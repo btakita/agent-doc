@@ -48,7 +48,8 @@ use state_store::{
     Connection, insert_state_event_in_db, load_actor_record_from_db, load_actor_store_from_db,
     load_control_plane_store_counts, load_layout_state_from_db,
     load_session_operator_status_from_db, load_state_events_from_db, load_supervisor_lease_from_db,
-    open_state_db, open_state_db_for_event_ingress, store_layout_state_in_db, timestamp_secs,
+    open_state_db, open_state_db_for_event_ingress, open_state_db_for_event_ingress_with_timeout,
+    store_layout_state_in_db, timestamp_secs,
 };
 #[cfg(test)]
 use state_store::{ProjectionDiagnosticInsert, insert_projection_diagnostic_with_metadata};
@@ -3976,6 +3977,20 @@ impl ControllerMemoryState {
 /// Threshold past which an ingress wait or hold is logged as
 /// `state_event_ingress_slow`. Clients time out at 5s, so 1s is early warning.
 pub(crate) const STATE_EVENT_INGRESS_SLOW: Duration = Duration::from_secs(1);
+/// Best-effort authority telemetry must never spend the lifecycle lane's
+/// recovery budget. Its producer retains the latest observation and retries it;
+/// closeout facts have no such freedom and keep the normal durable timeout.
+const TELEMETRY_EVENT_INGRESS_BUSY_TIMEOUT: Duration = Duration::from_millis(100);
+
+fn telemetry_event_ingress_busy_timeout(
+    event: &agent_doc_state_backbone::StateEvent,
+) -> Option<Duration> {
+    matches!(
+        event.fact,
+        agent_doc_state_backbone::StateFact::DocumentAuthorityObserved { .. }
+    )
+    .then_some(TELEMETRY_EVENT_INGRESS_BUSY_TIMEOUT)
+}
 
 /// The ops-log line for a slow ingress wait or hold, or `None` when both were fast.
 pub(crate) fn state_event_ingress_slow_line(
@@ -10358,7 +10373,11 @@ impl ControllerRuntime {
             "append_apply_state_event",
             event.fact.label(),
         );
-        let inserted = append_state_event(project_root, event)?;
+        let inserted = if let Some(busy_timeout) = telemetry_event_ingress_busy_timeout(event) {
+            append_state_event_with_timeout(project_root, event, busy_timeout)?
+        } else {
+            append_state_event(project_root, event)?
+        };
         if inserted {
             self.apply_state_event(event)?;
         }
@@ -12133,14 +12152,30 @@ pub(crate) fn append_state_event(
     project_root: &Path,
     event: &agent_doc_state_backbone::StateEvent,
 ) -> Result<bool> {
+    let conn = open_state_db_for_event_ingress(project_root)?;
+    insert_state_event_on_connection(&conn, event)
+}
+
+fn append_state_event_with_timeout(
+    project_root: &Path,
+    event: &agent_doc_state_backbone::StateEvent,
+    busy_timeout: Duration,
+) -> Result<bool> {
     // The caller holds the controller-wide state-event ingress mutex. Schema
     // convergence and retention are maintenance, not append semantics; keep
     // them out of this serialized lane so one large database cannot starve
     // unrelated documents behind a multi-second retention pass.
-    let conn = open_state_db_for_event_ingress(project_root)?;
+    let conn = open_state_db_for_event_ingress_with_timeout(project_root, busy_timeout)?;
+    insert_state_event_on_connection(&conn, event)
+}
+
+fn insert_state_event_on_connection(
+    conn: &Connection,
+    event: &agent_doc_state_backbone::StateEvent,
+) -> Result<bool> {
     let payload_json = serde_json::to_string(event).context("serialize state backbone event")?;
     insert_state_event_in_db(
-        &conn,
+        conn,
         &state_store::StateEventInsert {
             event_id: &event.event_id,
             document_hash: event.document_hash(),
@@ -23184,6 +23219,36 @@ agent:queue\n\
                 editor_id: None,
             },
         )
+    }
+
+    #[test]
+    fn authority_telemetry_yields_quickly_to_lifecycle_state_writes() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let writer = open_state_db(dir.path()).unwrap();
+        writer.execute_batch("BEGIN IMMEDIATE").unwrap();
+        let event = document_authority_event(
+            "doc",
+            agent_doc_state_backbone::DocumentAuthority::EditorRelay,
+            1,
+            "editor-cut",
+        );
+        assert_eq!(
+            telemetry_event_ingress_busy_timeout(&event),
+            Some(TELEMETRY_EVENT_INGRESS_BUSY_TIMEOUT),
+        );
+
+        let started = Instant::now();
+        let error = append_state_event_with_timeout(
+            dir.path(),
+            &event,
+            telemetry_event_ingress_busy_timeout(&event).unwrap(),
+        )
+        .expect_err("the fixture holds SQLite's write lock");
+        assert!(
+            started.elapsed() < Duration::from_secs(1),
+            "telemetry must release the lifecycle lane well before its 5s RPC deadline: {error:#}",
+        );
+        writer.execute_batch("ROLLBACK").unwrap();
     }
 
     fn pending_intent_id(runtime: &Arc<ControllerRuntime>, document_hash: &str) -> Option<String> {

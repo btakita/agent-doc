@@ -1115,10 +1115,47 @@ struct CliAdminControllerEffects {
     tmux: tmux_router::Tmux,
 }
 
+const ADMIN_PANE_OBSERVATION_TIMEOUT: Duration = Duration::from_millis(250);
+
 impl Default for CliAdminControllerEffects {
     fn default() -> Self {
         Self {
             tmux: agent_doc_tmux_io::configured_tmux(),
+        }
+    }
+}
+
+impl CliAdminControllerEffects {
+    fn observe_pane(
+        &self,
+        pane_id: &str,
+        harness_name: &str,
+    ) -> agent_doc_admin_io::PaneObservationView {
+        let harness = agent_doc_harness::HarnessConfig::from_agent_name(harness_name);
+        match agent_doc_tmux_io::capture_pane_with_ansi_bounded(
+            &self.tmux,
+            pane_id,
+            ADMIN_PANE_OBSERVATION_TIMEOUT,
+        ) {
+            Ok(content) => match harness.dispatch_blocker_reason(&content) {
+                Some(blocker) => agent_doc_admin_io::PaneObservationView {
+                    status: "busy_or_blocked".to_string(),
+                    blocker: Some(blocker),
+                    detail: Some(
+                        "effective harness classifier contradicts stored ready state".to_string(),
+                    ),
+                },
+                None => agent_doc_admin_io::PaneObservationView {
+                    status: "ready".to_string(),
+                    blocker: None,
+                    detail: None,
+                },
+            },
+            Err(err) => agent_doc_admin_io::PaneObservationView {
+                status: "unavailable".to_string(),
+                blocker: None,
+                detail: Some(err.to_string()),
+            },
         }
     }
 }
@@ -1158,6 +1195,10 @@ fn actor_inspection_view(
             document_prompt: inspection.queue_projection.document_prompt,
             detail: inspection.queue_projection.detail,
         },
+        pane_observation: agent_doc_admin_io::PaneObservationView {
+            status: "unobserved".to_string(),
+            ..agent_doc_admin_io::PaneObservationView::default()
+        },
         queue_control: inspection.queue_control,
         queue_controls: inspection.queue_controls,
         queue_backpressure: inspection.queue_backpressure,
@@ -1174,7 +1215,16 @@ impl agent_doc_admin_io::AdminControllerEffects for CliAdminControllerEffects {
         &self,
         root: &Path,
     ) -> anyhow::Result<Vec<agent_doc_controller::fleet::ActorListRecord>> {
-        agent_doc_controller_io::project_controller::load_actor_list_records(root)
+        let mut records =
+            agent_doc_controller_io::project_controller::load_actor_list_records(root)?;
+        for record in &mut records {
+            if record.state == "ready" {
+                let observation = self.observe_pane(&record.pane, &record.harness);
+                record.state =
+                    agent_doc_admin_io::effective_actor_state(&record.state, &observation);
+            }
+        }
+        Ok(records)
     }
 
     fn load_registry_bindings(
@@ -1204,8 +1254,17 @@ impl agent_doc_admin_io::AdminControllerEffects for CliAdminControllerEffects {
         session: Option<&str>,
         pane: Option<&str>,
     ) -> anyhow::Result<agent_doc_admin_io::ControllerActorInspectionView> {
-        agent_doc_controller_io::project_controller::inspect_actor(root, document, session, pane)
-            .map(actor_inspection_view)
+        let inspection = agent_doc_controller_io::project_controller::inspect_actor(
+            root, document, session, pane,
+        )?;
+        let mut view = actor_inspection_view(inspection);
+        if let Some(record) = view.record.as_ref() {
+            view.pane_observation = self.observe_pane(&record.pane_id, &record.harness);
+            if view.pane_observation.status != "ready" {
+                view.projection_lag = true;
+            }
+        }
+        Ok(view)
     }
 
     fn control_queue(

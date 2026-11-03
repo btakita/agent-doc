@@ -620,6 +620,79 @@ mod tests {
     }
 
     #[test]
+    fn reported_work_stays_active_until_its_source_is_integrated_and_closed() {
+        let open = concat!(
+            "## Active <!-- agent:active priority -->\n",
+            "- **Queue** (1)\n",
+            "  - `[#worker-report]` — integrate the worker report\n",
+            "    - **Status:** running\n",
+            "<!-- /agent:active -->\n",
+            "<!-- agent:run subagents -->\n",
+            "- ### ☑️ [#subagent:worker_report#3] do [#worker-report]\n",
+            "<!-- /agent:run -->\n",
+        );
+
+        let reported = reconcile_managed_active_items(open)
+            .unwrap()
+            .expect("the stale running status must refresh to reported");
+        assert!(reported.contains("`[#worker-report]`"));
+        assert!(reported.contains("- **Status:** reported"));
+
+        let integrated = reported.replace(
+            "- ### ☑️ [#subagent:worker_report#3] do [#worker-report]",
+            "- ### ~~do [#worker-report]~~",
+        );
+        let settled = reconcile_managed_active_items(&integrated)
+            .unwrap()
+            .expect("the terminal source must retire its active row");
+        assert!(!settled.contains("`[#worker-report]`"));
+        assert!(!settled.contains("- **Status:** reported"));
+    }
+
+    #[test]
+    fn live_running_and_unresolved_lost_work_are_not_hidden() {
+        let content = concat!(
+            "## Status <!-- agent:status -->\n<!-- /agent:status -->\n",
+            "<!-- agent:run subagents -->\n",
+            "- ### 🚧 do [#live]\n",
+            "- ### ⚠️ do [#lost]\n",
+            "<!-- /agent:run -->\n",
+        );
+
+        let reconciled = reconcile_managed_active_items(content)
+            .unwrap()
+            .expect("both unresolved attempts must be projected");
+        assert!(reconciled.contains("`[#live]`"));
+        assert!(reconciled.contains("- **Status:** running"));
+        assert!(reconciled.contains("`[#lost]`"));
+        assert!(reconciled.contains("- **Status:** lost"));
+    }
+
+    #[test]
+    fn a_terminal_running_attempt_leaves_active_while_unrelated_live_work_remains() {
+        let content = concat!(
+            "## Active <!-- agent:active priority -->\n",
+            "- **Queue** (2)\n",
+            "  - `[#terminal]` — terminal worker\n",
+            "    - **Status:** running\n",
+            "  - `[#live]` — live worker\n",
+            "    - **Status:** running\n",
+            "<!-- /agent:active -->\n",
+            "<!-- agent:run subagents -->\n",
+            "- ### ~~do [#terminal]~~\n",
+            "- ### 🚧 do [#live]\n",
+            "<!-- /agent:run -->\n",
+        );
+
+        let reconciled = reconcile_managed_active_items(content)
+            .unwrap()
+            .expect("the stale terminal row must be removed");
+        assert!(!reconciled.contains("`[#terminal]`"));
+        assert!(reconciled.contains("`[#live]`"));
+        assert_eq!(reconciled.matches("- **Status:** running").count(), 1);
+    }
+
+    #[test]
     fn status_drops_queue_free_identity_after_executable_leaf_is_consumed() {
         let stale_identity =
             source_free_text_identity("queue", "Complete the remaining work for the parent item.");

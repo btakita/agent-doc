@@ -4681,17 +4681,29 @@ pub fn project_waiting_on_you_tree(document: &str, response_body: &str) -> Resul
         .map(|location| existing_waiting_children(projected_document, location))
         .transpose()?
         .unwrap_or_default();
+    let response_timestamp = latest_response_timestamp(response_body)
+        .or_else(|| latest_response_timestamp(document))
+        .unwrap_or(FALLBACK_RESPONSE_TIMESTAMP);
 
     let mut children = Vec::new();
     for todo in todos {
         if external_ids.contains(&todo.id) {
             continue;
         }
+        let timestamp = packets
+            .get(&todo.id)
+            .and_then(|packet| packet.response_timestamp.as_deref())
+            .unwrap_or(response_timestamp);
         if let Some((raw, true)) = existing.get(&todo.id) {
-            children.push(unstrike_waiting_metadata(raw)?);
+            let child = unstrike_waiting_metadata(raw)?;
+            children.push(ensure_waiting_response_timestamp(&child, timestamp));
             continue;
         }
-        children.push(render_waiting_child(&todo, packets.get(&todo.id)));
+        children.push(render_waiting_child(
+            &todo,
+            packets.get(&todo.id),
+            timestamp,
+        ));
     }
 
     let Some(location) = location else {
@@ -4804,8 +4816,17 @@ fn project_external_waiting_items(
                 unreachable!("source and projected queue entry shapes are identical")
             };
             adopted.text = format!("{} {}", adopted.text.trim_end(), WAITING_ON_YOU_ITEM_MARKER);
-            let metadata =
-                render_waiting_metadata(todo, packets.get(&request_id), prompt.indent + 2);
+            let packet = packets.get(&request_id);
+            let response_timestamp = packet
+                .and_then(|packet| packet.response_timestamp.as_deref())
+                .or_else(|| latest_response_timestamp(document))
+                .unwrap_or(FALLBACK_RESPONSE_TIMESTAMP);
+            let metadata = render_waiting_metadata(
+                todo,
+                packet,
+                prompt.indent + 2,
+                response_timestamp,
+            );
             insertions.push((subtree_end, document_queue::parse(&metadata)?));
         }
 
@@ -5039,6 +5060,7 @@ struct WaitingOperatorPacket {
     request: String,
     context: String,
     choices: Vec<String>,
+    response_timestamp: Option<String>,
 }
 
 fn waiting_operator_packets(
@@ -5065,13 +5087,20 @@ fn parse_waiting_operator_packets(source: &str) -> Vec<(String, WaitingOperatorP
 
     let lines = source.lines().collect::<Vec<_>>();
     let mut packets = Vec::new();
+    let mut current_response_timestamp = None;
     let mut index = 0;
     while index < lines.len() {
+        if let Some(timestamp) = response_heading_timestamp(lines[index]) {
+            current_response_timestamp = Some(timestamp.to_string());
+            index += 1;
+            continue;
+        }
         let Some(id) = operator_packet_id(lines[index]) else {
             index += 1;
             continue;
         };
         let mut packet = WaitingOperatorPacket::default();
+        packet.response_timestamp = current_response_timestamp.clone();
         let mut blocking = false;
         let mut field = Field::Other;
         index += 1;
@@ -5153,12 +5182,67 @@ fn one_line(value: &str) -> String {
     value.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-fn render_waiting_child(todo: &WaitingTodo, packet: Option<&WaitingOperatorPacket>) -> String {
+fn response_heading_timestamp(line: &str) -> Option<&str> {
+    let trimmed = line.trim().trim_start_matches('❯').trim();
+    let without_hashes = trimmed.trim_start_matches('#').trim_start();
+    let rest = without_hashes.strip_prefix("Re:")?.trim();
+    let (_, timestamp) = rest.rsplit_once(" · ")?;
+    let timestamp = timestamp.trim();
+    (!timestamp.is_empty()).then_some(timestamp)
+}
+
+fn latest_response_timestamp(source: &str) -> Option<&str> {
+    source
+        .lines()
+        .filter_map(response_heading_timestamp)
+        .next_back()
+}
+
+fn ensure_waiting_response_timestamp(child: &str, response_timestamp: &str) -> String {
+    if child.lines().any(|line| {
+        line.trim_start().starts_with("- **Timestamp:** ")
+            && line.contains(WAITING_ON_YOU_METADATA_MARKER)
+    }) {
+        return child.to_string();
+    }
+
+    let mut out = String::with_capacity(child.len() + response_timestamp.len() + 80);
+    let mut inserted = false;
+    for line in child.split_inclusive('\n') {
+        out.push_str(line);
+        if !inserted
+            && line.contains("**Response:**")
+            && line.contains(WAITING_ON_YOU_METADATA_MARKER)
+        {
+            if !line.ends_with('\n') {
+                out.push('\n');
+            }
+            out.push_str("      - **Timestamp:** ");
+            out.push_str(response_timestamp);
+            out.push(' ');
+            out.push_str(WAITING_ON_YOU_METADATA_MARKER);
+            out.push('\n');
+            inserted = true;
+        }
+    }
+    out
+}
+
+fn render_waiting_child(
+    todo: &WaitingTodo,
+    packet: Option<&WaitingOperatorPacket>,
+    response_timestamp: &str,
+) -> String {
     let mut out = format!(
         "  - [#{}] {} {}\n",
         todo.id, todo.action, WAITING_ON_YOU_ITEM_MARKER
     );
-    out.push_str(&render_waiting_metadata(todo, packet, 4));
+    out.push_str(&render_waiting_metadata(
+        todo,
+        packet,
+        4,
+        response_timestamp,
+    ));
     out.replace("> **Queue prompt:**", "&gt; **Queue prompt:**")
 }
 
@@ -5166,6 +5250,7 @@ fn render_waiting_metadata(
     todo: &WaitingTodo,
     packet: Option<&WaitingOperatorPacket>,
     indent: usize,
+    response_timestamp: &str,
 ) -> String {
     let summary = packet
         .map(|packet| packet.request.as_str())
@@ -5180,6 +5265,10 @@ fn render_waiting_metadata(
     // container (`Response [#id]`), which this waiting projection does not
     // render. Never duplicate or paraphrase this free-text evidence into a
     // second metadata node.
+    out.push_str(&format!("\n{child}- **Timestamp:** "));
+    out.push_str(response_timestamp);
+    out.push(' ');
+    out.push_str(WAITING_ON_YOU_METADATA_MARKER);
     if let Some(packet) = packet {
         if !packet.context.is_empty() {
             out.push_str(&format!("\n{child}- **Context:** "));
@@ -5433,7 +5522,7 @@ mod tests {
     fn waiting_tree_uses_blocking_packet_context_question_and_choices() {
         let id = "subagent-operator-request-release-target";
         let response = format!(
-            "### Re: release target — test\n\n\
+            "### Re: release target — test · 2026-11-02T10:45-05:00\n\n\
              [#{id}] subagent operator request\n\
              - *kind:* question\n\
              - *blocking:* true\n\
@@ -5458,6 +5547,12 @@ mod tests {
         );
         assert!(
             projected.contains("**Question:** Which release target should be used?"),
+            "{projected}"
+        );
+        assert!(
+            projected.contains(
+                "**Timestamp:** 2026-11-02T10:45-05:00 <!-- agent-doc:waiting-metadata -->"
+            ),
             "{projected}"
         );
         assert!(
@@ -5629,7 +5724,7 @@ mod tests {
 
     #[test]
     fn refresh_unstrikes_legacy_waiting_metadata_without_losing_answer_edges() {
-        let response = "### Re: approval — test\n\nWaiting for approval.";
+        let response = "### Re: approval — test · 2026-11-02T10:45-05:00\n\nWaiting for approval.";
         let legacy = concat!(
             "- ### Waiting on you — answer by adding a child line under an item <!-- agent-doc:waiting-on-you -->\n",
             "  - [#approve-pr] Approve and merge PR #42. <!-- agent-doc:waiting-item -->\n",
@@ -5648,6 +5743,7 @@ mod tests {
             .expect("legacy struck evidence should migrate");
         assert!(repaired.contains("        - approved\n"), "{repaired}");
         assert!(repaired.contains("- **Response:** Approve and merge PR #42."));
+        assert!(repaired.contains("- **Timestamp:** 2026-11-02T10:45-05:00"));
         assert!(!repaired.contains("~~**Response:"), "{repaired}");
         assert!(!repaired.contains("~~**Question:"), "{repaired}");
     }

@@ -1139,6 +1139,19 @@ fn load_document_projection_part<T: serde::de::DeserializeOwned>(
     Ok(ledger.project_document(&document_hash).map(part.extract))
 }
 
+#[cfg(test)]
+thread_local! {
+    /// Runs after the handoff snapshot and before the main-ledger snapshot.
+    /// This exposes the worker's append-then-ACK interleaving deterministically.
+    static DOCUMENT_AUTHORITY_HANDOFF_READ_TEST_HOOK:
+        std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(test)]
+fn set_document_authority_handoff_read_test_hook(hook: Option<Box<dyn FnOnce()>>) {
+    DOCUMENT_AUTHORITY_HANDOFF_READ_TEST_HOOK.with(|slot| *slot.borrow_mut() = hook);
+}
+
 /// Load only the newest durable current-document authority observation.
 ///
 /// The ordinary cycle projection deliberately excludes this high-frequency
@@ -1153,6 +1166,29 @@ pub fn load_latest_document_authority(
     };
     let project_root = agent_doc_project_root_io::project_root_or_file_parent(&canonical)?;
     let document_hash = agent_doc_fs::document_state_hash(&canonical)?;
+    // Snapshot the handoff first. The controller worker always appends to the
+    // main ledger before it ACK-deletes this row, so a subsequent main-ledger
+    // read cannot miss an observation that disappears from this snapshot.
+    let handoff_event = agent_doc_sqlite::state_store::load_document_authority_handoff(
+        &project_root,
+        &document_hash,
+    )?
+    .map(|handoff| {
+        serde_json::from_str::<agent_doc_state_backbone::StateEvent>(&handoff.payload_json)
+            .with_context(|| {
+                format!(
+                    "decode pending document authority handoff for {}",
+                    handoff.document_hash
+                )
+            })
+    })
+    .transpose()?;
+    #[cfg(test)]
+    DOCUMENT_AUTHORITY_HANDOFF_READ_TEST_HOOK.with(|slot| {
+        if let Some(hook) = slot.borrow_mut().take() {
+            hook();
+        }
+    });
     let durable_event = if agent_doc_sqlite::state_store::state_db_path(&project_root).exists() {
         let conn = agent_doc_sqlite::state_store::open_state_db(&project_root)?;
         agent_doc_sqlite::state_store::load_recent_state_events_by_fact_type_from_db(
@@ -1171,21 +1207,6 @@ pub fn load_latest_document_authority(
     } else {
         None
     };
-    let handoff_event =
-        agent_doc_sqlite::state_store::load_document_authority_handoff(
-            &project_root,
-            &document_hash,
-        )?
-        .map(|handoff| {
-            serde_json::from_str::<agent_doc_state_backbone::StateEvent>(&handoff.payload_json)
-                .with_context(|| {
-                    format!(
-                        "decode pending document authority handoff for {}",
-                        handoff.document_hash
-                    )
-                })
-        })
-        .transpose()?;
 
     let project = |event: agent_doc_state_backbone::StateEvent| {
         let mut ledger = agent_doc_state_backbone::EventLedger::new();
@@ -1197,11 +1218,13 @@ pub fn load_latest_document_authority(
     let durable = durable_event.and_then(project);
     let handoff = handoff_event.and_then(project);
     Ok(match (durable, handoff) {
-        (Some(durable), Some(handoff)) => Some(if handoff.authority_epoch >= durable.authority_epoch {
-            handoff
-        } else {
-            durable
-        }),
+        (Some(durable), Some(handoff)) => {
+            Some(if handoff.authority_epoch >= durable.authority_epoch {
+                handoff
+            } else {
+                durable
+            })
+        }
         (durable, handoff) => durable.or(handoff),
     })
 }
@@ -4176,6 +4199,111 @@ mod tests {
             latest.authority,
             agent_doc_state_backbone::DocumentAuthority::EditorRelay,
             "detached-disk admission must fail closed on the newer editor handoff"
+        );
+    }
+
+    #[test]
+    fn authority_snapshot_cannot_miss_fold_deleted_between_reads() {
+        let dir = setup_project();
+        let file = dir.path().join("session.md");
+        fs::write(&file, "body\n").unwrap();
+        let canonical = file.canonicalize().unwrap();
+        let document_hash = agent_doc_fs::document_state_hash(&canonical).unwrap();
+        let event = |event_id: &str, authority, authority_epoch| {
+            agent_doc_state_backbone::StateEvent::new(
+                event_id,
+                agent_doc_state_backbone::StateFact::DocumentAuthorityObserved {
+                    document_hash: document_hash.clone(),
+                    authority,
+                    authority_epoch,
+                    source: event_id.to_string(),
+                    reason: "test".to_string(),
+                    content_hash: Some(format!("cut-{authority_epoch}")),
+                    editor_id: None,
+                },
+            )
+        };
+        let insert = |event: &agent_doc_state_backbone::StateEvent| {
+            let conn = agent_doc_sqlite::state_store::open_state_db(dir.path()).unwrap();
+            let payload = serde_json::to_string(event).unwrap();
+            agent_doc_sqlite::state_store::insert_state_event_in_db(
+                &conn,
+                &agent_doc_sqlite::state_store::StateEventInsert {
+                    event_id: &event.event_id,
+                    document_hash: &document_hash,
+                    domain: event.domain().label(),
+                    fact_type: event.fact.label(),
+                    payload_json: &payload,
+                },
+            )
+            .unwrap();
+        };
+        let stale_disk = event(
+            "stale-disk",
+            agent_doc_state_backbone::DocumentAuthority::DiskReplica,
+            10,
+        );
+        insert(&stale_disk);
+        let pending_editor = event(
+            "pending-editor",
+            agent_doc_state_backbone::DocumentAuthority::EditorRelay,
+            11,
+        );
+        agent_doc_sqlite::state_store::enqueue_document_authority_handoff(
+            dir.path(),
+            &agent_doc_sqlite::state_store::DocumentAuthorityHandoff {
+                document_hash: document_hash.clone(),
+                authority_epoch: 11,
+                controller_generation: 2,
+                payload_json: serde_json::to_string(&pending_editor).unwrap(),
+            },
+        )
+        .unwrap();
+
+        let project_root = dir.path().to_path_buf();
+        let hook_document_hash = document_hash.clone();
+        let folded_editor = pending_editor.clone();
+        set_document_authority_handoff_read_test_hook(Some(Box::new(move || {
+            let conn = agent_doc_sqlite::state_store::open_state_db(&project_root).unwrap();
+            let payload = serde_json::to_string(&folded_editor).unwrap();
+            agent_doc_sqlite::state_store::insert_state_event_in_db(
+                &conn,
+                &agent_doc_sqlite::state_store::StateEventInsert {
+                    event_id: &folded_editor.event_id,
+                    document_hash: &hook_document_hash,
+                    domain: folded_editor.domain().label(),
+                    fact_type: folded_editor.fact.label(),
+                    payload_json: &payload,
+                },
+            )
+            .unwrap();
+            assert!(
+                agent_doc_sqlite::state_store::acknowledge_document_authority_handoff(
+                    &project_root,
+                    &hook_document_hash,
+                    11,
+                    2,
+                )
+                .unwrap()
+            );
+        })));
+
+        let latest = load_latest_document_authority(&file)
+            .unwrap()
+            .expect("folded editor authority cannot disappear between snapshots");
+        assert_eq!(latest.authority_epoch, 11);
+        assert_eq!(
+            latest.authority,
+            agent_doc_state_backbone::DocumentAuthority::EditorRelay
+        );
+        assert!(
+            agent_doc_sqlite::state_store::load_document_authority_handoff(
+                dir.path(),
+                &document_hash,
+            )
+            .unwrap()
+            .is_none(),
+            "the regression must exercise an ACK-deleted handoff"
         );
     }
 

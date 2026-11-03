@@ -304,6 +304,55 @@ pub fn completion_response(text: &str, expected_key: &str) -> Option<String> {
     None
 }
 
+/// Replace one structurally attested completion cell by key.
+///
+/// The caller supplies a complete replacement cell. Both the existing and
+/// replacement cells must carry `expected_key`, so ordinary prose containing a
+/// marker-shaped line can never be rewritten. The original trailing newline is
+/// preserved.
+pub fn replace_attested_completion_cell(
+    text: &str,
+    expected_key: &str,
+    replacement: &str,
+) -> anyhow::Result<Option<String>> {
+    let replacement_evidence = completion_evidence(replacement);
+    let replacement_ranges = completion_cell_line_ranges(replacement);
+    anyhow::ensure!(
+        replacement_evidence.len() == 1
+            && replacement_evidence[0].key == expected_key
+            && replacement_ranges.len() == 1
+            && replacement_ranges[0].start == 0
+            && replacement_ranges[0].end == replacement.lines().count(),
+        "replacement must be exactly one completion cell for key {expected_key}"
+    );
+
+    let lines: Vec<&str> = text.lines().collect();
+    let Some(range) = completion_cell_line_ranges(text).into_iter().find(|range| {
+        completion_evidence_for_range(&lines, range)
+            .is_some_and(|evidence| evidence.key == expected_key)
+    }) else {
+        return Ok(None);
+    };
+
+    let mut line_starts = vec![0];
+    line_starts.extend(
+        text.match_indices('\n')
+            .map(|(index, _)| index + 1)
+            .filter(|index| *index < text.len()),
+    );
+    let start = line_starts[range.start];
+    let end = line_starts.get(range.end).copied().unwrap_or(text.len());
+    let kept_trailing_newline = text[start..end].ends_with('\n');
+    let mut updated = String::with_capacity(text.len() + replacement.len());
+    updated.push_str(&text[..start]);
+    updated.push_str(replacement);
+    if kept_trailing_newline {
+        updated.push('\n');
+    }
+    updated.push_str(&text[end..]);
+    Ok(Some(updated))
+}
+
 fn completion_evidence_for_range(
     lines: &[&str],
     range: &Range<usize>,
@@ -594,6 +643,24 @@ mod tests {
         );
         assert!(completion_response(&edited, "k1").is_none());
         assert!(completion_response(&cell("subagent:a", "finish a", "k1"), "k1").is_none());
+    }
+
+    #[test]
+    fn replaces_only_the_attested_completion_cell_with_the_same_key() {
+        let old = cell_with_response("subagent:a", "finish a", "k1", "Tests: 4 passed.").unwrap();
+        let other = cell_with_response("subagent:b", "finish b", "k2", "Tests: 2 passed.").unwrap();
+        let replacement =
+            cell_with_response("subagent:a", "finish a", "k1", "Tests: 9 passed.").unwrap();
+        let text = format!("before\n{old}\n{other}\nafter\n");
+
+        let updated = replace_attested_completion_cell(&text, "k1", &replacement)
+            .unwrap()
+            .expect("matching attested cell");
+        assert!(updated.contains("Tests: 9 passed."));
+        assert!(!updated.contains("Tests: 4 passed."));
+        assert!(updated.contains("Tests: 2 passed."));
+        assert!(updated.ends_with("after\n"));
+        assert!(replace_attested_completion_cell(&text, "missing", &replacement).is_err());
     }
 
     /// `#completion-cell-queue-echo`: an older canonicalizer could place the

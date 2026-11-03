@@ -898,12 +898,15 @@ pub fn handoff_replacement_should_self_promote(
     is_handoff_replacement: bool,
     handoff_replacement_socket_exists: bool,
     handoff_state: ControllerHandoffState,
+    previous_controller_alive: Option<bool>,
     launched_elapsed: Duration,
     grace: Duration,
 ) -> bool {
     is_handoff_replacement
         && handoff_replacement_socket_exists
-        && handoff_state == ControllerHandoffState::Stable
+        && (handoff_state == ControllerHandoffState::Stable
+            || (handoff_state == ControllerHandoffState::Preparing
+                && previous_controller_alive == Some(false)))
         && launched_elapsed > grace
 }
 
@@ -2309,15 +2312,26 @@ mod tests {
             true,
             true,
             ControllerHandoffState::Stable,
+            Some(false),
             Duration::from_secs(4),
             grace,
         ));
-        // Not yet promoted (still Preparing) → leave to the stranded/suicide watchdog,
-        // never self-promote a replacement that has no authority.
+        // Once its exact predecessor is dead, a Preparing replacement is the only
+        // process that can restore the public admission socket.
+        assert!(handoff_replacement_should_self_promote(
+            true,
+            true,
+            ControllerHandoffState::Preparing,
+            Some(false),
+            Duration::from_secs(4),
+            grace,
+        ));
+        // A live predecessor still owns admission, so Preparing cannot promote.
         assert!(!handoff_replacement_should_self_promote(
             true,
             true,
             ControllerHandoffState::Preparing,
+            Some(true),
             Duration::from_secs(4),
             grace,
         ));
@@ -2326,6 +2340,7 @@ mod tests {
             true,
             false,
             ControllerHandoffState::Stable,
+            Some(false),
             Duration::from_secs(4),
             grace,
         ));
@@ -2334,6 +2349,7 @@ mod tests {
             false,
             true,
             ControllerHandoffState::Stable,
+            Some(false),
             Duration::from_secs(4),
             grace,
         ));
@@ -2342,6 +2358,7 @@ mod tests {
             true,
             true,
             ControllerHandoffState::Stable,
+            Some(false),
             Duration::from_secs(3),
             grace,
         ));

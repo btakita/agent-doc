@@ -2438,18 +2438,36 @@ impl DocumentStateProjection {
                     // file. An already-running effect still has the document
                     // compare-and-swap fence and the newer response replay wins
                     // the serialized controller effect order.
-                    if self
+                    let superseded_compact_target = self
                         .document
                         .pending_compact_projection
                         .as_ref()
-                        .is_some_and(|pending| {
+                        .filter(|pending| {
                             !agent_doc_turn::response_replay::response_materialized_in_content(
                                 response_body,
                                 &pending.live_content,
                             )
                         })
-                    {
+                        .map(|pending| pending.live_content.clone());
+                    if let Some(superseded_compact_target) = superseded_compact_target {
                         self.document.pending_compact_projection = None;
+                        // A retained compact is paired with the deferred
+                        // authority write that attempted to publish its exact
+                        // live target. Cancelling only the continuation leaves
+                        // that older generation as `editor_projection_pending`,
+                        // so preflight keeps refusing the newer captured
+                        // response even though the compact can no longer run.
+                        // Retire exact-target intents as part of the same pure
+                        // supersession transition. Any later/composed write has
+                        // different content (including this response) and
+                        // remains in the journal.
+                        self.document
+                            .seed_pending_write_journal_from_legacy_projection();
+                        self.document.pending_write_journal.retain(|pending| {
+                            pending.target_content != superseded_compact_target
+                        });
+                        self.document.pending_write =
+                            self.document.pending_write_journal.last().cloned();
                     }
                     self.closeout.captured_response = Some(CapturedResponseProjection {
                         cycle_id: cycle_id.clone(),
@@ -6550,14 +6568,25 @@ mod tests {
         // was disconnected, then closeout captured response B. A must not remain
         // eligible to publish after B merely because its delayed ACK arrives.
         let document_hash = "doc-compact-capture-fence";
+        let compact_target = "## Exchange\n\nCompacted generation A.\n";
         let mut projection = DocumentStateProjection::new(document_hash);
+        projection.apply_fact(&StateFact::DocumentWriteDeferred {
+            document_hash: document_hash.to_string(),
+            intent_id: "compact-write-generation-a".to_string(),
+            expected_hash: "pre-compact".to_string(),
+            expected_content: Some("## Exchange\n\nGeneration A.\n".to_string()),
+            target_hash: "compact-generation-a".to_string(),
+            target_content: compact_target.to_string(),
+            source: DocumentWriteSource::SerializedAtomicWrite,
+            reason: DocumentWriteDeferredReason::EditorProjectionPending,
+        });
         projection.apply_fact(&StateFact::DocumentCompactProjectionRetained {
             document_hash: document_hash.to_string(),
             continuation_id: "compact-generation-a".to_string(),
             retained_at_ms: 100,
             file: "/work/tsift.md".to_string(),
-            live_content: "## Exchange\n\nCompacted generation A.\n".to_string(),
-            committed_content: "## Exchange\n\nCompacted generation A.\n".to_string(),
+            live_content: compact_target.to_string(),
+            committed_content: compact_target.to_string(),
             target_component: Some("exchange".to_string()),
             commit: true,
         });
@@ -6578,6 +6607,11 @@ mod tests {
         assert!(
             projection.document.pending_compact_projection.is_none(),
             "a compact target missing the newer captured response is superseded"
+        );
+        assert!(
+            projection.document.pending_write.is_none()
+                && projection.document.pending_write_journal.is_empty(),
+            "the canceled compact generation must not survive as an editor-pending write"
         );
         assert_eq!(
             projection

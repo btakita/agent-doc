@@ -4848,8 +4848,22 @@ fn blocking_operator_request_todo_texts(
 }
 
 fn validate_blocking_operator_request_recommendations(
+    options: &CommandOptions,
     packets: &[agent_doc_turn::response_text::BlockingOperatorRequestPacket],
 ) -> Result<()> {
+    // Captured-finalize and repair replay re-apply binary-owned response input
+    // that may predate this validation contract.  Reject only a response being
+    // authored now; never wedge recovery of an already retained capture.
+    if matches!(
+        options.origin.as_deref(),
+        Some(
+            "captured_finalize_resume"
+                | "captured_finalize_resume_tracked_work"
+                | "repair_replay"
+        )
+    ) {
+        return Ok(());
+    }
     if let Some(error) = packets.iter().find_map(|packet| {
         agent_doc_queue::operator_request_packet::blocking_operator_request_recommendation_error(
             packet,
@@ -4885,7 +4899,7 @@ fn derive_blocking_operator_requests(
             "blocking subagent operator-request packets reuse [#{duplicate}]; give every packet a unique [#subagent-operator-request-<unique-id>] marker"
         );
     }
-    validate_blocking_operator_request_recommendations(&packets)?;
+    validate_blocking_operator_request_recommendations(options, &packets)?;
     // An unreadable document only loses the response-citation fallback; the
     // gate ids and the packet itself still derive the todo.
     let document_ids = if options.force_disk {
@@ -6627,7 +6641,14 @@ mod tests {
             "  - **Commit now**: Commit the verified patch.\n",
         );
         let packets = agent_doc_turn::response_text::blocking_operator_request_packets(response);
-        let error = validate_blocking_operator_request_recommendations(&packets)
+        let doc = Path::new("/tmp/recommendation-gate-unit.md");
+        let mut current =
+            agent_doc_write_command_io::CommandOptions::recovery_from_captured_closeout_mutation_plan(
+                doc,
+                agent_doc_write_command_io::CapturedCloseoutMutationPlan::default(),
+            );
+        current.origin = Some("skill".to_string());
+        let error = validate_blocking_operator_request_recommendations(&current, &packets)
             .unwrap_err()
             .to_string();
         assert!(error.contains("Recommended because"), "{error}");
@@ -6637,7 +6658,27 @@ mod tests {
             "Recommended because the integration regression is unresolved; preserving the worktree keeps the pending fix available.",
         );
         let packets = agent_doc_turn::response_text::blocking_operator_request_packets(&valid);
-        validate_blocking_operator_request_recommendations(&packets).unwrap();
+        validate_blocking_operator_request_recommendations(&current, &packets).unwrap();
+
+        let captured_replay =
+            agent_doc_write_command_io::CommandOptions::recovery_from_captured_closeout_mutation_plan(
+                doc,
+                agent_doc_write_command_io::CapturedCloseoutMutationPlan::default(),
+            );
+        let legacy_packets =
+            agent_doc_turn::response_text::blocking_operator_request_packets(response);
+        validate_blocking_operator_request_recommendations(&captured_replay, &legacy_packets)
+            .expect("pre-upgrade retained captures must remain recoverable");
+
+        let repair_replay = agent_doc_write_command_io::CommandOptions::repair_replay(
+            doc,
+            false,
+            false,
+            false,
+            &[],
+        );
+        validate_blocking_operator_request_recommendations(&repair_replay, &legacy_packets)
+            .expect("pre-upgrade repair replays must remain recoverable");
     }
 
     #[test]

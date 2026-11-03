@@ -217,5 +217,11 @@ mod tests {
             "Recommended because it is the recommended choice.".to_string();
         let error = render_choice_checkpoint(input).unwrap_err().to_string();
         assert!(error.contains("tautological"), "{error}");
+
+        let mut input = valid_input();
+        input.choices[0].description =
+            "Recommended because keep compatibility.".to_string();
+        let error = render_choice_checkpoint(input).unwrap_err().to_string();
+        assert!(error.contains("tautological"), "{error}");
     }
 }

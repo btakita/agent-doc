@@ -429,6 +429,7 @@ pub fn normalize_top_level_navigation_headings(body: &str) -> Option<String> {
 /// #multilineheadbullet).
 pub fn parse_spans(body: &str) -> Result<Vec<(QueueEntry, std::ops::Range<usize>)>> {
     let body_len = body.len();
+    let inline_code_ranges = agent_doc_markdown_ast::inline_code_ranges(body);
     // Mirror `str::lines()` line content while retaining each line's byte start,
     // so entry ranges are exact even across `\r\n` and a missing trailing newline.
     let mut lines: Vec<&str> = Vec::new();
@@ -572,22 +573,31 @@ pub fn parse_spans(body: &str) -> Result<Vec<(QueueEntry, std::ops::Range<usize>
             continue;
         }
 
-        // A queue item is `- <text>` or `<digits>. <text>`. Tolerate a single
-        // stray leading backtick
-        // (`` `- text ``, a common mistype where the operator's code-span tick
-        // landed before the bullet) by normalizing it to `- text`, so the item
-        // parses — and re-renders — as a real prompt instead of being silently
-        // preserved as inert `Freeform` and skipped (#queue-line-leading-backtick-drop).
-        let item_line = match line.strip_prefix('`') {
-            Some(rest) if split_list_item(rest).is_some() => rest,
-            _ => line,
+        // A queue item is `- <text>` or `<digits>. <text>`, but the prefix alone
+        // is not admission evidence: the same bytes can be an inline-code string.
+        // Keep the `#queue-line-leading-backtick-drop` recovery for an unmatched
+        // stray opening tick, then use the inline Markdown AST to reject the
+        // candidate whenever its marker is actually inside a code span.
+        let (item_line, marker_byte) = match line.strip_prefix('`') {
+            Some(rest) if split_list_item(rest).is_some() => {
+                let indent = rest.len() - rest.trim_start_matches(' ').len();
+                (rest, line_starts[start_i] + 1 + indent)
+            }
+            _ => {
+                let indent = line.len() - line.trim_start_matches(' ').len();
+                (line, line_starts[start_i] + indent)
+            }
         };
+        let item_line = (!inline_code_ranges
+            .iter()
+            .any(|range| range.contains(&marker_byte)))
+        .then_some(item_line);
         // `#queuenest` / `#f1s3`: accept indented unordered and ordered list
         // items, retaining both indentation and the exact source marker.
         // Before this, `1. <text>` fell through to inert `Freeform`. Capturing
         // the marker as data lets `render` preserve every operator-authored byte
         // while the ordered-list projection derives `after=` edges.
-        if let Some((indent, ordered_marker, rest)) = split_list_item(item_line) {
+        if let Some((indent, ordered_marker, rest)) = item_line.and_then(split_list_item) {
             if let Some(end_i) =
                 agent_doc_markdown_ast::overlay::response_row_child_end(&lines, i, indent)
             {
@@ -9162,6 +9172,25 @@ mod tests {
             "{rendered}"
         );
         assert!(!rendered.contains("`-"), "{rendered}");
+    }
+
+    #[test]
+    fn parse_does_not_promote_balanced_inline_code_string_to_queue_item() {
+        let quoted = "- ### /agent-doc did not start a session cycle. Connected admission failed three times, so no document was   5:01 PM [#subagent-operator-request-connected-admission-persist]";
+        let body = format!("`{quoted}`\n- run tests\n");
+        let entries = parse(&body).unwrap();
+
+        assert_eq!(entries.len(), 2, "{entries:?}");
+        assert_eq!(entries[0], QueueEntry::Freeform(format!("`{quoted}`")));
+        assert!(matches!(&entries[1], QueueEntry::Prompt(prompt) if prompt.text == "run tests"));
+        assert_eq!(prompts(&entries).len(), 1, "{entries:?}");
+
+        // The AST range, rather than a same-line closing-tick heuristic, also
+        // protects a list-shaped string on a later line of one code span.
+        let multiline = format!("`quoted status\n{quoted}\nstill quoted`\n- run tests\n");
+        let entries = parse(&multiline).unwrap();
+        assert_eq!(prompts(&entries).len(), 1, "{entries:?}");
+        assert!(matches!(prompts(&entries).as_slice(), [prompt] if prompt.text == "run tests"));
     }
 
     #[test]

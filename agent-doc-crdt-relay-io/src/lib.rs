@@ -559,6 +559,15 @@ fn authority_for_file(file: &str) -> CrdtAuthority {
 /// reserved id (`RelayHub::register` rejects it).
 const CANONICAL_CLIENT_ID: u64 = 1;
 const DOCUMENT_MODEL_ENSURE_POLL_MS: u64 = 25;
+/// Preserve the existing low-latency window for a replica that is actively
+/// registering, then back off repeated observations of the same unavailable
+/// state. A stale editor endpoint used to generate ~200 controller RPCs during
+/// one five-second ensure window, starving unrelated admission and focus work.
+const DOCUMENT_MODEL_ENSURE_POLL_WARMUP: usize = 4;
+#[cfg(test)]
+const DOCUMENT_MODEL_ENSURE_POLL_MAX_MS: u64 = 50;
+#[cfg(not(test))]
+const DOCUMENT_MODEL_ENSURE_POLL_MAX_MS: u64 = 250;
 #[cfg(test)]
 const DOCUMENT_MODEL_ENSURE_TIMEOUT_MS: u64 = 150;
 #[cfg(not(test))]
@@ -574,6 +583,30 @@ const DOCUMENT_MODEL_ENSURE_TIMEOUT_MS: u64 = 5_000;
 const DOCUMENT_MODEL_ENSURE_MISSING_REPLICA_TIMEOUT_MS: u64 = 60;
 #[cfg(not(test))]
 const DOCUMENT_MODEL_ENSURE_MISSING_REPLICA_TIMEOUT_MS: u64 = 400;
+
+fn document_model_ensure_poll_delay(completed_polls: usize) -> std::time::Duration {
+    document_model_ensure_poll_delay_with_max(
+        completed_polls,
+        DOCUMENT_MODEL_ENSURE_POLL_MAX_MS,
+    )
+}
+
+fn document_model_ensure_poll_delay_with_max(
+    completed_polls: usize,
+    max_delay_ms: u64,
+) -> std::time::Duration {
+    let delay_ms = if completed_polls < DOCUMENT_MODEL_ENSURE_POLL_WARMUP {
+        DOCUMENT_MODEL_ENSURE_POLL_MS
+    } else {
+        let backoff_shift = completed_polls
+            .saturating_sub(DOCUMENT_MODEL_ENSURE_POLL_WARMUP - 1)
+            .min(4) as u32;
+        DOCUMENT_MODEL_ENSURE_POLL_MS
+            .saturating_mul(1_u64 << backoff_shift)
+            .min(max_delay_ms)
+    };
+    std::time::Duration::from_millis(delay_ms)
+}
 
 /// `#ensurereplicagensup` — whether THIS process serves the relay hub.
 ///
@@ -2412,6 +2445,7 @@ fn ensure_document_model_with_current_text_observer_inner(
     let mut extended_for_registration = false;
     let mut last_label = first_label;
     let mut last_observer_error: Option<String> = None;
+    let mut completed_polls = 0usize;
     loop {
         if !extended_for_registration
             && ensure_timeout_ms < DOCUMENT_MODEL_ENSURE_TIMEOUT_MS
@@ -2513,9 +2547,8 @@ fn ensure_document_model_with_current_text_observer_inner(
                 last_observer_error.as_deref().unwrap_or("none")
             );
         }
-        std::thread::sleep(std::time::Duration::from_millis(
-            DOCUMENT_MODEL_ENSURE_POLL_MS,
-        ));
+        std::thread::sleep(document_model_ensure_poll_delay(completed_polls));
+        completed_polls = completed_polls.saturating_add(1);
         let current = match observe_current_text() {
             Ok(current) => current,
             Err(err) => {
@@ -13721,6 +13754,29 @@ mod tests {
             *polls.lock() >= 4,
             "the observer must keep polling past the short missing-replica window"
         );
+    }
+
+    #[test]
+    fn ensure_document_model_poll_backoff_bounds_unavailable_endpoint_probes() {
+        let first_delays = (0..8)
+            .map(document_model_ensure_poll_delay)
+            .map(|delay| delay.as_millis())
+            .collect::<Vec<_>>();
+        assert_eq!(first_delays, vec![25, 25, 25, 25, 50, 50, 50, 50]);
+
+        // Exercise the production ceiling explicitly even though unit tests use
+        // a shorter cap to keep the reconciliation tests fast. Four warm probes
+        // plus capped exponential backoff turn a five-second outage from about
+        // 200 RPCs into at most 27.
+        let mut elapsed_ms = 0_u64;
+        let mut probes = 0usize;
+        while elapsed_ms < 5_000 {
+            let delay_ms = document_model_ensure_poll_delay_with_max(probes, 250).as_millis()
+                as u64;
+            elapsed_ms = elapsed_ms.saturating_add(delay_ms);
+            probes += 1;
+        }
+        assert!(probes <= 27, "five-second outage used {probes} probes");
     }
 
     #[test]

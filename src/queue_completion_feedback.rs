@@ -7,7 +7,7 @@
 //! Reporting keeps the claim active while integration and verification run;
 //! ordinary claim release never implies that a worker completed successfully.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use agent_doc_element::component_scope::{changed_component_scope, with_component_write_scope};
@@ -31,6 +31,18 @@ pub(crate) struct CompletionFeedbackOutcome {
     /// Durable editor-authority target still awaiting visible projection.
     pub projection_pending: bool,
     pub intent_id: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct RepositoryCompletion {
+    pub source_repo: PathBuf,
+    pub source_sha: String,
+    pub sink_repo: PathBuf,
+    pub sink_ref: String,
+    pub worktree: Option<PathBuf>,
+    pub branch: Option<String>,
+    pub base_sha: Option<String>,
+    pub pushed_ref: Option<String>,
 }
 
 #[derive(Debug)]
@@ -74,6 +86,7 @@ pub(crate) fn report_complete(
     item: &str,
     generation: Option<u64>,
     publication_state: Option<QueueReportState>,
+    repository: Option<&RepositoryCompletion>,
     response: &str,
 ) -> Result<Option<CompletionFeedbackOutcome>> {
     anyhow::ensure!(
@@ -85,6 +98,7 @@ pub(crate) fn report_complete(
         item,
         generation,
         publication_state,
+        repository,
         response,
         COMPLETION_LOCK_WAIT,
     )
@@ -95,6 +109,7 @@ fn report_complete_with_lock_wait(
     item: &str,
     generation: Option<u64>,
     publication_state: Option<QueueReportState>,
+    repository: Option<&RepositoryCompletion>,
     response: &str,
     lock_wait: Duration,
 ) -> Result<Option<CompletionFeedbackOutcome>> {
@@ -135,6 +150,32 @@ fn report_complete_with_lock_wait(
     // process stops after this write, reconciliation can reconstruct the cell
     // and retry the exact state transition without consulting agent history.
     agent_doc_queue_io::claim_release_receipt::capture_response(file, &claim, response)?;
+    // Join repository facts to this exact claim before it can become
+    // Reported. A crash can leave running repository debt, never a prose-only
+    // completion that is eligible for closeout.
+    if let Some(repository) = repository {
+        agent_doc_queue_io::queue_lineage::record(
+            file, &claim.item_text, claim.generation,
+            agent_doc_queue_io::queue_lineage::RecordRequest {
+                kind: if repository.pushed_ref.is_some() {
+                    agent_doc_queue_io::queue_lineage::QueueLineageEventKind::Pushed
+                } else {
+                    agent_doc_queue_io::queue_lineage::QueueLineageEventKind::Committed
+                },
+                worker_id: Some(worker_id.clone()),
+                source_repo_path: Some(repository.source_repo.clone()),
+                sink_repo_path: Some(repository.sink_repo.clone()),
+                worktree_path: repository.worktree.clone(),
+                branch: repository.branch.clone(),
+                base_sha: repository.base_sha.clone(),
+                source_sha: Some(repository.source_sha.clone()),
+                pushed_ref: repository.pushed_ref.clone(),
+                sink_ref: Some(repository.sink_ref.clone()),
+                detail: Some("repository result captured by queue report-complete".to_string()),
+                ..agent_doc_queue_io::queue_lineage::RecordRequest::default()
+            },
+        )?;
+    }
     let claim = agent_doc_queue_io::queue_claim::report_exact_worker_attempt_with_publication_state(
         file,
         &claim.item_text,
@@ -975,7 +1016,7 @@ mod tests {
                 .handoffs
                 .is_empty()
         );
-        let reported = report_complete(&doc, ROW, Some(generation), None, clean)
+        let reported = report_complete(&doc, ROW, Some(generation), None, None, clean)
             .unwrap()
             .expect("the final-state hand-back is reported normally");
         assert!(reported.appended);
@@ -1022,6 +1063,7 @@ mod tests {
             "finish sdk.md with deterministic tests",
             Some(1),
             Some(QueueReportState::PublishedLocal),
+            None,
             "Implemented SDK support.\n\nTests: 12 passed.",
         )
         .unwrap()
@@ -1064,6 +1106,7 @@ mod tests {
             "finish sdk.md with deterministic tests",
             Some(1),
             None,
+            None,
             "Implemented SDK support.\n\nTests: 12 passed.",
         )
         .unwrap()
@@ -1078,6 +1121,7 @@ mod tests {
             &doc,
             "finish sdk.md with deterministic tests",
             Some(1),
+            None,
             None,
             "Implemented SDK support.\n\nTests: 18 passed.",
         )
@@ -1279,6 +1323,7 @@ mod tests {
                 item,
                 Some(first.generation),
                 None,
+                None,
                 "worker one completed"
             )
             .unwrap()
@@ -1303,6 +1348,7 @@ mod tests {
             &doc,
             item,
             Some(first.generation),
+            None,
             None,
             "late stale result",
         )
@@ -1380,7 +1426,7 @@ mod tests {
             .map(|item| {
                 let doc = doc.clone();
                 std::thread::spawn(move || {
-                    report_complete(&doc, item, Some(1), None, "concurrent worker completed")
+                    report_complete(&doc, item, Some(1), None, None, "concurrent worker completed")
                         .unwrap()
                         .unwrap()
                 })
@@ -1474,7 +1520,7 @@ mod tests {
         .unwrap()
         .expect("editor replica attaches");
 
-        let first = report_complete(&doc, "first worker", Some(1), None, "first result")
+        let first = report_complete(&doc, "first worker", Some(1), None, None, "first result")
             .unwrap()
             .unwrap();
         assert!(first.projection_pending);
@@ -1504,7 +1550,7 @@ mod tests {
             "fixture must expose the concurrent editor cut:\n{authoritative}",
         );
 
-        let second = report_complete(&doc, "second worker", Some(1), None, "second result")
+        let second = report_complete(&doc, "second worker", Some(1), None, None, "second result")
             .unwrap()
             .unwrap();
         assert!(second.projection_pending);
@@ -1573,6 +1619,7 @@ mod tests {
             &doc,
             "finish sdk",
             Some(1),
+            None,
             None,
             "worker completed",
             Duration::from_millis(50),

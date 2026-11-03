@@ -4917,6 +4917,25 @@ enum QueueAction {
         /// Worker-reported local/published state rendered as a canonical queue annotation.
         #[arg(long = "publication-state", value_name = "local|published|published+local")]
         publication_state: Option<agent_doc_queue::QueueReportState>,
+        /// Declare that this worker result carries no repository/worktree changes.
+        #[arg(long)]
+        prose_only: bool,
+        #[arg(long, value_name = "PATH")]
+        source_repo: Option<PathBuf>,
+        #[arg(long)]
+        source_sha: Option<String>,
+        #[arg(long, value_name = "PATH")]
+        sink_repo: Option<PathBuf>,
+        #[arg(long)]
+        sink_ref: Option<String>,
+        #[arg(long, value_name = "PATH")]
+        worktree: Option<PathBuf>,
+        #[arg(long)]
+        branch: Option<String>,
+        #[arg(long)]
+        base_sha: Option<String>,
+        #[arg(long)]
+        pushed_ref: Option<String>,
         /// The background worker's complete response. It is rendered visibly
         /// inside the binary-owned completion cell and retained until closeout.
         #[arg(long, value_name = "TEXT", allow_hyphen_values = true)]
@@ -5095,6 +5114,10 @@ enum QueueAction {
         worker_id: Option<String>,
         #[arg(long, value_name = "PATH")]
         repo: Option<PathBuf>,
+        #[arg(long, value_name = "PATH")]
+        source_repo: Option<PathBuf>,
+        #[arg(long, value_name = "PATH")]
+        sink_repo: Option<PathBuf>,
         #[arg(long, value_name = "PATH")]
         worktree: Option<PathBuf>,
         #[arg(long)]
@@ -8737,6 +8760,15 @@ fn try_main() -> anyhow::Result<()> {
                 item,
                 generation,
                 publication_state,
+                prose_only,
+                source_repo,
+                source_sha,
+                sink_repo,
+                sink_ref,
+                worktree,
+                branch,
+                base_sha,
+                pushed_ref,
                 response,
             } => {
                 anyhow::ensure!(
@@ -8772,11 +8804,30 @@ fn try_main() -> anyhow::Result<()> {
                     );
                     Ok(())
                 } else {
+                    let has_repository_result = publication_state.is_some()
+                        || source_repo.is_some() || source_sha.is_some()
+                        || sink_repo.is_some() || sink_ref.is_some()
+                        || worktree.is_some() || branch.is_some()
+                        || base_sha.is_some() || pushed_ref.is_some();
+                    anyhow::ensure!(
+                        prose_only ^ has_repository_result,
+                        "queue report-complete requires exactly one result class: --prose-only, or explicit repository provenance (--source-repo, --source-sha, --sink-repo, --sink-ref)"
+                    );
+                    let repository = if has_repository_result {
+                        Some(queue_completion_feedback::RepositoryCompletion {
+                            source_repo: source_repo.context("repository completion requires explicit --source-repo")?,
+                            source_sha: source_sha.context("repository completion requires explicit --source-sha")?,
+                            sink_repo: sink_repo.context("repository completion requires explicit --sink-repo")?,
+                            sink_ref: sink_ref.context("repository completion requires explicit designated --sink-ref")?,
+                            worktree, branch, base_sha, pushed_ref,
+                        })
+                    } else { None };
                     match queue_completion_feedback::report_complete(
                         &file,
                         &item,
                         generation,
                         publication_state,
+                        repository.as_ref(),
                         &response,
                     )? {
                         Some(outcome) => {
@@ -8940,6 +8991,8 @@ fn try_main() -> anyhow::Result<()> {
                 event,
                 worker_id,
                 repo,
+                source_repo,
+                sink_repo,
                 worktree,
                 branch,
                 base_sha,
@@ -8964,6 +9017,8 @@ fn try_main() -> anyhow::Result<()> {
                         at_secs: None,
                         worker_id,
                         repo_path: repo,
+                        source_repo_path: source_repo,
+                        sink_repo_path: sink_repo,
                         worktree_path: worktree,
                         branch,
                         base_sha,

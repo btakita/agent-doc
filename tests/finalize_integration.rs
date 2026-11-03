@@ -365,6 +365,7 @@ fn status_sync_checkpoint_commit_lands_status_beside_pending_completion_cells() 
     run(&[
         "queue",
         "report-complete",
+        "--prose-only",
         file,
         "--item",
         "do [#work]",
@@ -5871,6 +5872,7 @@ fn finalize_strikes_a_mid_turn_head_whose_reported_worker_was_released() {
         .args([
             "queue",
             "report-complete",
+            "--prose-only",
             doc.to_str().unwrap(),
             "--item",
             question,

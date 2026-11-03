@@ -175,6 +175,12 @@ pub struct QueueLineageEvent {
     pub worker_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub repo_path: Option<String>,
+    /// Repository that owns `source_sha`; workers may use a separate clone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_repo_path: Option<String>,
+    /// Repository containing the designated integration ref and commit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sink_repo_path: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub worktree_path: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -208,6 +214,8 @@ pub struct RecordRequest {
     pub at_secs: Option<u64>,
     pub worker_id: Option<String>,
     pub repo_path: Option<PathBuf>,
+    pub source_repo_path: Option<PathBuf>,
+    pub sink_repo_path: Option<PathBuf>,
     pub worktree_path: Option<PathBuf>,
     pub branch: Option<String>,
     pub base_sha: Option<String>,
@@ -238,6 +246,8 @@ pub struct QueueLineageAttemptReport {
     pub verification: String,
     pub worker_id: Option<String>,
     pub repo_path: Option<String>,
+    pub source_repo_path: Option<String>,
+    pub sink_repo_path: Option<String>,
     pub worktree_path: Option<String>,
     pub branch: Option<String>,
     pub base_sha: Option<String>,
@@ -589,6 +599,8 @@ fn event_from_request(request: RecordRequest) -> Result<QueueLineageEvent> {
         at_secs: request.at_secs.unwrap_or_else(now_secs),
         worker_id: nonempty(request.worker_id),
         repo_path: request.repo_path.map(durable_path).transpose()?,
+        source_repo_path: request.source_repo_path.map(durable_path).transpose()?,
+        sink_repo_path: request.sink_repo_path.map(durable_path).transpose()?,
         worktree_path: request.worktree_path.map(durable_path).transpose()?,
         branch: nonempty(request.branch),
         base_sha: nonempty(request.base_sha),
@@ -698,6 +710,8 @@ fn validate_transition(attempt: &QueueLineageAttempt, event: &QueueLineageEvent)
 struct Facts {
     worker_id: Option<String>,
     repo_path: Option<String>,
+    source_repo_path: Option<String>,
+    sink_repo_path: Option<String>,
     worktree_path: Option<String>,
     branch: Option<String>,
     base_sha: Option<String>,
@@ -722,6 +736,8 @@ fn facts(attempt: &QueueLineageAttempt) -> Facts {
         }
         keep!(worker_id);
         keep!(repo_path);
+        keep!(source_repo_path);
+        keep!(sink_repo_path);
         keep!(worktree_path);
         keep!(branch);
         keep!(base_sha);
@@ -742,11 +758,15 @@ fn facts(attempt: &QueueLineageAttempt) -> Facts {
 
 fn verify_event(attempt: &QueueLineageAttempt, event: &QueueLineageEvent) -> Result<()> {
     let prior = facts(attempt);
-    let repo = event
+    let legacy_repo = event
         .repo_path
         .as_deref()
         .or(prior.repo_path.as_deref())
         .map(Path::new);
+    let source_repo = event.source_repo_path.as_deref()
+        .or(prior.source_repo_path.as_deref()).map(Path::new).or(legacy_repo);
+    let sink_repo = event.sink_repo_path.as_deref()
+        .or(prior.sink_repo_path.as_deref()).map(Path::new).or(legacy_repo);
     let worktree = event
         .worktree_path
         .as_deref()
@@ -767,7 +787,7 @@ fn verify_event(attempt: &QueueLineageAttempt, event: &QueueLineageEvent) -> Res
                     }
                 }
             }
-            if let (Some(repo), Some(base)) = (repo, event.base_sha.as_deref()) {
+            if let (Some(repo), Some(base)) = (source_repo, event.base_sha.as_deref()) {
                 require_commit(repo, base, "base")?;
             }
         }
@@ -779,7 +799,7 @@ fn verify_event(attempt: &QueueLineageAttempt, event: &QueueLineageEvent) -> Res
             }
         }
         QueueLineageEventKind::Committed | QueueLineageEventKind::Pushed => {
-            let repo = repo.context("commit/push lineage event needs a recorded --repo")?;
+            let repo = source_repo.context("commit/push lineage event needs a recorded --source-repo (or legacy --repo)")?;
             let source = event
                 .source_sha
                 .as_deref()
@@ -800,9 +820,11 @@ fn verify_event(attempt: &QueueLineageAttempt, event: &QueueLineageEvent) -> Res
             }
         }
         QueueLineageEventKind::Integrated => {
-            let repo = repo.context("integrated lineage event needs a recorded --repo")?;
+            let source_repo = source_repo.context("integrated lineage event needs a recorded --source-repo (or legacy --repo)")?;
+            let sink_repo = sink_repo.context("integrated lineage event needs a recorded --sink-repo (or legacy --repo)")?;
             verify_integration(
-                repo,
+                source_repo,
+                sink_repo,
                 event.source_sha.as_deref().context("missing source SHA")?,
                 event
                     .integration_sha
@@ -819,7 +841,7 @@ fn verify_event(attempt: &QueueLineageAttempt, event: &QueueLineageEvent) -> Res
                 event.release_state,
                 Some(ReleaseState::Tagged | ReleaseState::Published)
             ) {
-                let repo = repo.context("tagged/published release needs a recorded --repo")?;
+                let repo = sink_repo.context("tagged/published release needs a recorded --sink-repo (or legacy --repo)")?;
                 let tag = event
                     .release_tag
                     .as_deref()
@@ -902,24 +924,25 @@ pub fn stored_integration_is_verified(
 }
 
 fn verify_integration(
-    repo: &Path,
+    source_repo: &Path,
+    sink_repo: &Path,
     source: &str,
     integration: &str,
     method: IntegrationMethod,
     sink_ref: &str,
 ) -> Result<()> {
-    require_commit(repo, source, "source")?;
-    require_commit(repo, integration, "integration")?;
+    require_commit(source_repo, source, "source")?;
+    require_commit(sink_repo, integration, "integration")?;
     match method {
         IntegrationMethod::Merge | IntegrationMethod::FastForward => require_ancestor(
-            repo,
+            sink_repo,
             source,
             integration,
             "source is not an ancestor of integration",
         ),
         IntegrationMethod::CherryPick | IntegrationMethod::Rebase => {
-            let source_patch = patch_id(repo, source)?;
-            let integration_patch = patch_id(repo, integration)?;
+            let source_patch = patch_id(source_repo, source)?;
+            let integration_patch = patch_id(sink_repo, integration)?;
             if source_patch != integration_patch {
                 bail!(
                     "explicit {method:?} mapping has different patch ids: {source_patch} != {integration_patch}"
@@ -931,10 +954,10 @@ fn verify_integration(
             "integration method `other` is not verifiable; record a cherry-pick, rebase, merge, or fast-forward edge"
         ),
     }?;
-    let sink_commit = git_output(repo, &["rev-parse", &format!("{sink_ref}^{{commit}}")])
+    let sink_commit = git_output(sink_repo, &["rev-parse", &format!("{sink_ref}^{{commit}}")])
         .with_context(|| format!("designated integration sink ref is unavailable: {sink_ref}"))?;
     require_ancestor(
-        repo,
+        sink_repo,
         integration,
         &sink_commit,
         "integration commit is not reachable from the designated sink ref",
@@ -1090,6 +1113,8 @@ fn require_integrated_repo_work_inner(
     };
     let carries_repo_work = attempt.events.iter().any(|event| {
         event.repo_path.is_some()
+            || event.source_repo_path.is_some()
+            || event.sink_repo_path.is_some()
             || event.worktree_path.is_some()
             || event.source_sha.is_some()
             || matches!(
@@ -1110,13 +1135,17 @@ fn require_integrated_repo_work_inner(
         .find(|event| event.kind == QueueLineageEventKind::Integrated)
         .ok_or_else(|| {
             let prior = facts(attempt);
-            let repo = prior.repo_path.as_deref().unwrap_or("<repo>");
+            let source_repo = prior.source_repo_path.as_deref()
+                .or(prior.repo_path.as_deref()).unwrap_or("<source-repo>");
+            let sink_repo = prior.sink_repo_path.as_deref()
+                .or(prior.repo_path.as_deref()).unwrap_or("<sink-repo>");
             let source = prior.source_sha.as_deref().unwrap_or("<source-sha>");
             anyhow::anyhow!(
-                "reported repository work for {item:?} generation {generation} is not integrated. A dirty worktree, commit, or side branch is not terminal. Integrate it into the designated sink, then record proof with `agent-doc queue lineage-record {} --item {:?} --generation {generation} --event integrated --repo {:?} --source-sha {source} --integration-sha <sink-commit-sha> --sink-ref <designated-sink-ref> --method <merge|fast-forward|cherry-pick|rebase>`; keep the row live until that command succeeds",
+                "reported repository work for {item:?} generation {generation} is not integrated. A dirty worktree, commit, or side branch is not terminal. Integrate it into the designated sink, then record proof with `agent-doc queue lineage-record {} --item {:?} --generation {generation} --event integrated --source-repo {:?} --sink-repo {:?} --source-sha {source} --integration-sha <sink-commit-sha> --sink-ref <designated-sink-ref> --method <merge|fast-forward|cherry-pick|rebase>`; keep the row live until that command succeeds",
                 file.display(),
                 item,
-                repo,
+                source_repo,
+                sink_repo,
             )
         })?;
     verify_event(attempt, integrated).with_context(|| {
@@ -1154,6 +1183,8 @@ fn report_attempt(attempt: &QueueLineageAttempt) -> QueueLineageAttemptReport {
         verification,
         worker_id: facts.worker_id,
         repo_path: facts.repo_path,
+        source_repo_path: facts.source_repo_path,
+        sink_repo_path: facts.sink_repo_path,
         worktree_path: facts.worktree_path,
         branch: facts.branch,
         base_sha: facts.base_sha,
@@ -1175,21 +1206,24 @@ fn diagnose(attempt: &QueueLineageAttempt, facts: &Facts) -> Vec<Diagnostic> {
         .events
         .iter()
         .any(|event| event.kind == QueueLineageEventKind::Removed);
-    let Some(repo_raw) = facts.repo_path.as_deref() else {
+    let Some(source_repo_raw) = facts.source_repo_path.as_deref().or(facts.repo_path.as_deref()) else {
         diagnostics.push(Diagnostic {
             level: DiagnosticLevel::Degraded,
-            text: "repo_unrecorded: record an attached receipt with --repo".to_string(),
+            text: "source_repo_unrecorded: record repository work with --source-repo".to_string(),
         });
         return diagnostics;
     };
-    let repo = Path::new(repo_raw);
-    if !repo.exists() {
+    let source_repo = Path::new(source_repo_raw);
+    if !source_repo.exists() {
         diagnostics.push(Diagnostic {
             level: DiagnosticLevel::Degraded,
-            text: format!("repo_missing: {repo_raw}"),
+            text: format!("source_repo_missing: {source_repo_raw}"),
         });
         return diagnostics;
     }
+    let sink_repo_raw = facts.sink_repo_path.as_deref().or(facts.repo_path.as_deref())
+        .unwrap_or(source_repo_raw);
+    let sink_repo = Path::new(sink_repo_raw);
     if let Some(worktree) = facts.worktree_path.as_deref() {
         let path = Path::new(worktree);
         if !path.exists() && !removed {
@@ -1214,7 +1248,7 @@ fn diagnose(attempt: &QueueLineageAttempt, facts: &Facts) -> Vec<Diagnostic> {
         ("integration", facts.integration_sha.as_deref()),
     ] {
         if let Some(sha) = sha
-            && require_commit(repo, sha, label).is_err()
+            && require_commit(if label == "integration" { sink_repo } else { source_repo }, sha, label).is_err()
         {
             diagnostics.push(Diagnostic {
                 level: DiagnosticLevel::Mismatch,
@@ -1223,7 +1257,7 @@ fn diagnose(attempt: &QueueLineageAttempt, facts: &Facts) -> Vec<Diagnostic> {
         }
     }
     if let (Some(base), Some(source)) = (facts.base_sha.as_deref(), facts.source_sha.as_deref())
-        && require_ancestor(repo, base, source, "").is_err()
+        && require_ancestor(source_repo, base, source, "").is_err()
     {
         diagnostics.push(Diagnostic {
             level: DiagnosticLevel::Mismatch,
@@ -1233,10 +1267,10 @@ fn diagnose(attempt: &QueueLineageAttempt, facts: &Facts) -> Vec<Diagnostic> {
     if let (Some(reference), Some(source)) =
         (facts.pushed_ref.as_deref(), facts.source_sha.as_deref())
     {
-        match git_output(repo, &["rev-parse", &format!("{reference}^{{commit}}")]) {
+        match git_output(source_repo, &["rev-parse", &format!("{reference}^{{commit}}")]) {
             Ok(actual)
                 if actual == source
-                    || git_output(repo, &["rev-parse", source]).ok().as_deref()
+                    || git_output(source_repo, &["rev-parse", source]).ok().as_deref()
                         == Some(actual.as_str()) => {}
             Ok(actual) => diagnostics.push(Diagnostic {
                 level: DiagnosticLevel::Mismatch,
@@ -1259,7 +1293,7 @@ fn diagnose(attempt: &QueueLineageAttempt, facts: &Facts) -> Vec<Diagnostic> {
                 level: DiagnosticLevel::Mismatch,
                 text: "integration_method_other: legacy edge is not integration proof".to_string(),
             });
-        } else if verify_integration(repo, source, integration, method, sink_ref).is_err() {
+        } else if verify_integration(source_repo, sink_repo, source, integration, method, sink_ref).is_err() {
             diagnostics.push(Diagnostic {
                 level: DiagnosticLevel::Mismatch,
                 text: format!(
@@ -1279,10 +1313,10 @@ fn diagnose(attempt: &QueueLineageAttempt, facts: &Facts) -> Vec<Diagnostic> {
         facts.integration_sha.as_deref(),
         facts.release_state,
     ) {
-        match git_output(repo, &["rev-parse", &format!("{tag}^{{commit}}")]) {
+        match git_output(sink_repo, &["rev-parse", &format!("{tag}^{{commit}}")]) {
             Ok(actual)
                 if actual == integration
-                    || git_output(repo, &["rev-parse", integration])
+                    || git_output(sink_repo, &["rev-parse", integration])
                         .ok()
                         .as_deref()
                         == Some(actual.as_str()) => {}
@@ -1362,8 +1396,10 @@ pub fn render_verbose_text(report: &QueueLineageReport) -> String {
             attempt.worker_id.as_deref().unwrap_or("-")
         ));
         out.push_str(&format!(
-            "  repo={} worktree={} branch={} base={}\n",
+            "  repo={} source_repo={} sink_repo={} worktree={} branch={} base={}\n",
             attempt.repo_path.as_deref().unwrap_or("-"),
+            attempt.source_repo_path.as_deref().unwrap_or("-"),
+            attempt.sink_repo_path.as_deref().unwrap_or("-"),
             attempt.worktree_path.as_deref().unwrap_or("-"),
             attempt.branch.as_deref().unwrap_or("-"),
             attempt.base_sha.as_deref().unwrap_or("-")
@@ -1575,6 +1611,69 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(refusal.contains("is not integrated"), "{refusal}");
+    }
+
+    #[test]
+    fn verifies_cherry_pick_across_distinct_git_object_databases() {
+        let fixture = RepoFixture::new();
+        let base = fixture.head();
+        let worker_repo = fixture._dir.path().join("worker-clone");
+        git(fixture._dir.path(), &["clone", "-q", fixture.root.to_str().unwrap(), worker_repo.to_str().unwrap()]);
+        git(&worker_repo, &["config", "user.email", "worker@example.com"]);
+        git(&worker_repo, &["config", "user.name", "Worker"]);
+        std::fs::write(worker_repo.join("result.txt"), "integrated result\n").unwrap();
+        git(&worker_repo, &["add", "result.txt"]);
+        git(&worker_repo, &["commit", "-qm", "worker result"]);
+        let source = git_output(&worker_repo, &["rev-parse", "HEAD"]).unwrap();
+
+        fixture.commit_file("sink-only.txt", "sink\n", "sink advance");
+        std::fs::write(fixture.root.join("result.txt"), "integrated result\n").unwrap();
+        git(&fixture.root, &["add", "result.txt"]);
+        git(&fixture.root, &["commit", "-qm", "integrate worker result"]);
+        let integration = fixture.head();
+        let sink_ref = git_output(&fixture.root, &["branch", "--show-current"]).unwrap();
+        assert!(require_commit(&fixture.root, &source, "source").is_err());
+
+        let claim = make_claim(&fixture.doc, "cross clone work", "subagent:cross-clone", Some("worker:cross-clone"));
+        record_started(&fixture.doc, &claim).unwrap();
+        record(&fixture.doc, &claim.item_text, claim.generation, RecordRequest {
+            kind: QueueLineageEventKind::Committed,
+            source_repo_path: Some(worker_repo.clone()),
+            sink_repo_path: Some(fixture.root.clone()),
+            base_sha: Some(base), source_sha: Some(source.clone()),
+            sink_ref: Some(sink_ref.clone()), ..RecordRequest::default()
+        }).unwrap();
+        record(&fixture.doc, &claim.item_text, claim.generation, RecordRequest {
+            kind: QueueLineageEventKind::Integrated,
+            source_sha: Some(source), integration_sha: Some(integration),
+            integration_method: Some(IntegrationMethod::CherryPick),
+            sink_ref: Some(sink_ref), ..RecordRequest::default()
+        }).unwrap();
+
+        require_integrated_repo_work(&fixture.doc, &claim.item_text, claim.generation).unwrap();
+        let report = query(&fixture.doc, Some(&claim.item_text), Some(claim.generation)).unwrap();
+        assert_eq!(report.attempts[0].source_repo_path.as_deref(), Some(worker_repo.to_string_lossy().as_ref()));
+        assert_eq!(report.attempts[0].sink_repo_path.as_deref(), Some(fixture.root.to_string_lossy().as_ref()));
+    }
+
+    #[test]
+    fn integration_guard_is_scoped_to_one_attempt_not_historical_project_debt() {
+        let fixture = RepoFixture::new();
+        let repo_claim = make_claim(&fixture.doc, "old repository work", "subagent:old", Some("worker:old"));
+        record_started(&fixture.doc, &repo_claim).unwrap();
+        record(&fixture.doc, &repo_claim.item_text, repo_claim.generation, RecordRequest {
+            kind: QueueLineageEventKind::Committed,
+            source_repo_path: Some(fixture.root.clone()),
+            sink_repo_path: Some(fixture.root.clone()),
+            source_sha: Some(fixture.head()),
+            sink_ref: Some("master".to_string()),
+            ..RecordRequest::default()
+        }).unwrap();
+        assert!(require_integrated_repo_work(&fixture.doc, &repo_claim.item_text, repo_claim.generation).is_err());
+
+        let prose_claim = make_claim(&fixture.doc, "current prose work", "subagent:current", Some("worker:current"));
+        record_started(&fixture.doc, &prose_claim).unwrap();
+        require_integrated_repo_work(&fixture.doc, &prose_claim.item_text, prose_claim.generation).unwrap();
     }
 
     #[test]

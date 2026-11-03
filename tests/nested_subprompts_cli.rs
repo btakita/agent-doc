@@ -602,6 +602,7 @@ fn dispatch_and_report(dir: &std::path::Path, path: &str, item: &str, owner: &st
             &[
                 "queue",
                 "report-complete",
+                "--prose-only",
                 path,
                 "--item",
                 item,

@@ -181,12 +181,16 @@ may republish the retained intent, but remains subject to the same rule.
 - If unresolved prompt-bearing drift exists and the pane is busy, route may attempt one scoped `agent-doc fix <FILE>` pass and then one bounded fresh-restart recovery, but it must still fail closed if no clean dispatch path emerges.
 - For live same-document panes with no new prompt-bearing drift, route may focus the pane and return success without sending a duplicate reopen.
 - Editor `Run Agent Doc` submits the controller-owned route directly. It must not create, attach, select, focus, or reveal an IDE terminal tab as a precondition; the route/controller owns cold start and uses the live actor/session authority described below.
-- The route's layout wait is owned by the pane-layout graph. If a newer passive
-  editor generation still contains the routed document, route follows that
-  generation until convergence instead of republishing another layout intent.
-  While that route is in flight, a passive generation that omits the document
-  is retained but cannot supersede the route; the newest retained generation is
-  projected after the routed dispatch attempt settles. A newer explicit route,
+- The route's layout wait is owned by the pane-layout graph. A current live
+  actor binding lets the route promote a stashed pane into the accepted target
+  window and focus it as a short generation-fenced active-surface effect. That
+  focus-ready receipt releases dispatch while structural reconciliation
+  continues asynchronously; it does not claim structural convergence. While
+  that route is in flight, a passive generation that omits the document *or
+  focuses another document* is retained but cannot supersede the active route;
+  merely retaining the routed document in another column is not active-surface
+  preservation. The newest retained generation is projected after the routed
+  dispatch attempt settles. A newer explicit route,
   operator ownership, or a terminal non-converged state still fails closed
   before dispatch (`#routelayoutlease`). When a newer foreground route or
   command supersedes an in-flight route, the refusal is terminal for that
@@ -196,6 +200,11 @@ may republish the retained intent, but remains subject to the same rule.
   (`#gh143`).
 - Fresh auto-starts and live reroutes both require the Project Controller's reactive per-document admission projection after dispatch; accepted input alone is not sufficient.
 - Automatic editor-layout `Sync` generations are structural edges and must cross the tmux effect boundary even when the desired columns match a retained structural receipt. A first observation or controller-observed drift cannot be declared converged from an older pane assignment; focus-only changes use their separate effect.
+- Structural layout reconciliation is latest-generation background work. It
+  checks supersession after lock/prune, at each ownership-document boundary,
+  after ownership proof, and immediately before tmux-router's atomic mutation
+  boundary. A stale generation stops there rather than making a route wait for
+  obsolete editor IPC, process-tree, provisioning, or reconcile work.
 - When a project has no explicit tmux-session configuration, the layout observer must resolve the observed session from that generation's effect-owned pane assignment. A configured session remains authoritative; the observer must not reject an already-applied shared-session effect merely because the target project omitted redundant session configuration.
 - A windowless editor-layout generation must derive its target from generation-fenced live actor bindings before ambient terminal context: prefer the focused actor when it is already visible in an `agent-doc` window, otherwise a desired sibling actor already visible in that shared window, then the focused actor's live session as the last actor-owned fallback. A focused pane sitting in another session's stash must not re-home an existing shared `agent-doc` window. An explicit window remains authoritative, while the controller process's ambient `TMUX_PANE` and current client session are fallback evidence only; controller recycle or editor-terminal attachment must not relocate a surviving actor surface. This actor-driven target applies only where the layout observer itself follows the effect's panes (a multi-session `tmux_sessions` project). A single-session project with a live `tmux_session` pin, and every navigation lane generation, is never windowless at the effect: the controller passes the window its convergence observer reads (the pin's or the lane's `agent-doc` window, `agent_doc_controller::pane_layout::structural_effect_window`) as the effect's explicit window. The effect and the observation must name the same window; before this a focused pane living in another session's `agent-doc` window moved the editor's columns there while the operator's pinned window kept one pane, and every retry re-applied the same wrong window (reported 2026-10-20 as "1 tmux pane with 2 editor panes").
 - An editor `projection` generation may reconcile structure and focus once. After that exact generation has converged, a later live extra pane or active-pane mismatch is operator-owned drift: background observation, identical editor publication, and controller recycle must not stash the pane or select the prior editor-focused pane again. A new editor selection publishes a new generation and may reconcile once in turn.

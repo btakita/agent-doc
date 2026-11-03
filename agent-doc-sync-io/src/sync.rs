@@ -3770,6 +3770,13 @@ fn run_with_options_internal_at_root(
     } else {
         false
     };
+    // Structural work is latest-generation background work. The target/window
+    // survey above is read-only; stop here before entering repair mutations if
+    // a newer publication arrived while it ran.
+    if agent_doc_process_owner_io::structural_effect_superseded() {
+        sync_log("structural_effect_cancelled_superseded phase=before_doctor_repair");
+        return Ok(());
+    }
     if run_doctor_repair {
         // `#syncdoctorconverged`: the pre-reconcile doctor pass sat between two
         // measured phases and was invisible to the phase meter, which is how a
@@ -4240,6 +4247,16 @@ fn run_with_options_internal_at_root(
         );
         let per_file_loop_start = Instant::now();
         for file_path in &all_files {
+            // Per-document ownership/provisioning is a safe cancellation
+            // boundary. Do not spend the rest of a stale generation's actor,
+            // editor-IPC, or process-tree work after a newer layout publishes.
+            if agent_doc_process_owner_io::structural_effect_superseded() {
+                sync_log(&format!(
+                    "structural_effect_cancelled_superseded phase=ownership_file file={}",
+                    file_path.display()
+                ));
+                return Ok(());
+            }
             let mut seg_mark = Instant::now();
             let _ = &seg_mark;
 
@@ -5494,6 +5511,11 @@ fn run_with_options_internal_at_root(
         );
     }
 
+    if agent_doc_process_owner_io::structural_effect_superseded() {
+        sync_log("structural_effect_cancelled_superseded phase=after_ownership");
+        return Ok(());
+    }
+
     // Log pane count before tmux_router::sync
     if let Some(w) = window {
         let pane_list: Vec<String> = tmux.list_window_panes(w).unwrap_or_default();
@@ -5724,6 +5746,14 @@ fn run_with_options_internal_at_root(
         return Ok(());
     }
     let col_args: &[String] = &router_col_args;
+
+    // tmux-router is the atomic structural mutation boundary (join/stash/swap).
+    // Recheck immediately before it so a passive generation or newer command
+    // cancels stale structure without waiting for that whole reconcile.
+    if agent_doc_process_owner_io::structural_effect_superseded() {
+        sync_log("structural_effect_cancelled_superseded phase=before_tmux_router");
+        return Ok(());
+    }
 
     // Open-cycle panes are logged during DETACH, but they are not kept visible.
     // Stashing preserves the process and avoids recurring 3-pane projections.

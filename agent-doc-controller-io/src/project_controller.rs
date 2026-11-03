@@ -954,6 +954,10 @@ pub(crate) struct PaneLayoutEffectReceipt {
     pub focus_applied: bool,
 }
 
+/// A route has completed its latency-critical pane promotion/focus while the
+/// structural layout reconciler continues in the background.
+pub(crate) const PANE_LAYOUT_ROUTE_FOCUS_READY_REASON: &str = "route_focus_ready_structure_pending";
+
 impl Default for PaneLayoutEffectReceipt {
     fn default() -> Self {
         Self {
@@ -1988,7 +1992,7 @@ impl ControllerPaneLayoutGraph {
                 && invocation.caller_kind == "automatic"
             {
                 if active_route.defer_all_passive
-                    || !invocation_columns_contain_document(&invocation, &active_route.document)
+                    || invocation.focus.as_deref() != Some(active_route.document.as_str())
                 {
                     let incoming = PendingPaneLayoutPublication {
                         invocation,
@@ -2009,8 +2013,11 @@ impl ControllerPaneLayoutGraph {
                         .get(&self.desired)
                         .expect("an active route lease retains desired layout state");
                 }
-                // A newer passive state that still covers the route is safe to
-                // project immediately and replaces any older deferred state.
+                // A passive state may project during an active route only when
+                // it preserves that route's active surface, not merely when it
+                // happens to retain the document in another column. Otherwise
+                // it can supersede the focus generation and move the pane back
+                // to stash while the structural effect is still in flight.
                 publication_state.pending_passive = None;
             } else if !matches!(
                 publication,
@@ -2635,8 +2642,9 @@ impl ControllerPaneLayoutGraph {
         let mut guard = self.wait_lock.lock();
         loop {
             let effect_state = self.effect_state();
-            if pane_layout_route_readiness(&effect_state, document)
-                != PaneLayoutRouteReadiness::Wait
+            if self.route_focus_ready(document)
+                || pane_layout_route_readiness(&effect_state, document)
+                    != PaneLayoutRouteReadiness::Wait
                 || Instant::now() >= deadline
             {
                 return effect_state;
@@ -2646,6 +2654,32 @@ impl ControllerPaneLayoutGraph {
                 deadline.saturating_duration_since(Instant::now()),
             );
         }
+    }
+
+    /// The editor route's active-surface consequence is independently ready
+    /// from its structural reconcile. This projection is deliberately strict:
+    /// it accepts only the current actor generation and either the explicit
+    /// fast-path receipt or a later retry receipt that preserved its applied
+    /// focus. This makes readiness monotone when a fast structural pass finishes
+    /// before the waiting route thread observes the first receipt.
+    fn route_focus_ready(&self, document: &str) -> bool {
+        let Some(desired) = self.ctx.get(&self.desired) else {
+            return false;
+        };
+        let receipt = self.ctx.get(&self.receipt);
+        desired.invocation.focus.as_deref() == Some(document)
+            && pane_layout_contains_document(&desired, document)
+            && receipt.generation == desired.generation
+            && receipt.actor_bindings == self.ctx.get(&self.actor_bindings)
+            && (receipt.phase == PaneLayoutEffectPhase::RetryPending
+                || (receipt.phase == PaneLayoutEffectPhase::InFlight
+                    && receipt.reason == PANE_LAYOUT_ROUTE_FOCUS_READY_REASON))
+            && receipt.focus_required
+            && receipt.focus_applied
+            && receipt
+                .file_panes
+                .iter()
+                .any(|(file, _)| Path::new(file) == Path::new(document))
     }
 
     /// GH #110: block until the tmux effect state differs from `observed`, or
@@ -15797,6 +15831,94 @@ mod tests {
         assert_eq!(projected.invocation, latest_passive);
         assert_eq!(projected.source_plane_version, Some(43));
         assert!(projected.generation > route.generation);
+    }
+
+    /// A passive editor frame can retain the routed document while making a
+    /// different tab active. During the route lease that is still a competing
+    /// active surface and must not supersede the focus-ready generation.
+    #[test]
+    fn editor_route_lease_defers_passive_focus_away_from_the_routed_document() {
+        let scope = agent_doc_state_scope::ProcessScope::new();
+        let actors = ControllerActorGraph::new_in(&scope, BTreeMap::new());
+        let graph = ControllerPaneLayoutGraph::new_in(&scope, actors.live_bindings_handle());
+
+        let mut route_invocation = pane_layout_desired_for_test(1).invocation;
+        route_invocation.columns = vec!["tasks/fpe.md".into(), "tasks/sdk.md".into()];
+        route_invocation.focus = Some("tasks/fpe.md".into());
+        route_invocation.caller_kind = "editor_route".into();
+        let route = graph.set_fresh_route_desired(route_invocation, None);
+        graph.record_receipt(PaneLayoutEffectReceipt {
+            generation: route.generation,
+            actor_bindings: graph.actor_bindings(),
+            attempt: 1,
+            phase: PaneLayoutEffectPhase::InFlight,
+            reason: PANE_LAYOUT_ROUTE_FOCUS_READY_REASON.into(),
+            file_panes: vec![("tasks/fpe.md".into(), "%15".into())],
+            focus_required: true,
+            focus_applied: true,
+        });
+        assert!(graph.route_focus_ready("tasks/fpe.md"));
+
+        let mut passive = route.invocation.clone();
+        passive.focus = Some("tasks/sdk.md".into());
+        passive.caller_kind = "automatic".into();
+        let retained = graph.set_desired(passive.clone(), Some(44));
+
+        assert_eq!(retained.generation, route.generation);
+        assert_eq!(retained.invocation.focus.as_deref(), Some("tasks/fpe.md"));
+        assert!(
+            graph.route_focus_ready("tasks/fpe.md"),
+            "passive publication must not cancel an active route while structure is in flight"
+        );
+        graph.release_route_lease(route.generation);
+        assert_eq!(graph.desired().unwrap().invocation, passive);
+    }
+
+    #[test]
+    fn route_focus_ready_does_not_wait_for_structural_convergence() {
+        let scope = agent_doc_state_scope::ProcessScope::new();
+        let actors = ControllerActorGraph::new_in(&scope, BTreeMap::new());
+        let graph = ControllerPaneLayoutGraph::new_in(&scope, actors.live_bindings_handle());
+        let mut invocation = pane_layout_desired_for_test(1).invocation;
+        invocation.columns = vec!["tasks/fpe.md".into(), "tasks/sdk.md".into()];
+        invocation.focus = Some("tasks/fpe.md".into());
+        invocation.caller_kind = "editor_route".into();
+        let route = graph.set_fresh_route_desired(invocation, None);
+        graph.record_receipt(PaneLayoutEffectReceipt {
+            generation: route.generation,
+            actor_bindings: graph.actor_bindings(),
+            attempt: 1,
+            phase: PaneLayoutEffectPhase::InFlight,
+            reason: PANE_LAYOUT_ROUTE_FOCUS_READY_REASON.into(),
+            file_panes: vec![("tasks/fpe.md".into(), "%15".into())],
+            focus_required: true,
+            focus_applied: true,
+        });
+
+        assert!(matches!(
+            graph.effect_state(),
+            TmuxLayoutEffectState::Applying(_)
+        ));
+        assert!(graph.route_focus_ready("tasks/fpe.md"));
+        assert!(matches!(
+            graph.await_route_document("tasks/fpe.md", Duration::ZERO),
+            TmuxLayoutEffectState::Applying(_)
+        ));
+
+        graph.record_receipt(PaneLayoutEffectReceipt {
+            generation: route.generation,
+            actor_bindings: graph.actor_bindings(),
+            attempt: 1,
+            phase: PaneLayoutEffectPhase::RetryPending,
+            reason: "pane_order_mismatch; route_focus_applied".into(),
+            file_panes: vec![("tasks/fpe.md".into(), "%15".into())],
+            focus_required: true,
+            focus_applied: true,
+        });
+        assert!(
+            graph.route_focus_ready("tasks/fpe.md"),
+            "focus readiness survives a structural retry transition"
+        );
     }
 
     #[test]

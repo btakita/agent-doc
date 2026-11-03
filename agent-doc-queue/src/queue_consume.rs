@@ -4663,17 +4663,27 @@ fn remove_inline_response_id(line: &str, response_id: &str) -> String {
 /// graph projection: metadata and operator answer edges are never independent
 /// work; an answer selects the durable waiting item parent.
 pub fn project_waiting_on_you_tree(document: &str, response_body: &str) -> Result<Option<String>> {
-    let location = waiting_tree_location(document)?;
-    let external_ids = queue_prompt_ids_outside_waiting_tree(document, location.as_ref())?;
+    let packets = waiting_operator_packets(document, response_body);
+    let todos = open_waiting_todos(document);
+    // An operator may answer a request directly beneath its original queue
+    // parent before the binary-owned Waiting-on-you mirror is materialized.
+    // That origin row already suppresses the duplicate mirror, so adopt it as
+    // the durable waiting item and graft the same inert response structure
+    // onto it. Otherwise its answer child is mistaken for unrelated queue work
+    // and dispatch loses the request/decision boundary entirely.
+    let adopted = project_external_waiting_items(document, &todos, &packets)?;
+    let projected_document = adopted.as_deref().unwrap_or(document);
+    let location = waiting_tree_location(projected_document)?;
+    let external_ids =
+        queue_prompt_ids_outside_waiting_tree(projected_document, location.as_ref())?;
     let existing = location
         .as_ref()
-        .map(|location| existing_waiting_children(document, location))
+        .map(|location| existing_waiting_children(projected_document, location))
         .transpose()?
         .unwrap_or_default();
-    let packets = waiting_operator_packets(document, response_body);
 
     let mut children = Vec::new();
-    for todo in open_waiting_todos(document) {
+    for todo in todos {
         if external_ids.contains(&todo.id) {
             continue;
         }
@@ -4696,7 +4706,7 @@ pub fn project_waiting_on_you_tree(document: &str, response_body: &str) -> Resul
         }
         tree
     };
-    let mut out = document.to_string();
+    let mut out = projected_document.to_string();
     if location.start == location.end && !replacement.is_empty() {
         let separator = if location.start > 0 && !out[..location.start].ends_with('\n') {
             "\n"
@@ -4708,6 +4718,118 @@ pub fn project_waiting_on_you_tree(document: &str, response_body: &str) -> Resul
         out.replace_range(location.start..location.end, &replacement);
     }
     Ok((out != document).then_some(out))
+}
+
+/// Adopt an answered origin row as the waiting item for its matching open Todo.
+///
+/// `agent:todo` remains authoritative. This projection changes only the queue
+/// view: the operator-authored descendants stay byte-for-byte work evidence,
+/// while binary metadata is regenerated as inert marked rows. Once adopted,
+/// the ordinary waiting-item scheduler selects the parent identity and carries
+/// those descendants as `decision_evidence` instead of dispatching them as
+/// independent tasks.
+fn project_external_waiting_items(
+    document: &str,
+    todos: &[WaitingTodo],
+    packets: &HashMap<String, WaitingOperatorPacket>,
+) -> Result<Option<String>> {
+    let todo_by_id = todos
+        .iter()
+        .map(|todo| (todo.id.as_str(), todo))
+        .collect::<HashMap<_, _>>();
+    let mut replacements = Vec::new();
+
+    for component in element::parse(document)?
+        .into_iter()
+        .filter(|component| component.name == "queue")
+    {
+        let body = component.content(document);
+        let parsed = document_queue::parse_spans(body)?;
+        let spans = parsed
+            .iter()
+            .map(|(_, span)| span.clone())
+            .collect::<Vec<_>>();
+        let entries = parsed
+            .into_iter()
+            .map(|(entry, _)| entry)
+            .collect::<Vec<_>>();
+        let response_metadata_ranges =
+            agent_doc_markdown_ast::overlay::response_row_child_ranges(body);
+        let mut updated = entries.clone();
+        let mut insertions = Vec::new();
+
+        for index in 0..entries.len() {
+            let QueueEntry::Prompt(prompt) = &entries[index] else {
+                continue;
+            };
+            if prompt.text.contains(WAITING_ON_YOU_ITEM_MARKER) {
+                continue;
+            }
+            let Some((request_id, todo)) =
+                agent_doc_document::queue_projection::operator_request_annotation_ids(&prompt.text)
+                    .into_iter()
+                    .find_map(|id| todo_by_id.get(id.as_str()).map(|todo| (id, *todo)))
+            else {
+                continue;
+            };
+            let subtree_end = entries[index + 1..]
+                .iter()
+                .position(|entry| {
+                    queue_entry_indent(entry).is_some_and(|indent| indent <= prompt.indent)
+                })
+                .map_or(entries.len(), |offset| index + 1 + offset);
+            let has_operator_decision = entries[index + 1..subtree_end]
+                .iter()
+                .enumerate()
+                .any(|(offset, entry)| {
+                    let child_index = index + 1 + offset;
+                    let generated_response_metadata = response_metadata_ranges
+                        .iter()
+                        .any(|&(start, end)| {
+                            spans[child_index].start >= start && spans[child_index].start < end
+                        });
+                    !generated_response_metadata
+                        && matches!(entry, QueueEntry::Prompt(child)
+                    if !child.text.contains(WAITING_ON_YOU_METADATA_MARKER)
+                        && !agent_doc_element_queue::struck_work_text(&child.text)
+                            .trim_start()
+                            .starts_with("**")
+                        && !agent_doc_element_queue::struck_work_text(&child.text).trim().is_empty())
+                });
+            if !has_operator_decision {
+                continue;
+            }
+
+            let QueueEntry::Prompt(adopted) = &mut updated[index] else {
+                unreachable!("source and projected queue entry shapes are identical")
+            };
+            adopted.text = format!("{} {}", adopted.text.trim_end(), WAITING_ON_YOU_ITEM_MARKER);
+            let metadata =
+                render_waiting_metadata(todo, packets.get(&request_id), prompt.indent + 2);
+            insertions.push((subtree_end, document_queue::parse(&metadata)?));
+        }
+
+        if insertions.is_empty() {
+            continue;
+        }
+        for (at, metadata) in insertions.into_iter().rev() {
+            updated.splice(at..at, metadata);
+        }
+        replacements.push((
+            component.open_end,
+            component.close_start,
+            document_queue::render(&updated),
+        ));
+    }
+
+    if replacements.is_empty() {
+        return Ok(None);
+    }
+    let mut out = document.to_string();
+    for (start, end, body) in replacements.into_iter().rev() {
+        out.replace_range(start..end, &body);
+    }
+    Ok(Some(out))
 }
 
 /// Migrate legacy struck waiting metadata without touching operator-authored
@@ -5032,18 +5154,27 @@ fn one_line(value: &str) -> String {
 }
 
 fn render_waiting_child(todo: &WaitingTodo, packet: Option<&WaitingOperatorPacket>) -> String {
+    let mut out = format!(
+        "  - [#{}] {} {}\n",
+        todo.id, todo.action, WAITING_ON_YOU_ITEM_MARKER
+    );
+    out.push_str(&render_waiting_metadata(todo, packet, 4));
+    out.replace("> **Queue prompt:**", "&gt; **Queue prompt:**")
+}
+
+fn render_waiting_metadata(
+    todo: &WaitingTodo,
+    packet: Option<&WaitingOperatorPacket>,
+    indent: usize,
+) -> String {
     let summary = packet
         .map(|packet| packet.request.as_str())
         .filter(|summary| !summary.is_empty())
         .unwrap_or(&todo.action);
-    let mut out = format!(
-        concat!("  - [#{}] {} {}\n", "    - **Response:** {} {}"),
-        todo.id,
-        todo.action,
-        WAITING_ON_YOU_ITEM_MARKER,
-        summary,
-        WAITING_ON_YOU_METADATA_MARKER
-    );
+    let row = " ".repeat(indent);
+    let child = " ".repeat(indent + 2);
+    let grandchild = " ".repeat(indent + 4);
+    let mut out = format!("{row}- **Response:** {summary} {WAITING_ON_YOU_METADATA_MARKER}");
     // `#waitingresponsededup`: this is a free-text Response node, so its text
     // is itself the summary. A nested Summary belongs only under an identity
     // container (`Response [#id]`), which this waiting projection does not
@@ -5051,42 +5182,41 @@ fn render_waiting_child(todo: &WaitingTodo, packet: Option<&WaitingOperatorPacke
     // second metadata node.
     if let Some(packet) = packet {
         if !packet.context.is_empty() {
-            out.push_str("\n      - **Context:** ");
+            out.push_str(&format!("\n{child}- **Context:** "));
             out.push_str(&packet.context);
             out.push(' ');
             out.push_str(WAITING_ON_YOU_METADATA_MARKER);
         }
-        out.push_str("\n      - **Question:** ");
+        out.push_str(&format!("\n{child}- **Question:** "));
         out.push_str(&packet.request);
         out.push(' ');
         out.push_str(WAITING_ON_YOU_METADATA_MARKER);
         if !packet.choices.is_empty() {
-            out.push_str("\n      - **Choices:** ");
+            out.push_str(&format!("\n{child}- **Choices:** "));
             out.push_str(WAITING_ON_YOU_METADATA_MARKER);
             for choice in &packet.choices {
-                out.push_str("\n        - ");
+                out.push_str(&format!("\n{grandchild}- "));
                 out.push_str(choice);
                 out.push(' ');
                 out.push_str(WAITING_ON_YOU_METADATA_MARKER);
             }
         }
     } else {
-        out.push_str(
-            "\n      - **Question:** What decision or completion result should be recorded? ",
-        );
+        out.push_str(&format!(
+            "\n{child}- **Question:** What decision or completion result should be recorded? "
+        ));
         out.push_str(WAITING_ON_YOU_METADATA_MARKER);
     }
-    out.push_str("\n      - **Next actions:** ");
+    out.push_str(&format!("\n{child}- **Next actions:** "));
     out.push_str(WAITING_ON_YOU_METADATA_MARKER);
-    out.push_str("\n        - **Action:** ");
+    out.push_str(&format!("\n{grandchild}- **Action:** "));
     out.push_str(&todo.action);
     out.push(' ');
     out.push_str(WAITING_ON_YOU_METADATA_MARKER);
     out.push('\n');
-    // A Todo may discuss agent-doc's own exchange syntax (for example the
-    // exact Queue-prompt echo token). The waiting tree is a generated queue
-    // projection, not conversation content, so encode that boundary token in
-    // the mirror while leaving the Todo authority untouched.
+    // A Todo may discuss agent-doc's own exchange syntax. The waiting tree is
+    // generated queue state, so encode that boundary token in the mirror while
+    // leaving the Todo authority untouched.
     out.replace("> **Queue prompt:**", "&gt; **Queue prompt:**")
 }
 
@@ -5341,6 +5471,75 @@ mod tests {
         assert!(
             !projected.contains("**Summary:**"),
             "a free-text Response is already its own summary: {projected}"
+        );
+    }
+
+    #[test]
+    fn operator_decision_under_origin_parent_adopts_durable_response_structure() {
+        let id = "subagent-operator-request-late-admission-commit-v2";
+        let parent = "Recover protected preflight cycles and reconcile late admission.";
+        let response = format!(
+            "### Re: late admission — test\n\n\
+             [#{id}] subagent operator request\n\
+             - *queue_item:*\n\
+               - {parent}\n\
+             - *kind:* permission\n\
+             - *blocking:* true\n\
+             - *request:* May this worker create one local git commit?\n\
+             - *context:* The fix and focused tests are complete.\n\
+             - *choices:*\n\
+               - **Authorize local commit**: Create one local commit.\n\
+               - **Leave uncommitted**: Keep the verified worktree uncommitted.\n"
+        );
+        let document = waiting_tree_document(
+            &format!("- {parent} [#{id}]\n  - commit + integrate\n"),
+            &format!("- [ ] [#{id}] Choose whether to create a local commit.\n"),
+            &response,
+        );
+
+        let projected = project_waiting_on_you_tree(&document, &response)
+            .unwrap()
+            .expect("the answered origin row should adopt the waiting projection");
+        assert!(
+            !projected.contains(WAITING_ON_YOU_ROOT_MARKER),
+            "{projected}"
+        );
+        assert!(
+            projected.contains(&format!("{parent} [#{id}] {WAITING_ON_YOU_ITEM_MARKER}")),
+            "{projected}"
+        );
+        assert!(
+            projected.contains("**Response:** May this worker create one local git commit?"),
+            "{projected}"
+        );
+        assert!(
+            projected.contains("**Context:** The fix and focused tests are complete."),
+            "{projected}"
+        );
+        assert!(
+            projected.contains("**Authorize local commit**"),
+            "{projected}"
+        );
+
+        let queue = element::parse(&projected)
+            .unwrap()
+            .into_iter()
+            .find(|component| component.name == "queue")
+            .unwrap();
+        let entries = document_queue::parse(queue.content(&projected)).unwrap();
+        let executable = document_queue::executable_prompt_indexes(&entries);
+        assert_eq!(executable, vec![0], "{entries:#?}");
+        let packet = document_queue::prompt_context_packet_at(&entries, executable[0]).unwrap();
+        assert!(packet.origin.item_text.starts_with(parent), "{packet:#?}");
+        assert_eq!(packet.decision_evidence, ["commit + integrate"]);
+        assert_eq!(
+            packet.producer.kind,
+            agent_doc_prompt_context::lineage::PromptProducerKind::Operator
+        );
+        assert_eq!(
+            project_waiting_on_you_tree(&projected, &response).unwrap(),
+            None,
+            "adoption must be replay-idempotent"
         );
     }
 

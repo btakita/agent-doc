@@ -3776,42 +3776,28 @@ fn append_state_fact(
     let event = agent_doc_state_backbone::StateEvent::new(event_id, fact);
     let payload_json = serde_json::to_string(&event).context("serialize closeout state event")?;
     let controller_socket = agent_doc_controller::paths::socket_path(&project_root);
-    #[derive(serde::Deserialize)]
-    struct ActorAppendEnvelope {
-        ok: bool,
-        data: Option<bool>,
-        error: Option<String>,
-    }
-
     let request = serde_json::json!({
         "command": "state_event_append",
         "file": canonical,
         "caller": "cycle_state",
         "diagnostic_payload": payload_json.clone(),
     });
-    match agent_doc_state_wire::send_ndjson_request_to_actor(
-        &controller_socket,
-        &request,
-        std::time::Duration::from_secs(5),
-    ) {
-        Ok(raw) => {
-            let envelope: ActorAppendEnvelope =
-                serde_json::from_str(&raw).context("decode Lazily state append response")?;
-            if !envelope.ok {
-                anyhow::bail!(
-                    "Lazily state actor rejected closeout fact append: {}",
-                    envelope.error.as_deref().unwrap_or("unknown error")
-                );
-            }
-            return envelope
-                .data
-                .context("Lazily state actor returned no append result");
-        }
+    let send = || {
+        agent_doc_state_wire::send_ndjson_request_to_actor(
+            &controller_socket,
+            &request,
+            std::time::Duration::from_secs(5),
+        )
+    };
+    let initial = send();
+    let actor_response = match initial {
         Err(agent_doc_state_wire::ActorRequestError::Connect(_)) if !controller_socket.exists() => {
+            None
         }
-        Err(err) => {
-            return Err(err).context("append closeout state event through Lazily document actor");
-        }
+        initial => Some(reconcile_state_event_append_timeout(initial, send)?),
+    };
+    if let Some(raw) = actor_response {
+        return decode_actor_append_response(&raw);
     }
 
     // Cold-start compatibility: before a project controller exists, seed the
@@ -3828,6 +3814,133 @@ fn append_state_fact(
             payload_json: &payload_json,
         },
     )
+}
+
+/// Reconcile an ambiguous state-event append timeout by resending the exact
+/// same idempotency-keyed event once.
+///
+/// The actor answers only after the durable insert and live projection apply.
+/// Therefore `data=false` on the resend proves the first request applied late;
+/// callers must adopt the state they already constructed instead of starting a
+/// fresh cycle. A second transport failure remains fail-closed.
+fn reconcile_state_event_append_timeout(
+    initial: std::result::Result<String, agent_doc_state_wire::ActorRequestError>,
+    resend: impl FnOnce() -> std::result::Result<String, agent_doc_state_wire::ActorRequestError>,
+) -> Result<String> {
+    match initial {
+        Ok(raw) => Ok(raw),
+        Err(agent_doc_state_wire::ActorRequestError::Timeout(initial_timeout)) => resend()
+            .map_err(anyhow::Error::from)
+            .with_context(|| {
+                format!(
+                    "reconcile timed-out state event append with the same event id; initial timeout: {initial_timeout:#}"
+                )
+            }),
+        Err(error) => {
+            Err(error).context("append closeout state event through Lazily document actor")
+        }
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct ActorAppendEnvelope {
+    ok: bool,
+    data: Option<bool>,
+    error: Option<String>,
+}
+
+fn decode_actor_append_response(raw: &str) -> Result<bool> {
+    let envelope: ActorAppendEnvelope =
+        serde_json::from_str(raw).context("decode Lazily state append response")?;
+    if !envelope.ok {
+        anyhow::bail!(
+            "Lazily state actor rejected closeout fact append: {}",
+            envelope.error.as_deref().unwrap_or("unknown error")
+        );
+    }
+    envelope
+        .data
+        .context("Lazily state actor returned no append result")
+}
+
+#[cfg(test)]
+mod state_event_append_timeout_reconciliation_tests {
+    use super::*;
+
+    #[test]
+    fn late_applied_admission_cycle_is_adopted_from_duplicate_append_receipt() {
+        let mut resend_count = 0;
+        let raw = reconcile_state_event_append_timeout(
+            Err(agent_doc_state_wire::ActorRequestError::Timeout(
+                anyhow::anyhow!("first response arrived after the transport deadline"),
+            )),
+            || {
+                resend_count += 1;
+                Ok(r#"{"ok":true,"data":false}"#.to_string())
+            },
+        )
+        .expect("the identical event-id resend reconciles the ambiguous timeout");
+
+        assert_eq!(resend_count, 1, "the timeout gets one bounded resend");
+        assert!(
+            !decode_actor_append_response(&raw).unwrap(),
+            "inserted=false proves the original append applied late and its cycle is adopted",
+        );
+    }
+
+    #[test]
+    fn acknowledged_append_does_not_resend() {
+        let mut resent = false;
+        let raw = reconcile_state_event_append_timeout(
+            Ok(r#"{"ok":true,"data":true}"#.to_string()),
+            || {
+                resent = true;
+                unreachable!("an acknowledged append must not be resent")
+            },
+        )
+        .unwrap();
+
+        assert!(!resent);
+        assert!(decode_actor_append_response(&raw).unwrap());
+    }
+
+    #[test]
+    fn repeated_append_timeout_fails_closed() {
+        let error = reconcile_state_event_append_timeout(
+            Err(agent_doc_state_wire::ActorRequestError::Timeout(
+                anyhow::anyhow!("initial timeout"),
+            )),
+            || {
+                Err(agent_doc_state_wire::ActorRequestError::Timeout(
+                    anyhow::anyhow!("reconciliation timeout"),
+                ))
+            },
+        )
+        .expect_err("a second timeout must not be treated as an applied cycle");
+
+        let rendered = format!("{error:#}");
+        assert!(rendered.contains("reconcile timed-out state event append"));
+        assert!(rendered.contains("initial timeout"));
+        assert!(rendered.contains("reconciliation timeout"));
+    }
+
+    #[test]
+    fn non_timeout_transport_error_is_not_retried() {
+        let mut resent = false;
+        let error = reconcile_state_event_append_timeout(
+            Err(agent_doc_state_wire::ActorRequestError::Protocol(
+                anyhow::anyhow!("malformed response"),
+            )),
+            || {
+                resent = true;
+                unreachable!("protocol failures are not ambiguous append timeouts")
+            },
+        )
+        .expect_err("protocol error must remain fail-closed");
+
+        assert!(!resent);
+        assert!(format!("{error:#}").contains("malformed response"));
+    }
 }
 
 /// Submit a `closeout_advance` command to the controller authority over the

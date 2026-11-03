@@ -4249,6 +4249,28 @@ fn run_state_projection_effect_test_hook(document_hash: &str) {
 #[cfg(not(test))]
 fn run_state_projection_effect_test_hook(_document_hash: &str) {}
 
+#[cfg(test)]
+fn state_projection_derived_test_hook(
+) -> &'static Mutex<Option<(String, StateProjectionEffectTestHook)>> {
+    static HOOK: OnceLock<Mutex<Option<(String, StateProjectionEffectTestHook)>>> = OnceLock::new();
+    HOOK.get_or_init(|| Mutex::new(None))
+}
+
+#[cfg(test)]
+fn run_state_projection_derived_test_hook(document_hash: &str) {
+    let hook = state_projection_derived_test_hook()
+        .lock()
+        .as_ref()
+        .filter(|(expected, _)| expected == document_hash)
+        .map(|(_, hook)| Arc::clone(hook));
+    if let Some(hook) = hook {
+        hook();
+    }
+}
+
+#[cfg(not(test))]
+fn run_state_projection_derived_test_hook(_document_hash: &str) {}
+
 pub(crate) struct ControllerRuntime {
     bootstrap: Mutex<ControllerBootstrap>,
     memory: Mutex<ControllerMemoryState>,
@@ -4813,8 +4835,14 @@ fn derive_status_sync_due(
 /// `None` rather than a leaked graph.
 struct ControllerDocumentGraphs {
     ctx: ThreadSafeContext,
-    /// The fact seam: the document's state projection, set once per applied
-    /// state event. Everything retained-write-shaped is *derived* from this.
+    /// Lock-only authoritative plane updated on state ingress. It provides
+    /// immediate read-your-write without entering Lazily or flushing Effects.
+    latest_projection: Mutex<
+        HashMap<String, Option<agent_doc_state_backbone::DocumentStateProjection>>,
+    >,
+    /// Worker-owned reactive projection. Everything retained-write-shaped is
+    /// derived from this only after the activation worker copies the newest
+    /// authoritative value across the boundary.
     projection: lazily::ThreadSafeSourceMap<
         String,
         Option<agent_doc_state_backbone::DocumentStateProjection>,
@@ -7011,6 +7039,7 @@ impl ControllerDocumentGraphs {
     fn new_in(scope: &agent_doc_state_scope::ProcessScope) -> Self {
         let ctx = scope.ctx().clone();
         Self {
+            latest_projection: Mutex::new(HashMap::new()),
             projection: lazily::ThreadSafeSourceMap::new(&ctx),
             supervisor_recycle: lazily::ThreadSafeComputedMap::new(&ctx),
             closeout_cycle_id: lazily::ThreadSafeSourceMap::new(&ctx),
@@ -7555,18 +7584,32 @@ impl ControllerDocumentGraphs {
         document_hash: &str,
         projection: Option<agent_doc_state_backbone::DocumentStateProjection>,
     ) {
-        let activation_projection = projection.clone();
         self.set_projection_sources(document_hash, projection);
-        self.activate_projection(document_hash, activation_projection.as_ref());
+        self.activate_current_projection(document_hash);
     }
 
-    /// Seed only the cheap reactive Sources needed by immediate graph reads.
+    /// Seed only the lock-backed authoritative Source needed by immediate graph
+    /// reads. This path deliberately never enters the Lazily context: even a
+    /// Source set flushes already-installed persistent Effects synchronously.
     ///
     /// Startup must expose the durable projection as soon as `new_arc` returns,
     /// but activating its derived effects can reconcile a large managed list.
     /// Keep this source publication synchronous and let the ordered projection
     /// worker perform [`Self::activate_projection`].
     fn set_projection_sources(
+        &self,
+        document_hash: &str,
+        projection: Option<agent_doc_state_backbone::DocumentStateProjection>,
+    ) {
+        self.latest_projection
+            .lock()
+            .insert(document_hash.to_string(), projection);
+    }
+
+    /// Copy one authoritative projection into the reactive effect plane. This
+    /// may synchronously flush persistent Effects, so only the activation
+    /// worker calls it in production.
+    fn publish_effect_projection(
         &self,
         document_hash: &str,
         projection: Option<agent_doc_state_backbone::DocumentStateProjection>,
@@ -7662,11 +7705,20 @@ impl ControllerDocumentGraphs {
     }
 
     fn activate_current_projection(&self, document_hash: &str) {
-        let projection = self
-            .projection
-            .observe(&self.ctx, &document_hash.to_string())
-            .flatten();
+        let projection = self.latest_projection(document_hash);
+        self.publish_effect_projection(document_hash, projection.clone());
         self.activate_projection(document_hash, projection.as_ref());
+    }
+
+    fn latest_projection(
+        &self,
+        document_hash: &str,
+    ) -> Option<agent_doc_state_backbone::DocumentStateProjection> {
+        self.latest_projection
+            .lock()
+            .get(document_hash)
+            .cloned()
+            .flatten()
     }
 
     /// Observe one clock edge beside the current durable closeout facts and
@@ -9073,6 +9125,7 @@ impl ControllerDocumentGraphs {
         let published_frontier = self.retained_transition_published_frontier.clone();
         let effect_key = key.clone();
         let effect = self.ctx.effect(move |ctx| {
+            run_state_projection_derived_test_hook(&effect_key);
             let Some(projected_effect) = effect_map.observe(ctx, &effect_key).flatten() else {
                 return;
             };
@@ -10756,9 +10809,10 @@ impl ControllerRuntime {
         if captured_finalize_committed {
             rpc::clear_captured_finalize_wake(self, &document_hash);
         }
-        // Publish the cheap graph Sources before acknowledging the fact. The
-        // worker activates expensive derived effects from the newest Source;
-        // bursts coalesce to one desired version per document.
+        // Publish only the lock-backed authoritative projection before
+        // acknowledging the fact. The worker copies it into Lazily and
+        // activates expensive derived effects; bursts coalesce to one desired
+        // version per document.
         self.document_graphs
             .set_projection_sources(&document_hash, document_projection);
         self.enqueue_state_projection_activation(&document_hash);
@@ -10769,6 +10823,16 @@ impl ControllerRuntime {
     }
 
     fn enqueue_state_projection_activation(&self, document_hash: &str) -> u64 {
+        #[cfg(test)]
+        if self.state_projection_effect_worker_started.get().is_none() {
+            // Unit tests that deliberately construct `ControllerRuntime`
+            // directly bypass the production `new_arc` worker. Preserve their
+            // synchronous graph harness without reintroducing a production
+            // ingress fallback.
+            self.document_graphs
+                .activate_current_projection(document_hash);
+            return 0;
+        }
         self.state_projection_activation_queue
             .enqueue(document_hash)
     }
@@ -22249,9 +22313,7 @@ agent:queue\n\
         assert!(
             runtime
                 .document_graphs
-                .projection
-                .observe(&runtime.document_graphs.ctx, &document_hash)
-                .flatten()
+                .latest_projection(&document_hash)
                 .is_some(),
             "the cheap graph Source must advance before acknowledgement"
         );
@@ -22272,6 +22334,95 @@ agent:queue\n\
             std::thread::sleep(Duration::from_millis(10));
         }
         *state_projection_effect_test_hook().lock() = None;
+    }
+
+    #[test]
+    fn second_state_event_ack_does_not_flush_installed_derived_effect() {
+        let _test_lock = state_projection_effect_test_lock().lock();
+        let dir = tempfile::TempDir::new().unwrap();
+        let runtime = ControllerRuntime::new_arc(test_bootstrap(&dir)).unwrap();
+        let document_hash = "installed-derived-effect-ack";
+        for event in [
+            preflight_started_event(document_hash),
+            response_captured_event(document_hash),
+            deferred_document_write_event(document_hash, "first-event-intent", "first-target"),
+        ] {
+            assert!(
+                runtime
+                    .append_apply_state_event_serialized(dir.path(), &event)
+                    .unwrap()
+            );
+        }
+        let activation_deadline = Instant::now() + Duration::from_secs(2);
+        while runtime.state_projection_activation_queue.counts() != (0, 0) {
+            assert!(
+                Instant::now() < activation_deadline,
+                "initial retained-transition effect was not installed"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(
+            runtime
+                .document_graphs
+                .retained_transition_effects
+                .lock()
+                .contains_key(document_hash),
+            "first activation did not install the derived effect"
+        );
+
+        let (entered_tx, entered_rx) = std::sync::mpsc::sync_channel(1);
+        let (release_tx, release_rx) = std::sync::mpsc::sync_channel(1);
+        let release_rx = Arc::new(Mutex::new(release_rx));
+        let hook: StateProjectionEffectTestHook = Arc::new(move || {
+            let _ = entered_tx.send(());
+            let _ = release_rx.lock().recv();
+        });
+        *state_projection_derived_test_hook().lock() =
+            Some((document_hash.to_string(), hook));
+
+        // The first activation installed a persistent retained-transition
+        // Effect. Updating its durable projection must ACK before the worker
+        // copies that projection into Lazily and blocks in recomputation.
+        let second = deferred_document_write_event(
+            document_hash,
+            "second-event-intent",
+            "second-event-target",
+        );
+        let append_runtime = Arc::clone(&runtime);
+        let project_root = dir.path().to_path_buf();
+        let (ack_tx, ack_rx) = std::sync::mpsc::sync_channel(1);
+        let append = std::thread::spawn(move || {
+            let started = Instant::now();
+            let result = append_runtime.append_apply_state_event_serialized(&project_root, &second);
+            ack_tx.send((result, started.elapsed())).unwrap();
+        });
+        if let Err(error) = entered_rx.recv_timeout(Duration::from_secs(2)) {
+            let ack = ack_rx.recv_timeout(Duration::from_secs(1));
+            append.join().unwrap();
+            panic!(
+                "installed derived effect did not rerun: {error}; ack={ack:?}; queue={:?}; poisoned={}",
+                runtime.state_projection_activation_queue.counts(),
+                runtime.controller_generation_poisoned()
+            );
+        }
+        let ack = ack_rx.recv_timeout(Duration::from_millis(500));
+        release_tx.send(()).unwrap();
+        append.join().unwrap();
+        let (result, elapsed) = ack.expect("second ACK waited on the installed derived effect");
+        assert!(result.unwrap());
+        assert!(
+            elapsed < Duration::from_millis(500),
+            "second ACK flushed an installed derived effect: {elapsed:?}"
+        );
+        assert_eq!(
+            runtime
+                .document_graphs
+                .latest_projection(document_hash)
+                .and_then(|projection| projection.document.pending_write)
+                .map(|intent| intent.intent_id),
+            Some("second-event-intent".to_string())
+        );
+        *state_projection_derived_test_hook().lock() = None;
     }
 
     #[test]
@@ -22309,9 +22460,7 @@ agent:queue\n\
         assert_eq!(
             runtime
                 .document_graphs
-                .projection
-                .observe(&runtime.document_graphs.ctx, &document_hash.to_string())
-                .flatten()
+                .latest_projection(document_hash)
                 .and_then(|projection| projection.document.pending_write)
                 .map(|intent| intent.intent_id),
             Some("new-intent".to_string()),
@@ -22332,9 +22481,7 @@ agent:queue\n\
         assert!(
             runtime
                 .document_graphs
-                .projection
-                .observe(&runtime.document_graphs.ctx, &unrelated_hash.to_string())
-                .flatten()
+                .latest_projection(unrelated_hash)
                 .is_some()
         );
 
@@ -22399,9 +22546,7 @@ agent:queue\n\
         assert_eq!(
             runtime
                 .document_graphs
-                .projection
-                .observe(&runtime.document_graphs.ctx, &document_hash.to_string())
-                .flatten()
+                .latest_projection(document_hash)
                 .and_then(|projection| projection.document.pending_write)
                 .map(|intent| intent.intent_id),
             Some("intent-64".to_string())
@@ -22456,9 +22601,7 @@ agent:queue\n\
         assert!(
             runtime
                 .document_graphs
-                .projection
-                .observe(&runtime.document_graphs.ctx, &unrelated_hash.to_string())
-                .flatten()
+                .latest_projection(unrelated_hash)
                 .is_some(),
             "worker failure must not remove immediate Source publication"
         );
@@ -24216,6 +24359,7 @@ agent:queue\n\
         let event = deferred_document_write_event(document_hash, intent_id, target_hash);
         append_state_event(project_root, &event).unwrap();
         runtime.apply_state_event(&event).unwrap();
+        wait_for_projection_activation(runtime);
     }
 
     fn deferred_document_write_event(
@@ -24281,6 +24425,7 @@ agent:queue\n\
             append_state_event(project_root, &event).unwrap();
             runtime.apply_state_event(&event).unwrap();
         }
+        wait_for_projection_activation(runtime);
         // ResponseCaptured deliberately wakes ordinary closeout processing.
         // Clear that independent edge so retained-delivery tests observe only
         // the derived resume signal under test.
@@ -24366,6 +24511,17 @@ agent:queue\n\
             .document(document_hash)
             .and_then(|document| document.document.pending_write.as_ref())
             .map(|pending| pending.intent_id.clone())
+    }
+
+    fn wait_for_projection_activation(runtime: &Arc<ControllerRuntime>) {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while runtime.state_projection_activation_queue.counts() != (0, 0) {
+            assert!(
+                Instant::now() < deadline,
+                "state projection activation did not drain"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
     }
 
     fn wait_for_pending_intent(
@@ -24710,6 +24866,7 @@ agent:queue\n\
             append_state_event(dir.path(), &event).unwrap();
             runtime.apply_state_event(&event).unwrap();
         }
+        wait_for_projection_activation(&runtime);
         assert_eq!(
             pending_intent_id(&runtime, &document_hash).as_deref(),
             Some("strike-intent")
@@ -24937,6 +25094,20 @@ agent:queue\n\
         append_state_event(dir.path(), &event).unwrap();
 
         let runtime = ControllerRuntime::new_arc(test_bootstrap(&dir)).unwrap();
+        assert_eq!(
+            runtime
+                .document_graphs
+                .latest_projection(&document_hash)
+                .and_then(|projection| projection.document.pending_write)
+                .map(|intent| intent.intent_id),
+            Some("intent-before-start".to_string()),
+            "the lock-backed authoritative Source is immediately readable"
+        );
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while runtime.state_projection_activation_queue.counts() != (0, 0) {
+            assert!(Instant::now() < deadline, "startup activation did not drain");
+            std::thread::sleep(Duration::from_millis(10));
+        }
         let verdict = runtime.document_retained_write_verdict(
             &document_hash,
             &file,
@@ -25033,6 +25204,19 @@ agent:queue\n\
         append_state_event(dir.path(), &event).unwrap();
 
         runtime.refresh_memory().unwrap();
+        assert_eq!(
+            runtime
+                .document_graphs
+                .latest_projection(&document_hash)
+                .and_then(|projection| projection.document.pending_write)
+                .map(|intent| intent.intent_id),
+            Some("intent-after-start".to_string())
+        );
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while runtime.state_projection_activation_queue.counts() != (0, 0) {
+            assert!(Instant::now() < deadline, "refresh activation did not drain");
+            std::thread::sleep(Duration::from_millis(10));
+        }
         let verdict = runtime.document_retained_write_verdict(
             &document_hash,
             &file,
@@ -26996,6 +27180,7 @@ revised operator request
         );
         append_state_event(dir.path(), &retained).unwrap();
         runtime.apply_state_event(&retained).unwrap();
+        wait_for_projection_activation(&runtime);
 
         runtime.document_retained_write_observe_authority(
             &document_hash,

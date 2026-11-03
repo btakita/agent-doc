@@ -303,6 +303,34 @@ pub(super) struct ControllerEditorViewPolicyGraph {
     lifecycle_sender: Arc<OnceLock<std::sync::mpsc::Sender<EditorViewLifecycleEffectCommand>>>,
 }
 
+#[cfg(test)]
+type EditorViewLifecycleEffectTestHook = Arc<dyn Fn() + Send + Sync>;
+
+#[cfg(test)]
+fn editor_view_lifecycle_effect_test_hook(
+) -> &'static Mutex<Option<EditorViewLifecycleEffectTestHook>> {
+    static HOOK: OnceLock<Mutex<Option<EditorViewLifecycleEffectTestHook>>> = OnceLock::new();
+    HOOK.get_or_init(|| Mutex::new(None))
+}
+
+#[cfg(test)]
+pub(super) fn set_editor_view_lifecycle_effect_test_hook(
+    hook: Option<EditorViewLifecycleEffectTestHook>,
+) {
+    *editor_view_lifecycle_effect_test_hook().lock() = hook;
+}
+
+#[cfg(test)]
+fn run_editor_view_lifecycle_effect_test_hook() {
+    let hook = editor_view_lifecycle_effect_test_hook().lock().clone();
+    if let Some(hook) = hook {
+        hook();
+    }
+}
+
+#[cfg(not(test))]
+fn run_editor_view_lifecycle_effect_test_hook() {}
+
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 struct EditorViewLifecycleEffectKey {
     document_hash: String,
@@ -344,6 +372,7 @@ impl ControllerEditorViewPolicyGraph {
             EditorViewLifecycleEffectCommand,
         >::new()));
         let lifecycle_effect = ctx.effect(move |ctx| {
+            run_editor_view_lifecycle_effect_test_hook();
             let commands = ctx.get(&lifecycle_commands);
             let Some(sender) = sender_for_effect.get() else {
                 return;
@@ -33096,6 +33125,93 @@ pub(super) fn publish_captured_finalize_wake(
     )
 }
 
+/// Record captured-finalize authority without entering the state-plane graph.
+/// State-event ingress uses this lock-only update; the projection worker
+/// publishes the resulting snapshot later.
+pub(super) fn record_captured_finalize_wake(
+    runtime: &ControllerRuntime,
+    projection: &agent_doc_state_backbone::DocumentStateProjection,
+    reason: &str,
+) -> bool {
+    let Some(capture) = projection.closeout.captured_response.as_ref() else {
+        return false;
+    };
+    let Some(cycle_id) = projection.closeout.cycle_id.as_deref() else {
+        return false;
+    };
+    let payload = CapturedFinalizeWakeProjection {
+        document_hash: projection.document_hash.clone(),
+        cycle_id: cycle_id.to_string(),
+        capture_id: capture.capture_id.clone(),
+        response_sha256: capture.response_sha256.clone(),
+        reason: reason.to_string(),
+    };
+    let _publication = runtime.captured_finalize_wake_publication.lock();
+    let mut wakes = runtime.captured_finalize_wakes.lock();
+    if wakes
+        .get(&projection.document_hash)
+        .is_some_and(|current| !captured_finalize_wake_should_replace(current, &payload))
+    {
+        return true;
+    }
+    wakes.insert(projection.document_hash.clone(), payload);
+    runtime
+        .captured_finalize_wake_generation
+        .fetch_add(1, Ordering::SeqCst);
+    true
+}
+
+/// Publish the already-recorded authority snapshot. This may enter Lazily
+/// channel Effects and therefore runs only on the projection worker.
+pub(super) fn publish_recorded_captured_finalize_wakes(runtime: &ControllerRuntime) -> bool {
+    let _publication = runtime.captured_finalize_wake_publication.lock();
+    let generation = runtime
+        .captured_finalize_wake_generation
+        .load(Ordering::SeqCst);
+    if runtime
+        .captured_finalize_wake_published_generation
+        .load(Ordering::SeqCst)
+        >= generation
+    {
+        return true;
+    }
+    let snapshot = CapturedFinalizeWakeSnapshot {
+        wakes: runtime.captured_finalize_wakes.lock().clone(),
+    };
+    let epoch = CAPTURED_FINALIZE_WAKE_EPOCH.fetch_add(1, Ordering::SeqCst);
+    let producer_id = match runtime.bootstrap_snapshot() {
+        Ok(bootstrap) => format!(
+            "agent-doc-controller:{}:{}",
+            std::process::id(),
+            bootstrap.controller_generation
+        ),
+        Err(_) => format!("agent-doc-controller:{}", std::process::id()),
+    };
+    let result = state_plane_snapshot_message_json(
+        epoch,
+        CAPTURED_FINALIZE_WAKE_STATE_CHANNEL,
+        CAPTURED_FINALIZE_WAKE_TYPE_TAG,
+        &snapshot,
+    )
+    .and_then(|message_json| {
+        runtime.publish_state_plane_frame(
+            CAPTURED_FINALIZE_WAKE_STATE_CHANNEL.to_string(),
+            producer_id,
+            message_json,
+            epoch,
+            None,
+        )
+    });
+    if let Err(error) = result {
+        eprintln!("[controller] captured-finalize wake snapshot projection failed: {error:#}");
+        return false;
+    }
+    runtime
+        .captured_finalize_wake_published_generation
+        .fetch_max(generation, Ordering::SeqCst);
+    true
+}
+
 pub(super) fn publish_pinned_captured_finalize_wake(
     runtime: &ControllerRuntime,
     document_hash: &str,
@@ -33198,7 +33314,16 @@ fn captured_finalize_wake_should_replace(
 
 pub(super) fn clear_captured_finalize_wake(runtime: &ControllerRuntime, document_hash: &str) {
     let _publication = runtime.captured_finalize_wake_publication.lock();
-    runtime.captured_finalize_wakes.lock().remove(document_hash);
+    if runtime
+        .captured_finalize_wakes
+        .lock()
+        .remove(document_hash)
+        .is_some()
+    {
+        runtime
+            .captured_finalize_wake_generation
+            .fetch_add(1, Ordering::SeqCst);
+    }
 }
 
 /// Publish the pane-layout status of `lane` on that lane's own channel
@@ -46574,6 +46699,14 @@ mod tests {
             ),
         )
         .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while restarted.state_projection_activation_queue.counts() != (0, 0) {
+            assert!(
+                Instant::now() < deadline,
+                "editor binding effect publication did not drain"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
         let bound = restarted
             .editor_view_policy_graph
             .observe(
@@ -58980,6 +59113,11 @@ mod tests {
         };
 
         assert!(handle_state_event_append(&bootstrap, &runtime, request()).unwrap());
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while runtime.state_projection_activation_queue.counts() != (0, 0) {
+            assert!(Instant::now() < deadline, "wake projection did not drain");
+            std::thread::sleep(Duration::from_millis(10));
+        }
         let first = runtime.subscribe_state_plane(
             CAPTURED_FINALIZE_WAKE_STATE_CHANNEL,
             None,

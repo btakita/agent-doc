@@ -64,6 +64,8 @@ use std::sync::{
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 const DEFAULT_LAYOUT_SCOPE: &str = "default";
+const PROJECT_REACTIVE_ACTIVATION_KEY: &str = "\0agent-doc:project-reactive";
+const REFRESH_REACTIVE_ACTIVATION_KEY: &str = "\0agent-doc:refresh-reactive";
 const CONTROLLER_BOOTSTRAP_SCOPE: &str = "project";
 const CONNECT_WAIT: Duration = Duration::from_secs(3);
 #[cfg(not(any(test, feature = "test-support")))]
@@ -1368,10 +1370,6 @@ impl ControllerActorGraph {
         self.ctx.set(&self.records, records);
     }
 
-    fn record(&self, document_id: &str) -> Option<agent_doc_controller::actor::ActorRecord> {
-        self.ctx.get(&self.records).get(document_id).cloned()
-    }
-
     fn records(&self) -> ControllerActorStore {
         self.ctx.get(&self.records)
     }
@@ -1691,10 +1689,6 @@ impl ControllerMainLayoutEligibilityGraph {
         let ctx = scope.ctx().clone();
         let value = ctx.source(initial);
         Self { ctx, value }
-    }
-
-    fn get(&self) -> MainLayoutEligibility {
-        self.ctx.get(&self.value)
     }
 
     fn set(&self, value: MainLayoutEligibility) {
@@ -4313,6 +4307,7 @@ pub(crate) struct ControllerRuntime {
     /// the next client launches a clean graph instead of observing partial
     /// mutation left behind by an unwind (GH #354).
     controller_generation_poisoned: AtomicBool,
+    latest_actor_store: Mutex<ControllerActorStore>,
     actor_graph: ControllerActorGraph,
     document_authority_graph: ControllerDocumentAuthorityGraph,
     coordination_graph: ControllerCoordinationGraph,
@@ -4323,6 +4318,8 @@ pub(crate) struct ControllerRuntime {
     /// that cloned an older Snapshot from publishing after a newer wake.
     captured_finalize_wake_publication: Mutex<()>,
     captured_finalize_wakes: Mutex<BTreeMap<String, rpc::CapturedFinalizeWakeProjection>>,
+    captured_finalize_wake_generation: AtomicU64,
+    captured_finalize_wake_published_generation: AtomicU64,
     /// One pane-layout graph per navigation lane; every caller today uses the
     /// shared lane through [`ControllerRuntime::pane_layout_graph`].
     pane_layout_lanes: ControllerPaneLayoutLanes,
@@ -4850,10 +4847,6 @@ struct ControllerDocumentGraphs {
     /// `#closeoutterminalreactive`: the durable closeout facts and observed
     /// clock edge are keyed controller sources. The timer may wake a waiter,
     /// but only the Computed gate decides whether the incumbent still blocks.
-    supervisor_recycle: lazily::ThreadSafeComputedMap<
-        String,
-        agent_doc_state_backbone::SupervisorRecycleProjection,
-    >,
     closeout_cycle_id: lazily::ThreadSafeSourceMap<String, Option<String>>,
     closeout_owner: lazily::ThreadSafeSourceMap<
         String,
@@ -7041,7 +7034,6 @@ impl ControllerDocumentGraphs {
         Self {
             latest_projection: Mutex::new(HashMap::new()),
             projection: lazily::ThreadSafeSourceMap::new(&ctx),
-            supervisor_recycle: lazily::ThreadSafeComputedMap::new(&ctx),
             closeout_cycle_id: lazily::ThreadSafeSourceMap::new(&ctx),
             closeout_owner: lazily::ThreadSafeSourceMap::new(&ctx),
             closeout_now_secs: lazily::ThreadSafeSourceMap::new(&ctx),
@@ -7092,27 +7084,6 @@ impl ControllerDocumentGraphs {
             settle_sink: Arc::new(OnceLock::new()),
             ctx,
         }
-    }
-
-    fn supervisor_recycle(
-        &self,
-        document_hash: &str,
-    ) -> agent_doc_state_backbone::SupervisorRecycleProjection {
-        self.projection
-            .get_or_insert_with(&self.ctx, document_hash.to_string(), |_, _| None);
-        let projections = self.projection.clone();
-        let handle = self.supervisor_recycle.get_or_insert_handle(
-            &self.ctx,
-            document_hash.to_string(),
-            move |ctx, key| {
-                projections
-                    .observe(ctx, key)
-                    .flatten()
-                    .map(|document| document.supervisor.recycle)
-                    .unwrap_or_default()
-            },
-        );
-        self.ctx.get(&handle)
     }
 
     fn projection_handle(
@@ -7812,6 +7783,17 @@ impl ControllerDocumentGraphs {
         disk: Option<agent_doc_state_backbone::retained_write::ContentObservation>,
         settlement_receipt: Option<agent_doc_state_backbone::retained_write::SettlementVerdict>,
     ) -> agent_doc_state_backbone::retained_write::SettlementVerdict {
+        let pending = self
+            .latest_projection(document_hash)
+            .as_ref()
+            .and_then(retained_intent_facts_from_projection);
+        let immediate =
+            agent_doc_state_backbone::retained_write::settlement_verdict_with_receipt(
+                pending.as_ref(),
+                authority.as_ref(),
+                disk.as_ref(),
+                settlement_receipt.as_ref(),
+            );
         // One batch: the two planes are one observation, and a settle effect that
         // ran between them would be judging a fresh authority against a stale disk.
         self.ctx.batch(|ctx| {
@@ -7822,7 +7804,10 @@ impl ControllerDocumentGraphs {
                 .set(ctx, document_hash.to_string(), settlement_receipt);
         });
 
-        self.current_verdict(document_hash)
+        // Keep the effect-plane subscription live, but never use its possibly
+        // lagging worker projection as the synchronous query result.
+        let _ = self.current_verdict(document_hash);
+        immediate
     }
 
     /// Publish one live-authority edge without erasing the last disk edge.
@@ -7834,7 +7819,8 @@ impl ControllerDocumentGraphs {
     ) -> agent_doc_state_backbone::retained_write::SettlementVerdict {
         self.authority
             .set(&self.ctx, document_hash.to_string(), Some(authority));
-        self.current_verdict(document_hash)
+        let _ = self.current_verdict(document_hash);
+        self.immediate_verdict(document_hash)
     }
 
     /// Publish one editor-save edge without erasing the last authority edge.
@@ -7846,7 +7832,28 @@ impl ControllerDocumentGraphs {
     ) -> agent_doc_state_backbone::retained_write::SettlementVerdict {
         self.disk
             .set(&self.ctx, document_hash.to_string(), Some(disk));
-        self.current_verdict(document_hash)
+        let _ = self.current_verdict(document_hash);
+        self.immediate_verdict(document_hash)
+    }
+
+    fn immediate_verdict(
+        &self,
+        document_hash: &str,
+    ) -> agent_doc_state_backbone::retained_write::SettlementVerdict {
+        let key = document_hash.to_string();
+        let pending = self
+            .latest_projection(document_hash)
+            .as_ref()
+            .and_then(retained_intent_facts_from_projection);
+        agent_doc_state_backbone::retained_write::settlement_verdict_with_receipt(
+            pending.as_ref(),
+            self.authority.observe(&self.ctx, &key).flatten().as_ref(),
+            self.disk.observe(&self.ctx, &key).flatten().as_ref(),
+            self.settlement_receipt
+                .observe(&self.ctx, &key)
+                .flatten()
+                .as_ref(),
+        )
     }
 
     /// Publish the post-event CRDT delivery frontier. This is the only write
@@ -10030,6 +10037,7 @@ impl ControllerRuntime {
         }
         let (memory, actor_store) = ControllerMemoryState::load(&bootstrap.project_root)?;
         let scope = agent_doc_state_scope::ProcessScope::new();
+        let latest_actor_store = actor_store.clone();
         let actor_graph = ControllerActorGraph::new_in(&scope, actor_store);
         let supervisor_recycle_graph = ControllerSupervisorRecycleGraph::new_in(
             &scope,
@@ -10099,6 +10107,7 @@ impl ControllerRuntime {
             retained_intent_semantic_fences: Mutex::new(HashMap::new()),
             state_apply_generation: AtomicU64::new(0),
             controller_generation_poisoned: AtomicBool::new(false),
+            latest_actor_store: Mutex::new(latest_actor_store),
             actor_graph,
             document_authority_graph,
             coordination_graph,
@@ -10106,6 +10115,8 @@ impl ControllerRuntime {
             state_plane_graph,
             captured_finalize_wake_publication: Mutex::new(()),
             captured_finalize_wakes: Mutex::new(BTreeMap::new()),
+            captured_finalize_wake_generation: AtomicU64::new(0),
+            captured_finalize_wake_published_generation: AtomicU64::new(0),
             pane_layout_lanes,
             main_layout_eligibility_graph,
             editor_surface_graph,
@@ -10159,30 +10170,11 @@ impl ControllerRuntime {
         runtime
             .document_graphs
             .install_settle_sink(project_root.clone(), &runtime);
-        runtime.install_state_projection_effect_worker()?;
-        runtime.seed_state_projection_effects();
         runtime
             .editor_view_policy_graph
             .install_lifecycle_sink(&runtime);
-        let pending_editor_views = runtime
-            .memory
-            .lock()
-            .state_projection
-            .active_editor_view_bindings();
-        for (document_hash, binding) in pending_editor_views {
-            if matches!(
-                binding.state,
-                agent_doc_state_backbone::EditorViewBindingState::BindPending { .. }
-                    | agent_doc_state_backbone::EditorViewBindingState::ReleasePending { .. }
-            ) {
-                runtime.editor_view_policy_graph.apply_durable_binding(
-                    &document_hash,
-                    &binding.canonical_path,
-                    binding.binding_epoch,
-                    &binding.state,
-                );
-            }
-        }
+        runtime.install_state_projection_effect_worker()?;
+        runtime.seed_state_projection_effects();
         rpc::install_state_plane_effect_sinks(&runtime);
         #[cfg(not(any(test, feature = "test-support")))]
         rpc::install_tmux_layout_effect_state_sink(&runtime);
@@ -10222,9 +10214,17 @@ impl ControllerRuntime {
                         if !queue.is_current(&document_hash, version) {
                             return false;
                         }
-                        runtime
-                            .document_graphs
-                            .activate_current_projection(&document_hash);
+                        if document_hash == PROJECT_REACTIVE_ACTIVATION_KEY {
+                            runtime.publish_current_project_reactive_state();
+                        } else if document_hash == REFRESH_REACTIVE_ACTIVATION_KEY {
+                            runtime.publish_refreshed_reactive_state();
+                        } else {
+                            runtime
+                                .document_graphs
+                                .activate_current_projection(&document_hash);
+                            runtime.publish_current_reactive_state(Some(&document_hash));
+                            rpc::publish_recorded_captured_finalize_wakes(&runtime);
+                        }
                         true
                     }));
                     match activated {
@@ -10267,6 +10267,59 @@ impl ControllerRuntime {
         for document_hash in document_hashes {
             self.enqueue_state_projection_activation(&document_hash);
         }
+        self.enqueue_state_projection_activation(REFRESH_REACTIVE_ACTIVATION_KEY);
+    }
+
+    fn publish_current_project_reactive_state(&self) {
+        let (recycle, main_layout_eligibility) = {
+            let memory = self.memory.lock();
+            (
+                memory.state_projection.project_supervisor_recycle(),
+                main_layout_eligibility_from_state(&memory.state_projection),
+            )
+        };
+        self.supervisor_recycle_graph.set(recycle);
+        self.main_layout_eligibility_graph
+            .set(main_layout_eligibility);
+    }
+
+    fn publish_refreshed_reactive_state(&self) {
+        self.publish_current_project_reactive_state();
+        self.actor_graph.set(self.latest_actor_store.lock().clone());
+        let bindings = self
+            .memory
+            .lock()
+            .state_projection
+            .active_editor_view_bindings();
+        for (document_hash, binding) in bindings {
+            self.editor_view_policy_graph.apply_durable_binding(
+                &document_hash,
+                &binding.canonical_path,
+                binding.binding_epoch,
+                &binding.state,
+            );
+        }
+    }
+
+    fn publish_current_reactive_state(&self, document_hash: Option<&str>) {
+        if let Some(document_hash) = document_hash {
+            let binding = self
+                .memory
+                .lock()
+                .state_projection
+                .document(document_hash)
+                .and_then(|projection| projection.editor_view_binding.clone());
+            if let Some(binding) = binding {
+                self.editor_view_policy_graph.apply_durable_binding(
+                    document_hash,
+                    &binding.canonical_path,
+                    binding.binding_epoch,
+                    &binding.state,
+                );
+            }
+            return;
+        }
+        self.publish_current_project_reactive_state();
     }
 
     fn install_document_authority_handoff_worker(self: &Arc<Self>) -> Result<()> {
@@ -10375,7 +10428,7 @@ impl ControllerRuntime {
     }
 
     pub(crate) fn main_layout_eligibility(&self) -> MainLayoutEligibility {
-        self.main_layout_eligibility_graph.get()
+        main_layout_eligibility_from_state(&self.memory.lock().state_projection)
     }
 
     /// `#ctlrecycle` R2 — mark this controller for a two-phase handoff.
@@ -10466,11 +10519,11 @@ impl ControllerRuntime {
         &self,
         document_id: &str,
     ) -> Result<Option<agent_doc_controller::actor::ActorRecord>> {
-        Ok(self.actor_graph.record(document_id))
+        Ok(self.latest_actor_store.lock().get(document_id).cloned())
     }
 
     fn actor_store_snapshot(&self) -> BTreeMap<String, agent_doc_controller::actor::ActorRecord> {
-        self.actor_graph.records()
+        self.latest_actor_store.lock().clone()
     }
 
     fn acquire_document_turn_authority_subscription(&self, document_hash: &str, document_id: &str) {
@@ -10485,6 +10538,7 @@ impl ControllerRuntime {
 
     fn apply_actor_store_write(&self, write: &agent_doc_controller::actor::ActorStoreWrite) {
         self.actor_graph.apply_store_write(write);
+        *self.latest_actor_store.lock() = self.actor_graph.records();
     }
 
     fn install_state_plane_sink(&self, channel: &str, sink: Arc<dyn ControllerStatePlaneSink>) {
@@ -10700,8 +10754,6 @@ impl ControllerRuntime {
         } else {
             loaded_actor_store
         };
-        let recycle = next.state_projection.project_supervisor_recycle();
-        let main_layout_eligibility = main_layout_eligibility_from_state(&next.state_projection);
         let next_documents = next.state_projection.documents.clone();
         let mut memory = self.memory.lock();
         let previous_documents = memory.state_projection.documents.clone();
@@ -10709,10 +10761,7 @@ impl ControllerRuntime {
             std::mem::take(&mut memory.pending_document_authority_handoffs);
         *memory = next;
         drop(memory);
-        self.actor_graph.set(next_actor_store);
-        self.supervisor_recycle_graph.set(recycle);
-        self.main_layout_eligibility_graph
-            .set(main_layout_eligibility);
+        *self.latest_actor_store.lock() = next_actor_store;
         for document_hash in previous_documents
             .keys()
             .chain(next_documents.keys())
@@ -10726,6 +10775,7 @@ impl ControllerRuntime {
                 self.enqueue_state_projection_activation(document_hash);
             }
         }
+        self.enqueue_state_projection_activation(REFRESH_REACTIVE_ACTIVATION_KEY);
         self.supervisor_recycle_waiters.notify_all();
         self.state_projection_waiters.notify_all();
         crate::dashboard_refresh::mark_dirty_global();
@@ -10734,7 +10784,7 @@ impl ControllerRuntime {
 
     fn apply_state_event(&self, event: &agent_doc_state_backbone::StateEvent) -> Result<()> {
         let document_hash = event.fact.document_hash().to_string();
-        let (recycle, document_projection, main_layout_eligibility) = {
+        let document_projection = {
             let mut memory = self.memory.lock();
             // SQLite accepted the unique event id before this transition. Keep
             // only the current projection and epoch in the process: the durable
@@ -10747,11 +10797,7 @@ impl ControllerRuntime {
                 .and_modify(|epoch| *epoch = epoch.saturating_add(1))
                 .or_insert(1);
             let document_projection = memory.state_projection.document(&document_hash).cloned();
-            (
-                memory.state_projection.project_supervisor_recycle(),
-                document_projection,
-                main_layout_eligibility_from_state(&memory.state_projection),
-            )
+            document_projection
         };
         let captured_finalize_wake_reason = match &event.fact {
             agent_doc_state_backbone::StateFact::ResponseCaptured { .. } => {
@@ -10771,30 +10817,6 @@ impl ControllerRuntime {
             &event.fact,
             agent_doc_state_backbone::StateFact::CommitObserved { .. }
         );
-        if let agent_doc_state_backbone::StateFact::EditorViewBindingObserved {
-            document_hash,
-            canonical_path,
-            binding_epoch,
-            state,
-            ..
-        } = &event.fact
-            && document_projection
-                .as_ref()
-                .and_then(|document| document.editor_view_binding.as_ref())
-                .is_some_and(|binding| {
-                    binding.binding_epoch == *binding_epoch && binding.state == *state
-                })
-        {
-            self.editor_view_policy_graph.apply_durable_binding(
-                document_hash,
-                canonical_path,
-                *binding_epoch,
-                state,
-            );
-        }
-        self.supervisor_recycle_graph.set(recycle);
-        self.main_layout_eligibility_graph
-            .set(main_layout_eligibility);
         // `#retainedsettlereactive`: publish the applied *projection* as the fact
         // lands; the retained-intent facts and the settlement verdict are derived
         // from it. Pushing a pre-computed intent here instead would put the
@@ -10804,7 +10826,7 @@ impl ControllerRuntime {
         if let (Some(reason), Some(projection)) =
             (captured_finalize_wake_reason, document_projection.as_ref())
         {
-            rpc::publish_captured_finalize_wake(self, projection, reason);
+            rpc::record_captured_finalize_wake(self, projection, reason);
         }
         if captured_finalize_committed {
             rpc::clear_captured_finalize_wake(self, &document_hash);
@@ -10816,6 +10838,7 @@ impl ControllerRuntime {
         self.document_graphs
             .set_projection_sources(&document_hash, document_projection);
         self.enqueue_state_projection_activation(&document_hash);
+        self.enqueue_state_projection_activation(PROJECT_REACTIVE_ACTIVATION_KEY);
         self.supervisor_recycle_waiters.notify_all();
         self.state_projection_waiters.notify_all();
         crate::dashboard_refresh::mark_dirty_global();
@@ -10829,8 +10852,16 @@ impl ControllerRuntime {
             // directly bypass the production `new_arc` worker. Preserve their
             // synchronous graph harness without reintroducing a production
             // ingress fallback.
-            self.document_graphs
-                .activate_current_projection(document_hash);
+            if document_hash == PROJECT_REACTIVE_ACTIVATION_KEY {
+                self.publish_current_project_reactive_state();
+            } else if document_hash == REFRESH_REACTIVE_ACTIVATION_KEY {
+                self.publish_refreshed_reactive_state();
+            } else {
+                self.document_graphs
+                    .activate_current_projection(document_hash);
+                self.publish_current_reactive_state(Some(document_hash));
+                rpc::publish_recorded_captured_finalize_wakes(self);
+            }
             return 0;
         }
         self.state_projection_activation_queue
@@ -11323,7 +11354,7 @@ impl ControllerRuntime {
     fn supervisor_recycle_projection(
         &self,
     ) -> Result<agent_doc_state_backbone::SupervisorRecycleProjection> {
-        Ok(self.supervisor_recycle_graph.projection())
+        Ok(self.memory.lock().state_projection.project_supervisor_recycle())
     }
 
     fn supervisor_recycle_projection_for(
@@ -11331,7 +11362,11 @@ impl ControllerRuntime {
         document_hash: Option<&str>,
     ) -> Result<agent_doc_state_backbone::SupervisorRecycleProjection> {
         match document_hash {
-            Some(hash) => Ok(self.document_graphs.supervisor_recycle(hash)),
+            Some(hash) => Ok(self
+                .document_graphs
+                .latest_projection(hash)
+                .map(|document| document.supervisor.recycle)
+                .unwrap_or_default()),
             None => self.supervisor_recycle_projection(),
         }
     }
@@ -11543,10 +11578,6 @@ impl ControllerSupervisorRecycleGraph {
 
     fn set(&self, projection: agent_doc_state_backbone::SupervisorRecycleProjection) {
         self.ctx.set(&self.projection, projection);
-    }
-
-    fn projection(&self) -> agent_doc_state_backbone::SupervisorRecycleProjection {
-        self.ctx.get(&self.projection)
     }
 
     fn in_flight(&self) -> bool {
@@ -22108,6 +22139,7 @@ agent:queue\n\
             retained_intent_semantic_fences: Mutex::new(HashMap::new()),
             state_apply_generation: AtomicU64::new(0),
             controller_generation_poisoned: AtomicBool::new(false),
+            latest_actor_store: Mutex::new(BTreeMap::new()),
             actor_graph,
             document_authority_graph,
             supervisor_recycle_graph,
@@ -22122,6 +22154,8 @@ agent:queue\n\
             state_plane_graph: ControllerStatePlaneGraph::new_in(&scope),
             captured_finalize_wake_publication: Mutex::new(()),
             captured_finalize_wakes: Mutex::new(BTreeMap::new()),
+            captured_finalize_wake_generation: AtomicU64::new(0),
+            captured_finalize_wake_published_generation: AtomicU64::new(0),
             pane_layout_lanes,
             main_layout_eligibility_graph,
             editor_surface_graph,
@@ -22242,6 +22276,15 @@ agent:queue\n\
         // when derived work for an existing document is slow.
         let startup_hash = "blocked-startup-state-projection".to_string();
         append_state_event(dir.path(), &event_for("startup-event", &startup_hash)).unwrap();
+        append_state_event(
+            dir.path(),
+            &deferred_document_write_event(
+                &startup_hash,
+                "blocked-startup-intent",
+                "blocked-startup-target",
+            ),
+        )
+        .unwrap();
         let (startup_entered_tx, startup_entered_rx) = std::sync::mpsc::sync_channel(1);
         let (startup_release_tx, startup_release_rx) = std::sync::mpsc::sync_channel(1);
         let startup_release_rx = Arc::new(Mutex::new(startup_release_rx));
@@ -22266,6 +22309,19 @@ agent:queue\n\
                 .unwrap()
                 .is_some()
         );
+        let verdict = runtime.document_retained_write_verdict(
+            &startup_hash,
+            &dir.path().join("tasks/sdk.md"),
+            Some(observation("authority")),
+            Some(observation("disk")),
+        );
+        assert!(matches!(
+            verdict,
+            agent_doc_state_backbone::retained_write::SettlementVerdict::Unsettled {
+                intent_id,
+                ..
+            } if intent_id == "blocked-startup-intent"
+        ));
         startup_release_tx.send(()).unwrap();
         let startup_deadline = Instant::now() + Duration::from_secs(2);
         while runtime
@@ -22426,6 +22482,108 @@ agent:queue\n\
     }
 
     #[test]
+    fn editor_lifecycle_effect_never_blocks_append_or_refresh_ack() {
+        use agent_doc_state_backbone::{EditorViewBindingIdentity, EditorViewBindingState};
+
+        let _test_lock = state_projection_effect_test_lock().lock();
+        let binding_event = |event_id: &str, document_hash: &str, canonical_path: &Path| {
+            agent_doc_state_backbone::StateEvent::new(
+                event_id,
+                agent_doc_state_backbone::StateFact::EditorViewBindingObserved {
+                    document_hash: document_hash.to_string(),
+                    canonical_path: canonical_path.to_string_lossy().to_string(),
+                    binding_epoch: 1,
+                    state: EditorViewBindingState::BindPending {
+                        binding: EditorViewBindingIdentity {
+                            view_id: "view".to_string(),
+                            client_family: "test".to_string(),
+                            connection_generation: 1,
+                            surface_id: "surface".to_string(),
+                            surface_generation: 1,
+                            view_session: "session".to_string(),
+                        },
+                    },
+                },
+            )
+        };
+
+        let run_blocked = |runtime: Arc<ControllerRuntime>,
+                           project_root: PathBuf,
+                           event: agent_doc_state_backbone::StateEvent,
+                           refresh: bool| {
+            let canonical_path = match &event.fact {
+                agent_doc_state_backbone::StateFact::EditorViewBindingObserved {
+                    canonical_path,
+                    ..
+                } => canonical_path.clone(),
+                _ => unreachable!(),
+            };
+            let (entered_tx, entered_rx) = std::sync::mpsc::sync_channel(1);
+            let (release_tx, release_rx) = std::sync::mpsc::sync_channel(1);
+            let release_rx = Arc::new(Mutex::new(release_rx));
+            let first = Arc::new(AtomicBool::new(true));
+            rpc::set_editor_view_lifecycle_effect_test_hook(Some(Arc::new(move || {
+                if first.swap(false, Ordering::SeqCst) {
+                    let _ = entered_tx.send(());
+                    let _ = release_rx.lock().recv();
+                }
+            })));
+            if refresh {
+                append_state_event(&project_root, &event).unwrap();
+            }
+            let worker_runtime = Arc::clone(&runtime);
+            let (ack_tx, ack_rx) = std::sync::mpsc::sync_channel(1);
+            let worker = std::thread::spawn(move || {
+                let started = Instant::now();
+                let result = if refresh {
+                    worker_runtime.refresh_memory().map(|_| true)
+                } else {
+                    worker_runtime.append_apply_state_event_serialized(&project_root, &event)
+                };
+                ack_tx.send((result, started.elapsed())).unwrap();
+            });
+            entered_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+            let ack = ack_rx.recv_timeout(Duration::from_millis(500));
+            assert!(
+                !runtime.main_layout_eligibility().permits(&canonical_path),
+                "lock-backed layout eligibility must be immediate while its Effect is blocked"
+            );
+            release_tx.send(()).unwrap();
+            worker.join().unwrap();
+            let (result, elapsed) = ack.expect("editor lifecycle Effect blocked controller ACK");
+            assert!(result.unwrap());
+            assert!(elapsed < Duration::from_millis(500));
+            rpc::set_editor_view_lifecycle_effect_test_hook(None);
+        };
+
+        let append_dir = tempfile::TempDir::new().unwrap();
+        let append_runtime = ControllerRuntime::new_arc(test_bootstrap(&append_dir)).unwrap();
+        run_blocked(
+            append_runtime,
+            append_dir.path().to_path_buf(),
+            binding_event(
+                "editor-lifecycle-append",
+                "editor-lifecycle-append-doc",
+                &append_dir.path().join("tasks/append.md"),
+            ),
+            false,
+        );
+
+        let refresh_dir = tempfile::TempDir::new().unwrap();
+        let refresh_runtime = ControllerRuntime::new_arc(test_bootstrap(&refresh_dir)).unwrap();
+        run_blocked(
+            refresh_runtime,
+            refresh_dir.path().to_path_buf(),
+            binding_event(
+                "editor-lifecycle-refresh",
+                "editor-lifecycle-refresh-doc",
+                &refresh_dir.path().join("tasks/refresh.md"),
+            ),
+            true,
+        );
+    }
+
+    #[test]
     fn refresh_projection_activation_is_coalesced_and_cannot_overtake_sources() {
         let _test_lock = state_projection_effect_test_lock().lock();
         let dir = tempfile::TempDir::new().unwrap();
@@ -22540,8 +22698,8 @@ agent:queue\n\
         }
         assert_eq!(
             runtime.state_projection_activation_queue.counts(),
-            (1, 0),
-            "a blocked worker must retain one desired version, not 64 projections"
+            (2, 1),
+            "a blocked worker must retain one document version plus one project refresh, not 64 projections"
         );
         assert_eq!(
             runtime
@@ -22585,7 +22743,11 @@ agent:queue\n\
             assert!(Instant::now() < deadline, "worker panic did not poison generation");
             std::thread::sleep(Duration::from_millis(10));
         }
-        assert_eq!(runtime.state_projection_activation_queue.counts(), (1, 0));
+        assert_eq!(
+            runtime.state_projection_activation_queue.counts(),
+            (2, 1),
+            "worker failure retains the document and project publications for controller restart"
+        );
         *state_projection_effect_test_hook().lock() = None;
 
         let unrelated_hash = "post-panic-source";
@@ -25103,11 +25265,6 @@ agent:queue\n\
             Some("intent-before-start".to_string()),
             "the lock-backed authoritative Source is immediately readable"
         );
-        let deadline = Instant::now() + Duration::from_secs(2);
-        while runtime.state_projection_activation_queue.counts() != (0, 0) {
-            assert!(Instant::now() < deadline, "startup activation did not drain");
-            std::thread::sleep(Duration::from_millis(10));
-        }
         let verdict = runtime.document_retained_write_verdict(
             &document_hash,
             &file,
@@ -25212,11 +25369,6 @@ agent:queue\n\
                 .map(|intent| intent.intent_id),
             Some("intent-after-start".to_string())
         );
-        let deadline = Instant::now() + Duration::from_secs(2);
-        while runtime.state_projection_activation_queue.counts() != (0, 0) {
-            assert!(Instant::now() < deadline, "refresh activation did not drain");
-            std::thread::sleep(Duration::from_millis(10));
-        }
         let verdict = runtime.document_retained_write_verdict(
             &document_hash,
             &file,

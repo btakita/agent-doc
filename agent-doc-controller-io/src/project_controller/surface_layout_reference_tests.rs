@@ -87,6 +87,11 @@ impl Fixture {
             payload,
         )
     }
+
+    fn set_actors(&self, actors: ControllerActorStore) {
+        self.runtime.actor_graph.set(actors.clone());
+        *self.runtime.latest_actor_store.lock() = actors;
+    }
 }
 
 fn split(columns: &[&[&str]], focused: &str, order: SurfaceColumnOrder) -> EditorSurface {
@@ -260,28 +265,25 @@ fn sync_by_reference_fails_closed_without_a_usable_source() {
     );
 
     let document_id = canonical_layout_document_id(&fixture.bootstrap.project_root, &a);
-    fixture
-        .runtime
-        .actor_graph
-        .set(std::collections::BTreeMap::from([(
-            document_id,
-            agent_doc_controller::actor::ActorRecord {
-                document_id: canonical_layout_document_id(&fixture.bootstrap.project_root, &a),
-                session_id: "session-%1".to_string(),
-                generation: 7,
-                pane_id: "%1".to_string(),
-                window_id: "@1".to_string(),
-                harness: "codex".to_string(),
-                state: agent_doc_controller::actor::ActorState::Ready,
-                last_transition: agent_doc_controller::actor::ActorLastTransition {
-                    caller: "test".to_string(),
-                    reason: "started".to_string(),
-                    timestamp: 1,
-                    prior_generation: 6,
-                    new_generation: 7,
-                },
+    fixture.set_actors(std::collections::BTreeMap::from([(
+        document_id,
+        agent_doc_controller::actor::ActorRecord {
+            document_id: canonical_layout_document_id(&fixture.bootstrap.project_root, &a),
+            session_id: "session-%1".to_string(),
+            generation: 7,
+            pane_id: "%1".to_string(),
+            window_id: "@1".to_string(),
+            harness: "codex".to_string(),
+            state: agent_doc_controller::actor::ActorState::Ready,
+            last_transition: agent_doc_controller::actor::ActorLastTransition {
+                caller: "test".to_string(),
+                reason: "started".to_string(),
+                timestamp: 1,
+                prior_generation: 6,
+                new_generation: 7,
             },
-        )]));
+        },
+    )]));
     let started = fixture
         .resolve_sync(&fixture.sync_payload(4, false))
         .unwrap_err();
@@ -428,13 +430,10 @@ fn closed_or_unbound_actor_is_not_a_started_agent_session() {
         agent_doc_controller::actor::ActorState::Closed,
         agent_doc_controller::actor::ActorState::Ready,
     ];
-    fixture
-        .runtime
-        .actor_graph
-        .set(std::collections::BTreeMap::from([(
-            document_id.clone(),
-            started_actor(&document_id, cases[0], "%1"),
-        )]));
+    fixture.set_actors(std::collections::BTreeMap::from([(
+        document_id.clone(),
+        started_actor(&document_id, cases[0], "%1"),
+    )]));
     assert!(!document_has_started_agent_session(
         fixture.runtime.as_ref(),
         &fixture.bootstrap.project_root,
@@ -442,29 +441,23 @@ fn closed_or_unbound_actor_is_not_a_started_agent_session() {
     ));
     let mut unbound = started_actor(&document_id, cases[1], "");
     unbound.pane_id.clear();
-    fixture
-        .runtime
-        .actor_graph
-        .set(std::collections::BTreeMap::from([(
-            document_id.clone(),
-            unbound,
-        )]));
+    fixture.set_actors(std::collections::BTreeMap::from([(
+        document_id.clone(),
+        unbound,
+    )]));
     assert!(!document_has_started_agent_session(
         fixture.runtime.as_ref(),
         &fixture.bootstrap.project_root,
         &document,
     ));
-    fixture
-        .runtime
-        .actor_graph
-        .set(std::collections::BTreeMap::from([(
-            document_id,
-            started_actor(
-                &canonical_layout_document_id(&fixture.bootstrap.project_root, &document),
-                agent_doc_controller::actor::ActorState::Starting,
-                "%2",
-            ),
-        )]));
+    fixture.set_actors(std::collections::BTreeMap::from([(
+        document_id,
+        started_actor(
+            &canonical_layout_document_id(&fixture.bootstrap.project_root, &document),
+            agent_doc_controller::actor::ActorState::Starting,
+            "%2",
+        ),
+    )]));
     assert!(document_has_started_agent_session(
         fixture.runtime.as_ref(),
         &fixture.bootstrap.project_root,

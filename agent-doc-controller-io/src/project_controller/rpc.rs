@@ -57177,6 +57177,79 @@ mod tests {
     }
 
     #[test]
+    fn authority_overlay_read_is_atomic_with_fold_and_clear() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let runtime = ControllerRuntime::new_arc(test_bootstrap(&dir)).unwrap();
+        let disk = agent_doc_state_backbone::StateEvent::new(
+            "authority-stale-disk",
+            agent_doc_state_backbone::StateFact::DocumentAuthorityObserved {
+                document_hash: "doc".to_string(),
+                authority: agent_doc_state_backbone::DocumentAuthority::DiskReplica,
+                authority_epoch: 1,
+                source: "disk".to_string(),
+                reason: "detached".to_string(),
+                content_hash: Some("disk-cut".to_string()),
+                editor_id: None,
+            },
+        );
+        runtime
+            .append_apply_state_event_serialized(dir.path(), &disk)
+            .unwrap();
+        let editor = authority_handoff_test_event("authority-pending-editor", "doc", 2);
+        runtime.note_pending_document_authority_handoff(editor.clone());
+
+        let (read_locked_tx, read_locked_rx) = std::sync::mpsc::channel();
+        let (release_read_tx, release_read_rx) = std::sync::mpsc::channel();
+        let reader_runtime = Arc::clone(&runtime);
+        let reader = std::thread::spawn(move || {
+            set_authority_overlay_read_test_hook(Some(Box::new(move || {
+                read_locked_tx.send(()).unwrap();
+                release_read_rx.recv().unwrap();
+            })));
+            reader_runtime.document_state_projection("doc").unwrap()
+        });
+        read_locked_rx.recv().unwrap();
+
+        let (fold_done_tx, fold_done_rx) = std::sync::mpsc::channel();
+        let fold_runtime = Arc::clone(&runtime);
+        let project_root = dir.path().to_path_buf();
+        let fold_event = editor.clone();
+        let fold = std::thread::spawn(move || {
+            fold_runtime
+                .append_apply_state_event_serialized(&project_root, &fold_event)
+                .unwrap();
+            fold_runtime.clear_pending_document_authority_handoff(&fold_event);
+            fold_done_tx.send(()).unwrap();
+        });
+        assert!(
+            matches!(
+                fold_done_rx.recv_timeout(Duration::from_millis(50)),
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+            ),
+            "fold+clear must not interleave between the durable clone and pending overlay"
+        );
+        release_read_tx.send(()).unwrap();
+        let observed = reader.join().unwrap().unwrap();
+        assert_eq!(
+            observed
+                .document
+                .latest_authority
+                .map(|authority| authority.authority),
+            Some(agent_doc_state_backbone::DocumentAuthority::EditorRelay)
+        );
+        fold.join().unwrap();
+        fold_done_rx.recv().unwrap();
+        assert_eq!(
+            runtime
+                .document_state_projection("doc")
+                .unwrap()
+                .and_then(|projection| projection.document.latest_authority)
+                .map(|authority| authority.authority),
+            Some(agent_doc_state_backbone::DocumentAuthority::EditorRelay)
+        );
+    }
+
+    #[test]
     fn controller_local_state_event_reaches_live_graph_without_project_reload() {
         // A dedicated worker owns the same thread-local ingress context as a
         // production request; no socket or ledger replay may supply the result.

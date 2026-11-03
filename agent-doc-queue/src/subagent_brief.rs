@@ -928,6 +928,50 @@ mod tests {
     }
 
     #[test]
+    fn waiting_item_brief_carries_operator_prompt_nested_under_response_metadata() {
+        let item = concat!(
+            "Confirm the game integrator can git ls-remote private haiven-dev/haiven-sdk ",
+            "from their account <!-- agent-doc:waiting-item -->"
+        );
+        let question = "What is the \"game integrator\"? Why do you need this?";
+        let content = format!(
+            concat!(
+                "---\nagent_doc_session: sdk-release\nagent_doc_format: template\n---\n\n",
+                "<!-- agent:run id=main subagents go -->\n",
+                "- ### Waiting on you <!-- agent-doc:waiting-on-you -->\n",
+                "  - {item}\n",
+                "    - **Response:** Confirm repository access. <!-- agent-doc:waiting-metadata -->\n",
+                "      - **Question:** What decision should be recorded? <!-- agent-doc:waiting-metadata -->\n",
+                "      - **Next actions:** <!-- agent-doc:waiting-metadata -->\n",
+                "        - **Action:** Confirm repository access. <!-- agent-doc:waiting-metadata -->\n",
+                "        - {question}\n",
+                "<!-- /agent:run -->\n"
+            ),
+            item = item,
+            question = question,
+        );
+
+        let auth = subagent_authorization("sdk-release.md", &content, item);
+        let packet = auth
+            .prompt_context
+            .as_ref()
+            .expect("the executable waiting selector carries lineage");
+
+        assert_eq!(packet.decision_evidence, [question]);
+        assert!(
+            auth.subagent_prompt_preamble.contains(question),
+            "{}",
+            auth.subagent_prompt_preamble
+        );
+        assert!(
+            auth.subagent_prompt_preamble
+                .contains("Prompt tree (`#nestsubmit`"),
+            "{}",
+            auth.subagent_prompt_preamble
+        );
+    }
+
+    #[test]
     fn preset_queue_carries_guidance_for_the_active_agent() {
         let presets = concat!(
             "agent: codex\n",

@@ -2298,30 +2298,29 @@ fn run_with_options_inner(
                 "read_only_terminal_convergence",
             );
         }
-        // `#retainedbackgroundprojection`: once the coherent ownership cut
-        // proves a durable controller holder, an unsettled editor projection
-        // is background work rather than a foreground interruption. Returning
-        // the typed non-terminal outcome here is important in both directions:
-        // the CLI does not stall/retry the critical path, while embedded
-        // callers cannot mistake exit-0 reporting for terminal convergence.
-        // No response replay, force-disk write, guard sweep, or terminal `OK`
-        // can run until a later observation sees the exact save receipt.
+        // `#retainedbackgroundprojection`: BACKGROUND PENDING is legal only at
+        // the pre-effect fence. If ownership appears after that observation,
+        // archive/replay/guard effects may already have run, so this pass must
+        // fail closed without making the stronger "no effects ran" claim. A
+        // fresh invocation will observe the owner at the outer fence.
         if background_owns_read_only_projection(
             terminal_projection_decision,
             ownership.verdict(),
             projection_matches,
             operator_edit_lead,
         ) {
-            return Err(
-                SessionCheckBackgroundPending(background_owned_projection_message(
-                    file,
+            return Err(SessionCheckInterrupted(format!(
+                "[session-check] INTERRUPTED: retained projection ownership appeared after the pre-effect fence for {} (authority_hash={}, disk_hash={}, component_divergence={}); this pass may already have crossed response restoration, canonicalization, or guard effects, so it cannot report BACKGROUND PENDING or claim that no foreground effects ran. No terminal status was emitted. Run `agent-doc session-check {}` once to re-observe ownership at the pre-effect fence; do not replay/resubmit the response or force disk",
+                file.display(),
+                agent_doc_hash::content_hash(&authority_content),
+                agent_doc_hash::content_hash(&disk_content),
+                agent_doc_document::authority_hashes::format_authority_disk_component_divergence(
                     &authority_content,
                     &disk_content,
-                    terminal_projection_decision,
-                    &divergence_owner_note,
-                ))
-                .into(),
-            );
+                ),
+                file.display(),
+            ))
+            .into());
         }
         // `#splicesessionack`: fail closed while the exhausted state holds,
         // whatever scoped equality or operator lead says.
@@ -5314,6 +5313,150 @@ mod terminal_convergence_tests {
         fn resume_captured_finalize(&self, _file: &Path) -> Result<CapturedFinalizeResumeOutcome> {
             Ok(CapturedFinalizeResumeOutcome::NotApplicable)
         }
+    }
+
+    struct LateOwnershipEffects {
+        retained_reads: Cell<usize>,
+        restore_calls: Cell<usize>,
+        replay_gate_checks: Cell<usize>,
+    }
+
+    impl LateOwnershipEffects {
+        fn new() -> Self {
+            Self {
+                retained_reads: Cell::new(0),
+                restore_calls: Cell::new(0),
+                replay_gate_checks: Cell::new(0),
+            }
+        }
+    }
+
+    impl SessionCheckEffects for LateOwnershipEffects {
+        fn allows_recovery(&self) -> bool {
+            false
+        }
+
+        fn allows_response_replay_canonicalization(&self) -> bool {
+            self.replay_gate_checks
+                .set(self.replay_gate_checks.get() + 1);
+            false
+        }
+
+        fn restore_committed_response_evidence(&self, _file: &Path) -> Result<bool> {
+            self.restore_calls.set(self.restore_calls.get() + 1);
+            Ok(false)
+        }
+
+        fn closeout_recovery_hint(&self, file: &Path) -> String {
+            TestEffects.closeout_recovery_hint(file)
+        }
+
+        fn atomic_write(&self, file: &Path, content: &str) -> Result<()> {
+            TestEffects.atomic_write(file, content)
+        }
+
+        fn atomic_repair_write_if_current(
+            &self,
+            file: &Path,
+            content: &str,
+            expected_current: &str,
+            source: &str,
+        ) -> Result<String> {
+            TestEffects.atomic_repair_write_if_current(file, content, expected_current, source)
+        }
+
+        fn settle_committed_projection(
+            &self,
+            file: &Path,
+            committed_content: &str,
+            expected_current: &str,
+        ) -> Result<()> {
+            TestEffects.settle_committed_projection(file, committed_content, expected_current)
+        }
+
+        fn settle_retained_committed_projection(
+            &self,
+            file: &Path,
+            committed_content: &str,
+            expected_disk: &str,
+        ) -> Result<bool> {
+            TestEffects.settle_retained_committed_projection(file, committed_content, expected_disk)
+        }
+
+        fn repair_committed_historical_snapshot_drift(
+            &self,
+            file: &Path,
+        ) -> Result<Option<&'static str>> {
+            TestEffects.repair_committed_historical_snapshot_drift(file)
+        }
+
+        fn recover_missing_commit_boundary(
+            &self,
+            file: &Path,
+            event: &str,
+        ) -> Result<Option<&'static str>> {
+            TestEffects.recover_missing_commit_boundary(file, event)
+        }
+
+        fn resume_captured_finalize(&self, file: &Path) -> Result<CapturedFinalizeResumeOutcome> {
+            TestEffects.resume_captured_finalize(file)
+        }
+
+        fn retained_document_write_blocks(&self, _file: &Path) -> bool {
+            let read = self.retained_reads.get() + 1;
+            self.retained_reads.set(read);
+            read > 1
+        }
+    }
+
+    /// Ownership can become durable between the outer pre-effect observation
+    /// and the inner terminal cut. That interleaving must never reuse the
+    /// BACKGROUND PENDING claim, because restore/replay gates were already
+    /// crossed. It fails closed and asks one fresh observation instead.
+    #[test]
+    fn retained_ownership_appearing_after_pre_effect_fence_interrupts() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let file = dir.path().join("session.md");
+        let disk = concat!(
+            "# Task\n\n",
+            "<!-- agent:exchange -->\nanswered\n<!-- /agent:exchange -->\n",
+            "<!-- agent:queue -->\n- 📥 old queue head\n<!-- /agent:queue -->\n",
+        );
+        let authority = disk.replace("old queue head", "new queue head");
+        std::fs::write(&file, disk).unwrap();
+        publish_live_authority_without_saving(
+            &file,
+            &authority,
+            "intellij:retained-late-owner-race",
+        );
+
+        let effects = LateOwnershipEffects::new();
+        let error = try_run_with_options(&file, false, &effects)
+            .expect_err("late retained owner is a fail-closed race");
+        assert!(
+            error.downcast_ref::<SessionCheckBackgroundPending>().is_none(),
+            "late ownership cannot make the pre-effect no-mutation claim"
+        );
+        let interrupted = error
+            .downcast_ref::<SessionCheckInterrupted>()
+            .expect("late ownership is typed foreground interruption");
+        for needle in [
+            "ownership appeared after the pre-effect fence",
+            "may already have crossed response restoration, canonicalization, or guard effects",
+            "cannot report BACKGROUND PENDING",
+            "No terminal status was emitted",
+            "Run `agent-doc session-check",
+        ] {
+            assert!(interrupted.0.contains(needle), "{needle}: {interrupted}");
+        }
+        assert_eq!(effects.restore_calls.get(), 1, "outer restore was crossed");
+        assert_eq!(
+            effects.replay_gate_checks.get(),
+            1,
+            "inner replay gate was crossed"
+        );
+        assert!(effects.retained_reads.get() >= 2, "ownership appeared late");
     }
 
     #[test]

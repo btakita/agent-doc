@@ -28992,6 +28992,51 @@ fn inspect_queue_projection(
     actor_generation: Option<u64>,
     runtime_head: Option<QueueHeadStatus>,
 ) -> (Option<QueueHeadStatus>, QueueProjectionInspection, bool) {
+    let document_content = queue_projection_content(document_id).map_err(|err| format!("{err:#}"));
+    inspect_queue_projection_from_content(
+        document_id,
+        actor_generation,
+        runtime_head,
+        document_content,
+    )
+}
+
+/// Read the queue projection from the controller-owned editor authority.
+///
+/// An attached editor without a settled replica is unavailable rather than
+/// permission to inspect stale disk. Disk is authoritative only when the CRDT
+/// relay explicitly reports that the document is detached.
+fn queue_projection_content(document_id: &str) -> Result<String> {
+    let file = Path::new(document_id);
+    let current = agent_doc_crdt_relay_io::current_text_for_file_nonblocking(file)?;
+    queue_projection_content_from_authority(file, current)
+}
+
+fn queue_projection_content_from_authority(
+    file: &Path,
+    current: agent_doc_crdt_relay_io::CurrentText,
+) -> Result<String> {
+    match current {
+        agent_doc_crdt_relay_io::CurrentText::Current { text, .. } => Ok(text),
+        agent_doc_crdt_relay_io::CurrentText::Detached => std::fs::read_to_string(file)
+            .with_context(|| format!("could not read detached document {}", file.display())),
+        agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica => anyhow::bail!(
+            "live editor authority for {} has no registered replica",
+            file.display()
+        ),
+        agent_doc_crdt_relay_io::CurrentText::EditorSyncPending => anyhow::bail!(
+            "live editor authority for {} has no consistent canonical cut",
+            file.display()
+        ),
+    }
+}
+
+fn inspect_queue_projection_from_content(
+    document_id: &str,
+    actor_generation: Option<u64>,
+    runtime_head: Option<QueueHeadStatus>,
+    document_content: std::result::Result<String, String>,
+) -> (Option<QueueHeadStatus>, QueueProjectionInspection, bool) {
     let runtime_generation = runtime_head.as_ref().and_then(|head| head.generation);
     let runtime_head_id = runtime_head.as_ref().and_then(|head| head.head_id.clone());
     let runtime_prompt = runtime_head.as_ref().map(|head| head.prompt.clone());
@@ -29002,7 +29047,7 @@ fn inspect_queue_projection(
         runtime_prompt,
         ..QueueProjectionInspection::default()
     };
-    let content = match std::fs::read_to_string(document_id) {
+    let content = match document_content {
         Ok(content) => content,
         Err(err) => {
             return (
@@ -29033,9 +29078,10 @@ fn inspect_queue_projection(
         }
     };
 
-    let generation_matches = runtime_generation.is_none()
-        || actor_generation.is_none()
-        || runtime_generation == actor_generation;
+    let generation_matches = matches!(
+        (runtime_generation, actor_generation),
+        (Some(runtime), Some(actor)) if runtime == actor
+    );
     match (runtime_head, document_prompt) {
         (None, None) => (
             None,
@@ -29071,16 +29117,28 @@ fn inspect_queue_projection(
             )
         }
         (runtime, Some(document_prompt)) => {
-            let status = if runtime.is_some() {
+            let status = if runtime.as_ref().is_some_and(|runtime| {
+                runtime.prompt == document_prompt
+                    && (runtime.generation.is_none() || actor_generation.is_none())
+            }) {
+                "generation_unknown"
+            } else if runtime.is_some() {
                 "runtime_stale"
             } else {
                 "runtime_missing"
             };
             let detail = match runtime.as_ref() {
-                Some(runtime) if runtime.prompt == document_prompt => format!(
-                    "runtime head generation {:?} does not match actor generation {:?}",
-                    runtime.generation, actor_generation
-                ),
+                Some(runtime) if runtime.prompt == document_prompt => {
+                    match (runtime.generation, actor_generation) {
+                        (Some(runtime), Some(actor)) => format!(
+                            "runtime head generation {runtime} does not match actor generation {actor}"
+                        ),
+                        _ => format!(
+                            "runtime head generation {:?} and actor generation {:?} do not provide complete identity proof",
+                            runtime.generation, actor_generation
+                        ),
+                    }
+                }
                 Some(_) => "runtime and document queue heads differ".to_string(),
                 None => "document has an active queue head but runtime has none".to_string(),
             };
@@ -29159,20 +29217,13 @@ mod queue_projection_inspection_tests {
 
     #[test]
     fn stale_runtime_head_is_not_reported_as_the_effective_document_head() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let document = dir.path().join("session.md");
-        std::fs::write(&document, active_queue("new document head")).unwrap();
-        let document_id = document.to_string_lossy();
+        let document_id = "/session.md";
 
-        let (effective, projection, lag) = inspect_queue_projection(
-            &document_id,
+        let (effective, projection, lag) = inspect_queue_projection_from_content(
+            document_id,
             Some(9),
-            Some(runtime_head(
-                &document_id,
-                "old runtime head",
-                "selected",
-                9,
-            )),
+            Some(runtime_head(document_id, "old runtime head", "selected", 9)),
+            Ok(active_queue("new document head")),
         );
 
         assert!(lag);
@@ -29193,19 +29244,16 @@ mod queue_projection_inspection_tests {
 
     #[test]
     fn terminal_runtime_head_is_historical_when_document_has_no_head() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let document = dir.path().join("session.md");
-        std::fs::write(
-            &document,
-            "---\nqueue: go\n---\n\n<!-- agent:queue go -->\n<!-- /agent:queue -->\n",
-        )
-        .unwrap();
-        let document_id = document.to_string_lossy();
+        let document_id = "/session.md";
 
-        let (effective, projection, lag) = inspect_queue_projection(
-            &document_id,
+        let (effective, projection, lag) = inspect_queue_projection_from_content(
+            document_id,
             Some(9),
-            Some(runtime_head(&document_id, "completed head", "consumed", 9)),
+            Some(runtime_head(document_id, "completed head", "consumed", 9)),
+            Ok(
+                "---\nqueue: go\n---\n\n<!-- agent:queue go -->\n<!-- /agent:queue -->\n"
+                    .to_string(),
+            ),
         );
 
         assert!(!lag);
@@ -29218,15 +29266,13 @@ mod queue_projection_inspection_tests {
 
     #[test]
     fn matching_text_with_stale_generation_is_projection_lag() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let document = dir.path().join("session.md");
-        std::fs::write(&document, active_queue("same head")).unwrap();
-        let document_id = document.to_string_lossy();
+        let document_id = "/session.md";
 
-        let (effective, projection, lag) = inspect_queue_projection(
-            &document_id,
+        let (effective, projection, lag) = inspect_queue_projection_from_content(
+            document_id,
             Some(10),
-            Some(runtime_head(&document_id, "same head", "selected", 9)),
+            Some(runtime_head(document_id, "same head", "selected", 9)),
+            Ok(active_queue("same head")),
         );
 
         assert!(lag);
@@ -29238,15 +29284,76 @@ mod queue_projection_inspection_tests {
     #[test]
     fn unreadable_document_never_reports_healthy_projection() {
         let missing = "/definitely/missing/agent-doc-session.md";
-        let (effective, projection, lag) = inspect_queue_projection(
+        let (effective, projection, lag) = inspect_queue_projection_from_content(
             missing,
             Some(1),
             Some(runtime_head(missing, "runtime head", "selected", 1)),
+            Err("live authority unavailable".to_string()),
         );
 
         assert!(lag);
         assert_eq!(projection.status, "document_unavailable");
         assert_eq!(effective.unwrap().prompt, "runtime head");
+    }
+
+    #[test]
+    fn live_unsaved_queue_projection_wins_over_stale_disk() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let document = dir.path().join("session.md");
+        std::fs::write(&document, active_queue("stale disk head")).unwrap();
+        let document_id = document.to_string_lossy();
+        let content = queue_projection_content_from_authority(
+            &document,
+            agent_doc_crdt_relay_io::CurrentText::Current {
+                text: active_queue("live unsaved head"),
+                live_editors: 1,
+                delivery_converged: true,
+                delivery_version: 1,
+                semantics: None,
+                quarantined_replicas: 0,
+            },
+        )
+        .map_err(|err| format!("{err:#}"));
+
+        let (effective, projection, lag) = inspect_queue_projection_from_content(
+            &document_id,
+            Some(9),
+            Some(runtime_head(&document_id, "stale disk head", "selected", 9)),
+            content,
+        );
+
+        assert!(lag);
+        assert_eq!(projection.status, "runtime_stale");
+        assert_eq!(
+            projection.document_prompt.as_deref(),
+            Some("live unsaved head")
+        );
+        assert_eq!(effective.unwrap().prompt, "live unsaved head");
+    }
+
+    #[test]
+    fn generationless_runtime_head_is_unknown_projection_lag() {
+        let document_id = "/session.md";
+        let mut runtime = runtime_head(document_id, "same head", "selected", 9);
+        runtime.generation = None;
+
+        let (effective, projection, lag) = inspect_queue_projection_from_content(
+            document_id,
+            Some(9),
+            Some(runtime),
+            Ok(active_queue("same head")),
+        );
+
+        assert!(lag);
+        assert_eq!(projection.status, "generation_unknown");
+        assert_eq!(projection.runtime_generation, None);
+        assert_eq!(effective.unwrap().prompt, "same head");
+        assert!(
+            projection
+                .detail
+                .unwrap()
+                .contains("complete identity proof")
+        );
     }
 }
 

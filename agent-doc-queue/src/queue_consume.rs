@@ -3156,6 +3156,71 @@ pub fn reported_attempt_projection_node_keys_for_parent_id(
         .collect())
 }
 
+/// `#nestedreceiptack`: node keys of the binary-owned Reported projection of
+/// attempt `owner`/`generation` anywhere inside the subtree of a live queue row
+/// whose directive id is `target_id`.
+///
+/// [`reported_attempt_projection_node_keys_for_parent_id`] requires the
+/// projection to cite the parent id, which holds for the direct
+/// `Resolve the open operator action ... [#id]` child. A waiting-tree parent
+/// whose generated `**Response:**` structure nests the attempt deeper renders
+/// it as `Reconcile the reported work, then complete the parent item.` with no
+/// id (2026-11-03, agent-doc-bugs.md `subagent:vscode_workspace#1`). The
+/// owner/generation pair is already proven by the caller's durable evidence, so
+/// containment under the exact parent is the remaining structural proof.
+pub fn reported_attempt_projection_node_keys_under_parent_id(
+    content: &str,
+    target_id: &str,
+    owner: &str,
+    generation: u64,
+) -> Result<Vec<String>> {
+    let target_id =
+        agent_doc_element_backlog::backlog::normalize_pending_id(target_id).to_ascii_lowercase();
+    if target_id.is_empty() {
+        return Ok(Vec::new());
+    }
+    let nodes =
+        agent_doc_markdown_ast::mutations::item_nodes_all(content, "queue").map_err(|err| {
+            anyhow::anyhow!("reported-attempt reap: failed to derive queue node keys: {err}")
+        })?;
+    let indent = |start: usize| {
+        content
+            .get(start..)
+            .and_then(|tail| tail.lines().next())
+            .map(|line| line.len() - line.trim_start_matches([' ', '\t']).len())
+            .unwrap_or(0)
+    };
+    let mut keys = reported_attempt_projection_node_keys_for_parent_id(
+        content, &target_id, owner, generation,
+    )?;
+    for (index, parent) in nodes.iter().enumerate() {
+        if parent.item.struck
+            || !queue_prompt_done_id(parent.item.text.trim())
+                .is_some_and(|id| id.eq_ignore_ascii_case(&target_id))
+        {
+            continue;
+        }
+        let parent_indent = indent(parent.item.start_byte);
+        for node in nodes[index + 1..]
+            .iter()
+            .take_while(|node| indent(node.item.start_byte) > parent_indent)
+        {
+            let text = node.item.text.trim();
+            if !node.item.struck
+                && agent_doc_document::queue_projection::lifecycle_marker(text)
+                    == Some(agent_doc_document::queue_projection::QueueLifecycleMarker::Reported)
+                && agent_doc_document::queue_projection::owner_projection(text).is_some_and(
+                    |projection| projection.owner == owner && projection.generation == generation,
+                )
+                && !keys.contains(&node.node_key)
+            {
+                keys.push(node.node_key.clone());
+            }
+        }
+    }
+    Ok(keys)
+}
+
 /// True when `target_id` names a NON-done item in any `agent:backlog` component —
 /// live work that should drain through the normal `--done` lifecycle rather than
 /// the orphan escape hatch.

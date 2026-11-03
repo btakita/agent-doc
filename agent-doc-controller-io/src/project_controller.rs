@@ -7996,6 +7996,27 @@ impl ControllerDocumentGraphs {
                                 };
                             }
                         };
+                        // `#activeterminalprojection`: the answered-head Effect is
+                        // the terminal document successor for this work. Keep the
+                        // binary-owned active index in that same successor instead
+                        // of waiting for another foreground preflight to notice the
+                        // struck source row. Unstruck Reported/Lost work remains in
+                        // the index because the pure projection derives from the
+                        // authoritative source lifecycle, not from turn completion.
+                        let target_content = match agent_doc_work_projection::reconcile_managed_active_items(
+                            &target_content,
+                        ) {
+                            Ok(Some(content)) => content,
+                            Ok(None) => target_content,
+                            Err(error) => {
+                                return AnsweredFreeTextQueueStrikeProjection {
+                                    error: Some(format!(
+                                        "answered free-text active projection failed for {key}: {error}"
+                                    )),
+                                    ..AnsweredFreeTextQueueStrikeProjection::default()
+                                };
+                            }
+                        };
                         let projection_id = agent_doc_hash::content_hash(&format!(
                             "{}:{}:{}",
                             captured.response_sha256,
@@ -27261,8 +27282,13 @@ revised operator request
                 "<!-- agent:exchange patch=append -->\n",
                 "{}",
                 "<!-- /agent:exchange -->\n\n",
+                "## Active <!-- agent:active priority -->\n",
+                "- **Queue** (1)\n",
+                "  - `queue-free:stale` — staging deploy\n",
+                "    - **Status:** reported\n",
+                "<!-- /agent:active -->\n\n",
                 "<!-- agent:queue -->\n",
-                "- staging deploy\n",
+                "- ☑️ staging deploy\n",
                 "- do [#production-deploy]\n",
                 "<!-- /agent:queue -->\n",
             ),
@@ -27347,14 +27373,20 @@ revised operator request
             std::thread::sleep(Duration::from_millis(10));
         };
         assert!(
-            projected
-                .contains("- ### ~~staging deploy~~ — auto-struck: answered this cycle (#ftstrike)"),
+            projected.contains(
+                "- ### ~~staging deploy~~ — auto-struck: answered this cycle (#ftstrike)"
+            ),
             "the Effect should apply the Computed target without a caller requesting a strike"
         );
         // `#queuestopremove`: the torn legacy inactive flag is no control, so
         // the remaining head re-arms the default `go`.
         assert!(projected.contains("queue: go"), "{projected}");
         assert!(projected.contains("- do [#production-deploy]"));
+        assert!(
+            !projected.contains("queue-free:stale")
+                && !projected.contains("- **Status:** reported"),
+            "the background strike successor must retire its terminal active row: {projected}"
+        );
 
         let terminal_events = [
             agent_doc_state_backbone::StateEvent::new(

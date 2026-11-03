@@ -505,6 +505,11 @@ impl agent_doc_controller_io::project_controller::ProjectControllerRuntimeEffect
                                     &snapshot_target.target_content,
                                     &invocation.addressed_at,
                                 )?;
+                            let snapshot_target_content =
+                                agent_doc_work_projection::reconcile_managed_active_items(
+                                    &snapshot_target_content,
+                                )?
+                                .unwrap_or(snapshot_target_content);
                             agent_doc_snapshot_io::checkpoint_document_baseline(
                                 &file,
                                 &snapshot_target_content,

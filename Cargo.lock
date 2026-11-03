@@ -594,6 +594,7 @@ dependencies = [
  "agent-doc-tmux-scope-io",
  "agent-doc-turn",
  "agent-doc-turn-executor",
+ "agent-doc-work-projection",
  "anyhow",
  "base64 0.22.1",
  "fs2",

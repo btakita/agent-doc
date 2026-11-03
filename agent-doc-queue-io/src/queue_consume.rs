@@ -143,6 +143,19 @@ pub trait QueueConsumeWriteEffects {
     }
 }
 
+/// Fold the binary-owned Active index into a terminal queue successor.
+///
+/// The boolean is significant for callers that would otherwise apply queue-only
+/// structural operations: an Active change crosses that component boundary and
+/// therefore requires their full-text convergence path.
+fn reconcile_terminal_active_projection(content: String) -> Result<(String, bool)> {
+    let reconciled = agent_doc_work_projection::reconcile_managed_active_items(&content)?;
+    Ok(match reconciled {
+        Some(reconciled) => (reconciled, true),
+        None => (content, false),
+    })
+}
+
 const RETAINED_QUEUE_WRITE_CONVERGENCE_WAIT: std::time::Duration =
     std::time::Duration::from_secs(30);
 const RETAINED_QUEUE_WRITE_CONVERGENCE_SLICE: std::time::Duration =
@@ -729,6 +742,7 @@ pub fn acknowledge_paused_free_text_queue_head_with_selector_and_outcome(
             &content,
             std::slice::from_ref(&row.lineage),
         )?;
+        target = reconcile_terminal_active_projection(target)?.0;
         let plan = QueueConsumptionPlan {
             consumed_text: row.lineage.clone(),
             consumed_texts: vec![row.lineage.clone()],
@@ -893,6 +907,7 @@ pub fn acknowledge_paused_free_text_queue_head_with_selector_and_outcome(
         &content,
         std::slice::from_ref(&observed_head),
     )?;
+    target = reconcile_terminal_active_projection(target)?.0;
 
     let plan = QueueConsumptionPlan {
         consumed_text: observed_head.clone(),
@@ -1154,6 +1169,15 @@ fn consume_queue_prompts_with_options_fenced(
         &plan.consumed_texts,
     )?
     .content;
+
+    // `#activeterminalprojection`: queue consumption is the durable integration
+    // boundary for a reported handoff. Re-derive the informational active index
+    // in the same successor so a terminal closeout/background handoff cannot
+    // leave `reported` or `running` metadata behind until the next foreground
+    // preflight. Work whose source row remains unstruck (including Reported or
+    // Lost integration debt) is retained by the projection.
+    plan.new_document = reconcile_terminal_active_projection(plan.new_document)?.0;
+    plan.new_snapshot = reconcile_terminal_active_projection(plan.new_snapshot)?.0;
 
     record_queue_consumption_proofs(file, &plan, QueueConsumptionProofStage::BeforeMutation)?;
 
@@ -1867,6 +1891,8 @@ fn strike_free_text_queue_heads_with_proof(
     let keys = projected.node_keys;
     let new_document =
         annotate_newly_struck_rows(&content, &projected.target_content, &addressed_at)?;
+    let (new_document, active_projection_changed) =
+        reconcile_terminal_active_projection(new_document)?;
     require_integrated_reported_repo_work_for_successor(file, &content, &new_document)?;
 
     // Snapshot sync: match the same answered free-text heads in the snapshot and
@@ -1879,6 +1905,8 @@ fn strike_free_text_queue_heads_with_proof(
                 .map(|projected| {
                     annotate_newly_struck_rows(&snap, &projected.target_content, &addressed_at)
                 })
+                .transpose()?
+                .map(|content| reconcile_terminal_active_projection(content).map(|value| value.0))
                 .transpose()?,
             Err(err) => {
                 log_snapshot_recovery_warning(file, "free-text strike snapshot sync", err);
@@ -1901,7 +1929,7 @@ fn strike_free_text_queue_heads_with_proof(
         effects
             .atomic_write(file, &new_document)
             .context("free-text strike: failed to write document")?;
-    } else if !activation_changed && !replace_ops.is_empty() {
+    } else if !active_projection_changed && !activation_changed && !replace_ops.is_empty() {
         converge_awaiting_retained_delivery(
             effects,
             file,
@@ -2758,7 +2786,9 @@ fn converge_id_backed_head_strike(
             }
         },
         None => None,
-    };
+    }
+    .map(|content| reconcile_terminal_active_projection(content).map(|value| value.0))
+    .transpose()?;
     // A lifecycle projection is derived, not terminal content. A bare
     // structural `consume` would wrap the visible marker inside the strike
     // (`~~📥 ...~~`) even though the full-text target correctly removes it.
@@ -2785,6 +2815,7 @@ fn converge_id_backed_head_strike(
             .retained_completion_feedback_keys_for_heads(file, &struck_heads)
             .context("orphan strike: failed to inspect retained completion feedback")?,
     );
+    target = reconcile_terminal_active_projection(target)?.0;
     if target == new_document && retired_completion_keys.is_empty() {
         effects
             .converge_structural_ops(file, &strike_ops, &content, source)
@@ -3177,6 +3208,8 @@ pub fn mark_completed_queue_prompts_for_done_ids(
             &content, done_ids,
         )?;
     debug_assert_eq!(marked_count, marked_texts.len());
+    let (new_document, active_projection_changed) =
+        reconcile_terminal_active_projection(new_document)?;
 
     let new_snapshot =
         if let Some(snapshot_content) = load_snapshot_recovery_only(file, "queue done-id mark") {
@@ -3197,7 +3230,9 @@ pub fn mark_completed_queue_prompts_for_done_ids(
                         ),
                     );
                 }
-                Ok(Some(snapshot_document))
+                Ok(Some(
+                    reconcile_terminal_active_projection(snapshot_document)?.0,
+                ))
             })() {
                 Ok(snapshot) => snapshot,
                 Err(err) => {
@@ -3220,7 +3255,7 @@ pub fn mark_completed_queue_prompts_for_done_ids(
         effects
             .atomic_write(file, &new_document)
             .context("queue done-id mark: failed to write document")?;
-    } else if done_node_keys.ast_backed && !requeued {
+    } else if done_node_keys.ast_backed && !requeued && !active_projection_changed {
         let ops = queue_mark_done_node_ops(&done_node_keys.keys);
         converge_awaiting_retained_delivery(
             effects,
@@ -7123,8 +7158,13 @@ mod core_tests {
             "<!-- agent:exchange -->\n",
             "### Re: Run queued thing\n\nDone.\n",
             "<!-- /agent:exchange -->\n\n",
+            "## Active <!-- agent:active priority -->\n",
+            "- **Queue** (1)\n",
+            "  - `queue-free:stale` — Run queued thing\n",
+            "    - **Status:** reported\n",
+            "<!-- /agent:active -->\n\n",
             "<!-- agent:queue auto -->\n",
-            "- Run queued thing\n",
+            "- ☑️ Run queued thing\n",
             "<!-- /agent:queue -->\n",
         );
         std::fs::write(&doc, content).unwrap();
@@ -7146,6 +7186,10 @@ mod core_tests {
         assert!(
             !updated.contains("- Run queued thing"),
             "drained queue head should be removed:\n{updated}"
+        );
+        assert!(
+            !updated.contains("queue-free:stale") && !updated.contains("- **Status:** reported"),
+            "the terminal consume successor must retire its stale active row: {updated}"
         );
 
         let canonical = doc.canonicalize().unwrap();

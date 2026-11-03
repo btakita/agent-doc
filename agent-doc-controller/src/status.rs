@@ -630,6 +630,33 @@ pub fn preparing_controller_is_stale(
     now.saturating_sub(started) > stale_after.as_secs()
 }
 
+/// Whether a self-recycle worker still owns a *fresh* outgoing handoff strongly
+/// enough to suppress the predecessor's stranded-controller watchdog.
+///
+/// The worker runs off the accept loop, so a blocked launch/connect must not
+/// block controller service. Ownership is nevertheless a lease, not an
+/// unbounded exemption: once the same recorded `Preparing`/`Promoted` handoff
+/// is stale, the worker can no longer prove it will finish or roll back. The
+/// watchdog must then fail the generation so the next client can launch a clean
+/// controller and rehydrate retained editor delivery.
+pub fn outgoing_handoff_owner_suppresses_watchdog(
+    outgoing_handoff_in_flight: bool,
+    handoff_state: ControllerHandoffState,
+    handoff_started_at: Option<u64>,
+    now: u64,
+    launched_elapsed: Duration,
+    stale_after: Duration,
+) -> bool {
+    outgoing_handoff_in_flight
+        && !preparing_controller_is_stale(handoff_state, handoff_started_at, now, stale_after)
+        && !preparing_without_a_handoff_clock(
+            handoff_state,
+            handoff_started_at,
+            launched_elapsed,
+            stale_after,
+        )
+}
+
 /// Resolve the stuck-`Preparing` controller staleness threshold from the raw
 /// environment override value. Callers own environment IO.
 pub fn stale_preparing_controller_threshold_from_env_value(raw: Option<&str>) -> Duration {
@@ -2033,6 +2060,45 @@ mod tests {
             ControllerHandoffState::Preparing,
             None,
             now,
+            stale_after,
+        ));
+    }
+
+    #[test]
+    fn outgoing_handoff_ownership_is_a_bounded_watchdog_lease() {
+        let stale_after = Duration::from_secs(45);
+        let now = 10_000u64;
+
+        assert!(outgoing_handoff_owner_suppresses_watchdog(
+            true,
+            ControllerHandoffState::Preparing,
+            Some(now - 5),
+            now,
+            Duration::from_secs(5),
+            stale_after,
+        ));
+        assert!(!outgoing_handoff_owner_suppresses_watchdog(
+            true,
+            ControllerHandoffState::Preparing,
+            Some(now - 46),
+            now,
+            Duration::from_secs(46),
+            stale_after,
+        ));
+        assert!(!outgoing_handoff_owner_suppresses_watchdog(
+            false,
+            ControllerHandoffState::Preparing,
+            Some(now - 5),
+            now,
+            Duration::from_secs(5),
+            stale_after,
+        ));
+        assert!(!outgoing_handoff_owner_suppresses_watchdog(
+            true,
+            ControllerHandoffState::Preparing,
+            None,
+            now,
+            Duration::from_secs(46),
             stale_after,
         ));
     }

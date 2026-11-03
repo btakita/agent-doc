@@ -21547,17 +21547,25 @@ pub(crate) fn controller_self_watchdog_should_suicide(
     launched_elapsed: Duration,
     threshold: Duration,
 ) -> bool {
-    // A self-recycle changes the public predecessor's in-memory state to
-    // `Preparing`, but the worker that owns that outgoing handoff is also the
-    // only actor allowed to finish or abort it. Once promotion succeeds the
-    // same worker drains accepted clients before stopping the predecessor.
-    // The stranded-replacement watchdog must not race that owned lifecycle.
-    if outgoing_handoff_in_flight {
-        return false;
-    }
     let Ok(bootstrap) = runtime.bootstrap_snapshot() else {
         return false;
     };
+    // A self-recycle changes the public predecessor's in-memory state to
+    // `Preparing`, but the worker that owns that outgoing handoff is also the
+    // only actor allowed to finish or abort it. Suppress the watchdog only
+    // while that ownership is fresh. A wedged worker used to hold this boolean
+    // forever, disabling the very 45s watchdog that `Preparing` needs and
+    // leaving retained delivery behind a build-skew/no-replica handoff.
+    if status::outgoing_handoff_owner_suppresses_watchdog(
+        outgoing_handoff_in_flight,
+        bootstrap.handoff_state,
+        bootstrap.handoff_started_at,
+        timestamp_secs(),
+        launched_elapsed,
+        threshold,
+    ) {
+        return false;
+    }
     status::controller_watchdog_should_suicide(status::ControllerWatchdogFacts {
         handoff_state: bootstrap.handoff_state,
         handoff_started_at: bootstrap.handoff_started_at,
@@ -40703,6 +40711,44 @@ mod tests {
     #![allow(unused_imports)]
 
     use super::*;
+
+    #[test]
+    fn outgoing_self_handoff_only_suppresses_watchdog_inside_its_lease() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let threshold = Duration::from_secs(45);
+
+        let mut fresh = test_bootstrap(&dir);
+        fresh.handoff_state = ControllerHandoffState::Preparing;
+        fresh.handoff_started_at = Some(timestamp_secs().saturating_sub(5));
+        let fresh_runtime = test_controller_runtime(&fresh);
+        assert!(
+            !controller_self_watchdog_should_suicide(
+                fresh_runtime.as_ref(),
+                true,
+                None,
+                &socket_path(dir.path()),
+                Duration::from_secs(5),
+                threshold,
+            ),
+            "a healthy background handoff owns its fresh lifecycle"
+        );
+
+        let mut stale = test_bootstrap(&dir);
+        stale.handoff_state = ControllerHandoffState::Preparing;
+        stale.handoff_started_at = Some(timestamp_secs().saturating_sub(46));
+        let stale_runtime = test_controller_runtime(&stale);
+        assert!(
+            controller_self_watchdog_should_suicide(
+                stale_runtime.as_ref(),
+                true,
+                None,
+                &socket_path(dir.path()),
+                Duration::from_secs(46),
+                threshold,
+            ),
+            "a wedged handoff worker cannot exempt Preparing forever"
+        );
+    }
 
     #[test]
     fn editor_route_suppresses_a_stale_warning_that_settled_during_the_route() {

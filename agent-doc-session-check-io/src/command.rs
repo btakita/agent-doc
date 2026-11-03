@@ -2272,6 +2272,18 @@ fn run_with_options_inner(
             }
             println!("{}", message);
             warn_unrecorded_chat_prompts(file);
+            // #coordinatordrain: a clean closeout is the terminal synchronous
+            // boundary. The committed document frontier is already the typed
+            // supervisor ingress; queue selection, projection, dispatch, and
+            // integration are background actor work. Keep the former reporting
+            // implementation below only as an unreachable migration reference
+            // until its dedicated diagnostics move to `queue sync` completely.
+            let queue_handoff =
+                agent_doc_queue_io::subagent_dispatch::terminal_queue_drain_handoff();
+            if queue_handoff.is_terminal() {
+                enforce_owned_pane_response_patchback(file, codex_final_gate)?;
+                return Ok(());
+            }
             // `#wd40` / `#staleloop-recycle-restart`: a stale route-owned supervisor
             // that can never reach its own recycle boundary during a continuously
             // self-draining session asks the in-session loop to yield one boundary.
@@ -2329,17 +2341,11 @@ fn run_with_options_inner(
                     );
                     return Ok(());
                 }
-                // `#queueparallelbydefault`: auto-clear may hand one selected
-                // inline head to the supervisor only after the project-wide
-                // coordinator view proves that no independent sibling still
-                // needs dispatch, integration, recovery, or reconciliation.
-                // Otherwise ending this closeout would strand work that the
-                // selected-head continuation cannot see.
+                // `#queueparallelbydefault`: closeout publishes the event that
+                // wakes the supervisor. Do not rescan/project coordinator debt
+                // synchronously while the response is persisting.
                 let coordinator_drain =
-                    agent_doc_queue_io::subagent_dispatch::coordinator_drain_decision_for_content(
-                        file,
-                        &continuation_content,
-                    )?;
+                    agent_doc_queue_io::subagent_dispatch::terminal_queue_drain_handoff();
                 if coordinator_drain.has_action_beyond_inline_head(&continuation.head_prompt) {
                     report_coordinator_action_required(file, &coordinator_drain, codex_final_gate)?;
                     return Ok(());
@@ -2461,14 +2467,11 @@ fn run_with_options_inner(
                     file,
                     "deferred_queue_head_count",
                 )?);
-                // #coordinatordrain: the document-wide state machine, not one
-                // selected queue or one `.next()` head, owns the terminal gate.
-                // It observes every agent:run plus the durable claim ledger.
+                // #coordinatordrain: terminal closeout is already durable.
+                // Queue/worker reconciliation belongs to the background actor
+                // and cannot extend the synchronous persistence boundary.
                 let coordinator_drain =
-                    agent_doc_queue_io::subagent_dispatch::coordinator_drain_decision_for_content(
-                        file,
-                        content.as_deref().unwrap_or_default(),
-                    )?;
+                    agent_doc_queue_io::subagent_dispatch::terminal_queue_drain_handoff();
                 if coordinator_drain.phase
                     == agent_doc_queue::coordinator_drain::CoordinatorDrainPhase::ActionRequired
                 {
@@ -2677,54 +2680,7 @@ fn run_with_options_inner(
                     println!("queue_continuation_required=false {outcome_fields}");
                 }
             }
-            // #finalize-owned-pane-response-patchback: proactive final-gate
-            // block. When a Codex same-pane recursive invocation was refused
-            // (abandoned cycle with last_event starting
-            // "recursive_direct_invocation_blocked") but no response body was
-            // captured, the agent may still produce a final chat answer that
-            // bypasses `agent-doc write` / `finalize`. Block the final answer
-            // so the operator must pipe the response through binary-owned
-            // closeout.
-            //
-            // Recovery adoption: if the response was already patched into
-            // agent:exchange (no unresolved prompt), the abandoned cycle is
-            // recoverable — adopt the visible response idempotently instead of
-            // blocking.
-            if codex_final_gate
-                && let Some(cycle) = agent_doc_cycle_state_io::load_with_closeout_projection(file)
-                    .ok()
-                    .flatten()
-                && matches!(cycle.phase, agent_doc_turn::CyclePhase::Abandoned)
-                && OpsLogEvent::RecursiveDirectInvocationBlocked.is_line(&cycle.last_event)
-                && cycle.capture_id.is_none()
-                && cycle.response_sha256.is_none()
-            {
-                let has_visible_response = crate::unresolved_exchange_prompt(file)?.is_none()
-                    && crate::exchange_tail_has_response_heading(file)?;
-                if has_visible_response {
-                    eprintln!(
-                        "[session-check] codex-final-gate: recursive direct invocation was blocked for {} but the response is already visible in agent:exchange — adopting the manual patchback idempotently.",
-                        file.display()
-                    );
-                    agent_doc_ops_log_io::log_op(
-                        file,
-                        &format!(
-                            "codex_final_gate_manual_patchback_adopted file={} cycle_id={} last_event={}",
-                            file.display(),
-                            cycle.cycle_id,
-                            cycle.last_event
-                        ),
-                    );
-                } else {
-                    eprintln!(
-                        "[session-check] codex-final-gate: recursive direct invocation was blocked for {} with no captured response body — pipe the response through `agent-doc write --commit {}` before sending any final answer.",
-                        file.display(),
-                        file.display()
-                    );
-                    crate::profile::report_now(file);
-                    std::process::exit(2);
-                }
-            }
+            enforce_owned_pane_response_patchback(file, codex_final_gate)?;
             Ok(())
         }
         SessionCheckStatus::SteeringPending(message) => {
@@ -2733,6 +2689,54 @@ fn run_with_options_inner(
         }
         SessionCheckStatus::Interrupted(message) => Err(SessionCheckInterrupted(message).into()),
     }
+}
+
+/// Preserve the non-queue Codex response-capture safety gate at both the
+/// terminal background handoff and the legacy diagnostic fallthrough.
+fn enforce_owned_pane_response_patchback(file: &Path, codex_final_gate: bool) -> Result<()> {
+    if codex_final_gate
+        && let Some(cycle) = agent_doc_cycle_state_io::load_with_closeout_projection(file)
+            .ok()
+            .flatten()
+        && matches!(cycle.phase, agent_doc_turn::CyclePhase::Abandoned)
+        && OpsLogEvent::RecursiveDirectInvocationBlocked.is_line(&cycle.last_event)
+        && cycle.capture_id.is_none()
+        && cycle.response_sha256.is_none()
+    {
+        // This check is deliberately local to the already-committed file. A
+        // terminal closeout must not start or round-trip through a controller
+        // merely to decide whether its response is visible.
+        let content = std::fs::read_to_string(file)
+            .with_context(|| format!("read terminal closeout {}", file.display()))?;
+        let has_visible_response =
+            agent_doc_turn::exchange_tail::unresolved_exchange_prompt_in_content(&content)
+                .is_none()
+                && agent_doc_turn::exchange_tail::exchange_tail_has_response_heading(&content);
+        if has_visible_response {
+            eprintln!(
+                "[session-check] codex-final-gate: recursive direct invocation was blocked for {} but the response is already visible in agent:exchange — adopting the manual patchback idempotently.",
+                file.display()
+            );
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "codex_final_gate_manual_patchback_adopted file={} cycle_id={} last_event={}",
+                    file.display(),
+                    cycle.cycle_id,
+                    cycle.last_event
+                ),
+            );
+        } else {
+            eprintln!(
+                "[session-check] codex-final-gate: recursive direct invocation was blocked for {} with no captured response body — pipe the response through `agent-doc write --commit {}` before sending any final answer.",
+                file.display(),
+                file.display()
+            );
+            crate::profile::report_now(file);
+            std::process::exit(2);
+        }
+    }
+    Ok(())
 }
 
 /// `#chatprompt` (GH #125 gap 4): the committed cycle carried chat prompts the
@@ -6525,6 +6529,29 @@ mod response_debt_scope_tests {
     };
     use agent_doc_queue::queue_sync_payload::QueueSyncDocumentScope::{Current, Related};
     use std::path::Path;
+
+    #[test]
+    fn synchronous_session_check_hands_queue_reconciliation_to_background_actor() {
+        let production = include_str!("command.rs")
+            .split("fn run_with_options_inner(")
+            .nth(1)
+            .and_then(|tail| tail.split("\nfn ").next())
+            .expect("session-check command source");
+        assert!(production.contains("terminal_queue_drain_handoff()"));
+        assert!(!production.contains("coordinator_drain_decision_for_content("));
+        let handoff = production
+            .find("terminal_queue_drain_handoff()")
+            .expect("typed background handoff");
+        let terminal_guard = production
+            .find("if queue_handoff.is_terminal()")
+            .expect("terminal handoff returns before legacy queue reporting");
+        let legacy_scan = production
+            .find("queue_continuation::detect_for_content(")
+            .expect("migration-only queue report remains available");
+        assert!(handoff < terminal_guard && terminal_guard < legacy_scan);
+        let terminal_branch = &production[terminal_guard..legacy_scan];
+        assert!(terminal_branch.contains("return Ok(())"));
+    }
 
     #[test]
     fn preexisting_related_response_debt_does_not_fail_committed_child_closeout() {

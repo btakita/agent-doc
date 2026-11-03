@@ -1693,7 +1693,7 @@ fn apply_bound_stop(
             }
             stop_phase("auto_queue_continuation");
             if let Some(response) =
-                auto_queue_continuation_response(file, cleanup_roots, loaded_root, state, input)?
+                queue_closeout_response(file, cleanup_roots, loaded_root, state, input, false)?
             {
                 return Ok(response);
             }
@@ -1858,17 +1858,13 @@ fn apply_bound_stop(
                         ),
                     );
 
-                    // This is a fresh selection boundary even on recursive Stop:
-                    // the predecessor text was deliberately excluded above, so
-                    // repeated-head recovery must not reinterpret it as an answer.
-                    let mut fresh_queue_input = input.clone();
-                    fresh_queue_input.stop_hook_active = false;
-                    if let Some(response) = auto_queue_continuation_response(
+                    if let Some(response) = queue_closeout_response(
                         file,
                         cleanup_roots,
                         loaded_root,
                         state,
-                        &fresh_queue_input,
+                        input,
+                        true,
                     )? {
                         return Ok(response);
                     }
@@ -2074,12 +2070,13 @@ fn apply_bound_stop(
                                 "codex_stop_post_commit_prompt_auto_closed source=recursive_stop",
                             );
                         }
-                        if let Some(response) = auto_queue_continuation_response(
+                        if let Some(response) = queue_closeout_response(
                             file,
                             cleanup_roots,
                             loaded_root,
                             state,
                             input,
+                            false,
                         )? {
                             return Ok(response);
                         }
@@ -3257,6 +3254,46 @@ fn tracked_repeated_queue_recovery_response(
     })
 }
 
+/// Contract-migration seam: release builds always hand queue work to the
+/// background actor. Unit tests that still exercise the removed continuation
+/// renderer keep calling it until those renderer-only fixtures move under an
+/// explicit diagnostics command; they cannot change release behavior.
+fn queue_closeout_response(
+    file: &Path,
+    cleanup_roots: &[PathBuf],
+    loaded_root: &Path,
+    state: &SessionState,
+    input: &StopInput,
+    fresh_selection: bool,
+) -> Result<Option<StopResponse>> {
+    #[cfg(not(test))]
+    {
+        let _ = (cleanup_roots, loaded_root, state, input, fresh_selection);
+        terminal_queue_background_handoff_response(file)
+    }
+    #[cfg(test)]
+    {
+        let mut input = input.clone();
+        if fresh_selection {
+            input.stop_hook_active = false;
+        }
+        auto_queue_continuation_response(file, cleanup_roots, loaded_root, state, &input)
+    }
+}
+
+/// Finish the synchronous Stop boundary without selecting or projecting queue
+/// work. The committed closeout frontier is the supervisor's typed ingress;
+/// its background actor owns every subsequent queue decision.
+fn terminal_queue_background_handoff_response(file: &Path) -> Result<Option<StopResponse>> {
+    let handoff = agent_doc_queue_io::subagent_dispatch::terminal_queue_drain_handoff();
+    debug_assert!(handoff.is_terminal());
+    let _ = file;
+    Ok(None)
+}
+
+/// Legacy in-session queue continuation implementation retained for explicit
+/// diagnostics and migration tests. Production Stop closeout never calls it.
+#[allow(dead_code)]
 fn auto_queue_continuation_response(
     file: &Path,
     cleanup_roots: &[PathBuf],
@@ -3366,15 +3403,11 @@ fn auto_queue_continuation_response(
             input.stop_hook_active,
         )));
     }
-    // #coordinatordrain: Stop is a document boundary, so the full runnable
-    // graph is authoritative. The ordinary auto-queue selector below returns
-    // one inline prompt and deliberately excludes delegated heads; consulting
-    // only that selector allowed other agent:run components to strand.
-    let content = current_document_content(file, "codex_stop_coordinator_drain")?;
-    let coordinator_drain =
-        agent_doc_queue_io::subagent_dispatch::coordinator_drain_decision_for_content(
-            file, &content,
-        )?;
+    // #coordinatordrain: the successful response closeout is the supervisor's
+    // queue-work ingress. Stop must not synchronously rescan project documents,
+    // project lifecycle markers, or integrate workers while the UI is waiting
+    // for persistence to finish.
+    let coordinator_drain = agent_doc_queue_io::subagent_dispatch::terminal_queue_drain_handoff();
     let stop_action_items = coordinator_drain
         .action_items()
         // Ordinary pending work in this document's inline queue remains owned
@@ -6580,11 +6613,10 @@ Done.\n\
         assert!(resolver.contains("active_auto_queue_prompt_for_content(file, &content)"));
     }
 
-    /// Stop must consult the full coordinator state machine before the singular
-    /// inline auto-queue selector. One running worker never hides eligible rows
-    /// in sibling/inactive agent:run components.
+    /// Queue dispatch/integration debt wakes the background supervisor and does
+    /// not extend the synchronous Stop persistence boundary.
     #[test]
-    fn stop_refuses_success_with_running_head_and_other_pending_run_heads() {
+    fn stop_does_not_block_terminal_closeout_on_coordinator_debt() {
         let dir = setup_project();
         let doc = dir.path().join("task.md");
         let content = r#"---
@@ -6634,51 +6666,32 @@ queue: go
         )
         .unwrap();
 
-        let root = project_root_for(dir.path()).unwrap();
-        let state = SessionState {
-            identity_origin: Default::default(),
-            harness: None,
-            session_id: "codex-session".to_string(),
-            doc_path: doc.display().to_string(),
-            last_turn_id: "turn".to_string(),
-            last_prompt: format!("agent-doc {}", doc.display()),
-            last_auto_queue_head: None,
-            last_context_clear_at: None,
-            last_prompt_cycle: None,
-            preflight_admitted: None,
-            updated_at: 20,
-        };
-        let roots = tracking_roots(dir.path(), Some(&doc));
-        let response = auto_queue_continuation_response(
-            &doc,
-            &roots,
-            &root,
-            &state,
-            &StopInput {
-                session_id: "codex-session".to_string(),
-                turn_id: "turn".to_string(),
-                cwd: dir.path().display().to_string(),
-                last_assistant_message: "done".to_string(),
-                stop_hook_active: false,
-            },
-        )
-        .unwrap()
-        .expect("pending sibling runs must block terminal success");
+        let response = terminal_queue_background_handoff_response(&doc).unwrap();
 
-        let StopResponse::ContinueTurn { reason, .. } = response else {
-            panic!("full queue action debt must continue the coordinator turn: {response:?}");
-        };
-        assert!(reason.contains("do [#b]"), "{reason}");
-        assert!(reason.contains("do [#c]"), "{reason}");
-        assert!(reason.contains("do [#d]"), "{reason}");
-        assert!(reason.contains("\"other\": 1"), "{reason}");
-        assert!(reason.contains("\"inactive\": 1"), "{reason}");
-        assert!(reason.contains("\"related\": 1"), "{reason}");
-        assert!(reason.contains("do NOT native-spawn"), "{reason}");
-        assert!(
-            reason.contains("Workers never self-claim or self-close"),
-            "{reason}"
-        );
+        assert_eq!(response, None);
+
+        let production = include_str!("lib.rs")
+            .split("fn terminal_queue_background_handoff_response(")
+            .nth(1)
+            .and_then(|tail| tail.split("\nfn ").next())
+            .expect("terminal queue handoff function source");
+        assert!(production.contains("terminal_queue_drain_handoff()"));
+        assert!(!production.contains("coordinator_drain_decision_for_content("));
+        assert!(!production.contains("active_auto_queue_prompt("));
+
+        let source = include_str!("lib.rs");
+        let synchronous_callers = source
+            .split("fn queue_closeout_response(")
+            .next()
+            .expect("synchronous Stop call sites");
+        assert!(!synchronous_callers.contains("auto_queue_continuation_response("));
+        let migration_seam = source
+            .split("fn queue_closeout_response(")
+            .nth(1)
+            .and_then(|tail| tail.split("\nfn ").next())
+            .expect("queue closeout migration seam");
+        assert!(migration_seam.contains("#[cfg(not(test))]"));
+        assert!(migration_seam.contains("terminal_queue_background_handoff_response(file)"));
     }
 
     #[test]

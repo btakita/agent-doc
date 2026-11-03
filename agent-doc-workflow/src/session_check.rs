@@ -532,6 +532,41 @@ pub fn queue_response_contamination_candidates(
     queue_response_contamination_candidates_since_baseline(queue_body, exchange_body, None)
 }
 
+fn captured_queue_parent_proves_waiting_metadata(
+    child: &str,
+    parent: &str,
+    baseline_stable_ids: &std::collections::HashSet<String>,
+) -> bool {
+    let Some(parent_id) = agent_doc_element_queue::queue_prompt_stable_id(parent) else {
+        return false;
+    };
+    if !baseline_stable_ids.contains(&parent_id) {
+        return false;
+    }
+    let child = child
+        .trim()
+        .strip_suffix("<!-- agent-doc:waiting-metadata -->")
+        .unwrap_or(child.trim())
+        .trim();
+    let Some(child_work) = child
+        .strip_prefix("**Response:**")
+        .or_else(|| child.strip_prefix("**Action:**"))
+        .map(str::trim)
+    else {
+        return false;
+    };
+    let parent = parent
+        .trim()
+        .strip_suffix("<!-- agent-doc:waiting-item -->")
+        .unwrap_or(parent.trim())
+        .trim();
+    let parent_work = parent
+        .replacen(&format!("[#{parent_id}]"), "", 1)
+        .trim()
+        .to_string();
+    !child_work.is_empty() && child_work == parent_work
+}
+
 /// The same contamination check with committed queue provenance. Queue rows
 /// already present in the baseline are operator-authored ancestry, even when a
 /// later response quotes them at the start of a prose line.
@@ -550,6 +585,17 @@ pub fn queue_response_contamination_candidates_since_baseline(
     };
 
     let mut baseline_prefixes = std::collections::HashSet::new();
+    // Older documents can carry a durable semantic queue id while the row's
+    // presentation evolves from a terse `[#id]`/`do [#id]` form into the full
+    // tracked-work prompt.  Text-prefix ancestry cannot recognize that
+    // migration.  The captured queue cut can: an id present in that binary-
+    // owned baseline proves the row existed before the response being checked.
+    //
+    // Deliberately derive these ids from the baseline *queue component only*.
+    // A matching Todo/backlog row, current HEAD, or response mention is not
+    // provenance: accepting any of those would resurrect a row the operator
+    // deleted from the queue.
+    let mut baseline_stable_ids = std::collections::HashSet::new();
     if let Some(baseline) = baseline_queue_body {
         if let Ok(entries) = agent_doc_queue::document_queue::parse(baseline) {
             for entry in entries {
@@ -558,6 +604,9 @@ pub fn queue_response_contamination_candidates_since_baseline(
                     | agent_doc_queue::document_queue::QueueEntry::Completed(prompt) => prompt.text,
                     _ => continue,
                 };
+                if let Some(id) = agent_doc_element_queue::queue_prompt_stable_id(&text) {
+                    baseline_stable_ids.insert(id);
+                }
                 let normalized = normalized_queue_prompt(&text);
                 if normalized.chars().count() >= 20 {
                     baseline_prefixes.insert(normalized.chars().take(40).collect::<String>());
@@ -575,8 +624,19 @@ pub fn queue_response_contamination_candidates_since_baseline(
 
     let mut contaminated = Vec::new();
     if let Ok(entries) = agent_doc_queue::document_queue::parse(queue_body) {
+        let mut ancestors: Vec<(usize, String)> = Vec::new();
         for prompt in agent_doc_queue::document_queue::prompts(&entries) {
             let text = prompt.text.trim();
+            while ancestors
+                .last()
+                .is_some_and(|(indent, _)| *indent >= prompt.indent)
+            {
+                ancestors.pop();
+            }
+            let mirrors_proven_parent = ancestors.iter().rev().any(|(_, parent)| {
+                captured_queue_parent_proves_waiting_metadata(text, parent, &baseline_stable_ids)
+            });
+            ancestors.push((prompt.indent, text.to_string()));
             if text.is_empty() || agent_doc_queue::queue_command::is_queue_directive_prompt(text) {
                 continue;
             }
@@ -589,6 +649,14 @@ pub fn queue_response_contamination_candidates_since_baseline(
             }
             let needle: String = normalized.chars().take(40).collect();
             if baseline_prefixes.contains(&needle) {
+                continue;
+            }
+            if mirrors_proven_parent {
+                // Also exempt the raw-line fallback below.  Its purpose is to
+                // catch malformed, unparseable projections, not to override a
+                // successfully parsed binary-owned metadata mirror whose
+                // stable parent exists in the captured queue.
+                baseline_prefixes.insert(needle);
                 continue;
             }
             if response_text
@@ -1207,6 +1275,46 @@ mod tests {
             )
             .is_empty(),
             "an operator-authored parent already in the committed queue is not contamination"
+        );
+    }
+
+    #[test]
+    fn queue_response_contamination_accepts_legacy_stable_id_ancestry() {
+        let work = "Run the real Coder workspace smoke and update the editor status cell.";
+        let baseline = "- 📥 [#vscodecodersmoke]\n";
+        let baseline_ids = std::collections::HashSet::from(["vscodecodersmoke".to_string()]);
+        let parent = format!("[#vscodecodersmoke] {work} <!-- agent-doc:waiting-item -->");
+        let child = format!("**Response:** {work} <!-- agent-doc:waiting-metadata -->");
+        assert!(captured_queue_parent_proves_waiting_metadata(
+            &child,
+            &parent,
+            &baseline_ids,
+        ));
+        let queue = format!("- {parent}\n  - {child}\n");
+        let exchange = format!("### Re: smoke result\n\n**Response:** {work}\n");
+
+        assert!(
+            queue_response_contamination_candidates_since_baseline(
+                &queue,
+                &exchange,
+                Some(&baseline),
+            )
+            .is_empty(),
+            "the captured parent id plus an exact binary-owned metadata mirror proves legacy ancestry"
+        );
+    }
+
+    #[test]
+    fn queue_response_contamination_rejects_stable_id_after_queue_deletion() {
+        let work = "Run the real Coder workspace smoke and update the editor status cell.";
+        let child = format!("**Response:** {work} <!-- agent-doc:waiting-metadata -->");
+        let parent = format!("[#vscodecodersmoke] {work} <!-- agent-doc:waiting-item -->");
+        // A tracked-work/Todo mention outside the captured queue component is
+        // is not provenance. This models deletion while Todo lineage remains.
+        let baseline_ids = std::collections::HashSet::from(["other-work".to_string()]);
+        assert!(
+            !captured_queue_parent_proves_waiting_metadata(&child, &parent, &baseline_ids,),
+            "a stable id absent from the captured queue must fail closed"
         );
     }
 

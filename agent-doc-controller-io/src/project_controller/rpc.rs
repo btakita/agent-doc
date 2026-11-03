@@ -5258,6 +5258,130 @@ pub fn repair_projection(
     )
 }
 
+/// Exact state removed by one controller-owned queue clean-slate reset.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct QueueCleanSlateReset {
+    pub cleared_claims: usize,
+    pub cleared_release_receipts: usize,
+}
+
+/// Reset only stale queue-attempt projections while the document actor owns
+/// the admission boundary.
+///
+/// The controller re-reads cycle, editor, claim, and receipt authority at the
+/// mutation point. Callers must not preflight these facts and then mutate on
+/// their own: an admission or worker completion could otherwise land between
+/// the check and `BEGIN IMMEDIATE`.
+pub fn queue_clean_slate_reset_for_file(file: &Path) -> Result<QueueCleanSlateReset> {
+    let project_root = agent_doc_project_root_io::project_root_containing(file)
+        .with_context(|| format!("no project root found for {}", file.display()))?;
+
+    #[cfg(any(test, feature = "test-support"))]
+    {
+        let bootstrap = ControllerBootstrap {
+            project_root: project_root.clone(),
+            socket_path: socket_path(&project_root),
+            launch_mode: LaunchMode::Lazy,
+            bootstrap_epoch: 0,
+            pid: std::process::id(),
+            controller_binary: Some(current_binary_identity()?),
+            controller_generation: 1,
+            handoff_state: ControllerHandoffState::Stable,
+            handoff_started_at: None,
+            previous_controller_pid: None,
+        };
+        let runtime = ControllerRuntime::new(bootstrap.clone())?;
+        handle_queue_clean_slate_reset(
+            &bootstrap,
+            &runtime,
+            ControllerRequest {
+                command: "queue_clean_slate_reset".to_string(),
+                file: Some(file.to_path_buf()),
+                session_id: None,
+                pane_id: None,
+                window_id: None,
+                generation: None,
+                state: None,
+                caller: Some("queue_clean_slate".to_string()),
+                reason: None,
+                supervisor_pid: None,
+                supervisor_socket: None,
+                command_kind: None,
+                diagnostic_payload: None,
+                sequence: None,
+            },
+        )
+    }
+
+    #[cfg(not(any(test, feature = "test-support")))]
+    {
+        ensure_controller_running_for_file(file)?;
+        request_controller(
+            &project_root,
+            ControllerRequest {
+                command: "queue_clean_slate_reset".to_string(),
+                file: Some(file.to_path_buf()),
+                session_id: None,
+                pane_id: None,
+                window_id: None,
+                generation: None,
+                state: None,
+                caller: Some("queue_clean_slate".to_string()),
+                reason: None,
+                supervisor_pid: None,
+                supervisor_socket: None,
+                command_kind: None,
+                diagnostic_payload: None,
+                sequence: None,
+            },
+        )
+    }
+}
+
+/// Publish an edge on the idle supervisor's existing maintenance channel.
+///
+/// A durable repair request is recorded by the caller before this wake. If no
+/// supervisor is attached, the request survives and startup's initially-due
+/// self-heal consumes it; if one is attached, this edge avoids waiting for the
+/// periodic reconciliation cadence.
+pub fn wake_queue_projection_repair_for_file(file: &Path) -> Result<()> {
+    #[cfg(any(test, feature = "test-support"))]
+    {
+        // Unit tests assert the durable request itself. A live supervisor wake
+        // requires the long-lived project runtime exercised by controller and
+        // start-runtime integration tests.
+        let _ = file;
+        Ok(())
+    }
+
+    #[cfg(not(any(test, feature = "test-support")))]
+    {
+        let project_root = agent_doc_project_root_io::project_root_containing(file)
+            .with_context(|| format!("no project root found for {}", file.display()))?;
+        ensure_controller_running_for_file(file)?;
+        request_controller::<serde_json::Value>(
+            &project_root,
+            ControllerRequest {
+                command: "queue_projection_repair_wake".to_string(),
+                file: Some(file.to_path_buf()),
+                session_id: None,
+                pane_id: None,
+                window_id: None,
+                generation: None,
+                state: None,
+                caller: Some("queue_clean_slate".to_string()),
+                reason: Some("durable_queue_projection_repair_requested".to_string()),
+                supervisor_pid: None,
+                supervisor_socket: None,
+                command_kind: None,
+                diagnostic_payload: None,
+                sequence: None,
+            },
+        )?;
+        Ok(())
+    }
+}
+
 pub fn attach_pane(
     project_root: &Path,
     request: AttachPaneRequest,
@@ -22709,6 +22833,15 @@ pub(crate) fn handle_request_locked(
             runtime.as_ref(),
             request,
         )),
+        "queue_clean_slate_reset" => controller_envelope(handle_queue_clean_slate_reset(
+            &bootstrap_snapshot,
+            runtime.as_ref(),
+            request,
+        )),
+        "queue_projection_repair_wake" => controller_envelope(handle_queue_projection_repair_wake(
+            runtime.as_ref(),
+            request,
+        )),
         "reliable_sync" => controller_envelope(handle_reliable_sync(
             &bootstrap_snapshot.project_root,
             request,
@@ -39323,6 +39456,215 @@ pub(crate) fn handle_projection_repair(
         document_id.as_deref(),
     )?;
     Ok(receipt)
+}
+
+fn queue_clean_slate_current_content(canonical: &Path) -> Result<String> {
+    let authority = crdt_authority_for_file(&canonical.to_string_lossy());
+    match agent_doc_crdt_relay_io::current_text_for_file_with_authority(canonical, authority)? {
+        agent_doc_crdt_relay_io::CurrentText::Current { text, .. } => Ok(text),
+        agent_doc_crdt_relay_io::CurrentText::Detached => std::fs::read_to_string(canonical)
+            .with_context(|| format!("read queue clean-slate document {}", canonical.display())),
+        agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica => anyhow::bail!(
+            "queue clean-slate refused: editor authority for {} has no current replica; wait for editor synchronization",
+            canonical.display()
+        ),
+        agent_doc_crdt_relay_io::CurrentText::EditorSyncPending => anyhow::bail!(
+            "queue clean-slate refused: editor authority for {} is still synchronizing",
+            canonical.display()
+        ),
+    }
+}
+
+/// Controller-owned exclusive maintenance boundary for queue clean-slate.
+///
+/// The state-event ingress guard excludes cycle admission and closeout facts.
+/// The immediate transaction excludes claim/report writers and re-reads their
+/// ledgers after the guard is held. Editor authority is likewise resolved here,
+/// immediately before the transaction; document bytes are never rewritten by
+/// this operation.
+fn handle_queue_clean_slate_reset(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    request: ControllerRequest,
+) -> Result<QueueCleanSlateReset> {
+    let requested = request_file(&request)?;
+    let canonical = canonical_controller_request_file(bootstrap, &requested);
+    let document_hash = agent_doc_hash::document_id_for_path(&canonical);
+    let _maintenance = runtime.lock_state_event_ingress(
+        &bootstrap.project_root,
+        "queue_clean_slate_reset",
+        "exclusive_document_maintenance",
+    );
+
+    let projected = runtime.document_state_projection(&document_hash)?;
+    if let Some(cycle) = projected
+        .as_ref()
+        .map(agent_doc_cycle_state_io::reconstruct_cycle_state)
+        .transpose()?
+        .flatten()
+        && cycle.is_open()
+    {
+        anyhow::bail!(
+            "queue clean-slate refused: cycle {} is still open in phase {:?}; finish or recover that cycle first",
+            cycle.cycle_id,
+            cycle.phase,
+        );
+    }
+
+    let content = queue_clean_slate_current_content(&canonical)?;
+    let completion_count =
+        agent_doc_document::subagent_completion::completion_evidence(&content).len();
+    if completion_count > 0 {
+        anyhow::bail!(
+            "queue clean-slate refused: {completion_count} worker completion handoff(s) remain in the document; integrate/finalize them before resetting attempt projections"
+        );
+    }
+
+    let conn = agent_doc_sqlite::state_store::open_state_db(&bootstrap.project_root)?;
+    conn.execute_batch("BEGIN IMMEDIATE")
+        .context("begin controller-owned queue clean-slate transaction")?;
+    let reset = (|| {
+        let claim_record = agent_doc_sqlite::state_store::load_queue_document_state_from_db(
+            &conn,
+            &document_hash,
+            agent_doc_queue::queue_claim::QUEUE_CLAIMS_STATE_KIND,
+        )?;
+        let claims = claim_record
+            .as_ref()
+            .map(|record| {
+                agent_doc_queue::queue_claim::QueueClaimLedger::from_state_payload(
+                    &record.payload_json,
+                )
+            })
+            .transpose()?
+            .unwrap_or_default();
+        let protected_claims = claims
+            .claims
+            .iter()
+            .filter(|claim| {
+                matches!(
+                    claim.state,
+                    agent_doc_queue::queue_claim::QueueClaimState::Claimed
+                        | agent_doc_queue::queue_claim::QueueClaimState::Running
+                        | agent_doc_queue::queue_claim::QueueClaimState::Reported
+                ) || claim.completion_recovered_after_loss
+                    || claim.lost_from
+                        == Some(agent_doc_queue::queue_claim::QueueClaimState::Reported)
+            })
+            .map(|claim| format!("{}#{} ({:?})", claim.owner, claim.generation, claim.state))
+            .collect::<Vec<_>>();
+        if !protected_claims.is_empty() {
+            anyhow::bail!(
+                "queue clean-slate refused: claimed/running/reported or recovered worker attempt(s) retain authority: {}",
+                protected_claims.join(", ")
+            );
+        }
+
+        let receipt_record = agent_doc_sqlite::state_store::load_queue_document_state_from_db(
+            &conn,
+            &document_hash,
+            agent_doc_queue::claim_release_receipt::CLAIM_RELEASE_RECEIPTS_STATE_KIND,
+        )?;
+        let receipts = receipt_record
+            .as_ref()
+            .map(|record| {
+                serde_json::from_str::<
+                    agent_doc_queue::claim_release_receipt::ClaimReleaseReceiptLedger,
+                >(&record.payload_json)
+                .context("parse queue release receipts for clean-slate")
+            })
+            .transpose()?
+            .unwrap_or_default();
+        // A receipt is monotonic completion/outbox evidence. Fully integrated
+        // or struck rows retire their receipt during normal reconciliation, so
+        // every receipt still present here is authoritative and must survive.
+        if !receipts.receipts.is_empty() {
+            anyhow::bail!(
+                "queue clean-slate refused: {} released worker report receipt(s) still await integration/strike",
+                receipts.receipts.len()
+            );
+        }
+
+        agent_doc_sqlite::state_store::clear_queue_document_state_in_db(
+            &conn,
+            &document_hash,
+            agent_doc_queue::queue_claim::QUEUE_CLAIMS_STATE_KIND,
+        )?;
+        agent_doc_sqlite::state_store::clear_queue_document_state_in_db(
+            &conn,
+            &document_hash,
+            agent_doc_queue::claim_release_receipt::CLAIM_RELEASE_RECEIPTS_STATE_KIND,
+        )?;
+        Ok::<_, anyhow::Error>(QueueCleanSlateReset {
+            cleared_claims: claims.claims.len(),
+            cleared_release_receipts: 0,
+        })
+    })();
+    let reset = match reset {
+        Ok(reset) => {
+            conn.execute_batch("COMMIT")
+                .context("commit controller-owned queue clean-slate transaction")?;
+            reset
+        }
+        Err(error) => {
+            if let Err(rollback) = conn.execute_batch("ROLLBACK") {
+                agent_doc_ops_log_io::log_op(
+                    &canonical,
+                    &format!(
+                        "queue_clean_slate_rollback_failed file={} error={} rollback={}",
+                        canonical.display(),
+                        format!("{error:#}").replace('\n', "\\n"),
+                        format!("{rollback:#}").replace('\n', "\\n"),
+                    ),
+                );
+            }
+            return Err(error);
+        }
+    };
+
+    // Log immediately after the committed reset. Reprojection is a separate
+    // derived effect; an editor/controller error there must not hide this
+    // durable mutation from diagnostics.
+    agent_doc_ops_log_io::log_op(
+        &canonical,
+        &format!(
+            "queue_clean_slate_reset_committed file={} cleared_claims={} cleared_release_receipts={} authority=controller_exclusive_maintenance",
+            canonical.display(),
+            reset.cleared_claims,
+            reset.cleared_release_receipts,
+        ),
+    );
+    Ok(reset)
+}
+
+fn handle_queue_projection_repair_wake(
+    runtime: &ControllerRuntime,
+    request: ControllerRequest,
+) -> Result<serde_json::Value> {
+    let file = request_file(&request)?;
+    let canonical = file.canonicalize().unwrap_or(file);
+    let document_hash = agent_doc_hash::document_id_for_path(&canonical);
+    let channel = document_delivery_wake_channel(&document_hash);
+    let epoch = DOCUMENT_DELIVERY_WAKE_EPOCH.fetch_add(1, Ordering::SeqCst);
+    let bootstrap = runtime.bootstrap_snapshot()?;
+    let producer_id = format!(
+        "agent-doc-controller:{}:{}",
+        std::process::id(),
+        bootstrap.controller_generation
+    );
+    let snapshot = DocumentDeliveryWakeProjection {
+        document_hash,
+        content_hash: None,
+        visible_delivery_projected: false,
+    };
+    let message_json = state_plane_snapshot_message_json(
+        epoch,
+        &channel,
+        DOCUMENT_DELIVERY_WAKE_TYPE_TAG,
+        &snapshot,
+    )?;
+    runtime.publish_state_plane_frame(channel, producer_id, message_json, epoch, None)?;
+    Ok(serde_json::json!({ "woken": true }))
 }
 
 pub(crate) fn repair_projection_from_controller_state(

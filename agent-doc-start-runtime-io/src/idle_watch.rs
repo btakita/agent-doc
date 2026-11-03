@@ -2835,6 +2835,17 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     queue_projection_self_heal_worker = None;
                     queue_projection_self_heal_retry_at = None;
                     queue_projection_self_heal_superseded_through = None;
+                    if let Err(error) =
+                        agent_doc_queue_io::queue_cmd::clear_queue_projection_repair_request(&path)
+                    {
+                        agent_doc_ops_log_io::log_op(
+                            &path,
+                            &format!(
+                                "queue_projection_repair_request_clear_deferred file={} error={error:#}",
+                                path.display(),
+                            ),
+                        );
+                    }
                     agent_doc_ops_log_io::log_op(
                         &path,
                         &format!(

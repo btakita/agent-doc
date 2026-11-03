@@ -26,7 +26,8 @@ use agent_doc_queue::{
         queue_consume_count_for_done_ids, queue_consume_node_ops, queue_mark_done_node_ops,
         queue_prompt_node_keys_for_count, queue_prompt_node_keys_for_done_ids,
         queue_prompt_response_echoes_for_done_ids,
-        reported_attempt_projection_node_keys_for_parent_id, strike_all_noise_queue_heads,
+        reported_attempt_projection_node_keys_for_parent_id,
+        reported_attempt_projection_node_keys_under_parent_id, strike_all_noise_queue_heads,
     },
     queue_recency::annotate_newly_struck_rows,
     queue_response::{
@@ -2830,7 +2831,7 @@ fn converge_id_backed_head_strike(
             if snap_keys.is_empty()
                 && let Some((owner, generation)) = reported_attempt
             {
-                snap_keys = reported_attempt_projection_node_keys_for_parent_id(
+                snap_keys = reported_attempt_projection_node_keys_under_parent_id(
                     &snap,
                     target_id,
                     owner,
@@ -2994,9 +2995,10 @@ pub fn acknowledge_open_id_backed_queue_head(
     }
     let mut evidence = None;
     let mut orphan_completion = None;
+    let mut receipt_attempt = None;
     let mut keys = id_backed_head_node_keys(&content, &target_id)?;
     if keys.is_empty() {
-        let candidate = id_head_dispatch_guard(file, &content, &target_id, &keys, "--ack-id")?;
+        let mut candidate = id_head_dispatch_guard(file, &content, &target_id, &keys, "--ack-id")?;
         if let Some((owner, generation)) = candidate.reported.as_ref() {
             keys = reported_attempt_projection_node_keys_for_parent_id(
                 &content,
@@ -3004,6 +3006,28 @@ pub fn acknowledge_open_id_backed_queue_head(
                 owner,
                 *generation,
             )?;
+        }
+        // `#nestedreceiptack`: the worker reported and its claim was released,
+        // so no live `Reported` claim names the nested `☑️` projection. Its
+        // exact attempt is still proven by the reported-release receipt
+        // recorded for the waiting parent row. Without this, `--ack-id <parent>`
+        // (the closeout the Stop hook prescribes) refused every receipt-backed
+        // nested row as "free-text prose" because the queue head is the
+        // `### Waiting on you` group row (agent-doc-bugs.md, 2026-11-03).
+        if keys.is_empty()
+            && candidate.reported.is_none()
+            && let Some((owner, generation)) =
+                crate::claim_release_receipt::reported_receipt_attempt_for_parent_id(
+                    file, &target_id,
+                )?
+        {
+            keys = reported_attempt_projection_node_keys_under_parent_id(
+                &content, &target_id, &owner, generation,
+            )?;
+            if !keys.is_empty() {
+                candidate.reported_receipt = true;
+                receipt_attempt = Some((owner, generation));
+            }
         }
         if keys.is_empty() && candidate.reported.is_none() {
             orphan_completion = orphan_reported_completion_evidence(file, &content, &target_id)?;
@@ -3066,7 +3090,11 @@ pub fn acknowledge_open_id_backed_queue_head(
     let orphan_attempt = orphan_completion
         .as_ref()
         .map(|orphan| (orphan.owner.clone(), orphan.generation));
-    let reported_attempt = evidence.reported.as_ref().or(orphan_attempt.as_ref());
+    let reported_attempt = evidence
+        .reported
+        .as_ref()
+        .or(orphan_attempt.as_ref())
+        .or(receipt_attempt.as_ref());
     if !converge_id_backed_head_strike(
         file,
         effects,
@@ -3080,6 +3108,14 @@ pub fn acknowledge_open_id_backed_queue_head(
         "open_id_head_ack",
     )? {
         return Ok(false);
+    }
+    if let Some((owner, generation)) = receipt_attempt.as_ref() {
+        crate::claim_release_receipt::retire_exact_reported_receipt(
+            file,
+            owner,
+            *generation,
+            "open_id_head_ack",
+        )?;
     }
     let preserved = if open_backlog { "backlog" } else { "todo" };
     // `#ackkeepsopen`: acknowledging a reported row whose backlog item stays
@@ -10405,6 +10441,135 @@ Old.
                 .all(|claim| claim.owner != "subagent:vscode_smoke"),
             "the reported attempt ended: {ledger:?}"
         );
+    }
+
+    /// `#nestedreceiptack`: the 2026-11-03 agent-doc-bugs.md shape. The worker
+    /// reported AND its claim was released, so only a reported-release receipt
+    /// proves the attempt, and the queue head is the `### Waiting on you` group
+    /// row. `--ack-id <parent>` refused it as "free-text prose" and the Stop
+    /// hook prescribed that same command forever. The direct child cites the
+    /// parent id; the deep one sits inside the parent's `**Response:**` tree
+    /// and does not.
+    fn released_nested_attempt_doc(root: &Path, deep: bool) -> (PathBuf, String, String) {
+        std::fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        let doc = root.join("bugs.md");
+        let parent = concat!(
+            "[#vscodecodersmoke] Run the remote smoke on a real Coder workspace ",
+            "<!-- agent-doc:waiting-item -->"
+        );
+        let owner = "subagent:vscode_smoke";
+        let projection = if deep {
+            concat!(
+                "    - **Response:** Provide the missing workspace. <!-- agent-doc:waiting-metadata -->\n",
+                "      - **Question:** Which workspace? <!-- agent-doc:waiting-metadata -->\n",
+                "      - ☑️ [#subagent:vscode_smoke#1] Reconcile the reported work, then complete the parent item.\n",
+            )
+        } else {
+            concat!(
+                "    - **Response:** Provide the missing workspace. <!-- agent-doc:waiting-metadata -->\n",
+                "    - ☑️ [#subagent:vscode_smoke#1] Resolve the open operator action to complete the parent item. [#vscodecodersmoke] ⟦effect:1⟧\n",
+            )
+        };
+        let content = format!(
+            concat!(
+                "---\nsession: sid\nagent_doc_format: template\nqueue_active: true\n---\n\n",
+                "<!-- agent:exchange -->\n### Re: worker report\n\n",
+                "The worker is gated on a real Coder workspace.\n",
+                "<!-- /agent:exchange -->\n\n",
+                "## Run <!-- agent:run subagents priority go -->\n",
+                "- ### Waiting on you — answer by adding a child line under an item <!-- agent-doc:waiting-on-you -->\n",
+                "  - {parent}\n",
+                "{projection}",
+                "  - [#later] keep later work live\n",
+                "<!-- /agent:run -->\n\n",
+                "## Todo <!-- agent:todo priority -->\n",
+                "- [ ] {parent}\n",
+                "<!-- /agent:todo -->\n",
+            ),
+            parent = parent,
+            projection = projection,
+        );
+        std::fs::write(&doc, &content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        let generation = running_claim(&doc, parent, owner);
+        crate::queue_claim::report_attempt(&doc, parent, Some(generation)).unwrap();
+        crate::claim_release_receipt::capture_response_for_attempt(
+            &doc,
+            parent,
+            generation,
+            "Gated on a real Coder workspace.",
+        )
+        .unwrap();
+        crate::claim_release_receipt::release(
+            &doc,
+            parent,
+            crate::claim_release_receipt::ReleaseKind::Reported,
+        )
+        .unwrap();
+        assert!(
+            crate::queue_claim::load_ledger(&doc)
+                .unwrap()
+                .claims
+                .is_empty()
+        );
+        std::fs::write(&doc, &content).unwrap();
+        (doc, content, parent.to_string())
+    }
+
+    fn assert_released_nested_attempt_acknowledged(deep: bool) {
+        let dir = tempfile::tempdir().unwrap();
+        let (doc, content, parent) = released_nested_attempt_doc(dir.path(), deep);
+        assert_eq!(
+            crate::claim_release_receipt::load(&doc)
+                .unwrap()
+                .receipts
+                .len(),
+            1
+        );
+        assert!(queue_head_is_free_text_prompt(&content).unwrap());
+
+        assert!(acknowledge_open_id_backed_queue_head(&doc, "vscodecodersmoke").unwrap());
+
+        let result = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            !result.contains("[#subagent:vscode_smoke#1]"),
+            "the reported nested attempt is struck:\n{result}"
+        );
+        assert!(result.contains(&format!("  - {parent}\n")), "{result}");
+        assert!(
+            result.contains(&format!("- [ ] {parent}\n")),
+            "the Todo stays open:\n{result}"
+        );
+        assert!(
+            result.contains("  - [#later] keep later work live\n"),
+            "{result}"
+        );
+        assert!(
+            crate::claim_release_receipt::load(&doc)
+                .unwrap()
+                .receipts
+                .is_empty(),
+            "the exact reported-release receipt ends with the strike"
+        );
+        assert!(
+            !acknowledge_open_id_backed_queue_head(&doc, "vscodecodersmoke").unwrap_or(false),
+            "a retry after the strike changes nothing"
+        );
+    }
+
+    #[test]
+    fn nestedreceiptack_ack_id_strikes_released_reported_child_of_waiting_parent() {
+        assert_released_nested_attempt_acknowledged(false);
+    }
+
+    #[test]
+    fn nestedreceiptack_ack_id_strikes_released_reported_row_inside_response_tree() {
+        assert_released_nested_attempt_acknowledged(true);
     }
 
     fn orphan_waiting_attempt_document(

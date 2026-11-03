@@ -68,6 +68,64 @@ pub fn load(file: &Path) -> Result<ClaimReleaseReceiptLedger> {
     load_from_conn(&conn, &document_hash)
 }
 
+/// `#nestedreceiptack`: the one exact worker attempt (`owner`, `generation`)
+/// whose reported-release receipt was recorded for a queue row whose directive
+/// id is `target_id`. Only receipts that attest an exact attempt qualify;
+/// several distinct attempts are ambiguous and refused.
+pub fn reported_receipt_attempt_for_parent_id(
+    file: &Path,
+    target_id: &str,
+) -> Result<Option<(String, u64)>> {
+    let mut attempts = std::collections::BTreeSet::new();
+    for receipt in load(file)?.receipts {
+        if !receipt.attests_exact_attempt() {
+            continue;
+        }
+        let Some(id) =
+            agent_doc_queue::queue_response::queue_prompt_done_id(receipt.item_text.trim())
+        else {
+            continue;
+        };
+        if id.eq_ignore_ascii_case(target_id) {
+            attempts.insert((receipt.owner.clone(), receipt.generation));
+        }
+    }
+    if attempts.len() > 1 {
+        anyhow::bail!(
+            "{}: [#{target_id}] has {} reported-release receipts from distinct attempts; preserve them for explicit repair",
+            file.display(),
+            attempts.len()
+        );
+    }
+    Ok(attempts.into_iter().next())
+}
+
+/// End the reported-release receipt of exactly `owner`/`generation`
+/// (`#nestedreceiptack`, `#strikeretires`). Returns whether one was removed.
+pub fn retire_exact_reported_receipt(
+    file: &Path,
+    owner: &str,
+    generation: u64,
+    source: &str,
+) -> Result<bool> {
+    let removed = mutate(file, |ledger| {
+        let before = ledger.receipts.len();
+        ledger
+            .receipts
+            .retain(|receipt| !(receipt.owner == owner && receipt.generation == generation));
+        before - ledger.receipts.len()
+    })?;
+    if removed > 0 {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "queue_claim_release_receipt_exact_retired owner={owner} generation={generation} source={source} (#nestedreceiptack #strikeretires)"
+            ),
+        );
+    }
+    Ok(removed > 0)
+}
+
 /// Remove and return the exact reported-release receipt cancelled by operator
 /// row deletion. A stale generation never consumes a replacement receipt.
 pub fn cancel_reported_attempt(

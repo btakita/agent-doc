@@ -156,6 +156,45 @@ fn reconcile_terminal_active_projection(content: String) -> Result<(String, bool
     })
 }
 
+/// Repair Active as an independent terminal-source projection edge.
+///
+/// A restarted closeout may observe that its queue head is already struck even
+/// though an earlier retained write landed only the queue portion. That is a
+/// successful no-op for queue consumption but not for the derived Active index.
+fn reconcile_terminal_active_projection_with_effects(
+    file: &Path,
+    current: &str,
+    skip_visible_guard: bool,
+    effects: &dyn QueueConsumeWriteEffects,
+    reason: &str,
+) -> Result<bool> {
+    let (target, live_changed) = reconcile_terminal_active_projection(current.to_string())?;
+    if live_changed {
+        if skip_visible_guard {
+            effects.atomic_write(file, &target)?;
+        } else {
+            converge_awaiting_retained_delivery(
+                effects,
+                file,
+                &target,
+                &HashSet::new(),
+                reason,
+                || effects.converge_document_or_disk(file, &target, current, reason),
+            )?;
+        }
+    }
+
+    let mut snapshot_changed = false;
+    if let Some(snapshot) = load_snapshot_recovery_only(file, reason) {
+        let (target, changed) = reconcile_terminal_active_projection(snapshot)?;
+        if changed {
+            save_snapshot_recovery_only(file, &target, reason);
+            snapshot_changed = true;
+        }
+    }
+    Ok(live_changed || snapshot_changed)
+}
+
 const RETAINED_QUEUE_WRITE_CONVERGENCE_WAIT: std::time::Duration =
     std::time::Duration::from_secs(30);
 const RETAINED_QUEUE_WRITE_CONVERGENCE_SLICE: std::time::Duration =
@@ -188,9 +227,21 @@ fn queue_write_landed(
         agent_doc_document::subagent_completion::completion_evidence(current)
             .into_iter()
             .all(|evidence| !retired_completion_keys.contains(&evidence.key));
+    // `#activeterminalprojection`: queue/frontmatter equality alone is not a
+    // landing receipt once the same target also owns Active cleanup. Compare
+    // only binary-owned Active rows, so an operator note or an operator-authored
+    // descendant does not invalidate an otherwise exact landing.
+    let active_projection_landed = matches!(
+        (
+            agent_doc_work_projection::managed_active_projection_signature(target_content),
+            agent_doc_work_projection::managed_active_projection_signature(current),
+        ),
+        (Ok(expected), Ok(observed)) if expected == observed
+    );
     matches!((queue_body(target_content), queue_body(current)), (Some(a), Some(b)) if a == b)
         && queue_control(target_content) == queue_control(current)
         && retired_feedback_is_absent
+        && active_projection_landed
 }
 
 /// Run a queue write; a retained delivery deferral is not a failure when the
@@ -1003,6 +1054,13 @@ fn consume_queue_prompts_with_options_fenced(
         free_text_count,
     )?
     else {
+        reconcile_terminal_active_projection_with_effects(
+            file,
+            &content,
+            skip_visible_guard,
+            effects,
+            "queue_consume_terminal_active_repair",
+        )?;
         return Ok(None);
     };
     // `#qheadannotation` never-drop backstop: an id consume of a head carrying an
@@ -1885,14 +1943,19 @@ fn strike_free_text_queue_heads_with_proof(
     };
     let (projected, inline_vetoed) = project(&content)?;
     report_inline_answered_subagent_heads(file, &inline_vetoed, "free_text_strike");
-    let Some(projected) = projected else {
-        return Ok(0);
+    let (keys, new_document) = if let Some(projected) = projected {
+        (
+            projected.node_keys,
+            annotate_newly_struck_rows(&content, &projected.target_content, &addressed_at)?,
+        )
+    } else {
+        (Vec::new(), content.clone())
     };
-    let keys = projected.node_keys;
-    let new_document =
-        annotate_newly_struck_rows(&content, &projected.target_content, &addressed_at)?;
     let (new_document, active_projection_changed) =
         reconcile_terminal_active_projection(new_document)?;
+    if new_document == content {
+        return Ok(0);
+    }
     require_integrated_reported_repo_work_for_successor(file, &content, &new_document)?;
 
     // Snapshot sync: match the same answered free-text heads in the snapshot and
@@ -1901,13 +1964,16 @@ fn strike_free_text_queue_heads_with_proof(
     // converge on the struck state.
     let new_snapshot = match load_snapshot_recovery_only(file, "free-text strike snapshot sync") {
         Some(snap) => match project(&snap) {
-            Ok((snapshot, _)) => snapshot
-                .map(|projected| {
-                    annotate_newly_struck_rows(&snap, &projected.target_content, &addressed_at)
-                })
-                .transpose()?
-                .map(|content| reconcile_terminal_active_projection(content).map(|value| value.0))
-                .transpose()?,
+            Ok((snapshot, _)) => {
+                let target = snapshot
+                    .map(|projected| {
+                        annotate_newly_struck_rows(&snap, &projected.target_content, &addressed_at)
+                    })
+                    .transpose()?
+                    .unwrap_or_else(|| snap.clone());
+                let (target, changed) = reconcile_terminal_active_projection(target)?;
+                (changed || target != snap).then_some(target)
+            }
             Err(err) => {
                 log_snapshot_recovery_warning(file, "free-text strike snapshot sync", err);
                 None
@@ -5571,6 +5637,52 @@ mod core_tests {
     }
 
     #[test]
+    fn terminal_queue_noop_repairs_stale_active_in_document_and_snapshot() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("plan.md");
+        let content = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "## Active <!-- agent:active priority -->\n",
+            "- **Queue** (1)\n",
+            "  - `queue-free:stale` — already done\n",
+            "    - **Status:** reported\n",
+            "<!-- /agent:active -->\n\n",
+            "<!-- agent:queue -->\n",
+            "- ~~already done~~\n",
+            "<!-- /agent:queue -->\n",
+        );
+        fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        assert!(
+            consume_queue_prompts_with_outcome(&doc, &[], false, &TEST_EFFECTS)
+                .unwrap()
+                .is_none(),
+            "the queue head is already terminal, so consumption remains a no-op"
+        );
+
+        let live = fs::read_to_string(&doc).unwrap();
+        let snapshot = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
+        for (label, content) in [("document", live), ("snapshot", snapshot)] {
+            assert!(!content.contains("queue-free:stale"), "{label}: {content}");
+            assert!(content.contains("- ~~already done~~"), "{label}: {content}");
+            assert!(
+                agent_doc_work_projection::reconcile_managed_active_items(&content)
+                    .unwrap()
+                    .is_none(),
+                "{label} must be an Active projection fixpoint: {content}"
+            );
+        }
+    }
+
+    #[test]
     fn consuming_operator_request_row_closes_same_id_todo_in_one_write() {
         let dir = TempDir::new().unwrap();
         let doc = dir.path().join("plan.md");
@@ -5631,8 +5743,12 @@ mod core_tests {
 
     #[test]
     fn queue_write_landing_ignores_concurrent_edits_outside_the_queue() {
-        let target =
-            "---\nqueue: stop\n---\n\n<!-- agent:queue -->\n- ~~a~~\n<!-- /agent:queue -->\n";
+        let target = concat!(
+            "---\nqueue: stop\n---\n\n",
+            "## Active <!-- agent:active priority -->\n",
+            "<!-- /agent:active -->\n\n",
+            "<!-- agent:queue -->\n- ~~a~~\n<!-- /agent:queue -->\n",
+        );
         let with_edit = target.replace("---\n\n", "---\n\nOperator note.\n\n");
         let retired = HashSet::new();
         assert!(queue_write_landed(target, target, &retired));
@@ -5647,6 +5763,19 @@ mod core_tests {
             &target.replace("stop", "go"),
             &retired
         ));
+        let partial_landing = target.replace(
+            "<!-- /agent:active -->",
+            concat!(
+                "- **Queue** (1)\n",
+                "  - `queue-free:stale` — a\n",
+                "    - **Status:** reported\n",
+                "<!-- /agent:active -->",
+            ),
+        );
+        assert!(
+            !queue_write_landed(target, &partial_landing, &retired),
+            "queue landing without its managed Active cleanup is only a partial landing"
+        );
 
         let cell = agent_doc_document::subagent_completion::cell("subagent:a", "a", "retired-key");
         let stale_feedback = target.replace(

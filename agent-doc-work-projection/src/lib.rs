@@ -311,6 +311,47 @@ fn is_binary_active_child(line: &str) -> bool {
     trimmed.starts_with("- **Status:**") || trimmed.starts_with("- **Sources:**")
 }
 
+fn is_binary_active_group(line: &str) -> bool {
+    let trimmed = line.trim();
+    ["Queue", "Backlog", "Review", "Icebox"]
+        .iter()
+        .any(|group| trimmed.starts_with(&format!("- **{group}** (")))
+}
+
+fn is_binary_active_item(line: &str) -> bool {
+    let trimmed = line.trim();
+    trimmed.starts_with("- `") && trimmed.contains("` — ")
+}
+
+/// Exact binary-owned rows currently materialized in `agent:active`.
+///
+/// The component heading and every non-binary descendant are operator-owned,
+/// so retained-delivery landing checks compare this signature instead of the
+/// whole component body. `None` distinguishes a missing projection component
+/// from a present, correctly empty one.
+pub fn managed_active_projection_signature(content: &str) -> Result<Option<Vec<String>>> {
+    let components = agent_doc_element::element::parse(content)?;
+    Ok(components
+        .iter()
+        .find(|component| {
+            agent_doc_element::element::canonical_component_name(&component.name)
+                == agent_doc_element::element::ACTIVE_COMPONENT
+        })
+        .map(|active| {
+            active
+                .content(content)
+                .lines()
+                .filter(|line| {
+                    is_binary_active_group(line)
+                        || is_binary_active_item(line)
+                        || is_binary_active_child(line)
+                })
+                .map(str::trim)
+                .map(str::to_string)
+                .collect()
+        }))
+}
+
 /// Preserve operator-authored descendants while regenerating binary metadata.
 ///
 /// `Status` and `Sources` are owned projection rows. Every other descendant of

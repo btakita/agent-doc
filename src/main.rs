@@ -486,7 +486,7 @@ impl agent_doc_controller_io::project_controller::ProjectControllerRuntimeEffect
                             };
                             let _goal_presets =
                                 agent_doc_queue_io::goal_terminal_presets_guard(&file, &snapshot);
-                            let Some(snapshot_target) =
+                            let snapshot_target =
                                 agent_doc_queue::queue_consume::project_answered_free_text_strike_with_dispatch_at(
                                     &snapshot,
                                     &invocation.response_body,
@@ -495,26 +495,28 @@ impl agent_doc_controller_io::project_controller::ProjectControllerRuntimeEffect
                                     &invocation.selected_heads,
                                     &invocation.dispatch_owned_heads,
                                     &invocation.addressed_at,
-                                )?.0
-                            else {
-                                return Ok(());
-                            };
-                            let snapshot_target_content =
+                                )?.0;
+                            let snapshot_target_content = if let Some(snapshot_target) = snapshot_target {
                                 agent_doc_queue::queue_recency::annotate_newly_struck_rows(
                                     &snapshot,
                                     &snapshot_target.target_content,
                                     &invocation.addressed_at,
-                                )?;
+                                )?
+                            } else {
+                                snapshot.clone()
+                            };
                             let snapshot_target_content =
                                 agent_doc_work_projection::reconcile_managed_active_items(
                                     &snapshot_target_content,
                                 )?
                                 .unwrap_or(snapshot_target_content);
-                            agent_doc_snapshot_io::checkpoint_document_baseline(
-                                &file,
-                                &snapshot_target_content,
-                                agent_doc_ops_log_io::log_op,
-                            )?;
+                            if snapshot_target_content != snapshot {
+                                agent_doc_snapshot_io::checkpoint_document_baseline(
+                                    &file,
+                                    &snapshot_target_content,
+                                    agent_doc_ops_log_io::log_op,
+                                )?;
+                            }
                             Ok(())
                         })();
                         if let Err(error) = snapshot_projection {

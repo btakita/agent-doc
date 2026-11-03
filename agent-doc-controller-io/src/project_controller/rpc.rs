@@ -33146,7 +33146,6 @@ pub(super) fn record_captured_finalize_wake(
         response_sha256: capture.response_sha256.clone(),
         reason: reason.to_string(),
     };
-    let _publication = runtime.captured_finalize_wake_publication.lock();
     let mut wakes = runtime.captured_finalize_wakes.lock();
     if wakes
         .get(&projection.document_hash)
@@ -33313,7 +33312,6 @@ fn captured_finalize_wake_should_replace(
 }
 
 pub(super) fn clear_captured_finalize_wake(runtime: &ControllerRuntime, document_hash: &str) {
-    let _publication = runtime.captured_finalize_wake_publication.lock();
     if runtime
         .captured_finalize_wakes
         .lock()

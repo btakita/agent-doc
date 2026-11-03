@@ -2467,10 +2467,23 @@ fn supervisor_binary_freshness_observation(
     } else {
         (launch_binary_identity, running_exe_inode)
     };
-    let identity_stale = agent_doc_controller::status::process_binary_is_stale(
-        recorded_identity,
-        Some(&installed_binary_now.identity),
+    // A child-preserving supervisor hot-reload is an in-place `execve`: the
+    // process-scoped launch identity intentionally survives, while
+    // `/proc/<pid>/exe` immediately names the replacement image.  Once that
+    // observed inode matches the installed command, it is stronger evidence
+    // than the pre-exec identity snapshot.  Retaining `identity_stale` in that
+    // state makes the fresh image recycle itself again on every idle-watch
+    // tick, starving IPC and accumulating transient process resources.  Keep
+    // the identity fallback only when inode identity cannot prove freshness.
+    let running_inode_proves_fresh = matches!(
+        (recorded_inode, installed_binary_now.inode),
+        (Some(running), Some(installed)) if running == installed
     );
+    let identity_stale = !running_inode_proves_fresh
+        && agent_doc_controller::status::process_binary_is_stale(
+            recorded_identity,
+            Some(&installed_binary_now.identity),
+        );
     agent_doc_supervisor::binary_freshness::BinaryFreshnessObservation {
         identity_stale,
         running_exe_inode: recorded_inode,
@@ -3485,6 +3498,59 @@ mod tests {
             Some(10),
         ));
         assert!(freshness.stale());
+    }
+
+    #[test]
+    fn matching_running_inode_settles_stale_launch_identity_after_hot_reexec() {
+        let launch = binary_identity("/usr/bin/agent-doc", "1.0.0", 100, 1);
+        let installed_at_launch = InstalledBinarySnapshot {
+            identity: launch.clone(),
+            inode: Some(20),
+        };
+        let upgraded = InstalledBinarySnapshot {
+            identity: binary_identity("/usr/bin/agent-doc", "1.0.1", 101, 2),
+            inode: Some(21),
+        };
+
+        let before_reexec = supervisor_binary_freshness_observation(
+            Some(&launch),
+            Some(&installed_at_launch),
+            &upgraded,
+            Some(20),
+        );
+        assert!(before_reexec.identity_stale);
+        assert_eq!(before_reexec.running_exe_inode, Some(20));
+
+        let after_reexec = supervisor_binary_freshness_observation(
+            Some(&launch),
+            Some(&installed_at_launch),
+            &upgraded,
+            Some(21),
+        );
+        assert!(!after_reexec.identity_stale);
+        assert_eq!(after_reexec.running_exe_inode, Some(21));
+        assert_eq!(after_reexec.installed_binary_inode, Some(21));
+    }
+
+    #[test]
+    fn stale_launch_identity_remains_authoritative_when_running_inode_is_unavailable() {
+        let launch = binary_identity("/usr/bin/agent-doc", "1.0.0", 100, 1);
+        let installed_at_launch = InstalledBinarySnapshot {
+            identity: launch.clone(),
+            inode: Some(20),
+        };
+        let upgraded = InstalledBinarySnapshot {
+            identity: binary_identity("/usr/bin/agent-doc", "1.0.1", 101, 2),
+            inode: Some(21),
+        };
+
+        let observation = supervisor_binary_freshness_observation(
+            Some(&launch),
+            Some(&installed_at_launch),
+            &upgraded,
+            None,
+        );
+        assert!(observation.identity_stale);
     }
 
     #[test]

@@ -737,6 +737,7 @@ pub fn project_claim_runtime_state_with_effects(
         cleared_item,
         RuntimeProjectionRows::LifecycleEvidence,
         None,
+        CLAIM_RUNTIME_PROJECTION_MAX_ATTEMPTS,
     )
 }
 
@@ -756,6 +757,7 @@ pub fn project_claim_item_runtime_state_with_effects(
         cleared.then_some(item),
         RuntimeProjectionRows::LifecycleEvidence,
         Some(&identity),
+        CLAIM_RUNTIME_PROJECTION_MAX_ATTEMPTS,
     )
 }
 
@@ -814,8 +816,60 @@ pub fn project_all_queue_runtime_state_with_effects(
     effects: &(impl QueueRuntimeProjectionEffects + ?Sized),
     file: &Path,
 ) -> Result<bool> {
-    project_runtime_state_with_effects(effects, file, None, RuntimeProjectionRows::All, None)
+    project_runtime_state_with_effects(
+        effects,
+        file,
+        None,
+        RuntimeProjectionRows::All,
+        None,
+        CLAIM_RUNTIME_PROJECTION_MAX_ATTEMPTS,
+    )
 }
+
+/// One CAS attempt for a background projection repair.
+///
+/// Foreground claim admission may retry because its caller owns a concrete
+/// lifecycle transition and waits for the corresponding marker. Background
+/// self-heal has no such right to contend with operator edits: a changed editor
+/// revision supersedes its snapshot and schedules a later repair edge. One
+/// attempt keeps operator typing authoritative and prevents eight full-document
+/// retries from multiplying controller pressure.
+pub fn project_all_queue_runtime_state_once_with_effects(
+    effects: &(impl QueueRuntimeProjectionEffects + ?Sized),
+    file: &Path,
+) -> Result<QueueRuntimeProjectionOnceOutcome> {
+    match project_runtime_state_with_effects(
+        effects,
+        file,
+        None,
+        RuntimeProjectionRows::All,
+        None,
+        1,
+    ) {
+        Ok(changed) => Ok(QueueRuntimeProjectionOnceOutcome::Settled { changed }),
+        Err(error) if error.downcast_ref::<QueueRuntimeProjectionSuperseded>().is_some() => {
+            Ok(QueueRuntimeProjectionOnceOutcome::Superseded)
+        }
+        Err(error) => Err(error),
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QueueRuntimeProjectionOnceOutcome {
+    Settled { changed: bool },
+    Superseded,
+}
+
+#[derive(Debug)]
+struct QueueRuntimeProjectionSuperseded;
+
+impl std::fmt::Display for QueueRuntimeProjectionSuperseded {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("queue runtime projection was superseded by a newer authority cut")
+    }
+}
+
+impl std::error::Error for QueueRuntimeProjectionSuperseded {}
 
 /// Repaint only rows that are blocked now or still carry a stale blocked
 /// projection. Tracked-work closeout uses this narrower effect so blocker-list
@@ -830,6 +884,7 @@ pub fn project_blocker_runtime_state_with_effects(
         None,
         RuntimeProjectionRows::BlockedOrPreviouslyBlocked,
         None,
+        CLAIM_RUNTIME_PROJECTION_MAX_ATTEMPTS,
     )
 }
 
@@ -839,9 +894,10 @@ fn project_runtime_state_with_effects(
     cleared_item: Option<&str>,
     rows: RuntimeProjectionRows,
     only_identity: Option<&agent_doc_element_queue::QueueItemIdentity>,
+    max_attempts: usize,
 ) -> Result<bool> {
     let mut wrote_successor = false;
-    for attempt in 1..=CLAIM_RUNTIME_PROJECTION_MAX_ATTEMPTS {
+    for attempt in 1..=max_attempts {
         // Start every attempt from the live authority. This first absorbs any
         // operator/editor normalization that raced the ledger transition; the
         // marker overlay below is then rederived by stable work identity.
@@ -873,6 +929,22 @@ fn project_runtime_state_with_effects(
         } else {
             agent_doc_work_projection::reconcile_managed_active_items(&projection.target_content)?
                 .unwrap_or(projection.target_content)
+        };
+        // `#sdkdocumentselfheal`: exact operator-request rows and their Todo
+        // receipts are one lifecycle. Older/interrupted closeouts could strike
+        // the queue row but leave its same-id Todo open until another foreground
+        // preflight happened to repair it. A full runtime projection already
+        // owns every queue row, so fold the same proof-complete reconciliation
+        // into its CAS successor. The pure helper refuses cited ids and refuses
+        // when any duplicate row is still live.
+        let target_content = if rows == RuntimeProjectionRows::All && only_identity.is_none() {
+            agent_doc_queue::queue_consume::reconcile_terminal_operator_request_todos(
+                &target_content,
+                &[],
+            )?
+            .content
+        } else {
+            target_content
         };
         if target_content != current {
             effects.converge_document_or_disk(
@@ -906,7 +978,15 @@ fn project_runtime_state_with_effects(
         };
         let active_settled = only_identity.is_some()
             || agent_doc_work_projection::reconcile_managed_active_items(&authoritative)?.is_none();
-        if !settled.changed && active_settled {
+        let terminal_todos_settled = rows != RuntimeProjectionRows::All
+            || only_identity.is_some()
+            || agent_doc_queue::queue_consume::reconcile_terminal_operator_request_todos(
+                &authoritative,
+                &[],
+            )?
+            .completed_ids
+            .is_empty();
+        if !settled.changed && active_settled && terminal_todos_settled {
             let accepted = ClaimRuntimeProjection {
                 target_content: authoritative,
                 persisted_heads: settled.persisted_heads,
@@ -920,19 +1000,23 @@ fn project_runtime_state_with_effects(
             )?;
             return Ok(wrote_successor);
         }
+        let authority_superseded = authoritative != current;
+        if max_attempts == 1 && authority_superseded {
+            return Err(QueueRuntimeProjectionSuperseded.into());
+        }
 
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "queue_claim_runtime_projection_retry attempt={attempt} max={} (#queueclaimprojectionrace)",
-                CLAIM_RUNTIME_PROJECTION_MAX_ATTEMPTS
+                max_attempts
             ),
         );
     }
 
     bail!(
         "queue claim runtime projection did not converge after {} authoritative retries; the claim ledger transition is durable but its live queue marker is not yet verified",
-        CLAIM_RUNTIME_PROJECTION_MAX_ATTEMPTS
+        max_attempts
     )
 }
 
@@ -3607,5 +3691,99 @@ mod tests {
             projected.contains("- 🟡 [#subagent:worker#1] dispatched worker work"),
             "{projected}"
         );
+    }
+
+    /// `#sdkdocumentselfheal`: a terminal operator-request row is durable
+    /// proof that its same-id Todo receipt can close. Full background repair
+    /// must fold that proof even when no later foreground preflight occurs.
+    #[test]
+    fn full_runtime_projection_closes_only_terminal_operator_request_todo() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let request_id = "subagent-operator-request-sdk-self-heal";
+        let document = format!(
+            "<!-- agent:queue -->\n- ~~[#{request_id}]: integrate~~\n<!-- /agent:queue -->\n\
+             <!-- agent:todo -->\n\
+             - [ ] [#{request_id}] Integrate the completed worker result\n\
+             - [ ] [#ordinary-sdk-work] Keep real SDK work open\n\
+             <!-- /agent:todo -->\n"
+        );
+        let doc = dir.path().join("session.md");
+        std::fs::write(&doc, &document).unwrap();
+        let effects = FakeEffects::with_current(document);
+
+        assert_eq!(
+            project_all_queue_runtime_state_once_with_effects(&effects, &doc).unwrap(),
+            QueueRuntimeProjectionOnceOutcome::Settled { changed: true }
+        );
+        let projected = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            projected.contains(&format!("- [x] [#{request_id}]")),
+            "{projected}"
+        );
+        assert!(
+            projected.contains("- [ ] [#ordinary-sdk-work] Keep real SDK work open"),
+            "{projected}"
+        );
+        assert!(
+            project_all_queue_runtime_state_once_with_effects(&effects, &doc).unwrap()
+                == QueueRuntimeProjectionOnceOutcome::Settled { changed: false },
+            "the repaired projection must be a fixpoint"
+        );
+    }
+
+    /// A successful delivery call is not proof that its successor won the
+    /// editor CRDT race. Background self-heal must observe that supersession
+    /// and stop after one attempt instead of competing with the operator.
+    #[test]
+    fn background_runtime_projection_never_retries_a_superseded_editor_cut() {
+        struct SupersededEffects {
+            current: RefCell<String>,
+            convergence_attempts: Cell<usize>,
+        }
+
+        impl QueueRuntimeProjectionEffects for SupersededEffects {
+            fn current_document_content(&self, _file: &Path, _source: &str) -> Result<String> {
+                Ok(self.current.borrow().clone())
+            }
+
+            fn converge_document_or_disk(
+                &self,
+                _file: &Path,
+                _target_content: &str,
+                _source_content: &str,
+                _reason: &str,
+            ) -> Result<()> {
+                self.convergence_attempts
+                    .set(self.convergence_attempts.get() + 1);
+                // Model an operator edit superseding the repair cut while its
+                // delivery is in flight.
+                self.current
+                    .borrow_mut()
+                    .push_str("\noperator edit wins\n");
+                Ok(())
+            }
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let request_id = "subagent-operator-request-superseded-self-heal";
+        let current = format!(
+            "<!-- agent:queue -->\n- ~~[#{request_id}]~~\n<!-- /agent:queue -->\n\
+             <!-- agent:todo -->\n- [ ] [#{request_id}] Close only after terminal proof\n<!-- /agent:todo -->\n"
+        );
+        let doc = dir.path().join("session.md");
+        std::fs::write(&doc, &current).unwrap();
+        let effects = SupersededEffects {
+            current: RefCell::new(current),
+            convergence_attempts: Cell::new(0),
+        };
+
+        assert_eq!(
+            project_all_queue_runtime_state_once_with_effects(&effects, &doc).unwrap(),
+            QueueRuntimeProjectionOnceOutcome::Superseded,
+            "a superseded background CAS must defer"
+        );
+        assert_eq!(effects.convergence_attempts.get(), 1);
     }
 }

@@ -359,6 +359,49 @@ pub fn open_state_db(project_root: &Path) -> Result<Connection> {
     open_state_db_with_timeout(project_root, STATE_DB_BUSY_TIMEOUT)
 }
 
+/// Open the already-initialized state database for the controller's serialized
+/// state-event ingress lane without running whole-ledger convergence or
+/// retention maintenance.
+///
+/// `open_state_db` deliberately performs best-effort retention and repairs
+/// rows written by older binaries on every due open. Those are maintenance
+/// operations, not part of accepting one new event. Running them while the
+/// project controller holds its global ingress mutex made one large project's
+/// maintenance pause every document in that project: sdk-dev measured 36s lock
+/// holds and an eleven-minute waiter queue while the durable append itself was
+/// tiny. The controller has already initialized this database before serving
+/// requests, so the hot append path only needs a configured connection.
+///
+/// The first open in a process still takes the full initialization path. This
+/// preserves additive-upgrade and corruption guarantees; only subsequent
+/// controller ingress opens skip maintenance. Normal controller/supervisor
+/// reads continue to call [`open_state_db`], so periodic maintenance remains
+/// automatic and happens outside the state-event critical section.
+pub fn open_state_db_for_event_ingress(project_root: &Path) -> Result<Connection> {
+    anyhow::ensure!(
+        !state_db_connections_forbidden_for_process(),
+        "SQLite state connections are forbidden in this process; use the Project Controller projection/command plane"
+    );
+    let path = state_db_path(project_root);
+    agent_doc_fs::guard_test_runtime_target(&path, "a state.db event-ingress open");
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    if !schema_already_converged(&path) {
+        return open_and_init_state_db(&path, STATE_DB_BUSY_TIMEOUT).with_context(|| {
+            format!(
+                "authoritative state db {} is unavailable; refusing automatic replacement",
+                path.display()
+            )
+        });
+    }
+    let conn = Connection::open(&path)
+        .with_context(|| format!("failed to open {} for state-event ingress", path.display()))?;
+    conn.busy_timeout(STATE_DB_BUSY_TIMEOUT)?;
+    conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+    Ok(conn)
+}
+
 /// Open the authoritative state database with a caller-owned contention bound.
 ///
 /// Latency-sensitive optional projections use this instead of inheriting the
@@ -6767,6 +6810,49 @@ mod tests {
             other.query_row("SELECT COUNT(*) FROM documents", [], |row| row.get(0))?;
         assert_eq!(documents, 0);
         assert!(schema_already_converged(&state_db_path(&second)));
+        Ok(())
+    }
+
+    /// `#sdkeventlane`: accepting one event must not inherit whole-ledger
+    /// maintenance. A controller initializes the database before serving; an
+    /// older process may then append a version-zero row. The normal open repairs
+    /// it, while the ingress open deliberately leaves it for background/normal
+    /// maintenance so it cannot hold the controller's global event mutex.
+    #[test]
+    fn event_ingress_open_skips_row_convergence_after_initialization() -> Result<()> {
+        let dir = tempfile::TempDir::new()?;
+        let root = dir.path();
+        let conn = open_state_db(root)?;
+        conn.execute(
+            "INSERT INTO state_events
+                 (event_id, document_hash, document_version, domain, fact_type, payload_json, timestamp)
+             VALUES ('older-writer-event', 'doc', 0, 'document', 'document_authority_observed', '{}', 0)",
+            [],
+        )?;
+        drop(conn);
+
+        let ingress = open_state_db_for_event_ingress(root)?;
+        let ingress_version: i64 = ingress.query_row(
+            "SELECT document_version FROM state_events WHERE event_id = 'older-writer-event'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(
+            ingress_version, 0,
+            "latency-sensitive ingress must not run whole-ledger row convergence"
+        );
+        drop(ingress);
+
+        let maintained = open_state_db(root)?;
+        let maintained_version: i64 = maintained.query_row(
+            "SELECT document_version FROM state_events WHERE event_id = 'older-writer-event'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert!(
+            maintained_version > 0,
+            "the normal open still owns automatic row convergence"
+        );
         Ok(())
     }
 

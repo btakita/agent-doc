@@ -4145,6 +4145,7 @@ impl EditorOpCaptureAppliedNonces {
 struct StateProjectionEffectCommand {
     document_hash: String,
     projection: Option<agent_doc_state_backbone::DocumentStateProjection>,
+    sources_preseeded: bool,
 }
 
 #[cfg(test)]
@@ -7477,6 +7478,22 @@ impl ControllerDocumentGraphs {
         document_hash: &str,
         projection: Option<agent_doc_state_backbone::DocumentStateProjection>,
     ) {
+        let activation_projection = projection.clone();
+        self.set_projection_sources(document_hash, projection);
+        self.activate_projection(document_hash, activation_projection.as_ref());
+    }
+
+    /// Seed only the cheap reactive Sources needed by immediate graph reads.
+    ///
+    /// Startup must expose the durable projection as soon as `new_arc` returns,
+    /// but activating its derived effects can reconcile a large managed list.
+    /// Keep this source publication synchronous and let the ordered projection
+    /// worker perform [`Self::activate_projection`].
+    fn set_projection_sources(
+        &self,
+        document_hash: &str,
+        projection: Option<agent_doc_state_backbone::DocumentStateProjection>,
+    ) {
         let key = document_hash.to_string();
         let compact_frontier = CompactResumeFrontier::from_projection(projection.as_ref());
         let compact_frontier_changed = self
@@ -7492,14 +7509,6 @@ impl ControllerDocumentGraphs {
                 )
             })
             .unwrap_or((None, None));
-        let has_retained_intent = projection
-            .as_ref()
-            .and_then(retained_intent_facts_from_projection)
-            .is_some();
-        let has_captured_response = projection
-            .as_ref()
-            .and_then(|document| document.closeout.captured_response.as_ref())
-            .is_some();
         let has_compact_continuation = projection
             .as_ref()
             .and_then(|document| document.document.pending_compact_projection.as_ref())
@@ -7542,6 +7551,23 @@ impl ControllerDocumentGraphs {
             self.projection
                 .set(ctx, document_hash.to_string(), projection);
         });
+    }
+
+    /// Activate derived projection effects after the projection Sources exist.
+    fn activate_projection(
+        &self,
+        document_hash: &str,
+        projection: Option<&agent_doc_state_backbone::DocumentStateProjection>,
+    ) {
+        let has_retained_intent = projection
+            .and_then(retained_intent_facts_from_projection)
+            .is_some();
+        let has_captured_response = projection
+            .and_then(|document| document.closeout.captured_response.as_ref())
+            .is_some();
+        let has_compact_continuation = projection
+            .and_then(|document| document.document.pending_compact_projection.as_ref())
+            .is_some();
         if has_retained_intent {
             // A pending intent is itself the membership edge for the retained
             // settle Effect. Mint it while rebuilding the graph; sink
@@ -10048,9 +10074,14 @@ impl ControllerRuntime {
             .map(|(document_hash, projection)| (document_hash.clone(), projection.clone()))
             .collect::<Vec<_>>();
         for (document_hash, projection) in projections {
+            // Immediate graph reads after `new_arc` must see the durable
+            // projection. Only derived activation belongs on the worker.
+            self.document_graphs
+                .set_projection_sources(&document_hash, Some(projection.clone()));
             self.enqueue_state_projection_effect(StateProjectionEffectCommand {
                 document_hash,
                 projection: Some(projection),
+                sources_preseeded: true,
             });
         }
     }
@@ -10595,6 +10626,7 @@ impl ControllerRuntime {
         self.enqueue_state_projection_effect(StateProjectionEffectCommand {
             document_hash,
             projection: document_projection,
+            sources_preseeded: false,
         });
         self.supervisor_recycle_waiters.notify_all();
         self.state_projection_waiters.notify_all();
@@ -10617,8 +10649,13 @@ impl ControllerRuntime {
     }
 
     fn publish_state_projection_effect(&self, command: StateProjectionEffectCommand) {
-        self.document_graphs
-            .set_projection(&command.document_hash, command.projection);
+        if command.sources_preseeded {
+            self.document_graphs
+                .activate_projection(&command.document_hash, command.projection.as_ref());
+        } else {
+            self.document_graphs
+                .set_projection(&command.document_hash, command.projection);
+        }
     }
 
     /// Take the state-event ingress lock, recording how long it was awaited and

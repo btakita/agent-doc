@@ -21905,6 +21905,9 @@ pub(crate) fn controller_replacement_should_self_promote(
         true,
         handoff_temp_socket.exists(),
         bootstrap.handoff_state,
+        bootstrap
+            .previous_controller_pid
+            .map(crate::process::process_is_alive),
         launched_elapsed,
         HANDOFF_SELF_PROMOTE_GRACE,
     )

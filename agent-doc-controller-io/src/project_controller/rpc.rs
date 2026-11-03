@@ -4586,6 +4586,12 @@ pub fn enqueue_document_authority_state_event(
         diagnostic_payload: Some(serde_json::to_string(event)?),
         sequence: None,
     };
+    if agent_doc_state_wire::in_controller_request()
+        && let Some(runtime) = local_controller_runtime_for_project(project_root)?
+    {
+        let bootstrap = runtime.bootstrap_snapshot()?;
+        return handle_document_authority_handoff(&bootstrap, &runtime, request);
+    }
     retry_state_event_deadline(project_root, || {
         request_controller_with_timeout(project_root, request.clone(), CONTROLLER_RPC_TIMEOUT)
     })
@@ -57220,6 +57226,34 @@ mod tests {
                 "a local compact continuation must enter the live graph before its RPC returns"
             );
             assert!(!publish_state_event(dir.path(), &event).unwrap());
+        })
+        .join()
+        .unwrap();
+    }
+
+    #[test]
+    fn controller_local_authority_handoff_never_self_rpcs() {
+        std::thread::spawn(|| {
+            let dir = tempfile::TempDir::new().unwrap();
+            let runtime = ControllerRuntime::new_arc(test_bootstrap(&dir)).unwrap();
+            install_controller_request_thread_context(&runtime);
+            let event = authority_handoff_test_event("authority-local", "doc", 303);
+            let before = controller_round_trips_on_this_thread();
+
+            assert!(enqueue_document_authority_state_event(dir.path(), &event).unwrap());
+            assert_eq!(
+                controller_round_trips_on_this_thread(),
+                before,
+                "a controller-local producer must enter the durable handoff directly"
+            );
+            assert_eq!(
+                runtime
+                    .document_state_projection("doc")
+                    .unwrap()
+                    .and_then(|projection| projection.document.latest_authority)
+                    .map(|authority| authority.authority_epoch),
+                Some(303),
+            );
         })
         .join()
         .unwrap();

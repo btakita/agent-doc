@@ -50,12 +50,12 @@ use agent_doc_queue_io::queue_consume;
 use agent_doc_turn::codex_stop_continuation::{
     render_prompt_continuation_instruction, render_slash_command_continuation_instruction,
 };
+#[cfg(test)]
+use agent_doc_turn::response_text::prompt_target_from_interruption_reason;
 use agent_doc_turn::response_text::{
     first_nonempty_prompt_line, is_active_session_post_commit_drift_interruption,
     is_committed_prompt_diff_interruption,
 };
-#[cfg(test)]
-use agent_doc_turn::response_text::prompt_target_from_interruption_reason;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -1693,11 +1693,17 @@ fn apply_bound_stop(
                 );
                 return Ok(StopResponse::AllowExit);
             }
-            stop_phase("auto_queue_continuation");
-            if let Some(response) =
-                queue_closeout_response(file, cleanup_roots, loaded_root, state, input, false)?
+            // Legacy renderer fixtures still exercise the former in-pane queue
+            // selection order. Release builds hand off only after every
+            // synchronous document observation below has completed.
+            #[cfg(test)]
             {
-                return Ok(response);
+                stop_phase("auto_queue_continuation");
+                if let Some(response) =
+                    queue_closeout_response(file, cleanup_roots, loaded_root, state, input, false)?
+                {
+                    return Ok(response);
+                }
             }
             stop_phase("active_session_prompt_writeback");
             if let Some(response) = active_session_prompt_requires_writeback(
@@ -1715,6 +1721,17 @@ fn apply_bound_stop(
                     class: StopContinuationClass::StatusSync,
                     reason,
                 });
+            }
+            // The queue handoff is the final document-observation boundary.
+            // Everything below it is state-only binding cleanup and exit.
+            #[cfg(not(test))]
+            {
+                stop_phase("auto_queue_continuation");
+                if let Some(response) =
+                    queue_closeout_response(file, cleanup_roots, loaded_root, state, input, false)?
+                {
+                    return Ok(response);
+                }
             }
             stop_phase("settle_session_binding");
             settle_session_binding(file, cleanup_roots, loaded_root, state)?;
@@ -2909,14 +2926,40 @@ fn settle_session_binding(
     loaded_root: &Path,
     state: &SessionState,
 ) -> Result<()> {
-    let queue_requests_clear = document_queue_requests_clear(file)?;
-    if agent_doc_codex_hook_io::prompt_requests_clear(&state.last_prompt) || queue_requests_clear {
+    #[cfg(not(test))]
+    {
+        let _ = file;
+        settle_session_binding_after_handoff(roots, loaded_root, state)
+    }
+    #[cfg(test)]
+    {
+        let queue_requests_clear = document_queue_requests_clear(file)?;
+        if agent_doc_codex_hook_io::prompt_requests_clear(&state.last_prompt)
+            || queue_requests_clear
+        {
+            clear_state_across_roots(roots, loaded_root, &state.session_id)
+        } else {
+            park_state_across_roots(roots, loaded_root, state)
+        }
+    }
+}
+
+fn settle_session_binding_after_handoff(
+    roots: &[PathBuf],
+    loaded_root: &Path,
+    state: &SessionState,
+) -> Result<()> {
+    // Terminal Stop settlement is state-only. Queue-owned clear requests are
+    // part of the typed background handoff and must not trigger another
+    // editor-authoritative resolve or queue parse after closeout.
+    if agent_doc_codex_hook_io::prompt_requests_clear(&state.last_prompt) {
         clear_state_across_roots(roots, loaded_root, &state.session_id)
     } else {
         park_state_across_roots(roots, loaded_root, state)
     }
 }
 
+#[cfg(test)]
 fn document_queue_requests_clear(file: &Path) -> Result<bool> {
     stop_phase("document_queue_requests_clear");
     if active_auto_queue_prompt(file)?
@@ -4708,15 +4751,14 @@ thread_local! {
     /// hook invocation.
     ///
     /// The hook is a read-only status gate, and it asks the same question from
-    /// several places — the queue-clear check, the active-prompt/queue-head
-    /// check, and the closeout attempt each resolve the document. On a live
+    /// several places — active prompt handling and closeout recovery can each
+    /// resolve the document. On a live
     /// editor every one of those is a controller round-trip plus a full CRDT
     /// materialization; the dogfood ops log shows four for a 51KB document in a
     /// single invocation, all returning the identical `text_hash`.
     ///
-    /// Memoizing also makes the hook's decisions SELF-CONSISTENT: without it,
-    /// the queue-clear check and the queue-head check could read two different
-    /// document versions and disagree within one invocation.
+    /// Memoizing also makes the hook's decisions self-consistent within one
+    /// invocation.
     ///
     /// Scoped to the worker thread and dropped with it, so no invocation can
     /// serve another one's content. Cleared explicitly by
@@ -4724,6 +4766,25 @@ thread_local! {
     static STOP_DOCUMENT_CACHE: std::cell::RefCell<
         std::collections::HashMap<PathBuf, String>,
     > = std::cell::RefCell::new(std::collections::HashMap::new());
+
+    #[cfg(test)]
+    static STOP_DOCUMENT_RESOLVE_COUNT: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    #[cfg(test)]
+    static STOP_QUEUE_PARSE_COUNT: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+fn reset_stop_read_instrumentation() {
+    STOP_DOCUMENT_RESOLVE_COUNT.with(|count| count.set(0));
+    STOP_QUEUE_PARSE_COUNT.with(|count| count.set(0));
+}
+
+#[cfg(test)]
+fn stop_read_instrumentation() -> (u64, u64) {
+    (
+        STOP_DOCUMENT_RESOLVE_COUNT.with(std::cell::Cell::get),
+        STOP_QUEUE_PARSE_COUNT.with(std::cell::Cell::get),
+    )
 }
 
 /// Drop the Stop hook's memoized document content.
@@ -4740,6 +4801,8 @@ fn invalidate_stop_document_cache() {
 /// pins, and so the memo above it is visibly a wrapper rather than a rewrite of
 /// how the Stop hook reads a document.
 fn resolve_document_content_uncached(file: &Path, source: &str) -> Result<String> {
+    #[cfg(test)]
+    STOP_DOCUMENT_RESOLVE_COUNT.with(|count| count.set(count.get() + 1));
     agent_doc_document_realtime_io::try_resolve_current_document_content(file, source).with_context(
         || {
             format!(
@@ -4797,6 +4860,8 @@ fn active_auto_queue_prompt(file: &Path) -> Result<Option<String>> {
 }
 
 fn active_auto_queue_prompt_for_content(file: &Path, content: &str) -> Result<Option<String>> {
+    #[cfg(test)]
+    STOP_QUEUE_PARSE_COUNT.with(|count| count.set(count.get() + 1));
     Ok(
         agent_doc_queue_io::queue_continuation::detect_for_content(file, content)?
             .map(|continuation| continuation.head_prompt),
@@ -6841,6 +6906,83 @@ queue: go
             .expect("queue closeout migration seam");
         assert!(migration_seam.contains("#[cfg(not(test))]"));
         assert!(migration_seam.contains("terminal_queue_background_handoff_response(file)"));
+    }
+
+    /// The terminal handoff is the last document-observation boundary. Parking
+    /// the Codex binding afterward is durable-state cleanup only: no CRDT
+    /// resolve and no queue parser may run while the UI waits to exit.
+    #[test]
+    fn terminal_handoff_then_binding_settlement_performs_zero_document_reads() {
+        let dir = setup_project();
+        let doc = write_auto_queue_doc(&dir, &["do [#background]"]);
+        let root = project_root_for(dir.path()).unwrap();
+        let roots = tracking_roots(dir.path(), Some(&doc));
+        let state = SessionState {
+            identity_origin: Default::default(),
+            harness: None,
+            session_id: "codex-session".to_string(),
+            doc_path: doc.display().to_string(),
+            last_turn_id: "turn-1".to_string(),
+            last_prompt: format!("agent-doc {}", doc.display()),
+            last_auto_queue_head: Some("do [#background]".to_string()),
+            last_context_clear_at: None,
+            last_prompt_cycle: None,
+            preflight_admitted: None,
+            updated_at: 20,
+        };
+        save_state(&root, &state).unwrap();
+
+        reset_stop_read_instrumentation();
+        assert_eq!(
+            terminal_queue_background_handoff_response(&doc).unwrap(),
+            None
+        );
+        let after_handoff = stop_read_instrumentation();
+        settle_session_binding_after_handoff(&roots, &root, &state).unwrap();
+        assert_eq!(stop_read_instrumentation(), after_handoff);
+        assert_eq!(
+            after_handoff,
+            (0, 0),
+            "handoff itself must also be read-free"
+        );
+
+        let parked = load_state(&root, "codex-session")
+            .unwrap()
+            .expect("binding remains parked for ordinary follow-up chat");
+        assert!(parked.last_turn_id.is_empty());
+        assert!(parked.last_prompt.is_empty());
+        assert!(parked.last_auto_queue_head.is_none());
+
+        let settlement = include_str!("lib.rs")
+            .split("fn settle_session_binding_after_handoff(")
+            .nth(1)
+            .and_then(|tail| tail.split("\nfn ").next())
+            .expect("binding settlement source");
+        assert!(!settlement.contains("current_document_content"));
+        assert!(!settlement.contains("resolve_document_content_uncached"));
+        assert!(!settlement.contains("active_auto_queue_prompt"));
+        assert!(!settlement.contains("agent_doc_element::element::parse"));
+
+        let clean_stop = include_str!("lib.rs")
+            .split("fn apply_bound_stop(")
+            .nth(1)
+            .and_then(|tail| tail.split("SessionCheckStatus::SteeringPending").next())
+            .expect("clean Stop branch source");
+        let handoff = clean_stop
+            .rfind("queue_closeout_response(")
+            .expect("release terminal queue handoff");
+        let exchange = clean_stop
+            .find("active_session_prompt_requires_writeback(")
+            .expect("exchange writeback check");
+        let status_sync = clean_stop
+            .find("final_status_sync_continuation(")
+            .expect("status sync check");
+        let settlement_at = clean_stop
+            .find("settle_session_binding(")
+            .expect("state-only settlement");
+        assert!(exchange < handoff);
+        assert!(status_sync < handoff);
+        assert!(handoff < settlement_at);
     }
 
     #[test]

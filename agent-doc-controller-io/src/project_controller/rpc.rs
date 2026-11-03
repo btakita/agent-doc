@@ -14630,7 +14630,15 @@ fn empty_controller_request(command: &str) -> ControllerRequest {
 /// `target_published` is a successful command-plane terminal even though
 /// the pane effect is still reactive.
 fn tmux_layout_command_applied(receipt: &ControllerTmuxLayoutSyncReceipt) -> bool {
-    receipt.applied || receipt.reason == "target_published"
+    receipt.applied
+        || receipt.reason == "target_published"
+        // GH #389: an editor-surface publication is already the authoritative
+        // retained target. `tmux_effect_not_started` only says its reactive
+        // effect has not begun yet; it does not invalidate the target or stop
+        // that effect from running. Let the membership gate below decide
+        // whether this route may dispatch against the superseding surface.
+        || (receipt.reason == "tmux_effect_not_started"
+            && receipt.layout_publisher.as_deref() == Some("editor_surface"))
 }
 
 /// Render published layout columns for an operator-facing refusal.
@@ -52852,6 +52860,36 @@ mod tests {
         // `target_published` is a successful command-plane terminal.
         let published = gh110_receipt(false, "target_published", &["/repo/a.md"]);
         assert_eq!(editor_route_layout_refusal(&published, "/repo/a.md"), None);
+    }
+
+    #[test]
+    fn gh389_editor_surface_target_dispatches_before_reactive_effect_starts() {
+        let mut receipt = gh110_receipt(
+            false,
+            "tmux_effect_not_started",
+            &["/repo/a.md", "/repo/b.md"],
+        );
+        receipt.layout_generation = Some(16);
+        receipt.layout_publisher = Some("editor_surface".to_string());
+
+        assert_eq!(editor_route_layout_refusal(&receipt, "/repo/a.md"), None);
+
+        let missing = editor_route_layout_refusal(&receipt, "/repo/c.md").unwrap();
+        assert!(missing.retryable);
+        assert!(
+            missing
+                .message
+                .contains("is not one of the published layout columns")
+        );
+
+        receipt.layout_publisher = Some("route".to_string());
+        let unpublished = editor_route_layout_refusal(&receipt, "/repo/a.md").unwrap();
+        assert!(unpublished.retryable);
+        assert!(
+            unpublished
+                .message
+                .contains("reason=tmux_effect_not_started")
+        );
     }
 
     #[test]

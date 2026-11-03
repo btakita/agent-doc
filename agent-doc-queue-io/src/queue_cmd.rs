@@ -723,12 +723,13 @@ fn record_claim_runtime_projection_scoped(
                     &snapshot,
                     &projection.target_content,
                 );
-            let synced = if only_identity.is_some() {
-                queue_synced
-            } else {
-                agent_doc_work_projection::reconcile_managed_active_items(&queue_synced)?
-                    .unwrap_or(queue_synced)
-            };
+            // A target-scoped claim still changes the authoritative lifecycle
+            // of that work identity. Keep the derived Active index on the same
+            // accepted boundary; otherwise a reintroduced stable id can show a
+            // fresh Running queue row beside its predecessor's stale Reported
+            // status until an unrelated full-document repair happens.
+            let synced = agent_doc_work_projection::reconcile_managed_active_items(&queue_synced)?
+                .unwrap_or(queue_synced);
             if synced != snapshot
                 && let Err(err) = agent_doc_snapshot_io::checkpoint_document_baseline(
                     file,
@@ -792,8 +793,10 @@ pub fn project_claim_runtime_state_with_effects(
 }
 
 /// Reconcile only the exact attempt identity (across every duplicate display)
-/// after a claim/start/release transition. Unrelated lifecycle or Active-index
-/// drift remains for declarative sync and cannot veto this transition.
+/// after a claim/start/release transition. Unrelated queue-lifecycle drift
+/// remains for declarative sync and cannot veto this transition. The managed
+/// Active index is re-derived on the same boundary because it is a binary-owned
+/// view of those queue lifecycles, not independent operator state.
 pub fn project_claim_item_runtime_state_with_effects(
     effects: &(impl QueueRuntimeProjectionEffects + ?Sized),
     file: &Path,
@@ -1355,12 +1358,9 @@ fn project_runtime_state_with_effects(
                 derive_blocker_runtime_projection(file, &current)?
             }
         };
-        let target_content = if only_identity.is_some() {
-            projection.target_content
-        } else {
+        let target_content =
             agent_doc_work_projection::reconcile_managed_active_items(&projection.target_content)?
-                .unwrap_or(projection.target_content)
-        };
+                .unwrap_or(projection.target_content);
         // `#sdkdocumentselfheal`: exact operator-request rows and their Todo
         // receipts are one lifecycle. Older/interrupted closeouts could strike
         // the queue row but leave its same-id Todo open until another foreground
@@ -1413,8 +1413,8 @@ fn project_runtime_state_with_effects(
                 derive_blocker_runtime_projection(file, &authoritative)?
             }
         };
-        let active_settled = only_identity.is_some()
-            || agent_doc_work_projection::reconcile_managed_active_items(&authoritative)?.is_none();
+        let active_settled =
+            agent_doc_work_projection::reconcile_managed_active_items(&authoritative)?.is_none();
         let terminal_todos_settled = rows != RuntimeProjectionRows::All
             || only_identity.is_some()
             || agent_doc_queue::queue_consume::reconcile_terminal_operator_request_todos(
@@ -3339,6 +3339,132 @@ mod tests {
             .unwrap()
             .unwrap();
         assert!(snapshot.contains("- **Status:** running"), "{snapshot}");
+    }
+
+    /// A completed occurrence may be removed and later reintroduced with the
+    /// same stable prompt id. The id names the work across attempts; the
+    /// generation names the attempt. A focused claim/start projection must
+    /// therefore replace the stale terminal `agent:active` status immediately
+    /// while leaving the same leaf under another parent untouched.
+    #[test]
+    fn reintroduced_stable_id_projects_fresh_generation_into_queue_and_active() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("claim-active-reintroduced.md");
+        let source = concat!(
+            "---\nsession: sid\nagent_doc_format: template\n---\n\n",
+            "## Active <!-- agent:active priority -->\n<!-- /agent:active -->\n\n",
+            "## Run <!-- agent:run id=\"main\" subagents go -->\n",
+            "- https://example.test/pull/1\n",
+            "  - #address\n",
+            "- https://example.test/pull/2\n",
+            "  - #address\n",
+            "<!-- /agent:run -->\n",
+        );
+        let admitted = agent_doc_queue::prompt_identity::project(source, "session:claim-reopen");
+        assert_eq!(admitted.assignments.len(), 2);
+        let first_id = admitted.assignments[0].id.clone();
+        let second_id = admitted.assignments[1].id.clone();
+        assert_ne!(
+            first_id, second_id,
+            "different parent vectors need distinct ids"
+        );
+        std::fs::write(&doc, &admitted.content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &admitted.content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        let effects = FakeEffects::default();
+        let first_handle = format!("#{first_id}");
+        let first_claim = {
+            let _clock = crate::queue_claim::pin_claim_clock_for_current_thread(1_000);
+            let (_, claim) =
+                claim_with_runtime_projection(&effects, &doc, &first_handle, "subagent:first", 60)
+                    .unwrap();
+            let running = crate::queue_claim::start_attempt(
+                &doc,
+                &claim.item_text,
+                "subagent:first",
+                "worker:first",
+                60,
+                claim.generation,
+            )
+            .unwrap();
+            crate::queue_claim::report_attempt(&doc, &running.item_text, Some(running.generation))
+                .unwrap()
+        };
+        project_claim_runtime_state_with_effects(&effects, &doc, None).unwrap();
+        let reported = std::fs::read_to_string(&doc).unwrap();
+        assert!(reported.contains("- **Status:** reported"), "{reported}");
+
+        crate::queue_claim::cancel_removed_attempt(
+            &doc,
+            &first_claim.item_text,
+            Some(first_claim.generation),
+        )
+        .unwrap();
+
+        // Recreate the exact first parent vector without copying its id. Stable
+        // identity admission must recover its old id, while pull/2 keeps its
+        // unrelated identity.
+        let old_first = reported
+            .lines()
+            .find(|line| line.contains('☑') && line.contains(&format!("[#{}]", first_id)))
+            .expect("reported first row");
+        let reintroduced_raw = reported.replacen(old_first, "  - #address", 1);
+        let reintroduced =
+            agent_doc_queue::prompt_identity::project(&reintroduced_raw, "session:claim-reopen");
+        assert_eq!(reintroduced.assignments.len(), 1);
+        assert_eq!(reintroduced.assignments[0].id, first_id);
+        assert!(
+            reintroduced.content.contains(&format!("[#{}]", second_id)),
+            "unrelated parent identity was lost: {}",
+            reintroduced.content
+        );
+        std::fs::write(&doc, &reintroduced.content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &reintroduced.content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        let _clock = crate::queue_claim::pin_claim_clock_for_current_thread(2_000);
+        let (_, second_claim) =
+            claim_with_runtime_projection(&effects, &doc, &first_handle, "subagent:second", 600)
+                .unwrap();
+        assert_eq!(second_claim.generation, 2);
+        let running = crate::queue_claim::start_attempt(
+            &doc,
+            &second_claim.item_text,
+            "subagent:second",
+            "worker:second",
+            600,
+            second_claim.generation,
+        )
+        .unwrap();
+        project_claim_item_runtime_state_with_effects(&effects, &doc, &running.item_text, false)
+            .unwrap();
+
+        let projected = std::fs::read_to_string(&doc).unwrap();
+        assert_eq!(
+            projected
+                .matches(&format!("🚧 [#subagent:second#2] #address [#{}]", first_id))
+                .count(),
+            1,
+            "one fresh generation must own the reintroduced occurrence: {projected}"
+        );
+        assert!(!projected.contains("[#subagent:first#1]"), "{projected}");
+        assert!(projected.contains("- **Status:** running"), "{projected}");
+        assert!(!projected.contains("- **Status:** reported"), "{projected}");
+        assert_eq!(
+            crate::queue_claim::load_ledger(&doc).unwrap().claims.len(),
+            1,
+            "the retry must replace, not duplicate, worker ownership"
+        );
     }
 
     /// `#queueprojectiondrift`: text-identical review leaves under different

@@ -19186,6 +19186,7 @@ pub(crate) fn serve_with_options(
     let mut recycle_stale_since: Option<Instant> = None;
     let recycle_handoff_in_flight = Arc::new(AtomicBool::new(false));
     let recycle_handoff_promoted = Arc::new(AtomicBool::new(false));
+    let recycle_handoff_drain_deadline_secs = Arc::new(AtomicU64::new(0));
     // #supresilience Part B — autonomous route-owned supervisor watchdog. Runs on
     // the controller's idle serve tick, throttled to `SUPERVISOR_WATCHDOG_INTERVAL`.
     // `watchdog_halt_notified` dedups the operator halt diagnostic per document so a
@@ -19399,6 +19400,9 @@ pub(crate) fn serve_with_options(
                 if controller_self_watchdog_should_suicide(
                     &runtime,
                     recycle_handoff_in_flight.load(Ordering::SeqCst),
+                    recycle_handoff_promoted.load(Ordering::SeqCst),
+                    timestamp_secs()
+                        < recycle_handoff_drain_deadline_secs.load(Ordering::SeqCst),
                     handoff_temp_socket.as_deref(),
                     &public_sock,
                     controller_launched_at.elapsed(),
@@ -19486,6 +19490,8 @@ pub(crate) fn serve_with_options(
                     let recycle_reason = reason.to_string();
                     let handoff_in_flight = Arc::clone(&recycle_handoff_in_flight);
                     let handoff_promoted = Arc::clone(&recycle_handoff_promoted);
+                    let handoff_drain_deadline_secs =
+                        Arc::clone(&recycle_handoff_drain_deadline_secs);
                     let retry_backoff = Arc::clone(&recycle_retry_backoff);
                     let stop_after_handoff = Arc::clone(&should_stop);
                     let draining_clients = Arc::clone(&active_clients);
@@ -19581,6 +19587,12 @@ pub(crate) fn serve_with_options(
                                 // predecessor; let every already-accepted RPC
                                 // drain before retiring it.
                                 retry_backoff.lock().record_success();
+                                handoff_drain_deadline_secs.store(
+                                    timestamp_secs().saturating_add(
+                                        ASYNC_EDITOR_PREDECESSOR_DRAIN_BUDGET.as_secs(),
+                                    ),
+                                    Ordering::SeqCst,
+                                );
                                 handoff_promoted.store(true, Ordering::SeqCst);
                                 drain_predecessor_after_promotion(
                                     &draining_runtime,
@@ -21542,6 +21554,8 @@ pub(super) fn supervisor_watchdog_pane_stashed(
 pub(crate) fn controller_self_watchdog_should_suicide(
     runtime: &ControllerRuntime,
     outgoing_handoff_in_flight: bool,
+    successor_promoted: bool,
+    predecessor_drain_active: bool,
     handoff_temp_socket: Option<&Path>,
     public_sock: &Path,
     launched_elapsed: Duration,
@@ -21550,17 +21564,23 @@ pub(crate) fn controller_self_watchdog_should_suicide(
     let Ok(bootstrap) = runtime.bootstrap_snapshot() else {
         return false;
     };
+    let now = timestamp_secs();
     // A self-recycle changes the public predecessor's in-memory state to
     // `Preparing`, but the worker that owns that outgoing handoff is also the
-    // only actor allowed to finish or abort it. Suppress the watchdog only
-    // while that ownership is fresh. A wedged worker used to hold this boolean
-    // forever, disabling the very 45s watchdog that `Preparing` needs and
-    // leaving retained delivery behind a build-skew/no-replica handoff.
+    // only actor allowed to finish or abort it. Before promotion, suppress the
+    // watchdog only while that ownership is fresh. After promotion, the
+    // predecessor legitimately stays `Preparing` while accepted work drains,
+    // so its distinct pid+generation drain lease owns the longer bound. A
+    // wedged pre-promotion worker used to hold the boolean forever, disabling
+    // the very 45s watchdog that `Preparing` needs and leaving retained delivery
+    // behind a build-skew/no-replica handoff.
     if status::outgoing_handoff_owner_suppresses_watchdog(
         outgoing_handoff_in_flight,
+        successor_promoted,
+        predecessor_drain_active,
         bootstrap.handoff_state,
         bootstrap.handoff_started_at,
-        timestamp_secs(),
+        now,
         launched_elapsed,
         threshold,
     ) {
@@ -40725,6 +40745,8 @@ mod tests {
             !controller_self_watchdog_should_suicide(
                 fresh_runtime.as_ref(),
                 true,
+                false,
+                false,
                 None,
                 &socket_path(dir.path()),
                 Duration::from_secs(5),
@@ -40741,12 +40763,52 @@ mod tests {
             controller_self_watchdog_should_suicide(
                 stale_runtime.as_ref(),
                 true,
+                false,
+                false,
                 None,
                 &socket_path(dir.path()),
                 Duration::from_secs(46),
                 threshold,
             ),
             "a wedged handoff worker cannot exempt Preparing forever"
+        );
+    }
+
+    #[test]
+    fn promoted_predecessor_drain_deadline_outlives_pre_promotion_watchdog_bound() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let threshold = Duration::from_secs(45);
+        let mut bootstrap = test_bootstrap(&dir);
+        bootstrap.handoff_state = ControllerHandoffState::Preparing;
+        bootstrap.handoff_started_at = Some(timestamp_secs().saturating_sub(100));
+        let runtime = test_controller_runtime(&bootstrap);
+
+        assert!(
+            !controller_self_watchdog_should_suicide(
+                runtime.as_ref(),
+                true,
+                true,
+                true,
+                None,
+                &socket_path(dir.path()),
+                Duration::from_secs(100),
+                threshold,
+            ),
+            "a promoted predecessor remains alive through its bounded active drain"
+        );
+
+        assert!(
+            controller_self_watchdog_should_suicide(
+                runtime.as_ref(),
+                true,
+                true,
+                false,
+                None,
+                &socket_path(dir.path()),
+                Duration::from_secs(361),
+                threshold,
+            ),
+            "the separate drain deadline remains a real bound"
         );
     }
 

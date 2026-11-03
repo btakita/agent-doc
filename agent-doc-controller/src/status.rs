@@ -635,20 +635,31 @@ pub fn preparing_controller_is_stale(
 ///
 /// The worker runs off the accept loop, so a blocked launch/connect must not
 /// block controller service. Ownership is nevertheless a lease, not an
-/// unbounded exemption: once the same recorded `Preparing`/`Promoted` handoff
-/// is stale, the worker can no longer prove it will finish or roll back. The
-/// watchdog must then fail the generation so the next client can launch a clean
-/// controller and rehydrate retained editor delivery.
+/// unbounded exemption before promotion: once the same recorded `Preparing`
+/// handoff is stale, the worker can no longer prove it will finish or roll
+/// back. After promotion the predecessor is intentionally still `Preparing`
+/// while it drains accepted work; that distinct phase is protected only by its
+/// process-local predecessor-drain deadline (mirrored durably by its pid-scoped
+/// lease for external reapers). Once either bound expires, the watchdog may
+/// fail the generation so the next client can launch a clean controller and
+/// rehydrate retained editor delivery.
 pub fn outgoing_handoff_owner_suppresses_watchdog(
     outgoing_handoff_in_flight: bool,
+    successor_promoted: bool,
+    predecessor_drain_active: bool,
     handoff_state: ControllerHandoffState,
     handoff_started_at: Option<u64>,
     now: u64,
     launched_elapsed: Duration,
     stale_after: Duration,
 ) -> bool {
-    outgoing_handoff_in_flight
-        && !preparing_controller_is_stale(handoff_state, handoff_started_at, now, stale_after)
+    if !outgoing_handoff_in_flight {
+        return false;
+    }
+    if successor_promoted {
+        return predecessor_drain_active;
+    }
+    !preparing_controller_is_stale(handoff_state, handoff_started_at, now, stale_after)
         && !preparing_without_a_handoff_clock(
             handoff_state,
             handoff_started_at,
@@ -2071,21 +2082,7 @@ mod tests {
 
         assert!(outgoing_handoff_owner_suppresses_watchdog(
             true,
-            ControllerHandoffState::Preparing,
-            Some(now - 5),
-            now,
-            Duration::from_secs(5),
-            stale_after,
-        ));
-        assert!(!outgoing_handoff_owner_suppresses_watchdog(
-            true,
-            ControllerHandoffState::Preparing,
-            Some(now - 46),
-            now,
-            Duration::from_secs(46),
-            stale_after,
-        ));
-        assert!(!outgoing_handoff_owner_suppresses_watchdog(
+            false,
             false,
             ControllerHandoffState::Preparing,
             Some(now - 5),
@@ -2095,10 +2092,52 @@ mod tests {
         ));
         assert!(!outgoing_handoff_owner_suppresses_watchdog(
             true,
+            false,
+            false,
+            ControllerHandoffState::Preparing,
+            Some(now - 46),
+            now,
+            Duration::from_secs(46),
+            stale_after,
+        ));
+        assert!(!outgoing_handoff_owner_suppresses_watchdog(
+            false,
+            false,
+            false,
+            ControllerHandoffState::Preparing,
+            Some(now - 5),
+            now,
+            Duration::from_secs(5),
+            stale_after,
+        ));
+        assert!(!outgoing_handoff_owner_suppresses_watchdog(
+            true,
+            false,
+            false,
             ControllerHandoffState::Preparing,
             None,
             now,
             Duration::from_secs(46),
+            stale_after,
+        ));
+        assert!(outgoing_handoff_owner_suppresses_watchdog(
+            true,
+            true,
+            true,
+            ControllerHandoffState::Preparing,
+            Some(now - 100),
+            now,
+            Duration::from_secs(100),
+            stale_after,
+        ));
+        assert!(!outgoing_handoff_owner_suppresses_watchdog(
+            true,
+            true,
+            false,
+            ControllerHandoffState::Preparing,
+            Some(now - 100),
+            now,
+            Duration::from_secs(100),
             stale_after,
         ));
     }

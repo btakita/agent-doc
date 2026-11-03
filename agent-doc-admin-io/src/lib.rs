@@ -50,6 +50,8 @@ pub struct ControllerActorInspectionView {
     #[serde(default)]
     pub queue_projection: QueueProjectionInspectionView,
     #[serde(default)]
+    pub pane_observation: PaneObservationView,
+    #[serde(default)]
     pub queue_control: Option<QueueControlStatus>,
     #[serde(default)]
     pub queue_controls: Vec<QueueControlStatus>,
@@ -78,6 +80,27 @@ pub struct QueueProjectionInspectionView {
     pub document_prompt: Option<String>,
     #[serde(default)]
     pub detail: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PaneObservationView {
+    /// `ready`, `busy_or_blocked`, `unavailable`, or `unobserved`.
+    pub status: String,
+    #[serde(default)]
+    pub blocker: Option<String>,
+    #[serde(default)]
+    pub detail: Option<String>,
+}
+
+pub fn effective_actor_state(stored_state: &str, observation: &PaneObservationView) -> String {
+    if stored_state != "ready" {
+        return stored_state.to_string();
+    }
+    match observation.status.as_str() {
+        "busy_or_blocked" => "busy_or_blocked (stored_ready)".to_string(),
+        "unavailable" => "unknown (pane_observation_unavailable; stored_ready)".to_string(),
+        _ => stored_state.to_string(),
+    }
 }
 
 pub trait AdminControllerEffects {
@@ -325,6 +348,8 @@ fn inspect_text_lines(inspection: &ControllerActorInspectionView) -> Vec<String>
             .as_ref()
             .map(|health| health.live_replicas)
             .unwrap_or_default();
+        let effective_state =
+            effective_actor_state(record.state.as_str(), &inspection.pane_observation);
         lines.push(format!(
             "{} [{}] pane={} gen={} state={} queue_control={} queue_control_effective={} queue_control_reason={} projection_lag={} editor_replica={} live_editors={} live_replicas={} freshness={}",
             inspection
@@ -334,7 +359,7 @@ fn inspect_text_lines(inspection: &ControllerActorInspectionView) -> Vec<String>
             record.harness,
             record.pane_id,
             record.generation,
-            record.state.as_str(),
+            effective_state,
             inspection
                 .queue_control
                 .as_ref()
@@ -361,6 +386,25 @@ fn inspect_text_lines(inspection: &ControllerActorInspectionView) -> Vec<String>
                 inspection.queue_projection.status,
                 inspection
                     .queue_projection
+                    .detail
+                    .as_deref()
+                    .unwrap_or("none")
+            ));
+        }
+        if !matches!(
+            inspection.pane_observation.status.as_str(),
+            "ready" | "unobserved"
+        ) {
+            lines.push(format!(
+                "  pane_observation={} blocker={} detail={}",
+                inspection.pane_observation.status,
+                inspection
+                    .pane_observation
+                    .blocker
+                    .as_deref()
+                    .unwrap_or("none"),
+                inspection
+                    .pane_observation
                     .detail
                     .as_deref()
                     .unwrap_or("none")
@@ -591,6 +635,34 @@ pub fn repair_projection(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ready_store_state_yields_to_busy_or_unavailable_pane_observation() {
+        let busy = PaneObservationView {
+            status: "busy_or_blocked".to_string(),
+            blocker: Some("active turn".to_string()),
+            detail: None,
+        };
+        assert_eq!(
+            effective_actor_state("ready", &busy),
+            "busy_or_blocked (stored_ready)"
+        );
+
+        let unavailable = PaneObservationView {
+            status: "unavailable".to_string(),
+            blocker: None,
+            detail: Some("capture timed out".to_string()),
+        };
+        assert_eq!(
+            effective_actor_state("ready", &unavailable),
+            "unknown (pane_observation_unavailable; stored_ready)"
+        );
+        assert_eq!(
+            effective_actor_state("busy", &unavailable),
+            "busy",
+            "a diagnostic observation never downgrades an authoritative non-ready state"
+        );
+    }
     use std::cell::RefCell;
 
     struct FakeEffects {

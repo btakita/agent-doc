@@ -1528,6 +1528,18 @@ pub fn try_run_with_options(
     crate::profile::reset();
     let started = std::time::Instant::now();
     let out = crate::with_current_document_pass(|| {
+        // `#retainedbackgroundprojection`: classify a durable retained editor
+        // projection before archive restoration, orphan guards, response
+        // replay canonicalization, or closeout guards can mutate or interrupt
+        // the foreground. Operator-owned conflict/exhaustion wins inside this
+        // fence; only a genuinely deferred controller owner becomes
+        // BACKGROUND PENDING.
+        if let Some(outcome) = read_only_retained_projection_before_effects(file, effects)? {
+            return Err(match outcome {
+                ReadOnlyRetainedProjectionFence::BackgroundPending(pending) => pending.into(),
+                ReadOnlyRetainedProjectionFence::Interrupted(interrupted) => interrupted.into(),
+            });
+        }
         if effects.restore_committed_response_evidence(file)? {
             crate::invalidate_current_document_pass(file);
         }
@@ -1643,6 +1655,97 @@ fn background_owned_projection_message(
         read_only_terminal_projection_detail(decision),
         divergence_owner_note,
     )
+}
+
+const DEFERRED_PROJECTION_OWNER_NOTE: &str = "The controller owns the next closeout attempt; it retries the native editor save as the delivery receipt allows. The editor buffer remains authoritative; Git, disk, and snapshots are evidence only. Do not patch or restore the file, ask the operator to save, rerun session-check, or resubmit finalize";
+
+enum ReadOnlyRetainedProjectionFence {
+    BackgroundPending(SessionCheckBackgroundPending),
+    Interrupted(SessionCheckInterrupted),
+}
+
+/// Earliest status-only fence for a retained editor projection.
+///
+/// This function only observes the authority planes and durable ownership. It
+/// never requests a save, repairs content, restores an archive, runs a guard,
+/// or replays a response. A typed error is returned so the CLI can distinguish
+/// controller-owned background work from an actionable foreground conflict,
+/// while embedded callers still know neither is terminal success.
+fn read_only_retained_projection_before_effects(
+    file: &Path,
+    effects: &impl SessionCheckEffects,
+) -> Result<Option<ReadOnlyRetainedProjectionFence>> {
+    if effects.allows_recovery() || !effects.retained_document_write_blocks(file) {
+        return Ok(None);
+    }
+
+    // A retained roll-forward that would delete operator text, or an editor
+    // that exhausted its replica rebuilds while keeping unmerged visible text,
+    // is operator-owned and actionable. It must never be softened into the
+    // exit-0 background classification merely because another retained bit is
+    // also present.
+    if let Some(interruption) = operator_owned_retained_write_interruption(file) {
+        return Ok(Some(ReadOnlyRetainedProjectionFence::Interrupted(
+            SessionCheckInterrupted(interruption),
+        )));
+    }
+
+    let authority_content = crate::resolve_current_document_content(
+        file,
+        "session_check_retained_projection_pre_effect_fence",
+    )?;
+    let disk_content = crate::resolve_disk_document_content(
+        file,
+        "session_check_retained_projection_pre_effect_fence",
+    )?;
+    let projection_matches =
+        terminal_projection_matches_required_scope(file, &authority_content, &disk_content)?;
+    if projection_matches {
+        return Ok(None);
+    }
+
+    let cycle_phase =
+        agent_doc_cycle_state_io::load_with_closeout_projection(file)?.map(|state| state.phase);
+    let observed = agent_doc_document_realtime_io::observed_retained_write_ownership(file);
+    let decision = decide_read_only_terminal_projection(
+        false,
+        cycle_phase,
+        true,
+        authority_content == disk_content
+            || agent_doc_document_realtime_io::live_editor_projection_ready_for_native_save(
+                file,
+                &authority_content,
+                "session_check_retained_projection_pre_effect_fence",
+            )?,
+        observed.editor_holds_unmerged_visible_text,
+    );
+    let ownership = terminal_divergence_ownership(
+        observed,
+        cycle_phase,
+        agent_doc_capture_io::load_active(file)?.is_some(),
+        true,
+        false,
+    );
+    if !background_owns_read_only_projection(
+        decision,
+        ownership.verdict(),
+        false,
+        false,
+    ) {
+        // Rejection, an unserved/unregistered route, and every unrelated real
+        // divergence keep their established actionable guards and remedies.
+        return Ok(None);
+    }
+
+    Ok(Some(ReadOnlyRetainedProjectionFence::BackgroundPending(
+        SessionCheckBackgroundPending(background_owned_projection_message(
+            file,
+            &authority_content,
+            &disk_content,
+            decision,
+            DEFERRED_PROJECTION_OWNER_NOTE,
+        )),
+    )))
 }
 
 /// `#splicesessionack` (GH #273 remainder): the INTERRUPTED line for a durable
@@ -2157,11 +2260,7 @@ fn run_with_options_inner(
                 // for 38 minutes, while no request had ever been made. Name the
                 // owner, which is true, and not the request, which may not have
                 // happened.
-                "The controller owns the next closeout attempt; it retries the native editor save as the \
-                 delivery receipt allows. The editor buffer remains authoritative; Git, disk, and snapshots \
-                 are evidence only. \
-                 Do not patch or restore the file, ask the operator to save, rerun session-check, or resubmit finalize"
-                    .to_string()
+                DEFERRED_PROJECTION_OWNER_NOTE.to_string()
             }
             agent_doc_turn::write_ownership::RetainedWriteVerdict::Stranded
             | agent_doc_turn::write_ownership::RetainedWriteVerdict::AwaitingTerminalCommit
@@ -4676,7 +4775,149 @@ fn detect_duplicate_response_patchback(file: &Path) -> Result<Option<String>> {
 #[cfg(test)]
 mod terminal_convergence_tests {
     use super::*;
+    use std::cell::Cell;
     use std::process::Command;
+
+    struct PreEffectCounter {
+        replay_gate_checks: Cell<usize>,
+        restore_calls: Cell<usize>,
+        mutation_calls: Cell<usize>,
+        guard_calls: Cell<usize>,
+    }
+
+    impl PreEffectCounter {
+        fn new() -> Self {
+            Self {
+                replay_gate_checks: Cell::new(0),
+                restore_calls: Cell::new(0),
+                mutation_calls: Cell::new(0),
+                guard_calls: Cell::new(0),
+            }
+        }
+
+        fn assert_no_effects(&self) {
+            assert_eq!(self.replay_gate_checks.get(), 0, "replay phase entered");
+            assert_eq!(self.restore_calls.get(), 0, "archive restore entered");
+            assert_eq!(self.mutation_calls.get(), 0, "mutation effect entered");
+            assert_eq!(self.guard_calls.get(), 0, "guard sweep entered");
+        }
+
+        fn mutation_refused<T>(&self, effect: &str) -> Result<T> {
+            self.mutation_calls.set(self.mutation_calls.get() + 1);
+            anyhow::bail!("pre-effect fence failed before {effect}")
+        }
+    }
+
+    impl SessionCheckEffects for PreEffectCounter {
+        fn allows_recovery(&self) -> bool {
+            false
+        }
+
+        fn allows_response_replay_canonicalization(&self) -> bool {
+            self.replay_gate_checks
+                .set(self.replay_gate_checks.get() + 1);
+            true
+        }
+
+        fn restore_committed_response_evidence(&self, _file: &Path) -> Result<bool> {
+            self.restore_calls.set(self.restore_calls.get() + 1);
+            anyhow::bail!("pre-effect fence failed before archive restore")
+        }
+
+        fn closeout_recovery_hint(&self, _file: &Path) -> String {
+            self.guard_calls.set(self.guard_calls.get() + 1);
+            "guard sweep must not run".to_string()
+        }
+
+        fn atomic_write(&self, _file: &Path, _content: &str) -> Result<()> {
+            self.mutation_refused("atomic write")
+        }
+
+        fn atomic_repair_write_if_current(
+            &self,
+            _file: &Path,
+            _content: &str,
+            _expected_current: &str,
+            _source: &str,
+        ) -> Result<String> {
+            self.mutation_refused("response replay")
+        }
+
+        fn settle_committed_projection(
+            &self,
+            _file: &Path,
+            _committed_content: &str,
+            _expected_current: &str,
+        ) -> Result<()> {
+            self.mutation_refused("committed projection settlement")
+        }
+
+        fn settle_retained_committed_projection(
+            &self,
+            _file: &Path,
+            _committed_content: &str,
+            _expected_disk: &str,
+        ) -> Result<bool> {
+            self.mutation_refused("retained projection settlement")
+        }
+
+        fn repair_committed_historical_snapshot_drift(
+            &self,
+            _file: &Path,
+        ) -> Result<Option<&'static str>> {
+            self.mutation_refused("snapshot repair")
+        }
+
+        fn recover_missing_commit_boundary(
+            &self,
+            _file: &Path,
+            _event: &str,
+        ) -> Result<Option<&'static str>> {
+            self.mutation_refused("commit-boundary recovery")
+        }
+
+        fn resume_captured_finalize(
+            &self,
+            _file: &Path,
+        ) -> Result<CapturedFinalizeResumeOutcome> {
+            self.mutation_refused("captured finalize")
+        }
+
+        fn retained_document_write_blocks(&self, _file: &Path) -> bool {
+            true
+        }
+    }
+
+    fn publish_live_authority_without_saving(file: &Path, authority: &str, tag: &str) {
+        let canonical = file.canonicalize().unwrap();
+        agent_doc_test_support::seed_reliable_sync_editor_registration(
+            &canonical,
+            tag,
+            &["operator_text_authority_v1", "lazily_transport_receipts_v1"],
+        );
+        let identity = format!("{tag}:{}", canonical.display());
+        let (client_id, bootstrap) = agent_doc_crdt_relay_io::register_replica_for_file(
+            &canonical,
+            &identity,
+        )
+        .unwrap()
+        .expect("live editor replica");
+        let replica = agent_doc_merge::crdt_sync::ReplicaState::from_encoded(
+            client_id,
+            &bootstrap,
+        )
+        .unwrap();
+        let current = replica.text();
+        replica.apply_local_edit(0, current.len() as u32, authority);
+        agent_doc_crdt_relay_io::relay_replica_update_for_file(
+            &canonical,
+            &identity,
+            &replica.encode_state(),
+        )
+        .unwrap()
+        .expect("authority update accepted");
+        assert_eq!(std::fs::read_to_string(&canonical).unwrap(), current);
+    }
 
     #[test]
     fn clean_closeout_resolves_prior_stall_unless_supervisor_fallback_stays_in_session() {
@@ -5276,6 +5517,99 @@ mod terminal_convergence_tests {
             ),
             "operator-owned exhaustion remains a foreground interruption"
         );
+    }
+
+    /// The real command pipeline must recognize retained authority/disk drift
+    /// before it enters archive restore, replay canonicalization, force-disk
+    /// settlement, or the guard sweep. A helper-only classification test would
+    /// miss exactly the ordering regression this protects.
+    #[test]
+    fn retained_queue_projection_fences_every_foreground_effect_in_command_pipeline() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let file = dir.path().join("session.md");
+        let disk = concat!(
+            "# Task\n\n",
+            "<!-- agent:exchange -->\nanswered\n<!-- /agent:exchange -->\n",
+            "<!-- agent:queue -->\n- 📥 old queue head\n<!-- /agent:queue -->\n",
+        );
+        let authority = disk.replace("old queue head", "new queue head");
+        std::fs::write(&file, disk).unwrap();
+        publish_live_authority_without_saving(
+            &file,
+            &authority,
+            "intellij:retained-pre-effect-fence",
+        );
+
+        let effects = PreEffectCounter::new();
+        let error = try_run_with_options(&file, false, &effects)
+            .expect_err("retained projection is non-terminal background work");
+        let pending = error
+            .downcast_ref::<SessionCheckBackgroundPending>()
+            .expect("pipeline returns typed background ownership");
+        assert!(pending.0.contains("component_divergence=queue:"), "{pending}");
+        assert!(!pending.0.contains("INTERRUPTED"), "{pending}");
+        effects.assert_no_effects();
+        assert_eq!(
+            std::fs::read_to_string(&file).unwrap(),
+            disk,
+            "the pre-effect fence never force-writes editor authority to disk"
+        );
+    }
+
+    /// Operator text that conflicts with the retained roll-forward is not a
+    /// controller-owned retry. It stays actionable/foreground even though the
+    /// retained projection bit is also present, and still fences every repair
+    /// effect that could destroy either side of the conflict.
+    #[test]
+    fn retained_operator_text_conflict_wins_over_background_pending() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let file = dir.path().join("session.md");
+        let disk = concat!(
+            "# Task\n\n",
+            "<!-- agent:exchange -->\nanswered\n<!-- /agent:exchange -->\n",
+            "<!-- agent:queue -->\n- 📥 old queue head\n<!-- /agent:queue -->\n",
+        );
+        let authority = disk.replace("old queue head", "operator queue rewrite");
+        std::fs::write(&file, disk).unwrap();
+        publish_live_authority_without_saving(
+            &file,
+            &authority,
+            "intellij:retained-operator-conflict-fence",
+        );
+        agent_doc_controller_io::retained_operator_text_conflict::record(
+            dir.path(),
+            &file,
+            &agent_doc_controller_io::retained_operator_text_conflict::RetainedOperatorTextConflictRecord {
+                intent_id: "intent-conflict".to_string(),
+                target_hash: agent_doc_hash::content_hash("retained agent target\n"),
+                visible_hash: agent_doc_hash::content_hash(&authority),
+                delivery_version: 7,
+                lost_operator_lines: 1,
+                recorded_at_ms: 1,
+            },
+        )
+        .unwrap();
+
+        let effects = PreEffectCounter::new();
+        let error = try_run_with_options(&file, false, &effects)
+            .expect_err("operator conflict stays foreground actionable");
+        assert!(
+            error.downcast_ref::<SessionCheckBackgroundPending>().is_none(),
+            "operator conflict must never become exit-0 background work"
+        );
+        let interrupted = error
+            .downcast_ref::<SessionCheckInterrupted>()
+            .expect("operator conflict remains a typed interruption");
+        assert!(
+            interrupted
+                .0
+                .contains("state=retained_transition_refused_operator_text_loss"),
+            "{interrupted}"
+        );
+        effects.assert_no_effects();
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), disk);
     }
 
     struct RepairOnlyEffects;

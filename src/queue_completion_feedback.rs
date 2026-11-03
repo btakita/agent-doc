@@ -27,6 +27,7 @@ use agent_doc_document::subagent_completion::{
 pub(crate) struct CompletionFeedbackOutcome {
     pub claim: QueueClaim,
     pub appended: bool,
+    pub replaced: bool,
     /// Durable editor-authority target still awaiting visible projection.
     pub projection_pending: bool,
     pub intent_id: Option<String>,
@@ -146,12 +147,13 @@ fn report_complete_with_lock_wait(
     // the first is still awaiting projection.
     let projection =
         agent_doc_queue_io::queue_cmd::derive_claim_runtime_projection(file, &current, None)?;
-    let (appended, intent_id) =
-        append_completion_feedback(file, &current, &projection.target_content, &claim, response)?;
+    let (appended, replaced, intent_id) =
+        upsert_completion_feedback(file, &current, &projection.target_content, &claim, response)?;
     agent_doc_queue_io::queue_cmd::record_claim_runtime_projection(file, &projection, None)?;
     Ok(Some(CompletionFeedbackOutcome {
         claim,
         appended,
+        replaced,
         projection_pending: intent_id.is_some(),
         intent_id,
     }))
@@ -164,15 +166,14 @@ fn observed_claim(file: &Path, item: &str, current: &str) -> Result<Option<Queue
     Ok(ledger.release(item))
 }
 
-fn append_completion_feedback(
+fn upsert_completion_feedback(
     file: &Path,
     current: &str,
     projected: &str,
     claim: &QueueClaim,
     response: &str,
-) -> Result<(bool, Option<String>)> {
+) -> Result<(bool, bool, Option<String>)> {
     let key = agent_doc_queue_io::queue_claim::completion_feedback_key(claim)?;
-    let marker = agent_doc_document::subagent_completion::marker(&key);
     // Keep the heading, attested worker response, and marker contiguous. The existing N-1 diff
     // classifier treats a block beginning with `### Re:` as a recovery
     // artifact, while the structural/session-check gate requires substantive
@@ -190,17 +191,20 @@ fn append_completion_feedback(
         &key,
         response,
     )?;
-    let appended = !projected.contains(&marker);
-    let updated = if appended {
-        agent_doc_element_exchange::insert_prompt_line_before_boundary(projected, &note)?
-    } else {
-        projected.to_string()
+    let replacement = agent_doc_document::subagent_completion::replace_attested_completion_cell(
+        projected, &key, &note,
+    )?;
+    let appended = replacement.is_none();
+    let updated = match replacement {
+        Some(updated) => updated,
+        None => agent_doc_element_exchange::insert_prompt_line_before_boundary(projected, &note)?,
     };
+    let replaced = !appended && updated != projected;
     if updated == current {
         let intent_id = agent_doc_document_realtime_io::pending_document_write(file)
             .filter(|pending| pending.target_content == current)
             .map(|pending| pending.intent_id);
-        return Ok((false, intent_id));
+        return Ok((false, false, intent_id));
     }
     let scope = changed_component_scope(current, &updated)
         .context("subagent completion feedback must change only agent:exchange/queue")?;
@@ -237,7 +241,7 @@ fn append_completion_feedback(
                 .unwrap_or_default(),
         ),
     );
-    Ok((appended, retained_intent))
+    Ok((appended, replaced, retained_intent))
 }
 
 /// Settle any retained completion successor, then rederive the queue marker
@@ -1067,6 +1071,41 @@ mod tests {
         assert!(
             !second.appended,
             "the same completion must dedupe across TTL refresh"
+        );
+        assert!(!second.replaced);
+
+        let updated = report_complete(
+            &doc,
+            "finish sdk.md with deterministic tests",
+            Some(1),
+            None,
+            "Implemented SDK support.\n\nTests: 18 passed.",
+        )
+        .unwrap()
+        .unwrap();
+        assert!(!updated.appended);
+        assert!(
+            updated.replaced,
+            "a changed report for the same attempt must replace the visible cell"
+        );
+        let updated_content = fs::read_to_string(&doc).unwrap();
+        assert!(updated_content.contains("> Tests: 18 passed."));
+        assert!(!updated_content.contains("> Tests: 12 passed."));
+        assert_eq!(
+            updated_content
+                .matches("### Re: Subagent completed")
+                .count(),
+            1
+        );
+        let receipt = agent_doc_queue_io::claim_release_receipt::load(&doc)
+            .unwrap()
+            .receipts
+            .into_iter()
+            .next()
+            .unwrap();
+        assert_eq!(
+            receipt.response.unwrap().body,
+            "Implemented SDK support.\n\nTests: 18 passed."
         );
 
         let released = agent_doc_queue_io::queue_claim::release(

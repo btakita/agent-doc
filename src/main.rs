@@ -8795,6 +8795,8 @@ fn try_main() -> anyhow::Result<()> {
                                 "[queue] subagent completion feedback {} for {:?} (owner {}, generation {}); awaiting integration. A worker report, side-worktree commit, or published side branch is not terminal completion; verify the authorized delivery boundary and commit reachability. Next: {}{}",
                                 if outcome.appended {
                                     "accepted"
+                                } else if outcome.replaced {
+                                    "updated"
                                 } else {
                                     "already present"
                                 },

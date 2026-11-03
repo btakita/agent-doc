@@ -972,6 +972,8 @@ mod th {
                     is_ipc: false,
                     force_disk: true,
                     origin: Some("orchestrate_test".to_string()),
+                    response_input_provenance:
+                        agent_doc_write_command_io::ResponseInputProvenance::default(),
                     no_pending_capture: false,
                     pending_add: Vec::new(),
                     pending_add_to: Vec::new(),

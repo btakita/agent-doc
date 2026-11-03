@@ -745,6 +745,7 @@ fn tool_finalize(args: &Map<String, Value>) -> Result<Value> {
         is_ipc: bool_arg(args, "ipc", false)?,
         force_disk,
         origin: Some(origin),
+        response_input_provenance: agent_doc_write_command_io::ResponseInputProvenance::default(),
         no_pending_capture: bool_arg(args, "no_followups", false)?
             || bool_arg(args, "no_pending_capture", false)?,
         pending_add,

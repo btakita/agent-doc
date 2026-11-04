@@ -1842,6 +1842,83 @@ pub fn set_prompt_runtime_projections(
         .iter()
         .enumerate()
         .map(|(index, entry)| {
+            // `#waitingpacketowner`: a waiting item and its packet are never
+            // derived as group context and never painted `📥`. Only a real
+            // attempt (claim, receipt, completion evidence) is projected onto
+            // a row there, so a claimed waiting item stays visible while a
+            // packet row never becomes a pending queue row.
+            if crate::waiting_packet::waiting_owner(entries, index).is_some() {
+                let QueueEntry::Prompt(prompt) = entry else {
+                    return entry.clone();
+                };
+                if agent_doc_document::queue_projection::lifecycle_marker(&prompt.text)
+                    == Some(agent_doc_document::queue_projection::QueueLifecycleMarker::Reported)
+                {
+                    return entry.clone();
+                }
+                let mut next = prompt.clone();
+                if let Some(stripped) = strip_in_progress_marker_for_display(&next.text) {
+                    next.text = stripped;
+                }
+                if let Some(cleaned) =
+                    agent_doc_element_queue::subprompts::strip_subprompt_projections(&next.text)
+                {
+                    next.text = cleaned;
+                }
+                let key = projection_key(&next.text);
+                let target = targets
+                    .iter_mut()
+                    .find(|(target_key, _, consumed)| target_key == &key && !*consumed)
+                    .map(|(_, target, consumed)| {
+                        *consumed = true;
+                        target.clone()
+                    })
+                    .filter(|target| {
+                        target.marker
+                            != agent_doc_document::queue_projection::QueueLifecycleMarker::Pending
+                    });
+                next.text = match target {
+                    Some(target) if !crate::queue_command::is_slash_command(&next.text) => {
+                        let publication_state = target
+                            .text
+                            .lines()
+                            .next()
+                            .and_then(agent_doc_element_queue::queue_report_state_annotation)
+                            .map(|(_, state)| state);
+                        let marked =
+                            agent_doc_document::queue_projection::apply_lifecycle_marker_with_blockers(
+                                &next.text,
+                                target.marker,
+                                &target.blockers,
+                            );
+                        let marked_with_owner =
+                            agent_doc_document::queue_projection::apply_owner_projection(
+                                &marked,
+                                target.owner.as_ref(),
+                            );
+                        render_queue_effect_report_state_annotation(
+                            &marked_with_owner,
+                            publication_state,
+                        )
+                    }
+                    // Without an attempt, only a stale owner annotation is
+                    // removed. Re-rendering a bare row would also canonicalize
+                    // a waiting head's `🙋 [#todo-id] ...` gate as the legacy
+                    // request prefix and move its identity to the tail.
+                    _ if agent_doc_document::queue_projection::owner_projection(&next.text)
+                        .is_some() =>
+                    {
+                        agent_doc_document::queue_projection::apply_owner_projection(
+                            &next.text, None,
+                        )
+                    }
+                    _ => next.text,
+                };
+                if next.text != prompt.text {
+                    changed = true;
+                }
+                return QueueEntry::Prompt(next);
+            }
             if let Some(all_leaves_struck) = group_parent_all_leaves_struck(entries, index) {
                 let source = match entry {
                     QueueEntry::Prompt(prompt) | QueueEntry::Completed(prompt) => prompt,
@@ -2499,6 +2576,27 @@ pub fn set_prompt_operator_actions(
                                 agent_doc_element_queue::QueueItemIdentity::FreeText(_) => None,
                             }
                         })
+                        // A legacy text-led waiting head carries its ids after
+                        // the work text (`... <!-- agent-doc:waiting-item -->
+                        // [#todo-id] [#subagent-operator-request-x]`). Read
+                        // them there, request id first, so the bare and the
+                        // `🙋` renderings take the same gate branch.
+                        .or_else(|| {
+                            let ids = queue_prompt_reference_ids(
+                                agent_doc_element_queue::strip_attempt_projection_prefix(
+                                    &prompt.text,
+                                ),
+                            )
+                            .into_iter()
+                            .filter(|id| open_todo_ids.contains(id))
+                            .collect::<Vec<_>>();
+                            ids.iter()
+                                .find(|id| {
+                                    agent_doc_document::queue_projection::is_reserved_operator_action_id(id)
+                                })
+                                .or_else(|| ids.first())
+                                .cloned()
+                        })
                 })
                 .flatten();
             if let Some(id) = waiting_id
@@ -2530,6 +2628,8 @@ pub fn set_prompt_operator_actions(
         }
         let projected = if waiting_answer_selected {
             clear_waiting_item_operator_gate(&prompt.text)
+        } else if let Some(gated) = waiting_item_identity_gate(&prompt.text, &ids) {
+            gated
         } else {
             agent_doc_document::queue_projection::apply_operator_action_ids(&prompt.text, &ids)
         };
@@ -2539,6 +2639,45 @@ pub fn set_prompt_operator_actions(
         }
     }
     changed.then_some(updated)
+}
+
+/// Render the open-Todo gate on a waiting item that already carries its only
+/// gate id: the bare `🙋` glyph before the row, the id left where it is.
+///
+/// The general renderer reads `🙋 [#id] work` as the legacy
+/// request-prefix spelling and moves the id to the row's tail. On a waiting
+/// head that id is the item's own identity, so the next pass found a
+/// different first token and moved it again: `🙋 [#id] work` and
+/// `🙋 work [#id]` alternated forever.
+fn waiting_item_identity_gate(text: &str, ids: &[String]) -> Option<String> {
+    if !text.contains(crate::queue_consume::WAITING_ON_YOU_ITEM_MARKER) {
+        return None;
+    }
+    let [id] = ids else {
+        return None;
+    };
+    let leading_len = text.len() - text.trim_start().len();
+    let (leading, rest) = text.split_at(leading_len);
+    let marker = agent_doc_document::queue_projection::operator_action_marker();
+    let ungated = rest
+        .strip_prefix(marker)
+        .or_else(|| rest.strip_prefix("🙋"))
+        .unwrap_or(rest)
+        .trim_start();
+    // The gate id is already one of the row's own ids (its leading Todo id,
+    // or the id a legacy text-led head carries after its work text).
+    let carried = queue_prompt_reference_ids(ungated)
+        .iter()
+        .any(|carried| carried.eq_ignore_ascii_case(id));
+    if !carried {
+        return None;
+    }
+    // Same spacing as the shared projection renderer: the glyph abuts a
+    // lifecycle marker and is separated from anything else.
+    let abuts = agent_doc_document::queue_projection::has_lifecycle_marker(ungated)
+        && !ungated.starts_with('[');
+    let separator = if abuts { "" } else { " " };
+    Some(format!("{leading}{marker}{separator}{ungated}"))
 }
 
 /// Remove only the visible operator gate from a waiting item whose response
@@ -2589,6 +2728,12 @@ pub fn settle_inert_group_parents(
     let mut changed = false;
 
     for index in group_indexes.into_iter().rev() {
+        // `#waitingpacketowner`: a waiting item and its packet are a binary
+        // view of open Todo state. Settling must never synthesize a runnable
+        // follow-up child inside it (`Complete the remaining work ...`).
+        if crate::waiting_packet::waiting_owner(&updated, index).is_some() {
+            continue;
+        }
         let own_indent = entry_indent(&updated[index]).unwrap_or(0);
         let end = updated[index + 1..]
             .iter()
@@ -3739,12 +3884,18 @@ pub fn executable_prompt_indexes(entries: &[QueueEntry]) -> Vec<usize> {
             // claim, dispatch, steering and drainability on `[#todo-id]`
             // instead of inventing a nested `parent: metadata: answer` head.
             QueueEntry::Prompt(_)
-                if waiting_item_origin_index(entries, idx).is_some_and(|origin| origin != idx) =>
+                if waiting_item_origin_index(entries, idx).is_some_and(|origin| origin != idx)
+                    || crate::waiting_packet::is_packet_row(entries, idx) =>
             {
                 None
             }
+            // `#waitingpacketowner`: while a row in the item's packet still
+            // carries a worker attempt of its own (an older binary dispatched
+            // a choice or a reply separately), that work must be reconciled
+            // before the item is selected for another attempt.
             QueueEntry::Prompt(prompt)
                 if waiting_item_has_operator_reply(entries, idx)
+                    && !crate::waiting_packet::awaits_reconciliation(entries, idx)
                     && agent_doc_document::queue_projection::operator_action_ids(&prompt.text)
                         .is_empty() =>
             {
@@ -3801,6 +3952,11 @@ fn waiting_item_origin_index(entries: &[QueueEntry], idx: usize) -> Option<usize
 ///
 /// All binary metadata is marker-tagged. A live prompt in the item's descendant
 /// range without that marker is therefore operator evidence.
+///
+/// `#waitingpacketowner`: only rows this item owns count. A nested waiting
+/// item and its packet belong to that nested item; an offered choice, a bare
+/// legacy follow-up row, or another attempt's row is not an answer. The item's
+/// own attempt projected onto a child keeps it selected so its claim is live.
 fn waiting_item_has_operator_reply(entries: &[QueueEntry], item_idx: usize) -> bool {
     let Some(QueueEntry::Prompt(item)) = entries.get(item_idx) else {
         return false;
@@ -3811,14 +3967,7 @@ fn waiting_item_has_operator_reply(entries: &[QueueEntry], item_idx: usize) -> b
     {
         return false;
     }
-    entries[item_idx + 1..]
-        .iter()
-        .take_while(|entry| entry_indent(entry).is_none_or(|indent| indent > item.indent))
-        .any(|entry| {
-            matches!(entry, QueueEntry::Prompt(prompt)
-                if !crate::queue_consume::is_agent_doc_reply_row(&prompt.text)
-                    && !nest_row_work_text(&prompt.text).trim().is_empty())
-        })
+    crate::waiting_packet::is_selected(entries, item_idx)
 }
 
 /// `true` when the entry at `idx` is a nesting PARENT — it has at least one
@@ -4306,10 +4455,9 @@ pub fn prompt_context_packet_at(
     // selectable identity, so attach its live descendants as bounded decision
     // evidence instead of manufacturing a nested executable lineage.
     if waiting_item_has_operator_reply(entries, index) {
-        let own_indent = origin_prompt.indent;
-        for entry in entries[index + 1..]
-            .iter()
-            .take_while(|entry| entry_indent(entry).is_none_or(|indent| indent > own_indent))
+        for entry in crate::waiting_packet::packet_member_indexes(entries, index)
+            .into_iter()
+            .map(|member| &entries[member])
         {
             let Some(prompt) = prompt_of(entry) else {
                 continue;

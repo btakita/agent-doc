@@ -10126,6 +10126,49 @@ Old.
         doc
     }
 
+    /// Claim a waiting parent the way dispatch does: while it is answered
+    /// and carries no attempt row (`#waitingpacketowner`: one attempt per
+    /// item at a time). The document then takes the shape under test, with the
+    /// attempt projected beneath the parent.
+    fn running_waiting_parent_claim(
+        doc: &Path,
+        content: &str,
+        parent: &str,
+        owner: &str,
+        attempt: impl FnOnce(u64),
+    ) -> u64 {
+        let selectable = content
+            .lines()
+            .filter(|line| !line.contains(&format!("[#{owner}#")))
+            .map(|line| {
+                if line.ends_with(parent) {
+                    format!("{line}\n    - use the staging workspace")
+                } else {
+                    line.to_string()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+            + "\n";
+        std::fs::write(doc, &selectable).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            doc,
+            &selectable,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        let generation = running_claim(doc, parent, owner);
+        attempt(generation);
+        std::fs::write(doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        generation
+    }
+
     fn running_claim(doc: &Path, item: &str, owner: &str) -> u64 {
         let (_, claimed) = crate::queue_claim::claim(doc, item, owner, 600).unwrap();
         crate::queue_claim::start_attempt(
@@ -10397,8 +10440,15 @@ Old.
             agent_doc_ops_log_io::log_op,
         )
         .unwrap();
-        let generation = running_claim(&doc, parent, "subagent:vscode_smoke");
-        crate::queue_claim::report_attempt(&doc, parent, Some(generation)).unwrap();
+        let generation = running_waiting_parent_claim(
+            &doc,
+            &content,
+            parent,
+            "subagent:vscode_smoke",
+            |generation| {
+                crate::queue_claim::report_attempt(&doc, parent, Some(generation)).unwrap();
+            },
+        );
 
         assert!(
             id_backed_head_node_keys(&content, "vscodecodersmoke")
@@ -10496,21 +10546,22 @@ Old.
             agent_doc_ops_log_io::log_op,
         )
         .unwrap();
-        let generation = running_claim(&doc, parent, owner);
-        crate::queue_claim::report_attempt(&doc, parent, Some(generation)).unwrap();
-        crate::claim_release_receipt::capture_response_for_attempt(
-            &doc,
-            parent,
-            generation,
-            "Gated on a real Coder workspace.",
-        )
-        .unwrap();
-        crate::claim_release_receipt::release(
-            &doc,
-            parent,
-            crate::claim_release_receipt::ReleaseKind::Reported,
-        )
-        .unwrap();
+        running_waiting_parent_claim(&doc, &content, parent, owner, |generation| {
+            crate::queue_claim::report_attempt(&doc, parent, Some(generation)).unwrap();
+            crate::claim_release_receipt::capture_response_for_attempt(
+                &doc,
+                parent,
+                generation,
+                "Gated on a real Coder workspace.",
+            )
+            .unwrap();
+            crate::claim_release_receipt::release(
+                &doc,
+                parent,
+                crate::claim_release_receipt::ReleaseKind::Reported,
+            )
+            .unwrap();
+        });
         assert!(
             crate::queue_claim::load_ledger(&doc)
                 .unwrap()

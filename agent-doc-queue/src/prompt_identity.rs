@@ -243,11 +243,21 @@ fn executable_queue_nodes(content: &str) -> Vec<MutationItemNode> {
         .into_iter()
         .filter(|node| node.component == "queue")
         .collect::<Vec<_>>();
+    // `#waitingpacketowner`: a waiting item is identified by its Todo id, and
+    // every row in its packet is decision evidence for it. Neither is an
+    // executable queue node, so neither is ever admitted a `q-` id.
+    let waiting_ranges = crate::waiting_packet::waiting_tree_byte_ranges(content);
     nodes
         .iter()
         .enumerate()
         .filter(|(index, node)| {
             if node.item.struck || !matches!(node.item.kind, ItemKind::Do | ItemKind::FreeText) {
+                return false;
+            }
+            if waiting_ranges
+                .iter()
+                .any(|range| range.contains(&node.item.start_byte))
+            {
                 return false;
             }
             // Harness/supervisor slash controls are queue handoffs, not

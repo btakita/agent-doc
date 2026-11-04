@@ -3933,7 +3933,6 @@ pub fn annotate_newly_struck_queue_items_with_response_id_at(
             )
         } else {
             vec![response_back_reference_child(
-                before,
                 &node.item.text,
                 projected_response_body,
                 response_id,
@@ -3984,31 +3983,28 @@ pub fn annotate_newly_struck_queue_items_with_response_id_at(
 }
 
 fn response_back_reference_child(
-    source_document: &str,
     queue_item: &str,
     response_body: &str,
     response_id: &str,
     rendered_choice_packet_ids: &mut HashSet<String>,
 ) -> String {
     debug_assert!(agent_doc_markdown_ast::exchange_tree::is_compact_response_id(response_id));
+    // `#waitingpacketowner`: a back-reference links the closing response. It
+    // carries a Choices block only for a request this row itself owns and that
+    // no other row of this response has rendered, and then only that packet's
+    // own options. It never substitutes another decision's choices (which
+    // grafted one item's options onto its siblings) and never re-copies the
+    // offered options beneath a row that is itself one of those options.
     let mut child = format!("**Closed by:** {response_id}");
-    let decision_choices = structured_choice_projection(source_document, queue_item, response_body)
-        .map(|projection| projection.choices);
-    for (index, packet) in
-        crate::operator_request_packet::blocking_operator_request_packets(response_body)
-            .into_iter()
-            .filter(|packet| operator_request_packet_belongs_to_row(packet, queue_item))
-            .filter(|packet| rendered_choice_packet_ids.insert(packet.id.clone()))
-            .enumerate()
+    for packet in crate::operator_request_packet::blocking_operator_request_packets(response_body)
+        .into_iter()
+        .filter(|packet| operator_request_packet_belongs_to_row(packet, queue_item))
+        .filter(|packet| !row_is_offered_option_of(packet, queue_item))
+        .filter(|packet| rendered_choice_packet_ids.insert(packet.id.clone()))
     {
         child.push_str("\n- **Choices:**");
         child.push_str(&format!("\n  - **Request**: [#{}]", packet.id));
-        let choices = if index == 0 {
-            decision_choices.clone().unwrap_or(packet.choice_rows)
-        } else {
-            packet.choice_rows
-        };
-        for choice in choices {
+        for choice in packet.choice_rows {
             child.push_str("\n  - ");
             child.push_str(&choice);
         }
@@ -4235,6 +4231,7 @@ fn response_summary_row_child(
     let packets = crate::operator_request_packet::blocking_operator_request_packets(response_body)
         .into_iter()
         .filter(|packet| operator_request_packet_belongs_to_row(packet, queue_item))
+        .filter(|packet| !row_is_offered_option_of(packet, queue_item))
         .collect::<Vec<_>>();
     let has_blocking_request = !packets.is_empty()
         || response_body
@@ -4381,6 +4378,21 @@ fn response_summary_row_child(
     Some(child)
 }
 
+/// Whether `queue_item` is itself one of `packet`'s offered options (an
+/// option an older binary dispatched as its own row). Its packet's Choices are
+/// never re-copied beneath it (`#waitingpacketowner`).
+fn row_is_offered_option_of(
+    packet: &crate::operator_request_packet::BlockingOperatorRequestPacket,
+    queue_item: &str,
+) -> bool {
+    let row_work = agent_doc_element_queue::strip_attempt_projection_prefix(queue_item).trim();
+    packet.choice_rows.iter().any(|choice| {
+        choice
+            .split_once("**: ")
+            .is_some_and(|(label, _)| row_work.starts_with(&format!("{label}**: ")))
+    })
+}
+
 fn operator_request_packet_belongs_to_row(
     packet: &crate::operator_request_packet::BlockingOperatorRequestPacket,
     queue_item: &str,
@@ -4408,9 +4420,35 @@ fn structured_choice_projection(
     queue_item: &str,
     response_body: &str,
 ) -> Option<StructuredChoiceProjection> {
+    // `#waitingpacketowner`: a response may record decisions for several
+    // items. A request-scoped decision belongs only to the row that carries
+    // (or originated) that request; taking the response's first decision for
+    // every row it closed grafted one item's choices onto its siblings.
+    let response_packets =
+        crate::operator_request_packet::blocking_operator_request_packets(response_body)
+            .into_iter()
+            .chain(
+                crate::operator_request_packet::blocking_operator_request_packets(source_document),
+            )
+            .collect::<Vec<_>>();
+    let decision_belongs = |request_id: &str| {
+        queue_item.contains(&format!("[#{request_id}]"))
+            || agent_doc_document::queue_projection::operator_action_ids(queue_item)
+                .iter()
+                .any(|id| id.eq_ignore_ascii_case(request_id))
+            || response_packets.iter().any(|packet| {
+                packet.id.eq_ignore_ascii_case(request_id)
+                    && operator_request_packet_belongs_to_row(packet, queue_item)
+            })
+    };
     let decision = crate::operator_request_packet::structured_choice_decisions(response_body)
         .into_iter()
-        .next()
+        .find(|decision| {
+            decision
+                .request_id
+                .as_deref()
+                .is_none_or(|request_id| decision_belongs(request_id))
+        })
         .or_else(|| {
             crate::operator_request_packet::structured_choice_decisions(source_document)
                 .into_iter()
@@ -4858,6 +4896,153 @@ fn remove_inline_response_id(line: &str, response_id: &str) -> String {
 /// graph projection: metadata and operator answer edges are never independent
 /// work; an answer selects the durable waiting item parent.
 pub fn project_waiting_on_you_tree(document: &str, response_body: &str) -> Result<Option<String>> {
+    let adopted = adopt_legacy_waiting_items(document)?;
+    let base = adopted.as_deref().unwrap_or(document);
+    let projected = project_waiting_items_from_todos(base, response_body)?;
+    let projected = projected.as_deref().unwrap_or(base);
+    let normalized = normalize_waiting_queues(projected)?;
+    let out = normalized.as_deref().unwrap_or(projected);
+    Ok((out != document).then(|| out.to_string()))
+}
+
+/// `#waitingpacketowner`: adopt the items of a legacy, unmarked Waiting-on-you
+/// root as waiting items.
+///
+/// An older document can hold a `Waiting on you` heading that lost its hidden
+/// root marker, with Todo-id children that lost their item marker. Their
+/// packets were then ordinary queue leaves: offered Choices were dispatched
+/// one worker each and operator replies were claimed on their own. Marking the
+/// child row (only the hidden sentinel is appended; no visible byte changes)
+/// restores packet ownership in place. Nothing is moved or regenerated.
+fn adopt_legacy_waiting_items(document: &str) -> Result<Option<String>> {
+    let open_ids = open_waiting_todos(document)
+        .into_iter()
+        .map(|todo| todo.id)
+        .collect::<HashSet<_>>();
+    if open_ids.is_empty() {
+        return Ok(None);
+    }
+    let mut replacements = Vec::new();
+    for component in element::parse(document)?
+        .into_iter()
+        .filter(|component| component.name == "queue")
+    {
+        let body = component.content(document);
+        if !body.contains(WAITING_ON_YOU_ROOT_TEXT) {
+            continue;
+        }
+        let mut entries = document_queue::parse(body)?;
+        let mut changed = false;
+        for root in 0..entries.len() {
+            let QueueEntry::Prompt(root_prompt) = &entries[root] else {
+                continue;
+            };
+            if agent_doc_element_queue::struck_work_text(&root_prompt.text).trim()
+                != WAITING_ON_YOU_ROOT_TEXT
+            {
+                continue;
+            }
+            let child_indent = root_prompt.indent + 2;
+            let end = crate::waiting_packet::subtree_end(&entries, root);
+            for child in root + 1..end {
+                let QueueEntry::Prompt(prompt) = &mut entries[child] else {
+                    continue;
+                };
+                if prompt.indent != child_indent || prompt.text.contains(WAITING_ON_YOU_ITEM_MARKER)
+                {
+                    continue;
+                }
+                let work = agent_doc_element_queue::strip_attempt_projection_prefix(&prompt.text);
+                let Some(id) = work
+                    .strip_prefix("[#")
+                    .and_then(|rest| rest.split_once(']'))
+                    .map(|(id, _)| id.to_ascii_lowercase())
+                else {
+                    continue;
+                };
+                if !open_ids.contains(&id) {
+                    continue;
+                }
+                prompt.text = with_waiting_item_marker(&prompt.text);
+                changed = true;
+            }
+        }
+        if changed {
+            replacements.push((
+                component.open_end,
+                component.close_start,
+                document_queue::render(&entries),
+            ));
+        }
+    }
+    if replacements.is_empty() {
+        return Ok(None);
+    }
+    let mut out = document.to_string();
+    for (start, end, body) in replacements.into_iter().rev() {
+        out.replace_range(start..end, &body);
+    }
+    Ok(Some(out))
+}
+
+/// Append the hidden waiting-item sentinel to a head's first line, before any
+/// trailing binary `⟦effect:N⟧` annotation so effect identity stays trailing.
+fn with_waiting_item_marker(text: &str) -> String {
+    let (head, tail) = text
+        .split_once('\n')
+        .map_or((text, None), |(head, tail)| (head, Some(tail)));
+    let trimmed = head.trim_end();
+    let marked = match trimmed.rsplit_once(" ⟦effect:") {
+        Some((work, effect))
+            if effect
+                .strip_suffix('⟧')
+                .is_some_and(|raw| raw.parse::<usize>().is_ok()) =>
+        {
+            format!("{work} {WAITING_ON_YOU_ITEM_MARKER} ⟦effect:{effect}")
+        }
+        _ => format!("{trimmed} {WAITING_ON_YOU_ITEM_MARKER}"),
+    };
+    match tail {
+        Some(tail) => format!("{marked}\n{tail}"),
+        None => marked,
+    }
+}
+
+/// Closeout normalization of every waiting item in every queue
+/// (`#waitingpacketowner`).
+fn normalize_waiting_queues(document: &str) -> Result<Option<String>> {
+    if !document.contains(WAITING_ON_YOU_ITEM_MARKER) {
+        return Ok(None);
+    }
+    let mut replacements = Vec::new();
+    for component in element::parse(document)?
+        .into_iter()
+        .filter(|component| component.name == "queue")
+    {
+        let body = component.content(document);
+        if !body.contains(WAITING_ON_YOU_ITEM_MARKER) {
+            continue;
+        }
+        let entries = document_queue::parse(body)?;
+        if let Some(normalized) = crate::waiting_packet::normalize_waiting_packets(&entries) {
+            replacements.push((
+                component.open_end,
+                component.close_start,
+                document_queue::render(&normalized),
+            ));
+        }
+    }
+    if replacements.is_empty() {
+        return Ok(None);
+    }
+    let mut out = document.to_string();
+    for (start, end, body) in replacements.into_iter().rev() {
+        out.replace_range(start..end, &body);
+    }
+    Ok(Some(out))
+}
+
+fn project_waiting_items_from_todos(document: &str, response_body: &str) -> Result<Option<String>> {
     let packets = waiting_operator_packets(document, response_body);
     let todos = open_waiting_todos(document);
     // An operator may answer a request directly beneath its original queue
@@ -5179,10 +5364,15 @@ fn existing_waiting_children(
             index += 1;
             continue;
         }
-        let Some(id) = document_queue::queue_prompt_reference_ids(&prompt.text)
-            .into_iter()
-            .next()
-        else {
+        // The item's identity is its Todo id. A worker attempt projected on
+        // the head (`☑️ [#subagent:x#1] [#id] ...`) is not that identity;
+        // reading the owner annotation as the id regenerated a claimed item
+        // and dropped its attempt projection.
+        let Some(id) = document_queue::queue_prompt_reference_ids(
+            agent_doc_element_queue::strip_attempt_projection_prefix(&prompt.text),
+        )
+        .into_iter()
+        .next() else {
             index += 1;
             continue;
         };
@@ -11573,5 +11763,78 @@ Old.
             annotate_newly_struck_free_text_heads(&before, &after).unwrap(),
             after
         );
+    }
+
+    #[test]
+    fn a_response_decision_for_another_request_is_never_grafted_onto_a_closed_row() {
+        // `#waitingpacketowner`: the response records a decision for a
+        // different item. The row it closes owns no part of that decision.
+        let response = concat!(
+            "### Re: batch — test\n\n",
+            "> **Queue prompt:** Publish alpha [#q-alpha]\n\n",
+            "**Outcome:** Alpha shipped.\n\n",
+            "**Decision record** for `[#subagent-operator-request-other-item]`:\n",
+            "- **Question:** Which colour should the other item use?\n",
+            "- **Choices presented:** red, blue.\n",
+            "- **Selected:** **red**. Paint the other item red.\n",
+        );
+        let before = doc_with_queue_and_exchange("- Publish alpha [#q-alpha]\n", "");
+        let after = doc_with_queue_and_exchange("- ~~Publish alpha [#q-alpha]~~\n", response);
+        let annotated =
+            annotate_newly_struck_queue_items_with_response_id(&before, &after, response).unwrap();
+        let queue = element::parse(&annotated)
+            .unwrap()
+            .into_iter()
+            .find(|component| component.name == "queue")
+            .unwrap();
+        let queue = queue.content(&annotated);
+        assert!(
+            queue.contains("**Summary:** **Outcome:** Alpha shipped."),
+            "{queue}"
+        );
+        assert!(!queue.contains("Which colour"), "{queue}");
+        assert!(!queue.contains("**Selected:**"), "{queue}");
+    }
+
+    #[test]
+    fn a_closed_offered_choice_links_its_response_without_recopying_the_choices() {
+        // `#waitingpacketowner`: an offered option that an older binary
+        // dispatched as its own row is closed by a link. Its packet's options
+        // are never re-copied beneath one of those options.
+        let row = "**Grant both**: Run both PUTs. [#q-grant]";
+        let response = format!(
+            "### Re: batch — test\n\n\
+> **Queue prompt:** Publish alpha [#q-alpha]\n\n\
+**Outcome:** Alpha shipped.\n\n\
+> **Queue prompt:** {row}\n\n\
+**Outcome:** Granted.\n\n\
+[#subagent-operator-request-grant-followup] subagent operator request\n\
+- *queue_item:*\n  - {row}\n\
+- *kind:* question\n\
+- *blocking:* true\n\
+- *request:*\n  - Confirm the grant?\n\
+- *choices:*\n  - **Grant both**: Run both PUTs.\n  - **Do not grant**: Leave access unchanged.\n"
+        );
+        let before =
+            doc_with_queue_and_exchange(&format!("- Publish alpha [#q-alpha]\n- {row}\n"), "");
+        let after = doc_with_queue_and_exchange(
+            &format!("- ~~Publish alpha [#q-alpha]~~\n- ~~{row}~~\n"),
+            &response,
+        );
+        let annotated =
+            annotate_newly_struck_queue_items_with_response_id(&before, &after, &response).unwrap();
+        let queue = element::parse(&annotated)
+            .unwrap()
+            .into_iter()
+            .find(|component| component.name == "queue")
+            .unwrap();
+        let queue = queue.content(&annotated);
+        let choice = &queue[queue.find("- ~~**Grant both**").unwrap()..];
+        assert!(
+            choice.contains("**Closed by:** [#r-") || choice.contains("**Response [#r-"),
+            "{queue}"
+        );
+        assert!(!choice.contains("**Choices:**"), "{queue}");
+        assert!(!queue.contains("**Do not grant**"), "{queue}");
     }
 }

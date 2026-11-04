@@ -588,13 +588,25 @@ fn response_choices_label_child_end(
     if item_indent != response_indent + 2 {
         return None;
     }
-    let parent = strip_bullet(lines.get(response_index)?)?;
-    if canonical_response_row(parent).is_none()
-        && canonical_response_back_reference(parent).is_none()
-    {
-        return None;
+    // `#waitingpacketowner`: the label is generated metadata anywhere inside a
+    // canonical response tree, not only as the response row's direct child.
+    // A packet whose Choices drifted one level (beneath its `**Summary:**`)
+    // otherwise made every offered option an executable queue leaf, and each
+    // mutually exclusive choice was dispatched to its own worker.
+    let mut ancestor = Some((response_index, response_indent));
+    while let Some((index, indent)) = ancestor {
+        let parent = strip_bullet(lines.get(index)?)?;
+        if canonical_response_row(parent).is_some()
+            || canonical_response_back_reference(parent).is_some()
+        {
+            return Some(opener_index + 1);
+        }
+        if indent == 0 {
+            break;
+        }
+        ancestor = nearest_prior_line_with_smaller_indent(lines, index, indent);
     }
-    Some(opener_index + 1)
+    None
 }
 
 fn response_next_actions_label_child_end(
@@ -3200,5 +3212,32 @@ trailing residue
         assert_eq!(comps.len(), 1, "fenced markers must not open a component");
         assert_eq!(comps[0].items.len(), 1);
         assert_eq!(comps[0].items[0].id, "real");
+    }
+
+    #[test]
+    fn a_choices_label_that_drifted_under_the_summary_stays_inert() {
+        // `#waitingpacketowner`: Choices one level too deep (beneath the
+        // response's Summary) are still generated metadata, so no offered
+        // option becomes an executable queue leaf.
+        let source = concat!(
+            "- tmstorm [#q-569d77146187]\n",
+            "  - **Response [#r-30853087f858]**\n",
+            "    - **Timestamp:** 2026-11-02T00:20:07.000Z\n",
+            "    - **Summary:** The draft is ready, not sent.\n",
+            "      - **Choices:**\n",
+            "        - **UI role**: create a studio role and assign it.\n",
+            "        - **Tester only**: no admin role.\n",
+            "- an ordinary queue row\n",
+        );
+        let ranges = inert_list_child_ranges(source);
+        let inert = |needle: &str| {
+            let at = source.find(needle).unwrap();
+            ranges.iter().any(|&(start, end)| at >= start && at < end)
+        };
+        assert!(inert("**Choices:**"));
+        assert!(inert("**UI role**"));
+        assert!(inert("**Tester only**"));
+        assert!(!inert("an ordinary queue row"));
+        assert!(!inert("tmstorm"));
     }
 }

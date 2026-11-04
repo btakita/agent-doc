@@ -5319,12 +5319,33 @@ pub enum QueueProjectionGenerationWriteOutcome {
     Superseded,
 }
 
+/// Who writes a derived queue projection. It decides whether an active
+/// retained closeout fences the write.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum QueueProjectionWriter {
+    /// Idle-supervisor self-heal (`#sdkdocumentselfheal`). It owns no lifecycle
+    /// transition, so a retained captured finalize or document write owns the
+    /// document first and the repair defers. The default, so a request that does
+    /// not name its writer stays fenced.
+    #[default]
+    BackgroundSelfHeal,
+    /// A foreground lifecycle owner (the closeout tracked-work tail, a queue
+    /// command) repainting markers from the successor it just made
+    /// authoritative. During finalize that owner IS the captured closeout, so
+    /// fencing it against its own capture refused every `--pending-add`
+    /// finalize with "queue projection repair deferred".
+    LifecycleOwner,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 struct QueueProjectionGenerationWriteRequest {
     generation: u64,
     source_content: String,
     target_content: String,
     reason: String,
+    #[serde(default)]
+    writer: QueueProjectionWriter,
 }
 
 /// Apply a derived queue projection under the same document-local fence as a
@@ -5335,6 +5356,7 @@ pub fn converge_queue_projection_for_generation(
     source_content: &str,
     reason: &str,
     generation: u64,
+    writer: QueueProjectionWriter,
 ) -> Result<QueueProjectionGenerationWriteOutcome> {
     let project_root = agent_doc_project_root_io::project_root_containing(file)
         .with_context(|| format!("no project root found for {}", file.display()))?;
@@ -5343,6 +5365,7 @@ pub fn converge_queue_projection_for_generation(
         source_content: source_content.to_string(),
         target_content: target_content.to_string(),
         reason: reason.to_string(),
+        writer,
     };
     #[cfg(any(test, feature = "test-support"))]
     {
@@ -40673,8 +40696,11 @@ fn handle_queue_projection_generation_write(
     // supervisor checks captured-finalize before launch, but a response can be
     // captured after that observation and before this controller-owned CAS.
     // Revalidate under the same document maintenance fence that guards the
-    // generation so a queue repair cannot splice itself into closeout.
-    if let Some(projected) = runtime.document_state_projection(&document_hash)?
+    // generation so a queue repair cannot splice itself into closeout. A
+    // lifecycle owner is not fenced: the closeout's own tracked-work tail
+    // repaints markers while its capture is, by construction, still active.
+    if payload.writer == QueueProjectionWriter::BackgroundSelfHeal
+        && let Some(projected) = runtime.document_state_projection(&document_hash)?
         && queue_projection_active_write_fence(&projected)?
     {
         anyhow::bail!(

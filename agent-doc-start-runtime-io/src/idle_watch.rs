@@ -540,6 +540,7 @@ impl agent_doc_queue_io::queue_cmd::QueueRuntimeProjectionEffects
                 source_content,
                 reason,
                 generation,
+                agent_doc_controller_io::project_controller::QueueProjectionWriter::BackgroundSelfHeal,
             )?,
             agent_doc_controller_io::project_controller::QueueProjectionGenerationWriteOutcome::Applied
         );

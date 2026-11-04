@@ -139,12 +139,26 @@ pub fn check_queue_response_contamination_guard(
     }
     let baseline_queue_body =
         (!proven_queue_bodies.is_empty()).then(|| proven_queue_bodies.join("\n"));
-    let contaminated =
+    let mut contaminated =
         agent_doc_workflow::session_check::queue_response_contamination_candidates_since_baseline(
             queue_body,
             exchange.content(&content),
             baseline_queue_body.as_deref(),
         );
+    // `#qcontam-row-predates-quote`: with no captured response in flight there
+    // is no capture baseline, so the guard ran with NO provenance and every
+    // queue row that any response had ever quoted at a line start became
+    // "contamination". After a settled closeout the cycle is capture-free, and
+    // session-check interrupted forever on the operator's own long-standing
+    // waiting item that an earlier response quoted verbatim from a worker's
+    // operator-request packet (2026-11-03, agent-doc-bugs.md,
+    // `[#vscodecodersmoke]`). Provenance is then row-level and historical: the
+    // row is ancestry when a committed version of the document already held it
+    // while no response quoted it. A row that only ever existed beside its
+    // quote (a committed bad projection) is still refused.
+    if capture.is_none() {
+        contaminated.retain(|candidate| !committed_row_predates_its_quote(file, candidate));
+    }
 
     if contaminated.is_empty() {
         return Ok(GuardResult::None);
@@ -158,6 +172,68 @@ pub fn check_queue_response_contamination_guard(
         ),
     );
     Ok(agent_doc_workflow::session_check::queue_response_contamination_guard_result(&contaminated))
+}
+
+/// Bound on committed document versions [`committed_row_predates_its_quote`]
+/// inspects.
+const QUEUE_ROW_PROVENANCE_HISTORY_COMMITS: usize = 256;
+
+/// True when, walking the document's committed versions newest first while the
+/// queue row stays present, some version holds the row while no assistant
+/// response line quotes it (`#qcontam-row-predates-quote`).
+fn committed_row_predates_its_quote(file: &Path, candidate: &str) -> bool {
+    let key = |line: &str| -> String {
+        let line = line.trim_start();
+        let line = line.strip_prefix("- ").unwrap_or(line);
+        let bare = agent_doc_element_queue::strip_priority_markers(line);
+        agent_doc_turn::closeout_signal::normalized_prompt_for_match(&bare)
+            .chars()
+            .take(40)
+            .collect()
+    };
+    let needle = key(candidate);
+    if needle.chars().count() < 20 {
+        return false;
+    }
+    let mut proven = false;
+    let walked = agent_doc_git_io::revision::walk_file_revisions(
+        file,
+        QUEUE_ROW_PROVENANCE_HISTORY_COMMITS,
+        |content| {
+            let Some(content) = content else {
+                return false;
+            };
+            let Ok(components) = agent_doc_element::element::parse(content) else {
+                return false;
+            };
+            let Some(queue) = components.iter().find(|c| c.name == "queue") else {
+                return false;
+            };
+            if !queue
+                .content(content)
+                .lines()
+                .any(|line| key(line) == needle)
+            {
+                return false;
+            }
+            let quoted = components
+                .iter()
+                .find(|c| c.name == "exchange")
+                .is_some_and(|exchange| {
+                    agent_doc_turn::closeout_signal::assistant_response_text(
+                        exchange.content(content),
+                    )
+                    .lines()
+                    .any(|line| key(line) == needle)
+                });
+            if !quoted {
+                proven = true;
+                return false;
+            }
+            true
+        },
+    );
+    walked.is_ok() && proven
 }
 
 /// `#exchange-prompt-dropped-on-merge`: fail closed when this cycle recorded a

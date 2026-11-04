@@ -750,6 +750,9 @@ fn strip_new_response_sections(baseline: &str, current: &str) -> String {
     let baseline_lines: BTreeSet<&str> = baseline.lines().map(str::trim).collect();
     let mut out = String::with_capacity(current.len());
     let mut skipping = false;
+    // `#echopreludesteer`: held `> **Queue prompt:**` prelude awaiting proof
+    // that a new response heading follows it.
+    let mut prelude: Option<String> = None;
     // `#chatprompt`: an agent-written record of a prompt that arrived in the
     // harness chat (`> **Chat prompt (#chatprompt):** …`, plus its `>`
     // continuation lines) is agent bookkeeping, never operator steering.
@@ -772,18 +775,57 @@ fn strip_new_response_sections(baseline: &str, current: &str) -> String {
             continue;
         }
         let heading = crate::baseline_comparison::is_exchange_response_heading(trimmed);
+        // `#echopreludesteer`: a response opens with its `> **Queue prompt:**`
+        // echo, often followed by a prose paragraph (a `**Deferred:**` outcome
+        // the finalize gate demands), ABOVE its `### Re:` heading. Skipping
+        // began only at the heading, so that agent-authored prelude came back
+        // as `source=exchange change=added dispatch=subagent` operator prompts
+        // (2026-11-03, agent-doc-bugs.md, commit b3bd1a09f7). A new echo line
+        // is agent-authored by construction, but it is only a prelude when a
+        // NEW response heading follows it: hold the echo and the lines after
+        // it, drop them at that heading, and release them unchanged at a
+        // boundary, the component end, or EOF.
+        if !skipping
+            && !heading
+            && prelude.is_none()
+            && is_queue_prompt_echo_line(trimmed)
+            && !baseline_lines.contains(trimmed)
+        {
+            prelude = Some(String::new());
+        }
         if heading {
             skipping = !baseline_headings.contains(trimmed);
+            if let Some(held) = prelude.take()
+                && !skipping
+            {
+                out.push_str(&held);
+            }
         } else if trimmed.starts_with("<!-- agent:boundary:")
             || trimmed == "<!-- /agent:exchange -->"
         {
             skipping = false;
+            if let Some(held) = prelude.take() {
+                out.push_str(&held);
+            }
         }
-        if !skipping {
+        if let Some(held) = prelude.as_mut() {
+            held.push_str(line);
+        } else if !skipping {
             out.push_str(line);
         }
     }
+    if let Some(held) = prelude {
+        out.push_str(&held);
+    }
     out
+}
+
+/// A `> **Queue prompt:** …` response echo line.
+fn is_queue_prompt_echo_line(trimmed: &str) -> bool {
+    trimmed
+        .strip_prefix('>')
+        .map(str::trim_start)
+        .is_some_and(|rest| rest.starts_with("**Queue prompt:**"))
 }
 
 #[derive(Debug, Clone)]
@@ -4059,6 +4101,44 @@ mod tests {
                 .contains("please also bump the version")
         );
         assert!(!obs.ready[0].verbatim.contains("#chatprompt"));
+    }
+
+    /// `#echopreludesteer`: the response's own `> **Queue prompt:**` echo and
+    /// the `**Deferred:**` paragraph under it sit above its `### Re:` heading.
+    /// Neither is operator steering; an operator prompt after the response
+    /// still is.
+    #[test]
+    fn response_echo_prelude_above_heading_is_never_operator_steering() {
+        let owned = BTreeSet::new();
+        let baseline = doc("", EX);
+        let prelude = concat!(
+            "> **Queue prompt:** Waiting on you — answer by adding a child line under an item <!-- agent-doc:waiting-on-you -->\n\n",
+            "**Deferred:** this group waits on two things: the fix install and the operator answers.\n\n",
+        );
+        let current = doc(
+            "",
+            &format!(
+                "{EX}{prelude}### Re: Queue status while the fix runs\n\nNo new operator edits this cycle.\n"
+            ),
+        );
+        let wm = seeded(&baseline, None);
+        for mode in [ObserveMode::InTurn, ObserveMode::Boundary] {
+            let obs = observe_with_mode(&wm, &current, &quiet_ctx(&owned), mode);
+            assert!(obs.ready.is_empty(), "{mode:?}: {:?}", obs.ready);
+            assert_eq!(obs.pending, 0, "{mode:?}");
+        }
+        let with_operator = current.replace(
+            "No new operator edits this cycle.\n",
+            "No new operator edits this cycle.\n\n<!-- agent:boundary:abc -->\nplease also bump the version\n",
+        );
+        let obs = observe(&wm, &with_operator, &quiet_ctx(&owned));
+        assert_eq!(obs.ready.len(), 1, "{:?}", obs.ready);
+        assert!(
+            obs.ready[0]
+                .verbatim
+                .contains("please also bump the version")
+        );
+        assert!(!obs.ready[0].verbatim.contains("Deferred"));
     }
 
     /// `#claimedsteerwake`: an explicit send bypasses the typing gate and

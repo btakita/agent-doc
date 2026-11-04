@@ -243,12 +243,48 @@ fn run_once() -> Result<()> {
     // how a workspace left skewed by an older one-shot upgrade gets repaired.
     // GH #113: after a replacement it runs in the new executable's image.
     crate::plugin::set_release_pin(Some(&latest));
-    reconcile_plugins_in_image(
+    let plugins = reconcile_plugins_in_image(
         upgraded_exe.as_deref(),
         &latest,
         ReconcileMode::Once,
         || reconcile_plugins_for_mode(&latest, ReconcileMode::Once),
-    )
+    );
+    reconcile_project_hooks_in_image(upgraded_exe.as_deref());
+    plugins
+}
+
+/// `#nestedhookdrift`: ensure the agent-doc Claude-format hook set in every
+/// known project root (live controllers plus this superproject's `.agent-doc`
+/// submodules), in the image that owns the hook set: the upgraded executable
+/// when one was installed, else this process. Warn-only: a settings file must
+/// never fail an upgrade, and each drift it could not fix stays visible through
+/// `agent-doc skill hooks`.
+fn reconcile_project_hooks_in_image(upgraded_exe: Option<&Path>) {
+    const ARGS: [&str; 4] = ["skill", "hooks", "--fix", "--known-projects"];
+    if let Some(exe) = upgraded_exe {
+        match std::process::Command::new(exe).args(ARGS).status() {
+            Ok(status) if status.success() => return,
+            Ok(status) => {
+                eprintln!(
+                    "WARNING: project hook reconcile by {} failed ({status}); run `agent-doc {}`",
+                    exe.display(),
+                    ARGS.join(" ")
+                );
+                return;
+            }
+            Err(error) => eprintln!(
+                "WARNING: could not launch {} for the project hook reconcile ({error}); \
+                 reconciling with this v{CURRENT_VERSION} process instead",
+                exe.display()
+            ),
+        }
+    }
+    if let Err(error) = crate::skill::run_hooks_command(&[], true, true) {
+        eprintln!(
+            "WARNING: project hook reconcile failed: {error:#}; run `agent-doc {}`",
+            ARGS.join(" ")
+        );
+    }
 }
 
 /// Reconcile installed editor plugins in this process image, reporting the way
@@ -399,7 +435,10 @@ fn run_auto_cycle(latest: &str, state: &mut AutoUpgradeState, target: &UpgradeTa
             ReconcileMode::Auto,
             || reconcile_plugins_for_mode(latest, ReconcileMode::Auto),
         ) {
-            Ok(()) => state.plugins_reconciled(latest),
+            Ok(()) => {
+                reconcile_project_hooks_in_image(state.upgraded_exe.as_deref());
+                state.plugins_reconciled(latest)
+            }
             Err(error) => eprintln!(
                 "Installed editor plugin reconciliation failed: {error:#}. Retrying on the next poll."
             ),

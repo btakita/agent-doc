@@ -5655,6 +5655,26 @@ enum SkillCommands {
     },
     /// Check if the installed skill matches the binary version
     Check,
+    /// Report missing agent-doc hooks in project `.claude/settings.json` files
+    /// (read-only; exits 1 on drift and names the fix), or add them with `--fix`.
+    ///
+    /// Claude Code and Grok Build both load Claude-format hooks from
+    /// `<project>/.claude/settings.json`; this never writes `.grok/hooks/`.
+    /// With no `--root` and no `--known-projects`, checks the current
+    /// directory's git root and `.agent-doc` project root.
+    Hooks {
+        /// Add missing hooks and raise stale timeouts (additive; operator hooks
+        /// are never removed, reordered, or rewritten)
+        #[arg(long)]
+        fix: bool,
+        /// Project directory to check (repeatable)
+        #[arg(long = "root")]
+        roots: Vec<std::path::PathBuf>,
+        /// Every project root agent-doc knows: live project controllers plus the
+        /// current superproject's `.agent-doc` submodules
+        #[arg(long)]
+        known_projects: bool,
+    },
 }
 
 /// Initialize structured logging. When `AGENT_DOC_LOG` is set (e.g., "debug"),
@@ -6397,6 +6417,10 @@ fn try_main() -> anyhow::Result<()> {
                     }),
                 )
             };
+            // `#nestedhookdrift`: the document's own git root (a submodule gets
+            // its own file) and its `.agent-doc` root gain any missing agent-doc
+            // hook before the harness loads settings. Best-effort, logged.
+            skill::reconcile_document_project_hooks(&file, "start");
             if agent_doc_start_io::bootstrap_start_inside_tmux_for_client(
                 &file,
                 force,
@@ -6804,6 +6828,11 @@ fn try_main() -> anyhow::Result<()> {
                 Ok(())
             }
             SkillCommands::Check => skill::check(),
+            SkillCommands::Hooks {
+                fix,
+                roots,
+                known_projects,
+            } => skill::run_hooks_command(&roots, known_projects, fix),
         },
         Commands::Plugin { action } => match action {
             PluginAction::Install {

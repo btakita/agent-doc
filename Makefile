@@ -597,6 +597,7 @@ install: editor-generation-bump
 	@"$(LOCAL_INSTALL_TARGET_DIR)/$(LOCAL_INSTALL_PROFILE)/agent-doc" binary-install --source "$(LOCAL_INSTALL_TARGET_DIR)/$(LOCAL_INSTALL_PROFILE)/agent-doc"
 	@"$(LOCAL_INSTALL_TARGET_DIR)/$(LOCAL_INSTALL_PROFILE)/agent-doc" skill install --all
 	@"$(LOCAL_INSTALL_TARGET_DIR)/$(LOCAL_INSTALL_PROFILE)/agent-doc" skill install --root . --all
+	@"$(LOCAL_INSTALL_TARGET_DIR)/$(LOCAL_INSTALL_PROFILE)/agent-doc" skill hooks --fix --known-projects
 	@CARGO_TARGET_DIR="$(LOCAL_INSTALL_TARGET_DIR)" agent-doc lib-install --profile "$(LOCAL_INSTALL_PROFILE)"
 	@$(MAKE) install-editor-plugins
 
@@ -617,6 +618,7 @@ install-full: editor-generation-bump
 	@"$(CARGO_TARGET_DIR_ABS)/release/agent-doc" binary-install --source "$(CARGO_TARGET_DIR_ABS)/release/agent-doc"
 	@"$(CARGO_TARGET_DIR_ABS)/release/agent-doc" skill install --all
 	@"$(CARGO_TARGET_DIR_ABS)/release/agent-doc" skill install --root . --all
+	@"$(CARGO_TARGET_DIR_ABS)/release/agent-doc" skill hooks --fix --known-projects
 	@CARGO_TARGET_DIR="$(CARGO_TARGET_DIR_ABS)" "$(CARGO_TARGET_DIR_ABS)/release/agent-doc" lib-install --profile release --target-dir "$(CARGO_INSTALL_BIN_DIR_ABS)"
 	@$(MAKE) install-editor-plugins
 	@$(MAKE) cleanup-build-artifacts

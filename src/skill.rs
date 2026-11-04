@@ -1804,19 +1804,6 @@ pub(crate) fn installed_preflight_hook_timeout_secs(settings: &str) -> Option<u6
         })
 }
 
-/// Raise a preflight hook entry this settings file already wires up to
-/// [`PREFLIGHT_HOOK_TIMEOUT_SECS`], returning the previous effective deadline
-/// when it changed.
-///
-/// Deliberately narrower than [`merge_claude_turn_status_hooks`]: it adds no
-/// hook the file does not already have and touches no other key. A project that
-/// was initialized before the timeout existed — or any checkout whose
-/// `.claude/settings.json` was written by an older binary — otherwise keeps
-/// Claude's 30s default forever, because the merge only runs on an explicit
-/// install in *that* directory. Live 2026-09-11: a submodule session
-/// (`src/haiven-dev`) lost its cycle contract to
-/// `UserPromptSubmit hook timed out after 30s — output discarded` while the
-/// superproject beside it carried the 120s entry.
 /// The preflight hook `timeout` that fits an admission `budget` (GH #127).
 ///
 /// The binary clamps its budget to the installed timeout minus its report
@@ -1831,51 +1818,659 @@ pub(crate) fn preflight_hook_timeout_for_budget(budget: std::time::Duration) -> 
     PREFLIGHT_HOOK_TIMEOUT_SECS.max(budget.as_secs().saturating_add(GAP))
 }
 
-pub(crate) fn repair_claude_preflight_hook_timeout(
-    path: &Path,
-    required_secs: u64,
-) -> Result<Option<u64>> {
-    if !path.exists() {
-        return Ok(None);
-    }
-    let content =
-        std::fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
-    let Some(installed) = installed_preflight_hook_timeout_secs(&content) else {
-        return Ok(None);
+/// One hook of the required agent-doc Claude-format project hook set.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct RequiredClaudeHook {
+    pub(crate) event: &'static str,
+    pub(crate) command: &'static str,
+    pub(crate) status_message: Option<&'static str>,
+    pub(crate) timeout_secs: Option<u64>,
+}
+
+/// `#nestedhookdrift`: THE required agent-doc hook set for a project
+/// `.claude/settings.json`, in install order. Every writer of project Claude
+/// hooks goes through [`ensure_claude_hooks_in_settings`] with this list, so an
+/// explicit `skill install`, a preflight admission, `agent-doc start`, and the
+/// install/upgrade reconcile can never disagree about what "installed" means.
+///
+/// Claude Code and Grok Build (which loads Claude-format hooks from
+/// `<git root>/.claude/settings.json`) both run this file, so it is the single
+/// project surface; agent-doc never writes a `.grok/hooks/*.json` copy, which
+/// Grok would run a second time.
+///
+/// `preflight_timeout_secs` is raised to at least [`PREFLIGHT_HOOK_TIMEOUT_SECS`].
+pub(crate) fn required_claude_project_hooks(
+    preflight_timeout_secs: u64,
+) -> [RequiredClaudeHook; 7] {
+    let hook = |event, command, status_message, timeout_secs| RequiredClaudeHook {
+        event,
+        command,
+        status_message,
+        timeout_secs,
     };
-    // Raise-only. An operator who deliberately set a LARGER timeout has made the
-    // invariant safer, not weaker, and this repair must not quietly undo that.
-    // Only a deadline below the installed default can produce the silent
-    // output-discard this exists to prevent.
-    let required_secs = required_secs.max(PREFLIGHT_HOOK_TIMEOUT_SECS);
-    if installed >= required_secs {
-        return Ok(None);
-    }
-    let mut root = serde_json::from_str::<serde_json::Value>(&content)
-        .with_context(|| format!("parse {}", path.display()))?;
-    let Some(entries) = root
-        .get_mut("hooks")
-        .and_then(|hooks| hooks.get_mut("UserPromptSubmit"))
-        .and_then(|entries| entries.as_array_mut())
-    else {
-        return Ok(None);
-    };
-    for hook in entries
-        .iter_mut()
-        .filter_map(|entry| entry.get_mut("hooks")?.as_array_mut())
-        .flatten()
-    {
-        if hook.get("command").and_then(|v| v.as_str()) != Some(PREFLIGHT_USER_PROMPT_COMMAND) {
-            continue;
+    [
+        // Turn-in-progress pane monitor (`#claude-busy-status-during-active-turn`).
+        hook("UserPromptSubmit", TURN_STATUS_ACTIVE_COMMAND, None, None),
+        hook("Stop", TURN_STATUS_IDLE_COMMAND, None, None),
+        // Consequential Stop boundary: a clean closeout with a durable next
+        // queue head is not allowed to become a final answer.
+        hook(
+            "Stop",
+            CLAUDE_STOP_COMMAND,
+            Some("Checking agent-doc queue continuation"),
+            Some(CLAUDE_STOP_HOOK_TIMEOUT_SECS),
+        ),
+        hook("SessionStart", TURN_STATUS_IDLE_COMMAND, None, None),
+        // No matcher: the handler filters by tool name itself and allows
+        // everything it does not recognize, so the guard cannot wedge a turn on
+        // an unknown tool.
+        hook("PreToolUse", COINED_ID_PRETOOLUSE_COMMAND, None, None),
+        // `#midturn-steering`: no matcher, so steering reaches the turn after
+        // any tool call (a long Bash build is exactly when the operator steers).
+        hook(
+            "PostToolUse",
+            STEERING_POSTTOOLUSE_COMMAND,
+            None,
+            Some(STEERING_HOOK_TIMEOUT_SECS),
+        ),
+        // `#preflightinbinary`: run preflight in-binary on the trigger prompt so
+        // the cycle contract arrives with the prompt rather than a round trip
+        // later.
+        hook(
+            "UserPromptSubmit",
+            PREFLIGHT_USER_PROMPT_COMMAND,
+            None,
+            Some(preflight_timeout_secs.max(PREFLIGHT_HOOK_TIMEOUT_SECS)),
+        ),
+    ]
+}
+
+/// One change [`ensure_claude_hooks_in_settings`] made (or, read-only, would make).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ClaudeHookChange {
+    /// The hook was absent from the event and was appended as a new entry.
+    Added {
+        event: &'static str,
+        command: &'static str,
+        timeout_secs: Option<u64>,
+    },
+    /// Our own entry was present; its timeout (or status message) was raised to
+    /// the current value. Raise-only: a larger operator timeout is kept.
+    Updated {
+        event: &'static str,
+        command: &'static str,
+        timeout_from: Option<u64>,
+        timeout_to: Option<u64>,
+    },
+}
+
+impl std::fmt::Display for ClaudeHookChange {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Added {
+                event,
+                command,
+                timeout_secs,
+            } => {
+                write!(f, "added {event} `{command}`")?;
+                if let Some(timeout) = timeout_secs {
+                    write!(f, " (timeout {timeout}s)")?;
+                }
+                Ok(())
+            }
+            Self::Updated {
+                event,
+                command,
+                timeout_from,
+                timeout_to,
+            } => {
+                write!(f, "updated {event} `{command}`")?;
+                if timeout_from != timeout_to {
+                    let from = timeout_from.map_or_else(
+                        || format!("unset={CLAUDE_DEFAULT_HOOK_TIMEOUT_SECS}s default"),
+                        |secs| format!("{secs}s"),
+                    );
+                    let to = timeout_to.map_or_else(|| "unset".to_string(), |s| format!("{s}s"));
+                    write!(f, " (timeout {from} -> {to})")?;
+                }
+                Ok(())
+            }
         }
-        let Some(hook) = hook.as_object_mut() else {
+    }
+}
+
+/// An order-preserving JSON tree for operator-owned settings files.
+///
+/// The runtime `serde_json` build has no `preserve_order`, so a
+/// `serde_json::Value` round trip re-sorts every object's keys: an additive
+/// hook reconcile would then "rewrite" operator hooks and top-level settings it
+/// never meant to touch. Parsing into this tree keeps every key where the
+/// operator put it, so the only bytes that change are the hooks agent-doc adds
+/// or repairs.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(untagged)]
+enum OrderedJson {
+    Null,
+    Bool(bool),
+    Number(serde_json::Number),
+    String(String),
+    Array(Vec<OrderedJson>),
+    Object(indexmap::IndexMap<String, OrderedJson>),
+}
+
+impl OrderedJson {
+    fn get(&self, key: &str) -> Option<&OrderedJson> {
+        match self {
+            Self::Object(map) => map.get(key),
+            _ => None,
+        }
+    }
+
+    fn as_str(&self) -> Option<&str> {
+        match self {
+            Self::String(value) => Some(value),
+            _ => None,
+        }
+    }
+
+    fn as_u64(&self) -> Option<u64> {
+        match self {
+            Self::Number(value) => value.as_u64(),
+            _ => None,
+        }
+    }
+
+    fn is_command_hook(&self, command: &str) -> bool {
+        self.get("type").and_then(Self::as_str) == Some("command")
+            && self.get("command").and_then(Self::as_str) == Some(command)
+    }
+}
+
+/// Additively apply `required` to an ordered `hooks` object, returning every
+/// change.
+///
+/// Never removes, reorders, or rewrites an operator hook: a missing hook is
+/// appended as its own entry at the end of its event (a missing event at the
+/// end of `hooks`), and an existing entry is touched only when it is
+/// agent-doc's own command (exact match) and its status message differs or its
+/// timeout is below the required one (raise-only, GH #127).
+fn apply_required_claude_hooks(
+    hooks_map: &mut indexmap::IndexMap<String, OrderedJson>,
+    required: &[RequiredClaudeHook],
+) -> Vec<ClaudeHookChange> {
+    let mut changes = Vec::new();
+    for spec in required {
+        let entries = hooks_map
+            .entry(spec.event.to_string())
+            .or_insert_with(|| OrderedJson::Array(Vec::new()));
+        let OrderedJson::Array(entries) = entries else {
+            // Validated by the caller before any change is applied.
             continue;
         };
-        hook.insert("timeout".to_string(), serde_json::json!(required_secs));
+        let existing = entries
+            .iter_mut()
+            .filter_map(|entry| match entry {
+                OrderedJson::Object(entry) => match entry.get_mut("hooks") {
+                    Some(OrderedJson::Array(hooks)) => Some(hooks),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .flatten()
+            .find(|hook| hook.is_command_hook(spec.command));
+        if let Some(OrderedJson::Object(hook)) = existing {
+            let timeout_from = hook.get("timeout").and_then(OrderedJson::as_u64);
+            let mut changed = false;
+            if let Some(status) = spec.status_message
+                && hook.get("statusMessage").and_then(OrderedJson::as_str) != Some(status)
+            {
+                hook.insert(
+                    "statusMessage".to_string(),
+                    OrderedJson::String(status.to_string()),
+                );
+                changed = true;
+            }
+            let mut timeout_to = timeout_from;
+            if let Some(timeout) = spec.timeout_secs
+                && timeout_from.is_none_or(|installed| installed < timeout)
+            {
+                hook.insert("timeout".to_string(), OrderedJson::Number(timeout.into()));
+                timeout_to = Some(timeout);
+                changed = true;
+            }
+            if changed {
+                changes.push(ClaudeHookChange::Updated {
+                    event: spec.event,
+                    command: spec.command,
+                    timeout_from,
+                    timeout_to,
+                });
+            }
+            continue;
+        }
+        // Keys in the order the sorted `serde_json` renderer always wrote them,
+        // so a new entry looks like every entry agent-doc installed before.
+        let mut hook = indexmap::IndexMap::new();
+        hook.insert(
+            "command".to_string(),
+            OrderedJson::String(spec.command.to_string()),
+        );
+        if let Some(status) = spec.status_message {
+            hook.insert(
+                "statusMessage".to_string(),
+                OrderedJson::String(status.to_string()),
+            );
+        }
+        if let Some(timeout) = spec.timeout_secs {
+            hook.insert("timeout".to_string(), OrderedJson::Number(timeout.into()));
+        }
+        hook.insert(
+            "type".to_string(),
+            OrderedJson::String("command".to_string()),
+        );
+        let mut entry = indexmap::IndexMap::new();
+        entry.insert(
+            "hooks".to_string(),
+            OrderedJson::Array(vec![OrderedJson::Object(hook)]),
+        );
+        entries.push(OrderedJson::Object(entry));
+        changes.push(ClaudeHookChange::Added {
+            event: spec.event,
+            command: spec.command,
+            timeout_secs: spec.timeout_secs,
+        });
     }
+    changes
+}
+
+/// Ensure the required agent-doc hook set in one Claude-format `settings.json`.
+///
+/// Additive and idempotent: missing hooks are appended, our own entries get a
+/// raise-only timeout repair, and every operator hook and setting keeps its
+/// bytes and key order (the file is re-rendered only when something changed).
+/// A missing or blank file is treated as `{}`. A malformed file, or an event
+/// value that is not an array, is an error rather than something to overwrite.
+/// With `write = false` nothing is written and the result is what WOULD change,
+/// which is the read-only drift check.
+pub(crate) fn ensure_claude_hooks_in_settings(
+    path: &Path,
+    preflight_timeout_secs: u64,
+    write: bool,
+) -> Result<Vec<ClaudeHookChange>> {
+    let existing = match std::fs::read_to_string(path) {
+        Ok(content) => Some(content),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => None,
+        Err(err) => return Err(err).with_context(|| format!("read {}", path.display())),
+    };
+    let mut root = match existing.as_deref() {
+        Some(content) if !content.trim().is_empty() => serde_json::from_str::<OrderedJson>(content)
+            .with_context(|| format!("parse {}", path.display()))?,
+        _ => OrderedJson::Object(indexmap::IndexMap::new()),
+    };
+    let required = required_claude_project_hooks(preflight_timeout_secs);
+    let OrderedJson::Object(root_map) = &mut root else {
+        anyhow::bail!("{} root must be an object", path.display());
+    };
+    let OrderedJson::Object(hooks_map) = root_map
+        .entry("hooks".to_string())
+        .or_insert_with(|| OrderedJson::Object(indexmap::IndexMap::new()))
+    else {
+        anyhow::bail!("{} `hooks` must be an object", path.display());
+    };
+    for spec in &required {
+        if let Some(value) = hooks_map.get(spec.event)
+            && !matches!(value, OrderedJson::Array(_))
+        {
+            anyhow::bail!(
+                "{} `hooks.{}` is not an array; refusing to rewrite operator hook settings",
+                path.display(),
+                spec.event
+            );
+        }
+    }
+    let changes = apply_required_claude_hooks(hooks_map, &required);
+    if changes.is_empty() || !write {
+        return Ok(changes);
+    }
+    ensure_parent_dir(path)?;
     let rendered = ensure_trailing_newline(&serde_json::to_string_pretty(&root)?);
     std::fs::write(path, rendered).with_context(|| format!("write {}", path.display()))?;
-    Ok(Some(installed))
+    Ok(changes)
+}
+
+/// Whether a settings file already wires any agent-doc hook command.
+fn settings_reference_agent_doc_hooks(content: &str) -> bool {
+    let Ok(root) = serde_json::from_str::<serde_json::Value>(content) else {
+        return false;
+    };
+    root.get("hooks")
+        .and_then(serde_json::Value::as_object)
+        .into_iter()
+        .flat_map(|hooks| hooks.values())
+        .filter_map(serde_json::Value::as_array)
+        .flatten()
+        .filter_map(|entry| entry.get("hooks").and_then(serde_json::Value::as_array))
+        .flatten()
+        .filter_map(|hook| hook.get("command").and_then(serde_json::Value::as_str))
+        .any(|command| command.trim_start().starts_with("agent-doc "))
+}
+
+/// The outcome of reconciling one project directory's Claude hook settings.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ClaudeHookStatus {
+    /// Every required hook is present with a current timeout.
+    Current,
+    /// Missing or stale hooks: applied when writing, otherwise what would change.
+    Drift(Vec<ClaudeHookChange>),
+    /// Not an agent-doc project (no `.agent-doc/` and no agent-doc hooks in an
+    /// existing settings file), so nothing is created or touched.
+    NotAgentDocProject,
+    /// The directory resolves to the user layer (`~/.claude`), which gets only
+    /// the `PreToolUse` guard (`#tmuxguardclaudeuser`), never the project set.
+    UserLayer,
+    /// A test process may not write outside its runtime scope
+    /// (`#testisolationleaks`).
+    OutOfTestScope,
+}
+
+/// One project directory's reconcile report.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ClaudeHookReport {
+    pub(crate) project_dir: PathBuf,
+    pub(crate) settings: PathBuf,
+    pub(crate) created: bool,
+    pub(crate) status: ClaudeHookStatus,
+}
+
+impl ClaudeHookReport {
+    /// The exact command that repairs this project's drift.
+    pub(crate) fn fix_command(&self) -> String {
+        format!(
+            "agent-doc skill hooks --fix --root {}",
+            self.project_dir.display()
+        )
+    }
+
+    /// Log each applied change to stderr (the hook log on the preflight path).
+    pub(crate) fn log_applied(&self, origin: &str) {
+        let ClaudeHookStatus::Drift(changes) = &self.status else {
+            return;
+        };
+        if self.created {
+            eprintln!(
+                "[agent-doc] {origin}: created {} with the agent-doc hook set",
+                self.settings.display()
+            );
+        }
+        for change in changes {
+            eprintln!(
+                "[agent-doc] {origin}: {} in {}; takes effect when Claude Code / Grok next load settings",
+                change,
+                self.settings.display()
+            );
+        }
+    }
+}
+
+/// Whether `project_dir`'s `.claude` is the Claude user layer: `$HOME` itself
+/// (`~/.agent-doc` exists here, so `$HOME` IS an `.agent-doc` root) or the
+/// configured `$CLAUDE_CONFIG_DIR`. The user layer carries only the
+/// `PreToolUse` guard (`#tmuxguardclaudeuser`).
+fn is_claude_user_layer_dir(
+    project_dir: &Path,
+    home: Option<&Path>,
+    claude_user_config: Option<&Path>,
+) -> bool {
+    home.is_some_and(|home| same_dir(project_dir, home))
+        || claude_user_config.is_some_and(|dir| same_dir(&project_dir.join(".claude"), dir))
+}
+
+fn same_dir(a: &Path, b: &Path) -> bool {
+    a == b
+        || matches!(
+            (a.canonicalize(), b.canonicalize()),
+            (Ok(a), Ok(b)) if a == b
+        )
+}
+
+/// Ensure the required agent-doc hook set for one project directory
+/// (`<project_dir>/.claude/settings.json`), the `#nestedhookdrift` reconcile.
+///
+/// The file is created only for a real agent-doc project (`.agent-doc/` in
+/// `project_dir`). An existing file is reconciled when the directory is an
+/// agent-doc project or the file already wires an agent-doc hook (a checkout
+/// written by an older binary). The user layer and, in a test process, any path
+/// outside the runtime scope are never written. `write = false` is the
+/// read-only drift check.
+pub(crate) fn ensure_claude_project_hooks(
+    project_dir: &Path,
+    preflight_timeout_secs: u64,
+    write: bool,
+) -> Result<ClaudeHookReport> {
+    let settings = project_dir.join(".claude").join("settings.json");
+    let report = |created, status| ClaudeHookReport {
+        project_dir: project_dir.to_path_buf(),
+        settings: settings.clone(),
+        created,
+        status,
+    };
+    if is_claude_user_layer_dir(
+        project_dir,
+        home_dir().as_deref(),
+        claude_user_config_dir().as_deref(),
+    ) {
+        return Ok(report(false, ClaudeHookStatus::UserLayer));
+    }
+    let existing = match std::fs::read_to_string(&settings) {
+        Ok(content) => Some(content),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => None,
+        Err(err) => return Err(err).with_context(|| format!("read {}", settings.display())),
+    };
+    let agent_doc_project = project_dir.join(".agent-doc").is_dir();
+    let eligible = agent_doc_project
+        || existing
+            .as_deref()
+            .is_some_and(settings_reference_agent_doc_hooks);
+    if !eligible {
+        return Ok(report(false, ClaudeHookStatus::NotAgentDocProject));
+    }
+    if write && !agent_doc_fs::path_in_test_runtime_scope(&settings) {
+        return Ok(report(false, ClaudeHookStatus::OutOfTestScope));
+    }
+    let changes = ensure_claude_hooks_in_settings(&settings, preflight_timeout_secs, write)?;
+    if changes.is_empty() {
+        return Ok(report(false, ClaudeHookStatus::Current));
+    }
+    Ok(report(existing.is_none(), ClaudeHookStatus::Drift(changes)))
+}
+
+/// The git working-tree root that holds `path`: the nearest ancestor with a
+/// `.git` entry (a directory for a plain clone, a gitfile for a submodule or a
+/// linked worktree). This is the directory Claude Code and Grok load
+/// `.claude/settings.json` from for a session rooted in that repository, and the
+/// boundary `#cross-repo-owner-guard` draws. A filesystem walk instead of
+/// `git rev-parse --show-toplevel` keeps the preflight hot path free of a
+/// subprocess, and is immune to an inherited `GIT_DIR`.
+pub(crate) fn git_worktree_root_of(path: &Path) -> Option<PathBuf> {
+    let anchored = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir().ok()?.join(path)
+    };
+    let anchored = anchored.canonicalize().unwrap_or(anchored);
+    let start = if anchored.is_dir() {
+        anchored.as_path()
+    } else {
+        anchored.parent()?
+    };
+    start
+        .ancestors()
+        .find(|dir| dir.join(".git").exists())
+        .map(Path::to_path_buf)
+}
+
+/// The project directories whose Claude hook settings serve `document`: its own
+/// git working-tree root (a submodule gets its own file) and its `.agent-doc`
+/// project root when that differs (a submodule with no local `.agent-doc/`
+/// collapses into the superproject's).
+pub(crate) fn document_hook_project_dirs(document: &Path) -> Vec<PathBuf> {
+    let mut dirs: Vec<PathBuf> = Vec::new();
+    let mut push = |dir: PathBuf| {
+        if !dirs.iter().any(|known| same_dir(known, &dir)) {
+            dirs.push(dir);
+        }
+    };
+    if let Some(root) = git_worktree_root_of(document) {
+        push(root);
+    }
+    if let Some(root) = agent_doc_fs::find_project_root(document) {
+        push(root);
+    }
+    dirs
+}
+
+/// Best-effort reconcile of the hook settings serving `document`, for paths
+/// that already touch a document's project (`agent-doc start`). A failure is
+/// reported, never propagated: a settings file must not block a session.
+pub(crate) fn reconcile_document_project_hooks(document: &Path, origin: &str) {
+    for dir in document_hook_project_dirs(document) {
+        match ensure_claude_project_hooks(&dir, PREFLIGHT_HOOK_TIMEOUT_SECS, true) {
+            Ok(report) => report.log_applied(origin),
+            Err(err) => eprintln!(
+                "[agent-doc] {origin}: could not reconcile agent-doc hooks in {}: {err:#}",
+                dir.join(".claude/settings.json").display()
+            ),
+        }
+    }
+}
+
+/// Every project root this process knows about: roots served by a live
+/// project controller (the controller registry is the process table) plus the
+/// `.agent-doc` roots of the current superproject and its submodules. Unknown
+/// checkouts (no live controller, outside this superproject) are not guessed at;
+/// `--root` names them explicitly.
+pub(crate) fn known_hook_project_dirs() -> Vec<PathBuf> {
+    let mut dirs: Vec<PathBuf> = Vec::new();
+    let mut push = |dir: PathBuf| {
+        if !dirs.iter().any(|known| same_dir(known, &dir)) {
+            dirs.push(dir);
+        }
+    };
+    if let Ok(cwd) = std::env::current_dir() {
+        let base = agent_doc_fs::find_project_root(&cwd).unwrap_or(cwd);
+        for project in crate::fleet_board_cmd::project_roots(&base, false) {
+            push(project.root);
+        }
+    }
+    for root in agent_doc_controller_io::process::controller_project_roots(std::process::id()) {
+        push(root);
+    }
+    dirs
+}
+
+/// `agent-doc skill hooks`: report (read-only) or, with `fix`, ensure the
+/// required agent-doc hook set in each project's `.claude/settings.json`.
+///
+/// Read-only drift exits non-zero so it is visible to scripts; every drifted
+/// project names its exact fix command. A per-project error is reported and the
+/// remaining projects still run; any error makes the command fail.
+pub fn run_hooks_command(roots: &[PathBuf], known_projects: bool, fix: bool) -> Result<()> {
+    let mut dirs: Vec<PathBuf> = Vec::new();
+    let mut push = |dir: PathBuf| {
+        if !dirs.iter().any(|known| same_dir(known, &dir)) {
+            dirs.push(dir);
+        }
+    };
+    for root in roots {
+        push(root.canonicalize().unwrap_or_else(|_| root.clone()));
+    }
+    if known_projects {
+        for dir in known_hook_project_dirs() {
+            push(dir);
+        }
+    }
+    if roots.is_empty() && !known_projects {
+        let cwd = std::env::current_dir().context("read current directory")?;
+        for dir in document_hook_project_dirs(&cwd) {
+            push(dir);
+        }
+    }
+    let mut drifted = 0usize;
+    let mut errors = 0usize;
+    for dir in &dirs {
+        match ensure_claude_project_hooks(dir, PREFLIGHT_HOOK_TIMEOUT_SECS, fix) {
+            Ok(report) => match &report.status {
+                ClaudeHookStatus::Current => {
+                    println!("ok     {}", report.settings.display());
+                }
+                ClaudeHookStatus::Drift(changes) if fix => {
+                    println!(
+                        "fixed  {}{}",
+                        report.settings.display(),
+                        if report.created { " (created)" } else { "" }
+                    );
+                    for change in changes {
+                        println!("         {change}");
+                    }
+                }
+                ClaudeHookStatus::Drift(changes) => {
+                    drifted += 1;
+                    println!(
+                        "drift  {}{}",
+                        report.settings.display(),
+                        if report.created {
+                            " (missing file)"
+                        } else {
+                            ""
+                        }
+                    );
+                    for change in changes {
+                        let pending = change.to_string();
+                        let pending = pending
+                            .strip_prefix("added ")
+                            .map(|rest| format!("missing {rest}"))
+                            .or_else(|| {
+                                pending
+                                    .strip_prefix("updated ")
+                                    .map(|rest| format!("stale {rest}"))
+                            })
+                            .unwrap_or(pending);
+                        println!("         {pending}");
+                    }
+                    println!("         fix: {}", report.fix_command());
+                }
+                ClaudeHookStatus::NotAgentDocProject => println!(
+                    "skip   {}: not an agent-doc project (no .agent-doc/, no agent-doc hooks); \
+                     install with `agent-doc skill install --root {}`",
+                    dir.display(),
+                    dir.display()
+                ),
+                ClaudeHookStatus::UserLayer => println!(
+                    "skip   {}: the Claude user layer carries only the PreToolUse guard",
+                    report.settings.display()
+                ),
+                ClaudeHookStatus::OutOfTestScope => println!(
+                    "skip   {}: outside this test process's runtime scope",
+                    report.settings.display()
+                ),
+            },
+            Err(err) => {
+                errors += 1;
+                eprintln!("error  {}: {err:#}", dir.display());
+            }
+        }
+    }
+    if errors > 0 {
+        anyhow::bail!("{errors} project hook settings file(s) could not be reconciled");
+    }
+    if drifted > 0 {
+        eprintln!(
+            "[agent-doc] {drifted} project(s) are missing agent-doc hooks; run the fix command above, \
+             or `agent-doc skill hooks --fix --known-projects` for every known project"
+        );
+        std::process::exit(1);
+    }
+    Ok(())
 }
 
 const TURN_STATUS_ACTIVE_COMMAND: &str = "agent-doc turn-status active";
@@ -2102,85 +2697,15 @@ fn merge_codex_turn_status_hooks(path: &Path) -> Result<()> {
     write_if_changed(path, &rendered)
 }
 
-/// Merge the turn-status hooks into a Claude `settings.json`. Claude's hook shape
-/// matches Codex `hooks.json`, so this reuses the same idempotent merge helper.
-fn merge_claude_turn_status_hooks(path: &Path) -> Result<()> {
-    let mut root = if path.exists() {
-        let content =
-            std::fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
-        if content.trim().is_empty() {
-            serde_json::json!({})
-        } else {
-            serde_json::from_str::<serde_json::Value>(&content)
-                .with_context(|| format!("parse {}", path.display()))?
-        }
-    } else {
-        serde_json::json!({})
-    };
-
-    let hooks = root
-        .as_object_mut()
-        .context("settings.json root must be an object")?
-        .entry("hooks")
-        .or_insert_with(|| serde_json::json!({}));
-    let hooks_map = hooks
-        .as_object_mut()
-        .context("settings.json `hooks` must be an object")?;
-
-    // Shared shape with Codex hooks.json — `ensure_codex_hook_command` is
-    // harness-agnostic (a command-hook merger), reused here for Claude.
-    ensure_codex_hook_command(
-        hooks_map,
-        "UserPromptSubmit",
-        TURN_STATUS_ACTIVE_COMMAND,
-        None,
-        None,
-    );
-    ensure_codex_hook_command(hooks_map, "Stop", TURN_STATUS_IDLE_COMMAND, None, None);
-    ensure_codex_hook_command(
-        hooks_map,
-        "Stop",
-        CLAUDE_STOP_COMMAND,
-        Some("Checking agent-doc queue continuation"),
-        Some(CLAUDE_STOP_HOOK_TIMEOUT_SECS),
-    );
-    ensure_codex_hook_command(
-        hooks_map,
-        "SessionStart",
-        TURN_STATUS_IDLE_COMMAND,
-        None,
-        None,
-    );
-    // No matcher: the handler filters by tool name itself and allows everything
-    // it does not recognize, so the guard cannot wedge a turn on an unknown tool.
-    ensure_codex_hook_command(
-        hooks_map,
-        "PreToolUse",
-        COINED_ID_PRETOOLUSE_COMMAND,
-        None,
-        None,
-    );
-    // `#midturn-steering`: no matcher, so steering reaches the turn after any
-    // tool call (a long Bash build is exactly when the operator steers).
-    ensure_codex_hook_command(
-        hooks_map,
-        "PostToolUse",
-        STEERING_POSTTOOLUSE_COMMAND,
-        None,
-        Some(STEERING_HOOK_TIMEOUT_SECS),
-    );
-    // `#preflightinbinary`: run preflight in-binary on the trigger prompt so the
-    // cycle contract arrives with the prompt rather than a round trip later.
-    ensure_codex_hook_command(
-        hooks_map,
-        "UserPromptSubmit",
-        PREFLIGHT_USER_PROMPT_COMMAND,
-        None,
-        Some(PREFLIGHT_HOOK_TIMEOUT_SECS),
-    );
-
-    let rendered = ensure_trailing_newline(&serde_json::to_string_pretty(&root)?);
-    write_if_changed(path, &rendered)
+/// Merge the full agent-doc project hook set into a Claude `settings.json`
+/// (explicit `skill install` / `turn-status install`: the file is created when
+/// missing). The set itself is owned by [`required_claude_project_hooks`].
+pub(crate) fn merge_claude_turn_status_hooks(path: &Path) -> Result<()> {
+    let changes = ensure_claude_hooks_in_settings(path, PREFLIGHT_HOOK_TIMEOUT_SECS, true)?;
+    for change in &changes {
+        eprintln!("[agent-doc] hooks: {change} in {}", path.display());
+    }
+    Ok(())
 }
 
 fn ensure_codex_hook_command(
@@ -2453,6 +2978,77 @@ mod tests {
     /// its output on expiry, which is exactly the silent no-contract state the
     /// admission-failure marker exists to remove. Preflight measured 23-34s on a
     /// large document, so the entry must carry its own timeout.
+    /// `#nestedhookdrift`: the reconcile keeps every operator key where the
+    /// operator put it (the runtime `serde_json` sorts keys), rejects a
+    /// malformed event instead of overwriting it, and is a no-write no-op once
+    /// the set is complete.
+    #[test]
+    fn claude_hook_reconcile_preserves_operator_key_order_and_refuses_malformed_events() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let settings = tmp.path().join("settings.json");
+        let original = "{\n  \"permissions\": {\n    \"deny\": [],\n    \"allow\": [\"Bash(ls)\"]\n  },\n  \"hooks\": {\n    \"Stop\": [\n      {\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"echo bye\"\n          }\n        ]\n      }\n    ]\n  },\n  \"model\": \"opus\"\n}\n";
+        std::fs::write(&settings, original).unwrap();
+
+        let changes =
+            ensure_claude_hooks_in_settings(&settings, PREFLIGHT_HOOK_TIMEOUT_SECS, true).unwrap();
+        assert_eq!(changes.len(), 7, "{changes:?}");
+        let after = std::fs::read_to_string(&settings).unwrap();
+        let position = |needle: &str| {
+            after
+                .find(needle)
+                .unwrap_or_else(|| panic!("{needle} in {after}"))
+        };
+        assert!(position("\"permissions\"") < position("\"hooks\""));
+        assert!(position("\"hooks\"") < position("\"model\""));
+        assert!(position("\"deny\"") < position("\"allow\""));
+        assert!(
+            after.contains("\"type\": \"command\",\n            \"command\": \"echo bye\""),
+            "the operator hook keeps its own key order: {after}"
+        );
+        assert!(
+            position("echo bye") < position(CLAUDE_STOP_COMMAND),
+            "a new Stop hook is appended after the operator's"
+        );
+
+        let rendered = after.clone();
+        assert!(
+            ensure_claude_hooks_in_settings(&settings, PREFLIGHT_HOOK_TIMEOUT_SECS, true)
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(std::fs::read_to_string(&settings).unwrap(), rendered);
+
+        let malformed = "{\"hooks\":{\"PostToolUse\":{\"oops\":true}}}";
+        std::fs::write(&settings, malformed).unwrap();
+        let err = ensure_claude_hooks_in_settings(&settings, PREFLIGHT_HOOK_TIMEOUT_SECS, true)
+            .unwrap_err();
+        assert!(format!("{err:#}").contains("hooks.PostToolUse"), "{err:#}");
+        assert_eq!(std::fs::read_to_string(&settings).unwrap(), malformed);
+    }
+
+    /// The user layer never receives the project set, whatever path reaches it.
+    #[test]
+    fn claude_project_hook_reconcile_recognizes_the_user_layer() {
+        let home = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(home.path().join(".claude")).unwrap();
+        assert!(is_claude_user_layer_dir(
+            home.path(),
+            Some(home.path()),
+            None
+        ));
+        // `$CLAUDE_CONFIG_DIR` spelled through a `..` still resolves to it.
+        let spelled = home.path().join("work/../.claude");
+        std::fs::create_dir_all(home.path().join("work")).unwrap();
+        assert!(is_claude_user_layer_dir(home.path(), None, Some(&spelled)));
+        let project = home.path().join("work/project");
+        std::fs::create_dir_all(&project).unwrap();
+        assert!(!is_claude_user_layer_dir(
+            &project,
+            Some(home.path()),
+            Some(&home.path().join(".claude"))
+        ));
+    }
+
     #[test]
     fn installed_preflight_hook_carries_an_explicit_timeout() {
         let tmp = tempfile::TempDir::new().unwrap();

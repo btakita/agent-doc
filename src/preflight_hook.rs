@@ -468,7 +468,7 @@ fn run_preflight_for_prompt(
     let configured_budget = hook_admission_budget();
     let budget = admission_budget_under_harness_deadline(
         configured_budget,
-        repair_and_report_hook_deadline(cwd, configured_budget),
+        repair_and_report_hook_deadline(cwd, Some(&file), configured_budget),
     );
 
     if let Err(err) = claim_loop_drain_owner(&invocation, &file) {
@@ -732,15 +732,24 @@ fn run_preflight_admission(
 }
 
 /// Report the preflight deadline the Claude settings for this session wire, and
-/// repair a stale one in passing.
+/// reconcile the agent-doc hook set in passing (`#nestedhookdrift`).
 ///
-/// The repaired value only reaches Claude on its next settings load, so the
-/// return value is the deadline still in force for THIS turn — the repair fixes
-/// the next session, the clamp fixes this one. Best-effort by construction: a
-/// hook must never block an ordinary prompt over a settings file, so a failure
-/// is reported to the operator's hook log and treated as an unknown deadline.
+/// The deadline in force is read BEFORE any repair: a repaired value only
+/// reaches Claude on its next settings load, so the return value is the
+/// deadline still in force for THIS turn — the repair fixes the next session,
+/// the clamp fixes this one.
+///
+/// The reconcile covers the settings this session was launched with (cwd and
+/// its `.agent-doc` root) AND the document's own git working-tree root, so a
+/// submodule document (`src/haiven-dev`) gets its own file repaired even though
+/// `make install` and `agent-doc upgrade` never reach it. It adds missing hooks
+/// and raises stale timeouts, never touches operator hooks, and is a read+parse
+/// no-op when nothing is missing. Best-effort by construction: a hook must never
+/// block an ordinary prompt over a settings file, so a failure is reported to
+/// the operator's hook log and treated as an unknown deadline.
 fn repair_and_report_hook_deadline(
     cwd: &Path,
+    document: Option<&Path>,
     configured_budget: std::time::Duration,
 ) -> Option<u64> {
     // GH #127: the repaired timeout fits the CONFIGURED budget, so raising
@@ -750,33 +759,58 @@ fn repair_and_report_hook_deadline(
     // Claude reads project settings from the directory it was launched in; the
     // project root is checked too so a session started in a subdirectory still
     // finds the file that wired the hook.
-    let mut candidates = vec![cwd.join(".claude/settings.json")];
-    if let Some(root) = agent_doc_fs::find_project_root(cwd) {
-        let rooted = root.join(".claude/settings.json");
-        if !candidates.contains(&rooted) {
-            candidates.push(rooted);
-        }
+    let mut session_dirs = vec![cwd.to_path_buf()];
+    if let Some(root) = agent_doc_fs::find_project_root(cwd)
+        && !session_dirs.contains(&root)
+    {
+        session_dirs.push(root);
     }
     let mut deadline = None;
-    for path in candidates {
-        let Ok(content) = std::fs::read_to_string(&path) else {
-            continue;
-        };
-        let Some(installed) = crate::skill::installed_preflight_hook_timeout_secs(&content) else {
+    for dir in &session_dirs {
+        let Ok(content) = std::fs::read_to_string(dir.join(".claude/settings.json")) else {
             continue;
         };
         // The nearest settings layer that wires the hook is the one in force.
-        deadline.get_or_insert(installed);
-        match crate::skill::repair_claude_preflight_hook_timeout(&path, required) {
-            Ok(Some(previous)) => eprintln!(
-                "[agent-doc] repaired {} preflight hook timeout {previous}s -> {required}s; \
-                 the {previous}s deadline still applies until Claude Code reloads settings",
-                path.display(),
-            ),
-            Ok(None) => {}
+        if let Some(installed) = crate::skill::installed_preflight_hook_timeout_secs(&content) {
+            deadline.get_or_insert(installed);
+        }
+    }
+    let mut targets = session_dirs;
+    for dir in document
+        .map(crate::skill::document_hook_project_dirs)
+        .unwrap_or_default()
+    {
+        if !targets.contains(&dir) {
+            targets.push(dir);
+        }
+    }
+    for dir in targets {
+        match crate::skill::ensure_claude_project_hooks(&dir, required, true) {
+            Ok(report) => {
+                report.log_applied("preflight hook");
+                if let (Some(document), crate::skill::ClaudeHookStatus::Drift(changes)) =
+                    (document, &report.status)
+                {
+                    let changes = changes
+                        .iter()
+                        .map(ToString::to_string)
+                        .collect::<Vec<_>>()
+                        .join("; ");
+                    agent_doc_ops_log_io::log_op(
+                        document,
+                        &format!(
+                            "claude_project_hooks_reconciled settings={} created={} changes=[{}] \
+                             (#nestedhookdrift)",
+                            report.settings.display(),
+                            report.created,
+                            changes,
+                        ),
+                    );
+                }
+            }
             Err(err) => eprintln!(
-                "[agent-doc] could not repair {} preflight hook timeout: {err:#}",
-                path.display()
+                "[agent-doc] could not reconcile agent-doc hooks in {}: {err:#}",
+                dir.join(".claude/settings.json").display()
             ),
         }
     }
@@ -1257,7 +1291,7 @@ mod tests {
         )
         .unwrap();
         let configured = Duration::from_secs(300);
-        let in_force = repair_and_report_hook_deadline(dir.path(), configured);
+        let in_force = repair_and_report_hook_deadline(dir.path(), None, configured);
         assert_eq!(in_force, Some(crate::skill::PREFLIGHT_HOOK_TIMEOUT_SECS));
         // THIS turn is still clamped by the timeout in force...
         assert!(admission_budget_under_harness_deadline(configured, in_force) < configured);
@@ -1347,7 +1381,7 @@ mod tests {
         // The deadline reported is the one still in force for THIS turn, not the
         // repaired value — Claude has not reloaded settings yet.
         assert_eq!(
-            repair_and_report_hook_deadline(dir.path(), default_budget()),
+            repair_and_report_hook_deadline(dir.path(), None, default_budget()),
             Some(crate::skill::CLAUDE_DEFAULT_HOOK_TIMEOUT_SECS)
         );
 
@@ -1363,7 +1397,7 @@ mod tests {
         );
         // Idempotent: a second pass reports the repaired deadline and rewrites nothing.
         assert_eq!(
-            repair_and_report_hook_deadline(dir.path(), default_budget()),
+            repair_and_report_hook_deadline(dir.path(), None, default_budget()),
             Some(crate::skill::PREFLIGHT_HOOK_TIMEOUT_SECS)
         );
     }
@@ -1390,7 +1424,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            repair_and_report_hook_deadline(dir.path(), default_budget()),
+            repair_and_report_hook_deadline(dir.path(), None, default_budget()),
             Some(300)
         );
         assert_eq!(
@@ -1403,27 +1437,387 @@ mod tests {
     }
 
     #[test]
-    fn a_settings_file_that_does_not_wire_preflight_is_left_alone() {
+    fn a_settings_file_without_agent_doc_hooks_outside_a_project_is_left_alone() {
+        // Not an agent-doc project (no `.agent-doc/`) and the file wires no
+        // agent-doc hook: the reconcile must neither add hooks nor reformat it.
         let dir = tempfile::tempdir().unwrap();
         let settings = dir.path().join(".claude/settings.json");
         std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
-        let original = serde_json::to_string_pretty(&serde_json::json!({
-            "hooks": { "UserPromptSubmit": [{ "hooks": [
-                { "type": "command", "command": "agent-doc turn-status active" }
-            ]}]}
-        }))
-        .unwrap();
-        std::fs::write(&settings, &original).unwrap();
+        let original = "{\"hooks\":{\"Stop\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"echo bye\"}]}]}}";
+        std::fs::write(&settings, original).unwrap();
 
         assert_eq!(
-            repair_and_report_hook_deadline(dir.path(), default_budget()),
+            repair_and_report_hook_deadline(dir.path(), None, default_budget()),
             None
         );
+        assert_eq!(std::fs::read_to_string(&settings).unwrap(), original);
+    }
+
+    #[test]
+    fn a_settings_file_wiring_only_turn_status_gains_the_rest_of_the_hook_set() {
+        // `#nestedhookdrift` reverses the old "never add a hook the file does
+        // not already wire" rule: an agent-doc settings file written by an older
+        // binary is exactly the one missing hooks, and nothing else repairs it.
+        let dir = tempfile::tempdir().unwrap();
+        let settings = dir.path().join(".claude/settings.json");
+        std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
+        std::fs::write(
+            &settings,
+            serde_json::to_string_pretty(&serde_json::json!({
+                "hooks": { "UserPromptSubmit": [{ "hooks": [
+                    { "type": "command", "command": "agent-doc turn-status active" }
+                ]}]}
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        // The preflight hook was wired in another layer, so no deadline here.
         assert_eq!(
-            std::fs::read_to_string(&settings).unwrap(),
-            original,
-            "the hook must never add a hook a settings file does not already wire"
+            repair_and_report_hook_deadline(dir.path(), None, default_budget()),
+            None
         );
+        let repaired = std::fs::read_to_string(&settings).unwrap();
+        for spec in
+            crate::skill::required_claude_project_hooks(crate::skill::PREFLIGHT_HOOK_TIMEOUT_SECS)
+        {
+            assert_eq!(
+                repaired.matches(spec.command).count(),
+                if spec.command == "agent-doc turn-status idle" {
+                    2
+                } else {
+                    1
+                },
+                "{} must be wired exactly once per event in {repaired}",
+                spec.command
+            );
+        }
+    }
+
+    fn git(dir: &std::path::Path, args: &[&str]) {
+        let status = std::process::Command::new("git")
+            .current_dir(dir)
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE")
+            .env_remove("GIT_INDEX_FILE")
+            .args(["-c", "user.email=t@example.com", "-c", "user.name=T"])
+            .args([
+                "-c",
+                "protocol.file.allow=always",
+                "-c",
+                "commit.gpgsign=false",
+            ])
+            .args(args)
+            .status()
+            .unwrap();
+        assert!(status.success(), "git {args:?} failed in {}", dir.display());
+    }
+
+    /// A superproject whose settings carry the full set, a submodule whose
+    /// settings predate the steering and claude-stop hooks (the exact
+    /// 2026-08-02 `src/haiven-dev` shape, operator tmux border hooks included),
+    /// and a plain nested repo that is not an agent-doc project.
+    struct NestedFixture {
+        _tmp: tempfile::TempDir,
+        superproject: std::path::PathBuf,
+        submodule: std::path::PathBuf,
+        plain: std::path::PathBuf,
+    }
+
+    const OPERATOR_STOP: &str = "tmux set-option -p pane-border-style 'fg=colour226' 2>/dev/null; \
+                                 tmux set-option -pu pane-active-border-style 2>/dev/null";
+    const OPERATOR_PROMPT: &str = "tmux set-option -p pane-border-style 'fg=colour39' 2>/dev/null; \
+                                   tmux set-option -pu pane-active-border-style 2>/dev/null";
+
+    /// Byte-for-byte the `src/haiven-dev/.claude/settings.json` that predates
+    /// the steering and claude-stop hooks (haiven-dev 47f34642, 2026-08-02),
+    /// including its non-alphabetical `type`/`timeout` key order.
+    fn stale_submodule_settings() -> String {
+        let entry = |command: &str| {
+            format!(
+                "      {{\n        \"hooks\": [\n          {{\n            \"command\": {},\n            \"type\": \"command\"\n          }}\n        ]\n      }}",
+                serde_json::to_string(command).unwrap()
+            )
+        };
+        let event = |name: &str, entries: &[String]| {
+            format!("    \"{name}\": [\n{}\n    ]", entries.join(",\n"))
+        };
+        let preflight = "      {\n        \"hooks\": [\n          {\n            \"command\": \"agent-doc hook preflight-user-prompt-submit\",\n            \"type\": \"command\",\n            \"timeout\": 120\n          }\n        ]\n      }".to_string();
+        let events = [
+            event(
+                "PreToolUse",
+                &[entry("agent-doc hook coined-id-pre-tool-use")],
+            ),
+            event("SessionStart", &[entry("agent-doc turn-status idle")]),
+            event(
+                "Stop",
+                &[entry(OPERATOR_STOP), entry("agent-doc turn-status idle")],
+            ),
+            event(
+                "UserPromptSubmit",
+                &[
+                    entry(OPERATOR_PROMPT),
+                    entry("agent-doc turn-status active"),
+                    preflight,
+                ],
+            ),
+        ];
+        format!("{{\n  \"hooks\": {{\n{}\n  }}\n}}\n", events.join(",\n"))
+    }
+
+    /// Every line of `before` appears in `after`, in order: the reconcile only
+    /// inserted lines (a trailing `}` gaining a `,` is the one allowed edit).
+    fn assert_purely_additive(before: &str, after: &str) {
+        let mut after_lines = after.lines();
+        for line in before.lines() {
+            assert!(
+                after_lines.any(|candidate| candidate == line
+                    || candidate.strip_suffix(',') == Some(line)),
+                "line {line:?} of the original settings was rewritten or reordered:\n{after}"
+            );
+        }
+    }
+
+    fn nested_fixture() -> NestedFixture {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path().canonicalize().unwrap();
+        let superproject = base.join("super");
+        let origin = base.join("sub-origin");
+        for dir in [&superproject, &origin] {
+            std::fs::create_dir_all(dir.join(".agent-doc")).unwrap();
+            git(dir, &["init", "-q", "--initial-branch=main"]);
+        }
+        std::fs::create_dir_all(origin.join(".claude")).unwrap();
+        std::fs::write(
+            origin.join(".claude/settings.json"),
+            stale_submodule_settings(),
+        )
+        .unwrap();
+        std::fs::create_dir_all(origin.join("tasks")).unwrap();
+        std::fs::write(origin.join("tasks/plan.md"), "# plan\n").unwrap();
+        git(&origin, &["add", "-A"]);
+        git(&origin, &["commit", "-q", "-m", "seed"]);
+        crate::skill::merge_claude_turn_status_hooks(&superproject.join(".claude/settings.json"))
+            .unwrap();
+        git(&superproject, &["add", "-A"]);
+        git(&superproject, &["commit", "-q", "-m", "seed"]);
+        git(
+            &superproject,
+            &[
+                "submodule",
+                "add",
+                "-q",
+                origin.to_str().unwrap(),
+                "src/sub",
+            ],
+        );
+        let submodule = superproject.join("src/sub");
+        // `.agent-doc/` is per-checkout state, never committed.
+        std::fs::create_dir_all(submodule.join(".agent-doc")).unwrap();
+        let plain = superproject.join("src/plain");
+        std::fs::create_dir_all(plain.join("tasks")).unwrap();
+        git(&plain, &["init", "-q", "--initial-branch=main"]);
+        std::fs::write(plain.join("tasks/notes.md"), "# notes\n").unwrap();
+        NestedFixture {
+            _tmp: tmp,
+            superproject,
+            submodule,
+            plain,
+        }
+    }
+
+    fn hook_commands_for(settings: &serde_json::Value, event: &str) -> Vec<String> {
+        settings["hooks"][event]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .flat_map(|entry| entry["hooks"].as_array().cloned().unwrap_or_default())
+            .filter_map(|hook| hook["command"].as_str().map(str::to_string))
+            .collect()
+    }
+
+    /// `#nestedhookdrift`: a preflight admission of a submodule document repairs
+    /// the submodule's OWN settings (the file Claude Code and Grok load for a
+    /// session rooted there), adding exactly the missing hooks, leaving operator
+    /// hooks and their order untouched; a second run changes nothing.
+    #[test]
+    fn preflight_of_a_submodule_document_adds_exactly_the_missing_hooks_to_its_own_settings() {
+        let fixture = nested_fixture();
+        let sub_settings = fixture.submodule.join(".claude/settings.json");
+        let super_settings = fixture.superproject.join(".claude/settings.json");
+        let super_before = std::fs::read_to_string(&super_settings).unwrap();
+        let before: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&sub_settings).unwrap()).unwrap();
+        assert!(
+            fixture.submodule.join(".git").is_file(),
+            "the fixture must be a real submodule (gitfile)"
+        );
+
+        let document = fixture.submodule.join("tasks/plan.md");
+        // Session launched from the superproject, document in the submodule.
+        let in_force = repair_and_report_hook_deadline(
+            &fixture.superproject,
+            Some(&document),
+            default_budget(),
+        );
+        assert_eq!(in_force, Some(crate::skill::PREFLIGHT_HOOK_TIMEOUT_SECS));
+
+        let after: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&sub_settings).unwrap()).unwrap();
+        assert_eq!(
+            hook_commands_for(&after, "PostToolUse"),
+            vec![crate::skill::STEERING_POSTTOOLUSE_COMMAND.to_string()]
+        );
+        assert_eq!(
+            hook_commands_for(&after, "Stop"),
+            vec![
+                OPERATOR_STOP.to_string(),
+                "agent-doc turn-status idle".to_string(),
+                "agent-doc hook claude-stop".to_string(),
+            ],
+            "the operator Stop hook keeps its place; claude-stop is appended"
+        );
+        // Byte level: nothing was rewritten or reordered, only inserted.
+        assert_purely_additive(
+            &stale_submodule_settings(),
+            &std::fs::read_to_string(&sub_settings).unwrap(),
+        );
+        // Everything else is exactly as it was: operator hooks untouched.
+        for event in ["PreToolUse", "SessionStart", "UserPromptSubmit"] {
+            assert_eq!(
+                after["hooks"][event], before["hooks"][event],
+                "{event} changed"
+            );
+        }
+        let after_keys: Vec<_> = after["hooks"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .cloned()
+            .collect();
+        let mut expected_keys: Vec<_> = before["hooks"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .cloned()
+            .collect();
+        expected_keys.push("PostToolUse".to_string());
+        expected_keys.sort();
+        let mut sorted_after = after_keys.clone();
+        sorted_after.sort();
+        assert_eq!(sorted_after, expected_keys, "exactly one event was added");
+        assert_eq!(
+            std::fs::read_to_string(&super_settings).unwrap(),
+            super_before,
+            "the already-complete superproject file is not rewritten"
+        );
+
+        // Idempotent: a second admission writes nothing anywhere.
+        let repaired = std::fs::read_to_string(&sub_settings).unwrap();
+        let mtime = std::fs::metadata(&sub_settings)
+            .unwrap()
+            .modified()
+            .unwrap();
+        repair_and_report_hook_deadline(&fixture.superproject, Some(&document), default_budget());
+        assert_eq!(std::fs::read_to_string(&sub_settings).unwrap(), repaired);
+        assert_eq!(
+            std::fs::metadata(&sub_settings)
+                .unwrap()
+                .modified()
+                .unwrap(),
+            mtime
+        );
+        assert_eq!(
+            std::fs::read_to_string(&super_settings).unwrap(),
+            super_before
+        );
+    }
+
+    /// The same reconcile from the `agent-doc start` path, and the read-only
+    /// drift check that names the fix.
+    #[test]
+    fn start_reconcile_repairs_the_submodule_and_the_check_reports_drift_read_only() {
+        let fixture = nested_fixture();
+        let sub_settings = fixture.submodule.join(".claude/settings.json");
+        let stale = std::fs::read_to_string(&sub_settings).unwrap();
+
+        let check = crate::skill::ensure_claude_project_hooks(
+            &fixture.submodule,
+            crate::skill::PREFLIGHT_HOOK_TIMEOUT_SECS,
+            false,
+        )
+        .unwrap();
+        let crate::skill::ClaudeHookStatus::Drift(missing) = &check.status else {
+            panic!("expected drift, got {:?}", check.status);
+        };
+        let missing: Vec<_> = missing.iter().map(ToString::to_string).collect();
+        assert_eq!(
+            missing,
+            vec![
+                "added Stop `agent-doc hook claude-stop` (timeout 15s)".to_string(),
+                "added PostToolUse `agent-doc hook steering-post-tool-use` (timeout 10s)"
+                    .to_string(),
+            ]
+        );
+        assert_eq!(
+            check.fix_command(),
+            format!(
+                "agent-doc skill hooks --fix --root {}",
+                fixture.submodule.display()
+            )
+        );
+        assert_eq!(
+            std::fs::read_to_string(&sub_settings).unwrap(),
+            stale,
+            "the check is read-only"
+        );
+
+        crate::skill::reconcile_document_project_hooks(
+            &fixture.submodule.join("tasks/plan.md"),
+            "start",
+        );
+        let check = crate::skill::ensure_claude_project_hooks(
+            &fixture.submodule,
+            crate::skill::PREFLIGHT_HOOK_TIMEOUT_SECS,
+            false,
+        )
+        .unwrap();
+        assert_eq!(check.status, crate::skill::ClaudeHookStatus::Current);
+    }
+
+    /// A nested repo with no `.agent-doc/` and no settings file is not an
+    /// agent-doc project: neither preflight nor start creates a file there.
+    #[test]
+    fn a_non_agent_doc_repo_gets_no_settings_file() {
+        let fixture = nested_fixture();
+        let document = fixture.plain.join("tasks/notes.md");
+        repair_and_report_hook_deadline(&fixture.plain, Some(&document), default_budget());
+        crate::skill::reconcile_document_project_hooks(&document, "start");
+        assert!(
+            !fixture.plain.join(".claude").exists(),
+            "a non-agent-doc repo must not gain a .claude directory"
+        );
+        let report = crate::skill::ensure_claude_project_hooks(
+            &fixture.plain,
+            crate::skill::PREFLIGHT_HOOK_TIMEOUT_SECS,
+            true,
+        )
+        .unwrap();
+        assert_eq!(
+            report.status,
+            crate::skill::ClaudeHookStatus::NotAgentDocProject
+        );
+        // An agent-doc project with no file yet does get one created.
+        let fresh = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(fresh.path().join(".agent-doc")).unwrap();
+        let report = crate::skill::ensure_claude_project_hooks(
+            fresh.path(),
+            crate::skill::PREFLIGHT_HOOK_TIMEOUT_SECS,
+            true,
+        )
+        .unwrap();
+        assert!(report.created);
+        assert!(fresh.path().join(".claude/settings.json").is_file());
     }
 
     /// GH #125 (`#chatprompt`): the operator typed a `prompt_presets` key in the

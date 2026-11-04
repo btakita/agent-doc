@@ -2173,6 +2173,39 @@ fn run_pending_maintenance_with_options(
         *snapshot = pruned.content;
         snapshot_mutated = true;
     }
+    // `#managedlistnodrift`: an item's tracked list is derived from its state.
+    // A gated backlog item moves verbatim into agent:review here; a duplicate
+    // open id is reported, never merged. Each document derives independently.
+    let tracked = agent_doc_work_projection::tracked_lists::project_tracked_lists(&current_content)?;
+    for action in &tracked.actions {
+        eprintln!("[preflight] tracked lists: {action} (#managedlistnodrift)");
+    }
+    if let Some(projected) = tracked.content {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "tracked_lists_projected file={} moved={} (#managedlistnodrift)",
+                file.display(),
+                tracked
+                    .actions
+                    .iter()
+                    .filter(|action| matches!(
+                        action,
+                        agent_doc_work_projection::managed_list::ReconcileAction::Migrate { .. }
+                    ))
+                    .count()
+            ),
+        );
+        current_content = projected;
+        mutated = true;
+    }
+    if let Some(ref mut snap_content) = snapshot_content
+        && let Some(projected) =
+            agent_doc_work_projection::tracked_lists::project_tracked_lists(snap_content)?.content
+    {
+        *snap_content = projected;
+        snapshot_mutated = true;
+    }
     let mut saw_completed_before = false;
     advise_misplaced_legacy_done_archive(file, &content);
     let already_done_ids = collect_agent_done_ids(file, &content)?;

@@ -4,6 +4,7 @@
 //! work-graph crate. The projection is pure text-in/text-out and performs no IO.
 
 pub mod managed_list;
+pub mod tracked_lists;
 
 use agent_doc_element_backlog::backlog::{self, PendingState};
 use anyhow::{Context, Result};

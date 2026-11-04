@@ -429,6 +429,49 @@ pub(crate) struct ManagedStateRepairReport {
     pub stale: agent_doc_queue_io::stale_completion_repair::StaleCompletionRepairReport,
     pub projection_drift: bool,
     pub projection_applied: bool,
+    /// `#managedlistnodrift`: the tracked-list and todo reconcile preflight
+    /// runs, run here through the same functions.
+    pub lists: ManagedListRepair,
+}
+
+/// The tracked-list (`agent:backlog`/`review`/`icebox`) and `agent:todo`
+/// reconcile of one repair run.
+#[derive(Debug, Default)]
+pub(crate) struct ManagedListRepair {
+    pub actions: Vec<String>,
+    pub drift: bool,
+    pub applied: bool,
+}
+
+/// Render the tracked lists and the todo list from their durable state, the
+/// same projections preflight applies.
+fn project_managed_lists(file: &Path, current: &str) -> Result<(Option<String>, Vec<String>)> {
+    let mut actions = Vec::new();
+    let tracked = agent_doc_work_projection::tracked_lists::project_tracked_lists(current)?;
+    actions.extend(tracked.actions.iter().map(ToString::to_string));
+    let after_tracked = tracked.content.unwrap_or_else(|| current.to_string());
+    let links = agent_doc_element_backlog_io::backlog_cmd::todo_link_index_in_content(
+        file,
+        &after_tracked,
+        true,
+        &[],
+    )?;
+    let todo = agent_doc_element::todo::project_todo(&after_tracked, &links)?;
+    actions.extend(
+        todo.completed
+            .iter()
+            .map(|id| format!("agent:todo: closed [#{id}] (its tracked work is resolved)")),
+    );
+    actions.extend(todo.duplicate_ids.iter().map(|(id, rows)| {
+        agent_doc_work_projection::managed_list::ReconcileAction::DuplicateId {
+            list: agent_doc_work_projection::managed_list::ManagedList::Todo,
+            id: id.clone(),
+            rows: *rows,
+        }
+        .to_string()
+    }));
+    let target = todo.content.unwrap_or(after_tracked);
+    Ok(((target != current).then_some(target), actions))
 }
 
 pub(crate) fn repair_managed_state(
@@ -493,10 +536,40 @@ pub(crate) fn repair_managed_state(
         false
     };
 
+    let current = agent_doc_document_realtime_io::try_resolve_current_document_content(
+        file,
+        "queue_repair_managed_lists",
+    )?;
+    let (target, actions) = project_managed_lists(file, &current)?;
+    let mut lists = ManagedListRepair {
+        drift: target.is_some(),
+        actions,
+        applied: false,
+    };
+    if apply && let Some(target) = target {
+        use agent_doc_queue_io::queue_consume::QueueConsumeWriteEffects as _;
+        crate::CLI_QUEUE_CONSUME_WRITE_EFFECTS.converge_document_or_disk(
+            file,
+            &target,
+            &current,
+            "queue_repair_managed_lists",
+        )?;
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "queue_repair_managed_lists_applied file={} actions={} (#managedlistnodrift)",
+                file.display(),
+                lists.actions.len()
+            ),
+        );
+        lists.applied = true;
+    }
+
     Ok(ManagedStateRepairReport {
         stale,
         projection_drift,
         projection_applied,
+        lists,
     })
 }
 
@@ -513,6 +586,23 @@ pub(crate) fn print_managed_state_report(report: &ManagedStateRepairReport) {
         ),
         (false, false) => eprintln!(
             "[queue] {}: lifecycle projection already synchronized",
+            report.stale.file.display()
+        ),
+    }
+    for action in &report.lists.actions {
+        println!("{}: {action}", report.stale.file.display());
+    }
+    match (report.lists.drift, report.lists.applied) {
+        (_, true) => println!(
+            "repaired tracked lists and agent:todo from durable state in {}",
+            report.stale.file.display()
+        ),
+        (true, false) => println!(
+            "would repair tracked lists and agent:todo from durable state in {} (dry run; rerun with --apply)",
+            report.stale.file.display()
+        ),
+        (false, false) => eprintln!(
+            "[queue] {}: tracked lists and agent:todo already synchronized",
             report.stale.file.display()
         ),
     }

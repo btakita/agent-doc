@@ -29,7 +29,46 @@ pub fn managed_list_mismatches(
             ),
         ),
         (ManagedList::Todo, todo_mismatch(file, content)),
+        (
+            ManagedList::Backlog,
+            tracked_mismatch(ManagedList::Backlog, content),
+        ),
+        (
+            ManagedList::Review,
+            tracked_mismatch(ManagedList::Review, content),
+        ),
+        (
+            ManagedList::Icebox,
+            tracked_mismatch(ManagedList::Icebox, content),
+        ),
     ]
+}
+
+/// backlog / review / icebox == render(tracked-item records).
+fn tracked_mismatch(list: ManagedList, content: &str) -> Result<Option<ListMismatch>> {
+    agent_doc_work_projection::managed_list::check_list(list, content, |content| {
+        Ok(agent_doc_work_projection::tracked_lists::project_tracked_lists(content)?.content)
+    })
+}
+
+/// Findings that are not a line of one component: duplicate ids (reported,
+/// never merged) and done items not yet archived into `agent:done`.
+pub fn tracked_finding_lines(content: &str) -> Vec<String> {
+    let mut lines = Vec::new();
+    if let Ok(duplicates) = agent_doc_work_projection::tracked_lists::duplicate_open_ids(content) {
+        lines.extend(
+            duplicates
+                .into_iter()
+                .map(|action| format!("[session-check] warning: {action} (#managedlistnodrift)")),
+        );
+    }
+    if let Ok(Some((list, item))) = agent_doc_work_projection::tracked_lists::done_drift(content) {
+        lines.push(format!(
+            "[session-check] warning: managed list drift (#managedlistnodrift): {} has done item `{item}` still in {list}; the next preflight archives it",
+            ManagedList::Done
+        ));
+    }
+    lines
 }
 
 /// `agent:todo` == render(todo records, tracked-work index + done archive).
@@ -93,6 +132,7 @@ pub fn check_managed_list_invariants(file: &Path, rc: &CycleContext) -> Result<G
     let content = rc.doc_content();
     let mut lines = managed_list_guard_lines(file, managed_list_mismatches(file, &content));
     lines.extend(todo_duplicate_id_lines(&content));
+    lines.extend(tracked_finding_lines(&content));
     Ok(if lines.is_empty() {
         GuardResult::None
     } else {
@@ -154,6 +194,51 @@ mod tests {
         let duplicates = todo_duplicate_id_lines(content);
         assert_eq!(duplicates.len(), 1, "{duplicates:?}");
         assert!(duplicates[0].contains("[#dup] names 2 rows (reported, not merged)"));
+    }
+
+    #[test]
+    fn tracked_drift_reports_the_gated_backlog_row_and_duplicates() {
+        let content = concat!(
+            "## Backlog <!-- agent:backlog -->\n",
+            "- [ ] [#open] Open work\n",
+            "- [/] [#gate] Waits on a vendor\n",
+            "- [x] [#finished] Done but not archived\n",
+            "<!-- /agent:backlog -->\n",
+            "## Review <!-- agent:review -->\n",
+            "<!-- /agent:review -->\n",
+            "## Icebox <!-- agent:icebox -->\n",
+            "- [ ] [#open] parked copy\n",
+            "<!-- /agent:icebox -->\n",
+        );
+        let lines = managed_list_guard_lines(
+            Path::new("plan.md"),
+            managed_list_mismatches(Path::new("plan.md"), content),
+        );
+        assert!(
+            lines.iter().any(|line| line.contains(
+                "agent:backlog line 2: render(durable state) has `- [x] [#finished] Done but not archived`, the document has `- [/] [#gate] Waits on a vendor`"
+            )),
+            "{lines:?}"
+        );
+        assert!(
+            lines.iter().any(|line| line.contains(
+                "agent:review line 1: render(durable state) has `- [/] [#gate] Waits on a vendor`"
+            )),
+            "{lines:?}"
+        );
+        let findings = tracked_finding_lines(content);
+        assert!(
+            findings
+                .iter()
+                .any(|line| line.contains("[#open] names 2 rows")),
+            "{findings:?}"
+        );
+        assert!(
+            findings
+                .iter()
+                .any(|line| line.contains("agent:done has done item `[#finished] Done but not archived` still in agent:backlog")),
+            "{findings:?}"
+        );
     }
 
     #[test]

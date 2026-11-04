@@ -3986,6 +3986,60 @@ fn preflight_warns_for_legacy_gated_backlog_items() {
     );
 }
 
+/// `#managedlistnodrift`: with an `agent:review` to receive them, preflight
+/// moves gated backlog items there verbatim instead of warning every cycle,
+/// and a second preflight changes nothing.
+#[test]
+fn preflight_moves_gated_backlog_items_into_review() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
+    let doc = tmp.path().join("session.md");
+    fs::write(
+        &doc,
+        concat!(
+            "---\nagent_doc_format: template\n---\n\n<!-- agent:exchange -->\n<!-- /agent:exchange -->\n\n",
+            "<!-- agent:backlog -->\n- [ ] [#aaaa] open\n- [/] [#bbbb] [blocked: vendor] legacy gated\n  - operator note\n<!-- /agent:backlog -->\n\n",
+            "<!-- agent:review -->\n<!-- /agent:review -->\n",
+        ),
+    )
+    .unwrap();
+    let output = agent_doc()
+        .args(["preflight", doc.to_str().unwrap()])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: serde_json::Value =
+        serde_json::from_str(&stdout).expect("preflight output should be JSON");
+    let warnings = parsed
+        .get("warnings")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    assert!(
+        !warnings
+            .iter()
+            .any(|warning| warning.get("code").and_then(|v| v.as_str())
+                == Some("legacy_gated_in_backlog")),
+        "warnings: {}",
+        serde_json::Value::Array(warnings)
+    );
+    let content = fs::read_to_string(&doc).unwrap();
+    assert_eq!(component_body(&content, "backlog").trim(), "- [ ] [#aaaa] open");
+    // The item keeps its line and its child; existing review backfill gives
+    // the child its own subtask id, as it would have in the backlog.
+    let review = component_body(&content, "review");
+    assert!(
+        review.contains("- [/] [#bbbb] [blocked: vendor] legacy gated\n") && review.contains("operator note"),
+        "{content}"
+    );
+    let again = agent_doc()
+        .args(["preflight", doc.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(again.status.success(), "{}", String::from_utf8_lossy(&again.stderr));
+    assert_eq!(fs::read_to_string(&doc).unwrap(), content, "a second preflight is a no-op");
+}
+
 #[test]
 fn preflight_omits_backlog_gated_count_when_zero() {
     let (_tmp, doc) = setup_doc("- [ ] [#aaaa] open\n- [ ] [#bbbb] also open");

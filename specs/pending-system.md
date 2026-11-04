@@ -163,11 +163,21 @@ Direct path (no gating needed):
 | `Done` | `[x]` | fully complete; user or agent signals reap | Yes (next preflight) |
 
 `agent:backlog` holds open work, `agent:review` holds gated review work, and
-`agent:icebox` holds parked tracked work. Legacy documents may still have `[/]`
-items inside `agent:backlog`; preflight reports `legacy_gated_in_backlog` and
-`agent-doc migrate` moves those items into `agent:review`.
+`agent:icebox` holds parked tracked work. An item's list is derived from its
+state (`#managedlistnodrift`): preflight renders the tracked lists through
+`agent_doc_work_projection::tracked_lists::project_tracked_lists`, which moves a
+gated `[/]` (or typed `[/type]`) item found in `agent:backlog`, verbatim with its
+continuation lines, to the end of `agent:review`, and reports a stable id that
+names more than one open item across backlog, review, and icebox without merging
+them. Done `[x]` items are archived into `agent:done` by pending maintenance as
+before. `agent-doc queue repair-managed-state` runs the same projection, and
+`session-check` reports the first backlog/review/icebox line that differs from
+it, each duplicate id, and any done item not yet archived. Only a document with
+no `agent:review` component keeps gated items in its backlog; preflight then
+reports `legacy_gated_in_backlog` and `agent-doc migrate` creates the review
+component and moves them.
 
-The `legacy_gated_in_backlog` warning is budget-aware (`#review-migrate-gated`).
+The `legacy_gated_in_backlog` warning (now only for documents without `agent:review`) is budget-aware (`#review-migrate-gated`).
 `agent-doc migrate` only MOVES gated items, so on a document with a long legacy
 tail it can satisfy the component-placement rule while pushing `agent:review`
 past the 10-item legibility target the instruction surfaces state — asking the

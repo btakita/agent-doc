@@ -441,6 +441,10 @@ and the pending granular-flags-only rule. This runbook carries the rest.
      --integration-sha <SINK_SHA> --sink-ref <INTEGRATION_OR_PR_REF>
      --method <merge|fast-forward|cherry-pick|rebase>`; the command verifies the
      mapping and that `<SINK_SHA>` remains reachable from the named sink ref.
+     When you resolved a conflict while integrating, the patch ids differ and
+     `cherry-pick`/`rebase` refuse: record `--method conflict-resolved
+     --resolves <WORKER_SHA>` instead (the sink commit must touch every file
+     the worker commit touched).
      You do not have to derive these closeouts by hand (`#reportedcloseout`):
      `agent-doc queue claims <FILE>` gives every reported attempt a
      `reported_closeout` (the exact ordered verify / lineage-record / consume

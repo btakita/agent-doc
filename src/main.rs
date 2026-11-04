@@ -5250,9 +5250,19 @@ enum QueueAction {
         pushed_ref: Option<String>,
         #[arg(long)]
         integration_sha: Option<String>,
-        /// cherry-pick|rebase|merge|fast-forward
+        /// cherry-pick|rebase|merge|fast-forward|conflict-resolved.
+        /// `cherry-pick` and `rebase` require equal patch ids;
+        /// `conflict-resolved` is for an integration whose conflict was
+        /// resolved by hand (patch ids differ): the integration commit must
+        /// name the source (in its message, or via `--resolves`), be a
+        /// single-parent commit, and touch every file the source touched.
         #[arg(long)]
         method: Option<String>,
+        /// `--method conflict-resolved` only: the source commit the
+        /// integration resolves, for an integration commit whose message does
+        /// not name it. Must name the same commit as `--source-sha`.
+        #[arg(long, value_name = "SOURCE_SHA")]
+        resolves: Option<String>,
         /// Designated integration branch/ref (for example main,
         /// refs/heads/integration/queue, or refs/remotes/origin/pr-branch).
         /// The integration commit must be reachable from this ref.
@@ -9218,6 +9228,7 @@ fn try_main() -> anyhow::Result<()> {
                 pushed_ref,
                 integration_sha,
                 method,
+                resolves,
                 sink_ref,
                 release_tag,
                 release_state,
@@ -9247,6 +9258,7 @@ fn try_main() -> anyhow::Result<()> {
                             .as_deref()
                             .map(agent_doc_queue_io::queue_lineage::IntegrationMethod::parse)
                             .transpose()?,
+                        resolves_sha: resolves,
                         sink_ref,
                         release_tag,
                         release_state: release_state

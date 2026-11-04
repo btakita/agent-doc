@@ -136,6 +136,11 @@ pub enum ReportedRepoEvidence {
     IntegratedUnverified {
         facts: ReportedRepoFacts,
         reason: String,
+        /// The refusal is a `cherry-pick`/`rebase` patch-id mismatch: the
+        /// landed commit changed the patch (a resolved conflict), so the
+        /// re-proof is a `conflict-resolved` receipt, not the same method.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        patch_id_mismatch: bool,
     },
     /// Repository work with no `integrated` receipt. `sink` is `None` when the
     /// facts needed to check containment were never recorded.
@@ -332,6 +337,8 @@ const PROSE_ONLY: &str = "prose_only";
 const CHERRY_PICK: &str = "cherry_pick";
 const MERGE: &str = "merge";
 const CORRECT_SINK: &str = "correct_sink";
+/// The `--method` that records a hand-resolved-conflict integration.
+const CONFLICT_RESOLVED_METHOD: &str = "conflict-resolved";
 
 /// The lineage event that declares an attempt prose-only
 /// (`agent-doc queue lineage-record --event prose-only`).
@@ -579,6 +586,32 @@ fn sink_worktree(checked_out: Option<&str>) -> &str {
     checked_out.unwrap_or("<worktree-with-sink-ref-checked-out>")
 }
 
+/// The `integrated` receipt for a commit that integrated the source through a
+/// hand-resolved conflict (`--method conflict-resolved`). `--resolves` names
+/// the source explicitly, so the proof does not depend on the commit message.
+fn conflict_resolved_record_step(
+    document: &str,
+    claim: &QueueClaim,
+    facts: &ReportedRepoFacts,
+    integration: Option<&str>,
+    alternative: Option<&str>,
+    detail: String,
+) -> ReportedCloseoutStep {
+    let mut step = record_step(
+        document,
+        claim,
+        facts,
+        CONFLICT_RESOLVED_METHOD,
+        integration,
+        alternative,
+        detail,
+    );
+    let source = facts.source_sha.as_deref().unwrap_or("<source-sha>");
+    step.argv.extend(["--resolves".to_string(), source.to_string()]);
+    step.concrete = !step.argv.iter().any(|arg| is_placeholder(arg));
+    step
+}
+
 /// `cherry_pick` branch: apply the source commit on the checked-out sink
 /// branch, then record the new sink commit. The record step verifies the
 /// patch-id equivalence itself, so it is the proof.
@@ -610,7 +643,7 @@ fn cherry_pick_steps(
             None,
             Some(CHERRY_PICK),
             format!(
-                "record the cherry-picked commit: `git -C {sink_repo} rev-parse {sink_ref}` after the cherry-pick is --integration-sha. The command verifies patch-id equivalence with {source} and that the commit stays reachable from {sink_ref}"
+                "record the cherry-picked commit: `git -C {sink_repo} rev-parse {sink_ref}` after the cherry-pick is --integration-sha. The command verifies patch-id equivalence with {source} and that the commit stays reachable from {sink_ref}. When the cherry-pick conflicted and you resolved it, the patch ids differ and this refuses (`different patch ids`); record the same commit with `--method {CONFLICT_RESOLVED_METHOD} --resolves {source}` instead, which proves sink reachability, the named source, and that the commit touches every file {source} touched"
             ),
         ),
     ]
@@ -835,11 +868,21 @@ pub fn reported_claim_closeout(
                 operator_request_packet: String::new(),
             }
         }
-        ReportedRepoEvidence::IntegratedUnverified { facts, reason } => {
+        ReportedRepoEvidence::IntegratedUnverified {
+            facts,
+            reason,
+            patch_id_mismatch,
+        } => {
             let missing = facts.missing();
-            let detail = format!(
-                "the recorded integration proof no longer verifies ({reason}); keep the row live and re-prove it against the designated sink"
-            );
+            let detail = if *patch_id_mismatch {
+                format!(
+                    "the recorded integration proof no longer verifies ({reason}); the landed commit is not patch-equivalent to the source, so keep the row live and re-prove it as a conflict-resolved integration"
+                )
+            } else {
+                format!(
+                    "the recorded integration proof no longer verifies ({reason}); keep the row live and re-prove it against the designated sink"
+                )
+            };
             let mut steps = vec![inspect_step(document, claim, detail.clone())];
             if !missing.is_empty() {
                 steps.push(record_repository_work_step(
@@ -851,8 +894,21 @@ pub fn reported_claim_closeout(
                     format!("record the missing {}", missing.join(", ")),
                 ));
             }
-            steps.push(verify_step(facts, None));
-            steps.push(fast_forward_record_step(document, claim, facts));
+            if *patch_id_mismatch {
+                steps.push(conflict_resolved_record_step(
+                    document,
+                    claim,
+                    facts,
+                    None,
+                    None,
+                    format!(
+                        "record the landed sink commit as --integration-sha with `--method {CONFLICT_RESOLVED_METHOD}`: the command proves it is reachable from the designated sink ref, names the source (`--resolves`), and touches every file the source touched"
+                    ),
+                ));
+            } else {
+                steps.push(verify_step(facts, None));
+                steps.push(fast_forward_record_step(document, claim, facts));
+            }
             steps.push(consume);
             ReportedClaimCloseout {
                 shape: if missing.is_empty() {
@@ -1942,6 +1998,7 @@ mod tests {
         let evidence = ReportedRepoEvidence::IntegratedUnverified {
             facts: facts(),
             reason: "integration commit is not reachable from the designated sink ref".to_string(),
+            patch_id_mismatch: false,
         };
         let closeout = reported_claim_closeout(DOC, &claim, &evidence).unwrap();
         assert_eq!(closeout.shape, ReportedCloseoutShape::IntegrationProofStale);
@@ -1952,6 +2009,71 @@ mod tests {
         assert_eq!(
             closeout.steps[1].action,
             ReportedCloseoutAction::VerifyIntegration
+        );
+    }
+
+    /// `#lineageconflictresolved`: a cherry-pick refused for a patch-id
+    /// mismatch is re-proven as a conflict-resolved integration naming its
+    /// source, never by repeating the same refused method or by a
+    /// fast-forward record the sink cannot satisfy.
+    #[test]
+    fn patch_id_mismatch_is_reproven_as_conflict_resolved() {
+        let claim = reported("do [#resolved]", "subagent:resolved");
+        let evidence = ReportedRepoEvidence::IntegratedUnverified {
+            facts: facts(),
+            reason: "explicit CherryPick mapping has different patch ids: a != b".to_string(),
+            patch_id_mismatch: true,
+        };
+        let closeout = reported_claim_closeout(DOC, &claim, &evidence).unwrap();
+        assert_eq!(closeout.shape, ReportedCloseoutShape::IntegrationProofStale);
+        let records: Vec<_> = closeout
+            .steps
+            .iter()
+            .filter(|step| step.action == ReportedCloseoutAction::RecordIntegration)
+            .collect();
+        assert_eq!(records.len(), 1, "{closeout:#?}");
+        let flag = |name: &str| {
+            let index = records[0].argv.iter().position(|arg| arg == name).unwrap();
+            records[0].argv[index + 1].clone()
+        };
+        assert_eq!(flag("--method"), "conflict-resolved");
+        assert_eq!(flag("--resolves"), "abc123");
+        assert_eq!(flag("--source-sha"), "abc123");
+        assert_eq!(flag("--integration-sha"), "<sink-commit-sha>");
+        assert!(!records[0].concrete);
+        assert!(
+            closeout
+                .steps
+                .iter()
+                .all(|step| step.action != ReportedCloseoutAction::VerifyIntegration),
+            "an ancestry check cannot pass for a conflict-resolved commit: {closeout:#?}"
+        );
+
+        let cherry = reported_claim_closeout(
+            DOC,
+            &claim,
+            &ReportedRepoEvidence::Unintegrated {
+                facts: facts(),
+                sink: Some(SinkContainment::DoesNotContain {
+                    fast_forward: false,
+                    checked_out_worktree: None,
+                }),
+            },
+        )
+        .unwrap();
+        let cherry_record = cherry
+            .steps
+            .iter()
+            .find(|step| {
+                step.action == ReportedCloseoutAction::RecordIntegration
+                    && step.alternative.as_deref() == Some(CHERRY_PICK)
+            })
+            .unwrap();
+        assert!(
+            cherry_record
+                .detail
+                .contains("--method conflict-resolved --resolves abc123"),
+            "{cherry_record:#?}"
         );
     }
 
@@ -1982,6 +2104,12 @@ mod tests {
             ReportedRepoEvidence::IntegratedUnverified {
                 facts: ReportedRepoFacts::default(),
                 reason: "x".to_string(),
+                patch_id_mismatch: false,
+            },
+            ReportedRepoEvidence::IntegratedUnverified {
+                facts: facts(),
+                reason: "x".to_string(),
+                patch_id_mismatch: true,
             },
         ];
         for sink in [

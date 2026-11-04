@@ -138,6 +138,15 @@ pub enum IntegrationMethod {
     Rebase,
     Merge,
     FastForward,
+    /// A coordinator integrated the source by hand-resolving a conflict, so
+    /// the landed commit's patch id differs from the source's and the
+    /// cherry-pick/rebase equivalence cannot prove it. The proof is weaker but
+    /// still Git-checked: the integration commit is reachable from the sink
+    /// ref, it names the source (its message carries the source SHA, as
+    /// `git cherry-pick -x` writes it, or the receipt's explicit `--resolves`
+    /// names the same commit), both are single-parent commits, and the
+    /// integration touches every file the source touched.
+    ConflictResolved,
     /// Legacy receipt shape retained for deserialization only. New receipts
     /// must use a Git-verifiable integration method.
     Other,
@@ -150,14 +159,72 @@ impl IntegrationMethod {
             "rebase" => Ok(Self::Rebase),
             "merge" => Ok(Self::Merge),
             "fast_forward" | "ff" => Ok(Self::FastForward),
+            "conflict_resolved" | "conflictresolved" | "resolved" => Ok(Self::ConflictResolved),
             "other" => bail!(
-                "integration method `other` is not verifiable; expected cherry-pick|rebase|merge|fast-forward"
+                "integration method `other` is not verifiable; expected {INTEGRATION_METHODS}"
             ),
-            other => bail!(
-                "unknown integration method {other:?}; expected cherry-pick|rebase|merge|fast-forward"
-            ),
+            other => bail!("unknown integration method {other:?}; expected {INTEGRATION_METHODS}"),
         }
     }
+
+    /// The `--method` spelling `lineage-record` accepts.
+    pub const fn as_cli_str(self) -> &'static str {
+        match self {
+            Self::CherryPick => "cherry-pick",
+            Self::Rebase => "rebase",
+            Self::Merge => "merge",
+            Self::FastForward => "fast-forward",
+            Self::ConflictResolved => "conflict-resolved",
+            Self::Other => "other",
+        }
+    }
+}
+
+/// Every `--method` value `lineage-record` accepts for new evidence.
+pub const INTEGRATION_METHODS: &str = "cherry-pick|rebase|merge|fast-forward|conflict-resolved";
+
+/// Shortest abbreviation of the source SHA an integration commit message may
+/// use to name it for a `conflict-resolved` receipt. Ten hex digits is what
+/// `git log --oneline` prints in this repository, and is long enough that a
+/// chance match in prose is not a plausible source of false proof.
+const MIN_NAMED_SOURCE_ABBREV: usize = 10;
+
+/// A `cherry-pick`/`rebase` receipt refused because the integration commit's
+/// patch id differs from the source's: the integration changed the patch,
+/// typically by resolving a conflict. Typed so a caller can recommend the
+/// `conflict-resolved` method instead of reporting a generic mismatch.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PatchIdMismatch {
+    pub method: IntegrationMethod,
+    pub source_sha: String,
+    pub integration_sha: String,
+    pub source_patch: String,
+    pub integration_patch: String,
+}
+
+impl std::fmt::Display for PatchIdMismatch {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "explicit {:?} mapping has different patch ids: {} != {}. When integrating {} needed a hand-resolved conflict, {} is not patch-equivalent and `--method {}` cannot prove it; record `--method conflict-resolved --resolves {}` instead (the integration commit must be reachable from --sink-ref, name the source, and touch every file the source touched)",
+            self.method,
+            self.source_patch,
+            self.integration_patch,
+            self.source_sha,
+            self.integration_sha,
+            self.method.as_cli_str(),
+            self.source_sha,
+        )
+    }
+}
+
+impl std::error::Error for PatchIdMismatch {}
+
+/// Whether `err` (anywhere in its context chain) is a cherry-pick/rebase
+/// patch-id refusal.
+pub fn is_patch_id_mismatch(err: &anyhow::Error) -> bool {
+    err.chain()
+        .any(|cause| cause.downcast_ref::<PatchIdMismatch>().is_some())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -211,6 +278,10 @@ pub struct QueueLineageEvent {
     pub integration_sha: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub integration_method: Option<IntegrationMethod>,
+    /// `conflict-resolved` only: the source commit the integration commit
+    /// explicitly resolves, when its message does not name it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resolves_sha: Option<String>,
     /// Explicit branch/ref that owns the integrated result. The integration
     /// commit must remain reachable from this ref; a side-branch commit alone
     /// is not durable integration proof.
@@ -239,6 +310,8 @@ pub struct RecordRequest {
     pub pushed_ref: Option<String>,
     pub integration_sha: Option<String>,
     pub integration_method: Option<IntegrationMethod>,
+    /// `--resolves`: see [`QueueLineageEvent::resolves_sha`].
+    pub resolves_sha: Option<String>,
     pub sink_ref: Option<String>,
     pub release_tag: Option<String>,
     pub release_state: Option<ReleaseState>,
@@ -737,6 +810,7 @@ fn event_from_request(request: RecordRequest) -> Result<QueueLineageEvent> {
         pushed_ref: nonempty(request.pushed_ref),
         integration_sha: nonempty(request.integration_sha),
         integration_method: request.integration_method,
+        resolves_sha: nonempty(request.resolves_sha),
         sink_ref: nonempty(request.sink_ref),
         release_tag: nonempty(request.release_tag),
         release_state: request.release_state,
@@ -759,6 +833,9 @@ fn durable_path(path: PathBuf) -> Result<String> {
 
 fn validate_transition(attempt: &QueueLineageAttempt, event: &QueueLineageEvent) -> Result<()> {
     let has = |kind| attempt.events.iter().any(|existing| existing.kind == kind);
+    if event.resolves_sha.is_some() && event.kind != QueueLineageEventKind::Integrated {
+        bail!("--resolves applies only to an `integrated` lineage event with `--method conflict-resolved`");
+    }
     match event.kind {
         QueueLineageEventKind::Created => bail!("created is binary-owned by `queue claim`"),
         QueueLineageEventKind::Attached => {
@@ -793,7 +870,14 @@ fn validate_transition(attempt: &QueueLineageAttempt, event: &QueueLineageEvent)
             }
             if event.integration_method == Some(IntegrationMethod::Other) {
                 bail!(
-                    "integrated lineage event refuses unverifiable method `other`; use cherry-pick|rebase|merge|fast-forward"
+                    "integrated lineage event refuses unverifiable method `other`; use {INTEGRATION_METHODS}"
+                );
+            }
+            if event.resolves_sha.is_some()
+                && event.integration_method != Some(IntegrationMethod::ConflictResolved)
+            {
+                bail!(
+                    "--resolves names the source of a conflict-resolved integration; it applies only to `--method conflict-resolved`"
                 );
             }
         }
@@ -862,6 +946,7 @@ struct Facts {
     pushed_ref: Option<String>,
     integration_sha: Option<String>,
     integration_method: Option<IntegrationMethod>,
+    resolves_sha: Option<String>,
     sink_ref: Option<String>,
     release_tag: Option<String>,
     release_state: Option<ReleaseState>,
@@ -889,6 +974,9 @@ fn facts(attempt: &QueueLineageAttempt) -> Facts {
         keep!(integration_sha);
         if event.integration_method.is_some() {
             facts.integration_method = event.integration_method;
+            // `--resolves` belongs to the integration edge it was recorded
+            // with; a later edge of another method must not inherit it.
+            facts.resolves_sha = event.resolves_sha.clone();
         }
         keep!(sink_ref);
         keep!(release_tag);
@@ -976,6 +1064,7 @@ fn verify_event(attempt: &QueueLineageAttempt, event: &QueueLineageEvent) -> Res
                 event
                     .integration_method
                     .context("missing integration method")?,
+                event.resolves_sha.as_deref(),
                 event.sink_ref.as_deref().context("missing designated sink ref")?,
             )?;
         }
@@ -1075,6 +1164,7 @@ fn verify_integration(
     source: &str,
     integration: &str,
     method: IntegrationMethod,
+    resolves: Option<&str>,
     sink_ref: &str,
 ) -> Result<()> {
     require_commit(source_repo, source, "source")?;
@@ -1090,14 +1180,22 @@ fn verify_integration(
             let source_patch = patch_id(source_repo, source)?;
             let integration_patch = patch_id(sink_repo, integration)?;
             if source_patch != integration_patch {
-                bail!(
-                    "explicit {method:?} mapping has different patch ids: {source_patch} != {integration_patch}"
-                );
+                return Err(PatchIdMismatch {
+                    method,
+                    source_sha: source.to_string(),
+                    integration_sha: integration.to_string(),
+                    source_patch,
+                    integration_patch,
+                }
+                .into());
             }
             Ok(())
         }
+        IntegrationMethod::ConflictResolved => {
+            verify_conflict_resolution(source_repo, sink_repo, source, integration, resolves)
+        }
         IntegrationMethod::Other => bail!(
-            "integration method `other` is not verifiable; record a cherry-pick, rebase, merge, or fast-forward edge"
+            "integration method `other` is not verifiable; record a cherry-pick, rebase, merge, fast-forward, or conflict-resolved edge"
         ),
     }?;
     let sink_commit = git_output(sink_repo, &["rev-parse", &format!("{sink_ref}^{{commit}}")])
@@ -1108,6 +1206,104 @@ fn verify_integration(
         &sink_commit,
         "integration commit is not reachable from the designated sink ref",
     )
+}
+
+/// The `conflict-resolved` edge: the integration commit names the source and
+/// covers every file it touched. Sink reachability is checked by the caller,
+/// as for every method.
+fn verify_conflict_resolution(
+    source_repo: &Path,
+    sink_repo: &Path,
+    source: &str,
+    integration: &str,
+    resolves: Option<&str>,
+) -> Result<()> {
+    let source_full = git_output(source_repo, &["rev-parse", &format!("{source}^{{commit}}")])?;
+    let integration_full =
+        git_output(sink_repo, &["rev-parse", &format!("{integration}^{{commit}}")])?;
+    if source_full == integration_full {
+        bail!(
+            "conflict-resolved integration {integration} is the source commit itself; record it with `--method fast-forward`"
+        );
+    }
+    require_single_parent(source_repo, &source_full, "source")?;
+    require_single_parent(sink_repo, &integration_full, "integration")?;
+    match resolves {
+        Some(resolves) => {
+            let named = git_output(source_repo, &["rev-parse", &format!("{resolves}^{{commit}}")])
+                .with_context(|| format!("--resolves commit {resolves:?} is unavailable"))?;
+            if named != source_full {
+                bail!(
+                    "--resolves {resolves} names {named}, not source commit {source_full}; a conflict-resolved receipt must name its own source"
+                );
+            }
+        }
+        None => {
+            let message = git_output(sink_repo, &["log", "-1", "--format=%B", &integration_full])?;
+            if !message_names_commit(&message, &source_full) {
+                bail!(
+                    "conflict-resolved integration {integration_full} does not name source commit {source_full}: its message carries no SHA of it (at least {MIN_NAMED_SOURCE_ABBREV} hex digits, e.g. the `(cherry picked from commit …)` line `git cherry-pick -x` writes). Pass `--resolves {source_full}` to name it explicitly"
+                );
+            }
+        }
+    }
+    let source_files = touched_files(source_repo, &source_full)?;
+    if source_files.is_empty() {
+        bail!(
+            "source commit {source_full} touches no file, so no integration commit can be shown to carry it"
+        );
+    }
+    let integration_files = touched_files(sink_repo, &integration_full)?;
+    let uncovered: Vec<&String> = source_files.difference(&integration_files).collect();
+    if !uncovered.is_empty() {
+        let shown: Vec<&str> = uncovered.iter().take(10).map(|path| path.as_str()).collect();
+        bail!(
+            "conflict-resolved integration {integration_full} does not touch {} of the {} file(s) source commit {source_full} touched ({}{}); it cannot carry that change. Integrate the missing paths, or record the commit that does",
+            uncovered.len(),
+            source_files.len(),
+            shown.join(", "),
+            if uncovered.len() > shown.len() { ", …" } else { "" },
+        );
+    }
+    Ok(())
+}
+
+/// Whether a commit message names `full_sha` by its full SHA or by an
+/// abbreviation of at least [`MIN_NAMED_SOURCE_ABBREV`] hex digits.
+fn message_names_commit(message: &str, full_sha: &str) -> bool {
+    let full_sha = full_sha.to_ascii_lowercase();
+    message
+        .split(|c: char| !c.is_ascii_hexdigit())
+        .filter(|token| token.len() >= MIN_NAMED_SOURCE_ABBREV && token.len() <= full_sha.len())
+        .any(|token| full_sha.starts_with(&token.to_ascii_lowercase()))
+}
+
+/// A conflict-resolved edge compares one commit's change against its parent;
+/// a merge (or root) commit has no single change to compare.
+fn require_single_parent(repo: &Path, sha: &str, label: &str) -> Result<()> {
+    let parents = git_output(repo, &["rev-list", "--parents", "-n", "1", sha])?;
+    let count = parents.split_whitespace().count().saturating_sub(1);
+    if count != 1 {
+        bail!(
+            "conflict-resolved {label} commit {sha} has {count} parents; the edge compares single-parent commits. Record a merge with `--method merge`"
+        );
+    }
+    Ok(())
+}
+
+/// Every path a single-parent commit changed, renames split into their delete
+/// and add so a path is compared literally.
+fn touched_files(repo: &Path, sha: &str) -> Result<BTreeSet<String>> {
+    let listing = git_output(
+        repo,
+        &["diff-tree", "--no-commit-id", "--name-only", "-r", "--no-renames", "-z", sha],
+    )?;
+    Ok(listing
+        .split('\0')
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+        .map(str::to_string)
+        .collect())
 }
 
 fn patch_id(repo: &Path, sha: &str) -> Result<String> {
@@ -1309,6 +1505,7 @@ fn event_carries_repo_facts(event: &QueueLineageEvent) -> bool {
         || event.source_sha.is_some()
         || event.pushed_ref.is_some()
         || event.integration_sha.is_some()
+        || event.resolves_sha.is_some()
         || event.sink_ref.is_some()
         || matches!(
             event.kind,
@@ -1506,6 +1703,7 @@ fn reported_repo_evidence_resolved(
                     Ok(()) => ReportedRepoEvidence::IntegratedVerified,
                     Err(err) => ReportedRepoEvidence::IntegratedUnverified {
                         facts,
+                        patch_id_mismatch: is_patch_id_mismatch(&err),
                         reason: format!("{err:#}"),
                     },
                 },
@@ -1566,7 +1764,7 @@ fn require_integrated_repo_work_inner(
                 .or(prior.repo_path.as_deref()).unwrap_or("<sink-repo>");
             let source = prior.source_sha.as_deref().unwrap_or("<source-sha>");
             anyhow::anyhow!(
-                "reported repository work for {item:?} generation {generation} is not integrated. A dirty worktree, commit, or side branch is not terminal. Integrate it into the designated sink, then record proof with `agent-doc queue lineage-record {} --item {:?} --generation {generation} --event integrated --source-repo {:?} --sink-repo {:?} --source-sha {source} --integration-sha <sink-commit-sha> --sink-ref <designated-sink-ref> --method <merge|fast-forward|cherry-pick|rebase>`; keep the row live until that command succeeds",
+                "reported repository work for {item:?} generation {generation} is not integrated. A dirty worktree, commit, or side branch is not terminal. Integrate it into the designated sink, then record proof with `agent-doc queue lineage-record {} --item {:?} --generation {generation} --event integrated --source-repo {:?} --sink-repo {:?} --source-sha {source} --integration-sha <sink-commit-sha> --sink-ref <designated-sink-ref> --method <merge|fast-forward|cherry-pick|rebase|conflict-resolved>` (`conflict-resolved` also takes `--resolves <source-sha>` when the integration commit's message does not name the source); keep the row live until that command succeeds",
                 file.display(),
                 item,
                 source_repo,
@@ -1722,7 +1920,17 @@ fn diagnose(attempt: &QueueLineageAttempt, facts: &Facts) -> Vec<Diagnostic> {
                 level: DiagnosticLevel::Mismatch,
                 text: "integration_method_other: legacy edge is not integration proof".to_string(),
             });
-        } else if verify_integration(source_repo, sink_repo, source, integration, method, sink_ref).is_err() {
+        } else if verify_integration(
+            source_repo,
+            sink_repo,
+            source,
+            integration,
+            method,
+            facts.resolves_sha.as_deref(),
+            sink_ref,
+        )
+        .is_err()
+        {
             diagnostics.push(Diagnostic {
                 level: DiagnosticLevel::Mismatch,
                 text: format!(
@@ -1840,7 +2048,7 @@ pub fn render_verbose_text(report: &QueueLineageReport) -> String {
             attempt.integration_sha.as_deref().unwrap_or("-"),
             attempt
                 .integration_method
-                .map(|method| format!("{method:?}").to_ascii_lowercase())
+                .map(|method| method.as_cli_str().to_string())
                 .unwrap_or_else(|| "-".to_string()),
             attempt.sink_ref.as_deref().unwrap_or("-")
         ));
@@ -2404,6 +2612,248 @@ mod tests {
             report.attempts[0].sink_ref.as_deref(),
             Some(base_branch.as_str())
         );
+    }
+
+    /// A source commit and a coordinator's conflict-resolved port of it onto
+    /// a sink branch that changed the same line: the ported commit's patch id
+    /// differs from the source's, exactly like 9a4a8d4ea4 -> 443070536d.
+    struct ConflictFixture {
+        fixture: RepoFixture,
+        base: String,
+        sink: String,
+        source: String,
+    }
+
+    impl ConflictFixture {
+        fn new() -> Self {
+            let fixture = RepoFixture::new();
+            fixture.commit_file("shared.txt", "original\n", "shared base");
+            let base = fixture.head();
+            let sink = git_output(&fixture.root, &["branch", "--show-current"]).unwrap();
+            git(&fixture.root, &["switch", "-qc", "source"]);
+            std::fs::write(fixture.root.join("added.txt"), "new file\n").unwrap();
+            git(&fixture.root, &["add", "added.txt"]);
+            let source = fixture.commit_file("shared.txt", "worker line\n", "worker change");
+            git(&fixture.root, &["switch", "-q", &sink]);
+            fixture.commit_file("shared.txt", "sink line\n", "sink moved the same line");
+            Self {
+                fixture,
+                base,
+                sink,
+                source,
+            }
+        }
+
+        /// Land the source on the checked-out branch with the conflict
+        /// resolved by hand: both files, merged content, `message`.
+        fn resolve_onto_current(&self, message: &str, include_added: bool) -> String {
+            let root = &self.fixture.root;
+            std::fs::write(root.join("shared.txt"), "sink line\nworker line\n").unwrap();
+            git(root, &["add", "shared.txt"]);
+            if include_added {
+                std::fs::write(root.join("added.txt"), "new file\n").unwrap();
+                git(root, &["add", "added.txt"]);
+            }
+            git(root, &["commit", "-qm", message]);
+            self.fixture.head()
+        }
+
+        fn start_attempt(&self) {
+            let doc = &self.fixture.doc;
+            let claim = make_claim(doc, "work", "subagent:port", Some("worker:port"));
+            record_started(doc, &claim).unwrap();
+            record(doc, "work", 1, attach_request(&self.fixture, "worker:port", &self.base))
+                .unwrap();
+            record(
+                doc,
+                "work",
+                1,
+                RecordRequest {
+                    kind: QueueLineageEventKind::Committed,
+                    source_sha: Some(self.source.clone()),
+                    ..RecordRequest::default()
+                },
+            )
+            .unwrap();
+        }
+
+        fn integrate(
+            &self,
+            integration: &str,
+            method: IntegrationMethod,
+            resolves: Option<&str>,
+        ) -> Result<QueueLineageAttempt> {
+            record(
+                &self.fixture.doc,
+                "work",
+                1,
+                RecordRequest {
+                    kind: QueueLineageEventKind::Integrated,
+                    source_sha: Some(self.source.clone()),
+                    integration_sha: Some(integration.to_string()),
+                    integration_method: Some(method),
+                    resolves_sha: resolves.map(str::to_string),
+                    sink_ref: Some(self.sink.clone()),
+                    ..RecordRequest::default()
+                },
+            )
+        }
+    }
+
+    /// `#lineageconflictresolved`: a coordinator that resolved a conflict
+    /// while integrating a worker commit records honest proof with
+    /// `--method conflict-resolved`; cherry-pick and rebase stay strict, and
+    /// the new method still refuses an unreachable, unnamed, or non-covering
+    /// commit.
+    #[test]
+    fn conflict_resolved_integration_requires_a_reachable_named_covering_commit() {
+        let conflict = ConflictFixture::new();
+        let root = conflict.fixture.root.clone();
+        let source = conflict.source.clone();
+        let sink = conflict.sink.clone();
+        conflict.start_attempt();
+
+        // Off the sink: a named, covering port on a side branch.
+        git(&root, &["switch", "-qc", "side"]);
+        let side = conflict.resolve_onto_current("side port", true);
+        git(&root, &["switch", "-q", &sink]);
+        // On the sink, but missing one of the source's files.
+        git(&root, &["switch", "-qc", "partial"]);
+        let partial = conflict.resolve_onto_current("partial port", false);
+        git(&root, &["switch", "-q", &sink]);
+        // The honest landed commit: reachable, covering, message names nothing.
+        let landed = conflict.resolve_onto_current("feat: land the worker change", true);
+        git(&root, &["merge", "-q", "--no-edit", "partial"]);
+        let sink_head = conflict.fixture.head();
+
+        let strict = conflict
+            .integrate(&landed, IntegrationMethod::CherryPick, None)
+            .unwrap_err();
+        assert!(is_patch_id_mismatch(&strict), "{strict:#}");
+        let text = format!("{strict:#}");
+        assert!(text.contains("different patch ids"), "{text}");
+        assert!(
+            text.contains(&format!("--method conflict-resolved --resolves {source}")),
+            "the refusal names the honest method: {text}"
+        );
+        let rebase = conflict
+            .integrate(&landed, IntegrationMethod::Rebase, None)
+            .unwrap_err();
+        assert!(is_patch_id_mismatch(&rebase), "{rebase:#}");
+        let resolves_on_pick = conflict
+            .integrate(&landed, IntegrationMethod::CherryPick, Some(&source))
+            .unwrap_err();
+        assert!(
+            format!("{resolves_on_pick:#}").contains("only to `--method conflict-resolved`"),
+            "{resolves_on_pick:#}"
+        );
+
+        let unnamed = conflict
+            .integrate(&landed, IntegrationMethod::ConflictResolved, None)
+            .unwrap_err();
+        assert!(
+            format!("{unnamed:#}").contains("does not name source commit"),
+            "{unnamed:#}"
+        );
+        assert!(!is_patch_id_mismatch(&unnamed));
+        let wrong_name = conflict
+            .integrate(&landed, IntegrationMethod::ConflictResolved, Some(&conflict.base))
+            .unwrap_err();
+        assert!(
+            format!("{wrong_name:#}").contains("must name its own source"),
+            "{wrong_name:#}"
+        );
+        let unreachable = conflict
+            .integrate(&side, IntegrationMethod::ConflictResolved, Some(&source))
+            .unwrap_err();
+        assert!(
+            format!("{unreachable:#}").contains("not reachable from the designated sink ref"),
+            "{unreachable:#}"
+        );
+        let uncovered = conflict
+            .integrate(&partial, IntegrationMethod::ConflictResolved, Some(&source))
+            .unwrap_err();
+        assert!(
+            format!("{uncovered:#}").contains("added.txt"),
+            "{uncovered:#}"
+        );
+        let merge_commit = conflict
+            .integrate(&sink_head, IntegrationMethod::ConflictResolved, Some(&source))
+            .unwrap_err();
+        assert!(
+            format!("{merge_commit:#}").contains("has 2 parents"),
+            "{merge_commit:#}"
+        );
+        let itself = conflict
+            .integrate(&source, IntegrationMethod::ConflictResolved, Some(&source))
+            .unwrap_err();
+        assert!(
+            format!("{itself:#}").contains("is the source commit itself"),
+            "{itself:#}"
+        );
+        // No refusal left a receipt behind.
+        assert!(
+            matches!(
+                reported_repo_evidence(&conflict.fixture.doc, "work", 1).unwrap(),
+                ReportedRepoEvidence::Unintegrated { .. }
+            ),
+            "a refused integration records nothing"
+        );
+
+        let attempt = conflict
+            .integrate(&landed, IntegrationMethod::ConflictResolved, Some(&source))
+            .unwrap();
+        let integrated = latest_integrated(&attempt).unwrap();
+        assert_eq!(integrated.resolves_sha.as_deref(), Some(source.as_str()));
+        assert_eq!(
+            reported_repo_evidence(&conflict.fixture.doc, "work", 1).unwrap(),
+            ReportedRepoEvidence::IntegratedVerified
+        );
+        require_integrated_repo_work(&conflict.fixture.doc, "work", 1).unwrap();
+        let report = query(&conflict.fixture.doc, Some("work"), Some(1)).unwrap();
+        assert_eq!(report.attempts[0].verification, "verified", "{report:#?}");
+        assert_eq!(
+            report.attempts[0].integration_method,
+            Some(IntegrationMethod::ConflictResolved)
+        );
+        assert!(
+            render_verbose_text(&report).contains("method=conflict-resolved"),
+            "{}",
+            render_verbose_text(&report)
+        );
+    }
+
+    /// The integration commit's own message can name the source in place of
+    /// `--resolves`, by full SHA or an abbreviation of at least ten digits.
+    #[test]
+    fn conflict_resolved_integration_accepts_a_message_that_names_the_source() {
+        let conflict = ConflictFixture::new();
+        conflict.start_attempt();
+        let abbrev = &conflict.source[..MIN_NAMED_SOURCE_ABBREV];
+        let landed = conflict.resolve_onto_current(
+            &format!("feat: land the worker change\n\nResolves-conflict-of: {abbrev}"),
+            true,
+        );
+        conflict
+            .integrate(&landed, IntegrationMethod::ConflictResolved, None)
+            .unwrap();
+        assert_eq!(
+            reported_repo_evidence(&conflict.fixture.doc, "work", 1).unwrap(),
+            ReportedRepoEvidence::IntegratedVerified
+        );
+
+        let full = conflict.source.clone();
+        assert!(message_names_commit(
+            &format!("x\n\n(cherry picked from commit {full})"),
+            &full
+        ));
+        assert!(message_names_commit(&full.to_ascii_uppercase(), &full));
+        assert!(
+            !message_names_commit(&format!("see {}", &full[..MIN_NAMED_SOURCE_ABBREV - 1]), &full),
+            "a short abbreviation is not a name"
+        );
+        assert!(!message_names_commit(&format!("{full}0"), &full));
+        assert!(!message_names_commit("deadbeefdeadbeef", &full));
     }
 
     #[test]

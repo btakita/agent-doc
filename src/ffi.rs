@@ -317,6 +317,78 @@ fn editor_surface_event_message(project_root: &Path, event: EditorSurfaceEvent<'
     )
 }
 
+/// `#controllerrecyclelost`: keep the durable record of a replica attach the
+/// editor paused on operator evidence in step with the outcome it just
+/// reported. This runs inside the editor process, so the recorded pid is the
+/// editor that disarmed its retry. A record failure is logged, never swallowed;
+/// the surface event itself is already appended.
+fn apply_editor_attach_hold_transition(
+    project_root: &Path,
+    source: &str,
+    file_path: &str,
+    surface: &str,
+    status: &str,
+) {
+    use agent_doc_crdt_relay_io::editor_attach_hold;
+    use agent_doc_editor_surface::attach_failure::{AttachHoldTransition, attach_hold_transition};
+    let Some(transition) = attach_hold_transition(surface, status) else {
+        return;
+    };
+    if file_path.is_empty() || file_path == "." {
+        return;
+    }
+    let file = if Path::new(file_path).is_absolute() {
+        PathBuf::from(file_path)
+    } else {
+        project_root.join(file_path)
+    };
+    let file = file.as_path();
+    let outcome = match &transition {
+        AttachHoldTransition::Record { status_token } => editor_attach_hold::record(
+            project_root,
+            file,
+            &editor_attach_hold::EditorAttachHold {
+                status_token: status_token.clone(),
+                editor_source: source.to_string(),
+                editor_pid: std::process::id(),
+                canonical_path: file
+                    .canonicalize()
+                    .unwrap_or_else(|_| file.to_path_buf())
+                    .display()
+                    .to_string(),
+                recorded_at_ms: std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|elapsed| elapsed.as_millis() as u64)
+                    .unwrap_or_default(),
+            },
+        )
+        .map(|()| format!("action=recorded status_token={status_token}")),
+        AttachHoldTransition::Clear => editor_attach_hold::clear(project_root, file)
+            .map(|removed| format!("action=superseded removed={removed}")),
+    };
+    let message = match outcome {
+        Ok(outcome) => format!(
+            "editor_attach_hold_transition file={} source={source} editor_pid={} {outcome} (#controllerrecyclelost)",
+            editor_surface_relative_path(project_root, file_path),
+            std::process::id(),
+        ),
+        Err(error) => {
+            eprintln!("[ffi] editor attach hold transition failed: {error:#}");
+            format!(
+                "editor_attach_hold_transition_failed file={} source={source} error={error:#} (#controllerrecyclelost)",
+                editor_surface_relative_path(project_root, file_path),
+            )
+        }
+    };
+    if let Err(error) = agent_doc_ops_log_io::try_append_ops_log_at_project(
+        project_root,
+        &message,
+        agent_doc_ops_log_io::OpsLogTracking::default(),
+    ) {
+        eprintln!("[ffi] editor attach hold transition log failed: {error:#}");
+    }
+}
+
 /// Record a typed editor-surface outcome in the project ops log.
 ///
 /// This is the shared formatter/writer for JetBrains and VS Code. `file_path`
@@ -370,6 +442,7 @@ pub unsafe extern "C" fn agent_doc_record_editor_surface_event(
             agent_doc_ops_log_io::OpsLogTracking::default(),
         )
         .context("failed to append editor surface event")?;
+        apply_editor_attach_hold_transition(&project_root, &source, &file_path, &surface, &status);
         Ok(())
     })();
 
@@ -4382,6 +4455,68 @@ mod tests {
         assert!(ops.contains("surface=vcs_refresh_save action=save_document"));
         assert!(ops.contains("agent_command=save_document status=saved"));
         assert!(ops.contains("file=tasks/session.md patch_id=patch-1 doc=session #cyh0"));
+    }
+
+    /// `#controllerrecyclelost`: the JetBrains plugin reports a paused attach
+    /// through this one native call (`status=attach_refused_ambiguous-retained-projection`,
+    /// 2026-11-04 `sdk-dev.md`). The call durably records the hold against the
+    /// calling editor process, and the next registration outcome that is not a
+    /// hold supersedes it, so the retained-write readers can name the operator
+    /// action without a plugin generation.
+    #[test]
+    fn a_paused_replica_attach_event_records_and_a_later_outcome_clears_the_hold() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        let doc = tmp.path().join("tasks/sdk-dev.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(&doc, "body\n").unwrap();
+        let record = |status: &str| {
+            let root = CString::new(tmp.path().to_string_lossy().as_bytes()).unwrap();
+            let source = CString::new("jetbrains").unwrap();
+            let file = CString::new(doc.to_string_lossy().as_bytes()).unwrap();
+            let surface = CString::new("replica_registration").unwrap();
+            let action = CString::new("replica_attach").unwrap();
+            let command = CString::new("automatic_attach").unwrap();
+            let status = CString::new(status).unwrap();
+            unsafe {
+                agent_doc_record_editor_surface_event(
+                    root.as_ptr(),
+                    source.as_ptr(),
+                    file.as_ptr(),
+                    surface.as_ptr(),
+                    action.as_ptr(),
+                    command.as_ptr(),
+                    ptr::null(),
+                    status.as_ptr(),
+                )
+            }
+        };
+
+        assert_eq!(record("attach_refused_ambiguous-retained-projection"), 1);
+        let hold = agent_doc_crdt_relay_io::editor_attach_hold::load(tmp.path(), &doc)
+            .unwrap()
+            .expect("the paused attach is durably recorded");
+        assert_eq!(hold.status_token, "ambiguous-retained-projection");
+        assert_eq!(hold.editor_source, "jetbrains");
+        assert_eq!(hold.editor_pid, std::process::id());
+        assert_eq!(
+            agent_doc_crdt_relay_io::editor_attach_hold::observe(&doc),
+            Some(hold)
+        );
+
+        // A transient refusal re-arms the editor's own retry: no longer a hold.
+        assert_eq!(record("attach_refused_controller-register"), 1);
+        assert_eq!(
+            agent_doc_crdt_relay_io::editor_attach_hold::load(tmp.path(), &doc).unwrap(),
+            None
+        );
+        let ops = std::fs::read_to_string(tmp.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops.contains("editor_attach_hold_transition file=tasks/sdk-dev.md source=jetbrains"),
+            "{ops}"
+        );
+        assert!(ops.contains("action=recorded status_token=ambiguous-retained-projection"), "{ops}");
+        assert!(ops.contains("action=superseded removed=true"), "{ops}");
     }
 
     #[test]

@@ -1744,9 +1744,93 @@ mod tests {
             ),
             "{err:#}"
         );
+        // `#controllerrecyclelost`: the wait is derived from the shared
+        // ownership predicate, never promised in repair's own words.
+        let rendered = format!("{err:#}");
+        assert!(
+            rendered.contains("deferral, not a lost response"),
+            "an owned retained write renders the predicate's deferral: {rendered}"
+        );
+        assert!(!rendered.contains("delivers it once"), "{rendered}");
         let after = std::fs::read_to_string(&doc).unwrap();
         assert_eq!(after, content, "no second copy and no queue consumption");
         assert!(after.contains("- a later operator item"));
+    }
+
+    /// `#controllerrecyclelost`: a paused-attach record from a live editor
+    /// process describes the document only while that editor still has it
+    /// open. Once the tab is closed (the first step of the operator action, and
+    /// the shape of this headless fixture), repair's retained-replay refusal
+    /// drops the record instead of naming an operator action that already
+    /// happened, and keeps the deferral to the retained write.
+    #[test]
+    fn repair_drops_a_paused_attach_hold_once_the_document_is_closed() {
+        let dir = setup_project();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("test.md");
+        let content = concat!(
+            "---\nagent_doc_format: template\nagent_doc_session: test\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        let response = "### Re: hydrate — gpt-5\n\nDone.\n";
+        agent_doc_repair_io::pending::save_pending(
+            &doc,
+            &format!("<!-- patch:exchange -->\n{response}<!-- /patch:exchange -->\n"),
+        )
+        .unwrap();
+        let retained_target = content.replace(
+            "<!-- agent:boundary:abc123 -->\n",
+            &format!("{response}<!-- agent:boundary:abc123 -->\n"),
+        );
+        agent_doc_document_realtime_io::retain_deferred_document_write_target(
+            &doc,
+            content,
+            &retained_target,
+            "test_retained_response",
+            agent_doc_document_realtime_io::DocumentWriteDeferredReason::EditorOwnerWithoutRegisteredReplica,
+        )
+        .unwrap();
+        agent_doc_crdt_relay_io::editor_attach_hold::record(
+            dir.path(),
+            &doc,
+            &agent_doc_crdt_relay_io::editor_attach_hold::EditorAttachHold {
+                status_token: "ambiguous-retained-projection".to_string(),
+                editor_source: "jetbrains".to_string(),
+                editor_pid: std::process::id(),
+                canonical_path: doc.display().to_string(),
+                recorded_at_ms: 1,
+            },
+        )
+        .unwrap();
+
+        let err = run(&doc).expect_err("repair must still defer to the retained write");
+        let rendered = format!("{err:#}");
+        assert!(
+            rendered.contains(agent_doc_turn::write_ownership::AWAIT_EDITOR_REPLICA_NO_DISK_WRITE_TOKEN),
+            "{rendered}"
+        );
+        assert!(
+            !rendered.contains(agent_doc_turn::write_ownership::EDITOR_ATTACH_AWAITS_OPERATOR_STATE),
+            "a closed document holds no paused attach: {rendered}"
+        );
+        assert_eq!(
+            agent_doc_crdt_relay_io::editor_attach_hold::load(dir.path(), &doc).unwrap(),
+            None,
+            "the detached document clears the hold"
+        );
+        let ops = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(ops.contains("reason=document_detached"), "{ops}");
+        assert!(ops.contains("repair_replay_deferred_to_retained_write"), "{ops}");
+        assert!(ops.contains("verdict=deferred"), "{ops}");
     }
 
     #[test]

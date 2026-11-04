@@ -163,6 +163,23 @@ pub struct RetainedWriteOwnership {
     /// record (`agent_doc_controller_io::retained_persistence_exhaustion`) may
     /// set it; the default `false` keeps the conservative reading.
     pub editor_holds_unmerged_visible_text: bool,
+    /// The editor that has this document open refused to attach its replica
+    /// on a fail-closed projection hold (`ambiguous-retained-projection` and its
+    /// siblings) and has DISARMED its own retry until the operator supplies new
+    /// evidence (`retry=await_operator_evidence`, `#controllerrecyclelost`).
+    ///
+    /// Every holder completes through that replica, and nothing any agent or
+    /// controller can do re-arms it: the plugin waits for a close / repair /
+    /// reopen of the document, and a controller recycle only re-runs the same
+    /// refused attach. Observed 2026-11-04 on `src/haiven-dev/tasks/sdk/sdk-dev.md`:
+    /// the retained write for `cycle-1793794981490` waited behind exactly this
+    /// replica for 20 minutes while every reader said "the retained intent
+    /// delivers it once the editor replica converges", until an operator click
+    /// supplied the evidence. Only a site that has read the durable hold record
+    /// (`agent_doc_crdt_relay_io::editor_attach_hold`) with the editor still
+    /// open and no live replica may set it; the default `false` keeps the
+    /// conservative reading.
+    pub editor_attach_awaits_operator: bool,
 }
 
 impl RetainedWriteOwnership {
@@ -180,6 +197,7 @@ impl RetainedWriteOwnership {
         editor_route_unowned: false,
         replica_unserved: false,
         editor_holds_unmerged_visible_text: false,
+        editor_attach_awaits_operator: false,
     };
 
     pub const fn new(cycle_open: bool, retained_capture: bool) -> Self {
@@ -194,6 +212,7 @@ impl RetainedWriteOwnership {
             editor_route_unowned: false,
             replica_unserved: false,
             editor_holds_unmerged_visible_text: false,
+            editor_attach_awaits_operator: false,
         }
     }
 
@@ -214,6 +233,7 @@ impl RetainedWriteOwnership {
             editor_route_unowned: false,
             replica_unserved: false,
             editor_holds_unmerged_visible_text: false,
+            editor_attach_awaits_operator: false,
         }
     }
 
@@ -274,6 +294,17 @@ impl RetainedWriteOwnership {
         self
     }
 
+    /// Record that the editor holding this document paused its replica attach
+    /// on operator evidence (`#controllerrecyclelost`). Only a site that has
+    /// read the durable hold record with the editor still open may set it.
+    pub const fn with_editor_attach_awaits_operator(
+        mut self,
+        editor_attach_awaits_operator: bool,
+    ) -> Self {
+        self.editor_attach_awaits_operator |= editor_attach_awaits_operator;
+        self
+    }
+
     /// Refine ownership with a response capture proven by the current caller.
     ///
     /// Some guards already hold the loaded capture. Keeping that evidence is
@@ -295,6 +326,13 @@ impl RetainedWriteOwnership {
             // replica. Waiting cannot fire a state edge. This is the stranded
             // shape and commit is deliberately the named recovery.
             RetainedWriteVerdict::Stranded
+        } else if self.editor_attach_awaits_operator {
+            // `#controllerrecyclelost`: the editor refused its replica attach
+            // and disarmed every retry until the operator supplies evidence.
+            // Every holder below completes through that replica, so neither a
+            // wait, a resume worker, a reload, nor a recycle can end this; the
+            // terminating move is the operator's, and it is named exactly.
+            RetainedWriteVerdict::EditorAttachAwaitsOperator
         } else if self.retained_capture && self.capture_resume_unowned && !self.retained_projection {
             // `#capturedresumeunowned`: the capture is durable, but the worker
             // that would re-drive it is not running. Waiting is the one thing
@@ -410,6 +448,17 @@ pub enum RetainedWriteVerdict {
     /// (`operator_action=reconcile_editor_buffer_with_retained_write`); the
     /// controller's capped native-save retry then persists it on its own.
     EditorHoldsUnmergedVisibleText,
+    /// The editor that has the document open refused to attach its replica on
+    /// a fail-closed projection hold and paused its retry until the operator
+    /// supplies new evidence (`#controllerrecyclelost`).
+    ///
+    /// Between [`Self::Deferred`] and [`Self::Stranded`]: any retained write is
+    /// durable and NOT lost, but the replica it completes through will not
+    /// attach on its own, and a controller recycle re-runs the same refused
+    /// attach. The operator action
+    /// ([`editor_attach_awaits_operator_remedy`]) supplies the evidence; the
+    /// retained write then converges through the re-attached replica.
+    EditorAttachAwaitsOperator,
 }
 
 impl RetainedWriteVerdict {
@@ -423,6 +472,7 @@ impl RetainedWriteVerdict {
             Self::DeliveryRejected => "delivery_rejected",
             Self::ReplicaUnserved => "replica_unserved",
             Self::EditorHoldsUnmergedVisibleText => "editor_holds_unmerged_visible_text",
+            Self::EditorAttachAwaitsOperator => EDITOR_ATTACH_AWAITS_OPERATOR_STATE,
         }
     }
 
@@ -453,7 +503,8 @@ impl RetainedWriteVerdict {
             | Self::UnansweredEditPending
             | Self::DeliveryRejected
             | Self::ReplicaUnserved
-            | Self::EditorHoldsUnmergedVisibleText => false,
+            | Self::EditorHoldsUnmergedVisibleText
+            | Self::EditorAttachAwaitsOperator => false,
             Self::Stranded | Self::AwaitingTerminalCommit => true,
         }
     }
@@ -669,6 +720,48 @@ pub fn editor_holds_unmerged_visible_text_remedy(file: &str) -> String {
     )
 }
 
+/// The state token every reader of a replica attach paused on operator
+/// evidence names (`#controllerrecyclelost`). Also the
+/// [`RetainedWriteVerdict::EditorAttachAwaitsOperator`] verdict token.
+pub const EDITOR_ATTACH_AWAITS_OPERATOR_STATE: &str = "editor_attach_awaits_operator";
+/// The operator action every reader of that hold names, as a machine token.
+pub const REOPEN_DETACHED_AFTER_REPAIR_OPERATOR_ACTION: &str =
+    "close_tab_repair_detached_reopen";
+
+/// The exact operator action that supplies the evidence a paused editor
+/// replica attach waits for (`#controllerrecyclelost`).
+///
+/// It is the same sequence the editor's own attach-hold notification names
+/// (`agent_doc_editor_surface::attach_failure`), stated for the agent that has
+/// to ask the operator, with the document path filled in.
+pub fn editor_attach_operator_action(file: &str) -> String {
+    format!(
+        "copy any editor text they need to keep, close the editor tab of {file}, run `agent-doc \
+         repair {file}` while it is closed, reopen {file}, and paste back anything missing"
+    )
+}
+
+/// The one instruction for a retained write whose editor replica is paused on
+/// operator evidence (`#controllerrecyclelost`). `session-check`, the write
+/// path, and repair's retained-replay refusal all render it, so none of them
+/// can fall back to an indefinite "it delivers once the replica converges".
+pub fn editor_attach_awaits_operator_remedy(file: &str) -> String {
+    format!(
+        "The editor that has {file} open REFUSED to attach its replica on a fail-closed \
+         projection hold and PAUSED its own retry until the operator supplies new evidence \
+         (state={EDITOR_ATTACH_AWAITS_OPERATOR_STATE}, retry=await_operator_evidence). Every \
+         retained write is durable and NOT lost, but it completes only through that replica, \
+         so waiting will not converge it and `agent-doc admin recycle` or `agent-doc admin \
+         reload-lib` only re-runs the same refused attach. Do NOT re-send the response or force \
+         disk (the editor buffer may hold unsaved text). Do NOT run `agent-doc commit {file}` \
+         either; it would publish a cut without that buffer. Operator action \
+         (operator_action={REOPEN_DETACHED_AFTER_REPAIR_OPERATOR_ACTION}): ask the operator to \
+         {}. The re-attached replica then carries the retained write on its own; run \
+         `agent-doc session-check {file}` afterwards and follow the recovery it names",
+        editor_attach_operator_action(file)
+    )
+}
+
 /// The state token every reader of the durable retained operator-text refusal
 /// names (`#clobberfollowups`). Mirrors the controller's
 /// `retained_transition_refused_operator_text_loss` log event.
@@ -849,6 +942,9 @@ fn retained_write_remedy_inner(ownership: RetainedWriteOwnership, file: &str) ->
         RetainedWriteVerdict::EditorHoldsUnmergedVisibleText => {
             editor_holds_unmerged_visible_text_remedy(file)
         }
+        RetainedWriteVerdict::EditorAttachAwaitsOperator => {
+            editor_attach_awaits_operator_remedy(file)
+        }
         RetainedWriteVerdict::Stranded => {
             let evidence = if ownership.editor_route_unowned {
                 "The refusing editor endpoint is UNREGISTERED and document authority reports \
@@ -916,7 +1012,8 @@ pub const fn tracked_work_repair_admission(
     match ownership.with_retained_projection(true).verdict() {
         verdict @ (RetainedWriteVerdict::ReplicaUnserved
         | RetainedWriteVerdict::DeliveryRejected
-        | RetainedWriteVerdict::EditorHoldsUnmergedVisibleText) => {
+        | RetainedWriteVerdict::EditorHoldsUnmergedVisibleText
+        | RetainedWriteVerdict::EditorAttachAwaitsOperator) => {
             TrackedWorkRepairAdmission::RecoverEditorFirst(verdict)
         }
         _ => TrackedWorkRepairAdmission::Admissible,
@@ -1950,6 +2047,7 @@ mod tests {
             RetainedWriteVerdict::DeliveryRejected,
             RetainedWriteVerdict::ReplicaUnserved,
             RetainedWriteVerdict::EditorHoldsUnmergedVisibleText,
+            RetainedWriteVerdict::EditorAttachAwaitsOperator,
         ] {
             let ownership = match verdict {
                 RetainedWriteVerdict::Deferred => RetainedWriteOwnership::new(true, false),
@@ -1972,6 +2070,9 @@ mod tests {
                 RetainedWriteVerdict::EditorHoldsUnmergedVisibleText => {
                     RetainedWriteOwnership::new(true, true)
                         .with_editor_holds_unmerged_visible_text(true)
+                }
+                RetainedWriteVerdict::EditorAttachAwaitsOperator => {
+                    RetainedWriteOwnership::new(true, true).with_editor_attach_awaits_operator(true)
                 }
             };
             assert_eq!(ownership.verdict(), verdict, "fixture builds {verdict:?}");
@@ -2155,7 +2256,7 @@ mod tests {
     /// Every input combination, so a new verdict branch cannot quietly
     /// reintroduce the contradiction.
     fn every_ownership() -> Vec<RetainedWriteOwnership> {
-        (0u16..1024)
+        (0u16..2048)
             .map(|bits| {
                 let bit = |n: u16| bits & (1 << n) != 0;
                 RetainedWriteOwnership::new_with_phase(bit(0), bit(1), bit(2))
@@ -2166,6 +2267,7 @@ mod tests {
                     .with_editor_route_unowned(bit(7))
                     .with_replica_unserved(bit(8))
                     .with_editor_holds_unmerged_visible_text(bit(9))
+                    .with_editor_attach_awaits_operator(bit(10))
             })
             .collect()
     }
@@ -2274,6 +2376,101 @@ mod tests {
         );
     }
 
+    /// `#controllerrecyclelost` (2026-11-04, `src/haiven-dev/tasks/sdk/sdk-dev.md`,
+    /// `cycle-1793794981490`): the JetBrains replica refused every attach on
+    /// `ambiguous-retained-projection` with `retry=await_operator_evidence`, and
+    /// the retained editor-owned write waited behind it for 20 minutes while
+    /// repair said "the retained intent delivers it once the editor replica
+    /// converges". Every holder shape that observes the paused attach must name
+    /// the exact operator action instead of a wait, a recycle, or a commit.
+    #[test]
+    fn a_replica_attach_paused_on_operator_evidence_names_the_operator_action() {
+        for owned in [
+            RetainedWriteOwnership::new(true, false),
+            RetainedWriteOwnership::new(false, true),
+            RetainedWriteOwnership::new_with_phase(true, false, true),
+            RetainedWriteOwnership::UNOWNED.with_retained_projection(true),
+            RetainedWriteOwnership::UNOWNED,
+            // The observed incident shape: the retained write is a projection,
+            // the editor is attached without a served replica, and the
+            // controller's roll-forward was refused as `editor_unreachable`.
+            RetainedWriteOwnership::new(true, true)
+                .with_retained_projection(true)
+                .with_replica_unserved(true)
+                .with_editor_holds_unmerged_visible_text(true),
+            RetainedWriteOwnership::new(false, true)
+                .with_capture_resume_unowned(true)
+                .with_delivery_rejected(true),
+        ] {
+            let held = owned.with_editor_attach_awaits_operator(true);
+            assert_eq!(
+                held.verdict(),
+                RetainedWriteVerdict::EditorAttachAwaitsOperator,
+                "{held:?}"
+            );
+            assert_eq!(held.verdict().as_str(), EDITOR_ATTACH_AWAITS_OPERATOR_STATE);
+            let remedy = retained_write_remedy(held, "plan.md");
+            for named in [
+                "state=editor_attach_awaits_operator",
+                "retry=await_operator_evidence",
+                "operator_action=close_tab_repair_detached_reopen",
+                "close the editor tab of plan.md",
+                "`agent-doc repair plan.md` while it is closed",
+                "reopen plan.md",
+                "`agent-doc session-check plan.md`",
+            ] {
+                assert!(remedy.contains(named), "{named}: {remedy}");
+            }
+            assert!(remedy.contains(&editor_attach_operator_action("plan.md")));
+            for forbidden in ["re-send", "force disk", "Do NOT run `agent-doc commit plan.md`"] {
+                assert!(remedy.contains(forbidden), "{forbidden}: {remedy}");
+            }
+            assert!(
+                !remedy.contains("deferral, not a lost response"),
+                "waiting cannot end a paused attach: {remedy}"
+            );
+            assert!(
+                !remedy.contains("run `agent-doc admin recycle`"),
+                "a recycle re-runs the same refused attach: {remedy}"
+            );
+            assert!(!held.verdict().commit_is_the_named_recovery());
+            assert_eq!(
+                retained_queue_gate(Some(RetainedQueueHolder::WriteIntent), held),
+                RetainedQueueGate::Recover(RetainedWriteVerdict::EditorAttachAwaitsOperator)
+            );
+            assert_eq!(
+                tracked_work_repair_admission(held),
+                TrackedWorkRepairAdmission::RecoverEditorFirst(
+                    RetainedWriteVerdict::EditorAttachAwaitsOperator
+                )
+            );
+        }
+        // A removed route with zero live replicas is still the stranded shape.
+        assert_eq!(
+            RetainedWriteOwnership::new(true, true)
+                .with_editor_attach_awaits_operator(true)
+                .with_editor_route_unowned(true)
+                .verdict(),
+            RetainedWriteVerdict::Stranded
+        );
+        // Not observed == not paused: the default keeps the deferral.
+        assert_eq!(
+            RetainedWriteOwnership::new(true, true)
+                .with_editor_attach_awaits_operator(false)
+                .verdict(),
+            RetainedWriteVerdict::Deferred
+        );
+        for ownership in every_ownership() {
+            if ownership.editor_attach_awaits_operator && !ownership.editor_route_unowned {
+                assert_eq!(
+                    ownership.verdict(),
+                    RetainedWriteVerdict::EditorAttachAwaitsOperator,
+                    "{ownership:?}"
+                );
+            }
+        }
+    }
+
     /// GH #131 shape 2: `session-check`'s integrity gate prescribed `admin
     /// reload-lib` for an editor not serving its replica, while the retained
     /// write's deferral forbade it for the same document. An observed unserved
@@ -2371,7 +2568,8 @@ mod tests {
             match write_path_verdict {
                 RetainedWriteVerdict::ReplicaUnserved
                 | RetainedWriteVerdict::DeliveryRejected
-                | RetainedWriteVerdict::EditorHoldsUnmergedVisibleText => {
+                | RetainedWriteVerdict::EditorHoldsUnmergedVisibleText
+                | RetainedWriteVerdict::EditorAttachAwaitsOperator => {
                     assert_eq!(
                         admission,
                         TrackedWorkRepairAdmission::RecoverEditorFirst(write_path_verdict)

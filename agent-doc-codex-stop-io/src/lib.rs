@@ -3946,6 +3946,11 @@ fn retained_write_queue_recovery_response(
                 .with_retained_projection(true)
                 .with_editor_holds_unmerged_visible_text(true)
         }
+        agent_doc_turn::write_ownership::RetainedWriteVerdict::EditorAttachAwaitsOperator => {
+            agent_doc_turn::write_ownership::RetainedWriteOwnership::UNOWNED
+                .with_retained_projection(true)
+                .with_editor_attach_awaits_operator(true)
+        }
         _ => agent_doc_turn::write_ownership::RetainedWriteOwnership::UNOWNED,
     };
     let message = format!(
@@ -7187,6 +7192,7 @@ queue: go
             editor_route_unowned: false,
             replica_unserved: false,
             editor_holds_unmerged_visible_text: false,
+            editor_attach_awaits_operator: false,
         };
         let note = closeout_repair_retained_note(&err, owned, Path::new("/p/fpe.md"));
         assert!(note.contains("intent_id=abc"), "{note}");
@@ -7217,6 +7223,7 @@ queue: go
             editor_route_unowned: false,
             replica_unserved: false,
             editor_holds_unmerged_visible_text: false,
+            editor_attach_awaits_operator: false,
         };
         let remedy = agent_doc_turn::write_ownership::retained_write_remedy(owned, "/p/fpe.md");
         let err = anyhow::anyhow!("editor projection pending. {remedy}");

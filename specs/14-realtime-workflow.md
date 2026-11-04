@@ -486,6 +486,33 @@ re-decided at a site:
   replica. No verdict forbids `admin reload-lib` outright, and an observed
   unserved replica never reads as `Deferred` (exhaustive predicate test).
   `retained_write_ownership_guard.rs` owns both phrases.
+- **A replica attach paused on operator evidence names the operator action
+  (`#controllerrecyclelost`).** When the editor refuses to attach a replica on
+  a fail-closed projection hold (`ambiguous-retained-projection`,
+  `ambiguous-reregister-projection`, `retained-reseed-missing-settled-shadow`)
+  its `attach_failure_diagnosis` answers `retry=await_operator_evidence` and the
+  plugin disarms every retry. The native `agent_doc_record_editor_surface_event`
+  call that reports the hold also records it durably
+  (`agent_doc_crdt_relay_io::editor_attach_hold`,
+  `.agent-doc/state/editor-attach-holds/<doc-hash>.json`, keyed to the editor
+  pid; rule `attach_hold_transition`, the same retry disposition), and the next
+  registration outcome that is not such a hold supersedes it.
+  `observed_retained_write_ownership` sets `editor_attach_awaits_operator` only
+  while the recording editor is alive, the document is still open, and no
+  replica is live; a closed document clears the record. The verdict
+  `EditorAttachAwaitsOperator` ranks right after a removed route (`Stranded`)
+  and before every other verdict, because every holder completes through that
+  replica and a recycle or `admin reload-lib` re-runs the same refused attach.
+  Its remedy (`editor_attach_awaits_operator_remedy`) names
+  `state=editor_attach_awaits_operator`,
+  `operator_action=close_tab_repair_detached_reopen`, and the exact steps
+  (`editor_attach_operator_action`: copy any text to keep, close the tab, run
+  `agent-doc repair <FILE>` while it is closed, reopen, paste back anything
+  missing — the steps of the editor's own hold notification), forbids re-send,
+  force disk, and `agent-doc commit`, and returns to `session-check`. Repair's
+  retained-replay refusal (`repair_replay_deferred_to_retained_write`) is a
+  guarded refusal site: it derives its remedy from the predicate instead of
+  promising that the retained intent delivers once the replica converges.
 - **An exhausted rebuild budget is the operator's to end
   (`#splicesessionack`, GH #273).** `RetainedWriteOwnership` carries
   `editor_holds_unmerged_visible_text`, set only from the durable
@@ -1624,6 +1651,28 @@ state=editor_holds_unmerged_visible_text
 operator_action=reconcile_editor_buffer_with_retained_write` once and never
 overwrites that buffer. Only an applied save clears the streak, and only
 different content starts a new one.
+
+A fresh-controller reseed never hydrates an older committed revision
+(`#controllerrecyclelost`). A replacement controller adopts the editor's
+retained native replica (`recovery=fresh_controller_retained_replica`), which is
+only as new as the last canonical the editor accepted. On 2026-11-04 the
+JetBrains replica of `src/haiven-dev/tasks/sdk/sdk-dev.md` refused every attach,
+so it stayed at the 06:47 revision while the 06:52 response was committed, and
+each of ~170 recycles re-adopted that revision as canonical. On the one
+pending-to-settled reseed edge, before the durable queue-attempt repair, the
+relay compares the adopted text with the document's last
+`RESEED_COMMITTED_HISTORY_LIMIT` (16) committed revisions: when it equals the
+newest, nothing happens; when it equals an OLDER revision exactly, it holds
+nothing git does not, so the canonical rolls forward to the newest committed
+text through an ordinary canonical-origin write (fanned out to the editor as a
+delta; disk is not written) and logs
+`crdt_reseed_committed_history_rolled_forward ... recovery=newest_committed_text`;
+when it matches no revision it may carry operator typing, stays authoritative
+byte-for-byte, and logs `crdt_reseed_committed_history_unproven`. A committed
+text with a component parse failure is never adopted
+(`crdt_reseed_committed_history_roll_forward_refused`). The cold disk seed (no
+retained frontier, e.g. an IDE restart) is unchanged: the editor bootstraps the
+disk bytes it shows.
 
 Exhaustion is resolved in place, not by a recycle (`#jetbrainsreplicaloops`).
 Measured on sdk.md 2026-10-16T05:57Z-06:05Z: the JetBrains replica looped every

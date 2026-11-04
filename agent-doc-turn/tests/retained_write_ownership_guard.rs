@@ -29,7 +29,7 @@ use std::path::{Path, PathBuf};
 
 /// Phrases that state a verdict. Each belongs to exactly one branch of
 /// `retained_write_remedy` and must not be authored anywhere else.
-const VERDICT_PHRASES: [&str; 10] = [
+const VERDICT_PHRASES: [&str; 11] = [
     "deferral, not a lost response",
     "STRANDED, not deferred",
     // `#ownershipverdictdiverges`: the third verdict. `write_applied` is neither
@@ -69,6 +69,9 @@ const VERDICT_PHRASES: [&str; 10] = [
     // once so the two can never be re-authored into a contradiction.
     "so the editor re-registers its replica",
     "is the sanctioned recovery only when",
+    // `#controllerrecyclelost`: the caller-authored promise repair made while
+    // the replica it named had paused its attach on operator evidence.
+    "delivers it once",
 ];
 
 /// The file allowed to author them.
@@ -76,7 +79,7 @@ const VERDICT_OWNER: &str = "agent-doc-turn/src/write_ownership.rs";
 
 /// Every refusal site that retains a write and instructs the agent. Each must
 /// reach the shared predicate rather than deciding for itself.
-const REFUSAL_SITES: [(&str, &str); 5] = [
+const REFUSAL_SITES: [(&str, &str); 6] = [
     (
         "agent-doc-git-io/src/live_buffer_guard.rs",
         "crdt_relay_pending_refusal",
@@ -108,6 +111,14 @@ const REFUSAL_SITES: [(&str, &str); 5] = [
     (
         "agent-doc-git-io/src/capture_materialization_guard.rs",
         "missing captured response refusal",
+    ),
+    // `#controllerrecyclelost`: the sixth. Repair's retained-replay refusal
+    // promised in its own words that the retained intent "delivers it once the
+    // editor replica converges", and the route re-ran it every 90 seconds for 20
+    // minutes while that replica had paused its attach on operator evidence.
+    (
+        "agent-doc-repair-io/src/lib.rs",
+        "retained-replay refusal",
     ),
 ];
 

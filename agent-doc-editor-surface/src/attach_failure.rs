@@ -260,6 +260,50 @@ fn replacement_hold_message(file_name: &str, reason: &str) -> String {
     )
 }
 
+/// The editor-surface `surface` an attach outcome is reported on.
+pub const REPLICA_REGISTRATION_SURFACE: &str = "replica_registration";
+/// The status prefix of a refused attach (`attach_refused_<status_token>`).
+pub const ATTACH_REFUSED_STATUS_PREFIX: &str = "attach_refused_";
+
+/// What one reported replica-registration outcome does to the durable record
+/// of a replica attach paused on operator evidence (`#controllerrecyclelost`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AttachHoldTransition {
+    /// The editor refused the attach and disarmed its retry until the
+    /// operator supplies evidence: record the hold.
+    Record { status_token: String },
+    /// A newer registration outcome that is not such a hold supersedes it.
+    Clear,
+}
+
+/// Derive [`AttachHoldTransition`] from one `editor_surface_event`'s
+/// `surface` and `status`, by the same rule [`diagnose_attach_failure`] uses
+/// to disarm the editor's retry, so the agent-side record can never disagree
+/// with the editor about whether it is waiting for the operator. Events on
+/// other surfaces say nothing about the attach (`None`).
+pub fn attach_hold_transition(surface: &str, status: &str) -> Option<AttachHoldTransition> {
+    if surface != REPLICA_REGISTRATION_SURFACE {
+        return None;
+    }
+    let Some(token) = status.strip_prefix(ATTACH_REFUSED_STATUS_PREFIX) else {
+        return Some(AttachHoldTransition::Clear);
+    };
+    let diagnosis = diagnose_attach_failure(&AttachFailureEvidence {
+        reason: Some(token.to_string()),
+        file_name: None,
+        live_replica_attached: None,
+    });
+    Some(
+        if diagnosis.retry_disposition == AttachFailureRetryDisposition::AwaitOperatorEvidence {
+            AttachHoldTransition::Record {
+                status_token: diagnosis.status_token,
+            }
+        } else {
+            AttachHoldTransition::Clear
+        },
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -396,5 +440,73 @@ mod tests {
         assert!(json["remedy"].is_null());
         assert!(json["hold_message"].is_null());
         assert_eq!(json["hold_notification"], "error");
+    }
+
+    /// `#controllerrecyclelost`: the agent-side hold record follows the exact
+    /// rule that disarms the editor's retry. The 2026-11-04 status
+    /// `attach_refused_ambiguous-retained-projection` records a hold; a
+    /// transient refusal or any other registration outcome supersedes it; an
+    /// unrelated surface says nothing.
+    #[test]
+    fn the_attach_hold_transition_follows_the_retry_disposition() {
+        for token in [
+            "ambiguous-retained-projection",
+            "ambiguous-reregister-projection",
+            "retained-reseed-missing-settled-shadow",
+        ] {
+            assert_eq!(
+                attach_hold_transition(
+                    REPLICA_REGISTRATION_SURFACE,
+                    &format!("{ATTACH_REFUSED_STATUS_PREFIX}{token}"),
+                ),
+                Some(AttachHoldTransition::Record {
+                    status_token: token.to_string()
+                })
+            );
+            assert_eq!(
+                diagnose(token).retry_disposition,
+                AttachFailureRetryDisposition::AwaitOperatorEvidence
+            );
+        }
+        for status in [
+            "attach_refused_controller-register",
+            "attach_refused_socket_unavailable",
+            "attached",
+        ] {
+            assert_eq!(
+                attach_hold_transition(REPLICA_REGISTRATION_SURFACE, status),
+                Some(AttachHoldTransition::Clear),
+                "{status}"
+            );
+        }
+        assert_eq!(
+            attach_hold_transition(
+                "content_projection",
+                "attach_refused_ambiguous-retained-projection"
+            ),
+            None
+        );
+    }
+
+    /// The agent-facing operator action and the editor's own hold remedy name
+    /// the same steps, so an agent asking the operator and the notification the
+    /// operator already sees cannot disagree (`#controllerrecyclelost`).
+    #[test]
+    fn the_agent_operator_action_matches_the_editor_hold_remedy() {
+        let remedy = diagnose("ambiguous-retained-projection")
+            .remedy
+            .expect("an ambiguous hold names a remedy");
+        let action = agent_doc_turn::write_ownership::editor_attach_operator_action("plan.md");
+        for step in [
+            "editor text",
+            "close",
+            "editor tab",
+            "agent-doc repair",
+            "reopen",
+            "paste back anything missing",
+        ] {
+            assert!(remedy.contains(step), "{step}: {remedy}");
+            assert!(action.contains(step), "{step}: {action}");
+        }
     }
 }

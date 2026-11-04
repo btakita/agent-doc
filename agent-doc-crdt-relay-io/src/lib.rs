@@ -48,6 +48,8 @@
 //!   and publishes its complete visible projection. The commit barrier refuses a
 //!   MultiReplica closeout while any live target has unprojected delivery.
 
+pub mod editor_attach_hold;
+
 pub use agent_doc_turn::commit_barrier::{CommitBarrierRefusal, CommitBarrierVerdict};
 use agent_doc_turn::op_log::OpsLogEvent;
 use parking_lot::Mutex;
@@ -1479,6 +1481,167 @@ fn durable_queue_attempt_projection(file: &Path, current: &str) -> Result<String
         )?
         .unwrap_or_else(|| current.to_string()),
     )
+}
+
+/// How many committed revisions of a document a fresh-controller reseed
+/// searches for the reseeded text (`#controllerrecyclelost`). A retained editor
+/// replica that lags HEAD lags it by the few responses committed while it could
+/// not attach; anything older is not provably a committed ancestor here.
+const RESEED_COMMITTED_HISTORY_LIMIT: usize = 16;
+
+/// What a fresh-controller reseed's text is, judged against committed history
+/// (`#controllerrecyclelost`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ReseedCommittedHistory {
+    /// The reseeded text is the newest committed text, or the document has no
+    /// committed history to compare against.
+    Current,
+    /// The reseeded text is exactly an OLDER committed revision of the document
+    /// (`depth` commits behind the newest), and the newest committed text is
+    /// `committed`. Every byte the reseed holds is in git history, so rolling
+    /// the canonical forward to `committed` cannot lose anything.
+    OlderCommittedRevision { committed: String, depth: usize },
+    /// The reseeded text matches no recent committed revision: it may hold
+    /// editor-only text (operator typing) and stays authoritative.
+    Unproven,
+}
+
+/// Classify `reseeded` against `revisions` (newest first, at most
+/// [`RESEED_COMMITTED_HISTORY_LIMIT`] committed contents of the document).
+fn classify_reseed_committed_history<'a>(
+    reseeded: &str,
+    revisions: impl IntoIterator<Item = Option<&'a str>>,
+) -> ReseedCommittedHistory {
+    let mut revisions = revisions.into_iter();
+    let Some(Some(newest)) = revisions.next() else {
+        return ReseedCommittedHistory::Current;
+    };
+    if newest == reseeded {
+        return ReseedCommittedHistory::Current;
+    }
+    for (offset, revision) in revisions.enumerate() {
+        if revision == Some(reseeded) {
+            return ReseedCommittedHistory::OlderCommittedRevision {
+                committed: newest.to_string(),
+                depth: offset + 1,
+            };
+        }
+    }
+    ReseedCommittedHistory::Unproven
+}
+
+/// `#controllerrecyclelost` (1): a fresh controller must not hydrate its
+/// canonical from a projection OLDER than the committed document.
+///
+/// A replacement controller starts with no canonical of its own and adopts the
+/// editor's retained native replica (`crdt_replica_register_retained_reseed
+/// recovery=fresh_controller_retained_replica`). That replica is only as new as
+/// the last canonical the editor accepted. On 2026-11-04 the JetBrains replica
+/// of `src/haiven-dev/tasks/sdk/sdk-dev.md` refused every attach, so it stayed
+/// at the 06:47 revision (509313 bytes) while the 06:52 response was committed
+/// to HEAD; each of the ~170 controller recycles that morning re-adopted the old
+/// revision as canonical, dropping a committed response block.
+///
+/// On the one pending→settled reseed edge, compare the adopted text with the
+/// committed history. When it is exactly an older committed revision, it holds
+/// nothing git does not, so roll the canonical forward to the newest committed
+/// text through an ordinary canonical-origin write (the editor receives it as a
+/// delta like any agent write). When it matches no committed revision it may
+/// carry operator typing and stays authoritative. Git is read only on this
+/// edge, which a document crosses once per controller lifetime.
+fn reconcile_reseed_committed_history_on_hub(
+    file: &Path,
+    hub: &mut RelayHub,
+) -> Result<(bool, usize)> {
+    let current = hub.canonical_text();
+    let mut revisions: Vec<Option<String>> = Vec::new();
+    let walked = agent_doc_git_io::revision::walk_file_revisions(
+        file,
+        RESEED_COMMITTED_HISTORY_LIMIT + 1,
+        |content| {
+            let owned = content.map(str::to_string);
+            // Stop as soon as the answer is decided: the newest revision equal
+            // to the reseed is the common case and costs one `git show`.
+            let decided = owned.as_deref() == Some(current.as_str());
+            revisions.push(owned);
+            !decided
+        },
+    );
+    if let Err(error) = walked {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "crdt_reseed_committed_history_unavailable file={} error={error:#} action=keep_reseeded_canonical (#controllerrecyclelost)",
+                file.display(),
+            ),
+        );
+        return Ok((false, 0));
+    }
+    match classify_reseed_committed_history(&current, revisions.iter().map(Option::as_deref)) {
+        ReseedCommittedHistory::Current => Ok((false, 0)),
+        ReseedCommittedHistory::Unproven => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "crdt_reseed_committed_history_unproven file={} reseeded_hash={} revisions_compared={} action=keep_reseeded_canonical reason=reseed_matches_no_committed_revision (#controllerrecyclelost)",
+                    file.display(),
+                    agent_doc_hash::short_content_hash(&current),
+                    revisions.len(),
+                ),
+            );
+            Ok((false, 0))
+        }
+        ReseedCommittedHistory::OlderCommittedRevision { committed, depth } => {
+            // `walk_file_revisions` decodes lossily; a committed blob that is
+            // not UTF-8 is never authority (GH #274), so never adopt it.
+            let refusal = if committed.contains(char::REPLACEMENT_CHARACTER) {
+                Some("committed_blob_not_utf8".to_string())
+            } else {
+                agent_doc_element::element::component_parse_failure(&committed)
+            };
+            if let Some(reason) = refusal {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "crdt_reseed_committed_history_roll_forward_refused file={} depth={depth} reason={} action=keep_reseeded_canonical (#controllerrecyclelost)",
+                        file.display(),
+                        reason.split_whitespace().collect::<Vec<_>>().join("_"),
+                    ),
+                );
+                return Ok((false, 0));
+            }
+            let packet = hub.apply_canonical_replace(&current, &committed)?;
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "crdt_reseed_committed_history_rolled_forward file={} depth={depth} before_hash={} before_len={} after_hash={} after_len={} targets={} recovery=newest_committed_text (#controllerrecyclelost)",
+                    file.display(),
+                    agent_doc_hash::short_content_hash(&current),
+                    current.len(),
+                    agent_doc_hash::short_content_hash(&committed),
+                    committed.len(),
+                    packet.targets.len(),
+                ),
+            );
+            Ok((true, packet.targets.len()))
+        }
+    }
+}
+
+/// Every repair a settled retained reseed needs before any consumer observes
+/// the handoff as complete: first restore committed history the reseed
+/// predates (`#controllerrecyclelost`), then durable queue-attempt state
+/// (`#claimmarker #controllerhandoff`) over that result.
+fn reconcile_settled_retained_reseed_on_hub(
+    file: &Path,
+    hub: &mut RelayHub,
+) -> Result<(bool, usize)> {
+    let (history_changed, history_targets) = reconcile_reseed_committed_history_on_hub(file, hub)?;
+    let (queue_changed, queue_targets) = reconcile_durable_queue_attempts_on_hub(file, hub)?;
+    Ok((
+        history_changed || queue_changed,
+        history_targets.max(queue_targets),
+    ))
 }
 
 /// Apply [`durable_queue_attempt_projection`] to one materialized relay cut.
@@ -4031,7 +4194,7 @@ pub fn relay_replica_update_for_file(
         reseed_structure = RetainedReseedStructure::observe(retained_reseed_was_pending, hub);
         let queue_attempt_projection =
             if retained_reseed_was_pending && !hub.retained_replica_reseed_pending() {
-                reconcile_durable_queue_attempts_on_hub(file, hub)?
+                reconcile_settled_retained_reseed_on_hub(file, hub)?
             } else {
                 (false, 0)
             };
@@ -5948,7 +6111,7 @@ pub fn apply_document_op_delta_for_file_in_lineage(
         live_structure = LiveComponentStructure::observe(structure_was_fenced, hub);
         let queue_attempt_projection =
             if retained_reseed_was_pending && !hub.retained_replica_reseed_pending() {
-                reconcile_durable_queue_attempts_on_hub(file, hub)?
+                reconcile_settled_retained_reseed_on_hub(file, hub)?
             } else {
                 (false, 0)
             };
@@ -10340,6 +10503,159 @@ mod tests {
             assert!(hub.commit_barrier_ready().unwrap());
         })
         .unwrap();
+    }
+
+    /// Commit `text` as `doc` on top of the repository [`git_commit_document`]
+    /// created.
+    fn git_commit_next_revision(dir: &Path, doc: &Path, text: &str, message: &str) {
+        std::fs::write(doc, text).unwrap();
+        let name = doc.file_name().unwrap().to_str().unwrap();
+        for args in [
+            vec!["add", name],
+            vec![
+                "-c",
+                "user.name=agent-doc-test",
+                "-c",
+                "user.email=agent-doc-test@example.invalid",
+                "-c",
+                "commit.gpgsign=false",
+                "commit",
+                "-qm",
+                message,
+            ],
+        ] {
+            let status = std::process::Command::new("git")
+                .current_dir(dir)
+                .args(&args)
+                .status()
+                .unwrap();
+            assert!(status.success(), "git {args:?}");
+        }
+    }
+
+    #[test]
+    fn controllerrecyclelost_reseed_history_classification() {
+        let v1 = "# doc\n\nv1\n";
+        let v2 = "# doc\n\nv1\n\n### Re: committed response\n";
+        assert_eq!(
+            classify_reseed_committed_history(v2, [Some(v2), Some(v1)]),
+            ReseedCommittedHistory::Current
+        );
+        assert_eq!(
+            classify_reseed_committed_history(v1, std::iter::empty()),
+            ReseedCommittedHistory::Current,
+            "no committed history: nothing to roll forward to"
+        );
+        assert_eq!(
+            classify_reseed_committed_history(v1, [Some(v2), None, Some(v1)]),
+            ReseedCommittedHistory::OlderCommittedRevision {
+                committed: v2.to_string(),
+                depth: 2
+            }
+        );
+        assert_eq!(
+            classify_reseed_committed_history("# doc\n\nv1\noperator typing\n", [Some(v2), Some(v1)]),
+            ReseedCommittedHistory::Unproven,
+            "editor-only text is never rolled over"
+        );
+        assert_eq!(
+            classify_reseed_committed_history(v1, [None, Some(v1)]),
+            ReseedCommittedHistory::Current,
+            "a document absent at HEAD is not a newer committed text"
+        );
+    }
+
+    /// `#controllerrecyclelost` (2026-11-04, `src/haiven-dev/tasks/sdk/sdk-dev.md`):
+    /// the JetBrains replica refused every attach and stayed at the 06:47
+    /// revision while the 06:52 response was committed. Every fresh controller
+    /// reseeded from that replica and so hydrated a canonical without the
+    /// committed response. The reseed that settles on an older committed
+    /// revision must roll the canonical forward to the newest committed text,
+    /// and deliver that to the editor as an ordinary canonical delta.
+    #[test]
+    fn controllerrecyclelost_fresh_controller_reseed_hydrates_the_newest_committed_text() {
+        let (dir, doc) = temp_doc("recycle-lost.md");
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let older = "# recycle-lost.md\n\n<!-- agent:exchange -->\nprompt\n<!-- /agent:exchange -->\n";
+        let committed = "# recycle-lost.md\n\n<!-- agent:exchange -->\nprompt\n\n### Re: committed response\n\nBody.\n<!-- /agent:exchange -->\n";
+        git_commit_document(dir.path(), &doc, older);
+        git_commit_next_revision(dir.path(), &doc, committed, "agent-doc(recycle-lost): response");
+        // The 12:19 commit came from the snapshot: disk kept the older bytes.
+        std::fs::write(&doc, older).unwrap();
+        forget_controller_relay_state_for_test(&doc);
+        seed_live_reliable_sync_open(&doc.display().to_string());
+
+        // The editor's retained native replica never accepted the response.
+        let retained = agent_doc_merge::crdt_sync::ReplicaState::from_text(91, older);
+        let identity = "intellij:recycle-lost";
+        let registration =
+            register_replica_for_file_incremental(&doc, identity, Some(&retained.state_vector()))
+                .unwrap()
+                .expect("the retained editor attaches to the fresh controller");
+        assert!(registration.retained_replica_reseed_pending);
+        let delta = retained.diff(&registration.canonical_state_vector).unwrap();
+        relay_replica_update_for_file(&doc, identity, &delta)
+            .unwrap()
+            .expect("the retained delta enters the fresh controller");
+
+        with_hub(&doc, |hub| {
+            assert!(!hub.retained_replica_reseed_pending());
+            assert_eq!(
+                hub.canonical_text(),
+                committed,
+                "the canonical hydrates from the newest committed text, not the older replica"
+            );
+        })
+        .unwrap();
+        // The editor receives the roll-forward as a canonical delta.
+        let pull = pull_replica_updates_for_file(&doc, identity)
+            .unwrap()
+            .expect("the retained editor owns the roll-forward delivery");
+        for update in &pull.updates {
+            retained.apply_update(&update.update).unwrap();
+        }
+        assert_eq!(retained.text(), committed);
+        let ops = ops_log(dir.path());
+        assert!(
+            ops.contains("crdt_reseed_committed_history_rolled_forward") && ops.contains("depth=1"),
+            "{ops}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&doc).unwrap(),
+            older,
+            "hydration writes nothing to disk"
+        );
+    }
+
+    /// The other half: a reseed whose text matches no committed revision may
+    /// hold operator typing, so it stays the canonical byte-for-byte.
+    #[test]
+    fn controllerrecyclelost_reseed_with_editor_only_text_stays_authoritative() {
+        let (dir, doc) = temp_doc("recycle-typed.md");
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let older = "# recycle-typed.md\n\nbody\n";
+        let committed = "# recycle-typed.md\n\nbody\n\ncommitted response\n";
+        git_commit_document(dir.path(), &doc, older);
+        git_commit_next_revision(dir.path(), &doc, committed, "agent-doc(recycle-typed): response");
+        forget_controller_relay_state_for_test(&doc);
+        seed_live_reliable_sync_open(&doc.display().to_string());
+
+        let typed = format!("{older}operator typing not yet committed\n");
+        let retained = agent_doc_merge::crdt_sync::ReplicaState::from_text(92, &typed);
+        let identity = "intellij:recycle-typed";
+        let registration =
+            register_replica_for_file_incremental(&doc, identity, Some(&retained.state_vector()))
+                .unwrap()
+                .expect("the retained editor attaches to the fresh controller");
+        let delta = retained.diff(&registration.canonical_state_vector).unwrap();
+        relay_replica_update_for_file(&doc, identity, &delta)
+            .unwrap()
+            .expect("the retained delta enters the fresh controller");
+
+        with_hub(&doc, |hub| assert_eq!(hub.canonical_text(), typed)).unwrap();
+        let ops = ops_log(dir.path());
+        assert!(ops.contains("crdt_reseed_committed_history_unproven"), "{ops}");
+        assert!(!ops.contains("crdt_reseed_committed_history_rolled_forward"), "{ops}");
     }
 
     /// Test-only controller recycle: drop this process's relay hub and its

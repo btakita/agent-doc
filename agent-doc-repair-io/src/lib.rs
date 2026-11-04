@@ -1206,23 +1206,37 @@ pub fn run_with_queue_completion_ids_and_force_disk<
             &retained.target_content,
         )
     {
+        // `#controllerrecyclelost`: this refusal used to promise, on its own
+        // authority, that the retained intent would deliver the response as soon
+        // as the editor replica converged. On 2026-11-04 (`sdk-dev.md`, `cycle-1793794981490`) the
+        // route re-ran it every 90 seconds for 20 minutes while the replica it
+        // named had refused to attach and paused its retry on operator
+        // evidence, so the promise could not come true. The retained intent IS a
+        // durable projection holder; the verdict and the remedy come from the
+        // shared ownership predicate, which also observes a paused attach.
+        let ownership = agent_doc_document_realtime_io::observed_retained_write_ownership(&canonical)
+            .with_retained_projection(true);
         agent_doc_ops_log_io::log_op(
             &canonical,
             &format!(
-                "repair_replay_deferred_to_retained_write file={} intent_id={} target_hash={}",
+                "repair_replay_deferred_to_retained_write file={} intent_id={} target_hash={} verdict={}",
                 canonical.display(),
                 retained.intent_id,
                 retained.target_hash,
+                ownership.verdict().as_str(),
             ),
         );
         anyhow::bail!(
             "{}: the captured response for {} is already carried by retained editor-owned write {} \
-             (target_hash={}); repair does not re-send it, the retained intent delivers it once \
-             the editor replica converges",
+             (target_hash={}); repair does not re-send it. {}",
             agent_doc_turn::write_ownership::AWAIT_EDITOR_REPLICA_NO_DISK_WRITE_TOKEN,
             canonical.display(),
             retained.intent_id,
             retained.target_hash,
+            agent_doc_turn::write_ownership::retained_write_remedy(
+                ownership,
+                &canonical.display().to_string(),
+            ),
         );
     }
 

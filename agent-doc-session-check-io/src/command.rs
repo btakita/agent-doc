@@ -525,6 +525,7 @@ fn terminal_divergence_ownership(
     .with_editor_route_unowned(observed.editor_route_unowned)
     .with_replica_unserved(observed.replica_unserved)
     .with_editor_holds_unmerged_visible_text(observed.editor_holds_unmerged_visible_text)
+    .with_editor_attach_awaits_operator(observed.editor_attach_awaits_operator)
 }
 
 /// CLI entry: check the end-of-cycle write invariant for `file`.
@@ -2312,7 +2313,8 @@ fn run_with_options_inner(
             | agent_doc_turn::write_ownership::RetainedWriteVerdict::UnansweredEditPending
             | agent_doc_turn::write_ownership::RetainedWriteVerdict::DeliveryRejected
             | agent_doc_turn::write_ownership::RetainedWriteVerdict::ReplicaUnserved
-            | agent_doc_turn::write_ownership::RetainedWriteVerdict::EditorHoldsUnmergedVisibleText => {
+            | agent_doc_turn::write_ownership::RetainedWriteVerdict::EditorHoldsUnmergedVisibleText
+            | agent_doc_turn::write_ownership::RetainedWriteVerdict::EditorAttachAwaitsOperator => {
                 agent_doc_turn::write_ownership::retained_write_remedy(
                     ownership,
                     &file.display().to_string(),
@@ -4071,6 +4073,7 @@ fn retained_pending_write_message(
         agent_doc_turn::write_ownership::RetainedWriteVerdict::DeliveryRejected
             | agent_doc_turn::write_ownership::RetainedWriteVerdict::ReplicaUnserved
             | agent_doc_turn::write_ownership::RetainedWriteVerdict::EditorHoldsUnmergedVisibleText
+            | agent_doc_turn::write_ownership::RetainedWriteVerdict::EditorAttachAwaitsOperator
     ) {
         let kind = if captured_closeout {
             "response delivery"

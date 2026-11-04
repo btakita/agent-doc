@@ -7615,6 +7615,66 @@ pub fn observed_retained_write_ownership(
         .with_replica_unserved(editor_replica_unserved(file))
         .with_editor_route_unowned(editor_route_unowned(file))
         .with_editor_holds_unmerged_visible_text(editor_holds_unmerged_visible_text(file).is_some())
+        .with_editor_attach_awaits_operator(editor_attach_awaits_operator_evidence(file).is_some())
+}
+
+/// The durable record of a replica attach the editor paused on operator
+/// evidence, when it still describes `file` (`#controllerrecyclelost`).
+///
+/// The record (written by the editor process through
+/// `agent_doc_record_editor_surface_event`) only says the editor refused and
+/// disarmed its retry. This read adds what the record cannot know: the
+/// recording editor is still alive ([`agent_doc_crdt_relay_io::editor_attach_hold::observe`]),
+/// the document is still open (a `Detached` authority means the operator
+/// closed the tab, the first step of the action, so the record is cleared),
+/// and no editor replica is live (a live replica means a later attach
+/// succeeded, or only a replacement attach was refused beside a healthy one).
+/// An authority that cannot be read keeps the durable fact (fail closed). Only
+/// consulted when a record exists, so the common path makes no authority query.
+pub fn editor_attach_awaits_operator_evidence(
+    file: &Path,
+) -> Option<agent_doc_crdt_relay_io::editor_attach_hold::EditorAttachHold> {
+    let hold = agent_doc_crdt_relay_io::editor_attach_hold::observe(file)?;
+    let observed = query_live_editor_authority(file, "editor_attach_hold_probe");
+    match editor_attach_hold_describes(&observed) {
+        EditorAttachHoldReading::Held => Some(hold),
+        EditorAttachHoldReading::LiveReplica => None,
+        EditorAttachHoldReading::Detached => {
+            if let Some(project_root) = agent_doc_project_root_io::project_root_containing(file) {
+                agent_doc_crdt_relay_io::editor_attach_hold::clear_with_reason(
+                    &project_root,
+                    file,
+                    &hold,
+                    "document_detached",
+                );
+            }
+            None
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EditorAttachHoldReading {
+    /// Open with no live replica, or unobservable: the hold stands.
+    Held,
+    /// A replica is live; the record does not describe the document now.
+    LiveReplica,
+    /// No editor holds the document: the hold is moot.
+    Detached,
+}
+
+fn editor_attach_hold_describes(
+    observed: &Result<agent_doc_crdt_relay_io::CurrentText>,
+) -> EditorAttachHoldReading {
+    match observed {
+        Ok(agent_doc_crdt_relay_io::CurrentText::Detached) => EditorAttachHoldReading::Detached,
+        Ok(agent_doc_crdt_relay_io::CurrentText::Current { live_editors, .. })
+            if *live_editors > 0 =>
+        {
+            EditorAttachHoldReading::LiveReplica
+        }
+        _ => EditorAttachHoldReading::Held,
+    }
 }
 
 /// The durable exhausted replica-rebuild record for `file`, when it still
@@ -7777,6 +7837,14 @@ fn defer_visible_delivery_projection_with_ownership(
             if owned.verdict()
                 == agent_doc_turn::write_ownership::RetainedWriteVerdict::EditorHoldsUnmergedVisibleText
     );
+    // `#controllerrecyclelost`: a replica attach the editor paused on
+    // operator evidence voids the promise too; only the operator re-arms it.
+    let attach_awaits_operator = matches!(
+        ownership,
+        agent_doc_turn::write_ownership::RetainedProjectionOwnership::ResponseWrite(owned)
+            if owned.verdict()
+                == agent_doc_turn::write_ownership::RetainedWriteVerdict::EditorAttachAwaitsOperator
+    );
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
@@ -7787,6 +7855,8 @@ fn defer_visible_delivery_projection_with_ownership(
             live_editors,
             if delivery_rejected {
                 "editor_receipt_rejected"
+            } else if attach_awaits_operator {
+                agent_doc_turn::write_ownership::EDITOR_ATTACH_AWAITS_OPERATOR_STATE
             } else if unmerged_visible_text {
                 agent_doc_turn::write_ownership::EDITOR_HOLDS_UNMERGED_VISIBLE_TEXT_STATE
             } else {
@@ -7794,6 +7864,8 @@ fn defer_visible_delivery_projection_with_ownership(
             },
             if delivery_rejected {
                 "restart_rejecting_editor"
+            } else if attach_awaits_operator {
+                agent_doc_turn::write_ownership::REOPEN_DETACHED_AFTER_REPAIR_OPERATOR_ACTION
             } else if unmerged_visible_text {
                 agent_doc_turn::write_ownership::RECONCILE_EDITOR_BUFFER_OPERATOR_ACTION
             } else {
@@ -7801,7 +7873,7 @@ fn defer_visible_delivery_projection_with_ownership(
             },
         ),
     );
-    let pending_marker = if delivery_rejected || unmerged_visible_text {
+    let pending_marker = if delivery_rejected || unmerged_visible_text || attach_awaits_operator {
         String::new()
     } else {
         format!(
@@ -11558,6 +11630,51 @@ mod tests {
         ));
     }
 
+    /// `#controllerrecyclelost` (2026-11-04 `sdk-dev.md`): the refused replica
+    /// left `live_editors=0` with the document still open, which is exactly the
+    /// shape the paused-attach record describes. A live replica (a later attach
+    /// succeeded, or only a replacement was refused) and a closed document do
+    /// not; an unreadable authority keeps the durable fact (fail closed).
+    #[test]
+    fn controllerrecyclelost_attach_hold_describes_only_an_open_document_without_a_live_replica() {
+        let current = |live_editors: usize| {
+            Ok(agent_doc_crdt_relay_io::CurrentText::Current {
+                text: "canonical\n".to_string(),
+                live_editors,
+                delivery_converged: true,
+                delivery_version: 9,
+                semantics: None,
+                quarantined_replicas: 0,
+            })
+        };
+        assert_eq!(
+            editor_attach_hold_describes(&current(0)),
+            EditorAttachHoldReading::Held
+        );
+        assert_eq!(
+            editor_attach_hold_describes(&Ok(
+                agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica
+            )),
+            EditorAttachHoldReading::Held
+        );
+        assert_eq!(
+            editor_attach_hold_describes(&Ok(agent_doc_crdt_relay_io::CurrentText::EditorSyncPending)),
+            EditorAttachHoldReading::Held
+        );
+        assert_eq!(
+            editor_attach_hold_describes(&Err(anyhow::anyhow!("controller unavailable"))),
+            EditorAttachHoldReading::Held
+        );
+        assert_eq!(
+            editor_attach_hold_describes(&current(1)),
+            EditorAttachHoldReading::LiveReplica
+        );
+        assert_eq!(
+            editor_attach_hold_describes(&Ok(agent_doc_crdt_relay_io::CurrentText::Detached)),
+            EditorAttachHoldReading::Detached
+        );
+    }
+
     #[test]
     fn retained_prewrite_can_compose_successor_only_from_exact_pending_base() {
         let retained = await_editor_replica_no_disk_write("retained pending projection".into());
@@ -15165,6 +15282,63 @@ mod tests {
         );
         assert_eq!(std::fs::read_to_string(&file).unwrap(), target);
         assert!(pending_document_write(&file).is_none());
+    }
+
+    /// `#controllerrecyclelost` (2026-11-04 `sdk-dev.md`): the editor held the
+    /// document open, its replica refused to attach on
+    /// `ambiguous-retained-projection`, and it paused its retry on operator
+    /// evidence. On the real refusal builder the observed ownership must carry
+    /// the paused attach, the refusal must name the exact operator action
+    /// instead of `admin reload-lib` (a reload re-runs the same refused
+    /// attach), and closing the document (the action's first step) must end
+    /// the hold.
+    #[test]
+    fn controllerrecyclelost_a_paused_attach_names_the_operator_action_until_the_tab_closes() {
+        let (dir, file, _canonical) = temp_doc("# Session\n");
+        let identity = "test-controllerrecyclelost-paused-attach";
+        seed_reliable_sync_open_without_registration(&file, identity);
+        agent_doc_crdt_relay_io::editor_attach_hold::record(
+            dir.path(),
+            &file,
+            &agent_doc_crdt_relay_io::editor_attach_hold::EditorAttachHold {
+                status_token: "ambiguous-retained-projection".to_string(),
+                editor_source: "jetbrains".to_string(),
+                editor_pid: std::process::id(),
+                canonical_path: file.display().to_string(),
+                recorded_at_ms: 1,
+            },
+        )
+        .unwrap();
+
+        let observed = observed_retained_write_ownership(&file);
+        assert!(observed.editor_attach_awaits_operator, "{observed:?}");
+        assert_eq!(
+            observed.with_retained_projection(true).verdict(),
+            agent_doc_turn::write_ownership::RetainedWriteVerdict::EditorAttachAwaitsOperator
+        );
+        let err = guard_visible_delivery_convergence(&file, "controllerrecyclelost_paused_attach")
+            .expect_err("a paused attach cannot converge");
+        let message = format!("{err:#}");
+        let display = file.display().to_string();
+        assert!(
+            message.contains(&agent_doc_turn::write_ownership::editor_attach_operator_action(&display)),
+            "{message}"
+        );
+        assert!(
+            !message.contains(agent_doc_turn::write_ownership::editor_replica_recovery()),
+            "a native reload re-runs the same refused attach: {message}"
+        );
+        assert!(!message.contains("deferral, not a lost response"), "{message}");
+
+        seed_reliable_sync_close(&file, identity);
+        assert!(
+            editor_attach_awaits_operator_evidence(&file).is_none(),
+            "a closed document holds no paused attach"
+        );
+        assert_eq!(
+            agent_doc_crdt_relay_io::editor_attach_hold::load(dir.path(), &file).unwrap(),
+            None
+        );
     }
 
     /// GH #131 shape 2, on the real refusal builder: an attached editor whose

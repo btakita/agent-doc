@@ -2450,6 +2450,37 @@ pub fn set_prompt_operator_actions(
             .collect::<Vec<_>>();
         let mut waiting_answer_selected = false;
         if live {
+            // Request ids this closeout's operator actions attach to the row.
+            // Computed before the waiting gate below so the gate sees the same
+            // request whether or not `🙋` is already rendered: operator-action
+            // ids parse only behind the glyph, so deriving the waiting identity
+            // from them alone made the bare row and the `🙋` row take different
+            // branches, and a replay toggled the glyph forever (sdk-dev.md
+            // 2026-11-03).
+            let mut action_ids: Vec<String> = Vec::new();
+            for (queue_item, request_id) in actions {
+                let request_id = request_id.to_ascii_lowercase();
+                if !agent_doc_document::queue_projection::is_reserved_operator_action_id(
+                    &request_id,
+                ) {
+                    continue;
+                }
+                let direct_match =
+                    agent_doc_document::queue_projection::operator_request_item_matches_row(
+                        &prompt.text,
+                        queue_item,
+                    );
+                let group_match = group_origin.as_deref().is_some_and(|origin| {
+                    agent_doc_document::queue_projection::operator_request_origin_item(queue_item)
+                        == origin
+                });
+                if open_todo_ids.contains(&request_id)
+                    && (direct_match || group_match)
+                    && !action_ids.contains(&request_id)
+                {
+                    action_ids.push(request_id);
+                }
+            }
             // `#waitingselectboundary`: the Waiting-on-you tree is a
             // binary-owned view of Todo state, not operator-authored run
             // selection. Keep its parent explicitly gated by the matching
@@ -2459,12 +2490,15 @@ pub fn set_prompt_operator_actions(
                 .text
                 .contains(crate::queue_consume::WAITING_ON_YOU_ITEM_MARKER)
                 .then(|| {
-                    ids.first().cloned().or_else(|| {
-                        match agent_doc_element_queue::queue_head_identity(&prompt.text) {
-                            agent_doc_element_queue::QueueItemIdentity::Id(id) => Some(id),
-                            agent_doc_element_queue::QueueItemIdentity::FreeText(_) => None,
-                        }
-                    })
+                    ids.first()
+                        .or_else(|| action_ids.first())
+                        .cloned()
+                        .or_else(|| {
+                            match agent_doc_element_queue::queue_head_identity(&prompt.text) {
+                                agent_doc_element_queue::QueueItemIdentity::Id(id) => Some(id),
+                                agent_doc_element_queue::QueueItemIdentity::FreeText(_) => None,
+                            }
+                        })
                 })
                 .flatten();
             if let Some(id) = waiting_id
@@ -2486,26 +2520,8 @@ pub fn set_prompt_operator_actions(
                     ids.push(id);
                 }
             }
-            for (queue_item, request_id) in actions {
-                let request_id = request_id.to_ascii_lowercase();
-                if !agent_doc_document::queue_projection::is_reserved_operator_action_id(
-                    &request_id,
-                ) {
-                    continue;
-                }
-                let direct_match =
-                    agent_doc_document::queue_projection::operator_request_item_matches_row(
-                        &prompt.text,
-                        queue_item,
-                    );
-                let group_match = group_origin.as_deref().is_some_and(|origin| {
-                    agent_doc_document::queue_projection::operator_request_origin_item(queue_item)
-                        == origin
-                });
-                if open_todo_ids.contains(&request_id)
-                    && (direct_match || group_match)
-                    && !ids.contains(&request_id)
-                {
+            for request_id in action_ids {
+                if !ids.contains(&request_id) {
                     ids.push(request_id);
                 }
             }
@@ -13480,6 +13496,77 @@ mod tests {
             .expect("an open operator-request gate projects without burying its row")
             .expect("the open operator-request gate is projected");
         assert_eq!(projected, format!("{group}  - \u{1f64b} {request}\n"));
+    }
+
+    /// sdk-dev.md 2026-11-03: the captured-finalize tracked-work replay and
+    /// queue maintenance rewrote this answered waiting item forever. With the
+    /// closeout's operator action, the projection ADDED `🙋` to the bare row
+    /// and REMOVED it from the glyph row: a waiting item's identity was read
+    /// from its operator-action ids, which only parse behind `🙋`, so the two
+    /// renderings took different branches. Every pass must reach one fixed
+    /// point whichever rendering it starts from.
+    #[test]
+    fn answered_waiting_item_operator_action_projection_is_idempotent() {
+        let group = "- ### Waiting on you <!-- agent-doc:waiting-on-you -->\n";
+        let subtree = concat!(
+            "  - Before 2026-12-02T14:24:21Z, log in to desktop Unity Hub so the cachyos-unity-2022 runner Unity Personal license can be renewed, or provide a self-renewing license (Pro/Plus serial or floating license server) <!-- agent-doc:waiting-item --> [#tdunityrunner20261202] ⟦effect:2⟧ [#subagent-operator-request-unity-runner-license]\n",
+            "    - **Response [#r-6b754fc3918c]**\n",
+            "      - **Timestamp:** 2026-11-04T01:03:30.000Z\n",
+            "      - **Summary:** **Deferred:** the operator logs in to desktop Unity Hub before 2026-12-02T14:24:21Z, or provides a self-renewing license (Pro/Plus serial or floating license server). Log in to desktop Unity Hub before 2026-12-02T14:24:21Z so the cachyos-unity-2022 runner Unity Personal license renews, or provide a self-renewing license (Pro/Plus serial or floating license server).\n",
+            "      - **State:** Waiting on operator input.\n",
+            "      - **Guidance:** More work remains. Keep this tree and answer the operator request below.\n",
+            "      - **Choices:**\n",
+            "        - **Request**: [#subagent-operator-request-unity-runner-license]\n",
+            "        - **Log in to desktop Unity Hub**: sign in before 2026-12-02T14:24:21Z so the cachyos-unity-2022 Unity Personal license can be renewed.\n",
+            "        - **Provide a self-renewing license**: supply a Pro/Plus serial or a floating license server so the runner can renew without a desktop Unity Hub login.\n",
+            "    - **Response:** Before 2026-12-02T14:24:21Z, log in to desktop Unity Hub so the cachyos-unity-2022 runner Unity Personal license can be renewed, or provide a self-renewing license (Pro/Plus serial or floating license server) <!-- agent-doc:waiting-metadata -->\n",
+            "      - **Question:** What decision or completion result should be recorded? <!-- agent-doc:waiting-metadata -->\n",
+            "      - **Next actions:** <!-- agent-doc:waiting-metadata -->\n",
+            "        - **Action:** Before 2026-12-02T14:24:21Z, log in to desktop Unity Hub so the cachyos-unity-2022 runner Unity Personal license can be renewed, or provide a self-renewing license (Pro/Plus serial or floating license server) <!-- agent-doc:waiting-metadata -->\n",
+            "    - 📥 Complete the remaining work for the parent item.\n",
+        );
+        let bare = format!("{group}{subtree}");
+        let glyph = bare.replacen("  - Before", "  - \u{1f64b} Before", 1);
+        assert_ne!(bare, glyph);
+        let queue_item = "Before 2026-12-02T14:24:21Z, log in to desktop Unity Hub so the cachyos-unity-2022 runner Unity Personal license can be renewed, or provide a self-renewing license (Pro/Plus serial or floating license server) <!-- agent-doc:waiting-item --> [#tdunityrunner20261202] \u{27e6}effect:2\u{27e7}";
+        let request = "subagent-operator-request-unity-runner-license";
+        let open = std::collections::HashSet::from([
+            "tdunityrunner20261202".to_string(),
+            request.to_string(),
+        ]);
+        let with_action = vec![(queue_item.to_string(), request.to_string())];
+        let project = |body: &str, actions: &[(String, String)]| {
+            project_prompt_operator_actions(body, actions, &open)
+                .unwrap()
+                .map_or_else(|| body.to_string(), |(projected, _)| projected)
+        };
+        let mut fixed_points = Vec::new();
+        for actions in [with_action.as_slice(), &[]] {
+            for start in [&bare, &glyph] {
+                let once = project(start, actions);
+                assert_eq!(
+                    project(&once, actions),
+                    once,
+                    "a second pass must not rewrite the row (actions={})",
+                    actions.len()
+                );
+                fixed_points.push(once);
+            }
+        }
+        assert!(
+            fixed_points.windows(2).all(|pair| pair[0] == pair[1]),
+            "replay and maintenance must agree on one rendering: {:#?}",
+            fixed_points
+                .iter()
+                .map(|body| body
+                    .lines()
+                    .nth(1)
+                    .unwrap_or_default()
+                    .chars()
+                    .take(16)
+                    .collect::<String>())
+                .collect::<Vec<_>>()
+        );
     }
 
     #[test]

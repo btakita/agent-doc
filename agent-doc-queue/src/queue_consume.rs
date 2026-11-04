@@ -4213,11 +4213,16 @@ fn response_summary_row_child(
     if !agent_doc_markdown_ast::exchange_tree::is_compact_response_id(response_id) {
         return None;
     }
-    let mut summary = if shared_batch {
-        "This item was completed as part of a shared batch; no unrelated batch prose was copied into this row."
-            .to_string()
-    } else {
-        response_summary_lead(response_body)
+    // `#responsesummarypick`: one response commonly answers a chat prompt and
+    // closes queue rows in the same turn. The row's summary is the paragraph or
+    // bullet that names this row, never the response's first paragraph when
+    // that paragraph is about something else.
+    let item_scoped_summary = response_summary_for_queue_item(response_body, queue_item);
+    let mut summary = match item_scoped_summary {
+        Some(summary) => summary,
+        None if shared_batch => "This item was completed as part of a shared batch; no unrelated batch prose was copied into this row."
+            .to_string(),
+        None => response_summary_lead(response_body),
     };
     let next_actions = if shared_batch {
         Vec::new()
@@ -4686,6 +4691,133 @@ fn response_summary_lead(response_body: &str) -> String {
         })
         .unwrap_or(("Response.", false));
     soft_bound_response_summary(lead, actionable_contract)
+}
+
+/// Minimum normalized length before a free-text row's work text is used as a
+/// quote needle. Shorter rows (`fix it`, `retry`) occur incidentally in prose.
+const RESPONSE_SUMMARY_MIN_QUOTED_ROW_CHARS: usize = 16;
+
+/// The paragraph or list item of `response_body` that names `queue_item`.
+///
+/// `#responsesummarypick`: a closeout response may answer a chat prompt and
+/// close several queue rows in one turn. Summarizing its first paragraph gave
+/// a struck row the answer to a different prompt. A row is named by its
+/// durable id (`#id`, `[#id]`, `` `do [#id]` ``) or, for a free-text row
+/// without one, by a verbatim quote of its work text. Headings, blockquotes
+/// (including the `> **Queue prompt:**` echo, which names the row without
+/// describing its outcome), fenced code, HTML comments, and operator request
+/// packets never qualify. The first naming unit wins; `None` means nothing in
+/// the response names this row, and the caller keeps its existing fallback.
+fn response_summary_for_queue_item(response_body: &str, queue_item: &str) -> Option<String> {
+    let work = struck_work_text(queue_item);
+    let work = work
+        .strip_prefix("~~")
+        .and_then(|inner| inner.strip_suffix("~~"))
+        .unwrap_or(work);
+    let id = agent_doc_element_queue::queue_prompt_stable_id(work)
+        .map(|id| id.to_ascii_lowercase())
+        .filter(|id| !id.is_empty());
+    let quoted_row = id
+        .is_none()
+        .then(|| {
+            let (base, _) = document_queue::split_queue_effect_annotation(work);
+            base.split_whitespace().collect::<Vec<_>>().join(" ")
+        })
+        .filter(|row| row.chars().count() >= RESPONSE_SUMMARY_MIN_QUOTED_ROW_CHARS)
+        .map(|row| row.to_lowercase());
+    if id.is_none() && quoted_row.is_none() {
+        return None;
+    }
+    let names_item = |unit: &str| {
+        let lower = unit.to_lowercase();
+        if let Some(id) = id.as_deref() {
+            return lower.match_indices('#').any(|(offset, _)| {
+                let tail = &lower[offset + 1..];
+                tail.strip_prefix(id).is_some_and(|after| {
+                    !after.chars().next().is_some_and(|next| {
+                        next.is_ascii_alphanumeric() || matches!(next, '-' | '_')
+                    })
+                })
+            });
+        }
+        quoted_row
+            .as_deref()
+            .is_some_and(|quoted| lower.contains(quoted))
+    };
+
+    let mut prose = response_body.to_string();
+    for packet in crate::operator_request_packet::blocking_operator_request_blocks(response_body) {
+        prose = prose.replacen(packet, "", 1);
+    }
+    response_summary_units(&prose)
+        .into_iter()
+        .find(|unit| names_item(unit))
+        .map(|unit| soft_bound_response_summary(&unit, actionable_response_lead(&unit)))
+}
+
+/// Paragraphs and list items of `prose`, whitespace-normalized, in document
+/// order. A list item keeps its continuation lines and drops its marker.
+fn response_summary_units(prose: &str) -> Vec<String> {
+    fn list_item_body(line: &str) -> Option<&str> {
+        for marker in ["- ", "* ", "+ "] {
+            if let Some(body) = line.strip_prefix(marker) {
+                return Some(body);
+            }
+        }
+        let (number, body) = line.split_once(". ")?;
+        (!number.is_empty() && number.chars().all(|character| character.is_ascii_digit()))
+            .then_some(body)
+    }
+
+    let mut units = Vec::new();
+    let mut current = Vec::<&str>::new();
+    let flush = |current: &mut Vec<&str>, units: &mut Vec<String>| {
+        if !current.is_empty() {
+            let unit = current
+                .iter()
+                .flat_map(|line| line.split_whitespace())
+                .collect::<Vec<_>>()
+                .join(" ");
+            if !unit.is_empty() {
+                units.push(unit);
+            }
+            current.clear();
+        }
+    };
+    let mut fence: Option<&str> = None;
+    for line in prose.lines() {
+        let trimmed = line.trim();
+        if let Some(open) = fence {
+            if trimmed.starts_with(open) {
+                fence = None;
+            }
+            continue;
+        }
+        if let Some(open) = ["```", "~~~"]
+            .into_iter()
+            .find(|open| trimmed.starts_with(open))
+        {
+            flush(&mut current, &mut units);
+            fence = Some(open);
+            continue;
+        }
+        if trimmed.is_empty() {
+            flush(&mut current, &mut units);
+            continue;
+        }
+        if let Some(body) = list_item_body(trimmed) {
+            flush(&mut current, &mut units);
+            current.push(body);
+            continue;
+        }
+        if response_summary_structural_line(trimmed) {
+            flush(&mut current, &mut units);
+            continue;
+        }
+        current.push(trimmed);
+    }
+    flush(&mut current, &mut units);
+    units
 }
 
 fn response_summary_structural_line(line: &str) -> bool {
@@ -6409,6 +6541,148 @@ mod tests {
                 .unwrap(),
             annotated,
             "replaying the projection must not duplicate the response id"
+        );
+    }
+
+    fn response_summary_of_row(annotated: &str, row: &str) -> String {
+        let start = annotated
+            .find(row)
+            .unwrap_or_else(|| panic!("missing row {row}:\n{annotated}"));
+        let rest = &annotated[start + row.len()..];
+        let end = rest.find("\n- ").unwrap_or(rest.len());
+        let tree = &rest[..end];
+        tree.lines()
+            .find_map(|line| line.trim().strip_prefix("- **Summary:** "))
+            .unwrap_or_else(|| panic!("row {row} has no Summary child:\n{tree}"))
+            .to_string()
+    }
+
+    #[test]
+    fn single_item_summary_is_the_bullet_naming_the_struck_row_not_the_first_paragraph() {
+        // `#responsesummarypick`: the live `do [#dispatchpanetimeout]` closeout.
+        // The response first answered a chat prompt, then listed what the turn
+        // did with the queue, then echoed a different, still-live row.
+        let response = concat!(
+            "### Re: backlog → agent:run, and the queue — test\n\n",
+            "**They are in it now.** This turn's preflight mirrored every open `agent:backlog` item into `agent:run id=\"main\"` as a 📥 `do [#…]` row: 26 of 26.\n\n",
+            "**What this turn did with the queue:**\n\n",
+            "- `do [#dispatchpanetimeout]` is **done**: `f6a6c53eae` is on main, pushed and installed, and `make check` passed.\n",
+            "- `do [#reportedcloseoutdeadend]` is now claimed and bound to the worker already fixing it.\n\n",
+            "> **Queue prompt:** Run the remote smoke test on a real Coder workspace.\n\n",
+            "**Deferred:** this waits for you to provide a real Coder workspace.\n",
+        );
+        let before = doc_with_queue_and_exchange(
+            "- ### do [#dispatchpanetimeout]\n- ### 🚧 do [#reportedcloseoutdeadend]\n- ### Run the remote smoke test on a real Coder workspace.\n",
+            "",
+        );
+        let after = doc_with_queue_and_exchange(
+            "- ### ~~do [#dispatchpanetimeout]~~\n- ### 🚧 do [#reportedcloseoutdeadend]\n- ### Run the remote smoke test on a real Coder workspace.\n",
+            response,
+        );
+
+        let annotated =
+            annotate_newly_struck_queue_items_with_response_id(&before, &after, response).unwrap();
+        let summary = response_summary_of_row(&annotated, "- ### ~~do [#dispatchpanetimeout]~~");
+        assert_eq!(
+            summary,
+            "`do [#dispatchpanetimeout]` is **done**: `f6a6c53eae` is on main, pushed and installed, and `make check` passed.",
+            "{annotated}"
+        );
+        assert!(!summary.contains("They are in it now"), "{annotated}");
+    }
+
+    #[test]
+    fn multi_item_summaries_each_name_their_own_row() {
+        // Two independently addressed sections, each led by unrelated prose:
+        // every struck row gets the text naming it, never the section lead or
+        // its sibling's text.
+        let response = concat!(
+            "### Re: alpha — test\n\n",
+            "> **Queue prompt:** do [#alpha]\n\n",
+            "The chat question about install order is answered below.\n\n",
+            "- `do [#alpha]` is done: alpha landed as `aaaaaaa`.\n\n",
+            "### Re: beta — test\n\n",
+            "> **Queue prompt:** do [#beta]\n\n",
+            "Unrelated: the dogfood watch is quiet.\n\n",
+            "- `do [#beta]` is done: beta landed as `bbbbbbb`.\n",
+        );
+        let before = doc_with_queue_and_exchange("- do [#alpha]\n- do [#beta]\n", "");
+        let after = doc_with_queue_and_exchange("- ~~do [#alpha]~~\n- ~~do [#beta]~~\n", response);
+        let annotated =
+            annotate_newly_struck_queue_items_with_response_id(&before, &after, response).unwrap();
+        assert_eq!(
+            response_summary_of_row(&annotated, "- ~~do [#alpha]~~"),
+            "`do [#alpha]` is done: alpha landed as `aaaaaaa`.",
+            "{annotated}"
+        );
+        assert_eq!(
+            response_summary_of_row(&annotated, "- ~~do [#beta]~~"),
+            "`do [#beta]` is done: beta landed as `bbbbbbb`.",
+            "{annotated}"
+        );
+
+        // One response heading closing both rows: the canonical owner's summary
+        // is its own bullet, not the shared lead and not the sibling bullet;
+        // the sibling keeps its inert back-reference.
+        let response = concat!(
+            "### Re: batch — test\n\n",
+            "The chat question about install order is answered: install runs last.\n\n",
+            "- `do [#beta]` is done: beta landed as `bbbbbbb`.\n",
+            "- `do [#alpha]` is done: alpha landed as `aaaaaaa`.\n",
+        );
+        let after = doc_with_queue_and_exchange("- ~~do [#alpha]~~\n- ~~do [#beta]~~\n", response);
+        let annotated =
+            annotate_newly_struck_queue_items_with_response_id(&before, &after, response).unwrap();
+        assert_eq!(
+            response_summary_of_row(&annotated, "- ~~do [#alpha]~~"),
+            "`do [#alpha]` is done: alpha landed as `aaaaaaa`.",
+            "{annotated}"
+        );
+        assert!(
+            !annotated.contains("**Summary:** The chat question"),
+            "{annotated}"
+        );
+        assert_eq!(
+            annotated.matches("- **Closed by:** [#r-").count(),
+            1,
+            "{annotated}"
+        );
+    }
+
+    #[test]
+    fn summary_falls_back_to_the_first_paragraph_when_nothing_names_the_row() {
+        // The prompt echo names the row but describes no outcome, and the
+        // `#gammaray` mention is a different id sharing a prefix.
+        let response = concat!(
+            "### Re: gamma — test\n\n",
+            "> **Queue prompt:** do [#gamma]\n\n",
+            "Gamma's repair is merged and verified.\n\n",
+            "- `#gammaray` stays open for later.\n",
+        );
+        let annotated = annotate_newly_struck_queue_items_with_response_id(
+            &queue_doc("- do [#gamma]\n"),
+            &queue_doc("- ~~do [#gamma]~~\n"),
+            response,
+        )
+        .unwrap();
+        assert_eq!(
+            response_summary_of_row(&annotated, "- ~~do [#gamma]~~"),
+            "Gamma's repair is merged and verified.",
+            "{annotated}"
+        );
+        assert_eq!(
+            response_summary_for_queue_item(response, "do [#gamma]"),
+            None,
+            "a blockquote echo or a prefix-sharing id never names the row"
+        );
+        assert_eq!(
+            response_summary_for_queue_item(
+                "Intro.\n\n- Finished: run the integration suite on staging now.\n",
+                "run the integration suite on staging now"
+            )
+            .as_deref(),
+            Some("Finished: run the integration suite on staging now."),
+            "a free-text row without an id is named by a quote of its work text"
         );
     }
 

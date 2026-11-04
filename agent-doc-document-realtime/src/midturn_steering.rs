@@ -4664,4 +4664,36 @@ mod tests {
                 .is_empty()
         );
     }
+
+    /// `#barereplymarker`: generated packet rows carry only a bare trailing
+    /// `▫️`. Refreshing them is not steering; an operator answer typed under
+    /// the item selects that item, even when the answer also ends in the glyph.
+    #[test]
+    fn bare_glyph_reply_rows_are_not_steering_but_operator_answers_are() {
+        let owned = BTreeSet::new();
+        let packet = concat!(
+            "- ### Waiting on you — answer by adding a child line under an item <!-- agent-doc:waiting-on-you -->\n",
+            "  - [#pick] Pick a port <!-- agent-doc:waiting-item -->\n",
+            "    - **Response:** Pick a port. ▫️\n",
+        );
+        let baseline = doc(packet, EX);
+        let refreshed = doc(
+            &packet.replace(
+                "    - **Response:**",
+                "    - **Next:** you — answer: Which port? (evidence: Question) ▫️\n    - **Response:**",
+            ),
+            EX,
+        );
+        let obs = observe(&seeded(&baseline, None), &refreshed, &quiet_ctx(&owned));
+        assert!(obs.ready.is_empty(), "{:?}", obs.ready);
+
+        // The answer selects its waiting item, which surfaces as steering.
+        let answered = doc(&format!("{packet}    - use 8080 ▫️\n"), EX);
+        let obs = observe(&seeded(&baseline, None), &answered, &quiet_ctx(&owned));
+        assert!(
+            obs.ready.iter().any(|item| item.verbatim.contains("[#pick]")),
+            "{:?}",
+            obs.ready
+        );
+    }
 }

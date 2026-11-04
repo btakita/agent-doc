@@ -2137,11 +2137,7 @@ fn group_parent_all_leaves_struck(entries: &[QueueEntry], index: usize) -> Optio
         match &entries[descendant] {
             QueueEntry::Prompt(_) | QueueEntry::Completed(_)
                 if !entry_is_group_parent(entries, descendant)
-                    && !matches!(
-                        &entries[descendant],
-                        QueueEntry::Prompt(prompt) | QueueEntry::Completed(prompt)
-                            if crate::queue_consume::is_agent_doc_reply_row(&prompt.text)
-                    ) =>
+                    && !crate::waiting_packet::is_agent_doc_reply_entry(entries, descendant) =>
             {
                 saw_leaf = true;
                 all_struck &= matches!(entries[descendant], QueueEntry::Completed(_));
@@ -4515,14 +4511,12 @@ pub fn prompt_context_packet_at(
     // selectable identity, so attach its live descendants as bounded decision
     // evidence instead of manufacturing a nested executable lineage.
     if waiting_item_has_operator_reply(entries, index) {
-        for entry in crate::waiting_packet::packet_member_indexes(entries, index)
-            .into_iter()
-            .map(|member| &entries[member])
-        {
+        for member in crate::waiting_packet::packet_member_indexes(entries, index) {
+            let entry = &entries[member];
             // An answer typed beneath generated metadata parses inert; it is
             // still the operator's decision evidence for this item.
-            if let QueueEntry::Freeform(line) = entry
-                && let Some(answer) = crate::waiting_packet::operator_freeform_text(line)
+            if let QueueEntry::Freeform(_) = entry
+                && let Some(answer) = crate::waiting_packet::operator_freeform_text(entries, member)
             {
                 let answer = answer.to_string();
                 if !decision_evidence.contains(&answer) {
@@ -4533,7 +4527,7 @@ pub fn prompt_context_packet_at(
             let Some(prompt) = prompt_of(entry) else {
                 continue;
             };
-            if crate::queue_consume::is_agent_doc_reply_row(&prompt.text) {
+            if crate::waiting_packet::is_agent_doc_reply_entry(entries, member) {
                 continue;
             }
             let evidence = nest_row_work_text(&prompt.text);
@@ -13890,6 +13884,73 @@ mod tests {
                 .contains("I renewed the license; verify the runner.")),
             "the operator-authored child remains actionable: {rows:#?}"
         );
+    }
+
+    /// `#barereplymarker`: inside a waiting packet the bare trailing `▫️` is
+    /// the generated rows' only ownership mark and keeps them inert; the same
+    /// glyph on an operator-typed row (outside a packet, or unlabeled under
+    /// the item) never makes that row binary-owned.
+    #[test]
+    fn bare_reply_glyph_is_inert_only_on_generated_packet_rows() {
+        let body = concat!(
+            "- Waiting on you <!-- agent-doc:waiting-on-you -->\n",
+            "  - [#pick] Pick a port. <!-- agent-doc:waiting-item -->\n",
+            "    - **Next:** you — answer: Which port? (evidence: Question) ▫️\n",
+            "    - **Response:** Pick a port. ▫️\n",
+            "      - **Question:** Which port? ▫️\n",
+            "    - use 8080 ▫️\n",
+            "- fix the flaky test ▫️\n",
+            "- **Response:** an operator note ▫️\n",
+        );
+        let entries = parse(body).unwrap();
+        for (index, needle) in [
+            "**Next:** you",
+            "**Response:** Pick a port.",
+            "**Question:** Which port?",
+        ]
+        .into_iter()
+        .map(|needle| {
+            (
+                entries
+                    .iter()
+                    .position(|entry| render(std::slice::from_ref(entry)).contains(needle))
+                    .unwrap(),
+                needle,
+            )
+        }) {
+            assert!(
+                matches!(entries[index], QueueEntry::Freeform(_)),
+                "generated row stays inert: {needle}"
+            );
+            assert!(crate::waiting_packet::is_agent_doc_reply_entry(&entries, index));
+        }
+        let texts = entries
+            .iter()
+            .filter_map(prompt_of)
+            .map(|prompt| prompt.text.as_str())
+            .collect::<Vec<_>>();
+        assert!(texts.contains(&"use 8080 ▫️"), "{texts:#?}");
+        assert!(texts.contains(&"fix the flaky test ▫️"), "{texts:#?}");
+        assert!(texts.contains(&"**Response:** an operator note ▫️"), "{texts:#?}");
+        let runnable = executable_prompt_indexes(&entries)
+            .into_iter()
+            .filter_map(|index| prompt_of(&entries[index]))
+            .map(|prompt| prompt.text.as_str())
+            .collect::<Vec<_>>();
+        assert!(runnable.contains(&"fix the flaky test ▫️"), "{runnable:#?}");
+        assert!(
+            runnable.contains(&"**Response:** an operator note ▫️"),
+            "{runnable:#?}"
+        );
+        let item = entries
+            .iter()
+            .position(|entry| render(std::slice::from_ref(entry)).contains("[#pick]"))
+            .unwrap();
+        assert!(
+            crate::waiting_packet::has_operator_reply(&entries, item),
+            "an operator answer ending in the glyph is still the operator's answer"
+        );
+        assert_eq!(render(&entries), body, "every byte survives parse/render");
     }
 
     #[test]

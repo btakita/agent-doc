@@ -2525,6 +2525,8 @@ All green.
             let result =
                 apply_patches_pure(&doc, &[patch], "", None, &configs, &max_lines).unwrap();
             assert_eq!(result.matches("Queue markers:").count(), 1, "{result}");
+            // `#barereplymarker`: the one legend names the generated-row glyph once.
+            assert_eq!(result.matches("▫️ generated row").count(), 1, "{result}");
             assert!(
                 result.contains(&format!(
                     "Working on #a.\n\n{legend}\n<!-- /agent:status -->"

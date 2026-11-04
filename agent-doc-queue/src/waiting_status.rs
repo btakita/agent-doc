@@ -197,7 +197,7 @@ pub fn waiting_status(
                     }
                     WaitingMember::Operator => {
                         let reply = agent_doc_element_queue::struck_work_text(&prompt.text).trim();
-                        if !crate::queue_consume::is_agent_doc_reply_row(&prompt.text)
+                        if !crate::waiting_packet::is_agent_doc_reply_entry(entries, index)
                             && !reply.is_empty()
                         {
                             answered = true;
@@ -210,10 +210,10 @@ pub fn waiting_status(
             }
             QueueEntry::Freeform(line) => {
                 // This module's own Next row is output, never input.
-                if is_next_row(line) {
+                if is_next_row(entries, index) {
                     continue;
                 }
-                if let Some(reply) = crate::waiting_packet::operator_freeform_text(line) {
+                if let Some(reply) = crate::waiting_packet::operator_freeform_text(entries, index) {
                     answered = true;
                     latest_reply = Some(without_generated_id(reply));
                 }
@@ -301,24 +301,34 @@ fn without_generated_id(text: &str) -> String {
 /// The value of a generated `- **Label:** value` metadata row.
 fn metadata_value(line: &str, label: &str) -> Option<String> {
     let body = line.lines().next()?.trim_start().strip_prefix("- ")?.trim();
-    let value = body.strip_prefix(label)?;
-    let value = value
-        .replace(crate::queue_consume::AGENT_DOC_REPLY_MARKER, "")
-        .replace(crate::queue_consume::LEGACY_AGENT_DOC_REPLY_MARKER, "")
-        .replace(crate::queue_consume::AGENT_DOC_REPLY_PRESENTATION, "");
-    let value = value.trim();
+    body.strip_prefix(label)?;
+    let text = agent_doc_markdown_ast::reply_row::reply_row_text(body);
+    let value = text.strip_prefix(label)?.trim();
     (!value.is_empty()).then(|| value.to_string())
 }
 
-/// Whether `line` is this module's binary-owned Next row.
-pub fn is_next_row(line: &str) -> bool {
-    line.lines().next().is_some_and(|first| {
-        first
-            .trim_start()
-            .strip_prefix("- ")
-            .is_some_and(|body| body.starts_with(NEXT_ROW_LABEL))
-            && crate::queue_consume::is_agent_doc_reply_row(first)
-    })
+fn is_next_body(body: &str) -> bool {
+    body.starts_with(NEXT_ROW_LABEL)
+}
+
+/// Whether `entries[index]` is this module's binary-owned Next row: a
+/// `**Next:**` reply row under the shared `#barereplymarker` predicate.
+pub fn is_next_row(entries: &[QueueEntry], index: usize) -> bool {
+    matches!(entries.get(index), Some(QueueEntry::Freeform(line)) if line
+        .lines()
+        .next()
+        .and_then(|first| first.trim_start().strip_prefix("- "))
+        .is_some_and(is_next_body))
+        && crate::waiting_packet::is_agent_doc_reply_entry(entries, index)
+}
+
+/// [`is_next_row`] over markdown source lines.
+pub fn is_next_row_at(lines: &[&str], index: usize) -> bool {
+    lines
+        .get(index)
+        .and_then(|line| line.trim_start().strip_prefix("- "))
+        .is_some_and(is_next_body)
+        && agent_doc_markdown_ast::reply_row::is_agent_doc_reply_row_at(lines, index)
 }
 
 /// `text` without binary `[#id]` / `⟦...⟧` annotations, whitespace-normalized,
@@ -448,11 +458,10 @@ impl WaitingStatus {
     /// The item's Next row, rendered at `indent`.
     pub fn next_row(&self, indent: usize) -> String {
         format!(
-            "{}- {NEXT_ROW_LABEL} {} {} {}",
+            "{}- {NEXT_ROW_LABEL} {} {}",
             " ".repeat(indent),
             self.next_action(),
-            crate::queue_consume::AGENT_DOC_REPLY_PRESENTATION,
-            crate::queue_consume::AGENT_DOC_REPLY_MARKER
+            crate::queue_consume::AGENT_DOC_REPLY_GLYPH
         )
     }
 }
@@ -566,7 +575,7 @@ pub fn project_waiting_status(
                 break;
             }
             let stale_next = members.contains(&cursor)
-                && matches!(&entries[cursor], QueueEntry::Freeform(line) if is_next_row(line));
+                && is_next_row(entries, cursor);
             if !stale_next {
                 out.push(entries[cursor].clone());
             }
@@ -611,7 +620,7 @@ mod tests {
         let body = concat!(
             "- ### Waiting on you — answer by adding a child line under an item <!-- agent-doc:waiting-on-you -->\n",
             "  - 🙋 Run the sample smoke test on a real workspace <!-- agent-doc:waiting-item --> [#samplesmoke]\n",
-            "    - **Response:** Run the sample smoke test. ▫️ <!-- agent-doc:reply -->\n",
+            "    - **Response:** Run the sample smoke test. ▫️\n",
         );
         let once = project(body, &["samplesmoke"]);
         let head = once.lines().nth(1).unwrap().trim_start();
@@ -648,12 +657,12 @@ mod tests {
         let body = concat!(
             "- ### Waiting on you — answer by adding a child line under an item <!-- agent-doc:waiting-on-you -->\n",
             "  - [#ask] Choose an owner. <!-- agent-doc:waiting-item -->\n",
-            "    - **Response:** Choose an owner. ▫️ <!-- agent-doc:reply -->\n",
+            "    - **Response:** Choose an owner. ▫️\n",
             "  - [#answered] Pick a port. <!-- agent-doc:waiting-item -->\n",
-            "    - **Response:** Pick a port. ▫️ <!-- agent-doc:reply -->\n",
+            "    - **Response:** Pick a port. ▫️\n",
             "      - use 8080\n",
             "  - 🚧 [#subagent:run#1] [#running] Merge the PR. <!-- agent-doc:waiting-item -->\n",
-            "    - **Response:** Merge the PR. ▫️ <!-- agent-doc:reply -->\n",
+            "    - **Response:** Merge the PR. ▫️\n",
             "  - [#reported] Renew the license. <!-- agent-doc:waiting-item -->\n",
             "    - ☑️ [#subagent:lic#1] Resolve the open operator action to complete the parent item. [#reported]\n",
             "  - [#closed] Ship the docs. <!-- agent-doc:waiting-item -->\n",
@@ -708,9 +717,9 @@ mod tests {
     fn a_second_pass_changes_nothing() {
         let body = concat!(
             "- [#ask] Choose an owner. <!-- agent-doc:waiting-item -->\n",
-            "  - **Response:** Choose an owner. ▫️ <!-- agent-doc:reply -->\n",
+            "  - **Response:** Choose an owner. ▫️\n",
             "- 🙋☑️ [#subagent:x#1] [#gated] Merge it. <!-- agent-doc:waiting-item -->\n",
-            "  - **Response:** Merge it. ▫️ <!-- agent-doc:reply -->\n",
+            "  - **Response:** Merge it. ▫️\n",
         );
         let once = project(body, &["ask", "gated"]);
         assert_ne!(once, body);
@@ -759,22 +768,22 @@ mod tests {
     fn each_item_gets_one_next_row_naming_owner_action_and_evidence() {
         let body = concat!(
             "- [#ask] Choose an owner. <!-- agent-doc:waiting-item -->\n",
-            "  - **Response:** Choose an owner. ▫️ <!-- agent-doc:reply -->\n",
-            "    - **Question:** Who owns the alpha release? ▫️ <!-- agent-doc:reply -->\n",
+            "  - **Response:** Choose an owner. ▫️\n",
+            "    - **Question:** Who owns the alpha release? ▫️\n",
             "- [#generic] Renew the license. <!-- agent-doc:waiting-item -->\n",
-            "  - **Response:** Renew the license. ▫️ <!-- agent-doc:reply -->\n",
-            "    - **Question:** What decision or completion result should be recorded? ▫️ <!-- agent-doc:reply -->\n",
-            "    - **Next actions:** ▫️ <!-- agent-doc:reply -->\n",
-            "      - **Action:** Renew the license. ▫️ <!-- agent-doc:reply -->\n",
+            "  - **Response:** Renew the license. ▫️\n",
+            "    - **Question:** What decision or completion result should be recorded? ▫️\n",
+            "    - **Next actions:** ▫️\n",
+            "      - **Action:** Renew the license. ▫️\n",
             "- [#answered] Pick a port. <!-- agent-doc:waiting-item -->\n",
             "  - use 8080 [#q-0123456789ab]\n",
             "- 🚧 [#subagent:run#1] [#running] Merge the PR. <!-- agent-doc:waiting-item -->\n",
-            "  - **Response:** Merge the PR. ▫️ <!-- agent-doc:reply -->\n",
+            "  - **Response:** Merge the PR. ▫️\n",
             "- [#closed] Ship the docs. <!-- agent-doc:waiting-item -->\n",
             "  - ~~shipped~~\n",
         );
         let projected = project(body, &["ask", "generic", "answered", "running", "closed"]);
-        let reply = " ▫️ <!-- agent-doc:reply -->";
+        let reply = " ▫️";
         assert_eq!(
             next_line(&projected, "ask"),
             format!(
@@ -829,9 +838,9 @@ mod tests {
         // binary's own row back would keep that request "open" forever.
         let body = concat!(
             "- [#ask] Choose an owner. <!-- agent-doc:waiting-item -->\n",
-            "  - **Next:** you — answer the open request [#subagent-operator-request-gone] (evidence: open request in this item's packet) ▫️ <!-- agent-doc:reply -->\n",
-            "  - **Response:** Choose an owner. ▫️ <!-- agent-doc:reply -->\n",
-            "    - **Question:** Who owns the alpha release? ▫️ <!-- agent-doc:reply -->\n",
+            "  - **Next:** you — answer the open request [#subagent-operator-request-gone] (evidence: open request in this item's packet) ▫️\n",
+            "  - **Response:** Choose an owner. ▫️\n",
+            "    - **Question:** Who owns the alpha release? ▫️\n",
         );
         let projected = project(body, &["ask", "subagent-operator-request-gone"]);
         assert_eq!(projected.matches("**Next:**").count(), 1, "{projected}");
@@ -840,5 +849,41 @@ mod tests {
             projected.contains("⟦you: 1 · agent: 0 · done: 0⟧ [#ask]"),
             "{projected}"
         );
+    }
+
+    /// `#barereplymarker`: a legacy Next row that still carries the hidden
+    /// reply comment is recognized as this module's output, dropped, and
+    /// re-rendered with only the bare trailing glyph.
+    #[test]
+    fn legacy_commented_next_row_is_replaced_by_the_bare_form() {
+        let body = concat!(
+            "- [#ask] Choose an owner. <!-- agent-doc:waiting-item -->\n",
+            "  - **Next:** stale text ▫️ <!-- agent-doc:reply -->\n",
+            "  - **Response:** Choose an owner. ▫️ <!-- agent-doc:reply -->\n",
+            "    - **Question:** Who owns the alpha release? ▫️ <!-- agent-doc:reply -->\n",
+        );
+        let projected = project(body, &["ask"]);
+        assert!(!projected.contains("stale text"), "{projected}");
+        assert_eq!(projected.matches("**Next:**").count(), 1, "{projected}");
+        assert_eq!(
+            next_line(&projected, "ask"),
+            "  - **Next:** you — answer: Who owns the alpha release? (evidence: Question) ▫️"
+        );
+    }
+
+    /// An operator answer that happens to end in the glyph is still an answer.
+    #[test]
+    fn operator_answer_ending_in_the_glyph_is_still_an_answer() {
+        let body = concat!(
+            "- [#pick] Pick a port. <!-- agent-doc:waiting-item -->\n",
+            "  - **Response:** Pick a port. ▫️\n",
+            "  - use 8080 ▫️\n",
+        );
+        let projected = project(body, &["pick"]);
+        assert!(
+            next_line(&projected, "pick").contains("pick up your reply “use 8080 ▫️”"),
+            "{projected}"
+        );
+        assert!(projected.contains("  - use 8080 ▫️\n"), "{projected}");
     }
 }

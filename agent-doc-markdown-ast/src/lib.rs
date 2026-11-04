@@ -17,6 +17,7 @@ pub mod events;
 pub mod exchange_tree;
 pub mod mutations;
 pub mod overlay;
+pub mod reply_row;
 
 use std::hash::{Hash, Hasher};
 

@@ -369,19 +369,17 @@ fn every_live_head_carries_its_state_and_roll_up() {
 #[test]
 fn the_head_lines_and_their_next_rows_alone_tell_each_items_status() {
     let settled = settled_fixture();
-    let lines = main_queue_body(&settled)
-        .lines()
-        .map(str::to_string)
-        .collect::<Vec<_>>();
+    let body = main_queue_body(&settled);
+    let lines = body.lines().collect::<Vec<_>>();
     let mut items = 0usize;
     for (index, line) in lines.iter().enumerate() {
         if !line.contains(WAITING_ON_YOU_ITEM_MARKER) || line.contains("~~") {
             continue;
         }
         items += 1;
-        let next = &lines[index + 1];
+        let next = lines[index + 1];
         assert!(
-            crate::waiting_status::is_next_row(next),
+            crate::waiting_status::is_next_row_at(&lines, index + 1),
             "the first child of a waiting head is its Next row:\n{line}\n{next}"
         );
         assert!(
@@ -392,10 +390,9 @@ fn the_head_lines_and_their_next_rows_alone_tell_each_items_status() {
         );
         assert!(next.contains("(evidence: "), "{next}");
         assert_eq!(
-            lines[index + 1..]
-                .iter()
-                .take_while(|candidate| !candidate.contains(WAITING_ON_YOU_ITEM_MARKER))
-                .filter(|candidate| crate::waiting_status::is_next_row(candidate))
+            (index + 1..lines.len())
+                .take_while(|candidate| !lines[*candidate].contains(WAITING_ON_YOU_ITEM_MARKER))
+                .filter(|candidate| crate::waiting_status::is_next_row_at(&lines, *candidate))
                 .count(),
             1,
             "exactly one Next row per item: {line}"
@@ -410,6 +407,59 @@ fn the_head_lines_and_their_next_rows_alone_tell_each_items_status() {
         .unwrap();
     assert_eq!(
         lines[release + 1],
-        "    - **Next:** agent — integrate the reported results, then close the item or ask what remains (evidence: ☑️ `subagent:0f24a54c#1` and 10 more attempts) ▫️ <!-- agent-doc:reply -->"
+        "    - **Next:** agent — integrate the reported results, then close the item or ask what remains (evidence: ☑️ `subagent:0f24a54c#1` and 10 more attempts) ▫️"
     );
+}
+
+/// `#barereplymarker`: the live fixture still carries the legacy hidden
+/// `<!-- agent-doc:reply -->` comment on every generated row. One maintenance
+/// cycle re-renders each of them as a bare trailing `▫️`, and every generated
+/// row it re-renders is still recognized as binary-owned.
+#[test]
+fn legacy_reply_comments_migrate_to_the_bare_trailing_glyph() {
+    let fixture = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/waiting_tree_session.md"
+    ))
+    .unwrap();
+    assert!(
+        main_queue_body(&fixture).contains(crate::queue_consume::LEGACY_AGENT_DOC_REPLY_MARKER),
+        "the fixture exercises the legacy form"
+    );
+    let settled = settled_fixture();
+    let body = main_queue_body(&settled);
+    // The Waiting-on-you tree is what the refresh re-renders. (Items adopted
+    // in place elsewhere in the queue are not re-rendered; their legacy rows
+    // keep the comment and stay recognized through it.)
+    let all_lines = body.lines().collect::<Vec<_>>();
+    let root = all_lines
+        .iter()
+        .position(|line| line.contains(crate::queue_consume::WAITING_ON_YOU_ROOT_MARKER))
+        .unwrap();
+    let end = all_lines[root + 1..]
+        .iter()
+        .position(|line| !line.starts_with(' '))
+        .map_or(all_lines.len(), |offset| root + 1 + offset);
+    let tree = all_lines[root..end].join("\n");
+    assert!(
+        !tree.contains(crate::queue_consume::LEGACY_AGENT_DOC_REPLY_MARKER)
+            && !tree.contains(crate::queue_consume::LEGACY_WAITING_METADATA_MARKER),
+        "{tree}"
+    );
+    let lines = all_lines;
+    let glyph = crate::queue_consume::AGENT_DOC_REPLY_GLYPH;
+    let mut generated = 0usize;
+    for (index, line) in lines.iter().enumerate() {
+        if !line.ends_with(&format!(" {glyph}")) {
+            continue;
+        }
+        generated += 1;
+        assert!(
+            agent_doc_markdown_ast::reply_row::is_agent_doc_reply_row_at(&lines, index),
+            "a re-rendered generated row lost its ownership: {line}"
+        );
+    }
+    assert!(generated > 23, "every item has at least its Next row: {generated}");
+    // A fixed point: the next cycle changes nothing.
+    assert_eq!(maintenance_cycle(&settled), settled);
 }

@@ -17,6 +17,8 @@ use agent_doc_document::queue_projection::{
     QueueLifecycleMarker, lifecycle_marker, owner_projection,
 };
 
+use agent_doc_markdown_ast::reply_row::{ReplyRow, ReplyRows};
+
 use crate::document_queue::{QueueEntry, QueuePrompt};
 use crate::queue_consume::WAITING_ON_YOU_ITEM_MARKER;
 
@@ -46,6 +48,59 @@ pub enum WaitingMember {
     /// An offered option (`**label**: effect`) that drifted out of its inert
     /// `**Choices:**` block. It is an option for the operator, not an answer.
     OfferedChoice,
+}
+
+fn entry_reply_row(entry: &QueueEntry) -> ReplyRow<'_> {
+    match entry {
+        QueueEntry::Prompt(prompt) | QueueEntry::Completed(prompt) => ReplyRow::Item {
+            indent: prompt.indent,
+            body: &prompt.text,
+        },
+        QueueEntry::Freeform(line) => agent_doc_markdown_ast::reply_row::reply_row_of_line(
+            line.lines().next().unwrap_or_default(),
+        ),
+        _ => ReplyRow::Other { indent: 0 },
+    }
+}
+
+/// Parsed queue entries viewed as list rows for the shared reply-row predicate.
+struct EntryRows<'a>(&'a [QueueEntry]);
+
+impl ReplyRows for EntryRows<'_> {
+    fn row_count(&self) -> usize {
+        self.0.len()
+    }
+
+    fn row(&self, index: usize) -> ReplyRow<'_> {
+        self.0.get(index).map_or(ReplyRow::Blank, entry_reply_row)
+    }
+}
+
+/// `parse_spans` output viewed as list rows.
+struct SpannedEntryRows<'a, S>(&'a [(QueueEntry, S)]);
+
+impl<S> ReplyRows for SpannedEntryRows<'_, S> {
+    fn row_count(&self) -> usize {
+        self.0.len()
+    }
+
+    fn row(&self, index: usize) -> ReplyRow<'_> {
+        self.0
+            .get(index)
+            .map_or(ReplyRow::Blank, |(entry, _)| entry_reply_row(entry))
+    }
+}
+
+/// Whether `entries[index]` is a binary-owned reply row (`#barereplymarker`):
+/// the shared [`agent_doc_markdown_ast::reply_row::is_agent_doc_reply_row_in`]
+/// predicate over parsed queue entries.
+pub fn is_agent_doc_reply_entry(entries: &[QueueEntry], index: usize) -> bool {
+    agent_doc_markdown_ast::reply_row::is_agent_doc_reply_row_in(&EntryRows(entries), index)
+}
+
+/// [`is_agent_doc_reply_entry`] over `parse_spans` output.
+pub fn is_agent_doc_reply_spanned_entry<S>(entries: &[(QueueEntry, S)], index: usize) -> bool {
+    agent_doc_markdown_ast::reply_row::is_agent_doc_reply_row_in(&SpannedEntryRows(entries), index)
 }
 
 /// Whether `entry` is a waiting-item head row, live or struck.
@@ -198,16 +253,20 @@ fn only_binary_annotations(mut rest: &str) -> bool {
     }
 }
 
-/// The operator's text when an inert (`Freeform`) packet row is an operator
-/// answer: a live list row typed beneath generated response metadata, which
-/// parses inert because of where it sits. Generated rows carry the reply
-/// marker or a bold `**label**` shape; comments, quotes, HTML and struck rows
-/// are never answers.
-pub fn operator_freeform_text(line: &str) -> Option<&str> {
+/// The operator's text when an inert (`Freeform`) packet row at
+/// `entries[index]` is an operator answer: a live list row typed beneath
+/// generated response metadata, which parses inert because of where it sits.
+/// Generated rows are reply rows (trailing `▫️` in the rendered position, or a
+/// legacy reply comment) or have a bold `**label**` shape; comments, quotes,
+/// HTML and struck rows are never answers.
+pub fn operator_freeform_text(entries: &[QueueEntry], index: usize) -> Option<&str> {
+    let QueueEntry::Freeform(line) = entries.get(index)? else {
+        return None;
+    };
     let first = line.lines().next()?;
     let body = first.trim_start().strip_prefix("- ")?.trim();
     if body.is_empty()
-        || crate::queue_consume::is_agent_doc_reply_row(body)
+        || is_agent_doc_reply_entry(entries, index)
         || body.starts_with("**")
         || body.starts_with("%%")
         || body.starts_with('<')
@@ -227,12 +286,12 @@ pub fn has_operator_reply(entries: &[QueueEntry], head: usize) -> bool {
         .any(|index| match &entries[index] {
             QueueEntry::Prompt(prompt) => {
                 classify_member(prompt) == WaitingMember::Operator
-                    && !crate::queue_consume::is_agent_doc_reply_row(&prompt.text)
+                    && !is_agent_doc_reply_entry(entries, index)
                     && !agent_doc_element_queue::struck_work_text(&prompt.text)
                         .trim()
                         .is_empty()
             }
-            QueueEntry::Freeform(line) => operator_freeform_text(line).is_some(),
+            QueueEntry::Freeform(_) => operator_freeform_text(entries, index).is_some(),
             _ => false,
         })
 }
@@ -374,9 +433,9 @@ mod tests {
     const TREE: &str = concat!(
         "- ### Waiting on you — answer by adding a child line under an item <!-- agent-doc:waiting-on-you -->\n",
         "  - [#alpha] Choose the alpha owner. <!-- agent-doc:waiting-item -->\n",
-        "    - **Response:** Choose the alpha owner. ▫️ <!-- agent-doc:reply -->\n",
-        "      - **Next actions:** ▫️ <!-- agent-doc:reply -->\n",
-        "        - **Action:** Choose the alpha owner. ▫️ <!-- agent-doc:reply -->\n",
+        "    - **Response:** Choose the alpha owner. ▫️\n",
+        "      - **Next actions:** ▫️\n",
+        "        - **Action:** Choose the alpha owner. ▫️\n",
         "          - 📥 commit + integrate + push [#q-111111111111]\n",
         "    - 📥 Complete the remaining work for the parent item. ⟦effect:3⟧ [#q-222222222222]\n",
         "    - [#beta] Nested sibling item. <!-- agent-doc:waiting-item -->\n",
@@ -465,7 +524,7 @@ mod tests {
             "<!-- agent:queue id=\"main\" -->\n",
             "- ### Waiting on you — answer by adding a child line under an item <!-- agent-doc:waiting-on-you -->\n",
             "  - [#alpha] Choose the alpha owner. <!-- agent-doc:waiting-item -->\n",
-            "    - **Response:** Choose the alpha owner. ▫️ <!-- agent-doc:reply -->\n",
+            "    - **Response:** Choose the alpha owner. ▫️\n",
             "      - commit + integrate + push\n",
             "- ordinary work\n",
             "<!-- /agent:queue -->\n",
@@ -503,7 +562,7 @@ mod tests {
     fn the_open_todo_gate_on_a_waiting_head_is_a_fixed_point_across_passes() {
         let body = concat!(
             "- [#yeja] Choose the project-root policy. <!-- agent-doc:waiting-item -->\n",
-            "  - **Response:** Choose the project-root policy. ▫️ <!-- agent-doc:reply -->\n",
+            "  - **Response:** Choose the project-root policy. ▫️\n",
         );
         let open = std::collections::HashSet::from(["yeja".to_string()]);
         let gate = |body: &str| {

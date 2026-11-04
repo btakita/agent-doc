@@ -507,7 +507,10 @@ fn derive_runtime_projection_scoped(
                 QueueEntry::Prompt(prompt) | QueueEntry::Completed(prompt) => {
                     if prompt.text.contains(
                         agent_doc_queue::queue_consume::WAITING_ON_YOU_ROOT_MARKER,
-                    ) || agent_doc_queue::queue_consume::is_agent_doc_reply_row(&prompt.text) {
+                    ) || agent_doc_queue::waiting_packet::is_agent_doc_reply_entry(
+                        block.entries,
+                        index,
+                    ) {
                         return None;
                     }
                     // `#waitingitemclaimmarker`: a waiting-item head is never
@@ -2530,7 +2533,7 @@ mod tests {
         );
         assert!(
             repaired
-                .contains("- **Response:** Approve and merge PR #42. ▫️ <!-- agent-doc:reply -->")
+                .contains("- **Response:** Approve and merge PR #42. ▫️")
                 && !repaired.contains("~~**Response:** Approve and merge PR #42."),
             "agent-doc reply rows remain inert without being struck: {repaired}"
         );

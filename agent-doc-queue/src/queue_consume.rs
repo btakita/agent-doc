@@ -44,17 +44,21 @@ const FALLBACK_RESPONSE_TIMESTAMP: &str = "1970-01-01T00:00:00.000Z";
 /// operator-authored response edges, and keep refresh/removal byte-addressable
 /// without introducing another queue entry type.
 pub const WAITING_ON_YOU_ROOT_MARKER: &str = "<!-- agent-doc:waiting-on-you -->";
-pub const WAITING_ON_YOU_ITEM_MARKER: &str = "<!-- agent-doc:waiting-item -->";
-pub const AGENT_DOC_REPLY_MARKER: &str = "<!-- agent-doc:reply -->";
-pub const AGENT_DOC_REPLY_PRESENTATION: &str = "▫️";
-pub const LEGACY_AGENT_DOC_REPLY_MARKER: &str = "<!-- agent-doc:waiting-metadata -->";
-
-pub fn is_agent_doc_reply_row(text: &str) -> bool {
-    text.contains(AGENT_DOC_REPLY_MARKER) || text.contains(LEGACY_AGENT_DOC_REPLY_MARKER)
-}
+pub const WAITING_ON_YOU_ITEM_MARKER: &str = agent_doc_markdown_ast::reply_row::WAITING_ITEM_MARKER;
+/// Trailing glyph that is the only ownership mark of a generated packet row
+/// (`#barereplymarker`). Recognition lives in
+/// [`agent_doc_markdown_ast::reply_row`]; legacy rows that still carry a
+/// hidden reply comment are recognized there and re-rendered bare.
+pub const AGENT_DOC_REPLY_GLYPH: &str = agent_doc_markdown_ast::reply_row::AGENT_DOC_REPLY_GLYPH;
+/// Legacy hidden reply comment: accepted on read, never rendered.
+pub const LEGACY_AGENT_DOC_REPLY_MARKER: &str =
+    agent_doc_markdown_ast::reply_row::LEGACY_REPLY_MARKER;
+/// Older legacy ownership comment: accepted on read, never rendered.
+pub const LEGACY_WAITING_METADATA_MARKER: &str =
+    agent_doc_markdown_ast::reply_row::LEGACY_WAITING_METADATA_MARKER;
 
 fn agent_doc_reply_suffix() -> String {
-    format!("{AGENT_DOC_REPLY_PRESENTATION} {AGENT_DOC_REPLY_MARKER}")
+    AGENT_DOC_REPLY_GLYPH.to_string()
 }
 const WAITING_ON_YOU_ROOT_TEXT: &str =
     "Waiting on you — answer by adding a child line under an item";
@@ -5324,7 +5328,7 @@ fn project_external_waiting_items(
                         });
                     !generated_response_metadata
                         && matches!(entry, QueueEntry::Prompt(child)
-                    if !is_agent_doc_reply_row(&child.text)
+                    if !crate::waiting_packet::is_agent_doc_reply_entry(&entries, child_index)
                         && !agent_doc_element_queue::struck_work_text(&child.text)
                             .trim_start()
                             .starts_with("**")
@@ -5523,7 +5527,8 @@ fn existing_waiting_children(
                     child_end = candidate_span.start;
                     break;
                 }
-                if matches!(candidate, QueueEntry::Prompt(prompt) if !is_agent_doc_reply_row(&prompt.text))
+                if matches!(candidate, QueueEntry::Prompt(_))
+                    && !crate::waiting_packet::is_agent_doc_reply_spanned_entry(&entries, next)
                 {
                     has_operator_reply = true;
                 }
@@ -5551,14 +5556,14 @@ fn existing_waiting_children(
 /// the binary did not author: not a reply/metadata row, and not a binary-owned
 /// worker-attempt projection (`#waitingoperatortext`).
 fn waiting_child_has_operator_rows(raw: &str) -> bool {
-    raw.lines().skip(1).any(|line| {
+    let lines = raw.lines().collect::<Vec<_>>();
+    lines.iter().enumerate().skip(1).any(|(index, line)| {
         let Some(text) = line.trim_start().strip_prefix("- ") else {
             return false;
         };
         let text = text.trim();
         if text.is_empty()
-            || is_agent_doc_reply_row(text)
-            || text.contains("<!-- agent-doc:waiting-metadata -->")
+            || agent_doc_markdown_ast::reply_row::is_agent_doc_reply_row_at(&lines, index)
         {
             return false;
         }
@@ -5754,17 +5759,21 @@ fn latest_response_timestamp(source: &str) -> Option<&str> {
 }
 
 fn ensure_waiting_response_timestamp(child: &str, response_timestamp: &str) -> String {
-    if child.lines().any(|line| {
-        line.trim_start().starts_with("- **Timestamp:** ") && is_agent_doc_reply_row(line)
+    let lines = child.split_inclusive('\n').collect::<Vec<_>>();
+    let is_reply = |index: usize| {
+        agent_doc_markdown_ast::reply_row::is_agent_doc_reply_row_at(&lines, index)
+    };
+    if lines.iter().enumerate().any(|(index, line)| {
+        line.trim_start().starts_with("- **Timestamp:** ") && is_reply(index)
     }) {
         return child.to_string();
     }
 
     let mut out = String::with_capacity(child.len() + response_timestamp.len() + 80);
     let mut inserted = false;
-    for line in child.split_inclusive('\n') {
+    for (index, line) in lines.iter().enumerate() {
         out.push_str(line);
-        if !inserted && line.contains("**Response:**") && is_agent_doc_reply_row(line) {
+        if !inserted && line.contains("**Response:**") && is_reply(index) {
             if !line.ends_with('\n') {
                 out.push('\n');
             }
@@ -6000,9 +6009,19 @@ mod tests {
         assert!(projected.contains("**Action:** Approve and merge PR #42."));
         assert!(projected.contains(&agent_doc_reply_suffix()), "{projected}");
         assert!(
-            !projected.contains(LEGACY_AGENT_DOC_REPLY_MARKER),
-            "new projections must use canonical ownership: {projected}"
+            !projected.contains(LEGACY_AGENT_DOC_REPLY_MARKER)
+                && !projected.contains(LEGACY_WAITING_METADATA_MARKER),
+            "new projections carry only the bare trailing glyph: {projected}"
         );
+        for line in projected
+            .lines()
+            .filter(|line| line.contains(AGENT_DOC_REPLY_GLYPH))
+        {
+            assert!(
+                line.ends_with(&format!(" {AGENT_DOC_REPLY_GLYPH}")),
+                "the glyph is the row's last token: {line}"
+            );
+        }
         assert!(
             !projected.contains("~~**Response:")
                 && !projected.contains("~~**Question:")
@@ -6261,7 +6280,7 @@ mod tests {
         assert!(
             with_reply.contains(concat!(
                 "  - ⟦📥 you: 0 · agent: 1 · done: 0⟧ [#approve-pr] Approve and merge PR #42. <!-- agent-doc:waiting-item -->\n",
-                "    - **Next:** agent — pick up your reply “approved” and attempt `#approve-pr` (evidence: your reply) ▫️ <!-- agent-doc:reply -->\n",
+                "    - **Next:** agent — pick up your reply “approved” and attempt `#approve-pr` (evidence: your reply) ▫️\n",
                 "    - approved\n",
             )),
             "refresh must preserve an operator reply byte-for-byte: {with_reply}"
@@ -6331,16 +6350,20 @@ mod tests {
         let refreshed = project_waiting_on_you_tree(&document, response).unwrap();
         let refreshed = refreshed.as_deref().unwrap_or(&document);
         // Only the binary-owned state token and Next row are added.
-        let without_token = refreshed
-            .replace("⟦📥 you: 0 · agent: 1 · done: 0⟧ ", "")
-            .lines()
-            .filter(|line| !crate::waiting_status::is_next_row(line))
-            .map(|line| format!("{line}\n"))
+        let without_token = refreshed.replace("⟦📥 you: 0 · agent: 1 · done: 0⟧ ", "");
+        let lines = without_token.lines().collect::<Vec<_>>();
+        let without_token = (0..lines.len())
+            .filter(|index| !crate::waiting_status::is_next_row_at(&lines, *index))
+            .map(|index| format!("{}\n", lines[index]))
             .collect::<String>();
+        // `#barereplymarker`: the generated rows migrate to the bare trailing
+        // glyph; every other byte, including the operator's answer, survives.
+        let migrated = child.replace(&format!(" {LEGACY_AGENT_DOC_REPLY_MARKER}"), "");
         assert!(
-            without_token.contains(child),
+            without_token.contains(&migrated),
             "the operator-answered packet must survive byte-for-byte:\n{refreshed}"
         );
+        assert!(!refreshed.contains(LEGACY_AGENT_DOC_REPLY_MARKER), "{refreshed}");
         assert!(refreshed.contains("          - commit + integrate + push\n"));
         assert!(!refreshed.contains("What decision or completion result should be recorded?"));
     }
@@ -6404,7 +6427,8 @@ mod tests {
         assert!(repaired.contains("- **Timestamp:** 2026-11-02T10:45-05:00"));
         assert!(repaired.contains(&agent_doc_reply_suffix()), "{repaired}");
         assert!(
-            !repaired.contains(LEGACY_AGENT_DOC_REPLY_MARKER),
+            !repaired.contains(LEGACY_AGENT_DOC_REPLY_MARKER)
+                && !repaired.contains(LEGACY_WAITING_METADATA_MARKER),
             "{repaired}"
         );
         assert!(!repaired.contains("~~**Response:"), "{repaired}");

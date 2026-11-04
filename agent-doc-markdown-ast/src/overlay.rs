@@ -38,17 +38,6 @@ const AGENT_PIN_MARKERS: [&str; 6] = [
     "📍",
 ];
 
-/// Namespaced ownership proof attached to agent-doc-generated reply rows under
-/// a `waiting-item`. The visible glyph is presentation only: an operator-authored
-/// row containing `▫️` must remain ordinary queue work.
-const AGENT_DOC_REPLY_MARKER: &str = "<!-- agent-doc:reply -->";
-const AGENT_DOC_REPLY_PRESENTATION: &str = "▫️";
-const LEGACY_AGENT_DOC_REPLY_MARKER: &str = "<!-- agent-doc:waiting-metadata -->";
-
-fn is_agent_doc_reply_row(body: &str) -> bool {
-    body.contains(AGENT_DOC_REPLY_MARKER) || body.contains(LEGACY_AGENT_DOC_REPLY_MARKER)
-}
-
 /// Deterministic, visible separator that introduces the auto-struck explanation
 /// note appended *outside* the `~~…~~` strike wrapper (`#qstrikenote`). A struck
 /// free-text queue head renders as `~~foo~~ — auto-struck: …`; the separator lets
@@ -730,16 +719,15 @@ fn related_row_child_end(
 }
 
 /// Reserve one agent-doc-generated reply row without swallowing any
-/// operator-authored child beneath it. The marker is the ownership proof: the
-/// visible label is intentionally not parsed because older projections used
-/// several labels (`Response`, `Question`, `Summary`, `Choices`, `Action`, ...).
+/// operator-authored child beneath it. Ownership is decided by the shared
+/// [`crate::reply_row::is_agent_doc_reply_row_at`] predicate: a trailing `▫️`
+/// in the rendered packet position, or a legacy namespaced comment.
 fn agent_doc_reply_child_end(
     lines: &[&str],
     opener_index: usize,
     _item_indent: usize,
 ) -> Option<usize> {
-    let body = strip_bullet(lines.get(opener_index)?)?;
-    is_agent_doc_reply_row(body).then_some(opener_index + 1)
+    crate::reply_row::is_agent_doc_reply_row_at(lines, opener_index).then_some(opener_index + 1)
 }
 
 /// Return the end of an inert list child.
@@ -769,45 +757,12 @@ pub fn inert_list_child_end(
         .or_else(|| related_row_child_end(lines, opener_index, item_indent))
 }
 
-/// Normalize binary-owned reply rows to the canonical hidden ownership marker
-/// plus compact presentation glyph, and remove legacy strike wrappers.
-/// Operator-authored descendants and unmarked lookalikes remain byte-for-byte
-/// unchanged. In particular, the glyph alone never establishes ownership.
+/// Normalize binary-owned reply rows to the bare trailing-glyph form and
+/// remove legacy strike wrappers and hidden ownership comments
+/// (`#barereplymarker`). Operator-authored descendants and lookalikes remain
+/// byte-for-byte unchanged; see [`crate::reply_row::normalize_reply_rows`].
 pub fn normalize_agent_doc_reply_rows(source: &str) -> String {
-    let mut out = String::with_capacity(source.len());
-    for line in source.split_inclusive('\n') {
-        let Some(body) = strip_bullet(line) else {
-            out.push_str(line);
-            continue;
-        };
-        let (core, newline) = body
-            .strip_suffix("\r\n")
-            .map(|core| (core, "\r\n"))
-            .or_else(|| body.strip_suffix('\n').map(|core| (core, "\n")))
-            .unwrap_or((body, ""));
-        let (_, inner) = split_struck_body(core);
-        if !is_agent_doc_reply_row(inner) {
-            out.push_str(line);
-            continue;
-        }
-        let body_offset = body.as_ptr() as usize - line.as_ptr() as usize;
-        out.push_str(&line[..body_offset]);
-        let canonical = inner.replace(LEGACY_AGENT_DOC_REPLY_MARKER, AGENT_DOC_REPLY_MARKER);
-        if let Some(marker_at) = canonical.find(AGENT_DOC_REPLY_MARKER) {
-            let before_marker = canonical[..marker_at].trim_end();
-            out.push_str(before_marker);
-            if !before_marker.ends_with(AGENT_DOC_REPLY_PRESENTATION) {
-                out.push(' ');
-                out.push_str(AGENT_DOC_REPLY_PRESENTATION);
-            }
-            out.push(' ');
-            out.push_str(&canonical[marker_at..]);
-        } else {
-            unreachable!("reply ownership was checked before normalization");
-        }
-        out.push_str(newline);
-    }
-    out
+    crate::reply_row::normalize_reply_rows(source)
 }
 
 /// Remove queue-attempt lifecycle prefixes accidentally projected onto

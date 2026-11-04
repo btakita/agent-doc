@@ -285,7 +285,7 @@ static QUEUE_ICONS: OnceLock<QueueIconSet> = OnceLock::new();
 
 mod legend;
 pub use legend::{
-    ALL_QUEUE_MARKERS, QUEUE_MARKER_ANNOTATIONS, QUEUE_MARKER_LEGEND_ANCHOR,
+    AGENT_DOC_REPLY_GLYPH, ALL_QUEUE_MARKERS, QUEUE_REPLY_LEGEND_ENTRY, QUEUE_REPLY_MEANING, QUEUE_MARKER_ANNOTATIONS, QUEUE_MARKER_LEGEND_ANCHOR,
     QUEUE_MARKER_LEGEND_LINE_PREFIX, QUEUE_MARKER_LEGEND_URL, QueueMarker, QueueMarkerAnnotation,
     is_queue_marker_legend_line, queue_marker_legend_help, queue_marker_legend_help_for,
     queue_marker_legend_line, queue_marker_legend_line_for, queue_marker_legend_markdown_table,

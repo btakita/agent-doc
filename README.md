@@ -176,6 +176,7 @@ agent-doc prefixes each row in an `agent:run` section with its state:
 | `⏳` | waiting on an operator verdict |
 | `🙋` | an operator request is open for the row |
 | `📌` / `📍` | operator / agent priority pin |
+| `▫️` | ends a row agent-doc generated under a Waiting-on-you item; rewritten every closeout, never your answer or queue work |
 | `~~row~~` | integrated and terminal; a prompt tree is safe to delete only when every row is struck |
 
 A session document with an `agent:run` section keeps this legend on one line

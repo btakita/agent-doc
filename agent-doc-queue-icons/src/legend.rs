@@ -31,6 +31,18 @@ pub const QUEUE_TERMINAL_LEGEND_ENTRY: &str = "~~done~~ safe to delete";
 pub const QUEUE_TERMINAL_TOKEN: &str = "~~row~~";
 pub const QUEUE_TERMINAL_MEANING: &str = "Integrated, terminal queue history. A prompt tree is safe to delete only when every row in it is struck; any live row, especially `☑️`, must remain.";
 
+/// Trailing glyph that identifies a row agent-doc generated inside a
+/// Waiting-on-you packet (`**Next:**`, `**Response:**`, `**Question:**`,
+/// offered choices, ...) (`#barereplymarker`). It is the row's only ownership
+/// mark: older documents also carried a hidden `<!-- agent-doc:reply -->`
+/// comment, which the next refresh drops. The glyph counts only as the last
+/// token of a row in the rendered packet position, so an operator line that
+/// merely contains it stays operator text.
+pub const AGENT_DOC_REPLY_GLYPH: &str = "▫️";
+/// Legend entry for [`AGENT_DOC_REPLY_GLYPH`].
+pub const QUEUE_REPLY_LEGEND_ENTRY: &str = "▫️ generated row";
+pub const QUEUE_REPLY_MEANING: &str = "Ends a row agent-doc generated under a Waiting-on-you item (`**Next:**`, `**Response:**`, `**Question:**`, an offered choice, ...). It is rewritten every closeout and is never your answer or queue work: reply on your own line under the item, without the glyph.";
+
 /// Every visible prefix the binary paints on (or accepts from) a queue row.
 ///
 /// Lifecycle markers are mutually exclusive: a row shows exactly one. The
@@ -190,10 +202,14 @@ pub struct QueueMarkerAnnotation {
 
 /// Annotations and legacy spellings that appear on queue rows. Like the
 /// prefixes, every one is stripped before queue work identity is computed.
-pub const QUEUE_MARKER_ANNOTATIONS: [QueueMarkerAnnotation; 10] = [
+pub const QUEUE_MARKER_ANNOTATIONS: [QueueMarkerAnnotation; 11] = [
     QueueMarkerAnnotation {
         token: QUEUE_TERMINAL_TOKEN,
         meaning: QUEUE_TERMINAL_MEANING,
+    },
+    QueueMarkerAnnotation {
+        token: AGENT_DOC_REPLY_GLYPH,
+        meaning: QUEUE_REPLY_MEANING,
     },
     QueueMarkerAnnotation {
         token: "[#<owner>#<N>]",
@@ -240,6 +256,7 @@ pub fn queue_marker_legend_line_for(icons: &QueueIconSet) -> String {
         .iter()
         .map(|marker| format!("{} {}", marker.prefix_in(icons), marker.label()))
         .collect::<Vec<_>>();
+    entries.push(QUEUE_REPLY_LEGEND_ENTRY.to_string());
     entries.push(QUEUE_TERMINAL_LEGEND_ENTRY.to_string());
     let entries = entries.join(" · ");
     format!("{QUEUE_MARKER_LEGEND_LINE_PREFIX} {entries} ([legend]({QUEUE_MARKER_LEGEND_URL}))")
@@ -466,6 +483,14 @@ mod tests {
         assert!(help.contains("☑️  keep: worker done"));
         assert!(line.contains("☑️ keep: worker done"));
         assert!(line.contains(QUEUE_TERMINAL_LEGEND_ENTRY));
+        assert_eq!(
+            line.matches(AGENT_DOC_REPLY_GLYPH).count(),
+            1,
+            "the legend names the generated-row glyph exactly once: {line}"
+        );
+        assert!(line.contains(QUEUE_REPLY_LEGEND_ENTRY), "{line}");
+        assert!(help.contains(QUEUE_REPLY_MEANING));
+        assert!(table.contains(QUEUE_REPLY_MEANING));
         assert!(table.contains(QUEUE_TERMINAL_TOKEN));
         assert!(table.contains(QUEUE_TERMINAL_MEANING));
     }
@@ -533,6 +558,10 @@ mod tests {
                 "README queue markers section is missing {prefix}"
             );
         }
+        assert!(
+            section.contains(&format!("`{AGENT_DOC_REPLY_GLYPH}`")),
+            "README queue markers section is missing the generated-row glyph"
+        );
         assert!(section.contains("docs/guide/queue-markers.md#queue-markers"));
     }
 }

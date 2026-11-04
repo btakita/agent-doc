@@ -63,6 +63,7 @@ start` binds the replacement worker.
 | Annotation | Meaning |
 | --- | --- |
 | `~~row~~` | Integrated, terminal queue history. A prompt tree is safe to delete only when every row in it is struck; any live row, especially `☑️`, must remain. |
+| `▫️` | Ends a row agent-doc generated under a Waiting-on-you item (`**Next:**`, `**Response:**`, `**Question:**`, an offered choice, ...). It is rewritten every closeout and is never your answer or queue work: reply on your own line under the item, without the glyph. |
 | `[#<owner>#<N>]` | Owner and claim generation of the current attempt or report receipt, for example `[#subagent:fix#2]`. Metadata, not work identity. |
 | `⟦blocked by <id>, <id>⟧` | Follows the blocked marker and names the open items the row waits on (ids without `#`). Metadata, not work identity. |
 | `⟦effect:N⟧` | Numbers live rows that have identical text, so each one is its own claimable effect. |
@@ -87,7 +88,7 @@ surfaces render it:
   keeps one compact legend line as the last paragraph of `agent:status`:
 
   ```text
-  Queue markers: 📥 pending · ⛔ blocked · 🟡 claimed · 🚧 running · ☑️ keep: worker done · ⚠️ lost · ⚠️🟡 lost + claimed · ⚠️🚧 lost + running · ⚠️☑️ lost + worker done · 🔄 needs reconcile · ❔ unknown · ⏭️ skipped · ⏳ awaiting operator · 🙋 operator action · 📌 pinned · 📍 agent pin · ~~done~~ safe to delete ([legend](…/queue-markers.md#queue-markers))
+  Queue markers: 📥 pending · ⛔ blocked · 🟡 claimed · 🚧 running · ☑️ keep: worker done · ⚠️ lost · ⚠️🟡 lost + claimed · ⚠️🚧 lost + running · ⚠️☑️ lost + worker done · 🔄 needs reconcile · ❔ unknown · ⏭️ skipped · ⏳ awaiting operator · 🙋 operator action · 📌 pinned · 📍 agent pin · ▫️ generated row · ~~done~~ safe to delete ([legend](…/queue-markers.md#queue-markers))
   ```
 
   New documents from the Claim for Tmux Pane template start with it. An
@@ -269,6 +270,16 @@ never queue work of its own. It never gets `📥`, a `q-` id, a claim or a
 dispatch. Your reply is evidence for the item: it selects the item itself
 for one attempt, carrying your reply as its decision evidence. An offered
 choice (`**label**: effect`) is an option for you, never work.
+
+Every row agent-doc generates in a packet ends with `▫️` (`▫️ generated row`
+in the legend), and that glyph is how agent-doc tells its rows from yours. It
+counts only as the last token of a row in the generated position: a labeled
+row (`**Next:**`, `**Response:**`, `**Question:**`, ...) directly under the
+item or under another generated row, or an option under the generated
+`**Choices:**` row. A line you type under the item, under a choice or under a
+generated row stays yours even if it happens to end in `▫️`. Older documents
+also hid a `<!-- agent-doc:reply -->` comment on these rows; the next closeout
+rewrites them without it.
 
 Each item row carries its state and roll-up right after its attempt
 projection, for example:

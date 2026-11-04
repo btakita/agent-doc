@@ -3355,6 +3355,16 @@ fn inspect_with_warnings_sweep(
                 return Ok(report);
             }
         }
+        match crate::profile::timed("guard_managed_list_invariants", || {
+            crate::check_managed_list_invariants(file, &rc)
+        })? {
+            GuardResult::None => {}
+            GuardResult::Warn(lines) => report.warnings.extend(lines),
+            GuardResult::Error(message) => {
+                report.status = SessionCheckStatus::Interrupted(message);
+                return Ok(report);
+            }
+        }
         match crate::profile::timed("guard_backlog_replay", || {
             crate::check_backlog_replay_guard(file, &rc)
         })? {

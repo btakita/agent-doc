@@ -4443,12 +4443,7 @@ fn structured_choice_projection(
     };
     let decision = crate::operator_request_packet::structured_choice_decisions(response_body)
         .into_iter()
-        .find(|decision| {
-            decision
-                .request_id
-                .as_deref()
-                .is_none_or(|request_id| decision_belongs(request_id))
-        })
+        .find(|decision| decision.request_id.as_deref().is_none_or(&decision_belongs))
         .or_else(|| {
             crate::operator_request_packet::structured_choice_decisions(source_document)
                 .into_iter()
@@ -4944,8 +4939,8 @@ fn adopt_legacy_waiting_items(document: &str) -> Result<Option<String>> {
             }
             let child_indent = root_prompt.indent + 2;
             let end = crate::waiting_packet::subtree_end(&entries, root);
-            for child in root + 1..end {
-                let QueueEntry::Prompt(prompt) = &mut entries[child] else {
+            for entry in entries.iter_mut().take(end).skip(root + 1) {
+                let QueueEntry::Prompt(prompt) = entry else {
                     continue;
                 };
                 if prompt.indent != child_indent || prompt.text.contains(WAITING_ON_YOU_ITEM_MARKER)

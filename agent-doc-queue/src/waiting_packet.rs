@@ -125,19 +125,19 @@ pub fn packet_member_indexes(entries: &[QueueEntry], head: usize) -> Vec<usize> 
 
 /// Classify one live packet row.
 pub fn classify_member(prompt: &QueuePrompt) -> WaitingMember {
-    match lifecycle_marker(&prompt.text) {
-        Some(
-            marker @ (QueueLifecycleMarker::Claimed
-            | QueueLifecycleMarker::Running
-            | QueueLifecycleMarker::Reported
-            | QueueLifecycleMarker::Lost
-            | QueueLifecycleMarker::LostClaimed
-            | QueueLifecycleMarker::LostRunning
-            | QueueLifecycleMarker::LostReported
-            | QueueLifecycleMarker::Reconciling
-            | QueueLifecycleMarker::Unknown),
-        ) => return WaitingMember::Attempt(marker),
-        _ => {}
+    if let Some(
+        marker @ (QueueLifecycleMarker::Claimed
+        | QueueLifecycleMarker::Running
+        | QueueLifecycleMarker::Reported
+        | QueueLifecycleMarker::Lost
+        | QueueLifecycleMarker::LostClaimed
+        | QueueLifecycleMarker::LostRunning
+        | QueueLifecycleMarker::LostReported
+        | QueueLifecycleMarker::Reconciling
+        | QueueLifecycleMarker::Unknown),
+    ) = lifecycle_marker(&prompt.text)
+    {
+        return WaitingMember::Attempt(marker);
     }
     if owner_projection(&prompt.text).is_some() {
         return WaitingMember::Attempt(QueueLifecycleMarker::Claimed);

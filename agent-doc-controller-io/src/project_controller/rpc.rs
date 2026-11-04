@@ -46,13 +46,22 @@ const CONTROLLER_CRDT_CURRENT_TEXT_POLL_TIMEOUT: Duration = Duration::from_secs(
 /// Every document-scoped CLI command gets one fail-open supervisor freshness
 /// query. This budget keeps the check below human-visible command latency.
 const COMMAND_SUPERVISOR_FRESHNESS_TIMEOUT: Duration = Duration::from_millis(250);
-/// A wedged tmux server must not wedge controller admission.
+/// A wedged tmux server must not wedge controller admission. This is the
+/// budget of the FIRST pane read; each timed-out read doubles the next one up to
+/// [`CONTROLLER_DISPATCH_PANE_CAPTURE_TIMEOUT_CAP`].
 const CONTROLLER_DISPATCH_PANE_CAPTURE_TIMEOUT: Duration = Duration::from_millis(250);
+/// `#recoverableautoretry`: ceiling for one escalated pane read. On 2026-11-04,
+/// ~3 minutes after an IDE restart (host load 16-17 while the IDE re-indexed),
+/// three identical 250ms reads all timed out and refused an explicit
+/// `Run Agent Doc`. Scaling the budget with the latency tmux is actually showing
+/// gives a slow-but-alive server a read it can win, while a wedged one still
+/// fails closed within 250 + 500 + 1000 = 1.75s, well inside the 5s RPC deadline.
+const CONTROLLER_DISPATCH_PANE_CAPTURE_TIMEOUT_CAP: Duration = Duration::from_secs(1);
 /// Captures attempted before a timed-out pane observation fails dispatch
 /// closed. One slow tmux reply under load (the operator's server routinely
 /// serves dozens of panes) is not evidence of a wedged server: on 2026-11-04 a
 /// single 250ms timeout refused an explicit `Run Agent Doc` while tmux answered
-/// in 1-2ms before and after. Worst case stays bounded at 3 x 250ms.
+/// in 1-2ms before and after.
 const CONTROLLER_DISPATCH_PANE_CAPTURE_ATTEMPTS: usize = 3;
 // Foreground closeout reads may briefly queue behind a replica bootstrap or
 // durable outbox fold. Give that observation enough time to see the ACK that
@@ -3471,7 +3480,11 @@ pub fn authorize_dispatch(
             diagnostic_payload: Some(request.diagnostic_payload.clone()),
             sequence: None,
         };
-        match handle_dispatch(&bootstrap, None, dispatch_request(request.generation)) {
+        let dispatch_once = || match handle_dispatch(
+            &bootstrap,
+            None,
+            dispatch_request(request.generation),
+        ) {
             Err(err) => {
                 // `#anw0`: a racing dispatch that lost the supersede race against a
                 // newer dispatchable generation self-heals by retrying once against
@@ -3494,7 +3507,12 @@ pub fn authorize_dispatch(
                 }
             }
             ok => ok,
-        }
+        };
+        retry_once_after_recoverable_dispatch_refusal(
+            &request.file,
+            agent_doc_controller::dispatch::DISPATCH_RECOVERABLE_RETRY_BACKOFF,
+            dispatch_once,
+        )
     }
 
     #[cfg(not(any(test, feature = "test-support")))]
@@ -3528,7 +3546,7 @@ pub fn authorize_dispatch(
                 &file_for_log,
             )
         };
-        match request_dispatch(controller_request.clone()) {
+        let dispatch_once = || match request_dispatch(controller_request.clone()) {
             Err(err) if err.to_string().contains("controller_binary_stale") => {
                 agent_doc_ops_log_io::log_op(
                     &request.file,
@@ -3537,7 +3555,7 @@ pub fn authorize_dispatch(
                         request.file.display()
                     ),
                 );
-                request_dispatch(controller_request)
+                request_dispatch(controller_request.clone())
             }
             Err(err)
                 if dispatch_error_stale_generation_redirect_target(&err.to_string()).is_some() =>
@@ -3560,7 +3578,74 @@ pub fn authorize_dispatch(
                 request_dispatch(redirected)
             }
             other => other,
+        };
+        retry_once_after_recoverable_dispatch_refusal(
+            &request.file,
+            agent_doc_controller::dispatch::DISPATCH_RECOVERABLE_RETRY_BACKOFF,
+            dispatch_once,
+        )
+    }
+}
+
+/// `#recoverableautoretry`: re-dispatch exactly once, after `backoff`, when the
+/// controller refused with `ui_outcome_class=recoverable next_action=retry_dispatch`
+/// (it could not observe the owner pane, e.g. tmux timing out while an IDE
+/// re-indexes after a restart). Every client — JetBrains and VS Code `Run Agent
+/// Doc`, the CLI route, `/loop` continuation — funnels through
+/// [`authorize_dispatch`], so the retry lives here once instead of per editor.
+///
+/// No double delivery: the refusal is a `dispatch blocked` bail the controller
+/// returns BEFORE issuing an authorization (its receipt is `Blocked` with
+/// `dispatch_start_proven=false`), and callers only send the trigger on `Ok`, so
+/// nothing reached the pane. The retry also reuses the same `#netadv5` request
+/// key, so if a lost ACK ever hid an applied copy the controller answers the
+/// original outcome instead of re-injecting. A second refusal is returned
+/// unchanged, so the operator still sees the error UI.
+///
+/// Why a direct retry and not a reactive edge (`#lazily-reactive-first`): this is
+/// the actorless, one-shot client boundary of a single RPC. tmux publishes no
+/// responsiveness event the client could subscribe to, and the controller's own
+/// admission decision is already the authoritative reactive fence; the retry is
+/// bounded to one extra attempt and never loops.
+fn retry_once_after_recoverable_dispatch_refusal(
+    file: &Path,
+    backoff: Duration,
+    mut dispatch: impl FnMut() -> Result<DispatchAuthorization>,
+) -> Result<DispatchAuthorization> {
+    match dispatch() {
+        Err(err)
+            if agent_doc_controller::dispatch::dispatch_error_is_recoverable_retry(&format!(
+                "{err:#}"
+            )) =>
+        {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "dispatch_retry_after_recoverable_refusal file={} backoff_ms={} attempt=2 cause={}",
+                    file.display(),
+                    backoff.as_millis(),
+                    format!("{err:#}").chars().take(200).collect::<String>(),
+                ),
+            );
+            if !backoff.is_zero() {
+                std::thread::sleep(backoff);
+            }
+            let retried = dispatch();
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "dispatch_recoverable_retry_settled file={} result={}",
+                    file.display(),
+                    if retried.is_ok() {
+                        "authorized"
+                    } else {
+                        "refused"
+                    },
+                ),
+            );
+            retried
         }
+        other => other,
     }
 }
 
@@ -28518,14 +28603,24 @@ fn classify_controller_dispatch_pane(
 /// This is a bounded re-read at the actorless tmux boundary inside one RPC,
 /// not a caller-owned retry loop: the dispatch admission decision still sees
 /// exactly one observation, and a timeout on every attempt still fails closed.
+/// `capture` receives the budget for its attempt, which doubles after every
+/// observed timeout (`#recoverableautoretry`, see
+/// [`agent_doc_controller::dispatch::dispatch_pane_capture_attempt_timeout`]).
 fn capture_dispatch_pane_retrying_timeouts(
     attempts: usize,
-    mut capture: impl FnMut() -> Result<String, agent_doc_tmux_io::TmuxIoError>,
+    base_timeout: Duration,
+    timeout_cap: Duration,
+    mut capture: impl FnMut(Duration) -> Result<String, agent_doc_tmux_io::TmuxIoError>,
 ) -> Result<String, agent_doc_tmux_io::TmuxIoError> {
     let attempts = attempts.max(1);
     let mut attempt = 1;
     loop {
-        match capture() {
+        let timeout = agent_doc_controller::dispatch::dispatch_pane_capture_attempt_timeout(
+            base_timeout,
+            timeout_cap,
+            attempt,
+        );
+        match capture(timeout) {
             Err(agent_doc_tmux_io::TmuxIoError::Timeout { .. }) if attempt < attempts => {
                 attempt += 1;
             }
@@ -28545,13 +28640,14 @@ fn controller_dispatch_pane_observation(
     let tmux = agent_doc_tmux_io::configured_tmux();
     let observation = classify_controller_dispatch_pane(
         &record.harness,
-        capture_dispatch_pane_retrying_timeouts(CONTROLLER_DISPATCH_PANE_CAPTURE_ATTEMPTS, || {
-            agent_doc_tmux_io::capture_pane_with_ansi_bounded(
-                &tmux,
-                &record.pane_id,
-                CONTROLLER_DISPATCH_PANE_CAPTURE_TIMEOUT,
-            )
-        }),
+        capture_dispatch_pane_retrying_timeouts(
+            CONTROLLER_DISPATCH_PANE_CAPTURE_ATTEMPTS,
+            CONTROLLER_DISPATCH_PANE_CAPTURE_TIMEOUT,
+            CONTROLLER_DISPATCH_PANE_CAPTURE_TIMEOUT_CAP,
+            |timeout| {
+                agent_doc_tmux_io::capture_pane_with_ansi_bounded(&tmux, &record.pane_id, timeout)
+            },
+        ),
     );
     // Unit controller fixtures use synthetic pane ids without owning a tmux
     // server. Preserve those actor-state tests; the classifier regression
@@ -64871,16 +64967,79 @@ mod tests {
     }
 
     #[test]
+    fn recoverable_dispatch_refusal_retries_exactly_once_then_surfaces() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let file = dir.path().join("doc.md");
+        let refusal = || {
+            anyhow::anyhow!(
+                "project controller command `dispatch` failed: dispatch blocked for doc.md: failed_stage=actor_turn_observation_unavailable reason=/bin/tmux command timed out after 250ms receipt_id=7 {}",
+                agent_doc_controller::dispatch::dispatch_blocked_user_facing_outcome_fields(
+                    "actor_turn_observation_unavailable",
+                    "/bin/tmux command timed out after 250ms",
+                )
+            )
+        };
+
+        // Recovers on the single retry.
+        let mut calls = 0;
+        let result = retry_once_after_recoverable_dispatch_refusal(&file, Duration::ZERO, || {
+            calls += 1;
+            if calls == 1 {
+                Err(refusal())
+            } else {
+                Err(anyhow::anyhow!("second attempt reached the controller"))
+            }
+        });
+        assert_eq!(calls, 2);
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            "second attempt reached the controller"
+        );
+
+        // A second recoverable refusal is returned unchanged: one retry, never a loop.
+        let mut calls = 0;
+        let result = retry_once_after_recoverable_dispatch_refusal(&file, Duration::ZERO, || {
+            calls += 1;
+            Err(refusal())
+        });
+        assert_eq!(calls, 2);
+        let message = result.unwrap_err().to_string();
+        assert!(message.contains("ui_outcome_class=recoverable next_action=retry_dispatch"));
+
+        // Terminal refusals are never retried.
+        let mut calls = 0;
+        let result = retry_once_after_recoverable_dispatch_refusal(&file, Duration::ZERO, || {
+            calls += 1;
+            Err(anyhow::anyhow!(
+                "dispatch blocked for doc.md: failed_stage=queue_paused reason=operator paused receipt_id=8 {}",
+                agent_doc_controller::dispatch::dispatch_blocked_user_facing_outcome_fields(
+                    "queue_paused",
+                    "operator paused this queue for manual review",
+                )
+            ))
+        });
+        assert_eq!(calls, 1);
+        assert!(result.is_err());
+    }
+
+    #[test]
     fn dispatch_pane_capture_rereads_only_timeouts_and_stays_bounded() {
         use agent_doc_tmux_io::TmuxIoError;
         let timeout = || TmuxIoError::Timeout {
             binary: "tmux".to_string(),
             timeout_ms: 250,
         };
+        let timeout_err = |budget: Duration| TmuxIoError::Timeout {
+            binary: "tmux".to_string(),
+            timeout_ms: budget.as_millis(),
+        };
+
+        let base = Duration::from_millis(250);
+        let cap = Duration::from_secs(1);
 
         // One slow reply, then an answer: the answer wins.
         let mut calls = 0;
-        let result = capture_dispatch_pane_retrying_timeouts(3, || {
+        let result = capture_dispatch_pane_retrying_timeouts(3, base, cap, |_| {
             calls += 1;
             if calls == 1 {
                 Err(timeout())
@@ -64891,18 +65050,22 @@ mod tests {
         assert_eq!(result.expect("second read answers"), "ready");
         assert_eq!(calls, 2);
 
-        // Timeouts on every attempt still fail closed, after exactly `attempts` reads.
-        let mut calls = 0;
-        let result = capture_dispatch_pane_retrying_timeouts(3, || {
-            calls += 1;
-            Err(timeout())
+        // Timeouts on every attempt still fail closed, after exactly `attempts`
+        // reads, and each re-read gets a doubled (capped) budget.
+        let mut budgets = Vec::new();
+        let result = capture_dispatch_pane_retrying_timeouts(3, base, cap, |timeout| {
+            budgets.push(timeout);
+            Err(timeout_err(timeout))
         });
         assert!(matches!(result, Err(TmuxIoError::Timeout { .. })));
-        assert_eq!(calls, 3);
+        assert_eq!(
+            budgets,
+            vec![base, Duration::from_millis(500), Duration::from_secs(1)]
+        );
 
         // A non-timeout error is a real answer: no re-read.
         let mut calls = 0;
-        let result = capture_dispatch_pane_retrying_timeouts(3, || {
+        let result = capture_dispatch_pane_retrying_timeouts(3, base, cap, |_| {
             calls += 1;
             Err(TmuxIoError::Failed {
                 binary: "tmux".to_string(),

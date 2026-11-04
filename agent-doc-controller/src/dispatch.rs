@@ -14,6 +14,19 @@ pub const STALE_QUEUE_PAUSE_INVARIANT_ID: &str = "stale_queue_pause";
 pub const STALE_QUEUE_PAUSE_NEXT_ACTION: &str = "restart_supervisor_once_and_retry";
 pub const DISPATCH_RECOVERY_OUTCOME_CONTRACT_VERSION: &str = "binary-outcome-v1";
 const DISPATCH_BLOCKED_USER_FACING_OUTCOME_CONTRACT_VERSION: &str = "ui-outcome-v1";
+/// `#recoverableautoretry`: the user-facing class + next action the controller
+/// stamps on a dispatch it refused WITHOUT delivering anything because it could
+/// not observe the owner pane. The producer
+/// ([`dispatch_blocked_user_facing_outcome_fields`]) and the client-side
+/// classifier ([`dispatch_error_is_recoverable_retry`]) share these constants so
+/// the contract cannot drift between them.
+pub const DISPATCH_RECOVERABLE_OUTCOME_CLASS: &str = "recoverable";
+pub const DISPATCH_RETRY_DISPATCH_NEXT_ACTION: &str = "retry_dispatch";
+/// Pause before the single automatic re-dispatch of a recoverable refusal. Long
+/// enough for a tmux server stalled by a transient load spike (IDE re-index
+/// after a restart) to drain its backlog, short enough to stay well below the
+/// human "did my click do anything" threshold.
+pub const DISPATCH_RECOVERABLE_RETRY_BACKOFF: Duration = Duration::from_millis(750);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -254,8 +267,8 @@ pub fn dispatch_blocked_user_facing_outcome_fields(stage: &str, reason: &str) ->
         // sent operators to the wrong place. Retrying the run is the remedy.
         DispatchBlockedUserFacingOutcome {
             outcome: "pane_observation_unavailable",
-            class: "recoverable",
-            next_action: "retry_dispatch",
+            class: DISPATCH_RECOVERABLE_OUTCOME_CLASS,
+            next_action: DISPATCH_RETRY_DISPATCH_NEXT_ACTION,
             unblocker: None,
         }
     } else if stage == "actor_busy_draining" {
@@ -4342,6 +4355,37 @@ pub fn dispatch_error_stale_generation_redirect_target(message: &str) -> Option<
         let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
         digits.parse::<u64>().ok()
     })
+}
+
+/// `#recoverableautoretry`: true only for a controller dispatch refusal that
+/// provably delivered nothing and names a plain re-dispatch as its remedy.
+///
+/// The refusal must be a `dispatch blocked for …` bail (the controller recorded a
+/// `Blocked` receipt with `dispatch_start_proven=false` and returned before any
+/// authorization, so no prompt reached the pane) AND carry the
+/// `ui_outcome_class=recoverable next_action=retry_dispatch` contract. Every other
+/// recoverable outcome (for example `recovered_and_retried`, which names a
+/// supervisor restart) and every blocked/operator outcome stays terminal.
+pub fn dispatch_error_is_recoverable_retry(message: &str) -> bool {
+    let class = format!("ui_outcome_class={DISPATCH_RECOVERABLE_OUTCOME_CLASS}");
+    let next_action = format!("next_action={DISPATCH_RETRY_DISPATCH_NEXT_ACTION}");
+    message.contains("dispatch blocked for ")
+        && message.split_whitespace().any(|token| token == class)
+        && message.split_whitespace().any(|token| token == next_action)
+}
+
+/// `#recoverableautoretry`: the tmux capture budget for the `attempt`-th
+/// (1-based) controller re-read of the owner pane. Each observed timeout doubles
+/// the next budget, capped at `cap`, so a host whose tmux server is answering
+/// slowly gets a longer read instead of three identical reads that all lose the
+/// same race. The total stays bounded: `base + 2*base + … ≤ attempts * cap`.
+pub fn dispatch_pane_capture_attempt_timeout(
+    base: Duration,
+    cap: Duration,
+    attempt: usize,
+) -> Duration {
+    let doublings = attempt.saturating_sub(1).min(16) as u32;
+    base.saturating_mul(1u32 << doublings).min(cap.max(base))
 }
 
 pub fn pause_reason_is_stale_supervisor_churn_stop(reason: &str) -> bool {
@@ -8928,6 +8972,75 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
         assert!(!dispatch_error_is_coalesced(
             "dispatch blocked for x: failed_stage=queue_paused"
         ));
+    }
+
+    #[test]
+    fn recoverable_retry_classifier_matches_only_undelivered_retry_dispatch_refusals() {
+        // The operator's 2026-11-04 refusal, as the route sees it (wrapped by the
+        // controller client).
+        let observed = format!(
+            "project controller command `dispatch` failed: dispatch blocked for tasks/sdk/sdk-dev.md: failed_stage=actor_turn_observation_unavailable reason=/bin/tmux command timed out after 250ms receipt_id=5517 {}",
+            dispatch_blocked_user_facing_outcome_fields(
+                "actor_turn_observation_unavailable",
+                "/bin/tmux command timed out after 250ms"
+            )
+        );
+        assert!(dispatch_error_is_recoverable_retry(&observed));
+
+        // A recoverable outcome whose remedy is NOT a plain re-dispatch stays terminal here.
+        let churn = format!(
+            "dispatch blocked for x.md: failed_stage=queue_paused reason=churn-stop receipt_id=4 {}",
+            dispatch_blocked_user_facing_outcome_fields(
+                "queue_paused",
+                "churn-stop: stale supervisor pid42; needs operator recycle"
+            )
+        );
+        assert!(!dispatch_error_is_recoverable_retry(&churn));
+
+        // Busy / blocked / operator outcomes never auto-retry.
+        for (stage, reason) in [
+            ("actor_busy_draining", "busy"),
+            ("actor_turn_busy", "thinking"),
+            (
+                "queue_paused",
+                "operator paused this queue for manual review",
+            ),
+        ] {
+            let message = format!(
+                "dispatch blocked for x.md: failed_stage={stage} reason={reason} receipt_id=1 {}",
+                dispatch_blocked_user_facing_outcome_fields(stage, reason)
+            );
+            assert!(!dispatch_error_is_recoverable_retry(&message), "{stage}");
+        }
+
+        // The contract fields alone are not enough: only a `dispatch blocked`
+        // refusal is proof that nothing was delivered.
+        assert!(!dispatch_error_is_recoverable_retry(
+            "dispatch rejected for x.md: ui_outcome_class=recoverable next_action=retry_dispatch"
+        ));
+        // Tokens must match exactly, not as prefixes.
+        assert!(!dispatch_error_is_recoverable_retry(
+            "dispatch blocked for x.md: ui_outcome_class=recoverable_later next_action=retry_dispatch_later"
+        ));
+    }
+
+    #[test]
+    fn dispatch_pane_capture_attempt_timeout_doubles_and_caps() {
+        let base = Duration::from_millis(250);
+        let cap = Duration::from_secs(1);
+        assert_eq!(dispatch_pane_capture_attempt_timeout(base, cap, 0), base);
+        assert_eq!(dispatch_pane_capture_attempt_timeout(base, cap, 1), base);
+        assert_eq!(
+            dispatch_pane_capture_attempt_timeout(base, cap, 2),
+            Duration::from_millis(500)
+        );
+        assert_eq!(dispatch_pane_capture_attempt_timeout(base, cap, 3), cap);
+        assert_eq!(dispatch_pane_capture_attempt_timeout(base, cap, 64), cap);
+        // A cap below the base never shrinks the first read.
+        assert_eq!(
+            dispatch_pane_capture_attempt_timeout(base, Duration::from_millis(10), 3),
+            base
+        );
     }
 
     #[test]

@@ -449,9 +449,18 @@ and the pending granular-flags-only rule. This runbook carries the rest.
      `agent-doc queue claims <FILE>` gives every reported attempt a
      `reported_closeout` (the exact ordered verify / lineage-record / consume
      commands for its recorded facts) whose first step is its
-     `next_action_argv`, and `agent-doc plan <FILE>` lists those steps first in
-     `required_commands` and in the `phase.reported_closeout` operation phase.
-     Run them before any new claim or spawn. When a fact is missing or a choice
+     `next_action_argv`, and `agent-doc plan <FILE>` lists them in
+     `required_commands` with each closeout's `readiness`. An open question
+     never blocks unrelated work (`#questionsneverblock`): the plan lists new
+     claim/spawn steps first (`phase.queue_dispatch`), then the closeouts you
+     can run this turn (`readiness: coordinator`, `phase.reported_closeout`),
+     then one packet entry per closeout only the operator can answer
+     (`readiness: operator_request`, `phase.operator_requests`). None of them
+     is a prerequisite for the others: claim, spawn, and drain every
+     independent head as planned. Only the reported item itself and work
+     declared `after=` it wait. A closeout whose operator request is already
+     open in `agent:todo` (`readiness: awaiting_operator`) adds no command.
+     When a fact is missing or a choice
      is open, `next_action_argv` is absent and `reported_closeout.decision`
      names the question; steps tagged with an `alternative` belong to one
      choice, so run only the chosen branch. A `missing_facts` closeout always
@@ -465,11 +474,13 @@ and the pending granular-flags-only rule. This runbook carries the rest.
      (`sink_mismatch`) asks which sink is right. When the decision has
      `requires_operator: true`, or the worker's report does not settle it,
      present `reported_closeout.operator_request_packet` verbatim in the
-     response; finalize records it as the ordinary `🙋` operator wait. Until
-     that request is open, a closeout report keeps
+     response, once; finalize records it as the ordinary `🙋` operator wait.
+     Until that request is open, a closeout report keeps
      `queue_continuation_required: true` with `reported_closeout_required:
      true` (`#reportedcloseoutstall`): an owed reported closeout never ends a
-     turn as complete.
+     turn as complete. Presenting the packet satisfies that, not holding
+     dispatch, and the Claude Stop hook stops reminding about a recorded
+     result whose request is open.
      `other` is not a mechanically verifiable integration method. For an
      id-backed row whose tracked item must remain open, run
      `agent-doc queue consume <FILE> --ack-id <id>` immediately.

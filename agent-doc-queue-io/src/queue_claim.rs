@@ -1877,12 +1877,7 @@ pub fn pending_reported_closeout_for_content(
     file: &Path,
     content: &str,
 ) -> Result<Option<agent_doc_queue::reported_closeout::PendingReportedCloseout>> {
-    let obligations = reported_claim_closeouts_for_content(file, content)?
-        .into_iter()
-        .map(|(claim, closeout)| {
-            agent_doc_queue::reported_closeout::ReportedCloseoutObligation::new(&claim, closeout)
-        })
-        .collect::<Vec<_>>();
+    let obligations = reported_closeout_obligations_for_content(file, content)?;
     if obligations.is_empty() {
         return Ok(None);
     }
@@ -1890,6 +1885,25 @@ pub fn pending_reported_closeout_for_content(
         &obligations,
         &agent_doc_element::todo::open_todo_ids(content),
     ))
+}
+
+/// Every live `Reported` attempt as a plan obligation, classified against the
+/// document's open `agent:todo` operator requests (`#questionsneverblock`).
+pub fn reported_closeout_obligations_for_content(
+    file: &Path,
+    content: &str,
+) -> Result<Vec<agent_doc_queue::reported_closeout::ReportedCloseoutObligation>> {
+    let open_todo_ids = agent_doc_element::todo::open_todo_ids(content);
+    Ok(reported_claim_closeouts_for_content(file, content)?
+        .into_iter()
+        .map(|(claim, closeout)| {
+            agent_doc_queue::reported_closeout::ReportedCloseoutObligation::new(
+                &claim,
+                closeout,
+                &open_todo_ids,
+            )
+        })
+        .collect())
 }
 
 fn claim_assessment(claim: &QueueClaim, owner_session_state: &str) -> (&'static str, String) {

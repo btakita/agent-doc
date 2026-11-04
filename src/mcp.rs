@@ -1436,7 +1436,11 @@ mod tests {
         let closeout =
             reported_claim_closeout("doc.md", &claim, &ReportedRepoEvidence::Undeclared).unwrap();
         let request_id = closeout.operator_request_id.clone();
-        let obligations = [ReportedCloseoutObligation::new(&claim, closeout)];
+        let obligations = [ReportedCloseoutObligation::new(
+            &claim,
+            closeout,
+            &Default::default(),
+        )];
         let resolved = ToolQueueContinuation {
             continuation: None,
             auto_clear_yield: false,

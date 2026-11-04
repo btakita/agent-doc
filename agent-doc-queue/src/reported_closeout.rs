@@ -1267,7 +1267,7 @@ pub fn overdue_reported_closeout_warning(
         format!(" Missing facts: {}.", closeout.missing_facts.join(", "))
     };
     format!(
-        "reported queue attempt {:?} ({}#{}) is still open after {commits_since_report} committed cycle(s) since {since} ({}); close it before starting new work. {}{missing}",
+        "reported queue attempt {:?} ({}#{}) is still open after {commits_since_report} committed cycle(s) since {since} ({}); close it this turn, beside (never instead of) independent queue work. {}{missing}",
         claim_item_handle(&claim.item_text),
         claim.owner,
         claim.generation,
@@ -1276,6 +1276,63 @@ pub fn overdue_reported_closeout_warning(
     )
 }
 
+/// Who makes a reported closeout's next move (`#questionsneverblock`).
+///
+/// A closeout is per-item debt. Whatever its readiness, it never gates
+/// unrelated queue work: new claims, spawns, and independent heads proceed in
+/// the same plan. Only the item itself and work that declares `after=` it
+/// wait (the queue's own `#dagdraingate`, since a reported row stays open).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReportedCloseoutReadiness {
+    /// The coordinator can act this turn: a concrete common next step, or a
+    /// decision it settles from the worker's report and the repositories.
+    Coordinator,
+    /// Only the operator can answer, and its request is not open yet:
+    /// present the operator-request packet once, then leave the critical path.
+    OperatorRequest,
+    /// The operator request is already open in `agent:todo`: the explicit
+    /// `🙋` wait. Nothing is owed this turn.
+    AwaitingOperator,
+}
+
+impl ReportedCloseoutReadiness {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Coordinator => "coordinator",
+            Self::OperatorRequest => "operator_request",
+            Self::AwaitingOperator => "awaiting_operator",
+        }
+    }
+}
+
+impl ReportedClaimCloseout {
+    /// The coordinator can make the next move without the operator: a
+    /// concrete common next step, or a decision it may settle from evidence.
+    pub fn coordinator_can_act(&self) -> bool {
+        self.next_action_argv().is_some()
+            || self
+                .decision
+                .as_ref()
+                .is_some_and(|decision| !decision.requires_operator)
+    }
+
+    /// [`ReportedCloseoutReadiness`] against the open `agent:todo` ids.
+    pub fn readiness(&self, open_todo_ids: &HashSet<String>) -> ReportedCloseoutReadiness {
+        if open_todo_ids.contains(&self.operator_request_id.to_ascii_lowercase()) {
+            ReportedCloseoutReadiness::AwaitingOperator
+        } else if self.coordinator_can_act() {
+            ReportedCloseoutReadiness::Coordinator
+        } else {
+            ReportedCloseoutReadiness::OperatorRequest
+        }
+    }
+}
+
+/// The scope rule every closeout entry states, so no reader takes one
+/// item's open question as a barrier for the whole turn.
+pub const REPORTED_CLOSEOUT_SCOPE_RULE: &str = "It gates only this item and work declared `after=` it: claim, spawn, and drain every independent queue head as planned";
+
 /// One reported attempt's closeout as the plan presents it
 /// (`#reportedcloseout`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1283,15 +1340,22 @@ pub struct ReportedCloseoutObligation {
     pub item: String,
     pub owner: String,
     pub generation: u64,
+    /// Who makes the next move (`#questionsneverblock`).
+    pub readiness: ReportedCloseoutReadiness,
     pub closeout: ReportedClaimCloseout,
 }
 
 impl ReportedCloseoutObligation {
-    pub fn new(claim: &QueueClaim, closeout: ReportedClaimCloseout) -> Self {
+    pub fn new(
+        claim: &QueueClaim,
+        closeout: ReportedClaimCloseout,
+        open_todo_ids: &HashSet<String>,
+    ) -> Self {
         Self {
             item: claim_item_handle(&claim.item_text),
             owner: claim.owner.clone(),
             generation: claim.generation,
+            readiness: closeout.readiness(open_todo_ids),
             closeout,
         }
     }
@@ -1299,14 +1363,39 @@ impl ReportedCloseoutObligation {
     /// The open `agent:todo` ids include this attempt's operator request: the
     /// closeout is waiting on the operator, not on the coordinator.
     pub fn awaiting_operator(&self, open_todo_ids: &HashSet<String>) -> bool {
-        open_todo_ids.contains(&self.closeout.operator_request_id.to_ascii_lowercase())
+        self.readiness == ReportedCloseoutReadiness::AwaitingOperator
+            || open_todo_ids.contains(&self.closeout.operator_request_id.to_ascii_lowercase())
     }
 
-    /// Plan `required_commands` entries in order: a decision entry when the
-    /// closeout must choose first, then one entry per step. Every entry says
-    /// it precedes new claim/spawn work: the plan lists these first so
-    /// finished work closes before new work starts.
+    /// Plan `required_commands` entries in order (`#questionsneverblock`).
+    ///
+    /// * [`ReportedCloseoutReadiness::Coordinator`]: a decision entry when the
+    ///   closeout must choose first, then one entry per step, all work for
+    ///   this turn and none of it a prerequisite for new claims or spawns.
+    /// * [`ReportedCloseoutReadiness::OperatorRequest`]: one entry that
+    ///   presents the operator-request packet; the branch steps wait for the
+    ///   answer and stay in [`Self::closeout`].
+    /// * [`ReportedCloseoutReadiness::AwaitingOperator`]: nothing; the open
+    ///   `agent:todo` request is the wait.
     pub fn required_commands(&self) -> Vec<String> {
+        let item = format!(
+            "queue item {:?} ({}#{}, {})",
+            self.item,
+            self.owner,
+            self.generation,
+            self.closeout.shape.as_str(),
+        );
+        match self.readiness {
+            ReportedCloseoutReadiness::AwaitingOperator => Vec::new(),
+            ReportedCloseoutReadiness::OperatorRequest => vec![format!(
+                "Reported {item} needs the operator. {} Present it once; finalize records it as the `🙋` wait in `agent:todo`. {REPORTED_CLOSEOUT_SCOPE_RULE}.",
+                closeout_next_move(&self.closeout),
+            )],
+            ReportedCloseoutReadiness::Coordinator => self.coordinator_commands(&item),
+        }
+    }
+
+    fn coordinator_commands(&self, item: &str) -> Vec<String> {
         let total = self.closeout.steps.len();
         let missing = if self.closeout.missing_facts.is_empty() {
             String::new()
@@ -1316,16 +1405,14 @@ impl ReportedCloseoutObligation {
                 self.closeout.missing_facts.join(", ")
             )
         };
-        let prefix = format!(
-            "Close reported queue item {:?} ({}#{}, {}) before any new queue claim or spawn",
-            self.item,
-            self.owner,
-            self.generation,
-            self.closeout.shape.as_str(),
-        );
+        let prefix =
+            format!("Close reported {item} this turn, independent of new claims and spawns");
         let mut commands = Vec::new();
         if self.closeout.decision.is_some() {
-            commands.push(format!("{prefix}, decide first: {}", closeout_next_move(&self.closeout)));
+            commands.push(format!(
+                "{prefix}, decide first: {} {REPORTED_CLOSEOUT_SCOPE_RULE}.",
+                closeout_next_move(&self.closeout)
+            ));
         }
         commands.extend(self.closeout.steps.iter().enumerate().map(|(index, step)| {
             let branch = step
@@ -1382,7 +1469,7 @@ pub fn pending_reported_closeout(
     let first = pending.first()?;
     let closeout = &first.closeout;
     let guidance = format!(
-        "Continuation is required: reported queue item {:?} ({}#{}, {}) still owes its closeout, so this turn must not end as complete. {} Run `agent-doc queue claims <FILE>` for the full ordered steps.{}",
+        "Continuation is required: reported queue item {:?} ({}#{}, {}) still owes its closeout, so this turn must not end as complete. {} Run `agent-doc queue claims <FILE>` for the full ordered steps. {REPORTED_CLOSEOUT_SCOPE_RULE}.{}",
         first.item,
         first.owner,
         first.generation,
@@ -2198,6 +2285,7 @@ mod tests {
         let obligation = ReportedCloseoutObligation::new(
             &claim,
             reported_claim_closeout(DOC, &claim, &ReportedRepoEvidence::Undeclared).unwrap(),
+            &HashSet::new(),
         );
         let pending =
             pending_reported_closeout(std::slice::from_ref(&obligation), &HashSet::new())
@@ -2295,7 +2383,9 @@ mod tests {
         let obligation = ReportedCloseoutObligation::new(
             &claim,
             reported_claim_closeout(DOC, &claim, &evidence).unwrap(),
+            &HashSet::new(),
         );
+        assert_eq!(obligation.readiness, ReportedCloseoutReadiness::Coordinator);
         let commands = obligation.required_commands();
         assert_eq!(commands.len(), 3);
         assert!(commands[0].contains("step 1/3 (verify_integration): run `git -C /repo/main merge-base --is-ancestor abc123 refs/heads/main`"), "{}", commands[0]);
@@ -2311,10 +2401,77 @@ mod tests {
             "{}",
             commands[2]
         );
+        assert!(commands.iter().all(|command| {
+            command.contains("this turn, independent of new claims and spawns")
+                && !command.contains("before any new")
+        }));
+    }
+
+    /// `#questionsneverblock` (sdk-dev 2026-11-04): an operator-gated
+    /// closeout is one packet entry that names its scope, never a list of
+    /// "before any new claim" steps that stalls every independent head.
+    #[test]
+    fn operator_gated_obligation_is_one_packet_entry_scoped_to_its_item() {
+        let claim = reported("do [#port]", "subagent:port");
+        let evidence = ReportedRepoEvidence::Unintegrated {
+            facts: facts(),
+            sink: Some(SinkContainment::NoSharedHistory),
+        };
+        let closeout = reported_claim_closeout(DOC, &claim, &evidence).unwrap();
+        assert!(closeout.requires_operator(), "{closeout:#?}");
+        assert!(!closeout.coordinator_can_act());
+        let request_id = closeout.operator_request_id.clone();
+        let obligation = ReportedCloseoutObligation::new(&claim, closeout.clone(), &HashSet::new());
+        assert_eq!(
+            obligation.readiness,
+            ReportedCloseoutReadiness::OperatorRequest
+        );
+        let commands = obligation.required_commands();
+        assert_eq!(commands.len(), 1, "{commands:#?}");
+        assert!(commands[0].contains(&request_id), "{}", commands[0]);
+        assert!(commands[0].contains("Present it once"), "{}", commands[0]);
+        assert!(
+            commands[0].contains(REPORTED_CLOSEOUT_SCOPE_RULE),
+            "{}",
+            commands[0]
+        );
+        assert!(!commands[0].contains("before any new"), "{}", commands[0]);
+
+        // Once the request is open in agent:todo the wait is explicit and
+        // the plan owes nothing more for this item.
+        let open = HashSet::from([request_id]);
+        let waiting = ReportedCloseoutObligation::new(&claim, closeout, &open);
+        assert_eq!(
+            waiting.readiness,
+            ReportedCloseoutReadiness::AwaitingOperator
+        );
+        assert!(waiting.required_commands().is_empty());
+        assert!(waiting.awaiting_operator(&HashSet::new()));
+    }
+
+    /// A decision the coordinator settles from evidence is this turn's work,
+    /// listed as its decision plus branch steps, but still not a gate.
+    #[test]
+    fn coordinator_decidable_obligation_lists_its_decision_without_gating() {
+        let claim = reported("free text work", "subagent:x");
+        let closeout =
+            reported_claim_closeout(DOC, &claim, &ReportedRepoEvidence::Undeclared).unwrap();
+        assert!(!closeout.requires_operator(), "{closeout:#?}");
+        assert!(closeout.coordinator_can_act());
+        let obligation = ReportedCloseoutObligation::new(&claim, closeout.clone(), &HashSet::new());
+        assert_eq!(obligation.readiness, ReportedCloseoutReadiness::Coordinator);
+        let commands = obligation.required_commands();
+        assert_eq!(commands.len(), 1 + closeout.steps.len());
+        assert!(commands[0].contains("decide first"), "{}", commands[0]);
+        assert!(
+            commands[0].contains(REPORTED_CLOSEOUT_SCOPE_RULE),
+            "{}",
+            commands[0]
+        );
         assert!(
             commands
                 .iter()
-                .all(|command| command.contains("before any new queue claim or spawn"))
+                .all(|command| !command.contains("before any new"))
         );
     }
 

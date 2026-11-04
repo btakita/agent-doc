@@ -800,8 +800,14 @@ fn reported_writeback_debts(file: &Path, content: &str) -> Result<Vec<ReportedWr
         }
     })
     .flatten();
+    let open_todo_ids = agent_doc_element::todo::open_todo_ids(content);
+    let mut awaiting_operator = 0usize;
     for claim in claims {
         if claim.state == QueueClaimState::Reported && seen.insert(claim.identity.clone()) {
+            if awaiting_operator_answer(content, &claim, &receipts, &open_todo_ids) {
+                awaiting_operator += 1;
+                continue;
+            }
             let awaiting_integration =
                 awaiting_integration(file, content, &claim, lineage.as_ref(), &receipts);
             debts.push(ReportedWritebackDebt {
@@ -827,6 +833,17 @@ fn reported_writeback_debts(file: &Path, content: &str) -> Result<Vec<ReportedWr
             continue;
         }
         let receipt = receipt_by_identity.get(&identity).copied();
+        if receipt.is_some_and(|receipt| {
+            awaiting_operator_answer(
+                content,
+                &receipt.as_reported_claim(),
+                &receipts,
+                &open_todo_ids,
+            )
+        }) {
+            awaiting_operator += 1;
+            continue;
+        }
         let awaiting_integration = receipt.and_then(|receipt| {
             awaiting_integration(
                 file,
@@ -848,7 +865,35 @@ fn reported_writeback_debts(file: &Path, content: &str) -> Result<Vec<ReportedWr
             awaiting_integration,
         });
     }
+    if awaiting_operator > 0 {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "claude_stop_reported_writeback_awaiting_operator rows={awaiting_operator} action=exclude_from_reminder (#questionsneverblock)"
+            ),
+        );
+    }
     Ok(debts)
+}
+
+/// `#questionsneverblock`: a reported row whose result the document already
+/// records and whose closeout operator request is open in `agent:todo` is the
+/// explicit `🙋` wait. It was surfaced once; holding the final answer for it
+/// again re-raises an answered-elsewhere question instead of letting the
+/// operator answer it. A recovered-after-loss attempt stays urgent debt.
+fn awaiting_operator_answer(
+    content: &str,
+    claim: &agent_doc_queue::queue_claim::QueueClaim,
+    receipts: &[agent_doc_queue::claim_release_receipt::ClaimReleaseReceipt],
+    open_todo_ids: &std::collections::HashSet<String>,
+) -> bool {
+    !claim.completion_recovered_after_loss
+        && open_todo_ids.contains(
+            &agent_doc_queue::reported_closeout::operator_request_id(claim).to_ascii_lowercase(),
+        )
+        && agent_doc_queue_io::sync_payload::reported_result_recorded_in_document(
+            content, claim, receipts,
+        )
 }
 
 /// The Claude Stop reminder for [`ReportedWritebackDebt`] rows.
@@ -10094,6 +10139,33 @@ Reviewed the gated items.\n\
         assert!(held.reason.contains("do NOT re-persist"), "{}", held.reason);
         let ops = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(ops.contains("awaiting_integration=1"), "{ops}");
+
+        // `#questionsneverblock`: once the closeout's operator request is open
+        // in agent:todo, the row is the explicit `🙋` wait. The Stop hook no
+        // longer holds the final answer for it.
+        let request_id = agent_doc_queue::reported_closeout::operator_request_id(&running);
+        let waiting = fs::read_to_string(&doc).unwrap().replace(
+            "## Queue\n",
+            &format!(
+                "## Todo\n\n<!-- agent:todo -->\n- [ ] [#{request_id}] Choose the sink\n<!-- /agent:todo -->\n\n## Queue\n"
+            ),
+        );
+        fs::write(&doc, &waiting).unwrap();
+        invalidate_stop_document_cache();
+        let answered_elsewhere = ClaudeStopInput {
+            session_id: "awaiting-operator-session".to_string(),
+            ..fresh
+        };
+        assert!(
+            claude_reported_writeback_continuation_with(&answered_elsewhere, &doc, |_| false)
+                .is_none(),
+            "an open operator request is the wait, not coordinator debt"
+        );
+        let ops = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops.contains("claude_stop_reported_writeback_awaiting_operator rows=1"),
+            "{ops}"
+        );
     }
 
     /// `#stopneedsclosedcycle`: the marker is document-level and outlives the

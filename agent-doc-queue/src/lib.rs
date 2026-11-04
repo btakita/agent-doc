@@ -54,5 +54,6 @@ pub mod stale_completion_evidence;
 pub mod subagent_brief;
 pub mod subagent_intent;
 pub mod waiting_packet;
+pub mod waiting_status;
 #[cfg(test)]
 mod waiting_fixture_tests;

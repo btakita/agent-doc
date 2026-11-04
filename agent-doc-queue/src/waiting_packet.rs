@@ -198,6 +198,28 @@ fn only_binary_annotations(mut rest: &str) -> bool {
     }
 }
 
+/// The operator's text when an inert (`Freeform`) packet row is an operator
+/// answer: a live list row typed beneath generated response metadata, which
+/// parses inert because of where it sits. Generated rows carry the reply
+/// marker or a bold `**label**` shape; comments, quotes, HTML and struck rows
+/// are never answers.
+pub fn operator_freeform_text(line: &str) -> Option<&str> {
+    let first = line.lines().next()?;
+    let body = first.trim_start().strip_prefix("- ")?.trim();
+    if body.is_empty()
+        || crate::queue_consume::is_agent_doc_reply_row(body)
+        || body.starts_with("**")
+        || body.starts_with("%%")
+        || body.starts_with('<')
+        || body.starts_with('>')
+        || body.starts_with("~~")
+        || body.starts_with("&gt;")
+    {
+        return None;
+    }
+    Some(body)
+}
+
 /// Whether the waiting item at `head` has live operator-authored evidence.
 pub fn has_operator_reply(entries: &[QueueEntry], head: usize) -> bool {
     packet_member_indexes(entries, head)
@@ -210,6 +232,7 @@ pub fn has_operator_reply(entries: &[QueueEntry], head: usize) -> bool {
                         .trim()
                         .is_empty()
             }
+            QueueEntry::Freeform(line) => operator_freeform_text(line).is_some(),
             _ => false,
         })
 }

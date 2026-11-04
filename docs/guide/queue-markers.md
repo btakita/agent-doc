@@ -67,6 +67,7 @@ start` binds the replacement worker.
 | `⟦blocked by <id>, <id>⟧` | Follows the blocked marker and names the open items the row waits on (ids without `#`). Metadata, not work identity. |
 | `⟦effect:N⟧` | Numbers live rows that have identical text, so each one is its own claimable effect. |
 | `⟦addressed-at:YYYY-MM-DDTHH:MM:SS.mmmZ⟧` | Durable UTC time when a closeout struck the row. Editors derive `①`/`②`/`③` and graded highlights for the newest three addressed rows; visiting a row clears only its transient highlight. |
+| `⟦<state> you: N · agent: N · done: N⟧` | On a Waiting-on-you item: its state and roll-up, recomputed every closeout from its packet and attempts. `<state>` is a live attempt's own marker (`🚧`, `🟡`, `⚠️`, `🔄`, `☑️`, ...), `🙋` while the operator owes an answer, `📥` once the answer waits for an attempt, or `✅` when every row under the item is closed and only its Todo is open. `you` counts open operator asks, `agent` live attempts plus an answer waiting to be picked up, and `done` struck rows. Metadata, not work identity. |
 | `⟦local⟧ / ⟦published⟧ / ⟦published+local⟧` | Worker-reported publication state: local changes (✎), published (⇧), or published and then changed locally again (⇧✎). Metadata, not work identity. |
 | `📫 / 📤` | Older spellings of the reported marker; normalized on the next projection write. |
 | `⟦<owner>#<N>⟧` | Older spelling of the owner annotation; normalized to `[#<owner>#<N>]`. |
@@ -251,6 +252,37 @@ There are two usual causes:
   reconcile it.
 
 The exact rule is in `specs/07-orchestration-commands.md` (`#queueworkevidence`).
+
+## Waiting-on-you items
+
+Closeout keeps open operator-owned Todo items in a `Waiting on you` group of
+the main run. Each item row is binary-owned; everything indented beneath it,
+up to the next item, is that item's packet: the generated Response, Choices
+and Next actions, your replies, and any worker attempt. A packet row is
+never queue work of its own. It never gets `📥`, a `q-` id, a claim or a
+dispatch. Your reply is evidence for the item: it selects the item itself
+for one attempt, carrying your reply as its decision evidence. An offered
+choice (`**label**: effect`) is an option for you, never work.
+
+Each item row carries its state and roll-up right after its attempt
+projection, for example:
+
+```text
+- ⟦🙋 you: 1 · agent: 0 · done: 0⟧ [#approve-pr] Approve and merge PR #42.
+- ⟦📥 you: 0 · agent: 1 · done: 0⟧ [#pick-port] Pick a port.
+- ⟦☑️ you: 1 · agent: 3 · done: 2⟧ [#release-app] Release app access.
+```
+
+| State | Meaning |
+| --- | --- |
+| `🙋` | You owe an answer: the item's own ask, or an open request inside its packet. |
+| `📥` | You answered; no attempt has picked the answer up yet. |
+| `🚧` / `🟡` / `⚠️` / `🔄` / `☑️` | A worker attempt on the item or in its packet is live, in that lifecycle state; the agent owns the next step. `☑️` means a worker reported but its result is not integrated yet. |
+| `✅` | Every row under the item is closed; only its Todo is still open. |
+
+`you` counts open operator asks, `agent` counts live attempts plus an answer
+waiting to be picked up, and `done` counts struck rows in the packet. The
+token is recomputed on every closeout and never changes the item's identity.
 
 ## Custom palettes
 

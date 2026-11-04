@@ -547,6 +547,37 @@ fn strip_projection_token(trimmed: &str) -> Option<&str> {
         // (`⛔ ⟦blocked by a, b⟧`) is projection, never work identity.
         .or_else(|| strip_blocked_annotation_token(trimmed))
         .or_else(|| strip_owner_annotation_token(trimmed))
+        .or_else(|| strip_waiting_status_token(trimmed))
+}
+
+/// `#waitingitemstatus`: label words of the binary-owned waiting-item roll-up.
+pub const WAITING_STATUS_LABELS: [&str; 3] = ["you", "agent", "done"];
+
+/// Render the binary-owned state and roll-up token of a waiting-item head:
+/// `⟦<state> you: N · agent: N · done: N⟧`.
+pub fn render_waiting_status_token(state: &str, you: usize, agent: usize, done: usize) -> String {
+    format!("⟦{state} you: {you} · agent: {agent} · done: {done}⟧")
+}
+
+/// Strip ONE leading waiting-item state and roll-up token
+/// (`⟦🙋 you: 1 · agent: 0 · done: 3⟧`). The token is projection recomputed
+/// by every closeout, never work text and never identity. Recognition is
+/// exact: the three labelled counts in their fixed order, so no operator
+/// `⟦...⟧` text is ever mistaken for it.
+pub fn strip_waiting_status_token(trimmed: &str) -> Option<&str> {
+    let rest = trimmed.strip_prefix('⟦')?;
+    let close = rest.find('⟧')?;
+    let payload = &rest[..close];
+    let (state, counts) = payload.split_once(" you: ")?;
+    if state.is_empty() || state.contains(char::is_whitespace) || state.contains('⟦') {
+        return None;
+    }
+    let (you, rest_counts) = counts.split_once(" · agent: ")?;
+    let (agent, done) = rest_counts.split_once(" · done: ")?;
+    [you, agent, done]
+        .iter()
+        .all(|count| !count.is_empty() && count.chars().all(|ch| ch.is_ascii_digit()))
+        .then(|| &rest[close + '⟧'.len_utf8()..])
 }
 
 /// A leading `⟦blocked by ...⟧` annotation, the blocker list that follows `⛔`.

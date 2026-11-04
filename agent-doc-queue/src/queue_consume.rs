@@ -5014,6 +5014,10 @@ fn normalize_waiting_queues(document: &str) -> Result<Option<String>> {
     if !document.contains(WAITING_ON_YOU_ITEM_MARKER) {
         return Ok(None);
     }
+    let open_todo_ids = open_waiting_todos(document)
+        .into_iter()
+        .map(|todo| todo.id.to_ascii_lowercase())
+        .collect::<HashSet<_>>();
     let mut replacements = Vec::new();
     for component in element::parse(document)?
         .into_iter()
@@ -5023,12 +5027,18 @@ fn normalize_waiting_queues(document: &str) -> Result<Option<String>> {
         if !body.contains(WAITING_ON_YOU_ITEM_MARKER) {
             continue;
         }
-        let entries = document_queue::parse(body)?;
-        if let Some(normalized) = crate::waiting_packet::normalize_waiting_packets(&entries) {
+        let parsed = document_queue::parse(body)?;
+        let normalized = crate::waiting_packet::normalize_waiting_packets(&parsed);
+        let entries = normalized.as_deref().unwrap_or(&parsed);
+        // `#waitingitemstatus`: every live head carries its derived state and
+        // roll-up, recomputed from the normalized packet.
+        let with_status = crate::waiting_status::project_waiting_status(entries, &open_todo_ids);
+        if normalized.is_some() || with_status.is_some() {
+            let rendered = with_status.as_deref().unwrap_or(entries);
             replacements.push((
                 component.open_end,
                 component.close_start,
-                document_queue::render(&normalized),
+                document_queue::render(rendered),
             ));
         }
     }
@@ -5850,7 +5860,9 @@ mod tests {
             .expect("open todo should create the tree");
         assert_eq!(projected.matches(WAITING_ON_YOU_ROOT_MARKER).count(), 1);
         assert!(
-            projected.contains("- [#approve-pr] Approve and merge PR #42."),
+            projected.contains(
+                "- ⟦🙋 you: 1 · agent: 0 · done: 0⟧ [#approve-pr] Approve and merge PR #42."
+            ),
             "{projected}"
         );
         assert!(
@@ -6113,10 +6125,22 @@ mod tests {
             "<!-- agent-doc:waiting-item -->\n    - approved\n",
             1,
         );
+        // The reply moves the item's state from `🙋` (operator owes) to `📥`
+        // (answered, waiting for an attempt); nothing else changes, and the
+        // next refresh is a fixed point.
+        let with_reply = project_waiting_on_you_tree(&with_reply, response)
+            .unwrap()
+            .expect("the state token follows the reply");
+        assert!(
+            with_reply.contains(concat!(
+                "  - ⟦📥 you: 0 · agent: 1 · done: 0⟧ [#approve-pr] Approve and merge PR #42. <!-- agent-doc:waiting-item -->\n",
+                "    - approved\n",
+            )),
+            "refresh must preserve an operator reply byte-for-byte: {with_reply}"
+        );
         assert_eq!(
             project_waiting_on_you_tree(&with_reply, response).unwrap(),
-            None,
-            "refresh must preserve an operator reply byte-for-byte"
+            None
         );
         let queue = element::parse(&with_reply)
             .unwrap()
@@ -6178,8 +6202,10 @@ mod tests {
 
         let refreshed = project_waiting_on_you_tree(&document, response).unwrap();
         let refreshed = refreshed.as_deref().unwrap_or(&document);
+        // Only the binary-owned state token is added to the head.
+        let without_token = refreshed.replace("⟦📥 you: 0 · agent: 1 · done: 0⟧ ", "");
         assert!(
-            refreshed.contains(child),
+            without_token.contains(child),
             "the operator-answered packet must survive byte-for-byte:\n{refreshed}"
         );
         assert!(refreshed.contains("          - commit + integrate + push\n"));

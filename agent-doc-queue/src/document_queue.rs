@@ -4459,6 +4459,17 @@ pub fn prompt_context_packet_at(
             .into_iter()
             .map(|member| &entries[member])
         {
+            // An answer typed beneath generated metadata parses inert; it is
+            // still the operator's decision evidence for this item.
+            if let QueueEntry::Freeform(line) = entry
+                && let Some(answer) = crate::waiting_packet::operator_freeform_text(line)
+            {
+                let answer = answer.to_string();
+                if !decision_evidence.contains(&answer) {
+                    decision_evidence.push(answer);
+                }
+                continue;
+            }
             let Some(prompt) = prompt_of(entry) else {
                 continue;
             };

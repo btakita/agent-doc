@@ -288,7 +288,7 @@ fn a_claimed_waiting_item_keeps_its_attempt_projection() {
     let settled = settled_fixture();
     assert!(
         settled.contains(&format!(
-            "  - 🙋☑️ [#subagent:c7685t43#1] [#5t43] Merge https://github.com/haiven-dev/haiven-infra/pull/318 so main drops the colliding docs-site IAM role tags. {WAITING_ON_YOU_ITEM_MARKER}"
+            "  - 🙋☑️ [#subagent:c7685t43#1] ⟦☑️ you: 0 · agent: 1 · done: 0⟧ [#5t43] Merge https://github.com/haiven-dev/haiven-infra/pull/318 so main drops the colliding docs-site IAM role tags. {WAITING_ON_YOU_ITEM_MARKER}"
         )),
         "{}",
         main_queue_body(&settled)
@@ -310,4 +310,58 @@ fn answered_items_are_selected_once_and_reported_items_wait_for_reconciliation()
     assert!(!executable.contains(&head_index(&entries, "tdsdkreleaseapp")));
     // The item's own reported attempt keeps its claim live.
     assert!(executable.contains(&head_index(&entries, "tdhandoffdocrelock")));
+}
+
+/// The head line of the live waiting item `id` in the settled fixture.
+fn head_line(settled: &str, id: &str) -> String {
+    let needle = format!("[#{id}]");
+    settled
+        .lines()
+        .find(|line| {
+            line.contains(&needle)
+                && line.contains(WAITING_ON_YOU_ITEM_MARKER)
+                && !line.contains("~~")
+        })
+        .unwrap_or_else(|| panic!("no head line for {id}"))
+        .to_string()
+}
+
+#[test]
+fn every_live_head_carries_its_state_and_roll_up() {
+    let settled = settled_fixture();
+    let entries = main_entries(&settled);
+    for entry in &entries {
+        let QueueEntry::Prompt(prompt) = entry else {
+            continue;
+        };
+        if !is_waiting_item_head(entry) {
+            continue;
+        }
+        let work = agent_doc_element_queue::strip_attempt_projection_prefix(&prompt.text);
+        let prefix = &prompt.text[..prompt.text.len() - work.len()];
+        assert!(
+            prefix.contains(" you: ")
+                && prefix.contains(" · agent: ")
+                && prefix.contains(" · done: "),
+            "a live waiting head without its state token: {}",
+            prompt.text
+        );
+    }
+    // The item the operator could not read: worker reports on every offered
+    // choice, none integrated, one sibling decision still open.
+    assert!(
+        head_line(&settled, "tdsdkreleaseapp")
+            .contains("⟦☑️ you: 1 · agent: 11 · done: 3⟧ [#tdsdkreleaseapp]"),
+        "{}",
+        head_line(&settled, "tdsdkreleaseapp")
+    );
+    // Answered and idle: waiting for the agent to pick the answer up.
+    assert!(head_line(&settled, "tdprovauth").contains("⟦📥 you: 0 · agent: 1 · done: 0⟧"));
+    // Unanswered: the operator owes the answer.
+    assert!(
+        head_line(&settled, "subagent-operator-request-craigbot-dm-1793755182")
+            .contains("⟦🙋 you: 1 · agent: 0 · done: 0⟧")
+    );
+    // The item's own attempt reported; the agent must reconcile it.
+    assert!(head_line(&settled, "tdhandoffdocrelock").contains("⟦☑️ you: 0 · agent: 1 · done: 0⟧"));
 }

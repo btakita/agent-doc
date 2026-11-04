@@ -7329,6 +7329,88 @@ Body\n\
         }
     }
 
+    /// `#qcontam-no-capture-head`: after a settled closeout no capture is in
+    /// flight. A long-standing waiting item that an earlier response quoted
+    /// verbatim (a copied operator-request packet) is committed ancestry, not
+    /// contamination; a row added since HEAD that a response quotes still is.
+    fn quoted_waiting_item_doc(extra_queue_row: &str) -> String {
+        let item = "[#vscodecodersmoke] Run scripts/vscode-remote-smoke.py on a real Coder workspace <!-- agent-doc:waiting-item -->";
+        format!(
+            concat!(
+                "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+                "<!-- agent:exchange -->\n",
+                "### Re: operator request packet\n\n",
+                "queue_item:\n",
+                "- {item}\n\n",
+                "No new follow-up item is created.\n",
+                "<!-- /agent:exchange -->\n\n",
+                "## Run <!-- agent:run subagents priority go -->\n",
+                "- ### Waiting on you — answer by adding a child line under an item <!-- agent-doc:waiting-on-you -->\n",
+                "  - {item}\n",
+                "{extra}",
+                "<!-- /agent:run -->\n",
+            ),
+            item = item,
+            extra = extra_queue_row,
+        )
+    }
+
+    #[test]
+    fn queue_contamination_guard_accepts_committed_waiting_item_quoted_without_capture() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let quoted = quoted_waiting_item_doc("");
+        // The waiting item was committed first, before any response quoted it.
+        let before_quote = quoted.replace(
+            "queue_item:\n- [#vscodecodersmoke] Run scripts/vscode-remote-smoke.py on a real Coder workspace <!-- agent-doc:waiting-item -->\n\n",
+            "",
+        );
+        assert_ne!(before_quote, quoted);
+        let doc = init_committed_doc_for_queue_guard(tmp.path(), &before_quote);
+        fs::write(&doc, &quoted).unwrap();
+        for args in [
+            vec!["add", "doc.md"],
+            vec!["commit", "-m", "response quotes the packet", "--no-verify"],
+        ] {
+            Command::new("git")
+                .current_dir(tmp.path())
+                .args(&args)
+                .output()
+                .unwrap();
+        }
+        match check_queue_response_contamination_guard(&doc).unwrap() {
+            GuardResult::None => {}
+            other => panic!("a row older than its quote is not contamination, got {other:?}"),
+        }
+    }
+
+    /// The same quote with no older commit holding the row alone stays refused:
+    /// the row only ever existed beside the response that produced it.
+    #[test]
+    fn queue_contamination_guard_refuses_a_row_that_never_predated_its_quote() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = init_committed_doc_for_queue_guard(tmp.path(), &quoted_waiting_item_doc(""));
+        assert!(matches!(
+            check_queue_response_contamination_guard(&doc).unwrap(),
+            GuardResult::Error(_)
+        ));
+    }
+
+    #[test]
+    fn queue_contamination_guard_still_flags_a_row_added_since_head_without_capture() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let prose = "Yes. I drove the already-authenticated Google Ads browser session with chromium-bridge to demote the campaign.";
+        let doc = init_committed_doc_for_queue_guard(tmp.path(), &quoted_waiting_item_doc(""));
+        let contaminated = quoted_waiting_item_doc(&format!("- {prose}\n")).replace(
+            "No new follow-up item is created.\n",
+            &format!("No new follow-up item is created.\n\n{prose}\n"),
+        );
+        fs::write(&doc, &contaminated).unwrap();
+        match check_queue_response_contamination_guard(&doc).unwrap() {
+            GuardResult::Error(message) => assert!(message.contains("I drove"), "{message}"),
+            other => panic!("a row new since HEAD must still be flagged, got {other:?}"),
+        }
+    }
+
     #[test]
     fn queue_contamination_guard_flags_response_prose_in_queue() {
         let tmp = tempfile::TempDir::new().unwrap();

@@ -256,6 +256,54 @@ fn content_lines_without_protocol_boundaries(lines: &[String]) -> Vec<String> {
         .collect()
 }
 
+fn trailing_blank_line_count(lines: &[String]) -> usize {
+    lines
+        .iter()
+        .rev()
+        .take_while(|line| line.trim().is_empty())
+        .count()
+}
+
+fn without_trailing_blank_lines(lines: &[String]) -> &[String] {
+    &lines[..lines.len() - trailing_blank_line_count(lines)]
+}
+
+/// Substitute proven content into a retained exchange node without changing
+/// the document layout around it.
+///
+/// A parsed node owns the blank separator lines that follow it, while a
+/// captured materialization (or a baseline node that was last in its exchange)
+/// does not. Those separators are layout, not response content: comparing them
+/// made an already canonical single capture look "repaired", and substituting
+/// the bare capture deleted the blank line before the next `### Re:` heading.
+/// That glued the response's last paragraph to the next heading, which
+/// commit-time prompt canonicalization then reads as an answered operator
+/// prompt (`❯ ...`), so the repair could never cross its commit boundary.
+///
+/// Returns `None` when the node already carries the proven content (ignoring
+/// protocol boundaries and trailing separators); otherwise the proven content
+/// followed by the node's own trailing separator lines.
+fn substitute_retained_node_lines(current: &[String], proven: &[String]) -> Option<Vec<String>> {
+    let current_content = content_lines_without_protocol_boundaries(current);
+    let proven_content = content_lines_without_protocol_boundaries(proven);
+    if without_trailing_blank_lines(&current_content)
+        == without_trailing_blank_lines(&proven_content)
+    {
+        return None;
+    }
+    let separator_start = current_content.len() - trailing_blank_line_count(&current_content);
+    let mut substituted = without_trailing_blank_lines(proven).to_vec();
+    // Nodes render by plain concatenation, so a final proven line without its
+    // newline would fuse with whatever node follows.
+    if let Some(last) = substituted.last_mut()
+        && !last.ends_with('\n')
+    {
+        last.push('\n');
+    }
+    substituted.extend_from_slice(&current_content[separator_start..]);
+    Some(substituted)
+}
+
 fn replay_provenance_lines(lines: &[String]) -> Vec<String> {
     content_lines_without_protocol_boundaries(lines)
         .into_iter()
@@ -603,14 +651,18 @@ pub fn reconcile_captured_response_replays(
                 let baseline_lines = baseline_lines
                     .as_ref()
                     .expect("a retained baseline index has baseline content");
-                if node.lines != *baseline_lines {
-                    node.lines = baseline_lines.clone();
+                if let Some(substituted) =
+                    substitute_retained_node_lines(&node.lines, baseline_lines)
+                {
+                    node.lines = substituted;
                     removed = true;
                 }
                 next.push(node);
             } else if index == canonical_index {
-                if node.lines != captured.lines {
-                    node.lines = captured.lines.clone();
+                if let Some(substituted) =
+                    substitute_retained_node_lines(&node.lines, &captured.lines)
+                {
+                    node.lines = substituted;
                     removed = true;
                 }
                 next.push(node);
@@ -1461,6 +1513,96 @@ mod tests {
         assert_eq!(normalized.matches("Earlier body.").count(), 1);
         assert_eq!(normalized.matches("New body.").count(), 1);
         assert_eq!(normalized.matches("agent:boundary:").count(), 1);
+        assert!(normalized.contains("agent:boundary:latest"));
+    }
+
+    /// Live game-sessions.md wedge (2026-11-02..03): HEAD held an earlier
+    /// same-topic response accounted for by the baseline plus exactly one copy
+    /// of the captured response, followed by a blank line and a subagent
+    /// completion. Nothing was replayed, but the parsed node owns that blank
+    /// separator and the captured materialization does not, so the reconciler
+    /// "repaired" the node by deleting the separator. Glued to the next heading,
+    /// the response's closing question was then read as an answered operator
+    /// prompt by commit normalization and the repair could never commit.
+    #[test]
+    fn captured_response_single_canonical_copy_with_trailing_separator_is_not_a_replay() {
+        let captured = concat!(
+            "### Re: recovered response\n\n",
+            "The cycle is committed.\n\n",
+            "Should the PR path proceed, or remain on hold?\n",
+        );
+        let baseline = DOC.replace(
+            "<!-- agent:boundary:abc -->",
+            concat!(
+                "### Re: recovered response\n\n",
+                "Earlier recovered body.\n\n",
+                "<!-- agent:boundary:abc -->",
+            ),
+        );
+        let head = baseline.replace(
+            "<!-- agent:boundary:abc -->",
+            &format!(
+                concat!(
+                    "{captured}\n",
+                    "### Re: Subagent completed: `subagent:x` — agent-doc\n\n",
+                    "> **Subagent response:**\n",
+                    ">\n",
+                    "> Done.\n",
+                    "<!-- agent:boundary:latest -->",
+                ),
+                captured = captured,
+            ),
+        );
+
+        assert_eq!(
+            reconcile_captured_response_replays(&head, &baseline, captured).unwrap(),
+            None,
+            "one canonical captured copy is not a replay, whatever its trailing layout"
+        );
+    }
+
+    #[test]
+    fn captured_response_replay_repair_keeps_separator_before_following_node() {
+        let captured = concat!(
+            "### Re: recovered response\n\n",
+            "The cycle is committed.\n\n",
+            "Should the PR path proceed, or remain on hold?\n",
+        );
+        let baseline = DOC.replace(
+            "<!-- agent:boundary:abc -->",
+            concat!(
+                "### Re: recovered response\n\n",
+                "Earlier recovered body.\n\n",
+                "<!-- agent:boundary:abc -->",
+            ),
+        );
+        let following = concat!(
+            "### Re: Subagent completed: `subagent:x` — agent-doc\n\n",
+            "> **Subagent response:**\n",
+            ">\n",
+            "> Done.\n",
+        );
+        let duplicated = baseline.replace(
+            "<!-- agent:boundary:abc -->",
+            &format!(
+                "{captured}\n{captured}\n{following}<!-- agent:boundary:latest -->",
+                captured = captured,
+                following = following,
+            ),
+        );
+
+        let normalized = deduplicate_captured_response_replays(&duplicated, &baseline, captured)
+            .unwrap()
+            .expect("the duplicated captured response should collapse");
+
+        assert_eq!(normalized.matches("The cycle is committed.").count(), 1);
+        assert_eq!(normalized.matches("Earlier recovered body.").count(), 1);
+        assert!(
+            normalized.contains(&format!(
+                "Should the PR path proceed, or remain on hold?\n\n{following}"
+            )),
+            "the collapsed response must keep its blank separator: {normalized}"
+        );
         assert!(normalized.contains("agent:boundary:latest"));
     }
 

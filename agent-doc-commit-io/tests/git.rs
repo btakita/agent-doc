@@ -1489,6 +1489,143 @@ Duplicate replay should stay live.
         assert_eq!(String::from_utf8_lossy(&session_head.stdout), repaired);
     }
 
+    const SEPARATOR_BASELINE: &str = concat!(
+        "---\nagent_doc_format: template\n---\n\n",
+        "<!-- agent:exchange patch=append -->\n",
+        "❯ operator prompt\n\n",
+        "### Re: recovered response\n\n",
+        "Earlier recovered body.\n\n",
+        "<!-- agent:boundary:abc -->\n",
+        "<!-- /agent:exchange -->\n",
+    );
+    const SEPARATOR_CAPTURED: &str = concat!(
+        "### Re: recovered response\n\n",
+        "The cycle is committed.\n\n",
+        "Should the PR path proceed, or remain on hold?\n",
+    );
+    const SEPARATOR_FOLLOWING: &str = concat!(
+        "### Re: Subagent completed: `subagent:x` — agent-doc\n\n",
+        "> **Subagent response:**\n",
+        ">\n",
+        "> Done.\n",
+    );
+
+    /// Live game-sessions.md wedge: committed HEAD holds one canonical copy of
+    /// the retained capture (plus an earlier same-topic response the baseline
+    /// accounts for) and a blank line before the next node. Session-check kept
+    /// re-deriving a "replay repair" from that HEAD that only deleted the blank
+    /// line, then refused to commit it because the glued closing question
+    /// canonicalizes to an answered `❯` prompt. A HEAD with no replay must not
+    /// produce a pending replay repair at all.
+    #[test]
+    fn replay_canonicalization_ignores_single_captured_copy_with_trailing_separator() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        th::init_repo(root);
+        let head = SEPARATOR_BASELINE.replace(
+            "<!-- agent:boundary:abc -->",
+            &format!("{SEPARATOR_CAPTURED}\n{SEPARATOR_FOLLOWING}<!-- agent:boundary:latest -->"),
+        );
+        th::commit_file(root, "session.md", &head, "add captured response");
+        let doc = root.join("session.md");
+        agent_doc_capture_io::capture_response_with_current_content_and_intent(
+            &doc,
+            SEPARATOR_CAPTURED,
+            SEPARATOR_BASELINE,
+            None,
+        )
+        .unwrap();
+        // Editor authority moved on with operator edits; HEAD is still clean.
+        let authority = format!(
+            "{head}\n## Notes <!-- agent:notes -->\noperator note\n<!-- /agent:notes -->\n"
+        );
+        fs::write(&doc, &authority).unwrap();
+        assert_eq!(
+            agent_doc_git_io::transaction::normalize_session_document_content(&head),
+            head,
+            "fixture HEAD must already be a clean commit surface"
+        );
+
+        let candidate =
+            agent_doc_document_realtime_io::normalize_recoverable_response_replay_duplication_for_file(
+                &doc,
+                &head,
+                "test_single_captured_copy_head_proof",
+            )
+            .unwrap();
+        assert!(
+            candidate
+                .as_deref()
+                .is_none_or(|candidate| candidate == head),
+            "a HEAD without a replay must not yield a repair candidate: {candidate:?}"
+        );
+        let current_candidate =
+            agent_doc_document_realtime_io::normalize_recoverable_response_replay_duplication_for_file(
+                &doc,
+                &authority,
+                "test_single_captured_copy_authority",
+            )
+            .unwrap();
+        assert!(
+            current_candidate
+                .as_deref()
+                .is_none_or(|candidate| candidate == authority),
+            "the editor authority must not be self-healed either: {current_candidate:?}"
+        );
+    }
+
+    /// A genuine replay followed by another exchange node must still collapse,
+    /// and the collapsed response must keep its separator so the repair crosses
+    /// the commit-surface guard instead of being refused as transient artifacts.
+    #[test]
+    fn replay_canonicalization_commit_keeps_separator_before_following_node() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        th::init_repo(root);
+        let duplicated = SEPARATOR_BASELINE.replace(
+            "<!-- agent:boundary:abc -->",
+            &format!(
+                "{SEPARATOR_CAPTURED}\n{SEPARATOR_CAPTURED}\n{SEPARATOR_FOLLOWING}<!-- agent:boundary:latest -->"
+            ),
+        );
+        th::commit_file(root, "session.md", &duplicated, "add captured replay");
+        let doc = root.join("session.md");
+        agent_doc_capture_io::capture_response_with_current_content_and_intent(
+            &doc,
+            SEPARATOR_CAPTURED,
+            SEPARATOR_BASELINE,
+            None,
+        )
+        .unwrap();
+        let repaired =
+            agent_doc_document_realtime_io::normalize_recoverable_response_replay_duplication_for_file(
+                &doc,
+                &duplicated,
+                "test_separator_replay_head_proof",
+            )
+            .unwrap()
+            .expect("capture-scoped evidence must prove the replay repair");
+        assert_eq!(repaired.matches("The cycle is committed.").count(), 1);
+        assert!(
+            repaired.contains(&format!(
+                "Should the PR path proceed, or remain on hold?\n\n{SEPARATOR_FOLLOWING}"
+            )),
+            "{repaired}"
+        );
+        fs::write(&doc, &repaired).unwrap();
+
+        assert!(
+            commit_proven_response_replay_canonicalization(&doc)
+                .expect("the separator-preserving replay repair must commit")
+        );
+        let session_head = Command::new("git")
+            .current_dir(root)
+            .args(["show", "HEAD:session.md"])
+            .output()
+            .unwrap();
+        assert_eq!(String::from_utf8_lossy(&session_head.stdout), repaired);
+    }
+
     #[test]
     fn replay_canonicalization_commit_preserves_a_concurrent_operator_cut() {
         let dir = tempfile::TempDir::new().unwrap();

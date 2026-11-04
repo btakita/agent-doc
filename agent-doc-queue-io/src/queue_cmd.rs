@@ -127,6 +127,7 @@ pub trait QueueCommandEffects {
                 source_content,
                 reason,
                 generation,
+                agent_doc_controller_io::project_controller::QueueProjectionWriter::LifecycleOwner,
             )?,
             agent_doc_controller_io::project_controller::QueueProjectionGenerationWriteOutcome::Applied
         ))
@@ -4701,6 +4702,7 @@ mod tests {
                 &source,
                 "stale_generation_test",
                 1,
+                agent_doc_controller_io::project_controller::QueueProjectionWriter::LifecycleOwner,
             )
             .unwrap(),
             agent_doc_controller_io::project_controller::QueueProjectionGenerationWriteOutcome::Superseded,

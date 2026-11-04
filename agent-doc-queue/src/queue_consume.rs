@@ -60,7 +60,7 @@ pub const LEGACY_WAITING_METADATA_MARKER: &str =
 fn agent_doc_reply_suffix() -> String {
     AGENT_DOC_REPLY_GLYPH.to_string()
 }
-const WAITING_ON_YOU_ROOT_TEXT: &str =
+pub(crate) const WAITING_ON_YOU_ROOT_TEXT: &str =
     "Waiting on you — answer by adding a child line under an item";
 
 /// Pure projection of the queue mutation implied by a captured response and an
@@ -5158,13 +5158,17 @@ fn normalize_waiting_queues(document: &str) -> Result<Option<String>> {
         if !body.contains(WAITING_ON_YOU_ITEM_MARKER) {
             continue;
         }
+        // `#closedbygraft`: drop verbatim Choices re-copies older binaries
+        // grafted into Closed-by back-references.
+        let degrafted = crate::waiting_packet::strip_closed_by_choice_grafts(body, &open_todo_ids);
+        let body = degrafted.as_deref().unwrap_or(body);
         let parsed = document_queue::parse(body)?;
         let normalized = crate::waiting_packet::normalize_waiting_packets(&parsed);
         let entries = normalized.as_deref().unwrap_or(&parsed);
         // `#waitingitemstatus`: every live head carries its derived state and
         // roll-up, recomputed from the normalized packet.
         let with_status = crate::waiting_status::project_waiting_status(entries, &open_todo_ids);
-        if normalized.is_some() || with_status.is_some() {
+        if degrafted.is_some() || normalized.is_some() || with_status.is_some() {
             let rendered = with_status.as_deref().unwrap_or(entries);
             replacements.push((
                 component.open_end,
@@ -5205,12 +5209,33 @@ fn project_waiting_items_from_todos(document: &str, response_body: &str) -> Resu
     let response_timestamp = latest_response_timestamp(response_body)
         .or_else(|| latest_response_timestamp(document))
         .unwrap_or(FALLBACK_RESPONSE_TIMESTAMP);
+    // `#waitingarchive`: a child that carries an open Todo's id and operator
+    // text but lost its hidden item marker (or sits beside a binary-only
+    // duplicate) represents that item. Without this it was invisible to
+    // `existing`, a stub was regenerated beside it, and the two swapped
+    // places on every rebuild. Adopting it appends only the hidden sentinel.
+    let adoptable = location
+        .as_ref()
+        .map(|location| adoptable_waiting_segments(projected_document, location))
+        .unwrap_or_default();
+    let existing_has_reply = |id: &str| {
+        existing
+            .get(id)
+            .is_some_and(|(_, has_operator_reply)| *has_operator_reply)
+    };
 
+    let open_ids = todos
+        .iter()
+        .map(|todo| todo.id.to_ascii_lowercase())
+        .collect::<HashSet<_>>();
+    let mut kept_raws = HashSet::<String>::new();
     let mut children = Vec::new();
+    let mut child_ids = Vec::new();
     for todo in todos {
         if external_ids.contains(&todo.id) {
             continue;
         }
+        child_ids.push(todo.id.to_ascii_lowercase());
         let timestamp = packets
             .get(&todo.id)
             .and_then(|packet| packet.response_timestamp.as_deref())
@@ -5218,9 +5243,18 @@ fn project_waiting_items_from_todos(document: &str, response_body: &str) -> Resu
         // `#waitingoperatortext`: keep an existing child that holds operator
         // text, and never downgrade an existing packet to the generic stub
         // when no fresher operator packet is available to regenerate from.
+        if !existing_has_reply(&todo.id)
+            && let Some((source, marked)) = adoptable.get(&todo.id.to_ascii_lowercase())
+        {
+            kept_raws.insert(source.clone());
+            let child = normalize_agent_doc_reply_rows(marked)?;
+            children.push(ensure_waiting_response_timestamp(&child, timestamp));
+            continue;
+        }
         if let Some((raw, has_operator_reply)) = existing.get(&todo.id)
             && (*has_operator_reply || !packets.contains_key(&todo.id))
         {
+            kept_raws.insert(raw.clone());
             let child = normalize_agent_doc_reply_rows(raw)?;
             children.push(ensure_waiting_response_timestamp(&child, timestamp));
             continue;
@@ -5235,6 +5269,54 @@ fn project_waiting_items_from_todos(document: &str, response_body: &str) -> Resu
     let Some(location) = location else {
         return Ok(None);
     };
+
+    // `#waitingarchive`: the regenerated tree keeps only the children of open
+    // Todos. Every other child segment used to vanish with the rebuild,
+    // together with any operator text under it. Now a segment of a closed
+    // Todo moves byte-for-byte into `agent:done` under a one-line receipt,
+    // and a segment that matches no rendered item (no Todo id, a duplicate,
+    // a struck head of an open Todo) but holds operator text stays in the
+    // tree after the item it followed. Only binary-only segments of still
+    // open Todos, which the rebuild regenerates, are dropped.
+    let dispositions = waiting_segment_dispositions(
+        projected_document,
+        &location,
+        &kept_raws,
+        &open_ids,
+    );
+    let mut archived = Vec::new();
+    let mut retained = Vec::new();
+    for (segment, disposition) in dispositions {
+        match disposition {
+            SegmentDisposition::Archive(reason) => archived.push((segment, reason)),
+            SegmentDisposition::Retain { after } => retained.push((segment, after)),
+        }
+    }
+    let archive_entries = archived
+        .iter()
+        .map(|(segment, reason)| {
+            crate::waiting_archive::render_archive_entry(
+                &crate::waiting_archive::archive_date(response_timestamp),
+                &location.queue,
+                segment,
+                *reason,
+            )
+        })
+        .collect::<Vec<_>>();
+    let archive_target = if archive_entries.is_empty() {
+        None
+    } else {
+        // Probe whether the document can hold the entries; a document with no
+        // managed component keeps the segments in its tree instead.
+        crate::waiting_archive::append_to_done(projected_document, &archive_entries)?
+    };
+    if !archive_entries.is_empty() && archive_target.is_none() {
+        for (segment, _) in archived {
+            retained.push((segment, None));
+        }
+    }
+    let children = interleave_retained_segments(children, &child_ids, retained);
+
     let replacement = if children.is_empty() {
         String::new()
     } else {
@@ -5255,7 +5337,126 @@ fn project_waiting_items_from_todos(document: &str, response_body: &str) -> Resu
     } else {
         out.replace_range(location.start..location.end, &replacement);
     }
+    if archive_target.is_some() {
+        out = crate::waiting_archive::append_to_done(&out, &archive_entries)?
+            .ok_or_else(|| anyhow::anyhow!("agent:done vanished while archiving waiting items"))?;
+    }
     Ok((out != document).then_some(out))
+}
+
+/// Live (unstruck) child segments with an id and operator text, keyed by the
+/// lowercased id (first such segment wins), each with its text carrying the
+/// hidden item marker.
+fn adoptable_waiting_segments(
+    document: &str,
+    location: &WaitingTreeLocation,
+) -> HashMap<String, (String, String)> {
+    let mut out = HashMap::new();
+    if location.start == location.end {
+        return out;
+    }
+    let tree = &document[location.start..location.end];
+    let root_line = tree.lines().next().unwrap_or_default();
+    let root_indent = root_line.len() - root_line.trim_start_matches([' ', '\t']).len();
+    for segment in crate::waiting_archive::waiting_tree_segments(tree, root_indent) {
+        let Some(id) = segment.id.clone() else {
+            continue;
+        };
+        if segment.struck || !crate::waiting_archive::segment_has_operator_rows(&segment.raw) {
+            continue;
+        }
+        let head = segment.raw.lines().next().unwrap_or_default();
+        let marked = if head.contains(WAITING_ON_YOU_ITEM_MARKER) {
+            segment.raw.clone()
+        } else {
+            with_waiting_item_marker(&segment.raw)
+        };
+        out.entry(id).or_insert((segment.raw, marked));
+    }
+    out
+}
+
+/// What a rebuild does with one existing child segment it does not keep.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum SegmentDisposition {
+    /// Move it into `agent:done` (`#waitingarchive`).
+    Archive(crate::waiting_archive::ArchiveReason),
+    /// Keep it in the tree after the rendered item with this id (`None`:
+    /// before every rendered item).
+    Retain { after: Option<String> },
+}
+
+/// The existing child segments a rebuild does not keep verbatim, and what
+/// happens to each. A segment the rebuild regenerates from binary text alone
+/// (an open Todo's item with no operator rows) is not listed: it is replaced.
+fn waiting_segment_dispositions(
+    document: &str,
+    location: &WaitingTreeLocation,
+    kept_raws: &HashSet<String>,
+    open_ids: &HashSet<String>,
+) -> Vec<(crate::waiting_archive::WaitingSegment, SegmentDisposition)> {
+    if location.start == location.end {
+        return Vec::new();
+    }
+    let tree = &document[location.start..location.end];
+    let root_line = tree.lines().next().unwrap_or_default();
+    let root_indent = root_line.len() - root_line.trim_start_matches([' ', '\t']).len();
+    let mut previous_open_id: Option<String> = None;
+    let mut out = Vec::new();
+    for segment in crate::waiting_archive::waiting_tree_segments(tree, root_indent) {
+        let anchor = previous_open_id.clone();
+        if let Some(id) = segment.id.as_ref().filter(|id| open_ids.contains(*id)) {
+            previous_open_id = Some(id.clone());
+        }
+        if kept_raws.contains(&segment.raw) {
+            continue;
+        }
+        let disposition = match segment.id.as_deref() {
+            Some(id) if !open_ids.contains(id) => SegmentDisposition::Archive(
+                crate::waiting_archive::ArchiveReason::TodoClosed,
+            ),
+            _ if crate::waiting_archive::segment_has_operator_rows(&segment.raw) => {
+                SegmentDisposition::Retain { after: anchor }
+            }
+            _ => continue,
+        };
+        out.push((segment, disposition));
+    }
+    out
+}
+
+/// Place retained segments after the rendered item they followed, in their
+/// original order.
+fn interleave_retained_segments(
+    children: Vec<String>,
+    child_ids: &[String],
+    retained: Vec<(crate::waiting_archive::WaitingSegment, Option<String>)>,
+) -> Vec<String> {
+    if retained.is_empty() {
+        return children;
+    }
+    let rendered = child_ids.iter().collect::<HashSet<_>>();
+    let mut leading = Vec::new();
+    let mut after = HashMap::<String, Vec<String>>::new();
+    for (segment, anchor) in retained {
+        let raw = if segment.raw.ends_with('\n') {
+            segment.raw
+        } else {
+            format!("{}\n", segment.raw)
+        };
+        match anchor.filter(|id| rendered.contains(id)) {
+            Some(id) => after.entry(id).or_default().push(raw),
+            None => leading.push(raw),
+        }
+    }
+    let mut out = leading;
+    for (child, id) in children.into_iter().zip(child_ids) {
+        out.push(child);
+        if let Some(segments) = after.remove(id) {
+            out.extend(segments);
+        }
+    }
+    out
 }
 
 /// Adopt an answered origin row as the waiting item for its matching open Todo.
@@ -5395,6 +5596,8 @@ struct WaitingTreeLocation {
     end: usize,
     component_open_end: usize,
     component_close_start: usize,
+    /// The queue component's `id` attribute, or its marker name.
+    queue: String,
 }
 
 fn waiting_tree_location(document: &str) -> Result<Option<WaitingTreeLocation>> {
@@ -5427,6 +5630,7 @@ fn waiting_tree_location(document: &str) -> Result<Option<WaitingTreeLocation>> 
             end: descendant_region_end(document, line_end, indent),
             component_open_end: component.open_end,
             component_close_start: component.close_start,
+            queue: component_queue_name(component),
         }));
     }
 
@@ -5443,7 +5647,16 @@ fn waiting_tree_location(document: &str) -> Result<Option<WaitingTreeLocation>> 
         end: component.close_start,
         component_open_end: component.open_end,
         component_close_start: component.close_start,
+        queue: component_queue_name(component),
     }))
+}
+
+fn component_queue_name(component: &element::Component) -> String {
+    component
+        .attrs
+        .get("id")
+        .cloned()
+        .unwrap_or_else(|| component.name.clone())
 }
 
 fn queue_prompt_ids_outside_waiting_tree(
@@ -5522,7 +5735,10 @@ fn existing_waiting_children(
         let mut next = index + 1;
         while next < entries.len() {
             let (candidate, candidate_span) = &entries[next];
-            if let Some(candidate_indent) = queue_entry_indent(candidate) {
+            // Any list row at the child indent ends this item, including an
+            // inert one: an unmatched item typed or left there is its own
+            // child, never part of the item above it (`#waitingarchive`).
+            if let Some(candidate_indent) = crate::waiting_packet::entry_list_indent(candidate) {
                 if candidate_indent <= 2 {
                     child_end = candidate_span.start;
                     break;
@@ -5546,7 +5762,17 @@ fn existing_waiting_children(
         // agent-doc-bugs.md, f7f3fd84bc). Any list row in the subtree that the
         // binary did not author is operator text and pins the existing child.
         let has_operator_reply = has_operator_reply || waiting_child_has_operator_rows(raw);
-        children.insert(id, (raw.to_string(), has_operator_reply));
+        // Two children can carry one Todo id (a duplicate an older binary
+        // left). The one holding operator text represents the item, else the
+        // first; the other stays an unmatched child (`#waitingarchive`).
+        // Last-wins made the choice depend on position, so the kept child and
+        // its duplicate swapped places on every rebuild.
+        match children.get(&id) {
+            Some((_, kept_has_reply)) if *kept_has_reply || !has_operator_reply => {}
+            _ => {
+                children.insert(id, (raw.to_string(), has_operator_reply));
+            }
+        }
         index = next.max(index + 1);
     }
     Ok(children)
@@ -5555,7 +5781,7 @@ fn existing_waiting_children(
 /// True when a waiting child's subtree (below its item row) holds a list row
 /// the binary did not author: not a reply/metadata row, and not a binary-owned
 /// worker-attempt projection (`#waitingoperatortext`).
-fn waiting_child_has_operator_rows(raw: &str) -> bool {
+pub(crate) fn waiting_child_has_operator_rows(raw: &str) -> bool {
     let lines = raw.lines().collect::<Vec<_>>();
     lines.iter().enumerate().skip(1).any(|(index, line)| {
         let Some(text) = line.trim_start().strip_prefix("- ") else {
@@ -5586,6 +5812,15 @@ fn queue_entry_indent(entry: &QueueEntry) -> Option<usize> {
 struct WaitingTodo {
     id: String,
     action: String,
+}
+
+/// Lowercased ids of every open `agent:todo` item: the waiting items a
+/// closeout keeps live.
+pub(crate) fn open_waiting_todo_ids(document: &str) -> HashSet<String> {
+    open_waiting_todos(document)
+        .into_iter()
+        .map(|todo| todo.id.to_ascii_lowercase())
+        .collect()
 }
 
 fn open_waiting_todos(document: &str) -> Vec<WaitingTodo> {
@@ -6311,7 +6546,32 @@ mod tests {
             .unwrap()
             .expect("resolved todo should remove the tree");
         assert!(!cleaned.contains(WAITING_ON_YOU_ROOT_MARKER), "{cleaned}");
-        assert!(!cleaned.contains("    - approved\n"), "{cleaned}");
+        // `#waitingarchive`: the closed item leaves the queue, but its packet,
+        // including the operator's reply, moves into agent:done verbatim.
+        let queue = element::parse(&cleaned)
+            .unwrap()
+            .into_iter()
+            .find(|component| component.name == "queue")
+            .unwrap();
+        assert!(!queue.content(&cleaned).contains("approved"), "{cleaned}");
+        let done = element::parse(&cleaned)
+            .unwrap()
+            .into_iter()
+            .find(|component| component.name == "done")
+            .expect("the archive creates agent:done");
+        let done = done.content(&cleaned);
+        assert!(done.contains("  >     - approved\n"), "{done}");
+        assert_eq!(
+            done.matches(crate::waiting_archive::WAITING_ARCHIVE_MARKER)
+                .count(),
+            1,
+            "{done}"
+        );
+        assert_eq!(
+            project_waiting_on_you_tree(&cleaned, response).unwrap(),
+            None,
+            "archiving is a fixed point"
+        );
     }
 
     /// `#waitingoperatortext`: the 2026-11-03 agent-doc-bugs.md loss

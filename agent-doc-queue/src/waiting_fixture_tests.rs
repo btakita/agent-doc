@@ -650,3 +650,178 @@ fn offered_choices_in_a_waiting_packet_are_never_dispatched() {
         );
     }
 }
+
+/// `#waitingarchive`: closing a waiting item's Todo moves its whole subtree,
+/// operator answer included, into `agent:done` under one receipt. Nothing else
+/// in the queue changes, and the next cycle is a fixed point.
+#[test]
+fn a_closed_items_subtree_moves_to_done_byte_for_byte() {
+    use crate::waiting_archive::{WAITING_ARCHIVE_MARKER, unquote_archive_entry};
+
+    let settled = settled_fixture();
+    let body = main_queue_body(&settled);
+    let start = body
+        .split_inclusive('\n')
+        .scan(0usize, |offset, line| {
+            let at = *offset;
+            *offset += line.len();
+            Some((at, line))
+        })
+        .find(|(_, line)| {
+            line.starts_with("  - ")
+                && line.contains("[#sdkparitygate]")
+                && line.contains(WAITING_ON_YOU_ITEM_MARKER)
+        })
+        .map(|(at, _)| at)
+        .expect("the fixture's sdkparitygate waiting item");
+    let rest = &body[start..];
+    let len = rest
+        .split_inclusive('\n')
+        .enumerate()
+        .take_while(|(index, line)| *index == 0 || !line.starts_with("  - ") && !line.starts_with("- "))
+        .map(|(_, line)| line.len())
+        .sum::<usize>();
+    let segment = &rest[..len];
+    assert!(segment.contains("verified [#q-79076461751e]"), "{segment}");
+
+    let closed = settled.replacen("- [ ] [#sdkparitygate]", "- [x] [#sdkparitygate]", 1);
+    let archived = maintenance_cycle(&closed);
+
+    let after = main_queue_body(&archived);
+    assert!(!after.contains("verified [#q-79076461751e]"), "{after}");
+    assert_eq!(
+        after,
+        body.replacen(segment, "", 1),
+        "only the closed item leaves the queue"
+    );
+
+    let done = agent_doc_element::element::parse(&archived)
+        .unwrap()
+        .into_iter()
+        .find(|component| component.name == "done")
+        .expect("the archive creates agent:done")
+        .content(&archived)
+        .to_string();
+    let entry = &done[done.find("- ").expect("one receipt")..];
+    let receipt = entry.lines().next().unwrap();
+    assert!(receipt.contains("archived waiting item `#sdkparitygate` (its Todo closed)"), "{receipt}");
+    assert!(receipt.ends_with(WAITING_ARCHIVE_MARKER), "{receipt}");
+    assert_eq!(unquote_archive_entry(entry), segment, "every byte of the packet is kept");
+    assert_eq!(done.matches(WAITING_ARCHIVE_MARKER).count(), 1);
+
+    assert_eq!(
+        maintenance_cycle(&archived),
+        archived,
+        "archiving reaches a fixed point"
+    );
+}
+
+/// `#closedbygraft` (`#largewaitingtrees`): the Closed-by back-reference under
+/// the `Operator does it in the UI` option re-copied the sibling options (the
+/// Craig access choices) under `tdsdkreleaseapp`. Closeout drops the verbatim
+/// copies and keeps the operator's `~~pick~~` with the option it answered.
+#[test]
+fn closed_by_back_references_no_longer_regraft_sibling_choices() {
+    let settled = settled_fixture();
+    let body = main_queue_body(&settled);
+    let lines = body.lines().collect::<Vec<_>>();
+    let option = lines
+        .iter()
+        .position(|line| line.trim_start().starts_with("- **Operator does it in the UI**"))
+        .expect("the offered option row");
+    let indent = lines[option].len() - lines[option].trim_start().len();
+    let subtree = lines[option + 1..]
+        .iter()
+        .take_while(|line| line.len() - line.trim_start().len() > indent)
+        .copied()
+        .collect::<Vec<_>>();
+    let joined = subtree.join("\n");
+    for copied in [
+        "**UI role**",
+        "**Narrow app role**",
+        "**Tester only**",
+        "**Grant haiven-sdk only**",
+        "**Operator does it in the UI**",
+    ] {
+        assert!(!joined.contains(copied), "{copied} re-copied:\n{joined}");
+    }
+    assert!(joined.contains("**Grant both**"), "{joined}");
+    assert!(joined.contains("~~pick~~"), "the operator's answer stays:\n{joined}");
+    assert!(
+        joined.contains("**Request**: [#subagent-operator-request-craig-ui-read]"),
+        "{joined}"
+    );
+    // The original offered options are still shown once, where they were offered.
+    assert_eq!(body.matches("**Tester only**").count(), 1, "{body}");
+}
+
+/// A live document (2026-11-03 20:55) whose Waiting-on-you tree held an item
+/// with no Todo id beside a duplicate of the same Todo
+/// (`subagent-operator-request-queue-ast-strings-persist`).
+const UNMATCHED_FIXTURE: &str = include_str!("../tests/fixtures/waiting_tree_unmatched_replies.md");
+
+/// Operator replies of the unmatched-items fixture: list rows the binary did
+/// not author. A leading `📥 ` is a stale binary projection that closeout
+/// strips from packet rows (`#waitingpacketowner`); the operator's bytes are
+/// the rest of the line.
+const UNMATCHED_REPLIES: [&str; 6] = [
+    "          - Is this moot? agent-doc should do the reconciliation. [#q-4381636bab0e]\n",
+    "          - moot or still needed? [#q-eeb402d8c55c]\n",
+    "          - commit + integration + push\n",
+    "      - Why do you recommend Leave uncommitted?\n",
+    "        - commit + integrate + push\n",
+    "    - commit + integrate + push\n",
+];
+
+fn without_pending_projection(document: &str) -> String {
+    document.replace("- 📥 ", "- ")
+}
+
+/// `#waitingarchive`: rebuilding the tree from the Todo list must never
+/// delete operator text. An item with no Todo id (a duplicate of an open
+/// Todo's item) used to vanish with its reply `commit + integration + push`;
+/// it now stays in the tree, and every reply survives byte for byte.
+#[test]
+fn a_rebuild_keeps_every_operator_reply_of_unmatched_items() {
+    let fixture = without_pending_projection(UNMATCHED_FIXTURE);
+    for reply in UNMATCHED_REPLIES {
+        assert!(fixture.contains(reply), "fixture reply: {reply}");
+    }
+    let once = project_waiting_on_you_tree(UNMATCHED_FIXTURE, "")
+        .unwrap()
+        .unwrap_or_else(|| UNMATCHED_FIXTURE.to_string());
+    for reply in UNMATCHED_REPLIES {
+        assert_eq!(
+            without_pending_projection(&once).matches(reply).count(),
+            fixture.matches(reply).count(),
+            "operator reply lost or duplicated: {reply}\n{once}"
+        );
+    }
+    let ast = "Answer the blocking subagent question for queue item ‘The update to agent-doc-bugs.md";
+    let body = main_queue_body(&once);
+    let unmatched = body
+        .lines()
+        .position(|line| line.starts_with("  - ") && line.contains(ast) && !line.contains("[#"))
+        .unwrap_or_else(|| panic!("the unmatched item stays in the tree:\n{body}"));
+    assert!(
+        body.lines()
+            .skip(unmatched)
+            .take_while(|line| !line.starts_with("  - [#"))
+            .any(|line| line == "          - commit + integration + push"),
+        "the reply stays under its item:\n{body}"
+    );
+    assert!(!once.contains(crate::waiting_archive::WAITING_ARCHIVE_MARKER));
+    let twice = maintenance_cycle(&maintenance_cycle(&once));
+    for reply in UNMATCHED_REPLIES {
+        assert!(
+            without_pending_projection(&twice).contains(reply),
+            "reply lost on a later cycle: {reply}"
+        );
+    }
+    let thrice = maintenance_cycle(&twice);
+    assert!(
+        thrice == twice,
+        "retaining unmatched items reaches a fixed point:\n{}",
+        similar::TextDiff::from_lines(&twice, &thrice).unified_diff()
+    );
+}

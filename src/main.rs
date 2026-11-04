@@ -5138,6 +5138,26 @@ enum QueueAction {
         #[arg(long)]
         json: bool,
     },
+    /// Print a compact read-only view of the document's queue trees
+    /// (`#queuetreeview`): one line per queue row and live operator answer with
+    /// its derived state (done, waiting on you, running, needs integration,
+    /// ...), Waiting-on-you items with their `you · agent · done` roll-up, and
+    /// a summary line (`24 items: 9 done · 6 waiting on you · ...`). Generated
+    /// packet metadata folds under its item. Never writes the document.
+    #[command(after_help = agent_doc_frontmatter::frontmatter::queue_marker_legend_help())]
+    Tree {
+        /// Path to the session document
+        file: PathBuf,
+        /// Show only this item and its subtree: `#id`, `do [#id]`, or text
+        #[arg(long, value_name = "ID_OR_TEXT")]
+        item: Option<String>,
+        /// Hide closed (struck) rows together with their subtrees
+        #[arg(long)]
+        open_only: bool,
+        /// Print the tree as JSON (the same nodes the editor gutter reads)
+        #[arg(long)]
+        json: bool,
+    },
     /// Print the queue marker legend (`#queuemarkerlegend`): what each
     /// binary-owned prefix on a queue row means, using the configured
     /// `[queue_icons]` palette. `--line` prints the one-line legend the binary
@@ -9063,6 +9083,30 @@ fn try_main() -> anyhow::Result<()> {
                 let report =
                     queue_completion_feedback::repair_managed_state(&file, apply, &keys)?;
                 queue_completion_feedback::print_managed_state_report(&report);
+                Ok(())
+            }
+            QueueAction::Tree {
+                file,
+                item,
+                open_only,
+                json,
+            } => {
+                let content = std::fs::read_to_string(&file)
+                    .with_context(|| format!("failed to read {}", file.display()))?;
+                let options = agent_doc_queue::queue_tree::QueueTreeOptions { item, open_only };
+                let tree = agent_doc_queue::queue_tree::queue_tree(&content, &options)?;
+                if !agent_doc_queue::queue_tree::item_matched(&tree, &options) {
+                    anyhow::bail!(
+                        "no queue row in {} matches --item {}",
+                        file.display(),
+                        options.item.as_deref().unwrap_or_default()
+                    );
+                }
+                if json {
+                    println!("{}", serde_json::to_string_pretty(&tree)?);
+                } else {
+                    print!("{}", agent_doc_queue::queue_tree::render_text(&tree));
+                }
                 Ok(())
             }
             QueueAction::Brief { file, item, json } => {

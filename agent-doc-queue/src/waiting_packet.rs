@@ -11,6 +11,7 @@
 //! This module is pure: it classifies parsed queue entries and source lines and
 //! performs the closeout normalization of packets that older binaries polluted.
 
+use std::collections::HashSet;
 use std::ops::Range;
 
 use agent_doc_document::queue_projection::{
@@ -419,6 +420,190 @@ pub fn normalize_waiting_packets(entries: &[QueueEntry]) -> Option<Vec<QueueEntr
         out.push(entry.clone());
     }
     changed.then_some(out)
+}
+
+/// Normalized text of one row for duplicate detection: the work text without
+/// strike wrappers, attempt projection, `[#id]` references, or `⟦...⟧`
+/// annotations.
+fn graft_row_key(line: &str) -> Option<String> {
+    let body = line.trim_start().strip_prefix("- ")?;
+    let mut work = agent_doc_element_queue::struck_work_text(body).trim();
+    work = work
+        .strip_prefix("~~")
+        .and_then(|inner| inner.strip_suffix("~~"))
+        .unwrap_or(work);
+    let work = agent_doc_element_queue::strip_attempt_projection_prefix(work);
+    let mut out = String::with_capacity(work.len());
+    let mut rest = work;
+    loop {
+        let next = [rest.find("[#"), rest.find('⟦')]
+            .into_iter()
+            .flatten()
+            .min();
+        let Some(at) = next else {
+            out.push_str(rest);
+            break;
+        };
+        out.push_str(&rest[..at]);
+        let close = if rest[at..].starts_with("[#") {
+            "]"
+        } else {
+            "⟧"
+        };
+        match rest[at..].find(close) {
+            Some(end) => rest = &rest[at + end + close.len()..],
+            None => {
+                out.push_str(&rest[at..]);
+                break;
+            }
+        }
+    }
+    let key = out.split_whitespace().collect::<Vec<_>>().join(" ");
+    (!key.is_empty()).then_some(key)
+}
+
+fn line_list_indent(line: &str) -> Option<usize> {
+    let trimmed = line.trim_start_matches([' ', '\t']);
+    (trimmed.starts_with("- ") || trimmed.starts_with("* ") || trimmed.starts_with("+ "))
+        .then(|| line.len() - trimmed.len())
+}
+
+fn line_body(line: &str) -> &str {
+    line.trim_start()
+        .strip_prefix("- ")
+        .unwrap_or(line.trim_start())
+        .trim_end()
+}
+
+/// A generated bold-label row (`**label**: effect`, `**Request**: [#id]`,
+/// `**Closed by:** ...`, `**Choices:**`), never operator text.
+fn is_generated_label_row(line: &str) -> bool {
+    line_list_indent(line).is_some() && line_body(line).starts_with("**")
+}
+
+fn request_row_id(line: &str) -> Option<String> {
+    let rest = line_body(line).strip_prefix("**Request**: [#")?;
+    rest.split_once(']').map(|(id, _)| id.to_ascii_lowercase())
+}
+
+/// `#closedbygraft`: remove the verbatim re-copies an older binary grafted
+/// into `**Closed by:**` back-references.
+///
+/// Before `#waitingpacketowner`, a back-reference under every row a response
+/// closed carried a `**Choices:**` block, re-copying the options of whatever
+/// decision the response recorded. A single answer therefore left the same
+/// option list repeated under its siblings (the Craig access and ADR 0046
+/// options under `tdsdkreleaseapp`). The generator no longer does this; this
+/// pass removes what it left behind.
+///
+/// Within one waiting item, a child of such a Choices block is removed only
+/// when its whole subtree is generated label rows and its text duplicates a
+/// row the item shows elsewhere. A block left holding only `**Request**` rows
+/// for requests that are no longer open (or nothing) goes too. Any row with
+/// operator text beneath it (`~~pick~~`), any unique option, and an open
+/// request's answer surface stay byte-for-byte.
+pub fn strip_closed_by_choice_grafts(body: &str, open_ids: &HashSet<String>) -> Option<String> {
+    let ranges = waiting_tree_byte_ranges(body);
+    let outermost = ranges
+        .iter()
+        .filter(|range| {
+            !ranges.iter().any(|other| {
+                other != *range && other.start <= range.start && range.end <= other.end
+            })
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    let mut out = body.to_string();
+    let mut changed = false;
+    for range in outermost.into_iter().rev() {
+        if let Some(cleaned) = strip_grafts_in_item(&body[range.clone()], open_ids) {
+            out.replace_range(range, &cleaned);
+            changed = true;
+        }
+    }
+    changed.then_some(out)
+}
+
+fn strip_grafts_in_item(item: &str, open_ids: &HashSet<String>) -> Option<String> {
+    let lines = item.split_inclusive('\n').collect::<Vec<_>>();
+    let subtree_end = |start: usize| {
+        let Some(own) = line_list_indent(lines[start]) else {
+            return start + 1;
+        };
+        (start + 1..lines.len())
+            .find(|index| line_list_indent(lines[*index]).is_some_and(|indent| indent <= own))
+            .unwrap_or(lines.len())
+    };
+    let mut drop = vec![false; lines.len()];
+    let mut index = 0usize;
+    while index < lines.len() {
+        let line = lines[index];
+        let is_closed_by =
+            line_list_indent(line).is_some() && line_body(line).starts_with("**Closed by:** [#r-");
+        if !is_closed_by {
+            index += 1;
+            continue;
+        }
+        let Some(choices) = (index + 1..subtree_end(index)).find(|candidate| {
+            line_list_indent(lines[*candidate]).is_some()
+                && line_body(lines[*candidate]) == "**Choices:**"
+        }) else {
+            index += 1;
+            continue;
+        };
+        let block_end = subtree_end(choices);
+        let outside_keys = lines
+            .iter()
+            .enumerate()
+            .filter(|(at, _)| *at < choices || *at >= block_end)
+            .filter_map(|(_, line)| graft_row_key(line))
+            .collect::<HashSet<_>>();
+        let mut children = Vec::new();
+        let mut child = choices + 1;
+        while child < block_end {
+            if line_list_indent(lines[child]).is_none() {
+                child += 1;
+                continue;
+            }
+            let end = subtree_end(child).min(block_end);
+            children.push(child..end);
+            child = end;
+        }
+        let mut kept = Vec::new();
+        for range in &children {
+            let generated_only = lines[range.clone()]
+                .iter()
+                .all(|line| line.trim().is_empty() || is_generated_label_row(line));
+            let head = lines[range.start];
+            let duplicate = request_row_id(head).is_none()
+                && graft_row_key(head).is_some_and(|key| outside_keys.contains(&key));
+            if generated_only && duplicate {
+                drop[range.clone()].fill(true);
+            } else {
+                kept.push(range.clone());
+            }
+        }
+        let removed_any = kept.len() < children.len();
+        let only_closed_requests = kept.iter().all(|range| {
+            range.len() == 1
+                && request_row_id(lines[range.start]).is_some_and(|id| !open_ids.contains(&id))
+        });
+        if removed_any && only_closed_requests {
+            drop[choices..block_end].fill(true);
+        }
+        index = block_end.max(index + 1);
+    }
+    if !drop.iter().any(|dropped| *dropped) {
+        return None;
+    }
+    Some(
+        lines
+            .iter()
+            .zip(drop)
+            .filter(|(_, dropped)| !dropped)
+            .map(|(line, _)| *line)
+            .collect(),
+    )
 }
 
 #[cfg(test)]

@@ -657,6 +657,61 @@ pub unsafe extern "C" fn agent_doc_exchange_nodes(file_path: *const c_char) -> *
         .into_raw()
 }
 
+/// Return the read-only queue tree of a document's text as JSON
+/// (`#queuetreeview`): the same nodes `agent-doc queue tree --json` prints.
+///
+/// The editor passes its live buffer text, so unsaved edits are reflected.
+/// Each node carries a 1-based `line`, the inclusive `end_line` of its subtree
+/// (fold `line + 1 ..= end_line` when `closed`), its `state` (`done`,
+/// `waiting-on-you`, `answered`, `running`, `needs-integration`, `lost`,
+/// `reconciling`, `blocked`, `pending`, `open`, `skipped`, `unknown`, `reply`,
+/// `choice`, `follow-up`, `group`), the `glyph` a gutter icon shows, and a
+/// waiting item's `rollup` (`you`, `agent`, `done`). Editor plugins render
+/// these as gutter icons and fold closed subtrees; they never derive state
+/// themselves (FFI-first).
+///
+/// Returns null when `doc` is not UTF-8 or the document's components do not
+/// parse (the reason goes to stderr). Caller must free with
+/// `agent_doc_free_string`.
+///
+/// # Safety
+///
+/// `doc` must be a valid, NUL-terminated string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_queue_tree_json(doc: *const c_char) -> *mut c_char {
+    if doc.is_null() {
+        return std::ptr::null_mut();
+    }
+    let doc = match unsafe { CStr::from_ptr(doc) }.to_str() {
+        Ok(doc) => doc,
+        Err(error) => {
+            eprintln!("[ffi] agent_doc_queue_tree_json: document is not UTF-8: {error}");
+            return std::ptr::null_mut();
+        }
+    };
+    let tree = match agent_doc_queue::queue_tree::queue_tree(
+        doc,
+        &agent_doc_queue::queue_tree::QueueTreeOptions::default(),
+    ) {
+        Ok(tree) => tree,
+        Err(error) => {
+            eprintln!("[ffi] agent_doc_queue_tree_json: {error:#}");
+            return std::ptr::null_mut();
+        }
+    };
+    match serde_json::to_string(&tree).map(CString::new) {
+        Ok(Ok(json)) => json.into_raw(),
+        Ok(Err(error)) => {
+            eprintln!("[ffi] agent_doc_queue_tree_json: {error}");
+            std::ptr::null_mut()
+        }
+        Err(error) => {
+            eprintln!("[ffi] agent_doc_queue_tree_json: {error}");
+            std::ptr::null_mut()
+        }
+    }
+}
+
 /// Check whether a `.md` file is an opted-in agent-doc session document.
 ///
 /// Returns `1` when the file carries agent-doc frontmatter, matches a
@@ -5554,6 +5609,34 @@ mod tests {
             "guard is free again after unlock"
         );
         agent_doc_sync_unlock();
+    }
+
+    /// `#queuetreeview`: the editor gutter reads per-node queue states from
+    /// the live buffer text through one FFI call.
+    #[test]
+    fn queue_tree_json_exposes_node_states_for_editor_gutters() {
+        let doc = concat!(
+            "<!-- agent:queue id=\"main\" -->\n",
+            "- ### ~~Ship alpha [#q-alpha]~~\n",
+            "  - ~~step one~~\n",
+            "- ### ☑️ [#subagent:gamma#1] Fix gamma [#q-gamma]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let c_doc = CString::new(doc).unwrap();
+        let ptr = unsafe { agent_doc_queue_tree_json(c_doc.as_ptr()) };
+        assert!(!ptr.is_null());
+        let json = unsafe { CStr::from_ptr(ptr) }.to_str().unwrap().to_string();
+        unsafe { agent_doc_free_string(ptr) };
+        let tree: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let nodes = tree["nodes"].as_array().unwrap();
+        assert_eq!(nodes.len(), 3, "{json}");
+        assert_eq!(nodes[0]["line"], 2);
+        assert_eq!(nodes[0]["end_line"], 3);
+        assert_eq!(nodes[0]["state"], "done");
+        assert_eq!(nodes[0]["closed"], true);
+        assert_eq!(nodes[2]["state"], "needs-integration");
+        assert_eq!(tree["summary"]["items"], 3);
+        assert!(unsafe { agent_doc_queue_tree_json(std::ptr::null()) }.is_null());
     }
 
     fn parse_visual_tokens_json(doc: &str) -> Vec<serde_json::Value> {

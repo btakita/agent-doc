@@ -48,12 +48,14 @@ pub mod queue_response;
 pub mod queue_schedule;
 pub mod queue_schedule_runtime;
 pub mod queue_set;
+pub mod queue_tree;
 pub mod reported_closeout;
 pub mod queue_sync_payload;
 pub mod route_dispatch;
 pub mod stale_completion_evidence;
 pub mod subagent_brief;
 pub mod subagent_intent;
+pub mod waiting_archive;
 pub mod waiting_packet;
 pub mod waiting_status;
 #[cfg(test)]

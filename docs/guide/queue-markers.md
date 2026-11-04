@@ -320,6 +320,53 @@ reply under the item. When nothing can be derived the row says so rather than
 inventing a step. The row is binary-owned reply metadata, replaced on every
 closeout and never read back as evidence.
 
+## Closing a waiting item
+
+When a waiting item's Todo closes, closeout moves the item's whole subtree
+(packet rows, choices, struck rows, and your replies) out of the queue and into
+`agent:done`, under one receipt line (`#waitingarchive`):
+
+```text
+- 2026-11-04 archived waiting item `#approve-pr` (its Todo closed): `#approve-pr` Approve and merge PR #42. — its 4 rows moved here from the Waiting on you tree of queue `main` <!-- agent-doc:waiting-archive -->
+  >   - ⟦📥 you: 0 · agent: 1 · done: 0⟧ [#approve-pr] Approve and merge PR #42. <!-- agent-doc:waiting-item -->
+  >     - approved
+```
+
+Every archived line is the original line behind `  > `, so nothing you typed
+is lost, and no quoted `[#id]` counts as completed work. When the Done section
+declares `archive=`, the next done-archive flush moves the entry into that file.
+
+A rebuild never deletes operator text. A row that matches no open Todo item
+(no Todo id, a duplicate, or a struck head whose Todo is still open) but holds
+your text stays in the tree after the item it followed.
+
+Older binaries re-copied whole option lists into `**Closed by:**`
+back-references, so one decision's choices appeared under its siblings.
+Closeout drops those verbatim copies (`#closedbygraft`): only generated option
+rows that duplicate a row shown elsewhere in the same item go; anything with
+your text beneath it stays.
+
+## Queue tree view
+
+`agent-doc queue tree FILE` prints every queue as one line per row, with its
+state, and a summary (`#queuetreeview`):
+
+```text
+9 items: 3 done · 1 waiting on you · 1 answered · 1 running · 1 needs integration · 1 open · 1 reply
+queue main
+   L2   ✓ done · Ship alpha [#q-alpha]
+   L4   🚧 running · Build beta [#q-beta]
+   L5   ☑️ needs integration · Fix gamma [#q-gamma]
+   L8     🙋 waiting on you · [#ask] Approve the ask.  (you 1 · agent 0 · done 0)
+  L15       ↳ reply · blue please
+```
+
+`--open-only` hides closed rows with their subtrees, `--item ID` shows one
+subtree, and `--json` prints the nodes editors read through the
+`agent_doc_queue_tree_json` FFI export (1-based `line`, inclusive `end_line`
+for folding, `state`, `glyph`, `closed`, `rollup`). The view never writes the
+document.
+
 ## Custom palettes
 
 Each prefix can be overridden in `[queue_icons]` in

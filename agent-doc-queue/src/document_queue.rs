@@ -429,7 +429,18 @@ pub fn normalize_top_level_navigation_headings(body: &str) -> Option<String> {
 /// #multilineheadbullet).
 pub fn parse_spans(body: &str) -> Result<Vec<(QueueEntry, std::ops::Range<usize>)>> {
     let body_len = body.len();
-    let inline_code_ranges = agent_doc_markdown_ast::inline_code_ranges(body);
+    // A code span opened inside a list item ends before the next list item
+    // (`#operatorrepliesnested`). The marker offset mirrors the item test
+    // below, including the `#queue-line-leading-backtick-drop` stray tick.
+    let inline_code_ranges =
+        agent_doc_markdown_ast::inline_code_ranges_within_list_items(body, |line| {
+            match line.strip_prefix('`') {
+                Some(rest) if split_list_item(rest).is_some() => {
+                    split_list_item(rest).map(|(indent, _, _)| 1 + indent)
+                }
+                _ => split_list_item(line).map(|(indent, _, _)| indent),
+            }
+        });
     // Mirror `str::lines()` line content while retaining each line's byte start,
     // so entry ranges are exact even across `\r\n` and a missing trailing newline.
     let mut lines: Vec<&str> = Vec::new();

@@ -463,3 +463,190 @@ fn legacy_reply_comments_migrate_to_the_bare_trailing_glyph() {
     // A fixed point: the next cycle changes nothing.
     assert_eq!(maintenance_cycle(&settled), settled);
 }
+
+// ---- #operatorrepliesnested -------------------------------------------------
+
+const OPERATOR_REPLIES_FIXTURE: &str =
+    include_str!("../tests/fixtures/waiting_tree_operator_replies.md");
+
+
+/// The waiting items of the fixture whose packets hold an operator reply, with
+/// that reply's exact text (any stale binary `📥 ` paint removed).
+const OPERATOR_REPLIES: [(&str, &str); 5] = [
+    (
+        "rungamesessions-reopen",
+        "Is this moot? agent-doc should do the reconciliation. [#q-4381636bab0e]",
+    ),
+    (
+        "subagent-operator-request-vscode-coder-workspace",
+        "moot or still needed? [#q-eeb402d8c55c]",
+    ),
+    (
+        "subagent-operator-request-queue-ast-strings-persist",
+        "commit + integrate + push",
+    ),
+    (
+        "subagent-operator-request-parent-decision-response-disposition",
+        "Why do you recommend Leave uncommitted?",
+    ),
+    (
+        "subagent-operator-request-unique-child-vectors-persist",
+        "commit + integrate + push",
+    ),
+];
+
+fn operator_reply_index(entries: &[QueueEntry], id: &str, reply: &str) -> usize {
+    let head = head_index(entries, id);
+    packet_member_indexes(entries, head)
+        .into_iter()
+        .find(|member| row_text(&entries[*member]) == Some(reply))
+        .unwrap_or_else(|| panic!("{id}: reply {reply:?} is not in its packet"))
+}
+
+/// `#operatorrepliesnested`: a waiting item's text quoted a truncated report
+/// with an unbalanced backtick. The inline-code projection paired it with a
+/// backtick two items later, so the next two waiting items and every row
+/// beneath them read as inert text: their operator replies were invisible to
+/// the packet scan, and the Waiting-on-you refresh regenerated both packets
+/// from the Todo without them.
+#[test]
+fn an_unbalanced_backtick_in_one_item_never_hides_its_siblings() {
+    let entries = main_entries(OPERATOR_REPLIES_FIXTURE);
+    for id in [
+        "subagent-operator-request-parent-decision-response-disposition",
+        "subagent-operator-request-unique-child-vectors-persist",
+    ] {
+        let head = head_index(&entries, id);
+        assert!(matches!(entries[head], QueueEntry::Prompt(_)), "{id}");
+    }
+    let reply = entries
+        .iter()
+        .position(|entry| row_text(entry) == Some("Why do you recommend Leave uncommitted?"))
+        .expect("the operator reply is a list row, not inert text");
+    assert!(is_packet_row(&entries, reply));
+}
+
+#[test]
+fn operator_replies_nested_in_a_packet_are_decision_evidence_never_queue_rows() {
+    let settled = maintenance_cycle(OPERATOR_REPLIES_FIXTURE);
+    let entries = main_entries(&settled);
+    let executable = document_queue::executable_prompt_indexes(&entries)
+        .into_iter()
+        .collect::<HashSet<_>>();
+    let mut expected_executable = HashSet::new();
+    for (id, reply) in OPERATOR_REPLIES {
+        let head = head_index(&entries, id);
+        let row = operator_reply_index(&entries, id, reply);
+        let QueueEntry::Prompt(prompt) = &entries[row] else {
+            panic!("{id}: reply {reply:?} is no longer live");
+        };
+        assert_eq!(classify_member(prompt), WaitingMember::Operator, "{reply}");
+        assert_eq!(lifecycle_marker(&prompt.text), None, "{reply}");
+        assert!(!executable.contains(&row), "a reply is never queue work: {reply}");
+        // The reply selects its item, once, as decision evidence.
+        assert!(crate::waiting_packet::has_operator_reply(&entries, head), "{id}");
+        assert!(executable.contains(&head), "{id}");
+        expected_executable.insert(head);
+    }
+    // Nothing else in the tree is selectable: no offered choice, no generated
+    // row, no struck row. Only the two ordinary top-level heads remain.
+    for entry in &entries {
+        if let QueueEntry::Prompt(prompt) = entry
+            && prompt.indent == 0
+            && !prompt.text.contains(crate::queue_consume::WAITING_ON_YOU_ROOT_MARKER)
+        {
+            expected_executable.insert(entries.iter().position(|e| e == entry).unwrap());
+        }
+    }
+    assert_eq!(executable, expected_executable, "{}", main_queue_body(&settled));
+    // The binary's stale `📥` paint is gone from every reply, and no reply was
+    // admitted a fresh `q-` id.
+    for line in main_queue_body(&settled).lines() {
+        if !line.starts_with("    ") {
+            continue;
+        }
+        assert!(!line.contains("📥"), "a packet row carries a pending projection: {line}");
+    }
+    let admission = crate::prompt_identity::project(&settled, "fixture");
+    assert!(admission.assignments.is_empty(), "{:?}", admission.assignments);
+    assert_eq!(maintenance_cycle(&settled), settled, "a fixed point");
+}
+
+#[test]
+fn every_operator_row_survives_the_refresh_byte_for_byte() {
+    let settled = maintenance_cycle(OPERATOR_REPLIES_FIXTURE);
+    for (id, reply) in OPERATOR_REPLIES {
+        let original = OPERATOR_REPLIES_FIXTURE
+            .lines()
+            .filter(|line| line.trim_start().trim_start_matches("- ").trim_start_matches("📥 ") == reply)
+            .count();
+        let kept = settled
+            .lines()
+            .filter(|line| line.trim_start() == format!("- {reply}"))
+            .count();
+        assert!(original >= 1 && kept == original, "{id}: {reply:?} {original} -> {kept}");
+    }
+    // Each packet keeps its own Response timestamp instead of a regenerated
+    // placeholder.
+    assert!(!settled.contains("1970-01-01"), "{}", main_queue_body(&settled));
+}
+
+/// `#operatorrepliesnested`: a closeout that struck a reply row, as the old
+/// binary's consumption did for the `📥` rows it had painted, stays struck:
+/// maintenance never revives a packet row as live queue work.
+#[test]
+fn maintenance_never_unstrikes_a_struck_packet_row() {
+    let settled = maintenance_cycle(OPERATOR_REPLIES_FIXTURE);
+    let mut struck = settled.clone();
+    for (_, reply) in OPERATOR_REPLIES {
+        let row = format!("- {reply}\n");
+        let at = struck.find(&row).unwrap();
+        struck.replace_range(at..at + row.len(), &format!("- ~~{reply}~~\n"));
+    }
+    let once = maintenance_cycle(&struck);
+    for (_, reply) in OPERATOR_REPLIES {
+        let row = format!("- ~~{reply}~~");
+        assert!(
+            once.lines().any(|line| line.trim_start() == row),
+            "maintenance un-struck {reply:?}:\n{}",
+            main_queue_body(&once)
+        );
+        assert!(!once.lines().any(|line| line.trim_start() == format!("- {reply}")));
+    }
+    for row in [
+        "- ~~Resolve the open operator action to complete the parent item. [#rungamesessions-reopen] ⟦effect:2⟧~~",
+        "- ~~Reconcile the reported work, then complete the parent item.~~",
+    ] {
+        assert!(once.lines().any(|line| line.trim_start() == row), "{row}");
+    }
+    let entries = main_entries(&once);
+    for index in document_queue::executable_prompt_indexes(&entries) {
+        assert!(!is_packet_row(&entries, index), "{:?}", row_text(&entries[index]));
+    }
+    assert_eq!(maintenance_cycle(&once), once, "a fixed point");
+}
+
+#[test]
+fn offered_choices_in_a_waiting_packet_are_never_dispatched() {
+    let settled = maintenance_cycle(OPERATOR_REPLIES_FIXTURE);
+    let entries = main_entries(&settled);
+    let executable = document_queue::executable_prompt_indexes(&entries);
+    for choice in [
+        "**Install and retry**:",
+        "**Defer activation**:",
+        "**Open/provide Coder workspace (Recommended)**:",
+        "**Defer**:",
+    ] {
+        let line = main_queue_body(&settled)
+            .lines()
+            .find(|line| line.trim_start().starts_with(&format!("- {choice}")))
+            .unwrap_or_else(|| panic!("{choice}"))
+            .to_string();
+        assert!(line.ends_with(crate::queue_consume::AGENT_DOC_REPLY_GLYPH), "{line}");
+        assert!(
+            !executable.iter().any(|index| row_text(&entries[*index])
+                .is_some_and(|text| text.starts_with(choice))),
+            "an offered choice is an operator option, never work: {choice}"
+        );
+    }
+}

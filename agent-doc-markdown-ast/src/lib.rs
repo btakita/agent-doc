@@ -143,6 +143,75 @@ pub fn inline_code_ranges(source: &str) -> Vec<std::ops::Range<usize>> {
     ranges
 }
 
+/// [`inline_code_ranges`], with list-item boundaries respected.
+///
+/// The inline grammar sees `source` as one paragraph, so an unbalanced
+/// backtick inside one list item pairs with a backtick in a later sibling item
+/// and every list marker between them reads as inline code
+/// (`#operatorrepliesnested`: a truncated quote in one waiting item's text
+/// turned the next two waiting items, and the operator replies beneath them,
+/// into inert text, and the Waiting-on-you refresh regenerated them without
+/// those replies). CommonMark bounds a code span by its containing block: a
+/// span opened on a list-item line never extends past the start of the next
+/// list-item line. Such an opener is a literal backtick and scanning resumes
+/// right after it. A span opened on a line that is not a list item keeps the
+/// one-paragraph reading, so a multiline quoted string whose later line is
+/// list-shaped stays inline code.
+///
+/// `item_marker` returns the byte offset of the list marker within a line
+/// (the line has no terminator) when that line is list-item-shaped.
+pub fn inline_code_ranges_within_list_items(
+    source: &str,
+    item_marker: impl Fn(&str) -> Option<usize>,
+) -> Vec<std::ops::Range<usize>> {
+    // (line start, absolute marker byte) of every list-item-shaped line.
+    let mut items: Vec<(usize, usize)> = Vec::new();
+    let mut line_bounds: Vec<(usize, usize)> = Vec::new();
+    let mut pos = 0usize;
+    for raw in source.split_inclusive('\n') {
+        let line = raw.strip_suffix('\n').unwrap_or(raw);
+        let line = line.strip_suffix('\r').unwrap_or(line);
+        line_bounds.push((pos, pos + raw.len()));
+        if let Some(marker) = item_marker(line) {
+            items.push((pos, pos + marker));
+        }
+        pos += raw.len();
+    }
+    let line_start_of = |byte: usize| -> usize {
+        let index = line_bounds.partition_point(|&(_, end)| end <= byte);
+        line_bounds.get(index).map_or(source.len(), |&(start, _)| start)
+    };
+
+    let mut accepted: Vec<std::ops::Range<usize>> = Vec::new();
+    let mut from = 0usize;
+    'parse: while from < source.len() {
+        let mut ranges = inline_code_ranges(&source[from..]);
+        ranges.sort_by_key(|range| range.start);
+        for range in ranges {
+            let range = (range.start + from)..(range.end + from);
+            let opener_line = line_start_of(range.start);
+            let item = items.binary_search_by_key(&opener_line, |&(start, _)| start);
+            if let Ok(item) = item {
+                let (_, marker) = items[item];
+                let is_item = !accepted.iter().any(|done| done.contains(&marker));
+                let next_item = items.get(item + 1).map(|&(start, _)| start);
+                if is_item && next_item.is_some_and(|next| range.end > next) {
+                    let run = source[range.start..]
+                        .bytes()
+                        .take_while(|byte| *byte == b'`')
+                        .count()
+                        .max(1);
+                    from = range.start + run;
+                    continue 'parse;
+                }
+            }
+            accepted.push(range);
+        }
+        break;
+    }
+    accepted
+}
+
 fn build_block(node: tree_sitter::Node<'_>, src: &[u8]) -> Block {
     let kind = BlockKind::from_node_kind(node.kind());
     let start_byte = node.start_byte();
@@ -205,6 +274,59 @@ mod tests {
         let doc = parse(src).unwrap();
         // The document span covers the whole source.
         assert_eq!(doc.text(src), src);
+    }
+
+    fn item_marker(line: &str) -> Option<usize> {
+        let indent = line.len() - line.trim_start_matches(' ').len();
+        line[indent..].starts_with("- ").then_some(indent)
+    }
+
+    /// `#operatorrepliesnested`: an unbalanced backtick in one list item must
+    /// not pair with a backtick in a later sibling and hide the list markers
+    /// between them as inline code.
+    #[test]
+    fn a_code_span_opened_in_a_list_item_ends_before_the_next_item() {
+        let source = concat!(
+            "  - quote `a` and `- ### truncated\n",
+            "  - [#second] another item\n",
+            "    - Why do you recommend it?\n",
+            "  - [#third] closes ` and `b` here\n",
+        );
+        let ranges = inline_code_ranges_within_list_items(source, item_marker);
+        for needle in ["- [#second]", "- Why do you", "- [#third]"] {
+            let byte = source.find(needle).unwrap();
+            assert!(
+                !ranges.iter().any(|range| range.contains(&byte)),
+                "{needle:?} is a list marker, not inline code: {ranges:?}"
+            );
+        }
+        // The balanced spans on each line are still inline code.
+        for needle in ["`a`", "`b`"] {
+            let byte = source.find(needle).unwrap();
+            assert!(ranges.iter().any(|range| range.contains(&byte)), "{needle}");
+        }
+        // The unbounded grammar is what pairs them across items.
+        let unbounded = inline_code_ranges(source);
+        let second = source.find("- [#second]").unwrap();
+        assert!(unbounded.iter().any(|range| range.contains(&second)));
+    }
+
+    #[test]
+    fn a_code_span_opened_outside_a_list_item_still_spans_list_shaped_lines() {
+        let source = "`quoted status\n- ### quoted line\nstill quoted`\n- run tests\n";
+        let ranges = inline_code_ranges_within_list_items(source, item_marker);
+        let quoted = source.find("- ### quoted").unwrap();
+        let run = source.find("- run tests").unwrap();
+        assert!(ranges.iter().any(|range| range.contains(&quoted)));
+        assert!(!ranges.iter().any(|range| range.contains(&run)));
+        // A span closed on its own item line, or on a continuation line before
+        // the next item, stays inline code.
+        let source = "- see `- ### one\n  two` here\n- next `x`\n";
+        let ranges = inline_code_ranges_within_list_items(source, item_marker);
+        let inner = source.find("- ### one").unwrap();
+        let next = source.find("- next").unwrap();
+        assert!(ranges.iter().any(|range| range.contains(&inner)));
+        assert!(!ranges.iter().any(|range| range.contains(&next)));
     }
 
     #[test]

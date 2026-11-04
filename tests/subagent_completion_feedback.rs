@@ -462,6 +462,15 @@ fn git(root: &std::path::Path, args: &[&str]) -> std::process::Output {
 /// coordinator's document has between turns, when the background workers
 /// report back.
 fn committed_session(dir: &std::path::Path, items: &[&str]) -> std::path::PathBuf {
+    committed_session_with_response(dir, items, "Dispatched four subagents.\n")
+}
+
+/// [`committed_session`] whose last committed response body is `body`.
+fn committed_session_with_response(
+    dir: &std::path::Path,
+    items: &[&str],
+    body: &str,
+) -> std::path::PathBuf {
     fs::create_dir_all(dir.join(".agent-doc/locks")).unwrap();
     let doc = dir.join("session.md");
     let queue = items
@@ -473,14 +482,14 @@ fn committed_session(dir: &std::path::Path, items: &[&str]) -> std::path::PathBu
             "---\nagent_doc_session: completion-feedback-admission\nagent_doc_format: template\n---\n\n",
             "## Exchange\n\n",
             "<!-- agent:exchange patch=append subagents -->\n",
-            "### Re: dispatch — gpt-5 · 2026-10-14T22:00-04:00\n\nDispatched four subagents.\n",
+            "### Re: dispatch — gpt-5 · 2026-10-14T22:00-04:00\n\n{}",
             "<!-- agent:boundary:keep -->\n",
             "<!-- /agent:exchange -->\n\n",
             "<!-- agent:queue subagents -->\n",
             "{}",
             "<!-- /agent:queue -->\n",
         ),
-        queue,
+        body, queue,
     );
     fs::write(&doc, &content).unwrap();
     git(dir, &["init", "-q"]);
@@ -660,6 +669,68 @@ fn several_reports_then_preflight_admits_the_next_turn() {
     assert_preflight_admits(dir.path(), &doc, items.len());
     assert_cells_committed(dir.path(), items.len());
     assert_session_check_does_not_accuse_patchback(dir.path(), &doc);
+}
+
+/// `#subagentcompletioncell`: a completion cell appended under a response
+/// whose last line is its closing question is separated from it by a blank
+/// line, so commit-time prompt canonicalization never reads that question as
+/// an answered operator prompt and prefixes it with `❯`
+/// (game-sessions.md, 2026-10-30).
+#[test]
+fn a_completion_cell_under_a_closing_question_is_separated_and_never_prefixed() {
+    let dir = tempfile::tempdir().unwrap();
+    let item = "#gh-fix https://github.com/example/project/issues/741";
+    let question = "Should the PR path proceed, or remain on hold?";
+    let doc = committed_session_with_response(
+        dir.path(),
+        &[item],
+        &format!("The worker is running.\n\n{question}\n"),
+    );
+    let owner = "subagent:gh741";
+    for args in [
+        vec!["queue", "claim", doc.to_str().unwrap(), "--item", item, "--owner", owner],
+        vec![
+            "queue",
+            "start",
+            doc.to_str().unwrap(),
+            "--item",
+            item,
+            "--owner",
+            owner,
+            "--generation",
+            "1",
+            "--worker-id",
+            "worker:gh741",
+        ],
+        vec![
+            "queue",
+            "report-complete",
+            "--prose-only",
+            doc.to_str().unwrap(),
+            "--item",
+            item,
+            "--generation",
+            "1",
+            "--response",
+            "Implemented the requested fix; focused tests passed.",
+        ],
+    ] {
+        assert_ok(&run_agent_doc(dir.path(), &args), args[1]);
+    }
+    let separated = format!("\n{question}\n\n### Re: Subagent completed");
+    let reported = fs::read_to_string(&doc).unwrap();
+    assert!(reported.contains(&separated), "{reported}");
+
+    assert_preflight_admits(dir.path(), &doc, 1);
+    assert_cells_committed(dir.path(), 1);
+    let head = String::from_utf8(git(dir.path(), &["show", "HEAD:session.md"]).stdout).unwrap();
+    assert!(head.contains(&separated), "{head}");
+    assert!(!head.contains(&format!("❯ {question}")), "{head}");
+    assert!(
+        !fs::read_to_string(&doc)
+            .unwrap()
+            .contains(&format!("❯ {question}"))
+    );
 }
 
 /// Recovery for a document already wedged by the old heading grammar: the exact

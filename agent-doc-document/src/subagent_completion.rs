@@ -343,14 +343,30 @@ pub fn replace_attested_completion_cell(
     let start = line_starts[range.start];
     let end = line_starts.get(range.end).copied().unwrap_or(text.len());
     let kept_trailing_newline = text[start..end].ends_with('\n');
-    let mut updated = String::with_capacity(text.len() + replacement.len());
+    let mut updated = String::with_capacity(text.len() + replacement.len() + 1);
     updated.push_str(&text[..start]);
+    if needs_leading_separator(&text[..start]) {
+        updated.push('\n');
+    }
     updated.push_str(replacement);
     if kept_trailing_newline {
         updated.push('\n');
     }
     updated.push_str(&text[end..]);
     Ok(Some(updated))
+}
+
+/// `#subagentcompletioncell`: whether a completion cell placed right after
+/// `before` needs a blank separator line first. A cell glued to the preceding
+/// response makes that response's closing prose the block directly above a
+/// `### Re:` heading, which every prompt classifier reads as an answered
+/// operator prompt. Component and boundary markers need no separator.
+pub fn needs_leading_separator(before: &str) -> bool {
+    let Some(prior) = before.strip_suffix('\n') else {
+        return false;
+    };
+    let previous = prior.rsplit('\n').next().unwrap_or(prior).trim();
+    !previous.is_empty() && !previous.starts_with("<!-- agent:")
 }
 
 fn completion_evidence_for_range(
@@ -643,6 +659,30 @@ mod tests {
         );
         assert!(completion_response(&edited, "k1").is_none());
         assert!(completion_response(&cell("subagent:a", "finish a", "k1"), "k1").is_none());
+    }
+
+    /// `#subagentcompletioncell`: refreshing a cell that an older binary glued
+    /// directly under a response separates it; an already separated cell, or
+    /// one directly under a component marker, is replaced in place.
+    #[test]
+    fn replacing_a_glued_cell_separates_it_from_the_response_above() {
+        let old = cell_with_response("subagent:a", "a", "k", "old").unwrap();
+        let new = cell_with_response("subagent:a", "a", "k", "new").unwrap();
+        let glued = format!("### Re: r — m\n\nShould I push?\n{old}\n<!-- agent:boundary:b -->\n");
+        let replaced = replace_attested_completion_cell(&glued, "k", &new)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            replaced,
+            format!("### Re: r — m\n\nShould I push?\n\n{new}\n<!-- agent:boundary:b -->\n")
+        );
+        for before in ["### Re: r — m\n\nShould I push?\n\n", "<!-- agent:exchange -->\n", ""] {
+            let text = format!("{before}{old}\n");
+            assert_eq!(
+                replace_attested_completion_cell(&text, "k", &new).unwrap().unwrap(),
+                format!("{before}{new}\n")
+            );
+        }
     }
 
     #[test]

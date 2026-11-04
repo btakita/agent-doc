@@ -40,7 +40,7 @@ and the pending granular-flags-only rule. This runbook carries the rest.
     "context": "The user-visible facts and tradeoff that make this decision necessary.",
     "question": "Which option should the agent use?",
     "choices": [
-      {"label": "First (Recommended)", "description": "Effect of the first choice."},
+      {"label": "First (Recommended)", "description": "Recommended because <current evidence or tradeoff>; effect of the first choice."},
       {"label": "Second", "description": "Effect of the second choice."}
     ]
   }
@@ -59,6 +59,13 @@ and the pending granular-flags-only rule. This runbook carries the rest.
   cannot consume queue/backlog work or commit the cycle. If no native choice UI
   exists, write the same checkpoint before yielding the question in the
   harness's ordinary final channel.
+  A choice labelled `(Recommended)` must begin its description with
+  `Recommended because <contextual reason>` and name the current evidence or
+  tradeoff that makes it preferable. A bare effect, or a tautology such as
+  `Recommended because it is recommended`, is invalid. The same rule applies to
+  `choices:` in a blocking subagent operator-request packet. Existing committed
+  packets remain readable; the gate applies when a new response/checkpoint is
+  written.
 
   Once the operator answers, retain a compact decision record in the cumulative
   final response: the context, question, choices presented, and selected/free-

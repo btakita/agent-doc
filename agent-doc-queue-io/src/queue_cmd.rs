@@ -5220,7 +5220,7 @@ mod waiting_item_claim_projection_tests {
     use std::cell::{Cell, RefCell};
 
     const ITEM_MARKER: &str = agent_doc_queue::queue_consume::WAITING_ON_YOU_ITEM_MARKER;
-    const REPLY_MARKER: &str = agent_doc_queue::queue_consume::AGENT_DOC_REPLY_MARKER;
+    const REPLY_MARKER: &str = agent_doc_queue::queue_consume::LEGACY_AGENT_DOC_REPLY_MARKER;
 
     /// The live shape: an answered item nested inside another waiting item's
     /// tree whose own attempt already reported, under a `subagents` queue.

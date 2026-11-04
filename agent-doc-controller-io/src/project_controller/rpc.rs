@@ -12052,17 +12052,29 @@ fn clear_replica_refusals(file: &Path) {
     refusal_ledger().lock().remove(file);
 }
 
-/// Whether `file` is an agent-doc document (carries `agent_doc_*` frontmatter or
-/// an `<!-- agent:` component marker). Plain markdown that is not an agent-doc
-/// session document (README, AGENTS, CONTRIBUTING, a draft, a plan note) has
-/// neither. Used to keep such files out of the CRDT replica refusal storm
-/// (`#replicarefusalstorm`): the editor registers a replica for every `.md` it
-/// opens, and a non-agent-doc file never attaches an editor authority, so
-/// without this gate it is refused as `detached_authority` on every retry.
+/// Whether `file` is an agent-doc session document under the canonical opt-in
+/// predicate every write command already enforces
+/// ([`agent_doc_frontmatter::project_config::is_agent_doc_document`]): agent-doc
+/// frontmatter, a `[documents] include` glob, or the `auto_session_for_all_md`
+/// escape hatch. Plain markdown that is not an agent-doc session document
+/// (README, AGENTS, CONTRIBUTING, a draft, a plan note) is refused terminally so
+/// it stays out of the CRDT replica refusal storm (`#replicarefusalstorm`).
 ///
-/// Cached by `(path, mtime)` so a storming file that is not being edited is read
-/// once; the read is repeated only when the file actually changes.
-type AgentDocDocumentCache = BTreeMap<PathBuf, (Option<SystemTime>, bool)>;
+/// `liveeditorwatcher`: this used to be a substring test that also admitted any
+/// file whose BODY merely contained `agent_doc_session` or an `<!-- agent:`
+/// marker. A `git reset` of the agent-doc submodule made the IDE reload every
+/// in-memory markdown document; the editor registered each one, and this gate
+/// admitted the `fuzz/corpus/markdown_patch/hand-*.md` fixtures plus roughly
+/// sixty runbooks, specs, README, and AGENTS.md. Registration seeded a routed
+/// hub from disk, reconciled the queue attempt projection (`📥` markers), and
+/// the editor projected that canonical back over the fixtures. Component markers
+/// in a body are document *content*, never session opt-in.
+///
+/// Cached by `(path, document mtime, project config mtime)` so a storming file
+/// that is not being edited is read once; the read is repeated only when the
+/// file or its project's `[documents]` opt-in actually changes.
+type AgentDocDocumentCache =
+    BTreeMap<PathBuf, (Option<SystemTime>, Option<SystemTime>, bool)>;
 
 /// Project-internal state paths are never user documents, regardless of copied
 /// frontmatter or component markers. This path predicate precedes every relay
@@ -12078,25 +12090,41 @@ fn is_agent_doc_document(file: &Path) -> bool {
     }
     static CACHE: OnceLock<Mutex<AgentDocDocumentCache>> = OnceLock::new();
     let cache = CACHE.get_or_init(|| Mutex::new(BTreeMap::new()));
-    let mtime = std::fs::metadata(file)
-        .and_then(|metadata| metadata.modified())
-        .ok();
+    let modified = |path: &Path| {
+        std::fs::metadata(path)
+            .and_then(|metadata| metadata.modified())
+            .ok()
+    };
+    let mtime = modified(file);
+    let config_mtime = agent_doc_project_config_io::project_store_for_doc(file)
+        .map(|store| agent_doc_project_config_io::project_config_path_for_root(&store))
+        .and_then(|config| modified(&config));
     {
         let cache = cache.lock();
-        if let Some((cached_mtime, result)) = cache.get(file)
+        if let Some((cached_mtime, cached_config_mtime, result)) = cache.get(file)
             && *cached_mtime == mtime
+            && *cached_config_mtime == config_mtime
         {
             return *result;
         }
     }
-    let content = std::fs::read_to_string(file).unwrap_or_default();
-    let result = content.contains("agent_doc_session")
-        || content.contains("agent_doc_format")
-        || content.contains("agent_doc_write")
-        || content.contains("<!-- agent:");
+    let result = match std::fs::read_to_string(file) {
+        Ok(content) => {
+            agent_doc_frontmatter_io::session::is_agent_doc_document_for_file(&content, file)
+        }
+        Err(error) => {
+            // Fail closed: an unreadable path cannot prove session opt-in. Logged
+            // once per (mtime, config mtime) because the result is cached below.
+            eprintln!(
+                "[controller] replica admission could not read {}: {error}; refusing as not_agent_doc_document",
+                file.display()
+            );
+            false
+        }
+    };
     {
         let mut cache = cache.lock();
-        cache.insert(file.to_path_buf(), (mtime, result));
+        cache.insert(file.to_path_buf(), (mtime, config_mtime, result));
     }
     result
 }
@@ -12196,8 +12224,9 @@ fn handle_crdt_replica_rpc(
     }
     let authority = crdt_authority_for_file(&file_arg);
     // `#replicarefusalstorm` / `#replicaendpointtakeover`: a non-agent-doc
-    // markdown file (README, AGENTS, CONTRIBUTING, a draft — no `agent_doc_*`
-    // frontmatter and no `<!-- agent:` markers) never attaches an editor
+    // markdown file (README, AGENTS, CONTRIBUTING, a draft, a test fixture — no
+    // `agent_doc_*` frontmatter and no `[documents]` opt-in, whatever
+    // `<!-- agent:` markers its body quotes) never attaches an editor
     // authority, so the editor's retry loop drove thousands of `detached_authority`
     // refusals, each with its own `log_op` contending the disk `ops.log` and
     // loading the controller. Detect such files once (mtime-cached) and refuse
@@ -68870,6 +68899,109 @@ body
 
         agent_doc_crdt_relay_io::deregister_editor_replica_for_file(&canonical, &identity, pid)
             .unwrap();
+    }
+
+    /// `liveeditorwatcher`: a `git reset` of the agent-doc submodule made the IDE
+    /// reload every in-memory markdown document and register each one. The
+    /// `fuzz/corpus/markdown_patch/hand-*.md` fixtures (queue-shaped
+    /// `<!-- agent:run -->` content, no frontmatter) and docs that merely QUOTE
+    /// `agent_doc_session` / `<!-- agent:` in their body were admitted, seeded a
+    /// routed hub, had `📥` queue-attempt markers reconciled in, and were then
+    /// rewritten on disk by the editor's bootstrap projection. Registration must
+    /// refuse them terminally, before any hub exists, and leave their bytes alone.
+    #[test]
+    fn replica_registration_refuses_frontmatterless_queue_shaped_fixture() {
+        let _env = reliable_sync_env_lock();
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let corpus = dir.path().join("fuzz/corpus/markdown_patch");
+        std::fs::create_dir_all(&corpus).unwrap();
+        let fixture = corpus.join("hand-nested.md");
+        let fixture_text = "<!-- agent:exchange -->\n<!-- agent:run -->\n- a\n- [#elit]\n<!-- /agent:run -->\n<!-- /agent:exchange -->\n";
+        std::fs::write(&fixture, fixture_text).unwrap();
+        let prose = dir.path().join("runbooks/document-format.md");
+        std::fs::create_dir_all(prose.parent().unwrap()).unwrap();
+        let prose_text = "# Document format\n\nSet `agent_doc_session` in frontmatter, then add\n\n<!-- agent:queue -->\n- do [#x]\n<!-- /agent:queue -->\n";
+        std::fs::write(&prose, prose_text).unwrap();
+        let session = dir.path().join("tasks/session.md");
+        std::fs::create_dir_all(session.parent().unwrap()).unwrap();
+        std::fs::write(
+            &session,
+            "---\nagent_doc_session: liveeditorwatcher-real\n---\n\n<!-- agent:run -->\n- a\n<!-- /agent:run -->\n",
+        )
+        .unwrap();
+
+        let bootstrap = crate::project_controller::test_bootstrap(&dir);
+        let pid = std::process::id();
+        let register = |file: &Path, tag: &str| {
+            handle_crdt_replica_rpc(
+                &bootstrap,
+                None,
+                ControllerRequest {
+                    command: "crdt_replica".to_string(),
+                    file: Some(file.to_path_buf()),
+                    session_id: None,
+                    pane_id: None,
+                    window_id: None,
+                    generation: None,
+                    state: None,
+                    caller: None,
+                    reason: None,
+                    supervisor_pid: None,
+                    supervisor_socket: None,
+                    command_kind: None,
+                    diagnostic_payload: Some(
+                        serde_json::json!({
+                            "method": "replica_register",
+                            "identity": format!("jetbrains-{pid}-{tag}:refresh-1"),
+                            "editor_pid": pid,
+                            "source": "jetbrains_plugin",
+                        })
+                        .to_string(),
+                    ),
+                    sequence: None,
+                },
+            )
+            .unwrap()
+        };
+
+        for (file, text, tag) in [
+            (&fixture, fixture_text, "fixture"),
+            (&prose, prose_text, "prose"),
+        ] {
+            let canonical = file.canonicalize().unwrap();
+            let refused = register(&canonical, tag);
+            assert_eq!(
+                refused["reason"], "not_agent_doc_document",
+                "{} has no agent-doc opt-in and must be refused terminally: {refused}",
+                file.display()
+            );
+            assert!(refused.get("client_id").is_none(), "{refused}");
+            assert!(
+                !crdt_authority_for_file(&canonical.to_string_lossy()).editor_attached(),
+                "a refused fixture must never acquire a routed hub"
+            );
+            assert_eq!(
+                std::fs::read_to_string(&canonical).unwrap(),
+                text,
+                "registration must never rewrite a non-session document"
+            );
+        }
+
+        // Positive control: the same queue shape under agent-doc frontmatter is a
+        // real session document and still reaches relay registration.
+        let canonical = session.canonicalize().unwrap();
+        let admitted = register(&canonical, "session");
+        assert!(
+            admitted.get("client_id").is_some(),
+            "a frontmatter session document must still register: {admitted}"
+        );
+        agent_doc_crdt_relay_io::deregister_editor_replica_for_file(
+            &canonical,
+            &format!("jetbrains-{pid}-session:refresh-1"),
+            pid,
+        )
+        .unwrap();
     }
 
     #[test]

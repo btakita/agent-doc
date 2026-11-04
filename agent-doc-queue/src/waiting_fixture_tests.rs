@@ -548,6 +548,16 @@ fn operator_replies_nested_in_a_packet_are_decision_evidence_never_queue_rows() 
         assert!(executable.contains(&head), "{id}");
         expected_executable.insert(head);
     }
+    // A waiting item the rebuild retains because it holds operator text (for
+    // example a duplicate of a Todo-backed item, `#waitingarchive`) is selected
+    // by its reply exactly like the named items above.
+    for (index, entry) in entries.iter().enumerate() {
+        if crate::waiting_packet::is_waiting_item_head(entry)
+            && crate::waiting_packet::has_operator_reply(&entries, index)
+        {
+            expected_executable.insert(index);
+        }
+    }
     // Nothing else in the tree is selectable: no offered choice, no generated
     // row, no struck row. Only the two ordinary top-level heads remain.
     for entry in &entries {

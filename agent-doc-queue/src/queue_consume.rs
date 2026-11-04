@@ -4889,7 +4889,12 @@ pub fn project_waiting_on_you_tree(document: &str, response_body: &str) -> Resul
             .get(&todo.id)
             .and_then(|packet| packet.response_timestamp.as_deref())
             .unwrap_or(response_timestamp);
-        if let Some((raw, true)) = existing.get(&todo.id) {
+        // `#waitingoperatortext`: keep an existing child that holds operator
+        // text, and never downgrade an existing packet to the generic stub
+        // when no fresher operator packet is available to regenerate from.
+        if let Some((raw, has_operator_reply)) = existing.get(&todo.id)
+            && (*has_operator_reply || !packets.contains_key(&todo.id))
+        {
             let child = normalize_agent_doc_reply_rows(raw)?;
             children.push(ensure_waiting_response_timestamp(&child, timestamp));
             continue;
@@ -5200,16 +5205,42 @@ fn existing_waiting_children(
         }
         let absolute_start = location.component_open_end + span.start;
         let absolute_end = location.component_open_end + child_end;
-        children.insert(
-            id,
-            (
-                document[absolute_start..absolute_end].to_string(),
-                has_operator_reply,
-            ),
-        );
+        let raw = &document[absolute_start..absolute_end];
+        // `#waitingoperatortext`: rows nested under the generated
+        // `**Response:**` structure parse as inert response metadata, not
+        // prompts, so the prompt scan above missed an operator answer typed
+        // under a choice (`- commit + integrate + push`). The refresh then
+        // regenerated the whole packet and deleted it (2026-11-03,
+        // agent-doc-bugs.md, f7f3fd84bc). Any list row in the subtree that the
+        // binary did not author is operator text and pins the existing child.
+        let has_operator_reply = has_operator_reply || waiting_child_has_operator_rows(raw);
+        children.insert(id, (raw.to_string(), has_operator_reply));
         index = next.max(index + 1);
     }
     Ok(children)
+}
+
+/// True when a waiting child's subtree (below its item row) holds a list row
+/// the binary did not author: not a reply/metadata row, and not a binary-owned
+/// worker-attempt projection (`#waitingoperatortext`).
+fn waiting_child_has_operator_rows(raw: &str) -> bool {
+    raw.lines().skip(1).any(|line| {
+        let Some(text) = line.trim_start().strip_prefix("- ") else {
+            return false;
+        };
+        let text = text.trim();
+        if text.is_empty()
+            || is_agent_doc_reply_row(text)
+            || text.contains("<!-- agent-doc:waiting-metadata -->")
+        {
+            return false;
+        }
+        let work = agent_doc_element_queue::struck_work_text(text);
+        let binary_attempt = agent_doc_document::queue_projection::lifecycle_marker(work.trim())
+            .is_some()
+            && agent_doc_document::queue_projection::owner_projection(work.trim()).is_some();
+        !binary_attempt
+    })
 }
 
 fn queue_entry_indent(entry: &QueueEntry) -> Option<usize> {
@@ -5920,6 +5951,84 @@ mod tests {
             .expect("resolved todo should remove the tree");
         assert!(!cleaned.contains(WAITING_ON_YOU_ROOT_MARKER), "{cleaned}");
         assert!(!cleaned.contains("    - approved\n"), "{cleaned}");
+    }
+
+    /// `#waitingoperatortext`: the 2026-11-03 agent-doc-bugs.md loss
+    /// (f7f3fd84bc). The operator typed `commit + integrate + push` beneath a
+    /// choice inside the generated `**Response:**` packet. Those rows parse as
+    /// inert response metadata, so the refresh saw no operator reply and
+    /// regenerated the packet as the generic stub, deleting the answer and the
+    /// Context/Choices/Outcome rows. A closeout whose response never mentions
+    /// the item must leave that child byte-for-byte.
+    #[test]
+    fn refresh_never_regenerates_over_an_operator_answer_inside_the_response_packet() {
+        // The exact pre-loss child from agent-doc-bugs.md at 1acbe00f09.
+        let child = r##"  - [#subagent-operator-request-queue-ast-strings-persist] Answer the blocking subagent question for queue item ‘The update to agent-doc-bugs.md `agent:Run is malformed.` My string quote `- ### /agent-doc did not start a session cycle. Connected admission failed three times, so no document was 5:01 PM…’ in agent:exchange: Choose whether to commit and push, commit only, or leave uncommitted the completed AST string/list-item fix. (choices: Commit and push, Commit only, Leave uncommitted) <!-- agent-doc:waiting-item -->
+    - **Response:** Choose whether to commit and push, commit only, or leave uncommitted the completed AST string/list-item fix. ▫️ <!-- agent-doc:reply -->
+      - **Timestamp:** 2026-11-02T18:17-05:00 ▫️ <!-- agent-doc:reply -->
+      - **Context:** The implementation and targeted verification are complete. The changes are currently uncommitted on `fix/queue-ast-string-literals-20261102` in `/home/brian/worktrees/agent-doc-queue-ast-string-literals-20261102`. The unresolved `#spec-test-build-install-commit-push` preset supplies no commit or push authorization. The target scope is the two modified Rust files for this queue item only. Committing records the work locally; pushing publishes the branch remotely; leaving it uncommitted preserves the current isolated worktree state. ▫️ <!-- agent-doc:reply -->
+      - **Question:** Choose whether to commit and push, commit only, or leave uncommitted the completed AST string/list-item fix. ▫️ <!-- agent-doc:reply -->
+      - **Choices:** ▫️ <!-- agent-doc:reply -->
+        - **Commit and push**: Create a local commit and publish this branch. ▫️ <!-- agent-doc:reply -->
+          - commit + integrate + push
+        - **Commit only**: Create a local commit without publishing it. ▫️ <!-- agent-doc:reply -->
+        - **Leave uncommitted**: Keep the verified changes only in the isolated worktree. ▫️ <!-- agent-doc:reply -->
+        - **Outcome:** The compact-supersession wedge is diagnosed and fixed in one uncommitted file. Exact stale compact-target writes are retired while newer/composed writes and the captured response remain. The state-backbone suite passed 149/149 tests. ▫️ <!-- agent-doc:reply -->
+      - **Next actions:** ▫️ <!-- agent-doc:reply -->
+        - **Action:** Answer the blocking subagent question for queue item ‘The update to agent-doc-bugs.md `agent:Run is malformed.` My string quote `- ### /agent-doc did not start a session cycle. Connected admission failed three times, so no document was 5:01 PM…’ in agent:exchange: Choose whether to commit and push, commit only, or leave uncommitted the completed AST string/list-item fix. (choices: Commit and push, Commit only, Leave uncommitted) ▫️ <!-- agent-doc:reply -->
+"##;
+        let todo = r##"- [ ] [#subagent-operator-request-queue-ast-strings-persist] Answer the blocking subagent question for queue item ‘The update to agent-doc-bugs.md `agent:Run is malformed.` My string quote `- ### /agent-doc did not start a session cycle. Connected admission failed three times, so no document was 5:01 PM…’ in agent:exchange: Choose whether to commit and push, commit only, or leave uncommitted the completed AST string/list-item fix. (choices: Commit and push, Commit only, Leave uncommitted)
+"##;
+        let queue = format!(
+            "- ### Waiting on you — answer by adding a child line under an item <!-- agent-doc:waiting-on-you -->\n{child}"
+        );
+        let response =
+            "### Re: unrelated closeout · 2026-11-03T18:25-05:00\n\nNothing about that item.";
+        let document = waiting_tree_document(&queue, todo, response);
+
+        let refreshed = project_waiting_on_you_tree(&document, response).unwrap();
+        let refreshed = refreshed.as_deref().unwrap_or(&document);
+        assert!(
+            refreshed.contains(child),
+            "the operator-answered packet must survive byte-for-byte:\n{refreshed}"
+        );
+        assert!(refreshed.contains("          - commit + integrate + push\n"));
+        assert!(!refreshed.contains("What decision or completion result should be recorded?"));
+    }
+
+    /// Without an operator answer, an existing rich packet is still not
+    /// downgraded to the generic stub when no fresher packet is available.
+    #[test]
+    fn refresh_keeps_an_existing_packet_when_no_fresher_packet_exists() {
+        let reply = agent_doc_reply_suffix();
+        let child = format!(
+            concat!(
+                "  - [#approve-pr] Approve and merge PR #42. <!-- agent-doc:waiting-item -->\n",
+                "    - **Response:** Approve and merge PR #42 after CI. {r}\n",
+                "      - **Timestamp:** 2026-11-02T18:17-05:00 {r}\n",
+                "      - **Context:** CI is green on the release branch. {r}\n",
+                "      - **Question:** Merge now or wait for the soak? {r}\n",
+                "      - **Next actions:** {r}\n",
+                "        - **Action:** Approve and merge PR #42. {r}\n",
+            ),
+            r = reply,
+        );
+        let queue = format!(
+            "- ### Waiting on you — answer by adding a child line under an item <!-- agent-doc:waiting-on-you -->\n{child}"
+        );
+        let response = "### Re: unrelated · 2026-11-03T18:25-05:00\n\nNothing.";
+        let document = waiting_tree_document(
+            &queue,
+            "- [ ] [#approve-pr] Approve and merge PR #42.\n",
+            response,
+        );
+        let refreshed = project_waiting_on_you_tree(&document, response).unwrap();
+        let refreshed = refreshed.as_deref().unwrap_or(&document);
+        assert!(
+            refreshed.contains("CI is green on the release branch."),
+            "{refreshed}"
+        );
+        assert!(!refreshed.contains("What decision or completion result should be recorded?"));
     }
 
     #[test]

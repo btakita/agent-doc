@@ -103,6 +103,31 @@ pub fn controller_binary_identity_is_newer(
         > (recorded.modified_secs, recorded.modified_nanos)
 }
 
+/// `recyclestorm`: should a client whose own launch identity is `client` ask a
+/// controller running `controller` to be replaced?
+///
+/// A strictly newer release version anywhere warrants it. For the SAME version
+/// only a later rebuild at the SAME path does (`make install` over
+/// `~/.cargo/bin`): a different copy of the same build (`target/release` vs
+/// `~/.cargo/bin`, byte-identical but re-linked later) is not an upgrade, and a
+/// delegated recycle relaunches the controller's own launch path, never the
+/// client's, so no recycle could ever satisfy that client. Treating it as newer
+/// recycled the haiven-dev controller 204 times in ~3h on 2026-11-04.
+pub fn client_binary_warrants_controller_replacement(
+    client: Option<&ControllerBinaryIdentity>,
+    controller: Option<&ControllerBinaryIdentity>,
+) -> bool {
+    let (Some(client_identity), Some(controller_identity)) = (client, controller) else {
+        return false;
+    };
+    if client_identity.version == controller_identity.version
+        && client_identity.path != controller_identity.path
+    {
+        return false;
+    }
+    controller_binary_identity_is_newer(client, controller)
+}
+
 fn normalized_release_version(version: &str) -> Option<Vec<u64>> {
     let normalized = version.strip_prefix('v').unwrap_or(version);
     let release = normalized
@@ -1646,6 +1671,70 @@ mod tests {
             Some(&recorded)
         ));
         assert!(!controller_binary_identity_is_newer(None, Some(&recorded)));
+    }
+
+    fn identity_at(path: &str, version: &str, modified_secs: u64) -> ControllerBinaryIdentity {
+        ControllerBinaryIdentity {
+            path: PathBuf::from(path),
+            version: version.to_string(),
+            len: 70_000_000,
+            modified_secs,
+            modified_nanos: 0,
+        }
+    }
+
+    /// `recyclestorm` (haiven-dev 2026-11-04): a supervisor on
+    /// `target/release` re-linked after `make install-full` copied the same
+    /// 0.35.568 build to `~/.cargo/bin` must not ask the controller running
+    /// `~/.cargo/bin` to be replaced — that recycled it 204 times in ~3h.
+    #[test]
+    fn recyclestorm_same_version_copy_at_another_path_is_not_a_replacement() {
+        let controller = identity_at("/home/u/.cargo/bin/agent-doc", "0.35.568", 100);
+        let client = identity_at("/src/agent-doc/target/release/agent-doc", "0.35.568", 200);
+        assert!(
+            controller_binary_identity_is_newer(Some(&client), Some(&controller)),
+            "precondition: the bare mtime predicate calls the copy newer"
+        );
+        assert!(!client_binary_warrants_controller_replacement(
+            Some(&client),
+            Some(&controller)
+        ));
+    }
+
+    #[test]
+    fn recyclestorm_same_path_rebuild_and_newer_version_still_replace() {
+        let controller = identity_at("/home/u/.cargo/bin/agent-doc", "0.35.568", 100);
+        // `make install` over the controller's own path: same version, later mtime.
+        let rebuild = identity_at("/home/u/.cargo/bin/agent-doc", "0.35.568", 101);
+        assert!(client_binary_warrants_controller_replacement(
+            Some(&rebuild),
+            Some(&controller)
+        ));
+        // A strictly newer version replaces from any path, even with an older mtime.
+        let newer = identity_at("/src/agent-doc/target/release/agent-doc", "0.35.569", 50);
+        assert!(client_binary_warrants_controller_replacement(
+            Some(&newer),
+            Some(&controller)
+        ));
+        // Older version, older same-path build, or unknown identity: never.
+        let older = identity_at("/home/u/.cargo/bin/agent-doc", "0.35.567", 900);
+        assert!(!client_binary_warrants_controller_replacement(
+            Some(&older),
+            Some(&controller)
+        ));
+        let older_build = identity_at("/home/u/.cargo/bin/agent-doc", "0.35.568", 99);
+        assert!(!client_binary_warrants_controller_replacement(
+            Some(&older_build),
+            Some(&controller)
+        ));
+        assert!(!client_binary_warrants_controller_replacement(
+            None,
+            Some(&controller)
+        ));
+        assert!(!client_binary_warrants_controller_replacement(
+            Some(&rebuild),
+            None
+        ));
     }
 
     #[test]

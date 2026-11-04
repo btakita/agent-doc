@@ -17522,7 +17522,10 @@ fn active_controller_status_needs_binary_replacement(
     active_status: &ControllerStatus,
     current_binary: Option<&ControllerBinaryIdentity>,
 ) -> bool {
-    status::controller_binary_identity_is_newer(
+    // `recyclestorm`: a later-linked copy of the same build at another path
+    // is not an upgrade, and a delegated recycle relaunches the controller's
+    // own path, so it could never satisfy this client.
+    status::client_binary_warrants_controller_replacement(
         current_binary,
         active_status.controller_binary.as_ref(),
     )
@@ -17584,6 +17587,12 @@ fn optional_pid_label(pid: Option<u32>) -> String {
         .unwrap_or_else(|| "none".to_string())
 }
 
+fn identity_path_label(identity: Option<&ControllerBinaryIdentity>) -> String {
+    identity
+        .map(|identity| identity.path.display().to_string())
+        .unwrap_or_else(|| "unknown".to_string())
+}
+
 fn identity_version_label(identity: Option<&ControllerBinaryIdentity>) -> String {
     identity
         .map(|identity| identity.version.clone())
@@ -17599,6 +17608,10 @@ enum DelegatedStaleRestart {
     /// The stale controller did not accept the delegation; the caller still
     /// holds its launch claim and falls back to the direct handoff.
     NotDelegated,
+    /// `recyclestorm`: the controller deferred because the binary it would
+    /// relaunch is not newer than the image it runs; nothing was armed. The
+    /// caller still holds its launch claim.
+    DeferredTargetNotNewer,
     /// Accepted, but no successor within the budget; the launch claim was
     /// released and the caller must re-acquire it before falling back.
     TimedOut,
@@ -17630,9 +17643,25 @@ fn delegate_stale_restart_to_self_recycle(
         return DelegatedStaleRestart::NotDelegated;
     };
     let generation = stale_status.controller_generation.unwrap_or(0);
-    let accepted = request_with_reason(project_root, "recycle_force", "stale_binary_client")
-        .is_ok_and(|response| response.contains("\"ok\":true"));
-    if !accepted {
+    let reply = request_with_reason(
+        project_root,
+        "recycle_force",
+        agent_doc_controller::recycle::STALE_BINARY_CLIENT_RECYCLE_REASON,
+    )
+    .map(|response| {
+        agent_doc_controller::recycle::classify_delegated_stale_restart_reply(&response)
+    })
+    .unwrap_or(agent_doc_controller::recycle::DelegatedStaleRestartReply::Refused);
+    if reply == agent_doc_controller::recycle::DelegatedStaleRestartReply::DeferredTargetNotNewer {
+        agent_doc_ops_log_io::log_op(
+            project_root,
+            &format!(
+                "controller_active_stale_binary_restart_deferred pid={pid} generation={generation} cause=target_not_newer (recyclestorm)"
+            ),
+        );
+        return DelegatedStaleRestart::DeferredTargetNotNewer;
+    }
+    if reply != agent_doc_controller::recycle::DelegatedStaleRestartReply::Accepted {
         agent_doc_ops_log_io::log_op(
             project_root,
             &format!(
@@ -17765,6 +17794,35 @@ fn request_stable_stale_controller_restart(
     match delegate_stale_restart_to_self_recycle(project_root, &stale_status, &mut launch_claim) {
         DelegatedStaleRestart::Adopted(stream) => return Ok(stream),
         DelegatedStaleRestart::NotDelegated => {}
+        DelegatedStaleRestart::DeferredTargetNotNewer => {
+            use agent_doc_controller::recycle::{
+                DeclinedStaleRestartAction, declined_stale_restart_action,
+            };
+            let current_binary = current_binary_identity().ok();
+            let action = declined_stale_restart_action(
+                current_binary.as_ref(),
+                stale_status.controller_binary.as_ref(),
+            );
+            agent_doc_ops_log_io::log_op(
+                project_root,
+                &format!(
+                    "controller_active_stale_binary_restart_declined pid={} generation={generation} action={} client_version={} controller_version={old_version} (recyclestorm)",
+                    optional_pid_label(pid),
+                    match action {
+                        DeclinedStaleRestartAction::AdoptRunningController =>
+                            "adopt_running_controller",
+                        DeclinedStaleRestartAction::DirectHandoff => "direct_handoff",
+                    },
+                    identity_version_label(current_binary.as_ref()),
+                ),
+            );
+            if action == DeclinedStaleRestartAction::AdoptRunningController {
+                // Recycling would relaunch the same image; use the controller
+                // that is already serving.
+                drop(launch_claim);
+                return connect(project_root);
+            }
+        }
         DelegatedStaleRestart::TimedOut => {
             launch_claim = LaunchClaim::acquire_blocking(project_root, LAUNCH_CLAIM_WAIT).ok();
             if let Ok(active) = status(project_root)
@@ -19778,15 +19836,12 @@ pub(crate) fn serve_with_options(
                         .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
                         .is_ok()
                 {
-                    let reason = if runtime.recycle_forced() {
-                        "operator_force_request"
-                    } else if runtime.recycle_urgent() {
-                        "ipc_build_skew"
-                    } else if runtime.recycle_requested() {
-                        "operator_request"
-                    } else {
-                        "stale_binary"
-                    };
+                    // `recyclestorm`: a client-delegated stale-binary request
+                    // keeps its own reason (and its not-newer gate) instead of
+                    // passing as an operator force request.
+                    let reason = agent_doc_controller::recycle::self_recycle_reason(
+                        runtime.recycle_request_facts(),
+                    );
                     // `#installworktreecontrollers`: a routine stale-binary
                     // handoff in a root nobody uses would only launch the next
                     // perpetual idle controller. Retire instead; the next client
@@ -19870,6 +19925,14 @@ pub(crate) fn serve_with_options(
                                 // further install changes it.
                                 draining_runtime
                                     .decline_recycle_target(current_binary_identity().ok());
+                                // `recyclestorm`: a client-delegated request
+                                // that cannot escape this image is withdrawn,
+                                // or every tick would re-defer it.
+                                if recycle_reason
+                                    == agent_doc_controller::recycle::STALE_BINARY_CLIENT_RECYCLE_REASON
+                                {
+                                    draining_runtime.withdraw_stale_binary_client_recycle_request();
+                                }
                                 handoff_in_flight.store(false, Ordering::SeqCst);
                                 agent_doc_ops_log_io::log_op(
                                     &handoff_root,
@@ -22657,10 +22720,50 @@ pub(crate) fn handle_request_locked(
             Ok(serde_json::to_string(&serde_json::json!({ "ok": true }))?)
         }
         "recycle_force" => {
-            // `#recycleforce`: mark this controller to recycle promptly. It skips
-            // the normal debounce but still uses two-phase promotion and
-            // predecessor drain. The active harness child is never interrupted.
-            runtime.request_recycle_force();
+            // `recyclestorm`: a client delegating its stale-binary restart is
+            // making a staleness claim, not issuing an operator override. When
+            // the binary this controller would relaunch is not newer than the
+            // image it runs, a recycle would launch an identical successor that
+            // the same client asks to recycle again (haiven-dev 2026-11-04: 204
+            // recycles in ~3h). Defer without arming anything and tell the
+            // client, which then adopts this controller. The serve loop gates
+            // the request again, on the target's probed version, before launch.
+            if request.reason.as_deref()
+                == Some(agent_doc_controller::recycle::STALE_BINARY_CLIENT_RECYCLE_REASON)
+            {
+                let target = current_binary_identity().ok();
+                if agent_doc_controller::recycle::self_recycle_target_decision(
+                    agent_doc_controller::recycle::STALE_BINARY_CLIENT_RECYCLE_REASON,
+                    bootstrap_snapshot.controller_binary.as_ref(),
+                    target.as_ref(),
+                )
+                    == agent_doc_controller::recycle::SelfRecycleTargetDecision::DeferTargetNotNewer
+                {
+                    agent_doc_ops_log_io::log_op(
+                        &bootstrap_snapshot.project_root,
+                        &format!(
+                            "controller_recycle_deferred pid={} generation={} reason={} cause=target_not_newer running_path={} target_path={} client_path={} note=client_adopts_running_controller (recyclestorm)",
+                            bootstrap_snapshot.pid,
+                            bootstrap_snapshot.controller_generation,
+                            agent_doc_controller::recycle::STALE_BINARY_CLIENT_RECYCLE_REASON,
+                            identity_path_label(bootstrap_snapshot.controller_binary.as_ref()),
+                            identity_path_label(target.as_ref()),
+                            identity_path_label(client_binary_identity.as_ref()),
+                        ),
+                    );
+                    return Ok(serde_json::to_string(&serde_json::json!({
+                        "ok": false,
+                        "deferred": agent_doc_controller::recycle::DELEGATED_STALE_RESTART_DEFERRED_TARGET_NOT_NEWER,
+                    }))?);
+                }
+                runtime.request_stale_binary_client_recycle();
+            } else {
+                // `#recycleforce`: mark this controller to recycle promptly. It
+                // skips the normal debounce but still uses two-phase promotion
+                // and predecessor drain. The active harness child is never
+                // interrupted.
+                runtime.request_recycle_force();
+            }
             agent_doc_ops_log_io::log_op(
                 &bootstrap_snapshot.project_root,
                 &format!(
@@ -55572,6 +55675,242 @@ mod tests {
         );
     }
 
+    /// `recyclestorm`: a fake controller on the project socket. It answers
+    /// `recycle_force` with `recycle_force_reply` (computed by the REAL handler
+    /// beforehand, with no listener bound, so the handler's own logging never
+    /// round-trips into this single-threaded fake), refuses every other
+    /// command, and records them until the client's plain connect (an empty
+    /// line). Accept is nonblocking and bounded by `deadline`, so a client that
+    /// never connects ends the fake with `<deadline>` instead of hanging.
+    fn recyclestorm_fake_controller(
+        dir: &tempfile::TempDir,
+        recycle_force_reply: String,
+        deadline: Duration,
+    ) -> std::thread::JoinHandle<Vec<String>> {
+        let sock = socket_path(dir.path());
+        let name = sock.to_fs_name::<GenericFilePath>().unwrap();
+        let listener = ListenerOptions::new().name(name).create_sync().unwrap();
+        listener
+            .set_nonblocking(ListenerNonblockingMode::Accept)
+            .unwrap();
+        std::thread::spawn(move || {
+            let started = Instant::now();
+            let mut commands = Vec::new();
+            while commands.last().map(String::as_str) != Some("<connect>") {
+                if started.elapsed() >= deadline || commands.len() >= 8 {
+                    commands.push("<deadline>".to_string());
+                    break;
+                }
+                let stream = match listener.accept() {
+                    Ok(stream) => stream,
+                    Err(err) if err.kind() == ErrorKind::WouldBlock => {
+                        std::thread::sleep(Duration::from_millis(2));
+                        continue;
+                    }
+                    Err(err) => panic!("fake controller accept failed: {err}"),
+                };
+                let (reader_half, mut writer_half) = stream.split();
+                let mut line = String::new();
+                if BufReader::new(reader_half).read_line(&mut line).is_err()
+                    || line.trim().is_empty()
+                {
+                    commands.push("<connect>".to_string());
+                    continue;
+                }
+                let request: serde_json::Value = serde_json::from_str(&line).unwrap();
+                let command = request["command"].as_str().unwrap_or_default().to_string();
+                let response = if command == "recycle_force" {
+                    recycle_force_reply.clone()
+                } else {
+                    r#"{"ok":false,"error":"unsupported"}"#.to_string()
+                };
+                // The client's ops-log turn attribution reads the closeout
+                // projection; it is incidental to the restart sequence.
+                if command != "document_closeout_projection" {
+                    commands.push(command);
+                }
+                let _ = writeln!(writer_half, "{response}");
+                let _ = writer_half.flush();
+            }
+            commands
+        })
+    }
+
+    /// Run `request_stable_stale_controller_restart` off the test thread and
+    /// bound the wait, so a regression fails instead of hanging the suite.
+    fn recyclestorm_bounded_restart(
+        project_root: &Path,
+        stale: ControllerStatus,
+        bound: Duration,
+    ) -> Result<()> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let project_root = project_root.to_path_buf();
+        std::thread::spawn(move || {
+            let result = request_stable_stale_controller_restart(
+                &project_root,
+                LaunchMode::Lazy,
+                stale,
+                None,
+            )
+            .map(drop);
+            let _ = tx.send(result);
+        });
+        rx.recv_timeout(bound)
+            .unwrap_or_else(|_| panic!("stale restart did not return within {bound:?}"))
+    }
+
+    /// `recyclestorm` (haiven-dev 2026-11-04): a client-delegated
+    /// `stale_binary_client` recycle whose relaunch target is the very image the
+    /// controller runs is deferred at the RPC: nothing is armed and the reply
+    /// says why. A target that is newer arms a request that keeps its own
+    /// reason; an operator `admin recycle --force` still overrides it.
+    #[test]
+    fn recyclestorm_stale_binary_client_recycle_is_gated_on_a_newer_target() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let runtime = ControllerRuntime::new_arc(test_bootstrap(&dir)).unwrap();
+        let client_request = serde_json::json!({
+            "command": "recycle_force",
+            "reason": agent_doc_controller::recycle::STALE_BINARY_CLIENT_RECYCLE_REASON,
+        })
+        .to_string()
+            + "\n";
+        let mut should_stop = false;
+
+        let response = handle_request_locked(&client_request, &runtime, &mut should_stop).unwrap();
+        assert_eq!(
+            agent_doc_controller::recycle::classify_delegated_stale_restart_reply(&response),
+            agent_doc_controller::recycle::DelegatedStaleRestartReply::DeferredTargetNotNewer,
+            "{response}"
+        );
+        assert!(!runtime.recycle_requested());
+        assert!(!runtime.recycle_forced());
+        assert!(!controller_wants_recycle(&runtime));
+        let log = gh128_ops_log(&dir);
+        assert!(
+            log.contains(
+                "controller_recycle_deferred pid=456 generation=1 reason=stale_binary_client cause=target_not_newer"
+            ),
+            "{log}"
+        );
+        assert!(!log.contains("controller_recycle_requested"), "{log}");
+
+        // The controller runs an OLDER build of its own launch path: a real
+        // install landed, so the delegated recycle arms and keeps its reason.
+        let mut older = test_bootstrap(&dir);
+        if let Some(identity) = older.controller_binary.as_mut() {
+            identity.modified_secs = identity.modified_secs.saturating_sub(10);
+        }
+        let runtime = ControllerRuntime::new_arc(older).unwrap();
+        let response = handle_request_locked(&client_request, &runtime, &mut should_stop).unwrap();
+        assert_eq!(
+            agent_doc_controller::recycle::classify_delegated_stale_restart_reply(&response),
+            agent_doc_controller::recycle::DelegatedStaleRestartReply::Accepted,
+            "{response}"
+        );
+        assert!(runtime.recycle_requested() && runtime.recycle_forced());
+        assert_eq!(
+            agent_doc_controller::recycle::self_recycle_reason(runtime.recycle_request_facts()),
+            agent_doc_controller::recycle::STALE_BINARY_CLIENT_RECYCLE_REASON
+        );
+        // A not-newer verdict at launch time withdraws exactly that request.
+        assert!(runtime.withdraw_stale_binary_client_recycle_request());
+        assert!(!runtime.recycle_requested() && !runtime.recycle_forced());
+
+        // An operator force recycle is never withdrawn and keeps its reason,
+        // even when it lands on top of a pending client delegation.
+        handle_request_locked(&client_request, &runtime, &mut should_stop).unwrap();
+        handle_request_locked(
+            &(serde_json::json!({ "command": "recycle_force" }).to_string() + "\n"),
+            &runtime,
+            &mut should_stop,
+        )
+        .unwrap();
+        assert_eq!(
+            agent_doc_controller::recycle::self_recycle_reason(runtime.recycle_request_facts()),
+            "operator_force_request"
+        );
+        assert!(!runtime.withdraw_stale_binary_client_recycle_request());
+        assert!(runtime.recycle_requested() && runtime.recycle_forced());
+        // ...and an operator request on a fresh controller is never deferred.
+        let runtime = ControllerRuntime::new_arc(test_bootstrap(&dir)).unwrap();
+        let response = handle_request_locked(
+            &(serde_json::json!({ "command": "recycle_force" }).to_string() + "\n"),
+            &runtime,
+            &mut should_stop,
+        )
+        .unwrap();
+        assert!(response.contains("\"ok\":true"), "{response}");
+        assert!(runtime.recycle_forced());
+        assert_eq!(
+            agent_doc_controller::recycle::self_recycle_reason(runtime.recycle_request_facts()),
+            "operator_force_request"
+        );
+    }
+
+    /// `recyclestorm` (haiven-dev 2026-11-04): a client that delegates its
+    /// stale-binary restart to a controller whose relaunch target is not newer
+    /// adopts the running controller: one `recycle_force`, no handoff prepared,
+    /// no successor awaited, and a second attempt for the same generation does
+    /// not ask again — the delegated request cannot loop.
+    #[test]
+    fn recyclestorm_deferred_delegation_adopts_running_controller_without_looping() {
+        let dir = async_handoff_test_project();
+        // The real controller's answer to the client's delegated request, for a
+        // controller whose relaunch target is the image it already runs.
+        let runtime = ControllerRuntime::new_arc(test_bootstrap(&dir)).unwrap();
+        let mut should_stop = false;
+        let reply = handle_request_locked(
+            &(serde_json::json!({
+                "command": "recycle_force",
+                "reason": agent_doc_controller::recycle::STALE_BINARY_CLIENT_RECYCLE_REASON,
+            })
+            .to_string()
+                + "\n"),
+            &runtime,
+            &mut should_stop,
+        )
+        .unwrap();
+        assert!(!runtime.recycle_requested() && !runtime.recycle_forced());
+
+        let mut stale = active_controller_status_with_handoff_state(ControllerHandoffState::Stable);
+        stale.project_root = dir.path().to_path_buf();
+        stale.pid = Some(456);
+        stale.controller_generation = Some(1);
+        stale.controller_binary = current_binary_identity().ok();
+
+        let fake = recyclestorm_fake_controller(&dir, reply.clone(), Duration::from_secs(60));
+        recyclestorm_bounded_restart(dir.path(), stale.clone(), Duration::from_secs(60))
+            .expect("the running controller is adopted");
+        let commands = fake.join().unwrap();
+        assert_eq!(commands, vec!["recycle_force", "<connect>"]);
+        assert!(
+            read_predecessor_drain_lease(dir.path()).is_none(),
+            "a deferred delegation must not lease a predecessor that is not draining"
+        );
+        let log = gh128_ops_log(&dir);
+        assert!(
+            log.contains("controller_active_stale_binary_restart_deferred pid=456 generation=1 cause=target_not_newer")
+                && log.contains(
+                    "controller_active_stale_binary_restart_declined pid=456 generation=1 action=adopt_running_controller"
+                ),
+            "{log}"
+        );
+        assert!(
+            !log.contains("controller_detached_child_launched")
+                && !log.contains("controller_active_stale_binary_restart_delegated")
+                && !log.contains("controller_recycle_requested"),
+            "{log}"
+        );
+
+        // The same client asking again for the same generation is suppressed
+        // and simply connects: still exactly one recycle request overall.
+        let fake = recyclestorm_fake_controller(&dir, reply, Duration::from_secs(60));
+        recyclestorm_bounded_restart(dir.path(), stale, Duration::from_secs(60))
+            .expect("the suppressed retry connects to the running controller");
+        assert_eq!(fake.join().unwrap(), vec!["<connect>"]);
+    }
+
     /// `#drainingpredecessor`: duplicate reaping skips exactly the leased,
     /// still-draining predecessor until its deadline; everything else (and the
     /// predecessor after the deadline) stays reapable.
@@ -58376,6 +58715,19 @@ mod tests {
         assert!(active_controller_status_needs_binary_replacement(
             &stable,
             Some(&changed_binary)
+        ));
+
+        // `recyclestorm`: a later-linked copy of the SAME build at another
+        // path (`target/release` vs `~/.cargo/bin`) is not an upgrade.
+        let mut same_build_elsewhere = changed_binary.clone();
+        same_build_elsewhere.path = PathBuf::from("/src/agent-doc/target/release/agent-doc");
+        assert!(
+            active_controller_status_is_adoptable(&stable, Some(&same_build_elsewhere)),
+            "a same-version copy at another path must adopt the running controller"
+        );
+        assert!(!active_controller_status_needs_binary_replacement(
+            &stable,
+            Some(&same_build_elsewhere)
         ));
 
         let mut older_binary = current_binary.clone();

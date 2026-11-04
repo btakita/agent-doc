@@ -619,15 +619,70 @@ pub enum SelfRecycleTargetDecision {
     DeferTargetNotNewer,
 }
 
+/// Reason of a routine self-detected stale-binary recycle (R1).
+pub const STALE_BINARY_RECYCLE_REASON: &str = "stale_binary";
+
+/// `recyclestorm`: reason a client attaches to the `recycle_force` it sends
+/// when it believes the controller's binary is stale and delegates the restart
+/// to the controller's own drained self-recycle (`#drainingpredecessor`).
+///
+/// It is a staleness claim, not an operator instruction: the controller gates
+/// it exactly like [`STALE_BINARY_RECYCLE_REASON`]. Lumping it under
+/// `operator_force_request` let a client that would never be satisfied (its
+/// binary is a later-linked copy of the same build at another path) recycle
+/// the controller onto an identical image forever.
+pub const STALE_BINARY_CLIENT_RECYCLE_REASON: &str = "stale_binary_client";
+
+/// Reasons that assert the running image is stale. Their whole point is to
+/// escape that image, so they are gated on the target being newer and a
+/// same-image successor is a failure.
+pub fn recycle_reason_claims_stale_binary(reason: &str) -> bool {
+    reason == STALE_BINARY_RECYCLE_REASON || reason == STALE_BINARY_CLIENT_RECYCLE_REASON
+}
+
+/// `recyclestorm`: the pending recycle request facts a serve-loop tick sees.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SelfRecycleRequestFacts {
+    /// Any `recycle_force` is pending (operator or client-delegated).
+    pub forced: bool,
+    /// A protocol-skew recovery asked for an urgent recycle.
+    pub urgent: bool,
+    /// Any explicit `recycle` / `recycle_force` request is pending.
+    pub requested: bool,
+    /// The only explicit request pending is a client-delegated
+    /// [`STALE_BINARY_CLIENT_RECYCLE_REASON`] one; no operator asked.
+    pub stale_binary_client_only: bool,
+}
+
+/// `recyclestorm`: the reason a self-recycle runs under. A genuine operator
+/// request (`agent-doc admin recycle [--force]`) keeps its operator reason and
+/// always launches; a client-delegated stale-binary request is reported (and
+/// gated) as [`STALE_BINARY_CLIENT_RECYCLE_REASON`].
+pub fn self_recycle_reason(facts: SelfRecycleRequestFacts) -> &'static str {
+    let client_only = facts.stale_binary_client_only && facts.requested;
+    if facts.forced && !client_only {
+        "operator_force_request"
+    } else if facts.urgent {
+        "ipc_build_skew"
+    } else if client_only {
+        STALE_BINARY_CLIENT_RECYCLE_REASON
+    } else if facts.requested {
+        "operator_request"
+    } else {
+        STALE_BINARY_RECYCLE_REASON
+    }
+}
+
 /// `target` carries the version read FROM the target binary, not the running
-/// process's compiled-in version. Only a routine `stale_binary` recycle is
+/// process's compiled-in version. Only a staleness claim — the routine
+/// `stale_binary` recycle or a client-delegated `stale_binary_client` one — is
 /// gated; an operator request always launches.
 pub fn self_recycle_target_decision(
     reason: &str,
     recorded: Option<&crate::status::ControllerBinaryIdentity>,
     target: Option<&crate::status::ControllerBinaryIdentity>,
 ) -> SelfRecycleTargetDecision {
-    if reason != "stale_binary" {
+    if !recycle_reason_claims_stale_binary(reason) {
         return SelfRecycleTargetDecision::Launch;
     }
     match (recorded, target) {
@@ -682,10 +737,71 @@ pub fn self_recycle_log_disposition(
     reason: &str,
     outcome: SelfRecycleOutcome,
 ) -> SelfRecycleLogDisposition {
-    if reason == "stale_binary" && outcome == SelfRecycleOutcome::SameImage {
+    if recycle_reason_claims_stale_binary(reason) && outcome == SelfRecycleOutcome::SameImage {
         SelfRecycleLogDisposition::FailedSameImage
     } else {
         SelfRecycleLogDisposition::Completed
+    }
+}
+
+/// `recyclestorm`: how a stale controller answered a client's delegated
+/// `recycle_force` (`stale_binary_client`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DelegatedStaleRestartReply {
+    /// The controller armed its own drained self-recycle.
+    Accepted,
+    /// The binary the controller would relaunch is not newer than the image it
+    /// runs, so a recycle cannot change anything; nothing was armed.
+    DeferredTargetNotNewer,
+    /// Anything else (older controller error, unparseable reply).
+    Refused,
+}
+
+/// Wire value of the deferral the controller answers a not-newer
+/// `stale_binary_client` request with.
+pub const DELEGATED_STALE_RESTART_DEFERRED_TARGET_NOT_NEWER: &str = "target_not_newer";
+
+pub fn classify_delegated_stale_restart_reply(response: &str) -> DelegatedStaleRestartReply {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(response.trim()) else {
+        return DelegatedStaleRestartReply::Refused;
+    };
+    if value.get("deferred").and_then(serde_json::Value::as_str)
+        == Some(DELEGATED_STALE_RESTART_DEFERRED_TARGET_NOT_NEWER)
+    {
+        return DelegatedStaleRestartReply::DeferredTargetNotNewer;
+    }
+    if value.get("ok").and_then(serde_json::Value::as_bool) == Some(true) {
+        DelegatedStaleRestartReply::Accepted
+    } else {
+        DelegatedStaleRestartReply::Refused
+    }
+}
+
+/// `recyclestorm`: what a client does when the controller deferred its
+/// delegated stale-binary restart because its own relaunch target is not newer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DeclinedStaleRestartAction {
+    /// Use the running controller. Retrying the recycle would relaunch the same
+    /// image.
+    AdoptRunningController,
+    /// The client carries a strictly newer RELEASE than the controller and the
+    /// controller's own launch path cannot deliver it: the direct client
+    /// handoff (which launches the client's binary) is the only way up.
+    DirectHandoff,
+}
+
+pub fn declined_stale_restart_action(
+    client: Option<&crate::status::ControllerBinaryIdentity>,
+    controller: Option<&crate::status::ControllerBinaryIdentity>,
+) -> DeclinedStaleRestartAction {
+    match (client, controller) {
+        (Some(client_identity), Some(controller_identity))
+            if client_identity.version != controller_identity.version
+                && crate::status::controller_binary_identity_is_newer(client, controller) =>
+        {
+            DeclinedStaleRestartAction::DirectHandoff
+        }
+        _ => DeclinedStaleRestartAction::AdoptRunningController,
     }
 }
 
@@ -927,6 +1043,226 @@ mod gh128_tests {
             ),
             SelfRecycleTargetDecision::Launch
         );
+    }
+
+    fn identity_at(path: &str, version: &str, mtime: u64) -> ControllerBinaryIdentity {
+        ControllerBinaryIdentity {
+            path: PathBuf::from(path),
+            ..identity(version, mtime)
+        }
+    }
+
+    const CARGO_BIN: &str = "/home/u/.cargo/bin/agent-doc";
+    const TARGET_RELEASE: &str = "/src/agent-doc/target/release/agent-doc";
+
+    #[test]
+    fn recyclestorm_client_delegated_recycle_defers_when_target_is_not_newer() {
+        let running = identity_at(CARGO_BIN, "0.35.568", 100);
+        assert_eq!(
+            self_recycle_target_decision(
+                STALE_BINARY_CLIENT_RECYCLE_REASON,
+                Some(&running),
+                Some(&running.clone())
+            ),
+            SelfRecycleTargetDecision::DeferTargetNotNewer
+        );
+        assert_eq!(
+            self_recycle_target_decision(
+                STALE_BINARY_CLIENT_RECYCLE_REASON,
+                Some(&running),
+                Some(&identity_at(CARGO_BIN, "0.35.567", 300))
+            ),
+            SelfRecycleTargetDecision::DeferTargetNotNewer
+        );
+        // A real install over the launch path still launches.
+        assert_eq!(
+            self_recycle_target_decision(
+                STALE_BINARY_CLIENT_RECYCLE_REASON,
+                Some(&running),
+                Some(&identity_at(CARGO_BIN, "0.35.568", 101))
+            ),
+            SelfRecycleTargetDecision::Launch
+        );
+        // A genuine operator recycle (forced or not) always launches.
+        for operator in ["operator_force_request", "operator_request"] {
+            assert_eq!(
+                self_recycle_target_decision(operator, Some(&running), Some(&running.clone())),
+                SelfRecycleTargetDecision::Launch,
+                "{operator}"
+            );
+        }
+        assert_eq!(
+            self_recycle_log_disposition(
+                STALE_BINARY_CLIENT_RECYCLE_REASON,
+                SelfRecycleOutcome::SameImage
+            ),
+            SelfRecycleLogDisposition::FailedSameImage
+        );
+    }
+
+    #[test]
+    fn recyclestorm_client_delegated_reason_is_distinct_from_operator_force() {
+        let client_only = SelfRecycleRequestFacts {
+            forced: true,
+            requested: true,
+            stale_binary_client_only: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            self_recycle_reason(client_only),
+            STALE_BINARY_CLIENT_RECYCLE_REASON
+        );
+        // An operator `admin recycle --force` keeps its operator reason, even if
+        // a client delegation is also pending (the runtime clears the
+        // client-only marker on any operator request).
+        assert_eq!(
+            self_recycle_reason(SelfRecycleRequestFacts {
+                stale_binary_client_only: false,
+                ..client_only
+            }),
+            "operator_force_request"
+        );
+        assert_eq!(
+            self_recycle_reason(SelfRecycleRequestFacts {
+                urgent: true,
+                ..client_only
+            }),
+            "ipc_build_skew"
+        );
+        assert_eq!(
+            self_recycle_reason(SelfRecycleRequestFacts {
+                requested: true,
+                ..Default::default()
+            }),
+            "operator_request"
+        );
+        assert_eq!(
+            self_recycle_reason(SelfRecycleRequestFacts::default()),
+            STALE_BINARY_RECYCLE_REASON
+        );
+    }
+
+    #[test]
+    fn recyclestorm_classifies_delegated_restart_replies() {
+        assert_eq!(
+            classify_delegated_stale_restart_reply(r#"{"ok":true}"#),
+            DelegatedStaleRestartReply::Accepted
+        );
+        assert_eq!(
+            classify_delegated_stale_restart_reply(r#"{"ok":false,"deferred":"target_not_newer"}"#),
+            DelegatedStaleRestartReply::DeferredTargetNotNewer
+        );
+        assert_eq!(
+            classify_delegated_stale_restart_reply(r#"{"ok":false,"error":"unsupported"}"#),
+            DelegatedStaleRestartReply::Refused
+        );
+        assert_eq!(
+            classify_delegated_stale_restart_reply("not json"),
+            DelegatedStaleRestartReply::Refused
+        );
+    }
+
+    #[test]
+    fn recyclestorm_declined_restart_adopts_unless_client_is_a_newer_release() {
+        let controller = identity_at(CARGO_BIN, "0.35.568", 100);
+        assert_eq!(
+            declined_stale_restart_action(
+                Some(&identity_at(TARGET_RELEASE, "0.35.568", 200)),
+                Some(&controller)
+            ),
+            DeclinedStaleRestartAction::AdoptRunningController
+        );
+        assert_eq!(
+            declined_stale_restart_action(
+                Some(&identity_at(CARGO_BIN, "0.35.568", 200)),
+                Some(&controller)
+            ),
+            DeclinedStaleRestartAction::AdoptRunningController
+        );
+        assert_eq!(
+            declined_stale_restart_action(
+                Some(&identity_at(TARGET_RELEASE, "0.35.569", 50)),
+                Some(&controller)
+            ),
+            DeclinedStaleRestartAction::DirectHandoff
+        );
+        assert_eq!(
+            declined_stale_restart_action(None, Some(&controller)),
+            DeclinedStaleRestartAction::AdoptRunningController
+        );
+    }
+
+    /// `recyclestorm` (haiven-dev 2026-11-04): model the client/controller
+    /// loop over fixed identities. A supervisor runs a later-linked
+    /// `target/release` copy of 0.35.568; the controller runs and relaunches
+    /// `~/.cargo/bin` 0.35.568. Each generation the client decides whether to
+    /// ask, the controller decides whether its relaunch target is newer, and a
+    /// launch produces a successor running that target. Either half alone must
+    /// end the loop with zero recycles; the pre-fix pair recycles forever.
+    #[test]
+    fn recyclestorm_either_half_alone_stops_the_delegated_recycle_loop() {
+        let client = identity_at(TARGET_RELEASE, "0.35.568", 200);
+        let target = identity_at(CARGO_BIN, "0.35.568", 100);
+        let simulate = |client_asks: &dyn Fn(&ControllerBinaryIdentity) -> bool,
+                        controller_reason: &str| {
+            let mut running = target.clone();
+            let mut recycles = 0u32;
+            for _generation in 0..50 {
+                if !client_asks(&running) {
+                    break;
+                }
+                match self_recycle_target_decision(controller_reason, Some(&running), Some(&target))
+                {
+                    SelfRecycleTargetDecision::DeferTargetNotNewer => break,
+                    SelfRecycleTargetDecision::Launch => {
+                        recycles += 1;
+                        running = target.clone();
+                    }
+                }
+            }
+            recycles
+        };
+        let old_client = |running: &ControllerBinaryIdentity| {
+            crate::status::controller_binary_identity_is_newer(Some(&client), Some(running))
+        };
+        let new_client = |running: &ControllerBinaryIdentity| {
+            crate::status::client_binary_warrants_controller_replacement(
+                Some(&client),
+                Some(running),
+            )
+        };
+        // Pre-fix: the delegated request ran as `operator_force_request`.
+        assert_eq!(simulate(&old_client, "operator_force_request"), 50);
+        // Client half alone.
+        assert_eq!(simulate(&new_client, "operator_force_request"), 0);
+        // Controller half alone.
+        assert_eq!(simulate(&old_client, STALE_BINARY_CLIENT_RECYCLE_REASON), 0);
+        assert_eq!(simulate(&new_client, STALE_BINARY_CLIENT_RECYCLE_REASON), 0);
+
+        // The genuine same-path rebuild still recycles exactly once and then
+        // settles: the successor runs the rebuilt image.
+        let rebuilt = identity_at(CARGO_BIN, "0.35.568", 300);
+        let mut running = target.clone();
+        let mut recycles = 0u32;
+        for _generation in 0..50 {
+            if !crate::status::client_binary_warrants_controller_replacement(
+                Some(&rebuilt),
+                Some(&running),
+            ) {
+                break;
+            }
+            assert_eq!(
+                self_recycle_target_decision(
+                    STALE_BINARY_CLIENT_RECYCLE_REASON,
+                    Some(&running),
+                    Some(&rebuilt)
+                ),
+                SelfRecycleTargetDecision::Launch
+            );
+            recycles += 1;
+            running = rebuilt.clone();
+        }
+        assert_eq!(recycles, 1);
     }
 
     #[test]

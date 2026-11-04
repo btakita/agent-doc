@@ -4434,6 +4434,13 @@ pub(crate) struct ControllerRuntime {
     /// handoff even mid-turn. It never interrupts the supervisor-owned harness
     /// child or an accepted RPC. Implies `recycle_requested`.
     recycle_forced: AtomicBool,
+    /// `recyclestorm` — true while the ONLY pending explicit recycle request
+    /// is a client-delegated `stale_binary_client` one. Such a request is a
+    /// staleness claim, gated on the relaunch target being newer; any operator
+    /// request clears it so `agent-doc admin recycle` always launches. The
+    /// mutex also serializes every recycle-request flag transition, so a
+    /// withdrawal can never swallow an operator request that raced it.
+    recycle_stale_binary_client_only: Mutex<bool>,
     /// GH #128 — the on-disk binary identity a routine `stale_binary` recycle
     /// declined because the binary it would launch was not newer than this
     /// image. Stale detection ignores exactly this identity so the serve loop
@@ -10190,6 +10197,7 @@ impl ControllerRuntime {
             recycle_requested: AtomicBool::new(false),
             recycle_urgent: AtomicBool::new(false),
             recycle_forced: AtomicBool::new(false),
+            recycle_stale_binary_client_only: Mutex::new(false),
             recycle_declined_target: Mutex::new(None),
             _scope: scope,
         };
@@ -10484,6 +10492,8 @@ impl ControllerRuntime {
 
     /// `#ctlrecycle` R2 — mark this controller for a two-phase handoff.
     fn request_recycle(&self) {
+        let mut client_only = self.recycle_stale_binary_client_only.lock();
+        *client_only = false;
         self.recycle_requested.store(true, Ordering::SeqCst);
     }
 
@@ -10499,6 +10509,8 @@ impl ControllerRuntime {
     /// debounce (`agent-doc admin recycle --force`). Also sets
     /// `recycle_requested` so the existing want-recycle predicate fires.
     fn request_recycle_force(&self) {
+        let mut client_only = self.recycle_stale_binary_client_only.lock();
+        *client_only = false;
         self.recycle_forced.store(true, Ordering::SeqCst);
         self.recycle_requested.store(true, Ordering::SeqCst);
     }
@@ -10507,10 +10519,50 @@ impl ControllerRuntime {
         self.recycle_forced.load(Ordering::SeqCst)
     }
 
+    /// `recyclestorm` — a client delegated its stale-binary restart
+    /// (`recycle_force` reason `stale_binary_client`). It keeps the forced
+    /// no-debounce handoff, but stays marked client-only unless an operator
+    /// request is (or becomes) pending.
+    fn request_stale_binary_client_recycle(&self) {
+        let mut client_only = self.recycle_stale_binary_client_only.lock();
+        *client_only = *client_only || !self.recycle_requested.load(Ordering::SeqCst);
+        self.recycle_forced.store(true, Ordering::SeqCst);
+        self.recycle_requested.store(true, Ordering::SeqCst);
+    }
+
+    /// `recyclestorm` — the pending request facts the serve loop derives its
+    /// recycle reason from.
+    fn recycle_request_facts(&self) -> agent_doc_controller::recycle::SelfRecycleRequestFacts {
+        let client_only = self.recycle_stale_binary_client_only.lock();
+        agent_doc_controller::recycle::SelfRecycleRequestFacts {
+            forced: self.recycle_forced.load(Ordering::SeqCst),
+            urgent: self.recycle_urgent.load(Ordering::SeqCst),
+            requested: self.recycle_requested.load(Ordering::SeqCst),
+            stale_binary_client_only: *client_only,
+        }
+    }
+
+    /// `recyclestorm` — drop a client-delegated stale-binary request whose
+    /// relaunch target was not newer, so the serve loop does not re-attempt it
+    /// every tick. Leaves any operator request untouched. Returns whether a
+    /// client-only request was withdrawn.
+    fn withdraw_stale_binary_client_recycle_request(&self) -> bool {
+        let mut client_only = self.recycle_stale_binary_client_only.lock();
+        if !*client_only {
+            return false;
+        }
+        *client_only = false;
+        self.recycle_requested.store(false, Ordering::SeqCst);
+        self.recycle_forced.store(false, Ordering::SeqCst);
+        true
+    }
+
     /// `#supthrash` L4 — a self-handoff that cannot make progress drops every
     /// pending recycle request so the serve loop stops re-attempting it. A
     /// further operator request or install re-arms it.
     fn abandon_recycle_request(&self) {
+        let mut client_only = self.recycle_stale_binary_client_only.lock();
+        *client_only = false;
         self.recycle_requested.store(false, Ordering::SeqCst);
         self.recycle_forced.store(false, Ordering::SeqCst);
         self.recycle_urgent.store(false, Ordering::SeqCst);
@@ -22238,6 +22290,7 @@ agent:queue\n\
             recycle_requested: AtomicBool::new(false),
             recycle_urgent: AtomicBool::new(false),
             recycle_forced: AtomicBool::new(false),
+            recycle_stale_binary_client_only: Mutex::new(false),
             recycle_declined_target: Mutex::new(None),
             _scope: scope,
         }

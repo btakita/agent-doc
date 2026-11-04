@@ -1222,6 +1222,7 @@ mod tests {
                     label: "IntelliJIdea2026.3".to_string(),
                     version: "0.2.508".to_string(),
                     outcome: crate::plugin::PluginTargetOutcome::UnsupportedPlatform { build: 263 },
+                    replaced_unreleased: None,
                 }],
             })
         });
@@ -1239,6 +1240,7 @@ mod tests {
                     label: "IntelliJIdea2026.3".to_string(),
                     version: "0.2.481".to_string(),
                     outcome: crate::plugin::PluginTargetOutcome::HotUpgraded,
+                    replaced_unreleased: None,
                 }],
             })
         })

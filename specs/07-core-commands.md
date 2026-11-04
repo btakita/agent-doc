@@ -708,6 +708,12 @@ The runtime version warning cache lives at `~/.cache/agent-doc/version-cache.jso
   `agent-doc-jetbrains-263-<version>.zip`, and an unprovable or unsupported
   target fails before any installed tree is replaced. `--local --all-installed`
   applies the same policy independently to every existing installation.
+  A release install, `plugin update`, or `agent-doc upgrade` reconcile keeps
+  an installed update number above the release asset only when it is the
+  generation the running binary pairs with on that IDE line; any other higher
+  number is an unreleased build and is replaced with the asset, with a
+  warning and `replaced_unreleased=` in `plugin_upgrade_summary` naming the
+  replaced build, never an `unchanged` verdict (GH #392).
   Release-version projection compares each package's recorded
   `pluginSourceDigest`. When a new agent-doc release has byte-identical plugin
   sources, it retains that package's `pluginVersion`, updates only the

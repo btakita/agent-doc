@@ -5,6 +5,7 @@
 //! - `install(editor)` — fetches the latest GitHub Release for `btakita/agent-doc`, selects the appropriate asset (signed variant preferred), downloads it, and installs it.
 //! - `install_local(editor)` — installs from a locally built artifact found by walking up from CWD to locate an `editors/` directory.
 //! - `update(editor)` — for JetBrains, skips re-install if the installed plugin version matches the latest package asset; for VS Code, reinstalls through the editor CLI.
+//! - GH #392: an installed JetBrains update number ABOVE the release asset on the same line is kept only when it is the generation this binary pairs with (`expected_editor_plugin_version_for_platform_build`, baked from that line's `gradle.properties`). Any other higher number is an unreleased build whose number proves nothing about its content, so release install/update/reconcile replaces it with the asset and names the replaced build (`replaced_unreleased` on the target report, a summary WARNING, `replaced_unreleased=` in `plugin_upgrade_summary`) instead of reporting it `unchanged`. Equal numbers stay current (GH #295).
 //! - `update_all_installed()` — release-watcher entry point that updates every existing agent-doc JetBrains/VS Code installation without installing into a new editor. Returns a `PluginReconcileReport` with one `PluginTargetOutcome` per target (GH #114), from which `PluginReconcileReport::summary` derives the upgrade's closing lines: separate hot-upgraded / installed / staged / restart-required / unchanged counts, each target that needs a restart by name, and no "if it does not reload on its own" hedge where a reload is known not to happen. A target whose proven platform build is outside every published package range is reported as `UnsupportedPlatform` (GH #233): left in place, one warning, no failure.
 //! - `list()` — scans JetBrains plugin directories for the versioned agent-doc JAR and queries `code --list-extensions` for the VS Code extension; prints found entries to stdout.
 //! - JetBrains plugin directories are discovered from versioned IDE data roots (`~/.local/share/JetBrains/<Product><Version>/` on Linux, `~/Library/Application Support/JetBrains/<Product><Version>/` on macOS). Config roots and unrelated JetBrains service directories are excluded. Callers can select an exact target with `--plugins-dir`; ambiguous non-interactive discovery fails with rerun guidance instead of waiting on stdin.
@@ -682,21 +683,57 @@ fn installed_jetbrains_package(
 }
 
 /// What a release reconciliation must do with one target.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum JetbrainsReleaseDecision {
-    /// The target already holds this compatibility line at or above the asset.
+    /// The target already holds the asset's own update number on this
+    /// compatibility line. Release projection keeps an update number exactly
+    /// while the package's `pluginSourceDigest` is unchanged (GH #295), so an
+    /// equal number names the same generation and nothing is replaced.
     Current,
+    /// GH #392: the target holds a HIGHER update number than the asset, and
+    /// that number is the generation this agent-doc binary pairs with on the
+    /// target's line (a binary built beside its own unreleased plugin). It is
+    /// kept: replacing it with the older asset would skew plugin and binary.
+    KeepPaired { installed_version: String },
     /// Install the asset. `cross_line` means the target holds the OTHER
     /// compatibility line (for example a classic package inside a 262 IDE);
     /// version numbers across lines are not comparable, so it is replaced
     /// regardless of which Marketplace update number is higher.
     Replace { cross_line: bool },
+    /// GH #392: the target holds a HIGHER update number than the asset that
+    /// this binary does NOT pair with. No published generation carries a number
+    /// above the release asset being reconciled, so the installed tree is an
+    /// unreleased local build whose number says nothing about its content: a
+    /// `0.2.914` dev build lacked the `MarkdownBracketWrap*` classes the
+    /// `0.2.911` release asset shipped. It is replaced with the release asset,
+    /// and the report names the build it replaced.
+    ReplaceUnreleased { installed_version: String },
 }
 
+/// The JetBrains generation this binary pairs with on one package line, as
+/// baked from that line's `gradle.properties` at build time.
+fn paired_jetbrains_generation(range: JetbrainsPackageRange) -> Option<&'static str> {
+    let platform_build = match range {
+        JetbrainsPackageRange::Classic242To261 => None,
+        JetbrainsPackageRange::Modular262 => Some(262),
+        JetbrainsPackageRange::Modular263 => Some(263),
+    };
+    agent_doc_reliable_sync_io::liveness::expected_editor_plugin_version_for_platform_build(
+        "jetbrains",
+        platform_build,
+    )
+}
+
+/// GH #392: a version number is an ordering, not a content identity. A number
+/// at or below the asset is decided by the number alone (lower is stale; equal
+/// is the same generation per GH #295). A number ABOVE the asset is kept only
+/// when it is the generation this binary pairs with (`paired_version`);
+/// otherwise it is an unreleased build and the release asset replaces it.
 fn jetbrains_release_decision(
     installed: Option<(JetbrainsPackageRange, &str)>,
     target_range: JetbrainsPackageRange,
     available_version: &str,
+    paired_version: Option<&str>,
 ) -> Result<JetbrainsReleaseDecision> {
     let Some((installed_range, installed_version)) = installed else {
         return Ok(JetbrainsReleaseDecision::Replace { cross_line: false });
@@ -707,7 +744,15 @@ fn jetbrains_release_decision(
     Ok(
         match jetbrains_version_cmp(installed_version, available_version)? {
             CmpOrdering::Less => JetbrainsReleaseDecision::Replace { cross_line: false },
-            CmpOrdering::Equal | CmpOrdering::Greater => JetbrainsReleaseDecision::Current,
+            CmpOrdering::Equal => JetbrainsReleaseDecision::Current,
+            CmpOrdering::Greater if paired_version == Some(installed_version) => {
+                JetbrainsReleaseDecision::KeepPaired {
+                    installed_version: installed_version.to_string(),
+                }
+            }
+            CmpOrdering::Greater => JetbrainsReleaseDecision::ReplaceUnreleased {
+                installed_version: installed_version.to_string(),
+            },
         },
     )
 }
@@ -724,6 +769,39 @@ fn jetbrains_release_decision_for(
             .map(|(range, version)| (*range, version.as_str())),
         target_range,
         available_version,
+        paired_jetbrains_generation(target_range),
+    )
+}
+
+/// GH #392: the operator-facing line for a kept higher build that this binary
+/// pairs with.
+fn kept_paired_jetbrains_build_message(
+    target_dir: &Path,
+    installed_version: &str,
+    available_version: &str,
+) -> String {
+    format!(
+        "{}: kept JetBrains plugin v{installed_version} instead of release asset v{available_version}: v{installed_version} is the generation this agent-doc binary pairs with on that IDE line, so replacing it would skew the plugin and the binary.",
+        jetbrains_target_label(target_dir)
+    )
+}
+
+/// GH #392: the operator-facing warning for an unreleased higher build that a
+/// release install replaced. It names the replaced build, why its number did
+/// not count as current, and how to put a local build back.
+fn replaced_unreleased_jetbrains_build_message(
+    target_dir: &Path,
+    paired_version: Option<&str>,
+    installed_version: &str,
+    release_version: &str,
+) -> String {
+    let paired = paired_version
+        .map(|version| format!("v{version}"))
+        .unwrap_or_else(|| "no recorded generation".to_string());
+    format!(
+        "{label} held JetBrains plugin v{installed_version}, an unreleased build: its update number is above release asset v{release_version}, yet this agent-doc binary pairs with {paired} on that IDE line, not v{installed_version}. A higher number does not prove the build carries the release's plugin content, so it was replaced with release plugin v{release_version}. To run a local build again, reinstall it from its checkout with `agent-doc plugin install jetbrains --local --plugins-dir {dir}`.",
+        label = jetbrains_target_label(target_dir),
+        dir = target_dir.display(),
     )
 }
 
@@ -776,10 +854,72 @@ fn choose_plugins_dir(dirs: &[PathBuf], explicit: Option<&Path>) -> Result<PathB
     choose_plugins_dir_with_interactivity(dirs, explicit, io::stdin().is_terminal())
 }
 
-fn install_jetbrains_into(
-    release: &Value,
+/// The result of installing a release asset into one JetBrains target.
+/// `replaced_unreleased` (GH #392) names the unreleased higher build the
+/// install replaced, so the reconcile verdict can say what it overwrote.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct JetbrainsReleaseInstall {
+    outcome: JetbrainsLocalInstallOutcome,
+    replaced_unreleased: Option<String>,
+}
+
+/// GH #392: the release-asset guard, applied after the asset's own version is
+/// known. `Ok(None)` keeps the installed tree (this binary's paired higher
+/// generation); `Ok(Some(replaced))` installs, where `replaced` names an
+/// unreleased higher build being overwritten.
+fn jetbrains_release_install_guard(
     target_dir: &Path,
-) -> Result<JetbrainsLocalInstallOutcome> {
+    package_range: JetbrainsPackageRange,
+    paired_version: Option<&str>,
+    expected_version: &str,
+) -> Result<Option<Option<String>>> {
+    let installed = installed_jetbrains_package(target_dir, package_range);
+    let decision = jetbrains_release_decision(
+        installed
+            .as_ref()
+            .map(|(range, version)| (*range, version.as_str())),
+        package_range,
+        expected_version,
+        paired_version,
+    )?;
+    Ok(match decision {
+        JetbrainsReleaseDecision::KeepPaired { installed_version } => {
+            eprintln!(
+                "{}",
+                kept_paired_jetbrains_build_message(
+                    target_dir,
+                    &installed_version,
+                    expected_version
+                )
+            );
+            log_jetbrains_upgrade_decision(&format!(
+                "plugin_release_decision outcome=kept_paired installed={installed_version} asset={expected_version} target={}",
+                target_dir.display()
+            ));
+            None
+        }
+        JetbrainsReleaseDecision::ReplaceUnreleased { installed_version } => {
+            eprintln!(
+                "WARNING: {}",
+                replaced_unreleased_jetbrains_build_message(
+                    target_dir,
+                    paired_version,
+                    &installed_version,
+                    expected_version,
+                )
+            );
+            log_jetbrains_upgrade_decision(&format!(
+                "plugin_release_decision outcome=replace_unreleased installed={installed_version} paired={} asset={expected_version} target={}",
+                paired_version.unwrap_or("none"),
+                target_dir.display()
+            ));
+            Some(Some(installed_version))
+        }
+        JetbrainsReleaseDecision::Current | JetbrainsReleaseDecision::Replace { .. } => Some(None),
+    })
+}
+
+fn install_jetbrains_into(release: &Value, target_dir: &Path) -> Result<JetbrainsReleaseInstall> {
     let (package_range, asset) = jetbrains_release_asset_for_target(release, target_dir)?;
     eprintln!("Found asset: {}", asset.name);
     fs::create_dir_all(target_dir).context("Failed to create JetBrains plugins directory")?;
@@ -788,19 +928,23 @@ fn install_jetbrains_into(
     verify_editor_package(release, &asset, tmp.path())?;
 
     let expected_version = jetbrains_zip_plugin_version(tmp.path())?;
-    // The downgrade guard compares versions only within one compatibility
-    // line. A classic package left inside a 262 IDE (or the reverse) is
-    // incompatible whatever its update number, so it is always replaced.
-    if let Some((installed_range, installed_version)) =
-        installed_jetbrains_package(target_dir, package_range)
-        && installed_range == package_range
-        && jetbrains_version_cmp(&installed_version, &expected_version)? == CmpOrdering::Greater
-    {
-        eprintln!(
-            "Installed JetBrains plugin v{installed_version} is newer than release asset v{expected_version}; refusing downgrade and keeping the installed generation. Use `agent-doc plugin install jetbrains --local` for the current checkout build."
-        );
-        return Ok(JetbrainsLocalInstallOutcome::Unchanged);
-    }
+    // Versions are compared only within one compatibility line: a classic
+    // package left inside a 262 IDE (or the reverse) is incompatible whatever
+    // its update number, so it is always replaced. GH #392: within one line a
+    // HIGHER number is kept only when it is this binary's paired generation;
+    // any other higher number is an unreleased build and is replaced, loudly.
+    let Some(replaced_unreleased) = jetbrains_release_install_guard(
+        target_dir,
+        package_range,
+        paired_jetbrains_generation(package_range),
+        &expected_version,
+    )?
+    else {
+        return Ok(JetbrainsReleaseInstall {
+            outcome: JetbrainsLocalInstallOutcome::Unchanged,
+            replaced_unreleased: None,
+        });
+    };
     let outcome = install_jetbrains_zip_into(tmp.path(), target_dir, &expected_version)?;
 
     eprintln!(
@@ -809,7 +953,10 @@ fn install_jetbrains_into(
     );
     print_jetbrains_activation_outcome(outcome.clone());
     print_jetbrains_remote_dev_install_scope(package_range);
-    Ok(outcome)
+    Ok(JetbrainsReleaseInstall {
+        outcome,
+        replaced_unreleased,
+    })
 }
 
 fn jetbrains_remote_dev_install_scope_notice(
@@ -872,7 +1019,7 @@ fn install_jetbrains(plugins_dir: Option<&Path>) -> Result<JetbrainsLocalInstall
     let target_dir = choose_plugins_dir(&dirs, plugins_dir)?;
     let package_range = jetbrains_package_range(&target_dir)?;
     let release = fetch_release_for_asset(package_range.asset_prefix(), "zip")?;
-    install_jetbrains_into(&release, &target_dir)
+    Ok(install_jetbrains_into(&release, &target_dir)?.outcome)
 }
 
 // --- VS Code ---
@@ -3435,8 +3582,19 @@ pub fn update_with_plugins_dir(editor: &str, plugins_dir: Option<&Path>) -> Resu
             match jetbrains_release_decision_for(&target_dir, package_range, &version)? {
                 JetbrainsReleaseDecision::Current => {
                     eprintln!(
-                        "JetBrains plugin ({}) is already at or above v{version}.",
+                        "JetBrains plugin ({}) is already at v{version}.",
                         package_range.asset_prefix()
+                    );
+                    return Ok(());
+                }
+                JetbrainsReleaseDecision::KeepPaired { installed_version } => {
+                    eprintln!(
+                        "{}",
+                        kept_paired_jetbrains_build_message(
+                            &target_dir,
+                            &installed_version,
+                            &version
+                        )
                     );
                     return Ok(());
                 }
@@ -3445,10 +3603,13 @@ pub fn update_with_plugins_dir(editor: &str, plugins_dir: Option<&Path>) -> Resu
                     jetbrains_target_label(&target_dir),
                     asset.name
                 ),
-                JetbrainsReleaseDecision::Replace { cross_line: false } => {}
+                // GH #392: install_jetbrains_into names the unreleased build
+                // it replaces once the downloaded asset's version is proven.
+                JetbrainsReleaseDecision::Replace { cross_line: false }
+                | JetbrainsReleaseDecision::ReplaceUnreleased { .. } => {}
             }
             matches!(
-                install_jetbrains_into(&release, &target_dir)?,
+                install_jetbrains_into(&release, &target_dir)?.outcome,
                 JetbrainsLocalInstallOutcome::HotUpgraded { .. }
             )
         }
@@ -3539,12 +3700,16 @@ impl PluginTargetOutcome {
 /// GH #114: one reconciled target. `label` names it for the operator (the
 /// JetBrains IDE data directory, e.g. `IntelliJIdea2026.3`, or the VS Code CLI);
 /// `version` is the plugin package version it was reconciled against.
+/// `replaced_unreleased` (GH #392) is the unreleased higher build a release
+/// install overwrote on this target, so the verdict names it instead of the
+/// old `unchanged` count that hid a stale local build.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PluginTargetReport {
     pub family: PluginEditorFamily,
     pub label: String,
     pub version: String,
     pub outcome: PluginTargetOutcome,
+    pub replaced_unreleased: Option<String>,
 }
 
 /// GH #114: the per-target result of `update_all_installed`.
@@ -3586,6 +3751,22 @@ impl PluginReconcileReport {
                     ranges = agent_doc_fs::jetbrains_install::JETBRAINS_SUPPORTED_RANGES,
                 )),
                 _ => None,
+            })
+            .collect()
+    }
+
+    /// GH #392: one warning per target whose unreleased higher build a release
+    /// install replaced, naming both versions and how to restore a local build.
+    pub fn replaced_unreleased_warnings(&self) -> Vec<String> {
+        self.targets
+            .iter()
+            .filter_map(|target| {
+                let replaced = target.replaced_unreleased.as_deref()?;
+                Some(format!(
+                    "WARNING: {label}: replaced unreleased plugin build v{replaced} with release plugin v{version}; its higher update number did not prove it carried this release's plugin content, and it is not the generation this agent-doc binary pairs with. To run a local build again, reinstall it from its checkout with `agent-doc plugin install jetbrains --local`.",
+                    label = target.label,
+                    version = target.version,
+                ))
             })
             .collect()
     }
@@ -3675,6 +3856,9 @@ impl PluginReconcileReport {
         let mut lines = vec![format!(
             "Editor plugins reconciled with the v{release} release: {counts}."
         )];
+        // GH #392: an overwritten unreleased build is named whatever the
+        // live-load outcome, so the verdict never hides what was replaced.
+        lines.extend(self.replaced_unreleased_warnings());
         for target in &self.targets {
             let (label, version) = (&target.label, &target.version);
             let line = match (target.family, &target.outcome) {
@@ -3748,8 +3932,17 @@ impl PluginReconcileReport {
             .targets
             .iter()
             .any(|target| target.outcome.restart_free_unavailable());
+        let replaced_unreleased = self
+            .targets
+            .iter()
+            .filter_map(|target| {
+                let replaced = target.replaced_unreleased.as_deref()?;
+                Some(format!("{}@{replaced}->{}", target.label, target.version))
+            })
+            .collect::<Vec<_>>()
+            .join(",");
         format!(
-            "plugin_upgrade_summary release={release} {counts} restart_targets={restart_targets:?} restart_free_unavailable={permanent}"
+            "plugin_upgrade_summary release={release} {counts} restart_targets={restart_targets:?} restart_free_unavailable={permanent} replaced_unreleased={replaced_unreleased:?}"
         )
     }
 }
@@ -3910,24 +4103,45 @@ pub fn update_all_installed() -> Result<PluginReconcileReport> {
                 version: installed_jetbrains_plugin_version(&target)
                     .unwrap_or_else(|| "unknown".to_string()),
                 outcome: PluginTargetOutcome::UnsupportedPlatform { build },
+                replaced_unreleased: None,
             });
         }
         for entry in plan.entries {
-            let mut record = |outcome| {
+            let mut record = |outcome, replaced_unreleased| {
                 report.targets.push(PluginTargetReport {
                     family: PluginEditorFamily::JetBrains,
                     label: jetbrains_target_label(&entry.target),
                     version: entry.version.clone(),
                     outcome,
+                    replaced_unreleased,
                 })
             };
-            if entry.decision == JetbrainsReleaseDecision::Current {
-                record(PluginTargetOutcome::Unchanged);
-                continue;
+            match &entry.decision {
+                JetbrainsReleaseDecision::Current => {
+                    record(PluginTargetOutcome::Unchanged, None);
+                    continue;
+                }
+                JetbrainsReleaseDecision::KeepPaired { installed_version } => {
+                    eprintln!(
+                        "{}",
+                        kept_paired_jetbrains_build_message(
+                            &entry.target,
+                            installed_version,
+                            &entry.version
+                        )
+                    );
+                    record(PluginTargetOutcome::Unchanged, None);
+                    continue;
+                }
+                JetbrainsReleaseDecision::Replace { .. }
+                | JetbrainsReleaseDecision::ReplaceUnreleased { .. } => {}
             }
             let release = &plan.releases[&entry.range];
             match install_jetbrains_into(release, &entry.target) {
-                Ok(outcome) => record(PluginTargetOutcome::from_jetbrains(&outcome)),
+                Ok(installed) => record(
+                    PluginTargetOutcome::from_jetbrains(&installed.outcome),
+                    installed.replaced_unreleased,
+                ),
                 Err(error) => errors.push(format!("{}: {error:#}", entry.target.display())),
             }
         }
@@ -3971,6 +4185,7 @@ pub fn update_all_installed() -> Result<PluginReconcileReport> {
                             label: code.to_string(),
                             version,
                             outcome,
+                            replaced_unreleased: None,
                         });
                     }
                 }
@@ -5080,7 +5295,7 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
             (
                 entry.asset_name.clone(),
                 entry.version.clone(),
-                entry.decision,
+                entry.decision.clone(),
             )
         };
         use super::JetbrainsReleaseDecision::{Current, Replace};
@@ -5126,6 +5341,216 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
         assert_eq!(plan.releases.len(), 2);
     }
 
+    /// GH #392: `agent-doc upgrade` to v0.35.568 left a local `0.2.914` dev
+    /// build in place because it out-numbered the release's 263 asset
+    /// `0.2.911`, although it lacked the release's `MarkdownBracketWrap*`
+    /// classes. A higher number is kept only when it is the generation this
+    /// binary pairs with; otherwise it is an unreleased build and is replaced.
+    #[test]
+    fn higher_unpaired_build_is_replaced_and_paired_build_is_kept() {
+        use super::JetbrainsReleaseDecision::{Current, KeepPaired, Replace, ReplaceUnreleased};
+        let line = JetbrainsPackageRange::Modular263;
+        let decide = |installed: &str, paired: Option<&str>| {
+            super::jetbrains_release_decision(Some((line, installed)), line, "0.2.911", paired)
+                .unwrap()
+        };
+        // The issue's exact shape: the release binary pairs with 0.2.911.
+        assert_eq!(
+            decide("0.2.914", Some("0.2.911")),
+            ReplaceUnreleased {
+                installed_version: "0.2.914".into()
+            }
+        );
+        // No recorded pairing proves nothing about a higher number either.
+        assert_eq!(
+            decide("0.2.914", None),
+            ReplaceUnreleased {
+                installed_version: "0.2.914".into()
+            }
+        );
+        // A binary built beside its own unreleased plugin keeps that plugin.
+        assert_eq!(
+            decide("0.2.914", Some("0.2.914")),
+            KeepPaired {
+                installed_version: "0.2.914".into()
+            }
+        );
+        // GH #295: an equal number is the same generation; no replacement.
+        assert_eq!(decide("0.2.911", Some("0.2.911")), Current);
+        assert_eq!(decide("0.2.911", Some("0.2.914")), Current);
+        assert_eq!(
+            decide("0.2.905", Some("0.2.911")),
+            Replace { cross_line: false }
+        );
+        // The other line is replaced whatever its number, paired or not.
+        assert_eq!(
+            super::jetbrains_release_decision(
+                Some((JetbrainsPackageRange::Classic242To261, "0.2.999")),
+                line,
+                "0.2.911",
+                Some("0.2.999"),
+            )
+            .unwrap(),
+            Replace { cross_line: true }
+        );
+    }
+
+    /// GH #392: the reconcile plan no longer reports a higher unreleased build
+    /// as current (which produced `unchanged=1` and no download), while the
+    /// equal-number target stays `Current` without fetching anything.
+    #[test]
+    fn update_all_plan_marks_a_higher_unreleased_263_build_for_replacement() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().join("JetBrains");
+        let unreleased = root.join("IntelliJIdea2026.3/plugins");
+        // A number no real build of this binary will ever pair with.
+        install_test_jar(&unreleased, "agent.doc-9.9.914.jar");
+        let current = root.join("RustRover2026.3/plugins");
+        install_test_jar(&current, "agent.doc-0.2.512.jar");
+
+        let plan = super::plan_jetbrains_release_reconcile(
+            vec![unreleased.clone(), current.clone()],
+            |_| Ok(triple_range_release()),
+        );
+        assert!(plan.errors.is_empty(), "{:?}", plan.errors);
+        let decision = |target: &Path| {
+            plan.entries
+                .iter()
+                .find(|entry| entry.target == target)
+                .map(|entry| (entry.version.clone(), entry.decision.clone()))
+                .unwrap()
+        };
+        assert_eq!(
+            decision(&unreleased),
+            (
+                "0.2.512".to_string(),
+                super::JetbrainsReleaseDecision::ReplaceUnreleased {
+                    installed_version: "9.9.914".into()
+                }
+            )
+        );
+        assert_eq!(
+            decision(&current),
+            (
+                "0.2.512".to_string(),
+                super::JetbrainsReleaseDecision::Current
+            )
+        );
+    }
+
+    /// GH #392: the install-time guard keeps the paired build (no install)
+    /// and lets the release replace an unpaired higher build, naming it on
+    /// stderr and in `ops.log` instead of claiming the target is current.
+    #[test]
+    fn release_install_guard_names_the_unreleased_build_it_replaces() {
+        let tmp = TempDir::new().unwrap();
+        let target = tmp.path().join("JetBrains/IntelliJIdea2026.3/plugins");
+        install_test_jar(&target, "agent.doc-0.2.914.jar");
+        let line = JetbrainsPackageRange::Modular263;
+
+        super::LOGGED_UPGRADE_DECISIONS.with(|log| log.borrow_mut().clear());
+        assert_eq!(
+            super::jetbrains_release_install_guard(&target, line, Some("0.2.911"), "0.2.911")
+                .unwrap(),
+            Some(Some("0.2.914".to_string()))
+        );
+        assert_eq!(
+            super::jetbrains_release_install_guard(&target, line, Some("0.2.914"), "0.2.911")
+                .unwrap(),
+            None,
+            "the binary's own paired generation must be kept"
+        );
+        assert_eq!(
+            super::jetbrains_release_install_guard(&target, line, Some("0.2.914"), "0.2.914")
+                .unwrap(),
+            Some(None),
+            "an equal number proceeds to the byte comparison with nothing to name"
+        );
+        let logged = super::LOGGED_UPGRADE_DECISIONS.with(|log| log.borrow().clone());
+        assert_eq!(logged.len(), 2, "{logged:?}");
+        assert!(
+            logged[0].starts_with(
+                "plugin_release_decision outcome=replace_unreleased installed=0.2.914 paired=0.2.911 asset=0.2.911 target="
+            ),
+            "{logged:?}"
+        );
+        assert!(
+            logged[1].starts_with(
+                "plugin_release_decision outcome=kept_paired installed=0.2.914 asset=0.2.911 target="
+            ),
+            "{logged:?}"
+        );
+
+        let message = super::replaced_unreleased_jetbrains_build_message(
+            &target,
+            Some("0.2.911"),
+            "0.2.914",
+            "0.2.911",
+        );
+        for needle in [
+            "IntelliJIdea2026.3 held JetBrains plugin v0.2.914, an unreleased build",
+            "pairs with v0.2.911",
+            "replaced with release plugin v0.2.911",
+            "agent-doc plugin install jetbrains --local --plugins-dir",
+        ] {
+            assert!(message.contains(needle), "missing {needle:?}: {message}");
+        }
+    }
+
+    /// GH #392: the verdict names the replaced unreleased build in the summary
+    /// and in the `plugin_upgrade_summary` record, and never counts it as
+    /// unchanged.
+    #[test]
+    fn reconcile_summary_names_a_replaced_unreleased_build() {
+        use super::{PluginEditorFamily::JetBrains, PluginTargetOutcome as O};
+        let mut replaced = reconcile_target(
+            JetBrains,
+            "IntelliJIdea2026.3",
+            "0.2.911",
+            O::RestartRequired { permanent: true },
+        );
+        replaced.replaced_unreleased = Some("0.2.914".to_string());
+        let report = super::PluginReconcileReport {
+            targets: vec![replaced],
+        };
+        assert_eq!(report.changed(), 1);
+        let summary = report.summary("0.35.568");
+        assert!(!summary.contains("already match"), "{summary}");
+        let warnings = report.replaced_unreleased_warnings();
+        assert_eq!(warnings.len(), 1, "{summary}");
+        assert!(
+            warnings[0].starts_with(
+                "WARNING: IntelliJIdea2026.3: replaced unreleased plugin build v0.2.914 with release plugin v0.2.911;"
+            ),
+            "{summary}"
+        );
+        assert!(summary.contains(&warnings[0]), "{summary}");
+        assert!(summary.contains("Restart IntelliJIdea2026.3"), "{summary}");
+
+        let logged = report.ops_log_line("0.35.568");
+        for field in [
+            "unchanged=0",
+            "restart_required=1",
+            "replaced_unreleased=\"IntelliJIdea2026.3@0.2.914->0.2.911\"",
+        ] {
+            assert!(logged.contains(field), "missing {field}: {logged}");
+        }
+        let plain = super::PluginReconcileReport {
+            targets: vec![reconcile_target(
+                JetBrains,
+                "IntelliJIdea2026.3",
+                "0.2.911",
+                O::Unchanged,
+            )],
+        };
+        assert!(
+            plain
+                .ops_log_line("0.35.568")
+                .ends_with("replaced_unreleased=\"\"")
+        );
+        assert!(plain.replaced_unreleased_warnings().is_empty());
+    }
+
     /// GH #255: after installation both 262 and 263 use the canonical plugin
     /// directory and the same `agent.doc-<version>.jar` name. The target's
     /// proven platform line must keep an equal release current on both builds.
@@ -5166,14 +5591,22 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
             super::JetbrainsReleaseDecision::Current
         );
         assert_eq!(
-            super::jetbrains_release_decision_for(
-                &modern_newer,
+            super::jetbrains_release_decision(
+                super::installed_jetbrains_package(
+                    &modern_newer,
+                    JetbrainsPackageRange::Modular263
+                )
+                .as_ref()
+                .map(|(range, version)| (*range, version.as_str())),
                 JetbrainsPackageRange::Modular263,
                 "0.2.592",
+                Some("0.2.593"),
             )
             .unwrap(),
-            super::JetbrainsReleaseDecision::Current,
-            "a newer shared-jar 263 install must keep the downgrade guard"
+            super::JetbrainsReleaseDecision::KeepPaired {
+                installed_version: "0.2.593".into()
+            },
+            "a newer shared-jar 263 install stays on its own line, and the binary's paired generation is kept"
         );
     }
 
@@ -7214,6 +7647,7 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
             label: label.to_string(),
             version: version.to_string(),
             outcome,
+            replaced_unreleased: None,
         }
     }
 

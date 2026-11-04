@@ -41,6 +41,13 @@ Rust binary.
   warning names the build, the supported ranges and the version left
   installed, with no retry or manual-install advice, and the upgrade exits 0. Update numbers are compared only within one line; a target
   holding the other line is always replaced with its own line's package.
+  Within one line an update number is an ordering, not a content identity
+  (GH #392): a number below the asset is replaced, an equal number is the same
+  generation, and a number ABOVE the asset is kept only when it is the
+  generation the running binary pairs with on that line. Any other higher
+  number is an unreleased build and is replaced with the release asset; the
+  verdict names the replaced build and how to reinstall a local one, and never
+  counts it as `unchanged`.
 - A new agent-doc release retains each JetBrains package's existing update
   number when its recorded `pluginSourceDigest` still matches the source tree.
   The digest covers runtime/main source sets and artifact-shaping build metadata,

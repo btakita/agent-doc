@@ -155,7 +155,7 @@ fn attach_failure_remedy(reason: &str) -> Option<&'static str> {
         )
     } else if reason.contains("not_agent_doc_document") {
         Some(
-            "That file is not an agent-doc session document (no agent_doc_* frontmatter, no <!-- agent: markers).",
+            "That file is not an agent-doc session document: it needs agent-doc frontmatter (agent_doc_* fields) or a [documents] include match in .agent-doc/config.toml; <!-- agent: markers in the body do not opt it in.",
         )
     } else if reason.contains("retained-reseed-missing-settled-shadow") {
         Some(

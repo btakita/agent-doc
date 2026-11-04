@@ -38,7 +38,7 @@
         "reason": "not_agent_doc_document"
       },
       "expected": {
-        "remedy": "That file is not an agent-doc session document (no agent_doc_* frontmatter, no <!-- agent: markers).",
+        "remedy": "That file is not an agent-doc session document: it needs agent-doc frontmatter (agent_doc_* fields) or a [documents] include match in .agent-doc/config.toml; <!-- agent: markers in the body do not opt it in.",
         "status_token": "not_agent_doc_document",
         "needs_operator_surface": false,
         "needs_liveness_republish": false,

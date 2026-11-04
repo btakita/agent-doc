@@ -1492,6 +1492,16 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 // the same canonical edit again. The remote apply path updates
                 // the shadow and schedules its own post-projection drain.
                 if (CrdtReplicaManager.isApplyingRemote(filePath)) return
+                // `liveeditorwatcher`: a VFS reload (for example after `git reset`)
+                // mutates every IN-MEMORY Document, not only open tabs. It may
+                // refresh an attached replica, but must never adopt a document no
+                // editor surface shows: that path registered ~70 fixtures, specs,
+                // and runbooks and projected controller canonical over them.
+                if (!nonOperatorEditorEventMayAdoptUtil(
+                        hasAttachedForwarder = forwarders[filePath]?.attached == true,
+                        shownOnEditorSurface = EditorOpenFileSurface.find(project, filePath) != null,
+                    )
+                ) return
                 // A clean File Cache Conflict reload may be the operator
                 // accepting a Lazily-retained external disk candidate. Resolve
                 // on the worker; exact CAS/rebootstrap rules keep ordinary
@@ -6323,7 +6333,9 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             reason.contains("socket_unavailable") ->
                 "No project controller is listening for that document's project root; start or recycle it."
             reason.contains("not_agent_doc_document") ->
-                "That file is not an agent-doc session document (no agent_doc_* frontmatter, no <!-- agent: markers)."
+                "That file is not an agent-doc session document: it needs agent-doc frontmatter " +
+                    "(agent_doc_* fields) or a [documents] include match in .agent-doc/config.toml; " +
+                    "<!-- agent: markers in the body do not opt it in."
             reason.contains("retained-reseed-missing-settled-shadow") ->
                 "The restarted editor has no settled ancestor from which it can safely seed the retained " +
                     "controller projection. Copy any unsaved text, close this editor tab, run `agent-doc repair " +
@@ -6467,6 +6479,16 @@ internal fun isAgentDocDocumentTextUtil(text: CharSequence): Boolean =
         text.contains("agent_doc_format") ||
         text.contains("agent_doc_write") ||
         text.contains("<!-- agent:")
+
+/**
+ * Whether a non-operator Document mutation may (re)register a replica
+ * (`liveeditorwatcher`). Refreshing an attached replica is always allowed; adopting
+ * an unattached document requires that an editor surface currently shows it.
+ */
+internal fun nonOperatorEditorEventMayAdoptUtil(
+    hasAttachedForwarder: Boolean,
+    shownOnEditorSurface: Boolean,
+): Boolean = hasAttachedForwarder || shownOnEditorSurface
 
 /** Project-internal `.agent-doc/` paths are state/artifacts, never user documents. */
 internal fun isAgentDocUserDocumentPathUtil(filePath: String): Boolean =

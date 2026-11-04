@@ -198,3 +198,13 @@ class AgentDocDocumentTextTest {
         )
     }
 }
+
+/** `liveeditorwatcher`: a reload of a document no tab shows must not adopt it. */
+class NonOperatorReloadAdoptionTest {
+    @Test
+    fun `a reloaded document no editor shows is never adopted`() {
+        assertFalse(nonOperatorEditorEventMayAdoptUtil(hasAttachedForwarder = false, shownOnEditorSurface = false))
+        assertTrue(nonOperatorEditorEventMayAdoptUtil(hasAttachedForwarder = false, shownOnEditorSurface = true))
+        assertTrue(nonOperatorEditorEventMayAdoptUtil(hasAttachedForwarder = true, shownOnEditorSurface = false))
+    }
+}

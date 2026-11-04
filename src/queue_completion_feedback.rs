@@ -150,9 +150,22 @@ fn report_complete_with_lock_wait(
     // process stops after this write, reconciliation can reconstruct the cell
     // and retry the exact state transition without consulting agent history.
     agent_doc_queue_io::claim_release_receipt::capture_response(file, &claim, response)?;
-    // Join repository facts to this exact claim before it can become
+    // Join the result class to this exact claim before it can become
     // Reported. A crash can leave running repository debt, never a prose-only
-    // completion that is eligible for closeout.
+    // completion that is eligible for closeout. The attempt is (re-)keyed from
+    // the live claim first: a claim that followed an admission edit would
+    // otherwise find no lineage attempt for its current text.
+    agent_doc_queue_io::queue_lineage::record_claim(file, &claim)?;
+    if repository.is_none() {
+        // `--prose-only` is the worker's explicit, durable declaration
+        // (`#reportedcloseoutfacts`); without it an attempt with no
+        // repository facts is unknown, never prose.
+        agent_doc_queue_io::queue_lineage::record_prose_only(
+            file,
+            &claim,
+            "prose-only result declared by queue report-complete",
+        )?;
+    }
     if let Some(repository) = repository {
         agent_doc_queue_io::queue_lineage::record(
             file, &claim.item_text, claim.generation,

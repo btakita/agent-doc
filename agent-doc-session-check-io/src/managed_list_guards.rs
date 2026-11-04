@@ -383,7 +383,11 @@ mod tests {
             claimed.generation,
         )
         .unwrap();
-        agent_doc_queue_io::queue_claim::report_attempt(&file, item, Some(claimed.generation))
+        let reported =
+            agent_doc_queue_io::queue_claim::report_attempt(&file, item, Some(claimed.generation))
+                .unwrap();
+        // `#reportedcloseoutfacts`: what `report-complete --prose-only` records.
+        agent_doc_queue_io::queue_lineage::record_prose_only(&file, &reported, "review posted")
             .unwrap();
 
         let commit = |n: u64| {

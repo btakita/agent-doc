@@ -5192,7 +5192,10 @@ enum QueueAction {
         /// Exact queue-attempt generation
         #[arg(long)]
         generation: u64,
-        /// created|attached|dirty|committed|pushed|integrated|released|cancelled|retained|removed
+        /// created|attached|dirty|committed|pushed|integrated|released|cancelled|retained|removed|prose-only.
+        /// `prose-only` is the explicit declaration that the attempt changed
+        /// no repository; without it (or repository facts) a reported row
+        /// cannot be consumed.
         #[arg(long)]
         event: String,
         #[arg(long)]
@@ -8965,13 +8968,12 @@ fn try_main() -> anyhow::Result<()> {
                                     &file.display().to_string(),
                                     &outcome.claim.item_text,
                                 );
-                            let next = match agent_doc_queue_io::queue_lineage::require_integrated_repo_work(
+                            let next = match agent_doc_queue_io::queue_lineage::require_integrated_claim_repo_work(
                                 &file,
-                                &outcome.claim.item_text,
-                                outcome.claim.generation,
+                                &outcome.claim,
                             ) {
                                 Ok(()) => format!(
-                                    "integration proof is verified (or this attempt is prose-only); now run: {closeout}"
+                                    "integration proof is verified (or this attempt is declared prose-only); now run: {closeout}"
                                 ),
                                 Err(err) => err.to_string(),
                             };
@@ -9135,7 +9137,7 @@ fn try_main() -> anyhow::Result<()> {
                 detail,
                 json,
             } => {
-                let attempt = agent_doc_queue_io::queue_lineage::record(
+                let attempt = agent_doc_queue_io::queue_lineage::record_following_live_claim(
                     &file,
                     &item,
                     generation,
@@ -9172,7 +9174,7 @@ fn try_main() -> anyhow::Result<()> {
                 } else {
                     let report = agent_doc_queue_io::queue_lineage::query(
                         &file,
-                        Some(&item),
+                        Some(&attempt.item_text),
                         Some(generation),
                     )?;
                     println!(

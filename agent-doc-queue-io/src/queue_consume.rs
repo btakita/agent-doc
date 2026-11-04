@@ -763,11 +763,7 @@ pub fn acknowledge_paused_free_text_queue_head_with_selector_and_outcome(
                     attempt.generation,
                 );
             }
-            crate::queue_lineage::require_integrated_repo_work(
-                file,
-                &attempt.item_text,
-                attempt.generation,
-            )?;
+            crate::queue_lineage::require_integrated_claim_repo_work(file, attempt)?;
         }
         if agent_doc_document::queue_projection::operator_action_holds_row(
             &row.lineage,
@@ -2149,7 +2145,8 @@ fn release_claims_on_struck_heads(file: &Path, before: &str, struck_heads: &[Str
 /// designated sink (`#subagentintegrationproof`). Reported attempts consume no
 /// worker capacity, but they remain coordinator-owned closeout debt until this
 /// check succeeds. Attempts whose lineage has no repository facts are
-/// explicitly prose-only and remain closable.
+/// closable only with an explicit prose-only declaration
+/// (`#reportedcloseoutfacts`).
 pub fn require_integrated_reported_repo_work_for_heads(
     file: &Path,
     content: &str,
@@ -2169,11 +2166,7 @@ pub fn require_integrated_reported_repo_work_for_heads(
         {
             continue;
         }
-        crate::queue_lineage::require_integrated_repo_work(
-            file,
-            &claim.item_text,
-            claim.generation,
-        )?;
+        crate::queue_lineage::require_integrated_claim_repo_work(file, &claim)?;
         verified.push((claim.identity, claim.generation));
     }
 
@@ -2764,11 +2757,7 @@ pub fn id_head_dispatch_guard_for_caller(
                          from that session."
                     );
                 }
-                crate::queue_lineage::require_integrated_repo_work(
-                    file,
-                    &claim.item_text,
-                    generation,
-                )?;
+                crate::queue_lineage::require_integrated_claim_repo_work(file, claim)?;
                 evidence.reported = Some((owner.clone(), generation));
             }
         }
@@ -5121,7 +5110,10 @@ mod core_tests {
             claim.generation,
         )
         .unwrap();
-        crate::queue_claim::report_attempt(&doc, target, Some(claim.generation)).unwrap();
+        let reported_prose = crate::queue_claim::report_attempt(&doc, target, Some(claim.generation)).unwrap();
+        // `#reportedcloseoutfacts`: the worker declared a prose-only result.
+        crate::queue_lineage::record_prose_only(&doc, &reported_prose, "test prose result")
+            .unwrap();
 
         let unfenced = super::acknowledge_paused_free_text_queue_head_with_outcome(
             &doc,
@@ -8205,7 +8197,10 @@ mod core_tests {
             "Done; the backlog item was reaped.",
         )
         .unwrap();
-        crate::queue_claim::report_attempt(&doc, item, Some(running.generation)).unwrap();
+        let reported_prose = crate::queue_claim::report_attempt(&doc, item, Some(running.generation)).unwrap();
+        // `#reportedcloseoutfacts`: the worker declared a prose-only result.
+        crate::queue_lineage::record_prose_only(&doc, &reported_prose, "test prose result")
+            .unwrap();
         crate::claim_release_receipt::capture_response_for_attempt(
             &doc,
             item,
@@ -8391,7 +8386,10 @@ mod core_tests {
         let running =
             crate::queue_claim::start_attempt(doc, item, owner, "/root/w", 600, claimed.generation)
                 .unwrap();
-        crate::queue_claim::report_attempt(doc, item, Some(running.generation)).unwrap();
+        let reported_prose = crate::queue_claim::report_attempt(doc, item, Some(running.generation)).unwrap();
+        // `#reportedcloseoutfacts`: the worker declared a prose-only result.
+        crate::queue_lineage::record_prose_only(doc, &reported_prose, "test prose result")
+            .unwrap();
         let ledger = crate::queue_claim::load_ledger(doc).unwrap();
         assert_eq!(ledger.claims.len(), 1);
         assert_eq!(
@@ -9610,6 +9608,8 @@ mod core_tests {
         let reported =
             crate::queue_claim::report_attempt(&doc, "#altshiftmenu", Some(claimed.generation))
                 .unwrap();
+        // `#reportedcloseoutfacts`: the worker declared a prose-only result.
+        crate::queue_lineage::record_prose_only(&doc, &reported, "test prose result").unwrap();
         assert_eq!(
             reported.state,
             agent_doc_queue::queue_claim::QueueClaimState::Reported
@@ -10371,7 +10371,10 @@ Old.
         let dir = tempfile::tempdir().unwrap();
         let doc = reported_todo_row_doc(dir.path());
         let generation = running_claim(&doc, "#ahfe", "subagent:ahfe");
-        crate::queue_claim::report_attempt(&doc, "#ahfe", Some(generation)).unwrap();
+        let reported_prose = crate::queue_claim::report_attempt(&doc, "#ahfe", Some(generation)).unwrap();
+        // `#reportedcloseoutfacts`: the worker declared a prose-only result.
+        crate::queue_lineage::record_prose_only(&doc, &reported_prose, "test prose result")
+            .unwrap();
 
         assert!(acknowledge_open_id_backed_queue_head(&doc, "ahfe").unwrap());
 
@@ -10446,7 +10449,10 @@ Old.
             parent,
             "subagent:vscode_smoke",
             |generation| {
-                crate::queue_claim::report_attempt(&doc, parent, Some(generation)).unwrap();
+                let reported_prose = crate::queue_claim::report_attempt(&doc, parent, Some(generation)).unwrap();
+                // `#reportedcloseoutfacts`: the worker declared a prose-only result.
+                crate::queue_lineage::record_prose_only(&doc, &reported_prose, "test prose result")
+                    .unwrap();
             },
         );
 
@@ -10742,7 +10748,10 @@ Old.
         .unwrap();
 
         let reported_generation = running_claim(&doc, "#reported", "subagent:reported");
-        crate::queue_claim::report_attempt(&doc, "#reported", Some(reported_generation)).unwrap();
+        let reported_prose = crate::queue_claim::report_attempt(&doc, "#reported", Some(reported_generation)).unwrap();
+        // `#reportedcloseoutfacts`: the worker declared a prose-only result.
+        crate::queue_lineage::record_prose_only(&doc, &reported_prose, "test prose result")
+            .unwrap();
         let sibling_generation =
             running_claim(&doc, "keep the sibling worker running", "subagent:sibling");
 
@@ -10800,7 +10809,10 @@ Old.
             "#review [#adr0043-publish]",
             "subagent:adr0043-review",
         );
-        crate::queue_claim::report_attempt(&doc, "#review [#adr0043-publish]", Some(generation))
+        let reported_prose = crate::queue_claim::report_attempt(&doc, "#review [#adr0043-publish]", Some(generation))
+            .unwrap();
+        // `#reportedcloseoutfacts`: the worker declared a prose-only result.
+        crate::queue_lineage::record_prose_only(&doc, &reported_prose, "test prose result")
             .unwrap();
         assert_eq!(
             id_backed_head_node_keys(content, "adr0043-publish")
@@ -10986,7 +10998,10 @@ Old.
             "#publish-session-contracts",
             "subagent:publish-session-contracts",
         );
-        crate::queue_claim::report_attempt(&doc, "#publish-session-contracts", Some(generation))
+        let reported_prose = crate::queue_claim::report_attempt(&doc, "#publish-session-contracts", Some(generation))
+            .unwrap();
+        // `#reportedcloseoutfacts`: the worker declared a prose-only result.
+        crate::queue_lineage::record_prose_only(&doc, &reported_prose, "test prose result")
             .unwrap();
 
         assert!(acknowledge_open_id_backed_queue_head(&doc, "publish-session-contracts").unwrap());

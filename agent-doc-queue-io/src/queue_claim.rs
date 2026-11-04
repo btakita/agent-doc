@@ -248,6 +248,26 @@ fn load_from_conn(
     QueueClaimLedger::from_state_payload(&record.payload_json)
 }
 
+/// Store `ledger` verbatim, bypassing claim transitions, so tests can stage
+/// an exact claim (followed texts, reported state) for IO that reads it.
+#[cfg(test)]
+pub(crate) fn store_ledger_for_test(file: &Path, ledger: &QueueClaimLedger) -> Result<()> {
+    let (root, document_hash, canonical_path) =
+        state_identity(file)?.context("test document is not inside an agent-doc project")?;
+    let conn = agent_doc_sqlite::state_store::open_state_db(&root)?;
+    agent_doc_sqlite::state_store::upsert_queue_document_state_in_db(
+        &conn,
+        &agent_doc_sqlite::state_store::QueueDocumentStateRecord {
+            document_hash,
+            state_kind: QUEUE_CLAIMS_STATE_KIND.to_string(),
+            canonical_path,
+            payload_json: serde_json::to_string(ledger)?,
+            updated_at_secs: now_secs(),
+        },
+    )?;
+    Ok(())
+}
+
 /// Apply `mutate` to the document's ledger in one immediate transaction.
 fn mutate_ledger<T>(
     file: &Path,
@@ -1778,7 +1798,22 @@ pub fn reported_claim_closeout(
     if claim.state != agent_doc_queue::queue_claim::QueueClaimState::Reported {
         return None;
     }
-    reported_claim_closeout_in(file, claim, crate::queue_lineage::load(file).ok().as_ref())
+    reported_claim_closeout_in(file, claim, load_lineage_for_closeout(file).as_ref())
+}
+
+/// The lineage ledger for closeout classification. An unreadable ledger is
+/// reported and classified as missing lineage, never guessed prose-only.
+fn load_lineage_for_closeout(file: &Path) -> Option<crate::queue_lineage::QueueLineageLedger> {
+    match crate::queue_lineage::load(file) {
+        Ok(ledger) => Some(ledger),
+        Err(err) => {
+            eprintln!(
+                "[queue-claims] WARNING: could not read queue lineage for {}; reported closeouts treat it as missing lineage: {err:#}",
+                file.display()
+            );
+            None
+        }
+    }
 }
 
 /// [`reported_claim_closeout`] over a lineage ledger the caller loaded once;
@@ -1793,13 +1828,7 @@ fn reported_claim_closeout_in(
         return None;
     }
     let evidence = lineage
-        .map(|ledger| {
-            crate::queue_lineage::reported_repo_evidence_in(
-                ledger,
-                &claim.item_text,
-                claim.generation,
-            )
-        })
+        .map(|ledger| crate::queue_lineage::reported_claim_evidence_in(ledger, claim))
         .unwrap_or(ReportedRepoEvidence::LineageMissing);
     agent_doc_queue::reported_closeout::reported_claim_closeout(
         &file.display().to_string(),
@@ -1816,7 +1845,7 @@ fn lineage_for_reported(
     claims
         .iter()
         .any(|claim| claim.state == agent_doc_queue::queue_claim::QueueClaimState::Reported)
-        .then(|| crate::queue_lineage::load(file).ok())
+        .then(|| load_lineage_for_closeout(file))
         .flatten()
 }
 
@@ -1841,6 +1870,28 @@ pub fn reported_claim_closeouts_for_content(
         .collect())
 }
 
+/// `#reportedcloseoutstall`: the reported closeout that keeps a closeout
+/// report's continuation required, or `None` when every reported attempt is
+/// closed or already waiting on its open operator request (`agent:todo`).
+pub fn pending_reported_closeout_for_content(
+    file: &Path,
+    content: &str,
+) -> Result<Option<agent_doc_queue::reported_closeout::PendingReportedCloseout>> {
+    let obligations = reported_claim_closeouts_for_content(file, content)?
+        .into_iter()
+        .map(|(claim, closeout)| {
+            agent_doc_queue::reported_closeout::ReportedCloseoutObligation::new(&claim, closeout)
+        })
+        .collect::<Vec<_>>();
+    if obligations.is_empty() {
+        return Ok(None);
+    }
+    Ok(agent_doc_queue::reported_closeout::pending_reported_closeout(
+        &obligations,
+        &agent_doc_element::todo::open_todo_ids(content),
+    ))
+}
+
 fn claim_assessment(claim: &QueueClaim, owner_session_state: &str) -> (&'static str, String) {
     use agent_doc_queue::queue_claim::QueueClaimState;
 
@@ -1851,7 +1902,7 @@ fn claim_assessment(claim: &QueueClaim, owner_session_state: &str) -> (&'static 
         ),
         QueueClaimState::Reported => (
             "reported_pending_integration",
-            "The worker reported completion; coordinator integration, verification, and queue closeout are still pending. `reported_closeout` lists the exact commands, and `next_action_argv` is the first.".to_string(),
+            "The worker reported completion; coordinator integration, verification, and queue closeout are still pending. `reported_closeout` lists the exact commands, and `next_action_argv` is the first. When it is absent, settle `reported_closeout.decision` first (present `reported_closeout.operator_request_packet` when only the operator can).".to_string(),
         ),
         QueueClaimState::Claimed => (
             if owner_session_state == "ended" {
@@ -2723,7 +2774,12 @@ mod tests {
         let _reported_at = pin_claim_clock_for_current_thread(pinned + 30);
         let reported = report_attempt(&doc, "review the pull request", Some(1)).unwrap();
         assert_eq!(reported.reported_at_secs, Some(pinned + 30));
-        report_attempt(&doc, "#reportedid", Some(1)).unwrap();
+        let reported_id = report_attempt(&doc, "#reportedid", Some(1)).unwrap();
+        // `#reportedcloseoutfacts`: both workers declared a prose-only result
+        // (what `queue report-complete --prose-only` records).
+        for claim in [&reported, &reported_id] {
+            crate::queue_lineage::record_prose_only(&doc, claim, "test prose result").unwrap();
+        }
         {
             // A repeated report keeps the first report time.
             let _later = pin_claim_clock_for_current_thread(pinned + 90);

@@ -261,7 +261,7 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
             .collect::<Vec<_>>();
     let reported_closeout_len = queue_reported_closeout
         .iter()
-        .map(|obligation| obligation.closeout.steps.len())
+        .map(|obligation| obligation.required_commands().len())
         .sum::<usize>();
     let queue_lifecycle_required_commands = queue_lifecycle_required_commands(
         &queue_reported_closeout,
@@ -1941,6 +1941,77 @@ Done.
     /// before the claim/spawn steps for the next heads. Observed 2026-11-04:
     /// the plan listed only new claims plus finalize, so nine reported rows
     /// sat for 3h-42h while every cycle started new work.
+    /// `#reportedcloseoutfacts`: a reported attempt with no recorded result
+    /// class is never planned as a consume. Its decision leads the closeout
+    /// phase, and the phase still precedes every new claim step.
+    #[test]
+    fn plan_leads_an_undeclared_reported_closeout_with_its_decision() {
+        let _prompt = EnvGuard::unset("AGENT_DOC_HARNESS_PROMPT");
+        let dir = setup_project();
+        let doc = dir.path().join("plan.md");
+        let content = subagents_queue_doc().replace(
+            "- Align the Close button.\n",
+            "- Align the Close button.\n- Rename the save action.\n",
+        );
+        std::fs::write(&doc, &content).unwrap();
+        let item = "Fix the claim button.";
+        let (_, claimed) =
+            agent_doc_queue_io::queue_claim::claim(&doc, item, "subagent:fix", 600).unwrap();
+        agent_doc_queue_io::queue_claim::start_attempt(
+            &doc,
+            item,
+            "subagent:fix",
+            "worker:fix",
+            600,
+            claimed.generation,
+        )
+        .unwrap();
+        agent_doc_queue_io::queue_claim::report_attempt(&doc, item, Some(claimed.generation))
+            .unwrap();
+        let content = std::fs::read_to_string(&doc).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(&content), Some(&content)).unwrap();
+
+        let plan = build(&doc).unwrap();
+
+        let closeout = &plan.queue_reported_closeout[0].closeout;
+        assert_eq!(
+            closeout.shape,
+            agent_doc_queue::reported_closeout::ReportedCloseoutShape::MissingFacts
+        );
+        assert!(
+            plan.required_commands[0].contains("decide first"),
+            "{:#?}",
+            plan.required_commands
+        );
+        assert!(
+            plan.required_commands[0].contains("repository_work | prose_only"),
+            "{:#?}",
+            plan.required_commands
+        );
+        let closeout_len = plan.queue_reported_closeout[0].required_commands().len();
+        assert_eq!(closeout_len, closeout.steps.len() + 1);
+        let first_claim = plan
+            .required_commands
+            .iter()
+            .position(|command| command.starts_with("Reserve queue item"))
+            .unwrap_or_else(|| panic!("{:#?}", plan.required_commands));
+        assert_eq!(first_claim, closeout_len, "{:#?}", plan.required_commands);
+        fn find<'a>(node: &'a OperationNode, id: &str) -> Option<&'a OperationNode> {
+            if node.id == id {
+                return Some(node);
+            }
+            node.children.iter().find_map(|child| find(child, id))
+        }
+        let phase = find(&plan.operation_tree.root, "phase.reported_closeout").unwrap();
+        assert_eq!(phase.children.len(), closeout_len, "{phase:#?}");
+    }
+
     #[test]
     fn plan_orders_reported_closeout_before_new_claim_steps() {
         let _prompt = EnvGuard::unset("AGENT_DOC_HARNESS_PROMPT");
@@ -1963,7 +2034,11 @@ Done.
             claimed.generation,
         )
         .unwrap();
-        agent_doc_queue_io::queue_claim::report_attempt(&doc, item, Some(claimed.generation))
+        let reported =
+            agent_doc_queue_io::queue_claim::report_attempt(&doc, item, Some(claimed.generation))
+                .unwrap();
+        // `#reportedcloseoutfacts`: what `report-complete --prose-only` records.
+        agent_doc_queue_io::queue_lineage::record_prose_only(&doc, &reported, "prose result")
             .unwrap();
         let content = std::fs::read_to_string(&doc).unwrap();
         agent_doc_snapshot_io::checkpoint_document_baseline(

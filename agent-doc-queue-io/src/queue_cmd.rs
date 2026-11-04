@@ -3144,7 +3144,9 @@ mod tests {
             "{running}"
         );
 
-        crate::queue_claim::report_attempt(&doc, "dispatched worker work", Some(1)).unwrap();
+        let reported =
+            crate::queue_claim::report_attempt(&doc, "dispatched worker work", Some(1)).unwrap();
+        crate::queue_lineage::record_prose_only(&doc, &reported, "test prose result").unwrap();
         let drift = claim_reports_with_effects(&effects, &doc).unwrap();
         assert_eq!(drift.len(), 1);
         assert_eq!(drift[0].visible_projection_state, "out_of_sync");

@@ -675,6 +675,12 @@ fn tool_session_check(args: &Map<String, Value>) -> Result<Value> {
             QueueContinuationProjection::Unsettled("closeout_unsettled")
         },
     );
+    add_reported_closeout_fields(
+        structured
+            .as_object_mut()
+            .expect("session-check result is an object"),
+        continuation.as_ref(),
+    )?;
     Ok(tool_success_result(
         serde_json::to_string_pretty(&structured)?,
         structured,
@@ -830,6 +836,12 @@ fn tool_finalize(args: &Map<String, Value>) -> Result<Value> {
             QueueContinuationProjection::Unsettled("closeout_unsettled")
         },
     );
+    add_reported_closeout_fields(
+        structured
+            .as_object_mut()
+            .expect("finalize result is an object"),
+        continuation.as_ref(),
+    )?;
     Ok(tool_success_result(
         serde_json::to_string_pretty(&structured)?,
         structured,
@@ -842,6 +854,9 @@ fn tool_finalize(args: &Map<String, Value>) -> Result<Value> {
 struct ToolQueueContinuation {
     continuation: Option<agent_doc_queue::queue_continuation::QueueContinuation>,
     auto_clear_yield: bool,
+    /// `#reportedcloseoutstall`: a reported attempt whose closeout is still
+    /// owed and not yet waiting on an open operator request.
+    reported_closeout: Option<agent_doc_queue::reported_closeout::PendingReportedCloseout>,
 }
 
 fn resolve_tool_queue_continuation(
@@ -854,9 +869,12 @@ fn resolve_tool_queue_continuation(
     let auto_clear_yield = continuation.is_some()
         && agent_doc_queue_io::queue_auto_clear::in_session_auto_clear_yield(file, &content, true)
             .yields;
+    let reported_closeout =
+        agent_doc_queue_io::queue_claim::pending_reported_closeout_for_content(file, &content)?;
     Ok(ToolQueueContinuation {
         continuation,
         auto_clear_yield,
+        reported_closeout,
     })
 }
 
@@ -866,6 +884,9 @@ enum QueueContinuationProjection<'a> {
     /// `#bgclearpolicy`: continuation work remains, but the supervisor clears
     /// the context and dispatches it; the agent ends its turn.
     AutoClearYield(&'a agent_doc_queue::queue_continuation::QueueContinuation),
+    /// `#reportedcloseoutstall`: no queue head is next, but a reported
+    /// attempt's closeout is still owed, so the turn must not end as complete.
+    ReportedCloseout(&'a agent_doc_queue::reported_closeout::PendingReportedCloseout),
     Unsettled(&'static str),
 }
 
@@ -875,11 +896,38 @@ impl<'a> QueueContinuationProjection<'a> {
             Some(ToolQueueContinuation {
                 continuation: Some(continuation),
                 auto_clear_yield: true,
+                ..
             }) => Self::AutoClearYield(continuation),
+            Some(ToolQueueContinuation {
+                continuation: None,
+                reported_closeout: Some(pending),
+                ..
+            }) => Self::ReportedCloseout(pending),
             Some(resolved) => Self::Known(resolved.continuation.as_ref()),
             None => Self::Known(None),
         }
     }
+}
+
+/// The owed reported closeout, reported beside any queue continuation so a
+/// next queue head never hides it (`#reportedcloseoutstall`).
+fn add_reported_closeout_fields(
+    result: &mut Map<String, Value>,
+    resolved: Option<&ToolQueueContinuation>,
+) -> Result<()> {
+    let pending = resolved.and_then(|resolved| resolved.reported_closeout.as_ref());
+    result.insert(
+        "reported_closeout_required".to_string(),
+        Value::Bool(pending.is_some()),
+    );
+    result.insert(
+        "next_reported_closeout".to_string(),
+        pending
+            .map(serde_json::to_value)
+            .transpose()?
+            .unwrap_or(Value::Null),
+    );
+    Ok(())
 }
 
 fn add_queue_continuation_fields(
@@ -891,13 +939,20 @@ fn add_queue_continuation_fields(
         QueueContinuationProjection::AutoClearYield(continuation) => {
             (true, Some(continuation), None, true)
         }
+        QueueContinuationProjection::ReportedCloseout(_) => (true, None, None, false),
         QueueContinuationProjection::Unsettled(reason) => (false, None, Some(reason), false),
+    };
+    let reported_closeout = match projection {
+        QueueContinuationProjection::ReportedCloseout(pending) => Some(pending),
+        _ => None,
     };
     result.insert("queue_continuation_known".to_string(), Value::Bool(known));
     result.insert(
         "queue_continuation_required".to_string(),
         if known {
-            Value::Bool(continuation.is_some() && !auto_clear_yield)
+            Value::Bool(
+                (continuation.is_some() && !auto_clear_yield) || reported_closeout.is_some(),
+            )
         } else {
             Value::Null
         },
@@ -912,6 +967,8 @@ fn add_queue_continuation_fields(
             Value::String(
                 agent_doc_queue::queue_continuation::QUEUE_AUTO_CLEAR_YIELD_GUIDANCE.to_string(),
             )
+        } else if let Some(pending) = reported_closeout {
+            Value::String(pending.guidance.clone())
         } else {
             Value::Null
         },
@@ -933,6 +990,17 @@ fn add_queue_continuation_fields(
         "queue_continuation_reason".to_string(),
         continuation
             .map(|item| Value::String(item.reason.clone()))
+            .or_else(|| {
+                reported_closeout.map(|pending| {
+                    Value::String(format!(
+                        "reported queue item {:?} ({}#{}) still owes its {} closeout",
+                        pending.item,
+                        pending.owner,
+                        pending.generation,
+                        pending.shape.as_str()
+                    ))
+                })
+            })
             .unwrap_or(Value::Null),
     );
     result.insert(
@@ -1331,6 +1399,102 @@ mod tests {
                 .is_some_and(|guidance| guidance.contains("#effectbeforecloseout")
                     && guidance.contains("never preempts, defers, or cancels"))
         );
+    }
+
+    /// `#reportedcloseoutstall` (sdk-dev 2026-11-04): every queue head was
+    /// claimed or reported, so finalize answered `queue_continuation_required:
+    /// false` with no next prompt and the coordinator ended its turn while
+    /// three reported closeouts were blocked. An owed closeout now keeps
+    /// continuation required and names its next move.
+    #[test]
+    fn owed_reported_closeout_keeps_finalize_continuation_required() {
+        use agent_doc_queue::queue_claim::{QueueClaim, QueueClaimState, claim_identity};
+        use agent_doc_queue::reported_closeout::{
+            ReportedCloseoutObligation, ReportedRepoEvidence, pending_reported_closeout,
+            reported_claim_closeout,
+        };
+        let item = "Convert *.ts files to *.js + *.d.ts [#q-0d0f4fa99c3f]";
+        let claim = QueueClaim {
+            identity: claim_identity(item),
+            item_text: item.to_string(),
+            owner: "subagent:c631tsjs".to_string(),
+            generation: 1,
+            state: QueueClaimState::Reported,
+            lost_from: None,
+            completion_recovered_after_loss: false,
+            publication_state: None,
+            worker: None,
+            dispatch_policy: None,
+            tracked_item_aliases: Vec::new(),
+            claimed_at_secs: 1,
+            expires_at_secs: 2,
+            owner_session: None,
+            anchor: None,
+            followed_from: Vec::new(),
+            followed_generation: 0,
+            claim_time_row: None,
+            reported_at_secs: None,
+        };
+        let closeout =
+            reported_claim_closeout("doc.md", &claim, &ReportedRepoEvidence::Undeclared).unwrap();
+        let request_id = closeout.operator_request_id.clone();
+        let obligations = [ReportedCloseoutObligation::new(&claim, closeout)];
+        let resolved = ToolQueueContinuation {
+            continuation: None,
+            auto_clear_yield: false,
+            reported_closeout: pending_reported_closeout(&obligations, &Default::default()),
+        };
+        let mut result = Map::new();
+        add_queue_continuation_fields(
+            &mut result,
+            QueueContinuationProjection::from_tool(Some(&resolved)),
+        );
+        add_reported_closeout_fields(&mut result, Some(&resolved)).unwrap();
+        assert_eq!(result["queue_continuation_known"], true);
+        assert_eq!(result["queue_continuation_required"], true, "{result:#?}");
+        assert!(result["next_queue_prompt"].is_null());
+        assert!(
+            result["queue_continuation_reason"]
+                .as_str()
+                .is_some_and(|reason| reason.contains("missing_facts closeout")),
+            "{result:#?}"
+        );
+        assert!(
+            result["queue_continuation_guidance"]
+                .as_str()
+                .is_some_and(|guidance| guidance.starts_with("Continuation is required")
+                    && guidance.contains(&request_id)),
+            "{result:#?}"
+        );
+        assert_eq!(result["reported_closeout_required"], true);
+        assert_eq!(
+            result["next_reported_closeout"]["operator_request_id"],
+            request_id.as_str()
+        );
+        assert!(
+            result["next_reported_closeout"]["operator_request_packet"]
+                .as_str()
+                .is_some_and(|packet| packet.contains("subagent operator request"))
+        );
+
+        // Once the operator request is open in agent:todo, the wait is the
+        // explicit operator item and the turn may end.
+        let waiting = ToolQueueContinuation {
+            continuation: None,
+            auto_clear_yield: false,
+            reported_closeout: pending_reported_closeout(
+                &obligations,
+                &std::collections::HashSet::from([request_id]),
+            ),
+        };
+        let mut result = Map::new();
+        add_queue_continuation_fields(
+            &mut result,
+            QueueContinuationProjection::from_tool(Some(&waiting)),
+        );
+        add_reported_closeout_fields(&mut result, Some(&waiting)).unwrap();
+        assert_eq!(result["queue_continuation_required"], false);
+        assert_eq!(result["reported_closeout_required"], false);
     }
 
     #[test]

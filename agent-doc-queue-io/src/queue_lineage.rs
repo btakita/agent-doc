@@ -79,6 +79,10 @@ pub enum QueueLineageEventKind {
     Cancelled,
     Retained,
     Removed,
+    /// Explicit, durable declaration that this attempt changed no repository,
+    /// worktree, or branch (`#reportedcloseoutfacts`). An attempt with no
+    /// repository facts is prose-only only when it carries this receipt.
+    ProseOnly,
 }
 
 impl QueueLineageEventKind {
@@ -94,8 +98,9 @@ impl QueueLineageEventKind {
             "cancelled" | "canceled" => Ok(Self::Cancelled),
             "retained" => Ok(Self::Retained),
             "removed" => Ok(Self::Removed),
+            "prose-only" | "prose_only" => Ok(Self::ProseOnly),
             other => bail!(
-                "unknown lineage event {other:?}; expected created|attached|dirty|committed|pushed|integrated|released|cancelled|retained|removed"
+                "unknown lineage event {other:?}; expected created|attached|dirty|committed|pushed|integrated|released|cancelled|retained|removed|prose-only"
             ),
         }
     }
@@ -112,6 +117,7 @@ impl QueueLineageEventKind {
             Self::Cancelled => "cancelled",
             Self::Retained => "retained",
             Self::Removed => "removed",
+            Self::ProseOnly => "prose_only",
         }
     }
 }
@@ -593,6 +599,57 @@ pub fn record(
     })
 }
 
+/// Record the explicit prose-only declaration for one live claim's attempt
+/// (`queue report-complete --prose-only`, `#reportedcloseoutfacts`). The
+/// attempt is established or re-keyed from the claim first, so a claim that
+/// followed an admission edit still lands on its own attempt.
+pub fn record_prose_only(file: &Path, claim: &QueueClaim, detail: &str) -> Result<QueueLineageAttempt> {
+    record_claim(file, claim)?;
+    record(
+        file,
+        &claim.item_text,
+        claim.generation,
+        RecordRequest {
+            kind: QueueLineageEventKind::ProseOnly,
+            worker_id: claim.worker.as_ref().map(|worker| worker.worker_id.clone()),
+            detail: Some(detail.to_string()),
+            ..RecordRequest::default()
+        },
+    )
+}
+
+/// [`record`] for an explicit `queue lineage-record`: when a live claim names
+/// this `(item, generation)` (by its current text or a text it followed), the
+/// attempt is first established or re-keyed from that claim, then the receipt
+/// is recorded against the claim's own text. Without this, a claim that
+/// followed an admission edit (`[#q-…]`, a publication annotation) left its
+/// lineage keyed by the old text and every receipt for the current row failed
+/// with "no queue lineage attempt" (sdk-dev 2026-11-04, openquestions).
+pub fn record_following_live_claim(
+    file: &Path,
+    item: &str,
+    generation: u64,
+    request: RecordRequest,
+) -> Result<QueueLineageAttempt> {
+    let identity = claim_identity(item);
+    let claims = crate::queue_claim::load_ledger(file)?;
+    let live = claims.claims.iter().find(|claim| {
+        claim.generation == generation
+            && (claim.identity == identity
+                || claim
+                    .followed_from
+                    .iter()
+                    .any(|text| claim_identity(text) == identity))
+    });
+    match live {
+        Some(claim) => {
+            record_claim(file, claim)?;
+            record(file, &claim.item_text, generation, request)
+        }
+        None => record(file, item, generation, request),
+    }
+}
+
 fn event_from_request(request: RecordRequest) -> Result<QueueLineageEvent> {
     let nonempty = |value: Option<String>| value.filter(|v| !v.trim().is_empty());
     let event = QueueLineageEvent {
@@ -698,6 +755,19 @@ fn validate_transition(attempt: &QueueLineageAttempt, event: &QueueLineageEvent)
                 {
                     bail!("release state cannot regress within one queue lineage generation");
                 }
+            }
+        }
+        QueueLineageEventKind::ProseOnly => {
+            if event_carries_repo_facts(event) {
+                bail!(
+                    "prose-only lineage event declares that the attempt changed no repository; it cannot carry repository, worktree, branch, or commit facts"
+                );
+            }
+            if attempt_carries_repo_work(attempt) {
+                bail!(
+                    "queue lineage generation {} already records repository work; a prose-only declaration cannot erase it. Record its integration instead",
+                    attempt.generation
+                );
             }
         }
         QueueLineageEventKind::Cancelled
@@ -879,7 +949,9 @@ fn verify_event(attempt: &QueueLineageAttempt, event: &QueueLineageEvent) -> Res
                 );
             }
         }
-        QueueLineageEventKind::Created | QueueLineageEventKind::Cancelled => {}
+        QueueLineageEventKind::Created
+        | QueueLineageEventKind::Cancelled
+        | QueueLineageEventKind::ProseOnly => {}
     }
     Ok(())
 }
@@ -1051,23 +1123,58 @@ pub fn query(
 }
 
 /// Fail closed when a reported attempt carried repository work but has no
-/// mechanically verified `Integrated` receipt (`#subagentintegrationproof`).
-/// Attempts with no repository/worktree/source facts are explicitly prose-only.
+/// mechanically verified `Integrated` receipt (`#subagentintegrationproof`),
+/// or when it records neither repository facts nor an explicit prose-only
+/// declaration (`#reportedcloseoutfacts`): absence of repository facts is not
+/// evidence of prose.
 pub fn require_integrated_repo_work(file: &Path, item: &str, generation: u64) -> Result<()> {
-    require_integrated_repo_work_inner(file, item, generation, true)
+    require_integrated_repo_work_inner(file, item, generation, None, true)
+}
+
+/// [`require_integrated_repo_work`] for a live claim: its lineage attempt may
+/// still be keyed by a text the claim followed (`#claimfollowsedit`, an
+/// admitted `[#q-…]` id or a publication annotation), so the claim's own
+/// followed texts resolve it, fenced to the claim's owner.
+pub fn require_integrated_claim_repo_work(file: &Path, claim: &QueueClaim) -> Result<()> {
+    require_integrated_repo_work_inner(
+        file,
+        &claim.item_text,
+        claim.generation,
+        Some(ClaimAliases::of(claim)),
+        true,
+    )
 }
 
 /// Apply [`require_integrated_repo_work`] when durable lineage exists for an
 /// older released attempt. A legacy prose-only release receipt may predate the
 /// lineage ledger entirely; absence therefore remains explicitly prose-only at
-/// this compatibility boundary, while any recorded repository facts still
-/// fail closed until their integration receipt verifies.
+/// this compatibility boundary. A recorded attempt does not predate the
+/// ledger, so it still needs verified integration proof or an explicit
+/// prose-only declaration (`#reportedcloseoutfacts`).
 pub fn require_integrated_repo_work_if_recorded(
     file: &Path,
     item: &str,
     generation: u64,
 ) -> Result<()> {
-    require_integrated_repo_work_inner(file, item, generation, false)
+    require_integrated_repo_work_inner(file, item, generation, None, false)
+}
+
+/// Earlier texts of one live claim, fenced to its owner. A followed text's
+/// identity is matched only on an attempt the same owner made: generations are
+/// per identity, so an unrelated older attempt can share the generation.
+#[derive(Clone, Copy)]
+struct ClaimAliases<'a> {
+    owner: &'a str,
+    texts: &'a [String],
+}
+
+impl<'a> ClaimAliases<'a> {
+    fn of(claim: &'a QueueClaim) -> Self {
+        Self {
+            owner: &claim.owner,
+            texts: &claim.followed_from,
+        }
+    }
 }
 
 /// The lineage attempt a reported `(item, generation)` names.
@@ -1081,6 +1188,7 @@ fn resolve_reported_attempt<'a>(
     ledger: &'a QueueLineageLedger,
     item: &str,
     generation: u64,
+    aliases: Option<ClaimAliases<'_>>,
 ) -> ResolvedReportedAttempt<'a> {
     let identity = claim_identity(item);
     // Admission can add a binary-owned `[#q-...]` after claim/start recorded
@@ -1091,10 +1199,24 @@ fn resolve_reported_attempt<'a>(
     let authored_item =
         agent_doc_queue::queue_response::normalized_authored_queue_prompt_text(item);
     let authored_identity = claim_identity(&authored_item);
+    let followed = aliases
+        .map(|aliases| {
+            aliases
+                .texts
+                .iter()
+                .map(|text| claim_identity(text))
+                .filter(|alias| alias != &identity && alias != &authored_identity)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
     let mut attempts = ledger.attempts.iter().filter(|attempt| {
         attempt.generation == generation
             && (attempt.matches_identity(&identity)
-                || (authored_identity != identity && attempt.matches_identity(&authored_identity)))
+                || (authored_identity != identity && attempt.matches_identity(&authored_identity))
+                || aliases.is_some_and(|aliases| {
+                    attempt.owner == aliases.owner
+                        && followed.iter().any(|alias| attempt.matches_identity(alias))
+                }))
     });
     match (attempts.next(), attempts.next()) {
         (None, _) => ResolvedReportedAttempt::Missing,
@@ -1103,23 +1225,41 @@ fn resolve_reported_attempt<'a>(
     }
 }
 
-/// Whether an attempt recorded repository work. Attempts with no repository,
-/// worktree, or commit facts are explicitly prose-only.
+/// Whether one receipt records repository work.
+fn event_carries_repo_facts(event: &QueueLineageEvent) -> bool {
+    event.repo_path.is_some()
+        || event.source_repo_path.is_some()
+        || event.sink_repo_path.is_some()
+        || event.worktree_path.is_some()
+        || event.branch.is_some()
+        || event.base_sha.is_some()
+        || event.source_sha.is_some()
+        || event.pushed_ref.is_some()
+        || event.integration_sha.is_some()
+        || event.sink_ref.is_some()
+        || matches!(
+            event.kind,
+            QueueLineageEventKind::Dirty
+                | QueueLineageEventKind::Committed
+                | QueueLineageEventKind::Pushed
+                | QueueLineageEventKind::Integrated
+        )
+}
+
+/// Whether an attempt recorded repository work.
 fn attempt_carries_repo_work(attempt: &QueueLineageAttempt) -> bool {
-    attempt.events.iter().any(|event| {
-        event.repo_path.is_some()
-            || event.source_repo_path.is_some()
-            || event.sink_repo_path.is_some()
-            || event.worktree_path.is_some()
-            || event.source_sha.is_some()
-            || matches!(
-                event.kind,
-                QueueLineageEventKind::Dirty
-                    | QueueLineageEventKind::Committed
-                    | QueueLineageEventKind::Pushed
-                    | QueueLineageEventKind::Integrated
-            )
-    })
+    attempt.events.iter().any(event_carries_repo_facts)
+}
+
+/// Whether an attempt carries the explicit prose-only declaration. An
+/// attempt with no repository facts and no declaration is NOT prose: a started
+/// worker that never recorded its commit looks exactly like that
+/// (`#reportedcloseoutfacts`, sdk-dev 2026-11-04 c631tsjs).
+fn attempt_declares_prose_only(attempt: &QueueLineageAttempt) -> bool {
+    attempt
+        .events
+        .iter()
+        .any(|event| event.kind == QueueLineageEventKind::ProseOnly)
 }
 
 fn latest_integrated(attempt: &QueueLineageAttempt) -> Option<&QueueLineageEvent> {
@@ -1164,22 +1304,82 @@ fn sink_containment(facts: &ReportedRepoFacts) -> Option<SinkContainment> {
             reason: format!("designated sink ref {sink_ref} is unavailable in {sink_repo}"),
         });
     }
-    let status = Command::new("git")
+    let is_ancestor = |ancestor: &str, descendant: &str| -> Result<bool, String> {
+        let status = Command::new("git")
+            .current_dir(repo)
+            .args(["merge-base", "--is-ancestor", ancestor, descendant])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .map_err(|err| format!("spawn git merge-base in {sink_repo}: {err}"))?;
+        match status.code() {
+            Some(0) => Ok(true),
+            Some(1) => Ok(false),
+            code => Err(format!("git merge-base exited {code:?} in {sink_repo}")),
+        }
+    };
+    let unverifiable = |reason| Some(SinkContainment::Unverifiable { reason });
+    match is_ancestor(source, sink_ref) {
+        Ok(true) => return Some(SinkContainment::Contains),
+        Ok(false) => {}
+        Err(reason) => return unverifiable(reason),
+    }
+    // `git merge-base A B` exits 1 with no output when the two share no
+    // commit: no ancestry-based integration can land the source on that ref.
+    let shared = Command::new("git")
         .current_dir(repo)
-        .args(["merge-base", "--is-ancestor", source, sink_ref])
+        .args(["merge-base", source, sink_ref])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status();
-    Some(match status.map(|status| status.code()) {
-        Ok(Some(0)) => SinkContainment::Contains,
-        Ok(Some(1)) => SinkContainment::DoesNotContain,
-        Ok(code) => SinkContainment::Unverifiable {
-            reason: format!("git merge-base exited {code:?} in {sink_repo}"),
-        },
-        Err(err) => SinkContainment::Unverifiable {
-            reason: format!("spawn git merge-base in {sink_repo}: {err}"),
-        },
+    match shared.map(|status| status.code()) {
+        Ok(Some(0)) => {}
+        Ok(Some(1)) => return Some(SinkContainment::NoSharedHistory),
+        Ok(code) => return unverifiable(format!("git merge-base exited {code:?} in {sink_repo}")),
+        Err(err) => return unverifiable(format!("spawn git merge-base in {sink_repo}: {err}")),
+    }
+    let fast_forward = match is_ancestor(sink_ref, source) {
+        Ok(fast_forward) => fast_forward,
+        Err(reason) => return unverifiable(reason),
+    };
+    Some(SinkContainment::DoesNotContain {
+        fast_forward,
+        checked_out_worktree: checked_out_worktree(repo, sink_ref),
     })
+}
+
+/// The worktree of `repo` that has the local branch `sink_ref` checked out.
+/// `git push` refuses to update such a branch, so integration runs there.
+/// A remote-tracking ref is never checked out. An unreadable worktree list is
+/// reported and treated as "not checked out": the push it leaves in the plan
+/// fails safe (a refused ref update changes nothing).
+fn checked_out_worktree(repo: &Path, sink_ref: &str) -> Option<String> {
+    if sink_ref.starts_with("refs/") && !sink_ref.starts_with("refs/heads/") {
+        return None;
+    }
+    let branch = format!(
+        "refs/heads/{}",
+        sink_ref.strip_prefix("refs/heads/").unwrap_or(sink_ref)
+    );
+    let listing = match git_output(repo, &["worktree", "list", "--porcelain"]) {
+        Ok(listing) => listing,
+        Err(err) => {
+            eprintln!(
+                "[queue-lineage] WARNING: could not list worktrees of {} to find a checkout of {sink_ref}: {err:#}",
+                repo.display()
+            );
+            return None;
+        }
+    };
+    let mut worktree = None;
+    for line in listing.lines() {
+        if let Some(path) = line.strip_prefix("worktree ") {
+            worktree = Some(path.to_string());
+        } else if line.strip_prefix("branch ") == Some(branch.as_str()) {
+            return worktree;
+        }
+    }
+    None
 }
 
 /// Classify one reported attempt's lineage for its coordinator closeout
@@ -1191,21 +1391,40 @@ pub fn reported_repo_evidence(
     item: &str,
     generation: u64,
 ) -> Result<ReportedRepoEvidence> {
-    Ok(reported_repo_evidence_in(&load(file)?, item, generation))
+    Ok(reported_repo_evidence_resolved(&load(file)?, item, generation, None))
 }
 
-/// [`reported_repo_evidence`] over an already-loaded lineage ledger, so a
-/// caller classifying several reported attempts reads state.db once.
-pub fn reported_repo_evidence_in(
+/// [`reported_repo_evidence`] for a live claim over an already-loaded lineage
+/// ledger, so a caller classifying several reported attempts reads state.db
+/// once. Resolves through the claim's followed texts exactly as
+/// [`require_integrated_claim_repo_work`] does.
+pub fn reported_claim_evidence_in(
+    ledger: &QueueLineageLedger,
+    claim: &QueueClaim,
+) -> ReportedRepoEvidence {
+    reported_repo_evidence_resolved(
+        ledger,
+        &claim.item_text,
+        claim.generation,
+        Some(ClaimAliases::of(claim)),
+    )
+}
+
+fn reported_repo_evidence_resolved(
     ledger: &QueueLineageLedger,
     item: &str,
     generation: u64,
+    aliases: Option<ClaimAliases<'_>>,
 ) -> ReportedRepoEvidence {
-    match resolve_reported_attempt(ledger, item, generation) {
+    match resolve_reported_attempt(ledger, item, generation, aliases) {
         ResolvedReportedAttempt::Missing => ReportedRepoEvidence::LineageMissing,
         ResolvedReportedAttempt::Ambiguous => ReportedRepoEvidence::LineageAmbiguous,
         ResolvedReportedAttempt::One(attempt) if !attempt_carries_repo_work(attempt) => {
-            ReportedRepoEvidence::ProseOnly
+            if attempt_declares_prose_only(attempt) {
+                ReportedRepoEvidence::ProseOnly
+            } else {
+                ReportedRepoEvidence::Undeclared
+            }
         }
         ResolvedReportedAttempt::One(attempt) => {
             let facts = reported_repo_facts(attempt);
@@ -1234,10 +1453,11 @@ fn require_integrated_repo_work_inner(
     file: &Path,
     item: &str,
     generation: u64,
+    aliases: Option<ClaimAliases<'_>>,
     require_attempt: bool,
 ) -> Result<()> {
     let ledger = load(file)?;
-    let attempt = match resolve_reported_attempt(&ledger, item, generation) {
+    let attempt = match resolve_reported_attempt(&ledger, item, generation, aliases) {
         ResolvedReportedAttempt::Ambiguous => bail!(
             "ambiguous queue lineage attempts for {item:?} generation {generation} after resolving its admitted prompt-id projection; keep the reported row live and inspect `agent-doc queue lineage {} --generation {generation}`",
             file.display(),
@@ -1247,7 +1467,7 @@ fn require_integrated_repo_work_inner(
                 return Ok(());
             }
             return Err(anyhow::anyhow!(
-                "no queue lineage attempt for {item:?} generation {generation}; keep the reported row live and inspect `agent-doc queue lineage {} --item {:?} --generation {generation}`",
+                "no queue lineage attempt for {item:?} generation {generation}, so prose-only versus repository work is unknown; keep the reported row live and record which it was: `agent-doc queue lineage-record {} --item {:?} --generation {generation} --event prose-only` when the worker changed no repository, else `--event committed` with its --source-repo, --source-sha, --sink-repo, and --sink-ref (`agent-doc queue claims` prints both)",
                 file.display(),
                 item,
             ));
@@ -1255,7 +1475,14 @@ fn require_integrated_repo_work_inner(
         ResolvedReportedAttempt::One(attempt) => attempt,
     };
     if !attempt_carries_repo_work(attempt) {
-        return Ok(());
+        if attempt_declares_prose_only(attempt) {
+            return Ok(());
+        }
+        bail!(
+            "reported attempt for {item:?} generation {generation} records neither repository work nor a prose-only declaration; a worker that never recorded its commit looks the same, so the row stays live (#reportedcloseoutfacts). Record which it was: `agent-doc queue lineage-record {} --item {:?} --generation {generation} --event prose-only` when the worker changed no repository, else `--event committed --source-repo <repo> --source-sha <sha> --sink-repo <repo> --sink-ref <ref>` (`agent-doc queue claims` prints both)",
+            file.display(),
+            item,
+        );
     }
     let integrated = latest_integrated(attempt)
         .ok_or_else(|| {
@@ -1332,9 +1559,13 @@ fn diagnose(attempt: &QueueLineageAttempt, facts: &Facts) -> Vec<Diagnostic> {
         .iter()
         .any(|event| event.kind == QueueLineageEventKind::Removed);
     let Some(source_repo_raw) = facts.source_repo_path.as_deref().or(facts.repo_path.as_deref()) else {
+        // A declared prose-only result has no repository by construction.
+        if attempt_declares_prose_only(attempt) && !attempt_carries_repo_work(attempt) {
+            return diagnostics;
+        }
         diagnostics.push(Diagnostic {
             level: DiagnosticLevel::Degraded,
-            text: "source_repo_unrecorded: record repository work with --source-repo".to_string(),
+            text: "source_repo_unrecorded: record repository work with --source-repo, or declare a prose-only result with --event prose-only".to_string(),
         });
         return diagnostics;
     };
@@ -1701,6 +1932,9 @@ mod tests {
             Some("worker:prose"),
         );
         record_started(&prose.doc, &claim).unwrap();
+        // `#reportedcloseoutfacts`: no repository facts is not prose until declared.
+        assert!(require_integrated_repo_work(&prose.doc, projected, claim.generation).is_err());
+        record_prose_only(&prose.doc, &claim, "nested prose result").unwrap();
         require_integrated_repo_work(&prose.doc, projected, claim.generation).unwrap();
 
         let repo = RepoFixture::new();
@@ -1798,6 +2032,7 @@ mod tests {
 
         let prose_claim = make_claim(&fixture.doc, "current prose work", "subagent:current", Some("worker:current"));
         record_started(&fixture.doc, &prose_claim).unwrap();
+        record_prose_only(&fixture.doc, &prose_claim, "current prose result").unwrap();
         require_integrated_repo_work(&fixture.doc, &prose_claim.item_text, prose_claim.generation).unwrap();
     }
 
@@ -2276,17 +2511,315 @@ mod tests {
             assert_eq!(shape(&fixture, &claim), ReportedCloseoutShape::MissingFacts);
         }
 
+        fn declare_prose_only(fixture: &RepoFixture, claim: &QueueClaim) -> Result<QueueLineageAttempt> {
+            record(
+                &fixture.doc,
+                &claim.item_text,
+                claim.generation,
+                RecordRequest {
+                    kind: QueueLineageEventKind::parse("prose-only").unwrap(),
+                    ..RecordRequest::default()
+                },
+            )
+        }
+
+        /// `#reportedcloseoutfacts`: a started attempt with no repository
+        /// facts is prose only once it carries the explicit declaration.
+        /// Before that it is indistinguishable from unrecorded repository
+        /// work, and `queue consume`'s gate refuses it.
         #[test]
-        fn started_attempt_without_repo_facts_is_prose_consume() {
+        fn started_attempt_without_repo_facts_is_missing_facts_until_declared_prose_only() {
             let fixture = RepoFixture::new();
             let claim = reported(make_claim(&fixture.doc, "review the PR", "subagent:review", Some("worker:review")));
             record_started(&fixture.doc, &claim).unwrap();
+            assert_eq!(
+                reported_repo_evidence(&fixture.doc, &claim.item_text, claim.generation).unwrap(),
+                ReportedRepoEvidence::Undeclared
+            );
+            assert_eq!(shape(&fixture, &claim), ReportedCloseoutShape::MissingFacts);
+            let refusal = require_integrated_repo_work(&fixture.doc, &claim.item_text, claim.generation)
+                .unwrap_err()
+                .to_string();
+            assert!(refusal.contains("neither repository work nor a prose-only declaration"), "{refusal}");
+            assert!(refusal.contains("--event prose-only"), "{refusal}");
+
+            // Replay the emitted declaration step's exact event.
+            let evidence =
+                reported_repo_evidence(&fixture.doc, &claim.item_text, claim.generation).unwrap();
+            let closeout = reported_claim_closeout("doc.md", &claim, &evidence).unwrap();
+            let declare = closeout
+                .steps
+                .iter()
+                .find(|step| step.action == ReportedCloseoutAction::DeclareProseOnly)
+                .unwrap();
+            assert_eq!(declare.argv.last().map(String::as_str), Some("prose-only"));
+            declare_prose_only(&fixture, &claim).unwrap();
+
             assert_eq!(
                 reported_repo_evidence(&fixture.doc, &claim.item_text, claim.generation).unwrap(),
                 ReportedRepoEvidence::ProseOnly
             );
             assert_eq!(shape(&fixture, &claim), ReportedCloseoutShape::ProseConsume);
             require_integrated_repo_work(&fixture.doc, &claim.item_text, claim.generation).unwrap();
+            let report = query(&fixture.doc, Some(&claim.item_text), Some(claim.generation)).unwrap();
+            assert_eq!(report.attempts[0].state, "prose_only");
+            assert_eq!(report.attempts[0].verification, "verified", "{:?}", report.attempts[0].diagnostics);
+        }
+
+        #[test]
+        fn prose_only_declaration_cannot_erase_recorded_repository_work() {
+            let fixture = RepoFixture::new();
+            let claim = reported(make_claim(&fixture.doc, "fix it", "subagent:fix", Some("worker:fix")));
+            record_started(&fixture.doc, &claim).unwrap();
+            let branch = git_output(&fixture.root, &["branch", "--show-current"]).unwrap();
+            let source = fixture.commit_file("fix.txt", "fix\n", "worker fix");
+            record_commit(&fixture, &claim, &source, &branch);
+            let refusal = declare_prose_only(&fixture, &claim).unwrap_err().to_string();
+            assert!(refusal.contains("already records repository work"), "{refusal}");
+            assert!(require_integrated_repo_work(&fixture.doc, &claim.item_text, claim.generation).is_err());
+
+            let carrying = record(
+                &fixture.doc,
+                &claim.item_text,
+                claim.generation,
+                RecordRequest {
+                    kind: QueueLineageEventKind::ProseOnly,
+                    source_sha: Some(source),
+                    ..RecordRequest::default()
+                },
+            )
+            .unwrap_err()
+            .to_string();
+            assert!(carrying.contains("cannot carry repository"), "{carrying}");
+        }
+
+        /// The c631tsjs shape over a real repository: the worker committed on
+        /// a side branch, but lineage only has its `attached` receipt. The
+        /// closeout must not be prose; recording the work it names turns it
+        /// into an ordinary integration closeout.
+        #[test]
+        fn unrecorded_side_branch_commit_is_never_consumed_as_prose() {
+            let fixture = RepoFixture::new();
+            let main = git_output(&fixture.root, &["branch", "--show-current"]).unwrap();
+            let claim = reported(make_claim(&fixture.doc, "convert ts to js", "subagent:c631tsjs", Some("worker:tsjs")));
+            record_started(&fixture.doc, &claim).unwrap();
+            git(&fixture.root, &["checkout", "-qb", "feat/ts-to-js-dts"]);
+            let source = fixture.commit_file("sdk.js", "js\n", "convert ts to js");
+            git(&fixture.root, &["checkout", "-q", &main]);
+
+            let closeout = reported_claim_closeout(
+                "doc.md",
+                &claim,
+                &reported_repo_evidence(&fixture.doc, &claim.item_text, claim.generation).unwrap(),
+            )
+            .unwrap();
+            assert_eq!(closeout.shape, ReportedCloseoutShape::MissingFacts);
+            assert_eq!(closeout.missing_facts, ["repo_work_or_prose_declaration"]);
+            assert!(closeout.next_action_argv().is_none(), "nothing may strike the row first");
+            assert!(require_integrated_repo_work(&fixture.doc, &claim.item_text, claim.generation).is_err());
+
+            // The repository_work branch, with its placeholders filled.
+            let step = closeout
+                .steps
+                .iter()
+                .find(|step| step.action == ReportedCloseoutAction::RecordRepositoryWork)
+                .unwrap();
+            assert_eq!(step.alternative.as_deref(), Some("repository_work"));
+            assert!(step.argv.windows(2).any(|pair| pair == ["--event", "committed"]));
+            record_commit(&fixture, &claim, &source, &main);
+            let evidence =
+                reported_repo_evidence(&fixture.doc, &claim.item_text, claim.generation).unwrap();
+            assert!(
+                matches!(
+                    &evidence,
+                    ReportedRepoEvidence::Unintegrated {
+                        sink: Some(SinkContainment::DoesNotContain { fast_forward: true, .. }),
+                        ..
+                    }
+                ),
+                "{evidence:?}"
+            );
+            assert!(require_integrated_repo_work(&fixture.doc, &claim.item_text, claim.generation).is_err());
+        }
+
+        /// The openquestions shape: the claim followed an admission edit
+        /// (`[#q-…]` and a publication annotation were added to its row), but
+        /// lineage still keys the attempt by the original text. The claim's
+        /// followed texts resolve it; `lineage-record` re-keys it.
+        #[test]
+        fn claim_that_followed_an_admission_edit_resolves_its_original_lineage() {
+            let fixture = RepoFixture::new();
+            let original = "Draft the open questions in a md file.";
+            let mut claim = reported(make_claim(&fixture.doc, original, "subagent:openquestions", Some("worker:oq")));
+            record_started(&fixture.doc, &claim).unwrap();
+            let current = "Draft the open questions in a md file.  [#q-21230b62be31]⟦local⟧";
+            claim.identity = claim_identity(current);
+            claim.item_text = current.to_string();
+            claim.followed_from = vec![original.to_string(), current.to_string()];
+            let ledger = load(&fixture.doc).unwrap();
+
+            assert_eq!(
+                reported_repo_evidence(&fixture.doc, current, claim.generation).unwrap(),
+                ReportedRepoEvidence::LineageMissing,
+                "the current text alone does not name the attempt"
+            );
+            assert_eq!(
+                reported_claim_evidence_in(&ledger, &claim),
+                ReportedRepoEvidence::Undeclared
+            );
+            // A followed text is honoured only for the same owner.
+            let mut stranger = claim.clone();
+            stranger.owner = "subagent:other".to_string();
+            assert_eq!(
+                reported_claim_evidence_in(&ledger, &stranger),
+                ReportedRepoEvidence::LineageMissing
+            );
+
+            // `lineage-record` with the row's current text re-keys the attempt
+            // from the live claim instead of failing "no queue lineage attempt".
+            assert!(declare_prose_only(&fixture, &claim).is_err());
+            let mut claims = agent_doc_queue::queue_claim::QueueClaimLedger::default();
+            claims.claims.push(claim.clone());
+            crate::queue_claim::store_ledger_for_test(&fixture.doc, &claims).unwrap();
+            let attempt = record_following_live_claim(
+                &fixture.doc,
+                current,
+                claim.generation,
+                RecordRequest {
+                    kind: QueueLineageEventKind::ProseOnly,
+                    ..RecordRequest::default()
+                },
+            )
+            .unwrap();
+            assert_eq!(attempt.item_text, current);
+            assert_eq!(
+                reported_repo_evidence(&fixture.doc, current, claim.generation).unwrap(),
+                ReportedRepoEvidence::ProseOnly
+            );
+            require_integrated_claim_repo_work(&fixture.doc, &claim).unwrap();
+        }
+
+        /// `lineage-record` for an attempt with no lineage at all establishes
+        /// it from the live claim, so the missing-lineage branch is runnable.
+        #[test]
+        fn missing_lineage_is_established_from_the_live_claim() {
+            let fixture = RepoFixture::new();
+            let claim = reported(make_claim(&fixture.doc, "never recorded", "subagent:x", Some("worker:x")));
+            let mut claims = agent_doc_queue::queue_claim::QueueClaimLedger::default();
+            claims.claims.push(claim.clone());
+            crate::queue_claim::store_ledger_for_test(&fixture.doc, &claims).unwrap();
+            record_following_live_claim(
+                &fixture.doc,
+                &claim.item_text,
+                claim.generation,
+                RecordRequest {
+                    kind: QueueLineageEventKind::ProseOnly,
+                    ..RecordRequest::default()
+                },
+            )
+            .unwrap();
+            assert_eq!(shape(&fixture, &claim), ReportedCloseoutShape::ProseConsume);
+        }
+
+        /// c106telem's refused push: the sink moved past the worker's base.
+        /// The emitted cherry-pick branch runs in the checked-out sink
+        /// worktree and its record step is the one the binary verifies.
+        #[test]
+        fn non_fast_forward_sink_closes_through_the_emitted_cherry_pick_branch() {
+            let fixture = RepoFixture::new();
+            let main = git_output(&fixture.root, &["branch", "--show-current"]).unwrap();
+            git(&fixture.root, &["checkout", "-qb", "side"]);
+            let source = fixture.commit_file("side.txt", "side\n", "side work");
+            git(&fixture.root, &["checkout", "-q", &main]);
+            fixture.commit_file("main.txt", "main moved\n", "main moves on");
+            let claim = reported(make_claim(&fixture.doc, "side work", "subagent:side", Some("worker:side")));
+            record_started(&fixture.doc, &claim).unwrap();
+            record_commit(&fixture, &claim, &source, &main);
+
+            let evidence =
+                reported_repo_evidence(&fixture.doc, &claim.item_text, claim.generation).unwrap();
+            let worktree = fixture.root.canonicalize().unwrap();
+            match &evidence {
+                ReportedRepoEvidence::Unintegrated {
+                    sink:
+                        Some(SinkContainment::DoesNotContain {
+                            fast_forward: false,
+                            checked_out_worktree: Some(path),
+                        }),
+                    ..
+                } => assert_eq!(Path::new(path).canonicalize().unwrap(), worktree),
+                other => panic!("{other:?}"),
+            }
+            let closeout = reported_claim_closeout("doc.md", &claim, &evidence).unwrap();
+            assert_eq!(closeout.shape, ReportedCloseoutShape::IntegrationRequired);
+            assert!(closeout.steps.iter().all(|step| step.action != ReportedCloseoutAction::Integrate));
+            let cherry = closeout
+                .steps
+                .iter()
+                .find(|step| step.action == ReportedCloseoutAction::CherryPickOntoSink)
+                .unwrap();
+            assert!(cherry.concrete, "{cherry:?}");
+            let status = Command::new(&cherry.argv[0]).args(&cherry.argv[1..]).status().unwrap();
+            assert!(status.success(), "{:?}", cherry.argv);
+
+            let record_step = closeout
+                .steps
+                .iter()
+                .find(|step| {
+                    step.action == ReportedCloseoutAction::RecordIntegration
+                        && step.alternative.as_deref() == Some("cherry_pick")
+                })
+                .unwrap();
+            let flag = |name: &str| {
+                let index = record_step.argv.iter().position(|arg| arg == name).unwrap();
+                record_step.argv[index + 1].clone()
+            };
+            assert_eq!(flag("--integration-sha"), "<sink-commit-sha>");
+            record(
+                &fixture.doc,
+                &flag("--item"),
+                flag("--generation").parse().unwrap(),
+                RecordRequest {
+                    kind: QueueLineageEventKind::Integrated,
+                    source_repo_path: Some(PathBuf::from(flag("--source-repo"))),
+                    sink_repo_path: Some(PathBuf::from(flag("--sink-repo"))),
+                    source_sha: Some(flag("--source-sha")),
+                    integration_sha: Some(fixture.head()),
+                    integration_method: Some(IntegrationMethod::parse(&flag("--method")).unwrap()),
+                    sink_ref: Some(flag("--sink-ref")),
+                    ..RecordRequest::default()
+                },
+            )
+            .unwrap();
+            require_integrated_repo_work(&fixture.doc, &claim.item_text, claim.generation).unwrap();
+            assert_eq!(shape(&fixture, &claim), ReportedCloseoutShape::IntegratedConsume);
+        }
+
+        #[test]
+        fn source_with_no_history_in_common_with_the_sink_is_a_sink_mismatch() {
+            let fixture = RepoFixture::new();
+            let main = git_output(&fixture.root, &["branch", "--show-current"]).unwrap();
+            git(&fixture.root, &["checkout", "-q", "--orphan", "contracts"]);
+            git(&fixture.root, &["rm", "-rq", "--cached", "."]);
+            let source = fixture.commit_file("contracts.txt", "pin\n", "contracts artifact");
+            git(&fixture.root, &["checkout", "-qf", &main]);
+            let claim = reported(make_claim(&fixture.doc, "publish telemetry", "subagent:c106telem", Some("worker:t")));
+            record_started(&fixture.doc, &claim).unwrap();
+            record_commit(&fixture, &claim, &source, &main);
+            assert_eq!(
+                reported_repo_evidence(&fixture.doc, &claim.item_text, claim.generation).unwrap(),
+                ReportedRepoEvidence::Unintegrated {
+                    facts: ReportedRepoFacts {
+                        source_repo: Some(fixture.root.canonicalize().unwrap().display().to_string()),
+                        sink_repo: Some(fixture.root.canonicalize().unwrap().display().to_string()),
+                        source_sha: Some(source.clone()),
+                        sink_ref: Some(main.clone()),
+                        pushed_ref: None,
+                    },
+                    sink: Some(SinkContainment::NoSharedHistory),
+                }
+            );
+            assert_eq!(shape(&fixture, &claim), ReportedCloseoutShape::SinkMismatch);
         }
 
         #[test]
@@ -2362,7 +2895,10 @@ mod tests {
             assert!(
                 matches!(
                     &evidence,
-                    ReportedRepoEvidence::Unintegrated { sink: Some(SinkContainment::DoesNotContain), .. }
+                    ReportedRepoEvidence::Unintegrated {
+                        sink: Some(SinkContainment::DoesNotContain { fast_forward: true, .. }),
+                        ..
+                    }
                 ),
                 "{evidence:?}"
             );

@@ -536,6 +536,50 @@ pub fn run(file: &Path, effects: &impl SessionCheckEffects) -> Result<()> {
     run_with_options(file, false, effects)
 }
 
+/// `#reportedcloseoutstall`: a clean closeout is not a silent completion
+/// while a reported attempt still owes its closeout. Print the
+/// machine-readable `reported_closeout_required=true` line and the next move
+/// (or the operator-request packet to present) whenever one is owed and not
+/// already waiting on an open operator request in `agent:todo`. Never fails
+/// the check: the closeout itself succeeded.
+fn report_pending_reported_closeout(file: &Path) {
+    let content =
+        match crate::resolve_current_document_content(file, "session_check_reported_closeout") {
+            Ok(content) => content,
+            Err(err) => {
+                eprintln!(
+                    "[session-check] WARNING: could not read {} to check owed reported closeouts: {err:#}",
+                    file.display()
+                );
+                return;
+            }
+        };
+    match agent_doc_queue_io::queue_claim::pending_reported_closeout_for_content(file, &content) {
+        Ok(Some(pending)) => {
+            println!(
+                "reported_closeout_required=true item={:?} owner={} generation={} shape={} operator_request_id={}",
+                pending.item,
+                pending.owner,
+                pending.generation,
+                pending.shape.as_str(),
+                pending.operator_request_id,
+            );
+            eprintln!("[session-check] {}", pending.guidance);
+            if pending.requires_operator {
+                eprintln!(
+                    "[session-check] operator request packet to present:\n{}",
+                    pending.operator_request_packet
+                );
+            }
+        }
+        Ok(None) => {}
+        Err(err) => eprintln!(
+            "[session-check] WARNING: could not derive owed reported closeouts for {}: {err:#}",
+            file.display()
+        ),
+    }
+}
+
 /// `#qpausemix`: the queue-continuation guidance `session-check` prints when
 /// `queue_continuation_required == true`, resolved against the controller pause
 /// state. Reads the effective `admin queue pause` reason and composes the
@@ -2461,6 +2505,7 @@ fn run_with_options_inner(
             }
             println!("{}", message);
             warn_unrecorded_chat_prompts(file);
+            report_pending_reported_closeout(file);
             // #coordinatordrain: a clean closeout is the terminal synchronous
             // boundary. The committed document frontier is already the typed
             // supervisor ingress; queue selection, projection, dispatch, and

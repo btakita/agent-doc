@@ -389,6 +389,11 @@ and the pending granular-flags-only rule. This runbook carries the rest.
      `agent-doc queue report-complete <FILE> --item <...> --generation <N> --prose-only --response '<worker response>'`
      for prose-only work. For repository work replace `--prose-only` with explicit
      `--source-repo`, `--source-sha`, `--sink-repo`, and designated `--sink-ref`.
+     `--prose-only` records a durable `prose_only` lineage declaration; it is
+     the only way an attempt with no repository facts closes as prose
+     (`#reportedcloseoutfacts`). A worker that committed, pushed, or left
+     changes anywhere is repository work even when it recorded nothing:
+     never declare it prose-only.
      Pass the worker's complete handback verbatim; an empty response is refused,
      and there is no placeholder-only completion mode.
      Before treating the handback as complete, compare it with the queue item,
@@ -439,10 +444,28 @@ and the pending granular-flags-only rule. This runbook carries the rest.
      You do not have to derive these closeouts by hand (`#reportedcloseout`):
      `agent-doc queue claims <FILE>` gives every reported attempt a
      `reported_closeout` (the exact ordered verify / lineage-record / consume
-     commands for its recorded facts, or the missing fact it needs) whose first
-     step is its `next_action_argv`, and `agent-doc plan <FILE>` lists those
-     steps first in `required_commands` and in the `phase.reported_closeout`
-     operation phase. Run them before any new claim or spawn.
+     commands for its recorded facts) whose first step is its
+     `next_action_argv`, and `agent-doc plan <FILE>` lists those steps first in
+     `required_commands` and in the `phase.reported_closeout` operation phase.
+     Run them before any new claim or spawn. When a fact is missing or a choice
+     is open, `next_action_argv` is absent and `reported_closeout.decision`
+     names the question; steps tagged with an `alternative` belong to one
+     choice, so run only the chosen branch. A `missing_facts` closeout always
+     includes the steps that record the fact: `lineage-record --event
+     committed` with the worker's `--source-repo`, `--source-sha`,
+     `--sink-repo`, `--sink-ref` (`<placeholder>` values are unknowns to fill,
+     and such steps are `concrete: false`), or `lineage-record --event
+     prose-only` when the worker changed no repository. A non-fast-forward
+     sink gets explicit `cherry_pick` and `merge` branches instead of a push
+     that would be refused, and a source sharing no history with its sink
+     (`sink_mismatch`) asks which sink is right. When the decision has
+     `requires_operator: true`, or the worker's report does not settle it,
+     present `reported_closeout.operator_request_packet` verbatim in the
+     response; finalize records it as the ordinary `🙋` operator wait. Until
+     that request is open, a closeout report keeps
+     `queue_continuation_required: true` with `reported_closeout_required:
+     true` (`#reportedcloseoutstall`): an owed reported closeout never ends a
+     turn as complete.
      `other` is not a mechanically verifiable integration method. For an
      id-backed row whose tracked item must remain open, run
      `agent-doc queue consume <FILE> --ack-id <id>` immediately.

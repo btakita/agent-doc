@@ -2028,25 +2028,10 @@ fn tracked_prompt_ids_by_entry(entries: &[QueueEntry]) -> Vec<Option<String>> {
             // projections. This preserves a primary `do [#id]` before a
             // trailing operator-request id while keeping free-text transcripts
             // free-text when annotations contain incidental `[#id]` tokens.
-            //
-            // `queue_head_identity` reads `🙋 [#id] work` as the legacy form
-            // whose `[#id]` is an operator-request prefix, so the open-Todo gate
-            // projecting `🙋` onto a tracked `[#id] work` waiting item made the
-            // row look buried. When that reading is free text, fall back to the
-            // row's own work identity after the attempt projection prefix
-            // (`#queuerowworkidentity`); an id-backed reading, such as legacy
-            // `🙋 [#request] do [#foo]`, keeps its existing identity.
             QueueEntry::Prompt(prompt) | QueueEntry::Completed(prompt) => {
                 match agent_doc_element_queue::queue_head_identity(&prompt.text) {
                     agent_doc_element_queue::QueueItemIdentity::Id(id) => Some(id),
-                    agent_doc_element_queue::QueueItemIdentity::FreeText(_) => {
-                        match agent_doc_element_queue::queue_head_identity(
-                            agent_doc_element_queue::strip_attempt_projection_prefix(&prompt.text),
-                        ) {
-                            agent_doc_element_queue::QueueItemIdentity::Id(id) => Some(id),
-                            agent_doc_element_queue::QueueItemIdentity::FreeText(_) => None,
-                        }
-                    }
+                    agent_doc_element_queue::QueueItemIdentity::FreeText(_) => None,
                 }
             }
             _ => None,
@@ -2097,13 +2082,34 @@ fn validate_in_progress_marker_projection(
             before_request_ids.iter().any(|id| id == bridged_id)
                 && after_request_ids.iter().any(|id| id == bridged_id)
         };
+    // A row whose work text is byte-identical after the attempt projection
+    // prefix was neither moved nor buried: only binary-owned projection
+    // (`🙋`, lifecycle markers, owner annotations) changed in front of it
+    // (`#queuerowworkidentity`). `queue_head_identity` alone cannot see that:
+    // it reads `🙋 [#id] work` as the legacy form whose `[#id]` is an
+    // operator-request prefix, so the open-Todo gate projecting `🙋` onto a
+    // tracked `[#id] work` waiting item looked like burying `#id`.
+    fn work_text(entries: &[QueueEntry], index: usize) -> Option<&str> {
+        entries
+            .get(index)
+            .and_then(queue_entry_prompt_text)
+            .map(agent_doc_element_queue::strip_attempt_projection_prefix)
+    }
+    let same_work_text = |index: usize| {
+        matches!(
+            (work_text(before, index), work_text(after, index)),
+            (Some(before), Some(after)) if before == after
+        )
+    };
     let mismatch =
         before_ids
             .iter()
             .zip(&after_ids)
             .enumerate()
             .find(|(index, (before_id, after_id))| {
-                before_id != after_id && !request_identity_bridge(*index, before_id, after_id)
+                before_id != after_id
+                    && !request_identity_bridge(*index, before_id, after_id)
+                    && !same_work_text(*index)
             });
     if let Some((index, (before_id, after_id))) = mismatch {
         anyhow::bail!(
@@ -13462,6 +13468,18 @@ mod tests {
             .expect("an open Todo gate projects without burying its row")
             .expect("the open Todo gate is projected");
         assert_eq!(projected, after);
+
+        // Its operator-request sibling under the same group projects through
+        // the same gate without being buried either.
+        let request = "[#subagent-operator-request-vscode-coder-workspace] Provide a real Coder workspace/project/session-document context for #vscodecodersmoke <!-- agent-doc:waiting-item -->";
+        let before = format!("{group}  - {request}\n");
+        let open = std::collections::HashSet::from([
+            "subagent-operator-request-vscode-coder-workspace".to_string(),
+        ]);
+        let (projected, _) = project_prompt_operator_actions(&before, &[], &open)
+            .expect("an open operator-request gate projects without burying its row")
+            .expect("the open operator-request gate is projected");
+        assert_eq!(projected, format!("{group}  - \u{1f64b} {request}\n"));
     }
 
     #[test]

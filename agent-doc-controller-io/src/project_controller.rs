@@ -6159,6 +6159,9 @@ struct QueueAuthorityObservation {
     /// (frontmatter plus `.agent-doc/project.md` inheritance), so a goal-like
     /// project preset gates the strike on its declared final states.
     goal_presets: agent_doc_queue::goal_preset_terminal::ResolvedPresets,
+    /// `#managedlistnodrift`: the durable lifecycle `agent:active` renders
+    /// from, read with the other ledger evidence of this observation.
+    active_lifecycle: agent_doc_work_projection::active_lifecycle::ActiveLifecycleRead,
 }
 
 /// Live queue heads of `content` held by an active worker claim, read from the
@@ -8122,6 +8125,7 @@ impl ControllerDocumentGraphs {
                     &content, file,
                 ),
             ),
+            active_lifecycle: agent_doc_work_projection::active_lifecycle::read(file),
             content,
         };
         self.queue_authority
@@ -8263,8 +8267,9 @@ impl ControllerDocumentGraphs {
                         // struck source row. Unstruck Reported/Lost work remains in
                         // the index because the pure projection derives from the
                         // authoritative source lifecycle, not from turn completion.
-                        let target_content = match agent_doc_work_projection::reconcile_managed_active_items(
+                        let target_content = match agent_doc_work_projection::reconcile_managed_active_items_from_read(
                             &target_content,
+                            &observation.active_lifecycle,
                         ) {
                             Ok(Some(content)) => content,
                             Ok(None) => target_content,

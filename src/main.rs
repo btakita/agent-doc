@@ -509,7 +509,8 @@ impl agent_doc_controller_io::project_controller::ProjectControllerRuntimeEffect
                                 snapshot.clone()
                             };
                             let snapshot_target_content =
-                                agent_doc_work_projection::reconcile_managed_active_items(
+                                agent_doc_work_projection::reconcile_managed_active_items_for(
+                                    &file,
                                     &snapshot_target_content,
                                 )?
                                 .unwrap_or(snapshot_target_content);
@@ -5928,6 +5929,11 @@ fn write_terminal_error_report(writer: &mut impl Write, report: &str) -> std::io
 fn try_main() -> anyhow::Result<()> {
     // `#supresilience` — crash resilience before any output (SIGPIPE reset + panic hook).
     crash_resilience::install();
+    // `#managedlistnodrift`: every `agent:active` render in this process reads
+    // durable lifecycle state, never the queue markers it would read back.
+    agent_doc_work_projection::active_lifecycle::install_loader(
+        agent_doc_queue_io::active_lifecycle::load,
+    );
     // `#reexecptybridge` (GH #270): a supervisor `execve` hot-reload hands this
     // image a live harness child's PTY master. Service it before anything that
     // can wait on `state.db` (the CLI-entry freshness probe below, config, start

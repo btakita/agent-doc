@@ -1594,7 +1594,8 @@ fn verify_compact_head_landed(file: &Path, authoritative_snapshot: &str) -> Resu
     // Commit re-derives the binary-owned Active index from the compacted
     // sources immediately before staging. Verify against that deterministic
     // projection as well as the byte-identical compact target.
-    let projected = agent_doc_work_projection::reconcile_managed_active_items(
+    let projected = agent_doc_work_projection::reconcile_managed_active_items_for(
+        file,
         authoritative_snapshot,
     )?;
     let landed = head.as_deref().is_some_and(|head| {

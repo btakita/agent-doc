@@ -52,7 +52,7 @@ is the legacy alias for `backlog`.
 | `agent:icebox` | Granular tracked work parked outside the runnable backlog. |
 | `agent:done` | Completed-work archive, inline or redirected with `archive`. |
 | `agent:status` | Current status projection. It may contain ordinary status prose and protected binary-owned operational lines. |
-| `agent:active` | Binary-owned, read-only index of started, unclosed work grouped by authoritative queue, backlog, review, and icebox source. Preflight replaces its full body; do not author rows here. Legacy `agent:open-items` markers are migrated to this component. |
+| `agent:active` | Binary-owned, read-only index of started, unclosed queue work rendered from the claim ledger, release receipts, and lineage (never from queue markers), grouped as **Running**, **Lost**, and **Needs integration** (with each entry's age); backlog/review/icebox locations of a listed item appear as sources. Preflight replaces its full body; do not author rows here. Legacy `agent:open-items` markers are migrated to this component. |
 | `agent:signals` | Realtime signal definitions/readings reconciled by the signal subsystem. |
 | `agent:todo` | Operator-owned informational checklist. It is not runnable work and is never promoted to the queue. |
 | `agent:notes` | Operator-owned informational context. Content-only edits do not start a turn. |

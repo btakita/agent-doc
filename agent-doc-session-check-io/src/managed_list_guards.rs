@@ -20,14 +20,7 @@ pub fn managed_list_mismatches(
     content: &str,
 ) -> Vec<(ManagedList, Result<Option<ListMismatch>>)> {
     vec![
-        (
-            ManagedList::Active,
-            agent_doc_work_projection::managed_list::check_list(
-                ManagedList::Active,
-                content,
-                agent_doc_work_projection::reconcile_managed_active_items,
-            ),
-        ),
+        (ManagedList::Active, active_mismatch(file, content)),
         (ManagedList::Todo, todo_mismatch(file, content)),
         (
             ManagedList::Backlog,
@@ -69,6 +62,38 @@ pub fn tracked_finding_lines(content: &str) -> Vec<String> {
         ));
     }
     lines
+}
+
+/// `agent:active` == render(claims, receipts, lineage). The age value is a
+/// function of the clock, not of durable state, so it is compared as `_`.
+fn active_mismatch(file: &Path, content: &str) -> Result<Option<ListMismatch>> {
+    use agent_doc_work_projection::active_lifecycle::without_age_values;
+    use agent_doc_work_projection::managed_list::{component_bodies, replace_component_body};
+    let Some(rendered) =
+        agent_doc_work_projection::reconcile_managed_active_items_for(file, content)?
+    else {
+        return Ok(None);
+    };
+    let normalize = |doc: &str| -> Result<String> {
+        let Some(body) = component_bodies(doc, ManagedList::Active)?
+            .first()
+            .map(|body| without_age_values(body))
+        else {
+            return Ok(doc.to_string());
+        };
+        let body = if body.is_empty() || body.ends_with('\n') {
+            body
+        } else {
+            format!("{body}\n")
+        };
+        Ok(replace_component_body(doc, ManagedList::Active, &body)?
+            .unwrap_or_else(|| doc.to_string()))
+    };
+    agent_doc_work_projection::managed_list::list_mismatch(
+        ManagedList::Active,
+        &normalize(content)?,
+        &normalize(&rendered)?,
+    )
 }
 
 /// `agent:todo` == render(todo records, tracked-work index + done archive).

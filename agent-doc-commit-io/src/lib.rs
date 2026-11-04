@@ -512,7 +512,7 @@ fn late_composed_binary_owned_projection(
         .collect::<Vec<_>>();
     for (base, mut parts) in active_item_bases {
         if let Some(with_active_items) =
-            agent_doc_work_projection::reconcile_managed_active_items(&base)?
+            agent_doc_work_projection::reconcile_managed_active_items_for(file, &base)?
         {
             parts.push("active_component");
             bases.push((with_active_items, parts));
@@ -2640,7 +2640,7 @@ fn adopt_pending_completion_cells_from_disk(file: &Path, current: &mut String, s
         ) || (stripped != disk_content
             && normalized_nonblank(current) == normalized_nonblank(&stripped));
     let pending_cells_plus_active = stripped != disk_content
-        && agent_doc_work_projection::reconcile_managed_active_items(&stripped)
+        && agent_doc_work_projection::reconcile_managed_active_items_for(file, &stripped)
             .ok()
             .flatten()
             .is_some_and(|reconciled| {
@@ -3860,7 +3860,7 @@ where
     let mut snapshot_active_projection_reconciled = false;
     if let Some(reconciled) = snapshot_content
         .as_deref()
-        .map(agent_doc_work_projection::reconcile_managed_active_items)
+        .map(|snapshot| agent_doc_work_projection::reconcile_managed_active_items_for(file, snapshot))
         .transpose()?
         .flatten()
     {

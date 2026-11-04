@@ -965,10 +965,11 @@ fn closeout_pending_maintenance_required(
         }
         Err(err) => return Err(err),
     };
-    content_closeout_pending_maintenance_need(&content)
+    content_closeout_pending_maintenance_need(file, &content)
 }
 
 fn content_closeout_pending_maintenance_need(
+    file: &Path,
     content: &str,
 ) -> Result<CloseoutPendingMaintenanceNeed> {
     if agent_doc_document::tracked_work_projection::tracked_work_maintenance_required(content)
@@ -980,7 +981,7 @@ fn content_closeout_pending_maintenance_need(
     // state that this closeout may have changed. Reconcile it before the
     // closeout commit when possible, while retaining its weaker housekeeping
     // classification for an unavailable editor replica.
-    if agent_doc_work_projection::reconcile_managed_active_items(content)?.is_some() {
+    if agent_doc_work_projection::reconcile_managed_active_items_for(file, content)?.is_some() {
         return Ok(CloseoutPendingMaintenanceNeed::StatusOnly);
     }
     Ok(CloseoutPendingMaintenanceNeed::None)
@@ -988,7 +989,7 @@ fn content_closeout_pending_maintenance_need(
 
 #[cfg(test)]
 fn content_requires_closeout_pending_maintenance(content: &str) -> Result<bool> {
-    Ok(content_closeout_pending_maintenance_need(content)?
+    Ok(content_closeout_pending_maintenance_need(Path::new("test.md"), content)?
         != CloseoutPendingMaintenanceNeed::None)
 }
 fn editor_authority_resolution_unavailable(err: &anyhow::Error) -> bool {

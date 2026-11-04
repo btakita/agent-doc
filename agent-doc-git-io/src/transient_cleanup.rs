@@ -107,7 +107,7 @@ pub fn repair_clean_head_if_only_transient_worktree_drift(
     // `running` beside a `reported` row). Re-derive from the worktree and only
     // restore HEAD when that exact projection proves the active component is
     // the sole drift. Operator descendants prevent equality and are preserved.
-    if agent_doc_work_projection::reconcile_managed_active_items(file_content)?
+    if agent_doc_work_projection::reconcile_managed_active_items_for(file, file_content)?
         .as_deref()
         == Some(head_doc.as_str())
     {

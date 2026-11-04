@@ -3,6 +3,7 @@
 //! Parsing markdown components belongs here rather than in the source-agnostic
 //! work-graph crate. The projection is pure text-in/text-out and performs no IO.
 
+pub mod active_lifecycle;
 pub mod managed_list;
 pub mod tracked_lists;
 
@@ -34,6 +35,9 @@ pub struct ManagedActiveItem {
     pub display_id: Option<String>,
     pub summary: String,
     pub sources: Vec<ManagedActiveItemSource>,
+    /// `#managedlistnodrift`: the `**Age:**` child of a needs-integration
+    /// entry rendered from durable state.
+    pub age: Option<String>,
     group: String,
     summary_priority: u8,
 }
@@ -77,6 +81,7 @@ fn push_managed_active_item(
         display_id,
         summary: summarize_text(text),
         sources: vec![source],
+        age: None,
         group,
         summary_priority,
     });
@@ -248,10 +253,125 @@ pub fn managed_active_items(content: &str) -> Result<Vec<ManagedActiveItem>> {
     Ok(items)
 }
 
+/// `#managedlistnodrift`: active work rendered from durable lifecycle state.
+///
+/// An entry exists exactly when a live executable queue row joins a durable
+/// attempt in `lifecycle` by work identity; the row's visible lifecycle
+/// marker is never read. Response-packet rows under a Waiting-on-you item are
+/// decision evidence, never work, so an attempt dispatched onto one is not
+/// listed. Entries group under `Running` and `Needs integration`; unfinished
+/// backlog/review/icebox locations of a listed identity are provenance.
+pub fn managed_active_items_durable(
+    content: &str,
+    lifecycle: &active_lifecycle::ActiveLifecycle,
+) -> Result<Vec<ManagedActiveItem>> {
+    use agent_doc_element::element;
+    use agent_doc_queue::document_queue::{self, QueueEntry};
+
+    let components = element::parse(content).context("active projection: parse components")?;
+    let mut items: Vec<ManagedActiveItem> = Vec::new();
+    let mut indexes: HashMap<String, usize> = HashMap::new();
+    let queue_set = agent_doc_queue::queue_set::QueueSet::parse(content, &components)?;
+    for block in queue_set.blocks() {
+        let entries =
+            agent_doc_queue::nested_claim_steer::expand_slice_if_installed(&block.entries);
+        let entries = entries.as_ref();
+        for index in document_queue::executable_prompt_indexes(entries) {
+            let Some(QueueEntry::Prompt(prompt)) = entries.get(index) else {
+                continue;
+            };
+            if agent_doc_queue::waiting_packet::is_packet_row(entries, index) {
+                continue;
+            }
+            let identity = agent_doc_queue::queue_claim::claim_identity_at(entries, index)
+                .unwrap_or_else(|| agent_doc_queue::queue_claim::claim_identity(&prompt.text));
+            let Some(attempt) = lifecycle.attempts.get(&identity) else {
+                continue;
+            };
+            let prompt_text =
+                agent_doc_document::queue_projection::strip_in_progress_marker(prompt.text.trim());
+            if prompt_text.trim().is_empty() {
+                continue;
+            }
+            let display_id = agent_doc_element_queue::queue_prompt_stable_id(&prompt_text);
+            let key = display_id.clone().unwrap_or_else(|| {
+                source_free_text_identity(
+                    "queue",
+                    &agent_doc_element_queue::normalize_multiline_dedup_text(&prompt_text),
+                )
+            });
+            if indexes.contains_key(&key) {
+                continue;
+            }
+            let group = active_lifecycle::ActiveGroup::of_marker(attempt.marker);
+            let mut state = lifecycle_state(attempt.marker).to_string();
+            if attempt.integrated {
+                state.push_str(" (integrated; closeout pending)");
+            }
+            let summary = agent_doc_element_queue::strip_queue_prompt_stable_id_annotation(
+                &agent_doc_element_queue::strip_priority_markers(&prompt_text),
+            );
+            indexes.insert(key.clone(), items.len());
+            items.push(ManagedActiveItem {
+                identity: key,
+                display_id,
+                summary: summarize_text(&summary),
+                sources: vec![ManagedActiveItemSource {
+                    component: "queue".to_string(),
+                    state,
+                }],
+                age: (group == active_lifecycle::ActiveGroup::NeedsIntegration)
+                    .then(|| active_lifecycle::age_line(attempt, lifecycle.now_secs)),
+                group: group.key().to_string(),
+                summary_priority: 3,
+            });
+        }
+    }
+    for component_name in ["backlog", "review", "icebox"] {
+        for component in components.iter().filter(|component| {
+            element::canonical_component_name(&component.name) == component_name
+                || (component_name == "backlog" && component.name == "pending")
+        }) {
+            let (_, parsed, _) = backlog::parse_items(component.content(content));
+            for item in parsed.into_iter().filter(|item| !item.is_done()) {
+                let Some(index) = indexes.get(&item.id).copied() else {
+                    continue;
+                };
+                let state = match item.state {
+                    PendingState::Open => "open",
+                    PendingState::Gated => "gated",
+                    PendingState::Done => unreachable!("done tracked work was filtered"),
+                };
+                let entry = &mut items[index];
+                let source = ManagedActiveItemSource {
+                    component: component_name.to_string(),
+                    state: state.to_string(),
+                };
+                if !entry.sources.contains(&source) {
+                    entry.sources.push(source);
+                }
+                if entry.summary_priority > 1 {
+                    entry.summary = summarize_text(&item.text);
+                    entry.summary_priority = 1;
+                }
+            }
+        }
+    }
+    Ok(items)
+}
+
 /// Render active work grouped by authoritative source. Empty groups are omitted.
 pub fn render_managed_active_items(items: &[ManagedActiveItem]) -> String {
     let mut out = String::new();
-    for component in ["queue", "backlog", "review", "icebox"] {
+    for component in [
+        "running",
+        "lost",
+        "needs-integration",
+        "queue",
+        "backlog",
+        "review",
+        "icebox",
+    ] {
         let grouped = items
             .iter()
             .filter(|item| item.group == component)
@@ -260,6 +380,9 @@ pub fn render_managed_active_items(items: &[ManagedActiveItem]) -> String {
             continue;
         }
         let title = match component {
+            "running" => active_lifecycle::ActiveGroup::Running.title(),
+            "lost" => active_lifecycle::ActiveGroup::Lost.title(),
+            "needs-integration" => active_lifecycle::ActiveGroup::NeedsIntegration.title(),
             "queue" => "Queue",
             "backlog" => "Backlog",
             "review" => "Review",
@@ -274,17 +397,28 @@ pub fn render_managed_active_items(items: &[ManagedActiveItem]) -> String {
                 .map(|id| format!("[#{id}]"))
                 .unwrap_or_else(|| item.identity.clone());
             out.push_str(&format!("  - `{identity}` — {}\n", item.summary));
+            let primary_component = if matches!(
+                item.group.as_str(),
+                "running" | "lost" | "needs-integration"
+            ) {
+                "queue"
+            } else {
+                item.group.as_str()
+            };
             if let Some(primary) = item
                 .sources
                 .iter()
-                .find(|source| source.component == item.group)
+                .find(|source| source.component == primary_component)
             {
                 out.push_str(&format!("    - **Status:** {}\n", primary.state));
+            }
+            if let Some(age) = &item.age {
+                out.push_str(&format!("    - {age}\n"));
             }
             let sources = item
                 .sources
                 .iter()
-                .filter(|source| source.component != item.group)
+                .filter(|source| source.component != primary_component)
                 .map(|source| format!("{} ({})", source.component, source.state))
                 .collect::<Vec<_>>()
                 .join("; ");
@@ -311,12 +445,22 @@ fn active_status(line: &str) -> Option<String> {
 
 fn is_binary_active_child(line: &str) -> bool {
     let trimmed = line.trim();
-    trimmed.starts_with("- **Status:**") || trimmed.starts_with("- **Sources:**")
+    trimmed.starts_with("- **Status:**")
+        || trimmed.starts_with("- **Sources:**")
+        || trimmed.starts_with("- **Age:**")
 }
 
 fn is_binary_active_group(line: &str) -> bool {
     let trimmed = line.trim();
-    ["Queue", "Backlog", "Review", "Icebox"]
+    [
+        "Running",
+        "Lost",
+        "Needs integration",
+        "Queue",
+        "Backlog",
+        "Review",
+        "Icebox",
+    ]
         .iter()
         .any(|group| trimmed.starts_with(&format!("- **{group}** (")))
 }
@@ -484,10 +628,63 @@ pub fn promote_active_resolution_commands(
     Ok(Some((active.replace_content(content, &new_body), commands)))
 }
 
-/// Re-derive and reconcile the binary-owned `agent:active` projection.
+/// `#managedlistnodrift`: re-derive `agent:active` for `file` from durable
+/// lifecycle state through the installed loader
+/// ([`active_lifecycle::install_loader`]). Every production caller uses this.
+/// When the durable state cannot be read the component is left unchanged
+/// (`Ok(None)`): an uncertain ledger never erases or invents active work.
+/// Without an installed loader (unit tests of crates that never start the
+/// binary) it falls back to [`reconcile_managed_active_items`].
+pub fn reconcile_managed_active_items_for(
+    file: &std::path::Path,
+    content: &str,
+) -> Result<Option<String>> {
+    let read = active_lifecycle::read(file);
+    if let active_lifecycle::ActiveLifecycleRead::Unreadable(err) = &read {
+        eprintln!(
+            "[active] durable lifecycle unreadable for {} ({err}); agent:active left unchanged",
+            file.display()
+        );
+    }
+    reconcile_managed_active_items_from_read(content, &read)
+}
+
+/// [`reconcile_managed_active_items_for`] over an already-captured read.
+pub fn reconcile_managed_active_items_from_read(
+    content: &str,
+    read: &active_lifecycle::ActiveLifecycleRead,
+) -> Result<Option<String>> {
+    match read {
+        active_lifecycle::ActiveLifecycleRead::NoLoader => reconcile_managed_active_items(content),
+        active_lifecycle::ActiveLifecycleRead::Loaded(lifecycle) => {
+            reconcile_managed_active_items_with(content, lifecycle)
+        }
+        active_lifecycle::ActiveLifecycleRead::Unreadable(_) => Ok(None),
+    }
+}
+
+/// [`reconcile_managed_active_items_for`] with an explicit lifecycle.
+pub fn reconcile_managed_active_items_with(
+    content: &str,
+    lifecycle: &active_lifecycle::ActiveLifecycle,
+) -> Result<Option<String>> {
+    let items = managed_active_items_durable(content, lifecycle)?;
+    reconcile_rendered_active_items(content, &items)
+}
+
+/// Re-derive and reconcile the binary-owned `agent:active` projection from
+/// the queue markers in `content` (the pre-`#managedlistnodrift` derivation,
+/// kept only for callers with no installed durable loader).
 pub fn reconcile_managed_active_items(content: &str) -> Result<Option<String>> {
     let items = managed_active_items(content)?;
-    let mut rendered = render_managed_active_items(&items);
+    reconcile_rendered_active_items(content, &items)
+}
+
+fn reconcile_rendered_active_items(
+    content: &str,
+    items: &[ManagedActiveItem],
+) -> Result<Option<String>> {
+    let mut rendered = render_managed_active_items(items);
     let components = agent_doc_element::element::parse(content)?;
     if let Some(active) = components.iter().find(|component| {
         agent_doc_element::element::canonical_component_name(&component.name)

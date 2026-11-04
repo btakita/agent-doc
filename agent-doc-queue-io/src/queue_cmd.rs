@@ -729,7 +729,7 @@ fn record_claim_runtime_projection_scoped(
             // accepted boundary; otherwise a reintroduced stable id can show a
             // fresh Running queue row beside its predecessor's stale Reported
             // status until an unrelated full-document repair happens.
-            let synced = agent_doc_work_projection::reconcile_managed_active_items(&queue_synced)?
+            let synced = agent_doc_work_projection::reconcile_managed_active_items_for(file, &queue_synced)?
                 .unwrap_or(queue_synced);
             if synced != snapshot
                 && let Err(err) = agent_doc_snapshot_io::checkpoint_document_baseline(
@@ -1360,7 +1360,7 @@ fn project_runtime_state_with_effects(
             }
         };
         let target_content =
-            agent_doc_work_projection::reconcile_managed_active_items(&projection.target_content)?
+            agent_doc_work_projection::reconcile_managed_active_items_for(file, &projection.target_content)?
                 .unwrap_or(projection.target_content);
         // `#sdkdocumentselfheal`: exact operator-request rows and their Todo
         // receipts are one lifecycle. Older/interrupted closeouts could strike
@@ -1415,7 +1415,7 @@ fn project_runtime_state_with_effects(
             }
         };
         let active_settled =
-            agent_doc_work_projection::reconcile_managed_active_items(&authoritative)?.is_none();
+            agent_doc_work_projection::reconcile_managed_active_items_for(file, &authoritative)?.is_none();
         let terminal_todos_settled = rows != RuntimeProjectionRows::All
             || only_identity.is_some()
             || agent_doc_queue::queue_consume::reconcile_terminal_operator_request_todos(
@@ -3340,6 +3340,65 @@ mod tests {
             .unwrap()
             .unwrap();
         assert!(snapshot.contains("- **Status:** running"), "{snapshot}");
+    }
+
+    /// `#managedlistnodrift`: through the real state.db loader, `agent:active`
+    /// follows the durable claim lifecycle (claimed and running under Running,
+    /// reported under Needs integration with an age), whatever marker the row
+    /// shows, and a second render is a no-op.
+    #[test]
+    fn durable_active_follows_claim_start_report_regardless_of_row_marker() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("durable-active.md");
+        let content = concat!(
+            "---\nsession: sid\nagent_doc_format: template\n---\n\n",
+            "## Active <!-- agent:active priority -->\n<!-- /agent:active -->\n\n",
+            "## Run <!-- agent:run id=\"main\" subagents go -->\n",
+            "- ☑️ dispatched worker work\n",
+            "<!-- /agent:run -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        let render = |content: &str| {
+            let lifecycle = crate::active_lifecycle::load(&doc).unwrap();
+            let rendered =
+                agent_doc_work_projection::reconcile_managed_active_items_with(content, &lifecycle)
+                    .unwrap()
+                    .unwrap_or_else(|| content.to_string());
+            assert!(
+                agent_doc_work_projection::reconcile_managed_active_items_with(&rendered, &lifecycle)
+                    .unwrap()
+                    .is_none(),
+                "a second render is a no-op"
+            );
+            rendered
+        };
+        // A stale `☑️` with no durable record is not active work.
+        let unbacked = render(content);
+        assert!(!unbacked.contains("dispatched worker work\n    - **Status"), "{unbacked}");
+
+        crate::queue_claim::claim(&doc, "dispatched worker work", "subagent:worker", 600).unwrap();
+        let claimed = render(content);
+        assert!(claimed.contains("- **Running** (1)\n"), "{claimed}");
+        assert!(claimed.contains("- **Status:** claimed"), "{claimed}");
+
+        let running = crate::queue_claim::start_attempt(
+            &doc,
+            "dispatched worker work",
+            "subagent:worker",
+            "worker:durable-active",
+            600,
+            1,
+        )
+        .unwrap();
+        assert!(render(content).contains("- **Status:** running"));
+
+        crate::queue_claim::report_attempt(&doc, &running.item_text, Some(running.generation))
+            .unwrap();
+        let reported = render(content);
+        assert!(reported.contains("- **Needs integration** (1)\n"), "{reported}");
+        assert!(reported.contains("- **Status:** reported\n    - **Age:** <1h (since attached "), "{reported}");
+        assert!(!reported.contains("- **Running**"), "{reported}");
     }
 
     /// A completed occurrence may be removed and later reintroduced with the

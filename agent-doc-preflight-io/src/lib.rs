@@ -2651,7 +2651,7 @@ fn run_pending_maintenance_with_options(
     // current-file work across an ownership boundary.
     let mut active_status_mutated = false;
     if let Some(reconciled) =
-        agent_doc_work_projection::reconcile_managed_active_items(&current_content)?
+        agent_doc_work_projection::reconcile_managed_active_items_for(file, &current_content)?
     {
         eprintln!("[preflight] active: reconciled managed list");
         current_content = reconciled;
@@ -2660,7 +2660,7 @@ fn run_pending_maintenance_with_options(
     }
     if let Some(ref mut snap_content) = snapshot_content
         && let Some(reconciled) =
-            agent_doc_work_projection::reconcile_managed_active_items(snap_content)?
+            agent_doc_work_projection::reconcile_managed_active_items_for(file, snap_content)?
     {
         *snap_content = reconciled;
         snapshot_mutated = true;
@@ -8203,7 +8203,7 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
     // paint so newly claimed/reported work appears immediately instead of one
     // preflight later, and released/closed work disappears in the same pass.
     if let Some(reconciled) =
-        agent_doc_work_projection::reconcile_managed_active_items(&current_content)?
+        agent_doc_work_projection::reconcile_managed_active_items_for(file, &current_content)?
     {
         current_content = reconciled;
         mutated = true;
@@ -8368,7 +8368,7 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
         }
 
         if let Some(reconciled) =
-            agent_doc_work_projection::reconcile_managed_active_items(&new_snap)?
+            agent_doc_work_projection::reconcile_managed_active_items_for(file, &new_snap)?
         {
             new_snap = reconciled;
         }

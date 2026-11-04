@@ -3033,6 +3033,7 @@ dependencies = [
  "agent-doc-queue",
  "anyhow",
  "proptest",
+ "serde_json",
 ]
 
 [[package]]

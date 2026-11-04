@@ -20,6 +20,11 @@
 //!
 //! The counts: `you` open operator asks, `agent` live attempts plus an answer
 //! waiting to be picked up, `done` struck rows in the packet.
+//!
+//! The same pass renders the head's first child, a binary-owned reply row
+//! `**Next:** <owner> — <action> (evidence: …)` naming the single remaining
+//! action derived from that state (`#waitingitemnext`). It is replaced every
+//! pass and never read back as input.
 
 use std::collections::{BTreeSet, HashSet};
 
@@ -81,6 +86,19 @@ pub struct WaitingStatus {
     pub open_requests: Vec<String>,
     /// Whether the item's own ask is still unanswered.
     pub own_ask_open: bool,
+    /// The item's Todo id.
+    pub item_id: Option<String>,
+    /// Owner annotation of the attempt that decides the state, and how many
+    /// other live attempts there are.
+    pub attempt_owner: Option<String>,
+    pub other_attempts: usize,
+    /// The packet's specific question, or its first action, when present.
+    pub question: Option<String>,
+    pub action: Option<String>,
+    /// The item's own work text.
+    pub item_text: String,
+    /// The operator's most recent live reply in the packet.
+    pub latest_reply: Option<String>,
 }
 
 impl WaitingStatus {
@@ -121,12 +139,32 @@ pub fn waiting_status(
     .into_iter()
     .collect::<HashSet<_>>();
 
-    let mut attempts = Vec::new();
+    let head_work = without_status_token(agent_doc_element_queue::strip_attempt_projection_prefix(
+        &head_prompt.text,
+    ));
+    let item_id = head_work
+        .strip_prefix("[#")
+        .and_then(|rest| rest.split_once(']'))
+        .map(|(id, _)| id.to_ascii_lowercase())
+        .or_else(|| {
+            reference_ids(&head_work)
+                .into_iter()
+                .find(|id| open_todo_ids.contains(id))
+        });
+    let item_text = head_work
+        .replace(crate::queue_consume::WAITING_ON_YOU_ITEM_MARKER, "")
+        .trim()
+        .to_string();
+
+    let mut attempts = Vec::<(QueueLifecycleMarker, Option<String>)>::new();
     if let Some(marker) = attempt_marker(&head_prompt.text) {
-        attempts.push(marker);
+        attempts.push((marker, owner_label(&head_prompt.text)));
     }
     let mut done = 0usize;
     let mut answered = false;
+    let mut latest_reply = None;
+    let mut question = None;
+    let mut action = None;
     let mut open_requests = BTreeSet::new();
     for index in packet_member_indexes(entries, head) {
         match &entries[index] {
@@ -134,19 +172,17 @@ pub fn waiting_status(
             QueueEntry::Prompt(prompt) => {
                 match classify_member(prompt) {
                     WaitingMember::Attempt(_) => {
-                        if let Some(marker) = attempt_marker(&prompt.text) {
-                            attempts.push(marker);
-                        } else {
-                            attempts.push(QueueLifecycleMarker::Claimed);
-                        }
+                        let marker =
+                            attempt_marker(&prompt.text).unwrap_or(QueueLifecycleMarker::Claimed);
+                        attempts.push((marker, owner_label(&prompt.text)));
                     }
                     WaitingMember::Operator => {
+                        let reply = agent_doc_element_queue::struck_work_text(&prompt.text).trim();
                         if !crate::queue_consume::is_agent_doc_reply_row(&prompt.text)
-                            && !agent_doc_element_queue::struck_work_text(&prompt.text)
-                                .trim()
-                                .is_empty()
+                            && !reply.is_empty()
                         {
                             answered = true;
+                            latest_reply = Some(without_generated_id(reply));
                         }
                     }
                     WaitingMember::BinaryFollowUp | WaitingMember::OfferedChoice => {}
@@ -154,8 +190,21 @@ pub fn waiting_status(
                 collect_open_requests(&prompt.text, &own_ids, open_todo_ids, &mut open_requests);
             }
             QueueEntry::Freeform(line) => {
-                if crate::waiting_packet::operator_freeform_text(line).is_some() {
+                // This module's own Next row is output, never input.
+                if is_next_row(line) {
+                    continue;
+                }
+                if let Some(reply) = crate::waiting_packet::operator_freeform_text(line) {
                     answered = true;
+                    latest_reply = Some(without_generated_id(reply));
+                }
+                if let Some(value) = metadata_value(line, "**Question:**")
+                    && value != GENERIC_QUESTION
+                {
+                    question.get_or_insert(value);
+                }
+                if let Some(value) = metadata_value(line, "**Action:**") {
+                    action.get_or_insert(value);
                 }
                 if !line.trim_start().trim_start_matches("- ").starts_with("~~") {
                     collect_open_requests(line, &own_ids, open_todo_ids, &mut open_requests);
@@ -169,8 +218,14 @@ pub fn waiting_status(
     let you = usize::from(own_ask_open) + open_requests.len();
     let attempt = ATTEMPT_PRECEDENCE
         .iter()
-        .find(|marker| attempts.contains(marker))
+        .find(|marker| attempts.iter().any(|(candidate, _)| candidate == *marker))
         .copied();
+    let attempt_owner = attempt.and_then(|marker| {
+        attempts
+            .iter()
+            .find(|(candidate, _)| *candidate == marker)
+            .and_then(|(_, owner)| owner.clone())
+    });
     let state = match attempt {
         Some(marker) => WaitingState::Attempt(marker),
         None if you > 0 => WaitingState::Operator,
@@ -185,7 +240,202 @@ pub fn waiting_status(
         done,
         open_requests: open_requests.into_iter().collect(),
         own_ask_open,
+        item_id,
+        attempt_owner,
+        other_attempts: attempts.len().saturating_sub(1),
+        question,
+        action,
+        item_text,
+        latest_reply,
     })
+}
+
+/// The packet placeholder question carries no decision of its own.
+const GENERIC_QUESTION: &str = "What decision or completion result should be recorded?";
+
+/// The longest action or evidence text the Next row quotes.
+const NEXT_QUOTE_CHARS: usize = 140;
+
+/// Label of the binary-owned Next row.
+pub const NEXT_ROW_LABEL: &str = "**Next:**";
+
+fn owner_label(text: &str) -> Option<String> {
+    agent_doc_document::queue_projection::owner_projection(text)
+        .map(|owner| format!("{}#{}", owner.owner, owner.generation))
+}
+
+/// Remove a trailing binary `[#q-…]` id from quoted operator text.
+fn without_generated_id(text: &str) -> String {
+    let trimmed = text.trim();
+    match trimmed.rsplit_once(" [#q-") {
+        Some((work, id))
+            if id.strip_suffix(']').is_some_and(|hash| {
+                !hash.is_empty() && hash.chars().all(|ch| ch.is_ascii_hexdigit())
+            }) =>
+        {
+            work.trim_end().to_string()
+        }
+        _ => trimmed.to_string(),
+    }
+}
+
+/// The value of a generated `- **Label:** value` metadata row.
+fn metadata_value(line: &str, label: &str) -> Option<String> {
+    let body = line.lines().next()?.trim_start().strip_prefix("- ")?.trim();
+    let value = body.strip_prefix(label)?;
+    let value = value
+        .replace(crate::queue_consume::AGENT_DOC_REPLY_MARKER, "")
+        .replace(crate::queue_consume::LEGACY_AGENT_DOC_REPLY_MARKER, "")
+        .replace(crate::queue_consume::AGENT_DOC_REPLY_PRESENTATION, "");
+    let value = value.trim();
+    (!value.is_empty()).then(|| value.to_string())
+}
+
+/// Whether `line` is this module's binary-owned Next row.
+pub fn is_next_row(line: &str) -> bool {
+    line.lines().next().is_some_and(|first| {
+        first
+            .trim_start()
+            .strip_prefix("- ")
+            .is_some_and(|body| body.starts_with(NEXT_ROW_LABEL))
+            && crate::queue_consume::is_agent_doc_reply_row(first)
+    })
+}
+
+/// `text` without binary `[#id]` / `⟦...⟧` annotations, whitespace-normalized,
+/// for comparing a packet row with the item's own text.
+fn core_text(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    loop {
+        let next = [rest.find("[#"), rest.find('⟦')]
+            .into_iter()
+            .flatten()
+            .min();
+        let Some(at) = next else {
+            out.push_str(rest);
+            break;
+        };
+        out.push_str(&rest[..at]);
+        let close = if rest[at..].starts_with("[#") {
+            "]"
+        } else {
+            "⟧"
+        };
+        match rest[at..].find(close) {
+            Some(end) => rest = &rest[at + end + close.len()..],
+            None => {
+                out.push_str(&rest[at..]);
+                break;
+            }
+        }
+    }
+    out.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn quote(text: &str) -> String {
+    let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    if flat.chars().count() <= NEXT_QUOTE_CHARS {
+        return flat;
+    }
+    let mut cut = flat.chars().take(NEXT_QUOTE_CHARS).collect::<String>();
+    if let Some(space) = cut.rfind(' ') {
+        cut.truncate(space);
+    }
+    format!("{}…", cut.trim_end())
+}
+
+impl WaitingStatus {
+    /// The single remaining action, its owner, and the evidence it was derived
+    /// from, as the body of the item's Next row.
+    pub fn next_action(&self) -> String {
+        let item = self
+            .item_id
+            .as_deref()
+            .map(|id| format!("`#{id}`"))
+            .unwrap_or_else(|| "this item".to_string());
+        let others = match self.other_attempts {
+            0 => String::new(),
+            1 => " and 1 more attempt".to_string(),
+            count => format!(" and {count} more attempts"),
+        };
+        let attempt = self
+            .attempt_owner
+            .as_deref()
+            .map(|owner| format!("`{owner}`"))
+            .unwrap_or_else(|| "the attempt".to_string());
+        match &self.state {
+            WaitingState::Attempt(marker) => {
+                let verb = match marker {
+                    QueueLifecycleMarker::Running | QueueLifecycleMarker::Claimed => {
+                        "let the running attempt finish and report"
+                    }
+                    QueueLifecycleMarker::Reported | QueueLifecycleMarker::LostReported
+                        if self.other_attempts > 0 =>
+                    {
+                        "integrate the reported results, then close the item or ask what remains"
+                    }
+                    QueueLifecycleMarker::Reported | QueueLifecycleMarker::LostReported => {
+                        "integrate the reported result, then close the item or ask what remains"
+                    }
+                    QueueLifecycleMarker::Reconciling => {
+                        "reconcile the recorded completion, then close the item"
+                    }
+                    QueueLifecycleMarker::Unknown => "diagnose the attempt's conflicting state",
+                    _ => "recover the lost attempt's result, or retry it",
+                };
+                format!(
+                    "agent — {verb} (evidence: {} {attempt}{others})",
+                    marker.prefix()
+                )
+            }
+            WaitingState::Operator if self.own_ask_open => {
+                // Quote the packet's specific ask; never repeat the head's own
+                // text, which the operator is already reading.
+                let item = core_text(&self.item_text);
+                let same_as_item = |text: &str| core_text(text) == item;
+                if let Some(question) = self.question.as_deref().filter(|q| !same_as_item(q)) {
+                    format!("you — answer: {} (evidence: Question)", quote(question))
+                } else if let Some(action) = self.action.as_deref().filter(|a| !same_as_item(a)) {
+                    format!("you — {} (evidence: Action)", quote(action))
+                } else {
+                    "you — reply under this item with the decision or result it asks for (evidence: no answer or attempt in its packet yet)".to_string()
+                }
+            }
+            WaitingState::Operator => {
+                let requests = self
+                    .open_requests
+                    .iter()
+                    .map(|id| format!("`#{id}`"))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!(
+                    "you — answer the open request {requests} (evidence: open request in this item's packet)"
+                )
+            }
+            WaitingState::Answered => {
+                let reply = self.latest_reply.as_deref().unwrap_or_default();
+                format!(
+                    "agent — pick up your reply “{}” and attempt {item} (evidence: your reply)",
+                    quote(reply)
+                )
+            }
+            WaitingState::Done => format!(
+                "you — check off {item} in Todo, or reply with what remains (evidence: every row under the item is closed)"
+            ),
+        }
+    }
+
+    /// The item's Next row, rendered at `indent`.
+    pub fn next_row(&self, indent: usize) -> String {
+        format!(
+            "{}- {NEXT_ROW_LABEL} {} {} {}",
+            " ".repeat(indent),
+            self.next_action(),
+            crate::queue_consume::AGENT_DOC_REPLY_PRESENTATION,
+            crate::queue_consume::AGENT_DOC_REPLY_MARKER
+        )
+    }
 }
 
 fn collect_open_requests(
@@ -260,32 +510,52 @@ fn remove_status_tokens(prefix: &str) -> String {
     out
 }
 
-/// Project the state token onto every live waiting head in one queue body.
+/// Project the state token and the Next row onto every live waiting head in
+/// one queue body. The Next row is the head's first child; any earlier Next
+/// row the item owns is replaced, and a struck head keeps none.
 pub fn project_waiting_status(
     entries: &[QueueEntry],
     open_todo_ids: &HashSet<String>,
 ) -> Option<Vec<QueueEntry>> {
-    let mut out = entries.to_vec();
-    let mut changed = false;
-    for head in 0..entries.len() {
-        if !matches!(&entries[head], QueueEntry::Prompt(_))
-            || !crate::waiting_packet::is_waiting_item_head(&entries[head])
-        {
+    let mut out = Vec::with_capacity(entries.len() + 8);
+    let mut index = 0usize;
+    while index < entries.len() {
+        let entry = &entries[index];
+        if !crate::waiting_packet::is_waiting_item_head(entry) {
+            out.push(entry.clone());
+            index += 1;
             continue;
         }
-        let Some(status) = waiting_status(entries, head, open_todo_ids) else {
-            continue;
-        };
-        let QueueEntry::Prompt(prompt) = &mut out[head] else {
-            continue;
-        };
-        let rendered = with_status_token(&prompt.text, &status.token());
-        if rendered != prompt.text {
-            prompt.text = rendered;
-            changed = true;
+        let members = packet_member_indexes(entries, index)
+            .into_iter()
+            .collect::<HashSet<_>>();
+        let end = crate::waiting_packet::subtree_end(entries, index);
+        match (entry, waiting_status(entries, index, open_todo_ids)) {
+            (QueueEntry::Prompt(prompt), Some(status)) => {
+                let mut head = prompt.clone();
+                head.text = with_status_token(&prompt.text, &status.token());
+                out.push(QueueEntry::Prompt(head));
+                out.push(QueueEntry::Freeform(status.next_row(prompt.indent + 2)));
+            }
+            _ => out.push(entry.clone()),
         }
+        // Copy the subtree, dropping this item's previous Next rows. A
+        // nested item's rows are copied by its own turn of this loop.
+        let mut cursor = index + 1;
+        while cursor < end {
+            if crate::waiting_packet::is_waiting_item_head(&entries[cursor]) {
+                break;
+            }
+            let stale_next = members.contains(&cursor)
+                && matches!(&entries[cursor], QueueEntry::Freeform(line) if is_next_row(line));
+            if !stale_next {
+                out.push(entries[cursor].clone());
+            }
+            cursor += 1;
+        }
+        index = cursor;
     }
-    changed.then_some(out)
+    (out != entries).then_some(out)
 }
 
 #[cfg(test)]
@@ -412,6 +682,102 @@ mod tests {
         assert_eq!(
             agent_doc_element_queue::strip_attempt_projection_prefix(operator),
             operator
+        );
+    }
+
+    fn next_line(body: &str, id: &str) -> String {
+        let lines = body.lines().collect::<Vec<_>>();
+        let head = lines
+            .iter()
+            .position(|line| line.contains(&format!("[#{id}]")) && line.contains("waiting-item"))
+            .unwrap();
+        lines[head + 1].to_string()
+    }
+
+    #[test]
+    fn each_item_gets_one_next_row_naming_owner_action_and_evidence() {
+        let body = concat!(
+            "- [#ask] Choose an owner. <!-- agent-doc:waiting-item -->\n",
+            "  - **Response:** Choose an owner. ▫️ <!-- agent-doc:reply -->\n",
+            "    - **Question:** Who owns the alpha release? ▫️ <!-- agent-doc:reply -->\n",
+            "- [#generic] Renew the license. <!-- agent-doc:waiting-item -->\n",
+            "  - **Response:** Renew the license. ▫️ <!-- agent-doc:reply -->\n",
+            "    - **Question:** What decision or completion result should be recorded? ▫️ <!-- agent-doc:reply -->\n",
+            "    - **Next actions:** ▫️ <!-- agent-doc:reply -->\n",
+            "      - **Action:** Renew the license. ▫️ <!-- agent-doc:reply -->\n",
+            "- [#answered] Pick a port. <!-- agent-doc:waiting-item -->\n",
+            "  - use 8080 [#q-0123456789ab]\n",
+            "- 🚧 [#subagent:run#1] [#running] Merge the PR. <!-- agent-doc:waiting-item -->\n",
+            "  - **Response:** Merge the PR. ▫️ <!-- agent-doc:reply -->\n",
+            "- [#closed] Ship the docs. <!-- agent-doc:waiting-item -->\n",
+            "  - ~~shipped~~\n",
+        );
+        let projected = project(body, &["ask", "generic", "answered", "running", "closed"]);
+        let reply = " ▫️ <!-- agent-doc:reply -->";
+        assert_eq!(
+            next_line(&projected, "ask"),
+            format!(
+                "  - **Next:** you — answer: Who owns the alpha release? (evidence: Question){reply}"
+            )
+        );
+        assert_eq!(
+            next_line(&projected, "generic"),
+            format!(
+                "  - **Next:** you — reply under this item with the decision or result it asks for (evidence: no answer or attempt in its packet yet){reply}"
+            ),
+            "the head's own text is never repeated as its next action"
+        );
+        assert_eq!(
+            next_line(&projected, "answered"),
+            format!(
+                "  - **Next:** agent — pick up your reply “use 8080” and attempt `#answered` (evidence: your reply){reply}"
+            )
+        );
+        assert_eq!(
+            next_line(&projected, "running"),
+            format!(
+                "  - **Next:** agent — let the running attempt finish and report (evidence: 🚧 `subagent:run#1`){reply}"
+            )
+        );
+        assert_eq!(
+            next_line(&projected, "closed"),
+            format!(
+                "  - **Next:** you — check off `#closed` in Todo, or reply with what remains (evidence: every row under the item is closed){reply}"
+            )
+        );
+        assert_eq!(projected.matches("**Next:**").count(), 5);
+        assert_eq!(
+            project(
+                &projected,
+                &["ask", "generic", "answered", "running", "closed"]
+            ),
+            projected
+        );
+        // The Next row is inert reply metadata, never queue work.
+        let entries = document_queue::parse(&projected).unwrap();
+        assert!(
+            document_queue::prompts(&entries)
+                .iter()
+                .all(|prompt| !prompt.text.contains("**Next:**"))
+        );
+    }
+
+    #[test]
+    fn a_stale_next_row_is_replaced_and_never_read_back_as_evidence() {
+        // The previous Next named a request that has since closed. Reading the
+        // binary's own row back would keep that request "open" forever.
+        let body = concat!(
+            "- [#ask] Choose an owner. <!-- agent-doc:waiting-item -->\n",
+            "  - **Next:** you — answer the open request [#subagent-operator-request-gone] (evidence: open request in this item's packet) ▫️ <!-- agent-doc:reply -->\n",
+            "  - **Response:** Choose an owner. ▫️ <!-- agent-doc:reply -->\n",
+            "    - **Question:** Who owns the alpha release? ▫️ <!-- agent-doc:reply -->\n",
+        );
+        let projected = project(body, &["ask", "subagent-operator-request-gone"]);
+        assert_eq!(projected.matches("**Next:**").count(), 1, "{projected}");
+        assert!(!projected.contains("request-gone"), "{projected}");
+        assert!(
+            projected.contains("⟦🙋 you: 1 · agent: 0 · done: 0⟧ [#ask]"),
+            "{projected}"
         );
     }
 }

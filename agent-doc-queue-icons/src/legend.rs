@@ -190,7 +190,7 @@ pub struct QueueMarkerAnnotation {
 
 /// Annotations and legacy spellings that appear on queue rows. Like the
 /// prefixes, every one is stripped before queue work identity is computed.
-pub const QUEUE_MARKER_ANNOTATIONS: [QueueMarkerAnnotation; 9] = [
+pub const QUEUE_MARKER_ANNOTATIONS: [QueueMarkerAnnotation; 10] = [
     QueueMarkerAnnotation {
         token: QUEUE_TERMINAL_TOKEN,
         meaning: QUEUE_TERMINAL_MEANING,
@@ -214,6 +214,10 @@ pub const QUEUE_MARKER_ANNOTATIONS: [QueueMarkerAnnotation; 9] = [
     QueueMarkerAnnotation {
         token: "⟦<state> you: N · agent: N · done: N⟧",
         meaning: "On a Waiting-on-you item: its state and roll-up, recomputed every closeout from its packet and attempts. `<state>` is a live attempt's own marker (`🚧`, `🟡`, `⚠️`, `🔄`, `☑️`, ...), `🙋` while the operator owes an answer, `📥` once the answer waits for an attempt, or `✅` when every row under the item is closed and only its Todo is open. `you` counts open operator asks, `agent` live attempts plus an answer waiting to be picked up, and `done` struck rows. Metadata, not work identity.",
+    },
+    QueueMarkerAnnotation {
+        token: "**Next:** <owner> — <action> (evidence: …)",
+        meaning: "First child of a Waiting-on-you item: the single remaining action, whose it is (`you` or `agent`), and the packet row or attempt it was derived from. When no action can be derived it says so instead of inventing one. Rewritten every closeout; never queue work.",
     },
     QueueMarkerAnnotation {
         token: "⟦local⟧ / ⟦published⟧ / ⟦published+local⟧",

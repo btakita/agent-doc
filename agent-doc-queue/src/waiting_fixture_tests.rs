@@ -365,3 +365,51 @@ fn every_live_head_carries_its_state_and_roll_up() {
     // The item's own attempt reported; the agent must reconcile it.
     assert!(head_line(&settled, "tdhandoffdocrelock").contains("⟦☑️ you: 0 · agent: 1 · done: 0⟧"));
 }
+
+#[test]
+fn the_head_lines_and_their_next_rows_alone_tell_each_items_status() {
+    let settled = settled_fixture();
+    let lines = main_queue_body(&settled)
+        .lines()
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    let mut items = 0usize;
+    for (index, line) in lines.iter().enumerate() {
+        if !line.contains(WAITING_ON_YOU_ITEM_MARKER) || line.contains("~~") {
+            continue;
+        }
+        items += 1;
+        let next = &lines[index + 1];
+        assert!(
+            crate::waiting_status::is_next_row(next),
+            "the first child of a waiting head is its Next row:\n{line}\n{next}"
+        );
+        assert!(
+            next.contains("**Next:** you — ")
+                || next.contains("**Next:** agent — ")
+                || next.contains("**Next:** none derivable"),
+            "{next}"
+        );
+        assert!(next.contains("(evidence: "), "{next}");
+        assert_eq!(
+            lines[index + 1..]
+                .iter()
+                .take_while(|candidate| !candidate.contains(WAITING_ON_YOU_ITEM_MARKER))
+                .filter(|candidate| crate::waiting_status::is_next_row(candidate))
+                .count(),
+            1,
+            "exactly one Next row per item: {line}"
+        );
+    }
+    assert_eq!(items, 23);
+    let release = lines
+        .iter()
+        .position(|line| {
+            line.contains("[#tdsdkreleaseapp]") && line.contains(WAITING_ON_YOU_ITEM_MARKER)
+        })
+        .unwrap();
+    assert_eq!(
+        lines[release + 1],
+        "    - **Next:** agent — integrate the reported results, then close the item or ask what remains (evidence: ☑️ `subagent:0f24a54c#1` and 10 more attempts) ▫️ <!-- agent-doc:reply -->"
+    );
+}

@@ -6134,6 +6134,7 @@ mod tests {
         assert!(
             with_reply.contains(concat!(
                 "  - ⟦📥 you: 0 · agent: 1 · done: 0⟧ [#approve-pr] Approve and merge PR #42. <!-- agent-doc:waiting-item -->\n",
+                "    - **Next:** agent — pick up your reply “approved” and attempt `#approve-pr` (evidence: your reply) ▫️ <!-- agent-doc:reply -->\n",
                 "    - approved\n",
             )),
             "refresh must preserve an operator reply byte-for-byte: {with_reply}"
@@ -6202,8 +6203,13 @@ mod tests {
 
         let refreshed = project_waiting_on_you_tree(&document, response).unwrap();
         let refreshed = refreshed.as_deref().unwrap_or(&document);
-        // Only the binary-owned state token is added to the head.
-        let without_token = refreshed.replace("⟦📥 you: 0 · agent: 1 · done: 0⟧ ", "");
+        // Only the binary-owned state token and Next row are added.
+        let without_token = refreshed
+            .replace("⟦📥 you: 0 · agent: 1 · done: 0⟧ ", "")
+            .lines()
+            .filter(|line| !crate::waiting_status::is_next_row(line))
+            .map(|line| format!("{line}\n"))
+            .collect::<String>();
         assert!(
             without_token.contains(child),
             "the operator-answered packet must survive byte-for-byte:\n{refreshed}"

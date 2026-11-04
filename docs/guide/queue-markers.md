@@ -68,6 +68,7 @@ start` binds the replacement worker.
 | `⟦effect:N⟧` | Numbers live rows that have identical text, so each one is its own claimable effect. |
 | `⟦addressed-at:YYYY-MM-DDTHH:MM:SS.mmmZ⟧` | Durable UTC time when a closeout struck the row. Editors derive `①`/`②`/`③` and graded highlights for the newest three addressed rows; visiting a row clears only its transient highlight. |
 | `⟦<state> you: N · agent: N · done: N⟧` | On a Waiting-on-you item: its state and roll-up, recomputed every closeout from its packet and attempts. `<state>` is a live attempt's own marker (`🚧`, `🟡`, `⚠️`, `🔄`, `☑️`, ...), `🙋` while the operator owes an answer, `📥` once the answer waits for an attempt, or `✅` when every row under the item is closed and only its Todo is open. `you` counts open operator asks, `agent` live attempts plus an answer waiting to be picked up, and `done` struck rows. Metadata, not work identity. |
+| `**Next:** <owner> — <action> (evidence: …)` | First child of a Waiting-on-you item: the single remaining action, whose it is (`you` or `agent`), and the packet row or attempt it was derived from. When no action can be derived it says so instead of inventing one. Rewritten every closeout; never queue work. |
 | `⟦local⟧ / ⟦published⟧ / ⟦published+local⟧` | Worker-reported publication state: local changes (✎), published (⇧), or published and then changed locally again (⇧✎). Metadata, not work identity. |
 | `📫 / 📤` | Older spellings of the reported marker; normalized on the next projection write. |
 | `⟦<owner>#<N>⟧` | Older spelling of the owner annotation; normalized to `[#<owner>#<N>]`. |
@@ -283,6 +284,25 @@ projection, for example:
 `you` counts open operator asks, `agent` counts live attempts plus an answer
 waiting to be picked up, and `done` counts struck rows in the packet. The
 token is recomputed on every closeout and never changes the item's identity.
+
+The item's first child is its `Next:` row: the one remaining action, whose it
+is, and the evidence it came from, so the item rows and their `Next:` rows
+alone tell you where everything stands:
+
+```text
+- ⟦🙋 you: 1 · agent: 0 · done: 0⟧ [#approve-pr] Approve and merge PR #42.
+  - **Next:** you — answer: Which reviewer should approve it? (evidence: Question) ▫️
+- ⟦📥 you: 0 · agent: 1 · done: 0⟧ [#pick-port] Pick a port.
+  - **Next:** agent — pick up your reply “use 8080” and attempt `#pick-port` (evidence: your reply) ▫️
+- ⟦☑️ you: 0 · agent: 3 · done: 2⟧ [#release-app] Release app access.
+  - **Next:** agent — integrate the reported results, then close the item or ask what remains (evidence: ☑️ `subagent:grant#1` and 2 more attempts) ▫️
+```
+
+The action is derived from the packet: a specific `**Question:**`, else an
+`**Action:**` that differs from the item's own text, else a plain request to
+reply under the item. When nothing can be derived the row says so rather than
+inventing a step. The row is binary-owned reply metadata, replaced on every
+closeout and never read back as evidence.
 
 ## Custom palettes
 

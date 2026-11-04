@@ -2,6 +2,7 @@
 
 pub mod active_lifecycle;
 pub mod claim_release_receipt;
+pub mod queue_marker_audit;
 pub mod continuation_detect;
 pub mod continuation_marker;
 pub mod continuation_request;

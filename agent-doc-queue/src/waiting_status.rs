@@ -110,6 +110,25 @@ impl WaitingStatus {
             self.done,
         )
     }
+
+    /// The token as rendered on the head. The `🙋` state is the one the
+    /// head's open-Todo operator-action gate already shows, so the token omits
+    /// it and keeps the counts (`⟦you: 1 · agent: 0 · done: 0⟧`); one row
+    /// never shows `🙋 ⟦🙋 …⟧` (`#managedlistnodrift`). The form depends only
+    /// on the derived state, never on whether the gate pass already ran, so it
+    /// is one fixed point in either pass order. Both forms parse as the same
+    /// projection token.
+    pub fn head_token(&self) -> String {
+        if self.state == WaitingState::Operator {
+            return agent_doc_element_queue::render_waiting_status_token(
+                "",
+                self.you,
+                self.agent,
+                self.done,
+            );
+        }
+        self.token()
+    }
 }
 
 fn attempt_marker(text: &str) -> Option<QueueLifecycleMarker> {
@@ -533,7 +552,7 @@ pub fn project_waiting_status(
         match (entry, waiting_status(entries, index, open_todo_ids)) {
             (QueueEntry::Prompt(prompt), Some(status)) => {
                 let mut head = prompt.clone();
-                head.text = with_status_token(&prompt.text, &status.token());
+                head.text = with_status_token(&prompt.text, &status.head_token());
                 out.push(QueueEntry::Prompt(head));
                 out.push(QueueEntry::Freeform(status.next_row(prompt.indent + 2)));
             }
@@ -582,6 +601,48 @@ mod tests {
         )
     }
 
+    /// `#managedlistnodrift` regression: a head whose open Todo already shows
+    /// the `🙋` gate rendered `🙋 ⟦🙋 you: 1 · agent: 0 · done: 0⟧ …`, the
+    /// state twice. The gate is the state now; the token keeps the counts, it
+    /// still parses as projection (never identity), and a second pass is a
+    /// no-op.
+    #[test]
+    fn an_operator_gate_head_shows_its_state_once() {
+        let body = concat!(
+            "- ### Waiting on you — answer by adding a child line under an item <!-- agent-doc:waiting-on-you -->\n",
+            "  - 🙋 Run the sample smoke test on a real workspace <!-- agent-doc:waiting-item --> [#samplesmoke]\n",
+            "    - **Response:** Run the sample smoke test. ▫️ <!-- agent-doc:reply -->\n",
+        );
+        let once = project(body, &["samplesmoke"]);
+        let head = once.lines().nth(1).unwrap().trim_start();
+        assert!(
+            head.starts_with("- 🙋 ⟦you: 1 · agent: 0 · done: 0⟧ Run the sample smoke test"),
+            "{once}"
+        );
+        // The same state without the gate rendered yet (the gate pass may run
+        // after this one) renders the same token: one fixed point.
+        let bare = body.replacen("  - 🙋 Run", "  - Run", 1);
+        assert!(
+            project(&bare, &["samplesmoke"]).contains("  - ⟦you: 1 · agent: 0 · done: 0⟧ Run the sample smoke test"),
+            "{}",
+            project(&bare, &["samplesmoke"])
+        );
+        assert_eq!(head.matches('🙋').count(), 1, "{once}");
+        assert_eq!(project(&once, &["samplesmoke"]), once, "a second pass is a no-op");
+        let work = head.trim_start_matches("- ");
+        assert_eq!(
+            agent_doc_element_queue::strip_attempt_projection_prefix(work),
+            "Run the sample smoke test on a real workspace <!-- agent-doc:waiting-item --> [#samplesmoke]"
+        );
+        // An answered item without the gate keeps the full token.
+        let answered = concat!(
+            "- ### Waiting on you — answer by adding a child line under an item <!-- agent-doc:waiting-on-you -->\n",
+            "  - [#picked] Pick a port. <!-- agent-doc:waiting-item -->\n",
+            "    - use 8080\n",
+        );
+        assert!(project(answered, &["picked"]).contains("⟦📥 you: 0 · agent: 1 · done: 0⟧ [#picked]"));
+    }
+
     #[test]
     fn each_state_is_derived_from_the_packet_and_attempts() {
         let body = concat!(
@@ -615,7 +676,7 @@ mod tests {
         );
         assert!(
             head_line(&projected, "ask")
-                .contains("⟦🙋 you: 1 · agent: 0 · done: 0⟧ [#ask] Choose an owner."),
+                .contains("⟦you: 1 · agent: 0 · done: 0⟧ [#ask] Choose an owner."),
             "{projected}"
         );
         assert!(
@@ -638,7 +699,7 @@ mod tests {
             "{projected}"
         );
         assert!(
-            head_line(&projected, "nested").contains("⟦🙋 you: 1 · agent: 0 · done: 0⟧ [#nested]"),
+            head_line(&projected, "nested").contains("⟦you: 1 · agent: 0 · done: 0⟧ [#nested]"),
             "an open request inside an answered packet is still owed: {projected}"
         );
     }
@@ -776,7 +837,7 @@ mod tests {
         assert_eq!(projected.matches("**Next:**").count(), 1, "{projected}");
         assert!(!projected.contains("request-gone"), "{projected}");
         assert!(
-            projected.contains("⟦🙋 you: 1 · agent: 0 · done: 0⟧ [#ask]"),
+            projected.contains("⟦you: 1 · agent: 0 · done: 0⟧ [#ask]"),
             "{projected}"
         );
     }

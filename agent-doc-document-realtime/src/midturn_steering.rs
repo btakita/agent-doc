@@ -4184,6 +4184,39 @@ mod tests {
         assert!(!current_item_is_present(&watermark, &closed));
     }
 
+    /// `#managedlistnodrift` regression: a waiting-item head whose only change
+    /// is the binary-owned roll-up token (`#waitingitemstatus`) and its
+    /// binary-owned `Next:` row is not operator steering. The hook reported
+    /// both as `change=edited/added` and forwarded one to a running subagent.
+    #[test]
+    fn waiting_roll_up_and_next_row_are_not_steering() {
+        let owned = BTreeSet::new();
+        let root = "- ### Waiting on you — answer by adding a child line under an item <!-- agent-doc:waiting-on-you -->\n";
+        let baseline = doc(
+            &format!(
+                "{root}  - [#subagent-operator-request-sample-workspace] Provide a sample workspace <!-- agent-doc:waiting-item -->\n    - **Response:** Provide a sample workspace. ▫️ <!-- agent-doc:reply -->\n  - 🚧 [#subagent:smoke#1] Run the sample smoke test <!-- agent-doc:waiting-item --> [#samplesmoke]\n    - **Response:** Run it. ▫️ <!-- agent-doc:reply -->\n"
+            ),
+            EX,
+        );
+        let current = doc(
+            &format!(
+                "{root}  - ⟦you: 1 · agent: 0 · done: 0⟧ [#subagent-operator-request-sample-workspace] Provide a sample workspace <!-- agent-doc:waiting-item -->\n    - **Next:** you — reply under this item with the decision or result it asks for (evidence: no answer or attempt in its packet yet) ▫️ <!-- agent-doc:reply -->\n    - **Response:** Provide a sample workspace. ▫️ <!-- agent-doc:reply -->\n  - 🚧 [#subagent:smoke#1] ⟦🚧 you: 0 · agent: 1 · done: 0⟧ Run the sample smoke test <!-- agent-doc:waiting-item --> [#samplesmoke]\n    - **Next:** agent — finish the running attempt (evidence: 🚧 `subagent:smoke#1`) ▫️ <!-- agent-doc:reply -->\n    - **Response:** Run it. ▫️ <!-- agent-doc:reply -->\n"
+            ),
+            EX,
+        );
+        // Also the legacy unmarked head shape, whose sentinel is hidden.
+        let unmarked = |doc: &str| doc.replace(" <!-- agent-doc:waiting-item -->", "");
+        for (baseline, current) in [
+            (baseline.clone(), current.clone()),
+            (unmarked(&baseline), unmarked(&current)),
+        ] {
+            for mode in [ObserveMode::Boundary, ObserveMode::InTurn] {
+                let obs = observe_with_mode(&seeded(&baseline, None), &current, &quiet_ctx(&owned), mode);
+                assert!(obs.ready.is_empty(), "{mode:?}: {:?}", obs.ready);
+            }
+        }
+    }
+
     /// `#steerworks` item 3 / `#claimedsteerwake`: an edit of a claimed head is
     /// forwarded to its owner, never offered as a NEW subagent dispatch.
     #[test]

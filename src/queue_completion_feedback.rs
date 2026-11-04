@@ -540,7 +540,13 @@ pub(crate) fn repair_managed_state(
         file,
         "queue_repair_managed_lists",
     )?;
-    let (target, actions) = project_managed_lists(file, &current)?;
+    let (target, mut actions) = project_managed_lists(file, &current)?;
+    // `#managedlistnodrift`: name every `☑️` that no durable record backs.
+    actions.extend(
+        agent_doc_queue_io::queue_marker_audit::unbacked_reported_rows(file, &current)?
+            .iter()
+            .map(ToString::to_string),
+    );
     let mut lists = ManagedListRepair {
         drift: target.is_some(),
         actions,
@@ -1309,7 +1315,7 @@ mod tests {
     }
 
     #[test]
-    fn managed_state_repair_reaps_only_proven_orphans_and_preserves_terminal_rows() {
+    fn managed_state_repair_reaps_only_proven_orphans_and_repaints_a_stale_reported_marker() {
         let dir = tempfile::tempdir().unwrap();
         fs::create_dir_all(dir.path().join(".agent-doc/locks")).unwrap();
         let doc = dir.path().join("sdk.md");
@@ -1354,18 +1360,20 @@ mod tests {
         let audit = repair_managed_state(&doc, false, &keys).unwrap();
         assert_eq!(audit.stale.stale_cells.len(), 1);
         assert_eq!(audit.stale.stale_cells[0].key, "old-key");
-        assert!(!audit.projection_drift);
+        // `#managedlistnodrift`: the visible `☑️` is output; the durable claim
+        // says the attempt is still running, so the audit reports drift.
+        assert!(audit.projection_drift);
         assert!(!audit.projection_applied);
         assert_eq!(fs::read_to_string(&doc).unwrap(), original);
 
         let repaired = repair_managed_state(&doc, true, &keys).unwrap();
         assert_eq!(repaired.stale.stale_cells.len(), 1);
         assert!(repaired.stale.applied);
-        assert!(!repaired.projection_applied);
+        assert!(repaired.projection_applied);
         let content = fs::read_to_string(&doc).unwrap();
         assert!(!content.contains("old-key"), "{content}");
         assert!(
-            content.contains("- ☑️ [#subagent:live#1] still running"),
+            content.contains("- 🚧 [#subagent:live#1] still running"),
             "{content}"
         );
 

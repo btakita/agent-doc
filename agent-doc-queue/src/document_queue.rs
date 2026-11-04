@@ -1812,9 +1812,11 @@ pub struct QueueRowProjection {
 
 /// Derive every projected prefix from an exact live occurrence target.
 ///
-/// Executable leaves own durable lifecycle state: reported (`☑️`) and struck
-/// leaves are terminal document authority, and only an operator edit reopens
-/// them. Context parents own no attempt state. Their presentation is derived
+/// Executable leaves own durable lifecycle state. A strike is terminal
+/// document authority that only an operator edit reopens. A reported (`☑️`)
+/// marker is binary-owned output (`#managedlistnodrift`): a target a durable
+/// record backs repaints it, and it is kept only while no record says
+/// otherwise. Context parents own no attempt state. Their presentation is derived
 /// lazily from their leaves: all leaves struck closes the parent; any live or
 /// reported leaf keeps/reopens the parent as plain context.
 pub fn set_prompt_runtime_projections(
@@ -1851,6 +1853,11 @@ pub fn set_prompt_runtime_projections(
                 let QueueEntry::Prompt(prompt) = entry else {
                     return entry.clone();
                 };
+                // A `☑️` inside a waiting item is reconciliation evidence the
+                // item's dispatch gate reads (`#waitingpacketowner`): retiring
+                // it would make the item dispatchable again, so it stays until
+                // the item is reconciled. The audit reports one no durable
+                // record backs (`#managedlistnodrift`).
                 if agent_doc_document::queue_projection::lifecycle_marker(&prompt.text)
                     == Some(agent_doc_document::queue_projection::QueueLifecycleMarker::Reported)
                 {
@@ -1991,8 +1998,49 @@ pub fn set_prompt_runtime_projections(
                             agent_doc_document::queue_projection::QueueLifecycleMarker::Reported
                         )
                     );
+                    // `#managedlistnodrift`: the visible `☑️` is binary-owned
+                    // output, never authority over durable state. A target that
+                    // a durable record backs (claim, receipt, completion
+                    // evidence) repaints the row. With no record behind it the
+                    // marker is kept, because retiring it would turn finished
+                    // work into a dispatchable `📥` row; the audit reports it
+                    // instead (`agent_doc_queue_io::queue_marker_audit`).
                     if reported {
-                        return entry.clone();
+                        let mut probe = prompt.clone();
+                        if let Some(stripped) = strip_in_progress_marker_for_display(&probe.text) {
+                            probe.text = stripped;
+                        }
+                        if let Some(cleaned) =
+                            agent_doc_element_queue::subprompts::strip_subprompt_projections(
+                                &probe.text,
+                            )
+                        {
+                            probe.text = cleaned;
+                        }
+                        let key = projection_key(&probe.text);
+                        // Repaint only when durable state says something the
+                        // row does not already show; the same reported attempt
+                        // keeps its row byte-for-byte.
+                        let observed_owner =
+                            agent_doc_document::queue_projection::owner_projection(&prompt.text);
+                        let repaint = targets
+                            .iter()
+                            .find(|(target_key, _, consumed)| target_key == &key && !*consumed)
+                            .is_some_and(|(_, target, _)| {
+                                durable_backed_marker(target.marker)
+                                    && !(target.marker
+                                        == agent_doc_document::queue_projection::QueueLifecycleMarker::Reported
+                                        && (target.owner.is_none()
+                                            || target.owner == observed_owner))
+                            });
+                        if !repaint {
+                            if let Some((_, _, consumed)) = targets.iter_mut().find(
+                                |(target_key, _, consumed)| target_key == &key && !*consumed,
+                            ) {
+                                *consumed = true;
+                            }
+                            return entry.clone();
+                        }
                     }
                     let mut next = prompt.clone();
                     if let Some(stripped) = strip_in_progress_marker_for_display(&next.text) {
@@ -2057,6 +2105,18 @@ pub fn set_prompt_runtime_projections(
         })
         .collect::<Vec<_>>();
     (changed && out != entries).then_some(out)
+}
+
+/// `#managedlistnodrift`: a lifecycle marker only a durable record (claim,
+/// release receipt, or completion evidence) can produce. `Pending`,
+/// `Blocked`, `Unknown`, `Skipped`, and `AwaitingOperator` targets carry no
+/// such record.
+pub fn durable_backed_marker(marker: agent_doc_document::queue_projection::QueueLifecycleMarker) -> bool {
+    use agent_doc_document::queue_projection::QueueLifecycleMarker::*;
+    matches!(
+        marker,
+        Claimed | Running | Reported | Lost | LostClaimed | LostRunning | LostReported | Reconciling
+    )
 }
 
 /// Return whether every executable leaf below `index` is struck when `index`
@@ -7425,8 +7485,11 @@ mod tests {
         );
     }
 
+    /// `#managedlistnodrift`: the visible marker is output. A durable target
+    /// repaints every live row, a reported one included (a new claim on the
+    /// same identity is a new attempt).
     #[test]
-    fn typed_lifecycle_projection_replaces_live_state_without_reopening_reported() {
+    fn typed_lifecycle_projection_paints_durable_state_over_any_visible_marker() {
         use agent_doc_document::queue_projection::QueueLifecycleMarker;
 
         let entries = parse("- 🚧 do [#a]\n- do [#b]\n- 📤 do [#c]\n").unwrap();
@@ -7438,7 +7501,7 @@ mod tests {
         let marked = set_prompt_lifecycle_markers(&entries, &targets).unwrap();
         assert_eq!(
             render(&marked),
-            "- ☑️ do [#a]\n- ⚠️ do [#b]\n- 📤 do [#c]\n"
+            "- ☑️ do [#a]\n- ⚠️ do [#b]\n- 🟡 do [#c]\n"
         );
     }
 
@@ -7461,20 +7524,50 @@ mod tests {
         );
     }
 
+    /// `#managedlistnodrift` regression for the 2026-11-03 ghosts: a `☑️`
+    /// row was "terminal document authority", so no durable state could ever
+    /// repaint it and `repair-managed-state` compared the projection with
+    /// itself ("already synchronized"). Now a target a durable record backs
+    /// repaints it; a target with no record behind it (pending, blocked,
+    /// unknown) leaves it alone, because retiring it would make finished work
+    /// dispatchable. Without the fix the Running case stays `☑️`.
     #[test]
-    fn runtime_projection_never_downgrades_reported_work() {
-        use agent_doc_document::queue_projection::QueueLifecycleMarker;
+    fn runtime_projection_repaints_reported_rows_only_from_durable_records() {
+        use agent_doc_document::queue_projection::{QueueLifecycleMarker, QueueOwnerProjection};
         let body = "- ☑️ [#subagent:sdk#4] fix sdk demo\n";
-        let targets = vec![QueueRowProjection {
-            text: "fix sdk demo".to_string(),
-            marker: QueueLifecycleMarker::Running,
-            owner: None,
-            blockers: Vec::new(),
-        }];
+        let target = |marker| {
+            vec![QueueRowProjection {
+                text: "fix sdk demo".to_string(),
+                marker,
+                owner: Some(QueueOwnerProjection {
+                    owner: "subagent:sdk".to_string(),
+                    generation: 5,
+                }),
+                blockers: Vec::new(),
+            }]
+        };
 
         assert_eq!(project_prompt_runtime_projections(body, &[]).unwrap(), None);
+        for unbacked in [
+            QueueLifecycleMarker::Pending,
+            QueueLifecycleMarker::Blocked,
+            QueueLifecycleMarker::Unknown,
+        ] {
+            assert_eq!(
+                project_prompt_runtime_projections(body, &target(unbacked)).unwrap(),
+                None,
+                "{unbacked:?} carries no durable record"
+            );
+        }
+        let (repainted, _) =
+            project_prompt_runtime_projections(body, &target(QueueLifecycleMarker::Running))
+                .unwrap()
+                .expect("a durable running attempt repaints the row");
+        assert_eq!(repainted, "- 🚧 [#subagent:sdk#5] fix sdk demo\n");
+        // A second render is a no-op.
         assert_eq!(
-            project_prompt_runtime_projections(body, &targets).unwrap(),
+            project_prompt_runtime_projections(&repainted, &target(QueueLifecycleMarker::Running))
+                .unwrap(),
             None
         );
     }

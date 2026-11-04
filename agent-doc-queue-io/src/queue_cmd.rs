@@ -2429,7 +2429,7 @@ mod tests {
         let repaired = std::fs::read_to_string(&doc).unwrap();
         assert!(
             repaired.contains(
-                "  - ⟦🙋 you: 1 · agent: 0 · done: 0⟧ [#approve-pr] Approve and merge PR #42. <!-- agent-doc:waiting-item -->\n"
+                "  - ⟦you: 1 · agent: 0 · done: 0⟧ [#approve-pr] Approve and merge PR #42. <!-- agent-doc:waiting-item -->\n"
             ),
             "{repaired}"
         );

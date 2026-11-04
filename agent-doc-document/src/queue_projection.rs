@@ -1334,6 +1334,15 @@ pub fn strip_priority_markers(text: &str) -> String {
             t = rest.trim_start();
             continue;
         }
+        // `#waitingitemstatus` / `#managedlistnodrift`: the waiting-item
+        // roll-up token (`⟦🙋 you: 1 · agent: 0 · done: 0⟧`) is binary-owned
+        // projection, never work identity, exactly as in
+        // `agent_doc_element_queue::strip_priority_markers`.
+        if let Some(rest) = agent_doc_element_queue::strip_waiting_status_token(trimmed) {
+            stripped_projection = true;
+            t = rest.trim_start();
+            continue;
+        }
         if stripped_projection
             && let Some(rest) = strip_repeated_projection_heading_prefix(trimmed)
         {

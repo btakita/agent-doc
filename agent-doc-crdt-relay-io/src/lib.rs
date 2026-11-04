@@ -9316,10 +9316,17 @@ mod tests {
         claims.claim(item, "subagent:sdk-retry", now + 3, 3600);
         assert_eq!(claims.claims[0].generation, 2);
         persist_queue_claim_ledger(dir.path(), &doc, &claims);
+        // `#managedlistnodrift`: the visible reported marker is output. A new
+        // durable attempt repaints the row from that attempt; the cancelled
+        // generation's report is never replayed onto it, whether or not the
+        // operator first removed the stale marker.
         let replacement = durable_queue_attempt_projection(&doc, &projected).unwrap();
-        assert_eq!(replacement, projected);
+        assert!(
+            replacement.contains("- 🟡 [#subagent:sdk-retry#2] finish sdk demo\n"),
+            "{replacement}"
+        );
 
-        let operator_reopened = replacement.replace(
+        let operator_reopened = projected.replace(
             &format!("- 📤 [#subagent:sdk#1] {item}\n"),
             &format!("- {item}\n"),
         );

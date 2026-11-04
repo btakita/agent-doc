@@ -5856,7 +5856,7 @@ mod tests {
         assert_eq!(projected.matches(WAITING_ON_YOU_ROOT_MARKER).count(), 1);
         assert!(
             projected.contains(
-                "- ⟦🙋 you: 1 · agent: 0 · done: 0⟧ [#approve-pr] Approve and merge PR #42."
+                "- ⟦you: 1 · agent: 0 · done: 0⟧ [#approve-pr] Approve and merge PR #42."
             ),
             "{projected}"
         );

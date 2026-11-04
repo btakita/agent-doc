@@ -67,7 +67,7 @@ start` binds the replacement worker.
 | `⟦blocked by <id>, <id>⟧` | Follows the blocked marker and names the open items the row waits on (ids without `#`). Metadata, not work identity. |
 | `⟦effect:N⟧` | Numbers live rows that have identical text, so each one is its own claimable effect. |
 | `⟦addressed-at:YYYY-MM-DDTHH:MM:SS.mmmZ⟧` | Durable UTC time when a closeout struck the row. Editors derive `①`/`②`/`③` and graded highlights for the newest three addressed rows; visiting a row clears only its transient highlight. |
-| `⟦<state> you: N · agent: N · done: N⟧` | On a Waiting-on-you item: its state and roll-up, recomputed every closeout from its packet and attempts. `<state>` is a live attempt's own marker (`🚧`, `🟡`, `⚠️`, `🔄`, `☑️`, ...), `🙋` while the operator owes an answer, `📥` once the answer waits for an attempt, or `✅` when every row under the item is closed and only its Todo is open. `you` counts open operator asks, `agent` live attempts plus an answer waiting to be picked up, and `done` struck rows. Metadata, not work identity. |
+| `⟦<state> you: N · agent: N · done: N⟧` | On a Waiting-on-you item: its state and roll-up, recomputed every closeout from its packet and attempts. `<state>` is a live attempt's own marker (`🚧`, `🟡`, `⚠️`, `🔄`, `☑️`, ...), `🙋` while the operator owes an answer (shown once, by the head's `🙋` operator-action gate, so the token keeps only the counts: `⟦you: N · agent: N · done: N⟧`), `📥` once the answer waits for an attempt, or `✅` when every row under the item is closed and only its Todo is open. `you` counts open operator asks, `agent` live attempts plus an answer waiting to be picked up, and `done` struck rows. Metadata, not work identity. |
 | `**Next:** <owner> — <action> (evidence: …)` | First child of a Waiting-on-you item: the single remaining action, whose it is (`you` or `agent`), and the packet row or attempt it was derived from. When no action can be derived it says so instead of inventing one. Rewritten every closeout; never queue work. |
 | `⟦local⟧ / ⟦published⟧ / ⟦published+local⟧` | Worker-reported publication state: local changes (✎), published (⇧), or published and then changed locally again (⇧✎). Metadata, not work identity. |
 | `📫 / 📤` | Older spellings of the reported marker; normalized on the next projection write. |
@@ -151,10 +151,15 @@ clause in the tracked item. The exact rule is in
 `☑️` (reported) means **keep this row**: a worker finished and reported back, but nobody has
 integrated its result yet. The state comes from one of two records: a
 `Reported` claim attempt (`queue report-complete`), or a release receipt
-(`queue release` without `--requeue`). For an executable leaf, agent-doc never
-strikes a `☑️` row by itself, never downgrades or reopens it from later runtime
-evidence, and time never clears it. Only the operator can reopen that leaf by
-removing the `☑️` marker in the document. A structural parent is different: it
+(`queue release` without `--requeue`). The marker is output of those records,
+never evidence for itself (`#managedlistnodrift`): when a durable record says
+something else (a new claim on the same work, a lost attempt), the projection
+repaints the row from it. For an executable leaf, agent-doc never strikes a
+`☑️` row by itself and time never clears it. A `☑️` that no claim, receipt, or
+lineage record backs is kept, because retiring it would make finished work
+dispatchable again; `agent-doc queue repair-managed-state` and `session-check`
+name each such row so you can decide. You reopen a leaf by removing its `☑️`
+marker in the document. A structural parent is different: it
 owns no worker lifecycle, so agent-doc removes a stale parent marker and lazily
 derives its strike from the leaves (struck only while every leaf is struck).
 The coordinator closes a reported leaf in a closeout, and
@@ -269,7 +274,7 @@ Each item row carries its state and roll-up right after its attempt
 projection, for example:
 
 ```text
-- ⟦🙋 you: 1 · agent: 0 · done: 0⟧ [#approve-pr] Approve and merge PR #42.
+- 🙋 ⟦you: 1 · agent: 0 · done: 0⟧ [#approve-pr] Approve and merge PR #42.
 - ⟦📥 you: 0 · agent: 1 · done: 0⟧ [#pick-port] Pick a port.
 - ⟦☑️ you: 1 · agent: 3 · done: 2⟧ [#release-app] Release app access.
 ```
@@ -290,7 +295,7 @@ is, and the evidence it came from, so the item rows and their `Next:` rows
 alone tell you where everything stands:
 
 ```text
-- ⟦🙋 you: 1 · agent: 0 · done: 0⟧ [#approve-pr] Approve and merge PR #42.
+- 🙋 ⟦you: 1 · agent: 0 · done: 0⟧ [#approve-pr] Approve and merge PR #42.
   - **Next:** you — answer: Which reviewer should approve it? (evidence: Question) ▫️
 - ⟦📥 you: 0 · agent: 1 · done: 0⟧ [#pick-port] Pick a port.
   - **Next:** agent — pick up your reply “use 8080” and attempt `#pick-port` (evidence: your reply) ▫️

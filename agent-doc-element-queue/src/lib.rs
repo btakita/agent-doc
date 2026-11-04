@@ -556,6 +556,11 @@ pub const WAITING_STATUS_LABELS: [&str; 3] = ["you", "agent", "done"];
 /// Render the binary-owned state and roll-up token of a waiting-item head:
 /// `⟦<state> you: N · agent: N · done: N⟧`.
 pub fn render_waiting_status_token(state: &str, you: usize, agent: usize, done: usize) -> String {
+    if state.is_empty() {
+        // `#managedlistnodrift`: the head's own `🙋` gate already shows the
+        // state; the token carries only the counts.
+        return format!("⟦you: {you} · agent: {agent} · done: {done}⟧");
+    }
     format!("⟦{state} you: {you} · agent: {agent} · done: {done}⟧")
 }
 
@@ -568,10 +573,17 @@ pub fn strip_waiting_status_token(trimmed: &str) -> Option<&str> {
     let rest = trimmed.strip_prefix('⟦')?;
     let close = rest.find('⟧')?;
     let payload = &rest[..close];
-    let (state, counts) = payload.split_once(" you: ")?;
-    if state.is_empty() || state.contains(char::is_whitespace) || state.contains('⟦') {
-        return None;
-    }
+    let counts = match payload.strip_prefix("you: ") {
+        // The stateless form, rendered when the head's `🙋` gate shows it.
+        Some(counts) => counts,
+        None => {
+            let (state, counts) = payload.split_once(" you: ")?;
+            if state.is_empty() || state.contains(char::is_whitespace) || state.contains('⟦') {
+                return None;
+            }
+            counts
+        }
+    };
     let (you, rest_counts) = counts.split_once(" · agent: ")?;
     let (agent, done) = rest_counts.split_once(" · done: ")?;
     [you, agent, done]

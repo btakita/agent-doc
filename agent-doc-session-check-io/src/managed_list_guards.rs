@@ -21,6 +21,7 @@ pub fn managed_list_mismatches(
 ) -> Vec<(ManagedList, Result<Option<ListMismatch>>)> {
     vec![
         (ManagedList::Active, active_mismatch(file, content)),
+        (ManagedList::Queue, queue_mismatch(file, content)),
         (ManagedList::Todo, todo_mismatch(file, content)),
         (
             ManagedList::Backlog,
@@ -96,6 +97,32 @@ fn active_mismatch(file: &Path, content: &str) -> Result<Option<ListMismatch>> {
     )
 }
 
+/// Queue lifecycle markers == render(claims, receipts, completion evidence).
+fn queue_mismatch(file: &Path, content: &str) -> Result<Option<ListMismatch>> {
+    // An unreadable ledger would project every row as `❔`; report it as
+    // unverifiable instead of as drift.
+    agent_doc_queue_io::active_lifecycle::load(file)?;
+    agent_doc_work_projection::managed_list::check_list(ManagedList::Queue, content, |content| {
+        let projection =
+            agent_doc_queue_io::queue_cmd::derive_claim_runtime_projection(file, content, None)?;
+        Ok(projection.changed.then_some(projection.target_content))
+    })
+}
+
+/// `☑️` rows no durable record backs: kept (retiring them could re-run
+/// finished work), and reported so the operator decides.
+pub fn unbacked_reported_lines(file: &Path, content: &str) -> Vec<String> {
+    match agent_doc_queue_io::queue_marker_audit::unbacked_reported_rows(file, content) {
+        Ok(rows) => rows
+            .into_iter()
+            .map(|row| format!("[session-check] warning: {row} (#managedlistnodrift)"))
+            .collect(),
+        Err(err) => vec![format!(
+            "[session-check] warning: agent:run reported-marker audit unverifiable (#managedlistnodrift): {err:#}"
+        )],
+    }
+}
+
 /// `agent:todo` == render(todo records, tracked-work index + done archive).
 fn todo_mismatch(file: &Path, content: &str) -> Result<Option<ListMismatch>> {
     let links = agent_doc_element_backlog_io::backlog_cmd::todo_link_index_in_content(
@@ -158,6 +185,7 @@ pub fn check_managed_list_invariants(file: &Path, rc: &CycleContext) -> Result<G
     let mut lines = managed_list_guard_lines(file, managed_list_mismatches(file, &content));
     lines.extend(todo_duplicate_id_lines(&content));
     lines.extend(tracked_finding_lines(&content));
+    lines.extend(unbacked_reported_lines(file, &content));
     Ok(if lines.is_empty() {
         GuardResult::None
     } else {
@@ -168,6 +196,14 @@ pub fn check_managed_list_invariants(file: &Path, rc: &CycleContext) -> Result<G
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn doc_file(content: &str) -> (tempfile::TempDir, std::path::PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        std::fs::write(&file, content).unwrap();
+        (dir, file)
+    }
 
     #[test]
     fn active_drift_reports_the_exact_line() {
@@ -181,10 +217,8 @@ mod tests {
             "- 📥 next [#next]\n",
             "<!-- /agent:run -->\n",
         );
-        let lines = managed_list_guard_lines(
-            Path::new("plan.md"),
-            managed_list_mismatches(Path::new("plan.md"), content),
-        );
+        let (_dir, file) = doc_file(content);
+        let lines = managed_list_guard_lines(&file, managed_list_mismatches(&file, content));
         assert_eq!(lines.len(), 1, "{lines:?}");
         assert!(lines[0].contains("agent:active line 1"), "{}", lines[0]);
         assert!(
@@ -235,10 +269,8 @@ mod tests {
             "- [ ] [#open] parked copy\n",
             "<!-- /agent:icebox -->\n",
         );
-        let lines = managed_list_guard_lines(
-            Path::new("plan.md"),
-            managed_list_mismatches(Path::new("plan.md"), content),
-        );
+        let (_dir, file) = doc_file(content);
+        let lines = managed_list_guard_lines(&file, managed_list_mismatches(&file, content));
         assert!(
             lines.iter().any(|line| line.contains(
                 "agent:backlog line 2: render(durable state) has `- [x] [#finished] Done but not archived`, the document has `- [/] [#gate] Waits on a vendor`"
@@ -278,10 +310,8 @@ mod tests {
         let reconciled = agent_doc_work_projection::reconcile_managed_active_items(content)
             .unwrap()
             .unwrap_or_else(|| content.to_string());
-        let lines = managed_list_guard_lines(
-            Path::new("plan.md"),
-            managed_list_mismatches(Path::new("plan.md"), &reconciled),
-        );
+        let (_dir, file) = doc_file(&reconciled);
+        let lines = managed_list_guard_lines(&file, managed_list_mismatches(&file, &reconciled));
         assert!(lines.is_empty(), "{lines:?}");
     }
 }

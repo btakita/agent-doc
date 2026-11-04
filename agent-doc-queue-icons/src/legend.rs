@@ -213,7 +213,7 @@ pub const QUEUE_MARKER_ANNOTATIONS: [QueueMarkerAnnotation; 10] = [
     },
     QueueMarkerAnnotation {
         token: "⟦<state> you: N · agent: N · done: N⟧",
-        meaning: "On a Waiting-on-you item: its state and roll-up, recomputed every closeout from its packet and attempts. `<state>` is a live attempt's own marker (`🚧`, `🟡`, `⚠️`, `🔄`, `☑️`, ...), `🙋` while the operator owes an answer, `📥` once the answer waits for an attempt, or `✅` when every row under the item is closed and only its Todo is open. `you` counts open operator asks, `agent` live attempts plus an answer waiting to be picked up, and `done` struck rows. Metadata, not work identity.",
+        meaning: "On a Waiting-on-you item: its state and roll-up, recomputed every closeout from its packet and attempts. `<state>` is a live attempt's own marker (`🚧`, `🟡`, `⚠️`, `🔄`, `☑️`, ...), `🙋` while the operator owes an answer (shown once, by the head's `🙋` operator-action gate, so the token keeps only the counts: `⟦you: N · agent: N · done: N⟧`), `📥` once the answer waits for an attempt, or `✅` when every row under the item is closed and only its Todo is open. `you` counts open operator asks, `agent` live attempts plus an answer waiting to be picked up, and `done` struck rows. Metadata, not work identity.",
     },
     QueueMarkerAnnotation {
         token: "**Next:** <owner> — <action> (evidence: …)",

@@ -535,6 +535,32 @@ fn leads_with_bare_id_directive(lower: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    /// `#managedlistnodrift` regression: the waiting-item roll-up token
+    /// (`#waitingitemstatus`) precedes the head's `[#id]`. Read as content it
+    /// turned an id-backed operator-request head into a FREE-TEXT head, so
+    /// after the head was legitimately closed with `--todo-done`, session-check
+    /// warned it "may have been silently lost".
+    #[test]
+    fn waiting_status_token_is_not_head_identity() {
+        let head = "⟦📥 you: 0 · agent: 1 · done: 0⟧ [#subagent-operator-request-sample-workspace] Provide a real sample workspace";
+        let doc = format!("<!-- agent:queue -->\n- {head}\n<!-- /agent:queue -->\n");
+        assert!(super::is_do_directive(head), "the head is id-backed: {head}");
+        assert!(
+            super::active_free_text_queue_heads(&doc).is_empty(),
+            "{:?}",
+            super::active_free_text_queue_heads(&doc)
+        );
+        assert_eq!(
+            agent_doc_document::queue_projection::strip_priority_markers(head),
+            "[#subagent-operator-request-sample-workspace] Provide a real sample workspace"
+        );
+        let glyph = "🙋 ⟦🙋 you: 1 · agent: 0 · done: 0⟧ Run the sample smoke test";
+        assert_eq!(
+            agent_doc_document::queue_projection::strip_priority_markers(glyph),
+            "Run the sample smoke test"
+        );
+    }
+
     #[test]
     fn a_typoed_head_id_names_the_tracked_item_it_meant() {
         let content = "---\nqueue_active: true\n---\n\n<!-- agent:queue -->\n- do [#event-adapter-impl-tourne9yx]\n<!-- /agent:queue -->\n\n<!-- agent:backlog -->\n- [ ] [#event-adapter-impl-tourneyx] Implement the TourneyX adapter.\n- [ ] [#event-adapter-impl-wa-wdfw] Implement the WDFW adapter.\n<!-- /agent:backlog -->\n";

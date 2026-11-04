@@ -340,7 +340,7 @@ fn every_live_head_carries_its_state_and_roll_up() {
         let work = agent_doc_element_queue::strip_attempt_projection_prefix(&prompt.text);
         let prefix = &prompt.text[..prompt.text.len() - work.len()];
         assert!(
-            prefix.contains(" you: ")
+            prefix.contains("you: ")
                 && prefix.contains(" · agent: ")
                 && prefix.contains(" · done: "),
             "a live waiting head without its state token: {}",
@@ -360,7 +360,7 @@ fn every_live_head_carries_its_state_and_roll_up() {
     // Unanswered: the operator owes the answer.
     assert!(
         head_line(&settled, "subagent-operator-request-craigbot-dm-1793755182")
-            .contains("⟦🙋 you: 1 · agent: 0 · done: 0⟧")
+            .contains("⟦you: 1 · agent: 0 · done: 0⟧")
     );
     // The item's own attempt reported; the agent must reconcile it.
     assert!(head_line(&settled, "tdhandoffdocrelock").contains("⟦☑️ you: 0 · agent: 1 · done: 0⟧"));

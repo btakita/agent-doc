@@ -159,6 +159,18 @@ pub fn check_queue_response_contamination_guard(
     if capture.is_none() {
         contaminated.retain(|candidate| !committed_row_predates_its_quote(file, candidate));
     }
+    // `#qcontam-tracked-work-projection`: a queue row that is exactly the
+    // projection of an OPEN `agent:todo`/`agent:backlog` item (same leading
+    // `[#id]`, same work text) is backlog-derived work, which this guard's own
+    // refusal names as a valid queue source. Text-prefix ancestry misses it
+    // whenever the binary re-materializes the row after the capture: on
+    // 2026-11-03 the capture baseline held `[#vscodecodersmoke]` struck, the
+    // waiting tree re-projected it live from its open Todo, and an older
+    // response that had quoted the row verbatim made every session-check after
+    // that closeout interrupt again.
+    contaminated.retain(|candidate| {
+        !queue_row_projects_open_tracked_work(&content, &components, queue_body, candidate)
+    });
 
     if contaminated.is_empty() {
         return Ok(GuardResult::None);
@@ -174,6 +186,70 @@ pub fn check_queue_response_contamination_guard(
     Ok(agent_doc_workflow::session_check::queue_response_contamination_guard_result(&contaminated))
 }
 
+/// The 40-character comparison key the contamination guard matches on, for
+/// a queue row, a response line, or a reported candidate.
+fn contamination_key(line: &str) -> String {
+    let line = line.trim_start();
+    let line = line.strip_prefix("- ").unwrap_or(line);
+    let bare = agent_doc_element_queue::strip_priority_markers(line);
+    agent_doc_turn::closeout_signal::normalized_prompt_for_match(&bare)
+        .chars()
+        .take(40)
+        .collect()
+}
+
+/// `(id, work text)` of a row that leads with a directive `[#id]`, with the
+/// binary-owned waiting-item marker removed.
+fn leading_id_and_work(text: &str) -> Option<(&str, &str)> {
+    let text = text
+        .trim()
+        .strip_suffix("<!-- agent-doc:waiting-item -->")
+        .unwrap_or(text.trim())
+        .trim();
+    let rest = text.strip_prefix("[#")?;
+    let (id, work) = rest.split_once(']')?;
+    (!id.is_empty()).then(|| (id, work.trim()))
+}
+
+/// True when the queue row behind `candidate` is exactly the projection of an
+/// open Todo or backlog item (`#qcontam-tracked-work-projection`).
+fn queue_row_projects_open_tracked_work(
+    content: &str,
+    components: &[agent_doc_element::element::Component],
+    queue_body: &str,
+    candidate: &str,
+) -> bool {
+    let needle = contamination_key(candidate);
+    if needle.chars().count() < 20 {
+        return false;
+    }
+    let tracked = components
+        .iter()
+        .filter(|component| {
+            component.name == "todo"
+                || agent_doc_element::element::is_backlog_component(&component.name)
+        })
+        .flat_map(|component| component.content(content).lines())
+        .filter_map(|line| {
+            let line = line.trim_start();
+            let open = line
+                .strip_prefix("- [ ] ")
+                .or_else(|| line.strip_prefix("- [/] "))?;
+            leading_id_and_work(open)
+        })
+        .collect::<Vec<_>>();
+    queue_body
+        .lines()
+        .filter(|line| contamination_key(line) == needle)
+        .filter_map(|line| leading_id_and_work(line.trim_start().strip_prefix("- ")?))
+        .any(|(id, work)| {
+            !work.is_empty()
+                && tracked.iter().any(|(tracked_id, tracked_work)| {
+                    tracked_id.eq_ignore_ascii_case(id) && *tracked_work == work
+                })
+        })
+}
+
 /// Bound on committed document versions [`committed_row_predates_its_quote`]
 /// inspects.
 const QUEUE_ROW_PROVENANCE_HISTORY_COMMITS: usize = 256;
@@ -182,15 +258,7 @@ const QUEUE_ROW_PROVENANCE_HISTORY_COMMITS: usize = 256;
 /// queue row stays present, some version holds the row while no assistant
 /// response line quotes it (`#qcontam-row-predates-quote`).
 fn committed_row_predates_its_quote(file: &Path, candidate: &str) -> bool {
-    let key = |line: &str| -> String {
-        let line = line.trim_start();
-        let line = line.strip_prefix("- ").unwrap_or(line);
-        let bare = agent_doc_element_queue::strip_priority_markers(line);
-        agent_doc_turn::closeout_signal::normalized_prompt_for_match(&bare)
-            .chars()
-            .take(40)
-            .collect()
-    };
+    let key = contamination_key;
     let needle = key(candidate);
     if needle.chars().count() < 20 {
         return false;

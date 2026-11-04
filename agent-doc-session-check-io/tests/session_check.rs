@@ -7411,6 +7411,79 @@ Body\n\
         }
     }
 
+    /// `#qcontam-tracked-work-projection`: the 2026-11-03 recurrence. A later
+    /// closeout captured its response while the waiting row was struck; the
+    /// waiting tree then re-projected the row live from its still-open Todo,
+    /// and an OLDER response quotes the row verbatim. The capture baseline no
+    /// longer holds the live row, so prefix ancestry fails, but the row is the
+    /// exact projection of open tracked work, not response prose. Without the
+    /// open Todo the same row is still refused.
+    fn reprojected_waiting_row_doc(with_todo: bool, row_struck: bool) -> String {
+        let work = "Run scripts/vscode-remote-smoke.py on a real Coder workspace; then update the VS Code status cell.";
+        let row = if row_struck {
+            format!("~~[#vscodecodersmoke] {work} <!-- agent-doc:waiting-item -->~~")
+        } else {
+            format!("[#vscodecodersmoke] {work} <!-- agent-doc:waiting-item -->")
+        };
+        let todo = if with_todo {
+            format!(
+                "\n## Todo <!-- agent:todo priority -->\n- [ ] [#vscodecodersmoke] {work}\n<!-- /agent:todo -->\n"
+            )
+        } else {
+            String::new()
+        };
+        format!(
+            concat!(
+                "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+                "<!-- agent:exchange -->\n",
+                "### Re: operator request packet\n\n",
+                "queue_item:\n",
+                "  - [#vscodecodersmoke] {work} <!-- agent-doc:waiting-item -->\n\n",
+                "### Re: later closeout\n\nNothing about that row.\n",
+                "<!-- /agent:exchange -->\n\n",
+                "## Run <!-- agent:run subagents priority go -->\n",
+                "- ### Waiting on you — answer by adding a child line under an item <!-- agent-doc:waiting-on-you -->\n",
+                "  - {row}\n",
+                "<!-- /agent:run -->\n",
+                "{todo}",
+            ),
+            work = work,
+            row = row,
+            todo = todo,
+        )
+    }
+
+    fn guard_after_capture_with_struck_row(with_todo: bool) -> GuardResult {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let baseline = reprojected_waiting_row_doc(with_todo, true);
+        let doc = init_committed_doc_for_queue_guard(tmp.path(), &baseline);
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(&baseline), Some(&baseline)).unwrap();
+        agent_doc_capture_io::capture_response_with_current_content(
+            &doc,
+            "### Re: later closeout\n\nNothing about that row.\n",
+            &baseline,
+        )
+        .unwrap();
+        fs::write(&doc, reprojected_waiting_row_doc(with_todo, false)).unwrap();
+        check_queue_response_contamination_guard(&doc).unwrap()
+    }
+
+    #[test]
+    fn queue_contamination_guard_accepts_reprojected_open_tracked_work_after_a_later_closeout() {
+        match guard_after_capture_with_struck_row(true) {
+            GuardResult::None => {}
+            other => panic!("the open Todo's projection is not contamination, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn queue_contamination_guard_refuses_the_same_row_without_open_tracked_work() {
+        assert!(matches!(
+            guard_after_capture_with_struck_row(false),
+            GuardResult::Error(_)
+        ));
+    }
+
     #[test]
     fn queue_contamination_guard_flags_response_prose_in_queue() {
         let tmp = tempfile::TempDir::new().unwrap();

@@ -54,7 +54,9 @@ impl QueueLineageAttempt {
 
     fn terminal_kind(&self) -> Option<QueueLineageEventKind> {
         self.events.iter().rev().find_map(|event| match event.kind {
-            QueueLineageEventKind::Cancelled => Some(event.kind),
+            QueueLineageEventKind::Cancelled | QueueLineageEventKind::AdmissionRefused => {
+                Some(event.kind)
+            }
             QueueLineageEventKind::Released
                 if event.release_state == Some(ReleaseState::Published) =>
             {
@@ -83,6 +85,12 @@ pub enum QueueLineageEventKind {
     /// worktree, or branch (`#reportedcloseoutfacts`). An attempt with no
     /// repository facts is prose-only only when it carries this receipt.
     ProseOnly,
+    /// Binary-owned terminal receipt: claim admission was rolled back because
+    /// the projector settled without the attempt's marker on its visible row
+    /// (`#waitingitemclaimmarker`). The detail names the blocker. Subagent
+    /// dispatch holds the identity until an explicit newer claim, so one
+    /// deterministic failure never becomes a claim/release loop.
+    AdmissionRefused,
 }
 
 impl QueueLineageEventKind {
@@ -118,6 +126,7 @@ impl QueueLineageEventKind {
             Self::Retained => "retained",
             Self::Removed => "removed",
             Self::ProseOnly => "prose_only",
+            Self::AdmissionRefused => "admission_refused",
         }
     }
 }
@@ -426,6 +435,68 @@ pub fn latest_unstarted_identities(
                     .all(|event| event.kind == QueueLineageEventKind::Created)
         })
         .map(|attempt| attempt.identity.clone())
+        .collect()
+}
+
+/// Terminalize one exact unstarted attempt whose claim admission was rolled
+/// back for a deterministic projection blocker (`#waitingitemclaimmarker`).
+pub fn record_admission_refused(
+    file: &Path,
+    claim: &QueueClaim,
+    blocker: &str,
+) -> Result<QueueLineageAttempt> {
+    record_claim(file, claim)?;
+    record(
+        file,
+        &claim.item_text,
+        claim.generation,
+        RecordRequest {
+            kind: QueueLineageEventKind::AdmissionRefused,
+            detail: Some(blocker.to_string()),
+            ..RecordRequest::default()
+        },
+    )
+}
+
+/// Work identities whose NEWEST durable generation ended in a refused claim
+/// admission, with the recorded blocker. Subagent dispatch never re-offers
+/// them: the same binary would refuse the same row again, and re-offering it
+/// every cycle was the claim/release thrash. An explicit `queue claim` creates
+/// a newer generation and lifts the hold.
+pub fn admission_refused_identities(
+    ledger: &QueueLineageLedger,
+) -> Vec<(agent_doc_element_queue::QueueItemIdentity, String)> {
+    let mut newest = std::collections::HashMap::new();
+    for attempt in &ledger.attempts {
+        for identity in std::iter::once(&attempt.identity).chain(&attempt.identity_history) {
+            newest
+                .entry(identity.clone())
+                .and_modify(|generation: &mut u64| {
+                    *generation = (*generation).max(attempt.generation)
+                })
+                .or_insert(attempt.generation);
+        }
+    }
+    ledger
+        .attempts
+        .iter()
+        .filter(|attempt| newest.get(&attempt.identity) == Some(&attempt.generation))
+        .filter_map(|attempt| {
+            attempt
+                .events
+                .iter()
+                .rev()
+                .find(|event| event.kind == QueueLineageEventKind::AdmissionRefused)
+                .map(|event| {
+                    (
+                        attempt.identity.clone(),
+                        event
+                            .detail
+                            .clone()
+                            .unwrap_or_else(|| "admission_refused".to_string()),
+                    )
+                })
+        })
         .collect()
 }
 
@@ -771,6 +842,7 @@ fn validate_transition(attempt: &QueueLineageAttempt, event: &QueueLineageEvent)
             }
         }
         QueueLineageEventKind::Cancelled
+        | QueueLineageEventKind::AdmissionRefused
         | QueueLineageEventKind::Retained
         | QueueLineageEventKind::Removed => {}
     }
@@ -951,6 +1023,7 @@ fn verify_event(attempt: &QueueLineageAttempt, event: &QueueLineageEvent) -> Res
         }
         QueueLineageEventKind::Created
         | QueueLineageEventKind::Cancelled
+        | QueueLineageEventKind::AdmissionRefused
         | QueueLineageEventKind::ProseOnly => {}
     }
     Ok(())

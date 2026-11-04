@@ -1643,7 +1643,7 @@ impl DispatchAcknowledgementObligation {
     }
 }
 
-fn shell_single_quote(text: &str) -> String {
+pub(crate) fn shell_single_quote(text: &str) -> String {
     format!("'{}'", text.replace('\'', "'\\''"))
 }
 
@@ -1969,16 +1969,28 @@ fn lost_claim_recovery(file: &Path, claim: &QueueClaim, now: u64) -> LostClaimRe
     }
 }
 
-/// Every live queue-head attempt, including retained lost attempts, with its
-/// owner-session verdict and actionable expiry recovery.
-pub fn claim_reports_for_content(file: &Path, content: &str) -> Result<Vec<ClaimReport>> {
+/// Every live queue row's work identity with the lifecycle marker an operator
+/// sees on it (`"bare"` when it carries none). This is the one observer both
+/// `queue claims` and claim admission read, so admission can never report a
+/// projection that `queue claims` then calls `out_of_sync`
+/// (`#waitingitemclaimmarker`).
+pub fn visible_lifecycle_markers_for_content(
+    content: &str,
+) -> Result<Vec<(agent_doc_element_queue::QueueItemIdentity, String)>> {
     let components = agent_doc_element::element::parse(content)?;
-    let observed = components
+    Ok(components
         .iter()
         .filter(|component| component.name == "queue")
         .flat_map(|component| {
+            // An unparseable queue shows no rows, so every claim on it reads
+            // `out_of_sync` (and admission fails closed); say why.
             let entries = agent_doc_queue::document_queue::parse(component.content(content))
-                .unwrap_or_default();
+                .unwrap_or_else(|err| {
+                    eprintln!(
+                        "[queue-claims] WARNING: could not parse a queue component; its rows are not observed: {err:#}"
+                    );
+                    Vec::new()
+                });
             entries
                 .iter()
                 .enumerate()
@@ -2001,7 +2013,43 @@ pub fn claim_reports_for_content(file: &Path, content: &str) -> Result<Vec<Claim
                 })
                 .collect::<Vec<_>>()
         })
+        .collect())
+}
+
+/// Whether every visible display of `claim`'s work identity carries the
+/// marker its durable state projects to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VisibleClaimProjection {
+    pub expected_visible_marker: String,
+    pub observed_visible_markers: Vec<String>,
+    pub synchronized: bool,
+}
+
+pub fn visible_claim_projection(
+    observed: &[(agent_doc_element_queue::QueueItemIdentity, String)],
+    claim: &QueueClaim,
+) -> VisibleClaimProjection {
+    let expected_visible_marker = claim.state.projection_marker().prefix().to_string();
+    let observed_visible_markers = observed
+        .iter()
+        .filter(|(identity, _)| identity == &claim.identity)
+        .map(|(_, marker)| marker.clone())
         .collect::<Vec<_>>();
+    let synchronized = !observed_visible_markers.is_empty()
+        && observed_visible_markers
+            .iter()
+            .all(|marker| marker == &expected_visible_marker);
+    VisibleClaimProjection {
+        expected_visible_marker,
+        observed_visible_markers,
+        synchronized,
+    }
+}
+
+/// Every live queue-head attempt, including retained lost attempts, with its
+/// owner-session verdict and actionable expiry recovery.
+pub fn claim_reports_for_content(file: &Path, content: &str) -> Result<Vec<ClaimReport>> {
+    let observed = visible_lifecycle_markers_for_content(content)?;
     let now = claim_clock_now_secs();
     let claims = claim_states_for_content(file, content)?;
     let lineage = lineage_for_reported(file, &claims);
@@ -2013,16 +2061,11 @@ pub fn claim_reports_for_content(file: &Path, content: &str) -> Result<Vec<Claim
                 ClaimOwnerLiveness::Unrecorded => ("unrecorded", None),
                 ClaimOwnerLiveness::Ended(reason) => ("ended", Some(reason.as_str())),
             };
-            let expected_visible_marker = claim.state.projection_marker().prefix().to_string();
-            let observed_visible_markers = observed
-                .iter()
-                .filter(|(identity, _)| identity == &claim.identity)
-                .map(|(_, marker)| marker.clone())
-                .collect::<Vec<_>>();
-            let synchronized = !observed_visible_markers.is_empty()
-                && observed_visible_markers
-                    .iter()
-                    .all(|marker| marker == &expected_visible_marker);
+            let VisibleClaimProjection {
+                expected_visible_marker,
+                observed_visible_markers,
+                synchronized,
+            } = visible_claim_projection(&observed, &claim);
             let (assessment, assessment_detail) = claim_assessment(&claim, state);
             let reported_closeout = reported_claim_closeout_in(file, &claim, lineage.as_ref());
             let next_action_argv = if synchronized {
@@ -2152,6 +2195,14 @@ fn claimed_items_with_queue_holds(
                     .collect::<Vec<_>>(),
             )
         }
+    };
+    // `#waitingitemclaimmarker`: a refused claim admission holds its row the
+    // same way until an explicit newer claim succeeds.
+    let refused = crate::subagent_dispatch::admission_refused_heads_for_content(file, content);
+    let claimed = if refused.is_empty() {
+        claimed
+    } else {
+        claimed.with_heads(&refused)
     };
     // `#queueschedule`: a scheduled queue's closed window holds every head the
     // same way — out of the in-session loop, the supervisor drain, preflight

@@ -507,11 +507,18 @@ fn derive_runtime_projection_scoped(
                 QueueEntry::Prompt(prompt) | QueueEntry::Completed(prompt) => {
                     if prompt.text.contains(
                         agent_doc_queue::queue_consume::WAITING_ON_YOU_ROOT_MARKER,
-                    ) || prompt.text.contains(
-                        agent_doc_queue::queue_consume::WAITING_ON_YOU_ITEM_MARKER,
                     ) || agent_doc_queue::queue_consume::is_agent_doc_reply_row(&prompt.text) {
                         return None;
                     }
+                    // `#waitingitemclaimmarker`: a waiting-item head is never
+                    // painted pending, selected, or blocked (`#waitingpacketowner`),
+                    // but a real attempt on it (claim, reported receipt,
+                    // completion evidence) still projects. Dropping the head
+                    // here left a claimed answered item bare forever while
+                    // `queue claims` expected `🟡`, so every dispatch was
+                    // released and requeued (sdk-dev, 2026-11-04).
+                    let waiting_item_head =
+                        agent_doc_queue::waiting_packet::is_waiting_item_head(entry);
                     let struck = matches!(entry, QueueEntry::Completed(_));
                     // `#queuemirrormarkers`: a sibling queue's struck row is its
                     // own terminal (or `agent:loop` pass-owned) evidence.
@@ -578,6 +585,13 @@ fn derive_runtime_projection_scoped(
                             &prompt.text,
                         )
                     });
+                    if waiting_item_head
+                        && claim.is_none()
+                        && receipt.is_none()
+                        && !has_completion_evidence
+                    {
+                        return None;
+                    }
                     let is_selected = selected.claims_at(block.entries, index);
                     let is_blocked = blockers.blocks_row(&prompt.text);
                     if rows == RuntimeProjectionRows::LifecycleEvidence
@@ -817,6 +831,69 @@ pub fn project_claim_item_runtime_state_with_effects(
     )
 }
 
+/// Named blocker for a claim admission the projector cannot make visible.
+pub const CLAIM_PROJECTION_UNREPRESENTABLE: &str = "claim_projection_unrepresentable";
+
+/// A claim admission refused for a deterministic reason: retrying the same
+/// claim against the same binary and row would fail the same way.
+#[derive(Debug)]
+pub struct ClaimAdmissionRefused {
+    pub blocker: &'static str,
+    pub detail: String,
+}
+
+impl std::fmt::Display for ClaimAdmissionRefused {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "claim admission refused (blocker: {}): {}", self.blocker, self.detail)
+    }
+}
+
+impl std::error::Error for ClaimAdmissionRefused {}
+
+/// Verify the admitted attempt through the SAME observer `queue claims` reads
+/// (`#waitingitemclaimmarker`). The projector's own settle check derives its
+/// targets with its own row filter; when that filter skipped a row, the
+/// projector "settled" with nothing written and admission returned spawn
+/// permission while `queue claims` reported `out_of_sync`. The coordinator
+/// then released and requeued, and the next cycle claimed again.
+fn verify_claim_admission_visible(
+    effects: &(impl QueueRuntimeProjectionEffects + ?Sized),
+    file: &Path,
+    claim: &agent_doc_queue::queue_claim::QueueClaim,
+) -> Result<()> {
+    let current = effects.current_document_content(file, "queue_claim_admission_verify")?;
+    let observed = crate::queue_claim::visible_lifecycle_markers_for_content(&current)?;
+    let visible = crate::queue_claim::visible_claim_projection(&observed, claim);
+    if visible.synchronized {
+        return Ok(());
+    }
+    let detail = format!(
+        "the claim projection settled but the visible row for {:?} shows {:?}, not the expected {}; no worker may be spawned. Subagent dispatch holds this item until the projection is fixed and an explicit `agent-doc queue claim {} --item {} --owner <owner>` succeeds",
+        agent_doc_queue::queue_claim::claim_item_handle(&claim.item_text),
+        visible.observed_visible_markers,
+        visible.expected_visible_marker,
+        crate::queue_claim::shell_single_quote(&file.display().to_string()),
+        crate::queue_claim::shell_single_quote(&agent_doc_queue::queue_claim::claim_item_handle(
+            &claim.item_text
+        )),
+    );
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "queue_claim_admission_refused blocker={CLAIM_PROJECTION_UNREPRESENTABLE} owner={} generation={} expected={} observed={:?} (#waitingitemclaimmarker)",
+            claim.owner,
+            claim.generation,
+            visible.expected_visible_marker,
+            visible.observed_visible_markers,
+        ),
+    );
+    Err(ClaimAdmissionRefused {
+        blocker: CLAIM_PROJECTION_UNREPRESENTABLE,
+        detail,
+    }
+    .into())
+}
+
 /// Admit one dispatch claim only when its operator-visible `Claimed` projection
 /// converges. The returned claim is the harness's permission to spawn. If the
 /// projection fails, compensate the exact still-unstarted ledger transition
@@ -838,10 +915,22 @@ pub fn claim_with_runtime_projection(
         .claims
         .iter()
         .find(|previous| previous.identity == claim.identity);
-    if let Err(projection_error) =
+    let projection =
         project_claim_item_runtime_state_with_effects(effects, file, &claim.item_text, false)
-    {
+            .and_then(|_| verify_claim_admission_visible(effects, file, &claim));
+    if let Err(projection_error) = projection {
         let rollback = crate::queue_claim::rollback_unstarted_admission(file, &claim, previous);
+        // `#waitingitemclaimmarker`: a deterministic blocker terminalizes this
+        // exact generation so subagent dispatch stops re-offering the row; a
+        // transient convergence failure stays retryable.
+        let rollback = rollback.and_then(|()| {
+            let Some(refused) = projection_error.downcast_ref::<ClaimAdmissionRefused>() else {
+                return Ok(());
+            };
+            crate::queue_lineage::record_admission_refused(file, &claim, refused.blocker)
+                .map(|_| ())
+                .context("record the refused claim admission in queue lineage")
+        });
         let repair = rollback.as_ref().ok().and_then(|_| {
             project_claim_item_runtime_state_with_effects(effects, file, &claim.item_text, true)
                 .err()
@@ -5113,5 +5202,285 @@ mod tests {
         let retained = crate::claim_release_receipt::load(&doc).unwrap();
         assert_eq!(retained.receipts, vec![receipt]);
         assert_eq!(retained.receipts[0].response.as_ref(), Some(&response));
+    }
+}
+
+/// `#waitingitemclaimmarker`: an operator-answered waiting item is agent-owned
+/// dispatch work (`#waitingitemnext`), so its claim must project `🟡` onto the
+/// visible head. The runtime projector used to skip every waiting-item head,
+/// settle with nothing written, and return spawn permission while `queue
+/// claims` reported the row bare; the coordinator then released and requeued
+/// the claim every cycle (sdk-dev, 2026-11-04: 24+ identical responses).
+#[cfg(test)]
+mod waiting_item_claim_projection_tests {
+    use super::*;
+    use std::cell::{Cell, RefCell};
+
+    const ITEM_MARKER: &str = agent_doc_queue::queue_consume::WAITING_ON_YOU_ITEM_MARKER;
+    const REPLY_MARKER: &str = agent_doc_queue::queue_consume::AGENT_DOC_REPLY_MARKER;
+
+    /// The live shape: an answered item nested inside another waiting item's
+    /// tree whose own attempt already reported, under a `subagents` queue.
+    fn waiting_doc() -> String {
+        format!(
+            "---\nsession: sid\nagent_doc_format: template\n---\n\n\
+             <!-- agent:queue subagents go -->\n\
+             - ### ☑️ [#subagent:outer#1] ⟦☑️ you: 0 · agent: 1 · done: 0⟧ [#outer] Check the outer result {ITEM_MARKER}\n  \
+             - **Next:** agent — integrate the reported result, then close the item or ask what remains (evidence: ☑️ `subagent:outer#1`) ▫️ {REPLY_MARKER}\n  \
+             - ⟦📥 you: 0 · agent: 1 · done: 0⟧ [#answered] Decide how downloads are served {ITEM_MARKER}\n    \
+             - **Next:** agent — pick up your reply “make it public” and attempt `#answered` (evidence: your reply) ▫️ {REPLY_MARKER}\n    \
+             - make it public [#q-0123456789ab]\n\
+             <!-- /agent:queue -->\n\n\
+             <!-- agent:todo -->\n\
+             - [ ] [#outer] Check the outer result\n\
+             - [ ] [#answered] Decide how downloads are served\n\
+             <!-- /agent:todo -->\n"
+        )
+    }
+
+    fn write_doc(root: &Path, content: &str) -> std::path::PathBuf {
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        let doc = root.join("waiting.md");
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        doc
+    }
+
+    fn answered_row(content: &str) -> String {
+        content
+            .lines()
+            .find(|line| line.contains("[#answered]") && line.contains(ITEM_MARKER))
+            .unwrap_or_else(|| panic!("no answered head in\n{content}"))
+            .to_string()
+    }
+
+    /// Disk-backed effects. With `hide_marker`, the admission verifier's read
+    /// models a replica that never shows the projected marker while the
+    /// projector's own reads see it.
+    #[derive(Default)]
+    struct DiskEffects {
+        hide_marker: RefCell<Option<String>>,
+        verify_reads: Cell<usize>,
+    }
+
+    impl QueueRuntimeProjectionEffects for DiskEffects {
+        fn current_document_content(&self, file: &Path, source: &str) -> Result<String> {
+            let content = std::fs::read_to_string(file)?;
+            if source == "queue_claim_admission_verify" {
+                self.verify_reads.set(self.verify_reads.get() + 1);
+                if let Some(marker) = self.hide_marker.borrow().as_deref() {
+                    return Ok(content.replace(marker, ""));
+                }
+            }
+            Ok(content)
+        }
+
+        fn converge_document_or_disk(
+            &self,
+            file: &Path,
+            target_content: &str,
+            source_content: &str,
+            _reason: &str,
+        ) -> Result<()> {
+            anyhow::ensure!(
+                std::fs::read_to_string(file)? == source_content,
+                "projection must converge from the authoritative current cut"
+            );
+            std::fs::write(file, target_content)?;
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn claim_admission_projects_claimed_marker_onto_an_answered_waiting_item() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = write_doc(dir.path(), &waiting_doc());
+        let effects = DiskEffects::default();
+
+        let (_, claim) =
+            claim_with_runtime_projection(&effects, &doc, "#answered", "subagent:worker", 600)
+                .expect("an answered waiting item is admitted with a visible 🟡");
+        assert_eq!(effects.verify_reads.get(), 1, "admission reads the queue-claims observer");
+
+        let claimed = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            answered_row(&claimed).starts_with("  - 🟡 [#subagent:worker#1] ⟦"),
+            "{}",
+            answered_row(&claimed)
+        );
+        let reports = crate::queue_claim::claim_reports_for_content(&doc, &claimed).unwrap();
+        let report = reports
+            .iter()
+            .find(|report| report.claim.generation == claim.generation)
+            .unwrap();
+        assert_eq!(report.visible_projection_state, "synchronized", "{report:#?}");
+        assert_eq!(report.observed_visible_markers, ["🟡"]);
+        // The reported outer item keeps its own receipt projection.
+        assert!(
+            claimed.contains("- ### ☑️ [#subagent:outer#1] ⟦☑️"),
+            "{claimed}"
+        );
+
+        // Closeout's waiting-status pass and the runtime projector agree on
+        // one fixed point: neither strips the other's projection.
+        let rerendered =
+            agent_doc_queue::queue_consume::project_waiting_on_you_tree(&claimed, "")
+                .unwrap()
+                .unwrap_or_else(|| claimed.clone());
+        assert!(
+            answered_row(&rerendered).starts_with("  - 🟡 [#subagent:worker#1] ⟦🟡 "),
+            "{}",
+            answered_row(&rerendered)
+        );
+        std::fs::write(&doc, &rerendered).unwrap();
+        assert!(
+            !project_claim_item_runtime_state_with_effects(&effects, &doc, "#answered", false)
+                .unwrap(),
+            "the runtime projection is already settled after the waiting pass"
+        );
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), rerendered);
+
+        crate::queue_claim::start_attempt(
+            &doc,
+            "#answered",
+            "subagent:worker",
+            "worker:waiting",
+            600,
+            claim.generation,
+        )
+        .unwrap();
+        assert!(
+            project_claim_item_runtime_state_with_effects(&effects, &doc, "#answered", false)
+                .unwrap()
+        );
+        let running = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            answered_row(&running).starts_with("  - 🚧 [#subagent:worker#1] ⟦"),
+            "{}",
+            answered_row(&running)
+        );
+    }
+
+    #[test]
+    fn requeued_waiting_item_claim_clears_its_marker() {
+        use crate::claim_release_receipt::{ReleaseKind, release_attempt};
+
+        let dir = tempfile::tempdir().unwrap();
+        let doc = write_doc(dir.path(), &waiting_doc());
+        let effects = DiskEffects::default();
+        let (_, claim) =
+            claim_with_runtime_projection(&effects, &doc, "#answered", "subagent:worker", 600)
+                .unwrap();
+        release_attempt(&doc, "#answered", ReleaseKind::Requeue, Some(claim.generation)).unwrap();
+        project_claim_item_runtime_state_with_effects(&effects, &doc, &claim.item_text, true)
+            .unwrap();
+        let released = std::fs::read_to_string(&doc).unwrap();
+        let row = answered_row(&released);
+        assert!(row.starts_with("  - ⟦"), "{row}");
+        assert!(!row.contains("[#subagent:worker#1]"), "{row}");
+    }
+
+    #[test]
+    fn unrepresentable_claim_projection_refuses_admission_once_and_holds_dispatch() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = write_doc(dir.path(), &waiting_doc());
+        let content = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            crate::subagent_dispatch::pending_subagent_dispatch_for_content(&doc, &content)
+                .unwrap()
+                .iter()
+                .any(|head| head.contains("[#answered]")),
+            "the answered waiting item is offered for subagent dispatch"
+        );
+
+        let effects = DiskEffects::default();
+        *effects.hide_marker.borrow_mut() = Some("🟡 [#subagent:worker#1] ".to_string());
+        let error =
+            claim_with_runtime_projection(&effects, &doc, "#answered", "subagent:worker", 600)
+                .expect_err("a settled projection the queue-claims observer cannot see is refused");
+        let refused = error
+            .downcast_ref::<ClaimAdmissionRefused>()
+            .expect("the refusal is typed");
+        assert_eq!(refused.blocker, CLAIM_PROJECTION_UNREPRESENTABLE);
+        assert!(format!("{error:#}").contains("no worker may be spawned"), "{error:#}");
+
+        // Compensated: no live claim, no visible marker, a terminal receipt.
+        assert!(crate::queue_claim::load_ledger(&doc).unwrap().claims.is_empty());
+        let after = std::fs::read_to_string(&doc).unwrap();
+        assert!(answered_row(&after).starts_with("  - ⟦"), "{}", answered_row(&after));
+        let lineage = crate::queue_lineage::load(&doc).unwrap();
+        assert_eq!(
+            crate::queue_lineage::admission_refused_identities(&lineage),
+            vec![(
+                agent_doc_queue::queue_claim::claim_identity("#answered"),
+                CLAIM_PROJECTION_UNREPRESENTABLE.to_string()
+            )]
+        );
+
+        // One failure, one named blocker: the row is not re-offered, so the
+        // coordinator cannot claim/refuse/re-claim it every cycle, and it is
+        // out of the inline loop like any other held subagent head.
+        assert!(
+            !crate::subagent_dispatch::pending_subagent_dispatch_for_content(&doc, &after)
+                .unwrap()
+                .iter()
+                .any(|head| head.contains("[#answered]")),
+            "a refused admission is held from dispatch"
+        );
+        assert!(
+            crate::queue_claim::claimed_items_for_content(&doc, &after)
+                .claims(answered_row(&after).trim_start().trim_start_matches("- ")),
+            "a refused admission is out of the in-session loop"
+        );
+        assert!(
+            crate::subagent_dispatch::out_of_loop_items_for_content(&doc, &after)
+                .claims(answered_row(&after).trim_start().trim_start_matches("- "))
+        );
+
+        // An explicit newer claim lifts the hold once the projection works.
+        let effects = DiskEffects::default();
+        let (_, reclaimed) =
+            claim_with_runtime_projection(&effects, &doc, "#answered", "subagent:worker", 600)
+                .expect("an explicit claim is admitted once the marker is visible");
+        assert_eq!(reclaimed.generation, 2);
+        let lineage = crate::queue_lineage::load(&doc).unwrap();
+        assert!(crate::queue_lineage::admission_refused_identities(&lineage).is_empty());
+        assert!(
+            answered_row(&std::fs::read_to_string(&doc).unwrap())
+                .starts_with("  - 🟡 [#subagent:worker#2] ⟦")
+        );
+    }
+
+    #[test]
+    fn transient_projection_failure_rolls_back_without_holding_dispatch() {
+        struct RefusingEffects;
+        impl QueueRuntimeProjectionEffects for RefusingEffects {
+            fn current_document_content(&self, file: &Path, _source: &str) -> Result<String> {
+                Ok(std::fs::read_to_string(file)?)
+            }
+            fn converge_document_or_disk(
+                &self,
+                _file: &Path,
+                _target_content: &str,
+                _source_content: &str,
+                _reason: &str,
+            ) -> Result<()> {
+                bail!("synthetic editor delivery refusal")
+            }
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+        let doc = write_doc(dir.path(), &waiting_doc());
+        let error =
+            claim_with_runtime_projection(&RefusingEffects, &doc, "#answered", "subagent:w", 600)
+                .unwrap_err();
+        assert!(error.downcast_ref::<ClaimAdmissionRefused>().is_none(), "{error:#}");
+        let lineage = crate::queue_lineage::load(&doc).unwrap();
+        assert!(crate::queue_lineage::admission_refused_identities(&lineage).is_empty());
     }
 }

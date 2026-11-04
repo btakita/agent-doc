@@ -127,12 +127,16 @@ fn subagent_dispatch_candidates_for_content(file: &Path, content: &str) -> Resul
     // worker's: offering it again dispatched a duplicate subagent for an
     // answered question (haiven-dev tasks/docs.md, 2026-10-15).
     let reported = crate::claim_release_receipt::reported_items_for_content(file, content);
+    // `#waitingitemclaimmarker`: an identity whose newest attempt was refused
+    // admission for a deterministic projection blocker is held, never
+    // re-offered: the same row would be refused again, every cycle.
+    let refused = admission_refused_holds(file);
     let keys = executable_row_keys(content);
     if let Some(plan) = queue_attr_subagent_plan_with_presets(file, content, &prompt_presets)? {
         return Ok(plan
             .dispatch
             .into_iter()
-            .filter(|head| !reported.claims(head))
+            .filter(|head| !reported.claims(head) && !refused.holds(file, head))
             .map(|head| visible_dispatch_head(&keys, &head))
             .collect());
     }
@@ -172,9 +176,68 @@ fn subagent_dispatch_candidates_for_content(file: &Path, content: &str) -> Resul
         });
     let claimed = crate::queue_claim::claimed_items_for_content(file, content);
     Ok(heads
-        .filter(|head| !claimed.claims(head) && !reported.claims(head))
+        .filter(|head| {
+            !claimed.claims(head) && !reported.claims(head) && !refused.holds(file, head)
+        })
         .map(|head| visible_dispatch_head(&keys, &head))
         .collect())
+}
+
+/// Identities held from subagent dispatch by a refused claim admission.
+struct AdmissionRefusedHolds(Vec<(agent_doc_element_queue::QueueItemIdentity, String)>);
+
+impl AdmissionRefusedHolds {
+    fn holds(&self, file: &Path, head: &str) -> bool {
+        let identity = agent_doc_queue::queue_claim::claim_identity(head);
+        let Some((_, blocker)) = self.0.iter().find(|(held, _)| held == &identity) else {
+            return false;
+        };
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "queue_subagent_dispatch_held reason=admission_refused blocker={blocker} item_bytes={} (#waitingitemclaimmarker)",
+                head.len()
+            ),
+        );
+        true
+    }
+}
+
+/// Lineage keys of the live executable rows held by a refused claim admission
+/// (`#waitingitemclaimmarker`). They stay out of the in-session loop, the
+/// inline-answer path, and the Stop-hook continuation exactly like a
+/// concurrency-held head: the coordinator reports the named blocker once
+/// instead of claiming, refusing, and re-claiming every cycle.
+pub fn admission_refused_heads_for_content(file: &Path, content: &str) -> Vec<String> {
+    let refused = admission_refused_holds(file);
+    if refused.0.is_empty() {
+        return Vec::new();
+    }
+    executable_row_keys(content)
+        .into_iter()
+        .map(|(_, lineage)| lineage)
+        .filter(|lineage| {
+            let identity = agent_doc_queue::queue_claim::claim_identity(lineage);
+            refused.0.iter().any(|(held, _)| held == &identity)
+        })
+        .collect()
+}
+
+/// An unreadable lineage ledger is reported and holds nothing: the failure
+/// direction is the pre-hold behaviour, never a stranded queue.
+fn admission_refused_holds(file: &Path) -> AdmissionRefusedHolds {
+    match crate::queue_lineage::load(file) {
+        Ok(ledger) => {
+            AdmissionRefusedHolds(crate::queue_lineage::admission_refused_identities(&ledger))
+        }
+        Err(err) => {
+            eprintln!(
+                "[queue] WARNING: could not read queue lineage for {}; refused claim admissions are not held from dispatch: {err:#}",
+                file.display()
+            );
+            AdmissionRefusedHolds(Vec::new())
+        }
+    }
 }
 
 pub fn reported_writeback_pending_for_content(file: &Path, content: &str) -> Result<bool> {
@@ -513,6 +576,7 @@ pub fn out_of_loop_items_for_content(
         .with_claimed(&reported)
         .with_heads(&dispatch_holds)
         .with_heads(&held)
+        .with_heads(&admission_refused_heads_for_content(file, content))
 }
 
 /// Live heads a queue-level `subagents` / `fan-out` attribute (or subagent
@@ -524,6 +588,7 @@ pub fn out_of_loop_items_for_content(
 /// answered-free-text strike keeps it queued and reports it.
 pub fn inline_answer_vetoed_heads_for_content(file: &Path, content: &str) -> Vec<String> {
     let mut owned = subagent_dispatch_candidates_or_warn(file, content);
+    owned.extend(admission_refused_heads_for_content(file, content));
     match queue_attr_subagent_plan(file, content) {
         Ok(Some(plan)) => owned.extend(plan.held),
         Ok(None) => {}

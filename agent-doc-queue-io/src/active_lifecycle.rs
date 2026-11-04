@@ -48,6 +48,7 @@ fn lineage_facts(file: &Path) -> HashMap<(String, u64), LineageFacts> {
                 latest,
                 integrated: has(crate::queue_lineage::QueueLineageEventKind::Integrated),
                 ended: has(crate::queue_lineage::QueueLineageEventKind::Cancelled)
+                    || has(crate::queue_lineage::QueueLineageEventKind::AdmissionRefused)
                     || has(crate::queue_lineage::QueueLineageEventKind::Removed),
             };
             ((attempt.owner, attempt.generation), facts)

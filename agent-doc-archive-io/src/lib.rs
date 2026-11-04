@@ -2443,12 +2443,11 @@ mod tests {
             rebuild_micros,
             MAX_RESPONSE_ARCHIVE_SHARDS,
         );
-        // These are regression tripwires, not machine-speed benchmarks. They
-        // chiefly prove neither normal route invokes Git history and rebuild is
-        // bounded by indexed shards rather than repository history.
-        assert!(cold.elapsed_micros < 5_000_000);
-        assert!(cached.elapsed_micros < 5_000_000);
-        assert!(rebuild_micros < 10_000_000);
+        // The timings above are a perf log, not assertions: wall-clock bounds
+        // failed on loaded CI runners without any code change. The regression
+        // properties are asserted structurally: neither route consults Git
+        // history (`git_candidates_checked == 0`), each route is the indexed
+        // one, and rebuild covers exactly the indexed entries.
     }
 
     #[test]

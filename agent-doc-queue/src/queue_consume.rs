@@ -4443,7 +4443,7 @@ fn structured_choice_projection(
     };
     let decision = crate::operator_request_packet::structured_choice_decisions(response_body)
         .into_iter()
-        .find(|decision| decision.request_id.as_deref().is_none_or(&decision_belongs))
+        .find(|decision| decision.request_id.as_deref().is_none_or(decision_belongs))
         .or_else(|| {
             crate::operator_request_packet::structured_choice_decisions(source_document)
                 .into_iter()

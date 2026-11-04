@@ -45,6 +45,13 @@ internal object RegistrationProjection {
         val canonicalText: String?,
         val canonicalContainsOperatorEdits: Boolean?,
         val cleanMergeAvailable: Boolean?,
+        /** `#emptycanonicaldeadlock`: the saved document on disk (null: unread or unreadable). */
+        val diskText: String? = null,
+        /**
+         * `#emptycanonicaldeadlock`: this editor already held an attach of the document for operator
+         * evidence and none has arrived since.
+         */
+        val attachHeldForOperator: Boolean = false,
     )
 
     /**
@@ -65,6 +72,10 @@ internal object RegistrationProjection {
         @SerializedName("canonical_equals_shadow") val canonicalEqualsShadow: Boolean,
         @SerializedName("canonical_contains_operator_edits") val canonicalContainsOperatorEdits: Boolean?,
         @SerializedName("clean_merge_available") val cleanMergeAvailable: Boolean?,
+        @SerializedName("canonical_empty") val canonicalEmpty: Boolean? = null,
+        @SerializedName("buffer_empty") val bufferEmpty: Boolean? = null,
+        @SerializedName("buffer_equals_disk") val bufferEqualsDisk: Boolean? = null,
+        @SerializedName("attach_held_for_operator") val attachHeldForOperator: Boolean? = null,
     )
 
     /** The answer. [holdReason] is non-null exactly when [action] is a hold. */
@@ -91,6 +102,11 @@ internal object RegistrationProjection {
             canonicalEqualsShadow = canonical != null && canonical == shadow,
             canonicalContainsOperatorEdits = observation.canonicalContainsOperatorEdits,
             cleanMergeAvailable = observation.cleanMergeAvailable,
+            canonicalEmpty = canonical?.isEmpty(),
+            bufferEmpty = buffer?.isEmpty(),
+            bufferEqualsDisk = observation.diskText?.let { disk -> buffer?.let { it == disk } },
+            // Reported only when true: an absent fact is the historical behaviour.
+            attachHeldForOperator = observation.attachHeldForOperator.takeIf { it },
         )
     }
 
@@ -111,7 +127,32 @@ internal object RegistrationProjection {
                 derivation.derive("registration_projection", GSON.toJson(evidence(observation)))
                     ?.let { parseNative(it, observation) }
             }
-        return native ?: frozen(observation)
+        return guardEmptyCanonical(native ?: frozen(observation), observation)
+    }
+
+    /**
+     * `#emptycanonicaldeadlock`: whichever rules answered (a native generation, possibly older
+     * than this plugin, or the frozen floor), an empty canonical is never adopted or merged over a
+     * non-empty buffer. An empty canonical holds no text, so the live buffer becomes canonical
+     * instead ([RetainedRegistrationProjectionAction.AdoptOperatorBuffer]); nothing is lost.
+     */
+    internal fun guardEmptyCanonical(decision: Decision, observation: Observation): Decision {
+        if (!emptyCanonicalWouldClobberBufferUtil(observation.canonicalText, observation.bufferText)) {
+            return decision
+        }
+        return when (decision.action) {
+            RetainedRegistrationProjectionAction.ApplyCanonical,
+            RetainedRegistrationProjectionAction.MergeForward,
+            RetainedRegistrationProjectionAction.HoldOperatorBuffer,
+            -> {
+                LOG.warn(
+                    "[crdt-replica] registration answered ${decision.action} with an EMPTY canonical over a " +
+                        "non-empty buffer; adopting the operator buffer instead (#emptycanonicaldeadlock)",
+                )
+                Decision(RetainedRegistrationProjectionAction.AdoptOperatorBuffer, null)
+            }
+            else -> decision
+        }
     }
 
     /** Parse the native output; `null` takes the frozen floor. */
@@ -126,6 +167,7 @@ internal object RegistrationProjection {
                     "hold_operator_buffer" -> RetainedRegistrationProjectionAction.HoldOperatorBuffer
                     "defer_canonical_projection" -> RetainedRegistrationProjectionAction.DeferCanonicalProjection
                     "merge_forward" -> RetainedRegistrationProjectionAction.MergeForward
+                    "adopt_operator_buffer" -> RetainedRegistrationProjectionAction.AdoptOperatorBuffer
                     else -> null
                 }
             if (action == null) {
@@ -184,3 +226,11 @@ internal object RegistrationProjection {
             AMBIGUOUS_REREGISTER_PROJECTION
         }
 }
+
+/**
+ * `#emptycanonicaldeadlock`: projecting [canonical] over [buffer] would replace text with nothing.
+ * An empty canonical holds no text and is never authority over a buffer that holds some, on any
+ * registration or remote-apply path. A null text is unknown, never empty.
+ */
+internal fun emptyCanonicalWouldClobberBufferUtil(canonical: String?, buffer: String?): Boolean =
+    canonical != null && canonical.isEmpty() && !buffer.isNullOrEmpty()

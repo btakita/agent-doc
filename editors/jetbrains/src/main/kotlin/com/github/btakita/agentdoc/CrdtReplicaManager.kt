@@ -3004,6 +3004,22 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         forwarder: CrdtReplicaForwarder,
         updates: List<ReplicaRemoteUpdate>,
     ): RemoteTextApplyDisposition {
+        // `#emptycanonicaldeadlock`: an empty canonical is never projected over a
+        // non-empty buffer. Route it like a malformed remote: the unchanged exact
+        // editor baseline rebuilds canonical, or the buffer is held untouched.
+        if (emptyCanonicalWouldClobberBufferUtil(converged, editorBufferText(filePath) ?: expectedText)) {
+            log.warn(
+                "[crdt-replica] refusing to project an EMPTY canonical over the non-empty buffer of " +
+                    "${File(filePath).name}; expected_hash=${contentHash(expectedText)} (#emptycanonicaldeadlock)",
+            )
+            return recoverRejectedRemoteCanonical(
+                filePath = filePath,
+                expectedText = expectedText,
+                remoteText = converged,
+                staleForwarder = forwarder,
+                remoteState = TemplateStructureProjectionState.Invalid,
+            )
+        }
         val remoteState =
             templateStructureState(
                 filePath,
@@ -3260,6 +3276,15 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 )
             }
             val before = document.text
+            if (emptyCanonicalWouldClobberBufferUtil(pending.targetText, before)) {
+                // `#emptycanonicaldeadlock`: the last line of defence at the actual
+                // mutation, whatever queued it. The buffer and disk stay as they are.
+                log.warn(
+                    "[crdt-replica] refused an EMPTY remote projection over the non-empty buffer of " +
+                        "${pending.filePath}; editor_hash=${contentHash(before)} (#emptycanonicaldeadlock)",
+                )
+                return completeRemoteEditorApply(pending, RemoteEditorApplyOutcome(false, before), started)
+            }
             val projectionMode =
                 if (documentWasUnsaved) {
                     RemoteCrdtProjectionMode.MemoryOnly
@@ -4187,6 +4212,15 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                     canonicalText = canonicalTextAtRegistration,
                     cleanMergeAvailable = causalProof.cleanMergeAvailable,
                     canonicalContainsOperatorEdits = causalProof.canonicalContainsOperatorEdits,
+                    // `#emptycanonicaldeadlock`: the saved document, read only when it can
+                    // decide something (the buffer and canonical differ).
+                    diskText =
+                        if (bufferTextAtRegistration != null && bufferTextAtRegistration != canonicalTextAtRegistration) {
+                            readRawDiskText(filePath)
+                        } else {
+                            null
+                        },
+                    attachHeldForOperator = retainedProjectionHoldPaths.contains(filePath),
                 ),
             )
         val retainedProjectionAction = registrationProjection.action
@@ -4243,12 +4277,20 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                     // to compare the live editor with the retained canonical. Refuse
                     // before the swap; this registration may not choose a generation
                     // by overwriting another.
+                    //
+                    // `#emptycanonicaldeadlock`: `canonical_hash` is the controller's
+                    // REGISTER-time answer, which for a fresh-controller reseed is the
+                    // empty hub before this editor's retained replica published into it
+                    // (the 2026-11-04 fpe.md hold printed e3b0c442..., sha256("")).
+                    // `replica_hash` is the canonical this decision actually compared.
                     log.warn(
                         "[crdt-replica] refusing ambiguous retained projection for ${File(filePath).name}; " +
                             "the live operator buffer was not derived from this canonical generation. " +
                             "shadow_hash=${publishedShadowAtRegistration?.let(::contentHash) ?: "unavailable"} " +
                             "buffer_hash=${bufferTextAtRegistration?.let(::contentHash) ?: "unavailable"} " +
-                            "canonical_hash=${forwarder.canonicalContentHash ?: "unknown"}",
+                            "canonical_hash=${forwarder.canonicalContentHash ?: "unknown"} " +
+                            "replica_hash=${canonicalTextAtRegistration?.let(::contentHash) ?: "unavailable"} " +
+                            "reseed=${forwarder.retainedReplicaReseedPending}",
                     )
                     forwarder.deregister()
                     retainedProjectionHoldPaths.add(filePath)
@@ -4268,6 +4310,11 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                         "[crdt-replica] deferred retained controller projection for ${File(filePath).name}; " +
                             "a captured local delta owns the visible buffer",
                     )
+                }
+
+                RetainedRegistrationProjectionAction.AdoptOperatorBuffer -> {
+                    logAdoptOperatorBuffer(filePath, forwarder, bufferTextAtRegistration, canonicalTextAtRegistration)
+                    retainedCanonicalProjectionPaths.remove(filePath)
                 }
 
                 RetainedRegistrationProjectionAction.MergeForward -> {
@@ -4298,6 +4345,9 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 registrationProjection.holdReason ?: RegistrationProjection.AMBIGUOUS_REREGISTER_PROJECTION,
             )
             return cached
+        } else if (retainedProjectionAction == RetainedRegistrationProjectionAction.AdoptOperatorBuffer) {
+            logAdoptOperatorBuffer(filePath, forwarder, bufferTextAtRegistration, canonicalTextAtRegistration)
+            retainedCanonicalProjectionPaths.remove(filePath)
         } else if (retainedProjectionAction == RetainedRegistrationProjectionAction.PublishOperatorBuffer) {
             log.warn(
                 "[crdt-replica] re-register found unpublished operator text for ${File(filePath).name}; " +
@@ -4364,6 +4414,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                         publishedShadow = publishedShadowAtRegistration,
                         bufferText = bufferTextAtRegistration,
                         mergeBase = causalProof.mergeBase,
+                        canonicalText = canonicalTextAtRegistration,
                     )
                 ) {
                     forwarders.replace(filePath, forwarder, cached)
@@ -4401,6 +4452,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 publishedShadow = publishedShadowAtRegistration,
                 bufferText = bufferTextAtRegistration,
                 mergeBase = causalProof.mergeBase,
+                canonicalText = canonicalTextAtRegistration,
             )
         ) {
             forwarders.remove(filePath, forwarder)
@@ -4420,6 +4472,22 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
     private fun cleanRegistrationMerge(shadow: String?, buffer: String?, canonical: String?): String? =
         RegistrationSpliceShaping.cleanMerge(shadow, buffer, canonical)
 
+    /** `#emptycanonicaldeadlock`: the decision record for [RetainedRegistrationProjectionAction.AdoptOperatorBuffer]. */
+    private fun logAdoptOperatorBuffer(
+        filePath: String,
+        forwarder: CrdtReplicaForwarder,
+        bufferText: String?,
+        canonicalText: String?,
+    ) {
+        log.warn(
+            "[crdt-replica] registration adopting the live operator buffer for ${File(filePath).name}: " +
+                "the controller canonical holds no text independent of this editor " +
+                "(empty=${canonicalText?.isEmpty()} reseed=${forwarder.retainedReplicaReseedPending}); " +
+                "buffer_hash=${bufferText?.let(::contentHash) ?: "unavailable"} " +
+                "replica_hash=${canonicalText?.let(::contentHash) ?: "unavailable"} (#emptycanonicaldeadlock)",
+        )
+    }
+
     /** Complete the causal projection decision only after this endpoint owns the map slot. */
     private fun finalizeRegistrationProjection(
         filePath: String,
@@ -4428,9 +4496,47 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         publishedShadow: String?,
         bufferText: String?,
         mergeBase: String? = publishedShadow,
+        canonicalText: String? = null,
     ): Boolean {
         val committed =
             when (action) {
+            RetainedRegistrationProjectionAction.AdoptOperatorBuffer -> {
+                // `#emptycanonicaldeadlock`: recheck at the publication edge that the
+                // operator did not type and the canonical did not move since the
+                // decision; then the exact captured buffer becomes canonical.
+                if (
+                    bufferText == null ||
+                    editorBufferText(filePath) != bufferText ||
+                    forwarder.replicaText() != canonicalText
+                ) {
+                    log.warn(
+                        "[crdt-replica] operator buffer adoption raced for ${File(filePath).name}; " +
+                            "leaving the operator buffer untouched and retrying registration",
+                    )
+                    false
+                } else if (!forwarder.ensureEditorText(bufferText) || forwarder.replicaText() != bufferText) {
+                    false
+                } else {
+                    shadows[filePath] = bufferText
+                    fenceCapturedEditsSubsumedByPublishedBuffer(
+                        filePath,
+                        bufferText,
+                        "adopt-operator-buffer",
+                    )
+                    retainedCanonicalProjectionPaths.remove(filePath)
+                    if (!projectSettledVisibleState(filePath, forwarder, bufferText)) {
+                        requestRemoteDrain(filePath, "registration-operator-buffer-adoption-retry")
+                    }
+                    log.warn(
+                        "[crdt-replica] adopted the live operator buffer as canonical for ${File(filePath).name}; " +
+                            "buffer_hash=${contentHash(bufferText)} " +
+                            "replaced_hash=${canonicalText?.let(::contentHash) ?: "unavailable"} " +
+                            "driver=editor-only-canonical (#emptycanonicaldeadlock)",
+                    )
+                    true
+                }
+            }
+
             RetainedRegistrationProjectionAction.ApplyCanonical -> {
                 if (mergeBase != publishedShadow && editorBufferText(filePath) != bufferText) {
                     // `#ackedreplicabase`: adoption was proven lossless for exactly
@@ -6558,6 +6664,13 @@ internal enum class RetainedRegistrationProjectionAction {
      * ambiguity hold gets an exit that does not overwrite the operator.
      */
     MergeForward,
+    /**
+     * `#emptycanonicaldeadlock`: the controller canonical holds no text independent of this
+     * editor (it is empty, or a fresh controller's reseed of this editor's own retained replica
+     * while the buffer is the saved document). The live buffer becomes canonical through the
+     * endpoint; no settled shadow is needed and no operator evidence can change the answer.
+     */
+    AdoptOperatorBuffer,
 }
 
 /**

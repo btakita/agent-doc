@@ -2845,14 +2845,33 @@ private fun isDispatchOnlyActiveTurnBlocked(output: String): Boolean {
 
     private fun notify(project: Project, content: String, type: NotificationType) {
         try {
-            NotificationGroupManager.getInstance()
-                .getNotificationGroup("Agent Doc")
-                .createNotification(notificationHtml(content), type)
-                .notify(project)
-        } catch (_: Exception) {
-            System.err.println("[agent-doc] $content")
+            val notification =
+                NotificationGroupManager.getInstance()
+                    .getNotificationGroup("Agent Doc")
+                    .createNotification(notificationHtml(content), type)
+            if (notificationCopyable(type)) {
+                // `#emptycanonicaldeadlock`: balloon text cannot be selected, so the
+                // 2026-11-04 fpe.md attach-hold error could not be copied. Every error
+                // carries its exact plain text (and the operator action it names).
+                notification.addAction(
+                    NotificationAction.createSimple(COPY_DETAILS_ACTION) {
+                        CopyPasteManager.getInstance().setContents(StringSelection(content))
+                    },
+                )
+            }
+            notification.notify(project)
+        } catch (e: Exception) {
+            // NEVER swallow: the notification is the operator's only view of this text.
+            System.err.println("[agent-doc] notification failed (${e.message}): $content")
         }
     }
+
+    /** The action label every copyable Agent Doc notification carries. */
+    internal const val COPY_DETAILS_ACTION = "Copy details"
+
+    /** Errors are copyable: they are the notifications that name an action to take. */
+    internal fun notificationCopyable(type: NotificationType): Boolean =
+        type == NotificationType.ERROR || type == NotificationType.WARNING
 
     internal fun buildRunAgentDocStillRunningMessage(relativePath: String): String {
         return "Agent Doc is still running for $relativePath.\n" +

@@ -1674,6 +1674,34 @@ text with a component parse failure is never adopted
 retained frontier, e.g. an IDE restart) is unchanged: the editor bootstraps the
 disk bytes it shows.
 
+An empty or editor-only canonical is never authority over an attached buffer
+(`#emptycanonicaldeadlock`). On 2026-11-04 (`src/haiven-dev/tasks/fpe.md`,
+20:09Z) a fresh controller reseeded from the JetBrains replica, which lagged its
+buffer after 48 raced deferred-write replays; the IDE restart had discarded the
+settled shadow, so the editor held (`retained-reseed-missing-settled-shadow`,
+`retry=await_operator_evidence`) while the controller refused disk because the
+editor was attached. Nothing but the editor held text, so no operator evidence
+could ever arrive. The rules: a pending reseed whose text is empty stays fenced
+(`RelayHub::retained_replica_reseed_empty`, `crdt_replica_reseed_empty_held`),
+so the empty string is never readable, committable, or persistable, and a reseed
+never rolls forward onto an empty committed blob (`committed_blob_empty`). An
+unproven reseed that differs from disk is kept as a content-addressed sidecar
+(`.agent-doc/recovery/<doc-hash>.reseed-<content-hash>.md`, logged as
+`recovery_sidecar=`) before the editor can replace it. The
+`registration_projection` derivation answers `adopt_operator_buffer` (the live
+buffer becomes canonical, no settled shadow needed) when the canonical is empty
+and the buffer is not, on every path, and for a reseed with no settled ancestor
+when the buffer is the saved document (`buffer_equals_disk`). A registration
+that follows this editor's own attach hold (`attach_held_for_operator`) never
+takes the restarted-IDE adoption fallback over the held buffer. The plugin
+refuses an empty canonical over a non-empty buffer whichever rules answer, at
+registration, at `queueRemoteTextApply`, and at the EDT mutation itself.
+`await_operator_evidence` remains only for a genuine two-sided conflict: an
+unsaved buffer and a reseed that hold different real text with no settled
+ancestor. The hold notification names the exact `EditorAttachAwaitsOperator`
+action for the document (`operator_action=close_tab_repair_detached_reopen`)
+and carries a `Copy details` action, since balloon text cannot be selected.
+
 Exhaustion is resolved in place, not by a recycle (`#jetbrainsreplicaloops`).
 Measured on sdk.md 2026-10-16T05:57Z-06:05Z: the JetBrains replica looped every
 30 s on a stale-baseline local delta (`local delta found a stale native baseline

@@ -32,6 +32,7 @@ class RegistrationProjectionTest {
         shadow: String?,
         buffer: String?,
         canonical: String?,
+        disk: String? = null,
     ) = RegistrationProjection.Observation(
         deferCanonicalProjectionForPendingLocal = flags.get("defer_canonical_projection_for_pending_local").asBoolean,
         canonicalProjectionRetained = flags.get("canonical_projection_retained").asBoolean,
@@ -42,6 +43,8 @@ class RegistrationProjectionTest {
         canonicalText = canonical,
         canonicalContainsOperatorEdits = flags.get("canonical_contains_operator_edits").flagOrNull(),
         cleanMergeAvailable = flags.get("clean_merge_available").flagOrNull(),
+        diskText = disk,
+        attachHeldForOperator = flags.get("attach_held_for_operator").flagOrNull() == true,
     )
 
     /** The answer in the fixture's wire shape. */
@@ -55,6 +58,7 @@ class RegistrationProjectionTest {
                     RetainedRegistrationProjectionAction.HoldOperatorBuffer -> "hold_operator_buffer"
                     RetainedRegistrationProjectionAction.DeferCanonicalProjection -> "defer_canonical_projection"
                     RetainedRegistrationProjectionAction.MergeForward -> "merge_forward"
+                    RetainedRegistrationProjectionAction.AdoptOperatorBuffer -> "adopt_operator_buffer"
                 },
             )
             add("hold_reason", decision.holdReason?.let { gson.toJsonTree(it) } ?: com.google.gson.JsonNull.INSTANCE)
@@ -80,6 +84,7 @@ class RegistrationProjectionTest {
                     texts.get("published_shadow").textOrNull(),
                     texts.get("buffer").textOrNull(),
                     texts.get("canonical").textOrNull(),
+                    texts.get("disk").textOrNull(),
                 )
             // What the plugin sends is exactly the fixture's input: facts, never text.
             assertEquals(
@@ -87,8 +92,106 @@ class RegistrationProjectionTest {
                 withoutNulls(input),
                 JsonParser.parseString(gson.toJson(RegistrationProjection.evidence(observation))).asJsonObject,
             )
-            assertEquals(name, case.getAsJsonObject("expected"), wire(RegistrationProjection.frozen(observation)))
+            // A native rule that diverged on purpose keeps the frozen answer beside it.
+            val frozenExpected = case.getAsJsonObject("frozen_expected") ?: case.getAsJsonObject("expected")
+            assertEquals(name, frozenExpected, wire(RegistrationProjection.frozen(observation)))
+            // The native answer is executed as given (this plugin knows every native action).
+            assertEquals(
+                name,
+                case.getAsJsonObject("expected"),
+                wire(RegistrationProjection.parseNative(gson.toJson(case.getAsJsonObject("expected")), observation)!!),
+            )
         }
+    }
+
+    private fun emptyCanonicalOver(buffer: String, reseed: Boolean, shadow: String?) =
+        RegistrationProjection.Observation(
+            deferCanonicalProjectionForPendingLocal = false,
+            canonicalProjectionRetained = false,
+            retainedReplicaReseedPending = reseed,
+            canonicalCoversRetainedFrontier = null,
+            publishedShadow = shadow,
+            bufferText = buffer,
+            canonicalText = "",
+            canonicalContainsOperatorEdits = null,
+            cleanMergeAvailable = null,
+            diskText = buffer,
+        )
+
+    @Test
+    fun `an empty canonical is never adopted over a non-empty buffer whichever rules answer`() {
+        // #emptycanonicaldeadlock: the frozen floor, an older native generation that still answers
+        // apply/merge/hold, and the current native answer all end in adopting the operator buffer.
+        val answers =
+            listOf(
+                """{"action":"apply_canonical","hold_reason":null}""",
+                """{"action":"merge_forward","hold_reason":null}""",
+                """{"action":"hold_operator_buffer","hold_reason":"retained-reseed-missing-settled-shadow"}""",
+                """{"action":"adopt_operator_buffer","hold_reason":null}""",
+            )
+        for (reseed in listOf(false, true)) {
+            for (shadow in listOf(null, "older")) {
+                val observation = emptyCanonicalOver("# doc\n\noperator text\n", reseed, shadow)
+                val floor = RegistrationProjection.decide(observation, EditorDerivation.Unavailable)
+                // Either way the buffer becomes canonical: the floor may already publish it from
+                // a proven shadow; anything that would project, merge, or hold becomes an adoption.
+                assertTrue(
+                    "floor reseed=$reseed shadow=$shadow: ${floor.action}",
+                    floor.action in
+                        setOf(
+                            RetainedRegistrationProjectionAction.AdoptOperatorBuffer,
+                            RetainedRegistrationProjectionAction.PublishOperatorBuffer,
+                        ),
+                )
+                assertNull(floor.holdReason)
+                for (answer in answers) {
+                    val decision = RegistrationProjection.decide(observation) { _, _ -> answer }
+                    assertEquals(answer, RetainedRegistrationProjectionAction.AdoptOperatorBuffer, decision.action)
+                }
+            }
+        }
+        // An empty buffer over an empty canonical is convergence, not a clobber.
+        val bothEmpty = emptyCanonicalOver("", reseed = true, shadow = null)
+        assertEquals(
+            RetainedRegistrationProjectionAction.ApplyCanonical,
+            RegistrationProjection.decide(bothEmpty) { _, _ -> """{"action":"apply_canonical","hold_reason":null}""" }.action,
+        )
+        assertTrue(emptyCanonicalWouldClobberBufferUtil("", "x"))
+        assertFalse(emptyCanonicalWouldClobberBufferUtil("", ""))
+        assertFalse(emptyCanonicalWouldClobberBufferUtil(null, "x"))
+        assertFalse(emptyCanonicalWouldClobberBufferUtil("c", "x"))
+    }
+
+    @Test
+    fun `the plugin reports emptiness, the saved document, and a prior hold as facts`() {
+        val observation =
+            divergent.copy(diskText = divergent.bufferText, attachHeldForOperator = true)
+        val evidence = RegistrationProjection.evidence(observation)
+        assertEquals(false, evidence.canonicalEmpty)
+        assertEquals(false, evidence.bufferEmpty)
+        assertEquals(true, evidence.bufferEqualsDisk)
+        assertEquals(true, evidence.attachHeldForOperator)
+        val unknown = RegistrationProjection.evidence(divergent)
+        assertNull("an unread disk is unknown", unknown.bufferEqualsDisk)
+        assertNull("no prior hold is not reported", unknown.attachHeldForOperator)
+        val wire = gson.toJson(RegistrationProjection.evidence(observation))
+        assertFalse("document text never crosses the boundary", wire.contains("base plus operator"))
+    }
+
+    @Test
+    fun `every remote editor apply refuses an empty canonical over a non-empty buffer`() {
+        val source =
+            Files.readString(Paths.get("src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"))
+        val queue = source.substringAfter("    private fun queueRemoteTextApply(").substringBefore("    private fun recoverRejectedRemoteCanonical(")
+        assertTrue(queue.contains("emptyCanonicalWouldClobberBufferUtil(converged"))
+        assertTrue(
+            "the guard runs before the remote text can be queued",
+            queue.indexOf("emptyCanonicalWouldClobberBufferUtil(") < queue.indexOf("remoteEditorApplies.ingress("),
+        )
+        val edt = source.substringAfter("    private fun applyRemoteTextOnEdt(").substringBefore("\n    private fun ")
+        assertTrue(edt.contains("emptyCanonicalWouldClobberBufferUtil(pending.targetText, before)"))
+        val finalize = source.substringAfter("    private fun finalizeRegistrationProjection(").substringBefore("    private fun retainCanonicalProjectionAfterRegistration(")
+        assertTrue(finalize.contains("RetainedRegistrationProjectionAction.AdoptOperatorBuffer ->"))
     }
 
     @Test

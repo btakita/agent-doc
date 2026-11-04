@@ -1568,10 +1568,11 @@ fn reconcile_reseed_committed_history_on_hub(
         },
     );
     if let Err(error) = walked {
+        let sidecar = preserve_unproven_reseed_sidecar(file, &current);
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
-                "crdt_reseed_committed_history_unavailable file={} error={error:#} action=keep_reseeded_canonical (#controllerrecyclelost)",
+                "crdt_reseed_committed_history_unavailable file={} error={error:#} recovery_sidecar={sidecar} action=keep_reseeded_canonical (#controllerrecyclelost #emptycanonicaldeadlock)",
                 file.display(),
             ),
         );
@@ -1580,13 +1581,16 @@ fn reconcile_reseed_committed_history_on_hub(
     match classify_reseed_committed_history(&current, revisions.iter().map(Option::as_deref)) {
         ReseedCommittedHistory::Current => Ok((false, 0)),
         ReseedCommittedHistory::Unproven => {
+            let sidecar = preserve_unproven_reseed_sidecar(file, &current);
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
-                    "crdt_reseed_committed_history_unproven file={} reseeded_hash={} revisions_compared={} action=keep_reseeded_canonical reason=reseed_matches_no_committed_revision (#controllerrecyclelost)",
+                    "crdt_reseed_committed_history_unproven file={} reseeded_hash={} reseeded_len={} revisions_compared={} recovery_sidecar={} action=keep_reseeded_canonical reason=reseed_matches_no_committed_revision (#controllerrecyclelost #emptycanonicaldeadlock)",
                     file.display(),
                     agent_doc_hash::short_content_hash(&current),
+                    current.len(),
                     revisions.len(),
+                    sidecar,
                 ),
             );
             Ok((false, 0))
@@ -1596,6 +1600,11 @@ fn reconcile_reseed_committed_history_on_hub(
             // not UTF-8 is never authority (GH #274), so never adopt it.
             let refusal = if committed.contains(char::REPLACEMENT_CHARACTER) {
                 Some("committed_blob_not_utf8".to_string())
+            } else if committed.is_empty() {
+                // `#emptycanonicaldeadlock`: an empty committed blob holds no
+                // text; rolling a reseed forward onto it would empty the
+                // canonical under an attached editor.
+                Some("committed_blob_empty".to_string())
             } else {
                 agent_doc_element::element::component_parse_failure(&committed)
             };
@@ -1624,6 +1633,58 @@ fn reconcile_reseed_committed_history_on_hub(
                 ),
             );
             Ok((true, packet.targets.len()))
+        }
+    }
+}
+
+/// `#emptycanonicaldeadlock`: record that an update left a pending retained
+/// reseed empty, so its fence stays up ([`RelayHub::retained_replica_reseed_empty`]).
+/// The editor's buffer publication, never the empty text, completes it.
+fn log_empty_retained_reseed_held(file: &Path, was_pending: bool, hub: &RelayHub) {
+    if was_pending && hub.retained_replica_reseed_empty() {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "crdt_replica_reseed_empty_held file={} action=keep_fence reason=empty_reseed_is_not_authority recovery=editor_buffer_publishes (#emptycanonicaldeadlock)",
+                file.display(),
+            ),
+        );
+    }
+}
+
+/// `#emptycanonicaldeadlock`: keep a reseeded canonical that no committed
+/// revision proves as a content-addressed recovery sidecar, and name it for the
+/// ops log (`on_disk` when disk already holds it, `failed` when the write
+/// failed, which is logged on its own).
+///
+/// The reseed is the editor's own retained replica, which can lag its
+/// operator-visible buffer (fpe.md, 2026-11-04: 48 deferred-write replays
+/// raced, so the replica missed edits the buffer and disk held). The editor may
+/// then adopt its buffer over this canonical (`AdoptOperatorBuffer`), so
+/// whatever only the replica held must stay recoverable first.
+fn preserve_unproven_reseed_sidecar(file: &Path, current: &str) -> String {
+    if current.is_empty() {
+        return "empty".to_string();
+    }
+    if std::fs::read_to_string(file).ok().as_deref() == Some(current) {
+        return "on_disk".to_string();
+    }
+    match agent_doc_fs::preserve_unproven_reseed(file, current) {
+        Ok((path, wrote)) => format!(
+            "{}{}",
+            path.display(),
+            if wrote { "" } else { "(existing)" }
+        ),
+        Err(error) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "crdt_reseed_recovery_sidecar_failed file={} reseeded_hash={} error={error:#} (#emptycanonicaldeadlock)",
+                    file.display(),
+                    agent_doc_hash::short_content_hash(current),
+                ),
+            );
+            "failed".to_string()
         }
     }
 }
@@ -4192,6 +4253,7 @@ pub fn relay_replica_update_for_file(
         // handoff as complete. This is intentionally limited to the one
         // pending->settled edge, not every editor keystroke.
         reseed_structure = RetainedReseedStructure::observe(retained_reseed_was_pending, hub);
+        log_empty_retained_reseed_held(file, retained_reseed_was_pending, hub);
         let queue_attempt_projection =
             if retained_reseed_was_pending && !hub.retained_replica_reseed_pending() {
                 reconcile_settled_retained_reseed_on_hub(file, hub)?
@@ -6108,6 +6170,7 @@ pub fn apply_document_op_delta_for_file_in_lineage(
         let structure_was_fenced = hub.component_structure_fenced();
         let outcome = hub.apply_document_op_delta_in_lineage(lineage, delta)?;
         reseed_structure = RetainedReseedStructure::observe(retained_reseed_was_pending, hub);
+        log_empty_retained_reseed_held(file, retained_reseed_was_pending, hub);
         live_structure = LiveComponentStructure::observe(structure_was_fenced, hub);
         let queue_attempt_projection =
             if retained_reseed_was_pending && !hub.retained_replica_reseed_pending() {

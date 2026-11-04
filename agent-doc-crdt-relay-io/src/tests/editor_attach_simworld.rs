@@ -89,6 +89,10 @@ struct SimPluginEditor {
     /// cached replica's text when canonical covers its frontier
     /// (`acknowledgedReplicaBaseUtil`). `false` is the plugin before it.
     acknowledged_base: bool,
+    /// `retainedProjectionHoldPaths`: this editor already held an attach of the
+    /// document and the operator has supplied no evidence since
+    /// (`#emptycanonicaldeadlock`).
+    attach_held: bool,
     last: Option<AttemptFacts>,
 }
 
@@ -111,6 +115,7 @@ impl SimPluginEditor {
             release,
             controller_retains_visible_write: false,
             acknowledged_base: true,
+            attach_held: false,
             last: None,
         };
         let registration = editor
@@ -250,13 +255,19 @@ impl SimPluginEditor {
         let acknowledged = cached_text.filter(|_| {
             self.acknowledged_base && registration.canonical_covers_retained_frontier == Some(true)
         });
-        let (evidence, merge_base) = registration_evidence(
+        let (mut evidence, merge_base) = registration_evidence(
             &registration,
             shadow.as_deref(),
             &self.buffer,
             &canonical,
             acknowledged.as_deref(),
         );
+        // `#emptycanonicaldeadlock`: the saved document and the prior hold, as
+        // `RegistrationProjection.evidence` reports them.
+        evidence.buffer_equals_disk = std::fs::read_to_string(&self.doc)
+            .ok()
+            .map(|disk| disk == self.buffer);
+        evidence.attach_held_for_operator = self.attach_held.then_some(true);
         let decision = derive_registration_projection(&evidence);
         self.last = Some(AttemptFacts {
             sent_state_vector: retained_state_vector.is_some(),
@@ -271,6 +282,7 @@ impl SimPluginEditor {
         });
         if decision.action == RegistrationProjectionAction::HoldOperatorBuffer {
             deregister_replica_for_file(&self.doc, &identity).unwrap();
+            self.attach_held = true;
             return Attempt::Held(decision.hold_reason.unwrap());
         }
         if self.release == ResumeRelease::BeforeSwap && retained_resume_state.is_some() {
@@ -284,7 +296,8 @@ impl SimPluginEditor {
         let target = match decision.action {
             RegistrationProjectionAction::ApplyCanonical
             | RegistrationProjectionAction::DeferCanonicalProjection => canonical.clone(),
-            RegistrationProjectionAction::PublishOperatorBuffer => self.buffer.clone(),
+            RegistrationProjectionAction::PublishOperatorBuffer
+            | RegistrationProjectionAction::AdoptOperatorBuffer => self.buffer.clone(),
             // Recomputed from exactly the captured generations.
             RegistrationProjectionAction::MergeForward => {
                 merge_from_base(merge_base.as_deref().unwrap(), &self.buffer, &canonical)
@@ -312,6 +325,7 @@ impl SimPluginEditor {
         }
         self.settle_receipts();
         self.controller_retains_visible_write = false;
+        self.attach_held = false;
         Attempt::Committed(decision.action)
     }
 
@@ -380,6 +394,10 @@ fn registration_evidence(
         canonical_equals_shadow: shadow == Some(canonical),
         canonical_contains_operator_edits: contained,
         clean_merge_available: Some(clean_merge),
+        canonical_empty: Some(canonical.is_empty()),
+        buffer_empty: Some(buffer.is_empty()),
+        buffer_equals_disk: None,
+        attach_held_for_operator: None,
     };
     (evidence, merge_base)
 }
@@ -802,4 +820,150 @@ fn a_controller_rewrite_of_the_retyped_row_still_holds_from_the_acknowledged_rep
     assert_eq!(attempt, Attempt::Held(HOLD.to_string()), "{facts:#?}");
     assert_eq!(editor.buffer, operator_text);
     assert_eq!(hub_text(&doc), rewritten);
+}
+
+/// The editor saves its buffer (IntelliJ autosave): disk now holds exactly what
+/// the operator sees, whether or not the replica has it.
+fn save_buffer(editor: &SimPluginEditor) {
+    std::fs::write(&editor.doc, &editor.buffer).unwrap();
+}
+
+/// Operator text with no queue, so no derived marker projection rewrites it.
+const EMPTY_RESEED_OPERATOR_TEXT: &str = "# notes\n\noperator text typed into an empty document\n";
+
+const FPE_DOC: &str = "# fpe\n\n<!-- agent:queue -->\n- replica row\n<!-- /agent:queue -->\n";
+
+/// `#emptycanonicaldeadlock`, the live fpe.md sequence (2026-11-04 20:09Z): the
+/// operator's typing reached the buffer and disk but not the native replica
+/// (48 raced deferred-write replays), the IDE restart discarded the settled
+/// shadow, and a fresh controller reseeded from the editor's own older
+/// retained replica. Before the fix the editor held on operator evidence that
+/// could not exist while the controller refused disk because the editor was
+/// attached. Now the saved buffer becomes canonical with no operator step, and
+/// the replica-only text survives as a recovery sidecar.
+#[test]
+fn a_fresh_controller_reseed_yields_to_the_saved_operator_buffer_without_operator_evidence() {
+    let (dir, doc) = temp_doc("fpe.md");
+    // HEAD is older than the replica: the reseed matches no committed revision.
+    git_commit_document(dir.path(), &doc, "# fpe\n\nolder committed text\n");
+    std::fs::write(&doc, FPE_DOC).unwrap();
+    let mut editor = SimPluginEditor::open(&doc, ResumeRelease::OnCommit);
+    let replica_text = editor.buffer.clone();
+    // The fresh controller projects its queue markers onto the row, so edit
+    // after the row text rather than at a literal `- ` prefix.
+    let operator_text = replica_text.replacen(
+        "replica row\n",
+        "replica row\n- operator row the replica never received\n",
+        1,
+    );
+    assert_ne!(operator_text, replica_text, "the operator edit landed");
+    editor.type_unapplied(&operator_text);
+    save_buffer(&editor);
+    // The IDE restart discards the JVM-local settled shadow; the native
+    // library reload keeps the retained replica; the controller is fresh.
+    editor.settled_shadow = None;
+    editor.reload_native_library();
+    forget_controller_relay_state_for_test(&doc);
+
+    let attempt = editor.reregister(false);
+    let facts = editor.last().clone();
+    assert!(facts.retained_replica_reseed_pending, "{facts:#?}");
+    assert_eq!(facts.canonical, replica_text, "the reseed is the older replica");
+    assert_eq!(facts.evidence.buffer_equals_disk, Some(true));
+    assert_eq!(
+        attempt,
+        Attempt::Committed(RegistrationProjectionAction::AdoptOperatorBuffer),
+        "{facts:#?}"
+    );
+    // Nothing is lost: buffer, canonical, and disk all hold the operator text.
+    assert_eq!(editor.buffer, operator_text);
+    assert_eq!(hub_text(&doc), operator_text);
+    assert_eq!(std::fs::read_to_string(&doc).unwrap(), operator_text);
+    with_hub(&doc, |hub| assert!(!hub.retained_replica_reseed_pending())).unwrap();
+    // The replica-only text was kept as a content-addressed recovery sidecar.
+    let recovery = dir.path().join(".agent-doc/recovery");
+    let sidecars: Vec<_> = std::fs::read_dir(&recovery)
+        .unwrap()
+        .map(|entry| std::fs::read_to_string(entry.unwrap().path()).unwrap())
+        .collect();
+    assert!(
+        sidecars.iter().any(|text| text == &replica_text),
+        "the reseeded replica text is recoverable: {sidecars:?}"
+    );
+    let ops = ops_log(dir.path());
+    assert!(ops.contains("crdt_reseed_committed_history_unproven"), "{ops}");
+    assert!(ops.contains("recovery_sidecar="), "{ops}");
+}
+
+/// `#emptycanonicaldeadlock`: a retained replica that holds NO text reseeds an
+/// empty canonical. The empty reseed stays fenced (never readable or
+/// committable), and the attached buffer, equal to disk, becomes canonical with
+/// no operator step.
+#[test]
+fn an_empty_fresh_canonical_takes_the_attached_buffer_and_loses_nothing() {
+    let (_dir, doc) = temp_doc("empty-reseed.md");
+    std::fs::write(&doc, "").unwrap();
+    let mut editor = SimPluginEditor::open(&doc, ResumeRelease::OnCommit);
+    assert_eq!(editor.buffer, "");
+    editor.type_unapplied(EMPTY_RESEED_OPERATOR_TEXT);
+    save_buffer(&editor);
+    editor.settled_shadow = None;
+    editor.reload_native_library();
+    forget_controller_relay_state_for_test(&doc);
+
+    let attempt = editor.reregister(false);
+    let facts = editor.last().clone();
+    assert!(facts.retained_replica_reseed_pending, "{facts:#?}");
+    assert_eq!(facts.canonical, "", "the fresh canonical is empty");
+    assert_eq!(facts.evidence.canonical_empty, Some(true));
+    assert_eq!(
+        attempt,
+        Attempt::Committed(RegistrationProjectionAction::AdoptOperatorBuffer),
+        "{facts:#?}"
+    );
+    assert_eq!(editor.buffer, EMPTY_RESEED_OPERATOR_TEXT);
+    assert_eq!(hub_text(&doc), EMPTY_RESEED_OPERATOR_TEXT);
+    assert_eq!(std::fs::read_to_string(&doc).unwrap(), EMPTY_RESEED_OPERATOR_TEXT);
+    with_hub(&doc, |hub| assert!(!hub.retained_replica_reseed_pending())).unwrap();
+}
+
+/// `#emptycanonicaldeadlock`: the bound. A genuine two-sided conflict (the
+/// reseeded replica and an UNSAVED buffer hold different real text, disk
+/// corroborates neither, and no settled ancestor exists) still holds for the
+/// operator; and a controller-driven re-register after that hold does not take
+/// the restarted-IDE adoption fallback over the held buffer.
+#[test]
+fn a_genuine_two_sided_reseed_conflict_still_holds_for_the_operator() {
+    let (_dir, doc) = temp_doc("two-sided.md");
+    std::fs::write(&doc, FPE_DOC).unwrap();
+    let mut editor = SimPluginEditor::open(&doc, ResumeRelease::OnCommit);
+    let replica_text = editor.buffer.clone();
+    // Disk moved on its own; the buffer holds different unsaved typing.
+    std::fs::write(&doc, format!("{FPE_DOC}- disk-only line\n")).unwrap();
+    let operator_text = replica_text.replacen("replica row\n", "unsaved operator row\n", 1);
+    assert_ne!(operator_text, replica_text, "the operator edit landed");
+    editor.type_unapplied(&operator_text);
+    editor.settled_shadow = None;
+    editor.reload_native_library();
+    forget_controller_relay_state_for_test(&doc);
+
+    assert_eq!(
+        editor.reregister(false),
+        Attempt::Held("retained-reseed-missing-settled-shadow".to_string()),
+        "{:#?}",
+        editor.last()
+    );
+    assert_eq!(editor.buffer, operator_text, "the hold never touches the buffer");
+
+    // The controller now holds the reseed; a later projection-recovery
+    // re-register is an ordinary register with no settled shadow.
+    let attempt = editor.reregister(false);
+    let facts = editor.last().clone();
+    assert!(!facts.retained_replica_reseed_pending, "{facts:#?}");
+    assert_eq!(
+        attempt,
+        Attempt::Held("ambiguous-reregister-projection".to_string()),
+        "{facts:#?}"
+    );
+    assert_eq!(editor.buffer, operator_text);
 }

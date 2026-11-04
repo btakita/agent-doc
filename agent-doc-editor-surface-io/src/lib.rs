@@ -1023,14 +1023,30 @@ mod tests {
             let both = |a: &serde_json::Value, b: &serde_json::Value| {
                 a.as_str().is_some() && a.as_str() == b.as_str()
             };
-            serde_json::json!({
+            let mut captured = serde_json::json!({
                 "has_published_shadow": shadow.is_string(),
                 "has_buffer": buffer.is_string(),
                 "has_canonical": canonical.is_string(),
                 "buffer_equals_canonical": both(buffer, canonical),
                 "buffer_equals_shadow": both(buffer, shadow),
                 "canonical_equals_shadow": both(canonical, shadow),
-            })
+            });
+            // `#emptycanonicaldeadlock`: emptiness is reported for every text
+            // the plugin holds (an unknown text reports nothing).
+            if let Some(text) = canonical.as_str() {
+                captured["canonical_empty"] = serde_json::json!(text.is_empty());
+            }
+            if let Some(text) = buffer.as_str() {
+                captured["buffer_empty"] = serde_json::json!(text.is_empty());
+            }
+            captured
+        };
+        // `#emptycanonicaldeadlock`: the saved document, when the case names one.
+        let disk_fact = |buffer: &serde_json::Value, disk: Option<&serde_json::Value>| {
+            match (buffer.as_str(), disk.and_then(serde_json::Value::as_str)) {
+                (Some(buffer), Some(disk)) => Some(buffer == disk),
+                _ => None,
+            }
         };
 
         let cases = fixture["cases"].as_array().unwrap();
@@ -1038,11 +1054,14 @@ mod tests {
         for case in cases {
             let name = case["name"].as_str().unwrap();
             let texts = &case["texts"];
-            let captured = facts(
+            let mut captured = facts(
                 &texts["published_shadow"],
                 &texts["buffer"],
                 &texts["canonical"],
             );
+            if let Some(equal) = disk_fact(&texts["buffer"], texts.get("disk")) {
+                captured["buffer_equals_disk"] = serde_json::json!(equal);
+            }
             for (field, value) in captured.as_object().unwrap() {
                 assert_eq!(&case["input"][field], value, "{name}: {field}");
             }

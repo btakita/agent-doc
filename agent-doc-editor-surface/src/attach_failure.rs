@@ -158,10 +158,14 @@ fn attach_failure_remedy(reason: &str) -> Option<&'static str> {
             "That file is not an agent-doc session document: it needs agent-doc frontmatter (agent_doc_* fields) or a [documents] include match in .agent-doc/config.toml; <!-- agent: markers in the body do not opt it in.",
         )
     } else if reason.contains("retained-reseed-missing-settled-shadow") {
+        // `#emptycanonicaldeadlock`: the same steps, in the same words, as the
+        // agent-facing `editor_attach_operator_action`.
         Some(
             "The restarted editor has no settled ancestor from which it can safely seed the retained \
-             controller projection. Copy any unsaved text, close this editor tab, run `agent-doc repair \
-             <file>` while it is detached, and reopen it; restarting the editor again cannot create that ancestor.",
+             controller projection, and Agent Doc could not prove the buffer is the saved document; \
+             restarting the editor again cannot create that ancestor. Copy any editor \
+             text you need to keep, close this editor tab, run `agent-doc repair <file>` while it is \
+             detached, reopen it, and paste back anything missing.",
         )
     } else if reason.contains("ambiguous-retained-projection")
         || reason.contains("ambiguous-reregister-projection")
@@ -245,9 +249,23 @@ fn hold_message(file_name: &str, reason: &str, remedy: Option<&str>) -> String {
         message.push(' ');
         message.push_str(remedy);
     }
+    if needs_operator_surface(reason) {
+        // `#emptycanonicaldeadlock`: the operator could not copy the 2026-11-04
+        // fpe.md notification, so it must carry the exact action the agent-side
+        // `EditorAttachAwaitsOperator` verdict names, with this document filled
+        // in, as one line an agent or the operator can act on verbatim.
+        message.push_str(&format!(
+            " Operator action ({OPERATOR_ACTION_KEY}={}): {}.",
+            agent_doc_turn::write_ownership::REOPEN_DETACHED_AFTER_REPAIR_OPERATOR_ACTION,
+            agent_doc_turn::write_ownership::editor_attach_operator_action(file_name),
+        ));
+    }
     message.push_str(" The editor buffer and disk were left unchanged.");
     message
 }
+
+/// The key the hold message tags its machine-readable operator action with.
+const OPERATOR_ACTION_KEY: &str = "operator_action";
 
 /// The log line for a projection hold that refused
 /// only a replacement registration. It names no remedy: the attached replica is
@@ -493,20 +511,67 @@ mod tests {
     /// operator already sees cannot disagree (`#controllerrecyclelost`).
     #[test]
     fn the_agent_operator_action_matches_the_editor_hold_remedy() {
-        let remedy = diagnose("ambiguous-retained-projection")
-            .remedy
-            .expect("an ambiguous hold names a remedy");
         let action = agent_doc_turn::write_ownership::editor_attach_operator_action("plan.md");
-        for step in [
-            "editor text",
-            "close",
-            "editor tab",
-            "agent-doc repair",
-            "reopen",
-            "paste back anything missing",
+        for reason in [
+            "ambiguous-retained-projection",
+            "ambiguous-reregister-projection",
+            "retained-reseed-missing-settled-shadow",
         ] {
-            assert!(remedy.contains(step), "{step}: {remedy}");
-            assert!(action.contains(step), "{step}: {action}");
+            let remedy = diagnose(reason).remedy.expect("a hold names a remedy");
+            for step in [
+                "editor text",
+                "close",
+                "editor tab",
+                "agent-doc repair",
+                "reopen",
+                "paste back anything missing",
+            ] {
+                assert!(remedy.contains(step), "{reason} {step}: {remedy}");
+                assert!(action.contains(step), "{step}: {action}");
+            }
         }
+    }
+
+    /// `#emptycanonicaldeadlock`: the operator notification carries the exact
+    /// `EditorAttachAwaitsOperator` operator action for THIS document, verbatim,
+    /// with its machine token, for every hold that pauses on operator evidence.
+    #[test]
+    fn every_operator_hold_message_names_the_exact_verdict_action() {
+        for reason in [
+            "ambiguous-retained-projection",
+            "ambiguous-reregister-projection",
+            "retained-reseed-missing-settled-shadow",
+        ] {
+            let message = diagnose_attach_failure(&AttachFailureEvidence {
+                reason: Some(reason.to_string()),
+                file_name: Some("fpe.md".to_string()),
+                live_replica_attached: None,
+            })
+            .hold_message
+            .unwrap();
+            let action = agent_doc_turn::write_ownership::editor_attach_operator_action("fpe.md");
+            assert!(message.contains(&action), "{reason}: {message}");
+            assert!(
+                message.contains(&format!(
+                    "operator_action={}",
+                    agent_doc_turn::write_ownership::REOPEN_DETACHED_AFTER_REPAIR_OPERATOR_ACTION
+                )),
+                "{reason}: {message}"
+            );
+            // The verdict renders the same action sentence.
+            assert!(
+                agent_doc_turn::write_ownership::editor_attach_awaits_operator_remedy("fpe.md")
+                    .contains(&action)
+            );
+        }
+        // A non-hold failure names no operator action.
+        let other = diagnose_attach_failure(&AttachFailureEvidence {
+            reason: Some("socket_unavailable".to_string()),
+            file_name: Some("fpe.md".to_string()),
+            live_replica_attached: None,
+        })
+        .hold_message
+        .unwrap();
+        assert!(!other.contains("operator_action="), "{other}");
     }
 }

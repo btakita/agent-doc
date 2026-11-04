@@ -647,6 +647,28 @@ pub fn preserve_dropped_operator_buffer(doc: &Path, content: &str) -> Result<Pat
     Ok(path)
 }
 
+/// `#emptycanonicaldeadlock`: keep an audit copy of a fresh controller's
+/// reseeded canonical that matches no committed revision, at
+/// `<project_root>/.agent-doc/recovery/<doc-hash>.reseed-<content-hash>.md`.
+///
+/// That text is the editor's retained native replica. When the live buffer
+/// then wins the registration (`AdoptOperatorBuffer`), text only the replica
+/// held would otherwise be gone. The name is content-addressed, so a document
+/// that reseeds the same text on every controller recycle writes it once.
+/// Returns the sidecar path and whether this call wrote it.
+pub fn preserve_unproven_reseed(doc: &Path, content: &str) -> Result<(PathBuf, bool)> {
+    let (root, hash) = state_root_and_hash(doc)?;
+    let path = root.join(RECOVERY_DIR).join(format!(
+        "{hash}.reseed-{}.md",
+        agent_doc_hash::short_content_hash(content)
+    ));
+    if path.exists() {
+        return Ok((path, false));
+    }
+    write_atomic(&path, content.as_bytes())?;
+    Ok((path, true))
+}
+
 fn first_component(path: &Path) -> Option<Component<'_>> {
     path.components().next()
 }
@@ -714,7 +736,8 @@ fn project_roots_for(path: &Path) -> Vec<PathBuf> {
 mod tests {
     use super::{
         document_state_hash, document_state_hash_from_str, find_project_root, inode_of_path,
-        preserve_dropped_operator_buffer, quarantine_corrupt_file, read_optional,
+        preserve_dropped_operator_buffer, preserve_unproven_reseed, quarantine_corrupt_file,
+        read_optional,
         read_valid_or_quarantine, referenced_markdown_path, referenced_markdown_path_checked,
         rewrite_start_path, running_exe_inode_for_pid, same_document_path, snapshot_path_for,
         startup_document_lock_path_for, startup_session_lock_name, startup_session_lock_path_for,
@@ -802,6 +825,24 @@ mod tests {
             std::fs::read_to_string(&path).unwrap(),
             "operator text that would be lost"
         );
+    }
+
+    #[test]
+    fn preserve_unproven_reseed_is_content_addressed_and_written_once() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        let doc = tmp.path().join("plan.md");
+        std::fs::write(&doc, "# plan\n").unwrap();
+        let (path, wrote) = preserve_unproven_reseed(&doc, "replica-only text").unwrap();
+        assert!(wrote);
+        assert!(path.to_string_lossy().contains("/.agent-doc/recovery/"));
+        assert!(path.to_string_lossy().contains(".reseed-"));
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "replica-only text");
+        let (again, wrote_again) = preserve_unproven_reseed(&doc, "replica-only text").unwrap();
+        assert_eq!(again, path);
+        assert!(!wrote_again, "the same reseed is preserved once");
+        let (other, _) = preserve_unproven_reseed(&doc, "different text").unwrap();
+        assert_ne!(other, path);
     }
 
     #[test]

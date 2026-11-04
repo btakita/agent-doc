@@ -1879,8 +1879,23 @@ impl RelayHub {
         if self.retained_replica_reseed_structural_refusal().is_some() {
             return;
         }
+        // `#emptycanonicaldeadlock`: an empty reseed holds no text, so it can
+        // never be authority. Completing it would make the readable,
+        // committable, persistable canonical the empty string while an editor
+        // (whose buffer may hold the whole document) is attached. Keep the
+        // fence up: the first update that carries text completes the reseed.
+        if self.retained_replica_reseed_empty() {
+            return;
+        }
         self.ctx.set(&self.retained_replica_reseed_pending, false);
         self.bump_delivery_epoch();
+    }
+
+    /// `#emptycanonicaldeadlock`: a pending retained reseed whose text is still
+    /// empty (a zero-length retained replica or a zero-byte bootstrap). It
+    /// stays fenced: an empty canonical is never authority.
+    pub fn retained_replica_reseed_empty(&self) -> bool {
+        self.retained_replica_reseed_pending() && self.canonical.text().is_empty()
     }
 
     /// `#componentownclose`: why a pending retained reseed stays fenced, i.e.
@@ -6586,6 +6601,37 @@ mod tests {
     /// pair (the incident: `agent:loop` closed by `/agent:todo`) never promotes
     /// the fresh hub to readable/committable authority; the operator's repair
     /// of the markers promotes it on the next op.
+    #[test]
+    fn emptycanonicaldeadlock_an_empty_reseed_stays_fenced_until_text_arrives() {
+        // A retained native replica that holds no text (or a zero-byte
+        // bootstrap) must never promote the fresh controller's canonical: the
+        // empty string would become readable, committable, and persistable
+        // while the attached editor's buffer holds the whole document.
+        let mut hub = RelayHub::new(3);
+        hub.begin_retained_replica_reseed();
+        let member = 45;
+        hub.register(member).unwrap();
+        let empty = RelayHub::from_text(9, "");
+        hub.relay_update(member, &empty.canonical_encoded_state())
+            .unwrap();
+        assert_eq!(hub.canonical_text(), "");
+        assert!(hub.retained_replica_reseed_pending());
+        assert!(hub.retained_replica_reseed_empty());
+        assert!(!hub.commit_barrier_ready().unwrap());
+        assert!(!hub.commit_barrier().unwrap());
+
+        // The editor publishes its operator-visible buffer: that text completes
+        // the reseed and becomes canonical.
+        let editor = ReplicaState::from_encoded(member, &hub.canonical_encoded_state()).unwrap();
+        let before = editor.state_vector();
+        editor.apply_local_edit(0, 0, "# doc\n\noperator text\n");
+        hub.relay_update(member, &editor.diff(&before).unwrap())
+            .unwrap();
+        assert_eq!(hub.canonical_text(), "# doc\n\noperator text\n");
+        assert!(!hub.retained_replica_reseed_pending());
+        assert!(!hub.retained_replica_reseed_empty());
+    }
+
     #[test]
     fn componentownclose_structurally_invalid_reseed_stays_fenced_until_repaired() {
         use agent_doc_element::sibling_span_fixture::{self as fx, LoopEdit, OpenerStyle};

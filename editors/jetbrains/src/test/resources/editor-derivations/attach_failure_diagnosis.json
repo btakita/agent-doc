@@ -54,6 +54,15 @@
         "file_name": "plan.md"
       },
       "expected": {
+        "remedy": "The restarted editor has no settled ancestor from which it can safely seed the retained controller projection, and Agent Doc could not prove the buffer is the saved document; restarting the editor again cannot create that ancestor. Copy any editor text you need to keep, close this editor tab, run `agent-doc repair <file>` while it is detached, reopen it, and paste back anything missing.",
+        "status_token": "retained-reseed-missing-settled-shadow",
+        "needs_operator_surface": true,
+        "needs_liveness_republish": false,
+        "retry_disposition": "await_operator_evidence",
+        "hold_message": "Agent Doc could not attach the open editor replica for plan.md. Cause: retained-reseed-missing-settled-shadow. The restarted editor has no settled ancestor from which it can safely seed the retained controller projection, and Agent Doc could not prove the buffer is the saved document; restarting the editor again cannot create that ancestor. Copy any editor text you need to keep, close this editor tab, run `agent-doc repair <file>` while it is detached, reopen it, and paste back anything missing. Operator action (operator_action=close_tab_repair_detached_reopen): copy any editor text they need to keep, close the editor tab of plan.md, run `agent-doc repair plan.md` while it is closed, reopen plan.md, and paste back anything missing. The editor buffer and disk were left unchanged.",
+        "hold_notification": "error"
+      },
+      "frozen_expected": {
         "remedy": "The restarted editor has no settled ancestor from which it can safely seed the retained controller projection. Copy any unsaved text, close this editor tab, run `agent-doc repair <file>` while it is detached, and reopen it; restarting the editor again cannot create that ancestor.",
         "status_token": "retained-reseed-missing-settled-shadow",
         "needs_operator_surface": true,
@@ -75,7 +84,7 @@
         "needs_operator_surface": true,
         "needs_liveness_republish": false,
         "retry_disposition": "await_operator_evidence",
-        "hold_message": "Agent Doc could not attach the open editor replica for agent-doc-bugs.md. Cause: ambiguous-retained-projection. Agent Doc could not prove that adopting the controller canonical, publishing this buffer, or merging the two keeps every edit, so the buffer was not changed. Copy any editor text you need to keep, close this editor tab, run `agent-doc repair <file>` while it is detached, reopen it, and paste back anything missing. The editor buffer and disk were left unchanged.",
+        "hold_message": "Agent Doc could not attach the open editor replica for agent-doc-bugs.md. Cause: ambiguous-retained-projection. Agent Doc could not prove that adopting the controller canonical, publishing this buffer, or merging the two keeps every edit, so the buffer was not changed. Copy any editor text you need to keep, close this editor tab, run `agent-doc repair <file>` while it is detached, reopen it, and paste back anything missing. Operator action (operator_action=close_tab_repair_detached_reopen): copy any editor text they need to keep, close the editor tab of agent-doc-bugs.md, run `agent-doc repair agent-doc-bugs.md` while it is closed, reopen agent-doc-bugs.md, and paste back anything missing. The editor buffer and disk were left unchanged.",
         "hold_notification": "error"
       },
       "frozen_expected": {
@@ -194,7 +203,7 @@
         "needs_operator_surface": true,
         "needs_liveness_republish": false,
         "retry_disposition": "await_operator_evidence",
-        "hold_message": "Agent Doc could not attach the open editor replica for session.md. Cause: ambiguous-reregister-projection: buffer typed after the settled shadow. Agent Doc could not prove that adopting the controller canonical, publishing this buffer, or merging the two keeps every edit, so the buffer was not changed. Copy any editor text you need to keep, close this editor tab, run `agent-doc repair <file>` while it is detached, reopen it, and paste back anything missing. The editor buffer and disk were left unchanged.",
+        "hold_message": "Agent Doc could not attach the open editor replica for session.md. Cause: ambiguous-reregister-projection: buffer typed after the settled shadow. Agent Doc could not prove that adopting the controller canonical, publishing this buffer, or merging the two keeps every edit, so the buffer was not changed. Copy any editor text you need to keep, close this editor tab, run `agent-doc repair <file>` while it is detached, reopen it, and paste back anything missing. Operator action (operator_action=close_tab_repair_detached_reopen): copy any editor text they need to keep, close the editor tab of session.md, run `agent-doc repair session.md` while it is closed, reopen session.md, and paste back anything missing. The editor buffer and disk were left unchanged.",
         "hold_notification": "error"
       },
       "frozen_expected": {
@@ -426,6 +435,15 @@
         "file_name": "plan.md"
       },
       "expected": {
+        "remedy": "The restarted editor has no settled ancestor from which it can safely seed the retained controller projection, and Agent Doc could not prove the buffer is the saved document; restarting the editor again cannot create that ancestor. Copy any editor text you need to keep, close this editor tab, run `agent-doc repair <file>` while it is detached, reopen it, and paste back anything missing.",
+        "status_token": "ambiguous-retained-projection_after_retained-reseed-missing-settled-shadow",
+        "needs_operator_surface": true,
+        "needs_liveness_republish": false,
+        "retry_disposition": "await_operator_evidence",
+        "hold_message": "Agent Doc could not attach the open editor replica for plan.md. Cause: ambiguous-retained-projection after retained-reseed-missing-settled-shadow. The restarted editor has no settled ancestor from which it can safely seed the retained controller projection, and Agent Doc could not prove the buffer is the saved document; restarting the editor again cannot create that ancestor. Copy any editor text you need to keep, close this editor tab, run `agent-doc repair <file>` while it is detached, reopen it, and paste back anything missing. Operator action (operator_action=close_tab_repair_detached_reopen): copy any editor text they need to keep, close the editor tab of plan.md, run `agent-doc repair plan.md` while it is closed, reopen plan.md, and paste back anything missing. The editor buffer and disk were left unchanged.",
+        "hold_notification": "error"
+      },
+      "frozen_expected": {
         "remedy": "The restarted editor has no settled ancestor from which it can safely seed the retained controller projection. Copy any unsaved text, close this editor tab, run `agent-doc repair <file>` while it is detached, and reopen it; restarting the editor again cannot create that ancestor.",
         "status_token": "ambiguous-retained-projection_after_retained-reseed-missing-settled-shadow",
         "needs_operator_surface": true,

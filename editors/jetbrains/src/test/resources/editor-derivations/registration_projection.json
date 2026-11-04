@@ -1,6 +1,6 @@
 {
   "derivation": "registration_projection",
-  "about": "GH #326 phase 5 parity cases. The Rust `registration_projection` derivation (agent-doc-editor-surface-io) and the plugin's frozen Kotlin floor (RegistrationProjectionTest) both answer every case. `texts` are the three generations the plugin holds (null: unavailable); the plugin turns them into the presence and equality facts in `input`, which is all the derivation sees, and the Kotlin test checks that capture. The frozen floor decides from `texts`; the derivation decides from `input`. A native rule change updates this file and may diverge from the frozen floor only on purpose.",
+  "about": "GH #326 phase 5 parity cases. The Rust `registration_projection` derivation (agent-doc-editor-surface-io) and the plugin's frozen Kotlin floor (RegistrationProjectionTest) both answer every case. `texts` are the three generations the plugin holds (null: unavailable); the plugin turns them into the presence and equality facts in `input`, which is all the derivation sees, and the Kotlin test checks that capture. The frozen floor decides from `texts`; the derivation decides from `input`. A native rule change updates this file and may diverge from the frozen floor only on purpose. `texts.disk` (optional) is the saved document the plugin compares the buffer with. `frozen_expected` is the frozen floor's answer where a native rule diverged from it on purpose (`#emptycanonicaldeadlock`); the plugin's empty-canonical execution guard still refuses an empty adoption whichever answers.",
   "cases": [
     {
       "name": "a fresh-controller reseed publishes a proven live buffer instead of the temporary empty canonical",
@@ -21,9 +21,15 @@
         "buffer_equals_shadow": false,
         "canonical_equals_shadow": false,
         "canonical_contains_operator_edits": null,
-        "clean_merge_available": null
+        "clean_merge_available": null,
+        "canonical_empty": true,
+        "buffer_empty": false
       },
       "expected": {
+        "action": "adopt_operator_buffer",
+        "hold_reason": null
+      },
+      "frozen_expected": {
         "action": "publish_operator_buffer",
         "hold_reason": null
       }
@@ -47,9 +53,15 @@
         "buffer_equals_shadow": false,
         "canonical_equals_shadow": false,
         "canonical_contains_operator_edits": null,
-        "clean_merge_available": null
+        "clean_merge_available": null,
+        "canonical_empty": true,
+        "buffer_empty": false
       },
       "expected": {
+        "action": "adopt_operator_buffer",
+        "hold_reason": null
+      },
+      "frozen_expected": {
         "action": "hold_operator_buffer",
         "hold_reason": "retained-reseed-missing-settled-shadow"
       }
@@ -73,7 +85,9 @@
         "buffer_equals_shadow": false,
         "canonical_equals_shadow": false,
         "canonical_contains_operator_edits": null,
-        "clean_merge_available": null
+        "clean_merge_available": null,
+        "canonical_empty": false,
+        "buffer_empty": false
       },
       "expected": {
         "action": "apply_canonical",
@@ -99,7 +113,9 @@
         "buffer_equals_shadow": false,
         "canonical_equals_shadow": false,
         "canonical_contains_operator_edits": null,
-        "clean_merge_available": null
+        "clean_merge_available": null,
+        "canonical_empty": false,
+        "buffer_empty": false
       },
       "expected": {
         "action": "defer_canonical_projection",
@@ -125,7 +141,9 @@
         "buffer_equals_shadow": false,
         "canonical_equals_shadow": false,
         "canonical_contains_operator_edits": null,
-        "clean_merge_available": null
+        "clean_merge_available": null,
+        "canonical_empty": false,
+        "buffer_empty": false
       },
       "expected": {
         "action": "defer_canonical_projection",
@@ -151,7 +169,9 @@
         "buffer_equals_shadow": false,
         "canonical_equals_shadow": true,
         "canonical_contains_operator_edits": null,
-        "clean_merge_available": null
+        "clean_merge_available": null,
+        "canonical_empty": false,
+        "buffer_empty": false
       },
       "expected": {
         "action": "publish_operator_buffer",
@@ -177,7 +197,9 @@
         "buffer_equals_shadow": false,
         "canonical_equals_shadow": false,
         "canonical_contains_operator_edits": null,
-        "clean_merge_available": null
+        "clean_merge_available": null,
+        "canonical_empty": false,
+        "buffer_empty": false
       },
       "expected": {
         "action": "hold_operator_buffer",
@@ -203,7 +225,9 @@
         "buffer_equals_shadow": false,
         "canonical_equals_shadow": false,
         "canonical_contains_operator_edits": null,
-        "clean_merge_available": true
+        "clean_merge_available": true,
+        "canonical_empty": false,
+        "buffer_empty": false
       },
       "expected": {
         "action": "merge_forward",
@@ -229,7 +253,9 @@
         "buffer_equals_shadow": false,
         "canonical_equals_shadow": false,
         "canonical_contains_operator_edits": true,
-        "clean_merge_available": true
+        "clean_merge_available": true,
+        "canonical_empty": false,
+        "buffer_empty": false
       },
       "expected": {
         "action": "apply_canonical",
@@ -255,7 +281,9 @@
         "buffer_equals_shadow": false,
         "canonical_equals_shadow": false,
         "canonical_contains_operator_edits": true,
-        "clean_merge_available": null
+        "clean_merge_available": null,
+        "canonical_empty": false,
+        "buffer_empty": false
       },
       "expected": {
         "action": "apply_canonical",
@@ -281,7 +309,9 @@
         "buffer_equals_shadow": false,
         "canonical_equals_shadow": true,
         "canonical_contains_operator_edits": null,
-        "clean_merge_available": null
+        "clean_merge_available": null,
+        "canonical_empty": false,
+        "buffer_empty": false
       },
       "expected": {
         "action": "publish_operator_buffer",
@@ -307,7 +337,9 @@
         "buffer_equals_shadow": true,
         "canonical_equals_shadow": false,
         "canonical_contains_operator_edits": null,
-        "clean_merge_available": null
+        "clean_merge_available": null,
+        "canonical_empty": false,
+        "buffer_empty": false
       },
       "expected": {
         "action": "apply_canonical",
@@ -333,7 +365,9 @@
         "buffer_equals_shadow": false,
         "canonical_equals_shadow": false,
         "canonical_contains_operator_edits": null,
-        "clean_merge_available": null
+        "clean_merge_available": null,
+        "canonical_empty": false,
+        "buffer_empty": false
       },
       "expected": {
         "action": "hold_operator_buffer",
@@ -359,7 +393,9 @@
         "buffer_equals_shadow": false,
         "canonical_equals_shadow": false,
         "canonical_contains_operator_edits": true,
-        "clean_merge_available": null
+        "clean_merge_available": null,
+        "canonical_empty": false,
+        "buffer_empty": false
       },
       "expected": {
         "action": "apply_canonical",
@@ -385,7 +421,9 @@
         "buffer_equals_shadow": false,
         "canonical_equals_shadow": false,
         "canonical_contains_operator_edits": null,
-        "clean_merge_available": true
+        "clean_merge_available": true,
+        "canonical_empty": false,
+        "buffer_empty": false
       },
       "expected": {
         "action": "merge_forward",
@@ -411,7 +449,9 @@
         "buffer_equals_shadow": false,
         "canonical_equals_shadow": false,
         "canonical_contains_operator_edits": null,
-        "clean_merge_available": null
+        "clean_merge_available": null,
+        "canonical_empty": false,
+        "buffer_empty": false
       },
       "expected": {
         "action": "apply_canonical",
@@ -437,7 +477,9 @@
         "buffer_equals_shadow": true,
         "canonical_equals_shadow": false,
         "canonical_contains_operator_edits": null,
-        "clean_merge_available": null
+        "clean_merge_available": null,
+        "canonical_empty": false,
+        "buffer_empty": false
       },
       "expected": {
         "action": "hold_operator_buffer",
@@ -463,7 +505,9 @@
         "buffer_equals_shadow": true,
         "canonical_equals_shadow": false,
         "canonical_contains_operator_edits": null,
-        "clean_merge_available": null
+        "clean_merge_available": null,
+        "canonical_empty": false,
+        "buffer_empty": false
       },
       "expected": {
         "action": "apply_canonical",
@@ -489,7 +533,9 @@
         "buffer_equals_shadow": true,
         "canonical_equals_shadow": false,
         "canonical_contains_operator_edits": null,
-        "clean_merge_available": null
+        "clean_merge_available": null,
+        "canonical_empty": false,
+        "buffer_empty": false
       },
       "expected": {
         "action": "hold_operator_buffer",
@@ -515,7 +561,9 @@
         "buffer_equals_shadow": false,
         "canonical_equals_shadow": false,
         "canonical_contains_operator_edits": null,
-        "clean_merge_available": null
+        "clean_merge_available": null,
+        "canonical_empty": false,
+        "buffer_empty": false
       },
       "expected": {
         "action": "apply_canonical",
@@ -541,7 +589,8 @@
         "buffer_equals_shadow": false,
         "canonical_equals_shadow": false,
         "canonical_contains_operator_edits": null,
-        "clean_merge_available": null
+        "clean_merge_available": null,
+        "canonical_empty": false
       },
       "expected": {
         "action": "apply_canonical",
@@ -567,7 +616,9 @@
         "buffer_equals_shadow": false,
         "canonical_equals_shadow": true,
         "canonical_contains_operator_edits": null,
-        "clean_merge_available": null
+        "clean_merge_available": null,
+        "canonical_empty": false,
+        "buffer_empty": false
       },
       "expected": {
         "action": "publish_operator_buffer",
@@ -593,7 +644,9 @@
         "buffer_equals_shadow": false,
         "canonical_equals_shadow": true,
         "canonical_contains_operator_edits": null,
-        "clean_merge_available": null
+        "clean_merge_available": null,
+        "canonical_empty": false,
+        "buffer_empty": false
       },
       "expected": {
         "action": "publish_operator_buffer",
@@ -619,10 +672,141 @@
         "buffer_equals_shadow": false,
         "canonical_equals_shadow": true,
         "canonical_contains_operator_edits": null,
-        "clean_merge_available": null
+        "clean_merge_available": null,
+        "canonical_empty": false,
+        "buffer_empty": false
       },
       "expected": {
         "action": "publish_operator_buffer",
+        "hold_reason": null
+      }
+    },
+    {
+      "name": "#emptycanonicaldeadlock: a fresh-controller reseed of the editor's own replica yields to the saved buffer",
+      "texts": {
+        "published_shadow": null,
+        "buffer": "# fpe\n\n<!-- agent:queue -->\n- older replica row\n- operator row typed while the replica raced\n<!-- /agent:queue -->\n",
+        "canonical": "# fpe\n\n<!-- agent:queue -->\n- older replica row\n<!-- /agent:queue -->\n",
+        "disk": "# fpe\n\n<!-- agent:queue -->\n- older replica row\n- operator row typed while the replica raced\n<!-- /agent:queue -->\n"
+      },
+      "input": {
+        "defer_canonical_projection_for_pending_local": false,
+        "canonical_projection_retained": false,
+        "retained_replica_reseed_pending": true,
+        "canonical_covers_retained_frontier": null,
+        "has_published_shadow": false,
+        "has_buffer": true,
+        "has_canonical": true,
+        "buffer_equals_canonical": false,
+        "buffer_equals_shadow": false,
+        "canonical_equals_shadow": false,
+        "canonical_contains_operator_edits": null,
+        "clean_merge_available": null,
+        "canonical_empty": false,
+        "buffer_empty": false,
+        "buffer_equals_disk": true
+      },
+      "expected": {
+        "action": "adopt_operator_buffer",
+        "hold_reason": null
+      },
+      "frozen_expected": {
+        "action": "hold_operator_buffer",
+        "hold_reason": "retained-reseed-missing-settled-shadow"
+      }
+    },
+    {
+      "name": "#emptycanonicaldeadlock: an unsaved two-sided reseed divergence still holds for the operator",
+      "texts": {
+        "published_shadow": null,
+        "buffer": "# fpe\n\n<!-- agent:queue -->\n- older replica row\n- operator row typed while the replica raced\n<!-- /agent:queue -->\n",
+        "canonical": "# fpe\n\n<!-- agent:queue -->\n- older replica row\n<!-- /agent:queue -->\n",
+        "disk": "# fpe\n\n<!-- agent:queue -->\n- older replica row\n<!-- /agent:queue -->\n- disk only\n"
+      },
+      "input": {
+        "defer_canonical_projection_for_pending_local": false,
+        "canonical_projection_retained": false,
+        "retained_replica_reseed_pending": true,
+        "canonical_covers_retained_frontier": null,
+        "has_published_shadow": false,
+        "has_buffer": true,
+        "has_canonical": true,
+        "buffer_equals_canonical": false,
+        "buffer_equals_shadow": false,
+        "canonical_equals_shadow": false,
+        "canonical_contains_operator_edits": null,
+        "clean_merge_available": null,
+        "canonical_empty": false,
+        "buffer_empty": false,
+        "buffer_equals_disk": false
+      },
+      "expected": {
+        "action": "hold_operator_buffer",
+        "hold_reason": "retained-reseed-missing-settled-shadow"
+      }
+    },
+    {
+      "name": "#emptycanonicaldeadlock: an empty canonical never adopts over a non-empty buffer on an ordinary register",
+      "texts": {
+        "published_shadow": null,
+        "buffer": "# fpe\n\n<!-- agent:queue -->\n- older replica row\n- operator row typed while the replica raced\n<!-- /agent:queue -->\n",
+        "canonical": ""
+      },
+      "input": {
+        "defer_canonical_projection_for_pending_local": false,
+        "canonical_projection_retained": false,
+        "retained_replica_reseed_pending": false,
+        "canonical_covers_retained_frontier": null,
+        "has_published_shadow": false,
+        "has_buffer": true,
+        "has_canonical": true,
+        "buffer_equals_canonical": false,
+        "buffer_equals_shadow": false,
+        "canonical_equals_shadow": false,
+        "canonical_contains_operator_edits": null,
+        "clean_merge_available": null,
+        "canonical_empty": true,
+        "buffer_empty": false
+      },
+      "expected": {
+        "action": "adopt_operator_buffer",
+        "hold_reason": null
+      },
+      "frozen_expected": {
+        "action": "apply_canonical",
+        "hold_reason": null
+      }
+    },
+    {
+      "name": "#emptycanonicaldeadlock: a re-register after an attach hold never falls back to adoption",
+      "texts": {
+        "published_shadow": null,
+        "buffer": "# fpe\n\n<!-- agent:queue -->\n- older replica row\n- operator row typed while the replica raced\n<!-- /agent:queue -->\n",
+        "canonical": "# fpe\n\n<!-- agent:queue -->\n- older replica row\n<!-- /agent:queue -->\n"
+      },
+      "input": {
+        "defer_canonical_projection_for_pending_local": false,
+        "canonical_projection_retained": false,
+        "retained_replica_reseed_pending": false,
+        "canonical_covers_retained_frontier": null,
+        "has_published_shadow": false,
+        "has_buffer": true,
+        "has_canonical": true,
+        "buffer_equals_canonical": false,
+        "buffer_equals_shadow": false,
+        "canonical_equals_shadow": false,
+        "canonical_contains_operator_edits": null,
+        "clean_merge_available": null,
+        "canonical_empty": false,
+        "buffer_empty": false,
+        "attach_held_for_operator": true
+      },
+      "expected": {
+        "action": "hold_operator_buffer",
+        "hold_reason": "ambiguous-reregister-projection"
+      },
+      "frozen_expected": {
+        "action": "apply_canonical",
         "hold_reason": null
       }
     }

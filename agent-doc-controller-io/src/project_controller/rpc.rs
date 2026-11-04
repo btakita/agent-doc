@@ -48,6 +48,12 @@ const CONTROLLER_CRDT_CURRENT_TEXT_POLL_TIMEOUT: Duration = Duration::from_secs(
 const COMMAND_SUPERVISOR_FRESHNESS_TIMEOUT: Duration = Duration::from_millis(250);
 /// A wedged tmux server must not wedge controller admission.
 const CONTROLLER_DISPATCH_PANE_CAPTURE_TIMEOUT: Duration = Duration::from_millis(250);
+/// Captures attempted before a timed-out pane observation fails dispatch
+/// closed. One slow tmux reply under load (the operator's server routinely
+/// serves dozens of panes) is not evidence of a wedged server: on 2026-11-04 a
+/// single 250ms timeout refused an explicit `Run Agent Doc` while tmux answered
+/// in 1-2ms before and after. Worst case stays bounded at 3 x 250ms.
+const CONTROLLER_DISPATCH_PANE_CAPTURE_ATTEMPTS: usize = 3;
 // Foreground closeout reads may briefly queue behind a replica bootstrap or
 // durable outbox fold. Give that observation enough time to see the ACK that
 // already landed; idle revision probes retain the sub-second budget below.
@@ -28478,6 +28484,27 @@ fn classify_controller_dispatch_pane(
     }
 }
 
+/// Re-observe the pane only when tmux timed out; any other capture error (a
+/// dead pane, a failed command) is a real answer and fails closed at once.
+/// This is a bounded re-read at the actorless tmux boundary inside one RPC,
+/// not a caller-owned retry loop: the dispatch admission decision still sees
+/// exactly one observation, and a timeout on every attempt still fails closed.
+fn capture_dispatch_pane_retrying_timeouts(
+    attempts: usize,
+    mut capture: impl FnMut() -> Result<String, agent_doc_tmux_io::TmuxIoError>,
+) -> Result<String, agent_doc_tmux_io::TmuxIoError> {
+    let attempts = attempts.max(1);
+    let mut attempt = 1;
+    loop {
+        match capture() {
+            Err(agent_doc_tmux_io::TmuxIoError::Timeout { .. }) if attempt < attempts => {
+                attempt += 1;
+            }
+            result => return result,
+        }
+    }
+}
+
 fn controller_dispatch_pane_observation(
     record: &agent_doc_controller::actor::ActorRecord,
 ) -> ControllerDispatchPaneObservation {
@@ -28489,11 +28516,13 @@ fn controller_dispatch_pane_observation(
     let tmux = agent_doc_tmux_io::configured_tmux();
     let observation = classify_controller_dispatch_pane(
         &record.harness,
-        agent_doc_tmux_io::capture_pane_with_ansi_bounded(
-            &tmux,
-            &record.pane_id,
-            CONTROLLER_DISPATCH_PANE_CAPTURE_TIMEOUT,
-        ),
+        capture_dispatch_pane_retrying_timeouts(CONTROLLER_DISPATCH_PANE_CAPTURE_ATTEMPTS, || {
+            agent_doc_tmux_io::capture_pane_with_ansi_bounded(
+                &tmux,
+                &record.pane_id,
+                CONTROLLER_DISPATCH_PANE_CAPTURE_TIMEOUT,
+            )
+        }),
     );
     // Unit controller fixtures use synthetic pane ids without owning a tmux
     // server. Preserve those actor-state tests; the classifier regression
@@ -64810,6 +64839,50 @@ mod tests {
             ControllerDispatchPaneObservation::Unavailable(reason)
                 if reason.contains("timed out after 250ms")
         ));
+    }
+
+    #[test]
+    fn dispatch_pane_capture_rereads_only_timeouts_and_stays_bounded() {
+        use agent_doc_tmux_io::TmuxIoError;
+        let timeout = || TmuxIoError::Timeout {
+            binary: "tmux".to_string(),
+            timeout_ms: 250,
+        };
+
+        // One slow reply, then an answer: the answer wins.
+        let mut calls = 0;
+        let result = capture_dispatch_pane_retrying_timeouts(3, || {
+            calls += 1;
+            if calls == 1 {
+                Err(timeout())
+            } else {
+                Ok("ready".to_string())
+            }
+        });
+        assert_eq!(result.expect("second read answers"), "ready");
+        assert_eq!(calls, 2);
+
+        // Timeouts on every attempt still fail closed, after exactly `attempts` reads.
+        let mut calls = 0;
+        let result = capture_dispatch_pane_retrying_timeouts(3, || {
+            calls += 1;
+            Err(timeout())
+        });
+        assert!(matches!(result, Err(TmuxIoError::Timeout { .. })));
+        assert_eq!(calls, 3);
+
+        // A non-timeout error is a real answer: no re-read.
+        let mut calls = 0;
+        let result = capture_dispatch_pane_retrying_timeouts(3, || {
+            calls += 1;
+            Err(TmuxIoError::Failed {
+                binary: "tmux".to_string(),
+                code: Some(1),
+                stderr: "can't find pane: %999".to_string(),
+            })
+        });
+        assert!(matches!(result, Err(TmuxIoError::Failed { .. })));
+        assert_eq!(calls, 1);
     }
     #[test]
     fn resolve_supervisor_auto_recycle_precedence() {

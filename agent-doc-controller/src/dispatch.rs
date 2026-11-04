@@ -247,7 +247,18 @@ impl std::fmt::Display for DispatchBlockedUserFacingOutcomeFields {
 
 pub fn dispatch_blocked_user_facing_outcome_fields(stage: &str, reason: &str) -> String {
     let lower = reason.to_ascii_lowercase();
-    let outcome = if stage == "actor_busy_draining" {
+    let outcome = if stage == "actor_turn_observation_unavailable" {
+        // The controller could not read the owner pane (for example a tmux
+        // timeout), so it refused to inject blind. Nothing about queue control
+        // is involved; the catch-all `resume_or_clear_queue_control` unblocker
+        // sent operators to the wrong place. Retrying the run is the remedy.
+        DispatchBlockedUserFacingOutcome {
+            outcome: "pane_observation_unavailable",
+            class: "recoverable",
+            next_action: "retry_dispatch",
+            unblocker: None,
+        }
+    } else if stage == "actor_busy_draining" {
         DispatchBlockedUserFacingOutcome {
             outcome: "queued_behind_owner",
             class: "ok",
@@ -8921,6 +8932,14 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
 
     #[test]
     fn dispatch_blocked_user_facing_outcome_fields_classify_stage_and_reason() {
+        // A pane the controller could not read is a retry, never a queue-control unblocker.
+        assert_eq!(
+            dispatch_blocked_user_facing_outcome_fields(
+                "actor_turn_observation_unavailable",
+                "/bin/tmux command timed out after 250ms"
+            ),
+            "ui_outcome_contract=ui-outcome-v1 ui_outcome=pane_observation_unavailable ui_outcome_class=recoverable next_action=retry_dispatch"
+        );
         assert!(
             dispatch_blocked_user_facing_outcome_fields("actor_busy_draining", "busy")
                 .contains("ui_outcome=queued_behind_owner")

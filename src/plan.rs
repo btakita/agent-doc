@@ -97,6 +97,16 @@ pub struct DispatchPlan {
     pub dispatch_candidate: bool,
     pub task_class: String,
     pub risk: String,
+    /// True exactly when subagent dispatch is enabled for this document's
+    /// queue work (`#subagentsalwaysparallel`): a queue/run component with
+    /// `subagents` (alias `fan-out`, `=N`), a queue-scoped preset that expands
+    /// to subagent dispatch, or an item carrying its own subagent intent in
+    /// `queue_subagent_dispatch`. Within subagent work it never depends on how
+    /// many heads this turn has (the operator may steer a new prompt in
+    /// mid-turn) or on a shared repo or `write_scope`. Without subagent intent
+    /// it is false: a main-session inline drain runs items one at a time.
+    /// `after=` is per-item ordering (the dependent is held out of
+    /// `queue_subagent_dispatch`), never this flag.
     pub parallelizable: bool,
     pub suggested_parent_tier: String,
     pub model_tier: String,
@@ -252,6 +262,12 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
         )?;
     let queue_subagent_dispatch_guidance = (!queue_subagent_dispatch.is_empty())
         .then(|| agent_doc_preflight_io::QUEUE_SUBAGENT_DISPATCH_GUIDANCE.to_string());
+    // `#subagentsalwaysparallel`: the same subagent-intent resolution the
+    // dispatch list uses, never a head count.
+    let parallelizable = !queue_subagent_dispatch.is_empty()
+        || agent_doc_queue_io::subagent_dispatch::queue_subagent_dispatch_enabled_for_content(
+            file, &content,
+        )?;
     // `#reportedcloseout`: finished worker results are this turn's work.
     // Without these steps the plan listed only claim/spawn for the next heads,
     // so a coordinator that follows it never closed reported work.
@@ -262,11 +278,16 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
         agent_doc_queue_io::queue_claim::reported_closeout_obligations_for_content(
             file, &content,
         )?;
+    // `#queuemodesteer`: a head this cycle already runs inline that is now
+    // subagent work (the operator added `subagents` mid-turn) carries the
+    // hand-off rule on its dispatch steps, so it never runs twice.
+    let inline_heads = open_cycle_inline_heads(file);
     let (queue_lifecycle_required_commands, queue_lifecycle_phases) =
         queue_lifecycle_required_commands(
             &queue_reported_closeout,
             &queue_subagent_dispatch,
             &queue_dispatch_acknowledgement_required,
+            &inline_heads,
         );
 
     let doc_diff = agent_doc_diff_io::compute(
@@ -391,7 +412,6 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
         };
         let mut required_commands = queue_lifecycle_required_commands;
         required_commands.extend(finalize_placeholder_commands(file, &fm, &[]));
-        let parallelizable = queue_subagent_dispatch.len() > 1;
         let blockers_for_tree = blockers.clone();
         let required_proof = queue_lifecycle_required_proof(
             &queue_reported_closeout,
@@ -504,9 +524,16 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
         &pending_mutations,
         &fm,
     );
+    // `#noparallelfanoutwhennotparallelizable`: the work items an inline
+    // `--mode parallel` orchestration would fan out, counted before queue
+    // lifecycle work marks the turn a dispatch candidate.
+    let dispatchable_work_items = if routing.dispatch_candidate {
+        repo_actions.len()
+    } else {
+        0
+    };
     if !queue_lifecycle_required_commands.is_empty() {
         routing.dispatch_candidate = true;
-        routing.parallelizable |= queue_subagent_dispatch.len() > 1;
         routing.context_budget_tokens = routing.context_budget_tokens.max(6000);
         routing.job_packet_budget_tokens = routing.job_packet_budget_tokens.max(4000);
         agent_doc_prompt_contract::push_unique_strings(
@@ -590,22 +617,22 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
         handoff = HandoffTarget::Compact;
     }
 
-    // `#noparallelfanoutwhennotparallelizable`: one contract must not order what
-    // it has itself judged impossible. `required_commands` is mandatory for the
-    // skill, so a `--mode parallel` handoff emitted next to
-    // `parallelizable: false` (this turn has a single repo action, so there is no
-    // batch to split) is an instruction to fan out nothing. Observed cost: a
-    // pasted status report resolved as `Parallel`, plan ordered the fan-out, and
-    // `orchestrate` created three git worktrees and three `claude -p` panes, one
-    // per quoted diff line. When the plan sees no parallel batch, it emits no
-    // parallel dispatch — the turn falls through to ordinary response + finalize.
+    // `#noparallelfanoutwhennotparallelizable`: never fan out text that is not
+    // work. `required_commands` is mandatory for the skill, so a `--mode
+    // parallel` handoff over fewer than two dispatchable work items is an
+    // instruction to fan out nothing. Observed cost: a pasted status report
+    // resolved as `Parallel`, plan ordered the fan-out, and `orchestrate`
+    // created three git worktrees and three `claude -p` panes, one per quoted
+    // diff line. The guard is keyed on dispatchable work items, not on
+    // `parallelizable` (`#subagentsalwaysparallel`); when there is
+    // no batch, the turn falls through to ordinary response + finalize.
     let orchestration_request = orchestration_request.filter(|request| {
         let refuse = request.mode == agent_doc_diff::OrchestrationRequestMode::Parallel
-            && !routing.parallelizable;
+            && dispatchable_work_items < 2;
         if refuse {
             warnings.push(format!(
-                "declined a `--mode parallel` orchestration handoff: this plan resolved {} repo action(s) and parallelizable=false, so there is no batch to fan out. Trigger text: {:?}",
-                repo_actions.len(),
+                "declined a `--mode parallel` orchestration handoff: this plan resolved {} dispatchable work item(s), so there is no batch to fan out. Trigger text: {:?}",
+                dispatchable_work_items,
                 request.trigger_text.chars().take(160).collect::<String>(),
             ));
         }
@@ -686,7 +713,7 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
         dispatch_candidate: routing.dispatch_candidate,
         task_class: routing.task_class,
         risk: routing.risk,
-        parallelizable: routing.parallelizable,
+        parallelizable,
         suggested_parent_tier: routing.suggested_parent_tier.clone(),
         model_tier: routing.model_tier,
         dispatch_mode: routing.dispatch_mode,
@@ -813,6 +840,52 @@ fn queue_lifecycle_required_proof(
     proof
 }
 
+/// `#queuemodesteer`: the queue heads the open cycle is executing inline
+/// (its durable free-text selection and its id-backed task). Empty without
+/// an open cycle.
+fn open_cycle_inline_heads(file: &Path) -> Vec<String> {
+    match agent_doc_cycle_state_io::load(file) {
+        Ok(Some(cycle)) if cycle.is_open() => {
+            // `active_queue_heads` is every visible head at preflight, not
+            // the selection; the selection is the free-text cut plus the
+            // id-backed head this cycle runs.
+            let mut heads = cycle.selected_free_text_queue_heads;
+            agent_doc_prompt_contract::push_unique_strings(
+                &mut heads,
+                cycle.queue_task_id.map(|id| format!("do [#{}]", id.trim_start_matches('#'))),
+            );
+            heads
+        }
+        Ok(_) => Vec::new(),
+        Err(err) => {
+            eprintln!(
+                "[plan] WARNING: could not read the open cycle of {} to find inline queue heads; dispatch steps carry no hand-off rule: {err:#}",
+                file.display()
+            );
+            Vec::new()
+        }
+    }
+}
+
+fn is_inline_head(inline_heads: &[String], item: &str) -> bool {
+    let identity = agent_doc_queue::queue_claim::claim_identity(item);
+    inline_heads
+        .iter()
+        .any(|head| agent_doc_queue::queue_claim::claim_identity(head) == identity)
+}
+
+/// `#queuemodesteer`: the rule for a head that started inline and became
+/// subagent work mid-turn.
+fn inline_head_handoff_rule(item: &str) -> String {
+    format!(
+        "Hand-off check: queue item {item:?} is the head this turn has been executing inline. \
+         Dispatch it only if it has produced no outward effect yet (no commit, push, file edit \
+         outside scratch, message, API call, or document write): stop the inline work, then \
+         claim it below. Otherwise finish it inline and skip its claim, spawn, and start steps; \
+         never run it both ways."
+    )
+}
+
 /// How many leading `required_commands` belong to each queue lifecycle phase.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 struct QueueLifecyclePhases {
@@ -834,13 +907,17 @@ fn queue_lifecycle_required_commands(
     reported: &[agent_doc_queue::reported_closeout::ReportedCloseoutObligation],
     dispatch: &[agent_doc_preflight_io::QueueSubagentDispatch],
     acknowledgements: &[agent_doc_queue_io::queue_claim::DispatchAcknowledgementObligation],
+    inline_heads: &[String],
 ) -> (Vec<String>, QueueLifecyclePhases) {
     use agent_doc_queue::reported_closeout::ReportedCloseoutReadiness;
     let mut commands = Vec::new();
     commands.extend(dispatch
         .iter()
         .flat_map(|entry| {
-            [
+            let handoff = is_inline_head(inline_heads, &entry.item).then(|| {
+                inline_head_handoff_rule(&entry.item)
+            });
+            let mut steps = [
                 format!(
                     "Reserve queue item {:?} before spawn: run `{}` and do not call the native \
                      spawn tool unless it succeeds and projects the row as claimed (🟡).",
@@ -857,7 +934,11 @@ fn queue_lifecycle_required_commands(
                      generation so the row projects running (🚧).",
                     entry.item, entry.start_command,
                 ),
-            ]
+            ];
+            if let Some(handoff) = handoff {
+                steps[0] = format!("{handoff} {}", steps[0]);
+            }
+            steps
         }));
     commands.extend(
         acknowledgements
@@ -1129,7 +1210,6 @@ struct RoutingFields {
     dispatch_candidate: bool,
     task_class: String,
     risk: String,
-    parallelizable: bool,
     suggested_parent_tier: String,
     model_tier: String,
     dispatch_mode: String,
@@ -1163,7 +1243,6 @@ fn routing_fields(
     let dispatch_candidate = execution_scope == ExecutionScope::Normal
         && !repo_actions.is_empty()
         && dispatch_mode(fm) != "off";
-    let parallelizable = dispatch_candidate && repo_actions.len() > 1;
     let context_budget_tokens = if risk == "high" { 10_000 } else { 6_000 };
     let mut required_proof = vec![
         "changed_paths".to_string(),
@@ -1183,7 +1262,6 @@ fn routing_fields(
         dispatch_candidate,
         task_class,
         risk: risk.clone(),
-        parallelizable,
         suggested_parent_tier: suggested_parent_tier.clone(),
         model_tier: suggested_parent_tier,
         dispatch_mode: dispatch_mode(fm),
@@ -2382,6 +2460,245 @@ Done.
         );
     }
 
+    /// `#subagentsalwaysparallel` (sdk-dev 2026-11-04): a subagents run with
+    /// one dispatchable head beside reported and operator-gated rows used to
+    /// plan `parallelizable: false` (`queue_subagent_dispatch.len() > 1`), and
+    /// the runbook told the coordinator to run such a head alone.
+    #[test]
+    fn plan_keeps_a_subagents_queue_parallel_with_one_dispatchable_head() {
+        let _prompt = EnvGuard::unset("AGENT_DOC_HARNESS_PROMPT");
+        let dir = setup_project();
+        let doc = dir.path().join("plan.md");
+        let content = subagents_queue_doc().replace(
+            "- Align the Close button.\n",
+            "- Align the Close button.\n- Rename the save action.\n",
+        );
+        std::fs::write(&doc, &content).unwrap();
+        let gated = report_item(&doc, "Fix the claim button.", "subagent:fix");
+        record_work_without_sink(&doc, &gated);
+        report_item(&doc, "Align the Close button.", "subagent:align");
+        checkpoint_for_plan(&doc);
+
+        let plan = build(&doc).unwrap();
+
+        assert_eq!(plan.queue_reported_closeout.len(), 2, "{plan:#?}");
+        assert_eq!(
+            plan.queue_subagent_dispatch
+                .iter()
+                .map(|entry| entry.item.as_str())
+                .collect::<Vec<_>>(),
+            ["Rename the save action."]
+        );
+        assert!(plan.parallelizable, "{plan:#?}");
+    }
+
+    /// `#subagentsalwaysparallel`: two heads that name the same repository
+    /// path (one shared `write_scope`) both dispatch this cycle, each brief
+    /// requiring its own worktree; sharing a repo never serializes starts.
+    #[test]
+    fn plan_dispatches_two_same_repo_heads_concurrently_in_separate_worktrees() {
+        let _prompt = EnvGuard::unset("AGENT_DOC_HARNESS_PROMPT");
+        let dir = setup_project();
+        let doc = dir.path().join("plan.md");
+        let content = subagents_queue_doc().replace(
+            "- Fix the claim button.\n- Align the Close button.\n",
+            "- Fix the ordering in src/plan.rs.\n- Fix the parallelism flag in src/plan.rs.\n",
+        );
+        std::fs::write(&doc, &content).unwrap();
+        checkpoint_for_plan(&doc);
+
+        let plan = build(&doc).unwrap();
+
+        let items = plan
+            .queue_subagent_dispatch
+            .iter()
+            .map(|entry| entry.item.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            items,
+            [
+                "Fix the ordering in src/plan.rs.",
+                "Fix the parallelism flag in src/plan.rs."
+            ]
+        );
+        assert!(plan.parallelizable, "{plan:#?}");
+        for entry in &plan.queue_subagent_dispatch {
+            assert!(
+                entry
+                    .authorization
+                    .subagent_prompt_preamble
+                    .contains("worktree"),
+                "{}",
+                entry.authorization.subagent_prompt_preamble
+            );
+        }
+        for item in items {
+            assert!(reserve_index(&plan, item).is_some(), "{:#?}", plan.required_commands);
+        }
+    }
+
+    /// `#subagentsalwaysparallel`: ordering is per item. An `after=`
+    /// dependent is held out of this cycle's dispatch until its prerequisite
+    /// closes, while the turn itself stays `parallelizable`.
+    #[test]
+    fn plan_holds_an_after_dependent_while_the_turn_stays_parallel() {
+        let _prompt = EnvGuard::unset("AGENT_DOC_HARNESS_PROMPT");
+        let dir = setup_project();
+        let doc = dir.path().join("plan.md");
+        let content = subagents_queue_doc()
+            .replace(
+                "- Fix the claim button.\n- Align the Close button.\n",
+                "- do [#first]\n- do [#second]\n",
+            )
+            .replace(
+                "## Queue\n",
+                concat!(
+                    "## Backlog\n\n<!-- agent:backlog -->\n",
+                    "- [ ] [#first] Land the schema\n",
+                    "- [ ] [#second] after=#first Use the schema\n",
+                    "<!-- /agent:backlog -->\n\n## Queue\n",
+                ),
+            );
+        std::fs::write(&doc, &content).unwrap();
+        checkpoint_for_plan(&doc);
+
+        let plan = build(&doc).unwrap();
+
+        assert_eq!(
+            plan.queue_subagent_dispatch
+                .iter()
+                .map(|entry| entry.item.as_str())
+                .collect::<Vec<_>>(),
+            ["do [#first]"],
+            "the after= dependent waits for its prerequisite"
+        );
+        assert!(plan.parallelizable, "{plan:#?}");
+    }
+
+    /// `#subagentsalwaysparallel` (operator, 2026-11-04): `parallelizable` is
+    /// true exactly when subagent dispatch is enabled for the work. A
+    /// subagents queue with 0, 1, or 2 heads is parallel (the operator may
+    /// steer a new prompt in mid-turn); a plain queue drains inline one item
+    /// at a time; one `#subagents` item in a plain queue is parallel for that
+    /// item's dispatch.
+    #[test]
+    fn plan_parallelizable_follows_subagent_intent_never_head_count() {
+        let _prompt = EnvGuard::unset("AGENT_DOC_HARNESS_PROMPT");
+        let dir = setup_project();
+        let doc = dir.path().join("plan.md");
+        let two = subagents_queue_doc().to_string();
+        let one = two.replace("- Align the Close button.\n", "");
+        let zero = one.replace("- Fix the claim button.\n", "");
+        let plain = two.replace("priority subagents go", "priority go");
+        let tagged = plain.replace(
+            "- Fix the claim button.\n",
+            "- Fix the claim button. #subagents\n",
+        );
+        let cases = [
+            ("subagents queue, 0 heads", zero, true),
+            ("subagents queue, 1 head", one, true),
+            ("subagents queue, 2 heads", two, true),
+            ("plain queue", plain, false),
+            ("plain queue, one #subagents item", tagged, true),
+        ];
+        for (case, content, expected) in cases {
+            std::fs::write(&doc, &content).unwrap();
+            checkpoint_for_plan(&doc);
+            let plan = build(&doc).unwrap();
+            assert_eq!(plan.parallelizable, expected, "{case}: {plan:#?}");
+            if case.contains("#subagents item") {
+                assert_eq!(
+                    plan.queue_subagent_dispatch
+                        .iter()
+                        .map(|entry| entry.item.as_str())
+                        .collect::<Vec<_>>(),
+                    ["Fix the claim button. #subagents"],
+                    "{case}"
+                );
+            }
+            let json = serde_json::to_value(&plan).unwrap();
+            assert_eq!(json["parallelizable"], expected, "{case}");
+        }
+    }
+
+    /// `#queuemodesteer` (operator, 2026-11-04): a queue that starts without
+    /// `subagents` drains inline; once the operator adds `subagents`
+    /// mid-turn, the re-derived plan dispatches every unstarted head in
+    /// parallel, and the head already running inline carries the hand-off
+    /// rule so it never runs twice. Removing `subagents` again stops dispatch.
+    #[test]
+    fn plan_moves_a_queue_to_subagents_when_the_operator_adds_the_attribute_mid_turn() {
+        let _prompt = EnvGuard::unset("AGENT_DOC_HARNESS_PROMPT");
+        let dir = setup_project();
+        let doc = dir.path().join("plan.md");
+        let inline = subagents_queue_doc().replace("priority subagents go", "priority go");
+        std::fs::write(&doc, &inline).unwrap();
+        checkpoint_for_plan(&doc);
+        agent_doc_cycle_state_io::record_selected_free_text_queue_heads(
+            &doc,
+            &["Fix the claim button.".to_string()],
+        )
+        .unwrap();
+
+        let before = build(&doc).unwrap();
+
+        assert!(!before.parallelizable, "{before:#?}");
+        assert!(before.queue_subagent_dispatch.is_empty(), "{before:#?}");
+
+        // The operator adds `subagents` to the marker mid-turn.
+        let moved = subagents_queue_doc().to_string();
+        std::fs::write(&doc, &moved).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &moved,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        let after = build(&doc).unwrap();
+
+        assert!(after.parallelizable, "{after:#?}");
+        assert_eq!(
+            after
+                .queue_subagent_dispatch
+                .iter()
+                .map(|entry| entry.item.as_str())
+                .collect::<Vec<_>>(),
+            ["Fix the claim button.", "Align the Close button."]
+        );
+        let inline_reserve = after
+            .required_commands
+            .iter()
+            .find(|command| command.contains("Reserve queue item \"Fix the claim button.\""))
+            .unwrap_or_else(|| panic!("{:#?}", after.required_commands));
+        assert!(
+            inline_reserve.starts_with("Hand-off check")
+                && inline_reserve.contains("no outward effect")
+                && inline_reserve.contains("never run it both ways"),
+            "{inline_reserve}"
+        );
+        assert_eq!(
+            reserve_index(&after, "Align the Close button."),
+            Some(3),
+            "the unstarted head has no hand-off condition: {:#?}",
+            after.required_commands
+        );
+
+        // The reverse: removing `subagents` stops new dispatch.
+        std::fs::write(&doc, &inline).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &inline,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        let reverted = build(&doc).unwrap();
+
+        assert!(!reverted.parallelizable, "{reverted:#?}");
+        assert!(reverted.queue_subagent_dispatch.is_empty(), "{reverted:#?}");
+    }
+
     #[test]
     fn connected_plan_preserves_singular_subagent_marker_ownership() {
         let _prompt = EnvGuard::unset("AGENT_DOC_HARNESS_PROMPT");
@@ -2728,7 +3045,7 @@ Done.
     /// emitting one made `orchestrate` create a git worktree and a `claude -p`
     /// pane per list line for a turn that has a single repo action.
     #[test]
-    fn build_plan_declines_a_parallel_handoff_it_judged_not_parallelizable() {
+    fn build_plan_declines_a_parallel_handoff_without_dispatchable_work_items() {
         let dir = setup_project();
         let doc = dir.path().join("plan.md");
 
@@ -2789,13 +3106,15 @@ Fix these concurrently
         let plan = build(&doc).unwrap();
 
         assert!(
-            !plan.parallelizable,
-            "precondition: this turn must resolve as non-parallelizable"
+            plan.repo_actions.len() < 2,
+            "precondition: the pasted list must not resolve as a batch of work items: {:?}",
+            plan.repo_actions
         );
+        assert!(!plan.parallelizable, "no subagent intent: {plan:#?}");
         assert_ne!(
             plan.handoff,
             HandoffTarget::Orchestrate,
-            "a non-parallelizable turn must not hand off to orchestrate: {:?}",
+            "fewer than two dispatchable work items must not hand off to orchestrate: {:?}",
             plan.required_commands
         );
         assert!(
@@ -4018,7 +4337,9 @@ agent_doc_dispatch: auto
         assert_eq!(plan.dispatch_mode, "auto");
         assert_eq!(plan.task_class, "lower_agent_orchestration");
         assert_eq!(plan.risk, "high");
-        assert!(plan.parallelizable);
+        // `#subagentsalwaysparallel`: two exchange directives with no
+        // subagent intent run inline, one at a time.
+        assert!(!plan.parallelizable);
         assert_eq!(plan.model_tier, "high");
         assert_eq!(plan.context_budget_tokens, 10_000);
         assert!(

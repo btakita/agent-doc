@@ -94,6 +94,11 @@ pub enum SteeringDispatch {
     /// the current turn, with the closeout that strikes the line. Never a new
     /// subagent dispatch. [`SteeringItem::owner`] names the reported worker.
     PersistReported,
+    /// The operator changed a queue marker's subagent mode mid-turn
+    /// (`#queuemodesteer`): adding or removing `subagents` / `fan-out` / `=N`,
+    /// or a queue preset that resolves to subagents. [`SteeringItem::queue_mode`]
+    /// names the queue and the new mode; `verbatim` is the marker line.
+    QueueModeChanged,
 }
 
 impl SteeringDispatch {
@@ -107,6 +112,7 @@ impl SteeringDispatch {
             Self::CancelClaimed => "cancel_claimed",
             Self::DegradedClaimMismatch => "degraded_claim_mismatch",
             Self::PersistReported => "persist_reported",
+            Self::QueueModeChanged => "queue_mode_changed",
         }
     }
 }
@@ -190,6 +196,10 @@ pub struct SteeringItem {
     /// which binds the first unclaimed row with that leaf (`#nestlistlineage`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub vector: Option<String>,
+    /// The queue and its new subagent mode for a
+    /// [`SteeringDispatch::QueueModeChanged`] item (`#queuemodesteer`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub queue_mode: Option<QueueModeChange>,
 }
 
 impl SteeringItem {
@@ -205,6 +215,15 @@ impl SteeringItem {
 /// lineage is its own (normalized) text.
 fn nested_vector(item: &QueueItem) -> Option<String> {
     (normalize_queue_text(&item.raw) != item.norm).then(|| item.norm.clone())
+}
+
+/// One queue's subagent mode as the operator just set it (`#queuemodesteer`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct QueueModeChange {
+    /// The queue block id (`id=` or its derived name).
+    pub queue: String,
+    /// True when the queue now runs its work in subagents.
+    pub subagents: bool,
 }
 
 /// A held (unsettled) candidate observation.
@@ -272,6 +291,12 @@ pub struct SteeringWatermark {
     /// and re-delivering everything the fallback already surfaced.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fallback_of: Option<String>,
+    /// Queue id -> whether it runs in subagents, as last surfaced
+    /// (`#queuemodesteer`). `None` until the first observation derives it
+    /// from `baseline`, so a watermark written before this field existed
+    /// compares against the admitted document, never against nothing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub acknowledged_queue_modes: Option<BTreeMap<String, bool>>,
 }
 
 impl SteeringWatermark {
@@ -310,6 +335,7 @@ impl SteeringWatermark {
             prior_cycle_queue: None,
             surfaced_struck_removals: BTreeSet::new(),
             fallback_of: None,
+            acknowledged_queue_modes: None,
         }
     }
 }
@@ -461,6 +487,8 @@ pub fn observe_with_mode_and_presets(
         prompt_presets,
     );
     candidates.extend(queue.candidates.iter().cloned());
+    let queue_modes = queue_mode_candidates(watermark, current, prompt_presets);
+    candidates.extend(queue_modes.candidates.iter().cloned());
 
     use agent_doc_debounce::edit_settle::{
         CompletionSignal, GateComponent, GateFeatures, SettleDecision, SettleInputs,
@@ -600,6 +628,13 @@ pub fn observe_with_mode_and_presets(
     let mut next = watermark.clone();
     next.pending = next_pending;
     next.last_observed_content_hash = Some(content_hash(current));
+    let mut acknowledged_modes = queue_modes.acknowledged.clone();
+    for (key, queue, subagents) in &queue_modes.changes {
+        if ready_keys.contains(key) {
+            acknowledged_modes.insert(queue.clone(), *subagents);
+        }
+    }
+    next.acknowledged_queue_modes = Some(acknowledged_modes);
     let mut ready = Vec::new();
     for candidate in &candidates {
         if !ready_keys.contains(&candidate.key) {
@@ -663,6 +698,141 @@ pub fn observe_with_mode_and_presets(
         decisions,
         ready,
         next,
+    }
+}
+
+/// `#queuemodesteer`: queue marker mode flips since the last surfacing.
+struct QueueModeCandidates {
+    candidates: Vec<Candidate>,
+    /// The acknowledged map before this observation's deliveries, with any
+    /// queue first seen now recorded at its current mode.
+    acknowledged: BTreeMap<String, bool>,
+    /// (candidate key, queue id, new mode) per flip.
+    changes: Vec<(String, String, bool)>,
+}
+
+/// Each queue block's id, marker line, and whether it runs in subagents
+/// ([`queue_component_runs_in_subagents`]).
+fn queue_modes(
+    content: &str,
+    prompt_presets: &agent_doc_frontmatter::frontmatter::PromptPresets,
+) -> BTreeMap<String, (String, bool)> {
+    let Ok(components) = agent_doc_element::element::parse(content) else {
+        return BTreeMap::new();
+    };
+    let Ok(graph) = agent_doc_queue::queue_set::QueueSet::parse(content, &components) else {
+        return BTreeMap::new();
+    };
+    graph
+        .blocks()
+        .iter()
+        .map(|block| {
+            let component = block.component;
+            let line_start = content[..component.open_start]
+                .rfind('\n')
+                .map_or(0, |index| index + 1);
+            let marker = content[line_start..component.open_end].trim_end().to_string();
+            (
+                block.id.to_string(),
+                (
+                    marker,
+                    queue_component_runs_in_subagents(content, component, prompt_presets),
+                ),
+            )
+        })
+        .collect()
+}
+
+/// `#queuemodesteer`: the operator turning subagent dispatch on or off for a
+/// queue mid-turn is steering, never a binary-owned marker change. One
+/// candidate per queue whose mode differs from the acknowledged mode.
+fn queue_mode_candidates(
+    watermark: &SteeringWatermark,
+    current: &str,
+    prompt_presets: &agent_doc_frontmatter::frontmatter::PromptPresets,
+) -> QueueModeCandidates {
+    let baseline_modes = queue_modes(&watermark.baseline, prompt_presets);
+    let mut acknowledged = watermark.acknowledged_queue_modes.clone().unwrap_or_else(|| {
+        baseline_modes
+            .iter()
+            .map(|(queue, (_, subagents))| (queue.clone(), *subagents))
+            .collect()
+    });
+    let mut candidates = Vec::new();
+    let mut changes = Vec::new();
+    for (queue, (marker, subagents)) in queue_modes(current, prompt_presets) {
+        let Some(&known) = acknowledged.get(&queue) else {
+            acknowledged.insert(queue, subagents);
+            continue;
+        };
+        if known == subagents {
+            continue;
+        }
+        let key = format!(
+            "queue_mode:{queue}:{}",
+            if subagents { "on" } else { "off" }
+        );
+        candidates.push(Candidate {
+            key: key.clone(),
+            content_hash: content_hash(&marker),
+            exchange_identity: None,
+            item: SteeringItem {
+                source: SteeringSource::Queue,
+                change: SteeringChange::Edited,
+                dispatch: SteeringDispatch::QueueModeChanged,
+                current_item: false,
+                previous: baseline_modes
+                    .get(&queue)
+                    .map(|(marker, _)| marker.clone())
+                    .filter(|previous| previous != &marker),
+                verbatim: marker,
+                presets: Vec::new(),
+                possibly_partial: false,
+                owner: None,
+                generation: None,
+                worker_id: None,
+                explicit: false,
+                vector: None,
+                queue_mode: Some(QueueModeChange {
+                    queue: queue.clone(),
+                    subagents,
+                }),
+            },
+        });
+        changes.push((key, queue, subagents));
+    }
+    QueueModeCandidates {
+        candidates,
+        acknowledged,
+        changes,
+    }
+}
+
+/// `#queuemodesteer`: what the coordinator does when a queue's subagent mode
+/// changes mid-turn. The dispatch list is a function of the current document
+/// (`agent-doc plan` re-derives it), so re-planning picks the new mode up.
+pub fn queue_mode_change_instruction(document: &str, change: &QueueModeChange) -> String {
+    if change.subagents {
+        format!(
+            "the operator turned subagent dispatch ON for queue `{queue}`. Run `agent-doc plan \
+             {document}` now: every unstarted head of that queue is in its \
+             `queue_subagent_dispatch`; claim, spawn, and start them all in parallel now, each in \
+             its own worktree. The head you are executing inline (if it is in that queue) hands \
+             off only if it has produced no outward effect yet (no commit, push, file edit outside \
+             scratch, message, API call, or document write): then stop it and dispatch it with the \
+             rest. Otherwise finish it inline and skip its dispatch entry. Never run one head both \
+             inline and in a subagent, and never redo work a head already did.",
+            queue = change.queue,
+        )
+    } else {
+        format!(
+            "the operator turned subagent dispatch OFF for queue `{queue}`. Stop claiming or \
+             spawning new heads from it. Workers already running continue to completion and are \
+             closed out as usual; the remaining unstarted heads drain inline in operator order \
+             after the current item. `agent-doc plan {document}` no longer lists them in \
+             `queue_subagent_dispatch`.",
+            queue = change.queue,
+        )
     }
 }
 
@@ -759,6 +929,7 @@ fn exchange_candidates(
                 worker_id: None,
                 explicit: false,
                 vector: None,
+                queue_mode: None,
             },
         });
     }
@@ -1036,6 +1207,7 @@ fn queue_alignment(
                 worker_id: None,
                 explicit: false,
                 vector: nested_vector(item),
+                queue_mode: None,
             },
         });
         alignment.events.push(QueueEvent::Insert {
@@ -1075,6 +1247,7 @@ fn queue_alignment(
                 worker_id: None,
                 explicit: false,
                 vector: nested_vector(item),
+                queue_mode: None,
             },
         });
         alignment.events.push(QueueEvent::Edit {
@@ -1112,6 +1285,7 @@ fn queue_alignment(
                 worker_id: None,
                 explicit: false,
                 vector: None,
+                queue_mode: None,
             },
         });
         alignment.events.push(QueueEvent::Delete {
@@ -1394,6 +1568,25 @@ impl PresetContext {
     }
 }
 
+/// `#subagentsalwaysparallel`: whether `component`'s queue work runs in
+/// subagents at queue scope: its `subagents` / `fan-out` attribute, or a
+/// queue-scoped preset that expands to subagent dispatch. Item-level intent
+/// (`#subagents` on one line) is resolved per row by the dispatch list. Uses
+/// the same [`PresetContext`] resolution as [`queue_component_subagent_heads`].
+pub fn queue_component_runs_in_subagents(
+    content: &str,
+    component: &agent_doc_element::element::Component,
+    prompt_presets: &agent_doc_frontmatter::frontmatter::PromptPresets,
+) -> bool {
+    let presets = PresetContext::for_queue_component(content, component, &[], prompt_presets);
+    presets.queue_subagents
+        || presets
+            .queue
+            .iter()
+            .chain(presets.cycle.iter())
+            .any(|intent| preset_requests_subagents(&intent.name, &intent.body))
+}
+
 /// True when a preset (by name or expansion body) asks for subagent dispatch.
 /// The vocabulary is shared with queue drainability
 /// (`agent_doc_queue::subagent_intent`, `#subagentintent`).
@@ -1605,6 +1798,13 @@ fn item_header_suffix(item: &SteeringItem) -> String {
     if item.explicit {
         out.push_str(" sent=explicit");
     }
+    if let Some(change) = &item.queue_mode {
+        out.push_str(&format!(
+            " queue={} subagents={}",
+            change.queue,
+            if change.subagents { "on" } else { "off" }
+        ));
+    }
     out
 }
 
@@ -1778,6 +1978,7 @@ pub fn append_claimed_queue_removals(
             worker_id: claim.worker.map(|worker| worker.worker_id),
             explicit: false,
             vector: None,
+            queue_mode: None,
         });
     }
 }
@@ -1840,6 +2041,10 @@ fn action_for(document: &str, item: &SteeringItem) -> String {
         SteeringDispatch::ForwardToOwner if item.change != SteeringChange::Deleted => {
             forward_to_owner_instruction(document, item)
         }
+        SteeringDispatch::QueueModeChanged => match &item.queue_mode {
+            Some(change) => queue_mode_change_instruction(document, change),
+            None => instruction_for(item).to_string(),
+        },
         _ => instruction_for(item).to_string(),
     }
 }
@@ -2030,6 +2235,11 @@ pub fn instruction_for(item: &SteeringItem) -> &'static str {
         }
         (SteeringDispatch::ForwardToOwner, _, SteeringChange::Added, _) => FORWARD_ADDED,
         (SteeringDispatch::ForwardToOwner, _, SteeringChange::Edited, _) => FORWARD_EDITED,
+        (SteeringDispatch::QueueModeChanged, _, _, _) => {
+            "the operator changed this queue's subagent mode: re-run `agent-doc plan` and follow \
+             its `queue_subagent_dispatch` (on: claim, spawn, and start every unstarted head in \
+             parallel; off: stop new dispatch, let running workers finish, drain the rest inline)."
+        }
         (SteeringDispatch::PersistReported, _, _, _) => {
             "this queue item's worker already reported and its claim was released: persist that \
              result in THIS turn with the closeout that strikes the item (`agent-doc finalize` \
@@ -2157,9 +2367,12 @@ pub fn render_closeout_steering_context(
             );
         }
         let action = match (item.dispatch, item.source) {
-            (SteeringDispatch::ForwardToOwner | SteeringDispatch::PersistReported, _) => {
-                action_for(document, item)
-            }
+            (
+                SteeringDispatch::ForwardToOwner
+                | SteeringDispatch::PersistReported
+                | SteeringDispatch::QueueModeChanged,
+                _,
+            ) => action_for(document, item),
             (SteeringDispatch::Subagent, SteeringSource::Queue) => format!(
                 "DISPATCH NOW to a NEW background subagent (one per item). Claim it first with \
                  `{}` so the loop and Stop hook do not drain it inline, then dispatch. Only \
@@ -2520,6 +2733,72 @@ mod tests {
 
     const EX: &str =
         "Earlier prompt.\n\n### Re: Earlier prompt\n\nAnswer.\n\nwork on the current item\n";
+
+    /// `#queuemodesteer` (operator, 2026-11-04): "If the queue starts without
+    /// `subagents`, then the operator adds `subagents` mid-turn, agent-doc
+    /// should move the work to subagents." The marker edit is one typed
+    /// steering item, surfaced once; the reverse turns dispatch back off.
+    #[test]
+    fn adding_and_removing_subagents_on_a_queue_marker_is_one_mode_change_item() {
+        let owned = BTreeSet::new();
+        let baseline = doc("- current task\n- next task\n", EX);
+        let on = baseline.replace("<!-- agent:queue -->", "<!-- agent:queue subagents -->");
+        let wm = seeded(&baseline, Some("current task"));
+
+        let obs = observe(&wm, &on, &quiet_ctx(&owned));
+
+        assert_eq!(obs.ready.len(), 1, "{:?}", obs.ready);
+        let item = &obs.ready[0];
+        assert_eq!(item.dispatch, SteeringDispatch::QueueModeChanged);
+        assert_eq!(item.verbatim, "<!-- agent:queue subagents -->");
+        assert_eq!(item.previous.as_deref(), Some("<!-- agent:queue -->"));
+        let change = item.queue_mode.as_ref().unwrap();
+        assert!(change.subagents);
+        let rendered = render_steering_context("plan.md", &obs.ready, 0).unwrap();
+        assert!(
+            rendered.contains(&format!(
+                "dispatch=queue_mode_changed source=queue change=edited queue={} subagents=on",
+                change.queue
+            )),
+            "{rendered}"
+        );
+        assert!(rendered.contains("agent-doc plan plan.md"), "{rendered}");
+        assert!(rendered.contains("in parallel now"), "{rendered}");
+        assert!(rendered.contains("no outward effect"), "{rendered}");
+        assert!(rendered.contains("Never run one head both"), "{rendered}");
+
+        // Surfaced once: the same document observes nothing new.
+        let again = observe(&obs.next, &on, &quiet_ctx(&owned));
+        assert!(again.ready.is_empty(), "{:?}", again.ready);
+
+        // The reverse direction.
+        let off = observe(&again.next, &baseline, &quiet_ctx(&owned));
+        assert_eq!(off.ready.len(), 1, "{:?}", off.ready);
+        let item = &off.ready[0];
+        assert_eq!(item.dispatch, SteeringDispatch::QueueModeChanged);
+        assert!(!item.queue_mode.as_ref().unwrap().subagents);
+        let rendered = render_closeout_steering_context("plan.md", &off.ready, 0).unwrap();
+        assert!(rendered.contains("subagents=off"), "{rendered}");
+        assert!(rendered.contains("Stop claiming or spawning new heads"), "{rendered}");
+        assert!(rendered.contains("continue to completion"), "{rendered}");
+        assert!(rendered.contains("drain inline"), "{rendered}");
+    }
+
+    /// `#queuemodesteer`: a queue preset that resolves to subagents is the
+    /// same mode change as the bare attribute.
+    #[test]
+    fn a_subagent_queue_preset_added_mid_turn_is_a_mode_change() {
+        let owned = BTreeSet::new();
+        let baseline = doc("- current task\n", EX);
+        let current = baseline.replace(
+            "<!-- agent:queue -->",
+            "<!-- agent:queue preset=\"#subagents\" -->",
+        );
+        let obs = observe(&seeded(&baseline, Some("current task")), &current, &quiet_ctx(&owned));
+        assert_eq!(obs.ready.len(), 1, "{:?}", obs.ready);
+        assert_eq!(obs.ready[0].dispatch, SteeringDispatch::QueueModeChanged);
+        assert!(obs.ready[0].queue_mode.as_ref().unwrap().subagents);
+    }
 
     #[test]
     fn queue_addition_surfaces_verbatim_as_drain_after_current() {
@@ -3779,6 +4058,7 @@ mod tests {
             worker_id: None,
             explicit: false,
             vector: None,
+            queue_mode: None,
         };
 
         let queue =
@@ -3832,6 +4112,7 @@ mod tests {
             worker_id: None,
             explicit: false,
             vector: None,
+            queue_mode: None,
         };
         let mut items = vec![
             item(SteeringChange::Added, SteeringDispatch::Subagent),
@@ -3883,6 +4164,7 @@ mod tests {
             worker_id: None,
             explicit: false,
             vector: None,
+            queue_mode: None,
         };
 
         let item_clone = item.clone();
@@ -3918,6 +4200,7 @@ mod tests {
             worker_id: None,
             explicit: false,
             vector: None,
+            queue_mode: None,
         };
         let text = render_closeout_steering_context("tasks/bugs.md", &[item], 0).unwrap();
         assert!(text.starts_with(CLOSEOUT_STEERING_MARKER), "{text}");
@@ -4647,6 +4930,7 @@ mod tests {
                 worker_id: None,
                 explicit: false,
                 vector: None,
+                queue_mode: None,
             },
             SteeringItem {
                 source: SteeringSource::Queue,
@@ -4664,6 +4948,7 @@ mod tests {
                 worker_id: None,
                 explicit: false,
                 vector: None,
+                queue_mode: None,
             },
         ];
         apply_claim_attempts(&mut items, |text| {
@@ -4699,6 +4984,7 @@ mod tests {
             explicit: false,
             vector: None,
             presets: Vec::new(),
+            queue_mode: None,
         };
 
         let rendered = render_steering_context("tasks/leaf context.md", &[item], 0).unwrap();

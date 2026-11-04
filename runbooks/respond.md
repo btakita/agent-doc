@@ -217,6 +217,19 @@ and the pending granular-flags-only rule. This runbook carries the rest.
     answer is only in your context. Persist it now with the closeout that
     strikes the line (the `> **Queue prompt:**` echo, or `--done <id>`). Never
     dispatch a new subagent for it and never re-claim it.
+  - `queue_mode_changed` (`#queuemodesteer`): the operator added or removed
+    `subagents` / `fan-out` / `=N` (or a queue preset that resolves to
+    subagents) on a queue marker mid-turn. The header carries `queue=<id>
+    subagents=on|off`; `verbatim` is the marker line. On: re-run `agent-doc
+    plan <FILE>` (its dispatch list is derived from the current document) and
+    claim, spawn, and start every unstarted head of that queue in parallel now.
+    The head you were executing inline hands off only if it has produced no
+    outward effect yet (no commit, push, file edit outside scratch, message,
+    API call, or document write); otherwise finish it inline and skip its
+    dispatch entry, whose Reserve step starts with `Hand-off check`. Never run a
+    head both ways and never redo work. Off: stop claiming new heads from that
+    queue; running workers continue to completion and close out as usual; the
+    remaining heads drain inline in operator order.
   - `sent=explicit` (`#claimedsteerwake`): the operator pressed Run Agent Doc
     (`agent-doc route`), which flushes all pending steering at once past the
     typing gate. Treat those items as final. Explicitly sent ordinary queue
@@ -312,10 +325,17 @@ and the pending granular-flags-only rule. This runbook carries the rest.
      one checkout. Heads that `agent-doc plan` gives the same repo
      `write_scope` still get separate worktrees, but they are integrated one at a
      time. Claim, spawn, and start EVERY independent entry from this cycle's
-     dispatch list before waiting for a result or beginning serial integration;
-     sharing a repo or `write_scope` never serializes worker execution. Only an
-     explicit `after=` / ordered dependency or `parallelizable: false` serializes
-     starts. A head marked `parallelizable: false` runs alone.
+     dispatch list before waiting for a result or beginning serial integration.
+     Subagent heads always start in parallel (`#subagentsalwaysparallel`): the
+     plan's `parallelizable` is true exactly when subagent dispatch is enabled
+     (a queue/run with `subagents`, alias `fan-out` or `=N`; an item with its own
+     `#subagents`; or a preset at item, queue, or cycle scope that expands to
+     subagents), whatever the number of heads this turn (the operator may steer a
+     new prompt in mid-turn) and even when heads share a repo or `write_scope`.
+     It is false only for work with no subagent intent, which drains inline in
+     the main session one item at a time. Only `after=` serializes subagent
+     heads: it is per-item ordering, and the dependent is simply absent from
+     `queue_subagent_dispatch` until its prerequisite closes.
      After the spawn succeeds and returns its concrete worker identity, run the
      entry's `start_command` (`agent-doc queue start <FILE> --item <...>
      --owner subagent:<label> --generation <N> --worker-id <WORKER>`). This

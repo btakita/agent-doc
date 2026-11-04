@@ -311,6 +311,21 @@ pub fn queue_attr_subagent_plan(
     queue_attr_subagent_plan_with_presets(file, content, &prompt_presets)
 }
 
+/// `#subagentsalwaysparallel`: subagent dispatch is enabled for this
+/// document's queue work when any queue or run component (live or drained,
+/// since the operator may steer a new prompt into it mid-turn) runs in
+/// subagents at queue scope ([`core::queue_component_runs_in_subagents`]).
+/// Item-level `#subagents` intent is the caller's dispatch list.
+pub fn queue_subagent_dispatch_enabled_for_content(file: &Path, content: &str) -> Result<bool> {
+    let prompt_presets =
+        agent_doc_frontmatter_io::session::effective_prompt_presets_for_file(content, file)?;
+    let components = agent_doc_element::element::parse(content)?;
+    let graph = agent_doc_queue::queue_set::QueueSet::parse(content, &components)?;
+    Ok(graph.blocks().iter().any(|block| {
+        core::queue_component_runs_in_subagents(content, block.component, &prompt_presets)
+    }))
+}
+
 /// Claims that choose which queue owns this cycle: ledger attempts (including
 /// `Reported`), closed schedule windows, and completion evidence. This cycle's
 /// fresh dispatch heads are not included, so naming them does not pause the

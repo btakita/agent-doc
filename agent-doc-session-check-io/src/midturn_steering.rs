@@ -772,6 +772,7 @@ fn append_struck_removal_mismatches(
                 .or_else(|| receipt.and_then(|receipt| receipt.worker_id.clone())),
             explicit: false,
             vector: None,
+            queue_mode: None,
         });
     }
     Ok(reported)

@@ -639,6 +639,7 @@ mod tests {
             worker_id: None,
             explicit: false,
             vector: None,
+            queue_mode: None,
         }
     }
 

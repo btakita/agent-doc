@@ -417,9 +417,12 @@ pub fn completion_cell_heading_lines(text: &str) -> Vec<usize> {
 ///
 /// Each cell is removed together with the one blank separator line directly
 /// before it, which `report-complete` inserts when the preceding exchange line
-/// is not already blank. When that blank was already present the comparison
-/// form is one blank line SHORTER than the original — callers compare for
-/// drift, where a missing trailing blank is never prompt- or response-bearing.
+/// is not already blank — unless the line after the cell is content, in which
+/// case that blank stays as the only separator (see
+/// [`strip_completion_cells_matching`]). When that blank was already present
+/// and the cell ends the exchange, the comparison form is one blank line
+/// SHORTER than the original — callers compare for drift, where a missing
+/// trailing blank is never prompt- or response-bearing.
 /// Every other line, including a completion-shaped heading that is NOT followed
 /// by an attested response (or legacy body) and marker, is preserved byte for byte.
 pub fn strip_completion_cells(text: &str) -> String {
@@ -434,6 +437,14 @@ pub fn strip_completion_cells(text: &str) -> String {
 /// preserving unrelated worker reports. Heading-shaped prose without the
 /// attested response (or legacy body) and keyed marker is never presented to the
 /// predicate or removed.
+///
+/// `#completioncellstripglue`: removal never glues the text above a cell to
+/// the text below it. The blank separator before a cell is retired with it
+/// only when the cell is followed by a blank line, a component/boundary
+/// marker, or the end of the text; when content follows, that blank stays.
+/// A cell an older binary glued between two content lines is replaced by one
+/// blank line. Selected cells separated only by blank lines retire as one
+/// group. No byte outside the removed cells and their own separator changes.
 pub fn strip_completion_cells_matching(
     text: &str,
     mut should_strip: impl FnMut(&CompletionEvidence) -> bool,
@@ -450,24 +461,65 @@ pub fn strip_completion_cells_matching(
         return text.to_string();
     }
     let lines: Vec<&str> = text.split_inclusive('\n').collect();
-    let mut removed = vec![false; lines.len()];
+    // `#completioncellstripglue`: selected cells separated only by blank lines
+    // retire as one group, so the decision below sees the real neighbours.
+    let mut groups: Vec<Range<usize>> = Vec::new();
     for range in ranges {
-        for index in range.clone() {
-            removed[index] = true;
-        }
-        if let Some(separator) = range.start.checked_sub(1)
-            && !removed[separator]
-            && lines[separator].trim().is_empty()
-        {
-            removed[separator] = true;
+        match groups.last_mut() {
+            Some(group)
+                if lines[group.end..range.start]
+                    .iter()
+                    .all(|line| line.trim().is_empty()) =>
+            {
+                group.end = range.end;
+            }
+            _ => groups.push(range),
         }
     }
-    lines
-        .iter()
-        .zip(removed)
-        .filter(|(_, removed)| !removed)
-        .map(|(line, _)| *line)
-        .collect()
+    let mut out = String::with_capacity(text.len());
+    let mut cursor = 0;
+    for group in groups {
+        for line in &lines[cursor..group.start] {
+            out.push_str(line);
+        }
+        cursor = group.end;
+        let next_needs_separator = lines
+            .get(group.end)
+            .is_some_and(|line| is_separable_content(line));
+        let previous = group.start.checked_sub(1).map(|index| lines[index]);
+        match previous {
+            // The blank before the cell is the separator `report-complete`
+            // inserted. It goes with the cell unless it is now the only thing
+            // keeping the text above from gluing to the text below.
+            Some(blank) if blank.trim().is_empty() => {
+                if !next_needs_separator {
+                    out.truncate(out.len() - blank.len());
+                }
+            }
+            // A cell an older binary glued directly under content: never let
+            // its removal join that content to the content below.
+            Some(above) if next_needs_separator && is_separable_content(above) => {
+                out.push_str(if above.ends_with("\r\n") {
+                    "\r\n"
+                } else {
+                    "\n"
+                });
+            }
+            _ => {}
+        }
+    }
+    for line in &lines[cursor..] {
+        out.push_str(line);
+    }
+    out
+}
+
+/// A line that must stay a separate markdown block from an adjacent content
+/// line: anything except a blank line or an agent-doc component/boundary
+/// marker, which delimit blocks on their own.
+fn is_separable_content(line: &str) -> bool {
+    let line = line.trim();
+    !line.is_empty() && !line.starts_with("<!-- agent:") && !line.starts_with("<!-- /agent:")
 }
 
 /// `current` without the binary-attested completion cells that `baseline`
@@ -803,6 +855,128 @@ mod tests {
         assert!(stripped.contains("key=k3"));
         assert!(stripped.contains("operator-authored body"));
         assert_eq!(completion_evidence(&stripped).len(), 1);
+    }
+
+    /// `#completioncellstripglue`: retiring a cell never joins the text above
+    /// it to the text below it, whichever side the cell was glued on.
+    #[test]
+    fn stripping_a_cell_between_two_paragraphs_keeps_them_separate() {
+        let c = cell_with_response("subagent:a", "a", "k", "Done.").unwrap();
+        // Separated above (the report-complete shape), response glued below.
+        let glued_below = format!("Above.\n\n{c}\nBelow.\n");
+        assert_eq!(strip_completion_cells(&glued_below), "Above.\n\nBelow.\n");
+        // Glued on both sides by an older binary.
+        let glued_both = format!("Above.\n{c}\nBelow.\n");
+        assert_eq!(strip_completion_cells(&glued_both), "Above.\n\nBelow.\n");
+        // Glued above only: the blank below is already the separator.
+        let glued_above = format!("Above.\n{c}\n\nBelow.\n");
+        assert_eq!(strip_completion_cells(&glued_above), "Above.\n\nBelow.\n");
+        // CRLF documents keep their line ending in the inserted separator.
+        let crlf = format!("Above.\r\n{}\r\nBelow.\r\n", c.replace('\n', "\r\n"));
+        assert_eq!(strip_completion_cells(&crlf), "Above.\r\n\r\nBelow.\r\n");
+        // Two selected cells with only blanks between them retire as one.
+        let d = cell_with_response("subagent:b", "b", "k2", "Done b.").unwrap();
+        let pair = format!("Above.\n\n{c}\n\n{d}\nBelow.\n");
+        assert_eq!(strip_completion_cells(&pair), "Above.\n\nBelow.\n");
+        let pair_glued = format!("Above.\n{c}\n{d}\nBelow.\n");
+        assert_eq!(strip_completion_cells(&pair_glued), "Above.\n\nBelow.\n");
+    }
+
+    /// `#completioncellstripglue`: the live shape from game-sessions.md
+    /// (6d1bc843): a cell glued under the closing line of one response and
+    /// above the next response's prose. Removal must not make the two read as
+    /// one paragraph.
+    #[test]
+    fn stripping_the_live_glued_cell_keeps_the_response_paragraphs_apart() {
+        let c = cell_with_response(
+            "subagent:api-797-commitpush",
+            "do [#commitpush-m3rd]",
+            "k",
+            "Verified.",
+        )
+        .unwrap();
+        let text = format!(
+            "auto-compaction is not enabled.\n{c}\n❯ PR #797 is repaired.\n\n❯ The broader work remains blocked.\n<!-- agent:boundary:6f886467 -->\n<!-- /agent:exchange -->\n"
+        );
+        assert_eq!(
+            strip_completion_cells(&text),
+            "auto-compaction is not enabled.\n\n❯ PR #797 is repaired.\n\n❯ The broader work remains blocked.\n<!-- agent:boundary:6f886467 -->\n<!-- /agent:exchange -->\n"
+        );
+    }
+
+    /// `#completioncellstripglue`: at the end of the exchange the separator
+    /// `report-complete` inserted goes with the cell, restoring the bytes the
+    /// append started from.
+    #[test]
+    fn stripping_a_cell_at_the_end_of_the_exchange_restores_the_pre_append_bytes() {
+        let c = cell_with_response("subagent:a", "a", "k", "Done.").unwrap();
+        for tail in [
+            "<!-- agent:boundary:b -->\n<!-- /agent:exchange -->\n",
+            "<!-- /agent:exchange -->\n",
+            "",
+        ] {
+            let before = format!("### Re: r — m\n\nLast line.\n{tail}");
+            let appended = format!("### Re: r — m\n\nLast line.\n\n{c}\n{tail}");
+            assert_eq!(strip_completion_cells(&appended), before, "tail={tail:?}");
+            // Glued by an older binary: nothing to retire but the cell.
+            let glued = format!("### Re: r — m\n\nLast line.\n{c}\n{tail}");
+            assert_eq!(strip_completion_cells(&glued), before, "tail={tail:?}");
+        }
+        // No trailing newline after the cell.
+        assert_eq!(
+            strip_completion_cells(&format!("Last line.\n\n{c}")),
+            "Last line.\n"
+        );
+    }
+
+    /// `#completioncellstripglue`: a heading on either side of the cell stays
+    /// its own block, so the prose above a removed cell never becomes the
+    /// block directly above a `### Re:` heading (which reads as a prompt).
+    #[test]
+    fn stripping_a_cell_adjacent_to_a_heading_keeps_the_heading_separate() {
+        let c = cell_with_response("subagent:a", "a", "k", "Done.").unwrap();
+        let heading_below = format!("Should I push?\n\n{c}\n### Re: next — m\n\nBody.\n");
+        assert_eq!(
+            strip_completion_cells(&heading_below),
+            "Should I push?\n\n### Re: next — m\n\nBody.\n"
+        );
+        let heading_below_glued = format!("Should I push?\n{c}\n### Re: next — m\n");
+        assert_eq!(
+            strip_completion_cells(&heading_below_glued),
+            "Should I push?\n\n### Re: next — m\n"
+        );
+        let heading_above = format!("### Re: prior — m\n{c}\nBody.\n");
+        assert_eq!(
+            strip_completion_cells(&heading_above),
+            "### Re: prior — m\n\nBody.\n"
+        );
+        // Directly under a component marker no separator is needed.
+        let under_marker = format!("<!-- agent:exchange -->\n{c}\nBody.\n");
+        assert_eq!(
+            strip_completion_cells(&under_marker),
+            "<!-- agent:exchange -->\nBody.\n"
+        );
+    }
+
+    /// `#completioncellstripglue`: when blank lines already separate the cell
+    /// on both sides, removal leaves exactly one of them and changes nothing
+    /// else, and a text without a selected cell is returned unchanged.
+    #[test]
+    fn stripping_an_already_separated_cell_changes_no_other_byte() {
+        let c = cell_with_response("subagent:a", "a", "k", "Done.").unwrap();
+        let separated = format!("Above.\n\n{c}\n\nBelow.\n");
+        assert_eq!(strip_completion_cells(&separated), "Above.\n\nBelow.\n");
+        let wide = format!("Above.\n\n\n{c}\n\n\nBelow.\n");
+        assert_eq!(strip_completion_cells(&wide), "Above.\n\n\n\nBelow.\n");
+        let unselected = format!("Above.\n{c}\nBelow.\n");
+        assert_eq!(
+            strip_completion_cells_matching(&unselected, |_| false),
+            unselected
+        );
+        assert_eq!(
+            strip_completion_cells("Above.\nBelow.\n"),
+            "Above.\nBelow.\n"
+        );
     }
 
     /// `#statussynccommitrefusal`: the baseline is a faithful projection of

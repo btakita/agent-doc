@@ -58808,14 +58808,27 @@ mod tests {
             "the fixture's state.db lock proves the client did not wait for main-ledger apply"
         );
         writer.execute_batch("ROLLBACK").unwrap();
+        // The worker appends to the main ledger and THEN ACK-deletes the
+        // handoff row, so "event is in the ledger" says nothing yet about the
+        // row; asserting the row gone right after seeing the event raced the
+        // ACK under load. Assert the ordering itself: read the handoff table
+        // first, and once it is empty the ledger read that follows must hold
+        // the event.
         let deadline = Instant::now() + Duration::from_secs(5);
         loop {
-            let ledger = load_state_event_ledger(dir.path()).unwrap();
-            if ledger
+            let acknowledged = state_store::load_document_authority_handoffs(dir.path())
+                .unwrap()
+                .is_empty();
+            let applied = load_state_event_ledger(dir.path())
+                .unwrap()
                 .events()
                 .iter()
-                .any(|stored| stored.event_id == event.event_id)
-            {
+                .any(|stored| stored.event_id == event.event_id);
+            if acknowledged {
+                assert!(
+                    applied,
+                    "the controller acknowledges the handoff only after durable state apply"
+                );
                 break;
             }
             assert!(
@@ -58824,12 +58837,6 @@ mod tests {
             );
             std::thread::sleep(Duration::from_millis(10));
         }
-        assert!(
-            state_store::load_document_authority_handoffs(dir.path())
-                .unwrap()
-                .is_empty(),
-            "the controller acknowledges the handoff only after durable state apply"
-        );
     }
 
     #[test]

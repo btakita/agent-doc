@@ -60,6 +60,7 @@ use std::path::Path;
 
 pub mod command_plane;
 pub mod pipeline_frontmatter;
+pub mod post_commit_error;
 
 /// Mark whether the current thread is handling a project-controller request
 /// in-process. Set `true` for the lifetime of the controller serve loop.

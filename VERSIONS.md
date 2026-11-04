@@ -2,6 +2,15 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.568
+
+- **Managed lists no longer drift.** `agent:active`, `agent:todo`, backlog, review, icebox, and done are each one projection of durable item state, re-rendered at preflight under a shared no-drift contract that `session-check` enforces. Active renders from claims, receipts, and lineage, separating running work from work that needs integration, and a visible ☑️ is treated as output, never as authority.
+- **Large waiting trees are legible.** Every waiting queue head carries its state and a `⟦you · agent · done⟧` roll-up, a **Next** row names each waiting item's one remaining action, and a waiting item's packet is decision evidence that is never regenerated over operator text or read as queue work.
+- **Queue projection converges instead of oscillating.** Operator-action projection reaches one fixed point on waiting items, an operator-action glyph never buries a tracked row, projection repair is fenced by generation and self-heals during long turns, and full queue prompt vectors survive consume.
+- **Closeout and the controller stay off each other's critical path.** Queue drains and authority telemetry moved off closeout and Stop, derived controller projections run in the background without publication locks, a controller deadline after the landed commit is no longer a terminal failure, and the Stop hook prescribes a closeout that works instead of looping.
+- **Concurrent `state.db` writers wait instead of failing.** Read-then-write transactions take the SQLite write lock up front (`BEGIN IMMEDIATE`), so a concurrent writer honours `busy_timeout` instead of failing immediately with `database is locked`; a Clippy ban keeps deferred transactions out.
+- **JetBrains keeps a list marker with its first words under soft wrap** (#391), and CI is green again on Rust 1.99 with a job budget that fits the full suite.
+
 ## 0.35.566
 
 - **Managed work now projects into one repairable Active view.** Queue, backlog, review, Todo, and response state share stable identities and explicit operator-resolution actions; legacy `## Active` headings migrate without losing authored text, missing-replica housekeeping defers safely, and cleared or orphaned owners no longer revive stale work.

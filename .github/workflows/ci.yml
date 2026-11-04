@@ -21,9 +21,11 @@ jobs:
     # hung test is killed and named). A lock/IPC deadlock now fails fast with a
     # backtrace instead of silently hanging. The job-level cap stays as a
     # backstop for NON-test hangs the per-test guard can't see (compile, doc
-    # tests, tmux-ci): well above a legitimate cold run (~25-40 min) yet far
-    # below GitHub's 6-hour default.
-    timeout-minutes: 60
+    # tests, tmux-ci): well above a legitimate cold run yet far below GitHub's
+    # 6-hour default. A green run now takes ~59 min (make check ~46 + tmux-ci
+    # ~13), and a 60-minute cap cancelled two of them during the post-run
+    # Gradle cache save after every check had passed.
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
 

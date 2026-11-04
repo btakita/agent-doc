@@ -570,7 +570,78 @@ pub fn session_check_effects() -> RuntimeSessionCheckEffects {
     RuntimeSessionCheckEffects
 }
 
+/// `#sessioncheckread`: read-only twin of
+/// [`agent_doc_session_check_io::SessionCheckEffects::resume_retained_pending_only_commit`].
+/// Answers whether that continuation would commit, retire a superseded
+/// intent, or roll back an invalid completion right now, without recording
+/// the inferred target or touching the editor, disk, or git.
+fn retained_pending_only_commit_is_pending(
+    effects: &RuntimeSessionCheckEffects,
+    file: &Path,
+) -> Result<bool> {
+    use agent_doc_session_check_io::SessionCheckEffects as _;
+    let Some(mut state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
+        return Ok(false);
+    };
+    if state.pending_only_commit_target_hash.is_none()
+        && state.phase == agent_doc_turn::CyclePhase::Committed
+        && !state.pending_done_ids.is_empty()
+        && let Some(head_content) = agent_doc_git_io::revision::show_head(file)?
+    {
+        let pending = agent_doc_document_realtime_io::pending_document_write(file);
+        // Mirror the resume's inference in memory only.
+        state.pending_only_commit_target_hash =
+            infer_pending_only_commit_target_from_retained_projection(
+                &head_content,
+                state.phase,
+                None,
+                &state.pending_done_ids,
+                pending.as_ref().map(|pending| {
+                    (
+                        pending.target_hash.as_str(),
+                        pending.target_content.as_str(),
+                    )
+                }),
+            )?;
+    }
+    let authority_content = agent_doc_document_realtime_io::try_resolve_current_document_content(
+        file,
+        "pending_only_commit_pending_authority",
+    )?;
+    let disk_content = agent_doc_document_realtime_io::resolve_disk_current_document_content(
+        file,
+        "pending_only_commit_pending_disk",
+    )?;
+    Ok(
+        match pending_only_commit_target(file, &state, &authority_content, &disk_content)? {
+            PendingOnlyCommitDecision::NotReady => false,
+            // A retained projection that still blocks is reported by the
+            // retained-write gate; the resume would wait on it too.
+            PendingOnlyCommitDecision::Eligible { .. } => {
+                !effects.retained_document_write_blocks(file)
+            }
+            PendingOnlyCommitDecision::Superseded { .. }
+            | PendingOnlyCommitDecision::InvalidAtomicCompletion { .. } => true,
+        },
+    )
+}
+
 impl agent_doc_session_check_io::SessionCheckEffects for RuntimeSessionCheckEffects {
+    fn pending_committed_response_evidence_repair(&self, file: &Path) -> Result<Option<String>> {
+        agent_doc_commit_io::pending_committed_response_evidence_repair(file)
+    }
+
+    fn pending_committed_historical_snapshot_drift(
+        &self,
+        file: &Path,
+    ) -> Result<Option<&'static str>> {
+        agent_doc_repair_io::pending_committed_historical_snapshot_drift(file)
+    }
+
+    fn pending_retained_pending_only_commit(&self, file: &Path) -> Result<bool> {
+        retained_pending_only_commit_is_pending(self, file)
+    }
+
     fn settle_response_replay_canonicalization(&self, file: &Path) -> Result<()> {
         agent_doc_commit_io::commit_proven_response_replay_canonicalization(file)?;
         Ok(())

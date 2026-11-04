@@ -3186,6 +3186,18 @@ enum Commands {
         /// not make it landable.
         #[arg(long, conflicts_with_all = ["apply_recovery", "resume_capture"])]
         requote_unlandable_capture: bool,
+        /// Apply the self-heals a read-only `agent-doc session-check` reported
+        /// (`#sessioncheckread`): committed response-evidence restoration,
+        /// response-replay canonicalization, committed historical snapshot
+        /// rebasing, the editor-native save, and the exact retained closeout /
+        /// tracked-work-only commit continuations. These write files and may
+        /// commit (and bump a parent submodule pointer); `session-check` itself
+        /// never does.
+        #[arg(
+            long,
+            conflicts_with_all = ["apply_recovery", "resume_capture", "requote_unlandable_capture"]
+        )]
+        session_check_heal: bool,
     },
     /// Admit a live agent request by opening a lightweight response-cycle checkpoint
     Admit {
@@ -7075,7 +7087,11 @@ fn try_main() -> anyhow::Result<()> {
             apply_recovery,
             resume_capture,
             requote_unlandable_capture,
+            session_check_heal,
         } => {
+            if session_check_heal {
+                return agent_doc_repair_command_io::run_session_check_heal(&file);
+            }
             if requote_unlandable_capture {
                 return run_requote_unlandable_capture(&file);
             }

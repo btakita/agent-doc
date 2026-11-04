@@ -5975,3 +5975,256 @@ fn finalize_strikes_a_mid_turn_head_whose_reported_worker_was_released() {
         Some(worker_response)
     );
 }
+
+fn git_in(repo: &Path, args: &[&str]) -> String {
+    let output = ProcessCommand::new("git")
+        .current_dir(repo)
+        .args(args)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "git {args:?} in {} failed: {}",
+        repo.display(),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8_lossy(&output.stdout).into_owned()
+}
+
+fn init_test_repo(repo: &Path) {
+    fs::create_dir_all(repo).unwrap();
+    git_in(repo, &["init", "-q"]);
+    git_in(repo, &["config", "user.email", "test@example.com"]);
+    git_in(repo, &["config", "user.name", "Test User"]);
+    git_in(repo, &["config", "protocol.file.allow", "always"]);
+}
+
+fn commit_in(repo: &Path, rel: &str, content: &str, message: &str) {
+    let path = repo.join(rel);
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    fs::write(&path, content).unwrap();
+    git_in(repo, &["add", "--", rel]);
+    git_in(repo, &["commit", "-q", "--no-verify", "-m", message]);
+}
+
+/// Everything a read-only check must leave byte-identical in `repo`: `HEAD`,
+/// the index, `git status` (tracked, untracked, and ignored), and the bytes of
+/// every working-tree file. Runtime diagnostics under `.agent-doc/` (ops.log,
+/// sqlite state, CRDT caches) are excluded; `.agent-doc/snapshots/` — the
+/// baseline a snapshot self-heal would rewrite — is included.
+fn repo_state(repo: &Path) -> Vec<String> {
+    fn walk(root: &Path, dir: &Path, out: &mut Vec<String>) {
+        let mut entries = fs::read_dir(dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .collect::<Vec<_>>();
+        entries.sort();
+        for path in entries {
+            let rel = path
+                .strip_prefix(root)
+                .unwrap()
+                .to_string_lossy()
+                .replace('\\', "/");
+            if rel == ".git" || rel.ends_with("/.git") {
+                continue;
+            }
+            // Any repo's (including a nested submodule's) runtime state dir,
+            // except its snapshot baselines.
+            let segments = rel.split('/').collect::<Vec<_>>();
+            if let Some(at) = segments.iter().position(|segment| *segment == ".agent-doc")
+                && at + 1 < segments.len()
+                && segments[at + 1] != "snapshots"
+            {
+                continue;
+            }
+            if path.is_dir() {
+                walk(root, &path, out);
+            } else if path.is_file() {
+                out.push(format!(
+                    "{rel} {}",
+                    content_hash(&String::from_utf8_lossy(&fs::read(&path).unwrap()))
+                ));
+            }
+        }
+    }
+    let mut state = vec![
+        format!("HEAD {}", git_in(repo, &["rev-parse", "HEAD"]).trim()),
+        format!("index\n{}", git_in(repo, &["ls-files", "-s"])),
+        format!(
+            "status\n{}",
+            git_in(
+                repo,
+                &[
+                    "status",
+                    "--porcelain=v1",
+                    "--untracked-files=all",
+                    "--ignored"
+                ]
+            )
+            .lines()
+            .filter(|line| {
+                // Ignored runtime state (ops.log, sqlite, handoff db) of this
+                // repo or a nested one; snapshot baselines stay visible.
+                let ignored_runtime = line.starts_with("!! ")
+                    && (line.contains(".agent-doc/") && !line.contains(".agent-doc/snapshots"));
+                !ignored_runtime
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+        ),
+    ];
+    walk(repo, repo, &mut state);
+    state
+}
+
+/// `#sessioncheckread`: `agent-doc session-check` is a CHECK. Observed
+/// 2026-11-04 in haiven-dev: a plain post-install `session-check` committed
+/// `agent-doc: restore committed response evidence` (archive + response index)
+/// in the document's submodule and bumped the superproject pointer. The check
+/// must leave HEAD, index, and working tree byte-identical in BOTH repos, report
+/// the pending self-heal with the exact repair command, and that command — not
+/// the check — must apply it.
+#[test]
+fn session_check_never_writes_or_commits_and_names_the_committed_evidence_heal() {
+    const RESPONSE_ID: &str = "[#r-f656df4698e6]";
+    const SUMMARY: &str = "Implemented and installed. Every open agent:todo now emits a selector-preserving todo_sync_required preflight obligation.";
+    let tmp = TempDir::new().unwrap();
+    let origin = tmp.path().join("origin");
+    init_test_repo(&origin);
+    commit_in(&origin, "README.md", "# sub\n", "init sub");
+    let outer = tmp.path().join("outer");
+    init_test_repo(&outer);
+    commit_in(&outer, "README.md", "# outer\n", "init outer");
+    let origin_url = format!("file://{}", origin.display());
+    git_in(
+        &outer,
+        &[
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "add",
+            "-q",
+            &origin_url,
+            "src/sub",
+        ],
+    );
+    git_in(
+        &outer,
+        &["commit", "-q", "--no-verify", "-m", "add submodule"],
+    );
+    let sub = outer.join("src/sub");
+    git_in(&sub, &["config", "user.email", "test@example.com"]);
+    git_in(&sub, &["config", "user.name", "Test User"]);
+    fs::create_dir_all(sub.join(".agent-doc/snapshots")).unwrap();
+    let exclude = sub.join(".git");
+    let exclude = if exclude.is_file() {
+        // A submodule's `.git` is a gitfile pointing into the superproject.
+        let gitdir = fs::read_to_string(&exclude).unwrap();
+        sub.join(gitdir.trim().trim_start_matches("gitdir:").trim())
+            .join("info/exclude")
+    } else {
+        exclude.join("info/exclude")
+    };
+    fs::create_dir_all(exclude.parent().unwrap()).unwrap();
+    fs::write(&exclude, ".agent-doc/\n").unwrap();
+
+    let initial = concat!(
+        "<!-- agent:queue -->\n",
+        "- agent-doc issues in sdk-dev.md\n",
+        "  - The same response was duplicated for several queue items.\n",
+        "<!-- /agent:queue -->\n",
+    );
+    commit_in(&sub, "session.md", initial, "initial queue");
+    let historical = format!(
+        concat!(
+            "<!-- agent:queue -->\n",
+            "- agent-doc issues in sdk-dev.md\n",
+            "  - ~~The same response was duplicated for several queue items.~~ — auto-struck: response: {id}\n",
+            "    - **Response {id}:** {summary}\n",
+            "<!-- /agent:queue -->\n",
+        ),
+        id = RESPONSE_ID,
+        summary = SUMMARY,
+    );
+    commit_in(&sub, "session.md", &historical, "committed inline response");
+    git_in(&outer, &["add", "src/sub"]);
+    git_in(&outer, &["commit", "-q", "--no-verify", "-m", "bump sub"]);
+    let doc = sub.join("session.md");
+
+    let sub_before = repo_state(&sub);
+    let outer_before = repo_state(&outer);
+    for attempt in 0..2 {
+        let check = agent_doc()
+            .current_dir(&sub)
+            .env("AGENT_DOC_SESSION_CHECK_SETTLE_SECS", "0")
+            .args(["session-check", doc.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&check.stderr);
+        let stdout = String::from_utf8_lossy(&check.stdout);
+        assert!(
+            check.status.success(),
+            "attempt {attempt}: a pending evidence heal is a warning, not a failed closeout\nstdout={stdout}\nstderr={stderr}"
+        );
+        assert_eq!(
+            repo_state(&sub),
+            sub_before,
+            "attempt {attempt}: session-check changed the submodule's HEAD, index, or tree"
+        );
+        assert_eq!(
+            repo_state(&outer),
+            outer_before,
+            "attempt {attempt}: session-check bumped or staged the superproject"
+        );
+        for needle in [
+            "self-heal `restore_committed_response_evidence` is pending",
+            "`session-check` is read-only and applied nothing",
+            &format!("agent-doc repair {} --session-check-heal", doc.display()),
+        ] {
+            assert!(
+                stderr.contains(needle),
+                "attempt {attempt}: {needle}\n{stderr}"
+            );
+        }
+    }
+
+    // Anti-vacuity: the fixture really carries the self-heal the check used to
+    // apply, and the explicit repair applies it (commit + archive/index).
+    let heal = agent_doc()
+        .current_dir(&sub)
+        .env("AGENT_DOC_SESSION_CHECK_SETTLE_SECS", "0")
+        .args(["repair", doc.to_str().unwrap(), "--session-check-heal"])
+        .output()
+        .unwrap();
+    assert!(
+        heal.status.success(),
+        "stdout={}\nstderr={}",
+        String::from_utf8_lossy(&heal.stdout),
+        String::from_utf8_lossy(&heal.stderr)
+    );
+    assert_eq!(
+        git_in(&sub, &["log", "-1", "--format=%s"]).trim(),
+        "agent-doc: restore committed response evidence"
+    );
+    assert_eq!(git_in(&sub, &["show", "HEAD:session.md"]), historical);
+    assert_ne!(
+        repo_state(&sub),
+        sub_before,
+        "the explicit heal must commit"
+    );
+
+    // Healed: the next check has nothing pending and is still read-only.
+    let sub_healed = repo_state(&sub);
+    let outer_healed = repo_state(&outer);
+    let check = agent_doc()
+        .current_dir(&sub)
+        .env("AGENT_DOC_SESSION_CHECK_SETTLE_SECS", "0")
+        .args(["session-check", doc.to_str().unwrap()])
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&check.stderr);
+    assert!(check.status.success(), "{stderr}");
+    assert!(!stderr.contains("self-heal `"), "{stderr}");
+    assert_eq!(repo_state(&sub), sub_healed);
+    assert_eq!(repo_state(&outer), outer_healed);
+}

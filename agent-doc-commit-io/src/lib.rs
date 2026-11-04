@@ -1832,6 +1832,141 @@ fn commit_proven_response_replay_canonicalization_scoped(file: &Path) -> Result<
     Ok(true)
 }
 
+/// Committed response-evidence self-heals that are pending for `file`, without
+/// applying any of them (`#sessioncheckread`).
+///
+/// Mirrors the three repairs `agent-doc repair <FILE> --session-check-heal`
+/// runs, in the same order: duplicate queue response-projection
+/// canonicalization, historical archive/index restoration, and orphaned
+/// queue response-projection detachment. Reads authority, disk, `HEAD`, the
+/// response index/archive, and bounded Git history; writes nothing.
+pub fn pending_committed_response_evidence_repair(file: &Path) -> Result<Option<String>> {
+    agent_doc_document_realtime_io::with_current_document_projection_pass(|| {
+        if let Some(ids) = duplicate_queue_response_projection_plan(file)? {
+            return Ok(Some(format!(
+                "duplicate queue response projections in HEAD would be canonicalized and committed (ids={})",
+                ids.into_iter().collect::<Vec<_>>().join(",")
+            )));
+        }
+        if let Some(ids) = historical_response_evidence_restore_plan(file)? {
+            return Ok(Some(format!(
+                "committed response evidence would be restored into the tracked response archive/index and committed (ids={})",
+                ids.into_iter().collect::<Vec<_>>().join(",")
+            )));
+        }
+        if let Some(ids) = orphaned_queue_response_projection_plan(file)? {
+            return Ok(Some(format!(
+                "orphaned queue response projections would be detached and committed (ids={})",
+                ids.into_iter().collect::<Vec<_>>().join(",")
+            )));
+        }
+        Ok(None)
+    })
+}
+
+/// Read-only plan for [`restore_and_commit_historical_response_evidence`]: the
+/// response ids it would restore/index, or `None` when it would do nothing.
+fn historical_response_evidence_restore_plan(file: &Path) -> Result<Option<BTreeSet<String>>> {
+    let authority = commit_current_document_content(
+        file,
+        "plan_historical_response_evidence_authority",
+    )?;
+    let Some(head) = agent_doc_git_io::revision::show_head(file)? else {
+        return Ok(None);
+    };
+    let reproven = agent_doc_archive_io::unproven_response_index_entries_restorable_from_git(file)?;
+    // `#archivedupid`: the repair restores these archive bytes FIRST; until
+    // then every verified index read below refuses the unproven entry. Their
+    // pending restoration alone already proves the repair would run.
+    if !reproven.is_empty() {
+        return Ok(Some(reproven.into_iter().collect()));
+    }
+    let referenced = agent_doc_archive_io::extract_response_reference_ids(&authority);
+    if referenced.is_empty() {
+        return Ok(None);
+    }
+    let restored = agent_doc_archive_io::committed_inline_response_references_restorable_from_git(
+        file, &authority, &head,
+    )?;
+    let mut affected =
+        agent_doc_archive_io::affected_response_ids_for_commit(file, Some(&head), &head)?;
+    affected.retain(|response_id| referenced.contains(response_id));
+    affected.extend(restored);
+    Ok((!affected.is_empty()).then_some(affected))
+}
+
+/// Read-only plan for
+/// [`canonicalize_and_commit_duplicate_queue_response_projections`].
+fn duplicate_queue_response_projection_plan(file: &Path) -> Result<Option<BTreeSet<String>>> {
+    let authority = commit_current_document_content(
+        file,
+        "plan_duplicate_queue_response_projection_authority",
+    )?;
+    let disk = agent_doc_document_realtime_io::resolve_disk_current_document_content(
+        file,
+        "plan_duplicate_queue_response_projection_disk",
+    )?;
+    if authority != disk {
+        return Ok(None);
+    }
+    let Some(head) = agent_doc_git_io::revision::show_head(file)? else {
+        return Ok(None);
+    };
+    let response_ids =
+        agent_doc_queue::queue_consume::duplicate_queue_response_projection_ids(&head)?;
+    Ok((!response_ids.is_empty()).then_some(response_ids.into_iter().collect()))
+}
+
+/// Read-only plan for [`detach_and_commit_orphaned_queue_response_projections`]:
+/// the response ids whose struck queue projection it would detach.
+fn orphaned_queue_response_projection_plan(file: &Path) -> Result<Option<BTreeSet<String>>> {
+    let authority = commit_current_document_content(
+        file,
+        "plan_orphaned_queue_response_projection_authority",
+    )?;
+    let disk = agent_doc_document_realtime_io::resolve_disk_current_document_content(
+        file,
+        "plan_orphaned_queue_response_projection_disk",
+    )?;
+    if authority != disk {
+        return Ok(None);
+    }
+    let Some(head) = agent_doc_git_io::revision::show_head(file)? else {
+        return Ok(None);
+    };
+    let dangling = agent_doc_archive_io::dangling_response_references(file, &head)?
+        .into_iter()
+        .collect::<BTreeSet<_>>();
+    if dangling.is_empty() {
+        return Ok(None);
+    }
+    let project_root = agent_doc_project_root_io::project_root_or_file_parent(file)?;
+    let decision_dangling = agent_doc_decision_io::validate(&project_root)?
+        .dangling_response_ids
+        .into_iter()
+        .collect::<BTreeSet<_>>();
+    let candidates = dangling
+        .difference(&decision_dangling)
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    let mut head_target = head;
+    let mut detached = BTreeSet::new();
+    for response_id in candidates {
+        let candidate = agent_doc_queue::queue_consume::detach_struck_queue_response_projections(
+            &head_target,
+            &BTreeSet::from([response_id.clone()]),
+        )?;
+        if candidate != head_target
+            && !agent_doc_archive_io::extract_response_reference_ids(&candidate)
+                .contains(&response_id)
+        {
+            head_target = candidate;
+            detached.insert(response_id);
+        }
+    }
+    Ok((!detached.is_empty()).then_some(detached))
+}
+
 /// Recover a response summary already proven by committed document history into
 /// the tracked sibling archive/index without changing the session document.
 ///
@@ -1841,6 +1976,12 @@ fn commit_proven_response_replay_canonicalization_scoped(file: &Path) -> Result<
 /// unchanged `HEAD` document plus only binary-owned response archive paths.
 pub fn restore_and_commit_historical_response_evidence(file: &Path) -> Result<bool> {
     agent_doc_document_realtime_io::with_current_document_projection_pass(|| {
+        // `#sessioncheckread`: the read-only plan is the gate, so the status
+        // check's report and this repair can never disagree about whether a
+        // restoration is pending.
+        if historical_response_evidence_restore_plan(file)?.is_none() {
+            return Ok(false);
+        }
         let authority =
             commit_current_document_content(file, "commit_historical_response_evidence_authority")?;
         let Some(head) = agent_doc_git_io::revision::show_head(file)? else {
@@ -1993,14 +2134,9 @@ pub fn canonicalize_and_commit_duplicate_queue_response_projections(file: &Path)
         if authority != disk {
             return Ok(false);
         }
-        let Some(head) = agent_doc_git_io::revision::show_head(file)? else {
+        let Some(response_ids) = duplicate_queue_response_projection_plan(file)? else {
             return Ok(false);
         };
-        let response_ids =
-            agent_doc_queue::queue_consume::duplicate_queue_response_projection_ids(&head)?;
-        if response_ids.is_empty() {
-            return Ok(false);
-        }
         let target =
             agent_doc_queue::queue_consume::canonicalize_duplicate_queue_response_projections(
                 &authority,
@@ -2142,48 +2278,9 @@ pub fn detach_and_commit_orphaned_queue_response_projections(file: &Path) -> Res
         if authority != disk {
             return Ok(false);
         }
-        let Some(head) = agent_doc_git_io::revision::show_head(file)? else {
+        let Some(detached) = orphaned_queue_response_projection_plan(file)? else {
             return Ok(false);
         };
-
-        let dangling = agent_doc_archive_io::dangling_response_references(file, &head)?
-            .into_iter()
-            .collect::<BTreeSet<_>>();
-        if dangling.is_empty() {
-            return Ok(false);
-        }
-        let project_root = agent_doc_project_root_io::project_root_or_file_parent(file)?;
-        let decision_dangling = agent_doc_decision_io::validate(&project_root)?
-            .dangling_response_ids
-            .into_iter()
-            .collect::<BTreeSet<_>>();
-        let candidates = dangling
-            .difference(&decision_dangling)
-            .cloned()
-            .collect::<BTreeSet<_>>();
-        if candidates.is_empty() {
-            return Ok(false);
-        }
-
-        let mut head_target = head.clone();
-        let mut detached = BTreeSet::new();
-        for response_id in candidates {
-            let candidate =
-                agent_doc_queue::queue_consume::detach_struck_queue_response_projections(
-                    &head_target,
-                    &BTreeSet::from([response_id.clone()]),
-                )?;
-            if candidate != head_target
-                && !agent_doc_archive_io::extract_response_reference_ids(&candidate)
-                    .contains(&response_id)
-            {
-                head_target = candidate;
-                detached.insert(response_id);
-            }
-        }
-        if detached.is_empty() {
-            return Ok(false);
-        }
         let mut target = authority.clone();
         for response_id in &detached {
             target = agent_doc_queue::queue_consume::detach_struck_queue_response_projections(

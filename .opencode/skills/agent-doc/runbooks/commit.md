@@ -92,6 +92,7 @@ The typed reload intent updates only the native cdylib already hosted by an inst
 - `agent-doc write --commit` remains the documented repair path because it preserves the older CLI surface while still crossing the write/commit boundary in one invocation.
 - For real session documents (`agent_doc_session` / legacy `session`) that command now fails closed like `finalize`: non-git docs are rejected before mutation, commit errors fail the command, and success means the cycle reached `committed`. Best-effort behavior remains only for non-session docs and `--backlog-only` maintenance (legacy alias: `--pending-only`).
 - The same post-write `agent-doc session-check <FILE>` guard applies after manual repair with `agent-doc write --commit`.
+- `session-check` never writes or commits (`#sessioncheckread`). A self-heal it finds (committed response-evidence restoration, response-replay canonicalization, historical snapshot rebasing, the editor-native save, a retained closeout or tracked-work-only commit continuation) is reported as pending with the exact command; only `agent-doc repair <FILE> --session-check-heal` applies it.
 - Manual repair uses the same ordering rule: do the repair write-back last, then `session-check`, then stop.
 
 ## Lint Gate (tagpath agent-doc dialect)

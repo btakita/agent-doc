@@ -542,6 +542,22 @@ fn route_claimed_items(
         .iter()
         .filter(|item| item.dispatch == core::SteeringDispatch::CancelClaimed)
     {
+        // `#sessioncheckread`: the cancellation tombstones the claim and
+        // retires its completion cell from the document. A status-only
+        // `session-check` reports the removal but leaves that write to an
+        // applying consumer (finalize/preflight closeout, the steering hook, or
+        // `agent-doc repair <FILE> --session-check-heal`).
+        if crate::status_only_pass_active() {
+            crate::note_status_only_deferred_write();
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "session_check_self_heal_pending file={} heal=cancel_removed_claim_attempt applied=false (#sessioncheckread)",
+                    file.display(),
+                ),
+            );
+            continue;
+        }
         cancel_removed_claim_attempt(file, content, item)?;
     }
     // `#reportedrelease`: a line whose worker reported (released with a
@@ -1924,14 +1940,44 @@ pub fn render_closeout(report: &SteeringReport) -> Option<String> {
 /// Failures are reported (stderr + ops.log) and never fail the already-
 /// committed closeout.
 pub fn emit_closeout_steering(file: &Path, writer: &mut impl std::io::Write) {
+    emit_closeout_steering_inner(file, writer, false);
+}
+
+/// `#sessioncheckread`: the closeout steering block for a status-only
+/// `session-check`. Identical report, but a claimed queue-removal
+/// cancellation is not applied; when one is pending the watermark is NOT
+/// advanced, so the next applying consumer still cancels the claim and
+/// delivers the item.
+pub fn emit_closeout_steering_status_only(file: &Path, writer: &mut impl std::io::Write) {
+    emit_closeout_steering_inner(file, writer, true);
+}
+
+fn emit_closeout_steering_inner(
+    file: &Path,
+    writer: &mut impl std::io::Write,
+    status_only: bool,
+) {
     let outcome = (|| -> Result<bool> {
-        let Some(prepared) = prepare_closeout(file)? else {
+        let prepared = if status_only {
+            crate::take_status_only_deferred_write();
+            crate::with_status_only_pass(|| prepare_closeout(file))?
+        } else {
+            prepare_closeout(file)?
+        };
+        let Some(prepared) = prepared else {
             return Ok(false);
         };
         let rendered = prepared.report.as_ref().and_then(render_closeout);
         if let Some(text) = &rendered {
             writeln!(writer, "{text}").context("write closeout steering report")?;
             writer.flush().context("flush closeout steering report")?;
+        }
+        if status_only && crate::take_status_only_deferred_write() {
+            eprintln!(
+                "[session-check] warn: a claimed queue row was removed; its claim cancellation is pending and `session-check` is read-only, so the steering watermark was not advanced. Run `{}` (or let the next finalize/preflight closeout) apply it.",
+                crate::session_check_heal_command(file),
+            );
+            return Ok(rendered.is_some());
         }
         prepared.acknowledge(file)?;
         Ok(rendered.is_some())

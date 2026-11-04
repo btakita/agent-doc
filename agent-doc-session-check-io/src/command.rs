@@ -30,13 +30,21 @@
 //!   diff without the binary-owned `❯ ` transcript prefix, `session-check`
 //!   reports the bare prompt target in the failure marker so the write path can
 //!   be repaired instead of silently accepted.
-//! - Narrow self-heal: when that drift is already committed in `HEAD` and the
-//!   current working tree matches `HEAD` modulo transient boundary / `(HEAD)`
-//!   markers, `session-check` repairs the stale snapshot instead of reporting
-//!   a fresh interruption forever. When it applies a proven lossless
-//!   response-replay canonicalization, it must also commit those exact bytes
-//!   through a private index before reporting `OK`; a process restart between
-//!   repair and commit resumes that same exact-only settlement from `HEAD`.
+//! - Narrow self-heal (self-healing callers only): when that drift is already
+//!   committed in `HEAD` and the current working tree matches `HEAD` modulo
+//!   transient boundary / `(HEAD)` markers, the check repairs the stale
+//!   snapshot instead of reporting a fresh interruption forever. When it
+//!   applies a proven lossless response-replay canonicalization, it must also
+//!   commit those exact bytes through a private index before reporting `OK`; a
+//!   process restart between repair and commit resumes that same exact-only
+//!   settlement from `HEAD`.
+//! - `#sessioncheckread`: plain `agent-doc session-check <FILE>` is
+//!   status-only ([`SessionCheckEffects::applies_self_heals`] is `false`). It
+//!   detects every self-heal above (plus committed response-evidence
+//!   restoration, the editor-native save, retained closeout / pending-only
+//!   commit resumes, and retained projection settlement) read-only and reports
+//!   each with [`session_check_heal_command`]; `agent-doc repair <FILE>
+//!   --session-check-heal` ([`run_self_heal`]) applies them.
 //! - Exit 0 when the current cycle state is committed, when state/log files
 //!   are missing, or when the fallback `ops.log` event is terminal and no
 //!   likely bypassed patchback is present.
@@ -55,10 +63,12 @@
 //! ## Agentic Contracts
 //! - May also clear a persisted startup-miss marker when the marker is proven
 //!   stale because a later registered session start has already superseded it.
-//! - Otherwise mutates only the snapshot in the narrow committed-historical-drift
-//!   repair case above, or the exact session document and its checkpoint while
-//!   settling a proven response-replay canonicalization. Unrelated index and
-//!   working-tree content is never included.
+//! - A self-healing caller otherwise mutates only the snapshot in the narrow
+//!   committed-historical-drift repair case above, or the exact session
+//!   document and its checkpoint while settling a proven response-replay
+//!   canonicalization. Unrelated index and working-tree content is never
+//!   included. The status-only CLI mutates none of it: HEAD, the index, and the
+//!   working tree stay byte-identical.
 //! - Called by supervisors / watchdogs (and directly from skill) to
 //!   detect the "started but never wrote" invariant violation flagged
 //!   as bug #a011.
@@ -382,6 +392,36 @@ impl ReadOnlyRetainedCloseoutResumeProjection {
 }
 
 pub trait SessionCheckEffects {
+    /// `#sessioncheckread`: whether this caller may APPLY session-check's
+    /// self-heals — archive/index restoration, response-replay
+    /// canonicalization, snapshot rebasing, editor-native save requests,
+    /// retained closeout / pending-only commit resumes, and retained projection
+    /// settlement. Every self-heal writes a file, a commit, or a submodule
+    /// pointer, so plain `agent-doc session-check <FILE>` answers `false`: it
+    /// detects each pending heal through the `pending_*` methods below and
+    /// reports it with [`session_check_heal_command`] instead.
+    fn applies_self_heals(&self) -> bool {
+        true
+    }
+    /// Read-only detection for [`Self::restore_committed_response_evidence`]:
+    /// a description of the committed response-evidence repair that WOULD run,
+    /// or `None`. Must not write.
+    fn pending_committed_response_evidence_repair(&self, _file: &Path) -> Result<Option<String>> {
+        Ok(None)
+    }
+    /// Read-only detection for
+    /// [`Self::repair_committed_historical_snapshot_drift`]. Must not write.
+    fn pending_committed_historical_snapshot_drift(
+        &self,
+        _file: &Path,
+    ) -> Result<Option<&'static str>> {
+        Ok(None)
+    }
+    /// Read-only detection for [`Self::resume_retained_pending_only_commit`]:
+    /// whether that continuation WOULD commit/retire now. Must not write.
+    fn pending_retained_pending_only_commit(&self, _file: &Path) -> Result<bool> {
+        Ok(false)
+    }
     /// Whether this caller owns document/lifecycle recovery. The operator-facing
     /// `session-check` command sets this false for general recovery, while
     /// finalize/write/preflight own mutations.
@@ -633,11 +673,11 @@ fn realtime_steering_closeout_guidance(file: &Path) -> String {
 fn committed_cycle_steering_status(
     file: &Path,
     state: &agent_doc_cycle_state_io::CycleState,
-    repaired_drift: Option<&str>,
+    healed_drift: Option<&str>,
     marker: &str,
 ) -> SessionCheckStatus {
-    let repaired = repaired_drift
-        .map(|reason| format!(", repaired committed historical {reason} snapshot drift,"))
+    let repaired = healed_drift
+        .map(|healed| format!(", {healed},"))
         .unwrap_or_else(|| ",".to_string());
     let detail = format!(
         "cycle `{}` is `{}` ({}){repaired} but the document still has unresolved prompt-bearing user changes with no new agent-doc cycle started: {marker}",
@@ -1572,7 +1612,24 @@ pub fn try_run_with_options(
     // added to find (`#sessioncheckprofile`).
     crate::profile::reset();
     let started = std::time::Instant::now();
-    let out = crate::with_current_document_pass(|| {
+    if !effects.applies_self_heals() {
+        let out = crate::with_status_only_pass(|| {
+            try_run_with_options_pass(file, codex_final_gate, effects)
+        });
+        crate::profile::report(file, started.elapsed());
+        return out;
+    }
+    let out = try_run_with_options_pass(file, codex_final_gate, effects);
+    crate::profile::report(file, started.elapsed());
+    out
+}
+
+fn try_run_with_options_pass(
+    file: &Path,
+    codex_final_gate: bool,
+    effects: &impl SessionCheckEffects,
+) -> Result<()> {
+    crate::with_current_document_pass(|| {
         // `#retainedbackgroundprojection`: classify a durable retained editor
         // projection before archive restoration, orphan guards, response
         // replay canonicalization, or closeout guards can mutate or interrupt
@@ -1585,15 +1642,39 @@ pub fn try_run_with_options(
                 ReadOnlyRetainedProjectionFence::Interrupted(interrupted) => interrupted.into(),
             });
         }
-        if effects.restore_committed_response_evidence(file)? {
-            crate::invalidate_current_document_pass(file);
+        // `#sessioncheckread`: restoring committed response evidence writes the
+        // tracked archive/index (or the document) and commits it. Only an
+        // explicit repair applies it; the status check reports it.
+        let mut pending_evidence_heal = None;
+        if effects.applies_self_heals() {
+            if effects.restore_committed_response_evidence(file)? {
+                crate::invalidate_current_document_pass(file);
+            }
+        } else {
+            pending_evidence_heal = effects.pending_committed_response_evidence_repair(file)?;
         }
         let content = crate::resolve_current_document_content(
             file,
             "session_check_response_archive_orphan_guard",
         )?;
-        let orphan_disposition =
-            response_orphan_guard(file, &content, true).map_err(response_orphan_interruption)?;
+        let orphan_disposition = response_orphan_guard(file, &content, true).map_err(|error| {
+            let interruption = response_orphan_interruption(error);
+            match pending_evidence_heal.as_deref() {
+                Some(detail) => pending_self_heal_appended(
+                    interruption,
+                    file,
+                    SelfHeal::RestoreCommittedResponseEvidence,
+                    detail,
+                ),
+                None => interruption,
+            }
+        })?;
+        if let Some(detail) = pending_evidence_heal.as_deref() {
+            eprintln!(
+                "{}",
+                pending_self_heal_warning(file, SelfHeal::RestoreCommittedResponseEvidence, detail)
+            );
+        }
         run_with_options_inner(file, codex_final_gate, effects)?;
         if orphan_disposition == ResponseOrphanGuardDisposition::DeferredToOwnedRetainedCloseout {
             // The pre-check deferred only IDs cryptographically owned by the
@@ -1609,9 +1690,7 @@ pub fn try_run_with_options(
                 .map_err(response_orphan_interruption)?;
         }
         Ok(())
-    });
-    crate::profile::report(file, started.elapsed());
-    out
+    })
 }
 
 /// Default bound for [`run_read_only_settling`] (`#scsettlewindow`, GH #60).
@@ -1885,10 +1964,169 @@ pub fn run_read_only_settling(
     window: std::time::Duration,
 ) -> Result<()> {
     let outcome = settle_until_converged(window, SESSION_CHECK_SETTLE_POLL, || {
-        let read_only = ReadOnlySessionCheckEffects { inner: effects };
-        try_run_with_options(file, codex_final_gate, &read_only)
+        let status_only = StatusOnlySessionCheckEffects { inner: effects };
+        try_run_with_options(file, codex_final_gate, &status_only)
     });
     exit_on_interrupted(file, outcome)
+}
+
+/// `agent-doc repair <FILE> --session-check-heal` (`#sessioncheckread`).
+///
+/// Runs the same check as `agent-doc session-check`, but APPLIES the narrow
+/// self-heals the status check only reports: committed response-evidence
+/// restoration, lossless response-replay canonicalization and its commit,
+/// committed historical snapshot rebasing, the one editor-native save for an
+/// unowned or retained divergence, the exact retained `write_applied` closeout
+/// resume after that save, retained projection settlement, and the exact
+/// tracked-work-only commit continuation. General recovery (captured-finalize
+/// replay, commit-boundary recovery, force-disk) stays with
+/// `finalize`/`write`/`preflight` and `repair --resume-capture`.
+pub fn run_self_heal(file: &Path, effects: &impl SessionCheckEffects) -> Result<()> {
+    let heal = SessionCheckHealEffects { inner: effects };
+    exit_on_interrupted(file, try_run_with_options(file, false, &heal))
+}
+
+/// The explicit command that applies a self-heal `session-check` reported.
+pub fn session_check_heal_command(file: &Path) -> String {
+    format!("agent-doc repair {} --session-check-heal", file.display())
+}
+
+/// Each write a status check used to perform on its own (`#sessioncheckread`).
+/// The token names the guard in reports, ops.log, and tests.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SelfHeal {
+    RestoreCommittedResponseEvidence,
+    ResponseReplayCanonicalization,
+    CommittedHistoricalSnapshotDrift,
+    NativeEditorSave,
+    RetainedCloseoutResume,
+    RetainedPendingOnlyCommit,
+    RetainedProjectionSettlement,
+}
+
+impl SelfHeal {
+    pub fn token(self) -> &'static str {
+        match self {
+            Self::RestoreCommittedResponseEvidence => "restore_committed_response_evidence",
+            Self::ResponseReplayCanonicalization => "self_heal_response_replay_duplication",
+            Self::CommittedHistoricalSnapshotDrift => {
+                "self_heal_committed_historical_snapshot_drift"
+            }
+            Self::NativeEditorSave => "request_native_editor_save",
+            Self::RetainedCloseoutResume => "resume_retained_closeout_after_native_save",
+            Self::RetainedPendingOnlyCommit => "resume_retained_pending_only_commit",
+            Self::RetainedProjectionSettlement => "settle_retained_non_capture_projection",
+        }
+    }
+}
+
+fn log_pending_self_heal(file: &Path, heal: SelfHeal) {
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "session_check_self_heal_pending file={} heal={} applied=false (#sessioncheckread)",
+            file.display(),
+            heal.token(),
+        ),
+    );
+}
+
+/// The shared sentence every pending-heal report carries.
+fn pending_self_heal_sentence(file: &Path, heal: SelfHeal, detail: &str) -> String {
+    format!(
+        "self-heal `{}` is pending for {}: {}. `session-check` is read-only and applied nothing; run `{}` to apply it, then rerun `agent-doc session-check {}`",
+        heal.token(),
+        file.display(),
+        detail,
+        session_check_heal_command(file),
+        file.display(),
+    )
+}
+
+fn pending_self_heal_interruption(file: &Path, heal: SelfHeal, detail: &str) -> anyhow::Error {
+    log_pending_self_heal(file, heal);
+    SessionCheckInterrupted(format!(
+        "[session-check] INTERRUPTED: {}",
+        pending_self_heal_sentence(file, heal, detail)
+    ))
+    .into()
+}
+
+fn pending_self_heal_warning(file: &Path, heal: SelfHeal, detail: &str) -> String {
+    log_pending_self_heal(file, heal);
+    format!(
+        "[session-check] warn: {}",
+        pending_self_heal_sentence(file, heal, detail)
+    )
+}
+
+/// Append a pending heal to an interruption another guard already raised.
+fn pending_self_heal_appended(
+    error: anyhow::Error,
+    file: &Path,
+    heal: SelfHeal,
+    detail: &str,
+) -> anyhow::Error {
+    log_pending_self_heal(file, heal);
+    match error.downcast::<SessionCheckInterrupted>() {
+        Ok(SessionCheckInterrupted(message)) => SessionCheckInterrupted(format!(
+            "{message} Also: {}.",
+            pending_self_heal_sentence(file, heal, detail)
+        ))
+        .into(),
+        Err(other) => other,
+    }
+}
+
+/// `#sessioncheckread`: the committed-historical snapshot-drift step of
+/// [`inspect_core`]. A self-healing caller rebases the snapshot; a status-only
+/// caller only reports the same proven drift. Returns the phrase the caller's
+/// status line embeds.
+fn committed_historical_snapshot_drift_heal(
+    file: &Path,
+    effects: &impl SessionCheckEffects,
+) -> Result<Option<String>> {
+    if effects.applies_self_heals() {
+        return Ok(effects
+            .repair_committed_historical_snapshot_drift(file)?
+            .map(|reason| format!("repaired committed historical {reason} snapshot drift")));
+    }
+    let Some(reason) = effects.pending_committed_historical_snapshot_drift(file)? else {
+        return Ok(None);
+    };
+    log_pending_self_heal(file, SelfHeal::CommittedHistoricalSnapshotDrift);
+    Ok(Some(format!(
+        "found committed historical {reason} snapshot drift proven by HEAD (self-heal `{}` pending; read-only, applied nothing — run `{}` to rebase the snapshot)",
+        SelfHeal::CommittedHistoricalSnapshotDrift.token(),
+        session_check_heal_command(file),
+    )))
+}
+
+/// `#sessioncheckread`: the response-replay canonicalization a self-healing
+/// caller would apply (to the visible document) or commit (from `HEAD`).
+fn pending_response_replay_canonicalization(file: &Path) -> Result<Option<&'static str>> {
+    let current = crate::resolve_current_document_content(
+        file,
+        "session_check_response_replay_dedup_pending_current",
+    )?;
+    if let Some(normalized) =
+        agent_doc_document_realtime_io::normalize_recoverable_response_replay_duplication_for_file(
+            file,
+            &current,
+            "session_check_response_replay_dedup_pending",
+        )?
+        && normalized != current
+    {
+        return Ok(Some(
+            "the visible document carries a recoverable same-topic response replay that would be canonicalized losslessly and committed",
+        ));
+    }
+    if response_replay_canonicalization_pending_commit(file)? {
+        return Ok(Some(
+            "HEAD carries a response replay whose lossless canonicalization would be committed",
+        ));
+    }
+    Ok(None)
 }
 
 fn settle_until_converged(
@@ -1910,11 +2148,137 @@ fn settle_until_converged(
     }
 }
 
-struct ReadOnlySessionCheckEffects<'a, E> {
+/// Plain `agent-doc session-check <FILE>` (`#sessioncheckread`): observes only.
+///
+/// Every effect that writes the document, its tracked archive/index, the
+/// snapshot baseline, the editor buffer, the index, `HEAD`, or a parent
+/// submodule pointer is refused or inert here. Pending self-heals are detected
+/// through the read-only `pending_*` methods and reported with
+/// [`session_check_heal_command`]. Diagnostics (ops.log, profile samples) and
+/// runtime observation state under `.agent-doc/` may still be recorded.
+struct StatusOnlySessionCheckEffects<'a, E> {
     inner: &'a E,
 }
 
-impl<E: SessionCheckEffects> SessionCheckEffects for ReadOnlySessionCheckEffects<'_, E> {
+impl<E: SessionCheckEffects> SessionCheckEffects for StatusOnlySessionCheckEffects<'_, E> {
+    fn applies_self_heals(&self) -> bool {
+        false
+    }
+
+    fn pending_committed_response_evidence_repair(&self, file: &Path) -> Result<Option<String>> {
+        self.inner.pending_committed_response_evidence_repair(file)
+    }
+
+    fn pending_committed_historical_snapshot_drift(
+        &self,
+        file: &Path,
+    ) -> Result<Option<&'static str>> {
+        self.inner.pending_committed_historical_snapshot_drift(file)
+    }
+
+    fn pending_retained_pending_only_commit(&self, file: &Path) -> Result<bool> {
+        self.inner.pending_retained_pending_only_commit(file)
+    }
+
+    fn allows_recovery(&self) -> bool {
+        false
+    }
+
+    fn allows_response_replay_canonicalization(&self) -> bool {
+        false
+    }
+
+    fn settle_response_replay_canonicalization(&self, _file: &Path) -> Result<()> {
+        anyhow::bail!("status-only session-check refused a response-replay canonicalization commit")
+    }
+
+    fn restore_committed_response_evidence(&self, _file: &Path) -> Result<bool> {
+        anyhow::bail!("status-only session-check refused a committed response-evidence restore")
+    }
+
+    fn closeout_recovery_hint(&self, file: &Path) -> String {
+        self.inner.closeout_recovery_hint(file)
+    }
+
+    fn atomic_write(&self, _file: &Path, _content: &str) -> Result<()> {
+        anyhow::bail!("status-only session-check refused an atomic document write")
+    }
+
+    fn atomic_repair_write_if_current(
+        &self,
+        _file: &Path,
+        _content: &str,
+        _expected_current: &str,
+        source: &str,
+    ) -> Result<String> {
+        anyhow::bail!("status-only session-check refused repair write `{source}`")
+    }
+
+    fn settle_committed_projection(
+        &self,
+        _file: &Path,
+        _committed_content: &str,
+        _expected_current: &str,
+    ) -> Result<()> {
+        anyhow::bail!("status-only session-check refused projection settlement")
+    }
+
+    fn settle_retained_committed_projection(
+        &self,
+        _file: &Path,
+        _committed_content: &str,
+        _expected_disk: &str,
+    ) -> Result<bool> {
+        Ok(false)
+    }
+
+    fn repair_committed_historical_snapshot_drift(
+        &self,
+        _file: &Path,
+    ) -> Result<Option<&'static str>> {
+        Ok(None)
+    }
+
+    fn recover_missing_commit_boundary(
+        &self,
+        _file: &Path,
+        _event: &str,
+    ) -> Result<Option<&'static str>> {
+        Ok(None)
+    }
+
+    fn resume_captured_finalize(&self, _file: &Path) -> Result<CapturedFinalizeResumeOutcome> {
+        Ok(CapturedFinalizeResumeOutcome::NotApplicable)
+    }
+
+    fn resume_retained_closeout_after_native_save(
+        &self,
+        _file: &Path,
+    ) -> Result<CapturedFinalizeResumeOutcome> {
+        Ok(CapturedFinalizeResumeOutcome::NotApplicable)
+    }
+
+    fn recover_retained_document_write(&self, _file: &Path) -> Result<bool> {
+        Ok(false)
+    }
+
+    fn retained_document_write_blocks(&self, file: &Path) -> bool {
+        self.inner.retained_document_write_blocks(file)
+    }
+
+    fn resume_retained_pending_only_commit(&self, _file: &Path) -> Result<bool> {
+        Ok(false)
+    }
+}
+
+/// `agent-doc repair <FILE> --session-check-heal` (`#sessioncheckread`): the
+/// former operator-facing session-check, which applies the narrow self-heals
+/// (and only those) while still refusing general recovery.
+struct SessionCheckHealEffects<'a, E> {
+    inner: &'a E,
+}
+
+impl<E: SessionCheckEffects> SessionCheckEffects for SessionCheckHealEffects<'_, E> {
     fn allows_recovery(&self) -> bool {
         false
     }
@@ -2013,22 +2377,18 @@ impl<E: SessionCheckEffects> SessionCheckEffects for ReadOnlySessionCheckEffects
     }
 }
 
-/// Operator-facing session check. It may read live authority, write
-/// diagnostics/metadata logs, request one editor-owned native save for a
-/// retained `write_applied` closeout, and resume that exact already-captured
-/// cycle after the save is proven exact. It may also apply and commit the one
-/// lossless response-replay canonicalization proven from `HEAD`, authority,
-/// and disk, restore an archive-only response index from bounded committed
-/// history, or detach an unpinned orphan response projection from an
-/// already-struck queue row. It cannot replace, repair, replay, or commit
-/// unrelated document content.
+/// Operator-facing status-only session check (`#sessioncheckread`). It reads
+/// live authority and records diagnostics, but never writes the document, its
+/// tracked archive/index, the snapshot baseline, the editor buffer, the git
+/// index, `HEAD`, or a submodule pointer. Every self-heal it detects is
+/// reported with [`session_check_heal_command`].
 pub fn run_read_only_with_options(
     file: &Path,
     codex_final_gate: bool,
     effects: &impl SessionCheckEffects,
 ) -> Result<()> {
-    let read_only = ReadOnlySessionCheckEffects { inner: effects };
-    run_with_options(file, codex_final_gate, &read_only)
+    let status_only = StatusOnlySessionCheckEffects { inner: effects };
+    run_with_options(file, codex_final_gate, &status_only)
 }
 
 /// The supervisor-scope queue head that is still unowned. A head claimed by a
@@ -2085,6 +2445,17 @@ fn run_with_options_inner(
     // Re-read only if it actually rewrote the document.
     if replay_healed {
         crate::invalidate_current_document_pass(file);
+    }
+    // `#sessioncheckread`: a status-only check reports the canonicalization it
+    // would have written and committed instead of applying it.
+    if !effects.applies_self_heals()
+        && let Some(detail) = pending_response_replay_canonicalization(file)?
+    {
+        return Err(pending_self_heal_interruption(
+            file,
+            SelfHeal::ResponseReplayCanonicalization,
+            detail,
+        ));
     }
     // A retained delivery can be validly reconstructable even when a stale
     // post-replacement IPC delta duplicated the exchange. Repair that known,
@@ -2195,8 +2566,14 @@ fn run_with_options_inner(
             cycle_phase,
             retained_document_write_blocks,
         );
+        // `#sessioncheckread`: the editor-native save writes the document on
+        // disk. A status-only check reports it; only the explicit heal asks.
+        let native_save_withheld = terminal_projection_decision
+            == ReadOnlyTerminalProjectionDecision::RequestNativeEditorSave
+            && !effects.applies_self_heals();
         if terminal_projection_decision
             == ReadOnlyTerminalProjectionDecision::RequestNativeEditorSave
+            && effects.applies_self_heals()
             && agent_doc_document_realtime_io::settle_live_editor_projection_through_authority(
                 file,
                 "session_check_read_only_retained_native_save",
@@ -2368,6 +2745,21 @@ fn run_with_options_inner(
             ))
             .into());
         }
+        // `#sessioncheckread`: an unowned divergence converges only through
+        // the native save this status-only check withheld, so it must not carry
+        // the settle-window `remains unsettled` token (nothing would settle it)
+        // and it names the explicit heal instead.
+        let projection_detail = if native_save_withheld && !retained_document_write_blocks {
+            log_pending_self_heal(file, SelfHeal::NativeEditorSave);
+            format!(
+                "no durable owner holds this divergence and the read-only check did not request the editor-native save that converges it; self-heal `{}` is pending — run `{}` to request that save, then rerun `agent-doc session-check {}`",
+                SelfHeal::NativeEditorSave.token(),
+                session_check_heal_command(file),
+                file.display(),
+            )
+        } else {
+            read_only_terminal_projection_detail(terminal_projection_decision).to_string()
+        };
         // `#splicesessionack`: fail closed while the exhausted state holds,
         // whatever scoped equality or operator lead says.
         anyhow::ensure!(
@@ -2382,7 +2774,7 @@ fn run_with_options_inner(
                 &authority_content,
                 &disk_content,
             ),
-            read_only_terminal_projection_detail(terminal_projection_decision),
+            projection_detail,
             divergence_owner_note,
             unmerged_editor_steering_note(
                 &authority_content,
@@ -2393,6 +2785,13 @@ fn run_with_options_inner(
                     .collect::<Vec<_>>(),
             ),
         );
+        if retained_closeout_resume.should_resume() && !effects.applies_self_heals() {
+            return Err(pending_self_heal_interruption(
+                file,
+                SelfHeal::RetainedCloseoutResume,
+                "the retained `write_applied` closeout's editor projection converged on disk, and its exact durable capture would be resumed and committed",
+            ));
+        }
         if retained_closeout_resume.should_resume() {
             match crate::profile::timed("resume_retained_closeout_after_native_save", || {
                 effects.resume_retained_closeout_after_native_save(file)
@@ -2469,10 +2868,18 @@ fn run_with_options_inner(
     // effect is durable cycle state, so session-check resumes that exact
     // continuation from the state edge instead of asking for another write or
     // preflight cycle.
-    if crate::profile::timed("resume_retained_pending_only_commit", || {
-        effects.resume_retained_pending_only_commit(file)
-    })? {
-        crate::invalidate_current_document_pass(file);
+    if effects.applies_self_heals() {
+        if crate::profile::timed("resume_retained_pending_only_commit", || {
+            effects.resume_retained_pending_only_commit(file)
+        })? {
+            crate::invalidate_current_document_pass(file);
+        }
+    } else if effects.pending_retained_pending_only_commit(file)? {
+        return Err(pending_self_heal_interruption(
+            file,
+            SelfHeal::RetainedPendingOnlyCommit,
+            "an exact tracked-work-only `write --commit` converged in the editor and disk, and its durable git effect would be committed (or its superseded intent retired)",
+        ));
     }
     // The lossless replay canonicalization is itself a binary-owned document
     // mutation. A terminal session-check may not report `OK` until the same
@@ -3245,8 +3652,21 @@ pub fn inspect_read_only(
     file: &Path,
     effects: &impl SessionCheckEffects,
 ) -> Result<SessionCheckStatus> {
-    let read_only = ReadOnlySessionCheckEffects { inner: effects };
-    inspect(file, &read_only)
+    let status_only = StatusOnlySessionCheckEffects { inner: effects };
+    crate::with_status_only_pass(|| inspect(file, &status_only))
+}
+
+/// `#sessioncheckread`: [`inspect`] for an internal closeout caller that
+/// already owns write intent (`respond`'s failed-closeout re-check). It applies
+/// the same narrow self-heals as `agent-doc repair <FILE> --session-check-heal`
+/// — never general recovery — so that caller keeps the convergence the former
+/// operator-facing check gave it, while plain `session-check` stays read-only.
+pub fn inspect_self_healing(
+    file: &Path,
+    effects: &impl SessionCheckEffects,
+) -> Result<SessionCheckStatus> {
+    let heal = SessionCheckHealEffects { inner: effects };
+    inspect(file, &heal)
 }
 
 pub fn is_committed_head_response_missing_interruption(message: &str) -> bool {
@@ -4331,7 +4751,11 @@ fn inspect_core_profiled(
             CyclePhase::ResponseCaptured | CyclePhase::WriteApplied | CyclePhase::Abandoned
         )
     });
-    if !closeout_committed && !captured_closeout {
+    // `#sessioncheckread`: settlement writes the retained projection; a
+    // status-only caller leaves it to the controller or the explicit heal.
+    let projection_settlement_withheld =
+        !closeout_committed && !captured_closeout && !effects.applies_self_heals();
+    if !closeout_committed && !captured_closeout && effects.applies_self_heals() {
         match agent_doc_document_realtime_io::settle_retained_non_capture_projection_through_authority(
             file,
             "session_check_retained_non_capture_projection_settlement",
@@ -4348,7 +4772,23 @@ fn inspect_core_profiled(
     if let Some(pending) = agent_doc_document_realtime_io::pending_document_write(file)
         && !closeout_committed
     {
-        return Ok(SessionCheckStatus::Interrupted(
+        let heal_note = if projection_settlement_withheld {
+            format!(
+                " {}.",
+                pending_self_heal_sentence(
+                    file,
+                    SelfHeal::RetainedProjectionSettlement,
+                    "the retained non-capture projection was not settled by this read-only check",
+                )
+            )
+        } else {
+            String::new()
+        };
+        if projection_settlement_withheld {
+            log_pending_self_heal(file, SelfHeal::RetainedProjectionSettlement);
+        }
+        return Ok(SessionCheckStatus::Interrupted(format!(
+            "{}{heal_note}",
             retained_pending_write_message(
                 file,
                 RetainedPendingWriteMessage {
@@ -4360,8 +4800,8 @@ fn inspect_core_profiled(
                     captured_closeout,
                 },
                 agent_doc_document_realtime_io::observed_retained_write_ownership(file),
-            ),
-        ));
+            )
+        )));
     }
 
     if let Some(reason) = captured_resume_reason {
@@ -4445,39 +4885,39 @@ fn inspect_core_profiled(
                 file.display()
             )));
         }
-        if let Some(reason) = effects.repair_committed_historical_snapshot_drift(file)? {
+        if let Some(healed) = committed_historical_snapshot_drift_heal(file, effects)? {
             if let Some(prompt_marker) = detect_unstarted_prompt_bearing_diff(file)? {
                 return Ok(committed_cycle_steering_status(
                     file,
                     &state,
-                    Some(reason),
+                    Some(&healed),
                     &prompt_marker,
                 ));
             }
             return Ok(SessionCheckStatus::Ok(format!(
-                "[session-check] ok — cycle `{}` is `{}` ({}); repaired committed historical {} snapshot drift",
+                "[session-check] ok — cycle `{}` is `{}` ({}); {}",
                 state.cycle_id,
                 state.phase.as_str(),
                 state.last_event,
-                reason
+                healed
             )));
         }
         if let Some(marker) = crate::detect_bypassed_response_write(file)? {
-            if let Some(reason) = effects.repair_committed_historical_snapshot_drift(file)? {
+            if let Some(healed) = committed_historical_snapshot_drift_heal(file, effects)? {
                 if let Some(prompt_marker) = detect_unstarted_prompt_bearing_diff(file)? {
                     return Ok(committed_cycle_steering_status(
                         file,
                         &state,
-                        Some(reason),
+                        Some(&healed),
                         &prompt_marker,
                     ));
                 }
                 return Ok(SessionCheckStatus::Ok(format!(
-                    "[session-check] ok — cycle `{}` is `{}` ({}); repaired committed historical {} snapshot drift",
+                    "[session-check] ok — cycle `{}` is `{}` ({}); {}",
                     state.cycle_id,
                     state.phase.as_str(),
                     state.last_event,
-                    reason
+                    healed
                 )));
             }
             // #patchback-head-tolerant: the patchback heuristic compares the
@@ -4616,29 +5056,29 @@ fn inspect_core_profiled(
 
     match initial_last_ops_event {
         None => {
-            if let Some(reason) = effects.repair_committed_historical_snapshot_drift(file)? {
+            if let Some(healed) = committed_historical_snapshot_drift_heal(file, effects)? {
                 if let Some(prompt_marker) = detect_unstarted_prompt_bearing_diff(file)? {
                     return Ok(SessionCheckStatus::Interrupted(format!(
-                        "[session-check] INTERRUPTED: repaired committed historical {} snapshot drift, but the document still has unresolved prompt-bearing user changes with no agent-doc cycle ever started: {}",
-                        reason, prompt_marker
+                        "[session-check] INTERRUPTED: {}, but the document still has unresolved prompt-bearing user changes with no agent-doc cycle ever started: {}",
+                        healed, prompt_marker
                     )));
                 }
                 return Ok(SessionCheckStatus::Ok(format!(
-                    "[session-check] ok — repaired committed historical {} snapshot drift",
-                    reason
+                    "[session-check] ok — {}",
+                    healed
                 )));
             }
             if let Some(marker) = crate::detect_bypassed_response_write(file)? {
-                if let Some(reason) = effects.repair_committed_historical_snapshot_drift(file)? {
+                if let Some(healed) = committed_historical_snapshot_drift_heal(file, effects)? {
                     if let Some(prompt_marker) = detect_unstarted_prompt_bearing_diff(file)? {
                         return Ok(SessionCheckStatus::Interrupted(format!(
-                            "[session-check] INTERRUPTED: repaired committed historical {} snapshot drift, but the document still has unresolved prompt-bearing user changes with no agent-doc cycle ever started: {}",
-                            reason, prompt_marker
+                            "[session-check] INTERRUPTED: {}, but the document still has unresolved prompt-bearing user changes with no agent-doc cycle ever started: {}",
+                            healed, prompt_marker
                         )));
                     }
                     return Ok(SessionCheckStatus::Ok(format!(
-                        "[session-check] ok — repaired committed historical {} snapshot drift",
-                        reason
+                        "[session-check] ok — {}",
+                        healed
                     )));
                 }
                 return Ok(SessionCheckStatus::Interrupted(format!(
@@ -4709,29 +5149,29 @@ fn inspect_core_profiled(
             )))
         }
         Some(event) => {
-            if let Some(reason) = effects.repair_committed_historical_snapshot_drift(file)? {
+            if let Some(healed) = committed_historical_snapshot_drift_heal(file, effects)? {
                 if let Some(prompt_marker) = detect_unstarted_prompt_bearing_diff(file)? {
                     return Ok(SessionCheckStatus::Interrupted(format!(
-                        "[session-check] INTERRUPTED: last ops.log event is terminal, repaired committed historical {} snapshot drift, but the document still has unresolved prompt-bearing user changes with no newer agent-doc cycle started: {}",
-                        reason, prompt_marker
+                        "[session-check] INTERRUPTED: last ops.log event is terminal, {}, but the document still has unresolved prompt-bearing user changes with no newer agent-doc cycle started: {}",
+                        healed, prompt_marker
                     )));
                 }
                 return Ok(SessionCheckStatus::Ok(format!(
-                    "[session-check] ok — last event: {}; repaired committed historical {} snapshot drift",
-                    event, reason
+                    "[session-check] ok — last event: {}; {}",
+                    event, healed
                 )));
             }
             if let Some(marker) = crate::detect_bypassed_response_write(file)? {
-                if let Some(reason) = effects.repair_committed_historical_snapshot_drift(file)? {
+                if let Some(healed) = committed_historical_snapshot_drift_heal(file, effects)? {
                     if let Some(prompt_marker) = detect_unstarted_prompt_bearing_diff(file)? {
                         return Ok(SessionCheckStatus::Interrupted(format!(
-                            "[session-check] INTERRUPTED: last ops.log event is terminal, repaired committed historical {} snapshot drift, but the document still has unresolved prompt-bearing user changes with no newer agent-doc cycle started: {}",
-                            reason, prompt_marker
+                            "[session-check] INTERRUPTED: last ops.log event is terminal, {}, but the document still has unresolved prompt-bearing user changes with no newer agent-doc cycle started: {}",
+                            healed, prompt_marker
                         )));
                     }
                     return Ok(SessionCheckStatus::Ok(format!(
-                        "[session-check] ok — last event: {}; repaired committed historical {} snapshot drift",
-                        event, reason
+                        "[session-check] ok — last event: {}; {}",
+                        event, healed
                     )));
                 }
                 return Ok(SessionCheckStatus::Interrupted(format!(
@@ -5519,10 +5959,39 @@ mod terminal_convergence_tests {
 
     #[test]
     fn operator_session_check_effects_refuse_every_semantic_document_mutation() {
-        let effects = ReadOnlySessionCheckEffects {
+        let effects = StatusOnlySessionCheckEffects {
             inner: &TestEffects,
         };
         let file = Path::new("/tmp/status-only-session-check.md");
+
+        // `#sessioncheckread`: no self-heal either — every one writes a file,
+        // a commit, or a pointer.
+        assert!(!effects.applies_self_heals());
+        assert!(!effects.allows_response_replay_canonicalization());
+        assert!(effects.settle_response_replay_canonicalization(file).is_err());
+        assert!(effects.restore_committed_response_evidence(file).is_err());
+        assert_eq!(
+            effects.repair_committed_historical_snapshot_drift(file).unwrap(),
+            None
+        );
+        assert_eq!(
+            effects
+                .resume_retained_closeout_after_native_save(file)
+                .unwrap(),
+            CapturedFinalizeResumeOutcome::NotApplicable
+        );
+        assert!(!effects.resume_retained_pending_only_commit(file).unwrap());
+        assert!(
+            effects
+                .atomic_repair_write_if_current(
+                    file,
+                    "replacement",
+                    "current",
+                    "session_check_response_replay_dedup"
+                )
+                .is_err(),
+            "even the replay canonicalization write is refused"
+        );
 
         assert!(!effects.allows_recovery());
         assert!(effects.atomic_write(file, "replacement").is_err());
@@ -6267,7 +6736,7 @@ mod terminal_convergence_tests {
         );
         std::fs::write(&file, duplicated).unwrap();
 
-        let read_only = ReadOnlySessionCheckEffects {
+        let read_only = SessionCheckHealEffects {
             inner: &RepairOnlyEffects,
         };
         assert!(read_only.allows_response_replay_canonicalization());
@@ -6309,7 +6778,7 @@ mod terminal_convergence_tests {
         );
         std::fs::write(&file, interrupted).unwrap();
 
-        let read_only = ReadOnlySessionCheckEffects {
+        let read_only = SessionCheckHealEffects {
             inner: &RepairOnlyEffects,
         };
         assert!(self_heal_response_replay_duplication(&file, &read_only).unwrap());

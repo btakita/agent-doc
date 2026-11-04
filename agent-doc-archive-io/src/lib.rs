@@ -585,9 +585,49 @@ const MAX_UNPROVEN_INDEX_ENTRIES: usize = 64;
 /// whose proof was restored; entries without a checksum-matching candidate are
 /// left for [`verified_indexed_response_ids`] to refuse with the recovery path.
 pub fn restore_unproven_response_index_entries_from_git(doc: &Path) -> Result<Vec<String>> {
+    let Some(plan) = plan_unproven_response_index_restoration(doc)? else {
+        return Ok(Vec::new());
+    };
+    let root = project_root(doc)?;
+    let touched = plan
+        .restored
+        .iter()
+        .map(|(path, _)| path.clone())
+        .collect::<BTreeSet<_>>();
+    for path in touched {
+        atomic_write(&root.join(&path), plan.archives[&path].as_bytes())?;
+        if let Err(error) = agent_doc_sqlite::archive_index::index_archive(doc, &root.join(&path)) {
+            eprintln!(
+                "[archive] warning: rebuildable SQLite archive index update failed for {path}: {error}"
+            );
+        }
+    }
+    Ok(plan.restored.into_iter().map(|(_, id)| id).collect())
+}
+
+/// Read-only half of [`restore_unproven_response_index_entries_from_git`]: the
+/// response ids whose archive proof that self-heal WOULD restore from Git
+/// history, without writing any archive (`#sessioncheckread`). A status check
+/// reports these and names the explicit repair instead of applying it.
+pub fn unproven_response_index_entries_restorable_from_git(doc: &Path) -> Result<Vec<String>> {
+    Ok(plan_unproven_response_index_restoration(doc)?
+        .map(|plan| plan.restored.into_iter().map(|(_, id)| id).collect())
+        .unwrap_or_default())
+}
+
+/// The archive bytes an unproven-entry restoration would write, keyed by
+/// archive path, plus the `(archive_path, response_id)` pairs it restores.
+struct UnprovenIndexRestorationPlan {
+    archives: BTreeMap<String, String>,
+    restored: Vec<(String, String)>,
+}
+
+fn plan_unproven_response_index_restoration(
+    doc: &Path,
+) -> Result<Option<UnprovenIndexRestorationPlan>> {
     let index_path = response_index_path(doc);
     if !index_path.exists() {
-        return Ok(Vec::new());
+        return Ok(None);
     }
     let root = project_root(doc)?;
     let index = parse_response_index_file(&index_path)?;
@@ -616,7 +656,7 @@ pub fn restore_unproven_response_index_entries_from_git(doc: &Path) -> Result<Ve
         .cloned()
         .collect::<Vec<_>>();
     if unproven.is_empty() {
-        return Ok(Vec::new());
+        return Ok(None);
     }
     ensure!(
         unproven.len() <= MAX_UNPROVEN_INDEX_ENTRIES,
@@ -673,21 +713,9 @@ pub fn restore_unproven_response_index_entries_from_git(doc: &Path) -> Result<Ve
         }
     }
     if restored.is_empty() {
-        return Ok(Vec::new());
+        return Ok(None);
     }
-    let touched = restored
-        .iter()
-        .map(|(path, _)| path.clone())
-        .collect::<BTreeSet<_>>();
-    for path in touched {
-        atomic_write(&root.join(&path), archives[&path].as_bytes())?;
-        if let Err(error) = agent_doc_sqlite::archive_index::index_archive(doc, &root.join(&path)) {
-            eprintln!(
-                "[archive] warning: rebuildable SQLite archive index update failed for {path}: {error}"
-            );
-        }
-    }
-    Ok(restored.into_iter().map(|(_, id)| id).collect())
+    Ok(Some(UnprovenIndexRestorationPlan { archives, restored }))
 }
 
 /// Render only response bodies not pinned by authoritative decision evidence.
@@ -1342,9 +1370,31 @@ pub fn restore_committed_inline_response_references_from_git(
     authority: &str,
     committed: &str,
 ) -> Result<Vec<String>> {
+    let safe_refs = committed_inline_safe_response_refs(authority, committed);
+    restore_inline_response_references_from_git_for_ids(doc, committed, &safe_refs)
+}
+
+/// Read-only half of [`restore_committed_inline_response_references_from_git`]:
+/// the response ids that self-heal WOULD restore into the tracked archive and
+/// index, without writing either (`#sessioncheckread`).
+pub fn committed_inline_response_references_restorable_from_git(
+    doc: &Path,
+    authority: &str,
+    committed: &str,
+) -> Result<Vec<String>> {
+    let safe_refs = committed_inline_safe_response_refs(authority, committed);
+    Ok(
+        plan_inline_response_reference_restoration(doc, committed, &safe_refs)?
+            .into_iter()
+            .map(|(response_id, _)| response_id)
+            .collect(),
+    )
+}
+
+fn committed_inline_safe_response_refs(authority: &str, committed: &str) -> BTreeSet<String> {
     let authority_refs = extract_response_reference_ids(authority);
     let committed_refs = extract_response_reference_ids(committed);
-    let safe_refs = authority_refs
+    authority_refs
         .intersection(&committed_refs)
         .filter(|response_id| {
             let authority_summaries = inline_response_summaries(authority, response_id);
@@ -1352,8 +1402,7 @@ pub fn restore_committed_inline_response_references_from_git(
             authority_summaries.is_empty() || authority_summaries == committed_summaries
         })
         .cloned()
-        .collect::<BTreeSet<_>>();
-    restore_inline_response_references_from_git_for_ids(doc, committed, &safe_refs)
+        .collect()
 }
 
 fn restore_inline_response_references_from_git_for_ids(
@@ -1361,6 +1410,20 @@ fn restore_inline_response_references_from_git_for_ids(
     content: &str,
     eligible: &BTreeSet<String>,
 ) -> Result<Vec<String>> {
+    let recovered = plan_inline_response_reference_restoration(doc, content, eligible)?;
+    if recovered.is_empty() {
+        return Ok(Vec::new());
+    }
+    write_inline_response_reference_restoration(doc, recovered)
+}
+
+/// The `(response_id, recovered_cell)` pairs an inline-reference restoration
+/// would archive. Reads the index, archive, and bounded Git history only.
+fn plan_inline_response_reference_restoration(
+    doc: &Path,
+    content: &str,
+    eligible: &BTreeSet<String>,
+) -> Result<Vec<(String, String)>> {
     let refs = extract_response_reference_ids(content)
         .intersection(eligible)
         .cloned()
@@ -1389,10 +1452,13 @@ fn restore_inline_response_references_from_git_for_ids(
             recovered.push((response_id, compatibility.content));
         }
     }
-    if recovered.is_empty() {
-        return Ok(Vec::new());
-    }
+    Ok(recovered)
+}
 
+fn write_inline_response_reference_restoration(
+    doc: &Path,
+    recovered: Vec<(String, String)>,
+) -> Result<Vec<String>> {
     let recovered_cells = recovered
         .iter()
         .map(|(_, content)| content.as_str())

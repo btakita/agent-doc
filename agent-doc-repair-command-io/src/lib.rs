@@ -93,11 +93,12 @@ pub fn run_write_command_with_empty_response_recovery(
 /// success only when it reaches `committed`. A failure before capture
 /// (pre-write gate, malformed patchback) leaves the phase at
 /// `preflight_started` and returns its error at once. A committed cycle then
-/// supersedes the error only if a fresh status-only session check no longer
-/// interrupts (GH #275): the closeout commits before its terminal session
-/// check, so `committed` alone never proves the error was transient. This
-/// reads cycle state and runs a status-only check: it performs no
-/// session-check repair and prints nothing to stdout.
+/// supersedes the error only if a fresh session check no longer interrupts
+/// (GH #275): the closeout commits before its terminal session check, so
+/// `committed` alone never proves the error was transient. This reads cycle
+/// state and runs the check with only its narrow self-heals (snapshot
+/// rebasing, retained projection settlement — `#sessioncheckread`), never
+/// general recovery, and prints nothing to stdout.
 fn settle_failed_strict_closeout(
     file: &Path,
     closing: &agent_doc_cycle_state_io::CycleState,
@@ -124,7 +125,9 @@ fn settle_failed_strict_closeout(
         agent_doc_session_check_io::session_check_settle_window(),
         RESPOND_SETTLE_POLL,
         || {
-            agent_doc_session_check_io::inspect_read_only(
+            // `#sessioncheckread`: `respond` owns write intent, so its re-check
+            // keeps the narrow self-heals the status-only CLI now only reports.
+            agent_doc_session_check_io::inspect_self_healing(
                 file,
                 &agent_doc_closeout_runtime_io::session_check_effects(),
             )
@@ -959,7 +962,10 @@ fn resume_materialized_captured_finalize(
 
 /// Run the operator-facing status-only session check. Durable capture replay is
 /// owned by finalize/write/preflight and the route supervisor; observing status
-/// must never manufacture a second document mutation.
+/// must never manufacture a second document mutation. `#sessioncheckread`: it
+/// never writes the document, its archive/index, the snapshot, the git index,
+/// `HEAD`, or a submodule pointer either — each self-heal it finds is reported
+/// with `agent-doc repair <FILE> --session-check-heal`.
 pub fn run_session_check(file: &Path, codex_final_gate: bool) -> Result<()> {
     // `#scsettlewindow` (GH #60): the harness runs this exactly once after a
     // deferred closeout, so it waits out a self-converging state rather than
@@ -972,7 +978,25 @@ pub fn run_session_check(file: &Path, codex_final_gate: bool) -> Result<()> {
     )?;
     // `#closeout-steering`: the post-commit check also carries operator
     // steering the closeout report has not surfaced yet (same agent-channel
-    // watermark, so nothing repeats).
+    // watermark, so nothing repeats). `#sessioncheckread`: status-only, so a
+    // claimed-row cancellation is reported, not applied.
+    agent_doc_session_check_io::midturn_steering::emit_closeout_steering_status_only(
+        file,
+        &mut std::io::stdout().lock(),
+    );
+    Ok(())
+}
+
+/// `agent-doc repair <FILE> --session-check-heal` (`#sessioncheckread`): apply
+/// exactly the self-heals the read-only `session-check` reports, through the
+/// same check, then report its terminal status. Rerun `session-check` after.
+pub fn run_session_check_heal(file: &Path) -> Result<()> {
+    agent_doc_session_check_io::run_self_heal(
+        file,
+        &agent_doc_closeout_runtime_io::session_check_effects(),
+    )?;
+    // The applying twin of `run_session_check`'s steering block: a claimed
+    // queue-row cancellation the status check deferred is applied here.
     agent_doc_session_check_io::midturn_steering::emit_closeout_steering(
         file,
         &mut std::io::stdout().lock(),

@@ -65,6 +65,39 @@ fn force_disk_resolution_enabled() -> bool {
     FORCE_DISK_RESOLUTION.with(Cell::get)
 }
 
+thread_local! {
+    static STATUS_ONLY_PASS: Cell<bool> = const { Cell::new(false) };
+    static STATUS_ONLY_DEFERRED_WRITE: Cell<bool> = const { Cell::new(false) };
+}
+
+/// `#sessioncheckread`: run `f` as a status-only pass. Shared helpers that the
+/// check reaches outside its `SessionCheckEffects` seam (steering's claimed
+/// queue-removal cancellation, which retires completion cells from the
+/// document) consult [`status_only_pass_active`] and defer their write to an
+/// applying consumer instead of performing it.
+pub(crate) fn with_status_only_pass<T>(f: impl FnOnce() -> T) -> T {
+    STATUS_ONLY_PASS.with(|slot| {
+        let previous = slot.replace(true);
+        let result = f();
+        slot.set(previous);
+        result
+    })
+}
+
+pub(crate) fn status_only_pass_active() -> bool {
+    STATUS_ONLY_PASS.with(Cell::get)
+}
+
+/// Record that a status-only pass skipped a write an applying consumer owes.
+pub(crate) fn note_status_only_deferred_write() {
+    STATUS_ONLY_DEFERRED_WRITE.with(|slot| slot.set(true));
+}
+
+/// Take (and clear) whether a status-only pass deferred a write.
+pub(crate) fn take_status_only_deferred_write() -> bool {
+    STATUS_ONLY_DEFERRED_WRITE.with(|slot| slot.replace(false))
+}
+
 pub(crate) fn resolve_current_document(
     file: &Path,
     source: &str,

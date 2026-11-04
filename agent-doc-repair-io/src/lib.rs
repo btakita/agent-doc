@@ -3664,6 +3664,79 @@ fn cycle_has_captured_response_projection(
 }
 
 pub fn repair_committed_historical_snapshot_drift(file: &Path) -> Result<Option<&'static str>> {
+    let Some(plan) = plan_committed_historical_snapshot_drift_repair(file)? else {
+        return Ok(None);
+    };
+    agent_doc_snapshot_io::checkpoint_document_baseline(
+        file,
+        &plan.head_doc,
+        agent_doc_ops_log_io::log_op,
+    )?;
+    if plan.basis == SnapshotDriftRepairBasis::Head {
+        // `#external-commit-crdt-staleness`: reconciling the durable baseline to
+        // HEAD is sufficient for a detached document, but a warm live canonical
+        // replica can still hold the pre-commit text
+        // and out-vote HEAD on the next merge (the `#compact-overlay-crdt-staleness`
+        // mechanism, generalized to any external commit). Converge the live CRDT
+        // canonical to HEAD too. Only safe in this `basis=head` branch: here the
+        // whole document is at HEAD (`current_doc` normalizes equal), so no operator
+        // content beyond HEAD exists to drop — the follow-up/local-drift branch
+        // deliberately does NOT converge (it would clobber a live operator
+        // follow-up). Authority-gated + best-effort: headless returns `Ok(None)`
+        // (the durable baseline already owns it) and a convergence error is
+        // logged, never failing the snapshot repair that already succeeded.
+        converge_crdt_canonical_to_head(file, &plan.head_doc);
+    }
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "snapshot_repair file={} reason={} basis={}",
+            file.display(),
+            plan.reason,
+            plan.basis.as_str()
+        ),
+    );
+    Ok(Some(plan.reason))
+}
+
+/// Which committed baseline a historical snapshot-drift repair would adopt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SnapshotDriftRepairBasis {
+    /// The whole current document normalizes to HEAD.
+    Head,
+    /// Current = HEAD plus a safe user-only follow-up.
+    HeadFollowUp,
+    /// Current = HEAD plus other local drift with no bypassed response.
+    HeadLocalDrift,
+}
+
+impl SnapshotDriftRepairBasis {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Head => "head",
+            Self::HeadFollowUp => "head_follow_up",
+            Self::HeadLocalDrift => "head_local_drift",
+        }
+    }
+}
+
+struct SnapshotDriftRepairPlan {
+    reason: &'static str,
+    basis: SnapshotDriftRepairBasis,
+    head_doc: String,
+}
+
+/// Read-only half of [`repair_committed_historical_snapshot_drift`]: the drift
+/// reason that repair WOULD rebase the snapshot for, without checkpointing the
+/// baseline or converging the CRDT canonical (`#sessioncheckread`). A
+/// status-only `session-check` reports it and names the explicit repair.
+pub fn pending_committed_historical_snapshot_drift(file: &Path) -> Result<Option<&'static str>> {
+    Ok(plan_committed_historical_snapshot_drift_repair(file)?.map(|plan| plan.reason))
+}
+
+fn plan_committed_historical_snapshot_drift_repair(
+    file: &Path,
+) -> Result<Option<SnapshotDriftRepairPlan>> {
     let Some(snapshot_doc) = agent_doc_snapshot_io::load_document_baseline(file)? else {
         return Ok(None);
     };
@@ -3761,33 +3834,11 @@ pub fn repair_committed_historical_snapshot_drift(file: &Path) -> Result<Option<
     ) == agent_doc_document::commit_normalization::normalize_committed_exchange_artifacts(
         &head_doc,
     ) {
-        agent_doc_snapshot_io::checkpoint_document_baseline(
-            file,
-            &head_doc,
-            agent_doc_ops_log_io::log_op,
-        )?;
-        // `#external-commit-crdt-staleness`: reconciling the durable baseline to
-        // HEAD is sufficient for a detached document, but a warm live canonical
-        // replica can still hold the pre-commit text
-        // and out-vote HEAD on the next merge (the `#compact-overlay-crdt-staleness`
-        // mechanism, generalized to any external commit). Converge the live CRDT
-        // canonical to HEAD too. Only safe in this `basis=head` branch: here the
-        // whole document is at HEAD (`current_doc` normalizes equal), so no operator
-        // content beyond HEAD exists to drop — the follow-up/local-drift branch
-        // below deliberately does NOT converge (it would clobber a live operator
-        // follow-up). Authority-gated + best-effort: headless returns `Ok(None)`
-        // (the durable baseline already owns it) and a convergence error is
-        // logged, never failing the snapshot repair that already succeeded.
-        converge_crdt_canonical_to_head(file, &head_doc);
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "snapshot_repair file={} reason={} basis=head",
-                file.display(),
-                reason
-            ),
-        );
-        return Ok(Some(reason));
+        return Ok(Some(SnapshotDriftRepairPlan {
+            reason,
+            basis: SnapshotDriftRepairBasis::Head,
+            head_doc,
+        }));
     }
 
     if agent_doc_document_realtime::baseline_comparison::detect_bypassed_response_write_between(
@@ -3800,25 +3851,15 @@ pub fn repair_committed_historical_snapshot_drift(file: &Path) -> Result<Option<
             &head_doc,
             &current_doc,
         ) {
-            "head_follow_up"
+            SnapshotDriftRepairBasis::HeadFollowUp
         } else {
-            "head_local_drift"
+            SnapshotDriftRepairBasis::HeadLocalDrift
         };
-        agent_doc_snapshot_io::checkpoint_document_baseline(
-            file,
-            &head_doc,
-            agent_doc_ops_log_io::log_op,
-        )?;
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "snapshot_repair file={} reason={} basis={}",
-                file.display(),
-                reason,
-                basis
-            ),
-        );
-        return Ok(Some(reason));
+        return Ok(Some(SnapshotDriftRepairPlan {
+            reason,
+            basis,
+            head_doc,
+        }));
     }
 
     Ok(None)

@@ -5906,6 +5906,73 @@ mod tests {
         )
         .expect("compact --commit must not reject a clean exchange-only historical response");
 
+        // `compact --commit` settles inline only when the editor's visible
+        // projection receipt lands inside `guard_visible_delivery_convergence`'s
+        // 100ms grace; otherwise it retains a continuation that the
+        // controller's compact-resume Effect completes once the editor has
+        // delivered and saved. Both are the contract. The fixture editor's
+        // delivery pump is a polling thread, so which one happened depended on
+        // scheduler load: the test asserted HEAD right after `run` and failed
+        // under the full suite. When compact retained, complete the exact
+        // retained continuation as that Effect does, after the pump's save
+        // (the event the Effect waits for), then assert the same end state.
+        let ledger =
+            agent_doc_controller_io::project_controller::load_state_event_ledger(root).unwrap();
+        let retained = ledger
+            .events()
+            .iter()
+            .rev()
+            .find_map(|event| match &event.fact {
+                agent_doc_state_backbone::StateFact::DocumentCompactProjectionRetained {
+                    continuation_id,
+                    live_content,
+                    committed_content,
+                    target_component,
+                    commit: true,
+                    ..
+                } => Some((
+                    continuation_id.clone(),
+                    live_content.clone(),
+                    committed_content.clone(),
+                    target_component.clone(),
+                )),
+                _ => None,
+            });
+        if let Some((continuation_id, live_content, committed_content, target_component)) = retained
+        {
+            // The pump saves only after publishing the visible projection, so
+            // the saved target is the completion's precondition. The bound is
+            // the pump's own lifetime, not a race window.
+            let saved_deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+            while fs::read_to_string(&file).unwrap() != live_content {
+                assert!(
+                    std::time::Instant::now() < saved_deadline,
+                    "fixture editor never saved the retained compact target"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            let outcome = complete_retained_projection(
+                &file,
+                &continuation_id,
+                &live_content,
+                &committed_content,
+                target_component.as_deref(),
+                true,
+            )
+            .unwrap_or_else(|error| {
+                let ops_log =
+                    fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap_or_default();
+                panic!("retained compact completion failed: {error:#}\n{ops_log}")
+            });
+            assert!(
+                matches!(
+                    outcome,
+                    agent_doc_controller_io::project_controller::ControllerCompactProjectionCompletionOutcome::Settled { .. }
+                ),
+                "{outcome:?}"
+            );
+        }
+
         let committed = agent_doc_git_io::revision::show_head(&file)
             .unwrap()
             .unwrap();

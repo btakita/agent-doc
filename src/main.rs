@@ -6907,6 +6907,15 @@ fn try_main() -> anyhow::Result<()> {
         }
         Commands::Finalize { args } => {
             let closeout_file = args.file.clone();
+            // `#committedcloseouttimeout`: the cycle before this closeout, so a
+            // controller deadline after this command's own commit landed is not
+            // reported as a terminal failure.
+            let cycle_before = agent_doc_cycle_state_io::post_commit_error::observed(
+                agent_doc_cycle_state_io::load(&closeout_file)
+                    .ok()
+                    .flatten()
+                    .as_ref(),
+            );
             let lint_override = match args.lint.as_deref() {
                 None => None,
                 Some(s) => Some(
@@ -6914,61 +6923,82 @@ fn try_main() -> anyhow::Result<()> {
                         .map_err(|e| anyhow::anyhow!(e))?,
                 ),
             };
-            agent_doc_repair_command_io::run_write_command_with_empty_response_recovery(
-                agent_doc_write_command_io::CommandOptions {
-                    file: args.file,
-                    is_template: args.template,
-                    is_stream: args.stream,
-                    is_ipc: args.ipc,
-                    force_disk: args.force_disk,
-                    origin: args.origin,
-                    response_input_provenance:
-                        agent_doc_write_command_io::ResponseInputProvenance::default(),
-                    no_pending_capture: args.no_pending_capture,
-                    pending_add: args.pending_add,
-                    pending_add_to: args.pending_add_to,
-                    pending_add_gated: args.pending_add_gated,
-                    pending_add_after: args.pending_add_after,
-                    pending_add_before: args.pending_add_before,
-                    pending_add_back: args.pending_add_back,
-                    backlog_queue_placement: args.backlog_queue_placement,
-                    icebox_add: args.icebox_add,
-                    icebox_add_after: args.icebox_add_after,
-                    icebox_add_before: args.icebox_add_before,
-                    icebox_add_back: args.icebox_add_back,
-                    icebox_edit: args.icebox_edit,
-                    icebox_clear: args.icebox_clear,
-                    icebox_reorder: args.icebox_reorder,
-                    pending_done: args.pending_done,
-                    pending_edit: args.pending_edit,
-                    pending_clear: args.pending_clear,
-                    pending_reorder: args.pending_reorder,
-                    pending_gate: args.pending_gate,
-                    pending_ungate: args.pending_ungate,
-                    pending_resolve_gate: args.pending_resolve_gate,
-                    pending_set_gate_type: args.pending_set_gate_type,
-                    pending_set_verify: args.pending_set_verify,
-                    pending_upsert: args.pending_upsert,
-                    review_add: args.review_add,
-                    review_edit: args.review_edit,
-                    review_remove: args.review_remove,
-                    review_resolve: args.review_resolve,
-                    todo_add: args.todo_add,
-                    todo_done: args.todo_done,
-                    todo_edit: args.todo_edit,
-                    todo_reopen: args.todo_reopen,
-                    todo_remove: args.todo_remove,
-                    queue_operator_actions: Vec::new(),
-                    queue_completion_ids: Vec::new(),
-                    allow_replace_pending: args.allow_replace_pending,
-                    pending_only: args.pending_only,
-                    status: args.status,
-                    lint_override,
-                    commit_sibling: args.commit_sibling,
-                    commit_sibling_message: args.commit_sibling_message,
-                },
-                agent_doc_write_command_io::CommitMode::Required,
-            )?;
+            let closeout =
+                agent_doc_repair_command_io::run_write_command_with_empty_response_recovery(
+                    agent_doc_write_command_io::CommandOptions {
+                        file: args.file,
+                        is_template: args.template,
+                        is_stream: args.stream,
+                        is_ipc: args.ipc,
+                        force_disk: args.force_disk,
+                        origin: args.origin,
+                        response_input_provenance:
+                            agent_doc_write_command_io::ResponseInputProvenance::default(),
+                        no_pending_capture: args.no_pending_capture,
+                        pending_add: args.pending_add,
+                        pending_add_to: args.pending_add_to,
+                        pending_add_gated: args.pending_add_gated,
+                        pending_add_after: args.pending_add_after,
+                        pending_add_before: args.pending_add_before,
+                        pending_add_back: args.pending_add_back,
+                        backlog_queue_placement: args.backlog_queue_placement,
+                        icebox_add: args.icebox_add,
+                        icebox_add_after: args.icebox_add_after,
+                        icebox_add_before: args.icebox_add_before,
+                        icebox_add_back: args.icebox_add_back,
+                        icebox_edit: args.icebox_edit,
+                        icebox_clear: args.icebox_clear,
+                        icebox_reorder: args.icebox_reorder,
+                        pending_done: args.pending_done,
+                        pending_edit: args.pending_edit,
+                        pending_clear: args.pending_clear,
+                        pending_reorder: args.pending_reorder,
+                        pending_gate: args.pending_gate,
+                        pending_ungate: args.pending_ungate,
+                        pending_resolve_gate: args.pending_resolve_gate,
+                        pending_set_gate_type: args.pending_set_gate_type,
+                        pending_set_verify: args.pending_set_verify,
+                        pending_upsert: args.pending_upsert,
+                        review_add: args.review_add,
+                        review_edit: args.review_edit,
+                        review_remove: args.review_remove,
+                        review_resolve: args.review_resolve,
+                        todo_add: args.todo_add,
+                        todo_done: args.todo_done,
+                        todo_edit: args.todo_edit,
+                        todo_reopen: args.todo_reopen,
+                        todo_remove: args.todo_remove,
+                        queue_operator_actions: Vec::new(),
+                        queue_completion_ids: Vec::new(),
+                        allow_replace_pending: args.allow_replace_pending,
+                        pending_only: args.pending_only,
+                        status: args.status,
+                        lint_override,
+                        commit_sibling: args.commit_sibling,
+                        commit_sibling_message: args.commit_sibling_message,
+                    },
+                    agent_doc_write_command_io::CommitMode::Required,
+                );
+            if let Err(err) = closeout {
+                let cycle_after = agent_doc_cycle_state_io::load(&closeout_file)
+                    .ok()
+                    .flatten();
+                if !agent_doc_cycle_state_io::post_commit_error::landed_commit_survives_post_commit_error(
+                    cycle_before.as_ref(),
+                    cycle_after.as_ref(),
+                    &err,
+                ) {
+                    return Err(err);
+                }
+                eprintln!(
+                    "[respond] WARNING: cycle `{}` is committed; a post-commit controller observation failed afterwards: {err:#}. The response is durable: do NOT re-answer or resubmit it. Run `agent-doc session-check {}` to observe the settled state (#committedcloseouttimeout).",
+                    cycle_after
+                        .as_ref()
+                        .map(|state| state.cycle_id.as_str())
+                        .unwrap_or("?"),
+                    closeout_file.display(),
+                );
+            }
             // `#closeout-steering`: the terminal report carries any operator
             // steering no mid-turn hook delivered, before the loop schedules
             // its next re-entry.

@@ -7401,6 +7401,11 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
     let strip_queue_marker_control =
         need_strip_activation || marker_stop || (need_clear_active && drain_clears_control);
 
+    // One drained receipt per pass: the document and its snapshot must carry
+    // the same bytes. Rendering it twice from a cycle-less wall clock wrote
+    // `…:46` into the document and `…:47` into the snapshot whenever the two
+    // writes straddled a second boundary (seen under parallel test load).
+    let mut drained_receipt: Option<String> = None;
     if need_clear_drained_body {
         let comps = agent_doc_element::element::parse(&current_content)?;
         let q = agent_doc_queue::queue_set::component_for_id(
@@ -7413,7 +7418,11 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
             &current_content[q.open_start..q.open_end],
         );
         let drained_body = if public_run {
-            agent_doc_queue_io::queue_consume::drained_run_receipt_for_current_cycle(file)
+            drained_receipt
+                .get_or_insert_with(|| {
+                    agent_doc_queue_io::queue_consume::drained_run_receipt_for_current_cycle(file)
+                })
+                .clone()
         } else {
             String::new()
         };
@@ -8209,7 +8218,13 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
                 && agent_doc_queue::document_queue::is_public_run_opening_tag(
                     &new_snap[snap_q.open_start..snap_q.open_end],
                 ) {
-                agent_doc_queue_io::queue_consume::drained_run_receipt_for_current_cycle(file)
+                drained_receipt
+                    .get_or_insert_with(|| {
+                        agent_doc_queue_io::queue_consume::drained_run_receipt_for_current_cycle(
+                            file,
+                        )
+                    })
+                    .clone()
             } else if need_clear_drained_body {
                 String::new()
             } else {

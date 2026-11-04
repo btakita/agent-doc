@@ -2028,10 +2028,25 @@ fn tracked_prompt_ids_by_entry(entries: &[QueueEntry]) -> Vec<Option<String>> {
             // projections. This preserves a primary `do [#id]` before a
             // trailing operator-request id while keeping free-text transcripts
             // free-text when annotations contain incidental `[#id]` tokens.
+            //
+            // `queue_head_identity` reads `🙋 [#id] work` as the legacy form
+            // whose `[#id]` is an operator-request prefix, so the open-Todo gate
+            // projecting `🙋` onto a tracked `[#id] work` waiting item made the
+            // row look buried. When that reading is free text, fall back to the
+            // row's own work identity after the attempt projection prefix
+            // (`#queuerowworkidentity`); an id-backed reading, such as legacy
+            // `🙋 [#request] do [#foo]`, keeps its existing identity.
             QueueEntry::Prompt(prompt) | QueueEntry::Completed(prompt) => {
                 match agent_doc_element_queue::queue_head_identity(&prompt.text) {
                     agent_doc_element_queue::QueueItemIdentity::Id(id) => Some(id),
-                    agent_doc_element_queue::QueueItemIdentity::FreeText(_) => None,
+                    agent_doc_element_queue::QueueItemIdentity::FreeText(_) => {
+                        match agent_doc_element_queue::queue_head_identity(
+                            agent_doc_element_queue::strip_attempt_projection_prefix(&prompt.text),
+                        ) {
+                            agent_doc_element_queue::QueueItemIdentity::Id(id) => Some(id),
+                            agent_doc_element_queue::QueueItemIdentity::FreeText(_) => None,
+                        }
+                    }
                 }
             }
             _ => None,
@@ -13426,6 +13441,27 @@ mod tests {
             set_prompt_operator_actions(&entries, &actions, &open).is_none(),
             "ordinary tracked ids must not become decision annotations"
         );
+    }
+
+    /// agent-doc-bugs.md 2026-11-03: every tracked-work closeout failed with
+    /// "queue in-progress marker projection moved or buried a tracked [#id]
+    /// row" because the open-Todo gate projected `🙋` onto this waiting-item
+    /// row and the validator's identity read `🙋 [#id] work` as the legacy
+    /// request-id prefix, i.e. as free text.
+    #[test]
+    fn operator_action_glyph_on_a_waiting_item_keeps_its_tracked_id() {
+        let work = "[#vscodecodersmoke] Run scripts/vscode-remote-smoke.py on a real Coder workspace (procedure in runbooks/coder-workspace.md): install, register, remote extension host, tmux attach, remoteName, layout sync; then update the VS Code on Coder status cell in editors/SPEC.md section 13. <!-- agent-doc:waiting-item -->";
+        let group = "- ### Waiting on you \u{2014} answer by adding a child line under an item <!-- agent-doc:waiting-on-you -->\n";
+        let before = format!("{group}  - {work}\n");
+        let after = format!("{group}  - \u{1f64b} {work}\n");
+        validate_in_progress_marker_projection(&parse(&before).unwrap(), &parse(&after).unwrap())
+            .expect("the operator-action glyph is projection, not a new identity");
+
+        let open = std::collections::HashSet::from(["vscodecodersmoke".to_string()]);
+        let (projected, _) = project_prompt_operator_actions(&before, &[], &open)
+            .expect("an open Todo gate projects without burying its row")
+            .expect("the open Todo gate is projected");
+        assert_eq!(projected, after);
     }
 
     #[test]

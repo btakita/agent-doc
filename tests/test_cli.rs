@@ -13470,7 +13470,14 @@ fn test_document_realtime_io_owns_pipeline_frontmatter_runtime_effects() {
 
     let cycle_state_io =
         fs::read_to_string(manifest_dir.join("agent-doc-cycle-state-io/src/lib.rs")).unwrap();
-    let cycle_state_prod = cycle_state_io.split("#[cfg(test)]").next().unwrap();
+    // The production region ends at the first test module, not the first
+    // `#[cfg(test)]` attribute: deterministic test hooks (`#[cfg(test)]
+    // thread_local!`/`fn`) legitimately sit beside the production code they
+    // instrument.
+    let cycle_state_prod = cycle_state_io
+        .split("\n#[cfg(test)]\nmod ")
+        .next()
+        .unwrap();
     for required in [
         "append_phase_event_to_session_log(file, &state, file_content)",
         "fn append_phase_event_to_session_log(file: &Path, state: &CycleState, file_content: Option<&str>)",
@@ -16938,7 +16945,12 @@ fn test_hot_state_uses_state_db_and_only_recovery_uses_snapshot_paths() {
 
     let cycle =
         fs::read_to_string(manifest_dir.join("agent-doc-cycle-state-io/src/lib.rs")).unwrap();
-    let cycle = cycle.split("\n#[cfg(test)]").next().unwrap_or(&cycle);
+    // Production ends at the first test module; inline `#[cfg(test)]` hooks
+    // are part of the production region they instrument.
+    let cycle = cycle
+        .split("\n#[cfg(test)]\nmod ")
+        .next()
+        .unwrap_or(&cycle);
     assert!(cycle.contains("agent_doc_sqlite::state_store::open_state_db("));
     assert!(cycle.contains("insert_state_event_in_db("));
     assert!(!cycle.contains(".agent-doc/state/cycles"));

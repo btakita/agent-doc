@@ -10202,10 +10202,7 @@ impl ControllerRuntime {
         std::thread::Builder::new()
             .name("agent-doc-state-projection-effects".to_string())
             .spawn(move || {
-                loop {
-                    let Some((document_hash, version)) = queue.next() else {
-                        break;
-                    };
+                while let Some((document_hash, version)) = queue.next() {
                     let Some(runtime) = runtime.upgrade() else {
                         break;
                     };
@@ -10342,11 +10339,9 @@ impl ControllerRuntime {
             .name("agent-doc-authority-handoff".to_string())
             .spawn(move || {
                 let mut retry_delay = Duration::from_millis(100);
-                loop {
-                    match receiver.recv_timeout(Duration::from_secs(1)) {
-                        Ok(()) | Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
-                        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
-                    }
+                while let Ok(()) | Err(std::sync::mpsc::RecvTimeoutError::Timeout) =
+                    receiver.recv_timeout(Duration::from_secs(1))
+                {
                     let Some(runtime) = runtime.upgrade() else {
                         break;
                     };
@@ -10796,8 +10791,7 @@ impl ControllerRuntime {
                 .entry(document_hash.clone())
                 .and_modify(|epoch| *epoch = epoch.saturating_add(1))
                 .or_insert(1);
-            let document_projection = memory.state_projection.document(&document_hash).cloned();
-            document_projection
+            memory.state_projection.document(&document_hash).cloned()
         };
         let captured_finalize_wake_reason = match &event.fact {
             agent_doc_state_backbone::StateFact::ResponseCaptured { .. } => {
@@ -22438,9 +22432,8 @@ agent:queue\n\
                 )
                 .unwrap();
         });
-        assert_eq!(
+        assert!(
             ack_rx.recv_timeout(Duration::from_millis(500)).unwrap(),
-            true,
             "capture ingress must not share the slow state-plane publication lock"
         );
 
@@ -22961,9 +22954,8 @@ agent:queue\n\
                 )
                 .unwrap();
         });
-        assert_eq!(
+        assert!(
             project_done_rx.recv_timeout(Duration::from_secs(2)).unwrap(),
-            true,
             "the project-wide waiter must inspect the held memory guard without relocking it"
         );
     }

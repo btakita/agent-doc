@@ -643,6 +643,7 @@ pub fn preparing_controller_is_stale(
 /// lease for external reapers). Once either bound expires, the watchdog may
 /// fail the generation so the next client can launch a clean controller and
 /// rehydrate retained editor delivery.
+#[allow(clippy::too_many_arguments)]
 pub fn outgoing_handoff_owner_suppresses_watchdog(
     outgoing_handoff_in_flight: bool,
     successor_promoted: bool,

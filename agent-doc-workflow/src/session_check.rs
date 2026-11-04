@@ -1390,7 +1390,7 @@ mod tests {
         let without_fallback = queue_response_contamination_candidates_since_baseline_impl(
             &queue,
             &exchange,
-            Some(&baseline),
+            Some(baseline),
             false,
         );
         assert_eq!(
@@ -1402,7 +1402,7 @@ mod tests {
             queue_response_contamination_candidates_since_baseline(
                 &queue,
                 &exchange,
-                Some(&baseline),
+                Some(baseline),
             )
             .is_empty(),
             "the captured parent id plus an exact binary-owned metadata mirror proves legacy ancestry"

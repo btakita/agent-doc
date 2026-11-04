@@ -321,7 +321,7 @@ pub fn managed_active_items_durable(
                     state,
                 }],
                 age: (group == active_lifecycle::ActiveGroup::NeedsIntegration)
-                    .then(|| active_lifecycle::age_line(attempt, lifecycle.now_secs)),
+                    .then(|| active_lifecycle::age_line(attempt)),
                 group: group.key().to_string(),
                 summary_priority: 3,
             });

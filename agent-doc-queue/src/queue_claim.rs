@@ -201,6 +201,11 @@ pub struct QueueClaim {
     /// `None` when `item_text` is already that row, or for an older claim.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub claim_time_row: Option<String>,
+    /// When this attempt first became `Reported` (`#reportedcloseout`): the
+    /// moment its result became coordinator closeout debt. `None` for an
+    /// attempt reported before the field existed, or not reported yet.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reported_at_secs: Option<u64>,
 }
 
 fn is_zero(value: &u64) -> bool {
@@ -1243,6 +1248,7 @@ impl QueueClaimLedger {
             followed_from: Vec::new(),
             followed_generation: 0,
             claim_time_row: None,
+            reported_at_secs: None,
         };
         match self
             .claims
@@ -1659,6 +1665,25 @@ impl QueueClaimLedger {
             claim.publication_state = publication_state;
         }
         Ok(claim.clone())
+    }
+
+    /// Record when `identity`'s exact `generation` first became `Reported`
+    /// (`#reportedcloseout`). Idempotent: a repeated report keeps the first
+    /// time, and an attempt in any other state is left alone. Returns the
+    /// stamped claim.
+    pub fn stamp_reported_at(
+        &mut self,
+        identity: &QueueItemIdentity,
+        generation: u64,
+        now_secs: u64,
+    ) -> Option<QueueClaim> {
+        let claim = self.claims.iter_mut().find(|claim| {
+            &claim.identity == identity
+                && claim.generation == generation
+                && claim.state == QueueClaimState::Reported
+        })?;
+        claim.reported_at_secs.get_or_insert(now_secs);
+        Some(claim.clone())
     }
 
     /// Release the claim on `item`. Returns the released claim, if any.
@@ -3745,6 +3770,7 @@ mod tests {
                     followed_from: Vec::new(),
                     followed_generation: 0,
                     claim_time_row: None,
+            reported_at_secs: None,
                 },
                 QueueClaim {
                     identity: QueueItemIdentity::FreeText(format!("#gh-fix {url}")),
@@ -3765,6 +3791,7 @@ mod tests {
                     followed_from: Vec::new(),
                     followed_generation: 0,
                     claim_time_row: None,
+            reported_at_secs: None,
                 },
             ],
             cancellations: Vec::new(),

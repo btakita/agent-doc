@@ -107,6 +107,37 @@ pub fn walk_file_revisions_with_time(
     Ok(visited)
 }
 
+/// How many commits touched `file` strictly after `since_secs` (committer
+/// time), counting at most `limit`. A file outside git, or with no commits,
+/// counts zero. The owning git root is narrowed to the submodule root, as in
+/// [`show_rev`].
+pub fn file_commits_since(file: &Path, since_secs: u64, limit: usize) -> Result<usize> {
+    let (super_root, resolved) = resolve_to_git_root(file)?;
+    let (git_root, _) = narrow_to_submodule(&super_root, &resolved);
+    let rel = relative_path_for_git_show(&resolved, &git_root)
+        .to_string_lossy()
+        .to_string();
+    let output = Command::new("git")
+        .current_dir(&git_root)
+        .args([
+            "log",
+            &format!("-{limit}"),
+            &format!("--since=@{since_secs}"),
+            "--format=%ct",
+            "--",
+            rel.as_str(),
+        ])
+        .output()?;
+    if !output.status.success() {
+        return Ok(0);
+    }
+    Ok(String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter_map(|line| line.trim().parse::<u64>().ok())
+        .filter(|committed| *committed > since_secs)
+        .count())
+}
+
 /// `#qheadresiduescope`: the exchange as it stood just before the live
 /// free-text head `head_text` last (re-)entered queue `queue_id` of `file`, or
 /// `None` when every echo counts.

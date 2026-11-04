@@ -123,6 +123,48 @@ pub fn unbacked_reported_lines(file: &Path, content: &str) -> Vec<String> {
     }
 }
 
+/// How many document commits a reported attempt may survive before it is
+/// reported: enough to see the allowance exceeded, bounded so a long history
+/// is never walked.
+const REPORTED_CLOSEOUT_COMMIT_SCAN_LIMIT: usize = 50;
+
+/// `#reportedcloseout`: a `Reported` (`☑️`) attempt still open after more than
+/// one committed cycle. Reported as a warning with its exact next command;
+/// never a failure, and never healed here (closing it is coordinator work).
+pub fn overdue_reported_closeout_lines(file: &Path, content: &str) -> Vec<String> {
+    use agent_doc_queue::reported_closeout::{
+        overdue_reported_closeout_warning, reported_closeout_overdue, reported_since,
+    };
+    let closeouts = match agent_doc_queue_io::queue_claim::reported_claim_closeouts_for_content(
+        file, content,
+    ) {
+        Ok(closeouts) => closeouts,
+        Err(err) => {
+            return vec![format!(
+                "[session-check] warning: reported queue closeout unverifiable (#reportedcloseout): {err:#}"
+            )];
+        }
+    };
+    closeouts
+        .into_iter()
+        .filter_map(|(claim, closeout)| {
+            let (since, _) = reported_since(&claim);
+            let commits = agent_doc_git_io::revision::file_commits_since(
+                file,
+                since,
+                REPORTED_CLOSEOUT_COMMIT_SCAN_LIMIT,
+            )
+            .ok()?;
+            reported_closeout_overdue(commits).then(|| {
+                format!(
+                    "[session-check] warning: {} (#reportedcloseout)",
+                    overdue_reported_closeout_warning(&claim, &closeout, commits)
+                )
+            })
+        })
+        .collect()
+}
+
 /// `agent:todo` == render(todo records, tracked-work index + done archive).
 fn todo_mismatch(file: &Path, content: &str) -> Result<Option<ListMismatch>> {
     let links = agent_doc_element_backlog_io::backlog_cmd::todo_link_index_in_content(
@@ -186,6 +228,7 @@ pub fn check_managed_list_invariants(file: &Path, rc: &CycleContext) -> Result<G
     lines.extend(todo_duplicate_id_lines(&content));
     lines.extend(tracked_finding_lines(&content));
     lines.extend(unbacked_reported_lines(file, &content));
+    lines.extend(overdue_reported_closeout_lines(file, &content));
     Ok(if lines.is_empty() {
         GuardResult::None
     } else {
@@ -295,6 +338,110 @@ mod tests {
                 .iter()
                 .any(|line| line.contains("agent:done has done item `[#finished] Done but not archived` still in agent:backlog")),
             "{findings:?}"
+        );
+    }
+
+    /// `#reportedcloseout`: a reported attempt that survives more than one
+    /// committed cycle warns with its next command; one commit is the
+    /// allowance (the commit that lands the report).
+    #[test]
+    fn reported_attempt_surviving_two_committed_cycles_warns_with_next_command() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        let git = |args: &[&str]| {
+            let output = std::process::Command::new("git")
+                .current_dir(root)
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "git {args:?}: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        };
+        git(&["init", "-q"]);
+        git(&["config", "user.email", "test@example.com"]);
+        git(&["config", "user.name", "Closeout Test"]);
+        std::fs::write(root.join(".gitignore"), ".agent-doc/\n").unwrap();
+        let file = root.join("plan.md");
+        let doc = "---\nsession: sid\nagent_doc_format: template\n---\n\n## Queue\n\n<!-- agent:queue go -->\n- review the pull request\n<!-- /agent:queue -->\n";
+        std::fs::write(&file, doc).unwrap();
+        let item = "review the pull request";
+        let reported_at = 1_700_000_000;
+        let _clock =
+            agent_doc_queue_io::queue_claim::pin_claim_clock_for_current_thread(reported_at);
+        let (_, claimed) =
+            agent_doc_queue_io::queue_claim::claim(&file, item, "subagent:review", 600).unwrap();
+        agent_doc_queue_io::queue_claim::start_attempt(
+            &file,
+            item,
+            "subagent:review",
+            "worker:review",
+            600,
+            claimed.generation,
+        )
+        .unwrap();
+        agent_doc_queue_io::queue_claim::report_attempt(&file, item, Some(claimed.generation))
+            .unwrap();
+
+        let commit = |n: u64| {
+            std::fs::write(&file, format!("{doc}\n<!-- cycle {n} -->\n")).unwrap();
+            let date = format!("@{} +0000", reported_at + n * 60);
+            let output = std::process::Command::new("git")
+                .current_dir(root)
+                .env("GIT_COMMITTER_DATE", &date)
+                .env("GIT_AUTHOR_DATE", &date)
+                .args(["commit", "-qam", &format!("cycle {n}")])
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        };
+        git(&["add", ".gitignore", "plan.md"]);
+        let output = std::process::Command::new("git")
+            .current_dir(root)
+            .env("GIT_COMMITTER_DATE", "@1600000000 +0000")
+            .env("GIT_AUTHOR_DATE", "@1600000000 +0000")
+            .args(["commit", "-qm", "before the report"])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let content = std::fs::read_to_string(&file).unwrap();
+        assert!(overdue_reported_closeout_lines(&file, &content).is_empty());
+        commit(1);
+        assert!(
+            overdue_reported_closeout_lines(&file, &content).is_empty(),
+            "the commit that lands the report is the allowance"
+        );
+        commit(2);
+        let lines = overdue_reported_closeout_lines(&file, &content);
+        assert_eq!(lines.len(), 1, "{lines:?}");
+        assert!(
+            lines[0].starts_with("[session-check] warning: "),
+            "{}",
+            lines[0]
+        );
+        assert!(
+            lines[0].contains("after 2 committed cycle(s) since reported"),
+            "{}",
+            lines[0]
+        );
+        assert!(
+            lines[0].contains(&format!(
+                "Next: `agent-doc queue consume {} --ack-text 'review the pull request' --ack-owner 'subagent:review#1'`",
+                file.display()
+            )),
+            "{}",
+            lines[0]
         );
     }
 

@@ -79,6 +79,12 @@ pub struct DispatchPlan {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub queue_dispatch_acknowledgement_required:
         Vec<agent_doc_queue_io::queue_claim::DispatchAcknowledgementObligation>,
+    /// Reported (`☑️`) attempts whose coordinator closeout is still owed, with
+    /// the exact ordered commands (`#reportedcloseout`). `required_commands`
+    /// lists these steps before any new claim or spawn.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub queue_reported_closeout:
+        Vec<agent_doc_queue::reported_closeout::ReportedCloseoutObligation>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub prompt_targets: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -241,7 +247,24 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
         )?;
     let queue_subagent_dispatch_guidance = (!queue_subagent_dispatch.is_empty())
         .then(|| agent_doc_preflight_io::QUEUE_SUBAGENT_DISPATCH_GUIDANCE.to_string());
+    // `#reportedcloseout`: finished worker results close before new work
+    // starts. Without these steps the plan listed only claim/spawn for the
+    // next heads, so a coordinator that follows it never closed reported work.
+    let queue_reported_closeout =
+        agent_doc_queue_io::queue_claim::reported_claim_closeouts_for_content(file, &content)?
+            .into_iter()
+            .map(|(claim, closeout)| {
+                agent_doc_queue::reported_closeout::ReportedCloseoutObligation::new(
+                    &claim, closeout,
+                )
+            })
+            .collect::<Vec<_>>();
+    let reported_closeout_len = queue_reported_closeout
+        .iter()
+        .map(|obligation| obligation.closeout.steps.len())
+        .sum::<usize>();
     let queue_lifecycle_required_commands = queue_lifecycle_required_commands(
+        &queue_reported_closeout,
         &queue_subagent_dispatch,
         &queue_dispatch_acknowledgement_required,
     );
@@ -347,7 +370,8 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
         let has_queue_lifecycle_work = !queue_lifecycle_required_commands.is_empty();
         let (task_class, blockers, warnings) = if has_queue_lifecycle_work {
             (
-                "queue_subagent_dispatch".to_string(),
+                queue_lifecycle_task_class(&queue_subagent_dispatch, &queue_dispatch_acknowledgement_required)
+                    .to_string(),
                 Vec::new(),
                 Vec::new(),
             )
@@ -369,10 +393,16 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
         required_commands.extend(finalize_placeholder_commands(file, &fm, &[]));
         let parallelizable = queue_subagent_dispatch.len() > 1;
         let blockers_for_tree = blockers.clone();
+        let required_proof = queue_lifecycle_required_proof(
+            &queue_reported_closeout,
+            &queue_subagent_dispatch,
+            &queue_dispatch_acknowledgement_required,
+        );
         let operation_tree = build_operation_tree(
             &[],
             &[],
             &required_commands,
+            reported_closeout_len,
             &[],
             HandoffTarget::None,
             &blockers_for_tree,
@@ -381,6 +411,7 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
             queue_subagent_dispatch,
             queue_subagent_dispatch_guidance,
             queue_dispatch_acknowledgement_required,
+            queue_reported_closeout,
             prompt_targets: Vec::new(),
             graph_evidence: None,
             dispatch_candidate: has_queue_lifecycle_work,
@@ -398,14 +429,7 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
             context_budget_tokens: if has_queue_lifecycle_work { 6000 } else { 0 },
             job_packet_budget_tokens: if has_queue_lifecycle_work { 4000 } else { 0 },
             write_scope: Vec::new(),
-            required_proof: if has_queue_lifecycle_work {
-                vec![
-                    "queue_claim_projection_before_spawn".to_string(),
-                    "queue_worker_binding".to_string(),
-                ]
-            } else {
-                Vec::new()
-            },
+            required_proof,
             tsift_context: tsift_context_plan(file, &content, &[]),
             execution_scope: ExecutionScope::Normal,
             repo_actions: Vec::new(),
@@ -487,13 +511,18 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
         routing.job_packet_budget_tokens = routing.job_packet_budget_tokens.max(4000);
         agent_doc_prompt_contract::push_unique_strings(
             &mut routing.required_proof,
-            [
-                "queue_claim_projection_before_spawn".to_string(),
-                "queue_worker_binding".to_string(),
-            ],
+            queue_lifecycle_required_proof(
+                &queue_reported_closeout,
+                &queue_subagent_dispatch,
+                &queue_dispatch_acknowledgement_required,
+            ),
         );
         if prompt_targets.is_empty() && repo_actions.is_empty() && pending_mutations.is_empty() {
-            routing.task_class = "queue_subagent_dispatch".to_string();
+            routing.task_class = queue_lifecycle_task_class(
+                &queue_subagent_dispatch,
+                &queue_dispatch_acknowledgement_required,
+            )
+            .to_string();
             routing.risk = "medium".to_string();
         }
     }
@@ -641,6 +670,7 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
         &prompt_targets,
         &repo_actions,
         &required_commands,
+        reported_closeout_len,
         &pending_mutations,
         handoff,
         &blockers,
@@ -650,6 +680,7 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
         queue_subagent_dispatch,
         queue_subagent_dispatch_guidance,
         queue_dispatch_acknowledgement_required,
+        queue_reported_closeout,
         prompt_targets,
         graph_evidence,
         dispatch_candidate: routing.dispatch_candidate,
@@ -676,10 +707,14 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
     })
 }
 
+/// `reported_closeout_len` is how many leading `required_commands` close
+/// reported attempts (`#reportedcloseout`); the tree runs them as its first
+/// phase, before any prompt, repo action, or new claim/spawn.
 fn build_operation_tree(
     prompt_targets: &[String],
     repo_actions: &[String],
     required_commands: &[String],
+    reported_closeout_len: usize,
     pending_mutations: &[PendingMutationPlan],
     handoff: HandoffTarget,
     blockers: &[String],
@@ -698,6 +733,7 @@ fn build_operation_tree(
                 prompt_targets,
                 repo_actions,
                 required_commands,
+                reported_closeout_len,
                 pending_mutations,
                 handoff,
             ),
@@ -733,11 +769,50 @@ fn build_operation_tree(
     }
 }
 
-fn queue_lifecycle_required_commands(
+/// `queue_subagent_dispatch` while any claim/spawn work exists; otherwise the
+/// queue lifecycle work is only reported closeout (`#reportedcloseout`).
+fn queue_lifecycle_task_class(
+    dispatch: &[agent_doc_preflight_io::QueueSubagentDispatch],
+    acknowledgements: &[agent_doc_queue_io::queue_claim::DispatchAcknowledgementObligation],
+) -> &'static str {
+    if dispatch.is_empty() && acknowledgements.is_empty() {
+        "queue_reported_closeout"
+    } else {
+        "queue_subagent_dispatch"
+    }
+}
+
+/// Proof the queue lifecycle steps owe: closeout proof for reported attempts,
+/// claim/worker-binding proof only when something is spawned or bound.
+fn queue_lifecycle_required_proof(
+    reported: &[agent_doc_queue::reported_closeout::ReportedCloseoutObligation],
     dispatch: &[agent_doc_preflight_io::QueueSubagentDispatch],
     acknowledgements: &[agent_doc_queue_io::queue_claim::DispatchAcknowledgementObligation],
 ) -> Vec<String> {
-    let mut commands = dispatch
+    let mut proof = Vec::new();
+    if !reported.is_empty() {
+        proof.push("reported_claim_closeout".to_string());
+    }
+    if !dispatch.is_empty() || !acknowledgements.is_empty() {
+        proof.push("queue_claim_projection_before_spawn".to_string());
+        proof.push("queue_worker_binding".to_string());
+    }
+    proof
+}
+
+/// Queue lifecycle steps in execution order: reported closeouts first, so
+/// finished work closes before any new claim or spawn, then new dispatch, then
+/// overdue dispatch acknowledgements.
+fn queue_lifecycle_required_commands(
+    reported: &[agent_doc_queue::reported_closeout::ReportedCloseoutObligation],
+    dispatch: &[agent_doc_preflight_io::QueueSubagentDispatch],
+    acknowledgements: &[agent_doc_queue_io::queue_claim::DispatchAcknowledgementObligation],
+) -> Vec<String> {
+    let mut commands = reported
+        .iter()
+        .flat_map(|obligation| obligation.required_commands())
+        .collect::<Vec<_>>();
+    commands.extend(dispatch
         .iter()
         .flat_map(|entry| {
             [
@@ -758,8 +833,7 @@ fn queue_lifecycle_required_commands(
                     entry.item, entry.start_command,
                 ),
             ]
-        })
-        .collect::<Vec<_>>();
+        }));
     commands.extend(
         acknowledgements
             .iter()
@@ -772,10 +846,19 @@ fn selected_operation_phases(
     prompt_targets: &[String],
     repo_actions: &[String],
     required_commands: &[String],
+    reported_closeout_len: usize,
     pending_mutations: &[PendingMutationPlan],
     handoff: HandoffTarget,
 ) -> Vec<OperationNode> {
     let mut phases = Vec::new();
+    let (reported_closeout, required_commands) =
+        required_commands.split_at(reported_closeout_len.min(required_commands.len()));
+    push_operation_phase(
+        &mut phases,
+        "reported_closeout",
+        "run_reported_closeout",
+        reported_closeout,
+    );
     push_operation_phase(
         &mut phases,
         "prompts",
@@ -1544,6 +1627,7 @@ mod tests {
             &["fix the queue".to_string()],
             &["edit parser".to_string()],
             &["agent-doc finalize plan.md --stream".to_string()],
+            0,
             &[resolve_existing("bug-1")],
             HandoffTarget::None,
             &[],
@@ -1581,11 +1665,42 @@ mod tests {
     }
 
     #[test]
+    fn operation_tree_runs_reported_closeout_before_prompts_and_new_claims() {
+        let tree = build_operation_tree(
+            &["fix the queue".to_string()],
+            &[],
+            &[
+                "Close reported queue item \"a\" step 1/1".to_string(),
+                "Reserve queue item \"b\" before spawn".to_string(),
+            ],
+            1,
+            &[],
+            HandoffTarget::None,
+            &[],
+        );
+        let phases = &tree.root.children[0].children[0].children;
+        assert_eq!(
+            phases.iter().map(|node| node.id.as_str()).collect::<Vec<_>>(),
+            ["phase.reported_closeout", "phase.prompts", "phase.required_commands"]
+        );
+        assert_eq!(phases[0].children.len(), 1);
+        assert_eq!(phases[2].children.len(), 1);
+        assert!(
+            phases[2].children[0]
+                .detail
+                .as_deref()
+                .unwrap()
+                .starts_with("Reserve queue item")
+        );
+    }
+
+    #[test]
     fn operation_tree_prunes_work_when_blocked() {
         let tree = build_operation_tree(
             &["fix the queue".to_string()],
             &["edit parser".to_string()],
             &["agent-doc finalize plan.md --stream".to_string()],
+            0,
             &[],
             HandoffTarget::None,
             &["security review required".to_string()],
@@ -1607,6 +1722,7 @@ mod tests {
             &["fan out fixes".to_string()],
             &["edit parser".to_string()],
             &["agent-doc orchestrate plan.md --mode parallel --from-exchange".to_string()],
+            0,
             &[],
             HandoffTarget::Orchestrate,
             &[],
@@ -1818,6 +1934,123 @@ Done.
                 "queue_claim_projection_before_spawn",
                 "queue_worker_binding"
             ]
+        );
+    }
+
+    /// `#reportedcloseout`: a reported (`☑️`) attempt's closeout is emitted
+    /// before the claim/spawn steps for the next heads. Observed 2026-11-04:
+    /// the plan listed only new claims plus finalize, so nine reported rows
+    /// sat for 3h-42h while every cycle started new work.
+    #[test]
+    fn plan_orders_reported_closeout_before_new_claim_steps() {
+        let _prompt = EnvGuard::unset("AGENT_DOC_HARNESS_PROMPT");
+        let dir = setup_project();
+        let doc = dir.path().join("plan.md");
+        let content = subagents_queue_doc().replace(
+            "- Align the Close button.\n",
+            "- Align the Close button.\n- Rename the save action.\n",
+        );
+        std::fs::write(&doc, &content).unwrap();
+        let item = "Fix the claim button.";
+        let (_, claimed) =
+            agent_doc_queue_io::queue_claim::claim(&doc, item, "subagent:fix", 600).unwrap();
+        agent_doc_queue_io::queue_claim::start_attempt(
+            &doc,
+            item,
+            "subagent:fix",
+            "worker:fix",
+            600,
+            claimed.generation,
+        )
+        .unwrap();
+        agent_doc_queue_io::queue_claim::report_attempt(&doc, item, Some(claimed.generation))
+            .unwrap();
+        let content = std::fs::read_to_string(&doc).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(&content), Some(&content)).unwrap();
+
+        let plan = build(&doc).unwrap();
+
+        assert_eq!(plan.queue_reported_closeout.len(), 1, "{plan:#?}");
+        let closeout = &plan.queue_reported_closeout[0];
+        assert_eq!(closeout.item, item);
+        assert_eq!(
+            closeout.closeout.shape,
+            agent_doc_queue::reported_closeout::ReportedCloseoutShape::ProseConsume
+        );
+        assert!(
+            plan.queue_subagent_dispatch
+                .iter()
+                .all(|entry| entry.item != item),
+            "the reported head is not redispatched: {:?}",
+            plan.queue_subagent_dispatch
+        );
+        assert!(!plan.queue_subagent_dispatch.is_empty());
+        let consume = format!(
+            "run `agent-doc queue consume {} --ack-text 'Fix the claim button.' --ack-owner 'subagent:fix#{}'`",
+            doc.display(),
+            claimed.generation
+        );
+        let closeout_index = plan
+            .required_commands
+            .iter()
+            .position(|command| command.contains(&consume))
+            .unwrap_or_else(|| panic!("{:#?}", plan.required_commands));
+        let first_claim = plan
+            .required_commands
+            .iter()
+            .position(|command| command.starts_with("Reserve queue item"))
+            .unwrap_or_else(|| panic!("{:#?}", plan.required_commands));
+        assert_eq!(closeout_index, 0, "{:#?}", plan.required_commands);
+        assert_eq!(plan.task_class, "queue_subagent_dispatch");
+        assert_eq!(
+            plan.required_proof,
+            [
+                "reported_claim_closeout",
+                "queue_claim_projection_before_spawn",
+                "queue_worker_binding"
+            ]
+        );
+        assert!(closeout_index < first_claim, "{:#?}", plan.required_commands);
+
+        // The operation tree carries the same order.
+        fn find<'a>(node: &'a OperationNode, id: &str) -> Option<&'a OperationNode> {
+            if node.id == id {
+                return Some(node);
+            }
+            node.children.iter().find_map(|child| find(child, id))
+        }
+        let execute = find(&plan.operation_tree.root, "path.execute").expect("execute path");
+        assert_eq!(execute.children[0].id, "phase.reported_closeout", "{execute:#?}");
+        let closeout_phase = &execute.children[0];
+        assert!(
+            closeout_phase.children[0]
+                .detail
+                .as_deref()
+                .is_some_and(|detail| detail.contains(&consume)),
+            "{closeout_phase:#?}"
+        );
+        assert!(
+            closeout_phase.children.iter().all(|child| !child
+                .detail
+                .as_deref()
+                .unwrap_or_default()
+                .starts_with("Reserve queue item")),
+            "{closeout_phase:#?}"
+        );
+        let required = find(&plan.operation_tree.root, "phase.required_commands")
+            .expect("required_commands phase");
+        assert!(
+            required.children.iter().any(|child| child
+                .detail
+                .as_deref()
+                .is_some_and(|detail| detail.starts_with("Reserve queue item"))),
+            "{required:#?}"
         );
     }
 

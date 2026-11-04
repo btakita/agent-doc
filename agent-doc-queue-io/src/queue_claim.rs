@@ -1048,9 +1048,12 @@ pub fn report_attempt_with_publication_state(
     let now = now_secs();
     let claim = mutate_ledger(file, |ledger| {
         log_followed(file, &ledger.follow_edits_in_view(now, &heads));
-        ledger
+        let reported = ledger
             .report_with_publication_state(&target, generation, publication_state)
-            .map_err(anyhow::Error::from)
+            .map_err(anyhow::Error::from)?;
+        Ok(ledger
+            .stamp_reported_at(&reported.identity, reported.generation, now)
+            .unwrap_or(reported))
     })?;
     agent_doc_ops_log_io::log_op(
         file,
@@ -1077,14 +1080,17 @@ pub fn report_exact_worker_attempt_with_publication_state(
     let now = now_secs();
     let claim = mutate_ledger(file, |ledger| {
         log_followed(file, &ledger.follow_edits_in_view(now, &heads));
-        ledger
+        let reported = ledger
             .report_exact_worker_with_publication_state(
                 &target,
                 generation,
                 worker_id,
                 publication_state,
             )
-            .map_err(anyhow::Error::from)
+            .map_err(anyhow::Error::from)?;
+        Ok(ledger
+            .stamp_reported_at(&reported.identity, reported.generation, now)
+            .unwrap_or(reported))
     })?;
     agent_doc_ops_log_io::log_op(
         file,
@@ -1750,9 +1756,89 @@ pub struct ClaimReport {
     pub visible_projection_state: &'static str,
     pub expected_visible_marker: String,
     pub observed_visible_markers: Vec<String>,
-    /// Exact argv for state-preserving repair when projection is out of sync.
+    /// Exact argv of the next coordinator action: state-preserving repair when
+    /// projection is out of sync, else the first closeout step of a
+    /// `Reported` attempt (`#reportedcloseout`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub next_action_argv: Option<Vec<String>>,
+    /// Every command that closes a `Reported` attempt, in order, derived from
+    /// its durable report and lineage facts (`#reportedcloseout`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reported_closeout: Option<agent_doc_queue::reported_closeout::ReportedClaimCloseout>,
+}
+
+/// The closeout for one `Reported` attempt (`#reportedcloseout`): lineage
+/// facts are classified here, the command sequence is pure policy. A lineage
+/// ledger that cannot be read names that as the missing fact instead of
+/// guessing prose-only.
+pub fn reported_claim_closeout(
+    file: &Path,
+    claim: &QueueClaim,
+) -> Option<agent_doc_queue::reported_closeout::ReportedClaimCloseout> {
+    if claim.state != agent_doc_queue::queue_claim::QueueClaimState::Reported {
+        return None;
+    }
+    reported_claim_closeout_in(file, claim, crate::queue_lineage::load(file).ok().as_ref())
+}
+
+/// [`reported_claim_closeout`] over a lineage ledger the caller loaded once;
+/// `None` means the ledger was unreadable.
+fn reported_claim_closeout_in(
+    file: &Path,
+    claim: &QueueClaim,
+    lineage: Option<&crate::queue_lineage::QueueLineageLedger>,
+) -> Option<agent_doc_queue::reported_closeout::ReportedClaimCloseout> {
+    use agent_doc_queue::reported_closeout::ReportedRepoEvidence;
+    if claim.state != agent_doc_queue::queue_claim::QueueClaimState::Reported {
+        return None;
+    }
+    let evidence = lineage
+        .map(|ledger| {
+            crate::queue_lineage::reported_repo_evidence_in(
+                ledger,
+                &claim.item_text,
+                claim.generation,
+            )
+        })
+        .unwrap_or(ReportedRepoEvidence::LineageMissing);
+    agent_doc_queue::reported_closeout::reported_claim_closeout(
+        &file.display().to_string(),
+        claim,
+        &evidence,
+    )
+}
+
+/// The lineage ledger, read only when some attempt is `Reported`.
+fn lineage_for_reported(
+    file: &Path,
+    claims: &[QueueClaim],
+) -> Option<crate::queue_lineage::QueueLineageLedger> {
+    claims
+        .iter()
+        .any(|claim| claim.state == agent_doc_queue::queue_claim::QueueClaimState::Reported)
+        .then(|| crate::queue_lineage::load(file).ok())
+        .flatten()
+}
+
+/// Every live `Reported` attempt with its closeout, in ledger order.
+pub fn reported_claim_closeouts_for_content(
+    file: &Path,
+    content: &str,
+) -> Result<
+    Vec<(
+        QueueClaim,
+        agent_doc_queue::reported_closeout::ReportedClaimCloseout,
+    )>,
+> {
+    let claims = claim_states_for_content(file, content)?;
+    let lineage = lineage_for_reported(file, &claims);
+    Ok(claims
+        .into_iter()
+        .filter_map(|claim| {
+            let closeout = reported_claim_closeout_in(file, &claim, lineage.as_ref())?;
+            Some((claim, closeout))
+        })
+        .collect())
 }
 
 fn claim_assessment(claim: &QueueClaim, owner_session_state: &str) -> (&'static str, String) {
@@ -1765,7 +1851,7 @@ fn claim_assessment(claim: &QueueClaim, owner_session_state: &str) -> (&'static 
         ),
         QueueClaimState::Reported => (
             "reported_pending_integration",
-            "The worker reported completion; coordinator integration, verification, and queue closeout are still pending.".to_string(),
+            "The worker reported completion; coordinator integration, verification, and queue closeout are still pending. `reported_closeout` lists the exact commands, and `next_action_argv` is the first.".to_string(),
         ),
         QueueClaimState::Claimed => (
             if owner_session_state == "ended" {
@@ -1866,7 +1952,9 @@ pub fn claim_reports_for_content(file: &Path, content: &str) -> Result<Vec<Claim
         })
         .collect::<Vec<_>>();
     let now = claim_clock_now_secs();
-    Ok(claim_states_for_content(file, content)?
+    let claims = claim_states_for_content(file, content)?;
+    let lineage = lineage_for_reported(file, &claims);
+    Ok(claims
         .into_iter()
         .map(|claim| {
             let (state, reason) = match claim_owner_liveness(file, &claim) {
@@ -1885,6 +1973,20 @@ pub fn claim_reports_for_content(file: &Path, content: &str) -> Result<Vec<Claim
                     .iter()
                     .all(|marker| marker == &expected_visible_marker);
             let (assessment, assessment_detail) = claim_assessment(&claim, state);
+            let reported_closeout = reported_claim_closeout_in(file, &claim, lineage.as_ref());
+            let next_action_argv = if synchronized {
+                reported_closeout
+                    .as_ref()
+                    .and_then(|closeout| closeout.next_action_argv())
+                    .map(<[String]>::to_vec)
+            } else {
+                Some(vec![
+                    "agent-doc".to_string(),
+                    "queue".to_string(),
+                    "repair-projection".to_string(),
+                    file.to_string_lossy().into_owned(),
+                ])
+            };
             ClaimReport {
                 assessment,
                 assessment_detail,
@@ -1906,14 +2008,8 @@ pub fn claim_reports_for_content(file: &Path, content: &str) -> Result<Vec<Claim
                 },
                 expected_visible_marker,
                 observed_visible_markers,
-                next_action_argv: (!synchronized).then(|| {
-                    vec![
-                        "agent-doc".to_string(),
-                        "queue".to_string(),
-                        "repair-projection".to_string(),
-                        file.to_string_lossy().into_owned(),
-                    ]
-                }),
+                next_action_argv,
+                reported_closeout,
             }
         })
         .collect())
@@ -2605,6 +2701,72 @@ mod tests {
             agent_doc_queue::queue_claim::QueueClaimState::Running
         );
         assert_eq!(stored.worker.unwrap().worker_id, "worker:started");
+    }
+
+    /// `#reportedcloseout`: a reported attempt is coordinator debt with an
+    /// exact closeout. `queue claims` used to give it an empty
+    /// `next_action_argv`, so nothing ever told the coordinator to close it.
+    #[test]
+    fn reported_claim_report_carries_its_closeout_as_next_action() {
+        let dir = tempfile::tempdir().unwrap();
+        let items = ["review the pull request", "do [#reportedid]"];
+        let doc = write_doc(dir.path(), &items);
+        let pinned = 3_000_000;
+        let _claimed_at = pin_claim_clock_for_current_thread(pinned);
+        for (item, owner, worker) in [
+            ("review the pull request", "subagent:review", "worker:review"),
+            ("#reportedid", "subagent:id", "worker:id"),
+        ] {
+            let (_, claimed) = claim(&doc, item, owner, 600).unwrap();
+            start_attempt(&doc, item, owner, worker, 600, claimed.generation).unwrap();
+        }
+        let _reported_at = pin_claim_clock_for_current_thread(pinned + 30);
+        let reported = report_attempt(&doc, "review the pull request", Some(1)).unwrap();
+        assert_eq!(reported.reported_at_secs, Some(pinned + 30));
+        report_attempt(&doc, "#reportedid", Some(1)).unwrap();
+        {
+            // A repeated report keeps the first report time.
+            let _later = pin_claim_clock_for_current_thread(pinned + 90);
+            let again = report_attempt(&doc, "review the pull request", Some(1)).unwrap();
+            assert_eq!(again.reported_at_secs, Some(pinned + 30));
+        }
+
+        // Render the binary-owned `☑️` projection the report produces.
+        let content = std::fs::read_to_string(&doc)
+            .unwrap()
+            .replace("- review the pull request", "- ☑️ review the pull request")
+            .replace("- do [#reportedid]", "- ☑️ do [#reportedid]");
+        let reports = claim_reports_for_content(&doc, &content).unwrap();
+        assert_eq!(reports.len(), 2, "{reports:#?}");
+        let document = doc.display().to_string();
+        for report in &reports {
+            assert_eq!(report.assessment, "reported_pending_integration");
+            assert_eq!(report.visible_projection_state, "synchronized", "{report:#?}");
+            let closeout = report.reported_closeout.as_ref().expect("closeout");
+            assert_eq!(
+                closeout.shape,
+                agent_doc_queue::reported_closeout::ReportedCloseoutShape::ProseConsume,
+                "{closeout:#?}"
+            );
+            let expected = if report.claim.owner == "subagent:review" {
+                vec![
+                    "agent-doc", "queue", "consume", &document, "--ack-text",
+                    "review the pull request", "--ack-owner", "subagent:review#1",
+                ]
+            } else {
+                vec!["agent-doc", "queue", "consume", &document, "--ack-id", "reportedid"]
+            };
+            assert_eq!(report.next_action_argv.as_deref().unwrap(), expected.as_slice());
+        }
+
+        // An out-of-sync row still repairs its projection first, keeping the
+        // closeout listed for after.
+        let raw = std::fs::read_to_string(&doc).unwrap();
+        let reports = claim_reports_for_content(&doc, &raw).unwrap();
+        assert!(reports.iter().all(|report| {
+            report.next_action_argv.as_ref().unwrap()[2] == "repair-projection"
+                && report.reported_closeout.is_some()
+        }));
     }
 
     /// `#claimfreshnessdiagnostics`: `Running` proves that dispatch bound a

@@ -3167,7 +3167,21 @@ mod tests {
         );
         let synchronized = claim_reports_with_effects(&effects, &doc).unwrap();
         assert_eq!(synchronized[0].visible_projection_state, "synchronized");
-        assert!(synchronized[0].next_action_argv.is_none());
+        // `#reportedcloseout`: a synchronized reported attempt is closeout
+        // debt, so its next action is the first closeout step, never empty.
+        let closeout = synchronized[0]
+            .reported_closeout
+            .as_ref()
+            .expect("reported attempt carries its closeout");
+        assert_eq!(
+            synchronized[0].next_action_argv.as_deref(),
+            closeout.next_action_argv(),
+        );
+        assert_eq!(
+            &synchronized[0].next_action_argv.as_ref().unwrap()[..3],
+            ["agent-doc", "queue", "consume"],
+            "{closeout:#?}"
+        );
 
         crate::claim_release_receipt::capture_response_for_attempt(
             &doc,
@@ -3397,7 +3411,7 @@ mod tests {
             .unwrap();
         let reported = render(content);
         assert!(reported.contains("- **Needs integration** (1)\n"), "{reported}");
-        assert!(reported.contains("- **Status:** reported\n    - **Age:** <1h (since attached "), "{reported}");
+        assert!(reported.contains("- **Status:** reported\n    - **Age:** since attached "), "{reported}");
         assert!(!reported.contains("- **Running**"), "{reported}");
     }
 

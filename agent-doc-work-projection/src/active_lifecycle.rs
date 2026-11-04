@@ -230,19 +230,6 @@ pub fn read(file: &Path) -> ActiveLifecycleRead {
     }
 }
 
-/// Coarse, human age: `<1h`, `5h`, `3d`.
-pub fn format_age(seconds: u64) -> String {
-    const HOUR: u64 = 3600;
-    const DAY: u64 = 24 * HOUR;
-    if seconds < HOUR {
-        "<1h".to_string()
-    } else if seconds < 2 * DAY {
-        format!("{}h", seconds / HOUR)
-    } else {
-        format!("{}d", seconds / DAY)
-    }
-}
-
 /// UTC `YYYY-MM-DDTHH:MMZ` for a unix timestamp.
 pub fn format_utc_minute(secs: u64) -> String {
     let days = (secs / 86_400) as i64;
@@ -261,18 +248,26 @@ pub fn format_utc_minute(secs: u64) -> String {
     format!("{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}Z")
 }
 
-/// The `- **Age:**` child of a needs-integration entry.
-pub fn age_line(attempt: &ActiveAttempt, now_secs: u64) -> String {
+/// The `- **Age:**` child of a needs-integration entry: the fixed time the
+/// debt started, never a clock-relative age (`#activeagenosteer`).
+///
+/// A relative value (`7h`) re-projected as time passed, so every reconcile
+/// rewrote the row with no durable change, and the coordinator received the
+/// rewrite as an operator-steering diff ("only age stamps on two reported
+/// rows", haiven-dev sdk-dev.md, 2026-11-04). `render(durable state)` must be
+/// a function of durable state alone (`#managedlistnodrift`).
+pub fn age_line(attempt: &ActiveAttempt) -> String {
     format!(
-        "**Age:** {} (since {} {})",
-        format_age(now_secs.saturating_sub(attempt.since_secs)),
+        "**Age:** since {} {}",
         attempt.since_source,
         format_utc_minute(attempt.since_secs)
     )
 }
 
-/// Strip the clock-dependent age value from an `agent:active` body so an
-/// invariant check compares only what durable state determines.
+/// Normalize an `agent:active` body's age lines to the fixed
+/// `**Age:** since <record> <UTC minute>` form, so an invariant check treats a
+/// legacy clock-relative line (`**Age:** 7h (since ...)`) as equal to its
+/// fixed rendering. The next reconcile rewrites the legacy line.
 pub fn without_age_values(body: &str) -> String {
     body.lines()
         .map(|line| {
@@ -282,9 +277,9 @@ pub fn without_age_values(body: &str) -> String {
                     let indent = &line[..line.len() - trimmed.len()];
                     let since = rest
                         .split_once(" (")
-                        .map(|(_, since)| since)
+                        .map(|(_, since)| since.strip_suffix(')').unwrap_or(since))
                         .unwrap_or(rest);
-                    format!("{indent}- **Age:** _ ({since}")
+                    format!("{indent}- **Age:** {since}")
                 }
                 None => line.to_string(),
             }
@@ -298,16 +293,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn ages_and_timestamps_are_coarse_and_stable() {
-        assert_eq!(format_age(59), "<1h");
-        assert_eq!(format_age(5 * 3600 + 7), "5h");
-        assert_eq!(format_age(47 * 3600), "47h");
-        assert_eq!(format_age(3 * 86_400), "3d");
+    fn age_lines_are_fixed_timestamps_and_legacy_lines_normalize() {
         assert_eq!(format_utc_minute(0), "1970-01-01T00:00Z");
         assert_eq!(format_utc_minute(1_793_765_160), "2026-11-04T04:06Z");
         assert_eq!(
             without_age_values("    - **Age:** 5h (since released 2026-11-04T02:06Z)\n- x"),
-            "    - **Age:** _ (since released 2026-11-04T02:06Z)\n- x"
+            "    - **Age:** since released 2026-11-04T02:06Z\n- x"
+        );
+        assert_eq!(
+            without_age_values("    - **Age:** since released 2026-11-04T02:06Z"),
+            "    - **Age:** since released 2026-11-04T02:06Z"
         );
     }
 }

@@ -433,9 +433,16 @@ and the pending granular-flags-only rule. This runbook carries the rest.
      that state as done. For repository work, record the verified edge before
      closeout with `agent-doc queue lineage-record <FILE> --item <ITEM>
      --generation <N> --event integrated --repo <REPO> --source-sha <WORKER_SHA>
-     --integration-sha <SINK_SHA> --integration-ref <INTEGRATION_OR_PR_REF>
+     --integration-sha <SINK_SHA> --sink-ref <INTEGRATION_OR_PR_REF>
      --method <merge|fast-forward|cherry-pick|rebase>`; the command verifies the
      mapping and that `<SINK_SHA>` remains reachable from the named sink ref.
+     You do not have to derive these closeouts by hand (`#reportedcloseout`):
+     `agent-doc queue claims <FILE>` gives every reported attempt a
+     `reported_closeout` (the exact ordered verify / lineage-record / consume
+     commands for its recorded facts, or the missing fact it needs) whose first
+     step is its `next_action_argv`, and `agent-doc plan <FILE>` lists those
+     steps first in `required_commands` and in the `phase.reported_closeout`
+     operation phase. Run them before any new claim or spawn.
      `other` is not a mechanically verifiable integration method. For an
      id-backed row whose tracked item must remain open, run
      `agent-doc queue consume <FILE> --ack-id <id>` immediately.

@@ -144,16 +144,16 @@ fn active_ghosts_come_from_markers_and_vanish_when_rendered_from_durable_state()
             "- **Needs integration** (4)\n",
             "  - `[#q-unity1]` — #adversarial-pr [#q-unity1]\n",
             "    - **Status:** reported\n",
-            "    - **Age:** 29h (since started 2026-11-02T22:01Z)\n",
+            "    - **Age:** since started 2026-11-02T22:01Z\n",
             "  - `[#q-rebase9]` — #rebase [#q-rebase9]\n",
             "    - **Status:** reported (integrated; closeout pending)\n",
-            "    - **Age:** 5h (since integrated 2026-11-03T23:00Z)\n",
+            "    - **Age:** since integrated 2026-11-03T23:00Z\n",
             "  - `queue-free:0091285b994a` — What are the next steps for the docs websites?\n",
             "    - **Status:** reported\n",
-            "    - **Age:** 1h (since started 2026-11-04T02:01Z)\n",
+            "    - **Age:** since started 2026-11-04T02:01Z\n",
             "  - `[#q-questions]` — Draft a consolidated list of open questions in a md file.\n",
             "    - **Status:** reported\n",
-            "    - **Age:** 3d (since started 2026-10-31T04:01Z)\n",
+            "    - **Age:** since started 2026-10-31T04:01Z\n",
             "    - **Sources:** backlog (open)\n",
         ),
         "before:\n{before}\nafter:\n{after}"
@@ -163,6 +163,32 @@ fn active_ghosts_come_from_markers_and_vanish_when_rendered_from_durable_state()
         agent_doc_work_projection::reconcile_managed_active_items_with(&after_doc, &durable)
             .unwrap()
             .is_none()
+    );
+}
+
+/// `#activeagenosteer`: the passage of time alone never re-projects
+/// `agent:active`. A clock-relative `**Age:** 7h` rewrote the reported rows
+/// every reconcile, and the coordinator received that rewrite as an
+/// operator-steering diff ("only age stamps on two reported rows",
+/// 2026-11-04). The same durable state rendered 50 minutes later (inside every
+/// claim's expiry, across the old `<1h`→`1h` and `29h`→`30h` boundaries) is
+/// byte-identical.
+#[test]
+fn active_render_is_independent_of_the_clock_without_a_state_change() {
+    let durable = lifecycle(FIXTURE);
+    let rendered = agent_doc_work_projection::reconcile_managed_active_items_from_read(
+        FIXTURE,
+        &agent_doc_work_projection::active_lifecycle::ActiveLifecycleRead::Loaded(durable.clone()),
+    )
+    .unwrap()
+    .expect("the ghosted list is drift");
+    let mut later = durable;
+    later.now_secs += 50 * 60;
+    assert!(
+        agent_doc_work_projection::reconcile_managed_active_items_with(&rendered, &later)
+            .unwrap()
+            .is_none(),
+        "a later clock with unchanged durable state must not rewrite agent:active"
     );
 }
 

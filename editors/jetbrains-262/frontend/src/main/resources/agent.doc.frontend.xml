@@ -8,6 +8,10 @@
     <extensions defaultExtensionNs="com.intellij">
         <postStartupActivity implementation="com.github.btakita.agentdoc.split.frontend.SurfaceSnapshotFrontendActivity"/>
         <fileEditorProvider implementation="com.github.btakita.agentdoc.split.frontend.DetachedPlaceholderFileEditorProvider"/>
+        <!-- GH #391: soft wraps are laid out in this process, so the Markdown wrap fix lives here.
+             The language is named by id; this module needs no Markdown plugin dependency. -->
+        <lang.lineWrapStrategy language="Markdown" order="first"
+                               implementationClass="com.github.btakita.agentdoc.split.frontend.MarkdownBracketWrapStrategy"/>
     </extensions>
 
     <!-- UpdateSettings is process-local. Keep this action in the JetBrains Client process so a

@@ -785,12 +785,16 @@ fn strip_new_response_sections(baseline: &str, current: &str) -> String {
         // NEW response heading follows it: hold the echo and the lines after
         // it, drop them at that heading, and release them unchanged at a
         // boundary, the component end, or EOF.
-        if !skipping
-            && !heading
-            && prelude.is_none()
-            && is_queue_prompt_echo_line(trimmed)
-            && !baseline_lines.contains(trimmed)
-        {
+        //
+        // `#committedresponseown`: whether the echo text already occurs in
+        // the baseline proves nothing. The Waiting-on-you echo is
+        // byte-identical in every response that reports the group, so from
+        // the second such response on its echo "was in the baseline" and was
+        // never held: after every closeout the hook delivered it as
+        // `source=exchange change=added dispatch=subagent`. The NEW heading
+        // that must follow is the proof; a baseline echo above its own
+        // baseline heading is released unchanged.
+        if !skipping && !heading && prelude.is_none() && is_queue_prompt_echo_line(trimmed) {
             prelude = Some(String::new());
         }
         if heading {
@@ -2914,6 +2918,45 @@ mod tests {
         );
     }
 
+    /// The live mirror shape (tasks/agent-doc/agent-doc-bugs.md, 2026-11-04):
+    /// a backlog→queue mirror writes `- ### 📥 do [#id]` heading rows, not
+    /// bare `- do [#id]`. A row the binary mirrored this cycle is bookkeeping
+    /// in that shape too; an operator-added row in the same shape is not.
+    #[test]
+    fn binary_mirrored_heading_rows_do_not_surface() {
+        let owned = BTreeSet::from(["mirrored1".to_string(), "mirrored2".to_string()]);
+        let baseline = doc("- ### 🚧 do [#current]\n", EX);
+        let current = doc(
+            "- ### 🚧 do [#current]\n- ### 📥 do [#mirrored1]\n- ### 📥 do [#mirrored2]\n",
+            EX,
+        );
+        for mode in [ObserveMode::InTurn, ObserveMode::Boundary] {
+            let obs = observe_with_mode(
+                &seeded(&baseline, Some("do [#current]")),
+                &current,
+                &quiet_ctx(&owned),
+                mode,
+            );
+            assert!(obs.ready.is_empty(), "{mode:?}: {:?}", obs.ready);
+        }
+        let operator = doc(
+            "- ### 🚧 do [#current]\n- ### 📥 do [#mirrored1]\n- ### do [#operatoradded]\n",
+            EX,
+        );
+        let obs = observe_with_mode(
+            &seeded(&baseline, Some("do [#current]")),
+            &operator,
+            &quiet_ctx(&owned),
+            ObserveMode::Boundary,
+        );
+        assert_eq!(obs.ready.len(), 1, "{:?}", obs.ready);
+        assert!(
+            obs.ready[0].verbatim.contains("operatoradded"),
+            "{:?}",
+            obs.ready
+        );
+    }
+
     #[test]
     fn watermark_prevents_reinjection() {
         let owned = BTreeSet::new();
@@ -4141,6 +4184,54 @@ mod tests {
         assert!(!obs.ready[0].verbatim.contains("Deferred"));
     }
 
+    /// `#committedresponseown`: the Waiting-on-you echo is byte-identical in
+    /// every response that reports the group, so a new response's echo line
+    /// already exists in the baseline (an earlier response carried it). That
+    /// repeated echo is still the new response's own prelude: it is never
+    /// operator steering, in turn or at the boundary after closeout. An
+    /// operator prompt typed after the new response still is.
+    #[test]
+    fn repeated_response_echo_prelude_is_never_operator_steering() {
+        let owned = BTreeSet::new();
+        let echo = "> **Queue prompt:** Waiting on you — answer by adding a child line under an item <!-- agent-doc:waiting-on-you -->\n";
+        let earlier = format!(
+            "{EX}{echo}\n**Deferred:** this group waits on the operator answers.\n\n### Re: Queue status — first\n\nNothing new.\n"
+        );
+        let baseline = doc("", &earlier);
+        let wm = seeded(&baseline, None);
+        for later in [
+            // Echo directly above the heading.
+            format!("{echo}\n### Re: Queue status — second\n\nStill nothing new.\n"),
+            // Echo, a Deferred paragraph, then the heading.
+            format!(
+                "{echo}\n**Deferred:** the group still waits on the operator answers.\n\n### Re: Queue status — second\n\nStill nothing new.\n"
+            ),
+        ] {
+            let current = doc("", &format!("{earlier}{later}"));
+            for mode in [ObserveMode::InTurn, ObserveMode::Boundary] {
+                let obs = observe_with_mode(&wm, &current, &quiet_ctx(&owned), mode);
+                assert!(obs.ready.is_empty(), "{mode:?}: {:?}", obs.ready);
+                assert_eq!(obs.pending, 0, "{mode:?}");
+            }
+            let with_operator = format!(
+                "{}<!-- agent:boundary:abc -->\nplease also bump the version\n",
+                current.trim_end_matches("<!-- /agent:exchange -->\n")
+            ) + "<!-- /agent:exchange -->\n";
+            for mode in [ObserveMode::InTurn, ObserveMode::Boundary] {
+                let obs = observe_with_mode(&wm, &with_operator, &quiet_ctx(&owned), mode);
+                assert_eq!(obs.ready.len(), 1, "{mode:?}: {:?}", obs.ready);
+                assert!(
+                    obs.ready[0]
+                        .verbatim
+                        .contains("please also bump the version"),
+                    "{mode:?}: {:?}",
+                    obs.ready
+                );
+                assert!(!obs.ready[0].verbatim.contains("Queue prompt"), "{mode:?}");
+            }
+        }
+    }
+
     /// `#claimedsteerwake`: an explicit send bypasses the typing gate and
     /// marks every item final.
     #[test]
@@ -4215,6 +4306,95 @@ mod tests {
                 assert!(obs.ready.is_empty(), "{mode:?}: {:?}", obs.ready);
             }
         }
+    }
+
+    /// `#steeringposttool`: the live waiting-group shapes from
+    /// tasks/agent-doc/agent-doc-bugs.md (2026-11-04), in an `agent:run …
+    /// subagents` component. A waiting item is executable once the operator
+    /// has replied under it, so each head here carries a standing operator
+    /// reply and stays the same selectable row on both sides. Every transition
+    /// the closeout projection makes on such a head (the `🙋` gate appearing
+    /// or clearing with the roll-up, the state moving into the token, the
+    /// counts changing, a `**Next:**` row being added or rewritten) is
+    /// binary-owned and never steering. A new operator reply still is.
+    #[test]
+    fn live_waiting_head_projection_transitions_are_not_steering() {
+        let owned = BTreeSet::new();
+        let run_doc = |rows: &str| {
+            format!(
+                "{FM}# Session\n\n## Run <!-- agent:run id=\"main\" subagents priority go -->\n- ### Waiting on you — answer by adding a child line under an item <!-- agent-doc:waiting-on-you -->\n{rows}<!-- /agent:run -->\n\n<!-- agent:exchange -->\n{EX}<!-- /agent:exchange -->\n"
+            )
+        };
+        let sentinel = " <!-- agent-doc:waiting-item -->";
+        let free = "Run the sample smoke on a real workspace, then update the status cell.";
+        let tracked = "[#subagent-operator-request-sample-workspace] Provide a real workspace context for #samplesmoke";
+        let response =
+            "    - **Response:** Provide a real workspace. ▫️ <!-- agent-doc:reply -->\n";
+        let reply = "    - moot or still needed?\n";
+        let next_you = "    - **Next:** you — reply under this item with the decision or result it asks for (evidence: no answer or attempt in its packet yet) ▫️ <!-- agent-doc:reply -->\n";
+        let next_agent = "    - **Next:** agent — pick up your reply “moot or still needed?” and attempt `#subagent-operator-request-sample-workspace` (evidence: your reply) ▫️ <!-- agent-doc:reply -->\n";
+        let head = |prefix: &str, body: &str| format!("  - {prefix}{body}{sentinel}\n");
+        let item = |prefix: &str, body: &str, next: &str| {
+            format!("{}{next}{response}{reply}", head(prefix, body))
+        };
+        let cases: Vec<(&str, String, String)> = vec![
+            (
+                "free-text head gains gate, token and Next row",
+                item("🙋 ", free, ""),
+                item("🙋 ⟦you: 1 · agent: 0 · done: 0⟧ ", free, next_you),
+            ),
+            (
+                "free-text head: gate clears, state moves into the token",
+                item("🙋 ⟦you: 1 · agent: 0 · done: 0⟧ ", free, next_you),
+                item("⟦📥 you: 0 · agent: 1 · done: 1⟧ ", free, next_agent),
+            ),
+            (
+                "free-text head: bare head gains a stateful token",
+                item("", free, ""),
+                item("⟦☑️ you: 0 · agent: 1 · done: 1⟧ ", free, next_agent),
+            ),
+            (
+                "tracked head gains a stateful token and Next row",
+                item("", tracked, ""),
+                item("⟦📥 you: 0 · agent: 1 · done: 1⟧ ", tracked, next_agent),
+            ),
+            (
+                "tracked head: counts change and the Next row is rewritten",
+                item("⟦📥 you: 1 · agent: 0 · done: 0⟧ ", tracked, next_you),
+                item("⟦📥 you: 0 · agent: 1 · done: 1⟧ ", tracked, next_agent),
+            ),
+        ];
+        for (label, before, after) in &cases {
+            let baseline = run_doc(before);
+            let current = run_doc(after);
+            let watermark = seeded(&baseline, None);
+            // Non-vacuity: the head is a live executable row on both sides,
+            // so the projection change really reaches queue alignment.
+            assert_eq!(watermark.acknowledged_queue.len(), 1, "{label}");
+            assert_eq!(executable_queue_items(&current).len(), 1, "{label}");
+            for mode in [ObserveMode::Boundary, ObserveMode::InTurn] {
+                let obs = observe_with_mode(&watermark, &current, &quiet_ctx(&owned), mode);
+                assert!(obs.ready.is_empty(), "{label} / {mode:?}: {:?}", obs.ready);
+                assert_eq!(obs.pending, 0, "{label} / {mode:?}");
+            }
+        }
+        // Positive control: the operator's first reply under a projected head
+        // selects it (`#waitingselectboundary`).
+        let unanswered = format!(
+            "{}{next_you}{response}",
+            head("🙋 ⟦you: 1 · agent: 0 · done: 0⟧ ", free)
+        );
+        let baseline = run_doc(&unanswered);
+        let replied = run_doc(&format!("{unanswered}{reply}"));
+        let obs = observe_with_mode(
+            &seeded(&baseline, None),
+            &replied,
+            &quiet_ctx(&owned),
+            ObserveMode::Boundary,
+        );
+        assert_eq!(obs.ready.len(), 1, "{:?}", obs.ready);
+        assert_eq!(obs.ready[0].source, SteeringSource::Queue);
+        assert!(obs.ready[0].verbatim.contains(free), "{:?}", obs.ready);
     }
 
     /// `#steerworks` item 3 / `#claimedsteerwake`: an edit of a claimed head is

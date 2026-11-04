@@ -2770,6 +2770,93 @@ mod tests {
         assert_eq!(hook.items[0].verbatim, operator_prompt);
     }
 
+    /// `#committedresponseown` (2026-11-04, tasks/agent-doc/agent-doc-bugs.md):
+    /// after every closeout the hook delivered
+    /// `[steering 1/1] source=exchange change=added verbatim: > **Queue
+    /// prompt:** Waiting on you — …`, the committed response's own echo of the
+    /// Waiting group. That echo is byte-identical in every response reporting
+    /// the group, so an earlier response already holds it. Neither the hook,
+    /// the closeout report, nor the stateless pending view may surface it; an
+    /// operator prompt typed after the closeout still surfaces.
+    #[test]
+    fn committed_response_repeated_waiting_echo_is_not_operator_steering() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        let echo = "> **Queue prompt:** Waiting on you — answer by adding a child line under an item <!-- agent-doc:waiting-on-you -->\n";
+        let baseline = format!(
+            "---\nagent_doc_steering_debounce_ms: 0\n---\n# S\n\n<!-- agent:exchange subagents -->\nOperator request.\n\n{echo}\n**Deferred:** waits on the operator answers.\n\n### Re: Queue status — first\n\nNothing new.\n<!-- /agent:exchange -->\n"
+        );
+        let body = format!(
+            "{echo}\n**Deferred:** still waits on the operator answers.\n\n### Re: Queue status — second\n\nStill nothing new.\n"
+        );
+        let response =
+            format!("<!-- patch:exchange mode=\"append\" -->\n{body}<!-- /patch:exchange -->\n");
+        let applied = baseline.replace(
+            "<!-- /agent:exchange -->",
+            &format!("\n{body}<!-- /agent:exchange -->"),
+        );
+        std::fs::write(&file, &baseline).unwrap();
+        let cycle =
+            agent_doc_cycle_state_io::start_preflight(&file, Some(&baseline), Some(&baseline))
+                .unwrap();
+        seed_for_cycle(&file, &cycle.cycle_id, &baseline, None, Vec::new()).unwrap();
+        std::fs::write(&file, &applied).unwrap();
+        // In turn: the response text is in the document while the cycle is
+        // still open and uncaptured. Only the new-response strip stands
+        // between the echo and the hook here; the boundary-only
+        // capture-lineage subtraction does not run.
+        let in_turn = observe(&file, CONSUMER_HOOK, false)
+            .unwrap()
+            .expect("an open cycle reports in turn");
+        assert!(!in_turn.after_close, "{in_turn:?}");
+        assert!(
+            in_turn.items.is_empty(),
+            "in turn, the response's own Waiting echo surfaced as operator steering: {in_turn:?}"
+        );
+        capture_response_body(&file, &response, &baseline);
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &file,
+            &applied,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        close_cycle(&file, &applied);
+
+        assert!(pending_steering_items(&file, &applied).is_empty());
+        let hook = observe(&file, CONSUMER_HOOK, true).unwrap();
+        assert!(
+            hook.as_ref().is_none_or(|report| report.items.is_empty()),
+            "the response's own Waiting echo surfaced as operator steering: {hook:?}"
+        );
+        let mut out = Vec::new();
+        emit_closeout_steering(&file, &mut out);
+        assert!(out.is_empty(), "{}", String::from_utf8_lossy(&out));
+        assert!(
+            crate::absorbed_steering::unanswered_prompts(&file)
+                .unwrap()
+                .is_empty(),
+            "the response's own echo must not enter the absorbed-steering ledger"
+        );
+
+        let operator_prompt = "Also check the release notes.";
+        std::fs::write(
+            &file,
+            applied.replace(
+                "<!-- /agent:exchange -->",
+                &format!(
+                    "<!-- agent:boundary:waitecho -->\n{operator_prompt}\n<!-- /agent:exchange -->"
+                ),
+            ),
+        )
+        .unwrap();
+        let hook = observe(&file, CONSUMER_HOOK, true)
+            .unwrap()
+            .expect("operator prompt should produce a report");
+        assert_eq!(hook.items.len(), 1, "{hook:?}");
+        assert_eq!(hook.items[0].verbatim, operator_prompt);
+    }
+
     #[test]
     fn captured_response_filter_preserves_adjacent_operator_edit() {
         let dir = tempfile::tempdir().unwrap();

@@ -2165,6 +2165,11 @@ pub(crate) enum ClaudeHookStatus {
     /// Not an agent-doc project (no `.agent-doc/` and no agent-doc hooks in an
     /// existing settings file), so nothing is created or touched.
     NotAgentDocProject,
+    /// An agent-doc project (`.agent-doc/` state) whose settings wire no
+    /// agent-doc hook yet, and the [`HookInstallPolicy`] does not allow the
+    /// first install: no session document lives there. Nothing is created;
+    /// `agent-doc skill hooks --fix --root DIR` installs anyway.
+    NoSessionDocument,
     /// The directory resolves to the user layer (`~/.claude`), which gets only
     /// the `PreToolUse` guard (`#tmuxguardclaudeuser`), never the project set.
     UserLayer,
@@ -2233,19 +2238,123 @@ fn same_dir(a: &Path, b: &Path) -> bool {
         )
 }
 
+/// When a reconcile may make the FIRST agent-doc install into a project's
+/// settings: create a missing `.claude/settings.json`, or add hooks to one that
+/// wires no agent-doc hook yet. Repairing a file that already wires an
+/// agent-doc hook is always allowed.
+///
+/// `.agent-doc/` alone is not enough: agent-doc leaves that state directory in
+/// every repo a controller, a supervisor, or a test fixture ever touched, and a
+/// `make install` fan-out that treated it as opt-in created untracked settings
+/// files in ~18 submodules that hold no session at all.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum HookInstallPolicy<'a> {
+    /// An explicit operator request (`skill hooks --fix --root DIR`): any
+    /// agent-doc project.
+    Explicit,
+    /// A document-driven path (preflight admission, `agent-doc start`): only
+    /// when this session document lives inside the directory.
+    SessionDocument(&'a Path),
+    /// The known-project fan-out (`--known-projects`, `make install`,
+    /// `agent-doc upgrade`): only when a bounded scan finds a session document.
+    ScanForSessionDocument,
+}
+
+/// Whether `document` is an opted-in agent-doc session document (agent-doc
+/// frontmatter, a `[documents] include` match, or the project's
+/// `auto_session_for_all_md` escape hatch).
+fn is_session_document_file(document: &Path) -> bool {
+    std::fs::read_to_string(document).is_ok_and(|content| {
+        agent_doc_frontmatter_io::session::is_agent_doc_document_for_file(&content, document)
+    })
+}
+
+/// Upper bound on directory entries the session-document scan visits per root.
+const SESSION_DOCUMENT_SCAN_BUDGET: usize = 20_000;
+
+/// Whether `root` holds at least one session document, by a bounded scan that
+/// skips hidden and underscore directories, build output, and nested git
+/// repositories (each is its own project).
+pub(crate) fn root_holds_session_document(root: &Path) -> bool {
+    const SKIP: [&str; 6] = ["node_modules", "target", "dist", "build", "vendor", "tmp"];
+    let config = agent_doc_project_config_io::load_project_for_root(root);
+    let mut budget = SESSION_DOCUMENT_SCAN_BUDGET;
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            if budget == 0 {
+                return false;
+            }
+            budget -= 1;
+            let path = entry.path();
+            let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+                continue;
+            };
+            let Ok(kind) = entry.file_type() else {
+                continue;
+            };
+            if kind.is_dir() {
+                if name.starts_with('.')
+                    || name.starts_with('_')
+                    || SKIP.contains(&name)
+                    || path.join(".git").exists()
+                {
+                    continue;
+                }
+                stack.push(path);
+            } else if kind.is_file() && name.ends_with(".md") && !name.ends_with(".done.md") {
+                let Ok(content) = std::fs::read_to_string(&path) else {
+                    continue;
+                };
+                let rel = path
+                    .strip_prefix(root)
+                    .unwrap_or(&path)
+                    .to_string_lossy()
+                    .replace('\\', "/");
+                if agent_doc_frontmatter::project_config::is_agent_doc_document(
+                    &rel, &content, &config,
+                ) {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
+fn first_install_allowed(project_dir: &Path, policy: HookInstallPolicy<'_>) -> bool {
+    match policy {
+        HookInstallPolicy::Explicit => true,
+        HookInstallPolicy::SessionDocument(document) => {
+            let document = document
+                .canonicalize()
+                .unwrap_or_else(|_| document.to_path_buf());
+            let dir = project_dir
+                .canonicalize()
+                .unwrap_or_else(|_| project_dir.to_path_buf());
+            document.starts_with(&dir) && is_session_document_file(&document)
+        }
+        HookInstallPolicy::ScanForSessionDocument => root_holds_session_document(project_dir),
+    }
+}
+
 /// Ensure the required agent-doc hook set for one project directory
 /// (`<project_dir>/.claude/settings.json`), the `#nestedhookdrift` reconcile.
 ///
-/// The file is created only for a real agent-doc project (`.agent-doc/` in
-/// `project_dir`). An existing file is reconciled when the directory is an
-/// agent-doc project or the file already wires an agent-doc hook (a checkout
-/// written by an older binary). The user layer and, in a test process, any path
-/// outside the runtime scope are never written. `write = false` is the
-/// read-only drift check.
+/// A file that already wires an agent-doc hook is repaired. The first install
+/// (a missing file, or one wiring no agent-doc hook) needs an agent-doc project
+/// (`.agent-doc/` in `project_dir`) AND `policy`'s consent, so a bare state
+/// directory never grows a settings file. The user layer and, in a test
+/// process, any path outside the runtime scope are never written.
+/// `write = false` is the read-only drift check.
 pub(crate) fn ensure_claude_project_hooks(
     project_dir: &Path,
     preflight_timeout_secs: u64,
     write: bool,
+    policy: HookInstallPolicy<'_>,
 ) -> Result<ClaudeHookReport> {
     let settings = project_dir.join(".claude").join("settings.json");
     let report = |created, status| ClaudeHookReport {
@@ -2266,13 +2375,16 @@ pub(crate) fn ensure_claude_project_hooks(
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => None,
         Err(err) => return Err(err).with_context(|| format!("read {}", settings.display())),
     };
-    let agent_doc_project = project_dir.join(".agent-doc").is_dir();
-    let eligible = agent_doc_project
-        || existing
-            .as_deref()
-            .is_some_and(settings_reference_agent_doc_hooks);
-    if !eligible {
-        return Ok(report(false, ClaudeHookStatus::NotAgentDocProject));
+    let wires_agent_doc = existing
+        .as_deref()
+        .is_some_and(settings_reference_agent_doc_hooks);
+    if !wires_agent_doc {
+        if !project_dir.join(".agent-doc").is_dir() {
+            return Ok(report(false, ClaudeHookStatus::NotAgentDocProject));
+        }
+        if !first_install_allowed(project_dir, policy) {
+            return Ok(report(false, ClaudeHookStatus::NoSessionDocument));
+        }
     }
     if write && !agent_doc_fs::path_in_test_runtime_scope(&settings) {
         return Ok(report(false, ClaudeHookStatus::OutOfTestScope));
@@ -2282,6 +2394,58 @@ pub(crate) fn ensure_claude_project_hooks(
         return Ok(report(false, ClaudeHookStatus::Current));
     }
     Ok(report(existing.is_none(), ClaudeHookStatus::Drift(changes)))
+}
+
+/// Why `dir` is not a project root a settings file may be written to, if it is
+/// not: a path inside agent-doc or harness state (`.agent-doc/`, `.claude/`,
+/// `.git/`). The controller registry is the process table, so a stray
+/// controller launched for `<root>/.agent-doc` or a skill folder names exactly
+/// such a "root".
+pub(crate) fn state_dir_skip_reason(dir: &Path) -> Option<String> {
+    dir.components().find_map(|component| {
+        let name = component.as_os_str().to_str()?;
+        matches!(name, ".agent-doc" | ".claude" | ".git")
+            .then(|| format!("inside a `{name}` state directory"))
+    })
+}
+
+/// Why a known-project root (controller registry or superproject fan-out) is
+/// skipped, if it is: [`state_dir_skip_reason`], a temp / test-fixture
+/// directory (under one of `temp_roots`, or a `.tmp*` tempfile component — a
+/// leaked fixture controller), or not a git working-tree root.
+pub(crate) fn known_root_skip_reason(dir: &Path, temp_roots: &[PathBuf]) -> Option<String> {
+    if let Some(reason) = state_dir_skip_reason(dir) {
+        return Some(reason);
+    }
+    let canonical = dir.canonicalize().unwrap_or_else(|_| dir.to_path_buf());
+    let in_temp_root = temp_roots.iter().any(|temp| {
+        let temp_canonical = temp.canonicalize().unwrap_or_else(|_| temp.clone());
+        dir.starts_with(temp) || canonical.starts_with(&temp_canonical)
+    });
+    let tempfile_component = canonical.components().any(|component| {
+        component
+            .as_os_str()
+            .to_str()
+            .is_some_and(|name| name.starts_with(".tmp"))
+    });
+    if in_temp_root || tempfile_component {
+        return Some("a temp / test-fixture directory".to_string());
+    }
+    if !canonical.join(".git").exists() {
+        return Some("not a git working-tree root".to_string());
+    }
+    None
+}
+
+/// The temp roots a known-project root must not live under.
+fn system_temp_roots() -> Vec<PathBuf> {
+    let mut roots = vec![
+        std::env::temp_dir(),
+        PathBuf::from("/tmp"),
+        PathBuf::from("/var/tmp"),
+    ];
+    roots.dedup();
+    roots
 }
 
 /// The git working-tree root that holds `path`: the nearest ancestor with a
@@ -2316,6 +2480,14 @@ pub(crate) fn git_worktree_root_of(path: &Path) -> Option<PathBuf> {
 pub(crate) fn document_hook_project_dirs(document: &Path) -> Vec<PathBuf> {
     let mut dirs: Vec<PathBuf> = Vec::new();
     let mut push = |dir: PathBuf| {
+        if let Some(reason) = state_dir_skip_reason(&dir) {
+            eprintln!(
+                "[agent-doc] hooks: skipping {} for {}: {reason}",
+                dir.display(),
+                document.display()
+            );
+            return;
+        }
         if !dirs.iter().any(|known| same_dir(known, &dir)) {
             dirs.push(dir);
         }
@@ -2334,7 +2506,12 @@ pub(crate) fn document_hook_project_dirs(document: &Path) -> Vec<PathBuf> {
 /// reported, never propagated: a settings file must not block a session.
 pub(crate) fn reconcile_document_project_hooks(document: &Path, origin: &str) {
     for dir in document_hook_project_dirs(document) {
-        match ensure_claude_project_hooks(&dir, PREFLIGHT_HOOK_TIMEOUT_SECS, true) {
+        match ensure_claude_project_hooks(
+            &dir,
+            PREFLIGHT_HOOK_TIMEOUT_SECS,
+            true,
+            HookInstallPolicy::SessionDocument(document),
+        ) {
             Ok(report) => report.log_applied(origin),
             Err(err) => eprintln!(
                 "[agent-doc] {origin}: could not reconcile agent-doc hooks in {}: {err:#}",
@@ -2348,22 +2525,42 @@ pub(crate) fn reconcile_document_project_hooks(document: &Path, origin: &str) {
 /// project controller (the controller registry is the process table) plus the
 /// `.agent-doc` roots of the current superproject and its submodules. Unknown
 /// checkouts (no live controller, outside this superproject) are not guessed at;
-/// `--root` names them explicitly.
+/// `--root` names them explicitly. A candidate that is not a git working-tree
+/// root, or lives inside a state directory or a temp / test-fixture directory,
+/// is skipped and logged ([`known_root_skip_reason`]).
 pub(crate) fn known_hook_project_dirs() -> Vec<PathBuf> {
-    let mut dirs: Vec<PathBuf> = Vec::new();
-    let mut push = |dir: PathBuf| {
-        if !dirs.iter().any(|known| same_dir(known, &dir)) {
-            dirs.push(dir);
-        }
-    };
+    let mut candidates: Vec<PathBuf> = Vec::new();
     if let Ok(cwd) = std::env::current_dir() {
         let base = agent_doc_fs::find_project_root(&cwd).unwrap_or(cwd);
         for project in crate::fleet_board_cmd::project_roots(&base, false) {
-            push(project.root);
+            candidates.push(project.root);
         }
     }
-    for root in agent_doc_controller_io::process::controller_project_roots(std::process::id()) {
-        push(root);
+    candidates.extend(agent_doc_controller_io::process::controller_project_roots(
+        std::process::id(),
+    ));
+    filter_known_hook_project_dirs(candidates, &system_temp_roots())
+}
+
+/// Drop and log every known-root candidate [`known_root_skip_reason`] rejects,
+/// and de-duplicate the rest.
+pub(crate) fn filter_known_hook_project_dirs(
+    candidates: impl IntoIterator<Item = PathBuf>,
+    temp_roots: &[PathBuf],
+) -> Vec<PathBuf> {
+    let mut dirs: Vec<PathBuf> = Vec::new();
+    for dir in candidates {
+        if dirs.iter().any(|known| same_dir(known, &dir)) {
+            continue;
+        }
+        if let Some(reason) = known_root_skip_reason(&dir, temp_roots) {
+            eprintln!(
+                "[agent-doc] skill hooks: skipping known root {}: {reason}",
+                dir.display()
+            );
+            continue;
+        }
+        dirs.push(dir);
     }
     dirs
 }
@@ -2375,30 +2572,37 @@ pub(crate) fn known_hook_project_dirs() -> Vec<PathBuf> {
 /// project names its exact fix command. A per-project error is reported and the
 /// remaining projects still run; any error makes the command fail.
 pub fn run_hooks_command(roots: &[PathBuf], known_projects: bool, fix: bool) -> Result<()> {
-    let mut dirs: Vec<PathBuf> = Vec::new();
-    let mut push = |dir: PathBuf| {
-        if !dirs.iter().any(|known| same_dir(known, &dir)) {
-            dirs.push(dir);
+    // An explicit `--root` is the operator's consent to a first install; every
+    // discovered directory needs a session document first.
+    let mut dirs: Vec<(PathBuf, bool)> = Vec::new();
+    let mut push = |dir: PathBuf, explicit: bool| {
+        if !dirs.iter().any(|(known, _)| same_dir(known, &dir)) {
+            dirs.push((dir, explicit));
         }
     };
     for root in roots {
-        push(root.canonicalize().unwrap_or_else(|_| root.clone()));
+        push(root.canonicalize().unwrap_or_else(|_| root.clone()), true);
     }
     if known_projects {
         for dir in known_hook_project_dirs() {
-            push(dir);
+            push(dir, false);
         }
     }
     if roots.is_empty() && !known_projects {
         let cwd = std::env::current_dir().context("read current directory")?;
         for dir in document_hook_project_dirs(&cwd) {
-            push(dir);
+            push(dir, false);
         }
     }
     let mut drifted = 0usize;
     let mut errors = 0usize;
-    for dir in &dirs {
-        match ensure_claude_project_hooks(dir, PREFLIGHT_HOOK_TIMEOUT_SECS, fix) {
+    for (dir, explicit) in &dirs {
+        let policy = if *explicit {
+            HookInstallPolicy::Explicit
+        } else {
+            HookInstallPolicy::ScanForSessionDocument
+        };
+        match ensure_claude_project_hooks(dir, PREFLIGHT_HOOK_TIMEOUT_SECS, fix, policy) {
             Ok(report) => match &report.status {
                 ClaudeHookStatus::Current => {
                     println!("ok     {}", report.settings.display());
@@ -2442,6 +2646,12 @@ pub fn run_hooks_command(roots: &[PathBuf], known_projects: bool, fix: bool) -> 
                 ClaudeHookStatus::NotAgentDocProject => println!(
                     "skip   {}: not an agent-doc project (no .agent-doc/, no agent-doc hooks); \
                      install with `agent-doc skill install --root {}`",
+                    dir.display(),
+                    dir.display()
+                ),
+                ClaudeHookStatus::NoSessionDocument => println!(
+                    "skip   {}: agent-doc state but no session document; not installed \
+                     (install anyway with `agent-doc skill hooks --fix --root {}`)",
                     dir.display(),
                     dir.display()
                 ),

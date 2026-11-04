@@ -785,7 +785,20 @@ fn repair_and_report_hook_deadline(
         }
     }
     for dir in targets {
-        match crate::skill::ensure_claude_project_hooks(&dir, required, true) {
+        if let Some(reason) = crate::skill::state_dir_skip_reason(&dir) {
+            eprintln!(
+                "[agent-doc] preflight hook: not reconciling hooks in {}: {reason}",
+                dir.display()
+            );
+            continue;
+        }
+        // The first install into a directory needs this session document to
+        // live there; a settings file that already wires agent-doc is repaired.
+        let policy = match document {
+            Some(document) => crate::skill::HookInstallPolicy::SessionDocument(document),
+            None => crate::skill::HookInstallPolicy::ScanForSessionDocument,
+        };
+        match crate::skill::ensure_claude_project_hooks(&dir, required, true, policy) {
             Ok(report) => {
                 report.log_applied("preflight hook");
                 if let (Some(document), crate::skill::ClaudeHookStatus::Drift(changes)) =
@@ -1745,6 +1758,7 @@ mod tests {
             &fixture.submodule,
             crate::skill::PREFLIGHT_HOOK_TIMEOUT_SECS,
             false,
+            crate::skill::HookInstallPolicy::ScanForSessionDocument,
         )
         .unwrap();
         let crate::skill::ClaudeHookStatus::Drift(missing) = &check.status else {
@@ -1780,6 +1794,7 @@ mod tests {
             &fixture.submodule,
             crate::skill::PREFLIGHT_HOOK_TIMEOUT_SECS,
             false,
+            crate::skill::HookInstallPolicy::ScanForSessionDocument,
         )
         .unwrap();
         assert_eq!(check.status, crate::skill::ClaudeHookStatus::Current);
@@ -1801,23 +1816,189 @@ mod tests {
             &fixture.plain,
             crate::skill::PREFLIGHT_HOOK_TIMEOUT_SECS,
             true,
+            crate::skill::HookInstallPolicy::Explicit,
         )
         .unwrap();
         assert_eq!(
             report.status,
             crate::skill::ClaudeHookStatus::NotAgentDocProject
         );
-        // An agent-doc project with no file yet does get one created.
+        // An explicit `--fix --root` creates one for an agent-doc project.
         let fresh = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(fresh.path().join(".agent-doc")).unwrap();
         let report = crate::skill::ensure_claude_project_hooks(
             fresh.path(),
             crate::skill::PREFLIGHT_HOOK_TIMEOUT_SECS,
             true,
+            crate::skill::HookInstallPolicy::Explicit,
         )
         .unwrap();
         assert!(report.created);
         assert!(fresh.path().join(".claude/settings.json").is_file());
+    }
+
+    /// The known-project fan-out (`make install`) created settings in ~18
+    /// submodules that merely carry `.agent-doc/` state. A discovered root with
+    /// no session document is never created; one holding a session document
+    /// (agent-doc frontmatter, or a `[documents] include` match) is.
+    #[test]
+    fn known_project_reconcile_creates_settings_only_where_a_session_document_lives() {
+        fn ensure(
+            dir: &std::path::Path,
+            policy: crate::skill::HookInstallPolicy<'_>,
+        ) -> crate::skill::ClaudeHookReport {
+            crate::skill::ensure_claude_project_hooks(
+                dir,
+                crate::skill::PREFLIGHT_HOOK_TIMEOUT_SECS,
+                true,
+                policy,
+            )
+            .unwrap()
+        }
+        let scan = crate::skill::HookInstallPolicy::ScanForSessionDocument;
+
+        // `.agent-doc/` state, markdown, but no session document. Session
+        // documents hidden in skipped places (state dirs, `_quarantine`,
+        // `target`, a nested repo) do not count either.
+        let bare = tempfile::tempdir().unwrap();
+        let bare = bare.path();
+        std::fs::create_dir_all(bare.join(".agent-doc")).unwrap();
+        std::fs::write(bare.join("README.md"), "# readme\n").unwrap();
+        let session = "---\nagent_doc_format: template\n---\n\n# plan\n";
+        for hidden in [
+            "_quarantine-x/plan.md",
+            "target/plan.md",
+            ".agent-doc/plan.md",
+            "nested/plan.md",
+        ] {
+            let path = bare.join(hidden);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, session).unwrap();
+        }
+        std::fs::create_dir_all(bare.join("nested/.git")).unwrap();
+        assert!(!crate::skill::root_holds_session_document(bare));
+        assert_eq!(
+            ensure(bare, scan).status,
+            crate::skill::ClaudeHookStatus::NoSessionDocument
+        );
+        assert!(!bare.join(".claude").exists(), "no settings for bare state");
+        // A document-driven path refuses too when its document lives elsewhere.
+        let elsewhere = tempfile::tempdir().unwrap();
+        let foreign = elsewhere.path().join("plan.md");
+        std::fs::write(&foreign, session).unwrap();
+        assert_eq!(
+            ensure(
+                bare,
+                crate::skill::HookInstallPolicy::SessionDocument(&foreign)
+            )
+            .status,
+            crate::skill::ClaudeHookStatus::NoSessionDocument
+        );
+        assert!(!bare.join(".claude").exists());
+        // Same refusal for an existing operator file that wires no agent-doc hook.
+        std::fs::create_dir_all(bare.join(".claude")).unwrap();
+        let operator = "{\"permissions\":{\"allow\":[]}}\n";
+        std::fs::write(bare.join(".claude/settings.json"), operator).unwrap();
+        assert_eq!(
+            ensure(bare, scan).status,
+            crate::skill::ClaudeHookStatus::NoSessionDocument
+        );
+        assert_eq!(
+            std::fs::read_to_string(bare.join(".claude/settings.json")).unwrap(),
+            operator
+        );
+
+        // A session document by frontmatter: created.
+        let with_doc = tempfile::tempdir().unwrap();
+        let with_doc = with_doc.path();
+        std::fs::create_dir_all(with_doc.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(with_doc.join("tasks")).unwrap();
+        std::fs::write(with_doc.join("tasks/plan.md"), session).unwrap();
+        let report = ensure(with_doc, scan);
+        assert!(report.created, "{:?}", report.status);
+        assert!(with_doc.join(".claude/settings.json").is_file());
+
+        // A session document by `[documents] include`: created, also from the
+        // document-driven path.
+        let by_glob = tempfile::tempdir().unwrap();
+        let by_glob = by_glob.path();
+        std::fs::create_dir_all(by_glob.join(".agent-doc")).unwrap();
+        std::fs::write(
+            by_glob.join(".agent-doc/config.toml"),
+            "[documents]\ninclude = [\"notes/*.md\"]\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(by_glob.join("notes")).unwrap();
+        std::fs::write(by_glob.join("notes/today.md"), "# today\n").unwrap();
+        assert!(crate::skill::root_holds_session_document(by_glob));
+        let report = ensure(
+            by_glob,
+            crate::skill::HookInstallPolicy::SessionDocument(&by_glob.join("notes/today.md")),
+        );
+        assert!(report.created, "{:?}", report.status);
+    }
+
+    /// Controller-registry roots are the process table: a stray controller for
+    /// `<root>/.agent-doc` or a skill folder, and leaked `/tmp/.tmp*` fixture
+    /// controllers, named "roots" `make install` then wrote settings into.
+    #[test]
+    fn known_project_roots_skip_state_dirs_skill_dirs_temp_dirs_and_non_git_roots() {
+        // Not under a `.tmp*` tempfile component, so only the explicit
+        // `temp_roots` decide what counts as temp here.
+        let base = tempfile::Builder::new()
+            .prefix("hookroots")
+            .tempdir()
+            .unwrap();
+        let base = base.path().canonicalize().unwrap();
+        let repo = base.join("work/repo");
+        let fake_tmp = base.join("faketmp");
+        let leaked = fake_tmp.join("fixture");
+        let leaked_dot_tmp = base.join("other/.tmpAbC123");
+        let not_git = base.join("work/plain");
+        for dir in [&repo, &leaked, &leaked_dot_tmp, &not_git] {
+            std::fs::create_dir_all(dir.join(".agent-doc")).unwrap();
+        }
+        for dir in [&repo, &leaked, &leaked_dot_tmp] {
+            std::fs::create_dir_all(dir.join(".git")).unwrap();
+        }
+        let state = repo.join(".agent-doc");
+        let skill = repo.join(".claude/skills/agent-doc/runbooks");
+        let git_internal = repo.join(".git/modules/sub");
+        std::fs::create_dir_all(&skill).unwrap();
+        std::fs::create_dir_all(&git_internal).unwrap();
+
+        let kept = crate::skill::filter_known_hook_project_dirs(
+            [
+                state.clone(),
+                skill.clone(),
+                git_internal.clone(),
+                leaked.clone(),
+                leaked_dot_tmp.clone(),
+                not_git.clone(),
+                repo.clone(),
+                repo.clone(),
+            ],
+            std::slice::from_ref(&fake_tmp),
+        );
+        assert_eq!(kept, vec![repo.clone()]);
+        let reason = |dir: &std::path::Path| {
+            crate::skill::known_root_skip_reason(dir, std::slice::from_ref(&fake_tmp))
+        };
+        assert!(reason(&state).unwrap().contains(".agent-doc"));
+        assert!(reason(&skill).unwrap().contains(".claude"));
+        assert!(reason(&git_internal).unwrap().contains(".git"));
+        assert!(reason(&leaked).unwrap().contains("temp"));
+        assert!(reason(&leaked_dot_tmp).unwrap().contains("temp"));
+        assert!(reason(&not_git).unwrap().contains("git working-tree root"));
+        // A document-driven path never targets a state directory either.
+        let doc = skill.join("plan.md");
+        std::fs::write(&doc, "---\nagent_doc_format: template\n---\n").unwrap();
+        let dirs = crate::skill::document_hook_project_dirs(&doc);
+        assert!(
+            dirs.iter()
+                .all(|dir| crate::skill::state_dir_skip_reason(dir).is_none()),
+            "{dirs:?}"
+        );
     }
 
     /// GH #125 (`#chatprompt`): the operator typed a `prompt_presets` key in the

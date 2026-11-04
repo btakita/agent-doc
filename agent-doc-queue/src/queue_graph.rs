@@ -26,8 +26,12 @@ pub const SURROGATE_QUEUE_ID_PREFIX: &str = "queue";
 pub struct QueueId(String);
 
 impl QueueId {
+    /// Parse a queue id reference. A single leading `#` (`#main`, the spelling
+    /// operators use for ids everywhere else) names the same id as `main`
+    /// (`#hashidattr`); anything else that fails [`validate_id`] is refused.
     pub fn parse(value: impl Into<String>) -> std::result::Result<Self, QueueGraphError> {
         let value = value.into();
+        let value = element::canonical_id_reference(&value).to_string();
         validate_id(&value)?;
         Ok(Self(value))
     }
@@ -131,10 +135,21 @@ impl std::fmt::Display for QueueGraphError {
                      Give this queue its own `id=`, or rename the other queue's id"
                 ),
             },
-            Self::InvalidId { value } => write!(
-                formatter,
-                "invalid agent:queue id `{value}`; use an ASCII letter/digit followed by letters, digits, `.`, `_`, or `-`"
-            ),
+            Self::InvalidId { value } => {
+                write!(
+                    formatter,
+                    "invalid agent:queue id `{value}` (on an `agent:run` / `agent:loop` / `agent:queue` marker's `id=` or `after=`); \
+                     an id is an ASCII letter/digit followed by letters, digits, `.`, `_`, or `-`, \
+                     optionally written with one leading `#` (`id=\"#main\"` names `main`)"
+                )?;
+                match suggested_queue_id(value) {
+                    Some(suggestion) => write!(
+                        formatter,
+                        ". Rename it in the marker, for example `id=\"{suggestion}\"`"
+                    ),
+                    None => write!(formatter, ". Give the marker a usable `id=` value"),
+                }
+            }
             Self::DuplicateId { id, occurrences } => write!(
                 formatter,
                 "duplicate agent:queue id `{id}` at occurrences {occurrences:?}; every queue component needs a unique `id=`"
@@ -398,8 +413,11 @@ impl<'a> QueueGraph<'a> {
         &self.blocks
     }
 
+    /// The block named `id`; `#id` names the same block (`#hashidattr`).
     pub fn block(&self, id: &str) -> Option<&QueueBlock<'a>> {
-        self.by_id.get(id).map(|index| &self.blocks[*index])
+        self.by_id
+            .get(element::canonical_id_reference(id))
+            .map(|index| &self.blocks[*index])
     }
 
     pub fn selected(&self) -> Option<&QueueBlock<'a>> {
@@ -858,6 +876,26 @@ pub fn component_for_id<'a>(
     Ok(QueueSet::parse(content, components)?
         .block(id)
         .map(|block| block.component))
+}
+
+/// A valid id close to the refused `value`, for the [`QueueGraphError::InvalidId`]
+/// message: leading non-alphanumerics dropped, every other unusable character
+/// folded to `-`, runs of `-` collapsed. `None` when nothing usable remains.
+fn suggested_queue_id(value: &str) -> Option<String> {
+    let mut suggestion = String::new();
+    for ch in value.trim().chars() {
+        if ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-') {
+            if suggestion.is_empty() && !ch.is_ascii_alphanumeric() {
+                continue;
+            }
+            suggestion.push(ch);
+        } else if !suggestion.is_empty() && !suggestion.ends_with('-') {
+            suggestion.push('-');
+        }
+    }
+    let suggestion = suggestion.trim_end_matches('-').to_string();
+    (!suggestion.is_empty() && validate_id(&suggestion).is_ok() && suggestion != "true")
+        .then_some(suggestion)
 }
 
 fn validate_id(id: &str) -> std::result::Result<(), QueueGraphError> {
@@ -2085,5 +2123,140 @@ mod tests {
                     .map(|b| b.component.open_start)
             );
         }
+    }
+
+    /// The fpe.md shape that hard-refused preflight (`#hashidattr`): two
+    /// `agent:run` components whose ids the operator wrote with `#`.
+    fn hash_id_two_run_fixture() -> &'static str {
+        concat!(
+            "## Run <!-- agent:run id=\"#fpe-prs\" subagents priority go -->\n",
+            "- https://github.com/haiven-dev/fpe/pull/215\n",
+            "<!-- /agent:run -->\n\n",
+            "## Run <!-- agent:run id=\"#main\" subagents priority go -->\n",
+            "- Create a PR to fix the tests\n",
+            "<!-- /agent:run -->\n",
+        )
+    }
+
+    #[test]
+    fn hash_prefixed_component_id_is_accepted_and_equals_the_bare_id() {
+        let doc = hash_id_two_run_fixture();
+        let components = element::parse(doc).unwrap();
+        let graph = QueueGraph::parse(doc, &components)
+            .expect("a `#`-prefixed id must not refuse the queue graph");
+        assert_eq!(block_ids(doc), vec!["fpe-prs", "main"]);
+
+        // `#id` and `id` address the same block, in the document and on a CLI.
+        let bare = doc.replace("id=\"#", "id=\"");
+        assert_eq!(block_ids(&bare), block_ids(doc));
+        for (hashed, plain) in [("#fpe-prs", "fpe-prs"), ("#main", "main")] {
+            let by_hash = graph.block(hashed).expect("`#id` lookup resolves");
+            let by_plain = graph.block(plain).expect("bare lookup resolves");
+            assert_eq!(by_hash.occurrence, by_plain.occurrence);
+            assert_eq!(
+                QueueId::parse(hashed).unwrap(),
+                QueueId::parse(plain).unwrap()
+            );
+        }
+        assert_eq!(
+            component_for_id(doc, &components, "#main")
+                .unwrap()
+                .map(|component| component.open_start),
+            component_for_id(doc, &components, "main")
+                .unwrap()
+                .map(|component| component.open_start),
+        );
+        // Explicit ids never need a surrogate backfill, so the operator's
+        // marker text (with its `#`) is never rewritten.
+        assert_eq!(backfill_missing_queue_ids(doc, &components).unwrap(), None);
+
+        // `after=#fpe-prs` names the same predecessor as `after=fpe-prs`.
+        let dependent = doc.replace(
+            "id=\"#main\" subagents",
+            "id=\"#main\" after=\"#fpe-prs\" subagents",
+        );
+        let dependent_components = element::parse(&dependent).unwrap();
+        let dependent_graph = QueueGraph::parse(&dependent, &dependent_components).unwrap();
+        assert_eq!(
+            dependent_graph.block("main").unwrap().dependencies,
+            vec!["fpe-prs".to_string()]
+        );
+    }
+
+    #[test]
+    fn two_runs_with_distinct_ids_are_independent_queues() {
+        let doc = hash_id_two_run_fixture();
+        let components = element::parse(doc).unwrap();
+        let graph = QueueGraph::parse(doc, &components).unwrap();
+        let first = graph.block("fpe-prs").unwrap();
+        let second = graph.block("main").unwrap();
+        assert_eq!(queue_kind(first.component), QueueKind::Run);
+        assert_eq!(queue_kind(second.component), QueueKind::Run);
+        assert_eq!(first.live_prompt_count(), 1);
+        assert_eq!(second.live_prompt_count(), 1);
+        assert!(first.dependencies.is_empty() && second.dependencies.is_empty());
+        // Source order breaks the tie between two independent ready runs.
+        assert_eq!(
+            graph.schedule(),
+            QueueScheduleDecision::Ready {
+                queue_id: "fpe-prs".into(),
+                occurrence: 0,
+            }
+        );
+        // Draining the first run leaves the second one ready on its own.
+        let drained = doc.replace("- https://github.com/haiven-dev/fpe/pull/215\n", "");
+        let drained_components = element::parse(&drained).unwrap();
+        assert_eq!(
+            QueueGraph::parse(&drained, &drained_components)
+                .unwrap()
+                .schedule(),
+            QueueScheduleDecision::Ready {
+                queue_id: "main".into(),
+                occurrence: 1,
+            }
+        );
+        // Two runs that collapse to one id after canonicalization still collide.
+        let duplicate = doc.replace("id=\"#main\"", "id=\"fpe-prs\"");
+        let duplicate_components = element::parse(&duplicate).unwrap();
+        let error = QueueGraph::parse(&duplicate, &duplicate_components)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("duplicate agent:queue id `fpe-prs`"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn genuinely_invalid_id_is_still_refused_with_an_actionable_message() {
+        for (bad, suggestion) in [
+            ("##fpe-prs", Some("fpe-prs")),
+            ("fpe prs!", Some("fpe-prs")),
+            ("#", None),
+            ("-lead", Some("lead")),
+        ] {
+            let doc = hash_id_two_run_fixture().replace("#fpe-prs", bad);
+            let components = element::parse(&doc).unwrap();
+            let error = QueueGraph::parse(&doc, &components)
+                .expect_err("an invalid id must still fail closed")
+                .to_string();
+            assert!(error.contains("invalid agent:queue id"), "{bad}: {error}");
+            assert!(
+                error.contains("one leading `#`"),
+                "the refusal names the accepted `#` spelling: {error}"
+            );
+            match suggestion {
+                Some(suggestion) => assert!(
+                    error.contains(&format!("for example `id=\"{suggestion}\"`")),
+                    "{bad}: {error}"
+                ),
+                None => assert!(
+                    error.contains("Give the marker a usable `id=` value"),
+                    "{error}"
+                ),
+            }
+        }
+        assert!(QueueId::parse("##x").is_err());
+        assert!(QueueId::parse("#").is_err());
     }
 }

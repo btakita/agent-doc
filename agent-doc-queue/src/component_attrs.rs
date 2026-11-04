@@ -190,6 +190,10 @@ pub fn component_attr_warning(content: &str) -> Option<ComponentAttrWarning> {
     let mut has_fatal_schedule_issue = false;
     let mut compatibility_migration_count = 0;
     for component in &components {
+        for issue in hash_prefixed_id_reference_issues(content, component) {
+            issues.push(issue);
+            compatibility_migration_count += 1;
+        }
         if component.name == "queue" {
             // `#queueschedule`: invalid `interval`/`time`/`loop` values are
             // reported here and hold only the queue that declares them.
@@ -323,9 +327,85 @@ pub fn component_attr_warning(content: &str) -> Option<ComponentAttrWarning> {
     })
 }
 
+/// `#hashidattr`: an id-reference attribute written with a leading `#`
+/// (`id="#fpe-prs"`, `after=#main`, `queue=#main`) is accepted — the parser
+/// canonicalizes it to the bare id — so it is a spelling hint, never a refusal.
+/// The raw marker text is read because the parsed attrs already carry the
+/// canonical value.
+fn hash_prefixed_id_reference_issues(content: &str, component: &element::Component) -> Vec<String> {
+    let Some(marker) = content.get(component.open_start..component.open_end) else {
+        return Vec::new();
+    };
+    let tokens = match element::open_marker_attr_tokens(marker) {
+        Ok(tokens) => tokens,
+        // The component parser accepted this marker, so a token split failure
+        // here is a parser disagreement, not an operator spelling: report it
+        // instead of dropping the hint silently.
+        Err(error) => {
+            eprintln!(
+                "[component-attrs] WARNING: could not re-read attrs of agent:{} marker for the `#id` hint: {error}",
+                component.name
+            );
+            return Vec::new();
+        }
+    };
+    let raw_name = marker
+        .trim_start()
+        .trim_start_matches("<!--")
+        .trim_start()
+        .strip_prefix("agent:")
+        .and_then(|rest| rest.split_whitespace().next())
+        .unwrap_or(component.name.as_str());
+    tokens
+        .into_iter()
+        .filter_map(|(key, value)| {
+            let raw = value?;
+            if !element::is_id_reference_attr(&key)
+                || !element::has_hash_prefixed_id_reference(&raw)
+            {
+                return None;
+            }
+            let canonical = component.attrs.get(&key)?;
+            Some(format!(
+                "`{key}=\"{raw}\"` on `agent:{raw_name}` names the id `{canonical}` (the leading `#` is accepted); write `{key}=\"{canonical}\"`"
+            ))
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hash_prefixed_component_id_is_a_spelling_hint_not_a_refusal() {
+        // `#hashidattr`: the fpe.md markers. The id is accepted (the parser
+        // canonicalizes it), so the only signal is a non-fatal hint naming the
+        // bare spelling; nothing is held.
+        let content = concat!(
+            "## Run <!-- agent:run id=\"#fpe-prs\" subagents priority go -->\n",
+            "- a\n",
+            "<!-- /agent:run -->\n\n",
+            "## Run <!-- agent:run id=\"#main\" subagents priority go -->\n",
+            "- b\n",
+            "<!-- /agent:run -->\n",
+        );
+        let warning = component_attr_warning(content).expect("`#id` spelling hint");
+        assert!(!warning.has_fatal_schedule_issue);
+        assert_eq!(warning.issues.len(), 2, "{:?}", warning.issues);
+        assert_eq!(warning.compatibility_migration_count, 2);
+        assert!(
+            warning.issues.iter().any(|issue| issue.contains(
+                "`id=\"#fpe-prs\"` on `agent:run` names the id `fpe-prs` (the leading `#` is accepted); write `id=\"fpe-prs\"`"
+            )),
+            "{:?}",
+            warning.issues
+        );
+        assert!(warning.message_body().contains("canonical spelling"));
+
+        // The bare spelling carries no hint at all.
+        assert!(component_attr_warning(&content.replace("id=\"#", "id=\"")).is_none());
+    }
 
     #[test]
     fn component_attr_warning_flags_auto_on_backlog() {

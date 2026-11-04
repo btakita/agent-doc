@@ -1063,6 +1063,10 @@ fn bounded_preview(doc: &str, start: usize, max_bytes: usize) -> &str {
 /// quote character, so the `.done.md` suffix check could never match. The document
 /// was unusable until the quotes were hand-stripped. A parser that rejects what
 /// the writers emit is the bug; be liberal here.
+///
+/// Id-reference attributes ([`ID_REFERENCE_ATTRS`]: `id`, `after`, `queue`) are
+/// canonicalized through [`canonical_id_reference`], so `id="#fpe-prs"` parses
+/// as `fpe-prs` for every reader (`#hashidattr`).
 pub fn parse_attrs(attr_text: &str) -> HashMap<String, String> {
     let mut attrs = HashMap::new();
     for (key, value) in split_attr_tokens(attr_text) {
@@ -1071,6 +1075,11 @@ pub fn parse_attrs(attr_text: &str) -> HashMap<String, String> {
         }
         match value {
             Some(value) if !value.is_empty() => {
+                let value = if is_id_reference_attr(&key) {
+                    canonical_id_reference_list(&value)
+                } else {
+                    value
+                };
                 attrs.insert(key, value);
             }
             // `key=` with an empty value is not a flag — it is a malformed pair,
@@ -1082,6 +1091,55 @@ pub fn parse_attrs(attr_text: &str) -> HashMap<String, String> {
         }
     }
     attrs
+}
+
+/// Attributes whose value names (or lists, comma-separated) component ids:
+/// `id=` on runnable components, `after=a,b` predecessors, and `queue=` on
+/// `agent:backlog` (a sync mode or a target queue id).
+pub const ID_REFERENCE_ATTRS: &[&str] = &["id", "after", "queue"];
+
+/// Whether `key` is an id-reference attribute ([`ID_REFERENCE_ATTRS`]).
+pub fn is_id_reference_attr(key: &str) -> bool {
+    ID_REFERENCE_ATTRS.contains(&key)
+}
+
+/// The canonical spelling of one component-id reference (`#hashidattr`).
+///
+/// Operators address ids as `#id` everywhere else (`do [#id]`, `re [#id]:`,
+/// backlog `id=#spec1`), so `id="#fpe-prs"` on a marker is the natural spelling
+/// and names the same id as `fpe-prs`. Exactly one leading `#` is dropped, and
+/// only when something follows it: `#` alone and `##x` (which canonicalizes to
+/// `#x`) stay invalid, so the queue graph still refuses them. Surrounding
+/// whitespace is trimmed first so ` #main ` and `main` agree too.
+pub fn canonical_id_reference(value: &str) -> &str {
+    let trimmed = value.trim();
+    match trimmed.strip_prefix('#') {
+        Some(rest) if !rest.is_empty() => rest,
+        _ => value,
+    }
+}
+
+/// Whether `value` (a single id or a comma-separated id list) carries a
+/// `#`-prefixed id that [`canonical_id_reference`] rewrites. Lint uses this to
+/// suggest the bare spelling without refusing the marker.
+pub fn has_hash_prefixed_id_reference(value: &str) -> bool {
+    value
+        .split(',')
+        .any(|item| canonical_id_reference(item) != item)
+}
+
+/// [`canonical_id_reference`] applied to each item of a comma-separated list
+/// (`after=#build,#test`). Item separators and empty items are preserved so
+/// the queue graph's `after` validation still sees malformed lists verbatim.
+fn canonical_id_reference_list(value: &str) -> String {
+    if !value.contains('#') {
+        return value.to_string();
+    }
+    value
+        .split(',')
+        .map(canonical_id_reference)
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 /// Split an attribute string into `(key, Some(value) | None)` pairs, honouring
@@ -3808,6 +3866,52 @@ actual content
         assert_eq!(attrs.get("priority").map(|s| s.as_str()), Some(""));
         assert_eq!(attrs.get("go").map(|s| s.as_str()), Some(""));
         assert_eq!(attrs.len(), 3);
+    }
+
+    #[test]
+    fn parse_attrs_canonicalizes_hash_prefixed_id_references() {
+        // `#hashidattr`: the fpe.md marker that hard-refused preflight. The
+        // operator spells ids `#id` everywhere else, so `id="#fpe-prs"` names
+        // the same id as `fpe-prs` for every reader of the parsed attrs.
+        let attrs = parse_attrs(r##"id="#fpe-prs" subagents priority go"##);
+        assert_eq!(attrs.get("id").map(String::as_str), Some("fpe-prs"));
+        assert_eq!(
+            parse_attrs(r##"id="#fpe-prs""##).get("id"),
+            parse_attrs("id=fpe-prs").get("id")
+        );
+        assert_eq!(
+            parse_attrs("id=#main").get("id").map(String::as_str),
+            Some("main")
+        );
+        // Each `after` item and a backlog's `queue=` target are id references too.
+        assert_eq!(
+            parse_attrs("after=#build,test,#lint")
+                .get("after")
+                .map(String::as_str),
+            Some("build,test,lint")
+        );
+        assert_eq!(
+            parse_attrs("queue=#main").get("queue").map(String::as_str),
+            Some("main")
+        );
+        // Exactly one `#` is dropped, and never the whole value: these stay
+        // invalid so the queue graph still refuses them.
+        assert_eq!(
+            parse_attrs("id=##x").get("id").map(String::as_str),
+            Some("#x")
+        );
+        assert_eq!(parse_attrs("id=#").get("id").map(String::as_str), Some("#"));
+        // Non-id attributes keep their `#` (preset names are `#`-addressed).
+        assert_eq!(
+            parse_attrs(r##"preset="#pr""##)
+                .get("preset")
+                .map(String::as_str),
+            Some("#pr")
+        );
+        assert!(has_hash_prefixed_id_reference("#fpe-prs"));
+        assert!(has_hash_prefixed_id_reference("a,#b"));
+        assert!(!has_hash_prefixed_id_reference("fpe-prs"));
+        assert!(!has_hash_prefixed_id_reference("#"));
     }
 
     #[test]

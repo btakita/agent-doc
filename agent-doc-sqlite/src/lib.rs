@@ -16,6 +16,8 @@
 //! - `state_store` — project-controller actor/lease/dispatch/queue/cycle/
 //!   diagnostic/admin/recovery/layout SQLite state plus storage-specific status
 //!   records. Actor domain types live in `agent-doc-controller`.
+//! - `write_lock` — `BEGIN IMMEDIATE` write transactions and busy-timeout
+//!   openers (`#sqlitebusyupgrade`); every transaction that may write uses it.
 
 pub mod archive_index;
 pub mod context_injection_ledger;
@@ -23,6 +25,9 @@ pub mod op_log;
 pub mod reliable_sync_inbox;
 pub mod state_store;
 pub mod steering_gate_log;
+pub mod write_lock;
+
+pub use write_lock::{immediate_transaction, immediate_transaction_unchecked};
 
 pub use state_store::{
     ActorTransitionStatus, ControlPlaneStoreCounts, DispatchAttemptStatus,

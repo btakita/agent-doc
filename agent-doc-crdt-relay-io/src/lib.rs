@@ -257,7 +257,13 @@ fn load_pending_liveness_outbox(
     if !database_path.exists() {
         return Ok(Vec::new());
     }
-    let outbox = lazily::SqliteOutbox::open(database_path, document_hash.to_string())?;
+    // `#sqlitebusyupgrade`: `lazily::SqliteOutbox::open` uses a bare
+    // `Connection::open` (no busy handler), so its schema statement failed with
+    // an immediate `SQLITE_BUSY` whenever the controller was writing state.db.
+    let outbox = lazily::SqliteOutbox::with_store(lazily::SqliteStore::with_connection(
+        agent_doc_sqlite::write_lock::open_state_db_file(database_path)?,
+        document_hash.to_string(),
+    )?);
     outbox
         .replay_from(0)
         .into_iter()

@@ -187,7 +187,7 @@ pub fn replace_response_location_cache(
     let db_path = db_path(&project_root);
     let mut conn = open_archive_index(&db_path)?;
     ensure_schema(&conn)?;
-    let tx = conn.transaction()?;
+    let tx = crate::immediate_transaction(&mut conn)?;
     tx.execute(
         "DELETE FROM response_locations WHERE document_path = ?1",
         params![document_path],
@@ -442,7 +442,7 @@ fn rebuild_project_index(project_root: &Path) -> Result<usize> {
     let archives = list_archive_files(project_root)?;
     // One commit for the whole reindex (`#archiveindexwal`): without this each
     // row of every archive is its own autocommit transaction and its own fsync.
-    let tx = conn.unchecked_transaction()?;
+    let tx = crate::immediate_transaction_unchecked(&conn)?;
     for archive_path in &archives {
         let record = parse_archive_from_project_root(archive_path, project_root)?;
         upsert_archive(&conn, &record)?;
@@ -458,7 +458,7 @@ fn sync_project_index(project_root: &Path) -> Result<usize> {
     let archives = list_archive_files(project_root)?;
     // One commit for the whole reindex (`#archiveindexwal`): without this each
     // row of every archive is its own autocommit transaction and its own fsync.
-    let tx = conn.unchecked_transaction()?;
+    let tx = crate::immediate_transaction_unchecked(&conn)?;
     for archive_path in &archives {
         let record = parse_archive_from_project_root(archive_path, project_root)?;
         upsert_archive(&conn, &record)?;

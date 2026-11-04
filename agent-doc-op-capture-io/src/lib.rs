@@ -346,7 +346,9 @@ pub fn refresh_op_capture_activity(doc: &Path) -> Result<bool> {
         &project_root,
         EDITOR_OP_CAPTURE_BUSY_TIMEOUT,
     )?;
-    let tx = conn.transaction()?;
+    // `#sqlitebusyupgrade`: this transaction projects the ledger and then
+    // appends, so it must hold the write lock before its first read.
+    let tx = agent_doc_sqlite::immediate_transaction(&mut conn)?;
     let rows = agent_doc_sqlite::state_store::load_state_events_from_db(&tx, Some(&document_hash))?;
     let mut ledger = agent_doc_state_backbone::EventLedger::new();
     for row in rows {
@@ -539,7 +541,9 @@ fn append_editor_ops_batch_cold(
     let local_current = agent_doc_state_wire::in_controller_request()
         .then(|| load_projected_captures(doc, project_root, document_hash))
         .transpose()?;
-    let tx = conn.transaction()?;
+    // `#sqlitebusyupgrade`: this transaction projects the ledger and then
+    // appends, so it must hold the write lock before its first read.
+    let tx = agent_doc_sqlite::immediate_transaction(&mut conn)?;
     let (generation, existing) = match local_current {
         Some((generation, active, _)) => (generation, active),
         None => {
@@ -1366,7 +1370,9 @@ fn clear_op_capture_with_timeout(doc: &Path, timeout: Duration) -> Result<()> {
         .then(|| load_projected_captures(doc, &project_root, &document_hash))
         .transpose()?
         .map(|(generation, _, _)| generation);
-    let tx = conn.transaction()?;
+    // `#sqlitebusyupgrade`: this transaction projects the ledger and then
+    // appends, so it must hold the write lock before its first read.
+    let tx = agent_doc_sqlite::immediate_transaction(&mut conn)?;
     let generation = match local_generation {
         Some(generation) => generation,
         None => {

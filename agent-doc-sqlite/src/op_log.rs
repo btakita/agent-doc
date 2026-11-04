@@ -30,7 +30,7 @@
 //! - read_ops_returns_lamport_order: rows come back ordered by Lamport tick
 
 use agent_doc_turn::op_log::{CausalClock, DocumentOp, OpActor, OpSource};
-use anyhow::{Context, Result};
+use anyhow::Result;
 use rusqlite::{Connection, params};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -128,18 +128,18 @@ pub fn append_ops(project_root: &Path, ops: &[DocumentOp]) -> Result<usize> {
     if ops.is_empty() {
         return Ok(0);
     }
-    let path = db_path(project_root);
-    if let Some(parent) = path.parent()
-        && !parent.exists()
-    {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create {}", parent.display()))?;
-    }
-    let mut conn =
-        Connection::open(&path).with_context(|| format!("failed to open {}", path.display()))?;
+    // `#sqlitebusyupgrade`: `state.db` is shared with the controller, so the
+    // connection needs the standard busy timeout (a bare `Connection::open` has
+    // no busy handler) and the dedupe/Lamport reads below must run under a
+    // write lock taken up front — a deferred read-then-insert fails with an
+    // immediate `SQLITE_BUSY` whenever another writer holds the database.
+    let mut conn = crate::write_lock::open_state_db_file(&db_path(project_root))?;
     ensure_schema(&conn)?;
+    append_ops_in_db(&mut conn, ops)
+}
 
-    let tx = conn.transaction()?;
+fn append_ops_in_db(conn: &mut Connection, ops: &[DocumentOp]) -> Result<usize> {
+    let tx = crate::immediate_transaction(conn)?;
     // Lazily seed the next Lamport tick per document from the persisted max so a
     // batch spanning multiple documents keeps independent clocks.
     let mut next_lamport: HashMap<String, u64> = HashMap::new();
@@ -220,8 +220,7 @@ pub fn read_ops(project_root: &Path, document_path: &str, limit: usize) -> Resul
     if !path.exists() {
         return Ok(Vec::new());
     }
-    let conn =
-        Connection::open(&path).with_context(|| format!("failed to open {}", path.display()))?;
+    let conn = crate::write_lock::open_state_db_file(&path)?;
     ensure_schema(&conn)?;
     let sql = "SELECT document_path, component, node_key, item_id, op_kind, actor, lamport,
                       origin_session, before_preview, after_preview, recorded_at
@@ -271,6 +270,31 @@ mod tests {
             after_preview: Some(after.to_string()),
             recorded_at: Some("100".to_string()),
         }
+    }
+
+    /// `#sqlitebusyupgrade` regression: the dedupe/Lamport reads and the
+    /// insert share one transaction, so a concurrent `state.db` writer must
+    /// make the append wait, not fail with `database is locked`.
+    #[test]
+    fn append_waits_for_a_concurrent_writer_instead_of_failing_busy() {
+        let dir = project_with_agent_doc();
+        let path = db_path(dir.path());
+        assert_eq!(
+            append_ops(dir.path(), &[op("doc.md", "a", "added", "x")]).unwrap(),
+            1
+        );
+
+        let worker = crate::write_lock::open_state_db_file(&path).unwrap();
+        let written = crate::write_lock::run_while_write_lock_held(&path, worker, |conn| {
+            append_ops_in_db(conn, &[op("doc.md", "b", "added", "y")])
+        })
+        .unwrap();
+        assert_eq!(written, 1);
+        let ops = read_ops(dir.path(), "doc.md", 0).unwrap();
+        assert_eq!(
+            ops.iter().map(|op| op.clock.lamport).collect::<Vec<_>>(),
+            vec![1, 2]
+        );
     }
 
     #[test]

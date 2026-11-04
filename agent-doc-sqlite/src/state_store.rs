@@ -20,7 +20,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 const STATE_DB_FILE: &str = "state.db";
-const STATE_DB_BUSY_TIMEOUT: Duration = Duration::from_secs(30);
+use crate::write_lock::STATE_DB_BUSY_TIMEOUT;
 const STATE_DB_SCHEMA_RETRY_INTERVAL: Duration = Duration::from_millis(10);
 static STATE_DB_CONNECTIONS_FORBIDDEN: AtomicBool = AtomicBool::new(false);
 
@@ -1537,7 +1537,7 @@ fn delete_state_events_planned_by_read(
         if rowids.is_empty() {
             return Ok(deleted);
         }
-        let tx = conn.unchecked_transaction()?;
+        let tx = crate::immediate_transaction_unchecked(conn)?;
         let mut removed_this_batch = 0usize;
         {
             let mut statement = tx.prepare_cached("DELETE FROM state_events WHERE rowid = ?1")?;
@@ -1841,6 +1841,8 @@ pub fn inspect_state_db_usage(project_root: &Path) -> Result<StateDbUsage> {
     }
     let conn = Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
     conn.busy_timeout(STATE_DB_BUSY_TIMEOUT)?;
+    // Read-only connection: a deferred snapshot transaction is correct here.
+    #[allow(clippy::disallowed_methods)]
     let transaction = conn.unchecked_transaction()?;
     let count = |sql: &str| -> Result<u64> {
         sqlite_u64(
@@ -2012,8 +2014,7 @@ fn converge_state_event_document_versions(conn: &Connection) -> Result<()> {
     if !needs_repair {
         return Ok(());
     }
-    let tx = conn
-        .unchecked_transaction()
+    let tx = crate::immediate_transaction_unchecked(conn)
         .context("begin document-version convergence")?;
     // `base` is computed before the UPDATE applies, so the high-water mark per
     // document cannot shift underneath the ranking. Unversioned rows are then
@@ -2061,15 +2062,24 @@ fn converge_state_event_document_versions(conn: &Connection) -> Result<()> {
 /// redundant rows once; it does not deserialize, translate, or preserve a
 /// compatibility runtime path.
 fn retire_removed_state_event_variants(conn: &Connection) -> Result<()> {
-    let tx = conn
-        .unchecked_transaction()
+    let migration_applied = |conn: &Connection| -> Result<bool> {
+        Ok(conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM state_schema_migrations WHERE migration_id = ?1)",
+            [RETIRE_PENDING_RESPONSE_FACTS_MIGRATION],
+            |row| row.get::<_, bool>(0),
+        )?)
+    };
+    // Every `open_state_db` runs this check, so the applied case stays a plain
+    // read and never takes the write lock.
+    if migration_applied(conn)? {
+        return Ok(());
+    }
+    // `#sqlitebusyupgrade`: re-check and retire under a write lock taken up
+    // front; a deferred check-then-delete fails its upgrade with an immediate
+    // SQLITE_BUSY whenever another opener holds state.db.
+    let tx = crate::immediate_transaction_unchecked(conn)
         .context("begin retired state-event migration")?;
-    let already_applied = tx.query_row(
-        "SELECT EXISTS(SELECT 1 FROM state_schema_migrations WHERE migration_id = ?1)",
-        [RETIRE_PENDING_RESPONSE_FACTS_MIGRATION],
-        |row| row.get::<_, bool>(0),
-    )?;
-    if !already_applied {
+    if !migration_applied(&tx)? {
         let applied_at = sqlite_i64(timestamp_secs(), "state migration applied_at")?;
         tx.execute(
             "DELETE FROM state_events
@@ -2588,6 +2598,31 @@ pub fn load_document_runtime_state_from_db(
     )
     .optional()
     .context("load document runtime state")
+}
+
+/// Read-modify-write one `document_runtime_state` row: `modify` receives the
+/// stored row (if any) and returns the replacement row plus a value to hand
+/// back.
+///
+/// `#sqlitebusyupgrade`: the read and the upsert run in one `BEGIN IMMEDIATE`
+/// transaction. The owner-pane wedge counter used to do this in a deferred
+/// transaction: it read the prior counter and then upgraded to a write, and
+/// whenever the project controller held the `state.db` write lock at that
+/// instant SQLite refused the upgrade with an immediate `SQLITE_BUSY` (the busy
+/// handler never runs for an upgrade), failing `agent-doc <FILE>` with a bare
+/// `Error: database is locked`.
+pub fn modify_document_runtime_state_in_db<T>(
+    conn: &mut Connection,
+    document_hash: &str,
+    state_kind: &str,
+    modify: impl FnOnce(Option<DocumentRuntimeStateRecord>) -> Result<(DocumentRuntimeStateRecord, T)>,
+) -> Result<T> {
+    let tx = crate::write_lock::immediate_transaction(conn)?;
+    let prior = load_document_runtime_state_from_db(&tx, document_hash, state_kind)?;
+    let (next, value) = modify(prior)?;
+    upsert_document_runtime_state_in_db(&tx, &next)?;
+    tx.commit()?;
+    Ok(value)
 }
 
 pub fn list_document_runtime_state_kind_from_db(
@@ -3321,9 +3356,9 @@ pub fn rekey_actor_document_path_in_db(
         return Ok(false);
     }
 
-    let tx = conn
-        .unchecked_transaction()
-        .context("begin actor document path rekey")?;
+    // `#sqlitebusyupgrade`: reads both actor records before rewriting them.
+    let tx =
+        crate::immediate_transaction_unchecked(conn).context("begin actor document path rekey")?;
     let Some(old) = load_actor_record_from_db(&tx, old_document_id)? else {
         return Ok(false);
     };
@@ -4624,7 +4659,7 @@ fn prune_editor_view_binding_facts(conn: &Connection) -> Result<()> {
         })
         .collect::<Result<Vec<_>>>()?;
     for rowids in rowids.chunks(2_000) {
-        let tx = conn.unchecked_transaction()?;
+        let tx = crate::immediate_transaction_unchecked(conn)?;
         {
             let mut statement = tx.prepare_cached("DELETE FROM state_events WHERE rowid = ?1")?;
             for rowid in rowids {
@@ -4949,9 +4984,8 @@ fn rekey_document_state_in_db_with_policy(
         return Ok(DocumentStateRekeyReport::default());
     }
 
-    let tx = conn
-        .unchecked_transaction()
-        .context("begin document state rekey")?;
+    // `#sqlitebusyupgrade`: probes and loads the events before rewriting them.
+    let tx = crate::immediate_transaction_unchecked(conn).context("begin document state rekey")?;
     let destination_event_count: i64 = tx
         .query_row(
             "SELECT COUNT(*) FROM state_events WHERE document_hash = ?1",
@@ -6176,7 +6210,7 @@ fn store_actor_record_in_tx(
 /// in a single transaction. Returns the number of `documents` rows removed (0 or
 /// 1).
 pub fn delete_actor_document_tx(conn: &mut Connection, document_id: &str) -> Result<usize> {
-    let tx = conn.transaction()?;
+    let tx = crate::immediate_transaction(conn)?;
     tx.execute(
         "DELETE FROM actor_transitions WHERE document_id = ?1",
         params![document_id],
@@ -6487,7 +6521,7 @@ pub fn commit_session_actor_closeout_in_db(
     closeout: &SessionActorCloseoutCommit<'_>,
 ) -> Result<()> {
     let now = sqlite_i64(timestamp_secs(), "session actor closeout timestamp")?;
-    let tx = conn.transaction()?;
+    let tx = crate::immediate_transaction(conn)?;
 
     if let Some(prompt) = closeout.queue_head_prompt {
         tx.execute(
@@ -9813,6 +9847,44 @@ mod tests {
         let rows: i64 =
             conn.query_row("SELECT COUNT(*) FROM state_events", [], |row| row.get(0))?;
         assert_eq!(rows, 3, "nothing was prunable, so nothing was deleted");
+        Ok(())
+    }
+
+    /// `#sqlitebusyupgrade`: the runtime-state read-modify-write waits for a
+    /// concurrent `state.db` writer and then succeeds, instead of failing its
+    /// read-to-write upgrade with an immediate `database is locked`.
+    #[test]
+    fn modify_document_runtime_state_waits_for_a_concurrent_writer() -> Result<()> {
+        let dir = tempfile::TempDir::new()?;
+        let bump = |prior: Option<DocumentRuntimeStateRecord>| {
+            let count = prior
+                .map(|row| row.payload_json.parse::<u64>().unwrap())
+                .unwrap_or(0)
+                + 1;
+            Ok((
+                DocumentRuntimeStateRecord {
+                    document_hash: "doc-hash".to_string(),
+                    state_kind: "probe".to_string(),
+                    canonical_path: "/doc.md".to_string(),
+                    payload_json: count.to_string(),
+                    updated_at_ms: count,
+                },
+                count,
+            ))
+        };
+        let mut seed = open_state_db(dir.path())?;
+        assert_eq!(
+            modify_document_runtime_state_in_db(&mut seed, "doc-hash", "probe", bump)?,
+            1
+        );
+        drop(seed);
+
+        let worker = open_state_db(dir.path())?;
+        let count =
+            crate::write_lock::run_while_write_lock_held(&state_db_path(dir.path()), worker, {
+                move |conn| modify_document_runtime_state_in_db(conn, "doc-hash", "probe", bump)
+            })?;
+        assert_eq!(count, 2);
         Ok(())
     }
 

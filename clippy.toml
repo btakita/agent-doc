@@ -1,0 +1,8 @@
+# `#sqlitebusyupgrade`: a DEFERRED SQLite transaction that reads and then
+# writes fails its read-to-write upgrade with an immediate SQLITE_BUSY whenever
+# another connection holds the write lock, and the busy handler never runs.
+# Every transaction that may write takes the lock up front instead.
+disallowed-methods = [
+    { path = "rusqlite::Connection::transaction", reason = "use agent_doc_sqlite::immediate_transaction (BEGIN IMMEDIATE); a deferred read-then-write fails with SQLITE_BUSY without waiting (#sqlitebusyupgrade)" },
+    { path = "rusqlite::Connection::unchecked_transaction", reason = "use agent_doc_sqlite::immediate_transaction_unchecked (BEGIN IMMEDIATE); a deferred read-then-write fails with SQLITE_BUSY without waiting (#sqlitebusyupgrade)" },
+]

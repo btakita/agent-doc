@@ -144,27 +144,43 @@ fn record_via_sqlite(
     head: &str,
 ) -> Result<u32> {
     let mut conn = agent_doc_sqlite::state_store::open_state_db(root)?;
-    let tx = conn.transaction()?;
-    let prior = agent_doc_sqlite::state_store::load_document_runtime_state_from_db(
-        &tx,
+    record_in_db(&mut conn, document_hash, canonical_path, head)
+}
+
+/// The wedge counter read-modify-write on an open `state.db` connection.
+///
+/// `#sqlitebusyupgrade`: it runs in one `BEGIN IMMEDIATE` transaction. The
+/// former deferred `SELECT`-then-`UPSERT` failed its read-to-write upgrade with
+/// an immediate `SQLITE_BUSY` whenever the project controller held the
+/// `state.db` write lock (SQLite never runs the busy handler for an upgrade),
+/// which surfaced as a bare `Error: database is locked` from `agent-doc <FILE>`.
+fn record_in_db(
+    conn: &mut agent_doc_sqlite::state_store::Connection,
+    document_hash: &str,
+    canonical_path: &str,
+    head: &str,
+) -> Result<u32> {
+    agent_doc_sqlite::state_store::modify_document_runtime_state_in_db(
+        conn,
         document_hash,
         OWNER_PANE_WEDGE_STATE_KIND,
-    )?
-    .and_then(|state| serde_json::from_str::<OwnerPaneWedgeRecord>(&state.payload_json).ok());
-    let record = record_owner_pane_wedge_fire(prior.as_ref(), head);
-    let count = record.count;
-    agent_doc_sqlite::state_store::upsert_document_runtime_state_in_db(
-        &tx,
-        &agent_doc_sqlite::state_store::DocumentRuntimeStateRecord {
-            document_hash: document_hash.to_string(),
-            state_kind: OWNER_PANE_WEDGE_STATE_KIND.to_string(),
-            canonical_path: canonical_path.to_string(),
-            payload_json: serde_json::to_string(&record)?,
-            updated_at_ms: now_ms(),
+        |prior| {
+            let prior = prior.and_then(|state| {
+                serde_json::from_str::<OwnerPaneWedgeRecord>(&state.payload_json).ok()
+            });
+            let record = record_owner_pane_wedge_fire(prior.as_ref(), head);
+            Ok((
+                agent_doc_sqlite::state_store::DocumentRuntimeStateRecord {
+                    document_hash: document_hash.to_string(),
+                    state_kind: OWNER_PANE_WEDGE_STATE_KIND.to_string(),
+                    canonical_path: canonical_path.to_string(),
+                    payload_json: serde_json::to_string(&record)?,
+                    updated_at_ms: now_ms(),
+                },
+                record.count,
+            ))
         },
-    )?;
-    tx.commit()?;
-    Ok(count)
+    )
 }
 
 /// Clear the wedge counter (after a halt, or once the head advances).
@@ -202,6 +218,35 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         dir
+    }
+
+    /// `#sqlitebusyupgrade` regression for the 2026-11-04
+    /// `codex_owned_pane_active_auto_queue_hands_off_without_drift` failure:
+    /// while another connection (the project controller) holds the `state.db`
+    /// write lock, the wedge counter write must wait for it and then succeed.
+    /// As a deferred transaction its `SELECT` succeeded under the holder and
+    /// its `UPSERT` upgrade failed at once with `database is locked`, without
+    /// ever consulting the busy handler.
+    #[test]
+    fn record_waits_for_a_concurrent_state_db_writer_instead_of_failing_busy() {
+        let dir = setup();
+        let doc = dir.path().join("session.md");
+        std::fs::write(&doc, "# doc\n").unwrap();
+        assert_eq!(record(&doc, "do [#alpha]").unwrap(), 1);
+        let (root, document_hash, canonical_path) = state_identity(&doc).unwrap().unwrap();
+
+        let worker = agent_doc_sqlite::state_store::open_state_db(&root).unwrap();
+        let count = agent_doc_sqlite::write_lock::run_while_write_lock_held(
+            &agent_doc_sqlite::state_store::state_db_path(&root),
+            worker,
+            move |conn| record_in_db(conn, &document_hash, &canonical_path, "do [#alpha]"),
+        )
+        .unwrap();
+        assert_eq!(
+            count, 2,
+            "the waited write still counts the consecutive fire"
+        );
+        assert_eq!(record(&doc, "do [#alpha]").unwrap(), 3);
     }
 
     #[test]

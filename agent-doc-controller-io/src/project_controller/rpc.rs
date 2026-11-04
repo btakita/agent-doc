@@ -24718,7 +24718,13 @@ fn handle_reliable_sync_outbox(
     let channel_lock = reliable_sync_outbox_channel_lock(project_root, &payload.document_hash);
     let _channel_guard = channel_lock.lock();
     let database_path = agent_doc_sqlite::state_store::state_db_path(project_root);
-    let outbox = lazily::SqliteOutbox::open(&database_path, payload.document_hash.clone())?;
+    // `#sqlitebusyupgrade`: `lazily::SqliteOutbox::open` uses a bare
+    // `Connection::open` (no busy handler); its appends and cursor saves then
+    // failed (and were only logged) whenever another writer held state.db.
+    let outbox = lazily::SqliteOutbox::with_store(lazily::SqliteStore::with_connection(
+        agent_doc_sqlite::write_lock::open_state_db_file(&database_path)?,
+        payload.document_hash.clone(),
+    )?);
     let acked_through = outbox.acked_through();
     // The receiver journal shares this database. Allocate strictly above every
     // epoch it has observed, not just above the sender's own ACK cursor: a lost
@@ -25599,27 +25605,31 @@ pub(crate) fn handle_record_owner_pane_wedge(
     let payload: OwnerPaneWedgePayload =
         serde_json::from_str(&payload_json).context("parse owner_pane_wedge payload")?;
     let mut conn = agent_doc_sqlite::state_store::open_state_db(&bootstrap.project_root)?;
-    let tx = conn.transaction()?;
-    let prior = agent_doc_sqlite::state_store::load_document_runtime_state_from_db(
-        &tx,
+    // `#sqlitebusyupgrade`: one `BEGIN IMMEDIATE` read-modify-write. The former
+    // deferred read-then-upsert failed with an immediate `SQLITE_BUSY` whenever
+    // another writer held `state.db`, and the client then fell back to the same
+    // failing pattern.
+    agent_doc_sqlite::state_store::modify_document_runtime_state_in_db(
+        &mut conn,
         &payload.document_hash,
         OWNER_PANE_WEDGE_STATE_KIND,
-    )?
-    .and_then(|state| serde_json::from_str::<OwnerPaneWedgeRecord>(&state.payload_json).ok());
-    let record = record_owner_pane_wedge_fire(prior.as_ref(), &payload.head);
-    let count = record.count;
-    agent_doc_sqlite::state_store::upsert_document_runtime_state_in_db(
-        &tx,
-        &agent_doc_sqlite::state_store::DocumentRuntimeStateRecord {
-            document_hash: payload.document_hash,
-            state_kind: OWNER_PANE_WEDGE_STATE_KIND.to_string(),
-            canonical_path: canonical_path.to_string_lossy().into_owned(),
-            payload_json: serde_json::to_string(&record)?,
-            updated_at_ms: controller_now_ms(),
+        |prior| {
+            let prior = prior.and_then(|state| {
+                serde_json::from_str::<OwnerPaneWedgeRecord>(&state.payload_json).ok()
+            });
+            let record = record_owner_pane_wedge_fire(prior.as_ref(), &payload.head);
+            Ok((
+                agent_doc_sqlite::state_store::DocumentRuntimeStateRecord {
+                    document_hash: payload.document_hash.clone(),
+                    state_kind: OWNER_PANE_WEDGE_STATE_KIND.to_string(),
+                    canonical_path: canonical_path.to_string_lossy().into_owned(),
+                    payload_json: serde_json::to_string(&record)?,
+                    updated_at_ms: controller_now_ms(),
+                },
+                record.count,
+            ))
         },
-    )?;
-    tx.commit()?;
-    Ok(count)
+    )
 }
 
 pub(crate) fn handle_clear_owner_pane_wedge(

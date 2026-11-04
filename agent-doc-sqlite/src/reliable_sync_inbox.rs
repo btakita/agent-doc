@@ -194,7 +194,7 @@ fn record_remote_frame_inner(
     reconcile_epoch_reuse: bool,
 ) -> Result<RemoteFrameReceipt> {
     let mut connection = open(path)?;
-    let tx = connection.transaction()?;
+    let tx = crate::immediate_transaction(&mut connection)?;
     let epoch_i64 = sqlite_epoch(epoch)?;
     // Keep the max join inside the UPSERT. A read-then-write max can still be
     // computed from a stale snapshot when two controller handles race; the SQL
@@ -258,7 +258,7 @@ pub fn record_local_liveness(
     ops_json: &str,
 ) -> Result<()> {
     let mut connection = open(path)?;
-    let tx = connection.transaction()?;
+    let tx = crate::immediate_transaction(&mut connection)?;
     insert_liveness_record(&tx, source_key, sqlite_epoch(epoch)?, ops_json)?;
     tx.commit()?;
     Ok(())
@@ -447,7 +447,7 @@ pub fn compact_liveness_journal(
     drop(records);
     let mut rows_removed = 0usize;
     for chunk in doomed.chunks(LIVENESS_COMPACTION_DELETE_CHUNK) {
-        let tx = connection.transaction()?;
+        let tx = crate::immediate_transaction(&mut connection)?;
         {
             let mut statement =
                 tx.prepare_cached("DELETE FROM reliable_sync_liveness_journal WHERE rowid = ?1")?;

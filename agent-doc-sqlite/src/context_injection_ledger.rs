@@ -166,7 +166,7 @@ pub fn record_context_manifest(
     let chunk_ids_json =
         serde_json::to_string(&chunk_ids).context("serialize context chunk ids")?;
     let now = sqlite_i64(timestamp_secs(), "context manifest timestamp")?;
-    let tx = conn.transaction()?;
+    let tx = crate::immediate_transaction(conn)?;
 
     tx.execute(
         r#"
@@ -467,7 +467,7 @@ pub fn clear_context_scope(
     conn: &mut Connection,
     scope: ContextClearScope<'_>,
 ) -> Result<ClearedContextRows> {
-    let tx = conn.transaction()?;
+    let tx = crate::immediate_transaction(conn)?;
     let (injections, manifests) = match scope {
         ContextClearScope::Document { document_id } => (
             tx.execute(

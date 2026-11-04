@@ -104,6 +104,49 @@ fn collision_remedy(collisions: &[String]) -> String {
     }
 }
 
+/// `#runpresetunresolved`: a prompt component's `preset=` names a preset
+/// nothing defines. Every subagent dispatched from it fails closed
+/// (`AUTHORIZATION NOT RESOLVED`) and refuses commit/push, so name the repair
+/// at the time the marker is written instead of at dispatch.
+pub fn unresolved_component_preset_warning(
+    file_display: &str,
+    content: &str,
+    prompt_presets: &IndexMap<String, String>,
+) -> Option<PreflightPolicyWarning> {
+    let unresolved =
+        agent_doc_queue::prompt_component_attrs::unresolved_component_presets(content, |name| {
+            agent_doc_frontmatter::frontmatter::resolve_prompt_preset_key(prompt_presets, name)
+                .is_some()
+        });
+    if unresolved.is_empty() {
+        return None;
+    }
+    let parts = unresolved
+        .iter()
+        .map(|entry| {
+            let marker = match &entry.id {
+                Some(id) => format!("`agent:{} id=\"{id}\"`", entry.component),
+                None => format!("`agent:{}`", entry.component),
+            };
+            let names = entry
+                .names
+                .iter()
+                .map(|name| format!("`{name}`"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("{marker} preset {names}")
+        })
+        .collect::<Vec<_>>()
+        .join("; ");
+    Some(PreflightPolicyWarning {
+        code: "unresolved_component_preset".to_string(),
+        message: format!(
+            "{file_display}: {parts}: no frontmatter `prompt_presets` entry defines it, so every subagent brief dispatched from that marker fails closed (AUTHORIZATION NOT RESOLVED) and grants no commit, push, install, release, or publish. {} (#runpresetunresolved)",
+            agent_doc_queue::prompt_component_attrs::UNRESOLVED_PRESET_FIX
+        ),
+    })
+}
+
 pub fn component_attr_preflight_warning(
     file_display: &str,
     content: &str,
@@ -404,6 +447,53 @@ mod tests {
         assert_eq!(warning.code, "post_exchange_comment_prompt_preset");
         assert!(warning.message.contains("dispatch #manual-review"));
         assert!(warning.message.contains("/clear"));
+    }
+
+    /// `#runpresetunresolved`: a marker preset nothing defines warns at write
+    /// time and names the frontmatter / inline fix; the live inline shape and a
+    /// defined name do not warn.
+    #[test]
+    fn unresolved_component_preset_warning_names_the_fix() {
+        let doc = |preset: &str| {
+            format!(
+                "## Run <!-- agent:run id=\"main\" subagents preset=\"{preset}\" go -->\n- a\n<!-- /agent:run -->\n"
+            )
+        };
+        let presets: IndexMap<String, String> =
+            [("#ship".to_string(), "commit + push".to_string())].into();
+        let warning = unresolved_component_preset_warning(
+            "doc.md",
+            &doc("#spec-test-build-install-commit-push"),
+            &presets,
+        )
+        .expect("undefined preset must warn");
+        assert_eq!(warning.code, "unresolved_component_preset");
+        assert!(
+            warning
+                .message
+                .contains("`agent:run id=\"main\"` preset `#spec-test-build-install-commit-push`"),
+            "{}",
+            warning.message
+        );
+        assert!(warning.message.contains("AUTHORIZATION NOT RESOLVED"));
+        assert!(warning.message.contains("frontmatter `prompt_presets`"));
+        assert!(
+            warning
+                .message
+                .contains("preset=\"#name: <authorization text>\"")
+        );
+
+        for ok in [
+            "#ship",
+            "ship",
+            "#spec-test-build-install-commit-push: approve all commit + integration + push: approve all worktree removals",
+        ] {
+            assert_eq!(
+                unresolved_component_preset_warning("doc.md", &doc(ok), &presets),
+                None,
+                "{ok}"
+            );
+        }
     }
 
     #[test]

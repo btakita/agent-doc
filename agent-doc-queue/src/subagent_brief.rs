@@ -43,6 +43,10 @@ pub enum AuthorizationStatus {
 pub enum PresetSource {
     /// `<!-- agent:queue preset="#name" -->` on the selected queue.
     QueueAttr,
+    /// `<!-- agent:run preset="#name: body" -->` on the selected queue: an
+    /// inline definition whose body is the operator's literal text after the
+    /// colon (`#runpresetunresolved`).
+    QueueAttrInline,
     /// A body-level `preset #name` line in the selected queue.
     QueueLine,
     /// A registered `#name` token in the item text itself.
@@ -220,8 +224,22 @@ fn block_contains_head(block: &crate::queue_graph::QueueBlock<'_>, item: &str) -
     })
 }
 
-/// Preset names the selected queue declares: every whitespace-separated
-/// reference in its `preset=` attr, then any body-level `preset <name>` lines.
+/// The selected queue's `preset=` attribute policy.
+fn selected_queue_prompt_attrs(
+    content: &str,
+    components: &[element::Component],
+) -> crate::prompt_component_attrs::PromptComponentAttrs {
+    match crate::queue_set::selected_component(content, components) {
+        Ok(Some(queue)) => {
+            crate::prompt_component_attrs::prompt_component_attrs_for(queue, "queue")
+        }
+        _ => Default::default(),
+    }
+}
+
+/// Preset names the selected queue declares: every reference in its
+/// `preset=` attr (lookup names and inline `#name: body` definitions alike),
+/// then any body-level `preset <name>` lines.
 fn queue_preset_names(
     content: &str,
     components: &[element::Component],
@@ -231,8 +249,14 @@ fn queue_preset_names(
         return names;
     };
     let attrs = crate::prompt_component_attrs::prompt_component_attrs_for(queue, "queue");
-    for preset in attrs.preset_names() {
-        names.push((preset.to_string(), PresetSource::QueueAttr));
+    for reference in attrs.preset_refs() {
+        let source = match reference {
+            crate::prompt_component_attrs::PresetRef::Lookup(_) => PresetSource::QueueAttr,
+            crate::prompt_component_attrs::PresetRef::Inline { .. } => {
+                PresetSource::QueueAttrInline
+            }
+        };
+        names.push((reference.name().to_string(), source));
     }
     if let Ok(entries) = crate::document_queue::parse(queue.content(content)) {
         for entry in entries {
@@ -278,6 +302,12 @@ pub fn subagent_authorization_with_presets(
     presets_map: &agent_doc_frontmatter::frontmatter::PromptPresets,
     submitted_prompt: Option<&str>,
 ) -> SubagentAuthorization {
+    // `#runpresetunresolved`: an inline `preset="#name: body"` definition on
+    // the selected queue resolves exactly like a frontmatter entry, for the
+    // queue attribute and for item/lineage tokens naming it alike.
+    let overlaid =
+        selected_queue_prompt_attrs(content, components).overlay_inline_presets(presets_map);
+    let presets_map = &overlaid;
     let mut presets: Vec<PresetAuthorization> = Vec::new();
     let mut push_preset = |requested: &str, source: PresetSource| {
         let requested = requested.trim().trim_matches(|c| c == '"' || c == '\'');
@@ -731,6 +761,7 @@ fn render_preamble(
     for preset in &resolved_presets {
         let origin = match preset.source {
             PresetSource::QueueAttr => "queue preset",
+            PresetSource::QueueAttrInline => "queue preset, defined inline on the queue marker",
             PresetSource::QueueLine => "queue preset line",
             PresetSource::Item => "item preset",
         };
@@ -787,8 +818,9 @@ fn render_preamble(
                  verbatim item text above was resolved. Do not commit, push, install, release, publish, \
                  or take any other outward action on the strength of that preset name. Do the \
                  in-worktree work the item text itself names, then report back what authorization is \
-                 missing.\n",
-                missing.join(", ")
+                 missing. Operator fix (the coordinator relays it; you never edit the document): {}\n",
+                missing.join(", "),
+                crate::prompt_component_attrs::UNRESOLVED_PRESET_FIX
             ));
         }
         AuthorizationStatus::ItemTextOnly => {
@@ -1272,6 +1304,109 @@ agent_doc_format: template
         assert!(
             auth.subagent_prompt_preamble
                 .contains("> rename the foo module to bar")
+        );
+    }
+
+    /// `#runpresetunresolved`: the live session's `agent:run` marker, verbatim.
+    const LIVE_RUN_PRESET: &str = "#spec-test-build-install-commit-push: approve all commit + integration + push: approve all worktree removals";
+
+    fn run_doc(frontmatter: &str, preset: &str) -> String {
+        format!(
+            "---\nagent_doc_session: s\nagent_doc_format: template\n{frontmatter}---\n\n\
+             ## Run <!-- agent:run id=\"main\" subagents preset=\"{preset}\" priority go -->\n\
+             - do [#runpresetunresolved]\n<!-- /agent:run -->\n\n\
+             ## Backlog\n\n<!-- agent:backlog -->\n\
+             - [ ] [#runpresetunresolved] [P1] resolve inline run presets\n<!-- /agent:backlog -->\n"
+        )
+    }
+
+    /// `#runpresetunresolved`: `preset="#name: body"` is an inline preset
+    /// definition. It resolves exactly like a frontmatter entry, the brief
+    /// quotes the operator's body verbatim, and the fail-closed block is gone.
+    /// Before the fix every word token was looked up and every brief said
+    /// AUTHORIZATION NOT RESOLVED.
+    #[test]
+    fn inline_run_preset_definition_resolves_and_quotes_the_body_verbatim() {
+        let content = run_doc("", LIVE_RUN_PRESET);
+        let auth = subagent_authorization("doc.md", &content, "do [#runpresetunresolved]");
+        assert_eq!(auth.status, AuthorizationStatus::Resolved, "{auth:#?}");
+        assert_eq!(auth.presets.len(), 1, "{:#?}", auth.presets);
+        let preset = &auth.presets[0];
+        assert_eq!(preset.name, "#spec-test-build-install-commit-push");
+        assert_eq!(preset.source, PresetSource::QueueAttrInline);
+        assert!(preset.resolved);
+        assert_eq!(
+            preset.body.as_deref(),
+            Some("approve all commit + integration + push: approve all worktree removals")
+        );
+        assert!(auth.unresolved_ids.is_empty(), "{:?}", auth.unresolved_ids);
+        let p = &auth.subagent_prompt_preamble;
+        assert!(!p.contains(UNRESOLVED_AUTHORIZATION_MARKER), "{p}");
+        assert!(
+            p.contains(concat!(
+                "  # source: queue preset, defined inline on the queue marker\n",
+                "  \"#spec-test-build-install-commit-push\": |-\n",
+                "    approve all commit + integration + push: approve all worktree removals\n",
+            )),
+            "{p}"
+        );
+        assert!(p.contains("current operator authorization for the work and actions they name"));
+        assert!(p.contains("> [P1] resolve inline run presets"));
+        // No word token of the free text is looked up as its own preset.
+        for word in ["`approve`", "`all`", "`+`", "`removals`"] {
+            assert!(!p.contains(word), "{word} leaked as a preset: {p}");
+        }
+        let json = serde_json::to_value(&auth).unwrap();
+        assert_eq!(json["status"], "resolved");
+        assert_eq!(json["presets"][0]["source"], "queue_attr_inline");
+    }
+
+    /// An inline definition shadows a frontmatter entry of the same name: the
+    /// marker's literal text is the authorization, never the two merged.
+    #[test]
+    fn inline_run_preset_shadows_a_frontmatter_definition() {
+        let content = run_doc(PRESETS, LIVE_RUN_PRESET);
+        let auth = subagent_authorization("doc.md", &content, "do [#runpresetunresolved]");
+        assert_eq!(auth.status, AuthorizationStatus::Resolved);
+        assert_eq!(auth.presets.len(), 1);
+        assert_eq!(
+            auth.presets[0].body.as_deref(),
+            Some("approve all commit + integration + push: approve all worktree removals")
+        );
+        assert!(
+            !auth
+                .subagent_prompt_preamble
+                .contains("build + install for local testing")
+        );
+    }
+
+    /// A bare unknown `#name` keeps meaning a lookup and still fails closed;
+    /// the brief names the operator fix.
+    #[test]
+    fn bare_unknown_run_preset_still_fails_closed_and_names_the_fix() {
+        let content = run_doc("", "#spec-test-build-install-commit-push");
+        let auth = subagent_authorization("doc.md", &content, "do [#runpresetunresolved]");
+        assert_eq!(auth.status, AuthorizationStatus::UnresolvedPreset);
+        assert_eq!(auth.presets.len(), 1);
+        assert_eq!(auth.presets[0].source, PresetSource::QueueAttr);
+        assert!(!auth.presets[0].resolved);
+        assert_eq!(auth.presets[0].body, None);
+        let p = &auth.subagent_prompt_preamble;
+        assert!(p.contains(UNRESOLVED_AUTHORIZATION_MARKER), "{p}");
+        assert!(p.contains("`#spec-test-build-install-commit-push`"), "{p}");
+        assert!(p.contains("Do not commit, push"), "{p}");
+        assert!(
+            p.contains(crate::prompt_component_attrs::UNRESOLVED_PRESET_FIX),
+            "{p}"
+        );
+
+        // Free text with no `#name:` head still fails closed, token by token.
+        let free = run_doc("", "approve all commit + push");
+        let auth = subagent_authorization("doc.md", &free, "do [#runpresetunresolved]");
+        assert_eq!(auth.status, AuthorizationStatus::UnresolvedPreset);
+        assert!(
+            auth.subagent_prompt_preamble
+                .contains(UNRESOLVED_AUTHORIZATION_MARKER)
         );
     }
 

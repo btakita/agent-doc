@@ -1245,18 +1245,29 @@ impl PresetContext {
             agent_doc_queue::prompt_component_attrs::prompt_component_attrs(current, "exchange");
         let exchange_names: Vec<String> =
             exchange_attrs.preset_names().map(str::to_string).collect();
-        for (names, scope, target) in [
+        // `#runpresetunresolved`: an inline `preset="#name: body"` definition
+        // resolves exactly like a frontmatter entry, within its own component.
+        let queue_presets = queue_attrs.overlay_inline_presets(prompt_presets);
+        let exchange_presets = exchange_attrs.overlay_inline_presets(prompt_presets);
+        for (names, scope, target, prompt_presets) in [
             (
                 queue_names.as_slice(),
                 PresetScope::Queue,
                 &mut queue_intents,
+                &queue_presets,
             ),
             (
                 exchange_names.as_slice(),
                 PresetScope::Exchange,
                 &mut exchange_intents,
+                &exchange_presets,
             ),
-            (session_presets, PresetScope::Cycle, &mut cycle),
+            (
+                session_presets,
+                PresetScope::Cycle,
+                &mut cycle,
+                prompt_presets,
+            ),
         ] {
             for name in names {
                 let requested = name.trim();
@@ -2474,6 +2485,29 @@ mod tests {
         assert!(rendered.contains("dispatch=drain_after_current"));
         assert!(rendered.contains("AFTER the current item closes"));
         assert!(rendered.contains("Do NOT interrupt"));
+    }
+
+    /// `#runpresetunresolved`: an inline `preset="#name: body"` on the run
+    /// marker is one queue intent carrying the operator's body, not one empty
+    /// intent per word token.
+    #[test]
+    fn inline_run_preset_definition_is_one_resolved_queue_intent() {
+        let current = concat!(
+            "<!-- agent:run id=\"main\" subagents preset=\"#spec-test-build-install-commit-push: ",
+            "approve all commit + integration + push: approve all worktree removals\" go -->\n",
+            "- do it\n<!-- /agent:run -->\n",
+        );
+        let presets = PresetContext::new_with_presets(current, &[], &Default::default());
+        assert_eq!(presets.queue.len(), 1, "{:?}", presets.queue);
+        assert_eq!(
+            presets.queue[0].name,
+            "#spec-test-build-install-commit-push"
+        );
+        assert_eq!(
+            presets.queue[0].body,
+            "approve all commit + integration + push: approve all worktree removals"
+        );
+        assert_eq!(presets.queue[0].scope, PresetScope::Queue);
     }
 
     #[test]

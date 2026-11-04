@@ -1132,6 +1132,23 @@ impl PromptPresets {
             .collect();
     }
 
+    /// Define `name` with the verbatim scalar `body` on this effective map
+    /// (`#runpresetunresolved`).
+    ///
+    /// A prompt component's `preset="#name: body"` attribute is an inline
+    /// preset definition; resolvers overlay it onto a *clone* of the effective
+    /// frontmatter map so the name resolves exactly like a frontmatter
+    /// `prompt_presets` entry. The inline definition shadows a frontmatter entry
+    /// of the same name. The body is the operator's literal text and is not
+    /// interpolated, so the other presets' already-resolved bodies are kept
+    /// rather than recomputed from `entries`. Never write a map carrying an
+    /// overlay back to frontmatter.
+    pub fn define_inline(&mut self, name: &str, body: &str) {
+        self.entries
+            .insert(name.to_string(), Some(PresetValue::Text(body.to_string())));
+        self.resolved.insert(name.to_string(), body.to_string());
+    }
+
     fn rebuild_resolved(&mut self) {
         self.resolved = self
             .entries

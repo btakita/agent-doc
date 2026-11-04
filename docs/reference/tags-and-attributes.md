@@ -211,7 +211,7 @@ on the status marker hides it; `queue-legend` also accepts `on`, `true`/`false`,
 | `auto` | Deprecated bare activation flag retained for compatibility. Prefer the default running state, `go`, or frontmatter `queue: go`. Binary-owned rewrites remove it. |
 | `clear` | Bare positive declaration of the default fresh-context policy. Direct queues clear once per completed turn; `subagents`/`fan-out` queues clear at the next safe idle boundary after in-flight claims settle. Omission remains enabled for compatibility. |
 | `disable-auto-clear` | Legacy opt-out. Bare or truthy disables the fresh-context reset; `false`, `0`, `no`, or `off` leaves it enabled. When both spellings appear, this opt-out wins. |
-| `preset` | One or more whitespace-separated prompt-preset references. Quote a multi-reference value. `preset=""` explicitly selects no component default. |
+| `preset` | One or more whitespace-separated prompt-preset references. Quote a multi-reference value. `preset="#name: <text>"` defines `#name` inline with `<text>` (verbatim, through the end of the value) as its body; free text without that `#name:` head is not prose and fails closed. `preset=""` explicitly selects no component default. |
 | `presets` | Compatibility alias for `preset`; a nonempty canonical `preset` wins when both appear. |
 | `subagents`, `fan-out` | Bare dispatches every eligible head to subagents; `=N` sets a positive concurrency cap. If both aliases appear, the most restrictive valid cap wins. On `agent:exchange`, only the bare form is valid because one prompt is dispatched at a time. |
 | `model` | Optional model override for subagents dispatched from this queue. It takes precedence over structured preset metadata and frontmatter `subagent_model`. |

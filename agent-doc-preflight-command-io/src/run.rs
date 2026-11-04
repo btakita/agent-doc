@@ -1944,11 +1944,19 @@ fn run_with_options_to_writer_in_pass(
         &added_diff_lines,
         &frontmatter_prompt_presets,
     );
+    // `#runpresetunresolved`: an inline `preset="#name: body"` exchange
+    // definition resolves exactly like a frontmatter entry for the exchange
+    // defaults, so it is neither reported missing nor dropped from expansion.
+    let exchange_prompt_presets = if has_exchange_prompt_target {
+        exchange_prompt_attrs.overlay_inline_presets(&frontmatter_prompt_presets)
+    } else {
+        frontmatter_prompt_presets.clone()
+    };
     if has_exchange_prompt_target {
         agent_doc_prompt_contract::extend_prompt_preset_resolution(
             &mut prompt_preset_resolution,
             exchange_prompt_attrs.preset_names().map(str::to_string),
-            &frontmatter_prompt_presets,
+            &exchange_prompt_presets,
         );
     }
     if !prompt_preset_resolution.missing.is_empty() {
@@ -1964,14 +1972,14 @@ fn run_with_options_to_writer_in_pass(
     // canonicalized and proven present by the `missing` bail above.
     let mut prompt_preset_expansions = Vec::new();
     for name in &prompt_presets_requested {
-        let Some(body) = frontmatter_prompt_presets.get(name.as_str()) else {
+        let Some(body) = exchange_prompt_presets.get(name.as_str()) else {
             continue;
         };
         prompt_preset_expansions.push(prompt_preset_expansion(
             file,
             name,
             body,
-            &frontmatter_prompt_presets,
+            &exchange_prompt_presets,
         )?);
     }
     for warning in agent_doc_preflight_io::warnings::content_and_staleness_warnings(

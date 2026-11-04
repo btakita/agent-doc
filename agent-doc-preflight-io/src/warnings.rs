@@ -86,6 +86,16 @@ pub fn content_and_staleness_warnings(
         warnings.push(warning);
     }
     if let Some(warning) =
+        agent_doc_workflow::preflight_policy::unresolved_component_preset_warning(
+            &file.display().to_string(),
+            content,
+            prompt_presets,
+        )
+        .map(PreflightWarning::from)
+    {
+        warnings.push(warning);
+    }
+    if let Some(warning) =
         agent_doc_workflow::preflight_policy::preset_item_id_collision_warning(content)
             .map(PreflightWarning::from)
     {

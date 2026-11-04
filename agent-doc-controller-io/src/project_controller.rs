@@ -28641,17 +28641,35 @@ revised operator request
             repair.node_keys.is_empty(),
             "the queue is already terminal, so the repair owns only Active: {repair:?}"
         );
-        let repaired = loop {
-            let repaired = std::fs::read_to_string(&canonical).unwrap();
-            if !repaired.contains("queue-free:partial") {
-                break repaired;
+        // Wait for the worker's receipt, not for the first read that lacks the
+        // stale row: that read can land inside the worker's write and see a
+        // truncated document (no response, so no capture-owned projection).
+        loop {
+            let current = std::fs::read_to_string(&canonical).unwrap();
+            if !current.contains("queue-free:partial") {
+                break;
             }
             assert!(
                 Instant::now() < deadline,
                 "the asynchronous Active-only repair did not settle"
             );
             std::thread::sleep(Duration::from_millis(10));
-        };
+        }
+        await_source_map_entry(
+            &runtime.document_graphs.ctx,
+            &runtime.document_graphs.answered_free_text_strike_applied,
+            &document_hash,
+            {
+                let projection_id = repair.projection_id.clone();
+                move |applied| applied.as_deref() == Some(projection_id.as_str())
+            },
+            "the Active-only repair effect did not publish its receipt",
+        );
+        let repaired = std::fs::read_to_string(&canonical).unwrap();
+        assert!(
+            agent_doc_turn::response_replay::response_materialized_in_content(response, &repaired),
+            "the settled repair keeps the response: {repaired}"
+        );
         assert!(
             agent_doc_work_projection::reconcile_managed_active_items(&repaired)
                 .unwrap()

@@ -737,7 +737,19 @@ at every response cycle. The binary projects deterministic document evidence;
 the agent decides from current authorized evidence whether a natural-language
 action is finished or moot:
 
-- **Preflight** (read-only) emits `todo_signals` in its JSON and a
+- **Preflight todo projection (`#managedlistnodrift`).** Before signals are
+  computed, preflight renders `agent:todo` from its durable state through
+  `agent_doc_element::todo::project_todo`: an OPEN item whose OWN id, or every
+  source its canonical locator names, is resolved tracked work (including the
+  done archive) is checked off `[x]`; nothing else in the list changes. Items
+  that only cite resolved work, id-less items, and ids the evidence does not
+  know stay open. A duplicate own id is reported (`[preflight] todo: [#id]
+  names N items; reported, not merged`), never folded by preflight. The
+  closeout's automatic completion is the same projection followed by its
+  `#tododupdone` fold, and `session-check` reports any `agent:todo` line that
+  differs from the projection. Such an item therefore stops raising
+  `todo_sync_required` at the next turn boundary instead of every turn.
+- **Preflight** emits `todo_signals` in its JSON and a
   `[preflight] todo:` stderr line per signal. Every OPEN row emits
   `todo_sync_required`, with its stable selector and an instruction to compare
   it with current-cycle evidence and use `--todo-done` when it is finished or

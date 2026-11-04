@@ -16,17 +16,57 @@ use anyhow::Result;
 /// Every list's invariant over one document cut. A list whose durable state
 /// cannot be read is reported as unverifiable rather than silently passing.
 pub fn managed_list_mismatches(
-    _file: &Path,
+    file: &Path,
     content: &str,
 ) -> Vec<(ManagedList, Result<Option<ListMismatch>>)> {
-    vec![(
-        ManagedList::Active,
-        agent_doc_work_projection::managed_list::check_list(
+    vec![
+        (
             ManagedList::Active,
-            content,
-            agent_doc_work_projection::reconcile_managed_active_items,
+            agent_doc_work_projection::managed_list::check_list(
+                ManagedList::Active,
+                content,
+                agent_doc_work_projection::reconcile_managed_active_items,
+            ),
         ),
-    )]
+        (ManagedList::Todo, todo_mismatch(file, content)),
+    ]
+}
+
+/// `agent:todo` == render(todo records, tracked-work index + done archive).
+fn todo_mismatch(file: &Path, content: &str) -> Result<Option<ListMismatch>> {
+    let links = agent_doc_element_backlog_io::backlog_cmd::todo_link_index_in_content(
+        file,
+        content,
+        true,
+        &[],
+    )?;
+    agent_doc_work_projection::managed_list::check_list(ManagedList::Todo, content, |content| {
+        Ok(agent_doc_element::todo::project_todo(content, &links)?.content)
+    })
+}
+
+/// Duplicate todo ids, reported by session-check, never merged.
+pub fn todo_duplicate_id_lines(content: &str) -> Vec<String> {
+    let Ok(projection) = agent_doc_element::todo::project_todo(
+        content,
+        &agent_doc_element::todo::TodoLinkIndex::default(),
+    ) else {
+        return Vec::new();
+    };
+    projection
+        .duplicate_ids
+        .into_iter()
+        .map(|(id, rows)| {
+            format!(
+                "[session-check] warning: {} (#managedlistnodrift)",
+                agent_doc_work_projection::managed_list::ReconcileAction::DuplicateId {
+                    list: ManagedList::Todo,
+                    id,
+                    rows,
+                }
+            )
+        })
+        .collect()
 }
 
 /// Render the per-list findings as `session-check` warning lines.
@@ -51,7 +91,8 @@ pub fn managed_list_guard_lines(
 
 pub fn check_managed_list_invariants(file: &Path, rc: &CycleContext) -> Result<GuardResult> {
     let content = rc.doc_content();
-    let lines = managed_list_guard_lines(file, managed_list_mismatches(file, &content));
+    let mut lines = managed_list_guard_lines(file, managed_list_mismatches(file, &content));
+    lines.extend(todo_duplicate_id_lines(&content));
     Ok(if lines.is_empty() {
         GuardResult::None
     } else {
@@ -86,6 +127,33 @@ mod tests {
             "{}",
             lines[0]
         );
+    }
+
+    #[test]
+    fn todo_drift_names_the_open_item_whose_work_is_done() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("plan.md");
+        let content = concat!(
+            "## Todo <!-- agent:todo -->\n",
+            "- [ ] [#shipped] Announce the release\n",
+            "- [ ] [#dup] one\n",
+            "- [ ] [#dup] two\n",
+            "<!-- /agent:todo -->\n",
+            "## Backlog <!-- agent:backlog -->\n",
+            "- [x] [#shipped] Ship the release\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&file, content).unwrap();
+        let lines = managed_list_guard_lines(&file, managed_list_mismatches(&file, content));
+        assert!(
+            lines.iter().any(|line| line.contains(
+                "agent:todo line 1: render(durable state) has `- [x] [#shipped] Announce the release`"
+            )),
+            "{lines:?}"
+        );
+        let duplicates = todo_duplicate_id_lines(content);
+        assert_eq!(duplicates.len(), 1, "{duplicates:?}");
+        assert!(duplicates[0].contains("[#dup] names 2 rows (reported, not merged)"));
     }
 
     #[test]

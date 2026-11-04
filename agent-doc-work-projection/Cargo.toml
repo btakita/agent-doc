@@ -18,3 +18,6 @@ agent-doc-element-queue = { path = "../agent-doc-element-queue", version = "0.35
 agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.567" }
 agent-doc-queue = { path = "../agent-doc-queue", version = "0.35.567" }
 anyhow = "1"
+
+[dev-dependencies]
+proptest = "1"

@@ -3032,6 +3032,7 @@ dependencies = [
  "agent-doc-hash",
  "agent-doc-queue",
  "anyhow",
+ "proptest",
 ]
 
 [[package]]

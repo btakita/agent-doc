@@ -2471,6 +2471,60 @@ fn run_pending_maintenance_with_options(
         snapshot_mutated = true;
     }
 
+    // `#managedlistnodrift`: `agent:todo` is render(durable state). An open
+    // item whose own tracked work is durably resolved closes here, at the
+    // turn boundary, through the same projection the closeout uses; nothing
+    // else in the list changes. Duplicate ids are reported, never merged.
+    // Each document derives from its own tracked-work evidence.
+    match agent_doc_element_backlog_io::backlog_cmd::todo_link_index_in_content(
+        file,
+        &current_content,
+        true,
+        &[],
+    ) {
+        Ok(links) => {
+            let projection = agent_doc_element::todo::project_todo(&current_content, &links)?;
+            for (id, count) in &projection.duplicate_ids {
+                eprintln!(
+                    "[preflight] todo: [#{id}] names {count} items; reported, not merged (#managedlistnodrift)"
+                );
+            }
+            if let Some(projected) = projection.content {
+                for id in &projection.completed {
+                    eprintln!(
+                        "[preflight] todo: closed [#{id}]: its tracked work is resolved (#managedlistnodrift)"
+                    );
+                    agent_doc_ops_log_io::log_op(
+                        file,
+                        &format!(
+                            "todo_auto_done file={} id={} basis=linked_work_resolved source=preflight_projection",
+                            file.display(),
+                            id
+                        ),
+                    );
+                }
+                current_content = projected;
+                mutated = true;
+            }
+        }
+        Err(err) => eprintln!(
+            "[preflight] todo: tracked-work evidence unreadable ({err:#}); todo projection skipped"
+        ),
+    }
+    if let Some(ref mut snap_content) = snapshot_content
+        && let Ok(links) = agent_doc_element_backlog_io::backlog_cmd::todo_link_index_in_content(
+            file,
+            snap_content,
+            true,
+            &[],
+        )
+        && let Some(projected) =
+            agent_doc_element::todo::project_todo(snap_content, &links)?.content
+    {
+        *snap_content = projected;
+        snapshot_mutated = true;
+    }
+
     if let Some(reconciled) =
         agent_doc_document::status_projection::reconcile_top_backlog_status_content(
             &current_content,

@@ -2367,20 +2367,86 @@ pub fn auto_complete_linked_todos_except(
     links: &TodoLinkIndex,
     exempt: &[String],
 ) -> Result<TodoAutoCompleteOutcome> {
-    let unchanged = |content: &str| TodoAutoCompleteOutcome {
-        content: content.to_string(),
-        completed: Vec::new(),
-        reconciled: 0,
+    // `#managedlistnodrift`: the closeout closes items through the same
+    // projection preflight renders, then folds the copies this closeout's own
+    // completion created (`#tododupdone`).
+    let projection = project_todo_except(content, links, exempt)?;
+    let Some(projected) = projection.content.filter(|_| !projection.completed.is_empty()) else {
+        return Ok(TodoAutoCompleteOutcome {
+            content: content.to_string(),
+            completed: Vec::new(),
+            reconciled: 0,
+        });
     };
+    let (folded, reconciled) = reconcile_todo_in_document(&projected)?;
+    Ok(TodoAutoCompleteOutcome {
+        content: folded,
+        completed: projection.completed,
+        reconciled,
+    })
+}
+
+/// `#managedlistnodrift`: what the `agent:todo` projection derives from its
+/// durable state.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TodoProjection {
+    /// The reconciled document, or `None` when `agent:todo` is already
+    /// `render(durable state)`.
+    pub content: Option<String>,
+    /// Own ids of the open items closed because their tracked work is durably
+    /// resolved, in item order.
+    pub completed: Vec<String>,
+    /// Own ids that name more than one item, with the item count. Reported,
+    /// never merged: folding copies stays an explicit operator command.
+    pub duplicate_ids: Vec<(String, usize)>,
+}
+
+/// `#managedlistnodrift`: `render(durable state)` for `agent:todo`.
+///
+/// The durable state is the todo items themselves (operator records: id,
+/// action, checkbox) plus `links`, the tracked-work index built from the
+/// tracked components and the done archive. The only state this projection
+/// derives is the checkbox of an OPEN item whose OWN id (or every tracked item
+/// linked to it) is durably resolved: that item is closed `[x]`, text
+/// otherwise unchanged ([`TodoLinkFindingKind::LinkedWorkResolved`]). Nothing
+/// is deleted, reordered, or folded; an item that only cites resolved work, an
+/// id-less item, and an item whose id `links` does not know stay open (fail
+/// closed). A second application is a no-op.
+pub fn project_todo(content: &str, links: &TodoLinkIndex) -> Result<TodoProjection> {
+    project_todo_except(content, links, &[])
+}
+
+/// [`project_todo`], leaving every item whose own id is in `exempt` open
+/// (`#todoaddonsamecycledone`: the todos the same closeout's `--todo-add`
+/// created are outstanding operator work by definition).
+pub fn project_todo_except(
+    content: &str,
+    links: &TodoLinkIndex,
+    exempt: &[String],
+) -> Result<TodoProjection> {
     let Some(todo) = find_todo_component(content)? else {
-        return Ok(unchanged(content));
+        return Ok(TodoProjection {
+            content: None,
+            completed: Vec::new(),
+            duplicate_ids: Vec::new(),
+        });
     };
+    let mut links = links.clone();
+    links.resolve_todo_backlinks_from_document(content)?;
     let mut body = TodoBody::parse(todo.content(content));
-    let mut completed = Vec::new();
+    let mut completed: Vec<String> = Vec::new();
+    let mut counts: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
+    let mut order: Vec<String> = Vec::new();
     for item in body.items.clone() {
         let Some(own) = item.own_id.as_deref() else {
             continue;
         };
+        let key = normalize_link_id(own);
+        let count = counts.entry(key.clone()).or_default();
+        if *count == 0 {
+            order.push(key);
+        }
+        *count += 1;
         if exempt
             .iter()
             .any(|id| normalize_link_id(id) == normalize_link_id(own))
@@ -2389,25 +2455,68 @@ pub fn auto_complete_linked_todos_except(
         }
         if item.state.is_open() && (links.is_resolved(own) || links.linked_sources_resolved(own)) {
             body.rewrite_line(item.line, TodoState::Done, Some(own), &item.action);
-            if !completed.iter().any(|seen: &String| seen == own) {
+            if !completed.iter().any(|seen| seen.eq_ignore_ascii_case(own)) {
                 completed.push(own.to_string());
             }
         }
     }
-    if completed.is_empty() {
-        return Ok(unchanged(content));
-    }
-    let (folded, reconciled) = reconcile_todo_body(&body.render());
-    Ok(TodoAutoCompleteOutcome {
-        content: todo.replace_content(content, &folded),
+    let duplicate_ids = order
+        .into_iter()
+        .filter_map(|id| {
+            let count = counts[&id];
+            (count > 1).then_some((id, count))
+        })
+        .collect();
+    let rendered = body.render();
+    let content = (rendered != todo.content(content)).then(|| todo.replace_content(content, &rendered));
+    Ok(TodoProjection {
+        content,
         completed,
-        reconciled,
+        duplicate_ids,
     })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `#managedlistnodrift`: the todo projection closes exactly the open
+    /// items whose own tracked work is durably resolved, changes nothing else,
+    /// reports (never folds) duplicate ids, and is a fixed point.
+    #[test]
+    fn project_todo_closes_resolved_own_ids_and_reports_duplicates() {
+        let content = concat!(
+            "<!-- agent:todo -->\n",
+            "- [ ] [#done-work] Verify the release\n",
+            "  - operator note stays\n",
+            "- [ ] [#open-work] Still waiting\n",
+            "- [ ] Mentions [#done-work] only\n",
+            "- [ ] standalone prose\n",
+            "- [ ] [#twice] first copy\n",
+            "- [ ] [#twice] second copy\n",
+            "<!-- /agent:todo -->\n",
+        );
+        let mut links = TodoLinkIndex::default();
+        links.mark_resolved("done-work");
+        links.mark_open("open-work", "backlog");
+        let projection = project_todo(content, &links).unwrap();
+        assert_eq!(projection.completed, vec!["done-work".to_string()]);
+        assert_eq!(projection.duplicate_ids, vec![("twice".to_string(), 2)]);
+        let projected = projection.content.expect("the resolved item closes");
+        assert!(projected.contains("- [x] [#done-work] Verify the release\n  - operator note stays\n"));
+        assert!(projected.contains("- [ ] [#open-work] Still waiting\n"));
+        assert!(projected.contains("- [ ] Mentions [#done-work] only\n"));
+        assert!(projected.contains("- [ ] [#twice] first copy\n- [ ] [#twice] second copy\n"));
+        let again = project_todo(&projected, &links).unwrap();
+        assert!(again.content.is_none(), "a second render is a no-op");
+        assert!(again.completed.is_empty());
+    }
+
+    #[test]
+    fn project_todo_without_a_todo_component_is_a_no_op() {
+        let projection = project_todo("# Doc\n", &TodoLinkIndex::default()).unwrap();
+        assert!(projection.content.is_none());
+    }
 
     /// `#todosync`: the brief quotes the Todo that OWNS the id, with its
     /// nested lines byte-for-byte; a Todo that only cites the id is not it.

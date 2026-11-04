@@ -2111,6 +2111,19 @@ impl QueueClaimLedger {
                 .filter(|(_, id)| **id == claim.identity)
                 .map(|(index, _)| index)
                 .collect();
+            // `#nestlistlineage`: the anchor pairs on the visible row, which
+            // cannot tell identical leaves under different parents apart
+            // (`#review` under PR 207 and under PR 212). While this claim's
+            // exact nest vector is still live, a text-identical row with a
+            // different vector is a new sibling, never this claim's edited row.
+            // Following it moved a running worker's claim (and its 🚧 marker)
+            // onto the operator's new row (sdk-dev 2026-11-04).
+            if !identity_lines.is_empty() {
+                anchored.retain(|&n| {
+                    live[n] == claim.identity
+                        || !identity_lines.iter().any(|&m| norms[m] == norms[n])
+                });
+            }
             // The visible `[#owner#generation]` annotation is the binary's own
             // projection of this exact attempt onto its row. Among the rows
             // that could be this claim's (anchored descendants, same-identity

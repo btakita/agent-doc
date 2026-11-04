@@ -3390,6 +3390,7 @@ mod th {
             pending_actionable_ids: Vec::new(),
             pending_anchored_ids: Vec::new(),
             queue_mirrored_ids: Vec::new(),
+            inherited_queue_owned_ids: Vec::new(),
             tracked_work_maintenance_required_at_preflight: Some(false),
             ipc_snapshot_adoption_blocked: false,
             dropped_exchange_prompts: Vec::new(),

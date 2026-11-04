@@ -7173,7 +7173,7 @@ fn try_main() -> anyhow::Result<()> {
             },
         ),
         Commands::Admit { file } => {
-            let output = agent_doc_cycle_state_io::admit_with_current_resolver(
+            let output = agent_doc_session_check_io::midturn_steering::admit_with_steering_seed(
                 &file,
                 |file| {
                     Ok(
@@ -7181,8 +7181,6 @@ fn try_main() -> anyhow::Result<()> {
                             .content,
                     )
                 },
-                agent_doc_snapshot_io::load_document_baseline,
-                agent_doc_ops_log_io::log_op,
             )?;
             println!("{}", serde_json::to_string_pretty(&output)?);
             Ok(())

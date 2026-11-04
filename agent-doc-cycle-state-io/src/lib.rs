@@ -320,6 +320,17 @@ pub struct CycleState {
     /// would make the closeout re-insert a head the operator deleted mid-turn.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub queue_mirrored_ids: Vec<String>,
+    /// `#mirrorbinaryownedids` across cycles: the binary-owned queue ids of
+    /// every cycle opened since the mid-turn steering watermark was last
+    /// seeded. A response write or a baseline-replay reopen opens a new cycle
+    /// without preflight, so steering keeps comparing against the seeded
+    /// cycle's baseline while the cycle record moved on; without this, the
+    /// rows the seeded cycle's preflight mirror or closeout materialized were
+    /// unowned and the hook delivered them as operator additions
+    /// (agent-doc-bugs.md 2026-11-04). Inherited when a new cycle opens;
+    /// cleared when the steering watermark is re-seeded.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub inherited_queue_owned_ids: Vec<String>,
     /// True when the preflight-current document already had completed tracked
     /// work that closeout pending maintenance should reap. This lets closeout
     /// distinguish status-only cycles from tracked-work cycles without reading
@@ -1825,6 +1836,10 @@ fn start_preflight_with_task_queue_selection_and_after_checkpoint(
         pending_actionable_ids: Vec::new(),
         pending_anchored_ids: Vec::new(),
         queue_mirrored_ids: Vec::new(),
+        inherited_queue_owned_ids: prior
+            .as_ref()
+            .map(CycleState::queue_owned_ids_through)
+            .unwrap_or_default(),
         tracked_work_maintenance_required_at_preflight: file_content
             .map(agent_doc_document::tracked_work_projection::tracked_work_maintenance_required),
         ipc_snapshot_adoption_blocked: false,
@@ -2681,6 +2696,45 @@ pub fn record_pending_anchored_ids(file: &Path, ids: &[String]) -> Result<Option
         save(file, &state)?;
     }
     Ok(Some(state))
+}
+
+impl CycleState {
+    /// The binary-owned queue ids this cycle carries for mid-turn steering:
+    /// its own tracked-work adds, actionable ids, mirrored rows, and every id
+    /// inherited from cycles opened since the steering watermark's seed
+    /// (`#mirrorbinaryownedids`). Normalized: trimmed, `#`-less, lowercase.
+    pub fn queue_owned_ids_through(&self) -> Vec<String> {
+        let mut ids: Vec<String> = Vec::new();
+        for id in self
+            .pending_actionable_ids
+            .iter()
+            .chain(self.pending_added_ids.iter())
+            .chain(self.requested_added_ids.iter())
+            .chain(self.queue_mirrored_ids.iter())
+            .chain(self.inherited_queue_owned_ids.iter())
+        {
+            let id = id.trim().trim_start_matches('#').to_ascii_lowercase();
+            if !id.is_empty() && !ids.contains(&id) {
+                ids.push(id);
+            }
+        }
+        ids
+    }
+}
+
+/// Forget the inherited binary-owned ids of `cycle_id` once mid-turn steering
+/// re-seeded its watermark from that cycle's admitted document: rows earlier
+/// cycles materialized are now part of the watermark's own baseline.
+pub fn clear_inherited_queue_owned_ids(file: &Path, cycle_id: &str) -> Result<()> {
+    let Some(mut state) = load(file)? else {
+        return Ok(());
+    };
+    if state.cycle_id != cycle_id || state.inherited_queue_owned_ids.is_empty() {
+        return Ok(());
+    }
+    state.inherited_queue_owned_ids.clear();
+    state.updated_at = now_secs();
+    save(file, &state)
 }
 
 /// `#mirrorbinaryownedids`: record ids a backlog-to-queue mirror just
@@ -4348,6 +4402,7 @@ fn synthetic_state_with_id(
         pending_actionable_ids: Vec::new(),
         pending_anchored_ids: Vec::new(),
         queue_mirrored_ids: Vec::new(),
+        inherited_queue_owned_ids: Vec::new(),
         // A synthetic cycle did not observe a preflight document. Preserve
         // that distinction instead of asserting a false preflight fact that
         // the state projection cannot reproduce.

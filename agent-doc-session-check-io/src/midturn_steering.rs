@@ -275,7 +275,57 @@ pub fn seed_for_cycle(
         &state_key("base", file),
         &serde_json::to_string(&watermark)?,
         now_ms(),
-    )
+    )?;
+    // The new baseline already holds every row earlier cycles materialized,
+    // so their inherited binary-owned ids no longer apply to this watermark.
+    agent_doc_cycle_state_io::clear_inherited_queue_owned_ids(file, cycle_id)
+}
+
+/// Admit a realtime cycle (`agent-doc admit`, MCP `agent_doc_admit`,
+/// `agent-doc run`) and seed its mid-turn steering watermark from the same
+/// admitted text preflight would have seeded it from.
+///
+/// Admission opens a new cycle without running preflight. Before this, the
+/// steering base kept the last *preflighted* cycle's id and baseline, so a
+/// realtime-admitted turn (Grok's admit path) compared operator edits with a
+/// baseline hours old, the route-sync baseline carried a stale cycle id, and
+/// every boundary-policy consumer treated the live turn as closed and framed
+/// its steering as next-cycle work. A seed failure is reported, never fatal:
+/// the admitted cycle stands and the next preflight re-seeds.
+pub fn admit_with_steering_seed(
+    file: &Path,
+    mut resolve_current: impl FnMut(&Path) -> Result<String>,
+) -> Result<agent_doc_cycle_state_io::AdmitOutput> {
+    let mut admitted_text = None;
+    let output = agent_doc_cycle_state_io::admit_with_current_resolver(
+        file,
+        |file| {
+            let content = resolve_current(file)?;
+            admitted_text = Some(content.clone());
+            Ok(content)
+        },
+        agent_doc_snapshot_io::load_document_baseline,
+        agent_doc_ops_log_io::log_op,
+    )?;
+    if let Some(baseline) = admitted_text.as_deref()
+        && let Err(err) = seed_for_cycle(file, &output.cycle_id, baseline, None, Vec::new())
+    {
+        eprintln!(
+            "[admit] warning: could not seed mid-turn steering for {} cycle {}: {err:#}",
+            file.display(),
+            output.cycle_id
+        );
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "midturn_steering_admit_seed_failed file={} cycle={} error={} (#routesyncsteer)",
+                file.display(),
+                output.cycle_id,
+                first_error_line(&format!("{err:#}"))
+            ),
+        );
+    }
+    Ok(output)
 }
 
 /// How long after an explicit send a document save still counts as part of
@@ -384,6 +434,13 @@ fn load_explicit_send(
     .and_then(|raw| serde_json::from_str(&raw).ok())
 }
 
+#[cfg(test)]
+thread_local! {
+    /// Test seam: make the claim-routing read fail the way a timed-out Lazily
+    /// editor-op provenance read does in production (`#routesyncsteer`).
+    static PROVENANCE_READ_FAULT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
 /// Route queue items a worker claimed to their owner (`#claimedsteerwake`) and
 /// synthesize authoritative cancellation for claimed rows the operator removed
 /// (`#queue-removal-cancels`).
@@ -393,6 +450,13 @@ fn route_claimed_items(
     watermark: &SteeringWatermark,
     items: &mut Vec<SteeringItem>,
 ) -> Result<BTreeSet<String>> {
+    #[cfg(test)]
+    if PROVENANCE_READ_FAULT.with(std::cell::Cell::get) {
+        anyhow::bail!(
+            "read operator edit provenance while routing claimed removals for {}: read Lazily editor-op projection: timed out waiting for Lazily actor",
+            file.display()
+        );
+    }
     let ledger = agent_doc_queue_io::queue_claim::load_ledger_following(file, content)
         .with_context(|| format!("read queue claims while routing {}", file.display()))?;
     let now = agent_doc_queue_io::queue_claim::claim_clock_now_secs();
@@ -707,6 +771,7 @@ fn append_struck_removal_mismatches(
                 .and_then(|claim| claim.worker.as_ref().map(|worker| worker.worker_id.clone()))
                 .or_else(|| receipt.and_then(|receipt| receipt.worker_id.clone())),
             explicit: false,
+            vector: None,
         });
     }
     Ok(reported)
@@ -873,15 +938,7 @@ fn cycle_accepts_steering(cycle: &agent_doc_cycle_state_io::CycleState, cycle_id
 /// and ungates (the closeout mirror's input) and every row a backlog-to-queue
 /// mirror materialized (`#mirrorbinaryownedids`).
 fn binary_owned_ids(cycle: &agent_doc_cycle_state_io::CycleState) -> BTreeSet<String> {
-    cycle
-        .pending_actionable_ids
-        .iter()
-        .chain(cycle.pending_added_ids.iter())
-        .chain(cycle.requested_added_ids.iter())
-        .chain(cycle.queue_mirrored_ids.iter())
-        .map(|id| id.trim().trim_start_matches('#').to_ascii_lowercase())
-        .filter(|id| !id.is_empty())
-        .collect()
+    cycle.queue_owned_ids_through().into_iter().collect()
 }
 
 /// A computed, not-yet-persisted observation for one consumer.
@@ -1026,6 +1083,22 @@ fn prepare_with_gate(
     unchanged_gate: bool,
     carried: Option<&WakeSettleCarry>,
 ) -> Result<Option<PreparedObservation>> {
+    prepare_with_gate_at(file, consumer, policy, unchanged_gate, carried, None)
+}
+
+/// [`prepare_with_gate`] against `delivered` instead of the current
+/// authoritative text when it is given. A consumer acknowledged after an
+/// explicit send must advance only past the document that was actually handed
+/// to the turn: an edit typed after the paste stays unsurfaced
+/// (`#routesyncsteer`).
+fn prepare_with_gate_at(
+    file: &Path,
+    consumer: &str,
+    policy: ClosedCyclePolicy,
+    unchanged_gate: bool,
+    carried: Option<&WakeSettleCarry>,
+    delivered: Option<&str>,
+) -> Result<Option<PreparedObservation>> {
     let Some(root) = project_root(file) else {
         return Ok(None);
     };
@@ -1051,12 +1124,16 @@ fn prepare_with_gate(
             .as_ref()
             .is_none_or(|cycle| cycle.cycle_id == base.cycle_id)
     };
+    let stored_identity = stored_base.as_ref().map(SteeringWatermark::identity);
     let base = match stored_base {
         Some(base) if policy == ClosedCyclePolicy::Hook || base_describes_cycle(&base) => base,
         // No seed for the latest cycle (or none at all): compare with the
         // last committed baseline.
         _ if policy != ClosedCyclePolicy::Hook => match committed_baseline_watermark(file)? {
-            Some(base) => base,
+            Some(mut base) => {
+                base.fallback_of = stored_identity.clone();
+                base
+            }
             None => return Ok(None),
         },
         _ => return Ok(None),
@@ -1065,6 +1142,20 @@ fn prepare_with_gate(
     let mut watermark = match load_watermark(&conn, &consumer_key)? {
         Some(existing)
             if existing.cycle_id == base.cycle_id && existing.baseline == base.baseline =>
+        {
+            existing
+        }
+        // `#mirrorbinaryownedids`: a committed-baseline fallback a boundary
+        // consumer (the closeout report) wrote while the seeded base was stale
+        // stands for that same base. The hook resolving the stale base must
+        // keep its progress, or it re-initializes and re-delivers everything
+        // the fallback already surfaced (agent-doc-bugs.md 2026-11-04: the
+        // same 7 rows under two tokens). A re-seeded base has a new identity
+        // and re-initializes as before.
+        Some(existing)
+            if existing.fallback_of.is_some()
+                && existing.fallback_of == stored_identity
+                && base.fallback_of.is_none() =>
         {
             existing
         }
@@ -1120,7 +1211,14 @@ fn prepare_with_gate(
     {
         return prepared(None, None, boundary, None);
     }
-    let content = crate::resolve_current_document_content(file, "midturn_steering")?;
+    let content = match delivered {
+        Some(delivered) => delivered.to_string(),
+        None => crate::resolve_current_document_content(file, "midturn_steering")?,
+    };
+    // The stat names the file as it is NOW. Against a delivered cut it may
+    // already hold a later edit, so recording it would let the detached-document
+    // stat gate skip that edit forever; leave it unset to force a content read.
+    let observed_stat = delivered.is_none().then(|| fingerprint.clone());
     let _nested_claim_steer = agent_doc_queue_io::queue_claim::steer_guard_for(file, &content);
     let content_hash = core::content_hash(&content);
     let selected_head_open = core::current_item_is_present(&watermark, &content);
@@ -1138,7 +1236,7 @@ fn prepare_with_gate(
         && watermark.pending.is_empty()
         && watermark.last_observed_content_hash.as_deref() == Some(content_hash.as_str())
     {
-        watermark.last_observed_stat = Some(fingerprint);
+        watermark.last_observed_stat = observed_stat;
         return prepared(Some(watermark), None, boundary, None);
     }
 
@@ -1295,7 +1393,7 @@ fn prepare_with_gate(
     // `#deletedstruckmismatch`: a degraded struck-row deletion is delivered
     // once; acknowledging this observation records it.
     next.surfaced_struck_removals.extend(struck_removals);
-    next.last_observed_stat = Some(fingerprint);
+    next.last_observed_stat = observed_stat;
     let report = SteeringReport {
         document: file.display().to_string(),
         cycle_id: next.cycle_id.clone(),
@@ -1650,18 +1748,23 @@ pub fn prepare_route_sync_steering(file: &Path) -> Result<Option<RouteSyncSteeri
     let conn = agent_doc_sqlite::state_store::open_state_db(&root)?;
     let watermark = load_watermark(&conn, &state_key("base", file))?;
     let stored = load_route_sync_baseline(&conn, file);
+    // Fail closed: an unreadable item set (a timed-out Lazily editor-op
+    // provenance read, an unreadable claim ledger) is NOT an empty one. Handing
+    // the turn a diff-only payload and then recording it as delivered would
+    // advance the baseline past items the agent never saw. Nothing is pasted
+    // or recorded; the next send (or the hook's next settle edge) retries.
     let items = match explicit_send_pending_items(file) {
         Ok(items) => items,
         Err(err) => {
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
-                    "route_sync_steering_items_unreadable file={} error={} (#routesyncsteer)",
+                    "route_sync_steering_items_unreadable file={} outcome=retained error={} (#routesyncsteer)",
                     file.display(),
                     first_error_line(&format!("{err:#}"))
                 ),
             );
-            Vec::new()
+            return Err(err.context("read the explicit-send steering items"));
         }
     };
     let (previous, cycle_id) = if let Some(watermark) = watermark {
@@ -1700,8 +1803,29 @@ fn first_error_line(text: &str) -> String {
         .collect()
 }
 
+/// Acknowledge `consumer` past exactly the `delivered` document.
+fn acknowledge_delivered(file: &Path, consumer: &str, delivered: &str) -> Result<()> {
+    let policy = if consumer == CONSUMER_HOOK {
+        ClosedCyclePolicy::Hook
+    } else {
+        ClosedCyclePolicy::Boundary
+    };
+    if let Some(prepared) = prepare_with_gate_at(file, consumer, policy, true, None, Some(delivered))?
+    {
+        prepared.acknowledge(file)?;
+    }
+    Ok(())
+}
+
 /// Remember `content` as the last document handed to the running owner, and
 /// acknowledge every steering consumer so the same diff is not sent again.
+///
+/// Every consumer is acknowledged against the delivered `content`, never a
+/// later read, so an edit typed after the paste is not absorbed. The baseline
+/// advances only after every acknowledgement succeeded: when one fails (for
+/// example a timed-out Lazily editor-op provenance read), the baseline and
+/// that consumer stay where they were, so the next send re-carries the diff
+/// and the consumer re-surfaces its items. Retained, never absorbed.
 pub fn record_route_sync_steering_delivered(
     file: &Path,
     cycle_id: &str,
@@ -1710,6 +1834,34 @@ pub fn record_route_sync_steering_delivered(
     let Some(root) = project_root(file) else {
         return Ok(());
     };
+    let mut failed = Vec::new();
+    for consumer in [CONSUMER_HOOK, CONSUMER_CLI, CONSUMER_FOLLOW] {
+        if let Err(err) = acknowledge_delivered(file, consumer, content) {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "route_sync_steering_ack_failed file={} consumer={consumer} outcome=retained error={} (#routesyncsteer)",
+                    file.display(),
+                    first_error_line(&format!("{err:#}"))
+                ),
+            );
+            failed.push(format!("{consumer}: {}", first_error_line(&format!("{err:#}"))));
+        }
+    }
+    if !failed.is_empty() {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "route_sync_steering_baseline_retained file={} cycle={cycle_id} failed_consumers={} (#routesyncsteer)",
+                file.display(),
+                failed.len()
+            ),
+        );
+        anyhow::bail!(
+            "steering consumers could not be acknowledged after the send ({}); the baseline was not advanced, so the next send re-carries this diff",
+            failed.join("; ")
+        );
+    }
     let baseline = RouteSyncBaseline {
         cycle_id: cycle_id.to_string(),
         content: content.to_string(),
@@ -1721,18 +1873,6 @@ pub fn record_route_sync_steering_delivered(
         &serde_json::to_string(&baseline)?,
         now_ms(),
     )?;
-    for consumer in [CONSUMER_HOOK, CONSUMER_CLI, CONSUMER_FOLLOW] {
-        if let Err(err) = observe(file, consumer, true) {
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "route_sync_steering_ack_failed file={} consumer={consumer} error={} (#routesyncsteer)",
-                    file.display(),
-                    first_error_line(&format!("{err:#}"))
-                ),
-            );
-        }
-    }
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
@@ -1915,6 +2055,9 @@ pub fn render_pending_steering_items(items: &[SteeringItem]) -> Option<String> {
                 .map(|owner| format!(" owner={owner}"))
                 .unwrap_or_default(),
         ));
+        if let Some(vector) = &item.vector {
+            out.push_str(&format!("\nvector: {vector}"));
+        }
         if let Some(previous) = &item.previous {
             out.push_str(&format!("\nprevious: {previous}"));
         }
@@ -1999,7 +2142,12 @@ fn emit_closeout_steering_inner(
 }
 
 /// Harness `PostToolUse` payload fields this hook reads. Claude Code and Codex
-/// both send `session_id` and `cwd`.
+/// both send `session_id` and `cwd`. Grok loads this hook from the project's
+/// Claude-format `.claude/settings.json`; its envelope is camelCase
+/// (`sessionId`, `toolName`, ...) and also carries Claude's snake_case
+/// `session_id` alias and the same `cwd`, so the same fields parse. No serde
+/// alias is declared for `sessionId`: Grok sends both spellings, and an alias
+/// would reject that envelope as a duplicate field.
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct PostToolUseInput {
     pub session_id: String,
@@ -2010,15 +2158,20 @@ pub struct PostToolUseInput {
     /// steering leaked into (and was consumed by) its subagents' tool calls.
     #[serde(default)]
     pub agent_id: Option<String>,
+    /// Grok's subagent identity: present on events fired inside a subagent's
+    /// session, absent in the main session (it sends no `agent_id`).
+    #[serde(default, rename = "subagentType")]
+    pub subagent_type: Option<String>,
 }
 
 impl PostToolUseInput {
     /// The tool call ran inside a subagent, not the turn that owns the
     /// document (`#steerowneronly`).
     pub fn is_subagent(&self) -> bool {
-        self.agent_id
-            .as_deref()
-            .is_some_and(|id| !id.trim().is_empty())
+        [self.agent_id.as_deref(), self.subagent_type.as_deref()]
+            .into_iter()
+            .flatten()
+            .any(|id| !id.trim().is_empty())
     }
 }
 
@@ -2046,7 +2199,9 @@ pub fn session_document(input: &PostToolUseInput) -> Result<Option<PathBuf>> {
     Ok(doc.is_file().then_some(doc))
 }
 
-/// The hook envelope Claude Code and Codex inject into the running turn.
+/// The hook envelope Claude Code, Codex, and Grok inject into the running
+/// turn: `hookSpecificOutput.hookEventName = "PostToolUse"` plus
+/// `additionalContext`, which each delivers next to the tool result.
 pub fn post_tool_use_output(context: &str) -> serde_json::Value {
     serde_json::json!({
         "hookSpecificOutput": {
@@ -2491,6 +2646,178 @@ mod tests {
             "the previous send is the baseline, not the cycle admission text: {}",
             second_payload
         );
+    }
+
+    fn route_sync_baseline_content(file: &Path) -> Option<String> {
+        let root = project_root(file).unwrap();
+        let conn = agent_doc_sqlite::state_store::open_state_db(&root).unwrap();
+        load_route_sync_baseline(&conn, file).map(|baseline| baseline.content)
+    }
+
+    fn with_provenance_fault<T>(f: impl FnOnce() -> T) -> T {
+        PROVENANCE_READ_FAULT.with(|fault| fault.set(true));
+        let out = f();
+        PROVENANCE_READ_FAULT.with(|fault| fault.set(false));
+        out
+    }
+
+    /// `#routesyncsteer` (sdk-dev 2026-11-04): a timed-out Lazily editor-op
+    /// provenance read must never be treated as an empty item set, and must
+    /// never advance the route-sync baseline or any consumer. The item stays
+    /// durable and the first send after the read recovers carries it.
+    #[test]
+    fn provenance_read_timeout_retains_route_sync_steering_until_retry() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        let baseline = "---\nagent_doc_steering_debounce_ms: 0\n---\n# S\n\n<!-- agent:queue -->\n- current task\n<!-- /agent:queue -->\n";
+        std::fs::write(&file, baseline).unwrap();
+        seed_for_cycle(&file, "cycle-1", baseline, Some("current task"), Vec::new()).unwrap();
+        let edited = baseline.replace("- current task\n", "- current task\n- ship the fix\n");
+        std::fs::write(&file, &edited).unwrap();
+        record_explicit_send(&file).unwrap();
+
+        // 1. Read fails while preparing: nothing is handed over or recorded.
+        let refused = with_provenance_fault(|| prepare_route_sync_steering(&file));
+        let err = refused.expect_err("an unreadable item set is not an empty one");
+        assert!(format!("{err:#}").contains("timed out waiting for Lazily actor"), "{err:#}");
+        assert_eq!(route_sync_baseline_content(&file), None);
+
+        // 2. Prepared fine, but the acknowledgement read fails after the
+        // paste: the baseline and every consumer stay put.
+        let first = prepare_route_sync_steering(&file).unwrap().expect("send");
+        assert_eq!(first.pending_items, 1, "{first:?}");
+        let ack = with_provenance_fault(|| {
+            record_route_sync_steering_delivered(&file, &first.cycle_id, &first.content)
+        });
+        assert!(ack.is_err(), "a failed acknowledgement is reported, not swallowed");
+        assert_eq!(
+            route_sync_baseline_content(&file),
+            None,
+            "the baseline must not advance past a failed provenance read"
+        );
+        let retained = observe(&file, CONSUMER_CLI, false).unwrap().expect("retained");
+        assert_eq!(retained.items.len(), 1, "{retained:?}");
+        assert_eq!(retained.items[0].verbatim, "ship the fix");
+
+        // 3. Retry once the read recovers: the same item is delivered again.
+        let retry = prepare_route_sync_steering(&file).unwrap().expect("retry");
+        assert_eq!(retry.pending_items, 1, "{retry:?}");
+        let payload = take_steering_surrogate(&file, compact_token(&retry.instructions)).unwrap();
+        assert!(payload.contains("ship the fix"), "{payload}");
+        record_route_sync_steering_delivered(&file, &retry.cycle_id, &retry.content).unwrap();
+        assert_eq!(route_sync_baseline_content(&file).as_deref(), Some(edited.as_str()));
+        assert!(prepare_route_sync_steering(&file).unwrap().is_none());
+    }
+
+    /// An edit typed after the paste is not absorbed by the acknowledgement:
+    /// consumers advance only past the document that was actually sent.
+    #[test]
+    fn route_sync_acknowledgement_does_not_absorb_an_edit_typed_after_the_send() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        let baseline = "---\nagent_doc_steering_debounce_ms: 0\n---\n# S\n\n<!-- agent:queue -->\n- current task\n<!-- /agent:queue -->\n";
+        std::fs::write(&file, baseline).unwrap();
+        seed_for_cycle(&file, "cycle-1", baseline, Some("current task"), Vec::new()).unwrap();
+        let sent = baseline.replace("- current task\n", "- current task\n- first ask\n");
+        std::fs::write(&file, &sent).unwrap();
+        record_explicit_send(&file).unwrap();
+        let prepared = prepare_route_sync_steering(&file).unwrap().expect("send");
+
+        // The operator keeps typing while tmux submits the paste.
+        let later = sent.replace("- first ask\n", "- first ask\n- second ask\n");
+        std::fs::write(&file, &later).unwrap();
+        record_route_sync_steering_delivered(&file, &prepared.cycle_id, &prepared.content).unwrap();
+
+        for consumer in [CONSUMER_HOOK, CONSUMER_CLI, CONSUMER_FOLLOW] {
+            let report = observe(&file, consumer, false).unwrap().expect(consumer);
+            let texts: Vec<_> = report.items.iter().map(|item| item.verbatim.as_str()).collect();
+            assert_eq!(texts, ["second ask"], "{consumer}: {report:?}");
+        }
+    }
+
+    /// sdk-dev 2026-11-04: the operator added `#review` under PR 207 while a
+    /// worker held the identical `#review` leaf under PR 212. The new child
+    /// must surface as its own item, unclaimed, named by its full vector, and
+    /// its claim command must name the vector, never the ambiguous leaf.
+    #[test]
+    fn nested_child_beside_a_claimed_identical_leaf_surfaces_with_its_full_vector() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        let baseline = "---\nagent_doc_steering_debounce_ms: 0\n---\n# S\n\n<!-- agent:queue -->\n- https://example.test/pull/212\n  - #subagent #review\n<!-- /agent:queue -->\n";
+        std::fs::write(&file, baseline).unwrap();
+        agent_doc_queue_io::queue_claim::claim(
+            &file,
+            "https://example.test/pull/212: #subagent #review",
+            "subagent:c206review",
+            3600,
+        )
+        .unwrap();
+        seed_for_cycle(&file, "cycle-1", baseline, None, Vec::new()).unwrap();
+        let edited = baseline.replace(
+            "- https://example.test/pull/212\n",
+            "- https://example.test/pull/207\n  - #subagent #review\n- https://example.test/pull/212\n",
+        );
+        std::fs::write(&file, &edited).unwrap();
+
+        let followed =
+            agent_doc_queue_io::queue_claim::load_ledger_following(&file, &edited).unwrap();
+        assert_eq!(
+            followed
+                .claims
+                .iter()
+                .map(|claim| claim.item_text.as_str())
+                .collect::<Vec<_>>(),
+            ["https://example.test/pull/212: #subagent #review"],
+            "the 212 worker's claim must stay on its own row"
+        );
+        let report = observe(&file, CONSUMER_HOOK, true).unwrap().expect("report");
+        assert_eq!(report.items.len(), 1, "{report:?}");
+        let item = &report.items[0];
+        assert_eq!(item.verbatim, "#subagent #review");
+        assert_eq!(
+            item.vector.as_deref(),
+            Some("https://example.test/pull/207: #subagent #review"),
+            "{item:?}"
+        );
+        assert_eq!(item.claim_text(), "https://example.test/pull/207: #subagent #review");
+        assert_ne!(item.dispatch, core::SteeringDispatch::ForwardToOwner, "{item:?}");
+        assert_eq!(item.owner, None, "the 212 worker does not own the 207 child: {item:?}");
+        let rendered = report.render().expect("rendered");
+        assert!(
+            rendered.contains("vector: https://example.test/pull/207: #subagent #review"),
+            "{rendered}"
+        );
+        assert!(
+            !rendered.contains("--item '#subagent #review'"),
+            "a queue command must not name the ambiguous leaf: {rendered}"
+        );
+    }
+
+    /// `#routesyncsteer`: `agent-doc admit` (Grok's realtime path) opens a cycle
+    /// without preflight. It must seed steering for THAT cycle, or every
+    /// consumer keeps comparing against the last preflighted cycle.
+    #[test]
+    fn realtime_admit_seeds_steering_for_the_admitted_cycle() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        let old = "# S\n\n<!-- agent:queue -->\n- old work\n<!-- /agent:queue -->\n";
+        std::fs::write(&file, old).unwrap();
+        seed_for_cycle(&file, "cycle-stale", old, None, Vec::new()).unwrap();
+        let current = old.replace("- old work\n", "- old work\n- admitted work\n");
+        std::fs::write(&file, &current).unwrap();
+
+        let admitted =
+            admit_with_steering_seed(&file, |file| Ok(std::fs::read_to_string(file)?)).unwrap();
+        let root = project_root(&file).unwrap();
+        let conn = agent_doc_sqlite::state_store::open_state_db(&root).unwrap();
+        let base = load_watermark(&conn, &state_key("base", &file)).unwrap().unwrap();
+        assert_eq!(base.cycle_id, admitted.cycle_id);
+        assert_ne!(base.cycle_id, "cycle-stale");
+        assert_eq!(base.baseline, current);
     }
 
     #[test]
@@ -2978,6 +3305,124 @@ mod tests {
         );
     }
 
+    /// `#mirrorbinaryownedids` across cycles (agent-doc-bugs.md 2026-11-04):
+    /// preflight seeded cycle A and its mirror materialized rows recorded on
+    /// A; the coordinator's response write then opened cycle B without
+    /// preflight. Steering kept A's baseline but read binary-owned ids from B,
+    /// so A's mirrored rows (and the claim-marker states they reached) came
+    /// back as `source=queue change=added`. B inherits A's owned ids; an
+    /// operator's real edit of such a row, and a real operator row, surface.
+    #[test]
+    fn mirrored_rows_stay_binary_owned_after_a_write_opens_the_next_cycle() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        let doc = |rows: &str| {
+            format!(
+                "---\nagent_doc_steering_debounce_ms: 0\n---\n# S\n\n<!-- agent:queue -->\n{rows}<!-- /agent:queue -->\n\n<!-- agent:exchange -->\nwork\n<!-- /agent:exchange -->\n"
+            )
+        };
+        let baseline = doc("");
+        std::fs::write(&file, &baseline).unwrap();
+        let cycle_a =
+            agent_doc_cycle_state_io::start_preflight(&file, Some(&baseline), Some(&baseline))
+                .unwrap();
+        // Preflight maintenance mirrors backlog rows, records them on A, then
+        // seeds from the pre-maintenance cut.
+        agent_doc_cycle_state_io::record_queue_mirrored_ids(
+            &file,
+            &["queuetreegutter".to_string(), "nestedhookdrift".to_string()],
+        )
+        .unwrap();
+        seed_for_cycle(&file, &cycle_a.cycle_id, &baseline, None, Vec::new()).unwrap();
+        let mirrored = doc(
+            "- 📥 do [#queuetreegutter]\n- 🚧 [#subagent:ensurehooks#1] do [#nestedhookdrift]\n",
+        );
+        std::fs::write(&file, &mirrored).unwrap();
+        close_cycle(&file, &mirrored);
+        // The response write opens cycle B; no preflight re-seeds steering.
+        let cycle_b =
+            agent_doc_cycle_state_io::start_preflight(&file, Some(&mirrored), Some(&mirrored))
+                .unwrap();
+        assert_ne!(cycle_b.cycle_id, cycle_a.cycle_id);
+
+        let report = observe(&file, CONSUMER_HOOK, true).unwrap();
+        assert!(
+            report.as_ref().is_none_or(|report| report.items.is_empty()),
+            "cycle A's mirrored rows surfaced as operator steering under cycle B: {report:?}"
+        );
+
+        let edited = doc(
+            "- 📥 do [#queuetreegutter]\n- 🚧 [#subagent:ensurehooks#1] do [#nestedhookdrift] and also the gutter\n- review the release notes\n",
+        );
+        std::fs::write(&file, &edited).unwrap();
+        let report = observe(&file, CONSUMER_HOOK, true)
+            .unwrap()
+            .expect("operator edits produce a report");
+        let texts: Vec<_> = report.items.iter().map(|item| item.verbatim.as_str()).collect();
+        assert_eq!(texts.len(), 2, "{report:?}");
+        assert!(texts.iter().any(|text| text.contains("and also the gutter")), "{texts:?}");
+        assert!(texts.contains(&"review the release notes"), "{texts:?}");
+
+        // A re-seed absorbs the inherited ownership into its own baseline.
+        seed_for_cycle(&file, &cycle_b.cycle_id, &edited, None, Vec::new()).unwrap();
+        let state = agent_doc_cycle_state_io::load(&file).unwrap().unwrap();
+        assert!(state.inherited_queue_owned_ids.is_empty(), "{state:?}");
+    }
+
+    /// agent-doc-bugs.md 2026-11-04: the hook delivered the same items twice
+    /// under two tokens. The closeout report (a boundary consumer) found the
+    /// seeded base stale, fell back to the committed baseline, and wrote that
+    /// fallback into the hook consumer; the next hook call resolved the stale
+    /// base again, re-initialized, and re-delivered everything.
+    #[test]
+    fn closeout_fallback_does_not_make_the_hook_redeliver_what_it_surfaced() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        let doc = |rows: &str| {
+            format!(
+                "---\nagent_doc_steering_debounce_ms: 0\n---\n# S\n\n<!-- agent:queue -->\n{rows}<!-- /agent:queue -->\n"
+            )
+        };
+        let baseline = doc("");
+        std::fs::write(&file, &baseline).unwrap();
+        let cycle_a =
+            agent_doc_cycle_state_io::start_preflight(&file, Some(&baseline), Some(&baseline))
+                .unwrap();
+        seed_for_cycle(&file, &cycle_a.cycle_id, &baseline, None, Vec::new()).unwrap();
+        close_cycle(&file, &baseline);
+        agent_doc_cycle_state_io::start_preflight(&file, Some(&baseline), Some(&baseline))
+            .unwrap();
+
+        let with_x = doc("- fix the flaky test\n");
+        std::fs::write(&file, &with_x).unwrap();
+        let first = observe(&file, CONSUMER_HOOK, true).unwrap().expect("first");
+        assert_eq!(first.items.len(), 1, "{first:?}");
+
+        // Cycle B commits the document as it stands; its closeout report runs.
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &file,
+            &with_x,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        close_cycle(&file, &with_x);
+        if let Some(prepared) = prepare_closeout(&file).unwrap() {
+            prepared.acknowledge(&file).unwrap();
+        }
+
+        let again = observe(&file, CONSUMER_HOOK, true).unwrap();
+        assert!(
+            again.as_ref().is_none_or(|report| report.items.is_empty()),
+            "the hook re-delivered an item it already surfaced: {again:?}"
+        );
+        std::fs::write(&file, doc("- fix the flaky test\n- and bump the version\n")).unwrap();
+        let next = observe(&file, CONSUMER_HOOK, true).unwrap().expect("next");
+        let texts: Vec<_> = next.items.iter().map(|item| item.verbatim.as_str()).collect();
+        assert_eq!(texts, ["and bump the version"], "{next:?}");
+    }
+
     #[test]
     fn captured_response_filter_preserves_adjacent_operator_edit() {
         let dir = tempfile::tempdir().unwrap();
@@ -3354,6 +3799,159 @@ mod tests {
                 .len(),
             1
         );
+    }
+
+    /// A `PostToolUse` envelope as Grok 1.0.70 sends it to a hook loaded from
+    /// the project's Claude-format `.claude/settings.json`: camelCase keys plus
+    /// Claude's snake_case aliases of the top-level keys.
+    fn grok_post_tool_use_payload(session: &str, cwd: &Path, subagent: Option<&str>) -> String {
+        let mut payload = serde_json::json!({
+            "hookEventName": "post_tool_use",
+            "hook_event_name": "PostToolUse",
+            "sessionId": session,
+            "session_id": session,
+            "cwd": cwd,
+            "workspaceRoot": cwd,
+            "timestamp": "2026-11-04T19:59:20Z",
+            "permissionMode": "default",
+            "permission_mode": "default",
+            "toolName": "run_terminal_command",
+            "tool_name": "run_terminal_command",
+            "toolInput": {"command": "gh pr view 207"},
+            "tool_input": {"command": "gh pr view 207"},
+            "toolInputTruncated": false,
+            "toolUseId": "tool-1",
+            "tool_use_id": "tool-1",
+            "toolResult": {"type": "Bash", "command": "gh pr view 207", "exit_code": 0, "output_for_prompt": "ok"},
+            "tool_response": {"type": "Bash", "command": "gh pr view 207", "exit_code": 0, "output_for_prompt": "ok"},
+            "toolResultTruncated": false,
+        });
+        if let Some(kind) = subagent {
+            payload["subagentType"] = serde_json::json!(kind);
+        }
+        payload.to_string()
+    }
+
+    /// Grok runs `agent-doc hook steering-post-tool-use` from the Claude-format
+    /// settings file. Its envelope must parse, a subagent's tool call must not
+    /// consume the owner's steering, and the owner gets the PostToolUse
+    /// `additionalContext` envelope Grok injects next to the tool result.
+    #[test]
+    fn grok_shaped_post_tool_use_payload_delivers_steering_to_the_owner_only() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        let file = root.join("plan.md");
+        let baseline = "---\nagent_doc_steering_debounce_ms: 0\n---\n# S\n\n<!-- agent:queue -->\n- current task\n<!-- /agent:queue -->\n";
+        std::fs::write(&file, baseline).unwrap();
+        agent_doc_codex_hook_io::save_state(
+            &root,
+            &agent_doc_codex_hook_io::SessionState {
+                session_id: "grok-sess".into(),
+                identity_origin: agent_doc_codex_hook_io::SessionIdentityOrigin::HarnessHook,
+                harness: None,
+                doc_path: file.display().to_string(),
+                last_turn_id: String::new(),
+                last_prompt: "agent-doc plan.md".into(),
+                last_auto_queue_head: None,
+                last_context_clear_at: None,
+                last_prompt_cycle: None,
+                preflight_admitted: None,
+                updated_at: 1,
+            },
+        )
+        .unwrap();
+        let cycle =
+            agent_doc_cycle_state_io::start_preflight(&file, Some(baseline), Some(baseline))
+                .unwrap();
+        seed_for_cycle(&file, &cycle.cycle_id, baseline, Some("current task"), Vec::new())
+            .unwrap();
+        let owner = grok_post_tool_use_payload("grok-sess", &root, None);
+        let input: PostToolUseInput = serde_json::from_str(&owner).unwrap();
+        assert_eq!(input.session_id, "grok-sess");
+        assert!(!input.is_subagent());
+        assert_eq!(post_tool_use_response(&owner).unwrap(), None);
+
+        std::fs::write(
+            &file,
+            baseline.replace("- current task\n", "- current task\n- also review PR 207\n"),
+        )
+        .unwrap();
+        // A Grok subagent's tool call is silent and consumes nothing.
+        let subagent = grok_post_tool_use_payload("grok-sess", &root, Some("explore"));
+        assert_eq!(post_tool_use_response(&subagent).unwrap(), None);
+
+        // The first owner tool call after the edit settles delivers it.
+        let output = post_tool_use_response(&owner)
+            .unwrap()
+            .expect("owner receives steering");
+        assert_eq!(output["hookSpecificOutput"]["hookEventName"], "PostToolUse");
+        let context = output["hookSpecificOutput"]["additionalContext"]
+            .as_str()
+            .unwrap();
+        let expanded = take_steering_surrogate(&file, compact_token(context)).unwrap();
+        assert!(expanded.contains("also review PR 207"), "{expanded}");
+        assert_eq!(post_tool_use_response(&owner).unwrap(), None);
+    }
+
+    /// Latency is bounded by the settle window, not by a later explicit send:
+    /// a row typed during the turn is held while it is still being typed, and
+    /// the first owner tool call after the document goes quiet delivers it.
+    #[test]
+    fn grok_hook_delivers_a_new_nested_row_on_the_first_tool_call_after_it_settles() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        let file = root.join("plan.md");
+        let baseline = "---\nagent_doc_steering_debounce_ms: 1500\n---\n# S\n\n<!-- agent:queue -->\n- current task\n- https://example.test/pull/207\n  - ~~#review~~\n<!-- /agent:queue -->\n";
+        std::fs::write(&file, baseline).unwrap();
+        agent_doc_codex_hook_io::save_state(
+            &root,
+            &agent_doc_codex_hook_io::SessionState {
+                session_id: "grok-sess".into(),
+                identity_origin: agent_doc_codex_hook_io::SessionIdentityOrigin::HarnessHook,
+                harness: None,
+                doc_path: file.display().to_string(),
+                last_turn_id: String::new(),
+                last_prompt: "agent-doc plan.md".into(),
+                last_auto_queue_head: None,
+                last_context_clear_at: None,
+                last_prompt_cycle: None,
+                preflight_admitted: None,
+                updated_at: 1,
+            },
+        )
+        .unwrap();
+        let cycle =
+            agent_doc_cycle_state_io::start_preflight(&file, Some(baseline), Some(baseline))
+                .unwrap();
+        seed_for_cycle(&file, &cycle.cycle_id, baseline, Some("current task"), Vec::new())
+            .unwrap();
+        let owner = grok_post_tool_use_payload("grok-sess", &root, None);
+
+        std::fs::write(
+            &file,
+            baseline.replace("  - ~~#review~~\n", "  - ~~#review~~\n  - #review\n"),
+        )
+        .unwrap();
+        assert_eq!(
+            post_tool_use_response(&owner).unwrap(),
+            None,
+            "still inside the settle window: held, not delivered"
+        );
+        backdate(&file);
+        let output = post_tool_use_response(&owner)
+            .unwrap()
+            .expect("the first tool call after the edit settles delivers it");
+        let context = output["hookSpecificOutput"]["additionalContext"]
+            .as_str()
+            .unwrap();
+        let expanded = take_steering_surrogate(&file, compact_token(context)).unwrap();
+        assert!(
+            expanded.contains("vector: https://example.test/pull/207: #review"),
+            "{expanded}"
+        );
+        assert_eq!(post_tool_use_response(&owner).unwrap(), None);
     }
 
     #[test]

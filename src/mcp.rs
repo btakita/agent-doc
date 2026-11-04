@@ -512,11 +512,9 @@ fn tool_admit(args: &Map<String, Value>) -> Result<Value> {
         &std::env::current_dir().context("failed to resolve MCP server working directory")?,
         agent_doc_tmux_io::current_pane_id_from_env().as_deref(),
     )?;
-    let admit = agent_doc_cycle_state_io::admit_with_current_resolver(
+    let admit = agent_doc_session_check_io::midturn_steering::admit_with_steering_seed(
         &file,
         |file| Ok(agent_doc_document_realtime_io::try_resolve_current_doc_from_file(file)?.content),
-        agent_doc_snapshot_io::load_document_baseline,
-        agent_doc_ops_log_io::log_op,
     )?;
     let mut structured = json!({
         "ok": true,

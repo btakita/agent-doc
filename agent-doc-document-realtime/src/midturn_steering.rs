@@ -184,6 +184,27 @@ pub struct SteeringItem {
     /// never partial. Rendered as `sent=explicit`.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub explicit: bool,
+    /// The full nest vector (`parent: child`) of a nested queue leaf, when it
+    /// differs from the visible row. A short child such as `#review` under two
+    /// parents is otherwise ambiguous to the agent and to `queue claim --item`,
+    /// which binds the first unclaimed row with that leaf (`#nestlistlineage`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vector: Option<String>,
+}
+
+impl SteeringItem {
+    /// The text that names this item's queue work unambiguously: its nest
+    /// vector for a nested leaf, else the verbatim row. Every queue command a
+    /// rendering hands the agent (`claim`, `start`, `brief`, `release`) uses it.
+    pub fn claim_text(&self) -> &str {
+        self.vector.as_deref().unwrap_or(&self.verbatim)
+    }
+}
+
+/// The nest vector of a nested queue row, `None` for a top-level row whose
+/// lineage is its own (normalized) text.
+fn nested_vector(item: &QueueItem) -> Option<String> {
+    (normalize_queue_text(&item.raw) != item.norm).then(|| item.norm.clone())
 }
 
 /// A held (unsettled) candidate observation.
@@ -244,9 +265,21 @@ pub struct SteeringWatermark {
     /// re-derived and re-reported the same deletion.
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pub surfaced_struck_removals: BTreeSet<String>,
+    /// For a committed-baseline fallback watermark: the identity
+    /// ([`SteeringWatermark::identity`]) of the stale seeded base it stood in
+    /// for. Every consumer keeps this watermark's progress until that base is
+    /// re-seeded, instead of bouncing between the stale base and the fallback
+    /// and re-delivering everything the fallback already surfaced.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fallback_of: Option<String>,
 }
 
 impl SteeringWatermark {
+    /// The seeded cycle and baseline this watermark describes.
+    pub fn identity(&self) -> String {
+        format!("{}:{}", self.cycle_id, content_hash(&self.baseline))
+    }
+
     /// Seed a fresh watermark for a newly admitted cycle.
     pub fn seed(
         cycle_id: &str,
@@ -276,6 +309,7 @@ impl SteeringWatermark {
             closed: false,
             prior_cycle_queue: None,
             surfaced_struck_removals: BTreeSet::new(),
+            fallback_of: None,
         }
     }
 }
@@ -724,6 +758,7 @@ fn exchange_candidates(
                 generation: None,
                 worker_id: None,
                 explicit: false,
+                vector: None,
             },
         });
     }
@@ -1000,6 +1035,7 @@ fn queue_alignment(
                 generation: None,
                 worker_id: None,
                 explicit: false,
+                vector: nested_vector(item),
             },
         });
         alignment.events.push(QueueEvent::Insert {
@@ -1038,6 +1074,7 @@ fn queue_alignment(
                 generation: None,
                 worker_id: None,
                 explicit: false,
+                vector: nested_vector(item),
             },
         });
         alignment.events.push(QueueEvent::Edit {
@@ -1074,6 +1111,7 @@ fn queue_alignment(
                 generation: None,
                 worker_id: None,
                 explicit: false,
+                vector: None,
             },
         });
         alignment.events.push(QueueEvent::Delete {
@@ -1481,6 +1519,9 @@ pub fn render_steering_context(
             },
             item_header_suffix(item),
         ));
+        if let Some(vector) = &item.vector {
+            out.push_str(&format!("\nvector: {vector}"));
+        }
         if let Some(previous) = &item.previous {
             out.push_str(&format!("\nprevious: {previous}"));
         }
@@ -1583,8 +1624,12 @@ pub fn apply_claim_owners(items: &mut [SteeringItem], owner_of: impl Fn(&str) ->
         if item.source != SteeringSource::Queue {
             continue;
         }
-        let owner =
-            owner_of(&item.verbatim).or_else(|| item.previous.as_deref().and_then(&owner_of));
+        let owner = item
+            .vector
+            .as_deref()
+            .and_then(&owner_of)
+            .or_else(|| owner_of(&item.verbatim))
+            .or_else(|| item.previous.as_deref().and_then(&owner_of));
         if let Some(owner) = owner {
             if item.current_item && !owner.starts_with("subagent:") {
                 continue;
@@ -1609,8 +1654,12 @@ pub fn apply_claim_attempts(
         if item.source != SteeringSource::Queue {
             continue;
         }
-        let claim =
-            claim_of(&item.verbatim).or_else(|| item.previous.as_deref().and_then(&claim_of));
+        let claim = item
+            .vector
+            .as_deref()
+            .and_then(&claim_of)
+            .or_else(|| claim_of(&item.verbatim))
+            .or_else(|| item.previous.as_deref().and_then(&claim_of));
         if let Some(claim) = claim {
             if item.current_item && !claim.owner.starts_with("subagent:") {
                 continue;
@@ -1728,6 +1777,7 @@ pub fn append_claimed_queue_removals(
             generation: Some(claim.generation),
             worker_id: claim.worker.map(|worker| worker.worker_id),
             explicit: false,
+            vector: None,
         });
     }
 }
@@ -1810,7 +1860,7 @@ fn forward_to_owner_instruction(document: &str, item: &SteeringItem) -> String {
     let requeue = format!(
         "agent-doc queue release {} --item {} --generation {} --requeue",
         shell_single_quote(document),
-        shell_single_quote(&item.verbatim),
+        shell_single_quote(item.claim_text()),
         generation,
     );
     format!(
@@ -1834,7 +1884,7 @@ fn cancel_claimed_instruction(document: &str, item: &SteeringItem) -> String {
     let release = format!(
         "agent-doc queue release {} --item {} --generation {}",
         shell_single_quote(document),
-        shell_single_quote(&item.verbatim),
+        shell_single_quote(item.claim_text()),
         generation,
     );
     format!(
@@ -2087,6 +2137,9 @@ pub fn render_closeout_steering_context(
             },
             item_header_suffix(item),
         ));
+        if let Some(vector) = &item.vector {
+            out.push_str(&format!("\nvector: {vector}"));
+        }
         if let Some(previous) = &item.previous {
             out.push_str(&format!("\nprevious: {previous}"));
         }
@@ -2116,9 +2169,9 @@ pub fn render_closeout_steering_context(
                  IDE-watched project. Paste the output of `{}` verbatim at the top of the \
                  subagent prompt: it carries the operator's authorization for the item \
                  (`#waypostauthorization`). {}",
-                claim_command_for(document, &item.verbatim),
-                start_command_for(document, &item.verbatim),
-                brief_command_for(document, &item.verbatim),
+                claim_command_for(document, item.claim_text()),
+                start_command_for(document, item.claim_text()),
+                brief_command_for(document, item.claim_text()),
                 REPORTED_WORKER_CLOSEOUT,
             ),
             (SteeringDispatch::Subagent, SteeringSource::Exchange) => {
@@ -3725,6 +3778,7 @@ mod tests {
             generation: None,
             worker_id: None,
             explicit: false,
+            vector: None,
         };
 
         let queue =
@@ -3777,6 +3831,7 @@ mod tests {
             generation: None,
             worker_id: None,
             explicit: false,
+            vector: None,
         };
         let mut items = vec![
             item(SteeringChange::Added, SteeringDispatch::Subagent),
@@ -3827,6 +3882,7 @@ mod tests {
             generation: None,
             worker_id: None,
             explicit: false,
+            vector: None,
         };
 
         let item_clone = item.clone();
@@ -3861,6 +3917,7 @@ mod tests {
             generation: None,
             worker_id: None,
             explicit: false,
+            vector: None,
         };
         let text = render_closeout_steering_context("tasks/bugs.md", &[item], 0).unwrap();
         assert!(text.starts_with(CLOSEOUT_STEERING_MARKER), "{text}");
@@ -4589,6 +4646,7 @@ mod tests {
                 generation: None,
                 worker_id: None,
                 explicit: false,
+                vector: None,
             },
             SteeringItem {
                 source: SteeringSource::Queue,
@@ -4605,6 +4663,7 @@ mod tests {
                 generation: None,
                 worker_id: None,
                 explicit: false,
+                vector: None,
             },
         ];
         apply_claim_attempts(&mut items, |text| {
@@ -4638,6 +4697,7 @@ mod tests {
             current_item: false,
             possibly_partial: false,
             explicit: false,
+            vector: None,
             presets: Vec::new(),
         };
 

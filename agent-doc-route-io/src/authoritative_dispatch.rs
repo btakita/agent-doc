@@ -497,9 +497,26 @@ fn one_line_error(err: &impl std::fmt::Display) -> String {
 }
 
 fn pending_explicit_send_count(file: &Path) -> usize {
-    agent_doc_session_check_io::midturn_steering::explicit_send_pending_items(file)
-        .map(|items| items.len())
-        .unwrap_or(0)
+    match agent_doc_session_check_io::midturn_steering::explicit_send_pending_items(file) {
+        Ok(items) => items.len(),
+        Err(err) => {
+            // Only a count: nothing is advanced or recorded here, so the items
+            // stay durable for the next consumer. Never swallow the failure.
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "route_explicit_send_items_unreadable file={} outcome=retained error={} (#routesyncsteer)",
+                    file.display(),
+                    one_line_error(&format!("{err:#}"))
+                ),
+            );
+            eprintln!(
+                "[route] warning: could not read the pending steering items for {}: {err:#}",
+                file.display()
+            );
+            0
+        }
+    }
 }
 
 /// Count, and for a busy route-owned composer submit, the explicit send.

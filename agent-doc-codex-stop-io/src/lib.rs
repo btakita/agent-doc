@@ -102,6 +102,32 @@ struct ClaudeStopInput {
     /// to tell whether this turn already scheduled the `/loop` re-entry.
     #[serde(default)]
     transcript_path: Option<String>,
+    /// Grok only (it loads this hook from the Claude-format settings file):
+    /// why the Stop fired. A genuine turn end is `end_turn`; Grok also fires an
+    /// observe-only Stop at session end (`channel_closed` / `shutdown`) whose
+    /// decision it ignores. Claude Code sends no `reason`.
+    #[serde(default)]
+    reason: Option<String>,
+    /// Grok's subagent identity (`subagentType`). Grok remaps a subagent's
+    /// Stop to `SubagentStop`, so this is defensive: a subagent never owns the
+    /// document's queue continuation.
+    #[serde(default, rename = "subagentType")]
+    subagent_type: Option<String>,
+}
+
+impl ClaudeStopInput {
+    /// A Stop that is not the owning turn's genuine completion: Grok's
+    /// session-end fire, or a subagent's stop. Neither can continue the turn,
+    /// so the guard must not consult or mutate continuation state for it.
+    fn is_observe_only(&self) -> bool {
+        self.reason
+            .as_deref()
+            .is_some_and(|reason| !reason.trim().is_empty() && reason.trim() != "end_turn")
+            || self
+                .subagent_type
+                .as_deref()
+                .is_some_and(|kind| !kind.trim().is_empty())
+    }
 }
 
 #[derive(Debug, Serialize, PartialEq, Eq)]
@@ -587,6 +613,9 @@ fn claude_stop_response(payload: Option<&str>) -> Result<serde_json::Value> {
 }
 
 fn apply_claude_stop(input: &ClaudeStopInput) -> Result<Option<ClaudeStopContinuation>> {
+    if input.is_observe_only() {
+        return Ok(None);
+    }
     apply_claude_stop_with_drain_readiness(
         input,
         agent_doc_controller_io::project_controller::supervisor_drain_readiness_for_doc,
@@ -9429,6 +9458,8 @@ Reviewed the gated items.\n\
             cwd: dir.path().display().to_string(),
             stop_hook_active: false,
             transcript_path: None,
+            reason: None,
+            subagent_type: None,
         })
         .unwrap()
         .expect("clean Claude closeout must keep draining");
@@ -9441,6 +9472,65 @@ Reviewed the gated items.\n\
                 .as_str()
                 .is_some()
         );
+    }
+
+    /// A Stop envelope as Grok 1.0.70 sends it to the Claude-format
+    /// `agent-doc hook claude-stop` entry: camelCase keys with Claude's
+    /// snake_case aliases, plus Grok's `reason`.
+    fn grok_stop_payload(cwd: &Path, reason: &str, subagent: Option<&str>) -> String {
+        let mut payload = serde_json::json!({
+            "hookEventName": "stop",
+            "hook_event_name": "Stop",
+            "sessionId": "codex-session",
+            "session_id": "codex-session",
+            "cwd": cwd,
+            "workspaceRoot": cwd,
+            "timestamp": "2026-11-04T20:04:27Z",
+            "permissionMode": "default",
+            "permission_mode": "default",
+            "stopHookActive": false,
+            "stop_hook_active": false,
+            "lastAssistantMessage": "Done.",
+            "last_assistant_message": "Done.",
+            "reason": reason,
+            "backgroundTasks": [],
+            "sessionCrons": [],
+        });
+        if let Some(kind) = subagent {
+            payload["subagentType"] = serde_json::json!(kind);
+        }
+        payload.to_string()
+    }
+
+    /// Grok invokes `claude-stop` from the project's Claude-format settings.
+    /// Its genuine turn end continues the queue exactly like Claude's, in the
+    /// `hookSpecificOutput.additionalContext` form Grok treats as non-error
+    /// feedback. Its observe-only session-end fire and a subagent stop never
+    /// consult or mutate the continuation.
+    #[test]
+    fn claude_stop_accepts_grok_shaped_payloads() {
+        let dir = setup_project();
+        let doc = write_auto_queue_doc(&dir, &["fix the next queue item"]);
+        init_git_repo(dir.path(), &doc);
+        track_doc(&dir, &doc, "");
+        agent_doc_queue_io::queue_continuation::reconcile_marker(&doc, "session-check")
+            .expect("continuation required");
+
+        for (reason, subagent) in [("channel_closed", None), ("shutdown", None), ("end_turn", Some("explore"))] {
+            let response =
+                claude_stop_response(Some(&grok_stop_payload(dir.path(), reason, subagent)))
+                    .unwrap();
+            assert_eq!(response, serde_json::json!({}), "{reason} {subagent:?}");
+        }
+
+        let response =
+            claude_stop_response(Some(&grok_stop_payload(dir.path(), "end_turn", None))).unwrap();
+        assert_eq!(response["hookSpecificOutput"]["hookEventName"], "Stop");
+        let context = response["hookSpecificOutput"]["additionalContext"]
+            .as_str()
+            .expect("continuation context");
+        assert!(context.contains("fix the next queue item"), "{context}");
+        assert!(response.get("decision").is_none(), "{response}");
     }
 
     #[test]
@@ -9456,6 +9546,8 @@ Reviewed the gated items.\n\
             cwd: dir.path().display().to_string(),
             stop_hook_active: false,
             transcript_path: None,
+            reason: None,
+            subagent_type: None,
         };
         let response = apply_claude_stop(&input)
             .unwrap()
@@ -9510,6 +9602,8 @@ Reviewed the gated items.\n\
             cwd: dir.path().display().to_string(),
             stop_hook_active: false,
             transcript_path: None,
+            reason: None,
+            subagent_type: None,
         };
         let no_supervisor =
             |_: &Path| agent_doc_controller::status::SupervisorDrainReadiness::NoLiveSupervisor;
@@ -9635,6 +9729,8 @@ Reviewed the gated items.\n\
             cwd: dir.path().display().to_string(),
             stop_hook_active: false,
             transcript_path: None,
+            reason: None,
+            subagent_type: None,
         };
         let no_supervisor =
             |_: &Path| agent_doc_controller::status::SupervisorDrainReadiness::NoLiveSupervisor;
@@ -9732,6 +9828,8 @@ Reviewed the gated items.\n\
             cwd: dir.path().display().to_string(),
             stop_hook_active: true,
             transcript_path: None,
+            reason: None,
+            subagent_type: None,
         };
         let held = claude_reported_writeback_continuation(&input, &doc)
             .expect("recursive Stop must still refuse unresolved recovered-loss debt");
@@ -9781,6 +9879,8 @@ Reviewed the gated items.\n\
             cwd: dir.path().display().to_string(),
             stop_hook_active: false,
             transcript_path: None,
+            reason: None,
+            subagent_type: None,
         };
         let held = apply_claude_stop_with_drain_readiness(&input, |_: &Path| {
             agent_doc_controller::status::SupervisorDrainReadiness::NoLiveSupervisor
@@ -9931,6 +10031,8 @@ Reviewed the gated items.\n\
             cwd: dir.path().display().to_string(),
             stop_hook_active: false,
             transcript_path: None,
+            reason: None,
+            subagent_type: None,
         };
 
         // Control: the result is NOT in the document yet. The persist reminder
@@ -10018,6 +10120,8 @@ Reviewed the gated items.\n\
                 cwd: dir.path().display().to_string(),
                 stop_hook_active: false,
                 transcript_path: None,
+                reason: None,
+                subagent_type: None,
             })
             .unwrap()
             .is_some(),
@@ -10044,6 +10148,8 @@ Reviewed the gated items.\n\
                 cwd: dir.path().display().to_string(),
                 stop_hook_active: false,
                 transcript_path: None,
+                reason: None,
+                subagent_type: None,
             })
             .unwrap()
             .is_none(),
@@ -10117,6 +10223,8 @@ Reviewed the gated items.\n\
             cwd: dir.path().display().to_string(),
             stop_hook_active: false,
             transcript_path: None,
+            reason: None,
+            subagent_type: None,
         };
         let recursive = ClaudeStopInput {
             stop_hook_active: true,
@@ -10176,6 +10284,8 @@ Reviewed the gated items.\n\
             cwd: dir.path().display().to_string(),
             stop_hook_active: false,
             transcript_path: None,
+            reason: None,
+            subagent_type: None,
         };
         assert!(
             apply_claude_stop_with_drain_readiness(&input, |_| SupervisorDrainReadiness::Ready {
@@ -10205,6 +10315,8 @@ Reviewed the gated items.\n\
             cwd: dir.path().display().to_string(),
             stop_hook_active: false,
             transcript_path: None,
+            reason: None,
+            subagent_type: None,
         };
 
         assert!(
@@ -10252,6 +10364,8 @@ Reviewed the gated items.\n\
             cwd: dir.path().display().to_string(),
             stop_hook_active: false,
             transcript_path: None,
+            reason: None,
+            subagent_type: None,
         };
         assert!(
             apply_claude_stop(&input).unwrap().is_none(),
@@ -10292,6 +10406,8 @@ Reviewed the gated items.\n\
                 cwd: dir.path().display().to_string(),
                 stop_hook_active: false,
                 transcript_path: None,
+                reason: None,
+                subagent_type: None,
             })
             .unwrap()
         };
@@ -10409,6 +10525,8 @@ Reviewed the gated items.\n\
                 cwd: dir.path().display().to_string(),
                 stop_hook_active: false,
                 transcript_path: None,
+                reason: None,
+                subagent_type: None,
             })
             .unwrap()
         };
@@ -10445,6 +10563,8 @@ Reviewed the gated items.\n\
                 cwd: dir.path().display().to_string(),
                 stop_hook_active: false,
                 transcript_path: None,
+                reason: None,
+                subagent_type: None,
             })
             .unwrap()
             .is_none(),
@@ -10456,6 +10576,8 @@ Reviewed the gated items.\n\
                 cwd: dir.path().display().to_string(),
                 stop_hook_active: true,
                 transcript_path: None,
+                reason: None,
+                subagent_type: None,
             })
             .unwrap()
             .is_none(),

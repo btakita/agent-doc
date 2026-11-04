@@ -638,6 +638,7 @@ mod tests {
             generation: None,
             worker_id: None,
             explicit: false,
+            vector: None,
         }
     }
 

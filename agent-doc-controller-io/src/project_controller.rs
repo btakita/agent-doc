@@ -4029,6 +4029,12 @@ impl ControllerMemoryState {
 /// Threshold past which an ingress wait or hold is logged as
 /// `state_event_ingress_slow`. Clients time out at 5s, so 1s is early warning.
 pub(crate) const STATE_EVENT_INGRESS_SLOW: Duration = Duration::from_secs(1);
+
+/// Bound on a synchronous graph query's wait for the activation worker to
+/// publish the state it already applied. A liveness bound only: on expiry the
+/// query refuses with the await-projection recovery token and its caller asks
+/// again; it never answers from the stale projection.
+const STATE_PROJECTION_ACTIVATION_BARRIER_TIMEOUT: Duration = Duration::from_secs(2);
 /// Best-effort authority telemetry must never spend the lifecycle lane's
 /// recovery budget. Its producer retains the latest observation and retries it;
 /// closeout facts have no such freedom and keep the normal durable timeout.
@@ -4145,12 +4151,19 @@ struct StateProjectionActivationState {
     desired: HashMap<String, u64>,
     pending: VecDeque<String>,
     scheduled: HashSet<String>,
+    /// Newest version whose activation completed, per document. Synchronous
+    /// graph queries wait on this to read their own durable writes.
+    activated: HashMap<String, u64>,
 }
 
 #[derive(Default)]
 struct StateProjectionActivationQueue {
     state: Mutex<StateProjectionActivationState>,
+    /// Wakes the single activation worker. `notify_one` only: a barrier
+    /// waiter on this Condvar could absorb the worker's wake.
     wake: Condvar,
+    /// Wakes [`Self::await_activated`] barriers when an activation completes.
+    activated_wake: Condvar,
 }
 
 impl StateProjectionActivationQueue {
@@ -4188,6 +4201,14 @@ impl StateProjectionActivationQueue {
 
     fn complete(&self, document_hash: &str, version: u64, activated: bool) {
         let mut state = self.state.lock();
+        if activated {
+            let completed = state
+                .activated
+                .entry(document_hash.to_string())
+                .or_default();
+            *completed = (*completed).max(version);
+            self.activated_wake.notify_all();
+        }
         if activated && state.desired.get(document_hash).copied() == Some(version) {
             state.desired.remove(document_hash);
             state.scheduled.remove(document_hash);
@@ -4200,9 +4221,39 @@ impl StateProjectionActivationQueue {
         self.wake.notify_one();
     }
 
+    /// Wait until every activation of `document_hash` requested before this
+    /// call has completed. Returns `false` on shutdown or `timeout`.
+    ///
+    /// Activation reads the newest durable projection when it runs, so once the
+    /// version desired at entry has completed, the effect plane reflects every
+    /// state event applied before this call.
+    fn await_activated(&self, document_hash: &str, timeout: Duration) -> bool {
+        let deadline = Instant::now() + timeout;
+        let mut state = self.state.lock();
+        let Some(target) = state.desired.get(document_hash).copied() else {
+            return true;
+        };
+        loop {
+            if state.activated.get(document_hash).copied().unwrap_or(0) >= target {
+                return true;
+            }
+            if state.shutdown {
+                return false;
+            }
+            if self
+                .activated_wake
+                .wait_until(&mut state, deadline)
+                .timed_out()
+            {
+                return state.activated.get(document_hash).copied().unwrap_or(0) >= target;
+            }
+        }
+    }
+
     fn shutdown(&self) {
         self.state.lock().shutdown = true;
         self.wake.notify_all();
+        self.activated_wake.notify_all();
     }
 
     #[cfg(test)]
@@ -11146,23 +11197,60 @@ impl ControllerRuntime {
             .status_sync_checkpoint(document_hash, observation)
     }
 
+    /// Read-your-writes barrier for synchronous queries of the derived graph.
+    ///
+    /// State ingress publishes the durable projection to the effect plane on
+    /// the activation worker (`#ingress-projection-isolation`), so a query
+    /// that runs right after its own state event (closeout's commit after
+    /// `ResponseCaptured`) would otherwise derive from the pre-capture
+    /// projection: the answered free-text strike had no target, the commit
+    /// sealed the response without it, and the strike landed as post-HEAD
+    /// drift. Wait for the activation requested before this call instead.
+    ///
+    /// A runtime constructed directly with [`Self::new`] (the in-process
+    /// `test-support` harnesses) has no activation worker, and `new` publishes
+    /// only the projection Sources, so nothing would ever activate them. With
+    /// no worker there is nothing to race: activate this document inline.
+    fn await_document_projection_activation(&self, document_hash: &str) -> Result<()> {
+        if self.state_projection_effect_worker_started.get().is_none() {
+            self.document_graphs
+                .activate_current_projection(document_hash);
+            return Ok(());
+        }
+        if self
+            .state_projection_activation_queue
+            .await_activated(document_hash, STATE_PROJECTION_ACTIVATION_BARRIER_TIMEOUT)
+        {
+            return Ok(());
+        }
+        anyhow::bail!(
+            "derived state projection for document {document_hash} has not activated the applied state yet {}",
+            rpc::CONTROLLER_COMMIT_AWAIT_PROJECTION_TOKEN,
+        )
+    }
+
     pub(crate) fn document_queue_authority_observe(
         &self,
         document_hash: &str,
         file: &Path,
         content: String,
     ) -> Result<usize> {
+        self.await_document_projection_activation(document_hash)?;
         self.document_graphs
             .observe_queue_authority(document_hash, file, content)
     }
 
     /// See [`ControllerDocumentGraphs::answered_free_text_strike_receipt_pending`].
+    /// A barrier timeout reads as pending: the caller awaits and asks again.
     pub(crate) fn document_answered_free_text_strike_receipt_pending(
         &self,
         document_hash: &str,
     ) -> bool {
-        self.document_graphs
-            .answered_free_text_strike_receipt_pending(document_hash)
+        self.await_document_projection_activation(document_hash)
+            .is_err()
+            || self
+                .document_graphs
+                .answered_free_text_strike_receipt_pending(document_hash)
     }
 
     /// `#lazily-hot-path` W1 — bounded await for the visible-write receipt of

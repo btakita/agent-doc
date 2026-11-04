@@ -1331,7 +1331,14 @@ pub fn complete_required_closeout(file: &Path, force_disk: bool) -> Result<bool>
 /// without opening a successor response cycle or capturing predecessor chat
 /// text as a new answer.
 pub fn complete_answered_free_text_queue_residue(file: &Path, force_disk: bool) -> Result<bool> {
-    agent_doc_preflight_io::run_queue_maintenance(file, None)?;
+    let queue_state = agent_doc_preflight_io::run_queue_maintenance(file, None)?;
+    // `#mirrorbinaryownedids`: rows this maintenance mirrored belong to the
+    // cycle being closed, never to the operator.
+    agent_doc_cycle_state_io::record_queue_mirrored_ids_or_warn(
+        file,
+        &queue_state.mirrored_queue_ids,
+        "closeout_queue_residue_maintenance",
+    );
     complete_required_closeout(file, force_disk)
 }
 

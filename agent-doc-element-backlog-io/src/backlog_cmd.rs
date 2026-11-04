@@ -1322,12 +1322,25 @@ fn reopen_in_list(
     );
     target = target_component.replace_content(&target, &canonical);
 
-    if enqueue {
-        target = agent_doc_queue::backlog_sync::reopen_actionable_id_in_content(&target, &id)?
-            .unwrap_or(target);
+    let mut requeued = false;
+    if enqueue
+        && let Some(projected) =
+            agent_doc_queue::backlog_sync::reopen_actionable_id_in_content(&target, &id)?
+    {
+        target = projected;
+        requeued = true;
     }
 
     persist_pending_write(file, &full_content, &target)?;
+    if requeued {
+        // `#mirrorbinaryownedids`: the reactivated `do [#id]` row is this
+        // command's projection, not an operator queue addition.
+        agent_doc_cycle_state_io::record_queue_mirrored_ids_or_warn(
+            file,
+            std::slice::from_ref(&id),
+            "backlog_reopen_queue",
+        );
+    }
     pending_receipt!(
         "[pending] reopened #{} into {}{}",
         id,
@@ -1375,6 +1388,12 @@ pub fn requeue(file: &Path, ids: &[String]) -> Result<()> {
         let plan = agent_doc_queue::backlog_sync::requeue_open_ids_in_content(&full_content, ids)?;
         if let Some(target) = plan.content.as_deref() {
             persist_pending_write(file, &full_content, target)?;
+            // `#mirrorbinaryownedids`: restored heads are binary repair.
+            agent_doc_cycle_state_io::record_queue_mirrored_ids_or_warn(
+                file,
+                &plan.restored,
+                "backlog_requeue",
+            );
         }
         agent_doc_ops_log_io::log_op(
             file,

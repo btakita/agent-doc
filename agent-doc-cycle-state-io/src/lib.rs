@@ -308,6 +308,18 @@ pub struct CycleState {
     /// `#queueatcreate` head default intact for everything else.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pending_anchored_ids: Vec<String>,
+    /// `#mirrorbinaryownedids`: tracked-work ids a binary backlog-to-queue
+    /// mirror materialized as queue rows during this cycle, by ANY mirror
+    /// path (preflight queue maintenance, `queue sync`, explicit `queue=<id>`
+    /// routes, `backlog reopen --queue`, `backlog requeue`). Mid-turn steering
+    /// reads it as binary-owned queue bookkeeping, so a mirrored `do [#id]` row
+    /// never surfaces as an operator `source=queue change=added` item.
+    ///
+    /// Deliberately separate from `pending_actionable_ids`: that set is the
+    /// closeout mirror's INPUT, and recording an already-mirrored id there
+    /// would make the closeout re-insert a head the operator deleted mid-turn.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub queue_mirrored_ids: Vec<String>,
     /// True when the preflight-current document already had completed tracked
     /// work that closeout pending maintenance should reap. This lets closeout
     /// distinguish status-only cycles from tracked-work cycles without reading
@@ -1812,6 +1824,7 @@ fn start_preflight_with_task_queue_selection_and_after_checkpoint(
         tracked_work_mutations_retained: false,
         pending_actionable_ids: Vec::new(),
         pending_anchored_ids: Vec::new(),
+        queue_mirrored_ids: Vec::new(),
         tracked_work_maintenance_required_at_preflight: file_content
             .map(agent_doc_document::tracked_work_projection::tracked_work_maintenance_required),
         ipc_snapshot_adoption_blocked: false,
@@ -2668,6 +2681,53 @@ pub fn record_pending_anchored_ids(file: &Path, ids: &[String]) -> Result<Option
         save(file, &state)?;
     }
     Ok(Some(state))
+}
+
+/// `#mirrorbinaryownedids`: record ids a backlog-to-queue mirror just
+/// materialized as queue rows, on the current cycle. A missing cycle state
+/// records nothing (there is no turn whose steering could misread them).
+pub fn record_queue_mirrored_ids(file: &Path, ids: &[String]) -> Result<Option<CycleState>> {
+    if ids.is_empty() {
+        return Ok(None);
+    }
+    let Some(mut state) = load(file)? else {
+        return Ok(None);
+    };
+
+    let mut changed = false;
+    for id in ids
+        .iter()
+        .map(|id| normalize_pending_id(id))
+        .filter(|id| !id.is_empty())
+    {
+        if !state
+            .queue_mirrored_ids
+            .iter()
+            .any(|existing| existing == &id)
+        {
+            state.queue_mirrored_ids.push(id);
+            changed = true;
+        }
+    }
+
+    if changed {
+        state.updated_at = now_secs();
+        save(file, &state)?;
+    }
+    Ok(Some(state))
+}
+
+/// [`record_queue_mirrored_ids`] for a mirror whose document write already
+/// landed: a failed record must not fail the command that mirrored, but it is
+/// never silent either (the row would then surface as operator steering).
+pub fn record_queue_mirrored_ids_or_warn(file: &Path, ids: &[String], source: &str) {
+    if let Err(err) = record_queue_mirrored_ids(file, ids) {
+        eprintln!(
+            "[queue] warning: failed to record binary-mirrored queue ids {:?} for {} ({source}); mid-turn steering may surface them as operator queue additions: {err:#}",
+            ids,
+            file.display()
+        );
+    }
 }
 
 /// `#queuemirrororder`: ids filed with an explicit `--backlog-add-after` /
@@ -4287,6 +4347,7 @@ fn synthetic_state_with_id(
         tracked_work_mutations_retained: false,
         pending_actionable_ids: Vec::new(),
         pending_anchored_ids: Vec::new(),
+        queue_mirrored_ids: Vec::new(),
         // A synthetic cycle did not observe a preflight document. Preserve
         // that distinction instead of asserting a false preflight fact that
         // the state projection cannot reproduce.

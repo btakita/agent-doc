@@ -853,12 +853,16 @@ fn cycle_accepts_steering(cycle: &agent_doc_cycle_state_io::CycleState, cycle_id
         && cycle.response_sha256.is_none()
 }
 
+/// Queue ids this cycle's own bookkeeping put in the queue: tracked-work adds
+/// and ungates (the closeout mirror's input) and every row a backlog-to-queue
+/// mirror materialized (`#mirrorbinaryownedids`).
 fn binary_owned_ids(cycle: &agent_doc_cycle_state_io::CycleState) -> BTreeSet<String> {
     cycle
         .pending_actionable_ids
         .iter()
         .chain(cycle.pending_added_ids.iter())
         .chain(cycle.requested_added_ids.iter())
+        .chain(cycle.queue_mirrored_ids.iter())
         .map(|id| id.trim().trim_start_matches('#').to_ascii_lowercase())
         .filter(|id| !id.is_empty())
         .collect()
@@ -2855,6 +2859,77 @@ mod tests {
             .expect("operator prompt should produce a report");
         assert_eq!(hook.items.len(), 1, "{hook:?}");
         assert_eq!(hook.items[0].verbatim, operator_prompt);
+    }
+
+    /// `#mirrorbinaryownedids` (2026-11-04, tasks/agent-doc/agent-doc-bugs.md):
+    /// preflight queue maintenance mirrors backlog ids into the queue BEFORE the
+    /// cycle opens, and the steering seed is the pre-maintenance cut, so the
+    /// mirrored row is absent from the watermark. Unless the opening cycle
+    /// records it, the hook later delivers it (already claimed or reported) as
+    /// `source=queue change=added`. A recorded mirror is silent in every marker
+    /// state; an operator's real edit of that row still surfaces.
+    #[test]
+    fn recorded_queue_mirror_rows_are_not_operator_steering_in_any_marker_state() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        let doc = |row: &str| {
+            format!(
+                "---\nagent_doc_steering_debounce_ms: 0\n---\n# S\n\n<!-- agent:queue -->\n- ### 🚧 do [#current]\n{row}<!-- /agent:queue -->\n\n<!-- agent:exchange -->\nwork on the current item\n<!-- /agent:exchange -->\n"
+            )
+        };
+        let baseline = doc("");
+        std::fs::write(&file, &baseline).unwrap();
+        let cycle =
+            agent_doc_cycle_state_io::start_preflight(&file, Some(&baseline), Some(&baseline))
+                .unwrap();
+        seed_for_cycle(
+            &file,
+            &cycle.cycle_id,
+            &baseline,
+            Some("do [#current]"),
+            Vec::new(),
+        )
+        .unwrap();
+
+        let mirrored = doc("- ### 📥 do [#mirrored]\n");
+        std::fs::write(&file, &mirrored).unwrap();
+        let unrecorded = observe(&file, CONSUMER_HOOK, false)
+            .unwrap()
+            .expect("an open cycle reports in turn");
+        assert_eq!(
+            unrecorded.items.len(),
+            1,
+            "control: an unrecorded mirror is indistinguishable from an operator add: {unrecorded:?}"
+        );
+
+        agent_doc_cycle_state_io::record_queue_mirrored_ids(&file, &["mirrored".to_string()])
+            .unwrap();
+        for row in [
+            "- ### 📥 do [#mirrored]\n",
+            "- ### 🚧 [#subagent:pick#1] do [#mirrored]\n",
+            "- ### ☑️ [#subagent:pick#1] do [#mirrored] ⟦local⟧\n",
+        ] {
+            std::fs::write(&file, doc(row)).unwrap();
+            let report = observe(&file, CONSUMER_HOOK, true).unwrap();
+            assert!(
+                report.as_ref().is_none_or(|report| report.items.is_empty()),
+                "{row:?}: a recorded mirror row surfaced as operator steering: {report:?}"
+            );
+        }
+
+        let edit = "- ### ☑️ [#subagent:pick#1] do [#mirrored] and also cover the reply marker\n";
+        std::fs::write(&file, doc(edit)).unwrap();
+        let report = observe(&file, CONSUMER_HOOK, true)
+            .unwrap()
+            .expect("an operator edit produces a report");
+        assert_eq!(report.items.len(), 1, "{report:?}");
+        assert!(
+            report.items[0]
+                .verbatim
+                .contains("also cover the reply marker"),
+            "{report:?}"
+        );
     }
 
     #[test]

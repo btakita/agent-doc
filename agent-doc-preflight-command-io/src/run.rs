@@ -2371,6 +2371,16 @@ fn run_with_options_to_writer_in_pass(
                     "[preflight] #dispatchturnstartreceipt turn-start record failed (non-fatal): {error:#}"
                 ),
             }
+            // `#mirrorbinaryownedids`: queue maintenance ran before this cycle
+            // opened, and the steering seed below is the PRE-maintenance cut, so
+            // rows the backlog→queue mirror just materialized are absent from
+            // the watermark. Record them on the cycle that now owns them, or
+            // mid-turn steering hands them back as operator queue additions.
+            agent_doc_cycle_state_io::record_queue_mirrored_ids_or_warn(
+                file,
+                &queue_state.mirrored_queue_ids,
+                "preflight_queue_maintenance",
+            );
             preflight_effects
                 .settle(PreflightEffect::CycleOpen)
                 .context("preflight cycle-open effect settlement")?;

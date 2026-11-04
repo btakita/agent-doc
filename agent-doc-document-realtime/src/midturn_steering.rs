@@ -2991,6 +2991,97 @@ mod tests {
         );
     }
 
+    /// `#mirrorbinaryownedids` (2026-11-04, tasks/agent-doc/agent-doc-bugs.md):
+    /// the hook delivered `source=queue change=added owner=subagent:… verbatim:
+    /// 🚧 [#subagent:summarypick#1] do [#responsesummarypick]` and later the
+    /// same row as `☑️ … ⟦local⟧`. The claim/report marker transitions are NOT
+    /// the cause: once a row is acknowledged, every binary lifecycle projection
+    /// of it (📥→🟡→🚧→☑️, the `[#owner#N]` prefix, the `⟦local⟧` suffix, the
+    /// strike) is bookkeeping. The cause was the insertion itself: a mirrored
+    /// row the watermark never acknowledged, carrying whatever marker it had
+    /// reached by the time steering looked. Recording the mirrored id silences
+    /// that insertion in every marker state, and an operator's real edit of
+    /// the same row still surfaces.
+    #[test]
+    fn mirrored_row_marker_transitions_are_bookkeeping_and_operator_edits_surface() {
+        let fm = "---\n---\n";
+        let doc = |row: &str| {
+            format!(
+                "{fm}# S\n\n<!-- agent:queue -->\n- ### 🚧 do [#cur]\n{row}<!-- /agent:queue -->\n\n<!-- agent:exchange -->\n{EX}<!-- /agent:exchange -->\n"
+            )
+        };
+        let lifecycle = [
+            "- ### 📥 do [#mirrored]\n",
+            "- ### 🟡 [#subagent:pick#1] do [#mirrored]\n",
+            "- ### 🚧 [#subagent:pick#1] do [#mirrored]\n",
+            "- ### ☑️ [#subagent:pick#1] do [#mirrored] ⟦local⟧\n",
+            "- ### ☑️ [#subagent:pick#1] do [#mirrored]\n",
+            "- ### ~~do [#mirrored] ⟦local⟧~~\n",
+        ];
+        let none = BTreeSet::new();
+        for pair in lifecycle.windows(2) {
+            let obs = observe(
+                &seeded(&doc(pair[0]), Some("do [#cur]")),
+                &doc(pair[1]),
+                &quiet_ctx(&none),
+            );
+            assert!(
+                obs.ready.is_empty(),
+                "{:?} -> {:?}: {:?}",
+                pair[0],
+                pair[1],
+                obs.ready
+            );
+        }
+
+        // The live shape: the mirrored row is new to the watermark and has
+        // already been claimed (or reported) when steering first sees it.
+        let baseline = doc("");
+        let owned = BTreeSet::from(["mirrored".to_string()]);
+        for row in &lifecycle[..5] {
+            let unrecorded = observe(
+                &seeded(&baseline, Some("do [#cur]")),
+                &doc(row),
+                &quiet_ctx(&none),
+            );
+            assert_eq!(unrecorded.ready.len(), 1, "{row:?}: {:?}", unrecorded.ready);
+            assert_eq!(unrecorded.ready[0].change, SteeringChange::Added);
+            for mode in [ObserveMode::InTurn, ObserveMode::Boundary] {
+                let recorded = observe_with_mode(
+                    &seeded(&baseline, Some("do [#cur]")),
+                    &doc(row),
+                    &quiet_ctx(&owned),
+                    mode,
+                );
+                assert!(
+                    recorded.ready.is_empty(),
+                    "{row:?} {mode:?}: {:?}",
+                    recorded.ready
+                );
+            }
+        }
+
+        // An operator's real edit of the same (binary-owned) row surfaces.
+        let acknowledged = doc("- ### 🚧 [#subagent:pick#1] do [#mirrored]\n");
+        let edited =
+            doc("- ### 🚧 [#subagent:pick#1] do [#mirrored] and also cover the reply marker\n");
+        for owned in [&none, &owned] {
+            let obs = observe(
+                &seeded(&acknowledged, Some("do [#cur]")),
+                &edited,
+                &quiet_ctx(owned),
+            );
+            assert_eq!(obs.ready.len(), 1, "{owned:?}: {:?}", obs.ready);
+            assert!(
+                obs.ready[0]
+                    .verbatim
+                    .contains("also cover the reply marker"),
+                "{:?}",
+                obs.ready
+            );
+        }
+    }
+
     #[test]
     fn watermark_prevents_reinjection() {
         let owned = BTreeSet::new();

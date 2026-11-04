@@ -3558,6 +3558,11 @@ pub struct QueueState {
     /// of opening a no-op cycle for in-flight work.
     pub claimed_queue_heads: Vec<agent_doc_queue::no_changes_explanation::ClaimedQueueItemFact>,
     pub synced_queue_ids: Vec<String>,
+    /// `#mirrorbinaryownedids`: every tracked id this maintenance pass
+    /// materialized as a queue row: explicit `queue=<id>` routes, free-text
+    /// admission, and the backlog→queue sync. Preflight records it on the
+    /// cycle it opens so mid-turn steering reads these rows as bookkeeping.
+    pub mirrored_queue_ids: Vec<String>,
     /// `#capturegatedispatched`: `(source_text, id)` receipts of the free-text
     /// queue heads this maintenance pass promoted into `do [#id]` heads, so a
     /// caller that observed the pre-promotion line can name the live head.
@@ -4040,6 +4045,7 @@ pub fn inspect_queue_state(file: &Path, diff: Option<&str>) -> Result<QueueState
             maintenance_mutated: false,
             claimed_queue_heads: vec![],
             synced_queue_ids: vec![],
+            mirrored_queue_ids: vec![],
             free_text_promotions: vec![],
             warnings: vec![],
         });
@@ -4068,6 +4074,7 @@ pub fn inspect_queue_state(file: &Path, diff: Option<&str>) -> Result<QueueState
             maintenance_mutated: false,
             claimed_queue_heads: vec![],
             synced_queue_ids: vec![],
+            mirrored_queue_ids: vec![],
             free_text_promotions: vec![],
             warnings: vec![],
         });
@@ -4224,6 +4231,7 @@ pub fn inspect_queue_state(file: &Path, diff: Option<&str>) -> Result<QueueState
         maintenance_mutated: false,
         claimed_queue_heads,
         synced_queue_ids: vec![],
+        mirrored_queue_ids: vec![],
         free_text_promotions: vec![],
         warnings: vec![],
     })
@@ -5377,6 +5385,7 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
             routing.placement_debt.len()
         );
     }
+    let mut mirrored_queue_ids: Vec<String> = Vec::new();
     if let Some(projected) = routing.content {
         current_content = projected;
         content = current_content.clone();
@@ -5386,6 +5395,7 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
             "[preflight] queue: routed {} backlog item(s) to explicitly named queue(s)",
             routing.newly_materialized.len()
         );
+        mirrored_queue_ids.extend(routing.newly_materialized.iter().cloned());
     }
     let owner_selection = agent_doc_queue_io::subagent_dispatch::owner_selection_claims_for_content(
         file,
@@ -5802,6 +5812,7 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
                 .iter()
                 .map(|id| id.trim().to_ascii_lowercase()),
         );
+        mirrored_queue_ids.extend(admission.queued_ids.iter().cloned());
         synced_queue_ids.extend(admission.queued_ids);
         queue_warnings.extend(warnings);
         mutated = true;
@@ -6110,6 +6121,7 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
                 .filter(|id| !pre_sync_ids.contains(id))
                 .filter(|id| seen_synced_ids.insert(id.clone()))
                 .collect();
+            mirrored_queue_ids.extend(synced_queue_ids.iter().cloned());
             let new_body = agent_doc_queue::document_queue::render(&synced);
             current_content = {
                 let comps = agent_doc_element::element::parse(&current_content)?;
@@ -7294,6 +7306,7 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
                 maintenance_mutated: false,
                 claimed_queue_heads: vec![],
                 synced_queue_ids,
+                mirrored_queue_ids: mirrored_queue_ids.clone(),
                 free_text_promotions: free_text_promotions.clone(),
                 warnings: Vec::new(),
             });
@@ -7339,6 +7352,7 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
                 maintenance_mutated: prompt_identity_admitted,
                 claimed_queue_heads: vec![],
                 synced_queue_ids,
+                mirrored_queue_ids: mirrored_queue_ids.clone(),
                 free_text_promotions: free_text_promotions.clone(),
                 warnings: Vec::new(),
             });
@@ -8550,6 +8564,7 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
         maintenance_mutated: mutated,
         claimed_queue_heads,
         synced_queue_ids,
+        mirrored_queue_ids,
         free_text_promotions,
         warnings: queue_warnings,
     })
@@ -12669,6 +12684,9 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
             "frontmatter queue mode must not create a /goal command:\n{updated}"
         );
         assert!(state.synced_queue_ids.contains(&id));
+        // `#mirrorbinaryownedids`: an admitted free-text head is a binary
+        // rewrite of a row this cycle already admitted.
+        assert!(state.mirrored_queue_ids.contains(&id), "{state:?}");
     }
 
     #[test]
@@ -15133,6 +15151,9 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
         let updated = std::fs::read_to_string(&doc).unwrap();
 
         assert_eq!(state.synced_queue_ids, vec!["alpha".to_string()]);
+        // `#mirrorbinaryownedids`: the preflight mirror reports the row it
+        // materialized, so the opening cycle records it as binary-owned.
+        assert_eq!(state.mirrored_queue_ids, vec!["alpha".to_string()]);
         assert!(
             updated.contains("- ### 🚧 do [#running]"),
             "running head stays:\n{updated}"

@@ -617,6 +617,28 @@ fn root_authored_exchange(content: &str) -> String {
         .join("\n")
 }
 
+/// `#reportedhookintegrationwait`: whether `content` already records this
+/// exact reported attempt's result: its generation-fenced binary completion
+/// cell carries the attested response, or the attempt's durable captured
+/// response is consolidated into a root-authored exchange response. The
+/// reported-writeback reminder uses it to stop demanding a persist the
+/// document already holds.
+pub fn reported_result_recorded_in_document(
+    content: &str,
+    claim: &agent_doc_queue::queue_claim::QueueClaim,
+    durable_receipts: &[agent_doc_queue::claim_release_receipt::ClaimReleaseReceipt],
+) -> bool {
+    let Ok(key) = crate::queue_claim::completion_feedback_key(claim) else {
+        return false;
+    };
+    if completion_cell_has_response(content, &key) {
+        return true;
+    }
+    durable_completion_response(claim, &key, content, durable_receipts, &[]).is_some_and(
+        |response| response_is_consolidated(&root_authored_exchange(content), &response),
+    )
+}
+
 fn response_is_consolidated(root_exchange: &str, response: &str) -> bool {
     let response = normalize_response_comparison(response);
     !response.is_empty() && normalize_response_comparison(root_exchange).contains(&response)

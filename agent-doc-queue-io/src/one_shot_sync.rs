@@ -52,6 +52,11 @@ pub fn sync_explicit_backlog_queue_routes_with_snapshot(
     let snapshot_warning = if let Some(projected) = projection.content {
         write_document(file, content, &projected)
             .with_context(|| format!("failed to write {}", file.display()))?;
+        agent_doc_cycle_state_io::record_queue_mirrored_ids_or_warn(
+            file,
+            &projection.newly_materialized,
+            "queue_sync_explicit_routes",
+        );
         save_snapshot(file, &projected)
             .err()
             .map(|error| error.to_string())
@@ -161,6 +166,13 @@ pub fn sync_configured_backlog_queue_with_snapshot(
 
     let report_entries = synced.as_ref().unwrap_or(&entries);
     let report = backlog_sync::backlog_queue_sync_report(&entries, &ids, report_entries);
+    // `#mirrorbinaryownedids`: a mid-turn `queue sync` is binary bookkeeping
+    // for the open cycle, not an operator queue addition.
+    agent_doc_cycle_state_io::record_queue_mirrored_ids_or_warn(
+        file,
+        &report.newly_materialized,
+        "queue_sync_backlog_mirror",
+    );
     let snapshot_warning = save_snapshot(file, &new_content)
         .err()
         .map(|err| err.to_string());
@@ -263,6 +275,44 @@ mod tests {
             !written.contains("- do [#gated]"),
             "gated marker must not be queued:\n{written}"
         );
+    }
+
+    /// `#mirrorbinaryownedids`: a mid-turn `agent-doc queue sync` records the
+    /// rows it materialized on the open cycle, so mid-turn steering reads them
+    /// as binary bookkeeping instead of operator queue additions.
+    #[test]
+    fn sync_records_materialized_ids_as_binary_owned_on_the_open_cycle() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("s.md");
+        let content = concat!(
+            "---\nqueue_active: false\n---\n\n",
+            "<!-- agent:queue -->\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#alpha] :inbox_tray: add me\n",
+            "- [ ] [#beta] leave me alone\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+
+        sync_one_shot_backlog_queue_with_snapshot(
+            &doc,
+            content,
+            |path, _current, target| {
+                std::fs::write(path, target)?;
+                Ok(())
+            },
+            |_path, _content| Ok(()),
+        )
+        .unwrap();
+
+        let cycle = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
+        assert_eq!(cycle.queue_mirrored_ids, vec!["alpha".to_string()]);
+        // The mirror's output never feeds the closeout mirror's input: an
+        // operator deleting the row mid-turn must not see it re-inserted.
+        assert!(cycle.pending_actionable_ids.is_empty(), "{cycle:?}");
     }
 
     #[test]

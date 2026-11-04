@@ -21856,6 +21856,7 @@ pub(super) fn supervisor_watchdog_pane_stashed(
 /// Reads the controller's own live bootstrap snapshot and supplies wall-clock/socket
 /// facts. A failed bootstrap snapshot is treated as "do not suicide" (the next
 /// external reaper pass still covers it).
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn controller_self_watchdog_should_suicide(
     runtime: &ControllerRuntime,
     outgoing_handoff_in_flight: bool,
@@ -40673,12 +40674,12 @@ fn handle_queue_projection_generation_write(
     // captured after that observation and before this controller-owned CAS.
     // Revalidate under the same document maintenance fence that guards the
     // generation so a queue repair cannot splice itself into closeout.
-    if let Some(projected) = runtime.document_state_projection(&document_hash)? {
-        if queue_projection_active_write_fence(&projected)? {
-            anyhow::bail!(
-                "queue projection repair deferred: captured finalize or retained document write is active"
-            );
-        }
+    if let Some(projected) = runtime.document_state_projection(&document_hash)?
+        && queue_projection_active_write_fence(&projected)?
+    {
+        anyhow::bail!(
+            "queue projection repair deferred: captured finalize or retained document write is active"
+        );
     }
 
     let authority = crdt_authority_for_file(&canonical.to_string_lossy());

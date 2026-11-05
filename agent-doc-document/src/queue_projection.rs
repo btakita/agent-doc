@@ -1212,24 +1212,15 @@ pub fn strip_in_progress_marker_for_display(text: &str) -> Option<String> {
     Some(stripped)
 }
 
-pub fn set_in_progress_work_item_markers(
-    content: &str,
-    active_ids: &HashSet<String>,
-) -> Result<(String, bool)> {
-    let lifecycle_by_id = active_ids
-        .iter()
-        .map(|id| (id.clone(), QueueLifecycleMarker::Running))
-        .collect();
-    set_work_item_lifecycle_markers(content, &lifecycle_by_id)
-}
-
-/// Mirror typed queue lifecycle state into linked tracked-work rows. Queue
-/// state is the source; stale tracked-work markers are removed in the same
-/// projection pass.
-pub fn set_work_item_lifecycle_markers(
-    content: &str,
-    lifecycle_by_id: &HashMap<String, QueueLifecycleMarker>,
-) -> Result<(String, bool)> {
+/// Strip queue attempt markers from every tracked-work row
+/// (`#backlogrowmarker`).
+///
+/// Queue attempt markers (`📥 🟡 🚧 ☑️ ⚠️ 🔄` ...) belong only on queue rows.
+/// Tracked-work rows in `agent:backlog`, `agent:pending`, `agent:review`, and
+/// `agent:icebox` never carry one: a `☑️` copied onto a backlog row kept
+/// reading as "done" after its queue row was consumed, while the item was
+/// still open. Queue rows are the only projection target for attempt state.
+pub fn strip_work_item_lifecycle_markers(content: &str) -> Result<(String, bool)> {
     let mut updated = content.to_string();
     let mut changed = false;
     let components = agent_doc_element::element::parse(&updated)?;
@@ -1244,9 +1235,8 @@ pub fn set_work_item_lifecycle_markers(
         .rev()
     {
         let (new_body, body_changed) =
-            agent_doc_element_backlog::backlog::set_lifecycle_item_markers(
+            agent_doc_element_backlog::backlog::strip_lifecycle_item_markers(
                 component.content(&updated),
-                lifecycle_by_id,
             );
         if body_changed {
             updated = component.replace_content(&updated, &new_body);
@@ -2187,47 +2177,38 @@ mod tests {
     }
 
     #[test]
-    fn set_in_progress_work_item_markers_updates_tracked_components() {
+    fn strip_work_item_lifecycle_markers_clears_every_tracked_component() {
+        // `#backlogrowmarker`: attempt markers live on queue rows only.
         let content = concat!(
+            "<!-- agent:queue -->\n",
+            "- ☑️ [#subagent:x#1] do [#reported]\n",
+            "<!-- /agent:queue -->\n\n",
             "<!-- agent:backlog -->\n",
-            "- [ ] [#alpha] Alpha\n",
-            "- [ ] [#beta] Beta\n",
+            "- [ ] ☑️ [#reported] Reported work\n",
+            "- [ ] 🚧 [#running] Running work\n",
+            "- [ ] [#plain] Plain work\n",
             "<!-- /agent:backlog -->\n\n",
             "<!-- agent:review -->\n",
-            "- [ ] [#alpha] Alpha review\n",
-            "<!-- /agent:review -->\n",
+            "- [ ] 🟡 [#reported] Review copy\n",
+            "<!-- /agent:review -->\n\n",
+            "<!-- agent:icebox -->\n",
+            "- [ ] ⚠️ [#iced] Iced work\n",
+            "<!-- /agent:icebox -->\n",
         );
-        let active_ids = HashSet::from(["alpha".to_string()]);
 
-        let (updated, changed) = set_in_progress_work_item_markers(content, &active_ids).unwrap();
+        let (updated, changed) = strip_work_item_lifecycle_markers(content).unwrap();
 
         assert!(changed);
-        assert!(updated.contains("- [ ] 🚧 [#alpha] Alpha"));
-        assert!(updated.contains("- [ ] [#beta] Beta"));
-        assert!(updated.contains("- [ ] 🚧 [#alpha] Alpha review"));
-    }
-
-    #[test]
-    fn set_work_item_lifecycle_markers_mirrors_typed_queue_state() {
-        let content = concat!(
-            "<!-- agent:backlog -->\n",
-            "- [ ] 🚧 [#reported] Reported work\n",
-            "- [ ] 🚧 [#running] Running work\n",
-            "- [ ] 🚧 [#stale] Stale work\n",
-            "<!-- /agent:backlog -->\n",
+        assert!(updated.contains("- ☑️ [#subagent:x#1] do [#reported]"));
+        assert!(updated.contains("- [ ] [#reported] Reported work"));
+        assert!(updated.contains("- [ ] [#running] Running work"));
+        assert!(updated.contains("- [ ] [#plain] Plain work"));
+        assert!(updated.contains("- [ ] [#reported] Review copy"));
+        assert!(updated.contains("- [ ] [#iced] Iced work"));
+        assert_eq!(
+            strip_work_item_lifecycle_markers(&updated).unwrap(),
+            (updated.clone(), false)
         );
-        let lifecycle_by_id = HashMap::from([
-            ("reported".to_string(), QueueLifecycleMarker::Reported),
-            ("running".to_string(), QueueLifecycleMarker::Running),
-        ]);
-
-        let (updated, changed) =
-            set_work_item_lifecycle_markers(content, &lifecycle_by_id).unwrap();
-
-        assert!(changed);
-        assert!(updated.contains("- [ ] ☑️ [#reported] Reported work"));
-        assert!(updated.contains("- [ ] 🚧 [#running] Running work"));
-        assert!(updated.contains("- [ ] [#stale] Stale work"));
     }
 
     #[test]
@@ -2245,14 +2226,15 @@ mod tests {
             "- 🚧 do [#alpha]\n",
             "<!-- /agent:queue -->\n\n",
             "<!-- agent:backlog -->\n",
-            "- [ ] 🚧 [#alpha] Alpha\n",
+            "- [ ] [#alpha] Alpha\n",
+            "- [ ] [#beta] Beta\n",
             "<!-- /agent:backlog -->\n",
         );
 
         let synced = sync_in_progress_marker_regions(snapshot, current);
 
         assert!(synced.contains("- 🚧 do [#alpha]"));
-        assert!(synced.contains("- [ ] 🚧 [#alpha] Alpha"));
+        assert!(synced.contains("- [ ] [#beta] Beta"));
         assert!(!synced.contains("#old"));
     }
 

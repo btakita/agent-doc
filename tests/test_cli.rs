@@ -30140,8 +30140,7 @@ fn test_agent_doc_document_owns_queue_lifecycle_projection_policy() {
         fs::read_to_string(manifest_dir.join("agent-doc-document/src/queue_projection.rs"))
             .unwrap();
     for required in [
-        "pub fn set_work_item_lifecycle_markers(",
-        "pub fn set_in_progress_work_item_markers(",
+        "pub fn strip_work_item_lifecycle_markers(",
         "pub fn sync_in_progress_marker_regions(",
         "pub fn strip_in_progress_marker(",
         "pub fn strip_priority_markers(",
@@ -30155,8 +30154,7 @@ fn test_agent_doc_document_owns_queue_lifecycle_projection_policy() {
     let maintenance =
         fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/src/lib.rs")).unwrap();
     for forbidden in [
-        "fn set_work_item_lifecycle_markers(",
-        "fn set_in_progress_work_item_markers(",
+        "fn strip_work_item_lifecycle_markers(",
         "fn sync_in_progress_marker_regions(",
     ] {
         assert!(
@@ -30165,8 +30163,9 @@ fn test_agent_doc_document_owns_queue_lifecycle_projection_policy() {
         );
     }
     assert!(
-        maintenance.contains("set_work_item_lifecycle_markers")
-            && maintenance.contains("sync_in_progress_marker_regions"),
+        maintenance.contains("strip_work_item_lifecycle_markers")
+            && maintenance.contains("sync_in_progress_marker_regions")
+            && !maintenance.contains("set_work_item_lifecycle_markers"),
         "preflight maintenance should call focused typed queue lifecycle projection policy directly"
     );
 }

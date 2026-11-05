@@ -327,8 +327,6 @@ pub fn take_done_archive_item(
             id: entry.id,
             state: agent_doc_element_backlog::backlog::PendingState::Open,
             gate_type: None,
-            in_progress: false,
-            lifecycle_marker: None,
             text: entry.text,
             continuation: archive[entry.first_line_end..entry.end].to_string(),
         });

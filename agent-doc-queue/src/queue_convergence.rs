@@ -4,7 +4,6 @@
 //! Callers provide document text. File IO, snapshot persistence, and preflight
 //! side effects stay in orchestration.
 
-use std::collections::HashSet;
 
 use agent_doc_document::queue_projection::strip_priority_markers;
 use agent_doc_element::element;
@@ -298,8 +297,7 @@ fn realign_component_when_only_in_progress_marker_changed(
 }
 
 fn body_without_in_progress_markers(body: &str) -> String {
-    let ids = HashSet::new();
-    backlog::set_in_progress_item_ids(body, &ids).0
+    backlog::strip_lifecycle_item_markers(body).0
 }
 
 #[cfg(test)]

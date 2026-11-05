@@ -117,10 +117,10 @@ fn is_started_and_unclosed(
 
 /// Collect work that has started and has not closed from its authoritative source.
 ///
-/// A source enters the index when its lifecycle marker proves work has started.
-/// Once an identity is active, matching unfinished tracked sources are retained
-/// as provenance even when only the queue projection carries the lifecycle
-/// marker. Completed/struck rows, pending/blocked/skipped work, todos, queue
+/// A queue row enters the index when its lifecycle marker proves work has
+/// started. Once an identity is active, matching unfinished tracked sources are
+/// retained as provenance; tracked-work rows never carry a lifecycle marker of
+/// their own (`#backlogrowmarker`), so they never start an identity. Completed/struck rows, pending/blocked/skipped work, todos, queue
 /// group labels, and the done archive are excluded.
 pub fn managed_active_items(content: &str) -> Result<Vec<ManagedActiveItem>> {
     use agent_doc_element::element;
@@ -177,9 +177,11 @@ pub fn managed_active_items(content: &str) -> Result<Vec<ManagedActiveItem>> {
         }
     }
 
-    // Establish active tracked identities before adding plain tracked aliases.
-    // This makes the result independent of component order: for example, an
-    // open backlog row can still be linked to a matching active review row.
+    // Preserve every unfinished tracked location for an already-active
+    // identity. These rows are provenance, not an independent reason to make
+    // otherwise dormant work active. `#backlogrowmarker`: a tracked row carries
+    // no attempt marker of its own, so its source reports the lifecycle the
+    // queue row projects for the same identity.
     for component_name in ["backlog", "review", "icebox"] {
         for component in components.iter().filter(|component| {
             element::canonical_component_name(&component.name) == component_name
@@ -187,9 +189,14 @@ pub fn managed_active_items(content: &str) -> Result<Vec<ManagedActiveItem>> {
         }) {
             let (_, parsed, _) = backlog::parse_items(component.content(content));
             for item in parsed.into_iter().filter(|item| !item.is_done()) {
-                let Some(marker) = item
-                    .lifecycle_marker
-                    .filter(|marker| is_started_and_unclosed(*marker))
+                let Some(&index) = indexes.get(&item.id) else {
+                    continue;
+                };
+                let Some(state) = items[index]
+                    .sources
+                    .iter()
+                    .find(|source| source.component == "queue")
+                    .map(|source| source.state.clone())
                 else {
                     continue;
                 };
@@ -201,41 +208,7 @@ pub fn managed_active_items(content: &str) -> Result<Vec<ManagedActiveItem>> {
                     &item.text,
                     ManagedActiveItemSource {
                         component: component_name.to_string(),
-                        state: lifecycle_state(marker).to_string(),
-                    },
-                    1,
-                );
-            }
-        }
-    }
-
-    // Preserve every unfinished tracked location for an already-active
-    // identity. These rows are provenance, not an independent reason to make
-    // otherwise dormant work active.
-    for component_name in ["backlog", "review", "icebox"] {
-        for component in components.iter().filter(|component| {
-            element::canonical_component_name(&component.name) == component_name
-                || (component_name == "backlog" && component.name == "pending")
-        }) {
-            let (_, parsed, _) = backlog::parse_items(component.content(content));
-            for item in parsed.into_iter().filter(|item| !item.is_done()) {
-                if item.lifecycle_marker.is_some() || !indexes.contains_key(&item.id) {
-                    continue;
-                }
-                let state = match item.state {
-                    PendingState::Open => "open",
-                    PendingState::Gated => "gated",
-                    PendingState::Done => unreachable!("done tracked work was filtered"),
-                };
-                push_managed_active_item(
-                    &mut items,
-                    &mut indexes,
-                    item.id.clone(),
-                    Some(item.id),
-                    &item.text,
-                    ManagedActiveItemSource {
-                        component: component_name.to_string(),
-                        state: state.to_string(),
+                        state,
                     },
                     1,
                 );
@@ -713,6 +686,8 @@ mod tests {
             "- [x] [#backlog-done] done\n",
             "<!-- /agent:backlog -->\n",
             "## Review <!-- agent:review -->\n",
+            // `#backlogrowmarker`: a stray attempt marker on a tracked row
+            // never starts an identity; only queue rows do.
             "- [/] ☑️ [#review-gated] verify externally\n",
             "<!-- /agent:review -->\n",
             "## Icebox <!-- agent:icebox -->\n",
@@ -721,7 +696,8 @@ mod tests {
         );
 
         let items = managed_active_items(content).unwrap();
-        assert_eq!(items.len(), 3);
+        assert_eq!(items.len(), 2);
+        assert!(!items.iter().any(|item| item.identity == "review-gated"));
         let shared = items.iter().find(|item| item.identity == "shared").unwrap();
         assert_eq!(shared.summary, "authoritative tracked summary");
         assert_eq!(
@@ -733,7 +709,7 @@ mod tests {
                 },
                 ManagedActiveItemSource {
                     component: "backlog".into(),
-                    state: "open".into(),
+                    state: "running".into(),
                 },
             ]
         );
@@ -747,12 +723,12 @@ mod tests {
         let rendered = render_managed_active_items(&items);
         assert!(rendered.starts_with("- **Queue** (1)\n"));
         assert!(rendered.contains("- **Backlog** (1)\n"));
-        assert!(rendered.contains("- **Review** (1)\n"));
+        assert!(!rendered.contains("- **Review**"));
         assert!(!rendered.contains("- **Icebox**"));
         assert!(rendered.contains("`[#shared]` — authoritative tracked summary"));
         assert!(rendered.contains("`[#q-child]` — child"));
         assert!(rendered.contains("**Status:** claimed"));
-        assert!(rendered.contains("**Status:** open"));
+        assert!(rendered.contains("**Status:** running"));
         assert!(rendered.contains("**Sources:** queue (running)"));
         assert!(!rendered.contains("**Sources:** backlog"));
         assert!(!rendered.contains("**Sources:** queue (claimed)"));
@@ -767,8 +743,11 @@ mod tests {
             "operator prose\n",
             "<!-- status:sync -->\nrelease prose\n<!-- /status:sync -->\n",
             "<!-- /agent:status -->\n",
+            "## Run <!-- agent:run -->\n",
+            "- 🚧 do [#live]\n",
+            "<!-- /agent:run -->\n",
             "## Backlog <!-- agent:backlog -->\n",
-            "- [ ] 🚧 [#live] still active\n",
+            "- [ ] [#live] still active\n",
             "<!-- /agent:backlog -->\n",
         );
         let one = reconcile_managed_active_items(doc)
@@ -780,10 +759,9 @@ mod tests {
         assert!(one.contains("<!-- status:sync -->\nrelease prose\n<!-- /status:sync -->"));
         assert!(reconcile_managed_active_items(&one).unwrap().is_none());
 
-        let closed = one.replace(
-            "- [ ] 🚧 [#live] still active",
-            "- [x] 🚧 [#live] still active",
-        );
+        let closed = one
+            .replace("- 🚧 do [#live]", "- ~~do [#live]~~")
+            .replace("- [ ] [#live] still active", "- [x] [#live] still active");
         let updated = reconcile_managed_active_items(&closed)
             .unwrap()
             .expect("stale row removed");

@@ -751,3 +751,52 @@ fn decision_why_walks_the_first_principles_chain() {
     assert!(text.contains("  derived from:"), "{text}");
     assert!(text.contains("(project, "), "{text}");
 }
+
+/// `#decisionstaleevidence`: an open todo that cites an accepted project
+/// `decisions.md` record recording its deliverable done is reported done by
+/// evidence, citing the record, by both `decision validate --document` and
+/// `decision answered --json`.
+#[test]
+fn a_cited_registry_record_reports_its_todo_done_by_evidence() {
+    let dir = tempfile::tempdir().unwrap();
+    let doc = session(
+        dir.path(),
+        "",
+        "- [ ] [#tdlru] Merge PR #77 per DEC-cache-001.\n",
+    );
+    fs::write(
+        dir.path().join("decisions.md"),
+        concat!(
+            "# Decisions\n\nThis file is the authoritative current decision registry.\n\n",
+            "<!-- agent:decision id=\"DEC-cache-001\" -->\n## DEC-cache-001\n",
+            "- State: accepted\n- Updated: 2026-11-05T00:00:00Z\n- Evidence: (none)\n- Supersedes: (none)\n",
+            "### Decision\nUse the LRU cache; PR #77 merged.\n### Rationale\nHit rate.\n<!-- /agent:decision -->\n\n",
+        ),
+    )
+    .unwrap();
+    let path = doc.to_str().unwrap();
+
+    let output = run_agent_doc(
+        dir.path(),
+        &["decision", "validate", "--json", "--document", path],
+    );
+    assert_ok(&output, "decision validate");
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["valid"], true, "{report:#}");
+    let reported = report["stale_tracked_items"].as_array().unwrap();
+    assert_eq!(reported.len(), 1, "{report:#}");
+    assert_eq!(reported[0]["todo"], "tdlru", "{report:#}");
+    assert_eq!(reported[0]["stale_kind"], "done_by_evidence", "{report:#}");
+    assert_eq!(reported[0]["decision"], "DEC-cache-001", "{report:#}");
+
+    let output = run_agent_doc(dir.path(), &["decision", "answered", "--json", path]);
+    assert_ok(&output, "decision answered");
+    let ledger: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let stale = ledger["stale_tracked_items"].as_array().unwrap();
+    assert_eq!(stale.len(), 1, "{ledger:#}");
+    assert_eq!(stale[0]["link"], "registry", "{ledger:#}");
+    assert_eq!(
+        stale[0]["location"], "decisions.md DEC-cache-001",
+        "{ledger:#}"
+    );
+}

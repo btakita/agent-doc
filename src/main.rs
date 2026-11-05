@@ -4561,7 +4561,7 @@ fn run_decision_action(action: DecisionAction) -> anyhow::Result<()> {
                     "possibly_answered": ledger.possible,
                     "near_duplicates": ledger.near_duplicates,
                     "edges": ledger.edges,
-                    "stale_tracked_items": ledger.stale_tracked_items(&observations),
+                    "stale_tracked_items": agent_doc_preflight_io::answer_ledger::stale_tracked_items_of(&file, &content, &ledger, &observations),
                     "liveness": ledger.liveness,
                     "hot_store": ledger.hot_store_size(),
                 });
@@ -4699,7 +4699,7 @@ fn run_decision_action(action: DecisionAction) -> anyhow::Result<()> {
                 for cluster in &ledger.near_duplicates {
                     eprintln!("near-duplicate questions (confirm once with the operator): {}", cluster.join(", "));
                 }
-                for stale in ledger.stale_tracked_items(&observations) {
+                for stale in agent_doc_preflight_io::answer_ledger::stale_tracked_items_of(document, &content, &ledger, &observations) {
                     if !json {
                         eprintln!(
                             "stale tracked item: agent:{} [#{}] {} — decision `{}`{}: {}",

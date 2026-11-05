@@ -832,3 +832,201 @@ fn evidence_must_cover_every_deliverable_and_be_delivered() {
         "{stale:?}"
     );
 }
+
+// `#decisionstaleevidence`: done-by-evidence also reads the decision graph's
+// `evidenced_by` responses and commits and the project `decisions.md` records
+// an item cites, not only the operator's answer text.
+
+struct Responses(std::collections::BTreeMap<&'static str, &'static str>);
+
+impl stale::ResponseSource for Responses {
+    fn response_text(&self, response_id: &str) -> Option<String> {
+        self.0.get(response_id).map(|text| text.to_string())
+    }
+}
+
+fn record(id: &str, current: bool, decision: &str, evidence: &[&str]) -> stale::RegistryRecord {
+    stale::RegistryRecord {
+        id: id.to_string(),
+        current,
+        decision: decision.to_string(),
+        rationale: "Recorded by the operator.".to_string(),
+        updated_at: "2026-11-05T00:00:00Z".to_string(),
+        evidence_response_ids: evidence.iter().map(|id| id.to_string()).collect(),
+    }
+}
+
+#[test]
+fn a_response_the_delivered_answer_cites_is_evidence() {
+    let content = concat!(
+        "<!-- agent:queue -->\n",
+        "- ~~[#mergedocs]: Done, see [#r-0123456789ab].~~\n",
+        "<!-- /agent:queue -->\n\n",
+        "<!-- agent:backlog -->\n",
+        "- [ ] [#mergedocs] Merge PR #42 and PR #43.\n",
+        "<!-- /agent:backlog -->\n",
+    );
+    let (observations, ledger) = build(content);
+    // The answer text alone records nothing merged.
+    assert!(ledger.stale_tracked_items(&observations).is_empty());
+
+    let responses = Responses(
+        [(
+            "r-0123456789ab",
+            "### Re: docs\n\nPR #42 merged. PR #43 merged too.\n",
+        )]
+        .into(),
+    );
+    let evidence = stale::DoneEvidence {
+        responses: Some(&responses),
+        ..Default::default()
+    };
+    let stale = ledger.stale_tracked_items_with(&observations, &evidence);
+    let found = stale_for(&stale, "mergedocs").expect("done by the cited response");
+    assert_eq!(found.kind, stale::StaleKind::DoneByEvidence);
+    assert_eq!(
+        found.evidence,
+        vec!["ref:42".to_string(), "ref:43".to_string()]
+    );
+    assert_eq!(found.answer, "Done, see [#r-0123456789ab].");
+    assert!(
+        found
+            .location
+            .starts_with("response [#r-0123456789ab] cited by"),
+        "{found:?}"
+    );
+    assert!(found.action.contains("--done mergedocs"), "{found:?}");
+    assert!(!found.auto_close);
+
+    // A response that records only one of them does not cover the item.
+    let partial = Responses([("r-0123456789ab", "PR #42 merged. PR #43 was not merged.")].into());
+    let evidence = stale::DoneEvidence {
+        responses: Some(&partial),
+        ..Default::default()
+    };
+    assert!(
+        ledger
+            .stale_tracked_items_with(&observations, &evidence)
+            .is_empty()
+    );
+}
+
+#[test]
+fn a_commit_a_closed_copy_recorded_is_evidence_and_an_answer_citation_is_not() {
+    let content = concat!(
+        "<!-- agent:queue -->\n",
+        "- ~~[#tdhotfix]: Ship the hotfix.~~\n",
+        "<!-- /agent:queue -->\n\n",
+        "<!-- agent:todo -->\n",
+        "- [x] [#tdhotfix] Decide whether to ship the hotfix (shipped as c71880dc60e3)\n",
+        "<!-- /agent:todo -->\n\n",
+        "<!-- agent:review -->\n",
+        "- [/] [#tdhotfix] Land c71880dc60e3 on main.\n",
+        "<!-- /agent:review -->\n",
+    );
+    let (observations, ledger) = build(content);
+    let stale = ledger.stale_tracked_items(&observations);
+    let found = stale_for(&stale, "tdhotfix").expect("done by the closed copy's commit");
+    assert_eq!(found.kind, stale::StaleKind::DoneByEvidence, "{found:?}");
+    assert_eq!(found.evidence, vec!["sha:c71880d".to_string()]);
+    assert_eq!(
+        found.location,
+        "commit c71880dc60e3 recorded on a closed copy"
+    );
+    assert!(
+        found.action.contains("--review-resolve tdhotfix"),
+        "{found:?}"
+    );
+
+    // An operator answer that cites the commit while saying it is not landed
+    // records nothing done, though the graph keeps the commit as evidence.
+    let negated = content
+        .replace(
+            "- ~~[#tdhotfix]: Ship the hotfix.~~",
+            "- ~~[#tdhotfix]: c71880dc60e3 was not merged yet.~~",
+        )
+        .replace(
+            "- [x] [#tdhotfix] Decide whether to ship the hotfix (shipped as c71880dc60e3)\n",
+            "- [ ] [#tdhotfix] Decide whether to ship the hotfix\n",
+        );
+    let (observations, ledger) = build(&negated);
+    let graph = graph::DecisionGraph::build(&ledger, &observations);
+    assert!(
+        graph
+            .edges
+            .iter()
+            .any(|edge| edge.kind == EdgeKind::EvidencedBy && edge.to == "commit:c71880dc60e3"),
+        "{:?}",
+        graph.edges
+    );
+    let stale = ledger.stale_tracked_items(&observations);
+    assert!(
+        stale
+            .iter()
+            .all(|found| found.kind != stale::StaleKind::DoneByEvidence),
+        "{stale:?}"
+    );
+}
+
+#[test]
+fn a_cited_registry_record_is_evidence_while_it_is_accepted() {
+    let content = concat!(
+        "<!-- agent:backlog -->\n",
+        "- [ ] [#lrucache] Merge PR #77 per DEC-cache-001.\n",
+        "- [ ] [#lrupinned] Merge PR #78 per decision:DEC-cache-002.\n",
+        "- [ ] [#uncited] Merge PR #77.\n",
+        "<!-- /agent:backlog -->\n",
+    );
+    let (observations, ledger) = build(content);
+    assert!(ledger.stale_tracked_items(&observations).is_empty());
+
+    let responses = Responses([("r-00000000beef", "PR #78 landed on main.")].into());
+    let records: std::collections::BTreeMap<String, stale::RegistryRecord> = [
+        record(
+            "DEC-cache-001",
+            true,
+            "Use the LRU cache; PR #77 merged.",
+            &[],
+        ),
+        record(
+            "DEC-cache-002",
+            true,
+            "Pin the cache size.",
+            &["[#r-00000000beef]"],
+        ),
+    ]
+    .into_iter()
+    .map(|record| (record.id.clone(), record))
+    .collect();
+    let evidence = stale::DoneEvidence {
+        records: records.clone(),
+        responses: Some(&responses),
+        ..Default::default()
+    };
+    let stale = ledger.stale_tracked_items_with(&observations, &evidence);
+    let lru = stale_for(&stale, "lrucache").expect("done by the record text");
+    assert_eq!(lru.link, stale::StaleLink::Registry);
+    assert_eq!(lru.decision_id, "DEC-cache-001");
+    assert_eq!(lru.revision_id, "DEC-cache-001@2026-11-05T00:00:00Z");
+    assert_eq!(lru.location, "decisions.md DEC-cache-001");
+    assert!(lru.action.contains("citing `DEC-cache-001`"), "{lru:?}");
+    let pinned = stale_for(&stale, "lrupinned").expect("done by the pinned response");
+    assert_eq!(
+        pinned.location,
+        "response [#r-00000000beef] pinned by decisions.md DEC-cache-002"
+    );
+    // The registry applies only to items that cite it.
+    assert!(stale_for(&stale, "uncited").is_none(), "{stale:?}");
+
+    // A superseded record is history: it records nothing done.
+    let mut history = records;
+    history.get_mut("DEC-cache-001").unwrap().current = false;
+    let evidence = stale::DoneEvidence {
+        records: history,
+        responses: Some(&responses),
+        ..Default::default()
+    };
+    let stale = ledger.stale_tracked_items_with(&observations, &evidence);
+    assert!(stale_for(&stale, "lrucache").is_none(), "{stale:?}");
+    assert!(stale_for(&stale, "lrupinned").is_some(), "{stale:?}");
+}

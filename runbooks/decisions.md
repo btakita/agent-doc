@@ -76,6 +76,11 @@ preflight and every closeout (`#answerbyrequestid`):
   id the delivered operator answer addresses; apply the rest, citing the
   decision. An operator question back (`[#id]: Is this done?`) is never
   recorded as an answer.
+- Done-by-evidence (`#decisionstaleevidence`) reads more than the answer
+  text: the responses a delivered answer or a closed copy cites, the commits
+  a closed copy recorded, and an `accepted` `decisions.md` record the item
+  cites by `DEC-…` id (with its pinned responses). The signal's location names
+  which one; cite that decision id when you apply it.
 - Only operator words change a decision. A newer operator answer becomes the
   latest revision. Earlier answers are kept, and the cycle contract shows a
   changed decision once as `decision changed: <old> -> <new>`.

@@ -907,7 +907,99 @@ pub fn stale_tracked_items(
     content: &str,
 ) -> Vec<agent_doc_answer_ledger::stale::StaleTrackedItem> {
     let (observations, ledger) = build_ledger(file, content);
-    ledger.stale_tracked_items(&observations)
+    stale_tracked_items_of(file, content, &ledger, &observations)
+}
+
+/// `#decisionstaleevidence`: response text for the stale audit from the
+/// session document, then the tracked response index and archive. It never
+/// scans git history, so a per-cycle audit stays bounded.
+struct LocalResponses<'a> {
+    file: &'a Path,
+    content: &'a str,
+}
+
+impl agent_doc_answer_ledger::stale::ResponseSource for LocalResponses<'_> {
+    fn response_text(&self, response_id: &str) -> Option<String> {
+        agent_doc_archive_io::read_response_locally(
+            self.file,
+            &format!("[#{response_id}]"),
+            Some(self.content),
+        )
+    }
+}
+
+/// `#decisionstaleevidence`: the project `decisions.md` records, as the stale
+/// audit reads them. An unreadable registry yields none.
+fn registry_records(
+    file: &Path,
+) -> std::collections::BTreeMap<String, agent_doc_answer_ledger::stale::RegistryRecord> {
+    let Some(root) = agent_doc_project_root_io::project_root_containing(file) else {
+        return Default::default();
+    };
+    match agent_doc_decision_io::read_registry(&root) {
+        Ok(registry) => registry
+            .records
+            .into_values()
+            .map(|record| {
+                (
+                    record.id.clone(),
+                    agent_doc_answer_ledger::stale::RegistryRecord {
+                        current: record.state == agent_doc_decision_io::DecisionState::Accepted,
+                        id: record.id,
+                        decision: record.decision,
+                        rationale: record.rationale,
+                        updated_at: record.updated_at,
+                        evidence_response_ids: record.evidence_response_ids,
+                    },
+                )
+            })
+            .collect(),
+        Err(err) => {
+            eprintln!(
+                "[preflight] stale audit: decision registry unreadable ({err:#}); using the document only"
+            );
+            Default::default()
+        }
+    }
+}
+
+/// `#decisionstaleevidence`: the stale audit over an already-built ledger,
+/// with done-by-evidence read from the decision graph (cached history
+/// included), the responses it cites, and the `decisions.md` records items
+/// cite. Read-only.
+pub fn stale_tracked_items_of(
+    file: &Path,
+    content: &str,
+    ledger: &Ledger,
+    observations: &agent_doc_answer_ledger::extract::Observations,
+) -> Vec<agent_doc_answer_ledger::stale::StaleTrackedItem> {
+    use agent_doc_answer_ledger::stale::{deliverable_anchors, evidence::registry_citations};
+    // Evidence only matters for an open item that names a deliverable; skip
+    // the cache, archive and registry reads when none does.
+    let wanting: Vec<_> = observations
+        .tracked
+        .iter()
+        .filter(|item| item.open && !deliverable_anchors(&item.text).is_empty())
+        .collect();
+    if wanting.is_empty() {
+        return ledger.stale_tracked_items(observations);
+    }
+    let records = if wanting
+        .iter()
+        .any(|item| !registry_citations(&item.text).is_empty())
+    {
+        registry_records(file)
+    } else {
+        Default::default()
+    };
+    let graph = graph_of(file, ledger, observations);
+    let responses = LocalResponses { file, content };
+    let evidence = agent_doc_answer_ledger::stale::DoneEvidence {
+        graph: Some(&graph),
+        records,
+        responses: Some(&responses),
+    };
+    ledger.stale_tracked_items_with(observations, &evidence)
 }
 
 /// Pre-write closeout gate: the questions this closeout would add that the
@@ -1147,6 +1239,83 @@ mod tests {
         assert_eq!(stale.len(), 1, "{stale:?}");
         assert_eq!(stale[0].item, "nextsteps");
         assert!(!stale[0].auto_close);
+    }
+
+    /// `#decisionstaleevidence`: done-by-evidence reads the response a
+    /// delivered answer cites (from the session document) and the project
+    /// `decisions.md` record an item cites, not only the answer text.
+    #[test]
+    fn stale_audit_reads_cited_responses_and_registry_records() {
+        const DOC: &str = concat!(
+            "---\nagent_doc_session: stale-evidence\n---\n\n",
+            "<!-- agent:queue -->\n",
+            "- ~~[#mergedocs]: Done, see [#r-0123456789ab].~~\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: docs [#r-0123456789ab]\n\n",
+            "PR #42 merged into main.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#mergedocs] Merge PR #42.\n",
+            "- [ ] [#lrucache] Merge PR #77 per DEC-cache-001.\n",
+            "- [ ] [#oldcache] Merge PR #79 per DEC-cache-000.\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        const REGISTRY: &str = concat!(
+            "# Decisions\n\nThis file is the authoritative current decision registry.\n\n",
+            "<!-- agent:decision id=\"DEC-cache-000\" -->\n## DEC-cache-000\n",
+            "- State: superseded\n- Updated: 2026-11-01T00:00:00Z\n- Evidence: (none)\n- Supersedes: (none)\n",
+            "### Decision\nUse a FIFO cache; PR #79 merged.\n### Rationale\nSimplest.\n<!-- /agent:decision -->\n\n",
+            "<!-- agent:decision id=\"DEC-cache-001\" -->\n## DEC-cache-001\n",
+            "- State: accepted\n- Updated: 2026-11-05T00:00:00Z\n- Evidence: (none)\n- Supersedes: DEC-cache-000\n",
+            "### Decision\nUse the LRU cache; PR #77 merged.\n### Rationale\nHit rate.\n<!-- /agent:decision -->\n\n",
+        );
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::write(dir.path().join("decisions.md"), REGISTRY).unwrap();
+        agent_doc_decision_io::read_registry(dir.path()).expect("fixture registry parses");
+        let doc = dir.path().join("session.md");
+        std::fs::write(&doc, DOC).unwrap();
+
+        let stale = stale_tracked_items(&doc, DOC);
+        let docs = stale
+            .iter()
+            .find(|found| found.item == "mergedocs")
+            .expect("done by the cited response");
+        assert_eq!(
+            docs.kind,
+            agent_doc_answer_ledger::stale::StaleKind::DoneByEvidence
+        );
+        assert!(
+            docs.location
+                .starts_with("response [#r-0123456789ab] cited by"),
+            "{docs:?}"
+        );
+        let lru = stale
+            .iter()
+            .find(|found| found.item == "lrucache")
+            .expect("done by the cited registry record");
+        assert_eq!(lru.decision_id, "DEC-cache-001");
+        assert_eq!(
+            lru.link,
+            agent_doc_answer_ledger::stale::StaleLink::Registry
+        );
+        // A superseded record records nothing done.
+        assert!(
+            stale.iter().all(|found| found.item != "oldcache"),
+            "{stale:?}"
+        );
+        // Without a registry the record citation proves nothing.
+        std::fs::remove_file(dir.path().join("decisions.md")).unwrap();
+        let stale = stale_tracked_items(&doc, DOC);
+        assert!(
+            stale.iter().all(|found| found.item != "lrucache"),
+            "{stale:?}"
+        );
+        assert!(
+            stale.iter().any(|found| found.item == "mergedocs"),
+            "{stale:?}"
+        );
     }
 
     struct NoEffects;

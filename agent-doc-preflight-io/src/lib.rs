@@ -292,7 +292,8 @@ pub struct TodoSignal {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub component: Option<String>,
     /// `#decisionstaleaudit`: why it is stale (`answered_but_open`,
-    /// `done_by_evidence`).
+    /// `done_by_evidence`; flag-only `#decisionstalegraph` kinds
+    /// `moot_by_decision`, `built_on_superseded`, `contradicts_decision`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stale_kind: Option<String>,
     /// `#decisionstaleaudit`: the cited answer-ledger decision id.
@@ -10745,6 +10746,41 @@ mod tests {
         // Plain signals keep their wire shape.
         let plain = serde_json::to_value(sync).unwrap();
         assert!(plain.get("component").is_none(), "{plain}");
+    }
+
+    /// `#decisionstalegraph`: a backlog item citing a decision whose answer a
+    /// delivered revision superseded surfaces as a flag-only
+    /// `stale_tracked_item` signal naming the superseded revision.
+    #[test]
+    fn graph_stale_kinds_surface_as_typed_signals() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "<!-- agent:run id=\"main\" -->\n",
+            "- ### Waiting on you <!-- agent-doc:waiting-on-you -->\n",
+            "  - 🙋 [#tdport] Choose the demo callback port <!-- agent-doc:waiting-item -->\n",
+            "    - ~~Use port 8080.~~\n",
+            "    - ~~Use the standard http ports.~~\n",
+            "<!-- /agent:run -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#portdocs] Write the callback setup docs (source: [#tdport])\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+
+        let signals = todo_signals_for_document(&doc, content);
+        let stale = signals
+            .iter()
+            .find(|signal| signal.kind == "stale_tracked_item" && signal.todo == "portdocs")
+            .unwrap_or_else(|| panic!("{signals:?}"));
+        assert_eq!(stale.stale_kind.as_deref(), Some("built_on_superseded"));
+        assert_eq!(stale.component.as_deref(), Some("backlog"));
+        let decision = stale.decision.clone().expect("cites a decision");
+        assert!(
+            stale.ids.iter().any(|id| id.starts_with(&format!("{decision}@"))),
+            "{stale:?}"
+        );
+        assert!(stale.action.contains("--done portdocs"), "{stale:?}");
     }
 
     /// GH #381 repro: `.agent-doc/project.md` declares `'#review'`; the session

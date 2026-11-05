@@ -81,6 +81,15 @@ preflight and every closeout (`#answerbyrequestid`):
   a closed copy recorded, and an `accepted` `decisions.md` record the item
   cites by `DEC-…` id (with its pinned responses). The signal's location names
   which one; cite that decision id when you apply it.
+- Three more kinds come from the decision graph and are only flagged
+  (`#decisionstalegraph`): `moot_by_decision` (the latest answer turns the
+  item's work down, or chose an option the item does not assume),
+  `built_on_superseded` (the item applies to or depends on a decision whose
+  earlier answer was superseded), and `contradicts_decision` (the item is
+  linked `conflicts with` an answered decision, or restates a superseded
+  answer). Close the item, or rewrite it against the current answer and keep
+  the cited revision id (`<decision>@<hash>`) in its text; that id marks it
+  reconciled.
 - Only operator words change a decision. A newer operator answer becomes the
   latest revision. Earlier answers are kept, and the cycle contract shows a
   changed decision once as `decision changed: <old> -> <new>`.

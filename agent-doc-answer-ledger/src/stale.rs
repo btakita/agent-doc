@@ -29,7 +29,11 @@
 //!
 //! Kinds that need decision-graph edges (an item made moot by a decision that
 //! rejected its premise, an item built on a superseded revision, an item that
-//! contradicts the current decision) are not derived here.
+//! contradicts the current decision) are derived in [`graph_kinds`]
+//! (`#decisionstalegraph`), flag-only, for items the two kinds above leave
+//! alone.
+
+mod graph_kinds;
 
 use std::cell::OnceCell;
 use std::collections::BTreeSet;
@@ -50,6 +54,15 @@ use crate::{
 pub enum StaleKind {
     AnsweredButOpen,
     DoneByEvidence,
+    /// `#decisionstalegraph`: the item assumes a choice the latest answer
+    /// rejects.
+    MootByDecision,
+    /// `#decisionstalegraph`: the item applies to or depends on a decision
+    /// whose answer a later revision superseded.
+    BuiltOnSuperseded,
+    /// `#decisionstalegraph`: the item is linked `conflicts_with` an answered
+    /// decision, or restates a superseded answer.
+    ContradictsDecision,
 }
 
 impl StaleKind {
@@ -57,6 +70,9 @@ impl StaleKind {
         match self {
             Self::AnsweredButOpen => "answered_but_open",
             Self::DoneByEvidence => "done_by_evidence",
+            Self::MootByDecision => "moot_by_decision",
+            Self::BuiltOnSuperseded => "built_on_superseded",
+            Self::ContradictsDecision => "contradicts_decision",
         }
     }
 }
@@ -67,10 +83,19 @@ impl StaleKind {
 pub enum StaleLink {
     /// The item's own id or normalized text is a key of the decision.
     Identity,
-    /// A request raised for the item (`applies_to`) carries the decision.
+    /// A request raised for the item (`applies_to`) carries the decision, or
+    /// the item cites one of the decision's copies.
     AppliesTo,
     /// The item cites a project `decisions.md` record (`DEC-…`).
     Registry,
+    /// The item (or its own decision) `depends_on` the decision.
+    DependsOn,
+    /// The item (or its own decision) and the decision are linked
+    /// `conflicts_with`.
+    ConflictsWith,
+    /// No edge: the item repeats a superseded answer of the decision nearly
+    /// word for word.
+    Restates,
 }
 
 /// One stale tracked item with the decision that makes it stale.
@@ -86,7 +111,10 @@ pub struct StaleTrackedItem {
     pub answer: String,
     pub location: String,
     pub link: StaleLink,
-    /// `done_by_evidence`: the deliverables the evidence records as done.
+    /// What the finding rests on: the deliverables the evidence records as
+    /// done (`done_by_evidence`), the superseded revision
+    /// (`built_on_superseded`, a restated `contradicts_decision`), or the
+    /// rejected options (`option:<text>`, `moot_by_decision`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub evidence: Vec<String>,
     /// The binary closes this item itself (identity-tier todo only).
@@ -204,6 +232,11 @@ fn suggested_action(
             "Open agent:{component} item [#{id}] asks for {} and {cite} already records it done.",
             evidence.join(", ")
         ),
+        // The graph kinds build their own action (`graph_kinds`).
+        kind => format!(
+            "Open agent:{component} item [#{id}] is {} by {cite}.",
+            kind.as_str()
+        ),
     };
     let what = match item.component {
         TrackedComponent::Todo => format!(
@@ -270,6 +303,7 @@ impl Ledger {
     ) -> Vec<StaleTrackedItem> {
         let local_graph = OnceCell::new();
         let mut out = Vec::new();
+        let graph = graph_kinds::GraphStale::new(self, observations);
         for item in observations.tracked.iter().filter(|item| item.open) {
             // A live queue row still names it: that work is in flight.
             if self.live_queue_ids.contains(&item.id) {
@@ -285,7 +319,7 @@ impl Ledger {
                     .done_by_evidence(item, &linked, observations, evidence, &local_graph)
                     .or(answered),
             };
-            out.extend(found);
+            out.extend(found.or_else(|| graph.stale(item)));
         }
         out
     }

@@ -875,10 +875,19 @@ action is finished or moot:
   question whose own id or normalized text has that answer;
   `done_by_evidence`: every PR/issue number or commit SHA the item names is
   recorded merged/landed/pushed/committed/published/released by the evidence
-  of one decision linked to it), the cited `decision`, and the closeout flag
-  to apply
+  of one decision linked to it; and, flag-only from the decision graph
+  (`#decisionstalegraph`), `moot_by_decision`: the latest answer leads with a
+  rejection of the work (`no`, `moot`, `not needed`, `drop it`, …) or chose an
+  option of the question other than the one the item names;
+  `built_on_superseded`: the item `applies_to` (by citation, too) or
+  `depends_on` a decision, directly or through `depends_on`, whose answer a
+  later delivered revision superseded; `contradicts_decision`: the item is
+  linked `conflicts_with` an answered decision, or restates a superseded
+  answer and not the current one), the cited `decision`, and the closeout
+  flag to apply
   (`--todo-done`, `--done`, `--review-resolve`; icebox items are only
-  flagged). The matching todo's `todo_sync_required` action names the
+  flagged). A graph-kind item whose text carries the cited revision id
+  (`<decision>@<hash>`) is reconciled and no longer flagged. The matching todo's `todo_sync_required` action names the
   settling decision. No signal is raised while a live queue row still names
   the item or the decision has an undelivered revision.
   The evidence (`#decisionstaleevidence`) of a decision linked by identity

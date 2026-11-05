@@ -1279,7 +1279,8 @@ fn run_with_options_to_writer_in_pass(
         // todo copies of answered questions, and collect the "already
         // answered" facts this cycle contract carries. Best-effort: a failure
         // closes nothing and never blocks admission.
-        match agent_doc_preflight_io::answer_ledger::run_answer_ledger_maintenance(file) {
+        match agent_doc_preflight_io::answer_ledger::run_answer_ledger_maintenance_with_recall(file)
+        {
             Ok(report) => answer_ledger_report = report,
             Err(err) => eprintln!("[preflight] answer ledger: not applied this pass: {err:#}"),
         }
@@ -3024,6 +3025,7 @@ fn run_with_options_to_writer_in_pass(
         answered_decisions_guidance: answer_ledger_report.guidance(),
         answered_decisions: answer_ledger_report.facts,
         possibly_answered: answer_ledger_report.possible,
+        answers_recalled_elsewhere: answer_ledger_report.recalled,
         queue_active: preflight_read_projection.queue.active,
         queue_deferred: preflight_read_projection.queue.deferred,
         queue_start_at: preflight_read_projection.queue.start_at.clone(),

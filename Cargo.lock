@@ -1659,12 +1659,14 @@ dependencies = [
  "agent-doc-workflow",
  "anyhow",
  "indexmap",
+ "libc",
  "serde",
  "serde_json",
  "tempfile",
  "tmux-router",
  "tracing",
  "ureq",
+ "wait-timeout",
 ]
 
 [[package]]

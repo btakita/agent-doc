@@ -2,6 +2,7 @@
 
 pub mod admission_replica_hold;
 pub mod answer_ledger;
+pub mod answer_recall;
 pub mod debounce;
 pub mod gc;
 pub mod layout;
@@ -1440,6 +1441,11 @@ pub struct PreflightOutput {
     /// operator once before treating one as answered.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub possibly_answered: Vec<agent_doc_answer_ledger::PossibleMatch>,
+    /// `#decisiontsiftrecall`: open questions here that look like questions
+    /// the operator answered in another document (optional tsift recall).
+    /// Annotation only: confirm with the operator once before applying one.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub answers_recalled_elsewhere: Vec<agent_doc_answer_ledger::recall::RecalledAnswer>,
     /// How to treat `answered_decisions` / `possibly_answered`; present only
     /// when either is non-empty.
     #[serde(default, skip_serializing_if = "Option::is_none")]

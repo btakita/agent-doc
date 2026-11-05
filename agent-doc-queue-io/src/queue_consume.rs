@@ -1456,11 +1456,80 @@ pub fn observe_authoritative_queue_state(file: &Path, content: &str) -> Result<u
         )
     })?;
     agent_doc_controller_io::project_controller::ensure_controller_running_for_file(&canonical)?;
-    agent_doc_controller_io::project_controller::observe_queue_authority(
-        &project_root,
-        &canonical,
-        content,
+    retry_queue_authority_awaiting_projection(
+        QUEUE_AUTHORITY_PROJECTION_LAG_BUDGET,
+        || {
+            agent_doc_controller_io::project_controller::observe_queue_authority(
+                &project_root,
+                &canonical,
+                content,
+            )
+        },
+        agent_doc_controller_io::project_controller::controller_commit_refusal_awaits_projection,
+        || std::thread::sleep(QUEUE_AUTHORITY_PROJECTION_LAG_BACKOFF),
+        |event| agent_doc_ops_log_io::log_op(file, &format!("{event} file={}", file.display())),
     )
+}
+
+/// `#respondfalseerror`: how long one queue-authority observation keeps asking
+/// while the controller reports that the document's derived state projection
+/// has not activated the applied state yet.
+///
+/// The controller's read-your-writes barrier waits at most 2s per ask and then
+/// refuses with `recovery=await_live_projection_then_retry_controller_commit`.
+/// On 2026-11-04 (`agent-doc-bugs.md`, cycles 1793834587613, 1793835295040,
+/// 1793836980789) closeout's waiting-on-you refresh hit that refusal right after
+/// its own retained write landed, `respond` exited non-zero with the dogfood fix
+/// prompt, and the retained worker committed the same cycle two seconds later.
+/// The refusal names its own recovery, so the observation re-asks inside this
+/// budget instead of surfacing the first one.
+const QUEUE_AUTHORITY_PROJECTION_LAG_BUDGET: std::time::Duration =
+    std::time::Duration::from_secs(10);
+/// Pause between two asks. Each ask already blocks on the activation barrier,
+/// so this only keeps a controller that refuses immediately from hot-looping.
+const QUEUE_AUTHORITY_PROJECTION_LAG_BACKOFF: std::time::Duration =
+    std::time::Duration::from_millis(100);
+
+/// The I/O-free core of [`observe_authoritative_queue_state`]'s projection-lag
+/// retry. An error `awaits_projection` classifies as a transient projection lag
+/// is asked again while the budget allows; any other error, and the last lag
+/// refusal once the budget is spent, propagates unchanged.
+fn retry_queue_authority_awaiting_projection<T>(
+    budget: std::time::Duration,
+    mut attempt: impl FnMut() -> Result<T>,
+    awaits_projection: impl Fn(&anyhow::Error) -> bool,
+    mut pause: impl FnMut(),
+    mut log: impl FnMut(String),
+) -> Result<T> {
+    let started = std::time::Instant::now();
+    let mut asks = 0usize;
+    loop {
+        asks += 1;
+        let err = match attempt() {
+            Ok(value) => {
+                if asks > 1 {
+                    log(format!(
+                        "queue_authority_projection_lag_settled asks={asks} waited_ms={}",
+                        started.elapsed().as_millis()
+                    ));
+                }
+                return Ok(value);
+            }
+            Err(err) => err,
+        };
+        if !awaits_projection(&err) {
+            return Err(err);
+        }
+        if started.elapsed() >= budget {
+            log(format!(
+                "queue_authority_projection_lag_exhausted asks={asks} waited_ms={} budget_ms={}",
+                started.elapsed().as_millis(),
+                budget.as_millis()
+            ));
+            return Err(err);
+        }
+        pause();
+    }
 }
 
 /// Refresh the closeout-maintained operator-work tree through the same
@@ -11564,5 +11633,93 @@ Old.
             !updated.contains(agent_doc_document::subagent_completion::MARKER_PREFIX),
             "consuming the handoff must retire its now-superseded completion evidence: {updated}"
         );
+    }
+}
+
+#[cfg(test)]
+mod queue_authority_projection_lag_tests {
+    use super::retry_queue_authority_awaiting_projection;
+    use std::cell::Cell;
+    use std::time::Duration;
+
+    const LAG: &str = "project controller command queue_authority_observation failed: derived state \
+         projection for document abc has not activated the applied state yet \
+         recovery=await_live_projection_then_retry_controller_commit";
+
+    fn awaits(err: &anyhow::Error) -> bool {
+        agent_doc_controller_io::project_controller::controller_commit_refusal_awaits_projection(
+            err,
+        )
+    }
+
+    /// `#respondfalseerror`: the 2026-11-04 closeouts surfaced the first
+    /// activation-lag refusal; the projection activated on the next ask.
+    #[test]
+    fn transient_projection_lag_is_asked_again_until_it_settles() {
+        let asks = Cell::new(0usize);
+        let pauses = Cell::new(0usize);
+        let mut events = Vec::new();
+        let projected = retry_queue_authority_awaiting_projection(
+            Duration::from_secs(10),
+            || {
+                asks.set(asks.get() + 1);
+                if asks.get() < 3 {
+                    Err(anyhow::anyhow!(LAG))
+                } else {
+                    Ok(2usize)
+                }
+            },
+            awaits,
+            || pauses.set(pauses.get() + 1),
+            |event| events.push(event),
+        )
+        .expect("a lag that settles inside the budget is not an error");
+        assert_eq!(projected, 2);
+        assert_eq!(asks.get(), 3);
+        assert_eq!(pauses.get(), 2);
+        assert_eq!(events.len(), 1);
+        assert!(events[0].starts_with("queue_authority_projection_lag_settled asks=3"));
+    }
+
+    #[test]
+    fn a_non_lag_error_propagates_on_the_first_ask() {
+        let asks = Cell::new(0usize);
+        let err = retry_queue_authority_awaiting_projection(
+            Duration::from_secs(10),
+            || -> anyhow::Result<usize> {
+                asks.set(asks.get() + 1);
+                Err(anyhow::anyhow!("component `queue` was not found"))
+            },
+            awaits,
+            || panic!("a real failure must not be awaited"),
+            |_| {},
+        )
+        .unwrap_err();
+        assert_eq!(asks.get(), 1);
+        assert!(format!("{err:#}").contains("component `queue` was not found"));
+    }
+
+    #[test]
+    fn a_lag_that_outlives_the_budget_surfaces_the_refusal() {
+        let asks = Cell::new(0usize);
+        let mut events = Vec::new();
+        let err = retry_queue_authority_awaiting_projection(
+            Duration::ZERO,
+            || -> anyhow::Result<usize> {
+                asks.set(asks.get() + 1);
+                Err(anyhow::anyhow!(LAG))
+            },
+            awaits,
+            || panic!("an exhausted budget must not pause again"),
+            |event| events.push(event),
+        )
+        .unwrap_err();
+        assert_eq!(asks.get(), 1);
+        assert!(
+            awaits(&err),
+            "the exhausted refusal keeps its recovery token"
+        );
+        assert_eq!(events.len(), 1);
+        assert!(events[0].starts_with("queue_authority_projection_lag_exhausted asks=1"));
     }
 }

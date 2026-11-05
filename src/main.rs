@@ -5878,6 +5878,11 @@ fn main() -> ExitCode {
             {
                 return report_retained_cli_write_deferral(deferral);
             }
+            if let Some(pending) =
+                agent_doc_cycle_state_io::post_commit_error::retained_closeout_pending(&err)
+            {
+                return report_retained_closeout_pending(pending);
+            }
             print_terminal_error_report(&err);
             ExitCode::FAILURE
         }
@@ -5908,6 +5913,107 @@ fn render_retained_cli_write_deferral(
         "[agent-doc] deferred (exit {}): {deferral}",
         agent_doc_write_converge_io::retained_cli_write::RETAINED_CLI_WRITE_DEFERRED_EXIT_CODE
     )
+}
+
+/// `#respondfalseerror`: a captured `respond` closeout retained for the
+/// closeout worker is reported like a retained CLI write — the distinct
+/// deferred status, no `Error:` prefix, no dogfood fix prompt.
+fn report_retained_closeout_pending(
+    pending: &agent_doc_cycle_state_io::post_commit_error::RetainedCloseoutPending,
+) -> ExitCode {
+    let mut stderr = std::io::stderr().lock();
+    let _ = write_terminal_error_report(
+        &mut stderr,
+        &format!(
+            "[agent-doc] deferred (exit {}): {pending}",
+            agent_doc_write_converge_io::retained_cli_write::RETAINED_CLI_WRITE_DEFERRED_EXIT_CODE
+        ),
+    );
+    ExitCode::from(
+        agent_doc_write_converge_io::retained_cli_write::RETAINED_CLI_WRITE_DEFERRED_EXIT_CODE,
+    )
+}
+
+/// Whether a retained capture has a worker that will close it: a durable
+/// active capture plus a supervisor idle watch to re-drive it. Without the
+/// supervisor nothing resumes it (`#capturedresumeunowned`), so the original
+/// failure stands and its remedy (`repair --resume-capture`) applies.
+fn retained_closeout_has_driver(file: &Path) -> bool {
+    let captured = agent_doc_capture_io::load_active(file)
+        .ok()
+        .flatten()
+        .is_some();
+    captured && agent_doc_supervisor_io::process::supervisor_pid_for_doc(file).is_some()
+}
+
+/// Follow the controller's closeout projection until the retained worker
+/// commits `cycle_id`, bounded by the retained-write wait. Committed → `Ok`
+/// (exit 0); still open → [`RetainedCloseoutPending`]. This command's own
+/// closeout lease has already been released, so the worker can claim it.
+fn await_retained_closeout_commit(
+    file: &Path,
+    cycle_id: &str,
+    refusal: anyhow::Error,
+) -> anyhow::Result<()> {
+    let wait =
+        agent_doc_write_converge_io::retained_cli_write::configured_retained_cli_write_wait();
+    let started = std::time::Instant::now();
+    let deadline = started + wait;
+    let committed = loop {
+        let state = agent_doc_cycle_state_io::load(file).ok().flatten();
+        match state.as_ref() {
+            Some(state) if state.cycle_id == cycle_id && state.phase.is_open() => {}
+            Some(state) => {
+                break state.cycle_id == cycle_id
+                    && state.phase == agent_doc_turn::CyclePhase::Committed;
+            }
+            None => break false,
+        }
+        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+        if remaining.is_zero() {
+            break false;
+        }
+        // The controller returns on the cycle's terminal edge or an owner
+        // change. Between the respond lease releasing and the worker claiming,
+        // there is no owner and it returns at once, so any early return (or
+        // an unavailable edge) pauses before the cycle state is read again.
+        let progressed =
+            agent_doc_controller_io::project_controller::await_closeout_cycle_progress_for_file(
+                file, cycle_id, remaining,
+            );
+        if !matches!(
+            progressed,
+            Ok(agent_doc_controller_io::project_controller::CloseoutCycleWaitOutcome::TimedOut)
+        ) {
+            std::thread::sleep(remaining.min(Duration::from_millis(250)));
+        }
+    };
+    let waited_ms = started.elapsed().as_millis();
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "respond_retained_closeout_awaited file={} cycle_id={} committed={} waited_ms={} wait_bound_ms={} (#respondfalseerror)",
+            file.display(),
+            cycle_id,
+            committed,
+            waited_ms,
+            wait.as_millis(),
+        ),
+    );
+    if committed {
+        eprintln!(
+            "[respond] cycle `{cycle_id}` was retained for the closeout worker while the controller's derived state projection activated; the worker committed it after {waited_ms}ms. The response is durable: do NOT re-answer or resubmit it (#respondfalseerror)."
+        );
+        return Ok(());
+    }
+    Err(anyhow::Error::new(
+        agent_doc_cycle_state_io::post_commit_error::RetainedCloseoutPending {
+            file: file.display().to_string(),
+            cycle_id: cycle_id.to_string(),
+            waited_ms,
+            refusal: format!("{refusal:#}"),
+        },
+    ))
 }
 
 /// A usage error with its own specific remedy (e.g. a `queue claim --item`
@@ -7063,21 +7169,31 @@ fn try_main() -> anyhow::Result<()> {
                 let cycle_after = agent_doc_cycle_state_io::load(&closeout_file)
                     .ok()
                     .flatten();
-                if !agent_doc_cycle_state_io::post_commit_error::landed_commit_survives_post_commit_error(
+                if agent_doc_cycle_state_io::post_commit_error::landed_commit_survives_post_commit_error(
                     cycle_before.as_ref(),
                     cycle_after.as_ref(),
                     &err,
                 ) {
+                    eprintln!(
+                        "[respond] WARNING: cycle `{}` is committed; a post-commit controller observation failed afterwards: {err:#}. The response is durable: do NOT re-answer or resubmit it. Run `agent-doc session-check {}` to observe the settled state (#committedcloseouttimeout).",
+                        cycle_after
+                            .as_ref()
+                            .map(|state| state.cycle_id.as_str())
+                            .unwrap_or("?"),
+                        closeout_file.display(),
+                    );
+                } else if let Some(cycle_id) =
+                    agent_doc_cycle_state_io::post_commit_error::retained_capture_awaits_projection(
+                        cycle_before.as_ref(),
+                        cycle_after.as_ref(),
+                        agent_doc_controller_io::project_controller::controller_commit_refusal_awaits_projection(&err),
+                    )
+                    && retained_closeout_has_driver(&closeout_file)
+                {
+                    await_retained_closeout_commit(&closeout_file, &cycle_id, err)?;
+                } else {
                     return Err(err);
                 }
-                eprintln!(
-                    "[respond] WARNING: cycle `{}` is committed; a post-commit controller observation failed afterwards: {err:#}. The response is durable: do NOT re-answer or resubmit it. Run `agent-doc session-check {}` to observe the settled state (#committedcloseouttimeout).",
-                    cycle_after
-                        .as_ref()
-                        .map(|state| state.cycle_id.as_str())
-                        .unwrap_or("?"),
-                    closeout_file.display(),
-                );
             }
             // `#closeout-steering`: the terminal report carries any operator
             // steering no mid-turn hook delivered, before the loop schedules

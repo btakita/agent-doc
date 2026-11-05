@@ -691,6 +691,25 @@ No step writes disk, requests a delivery, or forces anything; waiting is the
 only effect. A queue-consume write that already spent this bounded wait does
 not start a second `#qconsumedeferwedge` wait for the same answer.
 
+`#respondfalseerror` — `respond` / `finalize` follows the same exit contract
+for a closeout retained across a derived-projection lag. The controller's
+`queue_authority_observation` read-your-writes barrier refuses with
+`recovery=await_live_projection_then_retry_controller_commit` when the
+document's derived state projection has not activated the applied state within
+its 2s per-ask bound. Every queue-authority observation re-asks on that token
+for up to 10s (ops-log `queue_authority_projection_lag_settled` /
+`_exhausted`); any other refusal propagates on the first ask. If the lag
+outlives that budget during closeout, the cycle is still open with a durably
+captured response, and a supervisor drives its captured-finalize resume,
+`respond` releases its closeout lease and follows the controller's closeout
+projection for the retained-write wait (`AGENT_DOC_RETAINED_CLI_WRITE_WAIT_MS`,
+30s default; ops-log `respond_retained_closeout_awaited`). The worker committed
+the cycle → exit 0 with one `[respond] ... the worker committed it` line.
+Still open → exit 75 with `[agent-doc] deferred (exit 75):
+[status=retained_closeout_pending] ...`, no `Error:` prefix and no dogfood fix
+prompt. Without a captured response or without a supervisor to resume it, the
+original refusal stays a real failure (exit 1).
+
 ## Editor Frontend Hot Path
 
 The editor text-change callback is a capture boundary, not a convergence worker. JetBrains `DocumentListener` callbacks, VS Code

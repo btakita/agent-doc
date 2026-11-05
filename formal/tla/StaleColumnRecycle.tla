@@ -44,6 +44,18 @@
 (* stayed visible. `PromoteOverdue` promotes it FLAGGED instead: its own    *)
 (* record, realising exactly the published layout. I1/I2 now bind the       *)
 (* unflagged (recycle-backed) promotion; I4 forbids hiding an overdue pane. *)
+(*                                                                          *)
+(* `#stalewidenrestore` (2026-11-05, GH #343): `GuardWiden` measured every  *)
+(* publication against the target window's CURRENT pane count. After an   *)
+(* IDE restart's brief 1-window frame the window held one pane while the    *)
+(* editor's own split showed two, and a stale stash pane whose recycle was  *)
+(* still pending stayed hidden. The bound exists for a DERIVED column count *)
+(* (the `ensure`-route `observed_panes + 1` feedback loop); an editor split *)
+(* observation is the authority for its own width. `editorSplit` marks a    *)
+(* publication whose column count is the editor's own; with                 *)
+(* `EditorWidthAuthority` the gate admits such a publication's pending      *)
+(* stash pane up to exactly that width (I6), and I2 still binds every       *)
+(* derived publication.                                                     *)
 (***************************************************************************)
 EXTENDS Naturals, TLC
 
@@ -57,12 +69,16 @@ CONSTANTS
     LapseFanout,        \* PRE-FIX: an install fan-out request lapses for the consumer
     RefreshResetsClock, \* PRE-FIX: a refresh restarts the consumption clock
     PromoteOverdue,     \* FIX: an overdue stale stash pane is promoted flagged, not hidden
+    EditorWidthAuthority, \* FIX: an editor split's own width bounds a pending stash promotion
+    EditorSplits,       \* `editorSplit` values publications may carry (bounds the state space)
     MaxCopies,          \* NetChannel: copies of one in-flight message
     MaxGen              \* NetChannel: reconnects (bounds the state space)
 
 ASSUME /\ MaxWidth \in Nat /\ MaxWidth >= 2
        /\ MaxPublications \in Nat /\ MaxFanouts \in Nat
        /\ PromoteOverdue \in BOOLEAN
+       /\ EditorWidthAuthority \in BOOLEAN
+       /\ EditorSplits \subseteq BOOLEAN /\ EditorSplits # {}
 
 VARIABLES
     stale,          \* the 1099.md supervisor runs replaced bytes
@@ -90,13 +106,18 @@ Max(a, b) == IF a > b THEN a ELSE b
 (* One record shape for every message so the bag compares them uniformly.  *)
 (* A publication carries no id: the controller applies any delivered layout *)
 (* in any order, so two equal publications are just two copies in the bag.  *)
-LayoutMsgs == [kind : {"layout"}, width : 1..MaxWidth, focus : BOOLEAN]
-Notify == [kind |-> "notify", width |-> 1, focus |-> FALSE]
+(* `editorSplit`: the publication's column count is a positive editor split *)
+(* observation (plugin publication, `exact` route, editor-surface Sync), not *)
+(* a count derived from retained controller state.                         *)
+LayoutMsgs == [kind : {"layout"}, width : 1..MaxWidth, focus : BOOLEAN,
+               editorSplit : BOOLEAN]
+Notify == [kind |-> "notify", width |-> 1, focus |-> FALSE, editorSplit |-> FALSE]
 Msgs == LayoutMsgs \cup {Notify}
 
 NoStep == [promotedStale |-> FALSE, flagged |-> FALSE, hiddenOverdue |-> FALSE,
            width |-> 0, reqBefore |-> "none", windowBefore |-> 0,
-           windowAfter |-> 0, refusedBefore |-> FALSE]
+           windowAfter |-> 0, refusedBefore |-> FALSE, editorSplit |-> FALSE,
+           hiddenEditorRequested |-> FALSE]
 
 TypeOK ==
     /\ stale \in BOOLEAN
@@ -128,12 +149,14 @@ Init ==
     /\ lastStep = NoStep
 
 (* The editor publishes a layout: `width` columns, with or without 1099.md  *)
-(* focused in one of them. A reconnect to a new editor generation is just   *)
-(* more publications; nothing below trusts their order.                     *)
-Publish(width, focus) ==
+(* focused in one of them, as its own split observation or as a count the   *)
+(* controller derived. A reconnect to a new editor generation is just more  *)
+(* publications; nothing below trusts their order.                          *)
+Publish(width, focus, editorSplit) ==
     /\ published < MaxPublications
     /\ published' = published + 1
-    /\ C!Send([kind |-> "layout", width |-> width, focus |-> focus])
+    /\ C!Send([kind |-> "layout", width |-> width, focus |-> focus,
+               editorSplit |-> editorSplit])
     /\ UNCHANGED <<stale, req, reason, lapsed, notified,
                    cycleOpen, fanouts, window, promoted, refusedOverdue, lastStep>>
 
@@ -149,18 +172,22 @@ AdversaryStep ==
 (* The flagged promotion: its recycle is not coming, so it is not hidden.   *)
 FlaggedAdmit == PromoteOverdue /\ req = "overdue"
 
-StaleAdmitted(width) ==
+(* `#stalewidenrestore`: the editor's own split names this many columns,   *)
+(* so realising exactly that many is not a widening the gate must refuse.  *)
+EditorRequestedWidth(m) == EditorWidthAuthority /\ m.editorSplit
+
+StaleAdmitted(m) ==
     \/ promoted                                   \* visible: never moved (no flap)
     \/ FlaggedAdmit
     \/ /\ GuardOverdue => req # "overdue"
-       /\ GuardWiden => width <= Max(window, 1)
+       /\ GuardWiden => (m.width <= Max(window, 1) \/ EditorRequestedWidth(m))
 
 (* One layout effect: the gate, tmux-router, and the request effect, all    *)
 (* local to the controller. A duplicate is NetChannel's `Duplicate`.        *)
 Deliver(m) ==
     /\ m.kind = "layout"
     /\ LET staleFocus == m.focus /\ stale
-           admitted == ~staleFocus \/ StaleAdmitted(m.width)
+           admitted == ~staleFocus \/ StaleAdmitted(m)
            realised == IF admitted THEN m.width ELSE m.width - 1
            stalePromotion == staleFocus /\ ~promoted /\ admitted
            flaggedPromotion == stalePromotion /\ FlaggedAdmit
@@ -175,7 +202,10 @@ Deliver(m) ==
                        hiddenOverdue |-> staleFocus /\ ~admitted /\ req = "overdue",
                        width |-> m.width, reqBefore |-> req,
                        windowBefore |-> window, windowAfter |-> window',
-                       refusedBefore |-> refusedOverdue]
+                       refusedBefore |-> refusedOverdue,
+                       editorSplit |-> m.editorSplit,
+                       hiddenEditorRequested |->
+                           staleFocus /\ ~admitted /\ m.editorSplit /\ req # "overdue"]
        \* The gate requests on the first stale pass and refreshes after.
        /\ req' = IF requestNow THEN "pending"
                  ELSE IF staleFocus /\ RefreshResetsClock THEN "pending"
@@ -259,7 +289,7 @@ Consume ==
 Quiescent == UNCHANGED vars
 
 Next ==
-    \/ \E w \in 1..MaxWidth, f \in BOOLEAN : Publish(w, f)
+    \/ \E w \in 1..MaxWidth, f \in BOOLEAN, e \in EditorSplits : Publish(w, f, e)
     \/ \E m \in C!InFlight : Deliver(m) \/ DeliverNotify(m)
     \/ AdversaryStep
     \/ Expire
@@ -292,14 +322,21 @@ NoStashPromotionWhileOverdue ==
     lastStep.promotedStale /\ ~lastStep.flagged => lastStep.reqBefore # "overdue"
 
 (* I2: promoting a stale stash pane never widens the target window — the    *)
-(* `columns = observed_panes + 1` flap.                                     *)
+(* `columns = observed_panes + 1` flap — beyond what the editor's own split *)
+(* shows (`#stalewidenrestore`): a derived count never widens it at all.    *)
 StashPromotionNeverWidens ==
     lastStep.promotedStale /\ ~lastStep.flagged
-        => lastStep.windowAfter <= Max(lastStep.windowBefore, 1)
+        => \/ lastStep.windowAfter <= Max(lastStep.windowBefore, 1)
+           \/ lastStep.editorSplit /\ lastStep.windowAfter = lastStep.width
 
 (* I4 (`#stalesupervisorhidden`): a layout naming the stale pane while its  *)
 (* recycle is overdue never hides it.                                       *)
 OverdueStalePaneNeverHidden == ~lastStep.hiddenOverdue
+
+(* I6 (`#stalewidenrestore`, GH #343): a stale pane named by the editor's   *)
+(* own split is never kept in the stash for width while its recycle is not *)
+(* overdue — the editor's column list is authoritative.                     *)
+EditorRequestedStalePaneNeverHidden == ~lastStep.hiddenEditorRequested
 
 (* I5: a flagged promotion realises exactly the published layout.          *)
 FlaggedPromotionRealisesThePublication ==
@@ -319,5 +356,8 @@ EventuallyConsumed == (stale /\ req # "none") ~> ~stale
 (* Reach obligations (asserted negated; MUST be violated).                  *)
 NeverPromotesStale == ~lastStep.promotedStale
 NeverPromotesFlagged == ~lastStep.flagged
+NeverWidensForEditor ==
+    ~(lastStep.promotedStale /\ ~lastStep.flagged
+      /\ lastStep.windowAfter > Max(lastStep.windowBefore, 1))
 NeverConsumed == stale
 =============================================================================

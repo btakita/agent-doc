@@ -280,6 +280,20 @@ pub struct ControllerTmuxLayoutSyncInvocation {
     /// for a forward that will not arrive.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub layout_authority: Option<String>,
+    /// `#stalewidenrestore` (GH #343): this generation's column COUNT is a
+    /// positive editor split observation
+    /// ([`agent_doc_controller::pane_layout::LayoutWidthAuthority::EditorSplitObservation`],
+    /// held by the desired generation's provenance), not a count derived from
+    /// retained controller state. The stale-column gate may then promote a
+    /// stale stash pane the editor's own column list names up to that count.
+    ///
+    /// Controller-local, like `actor_bindings`: never accepted from or
+    /// serialized to an RPC caller. The pane-layout effect fills it from the
+    /// desired generation immediately before crossing the tmux boundary, so a
+    /// caller cannot forge it and every other path reads it as `false` (the
+    /// GH #136 window-count bound).
+    #[serde(skip)]
+    pub editor_column_authority: bool,
 }
 
 fn is_false(value: &bool) -> bool {
@@ -577,6 +591,12 @@ pub(crate) struct PaneLayoutProvenance {
     /// inside the structure they derived from, so they inherit it; a plugin
     /// publication and an `exact` route own the structure they publish.
     pub structure_owner: PaneLayoutPublisher,
+    /// `#stalewidenrestore` (GH #343): this generation's column count is the
+    /// editor's own — a positive editor split observation, or a derived
+    /// publication that re-placed columns inside such a structure without
+    /// changing the count. Copied into the effect invocation's
+    /// `editor_column_authority`.
+    pub editor_column_authority: bool,
 }
 
 impl PaneLayoutProvenance {
@@ -2123,6 +2143,9 @@ impl ControllerPaneLayoutGraph {
             }
             if observes_editor_split {
                 self.record_editor_visible(&invocation.columns);
+                // `#stalewidenrestore`: the editor has now observed exactly
+                // these columns itself, so their count is its own.
+                current.provenance.editor_column_authority = true;
             }
             // Republish the identical value without manufacturing a generation.
             // A converged Computed stays inert; a retained NeedsEffect projection
@@ -2155,6 +2178,17 @@ impl ControllerPaneLayoutGraph {
         if observes_editor_split {
             self.record_editor_visible(&invocation.columns);
         }
+        // `#stalewidenrestore` (GH #343): whether the column COUNT is the
+        // editor's own. A derived publication (escalation, `ensure` route,
+        // recycle or lane republish) that keeps the count inherits it, as
+        // `structure_owner` does; one that changes the count never has it.
+        let editor_column_authority = observes_editor_split
+            || (claim.width_authority()
+                == agent_doc_controller::pane_layout::LayoutWidthAuthority::Derived
+                && current.as_ref().is_some_and(|current| {
+                    current.provenance.editor_column_authority
+                        && current.invocation.columns.len() == invocation.columns.len()
+                }));
         let generation = self.next_generation.fetch_add(1, Ordering::SeqCst);
         if let Some(mut displaced) = displaced {
             displaced.winner_generation = Some(generation);
@@ -2179,6 +2213,7 @@ impl ControllerPaneLayoutGraph {
                 .map(|observation| observation.report.panes.len()),
             plane_basis,
             structure_owner,
+            editor_column_authority,
         };
         let desired = PaneLayoutDesired {
             generation,
@@ -15231,6 +15266,7 @@ mod tests {
 
                 unstarted_session_bootstrap: false,
                 layout_authority: None,
+                editor_column_authority: false,
             };
 
         assert!(invocation("manual", false).routes_created_panes());
@@ -15256,6 +15292,7 @@ mod tests {
 
                 unstarted_session_bootstrap: false,
                 layout_authority: None,
+                editor_column_authority: false,
             },
             provenance: PaneLayoutProvenance::default(),
         }
@@ -15560,6 +15597,7 @@ mod tests {
 
                 unstarted_session_bootstrap: false,
                 layout_authority: None,
+                editor_column_authority: false,
             },
             None,
         );
@@ -15644,6 +15682,7 @@ mod tests {
 
                     unstarted_session_bootstrap: false,
                     layout_authority: None,
+                    editor_column_authority: false,
                 },
                 source_plane_version: None,
                 provenance: PaneLayoutProvenance::default(),
@@ -15745,6 +15784,7 @@ mod tests {
 
                 unstarted_session_bootstrap: false,
                 layout_authority: None,
+                editor_column_authority: false,
             },
             None,
         );
@@ -15780,6 +15820,7 @@ mod tests {
 
                 unstarted_session_bootstrap: false,
                 layout_authority: None,
+                editor_column_authority: false,
             },
             None,
         );
@@ -29114,6 +29155,7 @@ revised operator request
 
                 unstarted_session_bootstrap: false,
                 layout_authority: None,
+                editor_column_authority: false,
             },
             source_plane_version: None,
             provenance: PaneLayoutProvenance::default(),
@@ -30064,6 +30106,7 @@ mod gh278_latest_focus_tests {
             client_id: None,
             unstarted_session_bootstrap: false,
             layout_authority: None,
+            editor_column_authority: false,
         }
     }
 

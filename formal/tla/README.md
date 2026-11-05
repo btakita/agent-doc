@@ -307,7 +307,17 @@ durable level-triggered request. One wedge per fix must violate:
 `StaleColumnRecycleLapseWedge` (an install fan-out request that lapses), and
 `StaleColumnRecycleDropWedge` (a fire-and-forget notification under Drop);
 `StaleColumnRecycleReach` and `StaleColumnRecycleConsumeReach` keep the focus
-exception and consumption reachable. The editor link is the shared
+exception and consumption reachable. `#stalewidenrestore` (GH #343) marks a
+publication whose column count is the editor's own split observation
+(`editorSplit`): with `EditorWidthAuthority` a pending stale stash pane it names
+is admitted up to exactly that width (`EditorRequestedStalePaneNeverHidden`),
+while `StashPromotionNeverWidens` still binds every derived count (checked by
+the positive `StaleColumnRecycleEditorSplit` config, which mixes editor splits
+into the publications at a smaller bound; `EditorSplits` keeps the main config
+derived-only so its state space is unchanged);
+`StaleColumnRecycleEditorWidthWedge` (the GH #136 window-count bound applied to
+an editor split) must violate it and `StaleColumnRecycleEditorWidthReach`
+keeps the editor-width promotion reachable. The editor link is the shared
 `NetChannel` (`#netadv3` port): publications carry no id, so two equal
 publications are two copies in the bag, and the pre-fix notification rides the
 same channel under `FairLossy({Notify})`. The Drop wedge is therefore the

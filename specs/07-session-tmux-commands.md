@@ -736,7 +736,26 @@ reconnect. A stale focused pane already visible is never moved by it. A stale
 focused pane still in a `stash` window is promoted only while (1) its recycle
 request is not *overdue* and (2) promoting it does not realise more columns
 than the target window holds (`max(window_panes, 1)`) — a stale stash pane may
-take the place of a column, never add one (`admission=excluded_focused_stash_would_widen`).
+take the place of a column, never add one (`admission=excluded_focused_stash_would_widen`)
+— unless the column count is the editor's own (`#stalewidenrestore`, GH #343).
+That bound exists for a DERIVED count (the `ensure`-route `observed_panes + 1`
+feedback loop); the editor's column list is authoritative for its own width.
+When the desired generation's count is a positive editor split observation (a
+plugin publication, an `exact` route, an editor-surface Sync or an explicit
+command, or a derived publication that re-placed a column without changing that
+count — `PaneLayoutProvenance.editor_column_authority`, carried to the effect as
+the controller-local `ControllerTmuxLayoutSyncInvocation.editor_column_authority`),
+a desired stale own pane outside the target window that the editor's list names
+and whose recycle is not overdue, focused or not, is promoted
+(`layout_column_pane_stale_stash_promoted_editor_requested`,
+`admission=promoted_editor_requested_recycle_pending:<focused|unfocused>:editor_columns=<n>`;
+the post-router audit records `admission=stale_stash_promoted_editor_requested`)
+as long as the realised layout stays within the editor's n documents. A
+document only a sync-side rewrite (column memory, focus-only expansion) added
+never carries that authority. The GH #124 live-turn guard still applies. In the
+recorded case an IDE restart's brief 1-window frame left `0:agent-doc` with one
+pane while the editor showed two columns, and sdk-dev.md's stale pane, its
+recycle pending behind its own turn, stayed in the stash.
 The request is *overdue* when the FIRST unconsumed request (the oldest
 `SupervisorRecycleRequested` epoch above the highest `Started`/`Settled` epoch)
 is older than `AGENT_DOC_STALE_RECYCLE_CONSUME_BOUND_SECS` (default 120s) while

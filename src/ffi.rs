@@ -4068,6 +4068,7 @@ fn sync_tmux_layout_ffi_invocation(
         client_id,
         unstarted_session_bootstrap: false,
         layout_authority: None,
+        editor_column_authority: false,
     }
 }
 

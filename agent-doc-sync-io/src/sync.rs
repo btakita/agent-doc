@@ -1056,8 +1056,9 @@ pub fn run_controller_layout_with_main_layout_eligibility_in_project_root(
     route_created_panes: bool,
     actor_bindings: &[agent_doc_controller_io::project_controller::ControllerTmuxActorBinding],
     main_layout_eligibility: &MainLayoutEligibility,
+    editor_column_authority: bool,
 ) -> Result<()> {
-    run_with_options_internal_at_root(
+    run_with_options_internal_at_root_with_column_authority(
         project_root,
         col_args,
         window,
@@ -1071,6 +1072,7 @@ pub fn run_controller_layout_with_main_layout_eligibility_in_project_root(
         route_created_panes,
         actor_bindings,
         main_layout_eligibility,
+        editor_column_authority,
         &agent_doc_tmux_io::configured_tmux(),
     )
 }
@@ -3422,6 +3424,44 @@ fn run_with_options_internal_at_root(
     main_layout_eligibility: &MainLayoutEligibility,
     tmux: &Tmux,
 ) -> Result<()> {
+    run_with_options_internal_at_root_with_column_authority(
+        project_root,
+        col_args,
+        window,
+        focus,
+        auto_start_mode,
+        exact_visible_target,
+        route_created_panes,
+        reactive_actor_bindings,
+        main_layout_eligibility,
+        false,
+        tmux,
+    )
+}
+
+/// [`run_with_options_internal_at_root`] with `#stalewidenrestore`'s editor
+/// column authority. `editor_column_authority` is true only when the
+/// controller's desired generation says `col_args`' column count is the
+/// editor's own split observation (GH #343); every other caller passes false
+/// and keeps the GH #136 window-count bound on stale stash promotions.
+#[allow(clippy::too_many_arguments)]
+fn run_with_options_internal_at_root_with_column_authority(
+    project_root: &Path,
+    col_args: &[String],
+    window: Option<&str>,
+    focus: Option<&str>,
+    auto_start_mode: AutoStartMode,
+    exact_visible_target: bool,
+    route_created_panes: bool,
+    reactive_actor_bindings: &[agent_doc_controller_io::project_controller::ControllerTmuxActorBinding],
+    main_layout_eligibility: &MainLayoutEligibility,
+    editor_column_authority: bool,
+    tmux: &Tmux,
+) -> Result<()> {
+    // `#stalewidenrestore`: the editor's own column list, captured BEFORE
+    // column memory, focus-only expansion, or any other rewrite below can add
+    // a document the editor did not name.
+    let editor_columns: Option<Vec<String>> = editor_column_authority.then(|| col_args.to_vec());
     let window = agent_doc_sync::normalize_scope_arg(window);
     let focus = agent_doc_sync::normalize_scope_arg(focus);
     reset_sync_run_report();
@@ -5665,7 +5705,7 @@ fn run_with_options_internal_at_root(
     // safe-boundary recycle is requested; the next sync after the recycle
     // admits the now-fresh pane.
     let requested_column_count = col_args.len();
-    let (router_col_args, excluded_column_count) = {
+    let (router_col_args, excluded_column_count, gate_promotions) = {
         let gate_session_keys: HashMap<PathBuf, String> = session_files
             .borrow()
             .iter()
@@ -5703,6 +5743,7 @@ fn run_with_options_internal_at_root(
             tmux,
             &crate::layout_column_audit::StaleColumnGateInput {
                 col_args,
+                editor_columns: editor_columns.as_deref(),
                 focus,
                 target_window: window,
                 pre_resolved: &pre_resolved_panes,
@@ -5717,7 +5758,7 @@ fn run_with_options_internal_at_root(
         // the controller converges on it instead of retrying it.
         record_sync_gated_documents(&gate.excluded);
         let excluded_column_count = requested_column_count.saturating_sub(gate.col_args.len());
-        (gate.col_args, excluded_column_count)
+        (gate.col_args, excluded_column_count, gate.promotions)
     };
     if gated_layout_decision(
         auto_start_mode,
@@ -5852,6 +5893,7 @@ fn run_with_options_internal_at_root(
                 before: &pane_windows_before_router,
                 after: &pane_windows_after_router,
                 focus,
+                gate_promotions: &gate_promotions,
             },
         );
     }

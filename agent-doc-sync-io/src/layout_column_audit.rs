@@ -42,6 +42,18 @@
 //!    only; it never authorises replacement. See [`stale_focus_admission`] for
 //!    the transition function and `formal/tla/StaleColumnRecycle.tla` for the
 //!    model.
+//!
+//!    `#stalewidenrestore` (GH #343): the window-count bound guards against a
+//!    DERIVED column count (the `ensure`-route `observed_panes + 1` feedback
+//!    loop). When the controller's desired generation says the column count is
+//!    the editor's own split observation, the editor's column list is the
+//!    authority: a stale stash pane that list names, with a pending (not yet
+//!    overdue) recycle, is promoted under
+//!    `layout_column_pane_stale_stash_promoted_editor_requested` when the
+//!    realised layout stays within the editor's requested count — after an IDE
+//!    restart's brief 1-window frame the window holds fewer panes than the
+//!    editor shows, and the GH #136 bound alone kept the column hidden. It
+//!    never displaces a live turn (GH #124).
 //! 5. The stale-supervisor consequence is owned by the controller. While a turn
 //!    is active the durable safe-boundary request remains the only action. Once
 //!    the same pane is proven idle, positive `/proc/<pid>/exe` unlinked evidence
@@ -436,6 +448,15 @@ pub enum ColumnAdmission {
     /// the target window's current pane count; it never displaces a live
     /// turn (GH #124).
     AdmitStaleStashFlagged,
+    /// `#stalewidenrestore` (GH #343): a desired stale own pane outside the
+    /// target window, recycle not overdue, whose document is named by the
+    /// editor's own column list (the desired generation's column count is a
+    /// positive editor split observation). The editor shows that column, so
+    /// it is realised — focused or not — as long as the realised layout stays
+    /// within the editor's requested count. Recorded under
+    /// `layout_column_pane_stale_stash_promoted_editor_requested`; it never
+    /// displaces a live turn (GH #124).
+    AdmitStaleStashEditorRequested,
     /// GH #136: promoting the stale focused pane out of the stash would realise
     /// more columns than the target window holds — the `columns =
     /// observed_panes + 1` flap. A stale stash pane may take the place of a
@@ -452,6 +473,7 @@ impl ColumnAdmission {
                 | Self::AdmitStaleVisible
                 | Self::AdmitStaleFocused
                 | Self::AdmitStaleStashFlagged
+                | Self::AdmitStaleStashEditorRequested
         )
     }
 }
@@ -475,6 +497,10 @@ pub struct StaleFocusFacts {
     /// turn-active, changing which peer is visible does not interrupt either
     /// turn, so the operator's newer focus intent wins.
     pub displaces_live_turn: bool,
+    /// `#stalewidenrestore` (GH #343): the editor's own column list names this
+    /// document and holds this many documents; `None` when the layout's column
+    /// count is derived (or the editor's list does not name the document).
+    pub editor_requested_columns: Option<usize>,
 }
 
 /// GH #136: the bounded focus exception, as a total transition function from
@@ -487,7 +513,10 @@ pub struct StaleFocusFacts {
 /// * a pane outside the target window (stash or any other window) is moved
 ///   in on the strength of its recycle only while that recycle is pending,
 ///   and then never when that widens the target window past
-///   `max(window_panes, 1)` (unknown counts as empty);
+///   `max(window_panes, 1)` (unknown counts as empty) — unless the editor's
+///   own column list names it and the realised layout stays within that
+///   list's count (`#stalewidenrestore`, GH #343:
+///   [`ColumnAdmission::AdmitStaleStashEditorRequested`]);
 /// * an overdue one is never hidden for it (`#stalesupervisorhidden`): it is
 ///   promoted flagged ([`ColumnAdmission::AdmitStaleStashFlagged`]);
 /// * a live turn is never displaced (GH #124);
@@ -503,10 +532,23 @@ pub fn stale_focus_admission(facts: StaleFocusFacts) -> ColumnAdmission {
     if facts.recycle_overdue {
         return ColumnAdmission::AdmitStaleStashFlagged;
     }
-    if facts.realised_columns > facts.window_panes.unwrap_or(0).max(1) {
-        return ColumnAdmission::ExcludeStaleFocusedWouldWiden;
+    if facts.realised_columns <= facts.window_panes.unwrap_or(0).max(1) {
+        return ColumnAdmission::AdmitStaleFocused;
     }
-    ColumnAdmission::AdmitStaleFocused
+    if within_editor_requested_columns(facts.realised_columns, facts.editor_requested_columns) {
+        return ColumnAdmission::AdmitStaleStashEditorRequested;
+    }
+    ColumnAdmission::ExcludeStaleFocusedWouldWiden
+}
+
+/// `#stalewidenrestore` (GH #343): the realised layout stays within the
+/// column count the editor itself shows. Without an editor-authored count
+/// (`None`) nothing is within it.
+pub fn within_editor_requested_columns(
+    realised_columns: usize,
+    editor_requested_columns: Option<usize>,
+) -> bool {
+    editor_requested_columns.is_some_and(|requested| realised_columns <= requested)
 }
 
 /// GH #124: panes running a live turn that the layout would stash — live-turn
@@ -575,6 +617,10 @@ pub struct ColumnGateFacts {
     pub recycle: StaleRecycleRequestState,
     /// A fresh harness-owned marker proves this pane is still mid-turn.
     pub turn_active: bool,
+    /// `#stalewidenrestore` (GH #343): `Some(n)` when the editor's own column
+    /// list (n documents) names this document; `None` for a derived column
+    /// count or a document only a controller-side rewrite added.
+    pub editor_requested_columns: Option<usize>,
 }
 
 /// Pure gate plan: one admission (plus the live-turn panes it would have
@@ -613,6 +659,15 @@ pub fn plan_column_admissions(
                 // hiding the document's harness for good. Provisional: the
                 // GH #124 live-turn guard below still applies.
                 ColumnAdmission::AdmitStaleStashFlagged
+            } else if admission == ColumnAdmission::ExcludeStale
+                && fact.editor_requested_columns.is_some()
+            {
+                // `#stalewidenrestore` (GH #343): the editor's own column list
+                // names it, so the editor shows this column; hiding it while
+                // the recycle is pending (deferred by a turn, possibly for
+                // hours) contradicts the authoritative layout. Provisional:
+                // the live-turn guard and the requested-width bound below.
+                ColumnAdmission::AdmitStaleStashEditorRequested
             } else {
                 admission
             }
@@ -621,7 +676,9 @@ pub fn plan_column_admissions(
     let moves_stale_pane_in = |admission: &ColumnAdmission| {
         matches!(
             admission,
-            ColumnAdmission::AdmitStaleFocused | ColumnAdmission::AdmitStaleStashFlagged
+            ColumnAdmission::AdmitStaleFocused
+                | ColumnAdmission::AdmitStaleStashFlagged
+                | ColumnAdmission::AdmitStaleStashEditorRequested
         )
     };
     if !base.iter().any(moves_stale_pane_in) {
@@ -661,10 +718,19 @@ pub fn plan_column_admissions(
             if !fact.is_focus {
                 // `#stalesupervisorhidden`: a non-focused overdue stash pane
                 // is promoted flagged unless that stashes a live turn.
+                // `#stalewidenrestore`: an editor-requested one likewise, and
+                // only within the editor's requested count.
                 return if !fact.turn_active && !displaced.is_empty() {
                     (ColumnAdmission::ExcludeStale, displaced)
+                } else if admission == ColumnAdmission::AdmitStaleStashEditorRequested
+                    && !within_editor_requested_columns(
+                        realised.len(),
+                        fact.editor_requested_columns,
+                    )
+                {
+                    (ColumnAdmission::ExcludeStale, Vec::new())
                 } else {
-                    (ColumnAdmission::AdmitStaleStashFlagged, Vec::new())
+                    (admission, Vec::new())
                 };
             }
             let admission = stale_focus_admission(StaleFocusFacts {
@@ -673,6 +739,7 @@ pub fn plan_column_admissions(
                 realised_columns: realised.len(),
                 window_panes,
                 displaces_live_turn: !fact.turn_active && !displaced.is_empty(),
+                editor_requested_columns: fact.editor_requested_columns,
             });
             (admission, displaced)
         })
@@ -765,6 +832,11 @@ fn request_stale_column_recycle(
 pub struct StaleColumnGateInput<'a> {
     /// The `--col` arguments sync is about to hand tmux-router.
     pub col_args: &'a [String],
+    /// `#stalewidenrestore` (GH #343): the editor's own column list, as the
+    /// controller published it, when the desired generation's column count is
+    /// a positive editor split observation; `None` for a derived count and for
+    /// every non-controller caller.
+    pub editor_columns: Option<&'a [String]>,
     /// The focused document, when the caller named one.
     pub focus: Option<&'a str>,
     /// The resolved layout target window (`@N`), when known.
@@ -810,7 +882,15 @@ pub fn gate_stale_column_panes(
 ) -> StaleColumnGateOutcome {
     let _observations = agent_doc_process_owner_io::begin_process_observation_scope();
     let focus = input.focus.map(|focus| path_identity(Path::new(focus)));
+    // `#stalewidenrestore`: the documents the editor's own column list names.
+    let editor_documents: Option<Vec<PathBuf>> = input.editor_columns.map(|columns| {
+        agent_doc_tmux::auto_start_candidate_files(columns)
+            .iter()
+            .map(|file| path_identity(file))
+            .collect()
+    });
     let mut excluded: Vec<PathBuf> = Vec::new();
+    let mut promotions: HashMap<PathBuf, &'static str> = HashMap::new();
     let mut facts: Vec<ColumnGateFacts> = Vec::new();
     let mut sources: Vec<Option<String>> = Vec::new();
     for file in agent_doc_tmux::auto_start_candidate_files(input.col_args) {
@@ -847,6 +927,11 @@ pub fn gate_stale_column_panes(
         } else {
             StaleRecycleRequestState::NotRequested
         };
+        let editor_requested_columns = editor_documents.as_ref().and_then(|documents| {
+            documents
+                .contains(&path_identity(&file))
+                .then_some(documents.len())
+        });
         facts.push(ColumnGateFacts {
             file,
             pane,
@@ -856,6 +941,7 @@ pub fn gate_stale_column_panes(
             outside_target_window,
             recycle,
             turn_active,
+            editor_requested_columns,
         });
         sources.push(pre_resolved);
     }
@@ -884,13 +970,27 @@ pub fn gate_stale_column_panes(
                     },
                 )
             }
-            ColumnAdmission::AdmitStaleStashFlagged => (
-                "layout_column_pane_stale_stash_promoted_flagged",
-                format!(
-                    "promoted_flagged_recycle_overdue:{}",
-                    if fact.is_focus { "focused" } else { "unfocused" }
-                ),
-            ),
+            ColumnAdmission::AdmitStaleStashFlagged => {
+                promotions.insert(path_identity(file), "stale_stash_promoted_flagged");
+                (
+                    "layout_column_pane_stale_stash_promoted_flagged",
+                    format!(
+                        "promoted_flagged_recycle_overdue:{}",
+                        if fact.is_focus { "focused" } else { "unfocused" }
+                    ),
+                )
+            }
+            ColumnAdmission::AdmitStaleStashEditorRequested => {
+                promotions.insert(path_identity(file), "stale_stash_promoted_editor_requested");
+                (
+                    "layout_column_pane_stale_stash_promoted_editor_requested",
+                    format!(
+                        "promoted_editor_requested_recycle_pending:{}:editor_columns={}",
+                        if fact.is_focus { "focused" } else { "unfocused" },
+                        fact.editor_requested_columns.unwrap_or_default(),
+                    ),
+                )
+            }
             ColumnAdmission::AdmitStaleFocused => (
                 "layout_column_pane_stale_focus_admitted",
                 if fact.turn_active && !displaced.is_empty() {
@@ -962,6 +1062,7 @@ pub fn gate_stale_column_panes(
     StaleColumnGateOutcome {
         col_args: col_args_without(input.col_args, &excluded),
         excluded,
+        promotions,
     }
 }
 
@@ -972,6 +1073,10 @@ pub struct StaleColumnGateOutcome {
     pub col_args: Vec<String>,
     /// The documents removed from them.
     pub excluded: Vec<PathBuf>,
+    /// Stale stash panes the gate promoted under their own record (canonical
+    /// document → post-router audit admission token), so the audit names the
+    /// gate's reason instead of reconstructing it.
+    pub promotions: HashMap<PathBuf, &'static str>,
 }
 
 /// One tmux pane's window and title, captured in a single `list-panes -a`.
@@ -1070,6 +1175,9 @@ pub struct LayoutColumnAuditInput<'a> {
     pub after: &'a HashMap<String, PaneWindowSnapshot>,
     /// The focused document, when the caller named one.
     pub focus: Option<&'a str>,
+    /// The pre-selection gate's stale stash promotions
+    /// ([`StaleColumnGateOutcome::promotions`]).
+    pub gate_promotions: &'a HashMap<PathBuf, &'static str>,
 }
 
 /// GH #109: validate and attribute every realised layout column.
@@ -1127,15 +1235,20 @@ pub fn audit_layout_column_panes(tmux: &Tmux, input: &LayoutColumnAuditInput<'_>
         } else {
             "layout_column_pane_selected"
         };
+        let gate_promotion = input.gate_promotions.get(&path_identity(file)).copied();
         let admission = if !freshness.is_stale() {
-            ""
+            String::new()
+        } else if let Some(token) = gate_promotion.filter(|_| promoted) {
+            // `#stalesupervisorhidden` / `#stalewidenrestore`: the gate's own
+            // record for this promotion.
+            format!(" admission={token}")
         } else if promoted && observe_stale_recycle_request(file, false).is_overdue() {
             // `#stalesupervisorhidden`: the gate promoted it flagged.
-            " admission=stale_stash_promoted_flagged"
+            " admission=stale_stash_promoted_flagged".to_string()
         } else if is_focus {
-            " admission=focused_document_sole_owner"
+            " admission=focused_document_sole_owner".to_string()
         } else {
-            " admission=ungated_router_choice"
+            " admission=ungated_router_choice".to_string()
         };
         let selection = format!(
             "{record} file={} pane={} source={} origin_window={} window={} promoted_from_stash={} binding={} supervisor={}{admission} candidates=pre_resolved:{},registry:{} (GH #109)",
@@ -1370,6 +1483,7 @@ mod tests {
                     deferred_by_turn: true,
                 },
                 turn_active: true,
+                editor_requested_columns: None,
             },
             ColumnGateFacts {
                 file: PathBuf::from("tasks/devops.md"),
@@ -1380,6 +1494,7 @@ mod tests {
                 outside_target_window: false,
                 recycle: StaleRecycleRequestState::NotRequested,
                 turn_active: false,
+                editor_requested_columns: None,
             },
         ];
 
@@ -1465,6 +1580,7 @@ mod tests {
                             StaleRecycleRequestState::NotRequested
                         },
                         turn_active: self.live_turn.contains(&pane),
+                        editor_requested_columns: None,
                     }
                 })
                 .collect();
@@ -1699,6 +1815,7 @@ mod tests {
                 | ColumnAdmission::AdmitStaleFocused
                 | ColumnAdmission::ExcludeStaleFocusedLiveTurn
                 | ColumnAdmission::AdmitStaleStashFlagged
+                | ColumnAdmission::AdmitStaleStashEditorRequested
                 | ColumnAdmission::ExcludeStaleFocusedWouldWiden => unreachable!(),
             }
         }
@@ -1764,73 +1881,124 @@ mod tests {
                 for displaces_live_turn in [false, true] {
                     for realised_columns in 1..=5usize {
                         for window_panes in [None, Some(0), Some(1), Some(2), Some(3), Some(4)] {
-                            cases += 1;
-                            let facts = StaleFocusFacts {
-                                outside_target_window,
-                                recycle_overdue,
-                                realised_columns,
-                                window_panes,
-                                displaces_live_turn,
-                            };
-                            let admission = stale_focus_admission(facts);
-                            let admitted = admission == ColumnAdmission::AdmitStaleFocused;
-                            let flagged = admission == ColumnAdmission::AdmitStaleStashFlagged;
-                            // `#stalesupervisorhidden`: an overdue pane outside
-                            // the window is never hidden for being overdue; only
-                            // the live-turn guard can keep it out.
-                            assert_eq!(
-                                flagged,
-                                outside_target_window && recycle_overdue && !displaces_live_turn,
-                                "{facts:?}"
-                            );
-                            assert!(!(flagged && displaces_live_turn), "{facts:?}");
-                            // The function only ever answers within the
-                            // focused-stale family.
-                            assert!(
-                                matches!(
-                                    admission,
-                                    ColumnAdmission::AdmitStaleFocused
-                                        | ColumnAdmission::ExcludeStaleFocusedLiveTurn
-                                        | ColumnAdmission::AdmitStaleStashFlagged
-                                        | ColumnAdmission::ExcludeStaleFocusedWouldWiden
-                                ),
-                                "{facts:?}"
-                            );
-                            // I1: a live turn is never displaced.
-                            assert!(!(admitted && displaces_live_turn), "{facts:?}");
-                            // I2: never promoted UNFLAGGED out of the stash while
-                            // overdue (the flagged promotion is its own record).
-                            assert!(
-                                !(admitted && outside_target_window && recycle_overdue),
-                                "{facts:?}"
-                            );
-                            // I3: a stash promotion never widens the window.
-                            assert!(
-                                !(admitted
-                                    && outside_target_window
-                                    && realised_columns > window_panes.unwrap_or(0).max(1)),
-                                "{facts:?}"
-                            );
-                            // I4: a visible pane is never moved by this rule
-                            // (no flap): only the live-turn guard can exclude it.
-                            if !outside_target_window && !displaces_live_turn {
-                                assert!(admitted, "{facts:?}");
-                            }
-                            // Liveness of the exception: a stash pane with a
-                            // pending request that replaces a column is admitted.
-                            if outside_target_window
-                                && !recycle_overdue
-                                && !displaces_live_turn
-                                && realised_columns <= window_panes.unwrap_or(0).max(1)
+                            for editor_requested_columns in
+                                [None, Some(1), Some(2), Some(3), Some(5)]
                             {
-                                assert!(admitted, "{facts:?}");
+                                cases += 1;
+                                let facts = StaleFocusFacts {
+                                    outside_target_window,
+                                    recycle_overdue,
+                                    realised_columns,
+                                    window_panes,
+                                    displaces_live_turn,
+                                    editor_requested_columns,
+                                };
+                                check_stale_focus_admission_row(facts);
                             }
                         }
                     }
                 }
             }
         }
-        assert_eq!(cases, 2 * 2 * 2 * 5 * 6);
+        assert_eq!(cases, 2 * 2 * 2 * 5 * 6 * 5);
+    }
+
+    fn check_stale_focus_admission_row(facts: StaleFocusFacts) {
+        let StaleFocusFacts {
+            outside_target_window,
+            recycle_overdue,
+            realised_columns,
+            window_panes,
+            displaces_live_turn,
+            editor_requested_columns,
+        } = facts;
+        let admission = stale_focus_admission(facts);
+        let admitted = admission == ColumnAdmission::AdmitStaleFocused;
+        let flagged = admission == ColumnAdmission::AdmitStaleStashFlagged;
+        let editor_requested = admission == ColumnAdmission::AdmitStaleStashEditorRequested;
+        let window_bound = window_panes.unwrap_or(0).max(1);
+        let within_editor = editor_requested_columns.is_some_and(|n| realised_columns <= n);
+        // `#stalesupervisorhidden`: an overdue pane outside the window is never
+        // hidden for being overdue; only the live-turn guard can keep it out.
+        assert_eq!(
+            flagged,
+            outside_target_window && recycle_overdue && !displaces_live_turn,
+            "{facts:?}"
+        );
+        // The function only ever answers within the focused-stale family.
+        assert!(
+            matches!(
+                admission,
+                ColumnAdmission::AdmitStaleFocused
+                    | ColumnAdmission::ExcludeStaleFocusedLiveTurn
+                    | ColumnAdmission::AdmitStaleStashFlagged
+                    | ColumnAdmission::AdmitStaleStashEditorRequested
+                    | ColumnAdmission::ExcludeStaleFocusedWouldWiden
+            ),
+            "{facts:?}"
+        );
+        // I1: a live turn is never displaced, by any admission.
+        assert!(
+            !(displaces_live_turn && !admission.excludes()),
+            "{facts:?}"
+        );
+        // I2: never promoted UNFLAGGED out of the stash while overdue (the
+        // flagged promotion is its own record).
+        assert!(
+            !((admitted || editor_requested) && outside_target_window && recycle_overdue),
+            "{facts:?}"
+        );
+        // I3: an unflagged stash promotion never widens the window past
+        // `max(window_panes, 1)` — except to the editor's own requested count
+        // (`#stalewidenrestore`, GH #343), never beyond it.
+        assert!(
+            !(admitted && outside_target_window && realised_columns > window_bound),
+            "{facts:?}"
+        );
+        if editor_requested {
+            assert!(
+                outside_target_window && realised_columns > window_bound && within_editor,
+                "an editor-requested promotion is only the widening the editor itself shows: {facts:?}"
+            );
+        }
+        // I4: a visible pane is never moved by this rule (no flap): only the
+        // live-turn guard can exclude it.
+        if !outside_target_window && !displaces_live_turn {
+            assert!(admitted, "{facts:?}");
+        }
+        // Liveness of the exception: a stash pane with a pending request that
+        // replaces a column is admitted.
+        if outside_target_window
+            && !recycle_overdue
+            && !displaces_live_turn
+            && realised_columns <= window_bound
+        {
+            assert!(admitted, "{facts:?}");
+        }
+        // `#stalewidenrestore` liveness: a pending stash pane the editor's own
+        // column list names is never refused for width while the realised
+        // layout stays within that list.
+        if outside_target_window && !recycle_overdue && !displaces_live_turn && within_editor {
+            assert!(admitted || editor_requested, "{facts:?}");
+            assert_ne!(
+                admission,
+                ColumnAdmission::ExcludeStaleFocusedWouldWiden,
+                "{facts:?}"
+            );
+        }
+        // The GH #136 refusal survives for a derived count.
+        if outside_target_window
+            && !recycle_overdue
+            && !displaces_live_turn
+            && realised_columns > window_bound
+            && !within_editor
+        {
+            assert_eq!(
+                admission,
+                ColumnAdmission::ExcludeStaleFocusedWouldWiden,
+                "{facts:?}"
+            );
+        }
     }
 
     /// GH #136 SimWorld: tmux panes, the gate plan, and tmux-router realising
@@ -1848,6 +2016,11 @@ mod tests {
         request_age: Option<u64>,
         stale_pane_interaction_active: bool,
         window_count_queries: std::cell::Cell<usize>,
+        /// `#stalewidenrestore`: the editor's own column list when the
+        /// desired generation's column count is an editor split observation.
+        editor_columns: Option<Vec<String>>,
+        /// Panes in the window holding a fresh turn-active lease.
+        live_turn: Vec<&'static str>,
     }
 
     impl Gh136World {
@@ -1866,6 +2039,32 @@ mod tests {
                 request_age: Some(31_622),
                 stale_pane_interaction_active: false,
                 window_count_queries: std::cell::Cell::new(0),
+                editor_columns: None,
+                live_turn: Vec::new(),
+            }
+        }
+
+        /// `#stalewidenrestore`, the measured shape (agent-loop generation 6,
+        /// 2026-11-05 16:52:19): after an IDE restart's brief 1-window frame,
+        /// `0:agent-doc` holds only `%2` (agent-doc-bugs.md) while the editor
+        /// shows two columns; sdk-dev.md's pane `%10` is a stale supervisor
+        /// (pid 2612299) in `stash` whose recycle is pending, deferred by its
+        /// own Grok Build turn.
+        fn stalewidenrestore() -> Self {
+            Self {
+                panes: vec![
+                    ("%2", "tasks/agent-doc/agent-doc-bugs.md"),
+                    ("%10", "src/haiven-dev/tasks/sdk/sdk-dev.md"),
+                    ("%434", "tasks/agent-doc/agent-doc.ad.md"),
+                ],
+                window: vec!["%2"],
+                stale_pane: "%10",
+                stale: true,
+                request_age: Some(5),
+                stale_pane_interaction_active: true,
+                window_count_queries: std::cell::Cell::new(0),
+                editor_columns: None,
+                live_turn: Vec::new(),
             }
         }
 
@@ -1900,6 +2099,9 @@ mod tests {
                 .map(|doc| {
                     let pane = self.pane_for(doc);
                     let stale = self.stale && pane == self.stale_pane;
+                    let editor_documents: Option<Vec<&str>> = self.editor_columns.as_ref().map(
+                        |columns| columns.iter().flat_map(|arg| arg.split(',')).collect(),
+                    );
                     ColumnGateFacts {
                         file: PathBuf::from(doc),
                         pane: pane.to_string(),
@@ -1917,6 +2119,9 @@ mod tests {
                             StaleRecycleRequestState::NotRequested
                         },
                         turn_active: stale && self.stale_pane_interaction_active,
+                        editor_requested_columns: editor_documents.and_then(|documents| {
+                            documents.contains(&doc).then_some(documents.len())
+                        }),
                     }
                 })
                 .collect();
@@ -1925,7 +2130,8 @@ mod tests {
                     .set(self.window_count_queries.get() + 1);
                 Some(self.window.len())
             };
-            let plan = plan_column_admissions(&facts, &window_panes, &Vec::new);
+            let live_turn = || self.live_turn.iter().map(|pane| pane.to_string()).collect();
+            let plan = plan_column_admissions(&facts, &window_panes, &live_turn);
             let excluded: Vec<PathBuf> = facts
                 .iter()
                 .zip(&plan)
@@ -2053,6 +2259,7 @@ mod tests {
                 outside_target_window: true,
                 recycle: overdue.clone(),
                 turn_active: false,
+                editor_requested_columns: None,
             }];
             let live = || vec!["%15".to_string()];
             let plan = plan_column_admissions(&facts, &|| Some(1), &live);
@@ -2377,6 +2584,7 @@ mod tests {
             outside_target_window: pane_outside_target_window(before.get(pane), target),
             recycle,
             turn_active: false,
+            editor_requested_columns: None,
         };
         let pending = StaleRecycleRequestState::Pending {
             reason: "stale_supervisor_turn_stage".to_string(),
@@ -2471,5 +2679,147 @@ mod tests {
             ])[0],
             ColumnAdmission::AdmitStaleFocused
         );
+    }
+
+    // ---------------------------------------------------------------------
+    // `#stalewidenrestore` (GH #343): the editor's column list is the
+    // authority for the column count.
+    // ---------------------------------------------------------------------
+
+    const BUGS: &str = "tasks/agent-doc/agent-doc-bugs.md";
+    const SDK_DEV: &str = "src/haiven-dev/tasks/sdk/sdk-dev.md";
+    const AD: &str = "tasks/agent-doc/agent-doc.ad.md";
+
+    #[test]
+    fn stalewidenrestore_incident_without_editor_authority_stays_hidden() {
+        // The pre-fix shape, kept as the derived-count behaviour: with no
+        // editor column authority the GH #136 bound refuses the widening.
+        let world = Gh136World::stalewidenrestore();
+        assert!(!world.recycle_state().is_overdue());
+        assert_eq!(
+            world.sync(&cols(&[BUGS, SDK_DEV]), SDK_DEV),
+            vec!["%2".to_string()],
+            "admission=excluded_focused_stash_would_widen"
+        );
+    }
+
+    #[test]
+    fn stalewidenrestore_editor_requested_width_restores_the_focused_stash_pane() {
+        let mut world = Gh136World::stalewidenrestore();
+        world.editor_columns = Some(cols(&[BUGS, SDK_DEV]));
+        assert_eq!(
+            world.sync(&cols(&[BUGS, SDK_DEV]), SDK_DEV),
+            vec!["%2".to_string(), "%10".to_string()],
+            "the editor shows two columns; the stale pane realises the second"
+        );
+        // An idle pending request (no turn deferral) is restored the same way.
+        world.stale_pane_interaction_active = false;
+        assert!(!world.recycle_state().is_overdue());
+        assert_eq!(
+            world.sync(&cols(&[BUGS, SDK_DEV]), SDK_DEV),
+            vec!["%2".to_string(), "%10".to_string()]
+        );
+    }
+
+    #[test]
+    fn stalewidenrestore_editor_requested_width_restores_an_unfocused_stash_pane() {
+        let mut world = Gh136World::stalewidenrestore();
+        world.stale_pane_interaction_active = false;
+        world.editor_columns = Some(cols(&[BUGS, SDK_DEV]));
+        assert_eq!(
+            world.sync(&cols(&[BUGS, SDK_DEV]), BUGS),
+            vec!["%2".to_string(), "%10".to_string()]
+        );
+        // Without the authority the GH #121 exclusion of a pending,
+        // unfocused stash pane is unchanged.
+        world.editor_columns = None;
+        assert_eq!(
+            world.sync(&cols(&[BUGS, SDK_DEV]), BUGS),
+            vec!["%2".to_string()]
+        );
+    }
+
+    #[test]
+    fn stalewidenrestore_never_widens_past_the_editor_requested_count() {
+        // The editor shows [bugs | sdk-dev]; a controller-side rewrite (column
+        // memory, focus-only expansion) added agent-doc.ad.md. Three columns
+        // over a one-pane window exceed both bounds: refused as before.
+        let mut world = Gh136World::stalewidenrestore();
+        world.editor_columns = Some(cols(&[BUGS, SDK_DEV]));
+        assert_eq!(
+            world.sync(&cols(&[BUGS, SDK_DEV, AD]), SDK_DEV),
+            vec!["%2".to_string(), "%434".to_string()]
+        );
+        // A document only the rewrite named never gets the editor's authority.
+        world.editor_columns = Some(cols(&[BUGS, AD]));
+        assert_eq!(
+            world.sync(&cols(&[BUGS, SDK_DEV]), SDK_DEV),
+            vec!["%2".to_string()]
+        );
+    }
+
+    #[test]
+    fn stalewidenrestore_never_displaces_a_live_turn() {
+        // The window's only pane `%434` runs a live turn and is not a column
+        // of the editor's layout: an idle stale pane never stashes it, for an
+        // editor-requested width either.
+        let mut world = Gh136World::stalewidenrestore();
+        world.window = vec!["%434"];
+        world.live_turn = vec!["%434"];
+        world.stale_pane_interaction_active = false;
+        world.editor_columns = Some(cols(&[BUGS, SDK_DEV]));
+        for focus in [SDK_DEV, BUGS] {
+            let window = world.sync(&cols(&[BUGS, SDK_DEV]), focus);
+            assert!(!window.contains(&"%10".to_string()), "{focus}: {window:?}");
+        }
+    }
+
+    #[test]
+    fn stalewidenrestore_plan_names_the_editor_requested_promotion() {
+        let fact = |doc: &str, pane: &str, stale: bool, is_focus: bool| ColumnGateFacts {
+            file: PathBuf::from(doc),
+            pane: pane.to_string(),
+            freshness: classify_pane_supervisor_freshness(Some(2612299), Some(stale), stale),
+            own_pane: true,
+            is_focus,
+            outside_target_window: pane == "%10",
+            recycle: if stale {
+                StaleRecycleRequestState::Pending {
+                    reason: "stale_supervisor_turn_stage".to_string(),
+                    age_secs: 5,
+                    deferred_by_turn: true,
+                }
+            } else {
+                StaleRecycleRequestState::NotRequested
+            },
+            turn_active: stale,
+            editor_requested_columns: Some(2),
+        };
+        for is_focus in [true, false] {
+            let facts = [
+                fact(BUGS, "%2", false, !is_focus),
+                fact(SDK_DEV, "%10", true, is_focus),
+            ];
+            let plan = plan_column_admissions(&facts, &|| Some(1), &Vec::new);
+            assert_eq!(plan[0].0, ColumnAdmission::Admit);
+            assert_eq!(
+                plan[1].0,
+                ColumnAdmission::AdmitStaleStashEditorRequested,
+                "focused={is_focus}"
+            );
+            assert!(!plan[1].0.excludes());
+        }
+        // Overdue stays the flagged promotion.
+        let mut overdue = fact(SDK_DEV, "%10", true, true);
+        overdue.recycle = StaleRecycleRequestState::Overdue {
+            reason: "install_fanout".to_string(),
+            age_secs: 500,
+        };
+        let plan = plan_column_admissions(
+            &[fact(BUGS, "%2", false, false), overdue],
+            &|| Some(1),
+            &Vec::new,
+        );
+        assert_eq!(plan[1].0, ColumnAdmission::AdmitStaleStashFlagged);
     }
 }

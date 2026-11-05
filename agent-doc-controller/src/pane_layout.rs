@@ -185,8 +185,10 @@ pub enum LayoutWidthAuthority {
     /// at this width: a plugin publication, an `exact` route, an editor-surface
     /// `Sync`, or an explicit operator command. It may widen the window — an
     /// operator opening a split publishes `observed + 1` by definition — and
-    /// its realisation is bounded by the stale-column gate instead (a pane that
-    /// is not proven fresh never adds a column, from any window).
+    /// its realisation is bounded by the stale-column gate instead: a pane
+    /// that is not proven fresh adds a column only up to the editor's own
+    /// requested count (`#stalewidenrestore`, GH #343), and only while its
+    /// recycle is pending and no live turn is displaced.
     EditorSplitObservation,
     /// The column count was recomputed from retained controller state: a focus
     /// escalation, an `ensure` route, or a recycle republish. Such a

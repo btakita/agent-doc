@@ -1532,7 +1532,6 @@ mod tests {
             "fixture must exercise the retained active-editor branch"
         );
 
-        let started = std::time::Instant::now();
         let threads = items
             .into_iter()
             .map(|item| {
@@ -1549,11 +1548,14 @@ mod tests {
             .map(|thread| thread.join().unwrap())
             .collect::<Vec<_>>();
         assert!(outcomes.iter().all(|outcome| outcome.appended));
+        // Found by the repositoryreportcell check run: the fixture's editor
+        // never acknowledges, so a report that waited for projection could
+        // only return after the projection landed. Every report returning with
+        // its intent still pending, and the composed target below still
+        // unprojected, proves they returned on durable acceptance. A
+        // wall-clock bound measured machine load instead (13.6 s at load
+        // average ~124 on 2026-11-05).
         assert!(outcomes.iter().all(|outcome| outcome.projection_pending));
-        assert!(
-            started.elapsed() < Duration::from_secs(5),
-            "four reports must return on durable acceptance, not wait for editor projection"
-        );
 
         let pending = agent_doc_document_realtime_io::pending_document_write(&doc)
             .expect("active-editor feedback must have one durable composed target");

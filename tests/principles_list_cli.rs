@@ -1,5 +1,6 @@
 //! `agent-doc principles <FILE> [--json]` and the principle checks in
-//! `agent-doc lint` (`#firstprincipleslist`).
+//! `agent-doc lint` (`#firstprincipleslist`), including `fact [#id]:` items
+//! (`#firstprinciplesfactlist`).
 
 use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;
@@ -182,7 +183,7 @@ fn lint_reports_principle_warnings_without_blocking() {
         .success()
         .stdout(predicate::str::contains("No blocking lint findings"))
         .stderr(
-            predicate::str::contains("2 principle warning(s)")
+            predicate::str::contains("2 principle/fact warning(s)")
                 .and(predicate::str::contains(
                     "sample.md: warning: principle [#velocity] declares scope global",
                 ))
@@ -193,4 +194,107 @@ fn lint_reports_principle_warnings_without_blocking() {
         std::fs::read_to_string(&fixture.document).unwrap(),
         fixture.document_text
     );
+}
+
+/// `#firstprinciplesfactlist`: the listing and lint also cover `fact [#id]:`
+/// items: nearest wins with the replaced source, a duplicate id in one file
+/// and a fact in the global principles file are warnings.
+#[test]
+fn principles_lists_facts_and_lint_reports_fact_warnings() {
+    let temp = tempfile::tempdir().unwrap();
+    let config_home = temp.path().join("config");
+    std::fs::create_dir_all(config_home.join("agent-doc")).unwrap();
+    std::fs::write(
+        config_home.join("agent-doc/principles.md"),
+        concat!(
+            "<!-- agent:rules -->\n",
+            "- fact [#global-fact]: Facts are not read from the global file.\n",
+            "<!-- /agent:rules -->\n",
+        ),
+    )
+    .unwrap();
+    let document = temp.path().join("facts.md");
+    let document_text = concat!(
+        "---\nagent_doc_session: facts\n---\n\n",
+        "<!-- agent:rules -->\n",
+        "- fact [#jws]: Session tokens are JWS.\n",
+        "- fact #os: Linux and macOS.\n",
+        "- fact [#jws]: declared twice\n",
+        "<!-- /agent:rules -->\n\n",
+        "<!-- agent:exchange -->\n",
+        "prompt\n",
+        "<!-- /agent:exchange -->\n",
+    );
+    std::fs::write(&document, document_text).unwrap();
+
+    let output = cargo_bin_cmd!("agent-doc")
+        .env("XDG_CONFIG_HOME", &config_home)
+        .args(["principles", "--json"])
+        .arg(&document)
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let facts: Vec<(&str, &str, &str)> = json["facts"]
+        .as_array()
+        .unwrap_or_else(|| panic!("{json:#}"))
+        .iter()
+        .map(|fact| {
+            (
+                fact["id"].as_str().unwrap(),
+                fact["scope"].as_str().unwrap(),
+                fact["statement"].as_str().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        facts,
+        vec![
+            ("jws", "document", "Session tokens are JWS."),
+            ("os", "document", "Linux and macOS."),
+        ],
+        "{json:#}"
+    );
+    let codes: Vec<&str> = json["warnings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|warning| warning["code"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        codes,
+        vec!["fact_in_global_file", "fact_duplicate_id"],
+        "{json:#}"
+    );
+
+    cargo_bin_cmd!("agent-doc")
+        .env("XDG_CONFIG_HOME", &config_home)
+        .arg("principles")
+        .arg(&document)
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("No principles in scope for")
+                .and(predicate::str::contains("2 fact(s) in scope for"))
+                .and(predicate::str::contains(
+                    "[#jws] document: Session tokens are JWS.",
+                ))
+                .and(predicate::str::contains("  fact_duplicate_id: ")),
+        );
+
+    cargo_bin_cmd!("agent-doc")
+        .env("XDG_CONFIG_HOME", &config_home)
+        .arg("lint")
+        .arg(&document)
+        .assert()
+        .success()
+        .stderr(
+            predicate::str::contains("2 principle/fact warning(s)")
+                .and(predicate::str::contains(
+                    "facts.md: warning: fact [#jws] is declared twice",
+                ))
+                .and(predicate::str::contains("[fact_in_global_file]"))
+                .and(predicate::str::contains("[fact_duplicate_id]")),
+        );
+    assert_eq!(std::fs::read_to_string(&document).unwrap(), document_text);
 }

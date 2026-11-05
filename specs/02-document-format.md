@@ -176,8 +176,13 @@ A fact is an `agent:rules` item whose first line reads
 accepted; continuation lines extend the statement). Facts are premises such
 as "credentials are JWS". They are read from every ancestor
 `.agent-doc/project.md` and the session document (not the global principles
-file); a nearer fact with the same id replaces a farther one. A fact item
-stays in `agent_rules` as written.
+file); a nearer fact with the same id replaces a farther one and lists the
+replaced sources in `overrides`. A second fact with one id in the same file is
+a `fact_duplicate_id` preflight warning and the first applies; a fact written
+in the global principles file is a `fact_in_global_file` warning and is
+ignored. A fact item stays in `agent_rules` as written. `agent-doc principles`
+lists the facts in scope beside the principles, and `agent-doc lint` prints
+the fact warnings beside the principle warnings (`#firstprinciplesfactlist`).
 
 Every preflight takes a SHA-256 digest of each principle's and fact's
 statement in scope for the document (whitespace runs collapse first, so

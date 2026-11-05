@@ -2972,6 +2972,10 @@ fn run_with_options_to_writer_in_pass(
     let agent_doc_principles::Composition {
         rules: agent_rules,
         principles,
+        // `#firstprinciplesfactlist`: premise_rederive reads the facts from
+        // the same layers through the same `rederive::compose_facts`; their
+        // issues are in `issues` and become preflight warnings below.
+        facts: _,
         issues: principle_issues,
     } = agent_doc_principles::compose(&rule_layers);
     let agent_rules_guidance = agent_doc_element::rules::agent_rules_guidance(&agent_rules);

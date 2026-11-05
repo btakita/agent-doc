@@ -4395,9 +4395,10 @@ enum DecisionAction {
         #[arg(long)]
         json: bool,
     },
-    /// Why a decision holds (`#decisiongraph`): every revision verbatim with
-    /// where and when the operator gave it, its evidence, and the decisions
-    /// it depends on
+    /// Why a decision holds (`#decisiongraph`, `#firstprincipleswhy`): every
+    /// revision verbatim with where and when the operator gave it, its
+    /// evidence, the decisions it depends on, and the first-principles
+    /// derivation chain (derived decisions down to principles and facts)
     Why {
         /// Session document
         file: PathBuf,
@@ -4586,45 +4587,40 @@ fn run_decision_action(action: DecisionAction) -> anyhow::Result<()> {
             Ok(())
         }
         DecisionAction::Why { file, id, json } => {
-            let (_, graph) = load_decision_graph(&file)?;
+            use agent_doc_answer_ledger::graph::why_chain;
+            let content = std::fs::read_to_string(&file)
+                .with_context(|| format!("failed to read {}", file.display()))?;
+            let (_, graph) = agent_doc_preflight_io::answer_ledger::build_graph(&file, &content);
+            // `#firstprincipleswhy`: the principles in scope for this
+            // document (global, project, document) and the derivation chain
+            // they support. Stored derivations join here once they have a
+            // durable store (`#firstprinciplesstore`).
+            let composition = agent_doc_preflight_command_io::composed_rules_and_principles(&file, &content);
+            let principles = composition.principles;
+            let (derivations, skipped) = why_chain::derivation_graph(&graph, &principles, Vec::new());
+            for message in &skipped {
+                eprintln!("[decision why] {message}");
+            }
+            let bare = id.trim_start_matches("[#").trim_start_matches('#').trim_end_matches(']');
             let decisions = match graph.resolve_decision(&id) {
                 Some(decision) => vec![decision],
+                None if !derivations.why(bare).steps.is_empty() => vec![bare.to_string()],
                 None => {
-                    let applying = graph.decisions_applying_to(id.trim_start_matches("[#").trim_start_matches('#').trim_end_matches(']'));
+                    let applying = graph.decisions_applying_to(bare);
                     anyhow::ensure!(!applying.is_empty(), "{id} is not a decision, a revision, a question copy, or an item a decision applies to");
                     applying
                 }
             };
-            let whys: Vec<_> = decisions.iter().filter_map(|decision| graph.why(decision)).collect();
+            let whys: Vec<_> = decisions
+                .iter()
+                .filter_map(|decision| why_chain::reasoned_why(&graph, &derivations, &principles, decision))
+                .collect();
             if json {
                 println!("{}", serde_json::to_string_pretty(&whys)?);
             } else {
                 for why in &whys {
-                    println!("{} {}", why.decision_id, why.question);
-                    if let Some(answer) = &why.current_answer {
-                        println!("  holds: “{answer}”");
-                    }
-                    for revision in &why.revisions {
-                        println!(
-                            "  {} ({}) “{}” — {}{}",
-                            revision.relation,
-                            revision.relation_source.as_str(),
-                            revision.answer,
-                            revision.location.as_deref().unwrap_or("unknown location"),
-                            if revision.evidence.is_empty() { String::new() } else { format!("; evidence: {}", revision.evidence.join(", ")) },
-                        );
-                    }
-                    for premise in &why.depends_on {
-                        println!("  depends on {} “{}”{}", premise.id, premise.label, premise.answer.as_deref().map(|answer| format!(": “{answer}”")).unwrap_or_default());
-                    }
-                    if !why.conflicts_with.is_empty() {
-                        println!("  conflicts with: {}", why.conflicts_with.join(", "));
-                    }
-                    if !why.copies.is_empty() {
-                        println!("  copies: {}", why.copies.join(", "));
-                    }
-                    if !why.applies_to.is_empty() {
-                        println!("  applies to: {}", why.applies_to.join(", "));
+                    for line in why_chain::render_reasoned_why(why) {
+                        println!("{line}");
                     }
                 }
             }

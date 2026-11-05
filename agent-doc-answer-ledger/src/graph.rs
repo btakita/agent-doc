@@ -1049,5 +1049,7 @@ pub fn render_impact(impact: &Impact) -> Vec<String> {
     lines
 }
 
+pub mod why_chain;
+
 #[cfg(test)]
 mod tests;

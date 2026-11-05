@@ -160,8 +160,9 @@ cycle-safe chain through derived premises, lists every live conclusion a
 changed premise reaches (unreviewed derivations are re-derived; confirmed
 ones are flagged for the operator, never rewritten), and flags live
 derivations of one decision that reach different answers (same premises: an
-inference is wrong; different premises: the premises conflict). Derivations
-have no durable store or CLI yet.
+inference is wrong; different premises: the premises conflict). `agent-doc
+decision why` prints the chain for a decision (`#firstprincipleswhy`,
+[§16](16-mutable-decisions.md)); derivations have no durable store yet.
 
 ## Components
 

@@ -114,5 +114,10 @@ else alone.
 
 `agent-doc decision impact <FILE> <id> [--json]` shows the same walk.
 `agent-doc decision why <FILE> <id> [--json]` shows why a decision holds:
-the operator's words for every revision, the evidence, and what it depends
-on. `agent-doc decision graph <FILE> [--json]` prints the whole graph.
+the operator's words for every revision, the evidence, what it depends on,
+and its first-principles chain (`derived_from`): each derivation step with
+its status, recursing through derived decisions down to the principles
+(with statement and scope) and facts it rests on. An answer that cites a
+principle as `[#id]`, or a `depends on [#id]` link to a principle or a
+decision, is an operator-confirmed step. `agent-doc decision graph <FILE>
+[--json]` prints the whole graph.

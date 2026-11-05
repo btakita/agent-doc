@@ -10,9 +10,13 @@
 //!   verb is a decision verb, it ends in `?`, or it is a request copy) and its
 //!   own key, the item id or its normalized text, has a delivered answer.
 //! - [`StaleKind::DoneByEvidence`]: the item names deliverables (PR / issue
-//!   numbers, commit SHAs) and a delivered revision of a decision linked to it
-//!   (by identity, or a request that `applies_to` it) says every one of them
-//!   is merged, landed, pushed, committed, published or released.
+//!   numbers, commit SHAs) and the evidence of one decision linked to it (by
+//!   identity, a request that `applies_to` it, or a project `decisions.md`
+//!   record it cites) records every one of them merged, landed, pushed,
+//!   committed, published or released. The evidence is the delivered answer
+//!   text plus the decision graph's `evidenced_by` responses and commits and
+//!   the registry record's text and pinned responses
+//!   ([`evidence`], `#decisionstaleevidence`).
 //!
 //! Only identity-tier todo matches close on their own ([`StaleTrackedItem::auto_close`]):
 //! an open `agent:todo` row whose own id is the exact key a delivered operator
@@ -27,9 +31,14 @@
 //! rejected its premise, an item built on a superseded revision, an item that
 //! contradicts the current decision) are not derived here.
 
+use std::cell::OnceCell;
 use std::collections::BTreeSet;
 
 use serde::Serialize;
+
+pub mod evidence;
+
+pub use evidence::{DoneEvidence, RegistryRecord, ResponseSource};
 
 use crate::extract::{AnswerObs, Observations, TrackedComponent, TrackedItemObs, is_question_text};
 use crate::{
@@ -60,6 +69,8 @@ pub enum StaleLink {
     Identity,
     /// A request raised for the item (`applies_to`) carries the decision.
     AppliesTo,
+    /// The item cites a project `decisions.md` record (`DEC-…`).
+    Registry,
 }
 
 /// One stale tracked item with the decision that makes it stale.
@@ -166,7 +177,7 @@ fn asks_question(item: &TrackedItemObs) -> bool {
 
 /// A revision has been delivered: its row is struck, archived, or only the
 /// index still remembers it.
-fn delivered(revision: &Revision) -> bool {
+pub(crate) fn delivered(revision: &Revision) -> bool {
     revision.consumed
 }
 
@@ -177,16 +188,14 @@ fn selector(item: &TrackedItemObs) -> String {
 fn suggested_action(
     kind: StaleKind,
     item: &TrackedItemObs,
-    decision: &Decision,
-    revision: &Revision,
+    decision_id: &str,
+    answer: &str,
+    location: &str,
     evidence: &[String],
 ) -> String {
     let id = selector(item);
     let component = item.component.as_str();
-    let cite = format!(
-        "decision `{}` (“{}”, {})",
-        decision.id, revision.answer, revision.location
-    );
+    let cite = format!("decision `{decision_id}` (“{answer}”, {location})");
     let why = match kind {
         StaleKind::AnsweredButOpen => format!(
             "Open agent:{component} item [#{id}] asks a question the operator already answered: {cite}."
@@ -198,20 +207,16 @@ fn suggested_action(
     };
     let what = match item.component {
         TrackedComponent::Todo => format!(
-            "If nothing is left for the operator, close it with --todo-done {id} citing `{}`; otherwise rewrite it as the action the answer implies with --todo-edit '{id}=<action>'.",
-            decision.id
+            "If nothing is left for the operator, close it with --todo-done {id} citing `{decision_id}`; otherwise rewrite it as the action the answer implies with --todo-edit '{id}=<action>'."
         ),
         TrackedComponent::Backlog => format!(
-            "If the decision finishes it, complete it with --done {id} citing `{}`; otherwise rewrite it as the action the answer implies with --backlog-edit '{id}=<action>'.",
-            decision.id
+            "If the decision finishes it, complete it with --done {id} citing `{decision_id}`; otherwise rewrite it as the action the answer implies with --backlog-edit '{id}=<action>'."
         ),
         TrackedComponent::Review => format!(
-            "If the decision settles the gate, resolve it with --review-resolve {id} citing `{}`; otherwise record what is still open with --review-edit '{id}=<text>'.",
-            decision.id
+            "If the decision settles the gate, resolve it with --review-resolve {id} citing `{decision_id}`; otherwise record what is still open with --review-edit '{id}=<text>'."
         ),
         TrackedComponent::Icebox => format!(
-            "Parked work is never closed for you: read the decision and act on it (complete it with --done {id} citing `{}`, move it into active work, or record why it stays parked).",
-            decision.id
+            "Parked work is never closed for you: read the decision and act on it (complete it with --done {id} citing `{decision_id}`, move it into active work, or record why it stays parked)."
         ),
     };
     format!("{why} {what} (#decisionstaleaudit)")
@@ -248,8 +253,22 @@ impl Ledger {
     }
 
     /// Every open tracked item a delivered decision makes stale, with the
-    /// cited decision and the suggested action.
+    /// cited decision and the suggested action. Evidence is the answer text
+    /// and the graph built from this ledger alone; see
+    /// [`Ledger::stale_tracked_items_with`].
     pub fn stale_tracked_items(&self, observations: &Observations) -> Vec<StaleTrackedItem> {
+        self.stale_tracked_items_with(observations, &DoneEvidence::default())
+    }
+
+    /// [`Ledger::stale_tracked_items`] with the IO layer's evidence: the
+    /// cached decision graph, response text and project registry records
+    /// (`#decisionstaleevidence`).
+    pub fn stale_tracked_items_with(
+        &self,
+        observations: &Observations,
+        evidence: &DoneEvidence<'_>,
+    ) -> Vec<StaleTrackedItem> {
+        let local_graph = OnceCell::new();
         let mut out = Vec::new();
         for item in observations.tracked.iter().filter(|item| item.open) {
             // A live queue row still names it: that work is in flight.
@@ -257,15 +276,14 @@ impl Ledger {
                 continue;
             }
             let linked = self.linked_decisions(item);
-            if linked.is_empty() {
-                continue;
-            }
             // An identity-tier close acts; otherwise the most specific
             // finding (evidence of the deliverable) is the suggestion.
             let answered = self.answered_but_open(item, &linked, observations);
             let found = match answered {
                 Some(found) if found.auto_close => Some(found),
-                answered => self.done_by_evidence(item, &linked).or(answered),
+                answered => self
+                    .done_by_evidence(item, &linked, observations, evidence, &local_graph)
+                    .or(answered),
             };
             out.extend(found);
         }
@@ -320,7 +338,14 @@ impl Ledger {
             link: StaleLink::Identity,
             evidence: Vec::new(),
             auto_close,
-            action: suggested_action(StaleKind::AnsweredButOpen, item, decision, latest, &[]),
+            action: suggested_action(
+                StaleKind::AnsweredButOpen,
+                item,
+                &decision.id,
+                &latest.answer,
+                &latest.location,
+                &[],
+            ),
         })
     }
 
@@ -328,47 +353,41 @@ impl Ledger {
         &self,
         item: &TrackedItemObs,
         linked: &[(&Decision, StaleLink)],
+        observations: &Observations,
+        evidence: &DoneEvidence<'_>,
+        local_graph: &OnceCell<crate::graph::DecisionGraph>,
     ) -> Option<StaleTrackedItem> {
         let wanted = deliverable_anchors(&item.text);
         if wanted.is_empty() {
             return None;
         }
-        for (decision, link) in linked {
-            let mut done = BTreeSet::new();
-            let mut cited: Option<&Revision> = None;
-            for revision in decision
-                .revisions
-                .iter()
-                .filter(|revision| delivered(revision))
-            {
-                let completed = completed_deliverables(&revision.answer);
-                if completed.iter().any(|anchor| wanted.contains(anchor)) {
-                    cited = Some(revision);
-                }
-                done.extend(completed);
-            }
-            let Some(revision) = cited else { continue };
-            if !wanted.is_subset(&done) {
+        for group in evidence.groups(self, observations, local_graph, item, linked) {
+            if !wanted.is_subset(&group.done()) {
                 continue;
             }
+            let Some(cited) = group.cited(&wanted) else {
+                continue;
+            };
             let evidence: Vec<String> = wanted.iter().cloned().collect();
+            let action = suggested_action(
+                StaleKind::DoneByEvidence,
+                item,
+                &group.decision_id,
+                &cited.answer,
+                &cited.location,
+                &evidence,
+            );
             return Some(StaleTrackedItem {
                 kind: StaleKind::DoneByEvidence,
                 component: item.component,
                 item: item.id.clone(),
                 item_text: text::question_body(&item.text),
-                decision_id: decision.id.clone(),
-                revision_id: revision.id.clone(),
-                answer: revision.answer.clone(),
-                location: revision.location.clone(),
-                link: *link,
-                action: suggested_action(
-                    StaleKind::DoneByEvidence,
-                    item,
-                    decision,
-                    revision,
-                    &evidence,
-                ),
+                decision_id: group.decision_id,
+                revision_id: cited.revision_id,
+                answer: cited.answer,
+                location: cited.location,
+                link: group.link,
+                action,
                 evidence,
                 auto_close: false,
             });

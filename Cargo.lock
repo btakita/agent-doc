@@ -1611,11 +1611,13 @@ name = "agent-doc-preflight-io"
 version = "0.35.568"
 dependencies = [
  "agent-doc-answer-ledger",
+ "agent-doc-archive-io",
  "agent-doc-config",
  "agent-doc-controller-io",
  "agent-doc-crdt-relay-io",
  "agent-doc-cycle-state-io",
  "agent-doc-debounce",
+ "agent-doc-decision-io",
  "agent-doc-diff",
  "agent-doc-document",
  "agent-doc-element",

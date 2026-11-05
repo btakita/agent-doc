@@ -1524,6 +1524,75 @@ fn historical_response_window(nodes: &[ExchangeNode], response_id: &str) -> Opti
     None
 }
 
+/// The recovery steps that read no git history: retained state, the tracked
+/// response index and its archive, then the checksum-verified SQLite cache.
+fn recover_response_locally(
+    doc: &Path,
+    response_id: &str,
+    retained_state: Option<&str>,
+) -> Result<Option<(RecoveredResponse, &'static str)>> {
+    let found = |source, content| RecoveredResponse {
+        source,
+        response_id: response_id.to_string(),
+        content,
+        commit: None,
+    };
+    if let Some(retained) = retained_state
+        && let Some(content) = response_content_by_id(retained, response_id, None)
+    {
+        return Ok(Some((
+            found(RecoverySource::RetainedState, content),
+            "retained",
+        )));
+    }
+    let root = project_root(doc)?;
+    if let Some(entry) = parse_response_index_file(&response_index_path(doc))?
+        .get(response_id)
+        .cloned()
+        && let Ok(archive) = std::fs::read_to_string(root.join(&entry.archive_path))
+        && let Some(content) =
+            response_content_by_id(&archive, response_id, Some(&entry.content_sha256))
+    {
+        return Ok(Some((
+            found(RecoverySource::ResponseIndex, content),
+            "tracked-index",
+        )));
+    }
+    // The tracked index is authoritative and always checked first. SQLite is a
+    // rebuildable acceleration layer; its candidate is accepted only after the
+    // archive content matches the cached checksum.
+    if let Ok(Some(entry)) =
+        agent_doc_sqlite::archive_index::lookup_response_location_cache(doc, response_id)
+        && let Ok(archive) = std::fs::read_to_string(root.join(&entry.archive_path))
+        && let Some(content) =
+            response_content_by_id(&archive, response_id, Some(&entry.content_sha256))
+    {
+        return Ok(Some((
+            found(RecoverySource::SqliteCache, content),
+            "sqlite-cache",
+        )));
+    }
+    Ok(None)
+}
+
+/// A response's text from retained state (the document), the response index
+/// and archive, or the SQLite cache, never a git history scan: the bounded
+/// lookup a per-cycle reader can afford (`#decisionstaleevidence`). `None`
+/// when no local source proves it, or `response_id` is not a compact id.
+pub fn read_response_locally(
+    doc: &Path,
+    response_id: &str,
+    retained_state: Option<&str>,
+) -> Option<String> {
+    if !is_compact_response_id(response_id) {
+        return None;
+    }
+    recover_response_locally(doc, response_id, retained_state)
+        .ok()
+        .flatten()
+        .map(|(found, _)| found.content)
+}
+
 /// Recovery order is retained state, response index/archive, Git trailer
 /// candidates with mandatory checksum verification, then bounded compatibility
 /// reconstruction for legacy composite ids. Ambiguous or checksum-bad evidence
@@ -1546,56 +1615,13 @@ pub fn recover_response_with_metrics(
         is_compact_response_id(response_id),
         "invalid response id `{response_id}`"
     );
-    if let Some(retained) = retained_state
-        && let Some(content) = response_content_by_id(retained, response_id, None)
-    {
+    if let Some((found, route)) = recover_response_locally(doc, response_id, retained_state)? {
         return Ok((
-            ResponseRecovery::Found(RecoveredResponse {
-                source: RecoverySource::RetainedState,
-                response_id: response_id.to_string(),
-                content,
-                commit: None,
-            }),
-            lookup_metrics("retained", started, 0),
+            ResponseRecovery::Found(found),
+            lookup_metrics(route, started, 0),
         ));
     }
     let root = project_root(doc)?;
-    if let Some(entry) = parse_response_index_file(&response_index_path(doc))?
-        .get(response_id)
-        .cloned()
-        && let Ok(archive) = std::fs::read_to_string(root.join(&entry.archive_path))
-        && let Some(content) =
-            response_content_by_id(&archive, response_id, Some(&entry.content_sha256))
-    {
-        return Ok((
-            ResponseRecovery::Found(RecoveredResponse {
-                source: RecoverySource::ResponseIndex,
-                response_id: response_id.to_string(),
-                content,
-                commit: None,
-            }),
-            lookup_metrics("tracked-index", started, 0),
-        ));
-    }
-    // The tracked index is authoritative and always checked first. SQLite is a
-    // rebuildable acceleration layer; its candidate is accepted only after the
-    // archive content matches the cached checksum.
-    if let Ok(Some(entry)) =
-        agent_doc_sqlite::archive_index::lookup_response_location_cache(doc, response_id)
-        && let Ok(archive) = std::fs::read_to_string(root.join(&entry.archive_path))
-        && let Some(content) =
-            response_content_by_id(&archive, response_id, Some(&entry.content_sha256))
-    {
-        return Ok((
-            ResponseRecovery::Found(RecoveredResponse {
-                source: RecoverySource::SqliteCache,
-                response_id: response_id.to_string(),
-                content,
-                commit: None,
-            }),
-            lookup_metrics("sqlite-cache", started, 0),
-        ));
-    }
     let trailer = format!(
         "Agent-Doc-Response: {}",
         response_id.trim_start_matches("[#").trim_end_matches(']')

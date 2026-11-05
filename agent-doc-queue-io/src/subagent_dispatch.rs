@@ -326,6 +326,18 @@ pub fn queue_subagent_dispatch_enabled_for_content(file: &Path, content: &str) -
     }))
 }
 
+/// `#queueskipsubagents`: lowercased `#id`s of live queue rows routed to
+/// subagent dispatch (never to the inline turn), resolved with this file's
+/// effective prompt presets. See [`core::subagent_routed_queue_head_ids`].
+pub fn subagent_routed_head_ids_for_content(
+    file: &Path,
+    content: &str,
+) -> Result<std::collections::HashSet<String>> {
+    let prompt_presets =
+        agent_doc_frontmatter_io::session::effective_prompt_presets_for_file(content, file)?;
+    Ok(core::subagent_routed_queue_head_ids(content, &prompt_presets))
+}
+
 /// Claims that choose which queue owns this cycle: ledger attempts (including
 /// `Reported`), closed schedule windows, and completion evidence. This cycle's
 /// fresh dispatch heads are not included, so naming them does not pause the

@@ -2602,6 +2602,47 @@ pub fn queue_component_subagent_heads_with_facts(
     Some((mode, eligible, live))
 }
 
+/// `#queueskipsubagents`: lowercased `#id`s of every live queue row, in any
+/// queue or run block, that is routed to subagent dispatch rather than to the
+/// inline turn: its block runs in subagents (`subagents` / `fan-out`, or a
+/// queue-scoped preset asking for it) and the row does not opt out, or the row
+/// itself carries subagent intent (`#subagents`).
+///
+/// Such a row is never run by an inline chat turn, so an inline turn that left
+/// it unconsumed is not evidence that it was dispatched and "came back"
+/// (`#queueskip`). Unlike [`queue_component_subagent_heads`], no
+/// awaiting-operator, blocked or answer-row filter applies: the question here is
+/// only *who* runs the row, not whether it is dispatchable now.
+pub fn subagent_routed_queue_head_ids(
+    content: &str,
+    prompt_presets: &agent_doc_frontmatter::frontmatter::PromptPresets,
+) -> std::collections::HashSet<String> {
+    let Ok(components) = agent_doc_element::element::parse(content) else {
+        return std::collections::HashSet::new();
+    };
+    let Ok(queues) = agent_doc_queue::queue_set::QueueSet::parse(content, &components) else {
+        return std::collections::HashSet::new();
+    };
+    queues
+        .blocks()
+        .iter()
+        .flat_map(|block| {
+            let presets =
+                PresetContext::for_queue_component(content, block.component, &[], prompt_presets);
+            queue_component_dispatch_rows(content, block.component)
+                .into_iter()
+                .filter(move |item| {
+                    presets.classify(&item.raw, SteeringSource::Queue).0
+                        == SteeringDispatch::Subagent
+                })
+                .filter_map(|item| {
+                    agent_doc_queue::queue_continuation::extract_head_id(&item.norm)
+                        .map(|id| id.to_ascii_lowercase())
+                })
+        })
+        .collect()
+}
+
 /// The queue-level subagents attribute applied to the claim-blind selected
 /// queue: `(mode, eligible heads, live heads)`, or `None` when that queue's
 /// marker has no valid `subagents` / `fan-out` attribute.
@@ -5224,5 +5265,37 @@ mod tests {
             "{:?}",
             obs.ready
         );
+    }
+
+    /// `#queueskipsubagents`: only rows whose dispatch is a subagent are
+    /// exempt from `#queueskip` — every row of a `subagents` run except an
+    /// `[inline]` opt-out, plus a `#subagents`-tagged row of an inline queue.
+    /// Rows of an inline queue stay the inline turn's.
+    #[test]
+    fn subagent_routed_queue_head_ids_cover_subagents_blocks_and_tagged_rows() {
+        let content = concat!(
+            "# Session\n\n",
+            "<!-- agent:queue id=\"inline\" -->\n",
+            "- do [#plain]\n",
+            "- #subagents do [#tagged]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:run id=\"main\" subagents go -->\n",
+            "- do [#fanned]\n",
+            "- \u{23ed}\u{fe0f} do [#decisiontsiftrecall]\n",
+            "- [inline] do [#optout]\n",
+            "<!-- /agent:run -->\n",
+        );
+        let presets = agent_doc_frontmatter::frontmatter::PromptPresets::default();
+        let ids = subagent_routed_queue_head_ids(content, &presets);
+        let expected: std::collections::HashSet<String> =
+            ["tagged", "fanned", "decisiontsiftrecall"]
+                .into_iter()
+                .map(str::to_string)
+                .collect();
+        assert_eq!(ids, expected);
+
+        let inline_only =
+            "# S\n\n<!-- agent:queue go -->\n- do [#a]\n- do [#b]\n<!-- /agent:queue -->\n";
+        assert!(subagent_routed_queue_head_ids(inline_only, &presets).is_empty());
     }
 }

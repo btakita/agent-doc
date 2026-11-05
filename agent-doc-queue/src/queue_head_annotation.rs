@@ -25,6 +25,7 @@
 use std::collections::HashSet;
 
 use agent_doc_element_queue::{QueueItemIdentity, strip_priority_markers};
+use agent_doc_markdown_ast::reply_row::WAITING_ITEM_MARKER;
 use serde::{Deserialize, Serialize};
 
 use crate::queue_response::{normalize_done_id, normalize_for_answer_match};
@@ -110,6 +111,21 @@ pub fn queue_head_annotation(head: &str) -> Option<QueueHeadAnnotation> {
         break;
     }
     let first = ids.first()?.clone();
+    // `#itemtextasnote`: a generated Waiting-on-you row
+    // (`[#id] <todo text> <!-- agent-doc:waiting-item -->`) mirrors its
+    // `agent:todo` item. The text up to and including the waiting-item marker
+    // is the binary's projection of that todo, not operator steering; only text
+    // the operator appends after the marker is an annotation. Operator replies
+    // added as child lines are separate rows the waiting tree preserves
+    // (`#waitingoperatortext`).
+    let first_line_len = rest.find('\n').unwrap_or(rest.len());
+    let waiting_row = match rest[..first_line_len].find(WAITING_ITEM_MARKER) {
+        Some(at) => {
+            rest = &rest[at + WAITING_ITEM_MARKER.len()..];
+            true
+        }
+        None => false,
+    };
     // An operator can append steering after the binary has projected an effect
     // id (`do [#id] ⟦effect:1⟧: note`). Ignore the exact metadata token but
     // keep everything after it subject to the normal annotation contract.
@@ -119,7 +135,7 @@ pub fn queue_head_annotation(head: &str) -> Option<QueueHeadAnnotation> {
     }
     // Optional-`do` grammar: a bare `[#id]: note` is inert prose (a free-text
     // head), not an annotated directive.
-    if !has_do && rest.starts_with(':') {
+    if !has_do && rest.starts_with(':') && !waiting_row {
         return None;
     }
     let annotation = strip_leading_separator(rest.trim());
@@ -469,6 +485,47 @@ mod tests {
         );
     }
 
+    /// `#itemtextasnote` (agent-doc-bugs.md, 2026-11-04): a todo-mirrored
+    /// Waiting-on-you row closed with `--done lazilyreleasedecision` was refused
+    /// until its own item text was quoted back as an Operator note.
+    #[test]
+    fn waiting_row_item_text_is_not_an_operator_annotation() {
+        for head in [
+            "⟦you: 1 · agent: 0 · done: 0⟧ [#lazilyreleasedecision] Decide for lazily-rs 29fde5a8c6 (#lazilysqlitestoreopen): push it to lazily-rs main, and publish a lazily release (source: agent:backlog [#lazilysqlitestoreopen]) <!-- agent-doc:waiting-item -->",
+            "[#lazilyreleasedecision] Decide for lazily-rs 29fde5a8c6 <!-- agent-doc:waiting-item -->",
+            "⟦📥 you: 0 · agent: 1 · done: 1⟧ [#alpha] Approve alpha [#subagent-operator-request-x]. <!-- agent-doc:waiting-item --> ⟦effect:2⟧",
+            "🚧 [#subagent:w#1] ⟦you: 1 · agent: 0 · done: 0⟧ [#ask] Approve the ask. <!-- agent-doc:waiting-item -->",
+            "do [#ask] Approve the ask. <!-- agent-doc:waiting-item -->",
+        ] {
+            assert_eq!(annotation(head), None, "{head}");
+        }
+    }
+
+    #[test]
+    fn operator_text_appended_after_a_waiting_row_marker_is_an_annotation() {
+        assert_eq!(
+            annotation(
+                "⟦you: 1 · agent: 0 · done: 0⟧ [#ask] Approve the ask. <!-- agent-doc:waiting-item --> but only after CI is green"
+            )
+            .as_deref(),
+            Some("but only after CI is green")
+        );
+        assert_eq!(
+            annotation(
+                "[#ask] Approve the ask. <!-- agent-doc:waiting-item -->: only after CI ⟦effect:2⟧"
+            )
+            .as_deref(),
+            Some("only after CI")
+        );
+        assert_eq!(
+            annotation(
+                "[#ask] Approve the ask. <!-- agent-doc:waiting-item --> ⟦effect:2⟧ — only after CI"
+            )
+            .as_deref(),
+            Some("only after CI")
+        );
+    }
+
     #[test]
     fn multiline_annotation_keeps_continuation_lines() {
         assert_eq!(
@@ -515,6 +572,75 @@ mod tests {
             unaddressed_completed_annotations(&content, "x", &[])
                 .unwrap()
                 .is_empty()
+        );
+    }
+
+    fn waiting_doc(queue: &str) -> String {
+        format!(
+            "<!-- agent:exchange -->\n<!-- /agent:exchange -->\n\n<!-- agent:queue id=\"main\" -->\n{queue}<!-- /agent:queue -->\n\n<!-- agent:todo -->\n- [ ] [#ask] Approve the ask.\n<!-- /agent:todo -->\n\n<!-- agent:backlog queue -->\n- [ ] [#a] item a\n<!-- /agent:backlog -->\n"
+        )
+    }
+
+    const WAITING_TREE: &str = "- ### Waiting on you — answer by adding a child line under an item <!-- agent-doc:waiting-on-you -->\n  - ⟦you: 1 · agent: 0 · done: 0⟧ [#ask] Approve the ask. <!-- agent-doc:waiting-item -->\n    - **Next:** you — reply under this item ▫️\n    - **Response:** Approve the ask. ▫️\n";
+
+    /// The finalize pre-write gate shape: closing a waiting row by id needs no
+    /// Operator note for the row's own text, while an annotated `do [#id]` head
+    /// completed by the same closeout still fails closed until answered.
+    #[test]
+    fn closeout_gate_skips_waiting_row_text_but_still_blocks_annotated_heads() {
+        let content = waiting_doc(&format!("- do [#a]: keep the old API\n{WAITING_TREE}"));
+        let response = "### Re: ask\n\n`#ask`: done; closed in this closeout.\n";
+        let missing = unaddressed_completed_annotations(
+            &content,
+            response,
+            &["ask".to_string(), "a".to_string()],
+        )
+        .unwrap();
+        assert_eq!(
+            missing
+                .iter()
+                .map(|annotation| (annotation.id.as_str(), annotation.annotation_verbatim.as_str()))
+                .collect::<Vec<_>>(),
+            vec![("a", "keep the old API")],
+            "only the operator annotation gates the closeout"
+        );
+        let answered = format!("{response}\n> **Operator note:** keep the old API\n\nKept.\n");
+        assert!(
+            unaddressed_completed_annotations(&content, &answered, &["ask".into(), "a".into()])
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn closeout_gate_still_blocks_an_operator_note_appended_to_a_waiting_row() {
+        let tree = WAITING_TREE.replace(
+            "<!-- agent-doc:waiting-item -->",
+            "<!-- agent-doc:waiting-item --> but only after CI is green",
+        );
+        let content = waiting_doc(&tree);
+        let missing =
+            unaddressed_completed_annotations(&content, "### Re: ask\n\ndone\n", &["ask".into()])
+                .unwrap();
+        assert_eq!(missing.len(), 1, "{missing:?}");
+        assert_eq!(missing[0].annotation_verbatim, "but only after CI is green");
+        let answered = "### Re: ask\n\n> **Operator note:** but only after CI is green\n\nCI was green first.\n";
+        assert!(
+            unaddressed_completed_annotations(&content, answered, &["ask".into()])
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn requeue_never_copies_a_waiting_rows_own_text_into_the_queue() {
+        let content = waiting_doc(WAITING_TREE);
+        let head = "⟦you: 1 · agent: 0 · done: 0⟧ [#ask] Approve the ask. <!-- agent-doc:waiting-item -->"
+            .to_string();
+        assert!(
+            requeue_unaddressed_annotations(&content, std::slice::from_ref(&head), &["no evidence"])
+                .unwrap()
+                .is_none()
         );
     }
 

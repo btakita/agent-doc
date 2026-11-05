@@ -79,6 +79,15 @@ historical action; reserve `--todo-remove` for an invalid or cancelled row whose
 checked history would mislead. Never infer completion when evidence is
 uncertain.
 
+**Stale tracked items (`#decisionstaleaudit`).** A `stale_tracked_item` signal
+means an operator decision that was already delivered settles an open todo,
+backlog, review, or icebox item. It cites the decision id and the answer. Apply
+its suggested flag in this closeout (`--todo-done`, `--done`, or
+`--review-resolve`) and cite the decision id in the response, or rewrite the
+item as the action the answer asks for. Icebox items are only flagged: decide
+what to do with them yourself. Preflight already closed a todo whose own id the
+delivered answer settled; it never closes anything else.
+
 Finalize also auto-dedupes identical same-id review entries during closeout maintenance, so an interleaved-finalize duplicate collapses without an explicit flag; distinct items that merely share an id are preserved so the ambiguity warning still surfaces.
 
 **Complete over gate — keep `agent:review` small (target < 10).** The default

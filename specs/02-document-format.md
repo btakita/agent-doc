@@ -826,6 +826,18 @@ action is finished or moot:
   resolved). Structural sync signals remain available when tracked-work
   evidence is unreadable; no link verdict is inferred in that case. Signals
   are state, not events, so they repeat until the state changes.
+  `stale_tracked_item` (`#decisionstaleaudit`) names an open todo, backlog,
+  review, or icebox item that a *delivered* answer-ledger decision (its answer
+  row struck, archived, or remembered only by the index) already settles,
+  with `component`, `stale_kind` (`answered_but_open`: the item asks a
+  question whose own id or normalized text has that answer;
+  `done_by_evidence`: every PR/issue number or commit SHA the item names is
+  recorded merged/landed/pushed/committed/published/released by a decision
+  linked to it), the cited `decision`, and the closeout flag to apply
+  (`--todo-done`, `--done`, `--review-resolve`; icebox items are only
+  flagged). The matching todo's `todo_sync_required` action names the
+  settling decision. No signal is raised while a live queue row still names
+  the item or the decision has an undelivered revision.
 - **Agent closeout audit** consumes every `todo_sync_required` signal. It
   includes `--todo-done <selector>` for every action current evidence proves
   finished or moot, even when the row has no tracked-work link and the operator

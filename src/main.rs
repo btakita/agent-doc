@@ -6285,13 +6285,15 @@ fn report_retained_closeout_pending(
 /// Whether a retained capture has a worker that will close it: a durable
 /// active capture plus a supervisor idle watch to re-drive it. Without the
 /// supervisor nothing resumes it (`#capturedresumeunowned`), so the original
-/// failure stands and its remedy (`repair --resume-capture`) applies.
+/// failure stands and its remedy (`repair --resume-capture`) applies. A
+/// route-owned and an operator-started supervisor both drive it
+/// (`#supervisorpidoperatorstarted`).
 fn retained_closeout_has_driver(file: &Path) -> bool {
     let captured = agent_doc_capture_io::load_active(file)
         .ok()
         .flatten()
         .is_some();
-    captured && agent_doc_supervisor_io::process::supervisor_pid_for_doc(file).is_some()
+    captured && agent_doc_supervisor_io::process::serving_supervisor_pid_for_doc(file).is_some()
 }
 
 /// Follow the controller's closeout projection until the retained worker

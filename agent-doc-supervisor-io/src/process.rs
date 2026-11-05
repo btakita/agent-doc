@@ -1,6 +1,6 @@
 //! Supervisor process discovery by owned document.
 //!
-//! "Which live `start --route-owned` process supervises this document?" is a
+//! "Which live supervisor process serves this document?" is a
 //! **discovery** question, not a kill-path concern. It previously lived in
 //! [`crate::selfkill`] because the verified force-kill was its first consumer,
 //! but the kill path is only one caller: liveness checks use the same lookup to
@@ -182,8 +182,11 @@ pub fn supervisor_pid_matches_doc(_pid: u32, _target: &Path) -> bool {
 /// read a pid change where there is none, and aim the verified kill at a
 /// short-lived child instead of the supervisor (#controllerforkimage).
 ///
-/// `None` means no supervisor process exists for the document — which also means
-/// no idle-queue watch, so an active queue cannot self-drain.
+/// This is the route-owned WITNESS only: `None` does not mean the document has
+/// no supervisor, because an operator-started `agent-doc start <FILE>` runs the
+/// same supervisor loop and idle watch without `--route-owned`. A liveness
+/// question ("is there a supervisor, and so an idle-queue watch?") asks
+/// [`serving_supervisor_pid_for_doc`] (`#supervisorpidoperatorstarted`).
 #[cfg(unix)]
 pub fn supervisor_pid_for_doc(target: &Path) -> Option<u32> {
     let entries = std::fs::read_dir("/proc").ok()?;
@@ -196,6 +199,94 @@ pub fn supervisor_pid_for_doc(target: &Path) -> Option<u32> {
         |pid| supervisor_pid_matches_doc(pid, target),
         is_unexeced_fork_of_parent,
     )
+}
+
+/// `#supervisorpidoperatorstarted`: the canonical documents `pid` serves as an
+/// agent-doc supervisor, read from ONE `/proc/<pid>/cmdline`: the route-owned
+/// parse (every shape [`supervisor_pid_for_doc`] accepts) and the direct
+/// `agent-doc start` parse (`argv[0]` the binary, never a shell wrapper,
+/// [`direct_start_supervisor_doc_from_args`]). A relative path resolves against
+/// the process's `/proc/<pid>/cwd`.
+#[cfg(unix)]
+fn serving_supervisor_docs_canonical(pid: u32) -> Vec<PathBuf> {
+    let Some(args) = read_proc_args(pid) else {
+        return Vec::new();
+    };
+    let mut docs = Vec::with_capacity(2);
+    for doc in [
+        agent_doc_supervisor::selfkill::start_route_owned_doc_from_args(&args),
+        direct_start_supervisor_doc_from_args(&args),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        if docs.contains(&doc) {
+            continue;
+        }
+        docs.push(doc);
+    }
+    let mut cwd = None;
+    docs.into_iter()
+        .filter_map(|doc| {
+            if doc.is_absolute() {
+                return doc.canonicalize().ok();
+            }
+            let cwd =
+                cwd.get_or_insert_with(|| std::fs::read_link(format!("/proc/{pid}/cwd")).ok());
+            cwd.as_ref()?.join(doc).canonicalize().ok()
+        })
+        .collect()
+}
+
+/// `#supervisorpidoperatorstarted`: does `pid` supervise exactly `target`,
+/// route-owned or operator-started (`agent-doc start <FILE>`)? This is the
+/// same ownership proof the verified kill uses (`#stalesupervisorhidden`), so a
+/// liveness answer and a kill target can never disagree about what counts as
+/// this document's supervisor.
+#[cfg(unix)]
+pub fn supervisor_pid_serves_doc(pid: u32, target: &Path) -> bool {
+    target
+        .canonicalize()
+        .is_ok_and(|want| serving_supervisor_docs_canonical(pid).contains(&want))
+}
+
+#[cfg(not(unix))]
+pub fn supervisor_pid_serves_doc(_pid: u32, _target: &Path) -> bool {
+    false
+}
+
+/// `#supervisorpidoperatorstarted`: scan `/proc` for the live supervisor of
+/// `target`, route-owned OR operator-started, verified exactly as
+/// [`verified_start_supervisor_pid`] verifies a witness: the process names this
+/// canonical document, it is not the calling pid, and it is not an un-exec'd
+/// fork image of its parent.
+///
+/// [`supervisor_pid_for_doc`] answers only for `start --route-owned`, so a
+/// document served by an operator-started `agent-doc start <FILE>` read as
+/// having no supervisor and no idle watch: the controller's orphan drain
+/// dispatched beside a live idle watch, capture ownership called a resumable
+/// capture unowned, the dispatch-only recycle gate saw no owner, and the CLI
+/// closeout said no driver would close a retained capture. Every liveness
+/// question ("is there a supervisor at all?") asks this; the route-owned scan
+/// stays only where a caller needs that specific witness.
+#[cfg(unix)]
+pub fn serving_supervisor_pid_for_doc(target: &Path) -> Option<u32> {
+    let want = target.canonicalize().ok()?;
+    let entries = std::fs::read_dir("/proc").ok()?;
+    let pids = entries
+        .flatten()
+        .filter_map(|entry| entry.file_name().to_str()?.parse::<u32>().ok());
+    first_supervisor_pid(
+        pids,
+        std::process::id(),
+        |pid| serving_supervisor_docs_canonical(pid).contains(&want),
+        is_unexeced_fork_of_parent,
+    )
+}
+
+#[cfg(not(unix))]
+pub fn serving_supervisor_pid_for_doc(_target: &Path) -> Option<u32> {
+    None
 }
 
 /// The selection behind [`supervisor_pid_for_doc`], over a scan order and two
@@ -312,6 +403,7 @@ pub(crate) mod tests {
                 is_unexeced_fork_of_parent(fork_image),
                 is_unexeced_fork_of_parent(supervisor.id()),
                 supervisor_pid_for_doc(&doc),
+                serving_supervisor_pid_for_doc(&doc),
             )
         });
         if let Some(fork_image) = fork_image {
@@ -323,11 +415,16 @@ pub(crate) mod tests {
         let _ = supervisor.kill();
         let _ = supervisor.wait();
 
-        let (image_is_fork, supervisor_is_fork, discovered) =
+        let (image_is_fork, supervisor_is_fork, discovered, serving) =
             observed.expect("fake supervisor never forked its subshell image");
         assert!(image_is_fork);
         assert!(!supervisor_is_fork);
         assert_eq!(discovered, Some(supervisor.id()));
+        assert_eq!(
+            serving,
+            Some(supervisor.id()),
+            "the widened liveness scan keeps every route-owned shape and skips fork images"
+        );
     }
 
     /// Discovery must be total: an unknown document simply has no supervisor,
@@ -453,5 +550,105 @@ pub(crate) mod tests {
         let _ = supervisor.wait();
 
         assert_eq!(observed, (Some(pid), None, true, false));
+    }
+
+    /// `#supervisorpidoperatorstarted`: the liveness scan behind capture-io's
+    /// no-supervisor check, the controller orphan drain's `supervisor_alive`,
+    /// the dispatch-only recycle proof and the CLI's captured-closeout driver
+    /// check. The 2026-11-05 `sdk-dev.md` supervisor 2612299 was started as
+    /// `agent-doc start <FILE>` and every one of those read it as absent. The
+    /// live operator-started supervisor (document relative to its cwd) is now
+    /// found and accepted by the shared ownership proof; the route-owned
+    /// witness still does not see it (pre-fix behaviour), a sibling document
+    /// has no supervisor, and the calling process is never its own answer.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn liveness_scan_finds_an_operator_started_supervisor() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join("tasks")).unwrap();
+        let doc = dir.path().join("tasks/sdk-dev.md");
+        let sibling = dir.path().join("tasks/sdk-dev-loop.md");
+        std::fs::write(&doc, "body").unwrap();
+        std::fs::write(&sibling, "body").unwrap();
+        let mut supervisor = spawn_operator_started_fake_supervisor(dir.path(), "tasks/sdk-dev.md");
+        let pid = supervisor.id();
+        let observed = (
+            serving_supervisor_pid_for_doc(&doc),
+            supervisor_pid_for_doc(&doc),
+            serving_supervisor_pid_for_doc(&sibling),
+            supervisor_pid_serves_doc(pid, &doc),
+            supervisor_pid_serves_doc(pid, &sibling),
+            supervisor_pid_serves_doc(std::process::id(), &doc),
+        );
+        let _ = supervisor.kill();
+        let _ = supervisor.wait();
+
+        assert_eq!(
+            observed,
+            (Some(pid), None, None, true, false, false),
+            "(serving scan, route-owned witness, sibling scan, serves doc, serves sibling, self serves)"
+        );
+    }
+
+    /// `#bare-foreign-session-guard` stays closed: a process whose command
+    /// string merely MENTIONS `agent-doc start <FILE>` (a shell wrapper, so
+    /// `argv[0]` is not the binary) is not a supervisor, and neither is a
+    /// non-`agent-doc` process naming the document.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn liveness_scan_rejects_a_shell_wrapper_naming_an_operator_start() {
+        use std::io::BufRead;
+        use std::process::{Command, Stdio};
+
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join("tasks")).unwrap();
+        let doc = dir.path().join("tasks/plan.md");
+        std::fs::write(&doc, "body").unwrap();
+        let mut spawned = Vec::new();
+        for argv in [
+            vec![
+                "-c",
+                "echo ready; read _",
+                "agent-doc",
+                "start",
+                "tasks/plan.md",
+            ],
+            vec![
+                "-c",
+                "echo ready; read _",
+                "grok",
+                "--resume",
+                "tasks/plan.md",
+            ],
+        ] {
+            let mut child = Command::new("sh")
+                .args(&argv)
+                .current_dir(dir.path())
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::null())
+                .spawn()
+                .unwrap();
+            let mut line = String::new();
+            std::io::BufReader::new(child.stdout.take().unwrap())
+                .read_line(&mut line)
+                .unwrap();
+            spawned.push((child, line.trim() == "ready"));
+        }
+        let pids: Vec<u32> = spawned.iter().map(|(child, _)| child.id()).collect();
+        let observed = (
+            serving_supervisor_pid_for_doc(&doc),
+            pids.iter()
+                .map(|pid| supervisor_pid_serves_doc(*pid, &doc))
+                .collect::<Vec<_>>(),
+        );
+        let started = spawned.iter().all(|(_, ready)| *ready);
+        for (mut child, _) in spawned {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+
+        assert!(started, "fake wrappers did not start");
+        assert_eq!(observed, (None, vec![false, false]));
     }
 }

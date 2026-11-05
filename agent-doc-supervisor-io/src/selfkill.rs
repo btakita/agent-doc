@@ -153,11 +153,9 @@ pub use crate::process::supervisor_pid_for_doc;
 /// The kill-time ownership proof: `pid` is a supervisor for exactly `target`,
 /// either a route-owned one (any shape the route-owned scan accepts) or a
 /// direct operator-started `agent-doc start <FILE>` (`#stalesupervisorhidden`).
+/// Liveness discovery shares it (`#supervisorpidoperatorstarted`).
 #[cfg(unix)]
-fn supervisor_pid_serves_doc(pid: u32, target: &Path) -> bool {
-    crate::process::supervisor_pid_matches_doc(pid, target)
-        || crate::process::start_supervisor_pid_matches_doc(pid, target)
-}
+use crate::process::supervisor_pid_serves_doc;
 
 /// `#supkill-b` — verified force-kill of a supervisor pid: SIGTERM, brief wait, then
 /// SIGKILL if still alive. Re-verifies the cmdline before *each* signal so a recycled

@@ -69,9 +69,10 @@ pub fn wait_for_dispatch_only_recycle_inflight_settle(
     loop {
         let ttl_secs = recycle_inflight_settle_ttl_secs();
         // `#netadv5` R9: the TTL alone is a timer; abandonment needs the
-        // supervisor to be gone.
+        // supervisor to be gone. An operator-started `agent-doc start <FILE>`
+        // supervisor is an owner too (`#supervisorpidoperatorstarted`).
         let supervisor_pid =
-            agent_doc_supervisor_io::process::supervisor_pid_for_doc(Path::new(file_path));
+            agent_doc_supervisor_io::process::serving_supervisor_pid_for_doc(Path::new(file_path));
         let supervisor_alive = supervisor_pid.is_some();
         // `#dispatchreadyselfheal`: a supervisor `ready` registration stamped
         // after this recycle started is the settle itself, observed directly.

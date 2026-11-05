@@ -21778,8 +21778,12 @@ fn controller_orphan_drain_tick(runtime: &Arc<ControllerRuntime>) {
             // queue-tag `go`, and legacy active state) as well as drainability.
             queue_active,
             has_drainable_head: drainable.is_some(),
-            supervisor_alive: agent_doc_supervisor_io::process::supervisor_pid_for_doc(&file)
-                .is_some(),
+            // `#supervisorpidoperatorstarted`: an operator-started supervisor
+            // runs the same idle watch as a route-owned one.
+            supervisor_alive: agent_doc_supervisor_io::process::serving_supervisor_pid_for_doc(
+                &file,
+            )
+            .is_some(),
             loop_owns_drain,
             pane_busy: record.state != agent_doc_controller::actor::ActorState::Ready,
             secs_since_last_dispatch: last_dispatch

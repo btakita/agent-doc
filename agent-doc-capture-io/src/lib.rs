@@ -525,12 +525,14 @@ pub fn retained_write_ownership(
     // Only asked when a capture is actually retained: the process scan is
     // pointless otherwise, and an unproven driver must never *add* ownership.
     //
-    // `supervisor_pid_for_doc` skips the calling pid, so a supervisor asking
-    // about its own document would otherwise report itself unowned mid-resume.
-    // Ask about this process explicitly.
+    // `serving_supervisor_pid_for_doc` skips the calling pid, so a supervisor
+    // asking about its own document would otherwise report itself unowned
+    // mid-resume. Ask about this process explicitly. Both questions accept an
+    // operator-started `agent-doc start <FILE>` supervisor as well as a
+    // route-owned one: it runs the same idle watch (`#supervisorpidoperatorstarted`).
     let capture_resume_unowned = retained_capture
-        && agent_doc_supervisor_io::process::supervisor_pid_for_doc(file).is_none()
-        && !agent_doc_supervisor_io::process::supervisor_pid_matches_doc(std::process::id(), file);
+        && agent_doc_supervisor_io::process::serving_supervisor_pid_for_doc(file).is_none()
+        && !agent_doc_supervisor_io::process::supervisor_pid_serves_doc(std::process::id(), file);
     // A response-bearing retained transition remains an owner even if the
     // mutable cycle state has already crossed `committed` and the active
     // capture view therefore disappears. The transition carries its own

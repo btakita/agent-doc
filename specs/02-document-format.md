@@ -166,7 +166,8 @@ ones are flagged for the operator, never rewritten), and flags live
 derivations of one decision that reach different answers (same premises: an
 inference is wrong; different premises: the premises conflict). `agent-doc
 decision why` prints the chain for a decision (`#firstprincipleswhy`,
-[§16](16-mutable-decisions.md)); derivations have no durable store yet.
+[§16](16-mutable-decisions.md)), including the steps `agent-doc decision
+derive` stores in the decision-graph tables (`#firstprinciplesstore`).
 
 #### Premise changes (`#firstprinciplesrederive`)
 
@@ -189,7 +190,9 @@ first pass for a document records a baseline and reports nothing.
 Each change reaches the cycle contract as a `premise_changes` entry:
 `premise` (`kind` `principle` or `fact`, `id`), `change`,
 `previous_statement`, `statement` (absent when removed), `source`, and
-`affected`: every live derivation that rested on the premise, directly or
+`affected`: every live derivation (the steps stored by `agent-doc decision
+derive`, `#firstprinciplesstore`, with the reviews the document shows
+applied) that rested on the premise, directly or
 through a derived decision, with action `rederive` (an unreviewed agent
 derivation: derive it again from the current premises) or `flag` (an
 operator-confirmed derivation: show the operator, never rewrite it).

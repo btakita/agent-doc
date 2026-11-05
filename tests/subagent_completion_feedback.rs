@@ -1144,3 +1144,121 @@ fn a_committed_plain_twin_of_a_running_claim_is_never_selected_or_dispatched() {
         "{state:#}"
     );
 }
+
+/// `#lifecyclewordfusion` (haiven-dev sdk-dev.md, 2026-11-03): after dispatch
+/// the running row read `📥 running🚧 do [#q-c2010d98af04]`. The state word
+/// fused to its glyph hid the row from its own running attempt, so
+/// `queue report-complete` printed "no subagent claim" and wrote nothing, and
+/// the coordinator struck the row by echo text instead. The fused token is
+/// projection: the report lands on the exact attempt and the repaint drops
+/// the word.
+#[test]
+fn report_complete_finds_the_attempt_on_a_row_whose_state_word_was_fused() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::create_dir_all(dir.path().join(".agent-doc/locks")).unwrap();
+    let doc = dir.path().join("session.md");
+    let parent = "ADR 0046 approvers";
+    let leaf = "do [#q-c2010d98af04]";
+    fs::write(
+        &doc,
+        format!(
+            concat!(
+                "---\nagent_doc_session: fused-state-word\nagent_doc_format: template\n---\n\n",
+                "<!-- agent:exchange patch=append subagents -->\n",
+                "### Re: prior — gpt-5\n\nDone.\n",
+                "<!-- agent:boundary:keep -->\n",
+                "<!-- /agent:exchange -->\n\n",
+                "<!-- agent:queue subagents -->\n",
+                "- {parent}\n",
+                "  - {leaf}\n",
+                "<!-- /agent:queue -->\n\n",
+                "<!-- agent:backlog -->\n",
+                "- [ ] [#q-c2010d98af04] Add Dillon + Eddie.\n",
+                "<!-- /agent:backlog -->\n",
+            ),
+            parent = parent,
+            leaf = leaf,
+        ),
+    )
+    .unwrap();
+    let binary = env!("CARGO_BIN_EXE_agent-doc");
+    let run = |args: &[&str]| {
+        let output = Command::new(binary)
+            .env(
+                agent_doc_controller_io::project_controller::TEST_CONTROLLER_LAUNCH_REASON_ENV,
+                CONTROLLER_LAUNCH_REASON,
+            )
+            .current_dir(dir.path())
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{args:?} failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8_lossy(&output.stderr).into_owned()
+    };
+    let path = doc.to_str().unwrap();
+    let vector = format!("{parent}: {leaf}");
+    run(&[
+        "queue",
+        "claim",
+        path,
+        "--item",
+        &vector,
+        "--owner",
+        "subagent:dillon",
+    ]);
+    run(&[
+        "queue",
+        "start",
+        path,
+        "--item",
+        &vector,
+        "--owner",
+        "subagent:dillon",
+        "--generation",
+        "1",
+        "--worker-id",
+        "worker:dillon",
+    ]);
+    let started = fs::read_to_string(&doc).unwrap();
+    assert!(
+        started.contains("  - 🚧 [#subagent:dillon#1] do [#q-c2010d98af04]\n"),
+        "{started}"
+    );
+    // The live corruption: the state word fused in front of its glyph and the
+    // owner annotation lost.
+    fs::write(
+        &doc,
+        started.replace(
+            "  - 🚧 [#subagent:dillon#1] do [#q-c2010d98af04]\n",
+            "  - 📥 running🚧 do [#q-c2010d98af04]\n",
+        ),
+    )
+    .unwrap();
+
+    let stderr = run(&[
+        "queue",
+        "report-complete",
+        "--prose-only",
+        path,
+        "--item",
+        &vector,
+        "--generation",
+        "1",
+        "--response",
+        "Recorded the decision.",
+    ]);
+    assert!(
+        stderr.contains("subagent completion feedback accepted"),
+        "the report must land on the running attempt: {stderr}"
+    );
+    let reported = fs::read_to_string(&doc).unwrap();
+    assert!(
+        reported.contains("  - ☑️ [#subagent:dillon#1] do [#q-c2010d98af04]\n"),
+        "{reported}"
+    );
+    assert!(!reported.contains("running🚧"), "{reported}");
+}

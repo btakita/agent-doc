@@ -548,6 +548,12 @@ fn strip_projection_token(trimmed: &str) -> Option<&str> {
         .or_else(|| strip_blocked_annotation_token(trimmed))
         .or_else(|| strip_owner_annotation_token(trimmed))
         .or_else(|| strip_waiting_status_token(trimmed))
+        // `#lifecyclewordfusion`: a state word fused to its glyph
+        // (`running🚧`) is one torn lifecycle token, never work identity.
+        .or_else(|| {
+            agent_doc_queue_icons::fused_lifecycle_word_token(trimmed)
+                .map(|(_, len)| &trimmed[len..])
+        })
 }
 
 /// `#waitingitemstatus`: label words of the binary-owned waiting-item roll-up.
@@ -1441,6 +1447,34 @@ mod tests {
         assert_eq!(
             strip_queue_prompt_stable_id_annotation("ship it [#q-abc123] ⟦effect:2⟧ ⟦published⟧"),
             "ship it ⟦effect:2⟧ ⟦published⟧"
+        );
+    }
+
+    /// `#lifecyclewordfusion`: haiven-dev sdk-dev.md 2026-11-03 struck the
+    /// row as `~~running🚧 do [#q-c2010d98af04]~~`. The fused state word is a
+    /// projection token: identity, priority stripping and the strike body all
+    /// read the authored `do [#q-c2010d98af04]`.
+    #[test]
+    fn fused_state_word_is_projection_for_identity_and_strikes() {
+        let fused = "📥 running🚧 do [#q-c2010d98af04]";
+        assert_eq!(strip_priority_markers(fused), "do [#q-c2010d98af04]");
+        assert_eq!(
+            strip_attempt_projection_prefix(fused),
+            "do [#q-c2010d98af04]"
+        );
+        assert_eq!(struck_work_text(fused), "do [#q-c2010d98af04]");
+        assert_eq!(render_struck_row_body(fused), "~~do [#q-c2010d98af04]~~");
+        assert_eq!(
+            queue_head_identity(fused),
+            queue_head_identity("do [#q-c2010d98af04]")
+        );
+        assert_eq!(
+            QueueItemIdentity::from_prompt("running🚧 fix the login flow"),
+            QueueItemIdentity::from_prompt("fix the login flow")
+        );
+        assert_eq!(
+            strip_priority_markers("running tests on main"),
+            "running tests on main"
         );
     }
 }

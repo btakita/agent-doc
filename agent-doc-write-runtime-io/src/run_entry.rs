@@ -68,6 +68,69 @@ fn enforce_dispatch_acknowledgements_at(
     )
 }
 
+/// `#claimedechostrike`: a closeout never strikes a row a subagent is still
+/// claimed or running on. The worker's row closes from the worker's report;
+/// striking it from the coordinator's `> **Queue prompt:**` echo or `--done`
+/// ends the claim with no report, so the result never crosses the
+/// report/integration boundary. Fail closed before anything is captured.
+fn enforce_claimed_rows_close_from_worker_report(
+    file: &Path,
+    current: &str,
+    response: &str,
+    flags: &WriteFlags,
+) -> Result<()> {
+    let claims = agent_doc_queue_io::queue_claim::claim_states_for_content(file, current)
+        .context("[finalize] pre-write gate: failed to read queue claim attempts")?;
+    let mut done_ids = flags.pending_done_ids.clone();
+    done_ids.extend(flags.queue_completion_ids.iter().cloned());
+    enforce_claimed_rows_close_from_worker_report_with_claims(
+        &file.display().to_string(),
+        current,
+        response,
+        &done_ids,
+        &claims,
+    )
+}
+
+fn enforce_claimed_rows_close_from_worker_report_with_claims(
+    file: &str,
+    current: &str,
+    response: &str,
+    done_ids: &[String],
+    claims: &[agent_doc_queue::queue_claim::QueueClaim],
+) -> Result<()> {
+    let rows = agent_doc_queue::queue_closeout_guard::unreported_claimed_rows_closed_by_closeout(
+        current, response, done_ids, claims,
+    );
+    if rows.is_empty() {
+        return Ok(());
+    }
+    let remedies = rows
+        .iter()
+        .map(|row| {
+            let how = match row.source {
+                agent_doc_queue::queue_closeout_guard::ClaimedRowCloseoutSource::QueuePromptEcho => {
+                    "the response's `> **Queue prompt:**` echo"
+                }
+                agent_doc_queue::queue_closeout_guard::ClaimedRowCloseoutSource::DoneId => {
+                    "`--done`"
+                }
+            };
+            let quote = |text: &str| format!("'{}'", text.replace('\'', "'\\''"));
+            let item = quote(&agent_doc_queue::queue_claim::claim_item_handle(&row.lineage));
+            let document = quote(file);
+            format!(
+                "{how} would strike queue row {:?} while `{}` generation {} is still {:?} on it and has not reported. Record the worker's result first: `agent-doc queue report-complete {document} --item {item} --generation {} --prose-only --response '<worker result>'` (or pass its repository provenance instead of `--prose-only`), then close the row; if no worker ran, `agent-doc queue release {document} --item {item} --generation {} --requeue`.",
+                row.lineage, row.owner, row.generation, row.state, row.generation, row.generation,
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    anyhow::bail!(
+        "[finalize] pre-write gate: a closeout may not strike a row a worker still owns (#claimedechostrike). {remedies} No response has been captured."
+    );
+}
+
 fn enforce_selected_queue_response_contract(
     file: Option<&Path>,
     baseline: Option<&str>,
@@ -80,6 +143,7 @@ fn enforce_selected_queue_response_contract(
     }
     if let Some(file) = file {
         enforce_dispatch_acknowledgements(file, current)?;
+        enforce_claimed_rows_close_from_worker_report(file, current, response, flags)?;
     }
     enforce_queue_head_annotation_response_contract(current, response, flags)?;
     let explicit_id_completion = !flags.queue_completion_ids.is_empty();
@@ -4524,5 +4588,71 @@ mod tests {
 
         agent_doc_crdt_relay_io::deregister_editor_replica_for_file(&canonical, &identity, pid)
             .unwrap();
+    }
+
+    /// `#claimedechostrike`: finalize refuses, before capture, to strike a row
+    /// a subagent is still running on, and names the report-complete and
+    /// release commands for that exact attempt (haiven-dev sdk-dev.md
+    /// 2026-11-03: `do [#q-c2010d98af04]` was struck with no worker report).
+    #[test]
+    fn finalize_refuses_to_strike_a_row_a_worker_still_runs_on() {
+        let content = concat!(
+            "<!-- agent:queue subagents -->\n",
+            "- 🚧 [#subagent:dillon#1] do [#q-c2010d98af04]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#q-c2010d98af04] Add Dillon + Eddie.\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        let mut ledger = agent_doc_queue::queue_claim::QueueClaimLedger::default();
+        ledger.claim("do [#q-c2010d98af04]", "subagent:dillon", 100, 3600);
+        ledger
+            .start(
+                "do [#q-c2010d98af04]",
+                "subagent:dillon",
+                "worker:dillon",
+                100,
+                3600,
+                Some(1),
+            )
+            .unwrap();
+        let response = "### Re: dillon\n\n> **Queue prompt:** do [#q-c2010d98af04]\n\nRecorded.\n";
+
+        let error = enforce_claimed_rows_close_from_worker_report_with_claims(
+            "doc.md",
+            content,
+            response,
+            &["q-c2010d98af04".to_string()],
+            &ledger.claims,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("#claimedechostrike"), "{error}");
+        assert!(
+            error.contains("`subagent:dillon` generation 1 is still Running"),
+            "{error}"
+        );
+        assert!(
+            error.contains(
+                "agent-doc queue report-complete 'doc.md' --item '#q-c2010d98af04' --generation 1 --prose-only"
+            ),
+            "{error}"
+        );
+        assert!(
+            error.contains(
+                "agent-doc queue release 'doc.md' --item '#q-c2010d98af04' --generation 1 --requeue"
+            ),
+            "{error}"
+        );
+
+        ledger.report("do [#q-c2010d98af04]", Some(1)).unwrap();
+        enforce_claimed_rows_close_from_worker_report_with_claims(
+            "doc.md",
+            content,
+            response,
+            &["q-c2010d98af04".to_string()],
+            &ledger.claims,
+        )
+        .expect("a reported attempt closes from its report");
     }
 }

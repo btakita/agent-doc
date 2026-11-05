@@ -58,7 +58,16 @@ internal fun decideIdeTerminalAttach(
  */
 internal object IdeTerminalCoordinator {
     private const val TERMINAL_PLUGIN_ID = "org.jetbrains.plugins.terminal"
-    private const val ENSURE_TIMEOUT_MS = 10_000L
+
+    /**
+     * `#starttimeoutload`: a bootstrap command may take as long as it keeps reporting
+     * phases, but no single phase longer than the idle bound and no command longer than
+     * the cap. The idle bound is the old fixed 10 s kill, so a binary without progress
+     * reporting waits exactly as before.
+     */
+    internal val BOOTSTRAP_WAIT = ProgressWaitBudget(idleTimeoutMs = 10_000L, overallCapMs = 60_000L)
+    private const val START_LABEL = "agent-doc tmux start"
+    private const val ENSURE_LABEL = "agent-doc tmux ensure"
 
     /** Start in tmux without creating, selecting, or revealing an IDE terminal. */
     fun startInPane(
@@ -71,20 +80,16 @@ internal object IdeTerminalCoordinator {
         GenerationWork.executeOnPooledThread {
             val result = try {
                 val agentDoc = TerminalUtil.resolveAgentDoc(cwd)
-                SyncLayoutAction.runCommandWithTimeout(
+                ProgressAwareCommand.run(
                     startAgentDocCommand(agentDoc, relativePath, CpRouteClient.navigationClientId),
                     cwd,
-                    ENSURE_TIMEOUT_MS,
-                    captureStderrSeparately = true,
+                    BOOTSTRAP_WAIT,
                 )
             } catch (failure: Throwable) {
                 dispatchFailure(project, onFailure, failure.message ?: failure.javaClass.simpleName)
                 return@executeOnPooledThread
             }
-            if (result.exitCode != 0) {
-                val detail = result.errorOutput.ifBlank {
-                    result.output.ifBlank { "agent-doc tmux start failed (exit ${result.exitCode})" }
-                }
+            ProgressAwareCommand.failureDetail(START_LABEL, result, BOOTSTRAP_WAIT)?.let { detail ->
                 dispatchFailure(project, onFailure, detail)
                 return@executeOnPooledThread
             }
@@ -133,39 +138,31 @@ internal object IdeTerminalCoordinator {
             }
             if (startFirst) {
                 val startResult = try {
-                    SyncLayoutAction.runCommandWithTimeout(
+                    ProgressAwareCommand.run(
                         startAgentDocCommand(agentDoc, relativePath, CpRouteClient.navigationClientId),
                         cwd,
-                        ENSURE_TIMEOUT_MS,
-                        captureStderrSeparately = true,
+                        BOOTSTRAP_WAIT,
                     )
                 } catch (failure: Throwable) {
                     dispatchFailure(project, onFailure, failure.message ?: failure.javaClass.simpleName)
                     return@executeOnPooledThread
                 }
-                if (startResult.exitCode != 0) {
-                    val detail = startResult.errorOutput.ifBlank {
-                        startResult.output.ifBlank { "agent-doc tmux start failed (exit ${startResult.exitCode})" }
-                    }
+                ProgressAwareCommand.failureDetail(START_LABEL, startResult, BOOTSTRAP_WAIT)?.let { detail ->
                     dispatchFailure(project, onFailure, detail)
                     return@executeOnPooledThread
                 }
             }
             val result = try {
-                SyncLayoutAction.runCommandWithTimeout(
+                ProgressAwareCommand.run(
                     ideTerminalEnsureCommand(agentDoc, relativePath, CpRouteClient.navigationClientId),
                     cwd,
-                    ENSURE_TIMEOUT_MS,
-                    captureStderrSeparately = true,
+                    BOOTSTRAP_WAIT,
                 )
             } catch (failure: Throwable) {
                 dispatchFailure(project, onFailure, failure.message ?: failure.javaClass.simpleName)
                 return@executeOnPooledThread
             }
-            if (result.exitCode != 0) {
-                val detail = result.errorOutput.ifBlank {
-                    result.output.ifBlank { "agent-doc tmux ensure failed (exit ${result.exitCode})" }
-                }
+            ProgressAwareCommand.failureDetail(ENSURE_LABEL, result, BOOTSTRAP_WAIT)?.let { detail ->
                 dispatchFailure(project, onFailure, detail)
                 return@executeOnPooledThread
             }

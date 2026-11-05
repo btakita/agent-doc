@@ -12,7 +12,7 @@ mod queue_tree_view;
 use agent_doc_document_realtime::editor_contract::{
     DOCUMENT_ONLY_LAYOUT_AUTHORITY, ZED_EDITOR_KIND, ZED_LSP_CAPABILITIES,
 };
-use agent_doc_merge::crdt_sync::ReplicaState;
+use agent_doc_merge::crdt_sync::{DivergentHistory, ReplicaState};
 use anyhow::{Context, Result, anyhow};
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use handoff::{BinaryObservation, BinaryWatch, HandoffDocument, HandoffState};
@@ -567,6 +567,7 @@ impl<W: Write, I: LspInput> Server<W, I> {
                 continue;
             };
             let mut changed = false;
+            let mut divergent = false;
             for update in updates {
                 let Some(origin) = update.get("origin").and_then(Value::as_u64) else {
                     continue;
@@ -581,10 +582,26 @@ impl<W: Write, I: LspInput> Server<W, I> {
                 else {
                     continue;
                 };
-                if document.replica.apply_update(&bytes).is_err() {
-                    continue;
+                match document.replica.apply_update_verified(&bytes) {
+                    Ok(()) => changed = true,
+                    // `#replicapositiondrift`: the delivery was encoded against
+                    // a different CRDT history, so applying it would land by id
+                    // on unrelated characters. Leave the buffer alone and
+                    // re-register from it so the controller bootstraps this
+                    // replica in its current lineage.
+                    Err(error) if error.is::<DivergentHistory>() => {
+                        divergent = true;
+                        break;
+                    }
+                    Err(_) => continue,
                 }
-                changed = true;
+            }
+            if divergent {
+                let visible = document.shadow.clone();
+                let uri = document.uri.clone();
+                self.detach(&uri);
+                self.attach(&uri, &visible);
+                continue;
             }
             if !changed {
                 continue;

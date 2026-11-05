@@ -3467,7 +3467,12 @@ fn register_replica_for_file_incremental_locked(
             && retained_state_vector.is_some();
         let canonical_projection_retained = !restore_fresh_controller_from_retained_replica
             && (force_full_bootstrap || retained_lineage_unproven || !hub.delivery_converged());
-        let effective_retained_state_vector = if canonical_projection_retained {
+        // `#replicapositiondrift`: a member registered before the canonical
+        // history was rebuilt from text re-announces a frontier from the retired
+        // history. An incremental bootstrap against it would be applied onto
+        // that history by id, so it always gets the full current canonical.
+        let lineage_retired = hub.member_lineage_retired(client_id);
+        let effective_retained_state_vector = if canonical_projection_retained || lineage_retired {
             None
         } else {
             retained_state_vector
@@ -3485,6 +3490,16 @@ fn register_replica_for_file_incremental_locked(
             hub.reconnect(client_id)?;
         } else {
             hub.register(client_id)?;
+        }
+        if lineage_retired && hub.renew_member_lineage(client_id) {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "crdt_replica_register_lineage_renewed file={} client_id={} bootstrap_kind=full (#replicapositiondrift)",
+                    file.display(),
+                    client_id,
+                ),
+            );
         }
         let canonical_state_vector = hub.canonical_state_vector();
         let (bootstrap, incremental) = match effective_retained_state_vector {
@@ -5202,6 +5217,14 @@ pub fn pull_replica_updates_for_file(file: &Path, identity: &str) -> Result<Opti
     }
     let client_id = mint_client_id(identity);
     let Some(pull) = with_existing_hub(file, |hub| {
+        // `#replicapositiondrift`: a member registered before the canonical
+        // history was rebuilt from text still holds the retired history in its
+        // editor replica, and every queued delta reuses that history's op ids
+        // for different characters. Never hand it one; answer like a missing
+        // member so the editor re-registers from its visible buffer.
+        if hub.member_lineage_retired(client_id) {
+            return Ok::<_, anyhow::Error>(None);
+        }
         let updates = hub.pending_updates(client_id)?;
         let delivery = hub
             .delivery_snapshot()
@@ -5209,7 +5232,7 @@ pub fn pull_replica_updates_for_file(file: &Path, identity: &str) -> Result<Opti
             .find(|entry| entry.client_id == client_id)
             .ok_or_else(|| anyhow::anyhow!("replica {client_id} is not registered"))?;
         let recovery_now = hub.claim_nonconverging_recovery(client_id)?;
-        Ok::<_, anyhow::Error>((updates, delivery, recovery_now))
+        Ok::<_, anyhow::Error>(Some((updates, delivery, recovery_now)))
     })?
     else {
         // Passive polls carry no editor state with which to rebuild an evicted
@@ -5217,7 +5240,17 @@ pub fn pull_replica_updates_for_file(file: &Path, identity: &str) -> Result<Opti
         // first; otherwise a stale poll recreates the phantom zero-member hub.
         return Ok(None);
     };
-    let (updates, delivery, recovery_now) = pull?;
+    let Some((updates, delivery, recovery_now)) = pull? else {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "crdt_replica_pull_refused file={} authority=multi_replica client_id={} reason=lineage_retired recovery=reregister (#replicapositiondrift)",
+                file.display(),
+                client_id,
+            ),
+        );
+        return Ok(None);
+    };
     // `#droppedreplicapull`: a member dropped from the delivery cut is
     // disconnected, so its pending queue was cleared and later broadcasts skip
     // it. An editor that keeps pulling as that member therefore receives
@@ -9957,6 +9990,96 @@ mod tests {
             .unwrap()
             .expect("a re-registered member pulls normally");
         assert!(pull.delivery.live);
+    }
+
+    /// `#replicapositiondrift` (2026-11-05 00:52-00:53Z, agent-doc-bugs.md):
+    /// the controller compacted the canonical into a fresh epoch, the old
+    /// JetBrains replica consumed the replace delivery but could not reattach,
+    /// and kept pulling as the same member. The next controller write was then
+    /// handed to it encoded in the fresh history, which reuses the retired
+    /// history's op ids, and landed 674 code points past its row. A retired
+    /// member must be refused until it re-registers, and that registration must
+    /// be a full bootstrap even when its retained frontier looks covered.
+    #[test]
+    fn a_member_retired_by_an_epoch_rebuild_is_refused_deltas_until_a_full_reregister() {
+        let (dir, doc) = temp_doc("retired-lineage-pull.md");
+        let ops_log = dir.path().join(".agent-doc/logs/ops.log");
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_format: template\n---\n\n<!-- agent:exchange patch=append -->\n❯ operator prompt\n<!-- agent:boundary:abc -->\n<!-- /agent:exchange -->\n",
+        )
+        .unwrap();
+        seed_live_reliable_sync_open(&doc.display().to_string());
+        let identity = "intellij:retired-lineage-pull";
+        let (client_id, bootstrap) = register_replica_for_file(&doc, identity)
+            .unwrap()
+            .expect("live editor should register with the relay");
+        let retired_native =
+            agent_doc_merge::crdt_sync::ReplicaState::from_encoded(client_id, &bootstrap).unwrap();
+        let retired_frontier = retired_native.state_vector();
+
+        with_existing_hub(&doc, |hub| {
+            let text = hub.canonical_text();
+            hub.compact_authoritative_epoch(&text)
+        })
+        .unwrap()
+        .unwrap()
+        .unwrap();
+        assert!(
+            pull_rebootstrap_for_file(&doc, identity).unwrap().is_some(),
+            "the replace delivery is still served first"
+        );
+
+        let response = "### Re: operator prompt — gpt-5\n\nWritten in the fresh epoch.";
+        let write = add_response_cell_for_file(&doc, None, response, "test")
+            .unwrap()
+            .expect("editor-attached response add should use the relay");
+        assert!(write.applied);
+        assert!(
+            pull_replica_updates_for_file(&doc, identity)
+                .unwrap()
+                .is_none(),
+            "a member still holding the retired history must never be handed a fresh-epoch delta"
+        );
+        let log = std::fs::read_to_string(&ops_log).unwrap();
+        assert!(
+            log.contains("reason=lineage_retired recovery=reregister"),
+            "the refusal names its cause"
+        );
+
+        // The editor shows the canonical (its projection settles the queued
+        // write), so only the retired history can make the registration unsafe.
+        let canonical = with_existing_hub(&doc, |hub| hub.canonical_text())
+            .unwrap()
+            .unwrap();
+        observe_replica_projection_for_file(
+            &doc,
+            identity,
+            &agent_doc_hash::content_hash(&canonical),
+        )
+        .unwrap();
+        let registration =
+            register_replica_for_file_incremental(&doc, identity, Some(&retired_frontier))
+                .unwrap()
+                .expect("the same editor re-registers");
+        assert_eq!(registration.client_id, client_id);
+        assert!(
+            !registration.incremental,
+            "a retired frontier is never answered with a delta onto the retired history"
+        );
+        let renewed = agent_doc_merge::crdt_sync::ReplicaState::from_encoded(
+            registration.client_id,
+            &registration.bootstrap,
+        )
+        .unwrap();
+        assert_eq!(renewed.text(), canonical);
+        assert!(renewed.text().contains("Written in the fresh epoch."));
+        let pull = pull_replica_updates_for_file(&doc, identity)
+            .unwrap()
+            .expect("a renewed member pulls normally");
+        assert!(pull.delivery.live);
+        let log = std::fs::read_to_string(&ops_log).unwrap();
+        assert!(log.contains("crdt_replica_register_lineage_renewed"));
     }
 
     #[test]

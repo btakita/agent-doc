@@ -21,7 +21,7 @@ use agent_doc_element::element;
 
 use agent_doc_frontmatter::frontmatter;
 use agent_doc_merge::crdt;
-use agent_doc_merge::crdt_sync::ReplicaState;
+use agent_doc_merge::crdt_sync::{DivergentHistory, ReplicaState};
 use agent_doc_syntax as syntax;
 use agent_doc_template as template;
 
@@ -527,6 +527,9 @@ fn null_state(out_len: *mut usize) -> *mut u8 {
 /// plugin re-seeds the replica on failure — instead of crashing the host.
 /// Requires `panic = "unwind"` (the `release` profile no longer forces abort).
 const ERR_FFI_PANIC: i32 = -99;
+/// `agent_doc_replica_apply_update` refused an update encoded against a
+/// different CRDT history (`#replicapositiondrift`).
+const ERR_DIVERGENT_HISTORY: i32 = -4;
 
 /// Run `$body` and return its value, or `$fallback` if it panicked, logging the
 /// panic payload to stderr first (per the "never swallow errors silently" rule).
@@ -763,8 +766,16 @@ pub unsafe extern "C" fn agent_doc_replica_diff(
 }
 
 /// Apply a remote update to replica `replica_id` (the editor applying a peer's
-/// ops — idempotent and yrs causal-buffered). Returns 0 ok, -2 bad
-/// update bytes, -3 replica not open.
+/// ops — idempotent and causal-buffered). Returns 0 ok, -2 bad
+/// update bytes, -3 replica not open, -4 refused because the update was encoded
+/// against a different CRDT history (`#replicapositiondrift`).
+///
+/// The -4 refusal is the replica-side guard against a misplaced apply: an
+/// update that restates an op id this replica stores with a different
+/// character or origin comes from a history that reuses its ids (a controller
+/// epoch rebuilt from text), and applying it would tombstone and anchor onto
+/// unrelated characters. Nothing is applied; the editor must re-register the
+/// replica from its visible buffer.
 ///
 /// # Safety
 /// `update` must point to `update_len` readable bytes, or be null.
@@ -781,8 +792,9 @@ pub unsafe extern "C" fn agent_doc_replica_apply_update(
         let bytes = unsafe { std::slice::from_raw_parts(update, update_len) };
         {
             match replica_for(replica_id) {
-                Some(replica) => match replica.lock().apply_update(bytes) {
+                Some(replica) => match replica.lock().apply_update_verified(bytes) {
                     Ok(()) => 0,
+                    Err(error) if error.is::<DivergentHistory>() => ERR_DIVERGENT_HISTORY,
                     Err(_) => -2,
                 },
                 None => -3,
@@ -1594,6 +1606,48 @@ mod tests {
         assert!(unsafe { agent_doc_replica_state_vector(id, &mut len) }.is_null());
         assert_eq!(len, 0, "null byte result sets out_len to 0");
         assert_eq!(unsafe { agent_doc_replica_close(id) }, -3);
+    }
+
+    /// `#replicapositiondrift`: the editor-facing apply refuses a delivery
+    /// encoded against a rebuilt canonical history (same canonical client id,
+    /// different text) with its own code, leaving the replica untouched.
+    #[test]
+    fn replica_ffi_refuses_a_delivery_from_a_rebuilt_history() {
+        let id: u64 = 0x5EED_0042;
+        let epoch_a = ReplicaState::new(1);
+        epoch_a.apply_local_edit(0, 0, "- do [#a]\n- do [#b]\n- do [#c]\n- do [#d]\n");
+        let state = epoch_a.encode_state();
+        assert_eq!(
+            unsafe { agent_doc_replica_open(id, state.as_ptr(), state.len()) },
+            0
+        );
+        let grow = std::ffi::CString::new("note\n").unwrap();
+        assert_eq!(
+            unsafe { agent_doc_replica_apply_local(id, 0, 0, grow.as_ptr()) },
+            0
+        );
+        let before = unsafe { CStr::from_ptr(agent_doc_replica_text(id)) }
+            .to_str()
+            .unwrap()
+            .to_string();
+
+        let epoch_b = ReplicaState::new(1);
+        epoch_b.apply_local_edit(0, 0, &before);
+        let frontier = epoch_b.state_vector();
+        let at = before.find("- do [#a]").unwrap() as u32;
+        epoch_b.apply_local_edit(at, 9, "- ~~do [#a]~~");
+        let delta = epoch_b.diff(&frontier).unwrap();
+
+        assert_eq!(
+            unsafe { agent_doc_replica_apply_update(id, delta.as_ptr(), delta.len()) },
+            ERR_DIVERGENT_HISTORY
+        );
+        let after = unsafe { CStr::from_ptr(agent_doc_replica_text(id)) }
+            .to_str()
+            .unwrap()
+            .to_string();
+        assert_eq!(after, before, "a refused delivery applies nothing");
+        assert_eq!(unsafe { agent_doc_replica_close(id) }, 0);
     }
 
     #[test]

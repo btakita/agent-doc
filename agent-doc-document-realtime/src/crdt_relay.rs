@@ -727,6 +727,14 @@ pub struct RelayHub {
     /// `RebuiltFromDisk`; drained by the caller which delivers the replace and
     /// calls [`Self::clear_rebootstrap`].
     pending_rebootstrap: HashSet<u64>,
+    /// Members registered before the canonical history was last rebuilt from
+    /// text (`#replicapositiondrift`). Their editor-side replica still holds the
+    /// retired history, while every later delta is encoded in the fresh one and
+    /// reuses the same op ids (the fresh epoch mints `(canonical, 1..n)` again),
+    /// so a delta handed to them lands by id on unrelated characters. Only a
+    /// new registration leaves this set: a replace delivery or a matching
+    /// visible projection proves the buffer *text*, never the replica history.
+    lineage_retired_members: HashSet<u64>,
     /// Compact Exchange or the automatic history budget requested a fresh
     /// lineage, but a newer canonical delivery still lacks the all-live
     /// visible-state proof. The final matching projection settles this retained
@@ -1550,6 +1558,7 @@ impl RelayHub {
             last_committed_text: None,
             last_committed_state_vector: None,
             pending_rebootstrap: HashSet::new(),
+            lineage_retired_members: HashSet::new(),
             compact_epoch_requested: false,
             automatic_history_compaction_requested: false,
             canonical_projection_required,
@@ -1770,6 +1779,7 @@ impl RelayHub {
     /// unique stable client-ids are required for deterministic op attribution.
     pub fn register(&mut self, client_id: u64) -> Result<()> {
         self.validate_unique(client_id)?;
+        self.lineage_retired_members.remove(&client_id);
         let bootstrap = self.canonical.encode_state();
         let replica = ReplicaState::from_encoded(client_id, &bootstrap)?;
         let observed_replica = ReplicaState::from_encoded(client_id, &bootstrap)?;
@@ -1952,6 +1962,29 @@ impl RelayHub {
 
     /// Whether additive updates from `client_id` must remain quarantined until
     /// the retained controller target is visibly projected to that member.
+    /// Whether `client_id` registered before the canonical history was last
+    /// rebuilt, so its editor replica still holds a retired history and must
+    /// re-register before it may receive another delta
+    /// (`#replicapositiondrift`). See the `lineage_retired_members` field.
+    pub fn member_lineage_retired(&self, client_id: u64) -> bool {
+        self.lineage_retired_members.contains(&client_id)
+    }
+
+    /// A registration just installed a full bootstrap of the current canonical
+    /// into `client_id`'s editor replica, replacing the retired history
+    /// (`#replicapositiondrift`). Returns whether the member was retired.
+    pub fn renew_member_lineage(&mut self, client_id: u64) -> bool {
+        self.lineage_retired_members.remove(&client_id)
+    }
+
+    /// Mark every current member as holding the history a text rebuild just
+    /// retired (`#replicapositiondrift`). Resetting a member's hub-side mirror
+    /// does not reset the editor's own replica.
+    fn retire_member_lineages(&mut self) {
+        let ids: Vec<u64> = self.members.keys().copied().collect();
+        self.lineage_retired_members.extend(ids);
+    }
+
     pub fn awaits_canonical_projection(&self, client_id: u64) -> bool {
         self.canonical_projection_required
             .observe(&self.ctx, &client_id)
@@ -1964,6 +1997,7 @@ impl RelayHub {
     pub fn deregister(&mut self, client_id: u64) -> bool {
         self.awareness.remove(client_id);
         let removed = self.members.remove(&client_id).is_some();
+        self.lineage_retired_members.remove(&client_id);
         if removed {
             self.pending_rebootstrap.remove(&client_id);
             self.clear_canonical_projection_obligation(client_id);
@@ -3244,6 +3278,7 @@ impl RelayHub {
         self.canonical = fresh;
         self.sync_live_document_projection(&before_text, on_disk);
         self.rotate_lineage();
+        self.retire_member_lineages();
         let ids: Vec<u64> = self.members.keys().copied().collect();
         for id in ids {
             let replica = ReplicaState::from_encoded(id, &bootstrap)?;
@@ -3394,6 +3429,7 @@ impl RelayHub {
         self.canonical = fresh;
         self.sync_live_document_projection(before_text, text);
         self.rotate_lineage();
+        self.retire_member_lineages();
         let ids: Vec<u64> = self.members.keys().copied().collect();
         for id in ids {
             let replica = ReplicaState::from_encoded(id, &bootstrap)?;
@@ -4982,6 +5018,56 @@ mod tests {
             DocumentOpDeltaOutcome::StaleLineage,
         );
         assert_eq!(hub.canonical_text(), "keep\n");
+    }
+
+    /// `#replicapositiondrift`: a text rebuild resets each member's hub-side
+    /// mirror, but never the editor's own replica, so every member registered
+    /// before it stays retired until it registers again; a member registered
+    /// after it, a projection of the same text, or a consumed replace delivery
+    /// does not change that.
+    #[test]
+    fn a_text_rebuild_retires_every_member_registered_before_it() {
+        let mut hub = RelayHub::from_text(1, "- do [#a]\n");
+        hub.register(2).unwrap();
+        hub.register(3).unwrap();
+        assert!(!hub.member_lineage_retired(2));
+
+        hub.compact_authoritative_epoch("- do [#a]\n").unwrap();
+        hub.register(4).unwrap();
+        assert!(hub.member_lineage_retired(2));
+        assert!(hub.member_lineage_retired(3));
+        assert!(
+            !hub.member_lineage_retired(4),
+            "registered into the fresh epoch"
+        );
+
+        assert!(
+            hub.clear_rebootstrap(2),
+            "the replace delivery was consumed"
+        );
+        hub.observe_delivery_projection(2, &content_hash("- do [#a]\n"))
+            .unwrap();
+        assert!(
+            hub.member_lineage_retired(2),
+            "a replace or an equal visible text proves the buffer, not the replica history"
+        );
+
+        assert!(hub.renew_member_lineage(2), "a full re-register renews it");
+        assert!(!hub.member_lineage_retired(2));
+        assert!(hub.deregister(3));
+        assert!(!hub.member_lineage_retired(3));
+
+        hub.adopt_authoritative_text("- ~~do [#a]~~\n").unwrap();
+        assert!(hub.member_lineage_retired(2), "every rebuild retires again");
+        assert!(hub.member_lineage_retired(4));
+
+        hub.register(5).unwrap();
+        assert!(
+            hub.reconcile_canonical_against_baseline("- reverted on disk\n")
+                .unwrap(),
+            "an out-of-band disk correction rebuilds the canonical from text"
+        );
+        assert!(hub.member_lineage_retired(5));
     }
 
     #[test]

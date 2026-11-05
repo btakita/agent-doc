@@ -4518,6 +4518,8 @@ fn run_decision_action(action: DecisionAction) -> anyhow::Result<()> {
                     "near_duplicates": ledger.near_duplicates,
                     "edges": ledger.edges,
                     "stale_tracked_items": ledger.stale_tracked_items(&observations),
+                    "liveness": ledger.liveness,
+                    "hot_store": ledger.hot_store_size(),
                 });
                 println!("{}", serde_json::to_string_pretty(&value)?);
             } else {
@@ -4530,6 +4532,12 @@ fn run_decision_action(action: DecisionAction) -> anyhow::Result<()> {
                         println!("  open copies: {}", decision.open_items.join(", "));
                     }
                 }
+                let size = ledger.hot_store_size();
+                println!(
+                    "\nhot store (#decisionprune): {} of {} decisions hot ({} archived, {} revived), {} of {} keys, {} of {} revisions",
+                    size.hot_decisions, size.decisions, size.archived_decisions, size.revived_decisions,
+                    size.hot_keys, size.keys, size.hot_revisions, size.revisions
+                );
                 if let Some(guidance) = agent_doc_answer_ledger::contract_guidance(&facts, &ledger.possible) {
                     println!("\n{guidance}");
                 }

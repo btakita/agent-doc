@@ -77,6 +77,7 @@ fn a_changed_answer_supersedes_and_keeps_the_old_revision() {
     let prior = PriorIndex {
         keys: ledger.index_rows().0,
         revisions,
+        ..Default::default()
     };
     let (_, again) = build_with(FIXTURE, &prior);
     let facts = again.answered_facts();
@@ -272,7 +273,11 @@ fn a_follow_up_asked_after_the_answer_is_not_closed() {
             key.first_seen_at = NOW + 100;
         }
     }
-    let prior = PriorIndex { keys, revisions };
+    let prior = PriorIndex {
+        keys,
+        revisions,
+        ..Default::default()
+    };
     let observations = extract::observe(&consumed, &[]);
     let ledger = Ledger::build(&observations, &prior, NOW + 200, None);
     let closures = ledger.duplicate_closures(&observations);
@@ -330,7 +335,14 @@ fn an_operator_same_as_reply_merges_once_and_closes_the_copy() {
     // The merge is durable: the index keeps both keys in one decision even
     // after the operator's merge row is gone.
     let (keys, revisions) = ledger.index_rows();
-    let (_, later) = build_with(FIXTURE, &PriorIndex { keys, revisions });
+    let (_, later) = build_with(
+        FIXTURE,
+        &PriorIndex {
+            keys,
+            revisions,
+            ..Default::default()
+        },
+    );
     assert_eq!(
         later
             .decision_for_key(&id_key("subagent-operator-request-c690prov-cap"))
@@ -414,7 +426,14 @@ fn answers_survive_in_the_index_after_their_rows_are_pruned() {
         "- ### ~~[#subagent-operator-request-tdgodot-allowlist]: Use the standard http ports.~~\n",
         "",
     );
-    let (_, later) = build_with(&pruned, &PriorIndex { keys, revisions });
+    let (_, later) = build_with(
+        &pruned,
+        &PriorIndex {
+            keys,
+            revisions,
+            ..Default::default()
+        },
+    );
     let decision = later
         .decision_for_key(&id_key("subagent-operator-request-tdgodot-allowlist"))
         .unwrap();
@@ -448,6 +467,7 @@ fn stable_decision_ids_come_from_the_index() {
             first_seen_at: 1,
         }],
         revisions: Vec::new(),
+        ..Default::default()
     };
     let (_, ledger) = build_with(FIXTURE, &prior);
     assert_eq!(
@@ -594,6 +614,7 @@ fn a_stamped_copy_keeps_its_decision_id_without_the_index() {
             first_seen_at: 1,
         }],
         revisions: Vec::new(),
+        ..Default::default()
     };
     let (_, indexed) = build_with(&pruned, &prior);
     assert_eq!(indexed.decision_for_key(&id_key("tdport")).unwrap().id, id);

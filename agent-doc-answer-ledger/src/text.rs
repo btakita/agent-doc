@@ -189,6 +189,67 @@ pub fn decision_kind(text: &str) -> Option<&'static str> {
     None
 }
 
+/// Whether an operator answer states a standing policy rather than a one-off
+/// choice (`#decisionprune`): an explicit `standing:` / `policy:` / `rule:`
+/// label, or a rule phrase (`always`, `never` as the subject's verb,
+/// `from now on`, `going forward`, `by default`, `as a rule`, `henceforth`,
+/// `all <plural> must|should|…`, `every <noun> must|should|…`). A standing
+/// decision is a liveness root: it stays hot while nothing applies it. A false
+/// positive only keeps a decision hot, so the test leans inclusive.
+pub fn is_policy_statement(text: &str) -> bool {
+    let lower = strip_decorations(text).to_lowercase();
+    let trimmed = lower.trim_start();
+    if ["standing:", "policy:", "rule:", "standing decision:"]
+        .iter()
+        .any(|label| trimmed.starts_with(label))
+    {
+        return true;
+    }
+    let phrases = [
+        "from now on",
+        "going forward",
+        "henceforth",
+        "as a rule",
+        "by default",
+        "in all cases",
+        "as a standing",
+    ];
+    if phrases.iter().any(|phrase| lower.contains(phrase)) {
+        return true;
+    }
+    let words: Vec<&str> = lower
+        .split(|c: char| !(c.is_alphanumeric() || c == '\'' || c == '-'))
+        .filter(|word| !word.is_empty())
+        .collect();
+    const SUBJECTS: &[&str] = &["we", "you", "agents", "agent", "it", "they", "i"];
+    const MODALS: &[&str] = &[
+        "must", "should", "need", "needs", "are", "go", "get", "stay", "use", "require",
+        "requires", "target", "follow",
+    ];
+    for (index, word) in words.iter().enumerate() {
+        let previous = index.checked_sub(1).map(|at| words[at]);
+        match *word {
+            "always" | "never"
+                if (index == 0 || previous.is_some_and(|p| SUBJECTS.contains(&p)))
+                    && words.get(index + 1) != Some(&"mind") =>
+            {
+                return true;
+            }
+            "all" | "every" | "each" => {
+                if let (Some(noun), Some(modal)) = (words.get(index + 1), words.get(index + 2))
+                    && noun.len() > 2
+                    && MODALS.contains(modal)
+                    && (*word != "all" || noun.ends_with('s'))
+                {
+                    return true;
+                }
+            }
+            _ => {}
+        }
+    }
+    false
+}
+
 /// Tier 2: the entities a question is about. Each anchor is `kind:value`:
 /// `adr:41`, `ref:88` (PR/issue numbers), `ver:0.1.0`, `url:…`, `path:…`,
 /// `opts:a|b` (a parenthesized `(a or b)` option set).
@@ -356,6 +417,32 @@ pub fn answer_relation(previous: &str, next: &str) -> crate::RevisionRelation {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn policy_statements_are_standing_and_one_off_choices_are_not() {
+        for policy in [
+            "From now on, always target sdk-dev.",
+            "Always target sdk-dev.",
+            "We never store credentials.",
+            "standing: the release owner has the final say.",
+            "All ADRs must go through Luke.",
+            "Every release needs a changelog entry.",
+            "Going forward, use the standard http ports.",
+            "By default keep the version.",
+        ] {
+            assert!(is_policy_statement(policy), "{policy}");
+        }
+        for one_off in [
+            "Use port 8080.",
+            "Keep at 0.1.0. Add the 4 new step verbs.",
+            "Target sdk-dev. Keep 0.3.0-preview.1",
+            "JWS makes the cap moot. We don't store credentials.",
+            "Fix all of it.",
+            "Never mind, use the old one.",
+        ] {
+            assert!(!is_policy_statement(one_off), "{one_off}");
+        }
+    }
 
     #[test]
     fn decorations_and_wrappers_are_removed() {

@@ -187,7 +187,11 @@ pub fn seed_index(
         }
     }
     HistorySeed {
-        index: PriorIndex { keys, revisions },
+        index: PriorIndex {
+            keys,
+            revisions,
+            ..Default::default()
+        },
         edges: ledger.edges.into_iter().collect(),
         recovered,
     }
@@ -301,6 +305,7 @@ mod tests {
                 first_seen_at: 500,
             }],
             revisions: Vec::new(),
+            ..Default::default()
         };
         let versions = [HistoryVersion {
             committed_at: 100,

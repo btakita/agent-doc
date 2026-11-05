@@ -96,7 +96,16 @@ preflight and every closeout (`#answerbyrequestid`):
   the row that keeps it open, computed from the queue tree like a completed
   row's `**Guidance:**`. Do not write "safe to delete" in a response.
 
-`agent-doc decision answered <FILE> [--json]` prints the ledger for debugging.
+- The ledger is pruned by relevance, never by age (`#decisionprune`). A
+  decision stays *hot* while the document still asks it, while it applies to
+  an open todo, backlog, icebox or review item, while its latest answer states
+  a standing policy (`always …`, `from now on …`, `standing: …`), or while a
+  live decision depends on it. The rest is archived, never deleted, and comes
+  back by itself when a new question names it. You never prune or revive by
+  hand; the answer still counts as already answered.
+
+`agent-doc decision answered <FILE> [--json]` prints the ledger for debugging,
+including its hot-store size and why each hot decision is live.
 `agent-doc decision validate --document <FILE>` also lists near-duplicate
 question clusters and stale tracked items (advisory; validation never fails on
 them and never writes).

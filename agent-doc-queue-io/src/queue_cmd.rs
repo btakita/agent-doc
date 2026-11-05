@@ -445,9 +445,12 @@ fn derive_runtime_projection_scoped(
         .receipts
         .into_iter()
         .filter(|receipt| {
-            !cancellations
-                .iter()
-                .any(|cancelled| cancelled.cancels_attempt(&receipt.identity, receipt.generation))
+            // `#todoeditrevivesrow`: a closed attempt is consumed work; it
+            // never paints `☑️` onto a later row with its identity.
+            !receipt.attempt_closed()
+                && !cancellations.iter().any(|cancelled| {
+                    cancelled.cancels_attempt(&receipt.identity, receipt.generation)
+                })
         })
         .map(|receipt| (receipt.identity.clone(), receipt))
         .collect::<std::collections::HashMap<_, _>>();

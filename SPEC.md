@@ -38,6 +38,15 @@
   live claim, an unclosed receipt whose exact attempt lineage records as
   integrated (no later cancellation) is terminal too, so deleting the struck
   row of integrated, consumed work is cleanup (`#consumedclaimmismatch`).
+  A closed receipt governs no row, so no projection, preflight
+  `reported_checkmark`, dispatch filter, or Stop-hook writeback debt reads it
+  as a reported attempt. A strike that ends an exact reported attempt closes
+  that attempt's receipt by owner and generation, even when a row with the
+  same id-backed identity stays (or is re-projected) live, and closeout
+  reconciliation closes a kept response capture whose row has no live head
+  (a pre-close, deferred, or hand strike). A `--todo-edit` that re-projects a
+  consumed item's waiting row under new text therefore leaves it bare instead
+  of reviving `☑️` (`#todoeditrevivesrow`).
 
 - Newly scaffolded and auto-created todo components use `<!-- agent:todo priority -->`; existing todo markers remain operator-owned and unchanged.
 

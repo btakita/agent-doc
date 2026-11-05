@@ -22355,12 +22355,13 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
     /// closeout `queue consume` retired the row's completion cell and only
     /// closeout pruned its reported-release receipt, so a later row with the
     /// same text inherited stale evidence. The strike's own maintenance
-    /// successor now retires the cell in the document and snapshot, while the
-    /// full-response receipt remains an intentional `☑️` fence until
-    /// commit/archive GC proof exists. Operator exchange text stays byte for
-    /// byte.
+    /// successor now retires the cell in the document and snapshot. The
+    /// full-response receipt stays as recovery evidence until commit/archive
+    /// GC proof exists, but its attempt is closed: a same-text re-add is fresh
+    /// work, not a `☑️` revival (`#todoeditrevivesrow`). Operator exchange
+    /// text stays byte for byte.
     #[test]
-    fn residue_strike_retains_response_receipt_and_blocks_same_text_readd() {
+    fn residue_strike_retains_response_receipt_and_frees_same_text_readd() {
         let dir = setup_project();
         let doc = dir.path().join("session.md");
         let item = "release + publish";
@@ -22463,12 +22464,16 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
         assert!(
             agent_doc_queue_io::queue_claim::completion_evidence_head_texts(&readded).is_empty()
         );
-        assert_readded_row_stays_reported_without_gc_proof(&doc, &readded, item);
+        assert_readded_row_is_fresh_while_response_is_retained(&doc, &readded, item);
     }
 
-    /// A re-added same-text row remains reported while its exact full-response
-    /// receipt is the only durable recovery authority.
-    fn assert_readded_row_stays_reported_without_gc_proof(
+    /// The struck attempt's full-response receipt stays as recovery authority
+    /// until commit/archive GC proof exists, but its attempt is closed, so a
+    /// re-added same-text row is fresh (`📥`) work: it never inherits the
+    /// consumed attempt's `☑️` or `🔄` (`#strikeretires`, `#todoeditrevivesrow`; agent-doc-bugs.md
+    /// 2026-11-05, `do [#lazilysqlitestoreopen]` reappeared `☑️` after its
+    /// strike).
+    fn assert_readded_row_is_fresh_while_response_is_retained(
         doc: &std::path::Path,
         readded: &str,
         item: &str,
@@ -22484,24 +22489,24 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
                 .map(|response| response.body.as_str()),
             Some("Implemented and pushed; tests pass.")
         );
+        assert!(receipts[0].attempt_closed(), "{receipts:?}");
         let projection =
             agent_doc_queue_io::queue_cmd::derive_claim_runtime_projection(doc, readded, None)
                 .unwrap();
         assert!(
-            projection
-                .target_content
-                .lines()
-                .any(|line| line.contains(item) && line.contains("☑️")),
+            !projection.target_content.lines().any(|line| {
+                line.contains(item)
+                    && !line.contains("~~")
+                    && (line.contains("☑️") || line.contains("🔄"))
+            }),
             "{}",
             projection.target_content
         );
         assert!(
-            !projection
-                .target_content
-                .lines()
-                .any(|line| line.contains(item) && (line.contains("📥") || line.contains("🔄"))),
-            "{}",
-            projection.target_content
+            agent_doc_queue_io::claim_release_receipt::reported_head_texts_for_content(
+                doc, readded
+            )
+            .is_empty()
         );
     }
 
@@ -22518,8 +22523,8 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
     /// 2026-10-26): the done-id strike (`#qdonestrike`) closed a reported
     /// `do [#alpha]` row, but its `Reported` attempt stayed in the claim
     /// ledger until the next closeout prune. The strike's maintenance
-    /// successor ends the claim, while the full response receipt keeps a
-    /// same-text re-add reported until commit/archive GC proof exists.
+    /// successor ends the claim; the full response receipt is retained with its
+    /// attempt closed, so a same-text re-add is fresh work.
     #[test]
     fn done_id_strike_ends_claim_but_retains_response_receipt() {
         let dir = setup_project();
@@ -22576,15 +22581,15 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
             &format!("- ### 🚧 do [#beta]\n- {item}\n"),
         );
         assert_ne!(readded, updated, "{updated}");
-        assert_readded_row_stays_reported_without_gc_proof(&doc, &readded, item);
+        assert_readded_row_is_fresh_while_response_is_retained(&doc, &readded, item);
     }
 
     /// `#strikeretires`: the backlog/done strike (`#qftbklgstrike`) bakes its
     /// note inside the strikethrough. Before, that note made the struck row's
     /// identity differ from the live row's, so the strike retired nothing and
     /// the row's `Reported` attempt outlived it. The claim now ends with the
-    /// strike, while its full response receipt keeps a same-text re-add
-    /// reported until GC proof exists. (The row is not yet
+    /// strike; its full response receipt is retained with its attempt closed,
+    /// so a same-text re-add is fresh work. (The row is not yet
     /// lifecycle-projected: the semantic scorer reads a projected
     /// `[#owner#N]` annotation as an id and leaves the row to the id paths.)
     #[test]
@@ -22648,7 +22653,7 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
             "the strike ends the reported claim"
         );
         let readded = updated.replace(&struck, &format!("{struck}- {item}\n"));
-        assert_readded_row_stays_reported_without_gc_proof(&doc, &readded, item);
+        assert_readded_row_is_fresh_while_response_is_retained(&doc, &readded, item);
     }
 
     /// `#qftbklgclaimed`: a claim is authoritative before its lifecycle marker

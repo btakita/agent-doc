@@ -443,12 +443,16 @@ pub fn consume_queue_prompts_for_done_ids_force_disk_with_outcome(
 /// live head only when it is still that exact head; otherwise it is a
 /// monotonic no-op. Ignored for an id-naming closeout, whose id match already
 /// binds the consume to a proven head.
+///
+/// `response_body` (`#atomicstrikeresponse`) is the closeout's captured
+/// response; its lookup child rides in the strike's own write.
 pub fn consume_queue_prompts_for_done_ids_selected_with_outcome(
     file: &Path,
     done_ids: &[String],
     selected_heads: &[String],
     approved_head: Option<&ApprovedQueueHead>,
     skip_visible_guard: bool,
+    response_body: Option<&str>,
     effects: &dyn QueueConsumeWriteEffects,
 ) -> Result<Option<QueueConsumptionOutcome>> {
     let budget = if skip_visible_guard {
@@ -469,6 +473,7 @@ pub fn consume_queue_prompts_for_done_ids_selected_with_outcome(
         None,
         selected,
         approved_head,
+        response_body,
         effects,
     )
 }
@@ -1016,6 +1021,7 @@ fn consume_queue_prompts_with_options(
         expected_head,
         selected_heads,
         None,
+        None,
         effects,
     )
 }
@@ -1029,6 +1035,7 @@ fn consume_queue_prompts_with_options_fenced(
     expected_head: Option<&str>,
     selected_heads: &[String],
     approved_head: Option<&ApprovedQueueHead>,
+    response_body: Option<&str>,
     effects: &dyn QueueConsumeWriteEffects,
 ) -> Result<Option<QueueConsumptionOutcome>> {
     // `#crdtstructops` Phase D follow-on: no file-TOCTOU flock across the
@@ -1063,6 +1070,7 @@ fn consume_queue_prompts_with_options_fenced(
     // `#qheadannotation` never-drop backstop: an id consume of a head carrying an
     // unanswered operator annotation re-queues the annotation as its own line,
     // then re-plans the same consume over that document.
+    let mut plan_base: Option<String> = None;
     if !done_ids.is_empty()
         && let Some(requeued_content) = requeue_unaddressed_queue_head_annotations(
             file,
@@ -1084,7 +1092,9 @@ fn consume_queue_prompts_with_options_fenced(
                  nothing (#qheadannotation); refusing to drop the annotation"
             )
         })?;
+        plan_base = Some(requeued_content);
     }
+    let plan_base = plan_base.as_deref().unwrap_or(&content);
     if expected_head.is_some_and(|expected| plan.consumed_text.trim() != expected.trim()) {
         agent_doc_ops_log_io::log_op(
             file,
@@ -1187,6 +1197,26 @@ fn consume_queue_prompts_with_options_fenced(
     }
 
     require_integrated_reported_repo_work_for_heads(file, &content, &plan.consumed_texts)?;
+
+    // `#atomicstrikeresponse`: a response closeout's strike carries its
+    // response lookup child in this same target, so the write below (and any
+    // retained delivery of it) lands both or neither.
+    plan.new_document = project_closeout_strike_with_response_backlink(
+        file,
+        plan_base,
+        std::mem::take(&mut plan.new_document),
+        response_body,
+    )?;
+    if plan.save_snapshot
+        && let Some(snapshot_before) = snapshot_content.as_deref()
+    {
+        plan.new_snapshot = project_closeout_snapshot_strike_with_response_backlink(
+            file,
+            snapshot_before,
+            std::mem::take(&mut plan.new_snapshot),
+            response_body,
+        );
+    }
 
     // `#subagentcompletionfeedback`: report-complete's cell is a transient
     // recovery placeholder, not the integrated response. Retire only cells for
@@ -1708,6 +1738,79 @@ pub fn annotate_newly_completed_queue_prompts_with_response_id(
         ),
     );
     Ok(annotated)
+}
+
+/// `#atomicstrikeresponse`: fold this closeout's response lookup child into a
+/// strike target, so the struck row and its `**Response [#r-…]**` /
+/// `**Closed by:**` child are ONE document change on ONE authority path.
+///
+/// The response backlink used to be a later, separate write
+/// ([`annotate_newly_completed_queue_prompts_with_response_id`]). When a
+/// closeout failed between the two (2026-11-03 sdk-dev `q-c2010d98af04`), the
+/// strike had already landed and the backlink never ran: the replayed
+/// closeout's pre-write cut already held the row struck, so nothing was
+/// "newly" struck and the row stayed bare forever. Projecting both into the
+/// strike's own target means a refused or retained strike carries its child,
+/// and a replay replays both or neither.
+///
+/// `before` is the authority cut the strike was derived from, `struck` the
+/// strike target. Without a response, or when the response is not yet
+/// materialized in `struck`, the target is returned unchanged; the projection
+/// is idempotent, so the later standalone backlink pass converges as a no-op
+/// over rows this already linked. A projection refusal (an ambiguous section,
+/// unpublished work) is an error: the strike must not land without its child.
+pub fn project_closeout_strike_with_response_backlink(
+    file: &Path,
+    before: &str,
+    struck: String,
+    response_body: Option<&str>,
+) -> Result<String> {
+    let Some(response_body) = response_body.filter(|body| !body.trim().is_empty()) else {
+        return Ok(struck);
+    };
+    if struck == before
+        || !agent_doc_turn::response_replay::response_materialized_in_content(
+            response_body,
+            &struck,
+        )
+    {
+        return Ok(struck);
+    }
+    let addressed_at = addressed_at_for_current_cycle(file);
+    agent_doc_queue::queue_consume::annotate_newly_struck_queue_items_with_response_id_at(
+        before,
+        &struck,
+        response_body,
+        &addressed_at,
+    )
+    .context("queue strike: refusing to land a strike without its response backlink (#atomicstrikeresponse)")
+}
+
+/// Snapshot-recovery twin of [`project_closeout_strike_with_response_backlink`]:
+/// the snapshot is recovery-only, so a refusal here is logged and the plain
+/// strike snapshot is kept.
+fn project_closeout_snapshot_strike_with_response_backlink(
+    file: &Path,
+    before: &str,
+    struck_snapshot: String,
+    response_body: Option<&str>,
+) -> String {
+    let Some(response_body) = response_body.filter(|body| !body.trim().is_empty()) else {
+        return struck_snapshot;
+    };
+    let addressed_at = addressed_at_for_current_cycle(file);
+    match agent_doc_queue::queue_consume::annotate_newly_struck_queue_items_with_response_id_at(
+        before,
+        &struck_snapshot,
+        response_body,
+        &addressed_at,
+    ) {
+        Ok(updated) => updated,
+        Err(error) => {
+            log_snapshot_recovery_warning(file, "queue strike response backlink snapshot", error);
+            struck_snapshot
+        }
+    }
 }
 
 fn projected_queue_response_ids(content: &str) -> Result<Vec<String>> {
@@ -3353,6 +3456,25 @@ pub fn mark_completed_queue_prompts_for_done_ids(
     skip_visible_guard: bool,
     effects: &dyn QueueConsumeWriteEffects,
 ) -> Result<usize> {
+    mark_completed_queue_prompts_for_done_ids_with_response(
+        file,
+        done_ids,
+        skip_visible_guard,
+        None,
+        effects,
+    )
+}
+
+/// [`mark_completed_queue_prompts_for_done_ids`] for a response closeout:
+/// `response_body` (`#atomicstrikeresponse`) projects each marked row's
+/// response lookup child into the mark's own write.
+pub fn mark_completed_queue_prompts_for_done_ids_with_response(
+    file: &Path,
+    done_ids: &[String],
+    skip_visible_guard: bool,
+    response_body: Option<&str>,
+    effects: &dyn QueueConsumeWriteEffects,
+) -> Result<usize> {
     if done_ids.is_empty() {
         return Ok(0);
     }
@@ -3414,6 +3536,18 @@ pub fn mark_completed_queue_prompts_for_done_ids(
             &content, done_ids,
         )?;
     debug_assert_eq!(marked_count, marked_texts.len());
+    // `#atomicstrikeresponse`: the struck rows and their response lookup
+    // children are one mutation. A projected child is a line insertion, which
+    // the node-only `mark_done` ops below cannot express, so a linked mark
+    // converges as the full-text target instead.
+    let strike_only_document = new_document.clone();
+    let new_document = project_closeout_strike_with_response_backlink(
+        file,
+        &content,
+        new_document,
+        response_body,
+    )?;
+    let response_backlink_projected = new_document != strike_only_document;
     let (new_document, active_projection_changed) =
         reconcile_terminal_active_projection(file, new_document)?;
 
@@ -3436,6 +3570,12 @@ pub fn mark_completed_queue_prompts_for_done_ids(
                         ),
                     );
                 }
+                let snapshot_document = project_closeout_snapshot_strike_with_response_backlink(
+                    file,
+                    &snapshot_content,
+                    snapshot_document,
+                    response_body,
+                );
                 Ok(Some(
                     reconcile_terminal_active_projection(file, snapshot_document)?.0,
                 ))
@@ -3461,7 +3601,11 @@ pub fn mark_completed_queue_prompts_for_done_ids(
         effects
             .atomic_write(file, &new_document)
             .context("queue done-id mark: failed to write document")?;
-    } else if done_node_keys.ast_backed && !requeued && !active_projection_changed {
+    } else if done_node_keys.ast_backed
+        && !requeued
+        && !active_projection_changed
+        && !response_backlink_projected
+    {
         let ops = queue_mark_done_node_ops(&done_node_keys.keys);
         converge_awaiting_retained_delivery(
             effects,
@@ -5927,6 +6071,7 @@ mod core_tests {
             false,
             None,
             &[],
+            None,
             None,
             &TEST_EFFECTS,
         )
@@ -11847,5 +11992,367 @@ mod queue_authority_projection_lag_tests {
         );
         assert_eq!(events.len(), 1);
         assert!(events[0].starts_with("queue_authority_projection_lag_exhausted asks=1"));
+    }
+}
+
+/// `#atomicstrikeresponse`: a closeout strike and its Response child are one
+/// change. Each test injects a failure at the seam between the two writes the
+/// closeout used to make (strike, then a separate `queue_response_backlink`).
+#[cfg(test)]
+mod atomic_strike_response_tests {
+    use super::*;
+    use std::cell::RefCell;
+    use std::fs;
+    use tempfile::TempDir;
+
+    const RESPONSE: &str = concat!(
+        "### Re: atomic strike — test\n\n",
+        "> **Queue prompt:**\n>\n> do [#atomic]\n\n",
+        "Completed `/work/tasks/atomic.md`.\n",
+    );
+
+    const RETAINED: &str = "retained";
+
+    /// Disk-backed effects whose write for one `reason` fails: either a plain
+    /// refusal, or a retained delivery deferral that may or may not land.
+    struct FaultEffects {
+        fail_reason: &'static str,
+        mode: &'static str,
+        lands: bool,
+        writes: RefCell<Vec<(String, String)>>,
+        awaited_targets: RefCell<Vec<String>>,
+    }
+
+    impl FaultEffects {
+        fn failing(fail_reason: &'static str) -> Self {
+            Self {
+                fail_reason,
+                mode: "refuse",
+                lands: false,
+                writes: RefCell::new(Vec::new()),
+                awaited_targets: RefCell::new(Vec::new()),
+            }
+        }
+
+        fn retained(fail_reason: &'static str, lands: bool) -> Self {
+            Self {
+                mode: RETAINED,
+                lands,
+                ..Self::failing(fail_reason)
+            }
+        }
+
+        fn healthy() -> Self {
+            Self::failing("never")
+        }
+
+        fn write_reasons(&self) -> Vec<String> {
+            self.writes
+                .borrow()
+                .iter()
+                .map(|(reason, _)| reason.clone())
+                .collect()
+        }
+    }
+
+    impl QueueConsumeWriteEffects for FaultEffects {
+        fn current_document_content(&self, file: &Path, _source: &str) -> Result<String> {
+            Ok(fs::read_to_string(file)?)
+        }
+
+        fn atomic_write(&self, file: &Path, content: &str) -> Result<()> {
+            self.writes
+                .borrow_mut()
+                .push(("atomic_write".to_string(), content.to_string()));
+            agent_doc_fs::write_atomic(file, content.as_bytes())
+        }
+
+        fn converge_document_or_disk(
+            &self,
+            file: &Path,
+            target_content: &str,
+            _source_content: &str,
+            reason: &str,
+        ) -> Result<()> {
+            self.writes
+                .borrow_mut()
+                .push((reason.to_string(), target_content.to_string()));
+            if reason != self.fail_reason {
+                return agent_doc_fs::write_atomic(file, target_content.as_bytes());
+            }
+            if self.mode == RETAINED {
+                if self.lands {
+                    agent_doc_fs::write_atomic(file, target_content.as_bytes())?;
+                }
+                anyhow::bail!(
+                    "visible document write retained [{}] [recovery={}]",
+                    agent_doc_turn::write_ownership::RETAINED_DELIVERY_PROJECTION_PENDING_TOKEN,
+                    "await_editor_replica_no_disk_write"
+                );
+            }
+            anyhow::bail!("injected {reason} write failure")
+        }
+
+        fn await_retained_queue_write_landed(
+            &self,
+            file: &Path,
+            target_content: &str,
+            retired_completion_keys: &HashSet<String>,
+        ) -> Result<bool> {
+            self.awaited_targets
+                .borrow_mut()
+                .push(target_content.to_string());
+            Ok(queue_write_landed(
+                target_content,
+                &fs::read_to_string(file)?,
+                retired_completion_keys,
+            ))
+        }
+    }
+
+    fn response_id() -> String {
+        agent_doc_markdown_ast::exchange_tree::ResponseTurnCellPolicy::from_response(Some(RESPONSE))
+            .response_id()
+            .to_string()
+    }
+
+    /// The closeout's authority cut: response already materialized, the
+    /// answered `do [#atomic]` head still live.
+    fn fixture() -> (TempDir, std::path::PathBuf, String) {
+        let tmp = TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        let doc = tmp.path().join("session.md");
+        let content = format!(
+            concat!(
+                "---\nqueue_active: true\n---\n\n",
+                "<!-- agent:exchange -->\n{}<!-- /agent:exchange -->\n",
+                "<!-- agent:queue -->\n",
+                "- do [#atomic]\n",
+                "- do [#later]\n",
+                "<!-- /agent:queue -->\n",
+            ),
+            RESPONSE
+        );
+        fs::write(&doc, &content).unwrap();
+        (tmp, doc, content)
+    }
+
+    fn queue_body(content: &str) -> String {
+        let components = element::parse(content).unwrap();
+        let queue = components
+            .iter()
+            .find(|component| component.name == "queue")
+            .expect("queue component");
+        queue.content(content).to_string()
+    }
+
+    fn struck(content: &str) -> bool {
+        queue_body(content).contains("~~do [#atomic]~~")
+    }
+
+    /// The struck row's own child subtree carries this response's lookup id.
+    fn struck_row_linked(content: &str) -> bool {
+        let body = queue_body(content);
+        let Some(start) = body.find("~~do [#atomic]~~") else {
+            return false;
+        };
+        let rest = &body[start..];
+        let row_end = rest.find("\n- ").unwrap_or(rest.len());
+        rest[..row_end].contains(&format!("**Response {}**", response_id()))
+    }
+
+    fn consume(
+        doc: &Path,
+        response: Option<&str>,
+        effects: &dyn QueueConsumeWriteEffects,
+    ) -> Result<Option<QueueConsumptionOutcome>> {
+        consume_queue_prompts_for_done_ids_selected_with_outcome(
+            doc,
+            &["atomic".to_string()],
+            &[],
+            None,
+            false,
+            response,
+            effects,
+        )
+    }
+
+    fn backlink_pass(
+        doc: &Path,
+        before: &str,
+        effects: &dyn QueueConsumeWriteEffects,
+    ) -> Result<usize> {
+        annotate_newly_completed_queue_prompts_with_response_id(
+            doc, before, RESPONSE, false, effects,
+        )
+    }
+
+    /// The defect as it shipped: strike and backlink are two writes, so a
+    /// failure between them publishes a struck row with no Response child —
+    /// and a replay cannot repair it, because its pre-write cut already holds
+    /// the row struck, so nothing is "newly" struck any more.
+    #[test]
+    fn split_strike_then_backlink_failure_leaves_a_bare_struck_row() {
+        let (_tmp, doc, before) = fixture();
+        let effects = FaultEffects::failing("queue_response_backlink");
+
+        consume(&doc, None, &effects)
+            .unwrap()
+            .expect("the answered head is consumed");
+        backlink_pass(&doc, &before, &effects)
+            .expect_err("the injected backlink write failure surfaces");
+
+        let landed = fs::read_to_string(&doc).unwrap();
+        assert!(struck(&landed), "{landed}");
+        assert!(!struck_row_linked(&landed), "{landed}");
+
+        // Replayed closeout: its pre-write cut is the already-struck document.
+        let replayed = backlink_pass(&doc, &landed, &FaultEffects::healthy()).unwrap();
+        assert_eq!(replayed, 0);
+        assert!(!struck_row_linked(&fs::read_to_string(&doc).unwrap()));
+    }
+
+    #[test]
+    fn closeout_strike_lands_with_its_response_child_in_one_write() {
+        let (_tmp, doc, before) = fixture();
+        let effects = FaultEffects::failing("queue_response_backlink");
+
+        consume(&doc, Some(RESPONSE), &effects)
+            .unwrap()
+            .expect("the answered head is consumed");
+
+        let landed = fs::read_to_string(&doc).unwrap();
+        assert!(struck(&landed), "{landed}");
+        assert!(struck_row_linked(&landed), "{landed}");
+        assert!(queue_body(&landed).contains("- do [#later]\n"), "{landed}");
+        assert_eq!(effects.write_reasons(), ["queue_consume"]);
+
+        // The later standalone backlink pass is now a convergent no-op: it
+        // never reaches the write the injected failure sits on.
+        assert_eq!(backlink_pass(&doc, &before, &effects).unwrap(), 0);
+        assert_eq!(effects.write_reasons(), ["queue_consume"]);
+        assert_eq!(fs::read_to_string(&doc).unwrap(), landed);
+    }
+
+    #[test]
+    fn failed_strike_write_lands_neither_and_replay_lands_both() {
+        let (_tmp, doc, content) = fixture();
+
+        consume(
+            &doc,
+            Some(RESPONSE),
+            &FaultEffects::failing("queue_consume"),
+        )
+        .expect_err("the injected strike write failure surfaces");
+        assert_eq!(fs::read_to_string(&doc).unwrap(), content);
+
+        consume(&doc, Some(RESPONSE), &FaultEffects::healthy())
+            .unwrap()
+            .expect("the replayed closeout consumes the head");
+        let landed = fs::read_to_string(&doc).unwrap();
+        assert!(struck(&landed), "{landed}");
+        assert!(struck_row_linked(&landed), "{landed}");
+    }
+
+    #[test]
+    fn retained_strike_delivery_carries_its_response_child() {
+        // Never lands: the retained target is refused whole — no strike, no child.
+        let (_tmp, doc, content) = fixture();
+        let effects = FaultEffects::retained("queue_consume", false);
+        consume(&doc, Some(RESPONSE), &effects).expect_err("an unproven landing keeps failing");
+        assert_eq!(fs::read_to_string(&doc).unwrap(), content);
+        let awaited = effects.awaited_targets.borrow().clone();
+        assert_eq!(awaited.len(), 1);
+        assert!(
+            struck(&awaited[0]) && struck_row_linked(&awaited[0]),
+            "{}",
+            awaited[0]
+        );
+
+        // Lands later: the landing proof is over the one target holding both.
+        let effects = FaultEffects::retained("queue_consume", true);
+        consume(&doc, Some(RESPONSE), &effects)
+            .unwrap()
+            .expect("a landed retained strike completes the consume");
+        let landed = fs::read_to_string(&doc).unwrap();
+        assert!(struck(&landed), "{landed}");
+        assert!(struck_row_linked(&landed), "{landed}");
+    }
+
+    #[test]
+    fn refused_response_projection_refuses_the_strike_too() {
+        // `refusing to terminalize unpublished queue work` used to fire in the
+        // separate backlink pass, after the strike had already landed.
+        let (_tmp, doc, _) = fixture();
+        let unpublished = RESPONSE.replace(
+            "Completed `/work/tasks/atomic.md`.",
+            "Completed `/work/tasks/atomic.md`; the fix remains uncommitted.",
+        );
+        let content = fs::read_to_string(&doc)
+            .unwrap()
+            .replace(RESPONSE, &unpublished);
+        fs::write(&doc, &content).unwrap();
+        let effects = FaultEffects::healthy();
+
+        let err = consume(&doc, Some(&unpublished), &effects)
+            .expect_err("the strike must not land without its child");
+
+        assert!(
+            format!("{err:#}").contains("#atomicstrikeresponse"),
+            "{err:#}"
+        );
+        assert!(effects.write_reasons().is_empty());
+        assert_eq!(fs::read_to_string(&doc).unwrap(), content);
+    }
+
+    #[test]
+    fn done_id_mark_lands_with_its_response_child_in_one_write() {
+        let (_tmp, doc, before) = fixture();
+        let effects = FaultEffects::failing("queue_response_backlink");
+
+        let marked = mark_completed_queue_prompts_for_done_ids_with_response(
+            &doc,
+            &["atomic".to_string()],
+            false,
+            Some(RESPONSE),
+            &effects,
+        )
+        .unwrap();
+
+        assert_eq!(marked, 1);
+        let landed = fs::read_to_string(&doc).unwrap();
+        assert!(struck(&landed), "{landed}");
+        assert!(struck_row_linked(&landed), "{landed}");
+        assert_eq!(effects.write_reasons(), ["queue_done_id_mark"]);
+        assert_eq!(backlink_pass(&doc, &before, &effects).unwrap(), 0);
+        assert_eq!(effects.write_reasons(), ["queue_done_id_mark"]);
+    }
+
+    #[test]
+    fn strike_without_a_response_is_unchanged() {
+        let (_tmp, doc, content) = fixture();
+        let struck_only = content.replace("- do [#atomic]\n", "- ~~do [#atomic]~~\n");
+        assert_eq!(
+            project_closeout_strike_with_response_backlink(
+                &doc,
+                &content,
+                struck_only.clone(),
+                None
+            )
+            .unwrap(),
+            struck_only
+        );
+        // A response that is not materialized in the target projects nothing.
+        let absent = struck_only.replace(RESPONSE, "");
+        assert_eq!(
+            project_closeout_strike_with_response_backlink(
+                &doc,
+                &content.replace(RESPONSE, ""),
+                absent.clone(),
+                Some(RESPONSE),
+            )
+            .unwrap(),
+            absent
+        );
     }
 }

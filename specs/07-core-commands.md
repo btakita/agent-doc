@@ -406,6 +406,15 @@ A response-bound preflight invoked from the authoritative actor's own pane may r
 
 `agent-doc outline <FILE> [--json]` reports markdown heading structure, line counts, and approximate token counts.
 
+## principles
+
+`agent-doc principles <FILE> [--json]` lists the operator first principles in scope for a document and the warnings their authoring produces (`#firstprincipleslist`). See [Document Format: First principles](02-document-format.md#first-principles-firstprinciples).
+
+- **Same composition as the cycle contract.** It composes with the function preflight uses, `agent_doc_preflight_command_io::composed_rules_and_principles`: the global principles file, every ancestor `.agent-doc/project.md` (farthest first), then the document, with the nearest scope winning. What it lists is what the next cycle contract carries as `principles`; its warnings are the `principle_*` preflight warnings. The document text is the current authoritative projection, the same read `agent-doc lint` uses.
+- **Output.** Text lists each principle as `[#id] <scope>: <statement>` with its rationale, `source`, and each overridden source, then the warnings as `<code>: <message> (<source>)`. With no principle in scope it says where to write one. `--json` prints `{file, principles, warnings}`: `principles` uses the cycle-contract shape (`id`, `statement`, optional `rationale`, `scope`, `source`, optional `overrides`), and each warning is `{code, message, source}`.
+- **Read-only, never failing on warnings.** Principle problems never fail admission, so they never change the exit status here.
+- **`agent-doc lint` runs the same checks.** After the lint gate it prints each principle warning on stderr as `<source>: warning: <message> [<code>]`, under a header naming the listing command. They are warnings in every lint mode and never block; the gate's own findings decide the exit status.
+
 ## board
 
 `agent-doc board [ROOT] [--json] [--dag] [--all] [--no-submodules]` renders one severity-ordered fleet **work** view: the queue and backlog of every session document across a superproject and its submodules, grouped into one section per project.

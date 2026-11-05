@@ -144,6 +144,10 @@ inference; otherwise ask once, listing the bearing principles, the missing
 premise, and the answer they recommend; never act against a principle
 silently. Content-only edits of principles do not start a turn. Principle
 problems are preflight warnings and never fail admission.
+`agent-doc principles <FILE> [--json]` lists the composed principles and
+their warnings without running a cycle, and `agent-doc lint` prints the same
+warnings (`#firstprincipleslist`, see
+[Core Commands: principles](07-core-commands.md#principles)).
 
 The global file is the hook for an operator philosophy repository: the
 binary reads only that file and never reads a philosophy repository itself,

@@ -4647,11 +4647,22 @@ fn run_decision_action(action: DecisionAction) -> anyhow::Result<()> {
             let (_, graph) = agent_doc_preflight_io::answer_ledger::build_graph(&file, &content);
             // `#firstprincipleswhy`: the principles in scope for this
             // document (global, project, document) and the derivation chain
-            // they support. Stored derivations join here once they have a
-            // durable store (`#firstprinciplesstore`).
+            // they support, including the steps `#firstprinciplesstore`
+            // keeps in state.db with the reviews the document shows applied.
             let composition = agent_doc_preflight_command_io::composed_rules_and_principles(&file, &content);
             let principles = composition.principles;
-            let (derivations, skipped) = why_chain::derivation_graph(&graph, &principles, Vec::new());
+            let stored = if agent_doc_project_root_io::project_root_containing(&file).is_some() {
+                match agent_doc_preflight_io::derivation_store::load(&file, &content) {
+                    Ok(stored) => stored.iter().map(agent_doc_preflight_io::derivation_store::StoredDerivation::to_model).collect(),
+                    Err(err) => {
+                        eprintln!("[decision why] stored derivations unreadable ({err:#}); showing operator-stated steps only");
+                        Vec::new()
+                    }
+                }
+            } else {
+                Vec::new()
+            };
+            let (derivations, skipped) = why_chain::derivation_graph(&graph, &principles, stored);
             for message in &skipped {
                 eprintln!("[decision why] {message}");
             }

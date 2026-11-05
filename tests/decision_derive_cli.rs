@@ -268,3 +268,60 @@ fn a_derivation_is_stored_in_the_decision_graph_and_reviewed_by_the_operator() {
         "{graph:#}"
     );
 }
+
+/// `decision why` reads the steps `decision derive` stored
+/// (`#firstprincipleswhy` + `#firstprinciplesstore`): each stored step shows
+/// in `derived_from` with its review status, a rejected one included, and the
+/// operator's reject row in the document overrides the stored status.
+#[test]
+fn decision_why_shows_stored_derivations_with_their_review_status() {
+    let dir = tempfile::tempdir().unwrap();
+    let doc = session(dir.path());
+    let path = doc.to_str().unwrap();
+
+    let kept = derive(dir.path(), path, "No cap.");
+    let kept_id = kept["derivation"]["id"].as_str().unwrap().to_string();
+    let other = derive(dir.path(), path, "Cap at one hour.");
+    let other_id = other["derivation"]["id"].as_str().unwrap().to_string();
+    set_run_rows(
+        &doc,
+        &format!("- [#{other_id}]: reject — the JWS already expires\n"),
+    );
+
+    let output = run_agent_doc(dir.path(), &["decision", "why", path, "tdcap", "--json"]);
+    assert_ok(&output, "decision why");
+    let whys: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let why = &whys[0];
+    let steps = why["derived_from"]
+        .as_array()
+        .unwrap_or_else(|| panic!("{whys:#}"));
+    let status_of = |id: &str| {
+        steps
+            .iter()
+            .find(|step| step["derivation"] == id)
+            .map(|step| step["status"].clone())
+            .unwrap_or_else(|| panic!("no step {id}: {whys:#}"))
+    };
+    assert_eq!(status_of(&kept_id), "agent_derived_unreviewed", "{whys:#}");
+    assert_eq!(status_of(&other_id), "rejected", "{whys:#}");
+    assert_eq!(why["derivation_supported"], true, "{whys:#}");
+    let step = steps
+        .iter()
+        .find(|step| step["derivation"] == kept_id.as_str())
+        .unwrap();
+    assert_eq!(step["answer"], "No cap.", "{whys:#}");
+    let premises: Vec<_> = step["premises"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|premise| premise["node"].clone())
+        .collect();
+    assert_eq!(premises.len(), 2, "{whys:#}");
+
+    // The text form names the stored step and its status too.
+    let output = run_agent_doc(dir.path(), &["decision", "why", path, "tdcap"]);
+    assert_ok(&output, "decision why");
+    let text = String::from_utf8_lossy(&output.stdout);
+    assert!(text.contains(&kept_id), "{text}");
+    assert!(text.contains(&other_id), "{text}");
+}

@@ -51,6 +51,42 @@ class AuthenticatedSurfaceIngressStateTest {
         assertEquals(3, publisher.published.size)
     }
 
+    /**
+     * `#viewsnapshotgenseedmac`: a restarted IDE recreates this state with a fresh generation
+     * counter. Seeded from wall-clock time, the successor's first lease is above every generation
+     * the predecessor issued, so the controller's `(connection_generation, sequence)` fence accepts
+     * the restart as a newer revision without a peer pid (macOS sockets report none).
+     */
+    @Test
+    fun restartedBackendGenerationStartsAboveItsPredecessor() = runBlocking {
+        val predecessor = AuthenticatedSurfaceIngressState(RecordingPublisher(), generationSeed = 1_000L)
+        val first = predecessor.open("client-a", "frontend-a-1")
+        assertEquals(1_001L, first.connectionGeneration)
+        val reconnects = (1..50).map { predecessor.open("client-a", "frontend-a-${it + 1}") }
+        val highWater = reconnects.last().connectionGeneration
+        assertEquals(1_051L, highWater)
+
+        // The successor process started later on the wall clock; its seed is a later instant.
+        val successorPublisher = RecordingPublisher()
+        val successor = AuthenticatedSurfaceIngressState(successorPublisher, generationSeed = 60_000L)
+        val restarted = successor.open("client-a", "frontend-a-restarted")
+        assertTrue(restarted.connectionGeneration > highWater)
+        assertEquals(
+            SurfaceIngressStatus.ACCEPTED,
+            successor.publish("client-a", restarted, snapshot("frontend-a-restarted", 1)).status,
+        )
+        assertEquals(listOf(Triple("client-a", 60_001L, 1L)), successorPublisher.published)
+    }
+
+    /** The production default seeds from wall-clock milliseconds, never from 0. */
+    @Test
+    fun defaultGenerationSeedIsWallClock() = runBlocking {
+        val before = System.currentTimeMillis()
+        val lease = AuthenticatedSurfaceIngressState(RecordingPublisher()).open("client-a", "frontend-a-1")
+        val after = System.currentTimeMillis()
+        assertTrue(lease.connectionGeneration in (before + 1)..(after + 1), "${lease.connectionGeneration}")
+    }
+
     /** GH #339 R1: the backend records and logs each connection's frontend receipt once per change. */
     @Test
     fun frontendActivationReceiptIsRecordedOncePerChange() = runBlocking {

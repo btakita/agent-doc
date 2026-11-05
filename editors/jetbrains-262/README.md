@@ -163,6 +163,12 @@ fence is gone, retires that predecessor (its detached bindings release as
 (`#viewsnapshotgenreset`). A regression from the same process, from a second
 live process sharing the client id, or with an unknown peer pid stays `stale`.
 
+macOS Unix sockets report no peer pid, so that reset cannot fire there. The
+backend therefore seeds its connection generation from wall-clock milliseconds
+when the ingress state is created (`#viewsnapshotgenseedmac`): a restarted IDE's
+first lease is above every generation the dead IDE issued, and the controller
+accepts it as an ordinary newer revision on every platform with no wire field.
+
 The controller returns an explicit, revision-fenced presentation list. The
 frontend adapter resolves the exact split containing the document, mounts a
 controller-session terminal or non-writable placeholder, restores originals on

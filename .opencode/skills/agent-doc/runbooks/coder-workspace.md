@@ -49,7 +49,9 @@ creates one with the receipt's attach command.
 - VS Code Remote SSH/Coder: the extension declares
   `"extensionKind": ["workspace"]`, so it runs in the remote extension host.
   Run `agent-doc plugin install vscode` on the workspace: it installs into
-  `code-server` when that is on `PATH`, and into the newest Remote-SSH server
+  `code-server` when that is on `PATH` (otherwise `~/.local/bin/code-server`
+  or `/tmp/code-server/bin/code-server`, where Coder's code-server module
+  installs it), and into the newest Remote-SSH server
   under `~/.vscode-server` (or `$VSCODE_AGENT_FOLDER`), `~/.vscodium-server` or
   `~/.cursor-server` through the server's own CLI. That server exists only
   after VS Code has connected once. Reload the remote window after an install.
@@ -83,20 +85,39 @@ activation receipt (`activation: role=workspace generation=<n> ...`).
 ## VS Code remote smoke test
 
 Run `scripts/vscode-remote-smoke.py` from the agent-doc checkout, on the
-workspace host, with the project and one session document:
+workspace host, with the project and one session document. Steps 2-6 need an
+operator with VS Code connected to the workspace; a headless agent can only
+run `--steps install`, and a timed-out wait with nobody connected is not a
+product failure.
+
+1. Pick a real session document: one with agent-doc frontmatter or matched by
+   `[documents] include`. The extension registers only session documents, so
+   the script exits 2 before any step when `--doc` is not one (for example
+   `README.md`). Run the smoke against the project the VS Code window has
+   open, not a fresh worktree nobody opened.
+2. Make sure `.agent-doc/config.toml` names the project's `tmux_session`
+   (`agent-doc session set <NAME>`); tmux-attach fails without it.
+3. Connect VS Code to the workspace (Coder Remote / Remote-SSH, or the
+   code-server browser tab) and open the document.
+4. Run, with the default 300 s waits:
 
 ```sh
 python3 scripts/vscode-remote-smoke.py --project ~/project --doc tasks/plan.md
 ```
 
-It installs the extension (`--install local` uses the checkout's VSIX build,
-`--install skip` keeps what is installed), then waits while you connect VS Code
-to the workspace, open the document, and run **Agent Doc: Run** or **Claim** so
-the extension attaches its `agent-doc` terminal. It checks, and prints PASS,
-FAIL or SKIP for, each step: install into a workspace host with
-`extensionKind` `workspace`; a VS Code registration with a `role=workspace`
-receipt; that the registered pid is a server extension host; a tmux client on
-the project session under the same server; `AGENT_DOC_VSCODE_REMOTE_NAME` in
-that client; and an accepted surface observation with no pane divergence. It
-exits 1 when any step failed. `--steps` selects steps and `--timeout` bounds
-each wait.
+5. When the install step reports it, reload the remote window (**Developer:
+   Reload Window**), then run **Agent Doc: Run** or **Claim** so the extension
+   attaches its `agent-doc` terminal, and **Agent Doc: Sync Layout**.
+
+`--install release` (the default) installs the latest released extension,
+`--install local` the checkout's VSIX build, and `--install skip` keeps what
+is installed. It checks, and prints PASS, FAIL or SKIP for, each step:
+install into a workspace host with `extensionKind` `workspace`; a VS Code
+registration with a `role=workspace` receipt; that the registered pid is a
+server extension host; a tmux client on the project session under the same
+server; `AGENT_DOC_VSCODE_REMOTE_NAME` in that client; and an accepted surface
+observation with no pane divergence. A step whose prerequisite did not pass
+is skipped, so fix the first FAIL. A timed-out wait names whether any server
+extension host process is running: none means no VS Code window is connected
+to this host. It exits 1 when any step failed. `--steps` selects steps and
+`--timeout` bounds each wait.

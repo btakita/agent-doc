@@ -373,6 +373,15 @@ describe('Rust-owned C string ownership at the koffi boundary (#vscodekoffisegv)
         const script = `
             const n = await import(${JSON.stringify(nativeUrl)});
             const doc = '<!-- agent:exchange -->\\nhi\\n<!-- /agent:exchange -->\\n';
+            // #treestatusvscode: the Tree Status action's query, on live buffer text.
+            const queueDoc = [
+                '<!-- agent:queue id="main" -->',
+                '- ~~do [#alpha]~~',
+                '  - ~~step one~~',
+                '- 🚧 [#subagent:beta#1] do [#beta]',
+                '<!-- /agent:queue -->',
+                '',
+            ].join('\\n');
             const out = {};
             for (let i = 0; i < 25; i++) {
                 out.normalize = n.normalizeTemplateStructure(doc);
@@ -382,6 +391,9 @@ describe('Rust-owned C string ownership at the koffi boundary (#vscodekoffisegv)
                 out.nodePatchesError = n.applyNodePatches(doc, [{ bogus: 1 }]);
                 out.deriveError = n.editorDeriveJson('{}');
                 out.resolved = n.resolveProjectPath(${JSON.stringify(fixtureDoc)});
+                out.treeStatus = n.queueTreeStatus(queueDoc, 1);
+                out.treeStatusOutside = n.queueTreeStatus('# no queue\\n', 1);
+                out.treeStatusNoQueueLine = n.queueTreeStatus('<!-- agent:queue id="main" -->\\n<!-- /agent:queue -->\\n', 9);
             }
             process.stdout.write('RESULT ' + JSON.stringify(out) + '\\n');
         `;
@@ -409,5 +421,14 @@ describe('Rust-owned C string ownership at the koffi boundary (#vscodekoffisegv)
         assert.strictEqual(out.nodePatchesError, null);
         assert.strictEqual(out.deriveError, null);
         assert.deepStrictEqual(out.resolved, { projectRoot: fixtureRoot, relativePath: path.join('docs', 'session.md') });
+        assert.strictEqual(out.treeStatus.whole_queue, true, JSON.stringify(out.treeStatus));
+        assert.deepStrictEqual(
+            out.treeStatus.deletable.map((row: { line: number; end_line: number }) => [row.line, row.end_line]),
+            [[2, 3]],
+        );
+        assert.strictEqual(out.treeStatus.agent[0]?.id, 'beta');
+        assert.match(out.treeStatus.text, /Deletable:/);
+        assert.strictEqual(out.treeStatusOutside, null);
+        assert.strictEqual(out.treeStatusNoQueueLine, null);
     });
 });

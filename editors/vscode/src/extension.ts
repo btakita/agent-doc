@@ -58,6 +58,7 @@ import {
     buildPrimaryPopupMenuItems,
 } from './popupMenu.js';
 import { DASHBOARD_COMMAND_ARGS, dashboardPath } from './dashboard.js';
+import { buildTreeStatusDeleteItems, treeStatusDeleteSpan, type QueueTreeStatusRow } from './queueTreeStatus.js';
 import {
     glyphIconDataUri,
     planQueueTreeAutoFolds,
@@ -1847,6 +1848,73 @@ async function dashboardAction(): Promise<void> {
     }
 }
 
+/**
+ * `#treestatusvscode`: Agent Doc: Tree Status (Alt+Shift+S). Asks the native
+ * tree-status query (`#treestatusquery`) about the queue subtree at the caret
+ * of the live buffer, shows the binary's `text` verbatim, and offers a delete
+ * action per deletable row (delete lines `line..=end_line`). It never derives
+ * or words a state itself. After a deletion it asks again, so the output and
+ * the remaining delete actions always come from the current buffer.
+ */
+async function treeStatusAction(): Promise<void> {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor || !isMarkdown(editor)) return;
+    const document = editor.document;
+    const root = getWorkspaceRoot(document.uri);
+    const rel = root ? relativePath(root, document.uri.fsPath) : path.basename(document.uri.fsPath);
+    const caretLine = editor.selection.active.line + 1;
+
+    for (;;) {
+        const version = document.version;
+        const status = native.queueTreeStatus(document.getText(), caretLine, root);
+        if (status === 'unavailable') {
+            showError('Tree Status needs a native agent-doc library with agent_doc_queue_tree_status_json; run make install');
+            return;
+        }
+        if (status === null) {
+            void vscode.window.showInformationMessage(`Agent Doc: Tree Status — line ${caretLine} is in no queue`);
+            return;
+        }
+        showSessionOutput(`Agent Doc Tree Status: ${rel}:${caretLine}`, status.text);
+
+        const items = buildTreeStatusDeleteItems(status, document.lineCount);
+        if (items.length === 0) return;
+        const picked = await vscode.window.showQuickPick(items, {
+            title: 'Agent Doc Tree Status',
+            placeHolder: 'Delete a deletable subtree (Esc to keep all)',
+        });
+        if (!picked) return;
+        if (document.isClosed) return;
+        if (document.version !== version) {
+            showHint('Tree Status: the document changed; asking again');
+            continue;
+        }
+        if (!(await deleteTreeStatusRow(document, picked.row))) {
+            showError(`Tree Status: could not delete lines ${picked.row.line}-${picked.row.end_line}`);
+            return;
+        }
+    }
+}
+
+/** Delete a deletable row's whole lines `line..=end_line`, newline included. */
+async function deleteTreeStatusRow(document: vscode.TextDocument, row: QueueTreeStatusRow): Promise<boolean> {
+    const span = treeStatusDeleteSpan(row, document.lineCount);
+    if (!span) return false;
+    let range: vscode.Range;
+    if (span.endLine < document.lineCount) {
+        range = new vscode.Range(span.startLine, 0, span.endLine, 0);
+    } else {
+        // The subtree ends the document: take the newline before it instead.
+        const start = span.startLine > 0
+            ? document.lineAt(span.startLine - 1).range.end
+            : new vscode.Position(0, 0);
+        range = new vscode.Range(start, document.lineAt(document.lineCount - 1).range.end);
+    }
+    const edit = new vscode.WorkspaceEdit();
+    edit.delete(document.uri, range);
+    return vscode.workspace.applyEdit(edit);
+}
+
 async function fixDocumentAction(): Promise<void> {
     const editor = vscode.window.activeTextEditor;
     if (!editor || !isMarkdown(editor)) return;
@@ -2651,6 +2719,9 @@ async function popupMenuAction(): Promise<void> {
             break;
         case 'dashboard':
             await dashboardAction();
+            break;
+        case 'treeStatus':
+            await treeStatusAction();
             break;
         case 'more': {
             const overflow = await vscode.window.showQuickPick(buildOverflowPopupMenuItems(), {
@@ -4000,6 +4071,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     );
     context.subscriptions.push(
         vscode.commands.registerCommand('agentDoc.dashboard', dashboardAction)
+    );
+    // `#treestatusvscode`: the queue subtree's tree status at the caret.
+    context.subscriptions.push(
+        vscode.commands.registerCommand('agentDoc.treeStatus', treeStatusAction)
     );
 
     // `editoractionmenu`: running plugin / CLI / native library versions.

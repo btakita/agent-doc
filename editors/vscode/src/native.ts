@@ -23,8 +23,10 @@ import {
     type AgentDocProjection,
 } from './stateMirror.js';
 import { parseQueueTreeJson, type QueueTreeNode } from './queueTreeGutter.js';
+import { parseQueueTreeStatusJson, type QueueTreeStatus } from './queueTreeStatus.js';
 
 export type { QueueTreeNode } from './queueTreeGutter.js';
+export type { QueueTreeStatus, QueueTreeStatusRow } from './queueTreeStatus.js';
 
 const requireFromExtension = createRequire(import.meta.url);
 /** Owned Rust C strings must remain pointers until decoded and explicitly freed. */
@@ -230,6 +232,7 @@ function resetBindings(): void {
     _admin_repair_projection_json = null;
     _visual_tokens_json = null;
     _queue_tree_json = null;
+    _queue_tree_status_json = null;
     _lazily_current_observed_v1 = null;
     _document_closed_for_editor = null;
     _deferred_write_reconnect_content = null;
@@ -481,6 +484,7 @@ let _admin_handoff_json: any = null;
 let _admin_repair_projection_json: any = null;
 let _visual_tokens_json: any = null;
 let _queue_tree_json: any = null;
+let _queue_tree_status_json: any = null;
 let _lazily_current_observed_v1: any = null;
 let _document_closed_for_editor: any = null;
 let _deferred_write_reconnect_content: any = null;
@@ -632,6 +636,17 @@ function bindFunctions(): void {
     } catch (e: any) {
         console.log(`[agent-doc/native] queue tree unavailable: ${e.message}`);
         _queue_tree_json = null;
+    }
+    try {
+        // #treestatusvscode: an older cdylib without the export disables Tree Status.
+        _queue_tree_status_json = lib.func(
+            'agent_doc_queue_tree_status_json',
+            OWNED_C_STRING_POINTER,
+            ['str', 'uint32'],
+        );
+    } catch (e: any) {
+        console.log(`[agent-doc/native] queue tree status unavailable: ${e.message}`);
+        _queue_tree_status_json = null;
     }
     try {
         _document_id_for_path = lib.func(
@@ -2150,6 +2165,37 @@ export function queueTreeNodes(doc: string, projectRoot?: string): QueueTreeNode
         return parseQueueTreeJson(koffi.decode(ptr, 'char', -1));
     } catch (err: any) {
         console.warn(`[agent-doc/native] queue_tree_json error: ${err.message}`);
+        return null;
+    } finally {
+        if (ptr) freeOwnedCString(ptr);
+    }
+}
+
+/**
+ * `#treestatusvscode`: the tree-status answer (`#treestatusquery`) for the queue
+ * subtree at 1-based `line` of the live buffer text, read through
+ * `agent_doc_queue_tree_status_json`. Returns `'unavailable'` when the library
+ * is missing or predates the export, and null when the line is in no queue
+ * component (or the document does not parse); the binary words the reason on
+ * stderr.
+ */
+export function queueTreeStatus(
+    doc: string,
+    line: number,
+    projectRoot?: string,
+): QueueTreeStatus | null | 'unavailable' {
+    if (!ensureLoaded(projectRoot)) return 'unavailable';
+    bindFunctions();
+    if (!_queue_tree_status_json) return 'unavailable';
+    if (!doc.includes('<!-- agent:queue')) return null;
+    if (!Number.isInteger(line) || line < 1) return null;
+
+    const ptr = _queue_tree_status_json(doc, line);
+    try {
+        if (!ptr) return null;
+        return parseQueueTreeStatusJson(koffi.decode(ptr, 'char', -1));
+    } catch (err: any) {
+        console.warn(`[agent-doc/native] queue_tree_status_json error: ${err.message}`);
         return null;
     } finally {
         if (ptr) freeOwnedCString(ptr);

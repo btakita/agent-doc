@@ -2940,8 +2940,19 @@ fn run_with_options_to_writer_in_pass(
             claimed_queue_items: &queue_state.claimed_queue_heads,
         })
     });
-    let agent_rules = composed_agent_rules(file, queue_authoritative_content);
+    let agent_doc_principles::Composition {
+        rules: agent_rules,
+        principles,
+        issues: principle_issues,
+    } = composed_rules_and_principles(file, queue_authoritative_content);
     let agent_rules_guidance = agent_doc_element::rules::agent_rules_guidance(&agent_rules);
+    let principles_guidance = agent_doc_principles::principles_guidance(&principles);
+    warnings.extend(principle_issues.into_iter().map(|issue| PreflightWarning {
+        code: issue.code.to_string(),
+        message: format!("{} ({})", issue.message, issue.source),
+        document_agent: None,
+        active_harness: None,
+    }));
     let output = PreflightOutput {
         warnings,
         layout_issues,
@@ -3003,6 +3014,8 @@ fn run_with_options_to_writer_in_pass(
         status_sync_revert,
         agent_rules,
         agent_rules_guidance,
+        principles,
+        principles_guidance,
         agent_model: preflight_read_projection.tiers.agent_model.clone(),
         queue_prompts: preflight_read_projection.queue.prompts.clone(),
         selected_queue_prompts,
@@ -3050,46 +3063,105 @@ fn run_with_options_to_writer_in_pass(
     Ok(())
 }
 
-/// Every ancestor `.agent-doc/project.md` rule, farthest first, then rules in
-/// `session_content`.
+/// Composed `agent_rules` and `principles` (`#firstprinciples`) for one turn.
 ///
-/// The walk matches project frontmatter defaults: from the nearest project
-/// root through ceiling-bounded ancestors. A nested `.git` does not stop the
-/// walk. When `file` is one of those project files, the session content is the
-/// only copy of that file. A missing project file contributes nothing. A
-/// project file that cannot be read, or whose component markers do not parse,
+/// Layers, farthest first: the global principles file
+/// ([`agent_doc_config::global_principles_path`], principles only), every
+/// ancestor `.agent-doc/project.md`, farthest first, then `session_content`.
+///
+/// The project walk matches project frontmatter defaults: from the nearest
+/// project root through ceiling-bounded ancestors. A nested `.git` does not
+/// stop the walk. When `file` is one of those project files, the session
+/// content is the only copy of that file. A missing file contributes nothing.
+/// A file that cannot be read, or whose component markers do not parse,
 /// contributes nothing and does not fail preflight: preset resolution still
 /// fail-closes on its own read of the same file.
-fn composed_agent_rules(file: &Path, session_content: &str) -> Vec<String> {
-    let session_rules = agent_doc_element::rules::rules_from_document(session_content);
-    let project_rules = project_agent_rules(file);
-    agent_doc_element::rules::compose_rules(&project_rules, &session_rules)
+pub fn composed_rules_and_principles(
+    file: &Path,
+    session_content: &str,
+) -> agent_doc_principles::Composition {
+    use agent_doc_principles::{Layer, PrincipleScope};
+    let mut layers = Vec::new();
+    if let Some(global) = global_principles_path()
+        && !same_file(file, &global)
+        && let Some(rules) = read_rules_file(&global)
+    {
+        layers.push(Layer {
+            scope: PrincipleScope::Global,
+            source: global.display().to_string(),
+            rules,
+        });
+    }
+    for project_md in project_rule_files(file) {
+        if let Some(rules) = read_rules_file(&project_md) {
+            layers.push(Layer {
+                scope: PrincipleScope::Project,
+                source: project_md.display().to_string(),
+                rules,
+            });
+        }
+    }
+    layers.push(Layer {
+        scope: PrincipleScope::Document,
+        source: file.display().to_string(),
+        rules: agent_doc_element::rules::rules_from_document(session_content),
+    });
+    agent_doc_principles::compose(&layers)
 }
 
-fn project_agent_rules(file: &Path) -> Vec<String> {
+/// Every existing ancestor `.agent-doc/project.md` other than `file`, farthest first.
+fn project_rule_files(file: &Path) -> Vec<PathBuf> {
     let Some(nearest_root) = agent_doc_project_root_io::project_root_containing(file) else {
         return Vec::new();
     };
-    let mut rules = Vec::new();
-    for root in agent_doc_fs::ancestors_within_root_ceiling(&nearest_root)
+    agent_doc_fs::ancestors_within_root_ceiling(&nearest_root)
         .into_iter()
         .rev()
-    {
-        let project_md = root.join(".agent-doc").join("project.md");
-        if same_file(file, &project_md) || !project_md.is_file() {
-            continue;
-        }
-        match std::fs::read_to_string(&project_md) {
-            Ok(text) => rules.extend(agent_doc_element::rules::rules_from_document(&text)),
-            Err(error) => {
-                eprintln!(
-                    "[preflight] agent:rules: could not read {}: {error}",
-                    project_md.display()
-                );
-            }
+        .map(|root| root.join(".agent-doc").join("project.md"))
+        .filter(|project_md| !same_file(file, project_md) && project_md.is_file())
+        .collect()
+}
+
+fn read_rules_file(path: &Path) -> Option<Vec<String>> {
+    if !path.is_file() {
+        return None;
+    }
+    match std::fs::read_to_string(path) {
+        Ok(text) => Some(agent_doc_element::rules::rules_from_document(&text)),
+        Err(error) => {
+            eprintln!(
+                "[preflight] agent:rules: could not read {}: {error}",
+                path.display()
+            );
+            None
         }
     }
-    rules
+}
+
+#[cfg(not(test))]
+fn global_principles_path() -> Option<PathBuf> {
+    Some(agent_doc_config::global_principles_path())
+}
+
+// Unit tests never read the operator's real global principles file; a test
+// that needs one installs it with `with_global_principles_path`.
+#[cfg(test)]
+thread_local! {
+    static GLOBAL_PRINCIPLES_PATH: std::cell::RefCell<Option<PathBuf>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(test)]
+fn global_principles_path() -> Option<PathBuf> {
+    GLOBAL_PRINCIPLES_PATH.with(|path| path.borrow().clone())
+}
+
+#[cfg(test)]
+fn with_global_principles_path<T>(path: &Path, body: impl FnOnce() -> T) -> T {
+    GLOBAL_PRINCIPLES_PATH.with(|cell| *cell.borrow_mut() = Some(path.to_path_buf()));
+    let result = body();
+    GLOBAL_PRINCIPLES_PATH.with(|cell| *cell.borrow_mut() = None);
+    result
 }
 
 fn same_file(left: &Path, right: &Path) -> bool {
@@ -10751,6 +10823,240 @@ mod tests {
         assert_eq!(
             contract["agent_rules"],
             serde_json::json!(["Ancestor workspace rule.", "Session free text only."]),
+            "{contract:#}"
+        );
+    }
+
+    /// `#firstprinciples`: principle items in the global principles file,
+    /// every ancestor project file, and the session compose into
+    /// `principles`; a nearer principle with one id replaces a farther one;
+    /// principle items leave `agent_rules`; a principle edited in the same
+    /// cycle as a real prompt is injected with its current text.
+    #[test]
+    fn preflight_injects_principles_from_global_projects_and_session_nearest_wins() {
+        let dir = setup_project();
+        let global = dir.path().join("operator-config/agent-doc/principles.md");
+        std::fs::create_dir_all(global.parent().unwrap()).unwrap();
+        std::fs::write(
+            &global,
+            concat!(
+                "<!-- agent:rules -->\n",
+                "- principle [#no-reask]: Never re-ask an answered question.\n",
+                "  rationale: It spends operator attention twice.\n",
+                "- principle [#velocity]: When a release is blocked, velocity over polish.\n",
+                "<!-- /agent:rules -->\n",
+            ),
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join(".agent-doc/project.md"),
+            concat!(
+                "<!-- agent:rules -->\n",
+                "- Ancestor workspace rule.\n",
+                "- principle [#editor-authority]: Editor-visible operator text is authoritative.\n",
+                "  rationale: The operator reads and edits the editor buffer.\n",
+                "  scope: project\n",
+                "<!-- /agent:rules -->\n",
+            ),
+        )
+        .unwrap();
+        let nested = dir.path().join("sample-app");
+        std::fs::create_dir_all(nested.join(".agent-doc")).unwrap();
+        std::fs::write(
+            nested.join(".agent-doc/project.md"),
+            concat!(
+                "<!-- agent:rules -->\n",
+                "- principle [#velocity]: In sample-app, correctness over velocity.\n",
+                "<!-- /agent:rules -->\n",
+            ),
+        )
+        .unwrap();
+        let doc = nested.join("sampleorders.md");
+        let baseline = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:rules -->\n",
+            "- Session list rule.\n",
+            "- principle [#orders-first]: Order data is never dropped.\n",
+            "<!-- /agent:rules -->\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "## User\n\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        std::fs::write(&doc, baseline).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            baseline,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        std::fs::write(
+            &doc,
+            baseline
+                .replace(
+                    "## User\n\n",
+                    "## User\n\nShould we ship without the polish pass?\n",
+                )
+                .replace(
+                    "Order data is never dropped.",
+                    "Order data is never dropped or reordered.",
+                ),
+        )
+        .unwrap();
+
+        let contract = with_global_principles_path(&global, || probe_contract(&doc));
+        assert_eq!(
+            contract["agent_rules"],
+            serde_json::json!(["Ancestor workspace rule.", "Session list rule."]),
+            "principle items are not also agent_rules: {contract:#}"
+        );
+        let summary: Vec<(String, String, String, Vec<String>)> = contract["principles"]
+            .as_array()
+            .unwrap_or_else(|| panic!("principles missing: {contract:#}"))
+            .iter()
+            .map(|principle| {
+                (
+                    principle["id"].as_str().unwrap().to_string(),
+                    principle["statement"].as_str().unwrap().to_string(),
+                    principle["scope"].as_str().unwrap().to_string(),
+                    principle["overrides"]
+                        .as_array()
+                        .map(|values| {
+                            values
+                                .iter()
+                                .map(|value| value.as_str().unwrap().to_string())
+                                .collect()
+                        })
+                        .unwrap_or_default(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            summary,
+            vec![
+                (
+                    "no-reask".to_string(),
+                    "Never re-ask an answered question.".to_string(),
+                    "global".to_string(),
+                    vec![],
+                ),
+                (
+                    "velocity".to_string(),
+                    "In sample-app, correctness over velocity.".to_string(),
+                    "project".to_string(),
+                    vec![global.display().to_string()],
+                ),
+                (
+                    "editor-authority".to_string(),
+                    "Editor-visible operator text is authoritative.".to_string(),
+                    "project".to_string(),
+                    vec![],
+                ),
+                (
+                    "orders-first".to_string(),
+                    "Order data is never dropped or reordered.".to_string(),
+                    "document".to_string(),
+                    vec![],
+                ),
+            ],
+            "{contract:#}"
+        );
+        assert_eq!(
+            contract["principles"][0]["rationale"],
+            "It spends operator attention twice."
+        );
+        assert_eq!(
+            contract["principles"][2]["source"],
+            dir.path()
+                .join(".agent-doc/project.md")
+                .display()
+                .to_string()
+        );
+        assert_eq!(
+            contract["principles_guidance"],
+            agent_doc_principles::PRINCIPLES_GUIDANCE
+        );
+        let codes: Vec<&str> = contract["warnings"]
+            .as_array()
+            .map(|warnings| {
+                warnings
+                    .iter()
+                    .filter_map(|warning| warning["code"].as_str())
+                    .filter(|code| code.starts_with("principle_"))
+                    .collect()
+            })
+            .unwrap_or_default();
+        assert!(codes.is_empty(), "{contract:#}");
+        let diff = contract["diff"].as_str().unwrap_or_default();
+        assert!(
+            diff.contains("Should we ship without the polish pass?"),
+            "{diff}"
+        );
+    }
+
+    /// A malformed principle stays an ordinary rule, and scope problems are
+    /// warnings; neither fails preflight. No principles, no contract keys.
+    #[test]
+    fn preflight_reports_principle_authoring_problems_as_warnings() {
+        let dir = setup_project();
+        std::fs::write(
+            dir.path().join(".agent-doc/project.md"),
+            concat!(
+                "<!-- agent:rules -->\n",
+                "- principle: forgot the id\n",
+                "- principle [#everywhere]: Applies everywhere.\n",
+                "  scope: global\n",
+                "<!-- /agent:rules -->\n",
+            ),
+        )
+        .unwrap();
+        let doc = dir.path().join("doc.md");
+        std::fs::write(
+            &doc,
+            concat!(
+                "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+                "<!-- agent:exchange patch=append -->\n",
+                "<!-- /agent:exchange -->\n",
+            ),
+        )
+        .unwrap();
+        let missing_global = dir.path().join("no-such-config/principles.md");
+        let contract = with_global_principles_path(&missing_global, || probe_contract(&doc));
+        assert_eq!(
+            contract["agent_rules"],
+            serde_json::json!(["principle: forgot the id"]),
+            "{contract:#}"
+        );
+        assert_eq!(contract["principles"][0]["id"], "everywhere");
+        assert_eq!(contract["principles"][0]["scope"], "project");
+        let warnings = contract["warnings"].as_array().cloned().unwrap_or_default();
+        let malformed = warnings
+            .iter()
+            .find(|warning| warning["code"] == agent_doc_principles::ISSUE_MALFORMED)
+            .unwrap_or_else(|| panic!("{contract:#}"));
+        assert!(
+            malformed["message"]
+                .as_str()
+                .unwrap()
+                .contains("needs an id"),
+            "{malformed:#}"
+        );
+        let mismatch = warnings
+            .iter()
+            .find(|warning| warning["code"] == agent_doc_principles::ISSUE_SCOPE_MISMATCH)
+            .unwrap_or_else(|| panic!("{contract:#}"));
+        assert!(
+            mismatch["message"]
+                .as_str()
+                .unwrap()
+                .contains("principles.md"),
+            "{mismatch:#}"
+        );
+
+        std::fs::write(dir.path().join(".agent-doc/project.md"), "").unwrap();
+        let contract = with_global_principles_path(&missing_global, || probe_contract(&doc));
+        assert!(contract.get("principles").is_none(), "{contract:#}");
+        assert!(
+            contract.get("principles_guidance").is_none(),
             "{contract:#}"
         );
     }

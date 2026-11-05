@@ -1,0 +1,15 @@
+[package]
+name = "agent-doc-principles"
+version = "0.35.568"
+edition = "2024"
+license = "Apache-2.0"
+description = "Operator first principles and derivations: authoring, scope composition, why-chains, change impact, and contradiction checks for agent-doc"
+repository = "https://github.com/btakita/agent-doc"
+publish = false
+
+[dependencies]
+agent-doc-element = { path = "../agent-doc-element", version = "0.35.568" }
+serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+serde_json = "1"

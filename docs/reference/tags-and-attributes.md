@@ -56,7 +56,7 @@ is the legacy alias for `backlog`.
 | `agent:signals` | Realtime signal definitions/readings reconciled by the signal subsystem. |
 | `agent:todo` | Operator-owned informational checklist. It is not runnable work and is never promoted to the queue. |
 | `agent:notes` | Operator-owned informational context. Content-only edits do not start a turn. |
-| `agent:rules` | Operator-owned rules for every admitted turn. A list is one rule per item; free text is included as written. Multiple blocks compose in file order from every ancestor `.agent-doc/project.md`, farthest first, then the session. Content-only edits do not start a turn. |
+| `agent:rules` | Operator-owned rules for every admitted turn. A list is one rule per item; free text is included as written. Multiple blocks compose in file order from every ancestor `.agent-doc/project.md`, farthest first, then the session. A `principle [#id]: <statement>` item is a first principle instead (see below). Content-only edits do not start a turn. |
 
 `agent:model` is a supported preflight control component rather than a
 registry-owned work component. Its trimmed body may be a tier
@@ -81,6 +81,31 @@ The composed list is `agent_rules` on the cycle contract, with
 `agent_rules_guidance` when the list is non-empty. A content-only edit does
 not start a turn. A real exchange or queue turn still includes the current
 rules.
+
+#### First principles
+
+An item whose first line reads `principle [#id]: <statement>` is an operator
+first principle, the top of the decision hierarchy (principles, standing
+decisions, decisions, items). Indented `rationale:` and `scope:` lines are
+optional:
+
+```markdown
+<!-- agent:rules -->
+- principle [#no-reask]: Never re-ask an answered question.
+  rationale: It spends operator attention twice.
+<!-- /agent:rules -->
+```
+
+Principles come from the global file `~/.config/agent-doc/principles.md`
+(principles only), every ancestor `.agent-doc/project.md`, and the session
+document. They reach the cycle contract as `principles` (with
+`principles_guidance`), not as `agent_rules`. Scope is where the principle is
+written (`global`, `project`, `document`); a nearer principle with the same id
+replaces a farther one. A principle-shaped item with no valid id or no
+statement stays an ordinary rule, and preflight warns about it. When the
+principles settle a question, the agent decides without asking and cites them
+as `[#id]`; otherwise it asks once, naming the principles that bear on it and
+the answer they recommend.
 
 Names such as `input`, `output`, `findings`, `log`, and `architecture` are
 conventional generic patch slots. Any syntactically valid unregistered

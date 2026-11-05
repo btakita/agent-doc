@@ -126,6 +126,11 @@ then the session. A nested repository's `.git` does not hide an ancestor
 project file. A missing project file is skipped. A rules body that does not
 parse contributes nothing instead of failing the preset map.
 
+First principles (`#firstprinciples`) add one layer before the project files:
+`~/.config/agent-doc/principles.md` (or `$XDG_CONFIG_HOME/agent-doc/principles.md`),
+whose `agent:rules` blocks hold `principle [#id]: …` items that apply to every
+project. See `02-document-format.md` for the principle syntax.
+
 Nested repositories therefore inherit a workspace parent's presets and rules
 while their own `project.md` remains the nearer overlay. The similarly named
 `.agent-doc/config.toml` remains runtime configuration, not a prompt

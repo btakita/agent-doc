@@ -122,3 +122,33 @@ current answers; conflicts, copies, applied items and `same_as` merges.
 [--json]`. `<id>` may be a decision id, a revision id, a question copy id, or
 (for `why`, and for `impact` when unambiguous) an item a decision applies to.
 tsift graph-db may index the cached rows as an optional traversal layer.
+
+### Project registry in the graph (`#decisionregistrygraph`)
+
+`decision graph|impact|why` also load the `decisions.md` registry at the
+document's project root (`agent_doc_answer_ledger::graph::registry`, loaded
+by `agent_doc_preflight_io::decision_registry_graph`). Each record is a
+`decision` node with its verbatim `DEC-…` id and one `revision`
+`DEC-…@<hash>` holding its current text (location `decisions.md (<state>,
+updated <timestamp>)`), `evidenced_by` its response evidence (the stored
+`[#r-<hex>]` form unbracketed, so it meets the evidence node a ledger answer
+citing the same response produces). A record's `Supersedes:` list becomes
+decision-level `supersedes` edges `DEC-new → DEC-old` (source `derived`); a
+dangling target adds nothing (`decision validate` reports it). A session
+item whose text cites a record (`[DEC-x](decision:DEC-x)`, read with the
+same parser as `decision validate`) `applies_to` it, and a bracket id
+`[#DEC-x]` (read by the ledger as the lowercased placeholder `dec-x`, e.g. in
+`depends on [#DEC-x]`) is folded onto the record node.
+
+The impact of a record that supersedes others is a `supersedes` change from
+the first replaced record's text (`superseded_decisions` lists all of them):
+the dependents of the record and of every record it replaces are flagged or
+reopened as for any supersede (a replaced record's dependents name it first
+in `via`), and the replaced records' evidence is listed in `actions_taken`.
+The replaced record's own impact stays `initial`. `why` adds `supersedes`
+(each replaced record with its text) and `superseded_by`.
+
+The overlay is applied on read only: preflight and closeout neither load nor
+cache it, so the registry stays the authority and a removed record never
+lingers as cached graph history. A missing registry is a no-op; an
+unparsable one is reported on stderr and skipped.

@@ -33,6 +33,9 @@ use serde::{Deserialize, Serialize};
 use crate::extract::{Observations, QuestionSource, bracket_ids};
 use crate::{EdgeKind, Ledger, RevisionRelation, id_key, text};
 
+mod registry;
+pub use registry::{REGISTRY_LOCATION, RegistryCitation, RegistryDecision, registry_revision_id};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum NodeKind {
@@ -614,6 +617,11 @@ pub struct Impact {
     /// Decisions recorded as conflicting with this one.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub conflicts_with: Vec<String>,
+    /// Decisions this one supersedes outright (a project registry record's
+    /// `Supersedes:` list, `#decisionregistrygraph`); their dependents and
+    /// evidence are walked as the old answer's.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub superseded_decisions: Vec<String>,
     /// Dependents an amend leaves alone (they do not touch the clause).
     pub unaffected: usize,
 }
@@ -716,14 +724,38 @@ impl DecisionGraph {
         };
         let target = revisions[target_index];
         let relation = self.relation_of(&target.id);
-        let change = relation.map_or("initial", |edge| edge.kind.as_str());
-        let previous = target_index.checked_sub(1).map(|index| revisions[index]);
+        // A decision that supersedes other decisions outright (a registry
+        // record) changes them with its current revision.
+        let replaced_decisions = if target_index + 1 == revisions.len() {
+            self.superseded_decisions(decision)
+        } else {
+            Vec::new()
+        };
+        let replaces_decisions = relation.is_none() && !replaced_decisions.is_empty();
+        let change = if replaces_decisions {
+            EdgeKind::Supersedes.as_str()
+        } else {
+            relation.map_or("initial", |edge| edge.kind.as_str())
+        };
+        let previous = if replaces_decisions {
+            replaced_decisions
+                .first()
+                .and_then(|old| self.revisions_of(old).last().copied())
+        } else {
+            target_index.checked_sub(1).map(|index| revisions[index])
+        };
         let clause = relation.and_then(|edge| edge.clause.clone());
         let mut impact = Impact {
             decision_id: decision.to_string(),
             question: decision_node.label.clone(),
             change: change.to_string(),
-            change_source: relation.map_or(EdgeSource::Derived, |edge| edge.source),
+            change_source: match relation {
+                Some(edge) => edge.source,
+                None => self
+                    .decision_supersede_source(decision)
+                    .filter(|_| replaces_decisions)
+                    .unwrap_or(EdgeSource::Derived),
+            },
             from_revision: previous.map(|node| node.id.clone()),
             from_answer: previous.map(|node| node.label.clone()),
             to_revision: target.id.clone(),
@@ -741,9 +773,14 @@ impl DecisionGraph {
                 .collect::<BTreeSet<_>>()
                 .into_iter()
                 .collect(),
+            superseded_decisions: replaced_decisions.clone(),
             unaffected: 0,
         };
-        let kind = relation.map(|edge| edge.kind);
+        let kind = if replaces_decisions {
+            Some(EdgeKind::Supersedes)
+        } else {
+            relation.map(|edge| edge.kind)
+        };
         if !matches!(kind, Some(EdgeKind::Supersedes | EdgeKind::Amends)) {
             return Some(impact);
         }
@@ -759,7 +796,7 @@ impl DecisionGraph {
                 action,
             })
         };
-        for dependent in self.dependents(decision) {
+        for dependent in self.dependents_with_replaced(decision, &replaced_decisions) {
             let Some(node) = self.nodes.get(&dependent.node) else {
                 continue;
             };
@@ -832,6 +869,8 @@ impl DecisionGraph {
                     });
                 }
             }
+            let rows = self.replaced_decision_evidence(&replaced_decisions, &mut seen);
+            impact.actions_taken.extend(rows);
         }
         Some(impact)
     }
@@ -908,6 +947,13 @@ pub struct Why {
     /// Operator `same as` merges among its copies.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub merged: Vec<String>,
+    /// Decisions this one supersedes outright, with their texts (project
+    /// registry `Supersedes:`, `#decisionregistrygraph`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub supersedes: Vec<WhyPremise>,
+    /// Decisions that supersede this one outright.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub superseded_by: Vec<String>,
 }
 
 impl DecisionGraph {
@@ -1020,6 +1066,8 @@ impl DecisionGraph {
                 .map(|edge| edge.to.clone())
                 .collect(),
             merged: merged.into_iter().collect(),
+            supersedes: self.why_supersedes(decision),
+            superseded_by: self.superseding_decisions(decision),
         })
     }
 }

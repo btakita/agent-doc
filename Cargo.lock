@@ -1616,6 +1616,7 @@ dependencies = [
  "agent-doc-crdt-relay-io",
  "agent-doc-cycle-state-io",
  "agent-doc-debounce",
+ "agent-doc-decision-io",
  "agent-doc-diff",
  "agent-doc-document",
  "agent-doc-element",

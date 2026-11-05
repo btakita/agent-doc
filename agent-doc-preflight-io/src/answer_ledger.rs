@@ -299,10 +299,13 @@ fn graph_of(
     graph
 }
 
-/// The decision graph for `content` (`#decisiongraph`). Read-only.
+/// The decision graph for `content` (`#decisiongraph`), with the project
+/// `decisions.md` records and their `supersedes` links overlaid
+/// (`#decisionregistrygraph`; never cached). Read-only.
 pub fn build_graph(file: &Path, content: &str) -> (Ledger, DecisionGraph) {
     let (observations, ledger) = build_ledger(file, content);
-    let graph = graph_of(file, &ledger, &observations);
+    let mut graph = graph_of(file, &ledger, &observations);
+    crate::decision_registry_graph::overlay_project_registry(file, &mut graph, &observations);
     (ledger, graph)
 }
 

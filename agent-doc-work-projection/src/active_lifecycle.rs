@@ -154,6 +154,7 @@ impl ActiveLifecycle {
         }
         for receipt in &receipts.receipts {
             if attempts.contains_key(&receipt.identity)
+                || receipt.attempt_closed()
                 || cancelled(&receipt.identity, receipt.generation)
                 || facts(&receipt.owner, receipt.generation).is_some_and(|facts| facts.ended)
             {

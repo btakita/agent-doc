@@ -86,7 +86,10 @@ pub fn build_project_queue_sync_payload(
                     let cancelled = cancellations.iter().any(|cancelled| {
                         cancelled.cancels_attempt(&receipt.identity, receipt.generation)
                     });
+                    // `#todoeditrevivesrow`: a closed attempt's receipt is
+                    // retained response evidence, not a reported attempt.
                     if !cancelled
+                        && !receipt.attempt_closed()
                         && !claims
                             .iter()
                             .any(|claim| claim.identity == receipt.identity)

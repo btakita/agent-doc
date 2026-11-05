@@ -78,7 +78,9 @@ pub fn reported_receipt_attempt_for_parent_id(
 ) -> Result<Option<(String, u64)>> {
     let mut attempts = std::collections::BTreeSet::new();
     for receipt in load(file)?.receipts {
-        if !receipt.attests_exact_attempt() {
+        // `#todoeditrevivesrow`: a closed attempt is consumed work, never the
+        // receipt a re-projected parent row of the same id acknowledges.
+        if receipt.attempt_closed() || !receipt.attests_exact_attempt() {
             continue;
         }
         let Some(id) =
@@ -124,6 +126,31 @@ pub fn retire_exact_reported_receipt(
         );
     }
     Ok(removed > 0)
+}
+
+/// Close the reported-release receipt of exactly `owner`/`generation`
+/// (`#todoeditrevivesrow`), keeping its response capture. The strike that
+/// ended that exact attempt calls this, so the consumed attempt stops
+/// governing its identity even when a row with the same `[#id]` is live again
+/// in the successor (a todo edit re-projects the waiting row under new text).
+/// Returns whether one was closed.
+pub fn close_exact_reported_receipt(
+    file: &Path,
+    owner: &str,
+    generation: u64,
+    source: &str,
+) -> Result<bool> {
+    let now = now_secs();
+    let closed = mutate(file, |ledger| ledger.close_exact_attempt(owner, generation, now))?;
+    if closed > 0 {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "queue_claim_release_receipt_exact_closed owner={owner} generation={generation} source={source} response=retained (#todoeditrevivesrow)"
+            ),
+        );
+    }
+    Ok(closed > 0)
 }
 
 /// Remove and return the exact reported-release receipt cancelled by operator
@@ -559,22 +586,41 @@ pub fn prune_closed(file: &Path, content: &str) -> Result<usize> {
         );
         return Ok(0);
     }
-    let mut live = live_queue_head_identities(content).unwrap_or_default();
+    let live_rows = live_queue_head_identities(content).unwrap_or_default();
+    let mut live = live_rows.clone();
     // A closed row is not enough to retire the last full response authority.
     // The queue receipt does not yet carry the repository commit + archive
     // index/path checksum proof needed to authorize GC, so full captures stay
     // fail-closed even after editor projection converges.
+    let mut retained = std::collections::HashSet::new();
     for receipt in load(file)?.receipts {
         if receipt.response.is_some() {
+            retained.insert(receipt.identity.clone());
             live.insert(receipt.identity);
         }
     }
     let now = now_secs();
-    let pruned = mutate(file, |ledger| ledger.prune(now, Some(&live)))?;
+    let (pruned, closed) = mutate(file, |ledger| {
+        let pruned = ledger.prune(now, Some(&live));
+        // `#todoeditrevivesrow`: a kept full capture whose row closed is
+        // response evidence, not ownership. Left open (a pre-close strike, a
+        // deferred or hand strike), it projected `☑️` onto the next row with
+        // its identity, e.g. a todo edit that re-projected the waiting row.
+        let closed = ledger.close_struck(&retained, Some(&live_rows), now);
+        (pruned, closed)
+    })?;
     if pruned > 0 {
         agent_doc_ops_log_io::log_op(
             file,
             &format!("queue_claim_release_receipt_prune pruned={pruned} (#reportedrelease)"),
+        );
+    }
+    if closed > 0 {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "queue_claim_release_receipt_closed_on_prune closed={closed} response=retained (#todoeditrevivesrow)"
+            ),
         );
     }
     Ok(pruned)
@@ -763,6 +809,98 @@ mod tests {
         )
         .unwrap();
         doc
+    }
+
+    /// `#todoeditrevivesrow` (agent-doc-bugs.md, 2026-11-05,
+    /// `lazilysqlitestoreopen`): a reported, released attempt's row was struck
+    /// at 02:15Z by a binary that kept the response-bearing receipt open, and
+    /// `queue claims` was empty when the row reappeared as a live
+    /// `☑️ [#subagent:lazilystore#1] do [#lazilysqlitestoreopen]` at 05:47Z:
+    /// the open receipt still governed the `[#id]` identity. Closeout
+    /// reconciliation now closes a kept capture whose row has closed, so a
+    /// later row with the same id is fresh work, not the consumed attempt.
+    #[test]
+    fn todoeditrevivesrow_prune_closes_a_struck_attempts_retained_receipt() {
+        let dir = tempfile::tempdir().unwrap();
+        let item = "do [#lazilysqlitestoreopen]";
+        let owner = "subagent:lazilystore";
+        let doc = write_doc(dir.path(), &[item, "other"]);
+        let live = std::fs::read_to_string(&doc).unwrap();
+        let (_, claim) = crate::queue_claim::claim(&doc, item, owner, 3600).unwrap();
+        crate::queue_claim::start_attempt(&doc, item, owner, "worker:lazilystore", 3600, 1)
+            .unwrap();
+        capture_response_for_attempt(&doc, item, claim.generation, "SqliteStore::open landed")
+            .unwrap();
+        release(&doc, item, ReleaseKind::Reported).unwrap();
+        assert!(governing_receipt(&doc, &live, item).is_some());
+
+        // A strike that left the receipt open (pre-close binary, deferred or
+        // hand strike): the reappearing row is still governed by it.
+        let struck = live.replace(&format!("- {item}\n"), &format!("- ~~{item}~~\n"));
+        let reappeared =
+            live.replace(&format!("- {item}\n"), &format!("- ~~{item}~~\n- {item}\n"));
+        assert!(
+            governing_receipt(&doc, &reappeared, item).is_some(),
+            "the legacy open receipt revives the re-added row"
+        );
+        let reported_rows = |current: &str| {
+            crate::sync_payload::build_project_queue_sync_payload(&doc, current, None)
+                .unwrap()
+                .reported_checkmark
+                .len()
+        };
+        assert_eq!(reported_rows(&reappeared), 1, "preflight serves it as reported");
+
+        assert_eq!(prune_closed(&doc, &struck).unwrap(), 0, "the capture is kept");
+        let receipts = load(&doc).unwrap().receipts;
+        assert_eq!(receipts.len(), 1, "{receipts:?}");
+        assert!(receipts[0].attempt_closed(), "{receipts:?}");
+        assert!(receipts[0].response.is_some(), "{receipts:?}");
+        let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops_log.contains("queue_claim_release_receipt_closed_on_prune closed=1"),
+            "{ops_log}"
+        );
+
+        for current in [live.as_str(), reappeared.as_str()] {
+            assert!(governing_receipt(&doc, current, item).is_none(), "{current}");
+            assert!(!reported_items_for_content(&doc, current).claims(item));
+            assert!(!attested_reported_items_for_content(&doc, current).claims(item));
+            assert!(reported_head_texts_for_content(&doc, current).is_empty());
+            assert!(reported_owners_for_content(&doc, current).is_empty());
+            assert_eq!(reported_rows(current), 0, "{current}");
+            let projected =
+                crate::queue_cmd::derive_claim_runtime_projection(&doc, current, None).unwrap();
+            assert!(
+                !projected.target_content.contains("☑️"),
+                "the consumed attempt never re-projects:\n{}",
+                projected.target_content
+            );
+        }
+        assert_eq!(
+            reported_receipt_attempt_for_parent_id(&doc, "lazilysqlitestoreopen").unwrap(),
+            None
+        );
+
+        // A live row keeps an open receipt governing it: closure needs the
+        // row to be gone, exactly like the plain-receipt prune.
+        let (_, next) = crate::queue_claim::claim(&doc, item, owner, 3600).unwrap();
+        assert!(next.generation > claim.generation, "lineage keeps the fence");
+        crate::queue_claim::start_attempt(
+            &doc,
+            item,
+            owner,
+            "worker:lazilystore-2",
+            3600,
+            next.generation,
+        )
+        .unwrap();
+        capture_response_for_attempt(&doc, item, next.generation, "second attempt").unwrap();
+        release(&doc, item, ReleaseKind::Reported).unwrap();
+        assert_eq!(prune_closed(&doc, &live).unwrap(), 0);
+        let receipt = governing_receipt(&doc, &live, item).expect("the new attempt governs");
+        assert_eq!(receipt.generation, next.generation);
+        assert!(!receipt.attempt_closed());
     }
 
     /// `#reportedrelease`: a reported release keeps a receipt through the

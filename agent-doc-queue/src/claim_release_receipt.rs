@@ -415,8 +415,33 @@ impl ClaimReleaseReceiptLedger {
         closed
     }
 
+    /// Mark the receipt of exactly `owner`/`generation` closed
+    /// (`#todoeditrevivesrow`): the strike that ended that attempt closes its
+    /// receipt by attempt, not by whether some row with the same identity is
+    /// still (or again) live. The response capture stays as recovery evidence.
+    /// Returns how many were marked.
+    pub fn close_exact_attempt(&mut self, owner: &str, generation: u64, now_secs: u64) -> usize {
+        let mut closed = 0;
+        for receipt in &mut self.receipts {
+            if receipt.attempt_closed()
+                || receipt.owner != owner
+                || receipt.generation != generation
+            {
+                continue;
+            }
+            receipt.attempt_closed_at_secs = Some(now_secs.max(1));
+            closed += 1;
+        }
+        closed
+    }
+
     /// The receipt that governs the live line `text`: still queued and not
     /// superseded by a live claim on the same line.
+    ///
+    /// `#todoeditrevivesrow`: a receipt whose attempt a strike closed governs
+    /// nothing. Identity is text-insensitive for an id-backed row, so a todo
+    /// edit (or any re-projection) that puts a fresh row with the same
+    /// `[#id]` back in the queue must not inherit the consumed attempt's `☑️`.
     pub fn governing(
         &self,
         _now_secs: u64,
@@ -434,7 +459,7 @@ impl ClaimReleaseReceiptLedger {
         }
         self.receipts
             .iter()
-            .find(|receipt| receipt.identity == identity)
+            .find(|receipt| receipt.identity == identity && !receipt.attempt_closed())
     }
 
     /// Every governing receipt's line identity: the lines a new worker must
@@ -452,7 +477,9 @@ impl ClaimReleaseReceiptLedger {
             self.receipts
                 .iter()
                 .filter(|receipt| {
-                    live.contains(&receipt.identity) && !claimed.claims(&receipt.item_text)
+                    !receipt.attempt_closed()
+                        && live.contains(&receipt.identity)
+                        && !claimed.claims(&receipt.item_text)
                 })
                 .map(|receipt| receipt.identity.clone()),
         )
@@ -638,6 +665,44 @@ mod tests {
                 .is_some()
         );
         assert!(ledger.governing(20, None, &none, question).is_none());
+    }
+
+    /// `#todoeditrevivesrow`: a receipt whose attempt a strike closed governs
+    /// no live row, even one with the same id-backed identity under edited
+    /// text; closing is exact to the ended attempt.
+    #[test]
+    fn a_closed_attempt_governs_no_row_with_its_identity() {
+        let consumed = "[#hookcreatedsubmodules] Keep or remove the settings files";
+        let edited = "[#hookcreatedsubmodules] Approve removing the settings files";
+        let mut ledger = ClaimReleaseReceiptLedger::default();
+        record(&mut ledger, &claim(consumed, "subagent:hookcreated"), 10, 50);
+        record(&mut ledger, &claim("other line", "subagent:other"), 10, 50);
+        let queued = live(&[edited, "other line"]);
+        let none = ClaimedQueueItems::none();
+        assert_eq!(claim_identity(consumed), claim_identity(edited));
+        assert!(ledger.governing(20, Some(&queued), &none, edited).is_some());
+
+        assert_eq!(ledger.close_exact_attempt("subagent:hookcreated", 2, 30), 0);
+        assert_eq!(ledger.close_exact_attempt("subagent:hookcreated", 1, 30), 1);
+        assert_eq!(
+            ledger.close_exact_attempt("subagent:hookcreated", 1, 31),
+            0,
+            "closing is idempotent"
+        );
+        assert!(ledger.governing(20, Some(&queued), &none, edited).is_none());
+        assert!(!ledger.reported_items(20, Some(&queued), &none).claims(edited));
+        assert!(
+            !ledger
+                .attested_reported_items(20, Some(&queued), &none)
+                .claims(edited)
+        );
+        assert!(
+            ledger
+                .governing(20, Some(&queued), &none, "other line")
+                .is_some(),
+            "another attempt's receipt is untouched"
+        );
+        assert_eq!(ledger.receipts.len(), 2, "the response capture is kept");
     }
 
     #[test]

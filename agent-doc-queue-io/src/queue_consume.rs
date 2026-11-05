@@ -3110,6 +3110,26 @@ fn converge_id_backed_head_strike(
             *generation,
             source,
         )?;
+        // `#todoeditrevivesrow`: the strike ended this exact attempt, so its
+        // response-bearing receipt stops governing the identity by attempt,
+        // not by row liveness. `retire_struck` above closes it only when no
+        // row with the identity is live in the successor; an id-backed waiting
+        // row a todo edit re-projected under new text is that row, and it
+        // revived `☑️ [#subagent:x#1]` (hookcreatedsubmodules, 2026-11-04).
+        // Like `retire_struck_or_warn`, a failure here is reported, never
+        // fatal: the successor is already accepted, and the next closeout
+        // prune closes a receipt whose row has no live head.
+        if let Err(err) = crate::claim_release_receipt::close_exact_reported_receipt(
+            file,
+            owner,
+            *generation,
+            source,
+        ) {
+            eprintln!(
+                "[queue] WARNING: could not close the release receipt of {owner} generation {generation} in {} ({source}): {err:#}",
+                file.display()
+            );
+        }
     }
     Ok(true)
 }
@@ -10744,6 +10764,137 @@ Old.
                 .iter()
                 .all(|claim| claim.owner != "subagent:vscode_smoke"),
             "the reported attempt ended: {ledger:?}"
+        );
+    }
+
+    /// `#todoeditrevivesrow` (agent-doc-bugs.md, 2026-11-04,
+    /// `hookcreatedsubmodules`): a Todo-backed waiting parent's worker captured
+    /// its full response and reported; `queue consume --ack-id` reaped the
+    /// `☑️` child and ended the claim while the waiting parent (same `[#id]`
+    /// identity) stayed live. The strike kept the response-bearing receipt
+    /// open because a row with its identity was still live, so it governed the
+    /// parent; the `--todo-edit` that rewrote the Todo text re-projected the
+    /// parent under the new text and the runtime projection painted a fresh
+    /// `☑️ [#subagent:hookcreated#1]` row, which the reported-writeback Stop
+    /// hook demanded be consumed a second time.
+    #[test]
+    fn todoeditrevivesrow_ack_closes_the_exact_receipt_so_an_edited_parent_stays_bare() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("bugs.md");
+        let owner = "subagent:hookcreated";
+        let parent = concat!(
+            "[#hookcreatedsubmodules] Keep or remove the hook-created settings files ",
+            "<!-- agent-doc:waiting-item -->"
+        );
+        let edited = concat!(
+            "[#hookcreatedsubmodules] Approve removing the hook-created settings files ",
+            "<!-- agent-doc:waiting-item -->"
+        );
+        let document = |parent: &str, attempt: &str| {
+            format!(
+                concat!(
+                    "---\nsession: sid\nagent_doc_format: template\nqueue_active: true\n---\n\n",
+                    "<!-- agent:exchange -->\n### Re: worker report\n\nKeep 4, remove 14.\n",
+                    "<!-- /agent:exchange -->\n\n",
+                    "## Run <!-- agent:run subagents priority go -->\n",
+                    "- ### Waiting on you — answer by adding a child line under an item <!-- agent-doc:waiting-on-you -->\n",
+                    "  - {parent}\n",
+                    "    - **Response:** Decide which files stay. <!-- agent-doc:waiting-metadata -->\n",
+                    "{attempt}",
+                    "  - [#later] keep later work live\n",
+                    "<!-- /agent:run -->\n\n",
+                    "## Todo <!-- agent:todo priority -->\n",
+                    "- [ ] {parent}\n",
+                    "<!-- /agent:todo -->\n",
+                ),
+                parent = parent,
+                attempt = attempt,
+            )
+        };
+        let content = document(
+            parent,
+            "    - 🙋☑️ [#subagent:hookcreated#1] Resolve the open operator action to complete the parent item. [#hookcreatedsubmodules]\n",
+        );
+        std::fs::write(&doc, &content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        let generation = running_waiting_parent_claim(&doc, &content, parent, owner, |generation| {
+            crate::claim_release_receipt::capture_response_for_attempt(
+                &doc,
+                parent,
+                generation,
+                "Keep 4 files, remove 14.",
+            )
+            .unwrap();
+            let reported =
+                crate::queue_claim::report_attempt(&doc, parent, Some(generation)).unwrap();
+            crate::queue_lineage::record_prose_only(&doc, &reported, "test prose result").unwrap();
+        });
+
+        assert!(acknowledge_open_id_backed_queue_head(&doc, "hookcreatedsubmodules").unwrap());
+
+        let struck = std::fs::read_to_string(&doc).unwrap();
+        assert!(!struck.contains("[#subagent:hookcreated#1]"), "{struck}");
+        assert!(struck.contains(&format!("  - {parent}\n")), "{struck}");
+        let receipts = crate::claim_release_receipt::load(&doc).unwrap().receipts;
+        assert_eq!(receipts.len(), 1, "the full response capture is retained");
+        assert_eq!(
+            (receipts[0].owner.as_str(), receipts[0].generation),
+            (owner, generation)
+        );
+        assert!(receipts[0].response.is_some(), "{receipts:?}");
+        assert!(
+            receipts[0].attempt_closed(),
+            "the strike closed its exact attempt although the parent stays live: {receipts:?}"
+        );
+
+        // The operator's `--todo-edit` rewrites the Todo text and the waiting
+        // parent is re-projected under it, with no attempt row.
+        let edited_content = document(edited, "");
+        std::fs::write(&doc, &edited_content).unwrap();
+        for (label, current) in [("struck", struck.as_str()), ("edited", edited_content.as_str())]
+        {
+            let projected =
+                crate::queue_cmd::derive_claim_runtime_projection(&doc, current, None).unwrap();
+            assert!(
+                !projected.target_content.contains("☑️"),
+                "{label}: the consumed attempt never re-projects:\n{}",
+                projected.target_content
+            );
+            assert!(
+                crate::claim_release_receipt::reported_head_texts_for_content(&doc, current)
+                    .is_empty(),
+                "{label}: no reported-writeback debt for consumed work"
+            );
+            let (_, row) = current
+                .lines()
+                .find_map(|line| line.split_once("  - [#hookcreatedsubmodules]"))
+                .unwrap();
+            let row = format!("[#hookcreatedsubmodules]{row}");
+            assert!(
+                crate::claim_release_receipt::governing_receipt(&doc, current, &row).is_none(),
+                "{label}"
+            );
+        }
+        assert_eq!(
+            crate::claim_release_receipt::reported_receipt_attempt_for_parent_id(
+                &doc,
+                "hookcreatedsubmodules"
+            )
+            .unwrap(),
+            None
+        );
+        let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops_log.contains(&format!(
+                "queue_claim_release_receipt_exact_closed owner={owner} generation={generation}"
+            )),
+            "{ops_log}"
         );
     }
 

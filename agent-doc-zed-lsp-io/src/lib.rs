@@ -8,6 +8,7 @@
 mod handoff;
 mod input;
 mod queue_tree_view;
+mod tree_status_action;
 
 use agent_doc_document_realtime::editor_contract::{
     DOCUMENT_ONLY_LAYOUT_AUTHORITY, ZED_EDITOR_KIND, ZED_LSP_CAPABILITIES,
@@ -243,7 +244,13 @@ impl<W: Write, I: LspInput> Server<W, I> {
                                     "save": { "includeText": true }
                                 },
                                 "foldingRangeProvider": true,
-                                "inlayHintProvider": true
+                                "inlayHintProvider": true,
+                                "codeActionProvider": {
+                                    "codeActionKinds": ["source", "quickfix"]
+                                },
+                                "executeCommandProvider": {
+                                    "commands": [tree_status_action::SHOW_TREE_STATUS_COMMAND]
+                                }
                             },
                             "serverInfo": {
                                 "name": "agent-doc-zed-lsp",
@@ -308,6 +315,56 @@ impl<W: Write, I: LspInput> Server<W, I> {
                         .map(|text| queue_tree_view::inlay_hints(text, start, end))
                         .unwrap_or(Value::Null);
                     self.respond(id, result)?;
+                }
+            }
+            Some("textDocument/codeAction") => {
+                if let Some(id) = id {
+                    let caret = message
+                        .pointer("/params/range/start/line")
+                        .and_then(Value::as_u64)
+                        .map(|line| line as usize);
+                    let only = message
+                        .pointer("/params/context/only")
+                        .and_then(Value::as_array)
+                        .map(|kinds| {
+                            kinds
+                                .iter()
+                                .filter_map(Value::as_str)
+                                .map(str::to_string)
+                                .collect::<Vec<_>>()
+                        });
+                    let trigger_kind = message
+                        .pointer("/params/context/triggerKind")
+                        .and_then(Value::as_u64);
+                    let uri = message
+                        .pointer("/params/textDocument/uri")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default();
+                    let result = match (self.queue_view_text(&message), caret) {
+                        (Some(text), Some(caret)) => tree_status_action::code_actions(
+                            uri,
+                            text,
+                            caret,
+                            only.as_deref(),
+                            trigger_kind,
+                        ),
+                        _ => Value::Null,
+                    };
+                    self.respond(id, result)?;
+                }
+            }
+            Some("workspace/executeCommand") => {
+                let command = message.pointer("/params/command").and_then(Value::as_str);
+                if command == Some(tree_status_action::SHOW_TREE_STATUS_COMMAND)
+                    && let Some(notification) =
+                        tree_status_action::show_message(message.pointer("/params/arguments"))
+                {
+                    self.send(notification)?;
+                    if let Some(id) = id {
+                        self.respond(id, Value::Null)?;
+                    }
+                } else if let Some(id) = id {
+                    self.error(id, -32602, "unknown agent-doc command")?;
                 }
             }
             Some(_) if id.is_some() => {
@@ -971,6 +1028,86 @@ mod tests {
         assert_eq!(output[1]["result"][0]["label"], "✓");
         assert_eq!(output[1]["result"][0]["tooltip"], "agent-doc queue: done");
         assert_eq!(output[2]["result"], Value::Null);
+    }
+
+    /// `#treestatuszed`: the code action menu on an agent-doc buffer's queue
+    /// offers the tree-status answer and one deletion per deletable subtree;
+    /// running the answer's command shows its text; any other Markdown buffer
+    /// answers null.
+    #[test]
+    fn tree_status_code_actions_answer_only_agent_doc_buffers() {
+        let (mut server, _sender) = scripted_server();
+        let doc = concat!(
+            "---\nagent_doc_session: s\n---\n",
+            "<!-- agent:queue id=\"main\" -->\n",
+            "- ~~do [#alpha]~~\n",
+            "  - ~~step one~~\n",
+            "- 🚧 [#subagent:beta#1] do [#beta]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        server.track_queue_view("file:///s.md", doc);
+        server.track_queue_view("file:///plain.md", "# notes\n<!-- agent:queue -->\n");
+        let code_action = |id: u64, uri: &str| {
+            json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "method": "textDocument/codeAction",
+                "params": {
+                    "textDocument": { "uri": uri },
+                    "range": { "start": { "line": 4, "character": 0 }, "end": { "line": 4, "character": 0 } },
+                    "context": { "diagnostics": [], "triggerKind": 1 }
+                }
+            })
+        };
+        server.handle_message(code_action(1, "file:///s.md")).unwrap();
+        server.handle_message(code_action(2, "file:///plain.md")).unwrap();
+        let output = decode_output(std::mem::take(&mut server.writer));
+        let actions = output[0]["result"].as_array().expect("actions");
+        assert_eq!(actions.len(), 2, "{output:?}");
+        assert_eq!(
+            actions[1]["edit"]["changes"]["file:///s.md"][0]["range"],
+            json!({ "start": { "line": 4, "character": 0 }, "end": { "line": 6, "character": 0 } })
+        );
+        assert_eq!(output[1]["result"], Value::Null);
+
+        let command = actions[0]["command"].clone();
+        server
+            .handle_message(json!({
+                "jsonrpc": "2.0",
+                "id": 3,
+                "method": "workspace/executeCommand",
+                "params": { "command": command["command"], "arguments": command["arguments"] }
+            }))
+            .unwrap();
+        let output = decode_output(std::mem::take(&mut server.writer));
+        assert_eq!(output[0]["method"], "window/showMessage", "{output:?}");
+        assert_eq!(output[0]["params"]["message"], command["arguments"][0]);
+        assert!(
+            output[0]["params"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("Deletable:")
+        );
+        assert_eq!(output[1]["id"], 3);
+        assert_eq!(output[1]["result"], Value::Null);
+    }
+
+    #[test]
+    fn initialize_advertises_tree_status_code_actions_and_command() {
+        let (mut server, _sender) = scripted_server();
+        server
+            .handle_message(json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}))
+            .unwrap();
+        let output = decode_output(std::mem::take(&mut server.writer));
+        let capabilities = &output[0]["result"]["capabilities"];
+        assert_eq!(
+            capabilities["codeActionProvider"]["codeActionKinds"],
+            json!(["source", "quickfix"])
+        );
+        assert_eq!(
+            capabilities["executeCommandProvider"]["commands"],
+            json!(["agent-doc.treeStatus"])
+        );
     }
 
     type ScriptedInput = std::sync::mpsc::Sender<std::io::Result<Vec<u8>>>;

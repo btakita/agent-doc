@@ -25,3 +25,11 @@ in place. If it cannot, Zed shows a message asking you to run
 `editor: restart language server`.
 
 For Zed remote development, see [REMOTE.md](REMOTE.md).
+
+## Queue tree status
+
+With the caret on a queue row, open the code action menu
+(`editor: toggle code actions`, `Ctrl+.` / `Cmd+.`). **Agent Doc: Tree Status**
+shows what that row's subtree needs (rows waiting on you, rows the agent owes,
+deletable subtrees, rows that need agent review), and each
+**Agent Doc: Delete …** action deletes one deletable subtree.

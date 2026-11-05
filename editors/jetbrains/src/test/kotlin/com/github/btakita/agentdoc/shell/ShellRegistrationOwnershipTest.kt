@@ -51,7 +51,7 @@ class ShellRegistrationOwnershipTest {
     @Test
     fun `every plugin xml action is a shell forwarder for its own id`() {
         val classes = descriptorAttributes("action", "class")
-        assertEquals("plugin.xml should still declare all 28 Agent Doc actions", 28, actionIds.size)
+        assertEquals("plugin.xml should still declare all 29 Agent Doc actions", 29, actionIds.size)
         assertEquals(actionIds.size, classes.size)
         val wrong = actionIds.zip(classes).mapNotNull { (id, className) ->
             val forwarder = load(className)
@@ -310,8 +310,8 @@ class ShellRegistrationOwnershipTest {
 
         /** Every EDT, pooled, executor, thread and alarm call the implementation stages. */
         val STAGED_WORK: Map<String, Int> = sortedMapOf(
-            "executeOnPooledThread" to 24,
-            "invokeLater" to 44,
+            "executeOnPooledThread" to 25,
+            "invokeLater" to 45,
             "newPooledAlarm" to 1,
             "newSingleThreadExecutor" to 1,
             "newSingleThreadScheduledExecutor" to 8,

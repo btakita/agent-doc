@@ -572,6 +572,15 @@ interface AgentDocLib : Library {
     fun agent_doc_queue_tree_json(doc: String): Pointer?
 
     /**
+     * `#treestatusquery` / `#treestatusjetbrains`: the tree-status answer for the queue subtree
+     * at 1-based `line` of the live buffer text as JSON (`you`, `agent`, `deletable`,
+     * `needs_review` rows with 1-based `line` and inclusive `end_line`, plus `text`, the CLI's
+     * rendering). Null when the document does not parse or the line is outside every queue.
+     * Caller must free result. Older libraries lack the symbol.
+     */
+    fun agent_doc_queue_tree_status_json(doc: String, line: Int): Pointer?
+
+    /**
      * #falsetyping-guard: per-editor full-content report carrying replica-churn provenance.
      * `no_unsaved_operator_edits` is 1 when the buffer holds no unsaved local operator edits ahead
      * of disk (any divergence is a `remoteCrdtApply`), letting the CLI re-merge on replica churn

@@ -133,6 +133,7 @@ class AgentDocImplGeneration : ImplGeneration {
             "AgentDoc.GcStaleSessions" to ::GcStaleSessionsAction,
             "AgentDoc.About" to ::AboutAgentDocAction,
             "AgentDoc.Dashboard" to ::DashboardAction,
+            "AgentDoc.TreeStatus" to ::TreeStatusAction,
         )
     }
 }

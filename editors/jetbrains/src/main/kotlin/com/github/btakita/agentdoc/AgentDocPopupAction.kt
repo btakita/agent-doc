@@ -42,6 +42,8 @@ class AgentDocPopupAction : ImplAction {
             "AgentDoc.RefreshEnvironment",
             // `gvqv`: project-wide dashboard (work board + controller liveness).
             "AgentDoc.Dashboard",
+            // `#treestatusjetbrains`: what the queue subtree at the caret still needs.
+            "AgentDoc.TreeStatus",
         )
 
         internal val OVERFLOW_ACTION_IDS = listOf(

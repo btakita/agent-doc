@@ -2796,6 +2796,26 @@ pub fn set_prompt_operator_actions(
                     ids.push(request_id);
                 }
             }
+            // `#dupetags`: `🙋` is the projection of the row's open request
+            // todos. A work row whose trailing request run still names an open
+            // todo keeps (or regains) the glyph even when this pass carries no
+            // closeout actions and the glyph was dropped. Waiting-on-you items
+            // own their own gate above.
+            if !waiting_answer_selected
+                && !prompt
+                    .text
+                    .contains(crate::queue_consume::WAITING_ON_YOU_ITEM_MARKER)
+            {
+                for request_id in
+                    agent_doc_document::queue_projection::unmarked_operator_request_run_ids(
+                        &prompt.text,
+                    )
+                {
+                    if open_todo_ids.contains(&request_id) && !ids.contains(&request_id) {
+                        ids.push(request_id);
+                    }
+                }
+            }
         } else {
             ids.clear();
         }
@@ -13731,6 +13751,77 @@ mod tests {
             tracked_prompt_ids_by_entry(&reparsed),
             vec![Some("apipendingorphans".to_string())]
         );
+    }
+
+    /// agent-doc-bugs.md 2026-11-05 (`#dupetags`): a row carrying TWO open
+    /// request ids gained one more copy of a request annotation on every
+    /// closeout replay (19 copies of each on `do [#activesummaryurl]`),
+    /// because the "already present" check read only the LAST trailing
+    /// annotation. Preflight (no closeout actions) also read only that last
+    /// id, so once it closed the row lost `🙋` while the other request was
+    /// still open. Projection must be idempotent, keep `🙋` while any of the
+    /// row's request ids is open, and collapse an existing duplicate run.
+    #[test]
+    fn operator_action_projection_with_two_requests_is_idempotent_and_collapses_duplicates() {
+        let file = "subagent-operator-request-activeurl-file-ijpl".to_string();
+        let wrap = "subagent-operator-request-activeurl-wrap-decision".to_string();
+        let body = "- do [#activesummaryurl]\n- another task\n";
+        let actions = vec![
+            ("do [#activesummaryurl]".to_string(), file.clone()),
+            ("do [#activesummaryurl]".to_string(), wrap.clone()),
+        ];
+        let open = std::collections::HashSet::from([file.clone(), wrap.clone()]);
+        let expected =
+            format!("- ### 🙋 do [#activesummaryurl] [#{file}] [#{wrap}]\n- another task\n");
+
+        let (projected, _) = project_prompt_operator_actions(body, &actions, &open)
+            .unwrap()
+            .expect("both requests are projected");
+        assert_eq!(projected, expected);
+        // Closeout replays carry the same actions again; nothing changes.
+        assert!(
+            project_prompt_operator_actions(&projected, &actions, &open)
+                .unwrap()
+                .is_none(),
+            "a closeout replay must not append the request ids again"
+        );
+        // Preflight maintenance (no closeout actions) keeps both ids and `🙋`.
+        assert!(
+            project_prompt_operator_actions(&projected, &[], &open)
+                .unwrap()
+                .is_none(),
+            "preflight must keep a row whose request ids are all open"
+        );
+
+        // One request answered: the other still holds `🙋`.
+        let only_file = std::collections::HashSet::from([file.clone()]);
+        let still_waiting = project_prompt_operator_actions(&projected, &[], &only_file)
+            .unwrap()
+            .map(|(text, _)| text)
+            .unwrap_or_else(|| projected.clone());
+        assert!(
+            still_waiting.starts_with("- ### 🙋 do [#activesummaryurl]"),
+            "an open request must keep `🙋`: {still_waiting}"
+        );
+
+        // An existing duplicate run collapses to one copy of each id through
+        // the ordinary preflight projection.
+        let mut duplicated = "- ### 🙋 do [#activesummaryurl]".to_string();
+        for _ in 0..19 {
+            duplicated.push_str(&format!(" [#{file}] [#{wrap}]"));
+        }
+        duplicated.push_str("\n- another task\n");
+        let (collapsed, _) = project_prompt_operator_actions(&duplicated, &[], &open)
+            .unwrap()
+            .expect("duplicate request annotations collapse");
+        assert_eq!(collapsed, expected);
+        // Without `🙋` (after it was wrongly dropped) the duplicates still collapse
+        // and the open request restores `🙋`.
+        let unmarked = duplicated.replacen("🙋 ", "", 1);
+        let (restored, _) = project_prompt_operator_actions(&unmarked, &[], &open)
+            .unwrap()
+            .expect("an unmarked duplicate run is repaired");
+        assert_eq!(restored, expected);
     }
 
     #[test]

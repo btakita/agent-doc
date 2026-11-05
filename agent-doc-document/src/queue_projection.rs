@@ -398,6 +398,121 @@ pub fn is_reserved_operator_action_id(id: &str) -> bool {
         .starts_with("subagent-operator-request-")
 }
 
+/// `#dupetags`: the run of bare reserved request annotations at the end of a
+/// row's work line (`work [#subagent-operator-request-a] [#subagent-operator-request-b]`),
+/// optionally followed by one local answer (`[#id]: answer`), which is not part
+/// of the run.
+///
+/// A row can carry several open requests, so "already annotated" and "which
+/// requests does this row carry" must read the whole run, not only the final
+/// `[#`. Reading only the last token appended the other id again on every
+/// closeout replay (19 copies of each on agent-doc-bugs.md `do
+/// [#activesummaryurl]`) and hid every non-final open request from preflight.
+struct TrailingRequestRun<'a> {
+    /// End of the text before the run (trailing whitespace excluded).
+    base_end: usize,
+    /// Run ids as written, in document order, duplicates kept.
+    ids: Vec<&'a str>,
+    /// Start of a trailing local answer annotation after the run, if any.
+    answer_start: Option<usize>,
+}
+
+fn trailing_request_run(text: &str) -> TrailingRequestRun<'_> {
+    let mut content = text.trim_end();
+    let mut answer_start = None;
+    if let Some((id, after, start)) = trailing_operator_action_annotation(content)
+        && start > 0
+        && is_reserved_operator_action_id(id)
+        && after
+            .trim_start()
+            .strip_prefix(':')
+            .is_some_and(|answer| !answer.trim().is_empty())
+    {
+        answer_start = Some(start);
+        content = content[..start].trim_end();
+    }
+    let mut ids = Vec::new();
+    while let Some((id, after, start)) = trailing_operator_action_annotation(content) {
+        if start == 0 || !after.is_empty() || !is_reserved_operator_action_id(id) {
+            break;
+        }
+        ids.push(id);
+        content = content[..start].trim_end();
+    }
+    ids.reverse();
+    TrailingRequestRun {
+        base_end: content.len(),
+        ids,
+        answer_start,
+    }
+}
+
+/// Lowercased reserved request ids in the row's trailing annotation run,
+/// first-seen order, deduplicated.
+fn trailing_request_run_ids(text: &str) -> Vec<String> {
+    let mut ids = Vec::new();
+    for id in trailing_request_run(text).ids {
+        let id = id.to_ascii_lowercase();
+        if !ids.contains(&id) {
+            ids.push(id);
+        }
+    }
+    ids
+}
+
+/// `#dupetags`: collapse a repeated trailing request run to one copy of each
+/// id, first-seen order. A bare copy of an id the row already answers locally
+/// (`[#id]: answer`) is dropped too. Returns `text` unchanged when the run
+/// holds no duplicate.
+fn dedupe_trailing_request_run(text: &str) -> String {
+    let run = trailing_request_run(text);
+    let answered = run.answer_start.and_then(|start| {
+        trailing_operator_action_annotation(text.trim_end())
+            .filter(|(_, _, found)| *found == start)
+            .map(|(id, _, _)| id.to_ascii_lowercase())
+    });
+    let mut seen: Vec<String> = answered.iter().cloned().collect();
+    let mut kept = Vec::new();
+    for id in &run.ids {
+        let lower = id.to_ascii_lowercase();
+        if !seen.contains(&lower) {
+            seen.push(lower.clone());
+            kept.push(lower);
+        }
+    }
+    if kept.len() == run.ids.len() {
+        return text.to_string();
+    }
+    let (content, trailing) = split_trailing_whitespace(text);
+    let mut rebuilt = content[..run.base_end].to_string();
+    for id in kept {
+        if !rebuilt.is_empty() {
+            rebuilt.push(' ');
+        }
+        rebuilt.push_str(&format!("[#{id}]"));
+    }
+    if let Some(start) = run.answer_start {
+        if !rebuilt.is_empty() {
+            rebuilt.push(' ');
+        }
+        rebuilt.push_str(&content[start..]);
+    }
+    rebuilt.push_str(trailing);
+    rebuilt
+}
+
+/// `#dupetags`: unmarked reserved request ids a live work row still carries in
+/// its trailing run. The `🙋` projection uses them to keep (or restore) the
+/// glyph while any of those requests' todos is open, even when the row's
+/// glyph was dropped.
+pub fn unmarked_operator_request_run_ids(text: &str) -> Vec<String> {
+    if operator_answer_row_request_id(text).is_some() {
+        return Vec::new();
+    }
+    let head = agent_doc_element_queue::subprompts::head_without_subprompts(text);
+    trailing_request_run_ids(head.trim())
+}
+
 fn render_projection_parts(parts: &[String]) -> String {
     let mut rendered = String::new();
     for part in parts {
@@ -671,6 +786,14 @@ pub fn operator_action_ids(text: &str) -> Vec<String> {
     {
         ids.push(id);
     }
+    if marked {
+        // `#dupetags`: every request in the trailing run, not only the last.
+        for id in trailing_request_run_ids(text.trim()) {
+            if !ids.contains(&id) {
+                ids.push(id);
+            }
+        }
+    }
     if let Some((id, after, _)) = trailing_operator_action_annotation(text.trim())
         && (marked
             || (is_reserved_operator_action_id(id)
@@ -727,6 +850,11 @@ pub fn operator_request_annotation_ids(text: &str) -> Vec<String> {
         .into_iter()
         .filter(|id| is_reserved_operator_action_id(id))
         .collect::<Vec<_>>();
+    for id in trailing_request_run_ids(head.trim()) {
+        if !ids.contains(&id) {
+            ids.push(id);
+        }
+    }
     if let Some((id, _, start)) = trailing_operator_action_annotation(head.trim())
         && start > 0
         && is_reserved_operator_action_id(id)
@@ -949,7 +1077,11 @@ pub fn apply_operator_action_ids(text: &str, ids: &[String]) -> String {
             normalized.push(id);
         }
     }
-    let bare = strip_operator_action_annotations_preserving_markers(content);
+    // `#dupetags`: a repeated request run collapses on every projection pass,
+    // including the clearing pass, so preflight repairs historic duplicates.
+    let bare = dedupe_trailing_request_run(&strip_operator_action_annotations_preserving_markers(
+        content,
+    ));
     if normalized.is_empty() {
         return format!("{leading}{bare}{trailing}");
     }
@@ -957,6 +1089,7 @@ pub fn apply_operator_action_ids(text: &str, ids: &[String]) -> String {
     for id in &normalized {
         let already_local = trailing_operator_action_annotation(&projected)
             .is_some_and(|(existing, _, _)| existing.eq_ignore_ascii_case(id))
+            || trailing_request_run_ids(&projected).contains(id)
             || matches!(
                 agent_doc_element_queue::queue_head_identity(&projected),
                 agent_doc_element_queue::QueueItemIdentity::Id(ref existing)
@@ -1362,6 +1495,17 @@ pub fn strip_priority_markers(text: &str) -> String {
         } else {
             bare[..start].trim_end()
         };
+        // `#dupetags`: a row may carry several request annotations (and, from
+        // older binaries, repeated copies of them). Strip the whole run so the
+        // work identity does not depend on how many the row carries.
+        if start > 0 {
+            while let Some((id, after, start)) = trailing_operator_action_annotation(bare) {
+                if start == 0 || !after.is_empty() || !(is_reserved_operator_action_id(id)) {
+                    break;
+                }
+                bare = bare[..start].trim_end();
+            }
+        }
     }
     let (head, tail) = bare
         .split_once('\n')
@@ -1638,6 +1782,65 @@ pub fn project_active_queue_prompts(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `#dupetags`: a row carrying several request annotations, or repeated
+    /// copies of them, reads every id, keeps its work identity, and collapses
+    /// to one copy of each id on the next projection pass.
+    #[test]
+    fn multiple_trailing_request_annotations_are_read_whole_and_collapse() {
+        let a = "subagent-operator-request-activeurl-file-ijpl";
+        let b = "subagent-operator-request-activeurl-wrap-decision";
+        let mut row = "🙋 do [#activesummaryurl]".to_string();
+        for _ in 0..3 {
+            row.push_str(&format!(" [#{a}] [#{b}]"));
+        }
+        // The marked row's own tracked id names the gate too (`🙋☑️ [#id]`
+        // shape), exactly as with a single request annotation.
+        assert_eq!(
+            operator_action_ids(&row),
+            vec!["activesummaryurl".to_string(), a.to_string(), b.to_string()]
+        );
+        let single = format!("🙋 do [#activesummaryurl] [#{a}]");
+        assert_eq!(
+            operator_action_ids(&single),
+            vec!["activesummaryurl".to_string(), a.to_string()]
+        );
+        assert_eq!(
+            operator_request_annotation_ids(&row),
+            vec![a.to_string(), b.to_string()]
+        );
+        let unmarked = row.replacen("🙋 ", "", 1);
+        assert!(operator_action_ids(&unmarked).is_empty());
+        assert_eq!(
+            unmarked_operator_request_run_ids(&unmarked),
+            vec![a.to_string(), b.to_string()]
+        );
+        assert_eq!(strip_priority_markers(&row), "do [#activesummaryurl]");
+        assert_eq!(
+            agent_doc_element_queue::queue_head_identity(&unmarked),
+            agent_doc_element_queue::queue_head_identity("do [#activesummaryurl]")
+        );
+        assert!(operator_request_item_matches_row(&row, "do [#activesummaryurl]"));
+        let expected = format!("🙋 do [#activesummaryurl] [#{a}] [#{b}]");
+        assert_eq!(
+            apply_operator_action_ids(&row, &[a.to_string(), b.to_string()]),
+            expected
+        );
+        assert_eq!(
+            apply_operator_action_ids(&expected, &[b.to_string(), a.to_string()]),
+            expected
+        );
+        assert_eq!(
+            apply_operator_action_ids(&row, &[]),
+            format!("do [#activesummaryurl] [#{a}] [#{b}]")
+        );
+        // A local answer after the run stays; a bare copy of the answered id goes.
+        let answered = format!("do [#activesummaryurl] [#{a}] [#{b}] [#{a}] [#{b}]: widen it");
+        assert_eq!(
+            apply_operator_action_ids(&answered, &[]),
+            format!("do [#activesummaryurl] [#{a}] [#{b}]: widen it")
+        );
+    }
 
     #[test]
     fn marker_identity_preserves_priority_marker() {

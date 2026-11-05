@@ -884,12 +884,25 @@ pub fn strip_priority_markers(text: &str) -> String {
         } else {
             bare[..start].trim_end()
         };
+        // `#dupetags`: a row may carry several request annotations (and, from
+        // older binaries, repeated copies of them). Strip the whole run so the
+        // work identity does not depend on how many the row carries.
+        if start > 0 {
+            while let Some((id, after, start)) = trailing_operator_action_annotation(bare) {
+                if start == 0
+                    || !after.is_empty()
+                    || !(id
+                        .to_ascii_lowercase()
+                        .starts_with("subagent-operator-request-"))
+                {
+                    break;
+                }
+                bare = bare[..start].trim_end();
+            }
+        }
     }
     match bare.split_once('\n') {
-        Some((head, tail)) => format!(
-            "{}\n{tail}",
-            strip_queue_report_state_annotation(head)
-        ),
+        Some((head, tail)) => format!("{}\n{tail}", strip_queue_report_state_annotation(head)),
         None => strip_queue_report_state_annotation(bare).to_string(),
     }
 }

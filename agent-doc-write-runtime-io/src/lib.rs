@@ -1663,7 +1663,7 @@ fn consume_queue_prompts_for_done_ids_closeout(
     done_ids: &[String],
     force_disk: bool,
 ) -> Result<Option<QueueConsumptionOutcome>> {
-    consume_approved_queue_prompts_for_done_ids_closeout(file, done_ids, None, force_disk)
+    consume_approved_queue_prompts_for_done_ids_closeout(file, done_ids, None, force_disk, None)
 }
 
 /// Phase 3c's consume, bound to the head its decision approved
@@ -1671,11 +1671,14 @@ fn consume_queue_prompts_for_done_ids_closeout(
 /// `queue_consumption_allowed_for_response` read; the consume itself re-reads
 /// the live document, so a head struck in between (by another closeout driver)
 /// must turn the consume into a no-op instead of taking the next prompt.
+/// `response_body` (`#atomicstrikeresponse`) is this closeout's captured
+/// response: its lookup child lands in the strike's own write.
 fn consume_queue_prompts_for_response_closeout(
     file: &Path,
     decision_content: &str,
     done_ids: &[String],
     force_disk: bool,
+    response_body: Option<&str>,
 ) -> Result<Option<QueueConsumptionOutcome>> {
     let approved_head = if done_ids.is_empty() {
         Some(agent_doc_queue::queue_consume::approved_queue_head_for_consume(decision_content)?)
@@ -1687,6 +1690,7 @@ fn consume_queue_prompts_for_response_closeout(
         done_ids,
         approved_head.as_ref(),
         force_disk,
+        response_body,
     )
 }
 
@@ -1695,6 +1699,7 @@ fn consume_approved_queue_prompts_for_done_ids_closeout(
     done_ids: &[String],
     approved_head: Option<&agent_doc_queue::queue_consume::ApprovedQueueHead>,
     force_disk: bool,
+    response_body: Option<&str>,
 ) -> Result<Option<QueueConsumptionOutcome>> {
     // `#qselectedheadonly`: fence a free-text consume to this cycle's
     // preflight-selected heads so it never takes the next, unanswered prompt.
@@ -1707,6 +1712,7 @@ fn consume_approved_queue_prompts_for_done_ids_closeout(
         &selected_heads,
         approved_head,
         force_disk,
+        response_body,
         queue_consume_writeback_effects(force_disk),
     );
     match result {
@@ -2262,6 +2268,16 @@ fn apply_pending_and_status_mutations_with_mode(
 ) -> Result<PendingStatusMutationOutcome> {
     let validate_only = mode.is_validate();
     let queue_completion_projected = std::cell::Cell::new(false);
+    // `#atomicstrikeresponse`: a response closeout's tracked-work strike links
+    // the response it completes in the same target. A validation pass runs
+    // before the response exists and a pending-only envelope has no response,
+    // so neither projects a child.
+    let closeout_response = if validate_only || options.pending_only {
+        None
+    } else {
+        Some(active_capture_response_body_for_write(file)?)
+            .filter(|response| !response.trim().is_empty())
+    };
     let queue_resolution_ids = agent_doc_queue::queue_heads::explicit_queue_resolution_ids(
         &options.pending_done,
         &options.pending_gate,
@@ -2569,6 +2585,18 @@ fn apply_pending_and_status_mutations_with_mode(
                                     content,
                                     &projected,
                                 )?;
+                                // `#atomicstrikeresponse`: the tracked-work strike
+                                // and its response lookup child are one target. A
+                                // closeout that later fails (or is replayed from a
+                                // retained cut) can no longer publish the struck
+                                // row while the separate backlink write never runs.
+                                let projected =
+                                    queue_consume::project_closeout_strike_with_response_backlink(
+                                        file,
+                                        content,
+                                        projected,
+                                        closeout_response.as_deref(),
+                                    )?;
                                 let consumed_count = plan
                                     .as_ref()
                                     .map(|plan| plan.consumed_texts.len())
@@ -4295,6 +4323,11 @@ fn run_command_inner_within_pass(
         {
             queue_resolution_ids.push(head_id);
         }
+        // `#atomicstrikeresponse`: every response-closeout strike carries its
+        // response lookup child in its own write. The standalone backlink
+        // pass below then converges as a no-op for those rows instead of
+        // being a second write a failed closeout could skip.
+        let closeout_response = Some(response_body.as_str());
         match commit_mode {
             CommitMode::None => {}
             CommitMode::BestEffort => {
@@ -4304,22 +4337,27 @@ fn run_command_inner_within_pass(
                         current_content_for_queue.as_ref(),
                         &queue_resolution_ids,
                         options.force_disk,
+                        closeout_response,
                     ) {
                         eprintln!("[queue] warning: consumption failed: {}", e);
                     }
-                    if let Err(e) = queue_consume::mark_completed_queue_prompts_for_done_ids(
-                        file,
-                        &queue_resolution_ids,
-                        options.force_disk,
-                        queue_consume_writeback_effects(options.force_disk),
-                    ) {
+                    if let Err(e) =
+                        queue_consume::mark_completed_queue_prompts_for_done_ids_with_response(
+                            file,
+                            &queue_resolution_ids,
+                            options.force_disk,
+                            closeout_response,
+                            queue_consume_writeback_effects(options.force_disk),
+                        )
+                    {
                         eprintln!("[queue] warning: done-id marking failed: {}", e);
                     }
                 } else {
-                    match queue_consume::mark_completed_queue_prompts_for_done_ids(
+                    match queue_consume::mark_completed_queue_prompts_for_done_ids_with_response(
                         file,
                         &queue_resolution_ids,
                         options.force_disk,
+                        closeout_response,
                         queue_consume_writeback_effects(options.force_disk),
                     ) {
                         Ok(0) => {
@@ -4344,20 +4382,24 @@ fn run_command_inner_within_pass(
                         current_content_for_queue.as_ref(),
                         &queue_resolution_ids,
                         options.force_disk,
+                        closeout_response,
                     )?;
-                    queue_consume::mark_completed_queue_prompts_for_done_ids(
+                    queue_consume::mark_completed_queue_prompts_for_done_ids_with_response(
                         file,
                         &queue_resolution_ids,
                         options.force_disk,
+                        closeout_response,
                         queue_consume_writeback_effects(options.force_disk),
                     )?;
                 } else {
-                    let marked = queue_consume::mark_completed_queue_prompts_for_done_ids(
-                        file,
-                        &queue_resolution_ids,
-                        options.force_disk,
-                        queue_consume_writeback_effects(options.force_disk),
-                    )?;
+                    let marked =
+                        queue_consume::mark_completed_queue_prompts_for_done_ids_with_response(
+                            file,
+                            &queue_resolution_ids,
+                            options.force_disk,
+                            closeout_response,
+                            queue_consume_writeback_effects(options.force_disk),
+                        )?;
                     if marked == 0 {
                         eprintln!(
                             "{}",
@@ -7215,7 +7257,7 @@ mod tests {
         );
 
         fs::write(&doc, &struck).unwrap();
-        let outcome = consume_queue_prompts_for_response_closeout(&doc, &decision, &[], true)
+        let outcome = consume_queue_prompts_for_response_closeout(&doc, &decision, &[], true, None)
             .unwrap();
         assert!(outcome.is_none(), "{outcome:?}");
         let after = fs::read_to_string(&doc).unwrap();
@@ -7245,7 +7287,7 @@ mod tests {
         fs::write(&doc, &decision).unwrap();
 
         let outcome =
-            consume_queue_prompts_for_response_closeout(&doc, &decision, &[], true).unwrap();
+            consume_queue_prompts_for_response_closeout(&doc, &decision, &[], true, None).unwrap();
         assert!(outcome.is_none(), "{outcome:?}");
         let after = fs::read_to_string(&doc).unwrap();
         assert_eq!(after, decision);
@@ -7282,7 +7324,7 @@ mod tests {
         fs::write(&doc, &struck).unwrap();
 
         let outcome =
-            consume_queue_prompts_for_response_closeout(&doc, decision, &[], true).unwrap();
+            consume_queue_prompts_for_response_closeout(&doc, decision, &[], true, None).unwrap();
         assert!(outcome.is_none(), "{outcome:?}");
         assert_eq!(fs::read_to_string(&doc).unwrap(), struck);
     }
@@ -7300,7 +7342,7 @@ mod tests {
         fs::write(&doc, &live).unwrap();
 
         let outcome =
-            consume_queue_prompts_for_response_closeout(&doc, decision, &[], true).unwrap();
+            consume_queue_prompts_for_response_closeout(&doc, decision, &[], true, None).unwrap();
         assert!(outcome.is_none(), "{outcome:?}");
         assert_eq!(fs::read_to_string(&doc).unwrap(), live);
     }
@@ -7336,6 +7378,7 @@ mod tests {
             &selected,
             None,
             true,
+            None,
             queue_consume_writeback_effects(true),
         )
         .unwrap();
@@ -7350,6 +7393,7 @@ mod tests {
             &selected,
             None,
             true,
+            None,
             queue_consume_writeback_effects(true),
         )
         .unwrap()

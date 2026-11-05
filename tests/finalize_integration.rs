@@ -4610,6 +4610,105 @@ fn finalize_consumes_contiguous_queue_items_resolved_by_done_ids() {
     );
 }
 
+/// `#atomicstrikeresponse` fixture: a session whose `do [#atomstrike]` head is
+/// completed by `--done`, beside a live `do [#atomkeep]` so the queue keeps
+/// its struck row instead of draining.
+fn atomic_strike_closeout_fixture() -> (TempDir, PathBuf) {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
+    let doc = tmp.path().join("session.md");
+    let baseline_content = "---\nagent_doc_format: template\nagent: codex\nmodel: gpt-5\nqueue_active: true\n---\n\n<!-- agent:exchange -->\n❯ do the atomic strike item\n<!-- agent:boundary:1234abcd -->\n<!-- /agent:exchange -->\n\n<!-- agent:queue -->\n- do [#atomstrike]\n- do [#atomkeep]\n<!-- /agent:queue -->\n\n<!-- agent:backlog -->\n- [ ] [#atomstrike] Strike with its response child.\n- [ ] [#atomkeep] Stay live.\n<!-- /agent:backlog -->\n";
+    fs::write(&doc, baseline_content).unwrap();
+    init_git_repo(tmp.path(), &doc);
+    checkpoint_baseline(tmp.path(), baseline_content);
+    (tmp, doc)
+}
+
+fn atomic_strike_queue_body(content: &str) -> &str {
+    content
+        .split_once("<!-- agent:queue -->\n")
+        .and_then(|(_, rest)| rest.split_once("<!-- /agent:queue -->"))
+        .map(|(body, _)| body)
+        .unwrap_or_else(|| panic!("queue component missing:\n{content}"))
+}
+
+/// `#atomicstrikeresponse`: the tracked-work `--done` strike and the response
+/// lookup child are one change — the struck row carries its child the moment
+/// it is struck, not after a later backlink write.
+#[test]
+fn finalize_done_strike_lands_with_its_response_child() {
+    let (tmp, doc) = atomic_strike_closeout_fixture();
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args([
+            "finalize",
+            doc.to_str().unwrap(),
+            "--force-disk",
+            "--done",
+            "atomstrike",
+        ])
+        .write_stdin(
+            "<!-- patch:exchange -->\n### Re: atomic strike — gpt-5\n\n> **Queue prompt:**\n>\n> do [#atomstrike]\n\nCompleted and published the atomic strike.\n<!-- /patch:exchange -->\n",
+        )
+        .assert()
+        .success();
+
+    let content = fs::read_to_string(&doc).unwrap();
+    let queue = atomic_strike_queue_body(&content);
+    let (_, after_strike) = queue
+        .split_once("~~do [#atomstrike]~~")
+        .unwrap_or_else(|| panic!("the done head is struck:\n{content}"));
+    let child = after_strike.split("\n- ").next().unwrap_or_default();
+    assert!(
+        child.contains("**Response [#r-"),
+        "the struck row must carry its Response child:\n{content}"
+    );
+    assert!(queue.contains("- do [#atomkeep]\n"), "{content}");
+}
+
+/// `#atomicstrikeresponse` (2026-11-03 sdk-dev `q-c2010d98af04`): a closeout
+/// that fails after the strike used to publish the struck row with no Response
+/// child, and the replay could not add it. Here the response projection itself
+/// refuses (unpublished work): the strike must not land without its child, so
+/// the row stays live and nothing half-applied reaches the queue.
+#[test]
+fn finalize_refused_response_backlink_never_lands_a_bare_struck_row() {
+    let (tmp, doc) = atomic_strike_closeout_fixture();
+
+    let output = agent_doc()
+        .current_dir(tmp.path())
+        .args([
+            "finalize",
+            doc.to_str().unwrap(),
+            "--force-disk",
+            "--done",
+            "atomstrike",
+        ])
+        .write_stdin(
+            "<!-- patch:exchange -->\n### Re: atomic strike — gpt-5\n\n> **Queue prompt:**\n>\n> do [#atomstrike]\n\nImplemented the atomic strike; the fix remains uncommitted.\n<!-- /patch:exchange -->\n",
+        )
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !output.status.success(),
+        "an unpublished completion must not close out:\n{stderr}"
+    );
+
+    let content = fs::read_to_string(&doc).unwrap();
+    let queue = atomic_strike_queue_body(&content);
+    assert!(
+        !queue.contains("~~do [#atomstrike]~~"),
+        "the strike must not land without its Response child:\n{content}\n{stderr}"
+    );
+    assert!(
+        stderr.contains("#atomicstrikeresponse"),
+        "the refusal is the strike's own backlink projection:\n{stderr}"
+    );
+    assert!(queue.contains("do [#atomstrike]"), "{content}");
+}
+
 #[test]
 fn finalize_consumes_done_id_queue_items_interspersed_with_priority_prompt() {
     let tmp = TempDir::new().unwrap();

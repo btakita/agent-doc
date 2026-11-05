@@ -118,6 +118,9 @@ pub fn content_and_staleness_warnings(
     {
         warnings.push(warning);
     }
+    if let Some(warning) = tracked_runtime_state_warning(file) {
+        warnings.push(warning);
+    }
     warnings.extend(dispatch_acknowledgement_warnings(file, content));
     warnings.extend(stale_plugin_warnings(file));
     warnings.extend(plugin_byte_identity_warnings(file));
@@ -304,6 +307,132 @@ pub fn stale_install_warning(doc_git_root: &Path) -> Option<PreflightWarning> {
         document_agent: None,
         active_harness: None,
     })
+}
+
+/// Directories under `.agent-doc/` that hold only runtime state agent-doc
+/// rewrites on its own. A tracked file in any of them is runtime state whatever
+/// its extension (snapshots, for example, are `.md` copies of documents).
+const RUNTIME_STATE_DIRS: &[&str] = &[
+    "archives",
+    "baselines",
+    "callbacks",
+    "captures",
+    "claimed-patches",
+    "claims",
+    "control",
+    "crdt",
+    "crdt-replica-events",
+    "hooks",
+    "inbound",
+    "live-buffer",
+    "locks",
+    "logs",
+    "op-capture",
+    "patches",
+    "pending",
+    "plugin-owner",
+    "pre-response",
+    "queue-journal",
+    "receipts",
+    "recycle-request",
+    "repair-backups",
+    "snapshots",
+    "starting",
+    "state",
+    "supervisor",
+    "typing",
+];
+
+/// `#trackedagentdocstate`: whether `rel` (a path relative to `.agent-doc/`)
+/// is agent-doc runtime state rather than configuration a repo may track on
+/// purpose (`project.md`, `config.toml`, `components.toml`, hand-written repro
+/// notes). The rule is deliberately a positive list of runtime shapes, so an
+/// intentionally tracked config or Markdown note never warns.
+pub fn is_agent_doc_runtime_state_path(rel: &str) -> bool {
+    let rel = rel.trim_start_matches("./");
+    let mut components = rel.split('/').filter(|part| !part.is_empty());
+    let Some(first) = components.next() else {
+        return false;
+    };
+    let nested = components.next().is_some();
+    if nested && RUNTIME_STATE_DIRS.contains(&first) {
+        return true;
+    }
+    let name = rel.rsplit('/').next().unwrap_or(rel);
+    // SQLite store and its sidecars: state.db, state.db-wal, state.db-shm,
+    // state.db.lock, document-authority-handoff.db.
+    if name.ends_with(".db") || name.contains(".db-") || name.contains(".db.") {
+        return true;
+    }
+    // Rotated logs keep a date suffix (debug.log.2026-08-08).
+    if name.ends_with(".log") || name.contains(".log.") || name.ends_with(".jsonl") {
+        return true;
+    }
+    [".lock", ".sock", ".json", ".stamp", ".pid"]
+        .iter()
+        .any(|suffix| name.ends_with(suffix))
+}
+
+/// Pure half of [`tracked_runtime_state_warning`]: `tracked` is the
+/// `git ls-files` output for `.agent-doc` (paths relative to `project_root`).
+pub fn tracked_runtime_state_warning_from(
+    project_root: &Path,
+    tracked: &[String],
+) -> Option<PreflightWarning> {
+    let runtime: Vec<&str> = tracked
+        .iter()
+        .map(String::as_str)
+        .filter(|path| {
+            path.strip_prefix(".agent-doc/")
+                .is_some_and(is_agent_doc_runtime_state_path)
+        })
+        .collect();
+    if runtime.is_empty() {
+        return None;
+    }
+    const SHOWN: usize = 3;
+    let mut sample = runtime
+        .iter()
+        .take(SHOWN)
+        .copied()
+        .collect::<Vec<_>>()
+        .join(", ");
+    if runtime.len() > SHOWN {
+        sample.push_str(&format!(", and {} more", runtime.len() - SHOWN));
+    }
+    let root = project_root.display();
+    Some(PreflightWarning {
+        code: "agent_doc_runtime_state_tracked".to_string(),
+        message: format!(
+            "agent-doc runtime state is tracked by git in {root}: {count} file(s) under .agent-doc/ ({sample}). agent-doc rewrites these on every run, so the checkout always shows them modified, and a commit, checkout, or pull can overwrite live state. Untrack them with `git -C {root} rm -r --cached -- <those paths>` (the files stay on disk), add `.agent-doc/` to .gitignore, and commit; keep intended config such as .agent-doc/project.md tracked. Other checkouts that pull the untracking commit delete their copies, so back up their .agent-doc/ first and restore it after the pull.",
+            count = runtime.len(),
+        ),
+        document_agent: None,
+        active_harness: None,
+    })
+}
+
+/// `#trackedagentdocstate`: warn when the document's `.agent-doc/` runtime
+/// store (state.db, logs, locks, snapshots) is tracked by git. Fail-open: no
+/// project root, no git repo, or a git error yields no warning.
+pub fn tracked_runtime_state_warning(file: &Path) -> Option<PreflightWarning> {
+    let project_root = agent_doc_fs::find_project_root_canonical(file)?;
+    let output = std::process::Command::new("git")
+        .arg("-C")
+        .arg(&project_root)
+        .args(["ls-files", "-z", "--", ".agent-doc"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let tracked: Vec<String> = output
+        .stdout
+        .split(|byte| *byte == 0)
+        .filter(|path| !path.is_empty())
+        .map(|path| String::from_utf8_lossy(path).into_owned())
+        .collect();
+    tracked_runtime_state_warning_from(&project_root, &tracked)
 }
 
 fn stale_install_guidance() -> &'static str {
@@ -989,6 +1118,159 @@ mod tests {
         MappedPluginJar, classify_mapped_plugin_jar, plugin_byte_identity_warnings_from,
         plugin_install_state_for_mapped_jar, plugin_jar_stems, prefer_mapped_plugin_jar,
     };
+
+    /// `#trackedagentdocstate`: the runtime store and its logs are runtime
+    /// state; config and hand-written notes a repo tracks on purpose are not.
+    #[test]
+    fn runtime_state_classifier_separates_store_from_config() {
+        for runtime in [
+            "state.db",
+            "state.db-wal",
+            "state.db-shm",
+            "state.db.lock",
+            "document-authority-handoff.db",
+            "logs/ops.log",
+            "logs/debug.log.2026-08-08",
+            "sessions.json",
+            "sync.lock",
+            "ipc.sock",
+            "build.stamp",
+            "snapshots/0123abcd.md",
+            "crdt/doc.yrs",
+            "locks/session.lock",
+        ] {
+            assert!(
+                super::is_agent_doc_runtime_state_path(runtime),
+                "{runtime} must classify as runtime state"
+            );
+        }
+        for config in [
+            "project.md",
+            "config.toml",
+            "components.toml",
+            "live-repro/jb-cache-cancel.md",
+            "",
+        ] {
+            assert!(
+                !super::is_agent_doc_runtime_state_path(config),
+                "{config} must not classify as runtime state"
+            );
+        }
+    }
+
+    #[test]
+    fn tracked_runtime_state_warning_lists_only_runtime_paths() {
+        let root = std::path::Path::new("/repo");
+        let config_only = vec![
+            ".agent-doc/project.md".to_string(),
+            ".agent-doc/live-repro/jb-cache-cancel.md".to_string(),
+        ];
+        assert!(super::tracked_runtime_state_warning_from(root, &config_only).is_none());
+        assert!(super::tracked_runtime_state_warning_from(root, &[]).is_none());
+
+        let tracked = vec![
+            ".agent-doc/project.md".to_string(),
+            ".agent-doc/logs/debug.log.2026-08-08".to_string(),
+            ".agent-doc/logs/debug.log.2026-08-09".to_string(),
+            ".agent-doc/logs/ops.log".to_string(),
+            ".agent-doc/state.db".to_string(),
+        ];
+        let warning = super::tracked_runtime_state_warning_from(root, &tracked).unwrap();
+        assert_eq!(warning.code, "agent_doc_runtime_state_tracked");
+        assert!(warning.message.contains("4 file(s)"), "{}", warning.message);
+        assert!(
+            warning.message.contains("and 1 more"),
+            "{}",
+            warning.message
+        );
+        assert!(
+            !warning.message.contains("project.md ("),
+            "{}",
+            warning.message
+        );
+        assert!(
+            warning.message.contains("rm -r --cached"),
+            "{}",
+            warning.message
+        );
+        assert!(
+            warning.message.contains(".gitignore"),
+            "{}",
+            warning.message
+        );
+        assert!(warning.message.contains("back up"), "{}", warning.message);
+    }
+
+    fn git(dir: &std::path::Path, args: &[&str]) {
+        let status = std::process::Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args([
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@example.com",
+                "-c",
+                "commit.gpgsign=false",
+                "-c",
+                "core.hooksPath=/dev/null",
+            ])
+            .args(args)
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE")
+            .env_remove("GIT_INDEX_FILE")
+            .status()
+            .unwrap();
+        assert!(status.success(), "git {args:?} failed");
+    }
+
+    /// End to end against a real repository: a committed `state.db` warns,
+    /// and untracking it (with `.agent-doc/` ignored) clears the warning while
+    /// the file stays on disk.
+    #[test]
+    fn tracked_state_db_warns_until_untracked() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        git(root, &["init", "-q"]);
+        std::fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        std::fs::write(root.join(".agent-doc/state.db"), b"sqlite").unwrap();
+        std::fs::write(root.join(".agent-doc/logs/ops.log"), b"op\n").unwrap();
+        std::fs::write(root.join(".agent-doc/project.md"), b"# project\n").unwrap();
+        let doc = root.join("session.md");
+        std::fs::write(&doc, "# session\n").unwrap();
+        git(root, &["add", "-A"]);
+        git(root, &["commit", "-q", "-m", "init"]);
+
+        let warning =
+            super::tracked_runtime_state_warning(&doc).expect("tracked state.db must warn");
+        assert_eq!(warning.code, "agent_doc_runtime_state_tracked");
+        assert!(
+            warning.message.contains(".agent-doc/state.db"),
+            "{}",
+            warning.message
+        );
+        assert!(warning.message.contains("2 file(s)"), "{}", warning.message);
+
+        git(
+            root,
+            &[
+                "rm",
+                "-q",
+                "--cached",
+                "--",
+                ".agent-doc/state.db",
+                ".agent-doc/logs/ops.log",
+            ],
+        );
+        std::fs::write(root.join(".gitignore"), ".agent-doc/\n").unwrap();
+        git(root, &["add", ".gitignore"]);
+        git(root, &["commit", "-q", "-m", "untrack"]);
+        assert!(root.join(".agent-doc/state.db").exists());
+        assert!(
+            super::tracked_runtime_state_warning(&doc).is_none(),
+            "only intended config (project.md) remains tracked"
+        );
+    }
 
     #[test]
     fn preflight_warns_when_claim_never_reaches_queue_start() {

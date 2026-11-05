@@ -4194,6 +4194,16 @@ pub fn entry_is_group_parent(entries: &[QueueEntry], idx: usize) -> bool {
         if list_comment_context_row(later).is_some() {
             continue;
         }
+        // A deeper reference row is an annotation like a comment; only rows
+        // nested beneath it make this row a group. A reference row at this
+        // depth or shallower is a sibling and ends the subtree
+        // (`#queuelineageparent`).
+        if let Some((indent, _)) = reference_context_row(later) {
+            if indent > own_indent {
+                continue;
+            }
+            return false;
+        }
         match entry_indent(later) {
             // Deeper than us before we returned to our own depth: we are a parent.
             Some(indent) if indent > own_indent => return true,
@@ -4433,6 +4443,31 @@ fn response_metadata_row_indent(entry: &QueueEntry) -> Option<usize> {
     let choice = content.strip_prefix("**")?;
     let (label, effect) = choice.split_once("**: ")?;
     (!label.trim().is_empty() && !effect.trim().is_empty()).then_some(indent)
+}
+
+/// A `re [#id]` reference row that supplies lineage (`#queuelineageparent`).
+///
+/// The parser keeps a reference row inert (`Freeform`) so it never runs, but
+/// it is still a list item with depth. An operator types one as a reply
+/// container (`- ### re [#decisionidstamp] response`) and nests answers
+/// beneath it, so it must be the parent of those rows and must close the
+/// preceding sibling's subtree. The label is the row text without its
+/// navigation heading.
+fn reference_context_row(entry: &QueueEntry) -> Option<(usize, String)> {
+    let QueueEntry::Freeform(raw) = entry else {
+        return None;
+    };
+    if raw.contains('\n') {
+        return None;
+    }
+    let (indent, _, item_content) = split_list_item(raw)?;
+    let content = if indent == 0 {
+        strip_top_level_queue_heading(item_content)
+    } else {
+        item_content
+    };
+    let content = content.trim();
+    is_reference_directive(content).then(|| (indent, content.to_string()))
 }
 
 /// A complete list comment that can supply lineage to executable descendants.
@@ -4768,7 +4803,9 @@ fn nest_vector_at_with_work(entries: &[QueueEntry], index: usize, shown: &str) -
             continue;
         };
         if indent < depth {
-            if let Some((_, label)) = list_comment_context_row(earlier) {
+            if let Some((_, label)) =
+                list_comment_context_row(earlier).or_else(|| reference_context_row(earlier))
+            {
                 labels.push(label);
                 depth = indent;
                 if depth == 0 {
@@ -4885,6 +4922,10 @@ pub fn lineage_claim_text(entries: &[QueueEntry], index: usize) -> Option<String
     }
     Some(nest_vector_claim_at(entries, index, &canonical).unwrap_or(canonical))
 }
+
+#[cfg(test)]
+#[path = "reference_lineage_tests.rs"]
+mod reference_lineage_tests;
 
 #[cfg(test)]
 mod unique_child_vector_regression_tests {
@@ -5214,6 +5255,10 @@ fn prompt_tree_outline(entries: &[QueueEntry], leaf_idx: usize) -> String {
             lines.extend(raw.trim_end().lines().map(str::to_string));
             continue;
         }
+        if let Some((indent, label)) = reference_context_row(entry) {
+            lines.push(context_quote(&format!("{}- {label}", " ".repeat(indent))));
+            continue;
+        }
         let (prompt, completed) = match entry {
             QueueEntry::Prompt(prompt) => (prompt, false),
             QueueEntry::Completed(prompt) => (prompt, true),
@@ -5392,9 +5437,21 @@ pub fn ordered_list_after_deps(
             };
         }
 
+        // A childless reference row inside an ordered list is an annotation,
+        // not a step; it must not break the sequence (`#queuelineageparent`).
+        let steps = children
+            .iter()
+            .copied()
+            .filter(|&child_idx| {
+                !(nodes[child_idx].children.is_empty()
+                    && nodes[child_idx].entry_idx.is_some_and(|entry_idx| {
+                        reference_context_row(&entries[entry_idx]).is_some()
+                    }))
+            })
+            .collect::<Vec<_>>();
         let ordered_siblings = node_idx != 0
-            && children.len() > 1
-            && children.iter().all(|&child_idx| {
+            && steps.len() > 1
+            && steps.iter().all(|&child_idx| {
                 nodes[child_idx]
                     .entry_idx
                     .and_then(|entry_idx| match &entries[entry_idx] {
@@ -5495,7 +5552,8 @@ fn entry_indent(entry: &QueueEntry) -> Option<usize> {
     match entry {
         QueueEntry::Prompt(p) | QueueEntry::Completed(p) => Some(p.indent),
         _ => response_metadata_row_indent(entry)
-            .or_else(|| list_comment_context_row(entry).map(|(indent, _)| indent)),
+            .or_else(|| list_comment_context_row(entry).map(|(indent, _)| indent))
+            .or_else(|| reference_context_row(entry).map(|(indent, _)| indent)),
     }
 }
 

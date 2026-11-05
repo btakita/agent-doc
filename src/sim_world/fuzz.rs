@@ -659,6 +659,9 @@ impl SimWorld {
                 outside_target_window: false,
                 recycle: StaleRecycleRequestState::NotRequested,
                 turn_active: self.sync.protected_open_cycle.contains(doc),
+                // A focus publication's extra column is a DERIVED count
+                // (`observed_panes + 1`), never the editor's own split.
+                editor_requested_columns: None,
             })
             .collect();
         facts.push(ColumnGateFacts {
@@ -685,6 +688,7 @@ impl SimWorld {
                 StaleRecycleRequestState::NotRequested
             },
             turn_active: self.sync.protected_open_cycle.contains(&focus),
+            editor_requested_columns: None,
         });
         let live_turn: Vec<String> = self
             .sync

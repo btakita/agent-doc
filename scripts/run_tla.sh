@@ -258,6 +258,9 @@ must_pass=(
     # `#keylogrebase`: a correctly based op ledger closes the disk-only
     # residual of `#queuecutexclusive`.
     AdmissionCutExclusivity:AdmissionCutExclusivityResidual
+    # `#stalewidenrestore`: GH #136's invariants plus the editor-width one with
+    # editor split observations in the publication mix (smaller bound).
+    StaleColumnRecycle:StaleColumnRecycleEditorSplit
 )
 
 # Non-vacuity obligations. Each entry is `Module:Config` that MUST be reported as
@@ -421,6 +424,8 @@ must_violate=(
     StaleColumnRecycle:StaleColumnRecycleConsumeReach
     StaleColumnRecycle:StaleColumnRecycleHiddenWedge
     StaleColumnRecycle:StaleColumnRecycleFlaggedReach
+    StaleColumnRecycle:StaleColumnRecycleEditorWidthWedge
+    StaleColumnRecycle:StaleColumnRecycleEditorWidthReach
     # `#netadv2`: the shared adversarial channel (NetChannel) must have teeth.
     # One wedge per obligation the channel imposes on a protocol over it:
     # fire-and-forget stalls on a Drop, a non-idempotent receiver applies a

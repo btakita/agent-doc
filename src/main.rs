@@ -403,6 +403,7 @@ impl agent_doc_controller_io::project_controller::ProjectControllerRuntimeEffect
             routes_created_panes,
             &invocation.actor_bindings,
             main_layout_eligibility,
+            invocation.editor_column_authority,
         );
         sync_result?;
         let sync_report = agent_doc_sync_io::sync::last_sync_run_report();

@@ -385,6 +385,7 @@ fn manual_bootstrap_invocation(
         client_id: None,
         unstarted_session_bootstrap: true,
         layout_authority: None,
+        editor_column_authority: false,
     }
 }
 

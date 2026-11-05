@@ -4932,6 +4932,7 @@ fn automatic_layout_sync_invocation(
         client_id: None,
         unstarted_session_bootstrap: false,
         layout_authority: None,
+        editor_column_authority: false,
     }
 }
 
@@ -15843,6 +15844,7 @@ fn editor_route_layout_invocation(
 
         unstarted_session_bootstrap: false,
         layout_authority: None,
+        editor_column_authority: false,
     })
 }
 
@@ -37201,6 +37203,10 @@ fn pane_layout_effect_worker(
         }
         let mut guarded_invocation = desired.invocation.clone();
         guarded_invocation.actor_bindings = actor_bindings.clone();
+        // `#stalewidenrestore` (GH #343): the stale-column gate may realise a
+        // stale stash pane up to the column count only when that count is the
+        // editor's own observation, never a derived reconstruction.
+        guarded_invocation.editor_column_authority = desired.provenance.editor_column_authority;
         // pane-count drift: the effect arranges the window this generation's
         // observer reads, never the window the focused pane happens to live in.
         guarded_invocation.window = agent_doc_controller::pane_layout::structural_effect_window(
@@ -39207,6 +39213,7 @@ mod desktop_editor_focus_tests {
 
             unstarted_session_bootstrap: false,
             layout_authority: None,
+            editor_column_authority: false,
         };
         assert!(suppress_inactive_automatic_layout_focus(
             &mut automatic,
@@ -40526,6 +40533,7 @@ mod tmux_layout_effect_state_dispatch_tests {
             client_id: None,
             unstarted_session_bootstrap: false,
             layout_authority: None,
+            editor_column_authority: false,
         }
     }
 
@@ -45479,6 +45487,7 @@ mod tests {
             client_id: None,
             unstarted_session_bootstrap: false,
             layout_authority: None,
+            editor_column_authority: false,
         }
     }
 
@@ -51932,6 +51941,7 @@ mod tests {
 
             unstarted_session_bootstrap: false,
             layout_authority: None,
+            editor_column_authority: false,
         };
         let message_json = state_plane_snapshot_message_json(
             42,
@@ -55408,6 +55418,80 @@ mod tests {
         assert_eq!(graph.editor_visible(), Some(vec![a, b]));
     }
 
+    /// `#stalewidenrestore` (GH #343): the effect invocation carries whether
+    /// the desired column COUNT is the editor's own observation. A plugin
+    /// publication owns it; an `ensure` route that re-places a column inside
+    /// it keeps it; an unattributed publication and a derived one that
+    /// changes the count never have it, so the stale-column gate keeps the
+    /// GH #136 window-count bound for them.
+    #[test]
+    fn stalewidenrestore_editor_column_authority_follows_the_structure_owner() {
+        let fixture = RouteLayoutFixture::new(&["alpha", "beta", "gamma"]);
+        let plugin = fixture.plugin(&["alpha", "beta"], "beta", 100);
+        assert!(plugin.provenance.editor_column_authority);
+        assert!(
+            !plugin.invocation.editor_column_authority,
+            "the invocation flag is filled only at the tmux boundary"
+        );
+
+        let routed = fixture.route("gamma", &["gamma"], Some("ensure")).unwrap();
+        assert_eq!(routed.exit_code, 0);
+        let desired = fixture.runtime.pane_layout_desired().unwrap();
+        assert_eq!(desired.provenance.publisher, PaneLayoutPublisher::Route);
+        assert_eq!(desired.invocation.columns.len(), 2);
+        assert!(
+            desired.provenance.editor_column_authority,
+            "an ensure route re-placing a column keeps the editor's count"
+        );
+
+        let scope = agent_doc_state_scope::ProcessScope::new();
+        let actors = ControllerActorGraph::new_in(&scope, BTreeMap::new());
+        let graph = ControllerPaneLayoutGraph::new_in(&scope, actors.live_bindings_handle());
+        let unattributed = graph.set_desired(
+            automatic_layout_sync_invocation(
+                vec!["/p/a.md".to_string(), "/p/b.md".to_string()],
+                "/p/a.md",
+                false,
+            ),
+            None,
+        );
+        assert!(!unattributed.provenance.editor_column_authority);
+        let surface = graph.set_desired_attributed(
+            automatic_layout_sync_invocation(
+                vec!["/p/a.md".to_string(), "/p/b.md".to_string()],
+                "/p/a.md",
+                false,
+            ),
+            None,
+            PaneLayoutPublication::CoalesceIdentical,
+            PaneLayoutPublisher::EditorSurface,
+        );
+        assert_eq!(surface.generation, unattributed.generation);
+        assert!(
+            surface.provenance.editor_column_authority,
+            "an identical editor observation upgrades the retained generation"
+        );
+        let widened = graph.set_desired_attributed(
+            automatic_layout_sync_invocation(
+                vec![
+                    "/p/a.md".to_string(),
+                    "/p/b.md".to_string(),
+                    "/p/c.md".to_string(),
+                ],
+                "/p/c.md",
+                false,
+            ),
+            None,
+            PaneLayoutPublication::CoalesceIdentical,
+            PaneLayoutPublisher::Escalation,
+        );
+        assert_eq!(widened.invocation.columns.len(), 3);
+        assert!(
+            !widened.provenance.editor_column_authority,
+            "a derived publication that changes the count never has it"
+        );
+    }
+
     /// `layoutpublisherarbiter` (GH #120 asks 2-3): the route publisher and
     /// `plugin_publication` overwrote each other last-writer-wins with the
     /// loser unlogged, and an `ensure` route could widen the plugin's visible
@@ -56377,6 +56461,7 @@ mod tests {
 
             unstarted_session_bootstrap: false,
             layout_authority: None,
+            editor_column_authority: false,
         };
         assert_eq!(editor_route_focus_refusal(&invocation, "/repo/a.md"), None);
         let refusal = editor_route_focus_refusal(&invocation, "/repo/z.md").unwrap();
@@ -57847,6 +57932,7 @@ mod tests {
 
                 unstarted_session_bootstrap: false,
                 layout_authority: None,
+                editor_column_authority: false,
             },
             provenance: PaneLayoutProvenance::default(),
         };
@@ -60023,6 +60109,7 @@ mod tests {
 
             unstarted_session_bootstrap: false,
             layout_authority: None,
+            editor_column_authority: false,
         };
         let old = graph.set_desired(invocation.clone(), None);
         graph.record_structural_assignment(
@@ -60392,6 +60479,7 @@ mod tests {
 
                     unstarted_session_bootstrap: false,
                     layout_authority: None,
+                    editor_column_authority: false,
                 })
                 .unwrap(),
             ),

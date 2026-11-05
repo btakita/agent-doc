@@ -3044,11 +3044,12 @@ enum Commands {
     },
     /// List the operator first principles in scope for a document (global
     /// principles file, ancestor `.agent-doc/project.md`, the document; nearest
-    /// scope wins) and the warnings their authoring produces (`#firstprincipleslist`)
+    /// scope wins), the `fact [#id]:` premises in scope, and the warnings their
+    /// authoring produces (`#firstprincipleslist`, `#firstprinciplesfactlist`)
     Principles {
         /// Path to the session document
         file: PathBuf,
-        /// Output as JSON `{file, principles, warnings}`
+        /// Output as JSON `{file, principles, facts, warnings}`
         #[arg(long)]
         json: bool,
     },

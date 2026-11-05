@@ -346,3 +346,82 @@ fn rules_parsed_from_an_agent_rules_body_feed_composition() {
         Some("The operator sees it.")
     );
 }
+
+/// `#firstprinciplesfactlist`: `compose` lists the facts of the same layers
+/// (nearest wins, overrides recorded) after the principle issues, reports a
+/// duplicate fact id in one file and a fact written in the global file, and
+/// keeps fact items in `rules` as written.
+#[test]
+fn compose_lists_facts_with_overrides_and_reports_their_problems() {
+    let composition = compose(&[
+        layer(
+            PrincipleScope::Global,
+            "principles.md",
+            &["fact [#g]: Facts are not read from here."],
+        ),
+        layer(
+            PrincipleScope::Project,
+            "project.md",
+            &["fact [#jws]: Credentials are JWS.", "principle [#p]: P."],
+        ),
+        layer(
+            PrincipleScope::Document,
+            "doc.md",
+            &[
+                "fact [#jws]: Credentials are JWS with a kid header.",
+                "fact [#jws]: declared twice",
+                "principle [#p]: P again.",
+                "principle [#p]: P a third time.",
+            ],
+        ),
+    ]);
+    assert_eq!(composition.facts.len(), 1);
+    let fact = &composition.facts[0];
+    assert_eq!(
+        (
+            fact.id.as_str(),
+            fact.statement.as_str(),
+            fact.scope,
+            fact.source.as_str()
+        ),
+        (
+            "jws",
+            "Credentials are JWS with a kid header.",
+            PrincipleScope::Document,
+            "doc.md"
+        )
+    );
+    assert_eq!(fact.overrides, vec!["project.md".to_string()]);
+    assert_eq!(
+        composition.rules,
+        vec![
+            "fact [#jws]: Credentials are JWS.",
+            "fact [#jws]: Credentials are JWS with a kid header.",
+            "fact [#jws]: declared twice",
+        ]
+    );
+    let codes: Vec<(&str, &str)> = composition
+        .issues
+        .iter()
+        .map(|issue| (issue.code, issue.source.as_str()))
+        .collect();
+    assert_eq!(
+        codes,
+        vec![
+            (ISSUE_FACT_IN_GLOBAL_FILE, "principles.md"),
+            (ISSUE_DUPLICATE_ID, "doc.md"),
+            (ISSUE_FACT_DUPLICATE_ID, "doc.md"),
+        ]
+    );
+    assert!(composition.issues[0].message.contains("ignored fact [#g]"));
+    assert_eq!(
+        serde_json::to_value(fact).unwrap(),
+        serde_json::json!({
+            "id": "jws",
+            "statement": "Credentials are JWS with a kid header.",
+            "scope": "document",
+            "source": "doc.md",
+            "overrides": ["project.md"],
+        })
+    );
+}

@@ -14,7 +14,10 @@
 //!   case, `#id` without brackets accepted, continuation lines extend the
 //!   statement). Facts come from project and document layers only; the global
 //!   principles file holds principles. A nearer fact with the same id replaces
-//!   a farther one. A fact item stays in `agent_rules` as written.
+//!   a farther one and lists the replaced source in `overrides`; a second fact
+//!   with one id in the same file is a `fact_duplicate_id` issue and the first
+//!   applies ([`compose_facts`]). A fact item stays in `agent_rules` as
+//!   written.
 //! - [`PremiseRecord`] is one premise's statement plus the digest a caller
 //!   stores (the caller supplies the hash function, so this crate stays free
 //!   of hashing and storage). [`statement_digest_input`] is the canonical text
@@ -32,7 +35,9 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use crate::derivation::{Contradiction, Graph, Impact, NodeKind, NodeRef};
-use crate::{Layer, Principle, PrincipleScope, is_valid_id};
+use crate::{
+    ISSUE_FACT_DUPLICATE_ID, Layer, Principle, PrincipleIssue, PrincipleScope, is_valid_id,
+};
 
 /// One premise statement in scope for a document: a principle or a fact.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -121,18 +126,34 @@ pub fn parse_fact(rule: &str) -> Option<ParsedFact> {
 }
 
 /// A fact in scope, after nearest-wins composition.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Fact {
     pub id: String,
     pub statement: String,
+    /// Where the fact is written: `project` or `document`.
+    pub scope: PrincipleScope,
+    /// The file the fact was read from.
     pub source: String,
+    /// Sources of farther facts with this id that this one replaced, farthest
+    /// first (`#firstprinciplesfactlist`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub overrides: Vec<String>,
 }
 
-/// Facts from `layers` (farthest first). The global layer is skipped. A
-/// nearer fact with the same id replaces the farther one in place; within one
-/// layer the first declaration wins.
-pub fn facts_from_layers(layers: &[Layer]) -> Vec<Fact> {
-    let mut facts: Vec<Fact> = Vec::new();
+/// Facts in scope and the problems their authoring produced.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct FactComposition {
+    pub facts: Vec<Fact>,
+    pub issues: Vec<PrincipleIssue>,
+}
+
+/// Compose facts from `layers` (farthest first). The global layer is skipped
+/// (the caller reports a fact written there). A nearer fact with the same id
+/// replaces the farther one in place and records the replaced source in
+/// [`Fact::overrides`]; within one layer the first declaration wins and each
+/// later one is a [`ISSUE_FACT_DUPLICATE_ID`] issue.
+pub fn compose_facts(layers: &[Layer]) -> FactComposition {
+    let mut composition = FactComposition::default();
     for layer in layers {
         if layer.scope == PrincipleScope::Global {
             continue;
@@ -140,21 +161,44 @@ pub fn facts_from_layers(layers: &[Layer]) -> Vec<Fact> {
         let mut seen_in_layer: Vec<String> = Vec::new();
         for parsed in layer.rules.iter().filter_map(|rule| parse_fact(rule)) {
             if seen_in_layer.contains(&parsed.id) {
+                composition.issues.push(PrincipleIssue {
+                    code: ISSUE_FACT_DUPLICATE_ID,
+                    message: format!(
+                        "fact [#{}] is declared twice in this file; the first one applies",
+                        parsed.id
+                    ),
+                    source: layer.source.clone(),
+                });
                 continue;
             }
             seen_in_layer.push(parsed.id.clone());
             let fact = Fact {
                 id: parsed.id,
                 statement: parsed.statement,
+                scope: layer.scope,
                 source: layer.source.clone(),
+                overrides: Vec::new(),
             };
-            match facts.iter_mut().find(|existing| existing.id == fact.id) {
-                Some(existing) => *existing = fact,
-                None => facts.push(fact),
+            match composition
+                .facts
+                .iter_mut()
+                .find(|existing| existing.id == fact.id)
+            {
+                Some(existing) => {
+                    let mut overrides = std::mem::take(&mut existing.overrides);
+                    overrides.push(existing.source.clone());
+                    *existing = Fact { overrides, ..fact };
+                }
+                None => composition.facts.push(fact),
             }
         }
     }
-    facts
+    composition
+}
+
+/// Facts from `layers` (farthest first): [`compose_facts`] without its issues.
+pub fn facts_from_layers(layers: &[Layer]) -> Vec<Fact> {
+    compose_facts(layers).facts
 }
 
 /// Every principle and fact in scope as a record, principles first.
@@ -401,15 +445,62 @@ mod tests {
                 Fact {
                     id: "jws".into(),
                     statement: "Credentials are JWS.".into(),
-                    source: "project.md".into()
+                    scope: PrincipleScope::Project,
+                    source: "project.md".into(),
+                    overrides: vec![],
                 },
                 Fact {
                     id: "os".into(),
                     statement: "Linux and macOS.".into(),
-                    source: "doc.md".into()
+                    scope: PrincipleScope::Document,
+                    source: "doc.md".into(),
+                    overrides: vec!["project.md".into()],
                 },
             ]
         );
+    }
+
+    #[test]
+    fn fact_composition_chains_overrides_and_reports_duplicates_in_one_file() {
+        let composed = compose_facts(&[
+            layer(
+                PrincipleScope::Project,
+                "outer/.agent-doc/project.md",
+                &["fact [#os]: Linux."],
+            ),
+            layer(
+                PrincipleScope::Project,
+                "outer/inner/.agent-doc/project.md",
+                &[
+                    "fact #os: Linux and macOS.",
+                    "fact [#os]: second in this file",
+                ],
+            ),
+            layer(
+                PrincipleScope::Document,
+                "doc.md",
+                &["FACT [#os]: Linux, macOS, Windows."],
+            ),
+        ]);
+        assert_eq!(composed.facts.len(), 1);
+        assert_eq!(composed.facts[0].statement, "Linux, macOS, Windows.");
+        assert_eq!(composed.facts[0].scope, PrincipleScope::Document);
+        assert_eq!(
+            composed.facts[0].overrides,
+            vec![
+                "outer/.agent-doc/project.md".to_string(),
+                "outer/inner/.agent-doc/project.md".to_string()
+            ]
+        );
+        assert_eq!(
+            composed.issues,
+            vec![PrincipleIssue {
+                code: ISSUE_FACT_DUPLICATE_ID,
+                message: "fact [#os] is declared twice in this file; the first one applies".into(),
+                source: "outer/inner/.agent-doc/project.md".into(),
+            }]
+        );
+        assert_eq!(facts_from_layers(&[]), Vec::<Fact>::new());
     }
 
     #[test]

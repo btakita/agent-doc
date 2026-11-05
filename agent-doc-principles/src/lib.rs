@@ -57,6 +57,12 @@
 //! the farther one in place (the list keeps first-declared order) and records
 //! the replaced source in [`Principle::overrides`]. Two principles with one id
 //! in the same layer: the first wins and the second is reported.
+//!
+//! [`compose`] also composes the `fact [#id]: <statement>` items of the same
+//! layers ([`rederive::compose_facts`], `#firstprinciplesfactlist`): project
+//! and document layers only, nearest wins with `overrides`, a duplicate id in
+//! one file reported as `fact_duplicate_id`, and a fact in the global file
+//! reported as `fact_in_global_file` and ignored. Fact items stay in `rules`.
 
 pub mod derivation;
 pub mod rederive;
@@ -137,6 +143,11 @@ pub const ISSUE_UNKNOWN_SCOPE: &str = "principle_unknown_scope";
 pub const ISSUE_SCOPE_MISMATCH: &str = "principle_scope_mismatch";
 pub const ISSUE_DUPLICATE_ID: &str = "principle_duplicate_id";
 pub const ISSUE_GLOBAL_PLAIN_RULE: &str = "principle_global_plain_rule";
+/// A second fact with one id in the same file (`#firstprinciplesfactlist`).
+pub const ISSUE_FACT_DUPLICATE_ID: &str = "fact_duplicate_id";
+/// A fact written in the global principles file, which holds principles only
+/// (`#firstprinciplesfactlist`).
+pub const ISSUE_FACT_IN_GLOBAL_FILE: &str = "fact_in_global_file";
 
 /// A problem with what the operator wrote. Surfaced as a preflight warning;
 /// never fails the turn.
@@ -156,11 +167,15 @@ pub struct Layer {
     pub rules: Vec<String>,
 }
 
-/// Composed rules and principles for one cycle.
+/// Composed rules, principles, and facts for one cycle.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Composition {
     pub rules: Vec<String>,
     pub principles: Vec<Principle>,
+    /// Facts in scope ([`rederive::compose_facts`]); fact items also stay in
+    /// `rules` as written.
+    pub facts: Vec<rederive::Fact>,
+    /// Principle issues in layer order, then fact issues.
     pub issues: Vec<PrincipleIssue>,
 }
 
@@ -312,7 +327,18 @@ pub fn compose(layers: &[Layer]) -> Composition {
         for rule in &layer.rules {
             match parse_rule(rule) {
                 RuleForm::Plain => {
-                    if layer.scope == PrincipleScope::Global {
+                    if layer.scope == PrincipleScope::Global
+                        && let Some(fact) = rederive::parse_fact(rule)
+                    {
+                        composition.issues.push(PrincipleIssue {
+                            code: ISSUE_FACT_IN_GLOBAL_FILE,
+                            message: format!(
+                                "the global principles file holds principles only; ignored fact [#{}]. Move it to a project's .agent-doc/project.md agent:rules, or the session document's.",
+                                fact.id
+                            ),
+                            source: layer.source.clone(),
+                        });
+                    } else if layer.scope == PrincipleScope::Global {
                         composition.issues.push(PrincipleIssue {
                             code: ISSUE_GLOBAL_PLAIN_RULE,
                             message: format!(
@@ -385,6 +411,9 @@ pub fn compose(layers: &[Layer]) -> Composition {
             }
         }
     }
+    let facts = rederive::compose_facts(layers);
+    composition.facts = facts.facts;
+    composition.issues.extend(facts.issues);
     composition
 }
 

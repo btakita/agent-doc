@@ -4,8 +4,9 @@
 //! It deliberately delegates to `agent-doc-lint-io`, so inspection and the
 //! write/compact gates cannot drift into separate rule sets.
 //!
-//! After the gate it prints the first-principle warnings preflight would
-//! raise for the document (`#firstprincipleslist`, see `principles_cmd`).
+//! After the gate it prints the first-principle and fact warnings preflight
+//! would raise for the document (`#firstprincipleslist`,
+//! `#firstprinciplesfactlist`, see `principles_cmd`).
 //! They are warnings in every lint mode and never change the exit status.
 
 use std::path::Path;

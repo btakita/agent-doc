@@ -41,8 +41,11 @@
 //! 3. **Normalized text similarity** (annotates only): token Jaccard at or
 //!    above [`text::TEXT_SIMILARITY_THRESHOLD`] with no conflicting numbers.
 //! 4. **Semantic neighbours** (annotates only): an optional
-//!    [`SemanticNeighbours`] implementation (for example a tsift embedding
-//!    index). Absent, the ledger degrades to tiers 1-3.
+//!    [`SemanticNeighbours`] implementation. [`recall`] builds one from an
+//!    external [`recall::AnswerRecall`] source (agent-doc wires `tsift
+//!    --envelope search`), and the same source yields cross-document
+//!    "possibly answered elsewhere" notes. Absent, the ledger degrades to
+//!    tiers 1-3 and emits no semantic or cross-document notes.
 //!
 //! The data model is graph-ready: decisions and revisions have stable ids, and
 //! every relation is a typed [`Edge`] (`answers`, `supersedes`, `amends`,
@@ -51,6 +54,7 @@
 pub mod extract;
 pub mod graph;
 pub mod history;
+pub mod recall;
 pub mod text;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -366,6 +370,9 @@ pub struct Ledger {
     live_queue_ids: BTreeSet<String>,
     kinds: BTreeMap<String, &'static str>,
     now: u64,
+    /// Per decision (same index): the text the gray-zone tiers compare, which
+    /// is also what a [`SemanticNeighbours`] source receives.
+    profiles: Vec<String>,
 }
 
 #[derive(Default)]
@@ -968,6 +975,12 @@ impl Ledger {
             }
         }
         ledger.possible = possible;
+        ledger.profiles = vec![String::new(); ledger.decisions.len()];
+        for (group, profile) in profiles.into_iter().enumerate() {
+            if let Some(index) = decision_of_group[group] {
+                ledger.profiles[index] = profile.0;
+            }
+        }
         ledger.near_duplicates = near_duplicates
             .into_iter()
             .map(|cluster| cluster.into_iter().collect())
@@ -1029,6 +1042,17 @@ impl Ledger {
             }
         }
         by_root.into_values().collect()
+    }
+
+    /// The text the gray-zone tiers compare for decision `index` (the longest
+    /// question body among its copies); empty when it has none.
+    pub fn profile_text(&self, index: usize) -> &str {
+        self.profiles.get(index).map_or("", String::as_str)
+    }
+
+    /// The index of the decision a key belongs to.
+    pub fn decision_index_for_key(&self, key: &str) -> Option<usize> {
+        self.key_to_decision.get(key).copied()
     }
 
     /// The decision a key belongs to.

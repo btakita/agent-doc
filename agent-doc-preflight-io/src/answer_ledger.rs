@@ -14,15 +14,26 @@
 //! answered question with its decision id, rebuilds the index once from the
 //! document's git history, and [`probe_answer_ledger`] reports the same facts
 //! read-only for `preflight --probe`.
+//!
+//! Preflight alone ([`run_answer_ledger_maintenance_with_recall`]) also asks
+//! the optional tsift recall source ([`crate::answer_recall`]) for semantic
+//! neighbours of the open, unanswered questions, inside this document and in
+//! other session documents (`#decisiontsiftrecall`). It runs after the
+//! stamped pass, the graph build and the index refresh, so the index and graph
+//! never depend on tsift. The results stay "possibly answered" notes; without
+//! tsift the pass is exactly the in-process one.
 
 use std::path::Path;
 
 use agent_doc_answer_ledger::graph::{DecisionGraph, EdgeSource, GraphEdge, Node, NodeKind};
+use agent_doc_answer_ledger::recall::{AnswerRecall, OtherDocument, RecallOptions, RecalledAnswer};
 use agent_doc_answer_ledger::{
     AnsweredFact, DuplicateClosure, Ledger, PossibleMatch, PriorIndex, PriorKey, PriorRevision,
-    Reask,
+    Reask, SemanticNeighbours,
 };
 use anyhow::Result;
+
+use crate::answer_recall::{RecallEnv, TsiftRecall};
 
 /// What one ledger pass produced.
 #[derive(Debug, Clone, Default)]
@@ -30,12 +41,22 @@ pub struct AnswerLedgerReport {
     pub facts: Vec<AnsweredFact>,
     pub possible: Vec<PossibleMatch>,
     pub closed: Vec<DuplicateClosure>,
+    /// Cross-document "possibly answered elsewhere" notes (tsift recall).
+    pub recalled: Vec<RecalledAnswer>,
 }
 
 impl AnswerLedgerReport {
-    /// Cycle-contract guidance; `None` when nothing is answered or possible.
+    /// Cycle-contract guidance; `None` when nothing is answered, possible or
+    /// recalled.
     pub fn guidance(&self) -> Option<String> {
-        agent_doc_answer_ledger::contract_guidance(&self.facts, &self.possible)
+        let parts: Vec<String> = [
+            agent_doc_answer_ledger::contract_guidance(&self.facts, &self.possible),
+            agent_doc_answer_ledger::recall::recall_guidance(&self.recalled),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+        (!parts.is_empty()).then(|| parts.join("\n"))
     }
 }
 
@@ -392,8 +413,18 @@ fn build_with_prior(
     prior: &PriorIndex,
     now: u64,
 ) -> (agent_doc_answer_ledger::extract::Observations, Ledger) {
+    build_with_neighbours(file, content, prior, now, None)
+}
+
+fn build_with_neighbours(
+    file: &Path,
+    content: &str,
+    prior: &PriorIndex,
+    now: u64,
+    neighbours: Option<&dyn SemanticNeighbours>,
+) -> (agent_doc_answer_ledger::extract::Observations, Ledger) {
     let observations = observe_document(file, content);
-    let ledger = Ledger::build(&observations, prior, now, None);
+    let ledger = Ledger::build(&observations, prior, now, neighbours);
     (observations, ledger)
 }
 
@@ -408,6 +439,87 @@ pub fn build_ledger(
         &load_prior(file),
         agent_doc_log_time::current_epoch_secs(),
     )
+}
+
+/// Largest other document recall reads.
+const MAX_RECALL_DOCUMENT_BYTES: u64 = 4 * 1024 * 1024;
+
+fn canonical(path: &Path) -> std::path::PathBuf {
+    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
+/// `#decisiontsiftrecall`: one recall pass over `ledger` (built from
+/// `content`). Returns the ledger rebuilt with in-document neighbours (when
+/// any) and the cross-document notes. Annotation only.
+fn recall_pass(
+    file: &Path,
+    content: &str,
+    prior: &PriorIndex,
+    now: u64,
+    ledger: Ledger,
+    source: &dyn AnswerRecall,
+    root: &Path,
+) -> (Ledger, Vec<RecalledAnswer>) {
+    let here = canonical(file);
+    let mut excluded: std::collections::BTreeSet<std::path::PathBuf> =
+        agent_doc_element_backlog_io::done_archive::read_done_archive_sources(file, content)
+            .map(|sources| {
+                sources
+                    .into_iter()
+                    .map(|source| canonical(&source.path))
+                    .collect()
+            })
+            .unwrap_or_default();
+    excluded.insert(here.clone());
+    let rows = agent_doc_answer_ledger::extract::observe(content, &[]);
+    let mut load = |path: &str| -> Option<OtherDocument> {
+        let path = Path::new(path);
+        if excluded.contains(path)
+            || std::fs::metadata(path).ok()?.len() > MAX_RECALL_DOCUMENT_BYTES
+        {
+            return None;
+        }
+        let text = std::fs::read_to_string(path).ok()?;
+        let rows = agent_doc_answer_ledger::extract::observe(&text, &[]);
+        if rows.answers.is_empty() {
+            return None;
+        }
+        Some(OtherDocument {
+            display: path
+                .strip_prefix(root)
+                .unwrap_or(path)
+                .to_string_lossy()
+                .into_owned(),
+            ledger: Ledger::build(&rows, &PriorIndex::default(), now, None),
+            rows,
+        })
+    };
+    let pass = agent_doc_answer_ledger::recall::run_recall(
+        &ledger,
+        &rows,
+        &here.to_string_lossy(),
+        source,
+        RecallOptions::default(),
+        &mut load,
+    );
+    if pass.queries > 0 {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "answer_ledger_recall file={} queries={} neighbours={} recalled={}",
+                file.display(),
+                pass.queries,
+                pass.neighbours.len(),
+                pass.recalled.len()
+            ),
+        );
+    }
+    let ledger = if pass.neighbours.is_empty() {
+        ledger
+    } else {
+        build_with_neighbours(file, content, prior, now, Some(&pass.neighbours)).1
+    };
+    (ledger, pass.recalled)
 }
 
 /// One planned ledger pass over `content`, nothing written yet.
@@ -473,6 +585,7 @@ fn report_of(
         facts,
         possible: ledger.possible.clone(),
         closed,
+        recalled: Vec::new(),
     }
 }
 
@@ -496,7 +609,22 @@ fn read_authoritative(file: &Path, force_disk: bool) -> Result<Option<String>> {
 /// stamp the remaining copies with their decision id, refresh the index, and
 /// return the facts for the cycle contract.
 pub fn run_answer_ledger_maintenance(file: &Path) -> Result<AnswerLedgerReport> {
-    run_answer_ledger_maintenance_with_options(file, false, None)
+    run_answer_ledger_maintenance_with_options(file, false, None, None)
+}
+
+/// Preflight pass: [`run_answer_ledger_maintenance`] plus the optional tsift
+/// recall notes (`#decisiontsiftrecall`). Only preflight carries the notes
+/// into a cycle contract, so only preflight pays for the search.
+pub fn run_answer_ledger_maintenance_with_recall(file: &Path) -> Result<AnswerLedgerReport> {
+    run_answer_ledger_maintenance_with_recall_env(file, &RecallEnv::from_process())
+}
+
+/// [`run_answer_ledger_maintenance_with_recall`] with an explicit environment.
+pub fn run_answer_ledger_maintenance_with_recall_env(
+    file: &Path,
+    env: &RecallEnv,
+) -> Result<AnswerLedgerReport> {
+    run_answer_ledger_maintenance_with_options(file, false, None, Some(env))
 }
 
 /// Force-disk counterpart for an explicitly force-disk strict closeout.
@@ -504,7 +632,7 @@ pub fn run_answer_ledger_maintenance_force_disk(
     file: &Path,
     write_effects: &dyn super::PreflightMaintenanceWriteEffects,
 ) -> Result<AnswerLedgerReport> {
-    run_answer_ledger_maintenance_with_options(file, true, Some(write_effects))
+    run_answer_ledger_maintenance_with_options(file, true, Some(write_effects), None)
 }
 
 /// `#decisionidstamp`: the probe-mode (`preflight --probe`) pass. It reads the
@@ -526,6 +654,7 @@ fn run_answer_ledger_maintenance_with_options(
     file: &Path,
     force_disk: bool,
     write_effects: Option<&dyn super::PreflightMaintenanceWriteEffects>,
+    recall: Option<&RecallEnv>,
 ) -> Result<AnswerLedgerReport> {
     let source = "preflight_answer_ledger";
     let Some(content) = read_authoritative(file, force_disk)? else {
@@ -537,6 +666,7 @@ fn run_answer_ledger_maintenance_with_options(
     let closed = pass.closed;
     let mut report_ledger = pass.ledger;
     let mut report_observations = pass.observations;
+    let mut final_content = content.clone();
     if let Some(target) = pass.target {
         let persisted = if force_disk {
             let effects = write_effects.ok_or_else(|| {
@@ -594,10 +724,29 @@ fn run_answer_ledger_maintenance_with_options(
             );
         }
         (report_observations, report_ledger) = build_with_prior(file, &persisted, &prior, now);
+        final_content = persisted;
     }
     let graph = graph_of(file, &report_ledger, &report_observations);
     store_index(file, &report_ledger, &graph, now);
-    let report = report_of(&report_ledger, &graph, closed);
+    // `#decisiontsiftrecall`: annotation only, after the index and graph are
+    // stored, so neither depends on whether tsift is available.
+    let mut recalled = Vec::new();
+    if let Some(source) = recall.and_then(|env| TsiftRecall::discover(file, env)) {
+        let root = source.root().to_path_buf();
+        let (ledger, notes) = recall_pass(
+            file,
+            &final_content,
+            &prior,
+            now,
+            report_ledger,
+            &source,
+            &root,
+        );
+        report_ledger = ledger;
+        recalled = notes;
+    }
+    let mut report = report_of(&report_ledger, &graph, closed);
+    report.recalled = recalled;
     for fact in &report.facts {
         eprintln!(
             "[preflight] answer ledger: already answered `{}` ({}): “{}”",
@@ -723,6 +872,162 @@ mod tests {
             .output()
             .unwrap();
         assert!(output.status.success(), "git {args:?}: {output:?}");
+    }
+
+    /// `#decisiontsiftrecall` fixture: a project with a tsift index marker,
+    /// this document (an answered request copy plus an open, unanswered
+    /// redirect question) and another session document that answered the
+    /// redirect question.
+    fn recall_project() -> (tempfile::TempDir, std::path::PathBuf, std::path::PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(dir.path().join(".tsift")).unwrap();
+        std::fs::write(dir.path().join(".tsift/index.db"), b"").unwrap();
+        std::fs::create_dir_all(dir.path().join("tasks")).unwrap();
+        let doc = dir.path().join("tasks/session.md");
+        let content = DOC.replace(
+            "<!-- /agent:todo -->\n",
+            "- [ ] [#redir] Choose the demo sign-in redirect port for local runs\n<!-- /agent:todo -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        let other = dir.path().join("tasks/other.md");
+        std::fs::write(
+            &other,
+            concat!(
+                "<!-- agent:todo -->\n",
+                "- [x] [#portpick] Which port should the demo sign-in redirect use for local runs\n",
+                "<!-- /agent:todo -->\n",
+                "<!-- agent:queue -->\n",
+                "- ~~[#portpick]: Use port 8443.~~\n",
+                "<!-- /agent:queue -->\n",
+            ),
+        )
+        .unwrap();
+        (dir, doc, other)
+    }
+
+    /// A fake `tsift` that prints one search envelope hitting `other` line 2,
+    /// after `delay` seconds.
+    fn fake_tsift(dir: &Path, other: &Path, delay: &str) -> std::path::PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let bin_dir = dir.join("fakebin");
+        std::fs::create_dir_all(&bin_dir).unwrap();
+        let script = bin_dir.join("tsift");
+        let report = serde_json::json!({
+            "tool": "search",
+            "report": {"ranked": [
+                {"path": other.to_string_lossy(), "line": 2, "score": 7.5, "source": "vector_chunk"}
+            ]}
+        });
+        std::fs::write(
+            &script,
+            format!("#!/bin/sh\nsleep {delay}\ncat <<'JSON'\n{report}\nJSON\n"),
+        )
+        .unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        bin_dir
+    }
+
+    fn recall_env(path: &Path, timeout_ms: u64) -> RecallEnv {
+        RecallEnv {
+            disabled: false,
+            tsift_bin: None,
+            path: Some(path.as_os_str().to_owned()),
+            timeout_ms: Some(timeout_ms),
+        }
+    }
+
+    /// No tsift on PATH: recall is not discovered and the pass is exactly the
+    /// in-process one (tiers 1-2 act, no semantic or cross-document notes).
+    #[test]
+    fn recall_without_tsift_on_path_degrades_to_the_in_process_tiers() {
+        let (dir, doc, _) = recall_project();
+        let empty_path = dir.path().join("empty-path");
+        std::fs::create_dir_all(&empty_path).unwrap();
+        let env = recall_env(&empty_path, 2000);
+        assert!(TsiftRecall::discover(&doc, &env).is_none());
+
+        let report =
+            run_answer_ledger_maintenance_with_options(&doc, true, Some(&NoEffects), Some(&env))
+                .unwrap();
+        // The acting tiers still close the answered request copy.
+        assert_eq!(report.closed.len(), 1, "{report:?}");
+        assert!(report.recalled.is_empty(), "{report:?}");
+        assert!(
+            report
+                .possible
+                .iter()
+                .all(|candidate| candidate.tier != agent_doc_answer_ledger::MatchTier::Semantic)
+        );
+        let guidance = report.guidance().unwrap_or_default();
+        assert!(!guidance.contains("#decisiontsiftrecall"), "{guidance}");
+    }
+
+    /// A project without a tsift index never looks for the executable.
+    #[test]
+    fn recall_needs_a_tsift_index() {
+        let (dir, doc, other) = recall_project();
+        std::fs::remove_file(dir.path().join(".tsift/index.db")).unwrap();
+        let bin_dir = fake_tsift(dir.path(), &other, "0");
+        assert!(TsiftRecall::discover(&doc, &recall_env(&bin_dir, 2000)).is_none());
+        let disabled = RecallEnv {
+            disabled: true,
+            ..recall_env(&bin_dir, 2000)
+        };
+        std::fs::write(dir.path().join(".tsift/index.db"), b"").unwrap();
+        assert!(TsiftRecall::discover(&doc, &disabled).is_none());
+    }
+
+    /// With tsift present, an answer in another document becomes a
+    /// "possibly answered elsewhere" note; nothing closes because of it.
+    #[test]
+    fn recall_with_tsift_notes_answers_from_other_documents() {
+        let (dir, doc, other) = recall_project();
+        let bin_dir = fake_tsift(dir.path(), &other, "0");
+        let env = recall_env(&bin_dir, 10_000);
+        assert!(TsiftRecall::discover(&doc, &env).is_some());
+
+        let report =
+            run_answer_ledger_maintenance_with_options(&doc, true, Some(&NoEffects), Some(&env))
+                .unwrap();
+        assert_eq!(report.closed.len(), 1, "{report:?}");
+        // The fake answers every open question with the same hit.
+        let note = report
+            .recalled
+            .iter()
+            .find(|note| note.open_items == ["redir"])
+            .unwrap_or_else(|| panic!("{report:?}"));
+        assert_eq!(note.document, "tasks/other.md");
+        assert_eq!(note.answer, "Use port 8443.");
+        assert_eq!(note.tier, agent_doc_answer_ledger::MatchTier::Semantic);
+        let written = std::fs::read_to_string(&doc).unwrap();
+        assert!(written.contains("- [ ] [#redir]"), "{written}");
+        let guidance = report.guidance().unwrap();
+        assert!(
+            guidance.contains("possibly answered elsewhere"),
+            "{guidance}"
+        );
+        assert!(guidance.contains("Use port 8443."), "{guidance}");
+    }
+
+    /// A tsift that outlives the deadline is killed; the pass returns
+    /// without notes well before the fake would have answered.
+    #[test]
+    fn recall_is_bounded_by_its_deadline() {
+        let (dir, doc, other) = recall_project();
+        let bin_dir = fake_tsift(dir.path(), &other, "30");
+        let env = recall_env(&bin_dir, 300);
+        let started = std::time::Instant::now();
+        let report =
+            run_answer_ledger_maintenance_with_options(&doc, true, Some(&NoEffects), Some(&env))
+                .unwrap();
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(10),
+            "{:?}",
+            started.elapsed()
+        );
+        assert!(report.recalled.is_empty(), "{report:?}");
+        assert_eq!(report.closed.len(), 1, "{report:?}");
     }
 
     /// Agent-free path: a plain force-disk maintenance pass (the closeout

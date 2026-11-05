@@ -48,6 +48,15 @@ preflight and every closeout (`#answerbyrequestid`):
 - `possibly_answered` entries are only likely matches. If one is the same
   question, ask the operator once whether it is the same. They confirm by
   replying `same as [#id]` under the item. Never merge two questions yourself.
+- When the project has a tsift index and `tsift` is installed, preflight also
+  searches for open, unanswered questions with `tsift --envelope search`.
+  Close matches in this document show up in `possibly_answered` as a
+  `semantic neighbour`. Answers found in other session documents show up in
+  `answers_recalled_elsewhere`. Both are search matches, not answers: never
+  close, merge or skip a question because of one. If one fits, ask the
+  operator once, quoting the other answer, whether it applies. Without tsift
+  these notes are simply absent. Set `AGENT_DOC_ANSWER_RECALL=off` to turn
+  the search off.
 - The binary closes duplicate request copies once their answer has been
   delivered. A closeout that asks an answered question again is refused, with
   the recorded answer. If the answer truly leaves a new question open, cite

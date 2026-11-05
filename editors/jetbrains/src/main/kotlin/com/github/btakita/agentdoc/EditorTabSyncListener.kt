@@ -100,6 +100,7 @@ class EditorTabSyncListener : FileEditorManagerListener {
     private val focusProjectionGeneration = AtomicLong(0)
     private val selectionFocusProbeGeneration = AtomicLong(0)
     private val surfaceDeliveryRetryAttempt = AtomicLong(0)
+    private val openedSessionStarts = OpenedSessionStartBatch<VirtualFile>()
     private val activeFocusProjection = AtomicReference<ScheduledFuture<*>?>(null)
     private val lifecycleLock = Any()
 
@@ -360,6 +361,47 @@ companion object {
             }
             return true
         }
+    }
+
+    /**
+     * The session-document starts that file-open edges have launched and that have not yet
+     * finished (`#restartstartcoalesce`). At IDE restart every restored tab runs its own
+     * `agent-doc tmux start`; publishing a surface observation per receipt reprojected the whole
+     * layout once per tab while the remaining starts were still running. One batch is the run of
+     * starts from the first [begin] until the running count returns to zero: only the start that
+     * empties it returns a publication, and only when some start in the batch became ready for a
+     * document that is still open. A batch whose starts all failed publishes nothing, as a single
+     * failed start never did. A start opened while others run joins their batch; a lone open is a
+     * batch of one.
+     *
+     * [F] is the file handle; the listener uses `VirtualFile`, tests use paths.
+     */
+    internal class OpenedSessionStartBatch<F : Any> {
+        private var running = 0
+        private var lastReady: F? = null
+
+        @Synchronized
+        fun begin() {
+            running += 1
+        }
+
+        /**
+         * Record that one started document finished. [readyFile] is the document when its start
+         * became ready and it is still open, otherwise null (failed, closed, or unresolvable).
+         * Returns the batch's most recently ready document when this was the last running start
+         * and some start in the batch was ready; otherwise null.
+         */
+        @Synchronized
+        fun finish(readyFile: F?): F? {
+            if (running == 0) return null
+            running -= 1
+            if (readyFile != null) lastReady = readyFile
+            if (running > 0) return null
+            return lastReady.also { lastReady = null }
+        }
+
+        @Synchronized
+        fun running(): Int = running
     }
 
     /**
@@ -2076,10 +2118,18 @@ requiredFocusGeneration = requestedFocusGeneration,
      * idempotence; this listener only preserves the causal order between that receipt and the
      * ordinary reactive surface publication. The automatic edge does not reveal or select a
      * terminal — the surface effect still owns layout and focus.
+     *
+     * Starts that overlap form one [OpenedSessionStartBatch] (`#restartstartcoalesce`): at IDE
+     * restart each restored tab starts its document, and the surface is requested once, when the
+     * last of them finishes, rather than once per receipt.
      */
     private fun startOpenedSessionBeforeObservation(project: Project, file: VirtualFile) {
+        openedSessionStarts.begin()
         GenerationWork.executeOnPooledThread {
-            if (project.isDisposed || !file.isValid) return@executeOnPooledThread
+            if (project.isDisposed || !file.isValid) {
+                finishOpenedSessionStartLater(project)
+                return@executeOnPooledThread
+            }
             val (cwd, relativePath) =
                 try {
                     TerminalUtil.resolveProject(project, file)
@@ -2088,6 +2138,7 @@ requiredFocusGeneration = requestedFocusGeneration,
                         "[layout-sync] fileOpened start resolution failed for ${file.path}",
                         failure,
                     )
+                    finishOpenedSessionStartLater(project)
                     return@executeOnPooledThread
                 }
             IdeTerminalCoordinator.startInPane(
@@ -2095,30 +2146,49 @@ requiredFocusGeneration = requestedFocusGeneration,
                 cwd = cwd,
                 relativePath = relativePath,
                 onReady = {
-                    if (
-                        project.isDisposed ||
-                            !file.isValid ||
-                            !FileEditorManager.getInstance(project).isFileOpen(file)
-                    ) {
-                        return@startInPane
-                    }
-                    requestObservation(
-                        PendingSurfaceObservation(
-                            project = project,
-                            preferredFile = file,
-                            forceReconcile = false,
-                            authority = ObservationAuthority.FileOpened,
-                        ),
-                    )
-                    log("fileOpened: file=${file.name}; start ready, surface queued")
+                    val stillOpen =
+                        !project.isDisposed &&
+                            file.isValid &&
+                            FileEditorManager.getInstance(project).isFileOpen(file)
+                    log("fileOpened: file=${file.name}; start ready open=$stillOpen")
+                    finishOpenedSessionStart(project, file.takeIf { stillOpen })
                 },
                 onFailure = { message ->
                     LOG.warn(
                         "[layout-sync] fileOpened start failed for ${file.path}: $message",
                     )
+                    finishOpenedSessionStart(project, null)
                 },
             )
         }
+    }
+
+    /** A start that ended on a pooled thread finishes its batch on the EDT, like a receipt. */
+    private fun finishOpenedSessionStartLater(project: Project) {
+        GenerationWork.invokeLater { finishOpenedSessionStart(project, null) }
+    }
+
+    /**
+     * Record one opened-session start's end; the start that empties the batch requests the one
+     * surface observation. The preferred file is the selected editor, the document the operator is
+     * looking at once restoration settles, falling back to the batch's last ready document.
+     */
+    private fun finishOpenedSessionStart(project: Project, readyFile: VirtualFile?) {
+        val lastReady = openedSessionStarts.finish(readyFile) ?: return
+        if (project.isDisposed) return
+        val manager = FileEditorManager.getInstance(project)
+        val preferredFile =
+            manager.selectedEditor?.file?.takeIf { it.isValid }
+                ?: lastReady.takeIf { it.isValid && manager.isFileOpen(it) }
+        requestObservation(
+            PendingSurfaceObservation(
+                project = project,
+                preferredFile = preferredFile,
+                forceReconcile = false,
+                authority = ObservationAuthority.FileOpened,
+            ),
+        )
+        log("fileOpened: starts settled preferred=${preferredFile?.name}; surface queued")
     }
 
     /**

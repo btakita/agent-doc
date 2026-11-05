@@ -38,8 +38,26 @@ pub const STAYS_OPEN_CLAUSE_OPEN: &str = "(stays open:";
 /// character, so `[#a]`, `#a,` and `(#a)` all cite `a` while `PR#2` cites
 /// nothing. Whether a cited id is tracked work is the caller's question.
 pub fn stays_open_blocker_ids(text: &str) -> Vec<String> {
-    let lower = text.to_ascii_lowercase();
     let mut ids = Vec::new();
+    for body in stays_open_clause_bodies(text) {
+        if body.to_ascii_lowercase().contains("block") {
+            for id in cited_hash_ids(body) {
+                if !ids.contains(&id) {
+                    ids.push(id);
+                }
+            }
+        }
+    }
+    ids
+}
+
+/// The body of every `(stays open: ...)` clause in `text`, in order, with
+/// balanced parentheses and the leading `stays open:` phrase removed
+/// (`#ackstrikeopenbacklog` reads the first one as the visible stays-open
+/// reason). An unclosed clause runs to the end of `text`.
+pub fn stays_open_clause_bodies(text: &str) -> Vec<&str> {
+    let lower = text.to_ascii_lowercase();
+    let mut bodies = Vec::new();
     let mut from = 0;
     while let Some(rel) = lower[from..].find(STAYS_OPEN_CLAUSE_OPEN) {
         let body_start = from + rel + 1;
@@ -58,16 +76,11 @@ pub fn stays_open_blocker_ids(text: &str) -> Vec<String> {
                 _ => {}
             }
         }
-        if lower[body_start..body_end].contains("block") {
-            for id in cited_hash_ids(&text[body_start..body_end]) {
-                if !ids.contains(&id) {
-                    ids.push(id);
-                }
-            }
-        }
+        let phrase_end = (from + rel + STAYS_OPEN_CLAUSE_OPEN.len()).min(body_end);
+        bodies.push(&text[phrase_end..body_end]);
         from = body_end.max(body_start);
     }
-    ids
+    bodies
 }
 
 fn cited_hash_ids(text: &str) -> Vec<String> {

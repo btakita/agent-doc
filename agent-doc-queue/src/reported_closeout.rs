@@ -367,7 +367,7 @@ fn consume_step(document: &str, claim: &QueueClaim) -> ReportedCloseoutStep {
             concrete: true,
             alternative: None,
             detail: format!(
-                "strike the reported row; the tracked item stays open. Only when the tracked work itself is complete, pass `--done {id}` to `agent-doc finalize {document}` instead"
+                "strike the reported row; the tracked item stays open and the struck row names its `(stays open: ...)` reason (#ackstrikeopenbacklog). When the worker's or operator's answer resolves the tracked item, pass `--done {id}` to `agent-doc finalize {document}` instead and close any parent item the same answer resolves; never acknowledge a head whose item the answer finished"
             ),
         },
         QueueItemIdentity::FreeText(_) => {

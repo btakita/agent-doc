@@ -134,7 +134,9 @@ Never write these forms yourself: they are the operator's words.
 
 When a reply has no `change:` or `amend:`, the binary proposes the kind and
 the contract says so. If it matters, ask the operator once to confirm by
-starting the reply with `change:` or `amend:`.
+starting the reply with `change:` or `amend:`. The operator's word outlives
+its row (`#decisionrevisionsource`): after the row is pruned, the contract
+still reports the kind as the operator's, so never ask to confirm it again.
 
 A changed or amended entry in `answered_decisions` carries `change_impact`:
 items to reopen or re-evaluate, rows that touch an amended clause, and work

@@ -19,6 +19,11 @@
 //! already surfaced revisions) from the hot tables. A load also searches the
 //! archive for the keys the document names, so a dormant decision comes back
 //! the moment a new question names one of its keys.
+//!
+//! A revision row also keeps who decided its relation (`relation_source`,
+//! `#decisionrevisionsource`): the operator's `change:` / `amend:` outlives
+//! the row that said it, so the cycle contract still reports a pruned
+//! operator word as the operator's call rather than the binary's proposal.
 
 use anyhow::Result;
 use rusqlite::{Connection, params};
@@ -38,6 +43,8 @@ pub struct AnswerRevisionRow {
     pub answer: String,
     pub location: String,
     pub relation: String,
+    /// `derived`, `operator` or `proposed` (`#decisionrevisionsource`).
+    pub relation_source: String,
     pub first_seen_at: u64,
     pub change_flagged: bool,
 }
@@ -150,6 +157,55 @@ pub(crate) fn ensure_schema(conn: &Connection) -> Result<()> {
     if !columns.iter().any(|column| column == "clause") {
         conn.execute_batch("ALTER TABLE answer_ledger_edges ADD COLUMN clause TEXT")?;
     }
+    ensure_revision_relation_source(conn, "answer_ledger_revisions")?;
+    Ok(())
+}
+
+/// Whether `table` already has `column`.
+fn has_column(conn: &Connection, table: &str, column: &str) -> Result<bool> {
+    let columns: Vec<String> = conn
+        .prepare(&format!("PRAGMA table_info({table})"))?
+        .query_map([], |row| row.get::<_, String>(1))?
+        .collect::<rusqlite::Result<_>>()?;
+    Ok(columns.iter().any(|name| name == column))
+}
+
+/// `#decisionrevisionsource`: give a revision table its `relation_source`
+/// column. Older databases gain it in place, and the rows they already hold
+/// adopt the operator's word from the decision-graph cache, which until now
+/// was the only place it survived: a revision node (`<decision>@<hash>`, its
+/// label the verbatim answer) whose revision-relation edge the operator
+/// asserted. Runs once, when the column is added; a concurrent process that
+/// added it first is not an error.
+fn ensure_revision_relation_source(conn: &Connection, table: &str) -> Result<()> {
+    if has_column(conn, table, "relation_source")? {
+        return Ok(());
+    }
+    if let Err(err) = conn.execute_batch(&format!(
+        "ALTER TABLE {table} ADD COLUMN relation_source TEXT NOT NULL DEFAULT 'derived'"
+    )) {
+        if has_column(conn, table, "relation_source")? {
+            return Ok(());
+        }
+        return Err(err.into());
+    }
+    let operator_edge = format!(
+        "FROM answer_ledger_nodes AS node
+         JOIN answer_ledger_edges AS edge
+           ON edge.document_id = node.document_id AND edge.from_id = node.node_id
+         WHERE node.document_id = {table}.document_id
+           AND node.kind = 'revision'
+           AND node.label = {table}.answer
+           AND substr(node.node_id, 1, length({table}.decision_id) + 1) = {table}.decision_id || '@'
+           AND edge.source = 'operator'
+           AND edge.kind IN {REVISION_RELATION_KINDS}"
+    );
+    conn.execute_batch(&format!(
+        "UPDATE {table} SET
+            relation = (SELECT edge.kind {operator_edge} ORDER BY edge.recorded_at DESC LIMIT 1),
+            relation_source = 'operator'
+         WHERE relation_source <> 'operator' AND EXISTS (SELECT 1 {operator_edge})"
+    ))?;
     Ok(())
 }
 
@@ -183,7 +239,8 @@ pub fn load(
     }
     let mut revisions = Vec::new();
     let mut statement = conn.prepare(
-        "SELECT decision_id, answer, location, relation, first_seen_at, change_flagged
+        "SELECT decision_id, answer, location, relation, first_seen_at, change_flagged,
+                relation_source
          FROM answer_ledger_revisions WHERE document_id = ?1 ORDER BY first_seen_at, rowid",
     )?;
     let rows = statement.query_map(params![document_id], |row| {
@@ -192,6 +249,7 @@ pub fn load(
             answer: row.get(1)?,
             location: row.get(2)?,
             relation: row.get(3)?,
+            relation_source: row.get(6)?,
             first_seen_at: sql_u64(row.get(4)?),
             change_flagged: row.get::<_, i64>(5)? != 0,
         })
@@ -300,6 +358,8 @@ pub fn load_with_archive(
                 answer: row.get(1)?,
                 location: row.get(2)?,
                 relation: row.get(3)?,
+                // The archive does not record who decided the relation.
+                relation_source: "derived".into(),
                 first_seen_at: sql_u64(row.get(4)?),
                 change_flagged: row.get::<_, i64>(5)? != 0,
             })
@@ -337,7 +397,9 @@ pub fn counts(conn: &Connection, document_id: &str) -> Result<IndexCounts> {
 /// Upsert the rows one ledger build implies into the hot tables. A key keeps
 /// its first-seen time and is repointed when decisions merge; a revision
 /// keeps its first-seen time and only ever gains its change flag. Every row is
-/// also written to the append-only archive; nothing is deleted.
+/// also written to the append-only archive; nothing is deleted. An
+/// operator's relation is only ever replaced by another operator word, never
+/// by a build that proposed or derived one (`#decisionrevisionsource`).
 pub fn store(
     conn: &mut Connection,
     document_id: &str,
@@ -444,10 +506,16 @@ pub fn store_partitioned(
     for revision in hot_revisions {
         tx.execute(
             "INSERT INTO answer_ledger_revisions
-                (document_id, decision_id, answer, location, relation, first_seen_at, change_flagged)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                (document_id, decision_id, answer, location, relation, first_seen_at, change_flagged,
+                 relation_source)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
              ON CONFLICT(document_id, decision_id, answer) DO UPDATE SET
-                relation = excluded.relation,
+                relation = CASE
+                    WHEN relation_source = 'operator' AND excluded.relation_source <> 'operator'
+                    THEN relation ELSE excluded.relation END,
+                relation_source = CASE
+                    WHEN relation_source = 'operator' THEN relation_source
+                    ELSE excluded.relation_source END,
                 change_flagged = MAX(change_flagged, excluded.change_flagged)",
             params![
                 document_id,
@@ -457,6 +525,7 @@ pub fn store_partitioned(
                 revision.relation,
                 sql_i64(revision.first_seen_at),
                 i64::from(revision.change_flagged),
+                revision.relation_source,
             ],
         )?;
         archive_revision(&tx, document_id, revision, now)?;
@@ -530,7 +599,8 @@ pub fn history_seeded(conn: &Connection, document_id: &str) -> Result<bool> {
 /// Store the rows a git-history rebuild produced and record that the rebuild
 /// ran, in one transaction (`#decisionidstamp`). History only ever moves a
 /// first-seen time earlier; it never repoints a key the index already holds,
-/// and never clears a change flag.
+/// and never clears a change flag. An operator word history recovered fills a
+/// revision whose relation was not the operator's (`#decisionrevisionsource`).
 #[allow(clippy::too_many_arguments)]
 pub fn store_history_seed(
     conn: &mut Connection,
@@ -561,11 +631,18 @@ pub fn store_history_seed(
     for revision in revisions {
         tx.execute(
             "INSERT INTO answer_ledger_revisions
-                (document_id, decision_id, answer, location, relation, first_seen_at, change_flagged)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                (document_id, decision_id, answer, location, relation, first_seen_at, change_flagged,
+                 relation_source)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
              ON CONFLICT(document_id, decision_id, answer) DO UPDATE SET
                 first_seen_at = MIN(first_seen_at, excluded.first_seen_at),
-                change_flagged = MAX(change_flagged, excluded.change_flagged)",
+                change_flagged = MAX(change_flagged, excluded.change_flagged),
+                relation = CASE
+                    WHEN relation_source <> 'operator' AND excluded.relation_source = 'operator'
+                    THEN excluded.relation ELSE relation END,
+                relation_source = CASE
+                    WHEN excluded.relation_source = 'operator' THEN 'operator'
+                    ELSE relation_source END",
             params![
                 document_id,
                 revision.decision_id,
@@ -574,6 +651,7 @@ pub fn store_history_seed(
                 revision.relation,
                 sql_i64(revision.first_seen_at),
                 i64::from(revision.change_flagged),
+                revision.relation_source,
             ],
         )?;
     }
@@ -867,6 +945,7 @@ mod tests {
             answer: "JWS makes the cap moot.".into(),
             location: "under [#y2fn]".into(),
             relation: "initial".into(),
+            relation_source: "derived".into(),
             first_seen_at: 10,
             change_flagged: false,
         };
@@ -924,6 +1003,7 @@ mod tests {
             answer: "Use port 3000.".into(),
             location: "queue row".into(),
             relation: "initial".into(),
+            relation_source: "derived".into(),
             first_seen_at: 500,
             change_flagged: false,
         };
@@ -975,6 +1055,173 @@ mod tests {
         assert_eq!(revisions.len(), 2);
         assert_eq!(revisions[0].answer, "Use port 4000.");
         assert_eq!(revisions[1].first_seen_at, 100);
+    }
+
+    fn revision_row(answer: &str, relation: &str, source: &str) -> AnswerRevisionRow {
+        AnswerRevisionRow {
+            decision_id: "dec-a".into(),
+            answer: answer.into(),
+            location: "under [#tdpublic]".into(),
+            relation: relation.into(),
+            relation_source: source.into(),
+            first_seen_at: 10,
+            change_flagged: false,
+        }
+    }
+
+    fn relation_of(conn: &Connection, answer: &str) -> (String, String) {
+        let (_, revisions) = load(conn, "doc").unwrap();
+        let row = revisions
+            .into_iter()
+            .find(|row| row.answer == answer)
+            .unwrap_or_else(|| panic!("no revision {answer}"));
+        (row.relation, row.relation_source)
+    }
+
+    /// `#decisionrevisionsource`: once the operator said `change:` /
+    /// `amend:`, a later build that only proposes (or derives) a kind never
+    /// overwrites it; another operator word does, and a history rebuild that
+    /// recovers the operator's word fills a revision that lacked it.
+    #[test]
+    fn an_operator_relation_outlives_a_rebuilt_proposal() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        let amend = revision_row("but keep the App private", "amends", "operator");
+        store(&mut conn, "doc", &[], std::slice::from_ref(&amend), &[], 10).unwrap();
+        assert_eq!(
+            relation_of(&conn, "but keep the App private"),
+            ("amends".into(), "operator".into())
+        );
+        // The row was pruned; the rebuild proposed a kind of its own.
+        for (relation, source) in [("supersedes", "proposed"), ("initial", "derived")] {
+            let rebuilt = revision_row("but keep the App private", relation, source);
+            store(&mut conn, "doc", &[], &[rebuilt], &[], 20).unwrap();
+            assert_eq!(
+                relation_of(&conn, "but keep the App private"),
+                ("amends".into(), "operator".into()),
+                "{relation}/{source}"
+            );
+        }
+        // The operator corrects their own word.
+        let corrected = revision_row("but keep the App private", "supersedes", "operator");
+        store(&mut conn, "doc", &[], &[corrected], &[], 30).unwrap();
+        assert_eq!(
+            relation_of(&conn, "but keep the App private"),
+            ("supersedes".into(), "operator".into())
+        );
+        // A proposal stays replaceable by another proposal.
+        let proposed = revision_row("Use port 8080.", "restates", "proposed");
+        store(&mut conn, "doc", &[], &[proposed], &[], 30).unwrap();
+        let reproposed = revision_row("Use port 8080.", "supersedes", "proposed");
+        store(&mut conn, "doc", &[], &[reproposed], &[], 40).unwrap();
+        assert_eq!(
+            relation_of(&conn, "Use port 8080."),
+            ("supersedes".into(), "proposed".into())
+        );
+        // History recovers the operator's `amend:` for it; a proposal from
+        // history changes nothing.
+        let history_operator = revision_row("Use port 8080.", "amends", "operator");
+        store_history_seed(&mut conn, "doc", &[], &[history_operator], &[], 1, 0, 50).unwrap();
+        assert_eq!(
+            relation_of(&conn, "Use port 8080."),
+            ("amends".into(), "operator".into())
+        );
+        let history_proposed = revision_row("but keep the App private", "restates", "proposed");
+        store_history_seed(&mut conn, "doc", &[], &[history_proposed], &[], 1, 0, 60).unwrap();
+        assert_eq!(
+            relation_of(&conn, "but keep the App private"),
+            ("supersedes".into(), "operator".into())
+        );
+    }
+
+    /// `#decisionrevisionsource`: a database written before the column
+    /// existed gains it in place, and its revision rows adopt the operator's
+    /// word from the decision-graph cache, the only place it survived. Only
+    /// a revision whose own node and edge say `operator` is touched.
+    #[test]
+    fn a_legacy_index_adopts_the_operator_word_from_the_graph_cache() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            r#"
+            CREATE TABLE answer_ledger_revisions (
+                document_id TEXT NOT NULL,
+                decision_id TEXT NOT NULL,
+                answer TEXT NOT NULL,
+                location TEXT NOT NULL,
+                relation TEXT NOT NULL,
+                first_seen_at INTEGER NOT NULL,
+                change_flagged INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (document_id, decision_id, answer)
+            );
+            CREATE TABLE answer_ledger_edges (
+                document_id TEXT NOT NULL,
+                from_id TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                to_id TEXT NOT NULL,
+                recorded_at INTEGER NOT NULL,
+                source TEXT NOT NULL DEFAULT 'derived',
+                clause TEXT,
+                PRIMARY KEY (document_id, from_id, kind, to_id)
+            );
+            CREATE TABLE answer_ledger_nodes (
+                document_id TEXT NOT NULL,
+                node_id TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                label TEXT NOT NULL,
+                open INTEGER,
+                location TEXT,
+                first_seen_at INTEGER,
+                recorded_at INTEGER NOT NULL,
+                PRIMARY KEY (document_id, node_id)
+            );
+            INSERT INTO answer_ledger_revisions VALUES
+                ('doc', 'dec-a', 'Public and open source.', 'under [#tdpublic]', 'initial', 10, 0),
+                ('doc', 'dec-a', 'but keep the App private', 'under [#tdpublic]', 'supersedes', 20, 1),
+                ('doc', 'dec-b', 'Use the standard http ports.', 'under [#tdport]', 'supersedes', 20, 1),
+                ('doc', 'dec-c', 'but keep the App private', 'under [#tdother]', 'restates', 20, 0);
+            INSERT INTO answer_ledger_nodes VALUES
+                ('doc', 'dec-a@0000000001', 'revision', 'Public and open source.', NULL, NULL, 10, 10),
+                ('doc', 'dec-a@0000000002', 'revision', 'but keep the App private', NULL, NULL, 20, 20),
+                ('doc', 'dec-b@0000000003', 'revision', 'Use the standard http ports.', NULL, NULL, 20, 20),
+                ('doc', 'dec-c@0000000004', 'revision', 'but keep the App private', NULL, NULL, 20, 20),
+                ('other', 'dec-b@0000000003', 'revision', 'Use the standard http ports.', NULL, NULL, 20, 20);
+            INSERT INTO answer_ledger_edges VALUES
+                ('doc', 'dec-a@0000000002', 'amends', 'dec-a@0000000001', 20, 'operator', 'but keep the App private'),
+                ('doc', 'dec-a@0000000002', 'answers', 'dec-a', 20, 'derived', NULL),
+                ('doc', 'dec-b@0000000003', 'supersedes', 'dec-b@0000000009', 20, 'proposed', NULL),
+                ('doc', 'dec-c@0000000004', 'restates', 'dec-c@0000000008', 20, 'proposed', NULL),
+                ('other', 'dec-b@0000000003', 'amends', 'dec-b@0000000009', 20, 'operator', NULL);
+            "#,
+        )
+        .unwrap();
+        let (_, revisions) = load(&conn, "doc").unwrap();
+        let by_answer: Vec<(&str, &str, &str, &str)> = revisions
+            .iter()
+            .map(|row| {
+                (
+                    row.decision_id.as_str(),
+                    row.answer.as_str(),
+                    row.relation.as_str(),
+                    row.relation_source.as_str(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            by_answer,
+            vec![
+                ("dec-a", "Public and open source.", "initial", "derived"),
+                ("dec-a", "but keep the App private", "amends", "operator"),
+                (
+                    "dec-b",
+                    "Use the standard http ports.",
+                    "supersedes",
+                    "derived"
+                ),
+                ("dec-c", "but keep the App private", "restates", "derived"),
+            ]
+        );
+        // The migration ran once; reopening the schema is a no-op.
+        ensure_schema(&conn).unwrap();
+        assert!(has_column(&conn, "answer_ledger_revisions", "relation_source").unwrap());
     }
 
     #[test]
@@ -1075,6 +1322,7 @@ mod tests {
             answer: answer.into(),
             location: "under [#x]".into(),
             relation: "initial".into(),
+            relation_source: "derived".into(),
             first_seen_at: at,
             change_flagged: false,
         }

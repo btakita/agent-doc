@@ -90,7 +90,17 @@ one whose clause is the reply text. The lead-in is stripped before the answer
 is hashed, so adding it to an earlier reply confirms that same revision.
 Without a lead-in the binary classifies the revision (`answer_relation`) as
 `proposed`, and the cycle-contract guidance tells the agent the operator
-confirms with `change:` or `amend:`. `depends on [#id]`, `assumes [#id]`,
+confirms with `change:` or `amend:`. The operator's word outlives its row
+(`#decisionrevisionsource`): each `answer_ledger_revisions` row records its
+`relation_source`, and a load restores an `operator` relation onto a revision
+whose row the document no longer shows (or whose row lost its lead-in), so
+the cycle contract keeps `change_source: operator` instead of falling back to
+a proposal. A store never replaces an `operator` relation with a `proposed` or
+`derived` one; only another operator word replaces it, and a history rebuild
+that recovers the operator's word fills a revision that lacked it. A database
+that predates the column gains it in place, and its rows adopt the operator's
+word from the graph cache (a revision node whose label is the answer and whose
+revision-relation edge is `operator`). `depends on [#id]`, `assumes [#id]`,
 `builds on [#id]`, `relies on [#id]` record `depends_on`; `conflicts with
 [#id]`, `contradicts [#id]` record `conflicts_with`. Both ends are lifted onto
 their decisions. A row that holds nothing but such phrases is a link, not an

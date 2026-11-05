@@ -134,6 +134,7 @@ fn prior_from_rows(
                 answer: row.answer,
                 location: row.location,
                 relation: row.relation,
+                relation_source: EdgeSource::parse(&row.relation_source).unwrap_or_default(),
                 first_seen_at: row.first_seen_at,
                 change_flagged: row.change_flagged,
             })
@@ -189,6 +190,7 @@ fn revision_rows(
                 answer: revision.answer,
                 location: revision.location,
                 relation: revision.relation,
+                relation_source: revision.relation_source.as_str().to_string(),
                 first_seen_at: revision.first_seen_at,
                 change_flagged: revision.change_flagged,
             },

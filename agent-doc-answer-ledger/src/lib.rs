@@ -97,6 +97,23 @@ impl RevisionRelation {
             Self::Supersedes => "supersedes",
         }
     }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        [
+            Self::Initial,
+            Self::Restates,
+            Self::Amends,
+            Self::Supersedes,
+        ]
+        .into_iter()
+        .find(|relation| relation.as_str() == value)
+    }
+
+    /// The relation a remembered operator `change:` / `amend:` restores
+    /// (`#decisionrevisionsource`): only a relation to a predecessor counts.
+    fn operator_word(value: &str) -> Option<Self> {
+        Self::parse(value).filter(|relation| *relation != Self::Initial)
+    }
 }
 
 /// A typed decision-graph edge kind (`#decisiongraph`). Every edge reads
@@ -286,6 +303,11 @@ pub struct PriorRevision {
     pub answer: String,
     pub location: String,
     pub relation: String,
+    /// Who decided `relation` (`#decisionrevisionsource`): `operator` when
+    /// the operator's reply said `change:` / `amend:`. It outlives the
+    /// operator's row, so a pruned `change:` / `amend:` stays the operator's
+    /// call instead of falling back to the binary's proposal.
+    pub relation_source: graph::EdgeSource,
     pub first_seen_at: u64,
     pub change_flagged: bool,
 }
@@ -826,6 +848,13 @@ impl Ledger {
                 }
                 continue;
             }
+            // The row's own `change:` / `amend:` wins; without one, the
+            // operator's remembered word for this answer still holds.
+            let explicit = answer.explicit.or_else(|| {
+                remembered
+                    .filter(|revision| revision.relation_source == graph::EdgeSource::Operator)
+                    .and_then(|revision| RevisionRelation::operator_word(&revision.relation))
+            });
             entry.push((
                 Some(remembered.map_or(now, |revision| revision.first_seen_at)),
                 order,
@@ -834,8 +863,8 @@ impl Ledger {
                     answer: answer.text.clone(),
                     location: answer.location.clone(),
                     first_seen_at: Some(remembered.map_or(now, |revision| revision.first_seen_at)),
-                    relation: answer.explicit.unwrap_or(RevisionRelation::Initial),
-                    relation_source: if answer.explicit.is_some() {
+                    relation: explicit.unwrap_or(RevisionRelation::Initial),
+                    relation_source: if explicit.is_some() {
                         graph::EdgeSource::Operator
                     } else {
                         graph::EdgeSource::Derived
@@ -874,6 +903,11 @@ impl Ledger {
                 continue;
             }
             let decision_id = ledger.decisions[index].id.clone();
+            // The operator's `change:` / `amend:` outlives its pruned row
+            // (`#decisionrevisionsource`).
+            let operator_word = (revision.relation_source == graph::EdgeSource::Operator)
+                .then(|| RevisionRelation::operator_word(&revision.relation))
+                .flatten();
             entry.push((
                 Some(revision.first_seen_at),
                 usize::MAX,
@@ -882,8 +916,12 @@ impl Ledger {
                     answer: revision.answer.clone(),
                     location: format!("{} (no longer in the document)", revision.location),
                     first_seen_at: Some(revision.first_seen_at),
-                    relation: RevisionRelation::Initial,
-                    relation_source: graph::EdgeSource::Derived,
+                    relation: operator_word.unwrap_or(RevisionRelation::Initial),
+                    relation_source: if operator_word.is_some() {
+                        graph::EdgeSource::Operator
+                    } else {
+                        graph::EdgeSource::Derived
+                    },
                     clause: None,
                     consumed: true,
                     in_document: false,
@@ -1519,6 +1557,7 @@ impl Ledger {
                     .trim_end_matches(" (no longer in the document)")
                     .to_string(),
                 relation: revision.relation.as_str().to_string(),
+                relation_source: revision.relation_source,
                 first_seen_at: revision.first_seen_at.unwrap_or(0),
                 change_flagged: revision.change_flagged
                     || (revision.relation == RevisionRelation::Supersedes

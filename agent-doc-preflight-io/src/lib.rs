@@ -269,19 +269,72 @@ pub struct GateVerifyResult {
 /// `#todoids`: one `agent:todo` item whose link to tracked work calls for an
 /// action this cycle. Derived from document state only, so it repeats every
 /// preflight until the state changes (the check is idempotent, not an event).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TodoSignal {
     /// `tracked_work_missing_todo_backlink`, `legacy_source_unqualified`,
     /// `operator_done_review_open`, `operator_done_backlog_open`, `operator_done_icebox_open`,
-    /// `linked_work_resolved`, `cited_work_resolved`, or
-    /// `todo_sync_required`.
+    /// `linked_work_resolved`, `cited_work_resolved`,
+    /// `stale_tracked_item`, or `todo_sync_required`.
     pub kind: String,
-    /// The `--todo-*` selector of the item (its own id, else its text).
+    /// The `--todo-*` selector of the item (its own id, else its text). For
+    /// `stale_tracked_item` it is the stale item's own id in `component`.
     pub todo: String,
     /// The tracked-work ids the signal is about.
     pub ids: Vec<String>,
     /// What the agent does about it.
     pub action: String,
+    /// `#decisionstaleaudit`: the component of a `stale_tracked_item`
+    /// (`todo`, `backlog`, `review`, `icebox`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub component: Option<String>,
+    /// `#decisionstaleaudit`: why it is stale (`answered_but_open`,
+    /// `done_by_evidence`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stale_kind: Option<String>,
+    /// `#decisionstaleaudit`: the cited answer-ledger decision id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub decision: Option<String>,
+}
+
+/// `#decisionstaleaudit`: one typed `stale_tracked_item` signal per stale
+/// item, citing the decision and the suggested action.
+pub fn stale_tracked_signal(
+    stale: &agent_doc_answer_ledger::stale::StaleTrackedItem,
+) -> TodoSignal {
+    let mut ids = vec![stale.item.clone()];
+    ids.extend(stale.evidence.iter().cloned());
+    TodoSignal {
+        kind: "stale_tracked_item".to_string(),
+        todo: stale.item.clone(),
+        ids,
+        action: stale.action.clone(),
+        component: Some(stale.component.as_str().to_string()),
+        stale_kind: Some(stale.kind.as_str().to_string()),
+        decision: Some(stale.decision_id.clone()),
+    }
+}
+
+/// `#decisionstaleaudit`: stale signals for `content`, plus the
+/// `todo_sync_required` enrichment: an open todo's audit obligation names the
+/// decision that already settles it.
+fn append_stale_tracked_signals(file: &Path, content: &str, signals: &mut Vec<TodoSignal>) {
+    let stale = answer_ledger::stale_tracked_items(file, content);
+    for found in &stale {
+        if found.component == agent_doc_answer_ledger::extract::TrackedComponent::Todo
+            && let Some(sync) = signals.iter_mut().find(|signal| {
+                signal.kind == "todo_sync_required" && signal.todo.eq_ignore_ascii_case(&found.item)
+            })
+        {
+            sync.action.push_str(&format!(
+                " Stale by decision `{}` ({}): “{}” ({}).",
+                found.decision_id,
+                found.kind.as_str(),
+                found.answer,
+                found.location
+            ));
+        }
+        signals.push(stale_tracked_signal(found));
+    }
 }
 
 fn shell_quote_todo_selector(selector: &str) -> String {
@@ -343,6 +396,7 @@ pub fn todo_signal_from_finding(finding: &agent_doc_element::todo::TodoLinkFindi
         todo: finding.selector.clone(),
         ids: finding.ids.clone(),
         action,
+        ..TodoSignal::default()
     }
 }
 
@@ -544,6 +598,7 @@ pub fn todo_signals_for_document(file: &Path, content: &str) -> Vec<TodoSignal> 
                         "Audit open agent:todo action `{}` against current cycle evidence. If it is finished or moot, complete it now with --todo-done {selector}; leave it open only while a concrete operator action remains.",
                         item.action
                     ),
+                    ..TodoSignal::default()
                 }
             })
             .collect::<Vec<_>>()
@@ -559,7 +614,9 @@ pub fn todo_signals_for_document(file: &Path, content: &str) -> Vec<TodoSignal> 
             eprintln!(
                 "[preflight] todo: tracked-work evidence unreadable ({err:#}); todo link checks skipped"
             );
-            return sync_signals();
+            let mut signals = sync_signals();
+            append_stale_tracked_signals(file, content, &mut signals);
+            return signals;
         }
     };
     match agent_doc_element::todo::todo_link_findings(content, &links) {
@@ -582,13 +639,16 @@ pub fn todo_signals_for_document(file: &Path, content: &str) -> Vec<TodoSignal> 
                     content, &presets,
                 );
             append_unlinked_queue_signals(content, &links, &preset_only, &mut signals);
+            append_stale_tracked_signals(file, content, &mut signals);
             signals
         }
         Err(err) => {
             eprintln!(
                 "[preflight] todo: agent:todo unreadable ({err:#}); todo link checks skipped"
             );
-            sync_signals()
+            let mut signals = sync_signals();
+            append_stale_tracked_signals(file, content, &mut signals);
+            signals
         }
     }
 }
@@ -638,6 +698,7 @@ fn append_unlinked_queue_signals(
                         action: format!(
                             "Queue head #{id} names neither tracked work with an inherited Todo backlink nor an existing Todo. Add the backing backlog/icebox item and Todo backlink, or link the head to an existing Todo."
                         ),
+                        ..TodoSignal::default()
                     });
                 }
                 agent_doc_element_queue::QueueItemIdentity::FreeText(text) => {
@@ -648,6 +709,7 @@ fn append_unlinked_queue_signals(
                         action: format!(
                             "Free-text queue head {text:?} has no stable Todo backlink. Let preflight promote it to a backlog surrogate id, then add/reuse a Todo and record `(todos: [#todo-id])`; if promotion is held, finish the edit or unpause and rerun preflight."
                         ),
+                        ..TodoSignal::default()
                     });
                 }
             }
@@ -10592,6 +10654,70 @@ mod tests {
             signals.iter().all(|signal| signal.todo != "verified"),
             "checked todos need no sync obligation: {signals:?}"
         );
+    }
+
+    /// `#decisionstaleaudit`: a todo whose busy waiting tree keeps it open and
+    /// a backlog question answered by a consumed queue row each emit a typed
+    /// `stale_tracked_item` signal citing the decision, and the todo's
+    /// `todo_sync_required` obligation names the settling decision.
+    #[test]
+    fn stale_tracked_items_emit_typed_signals_and_enrich_the_todo_audit() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "<!-- agent:run id=\"main\" -->\n",
+            "- ### 📥 Waiting on you — answer by adding a child line under an item [#q-4775b8697412]\n",
+            "  - 🙋 ⟦you: 1 · agent: 0 · done: 0⟧ [#tdalpha] Record the public-Alpha decision and the release owner. <!-- agent-doc:waiting-item -->\n",
+            "    - **Next:** you — reply under this item ▫️\n",
+            "- ### ~~[#tdalpha]: build the preview release~~\n",
+            "- ### ~~[#nextsteps]: Run the go-live checklist first.~~\n",
+            "<!-- /agent:run -->\n\n",
+            "<!-- agent:todo -->\n",
+            "- [ ] [#tdalpha] Record the public-Alpha decision and the release owner.\n",
+            "<!-- /agent:todo -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#nextsteps] What are next steps to make the docs site public?\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+
+        let signals = todo_signals_for_document(&doc, content);
+        let stale: Vec<&TodoSignal> = signals
+            .iter()
+            .filter(|signal| signal.kind == "stale_tracked_item")
+            .collect();
+        assert_eq!(stale.len(), 2, "{signals:?}");
+        let todo = stale
+            .iter()
+            .find(|signal| signal.todo == "tdalpha")
+            .unwrap();
+        assert_eq!(todo.component.as_deref(), Some("todo"));
+        assert_eq!(todo.stale_kind.as_deref(), Some("answered_but_open"));
+        let decision = todo.decision.clone().expect("cites a decision");
+        assert!(todo.action.contains(&decision), "{todo:?}");
+        assert!(todo.action.contains("--todo-done tdalpha"), "{todo:?}");
+        let backlog = stale
+            .iter()
+            .find(|signal| signal.todo == "nextsteps")
+            .unwrap();
+        assert_eq!(backlog.component.as_deref(), Some("backlog"));
+        assert!(backlog.action.contains("--done nextsteps"), "{backlog:?}");
+
+        let sync = signals
+            .iter()
+            .find(|signal| signal.kind == "todo_sync_required" && signal.todo == "tdalpha")
+            .unwrap();
+        assert!(
+            sync.action
+                .contains(&format!("Stale by decision `{decision}`")),
+            "{sync:?}"
+        );
+        let json = serde_json::to_value(todo).unwrap();
+        assert_eq!(json["kind"], "stale_tracked_item");
+        assert_eq!(json["decision"], decision);
+        // Plain signals keep their wire shape.
+        let plain = serde_json::to_value(sync).unwrap();
+        assert!(plain.get("component").is_none(), "{plain}");
     }
 
     /// GH #381 repro: `.agent-doc/project.md` declares `'#review'`; the session

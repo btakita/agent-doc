@@ -51,6 +51,7 @@
 pub mod extract;
 pub mod graph;
 pub mod history;
+pub mod stale;
 pub mod text;
 
 use std::collections::{BTreeMap, BTreeSet};

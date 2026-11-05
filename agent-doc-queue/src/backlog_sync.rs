@@ -44,6 +44,8 @@ pub struct BacklogQueueRoutingProjection {
     pub content: Option<String>,
     pub newly_materialized: Vec<String>,
     pub placement_debt: Vec<BacklogQueuePlacementDebt>,
+    /// Queue ids whose bodies `content` rewrote, in document order.
+    pub target_queue_ids: Vec<String>,
 }
 
 /// Operator-facing report facts for a completed backlog-to-queue sync.
@@ -267,6 +269,38 @@ pub fn project_explicit_backlog_queue_routes(
     components: &[element::Component],
     content: &str,
 ) -> anyhow::Result<BacklogQueueRoutingProjection> {
+    project_explicit_backlog_queue_routes_scoped(
+        components,
+        content,
+        None,
+        BacklogQueueSyncMode::Append,
+    )
+}
+
+/// `#backlogroutingskipped` / `#backlogqueuepopulation`: explicit
+/// `queue="<queue-id>"` routes for ONLY the backlog ids a closeout made
+/// actionable this cycle.
+///
+/// Preflight routes every open id because it runs before the response. The
+/// closeout path must stay mutation-scoped instead: sweeping every open id there
+/// would resurrect queue heads the operator deleted mid-turn. `mode` carries the
+/// caller's `#queueatcreate` placement.
+pub fn project_explicit_backlog_queue_routes_for_ids(
+    components: &[element::Component],
+    content: &str,
+    ids: &[String],
+    mode: BacklogQueueSyncMode,
+) -> anyhow::Result<BacklogQueueRoutingProjection> {
+    let only: HashSet<String> = ids.iter().map(|id| normalize_id(id)).collect();
+    project_explicit_backlog_queue_routes_scoped(components, content, Some(&only), mode)
+}
+
+fn project_explicit_backlog_queue_routes_scoped(
+    components: &[element::Component],
+    content: &str,
+    only_ids: Option<&HashSet<String>>,
+    mode: BacklogQueueSyncMode,
+) -> anyhow::Result<BacklogQueueRoutingProjection> {
     let queues = crate::queue_set::QueueSet::parse(content, components)?;
     let placement_debt = collect_backlog_queue_placement_debt(components, content)?;
     let mut ids_by_target: HashMap<String, Vec<String>> = HashMap::new();
@@ -286,6 +320,9 @@ pub fn project_explicit_backlog_queue_routes(
         }
         let target_ids = ids_by_target.entry(target_id.to_string()).or_default();
         for (id, _) in active_backlog_route_items(component, content) {
+            if only_ids.is_some_and(|only| !only.contains(&id)) {
+                continue;
+            }
             if !target_ids.contains(&id) {
                 target_ids.push(id);
             }
@@ -294,16 +331,20 @@ pub fn project_explicit_backlog_queue_routes(
 
     let mut replacements = Vec::new();
     let mut newly_materialized = Vec::new();
+    let mut target_queue_ids = Vec::new();
     for target in queues.blocks() {
         let Some(ids) = ids_by_target.remove(&target.id) else {
             continue;
         };
+        if ids.is_empty() {
+            continue;
+        }
         let sibling_ids =
             sibling_run_queue_reference_ids(components, content, target.component.open_start)?;
         let Some(synced) = document_queue::sync_backlog_into_queue_with_external_ids(
             &target.entries,
             &ids,
-            BacklogQueueSyncMode::Append,
+            mode,
             &sibling_ids,
         ) else {
             continue;
@@ -320,6 +361,7 @@ pub fn project_explicit_backlog_queue_routes(
                 .flat_map(document_queue::queue_entry_reference_ids)
                 .filter(|id| !before.contains(id) && seen.insert(id.clone())),
         );
+        target_queue_ids.push(target.id.clone());
         replacements.push((
             target.component.open_end,
             target.component.close_start,
@@ -332,6 +374,7 @@ pub fn project_explicit_backlog_queue_routes(
             content: None,
             newly_materialized,
             placement_debt,
+            target_queue_ids,
         });
     }
     replacements.sort_by_key(|(start, _, _)| std::cmp::Reverse(*start));
@@ -343,7 +386,87 @@ pub fn project_explicit_backlog_queue_routes(
         content: Some(projected),
         newly_materialized,
         placement_debt,
+        target_queue_ids,
     })
+}
+
+/// Why preflight queue maintenance returned without maintaining the queue
+/// (`#backlogroutingskipped`).
+///
+/// These used to be silent `QueueState::default()` returns, indistinguishable
+/// from a queue that was maintained and found idle. The reason token lives on
+/// the enum so the FlowCore hot path does not accumulate `reason=` literals.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QueueMaintenanceSkip {
+    DocumentUnreadable,
+    ComponentParseFailed,
+    QueueTopologyInvalid,
+    NoQueueComponent,
+    QueueBodyParseFailed,
+}
+
+impl QueueMaintenanceSkip {
+    pub fn reason_token(self) -> &'static str {
+        match self {
+            Self::DocumentUnreadable => "document_unreadable",
+            Self::ComponentParseFailed => "component_parse_failed",
+            Self::QueueTopologyInvalid => "queue_topology_invalid",
+            Self::NoQueueComponent => "no_queue_component",
+            Self::QueueBodyParseFailed => "queue_body_parse_failed",
+        }
+    }
+
+    /// The complete ops-log line; `detail` is folded onto one line.
+    pub fn log_line(self, file: &str, detail: Option<&str>) -> String {
+        let detail = detail
+            .map(|detail| format!(" error={}", detail.replace('\n', " ")))
+            .unwrap_or_default();
+        format!(
+            "queue_maintenance_skipped file={file} reason={}{detail} (#backlogroutingskipped)",
+            self.reason_token()
+        )
+    }
+}
+
+/// Why the closeout same-cycle backlog-to-queue sync enqueued nothing for ids
+/// this cycle made actionable (`#backlogroutingskipped`).
+///
+/// Every variant was a silent `Ok(vec![])`. `NoSyncModeQueueAttr` is the one
+/// that stranded explicit `queue="<queue-id>"` backlogs: the legacy go-mirror
+/// recognizes only sync-mode values, and nothing routed the named queue.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SameCycleBacklogSyncSkip {
+    AuthorityUnreadable,
+    ComponentParseFailed,
+    NoMirrorQueue,
+    QueueBodyParseFailed,
+    NotGoMode,
+    NoSyncModeQueueAttr,
+    NoQueueableIds,
+}
+
+impl SameCycleBacklogSyncSkip {
+    pub fn reason_token(self) -> &'static str {
+        match self {
+            Self::AuthorityUnreadable => "authority_unreadable",
+            Self::ComponentParseFailed => "component_parse_failed",
+            Self::NoMirrorQueue => "no_mirror_queue",
+            Self::QueueBodyParseFailed => "queue_body_parse_failed",
+            Self::NotGoMode => "not_go_mode",
+            Self::NoSyncModeQueueAttr => "no_sync_mode_queue_attr",
+            Self::NoQueueableIds => "no_queueable_ids",
+        }
+    }
+
+    /// The complete ops-log line. `explicit_routed` counts the ids the explicit
+    /// named-queue route already placed this pass, so a legacy skip after a
+    /// successful explicit route reads as expected, not as a dropped add.
+    pub fn log_line(self, file: &str, actionable: usize, explicit_routed: usize) -> String {
+        format!(
+            "closeout_actionable_backlog_sync_skipped file={file} reason={} actionable={actionable} explicit_routed={explicit_routed} (#backlogroutingskipped)",
+            self.reason_token()
+        )
+    }
 }
 
 /// Collect queue sync source ids from tracked-work components.
@@ -1524,6 +1647,49 @@ mod tests {
             "- ### do [#compile]\n"
         );
         assert!(collect_backlog_queue_sync(&components, content).is_none());
+    }
+
+    #[test]
+    fn explicit_backlog_routes_for_ids_touch_only_the_named_ids() {
+        // `#backlogroutingskipped`: the closeout route is mutation-scoped
+        // (`#backlogqueuepopulation`) and honors the caller's placement.
+        let content = concat!(
+            "<!-- agent:run id=\"main\" go -->\n- do [#older]\n<!-- /agent:run -->\n",
+            "<!-- agent:backlog priority queue=\"main\" -->\n",
+            "- [ ] [#older] queued\n",
+            "- [ ] [#fresh] filed this cycle\n",
+            "- [ ] [#untouched] open, not filed this cycle\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        let components = element::parse(content).unwrap();
+        let projection = project_explicit_backlog_queue_routes_for_ids(
+            &components,
+            content,
+            &["Fresh".to_string()],
+            BacklogQueueSyncMode::Prepend,
+        )
+        .unwrap();
+        assert_eq!(projection.newly_materialized, vec!["fresh".to_string()]);
+        assert_eq!(projection.target_queue_ids, vec!["main".to_string()]);
+        let projected = projection.content.unwrap();
+        let reparsed = element::parse(&projected).unwrap();
+        let queues = crate::queue_set::QueueSet::parse(&projected, &reparsed).unwrap();
+        let main = queues.block("main").unwrap().component.content(&projected);
+        assert!(
+            main.find("[#fresh]").unwrap() < main.find("[#older]").unwrap(),
+            "{main}"
+        );
+        assert!(!main.contains("[#untouched]"), "{main}");
+
+        // No named id is unrouted: nothing to write.
+        let none = project_explicit_backlog_queue_routes_for_ids(
+            &components,
+            content,
+            &["older".to_string()],
+            BacklogQueueSyncMode::Prepend,
+        )
+        .unwrap();
+        assert!(none.content.is_none() && none.target_queue_ids.is_empty());
     }
 
     #[test]

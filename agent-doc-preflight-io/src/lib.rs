@@ -5198,6 +5198,18 @@ mod rearm_evidence_fault {
     }
 }
 
+/// `#backlogroutingskipped`: queue maintenance that returns without running
+/// must say why. A silent empty [`QueueState`] reads exactly like a document
+/// whose queue was maintained and found idle.
+fn queue_maintenance_skipped(
+    file: &Path,
+    skip: agent_doc_queue::backlog_sync::QueueMaintenanceSkip,
+    detail: Option<&str>,
+) -> QueueState {
+    agent_doc_ops_log_io::log_op(file, &skip.log_line(&file.display().to_string(), detail));
+    QueueState::default()
+}
+
 pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> {
     run_queue_maintenance_with_coin_gate_and_snapshot(
         file,
@@ -5271,7 +5283,13 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
             Ok(Some(agent_doc_crdt_relay_io::CurrentText::Detached)) | Ok(None) => {
                 match std::fs::read_to_string(file) {
                     Ok(content) => (content, None),
-                    Err(_) => return Ok(QueueState::default()),
+                    Err(err) => {
+                        return Ok(queue_maintenance_skipped(
+                            file,
+                            agent_doc_queue::backlog_sync::QueueMaintenanceSkip::DocumentUnreadable,
+                            Some(&err.to_string()),
+                        ));
+                    }
                 }
             }
             Ok(Some(
@@ -5330,7 +5348,13 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
     let mut mutated = generated_response_markers_normalized;
     let mut components = match agent_doc_element::element::parse(&current_content) {
         Ok(cs) => cs,
-        Err(_) => return Ok(QueueState::default()),
+        Err(err) => {
+            return Ok(queue_maintenance_skipped(
+                file,
+                agent_doc_queue::backlog_sync::QueueMaintenanceSkip::ComponentParseFailed,
+                Some(&err.to_string()),
+            ));
+        }
     };
     let exchange_prompt =
         agent_doc_turn::exchange_tail::unresolved_exchange_prompt_in_content(&current_content);
@@ -5346,7 +5370,13 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
         content = current_content.clone();
         components = match agent_doc_element::element::parse(&current_content) {
             Ok(cs) => cs,
-            Err(_) => return Ok(QueueState::default()),
+            Err(err) => {
+                return Ok(queue_maintenance_skipped(
+                    file,
+                    agent_doc_queue::backlog_sync::QueueMaintenanceSkip::ComponentParseFailed,
+                    Some(&err.to_string()),
+                ));
+            }
         };
         mutated = true;
         eprintln!("[preflight] queue: created agent:queue for admitted free-text work");
@@ -5369,7 +5399,11 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
         Ok(None) => {}
         Err(err) => {
             eprintln!("[preflight] queue topology warning: {err}");
-            return Ok(QueueState::default());
+            return Ok(queue_maintenance_skipped(
+                file,
+                agent_doc_queue::backlog_sync::QueueMaintenanceSkip::QueueTopologyInvalid,
+                Some(&err.to_string()),
+            ));
         }
     }
     // A valued backlog `queue=<id>` is durable ownership, not a hint to the
@@ -5414,11 +5448,21 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
                 .or_else(|| queues.blocks().first())
             {
                 Some(queue) => queue.id.clone(),
-                None => return Ok(QueueState::default()),
+                None => {
+                    return Ok(queue_maintenance_skipped(
+                        file,
+                        agent_doc_queue::backlog_sync::QueueMaintenanceSkip::NoQueueComponent,
+                        None,
+                    ));
+                }
             },
             Err(err) => {
                 eprintln!("[preflight] queue topology warning: {err}");
-                return Ok(QueueState::default());
+                return Ok(queue_maintenance_skipped(
+                    file,
+                    agent_doc_queue::backlog_sync::QueueMaintenanceSkip::QueueTopologyInvalid,
+                    Some(&err.to_string()),
+                ));
             }
         };
     let mut comp = agent_doc_queue::queue_set::component_for_id(
@@ -5540,7 +5584,11 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
         Ok(e) => e,
         Err(e) => {
             eprintln!("[preflight] queue parse warning: {}", e);
-            return Ok(QueueState::default());
+            return Ok(queue_maintenance_skipped(
+                file,
+                agent_doc_queue::backlog_sync::QueueMaintenanceSkip::QueueBodyParseFailed,
+                Some(&e.to_string()),
+            ));
         }
     };
     // Publish authoritative markdown before any worklist projection. The
@@ -8599,6 +8647,14 @@ fn same_cycle_queue_sync_base(file: &Path) -> Option<String> {
 /// follow-up filed by the turn that just ran is, by construction, the most
 /// task-relevant work in the document, so the head is the right default; agents
 /// that deliberately do not want to preempt the current drain pass `Append`.
+///
+/// `#backlogroutingskipped`: ids whose backlog routes to an explicit
+/// `queue="<queue-id>"` go to that named queue first (any go mode: an explicit
+/// route is ownership, as in preflight). The legacy go-mirror below recognizes
+/// only sync-mode `queue` values, so before this split such a backlog's
+/// same-cycle adds were dropped with no log, and only the next
+/// `/agent-doc <FILE>` preflight routed them. Every return that enqueues
+/// nothing for actionable ids now logs why.
 pub fn sync_same_cycle_actionable_backlog_into_go_queue(
     file: &Path,
     placement: agent_doc_queue::backlog_sync::FollowUpQueuePlacement,
@@ -8607,7 +8663,157 @@ pub fn sync_same_cycle_actionable_backlog_into_go_queue(
     if actionable_this_cycle.is_empty() {
         return Ok(Vec::new());
     }
+    let actionable_count = actionable_this_cycle.len();
+    let actionable_ids: Vec<String> = actionable_this_cycle.iter().cloned().collect();
+    let mut synced =
+        route_same_cycle_actionable_backlog_into_named_queues(file, placement, &actionable_ids)?;
+    let explicit_routed = synced.len();
+    let skip = |reason: agent_doc_queue::backlog_sync::SameCycleBacklogSyncSkip| {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &reason.log_line(
+                &file.display().to_string(),
+                actionable_count,
+                explicit_routed,
+            ),
+        );
+    };
+    synced.extend(sync_same_cycle_actionable_backlog_into_legacy_go_mirror(
+        file,
+        placement,
+        actionable_this_cycle,
+        skip,
+    )?);
+    Ok(synced)
+}
 
+/// Route this cycle's actionable backlog ids into the queue their backlog
+/// component names with `queue="<queue-id>"` (`#backlogroutingskipped`).
+///
+/// Mutation-scoped like the legacy mirror (`#backlogqueuepopulation`): only ids
+/// recorded as made actionable this cycle are routed, never every open id.
+fn route_same_cycle_actionable_backlog_into_named_queues(
+    file: &Path,
+    placement: agent_doc_queue::backlog_sync::FollowUpQueuePlacement,
+    actionable: &[String],
+) -> Result<Vec<String>> {
+    let mode = match placement {
+        agent_doc_queue::backlog_sync::FollowUpQueuePlacement::Prepend => {
+            agent_doc_queue::document_queue::BacklogQueueSyncMode::Prepend
+        }
+        agent_doc_queue::backlog_sync::FollowUpQueuePlacement::Append => {
+            agent_doc_queue::document_queue::BacklogQueueSyncMode::Append
+        }
+    };
+    let project =
+        |content: &str| -> Result<agent_doc_queue::backlog_sync::BacklogQueueRoutingProjection> {
+            let components = agent_doc_element::element::parse(content)?;
+            agent_doc_queue::backlog_sync::project_explicit_backlog_queue_routes_for_ids(
+                &components,
+                content,
+                actionable,
+                mode,
+            )
+        };
+    let Some(content) = same_cycle_queue_sync_base(file) else {
+        return Ok(Vec::new());
+    };
+    let projection = match project(&content) {
+        Ok(projection) => projection,
+        Err(err) => {
+            eprintln!("[write] queue: explicit backlog route skipped — {err:#}");
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "backlog_queue_route_projection_failed file={} error={} (#backlogroutingskipped)",
+                    file.display(),
+                    format!("{err:#}").replace('\n', " ")
+                ),
+            );
+            return Ok(Vec::new());
+        }
+    };
+    let Some(target) = projection.content else {
+        return Ok(Vec::new());
+    };
+    let project_root = file.canonicalize().ok().and_then(|canonical| {
+        agent_doc_project_root_io::project_root_containing(&canonical)
+            .or_else(|| canonical.parent().map(std::path::Path::to_path_buf))
+    });
+    // Same two-path persistence as the legacy mirror below (`#queueatcreate`):
+    // prefer queue maintenance, fall back to the converging tracked-work write
+    // the backlog add itself used rather than discarding the route.
+    let persisted = match persist_queue_maintenance_doc(
+        file,
+        &target,
+        &content,
+        project_root.as_deref(),
+        "actionable_backlog_route",
+    ) {
+        Ok(persisted) => persisted,
+        Err(primary_err) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "queue_actionable_backlog_route_persist_fallback file={} error={} (#backlogroutingskipped)",
+                    file.display(),
+                    format!("{primary_err:#}").replace('\n', " ")
+                ),
+            );
+            agent_doc_element_backlog_io::backlog_cmd::apply_document_rewrite(
+                file,
+                "actionable_backlog_route_fallback",
+                |live| Ok(project(live)?.content),
+            )
+            .with_context(|| {
+                format!(
+                    "same-cycle explicit backlog route failed on both the queue-maintenance path ({primary_err}) \
+                     and the tracked-work fallback"
+                )
+            })?;
+            match current_text_via_preflight_authority_retrying(
+                file,
+                "actionable_backlog_route_fallback_observe",
+            )? {
+                Some(agent_doc_crdt_relay_io::CurrentText::Current { text, .. }) => text,
+                Some(agent_doc_crdt_relay_io::CurrentText::Detached) | None => {
+                    std::fs::read_to_string(file)?
+                }
+                Some(
+                    agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica
+                    | agent_doc_crdt_relay_io::CurrentText::EditorSyncPending,
+                ) => target.clone(),
+            }
+        }
+    };
+    for queue_id in &projection.target_queue_ids {
+        adopt_named_queue_region_into_snapshot(file, &persisted, queue_id);
+    }
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "backlog_queue_routed file={} source=closeout_actionable_backlog queues={} ids={} (#backlogroutingskipped)",
+            file.display(),
+            projection.target_queue_ids.join(","),
+            projection.newly_materialized.join(",")
+        ),
+    );
+    eprintln!(
+        "[write] queue: {} {} same-cycle actionable backlog id(s) into named queue(s) {}",
+        placement.log_verb(),
+        projection.newly_materialized.len(),
+        projection.target_queue_ids.join(", ")
+    );
+    Ok(projection.newly_materialized)
+}
+
+/// The `#backlogqueuepopulation` legacy go-mirror for sync-mode backlogs.
+fn sync_same_cycle_actionable_backlog_into_legacy_go_mirror(
+    file: &Path,
+    placement: agent_doc_queue::backlog_sync::FollowUpQueuePlacement,
+    actionable_this_cycle: std::collections::HashSet<String>,
+    skip: impl Fn(agent_doc_queue::backlog_sync::SameCycleBacklogSyncSkip),
+) -> Result<Vec<String>> {
     // `#respondcloseoutbacklog`: decide "already queued" against the live
     // authority, not the disk projection. A retained closeout's queue head can
     // sit in the editor/controller model while disk still lags; reading disk
@@ -8617,11 +8823,17 @@ pub fn sync_same_cycle_actionable_backlog_into_go_queue(
     // the live head and kept BOTH copies.
     let content = match same_cycle_queue_sync_base(file) {
         Some(c) => c,
-        None => return Ok(Vec::new()),
+        None => {
+            skip(agent_doc_queue::backlog_sync::SameCycleBacklogSyncSkip::AuthorityUnreadable);
+            return Ok(Vec::new());
+        }
     };
     let components = match agent_doc_element::element::parse(&content) {
         Ok(cs) => cs,
-        Err(_) => return Ok(Vec::new()),
+        Err(_) => {
+            skip(agent_doc_queue::backlog_sync::SameCycleBacklogSyncSkip::ComponentParseFailed);
+            return Ok(Vec::new());
+        }
     };
     // GH #378: gate and diff against the component the mirror writes into (the
     // first non-repeating `agent:run`), never the first `queue` component: a
@@ -8629,6 +8841,7 @@ pub fn sync_same_cycle_actionable_backlog_into_go_queue(
     // silently dropped every same-cycle `--backlog-add` mirror.
     let Some(queue_component) = agent_doc_queue::backlog_sync::mirror_queue_component(&components)
     else {
+        skip(agent_doc_queue::backlog_sync::SameCycleBacklogSyncSkip::NoMirrorQueue);
         return Ok(Vec::new());
     };
     let queue_body = &content[queue_component.open_end..queue_component.close_start];
@@ -8638,6 +8851,7 @@ pub fn sync_same_cycle_actionable_backlog_into_go_queue(
             eprintln!(
                 "[write] queue: same-cycle actionable backlog sync skipped — parse warning: {e}"
             );
+            skip(agent_doc_queue::backlog_sync::SameCycleBacklogSyncSkip::QueueBodyParseFailed);
             return Ok(Vec::new());
         }
     };
@@ -8647,6 +8861,7 @@ pub fn sync_same_cycle_actionable_backlog_into_go_queue(
         explicit_queue_go_mode(&queue_component.attrs, frontmatter_queue_control(&fm));
     let queue_active = fm.queue_active.unwrap_or(false) || queue_go_mode;
     if !queue_active || !queue_go_mode {
+        skip(agent_doc_queue::backlog_sync::SameCycleBacklogSyncSkip::NotGoMode);
         return Ok(Vec::new());
     }
 
@@ -8661,12 +8876,14 @@ pub fn sync_same_cycle_actionable_backlog_into_go_queue(
                 .is_some()
     });
     if !backlog_has_queue_attr {
+        skip(agent_doc_queue::backlog_sync::SameCycleBacklogSyncSkip::NoSyncModeQueueAttr);
         return Ok(Vec::new());
     }
 
     let Some(sync_request) =
         agent_doc_queue::backlog_sync::collect_backlog_queue_sync(&components, &content)
     else {
+        skip(agent_doc_queue::backlog_sync::SameCycleBacklogSyncSkip::NoSyncModeQueueAttr);
         return Ok(Vec::new());
     };
     let actionable_norm: std::collections::HashSet<String> = actionable_this_cycle
@@ -8681,6 +8898,7 @@ pub fn sync_same_cycle_actionable_backlog_into_go_queue(
         .filter(|id| actionable_norm.contains(id))
         .collect();
     if backlog_ids.is_empty() {
+        skip(agent_doc_queue::backlog_sync::SameCycleBacklogSyncSkip::NoQueueableIds);
         return Ok(Vec::new());
     }
 
@@ -9412,6 +9630,44 @@ pub(crate) fn adopt_edited_queue_head_into_snapshot(file: &Path, current_content
 /// copied an untouched sibling `agent:loop` and left the baseline without the
 /// mirrored row, so the closeout committed the backlog add and dropped the
 /// queue half from HEAD.
+/// [`adopt_queue_region_into_snapshot`] for one queue named by id
+/// (`#backlogroutingskipped`): an explicit backlog route may target any
+/// `agent:run` / `agent:loop`, not only the legacy mirror component.
+fn adopt_named_queue_region_into_snapshot(file: &Path, current_content: &str, queue_id: &str) {
+    let region = |content: &str| -> Option<(usize, usize)> {
+        let components = agent_doc_element::element::parse(content).ok()?;
+        let queues = agent_doc_queue::queue_set::QueueSet::parse(content, &components).ok()?;
+        let block = queues.block(queue_id)?;
+        Some((block.component.open_start, block.component.close_end))
+    };
+    let snap_now = match agent_doc_snapshot_io::load_document_baseline(file) {
+        Ok(Some(s)) => s,
+        Ok(None) => return,
+        Err(e) => {
+            eprintln!("[write] queue: named-queue snapshot load warning (non-fatal): {e}");
+            return;
+        }
+    };
+    let (Some((cur_start, cur_end)), Some((snap_start, snap_end))) =
+        (region(current_content), region(&snap_now))
+    else {
+        return;
+    };
+    let mut rebuilt = String::with_capacity(snap_now.len() + (cur_end - cur_start));
+    rebuilt.push_str(&snap_now[..snap_start]);
+    rebuilt.push_str(&current_content[cur_start..cur_end]);
+    rebuilt.push_str(&snap_now[snap_end..]);
+    if rebuilt != snap_now
+        && let Err(e) = agent_doc_snapshot_io::checkpoint_document_baseline(
+            file,
+            &rebuilt,
+            agent_doc_ops_log_io::log_op,
+        )
+    {
+        eprintln!("[write] queue: named-queue snapshot sync warning (non-fatal): {e}");
+    }
+}
+
 fn adopt_queue_region_into_snapshot(
     file: &Path,
     current_content: &str,
@@ -15698,6 +15954,182 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
         assert!(
             snap.contains("- do [#fresh]"),
             "snapshot queue region must include the appended closeout head:\n{snap}"
+        );
+    }
+
+    #[test]
+    fn closeout_sync_routes_same_cycle_add_into_its_explicitly_named_queue() {
+        // `#backlogroutingskipped`: observed 2026-11-04 on agent-doc-bugs.md,
+        // whose backlog is `queue="main"`. Chat-prompt turns filed 16 items with
+        // `--backlog-add`, every closeout ran this sync, and the legacy go-mirror
+        // returned silently because `main` is a queue id, not a sync mode. Only
+        // a later `/agent-doc <FILE>` preflight routed them.
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — claude\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "## Triage <!-- agent:run id=\"triage\" -->\n",
+            "- keep triage\n",
+            "<!-- /agent:run -->\n\n",
+            "## Run <!-- agent:run id=\"main\" priority go -->\n",
+            "- do [#older]\n",
+            "<!-- /agent:run -->\n\n",
+            "## Backlog <!-- agent:backlog priority queue=\"main\" -->\n",
+            "- [ ] [#older] already queued\n",
+            "- [ ] [#fresh] filed by this chat-prompt turn\n",
+            "- [ ] [#untouched] open, but not made actionable this cycle\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        agent_doc_cycle_state_io::record_pending_actionable_ids(&doc, &["fresh".to_string()])
+            .unwrap();
+
+        let synced = sync_same_cycle_actionable_backlog_into_go_queue(
+            &doc,
+            agent_doc_queue::backlog_sync::FollowUpQueuePlacement::default(),
+        )
+        .unwrap();
+        let updated = std::fs::read_to_string(&doc).unwrap();
+
+        assert_eq!(synced, vec!["fresh".to_string()]);
+        let queue_body = |text: &str, id: &str| {
+            let components = agent_doc_element::element::parse(text).unwrap();
+            let queues = agent_doc_queue::queue_set::QueueSet::parse(text, &components).unwrap();
+            queues
+                .block(id)
+                .unwrap()
+                .component
+                .content(text)
+                .to_string()
+        };
+        let main = queue_body(&updated, "main");
+        assert!(
+            main.find("do [#fresh]").unwrap() < main.find("do [#older]").unwrap(),
+            "the follow-up lands at the head of its named queue (`#queueatcreate`):\n{updated}"
+        );
+        assert_eq!(
+            queue_body(&updated, "triage"),
+            "- keep triage\n",
+            "{updated}"
+        );
+        assert!(
+            !updated.contains("do [#untouched]"),
+            "closeout routing stays mutation-scoped (`#backlogqueuepopulation`):\n{updated}"
+        );
+        let snap = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
+        assert!(
+            queue_body(&snap, "main").contains("do [#fresh]"),
+            "the snapshot carries the routed head so closeout commits it:\n{snap}"
+        );
+        let log =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
+        assert!(
+            log.contains("backlog_queue_routed")
+                && log.contains("source=closeout_actionable_backlog queues=main ids=fresh"),
+            "{log}"
+        );
+        assert!(
+            log.contains(
+                &agent_doc_queue::backlog_sync::SameCycleBacklogSyncSkip::NoSyncModeQueueAttr
+                    .log_line(&doc.display().to_string(), 1, 1)
+            ),
+            "the legacy mirror's skip is logged, and reads as expected after the route:\n{log}"
+        );
+
+        // Idempotent: the foreground closeout and the captured-finalize resume
+        // each run this sync, and the second must add nothing.
+        let again = sync_same_cycle_actionable_backlog_into_go_queue(
+            &doc,
+            agent_doc_queue::backlog_sync::FollowUpQueuePlacement::default(),
+        )
+        .unwrap();
+        assert!(again.is_empty(), "{again:?}");
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), updated);
+    }
+
+    #[test]
+    fn closeout_sync_logs_why_a_same_cycle_add_was_not_queued() {
+        // `#backlogroutingskipped`: every early return that dropped an
+        // actionable id used to be a silent `Ok(vec![])`.
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue priority go -->\n- do [#head]\n<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#head] running\n",
+            "- [ ] [#fresh] filed, but the backlog never opted into a queue\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        agent_doc_cycle_state_io::record_pending_actionable_ids(&doc, &["fresh".to_string()])
+            .unwrap();
+
+        let synced = sync_same_cycle_actionable_backlog_into_go_queue(
+            &doc,
+            agent_doc_queue::backlog_sync::FollowUpQueuePlacement::default(),
+        )
+        .unwrap();
+
+        assert!(synced.is_empty());
+        let log =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
+        assert!(
+            log.contains(
+                &agent_doc_queue::backlog_sync::SameCycleBacklogSyncSkip::NoSyncModeQueueAttr
+                    .log_line(&doc.display().to_string(), 1, 0)
+            ),
+            "{log}"
+        );
+    }
+
+    #[test]
+    fn queue_maintenance_logs_why_it_skipped_a_document_without_a_queue() {
+        // `#backlogroutingskipped`: an early return used to be an empty
+        // QueueState with no trace, indistinguishable from an idle queue.
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+
+        let state = run_queue_maintenance(&doc, None).unwrap();
+
+        assert!(state.mirrored_queue_ids.is_empty());
+        let log =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
+        assert!(
+            log.contains(
+                &agent_doc_queue::backlog_sync::QueueMaintenanceSkip::NoQueueComponent
+                    .log_line(&doc.display().to_string(), None)
+            ),
+            "{log}"
         );
     }
 

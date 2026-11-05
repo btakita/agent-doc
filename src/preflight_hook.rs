@@ -615,6 +615,18 @@ fn chat_prompt_hook_context(
         }
     };
     let chat = agent_doc_prompt_contract::chat_prompt::chat_prompt_text(&input.prompt)?;
+    // `#backlogroutingskipped`: a chat prompt is a session turn that opens no
+    // preflight, so preflight queue maintenance does not run for it. Say so in
+    // the ops log; the turn's closeout same-cycle backlog sync routes the items
+    // it files instead. Before this line, hours of chat-driven turns left no
+    // trace of why queue maintenance never ran.
+    agent_doc_ops_log_io::log_op(
+        &noted.document,
+        &format!(
+            "queue_maintenance_skipped file={} reason=chat_prompt_turn_without_preflight routing_owner=closeout_same_cycle_backlog_sync (#backlogroutingskipped)",
+            noted.document.display()
+        ),
+    );
     let document = std::fs::read_to_string(&noted.document).unwrap_or_default();
     let presets = agent_doc_prompt_contract::chat_prompt::chat_prompt_presets(&document, &chat);
     Some(agent_doc_prompt_contract::chat_prompt::chat_prompt_context(

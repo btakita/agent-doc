@@ -92,6 +92,7 @@ mod plugin;
 mod plugin_activation;
 mod plugin_live_owner;
 mod preflight_hook;
+mod principles_cmd;
 mod queue_completion_feedback;
 mod queue_dispatch;
 mod queue_recovery;
@@ -3036,6 +3037,16 @@ enum Commands {
         /// Path to the markdown document
         file: PathBuf,
         /// Output as JSON array
+        #[arg(long)]
+        json: bool,
+    },
+    /// List the operator first principles in scope for a document (global
+    /// principles file, ancestor `.agent-doc/project.md`, the document; nearest
+    /// scope wins) and the warnings their authoring produces (`#firstprincipleslist`)
+    Principles {
+        /// Path to the session document
+        file: PathBuf,
+        /// Output as JSON `{file, principles, warnings}`
         #[arg(long)]
         json: bool,
     },
@@ -7135,6 +7146,7 @@ fn try_main() -> anyhow::Result<()> {
             steering_cmd::run(&file, json, peek, follow, token.as_deref())
         }
         Commands::Outline { file, json } => outline_cmd::run_outline(&file, json),
+        Commands::Principles { file, json } => principles_cmd::run(&file, json),
         Commands::Document { pane, json } => {
             document_cmd::run(pane.as_deref(), json)
         }

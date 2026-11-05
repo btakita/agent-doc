@@ -5,7 +5,9 @@
 //! It keeps what Markdown alone cannot: when each answer and question key was
 //! first observed, the stable decision id every key belongs to (one key maps
 //! to exactly one decision, enforced by the primary key), answers whose source
-//! rows were later pruned, and typed decision-graph edges.
+//! rows were later pruned, and the typed decision graph (`#decisiongraph`):
+//! nodes, and edges with their provenance (`derived` / `operator` /
+//! `proposed`) and, for amends, the amended clause.
 
 use anyhow::Result;
 use rusqlite::{Connection, params};
@@ -29,13 +31,31 @@ pub struct AnswerRevisionRow {
     pub change_flagged: bool,
 }
 
-/// One typed decision-graph edge.
+/// One typed decision-graph edge (`#decisiongraph`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AnswerEdgeRow {
     pub from: String,
     pub kind: String,
     pub to: String,
+    /// `derived`, `operator` or `proposed`.
+    pub source: String,
+    /// For `amends`: the amended clause.
+    pub clause: Option<String>,
 }
+
+/// One decision-graph node (`#decisiongraph`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AnswerNodeRow {
+    pub id: String,
+    /// `question`, `decision`, `revision`, `item`, `evidence`, ...
+    pub kind: String,
+    pub label: String,
+    pub open: Option<bool>,
+    pub location: Option<String>,
+    pub first_seen_at: Option<u64>,
+}
+
+const REVISION_RELATION_KINDS: &str = "('restates', 'amends', 'supersedes')";
 
 fn ensure_schema(conn: &Connection) -> Result<()> {
     conn.execute_batch(
@@ -71,8 +91,33 @@ fn ensure_schema(conn: &Connection) -> Result<()> {
             versions_scanned INTEGER NOT NULL,
             answers_recovered INTEGER NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS answer_ledger_nodes (
+            document_id TEXT NOT NULL,
+            node_id TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            label TEXT NOT NULL,
+            open INTEGER,
+            location TEXT,
+            first_seen_at INTEGER,
+            recorded_at INTEGER NOT NULL,
+            PRIMARY KEY (document_id, node_id)
+        );
         "#,
     )?;
+    // `#decisiongraph` added edge provenance to the `#answerbyrequestid`
+    // edge table; older databases gain the columns in place.
+    let columns: Vec<String> = conn
+        .prepare("PRAGMA table_info(answer_ledger_edges)")?
+        .query_map([], |row| row.get::<_, String>(1))?
+        .collect::<rusqlite::Result<_>>()?;
+    if !columns.iter().any(|column| column == "source") {
+        conn.execute_batch(
+            "ALTER TABLE answer_ledger_edges ADD COLUMN source TEXT NOT NULL DEFAULT 'derived'",
+        )?;
+    }
+    if !columns.iter().any(|column| column == "clause") {
+        conn.execute_batch("ALTER TABLE answer_ledger_edges ADD COLUMN clause TEXT")?;
+    }
     Ok(())
 }
 
@@ -172,10 +217,33 @@ pub fn store(
         )?;
     }
     for edge in edges {
+        if REVISION_RELATION_KINDS.contains(&format!("'{}'", edge.kind)) {
+            // One relation per revision pair: the operator's `change:` /
+            // `amend:` replaces an earlier proposal of another kind.
+            tx.execute(
+                &format!(
+                    "DELETE FROM answer_ledger_edges
+                     WHERE document_id = ?1 AND from_id = ?2 AND to_id = ?3
+                       AND kind IN {REVISION_RELATION_KINDS} AND kind <> ?4"
+                ),
+                params![document_id, edge.from, edge.to, edge.kind],
+            )?;
+        }
         tx.execute(
-            "INSERT OR IGNORE INTO answer_ledger_edges (document_id, from_id, kind, to_id, recorded_at)
-             VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![document_id, edge.from, edge.kind, edge.to, sql_i64(now)],
+            "INSERT INTO answer_ledger_edges (document_id, from_id, kind, to_id, recorded_at, source, clause)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+             ON CONFLICT(document_id, from_id, kind, to_id) DO UPDATE SET
+                source = excluded.source,
+                clause = COALESCE(excluded.clause, clause)",
+            params![
+                document_id,
+                edge.from,
+                edge.kind,
+                edge.to,
+                sql_i64(now),
+                edge.source,
+                edge.clause
+            ],
         )?;
     }
     tx.commit()?;
@@ -250,10 +318,20 @@ pub fn store_history_seed(
         )?;
     }
     for edge in edges {
+        // History never overrides what a live build recorded.
         tx.execute(
-            "INSERT OR IGNORE INTO answer_ledger_edges (document_id, from_id, kind, to_id, recorded_at)
-             VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![document_id, edge.from, edge.kind, edge.to, sql_i64(now)],
+            "INSERT OR IGNORE INTO answer_ledger_edges
+                (document_id, from_id, kind, to_id, recorded_at, source, clause)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                document_id,
+                edge.from,
+                edge.kind,
+                edge.to,
+                sql_i64(now),
+                edge.source,
+                edge.clause
+            ],
         )?;
     }
     tx.execute(
@@ -342,6 +420,116 @@ pub fn store_for_project(
     store(&mut conn, document_id, keys, revisions, edges, now)
 }
 
+/// Upsert decision-graph nodes. A node keeps its first `recorded_at`; its
+/// label, open state and location follow the latest build. Nothing is
+/// deleted: the cache remembers nodes the document no longer shows.
+pub fn store_nodes(
+    conn: &mut Connection,
+    document_id: &str,
+    nodes: &[AnswerNodeRow],
+    now: u64,
+) -> Result<()> {
+    ensure_schema(conn)?;
+    let tx = crate::immediate_transaction(conn)?;
+    for node in nodes {
+        tx.execute(
+            "INSERT INTO answer_ledger_nodes
+                (document_id, node_id, kind, label, open, location, first_seen_at, recorded_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+             ON CONFLICT(document_id, node_id) DO UPDATE SET
+                kind = excluded.kind,
+                label = CASE WHEN excluded.label = '' THEN label ELSE excluded.label END,
+                open = COALESCE(excluded.open, open),
+                location = COALESCE(excluded.location, location),
+                first_seen_at = COALESCE(first_seen_at, excluded.first_seen_at)",
+            params![
+                document_id,
+                node.id,
+                node.kind,
+                node.label,
+                node.open.map(i64::from),
+                node.location,
+                node.first_seen_at.map(sql_i64),
+                sql_i64(now),
+            ],
+        )?;
+    }
+    tx.commit()?;
+    Ok(())
+}
+
+/// Load every decision-graph node and edge for one document.
+pub fn load_graph(
+    conn: &Connection,
+    document_id: &str,
+) -> Result<(Vec<AnswerNodeRow>, Vec<AnswerEdgeRow>)> {
+    ensure_schema(conn)?;
+    let mut nodes = Vec::new();
+    let mut statement = conn.prepare(
+        "SELECT node_id, kind, label, open, location, first_seen_at
+         FROM answer_ledger_nodes WHERE document_id = ?1 ORDER BY node_id",
+    )?;
+    let rows = statement.query_map(params![document_id], |row| {
+        Ok(AnswerNodeRow {
+            id: row.get(0)?,
+            kind: row.get(1)?,
+            label: row.get(2)?,
+            open: row.get::<_, Option<i64>>(3)?.map(|value| value != 0),
+            location: row.get(4)?,
+            first_seen_at: row.get::<_, Option<i64>>(5)?.map(sql_u64),
+        })
+    })?;
+    for row in rows {
+        nodes.push(row?);
+    }
+    let mut edges = Vec::new();
+    let mut statement = conn.prepare(
+        "SELECT from_id, kind, to_id, source, clause
+         FROM answer_ledger_edges WHERE document_id = ?1 ORDER BY from_id, kind, to_id",
+    )?;
+    let rows = statement.query_map(params![document_id], |row| {
+        Ok(AnswerEdgeRow {
+            from: row.get(0)?,
+            kind: row.get(1)?,
+            to: row.get(2)?,
+            source: row.get(3)?,
+            clause: row.get(4)?,
+        })
+    })?;
+    for row in rows {
+        edges.push(row?);
+    }
+    Ok((nodes, edges))
+}
+
+/// [`load_graph`] from the project's `state.db`; `None` where the state
+/// database may not or cannot be opened.
+pub fn load_graph_for_project(
+    project_root: &std::path::Path,
+    document_id: &str,
+) -> Option<Result<(Vec<AnswerNodeRow>, Vec<AnswerEdgeRow>)>> {
+    if crate::state_store::state_db_connections_forbidden_for_process() {
+        return None;
+    }
+    let conn = crate::state_store::open_state_db(project_root).ok()?;
+    Some(load_graph(&conn, document_id))
+}
+
+/// [`store_nodes`] into the project's `state.db`; a no-op where the state
+/// database may not be opened.
+pub fn store_nodes_for_project(
+    project_root: &std::path::Path,
+    document_id: &str,
+    nodes: &[AnswerNodeRow],
+    now: u64,
+) -> Result<()> {
+    if crate::state_store::state_db_connections_forbidden_for_process() {
+        return Ok(());
+    }
+    let mut conn = crate::state_store::open_state_db(project_root)?;
+    store_nodes(&mut conn, document_id, nodes, now)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -366,6 +554,8 @@ mod tests {
             from: "dec-a@1".into(),
             kind: "answers".into(),
             to: "dec-a".into(),
+            source: "derived".into(),
+            clause: None,
         };
         store(
             &mut conn,
@@ -465,5 +655,89 @@ mod tests {
         assert_eq!(revisions.len(), 2);
         assert_eq!(revisions[0].answer, "Use port 4000.");
         assert_eq!(revisions[1].first_seen_at, 100);
+    }
+
+    #[test]
+    fn graph_rows_round_trip_and_an_operator_relation_replaces_a_proposal() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        let proposed = AnswerEdgeRow {
+            from: "dec-a@2".into(),
+            kind: "supersedes".into(),
+            to: "dec-a@1".into(),
+            source: "proposed".into(),
+            clause: None,
+        };
+        store(
+            &mut conn,
+            "doc",
+            &[],
+            &[],
+            std::slice::from_ref(&proposed),
+            1,
+        )
+        .unwrap();
+        let confirmed = AnswerEdgeRow {
+            kind: "amends".into(),
+            source: "operator".into(),
+            clause: Some("keep the release App private".into()),
+            ..proposed
+        };
+        let depends = AnswerEdgeRow {
+            from: "dec-b".into(),
+            kind: "depends_on".into(),
+            to: "dec-a".into(),
+            source: "operator".into(),
+            clause: None,
+        };
+        store(
+            &mut conn,
+            "doc",
+            &[],
+            &[],
+            &[confirmed.clone(), depends.clone()],
+            2,
+        )
+        .unwrap();
+        let node = AnswerNodeRow {
+            id: "dec-a".into(),
+            kind: "decision".into(),
+            label: "Make haiven-cli public?".into(),
+            open: Some(true),
+            location: None,
+            first_seen_at: Some(5),
+        };
+        store_nodes(&mut conn, "doc", std::slice::from_ref(&node), 5).unwrap();
+        // A later build with an empty label and a newer first-seen time keeps
+        // the remembered label and time.
+        let later = AnswerNodeRow {
+            label: String::new(),
+            open: Some(false),
+            first_seen_at: Some(50),
+            ..node.clone()
+        };
+        store_nodes(&mut conn, "doc", &[later], 50).unwrap();
+        let (nodes, edges) = load_graph(&conn, "doc").unwrap();
+        assert_eq!(nodes.len(), 1);
+        assert_eq!(nodes[0].label, node.label);
+        assert_eq!(nodes[0].open, Some(false));
+        assert_eq!(nodes[0].first_seen_at, Some(5));
+        assert_eq!(edges, vec![confirmed, depends]);
+    }
+
+    #[test]
+    fn an_answerbyrequestid_edge_table_gains_the_provenance_columns() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE answer_ledger_edges (
+                document_id TEXT NOT NULL, from_id TEXT NOT NULL, kind TEXT NOT NULL,
+                to_id TEXT NOT NULL, recorded_at INTEGER NOT NULL,
+                PRIMARY KEY (document_id, from_id, kind, to_id));
+             INSERT INTO answer_ledger_edges VALUES ('doc', 'r@1', 'answers', 'r', 1);",
+        )
+        .unwrap();
+        let (_, edges) = load_graph(&conn, "doc").unwrap();
+        assert_eq!(edges[0].source, "derived");
+        assert_eq!(edges[0].clause, None);
+        store(&mut conn, "doc", &[], &[], &[], 2).unwrap();
     }
 }

@@ -77,6 +77,9 @@ pub struct AnswerObs {
     pub consumed: bool,
     /// The answer lives in its own target's waiting packet (the dispatch path).
     pub in_own_packet: bool,
+    /// The operator's explicit `change:` / `amend:` lead-in
+    /// (`#decisiongraph`); stripped from `text`.
+    pub explicit: Option<crate::RevisionRelation>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
@@ -90,6 +93,10 @@ pub enum LinkKind {
     QueueItem,
     /// The operator said `same as [#id]`.
     OperatorSameAs,
+    /// The operator said `depends on [#id]` / `assumes [#id]` (`#decisiongraph`).
+    OperatorDependsOn,
+    /// The operator said `conflicts with [#id]` / `contradicts [#id]`.
+    OperatorConflictsWith,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -258,6 +265,106 @@ fn same_as_target(text: &str) -> Option<String> {
         .or_else(|| lower.strip_prefix("duplicate of "))
         .or_else(|| lower.strip_prefix("same question as "))?;
     bracket_ids(rest).into_iter().next()
+}
+
+/// Lead-ins that classify a revision explicitly (`#decisiongraph`).
+const CHANGE_LEADS: [&str; 6] = [
+    "change:",
+    "changed:",
+    "changes:",
+    "reverse:",
+    "reversal:",
+    "supersede:",
+];
+const AMEND_LEADS: [&str; 3] = ["amend:", "amended:", "amendment:"];
+
+/// Split an explicit `change:` / `amend:` lead-in off an operator answer.
+/// The lead-in decides the revision kind; the rest is the answer (for an
+/// amend, the clause it changes or adds).
+pub fn explicit_relation(text: &str) -> (Option<crate::RevisionRelation>, String) {
+    let trimmed = text.trim();
+    let lower = trimmed.to_ascii_lowercase();
+    for (leads, relation) in [
+        (&CHANGE_LEADS[..], crate::RevisionRelation::Supersedes),
+        (&AMEND_LEADS[..], crate::RevisionRelation::Amends),
+    ] {
+        for lead in leads {
+            if lower.starts_with(lead) {
+                let rest = trimmed[lead.len()..].trim();
+                if !rest.is_empty() {
+                    return (Some(relation), rest.to_string());
+                }
+            }
+        }
+    }
+    (None, trimmed.to_string())
+}
+
+const DEPENDS_PHRASES: [&str; 5] = [
+    "depends on ",
+    "assumes ",
+    "builds on ",
+    "relies on ",
+    "requires decision ",
+];
+const CONFLICTS_PHRASES: [&str; 3] = ["conflicts with ", "contradicts ", "incompatible with "];
+
+/// Explicit `depends on [#id]` / `conflicts with [#id]` phrases in operator
+/// text, and whether the text is nothing but such phrases (a link-only row,
+/// not an answer).
+pub fn relation_links(text: &str) -> (Vec<(LinkKind, String)>, bool) {
+    let lower = text.to_ascii_lowercase();
+    let mut links = Vec::new();
+    let mut spans: Vec<std::ops::Range<usize>> = Vec::new();
+    for (phrases, kind) in [
+        (&DEPENDS_PHRASES[..], LinkKind::OperatorDependsOn),
+        (&CONFLICTS_PHRASES[..], LinkKind::OperatorConflictsWith),
+    ] {
+        for phrase in phrases {
+            let mut from = 0;
+            while let Some(found) = lower[from..].find(phrase) {
+                let start = from + found;
+                let after = start + phrase.len();
+                from = after;
+                let boundary = !lower[..start]
+                    .chars()
+                    .next_back()
+                    .is_some_and(|c| c.is_ascii_alphanumeric());
+                if !boundary || !lower[after..].starts_with("[#") {
+                    continue;
+                }
+                let Some(end) = lower[after..].find(']') else {
+                    continue;
+                };
+                let end = after + end + 1;
+                if let Some(id) = bracket_ids(&lower[after..end]).into_iter().next() {
+                    spans.push(start..end);
+                    links.push((kind, id));
+                }
+            }
+        }
+    }
+    if links.is_empty() {
+        return (links, false);
+    }
+    // Link-only when nothing but filler words remain once the phrases are
+    // removed ("This depends on [#a] and conflicts with [#b].").
+    let mut residue = String::with_capacity(lower.len());
+    for (index, c) in lower.char_indices() {
+        if !spans.iter().any(|span| span.contains(&index)) {
+            residue.push(c);
+        }
+    }
+    let link_only = residue
+        .split(|c: char| !c.is_ascii_alphanumeric())
+        .filter(|word| !word.is_empty())
+        .all(|word| {
+            matches!(
+                word,
+                "and" | "also" | "this" | "it" | "that" | "decision" | "but"
+            )
+        });
+    (links, link_only)
 }
 
 /// `[#id]: answer` / `re [#id]: answer` / `answer [#request-id]`.
@@ -461,15 +568,31 @@ fn scan_waiting_item(
                         Some((_, answer)) => (targets.clone(), answer, true),
                         None => (targets.clone(), text, true),
                     };
-                    out.answers.push(AnswerObs {
-                        targets: row_targets,
-                        head_text: own.is_none().then(|| question_text.clone()),
-                        text: answer,
-                        location: format!("{location_prefix}under {label}"),
-                        line: row + 1,
-                        consumed: consumed || archived,
-                        in_own_packet: in_own && !archived,
-                    });
+                    let (explicit, answer) = explicit_relation(&answer);
+                    let (links, link_only) = relation_links(&answer);
+                    if let Some(from) = row_targets.first() {
+                        for (kind, to) in links {
+                            if &to != from {
+                                out.links.push(LinkObs {
+                                    from: from.clone(),
+                                    to,
+                                    kind,
+                                });
+                            }
+                        }
+                    }
+                    if !link_only {
+                        out.answers.push(AnswerObs {
+                            targets: row_targets,
+                            head_text: own.is_none().then(|| question_text.clone()),
+                            text: answer,
+                            location: format!("{location_prefix}under {label}"),
+                            line: row + 1,
+                            consumed: consumed || archived,
+                            in_own_packet: in_own && !archived,
+                            explicit,
+                        });
+                    }
                 }
             }
         }
@@ -549,6 +672,20 @@ fn scan_queue_rows(content: &str, out: &mut Observations) {
                     });
                     continue;
                 }
+                let (explicit, answer) = explicit_relation(&answer);
+                let (links, link_only) = relation_links(&answer);
+                for (kind, to) in links {
+                    if to != id {
+                        out.links.push(LinkObs {
+                            from: id.clone(),
+                            to,
+                            kind,
+                        });
+                    }
+                }
+                if link_only {
+                    continue;
+                }
                 out.answers.push(AnswerObs {
                     targets: vec![id],
                     head_text: None,
@@ -561,6 +698,7 @@ fn scan_queue_rows(content: &str, out: &mut Observations) {
                     line: line_offset + index + 1,
                     consumed: struck,
                     in_own_packet: false,
+                    explicit,
                 });
             }
         }
@@ -843,6 +981,55 @@ mod tests {
             operator_row("JWS makes the cap moot."),
             Some(("JWS makes the cap moot.".into(), false))
         );
+    }
+
+    #[test]
+    fn explicit_change_and_amend_lead_ins() {
+        use crate::RevisionRelation::*;
+        assert_eq!(
+            explicit_relation("change: Keep the approver as is"),
+            (Some(Supersedes), "Keep the approver as is".to_string())
+        );
+        assert_eq!(
+            explicit_relation("Amend: but keep the release App private"),
+            (Some(Amends), "but keep the release App private".to_string())
+        );
+        // A lead-in alone, or the word inside a sentence, is not a form.
+        assert_eq!(explicit_relation("change:"), (None, "change:".to_string()));
+        assert_eq!(
+            explicit_relation("No change: keep it"),
+            (None, "No change: keep it".to_string())
+        );
+    }
+
+    #[test]
+    fn depends_on_and_conflicts_with_links() {
+        assert_eq!(
+            relation_links("depends on [#tdpublic]"),
+            (
+                vec![(LinkKind::OperatorDependsOn, "tdpublic".to_string())],
+                true
+            )
+        );
+        assert_eq!(
+            relation_links("This assumes [#a] and conflicts with [#b]."),
+            (
+                vec![
+                    (LinkKind::OperatorDependsOn, "a".to_string()),
+                    (LinkKind::OperatorConflictsWith, "b".to_string()),
+                ],
+                true
+            )
+        );
+        let (links, link_only) = relation_links("No token in install.sh; depends on [#tdpublic]");
+        assert_eq!(links.len(), 1);
+        assert!(!link_only);
+        // Needs an explicit id right after the phrase.
+        assert_eq!(
+            relation_links("it depends on the port"),
+            (Vec::new(), false)
+        );
+        assert_eq!(relation_links("misassumes [#x]"), (Vec::new(), false));
     }
 
     #[test]

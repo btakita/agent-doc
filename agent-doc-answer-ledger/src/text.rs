@@ -316,6 +316,24 @@ pub fn anchors_match(a: &BTreeSet<String>, b: &BTreeSet<String>) -> bool {
     true
 }
 
+/// The clause a heuristic amend adds: the later answer with the earlier one
+/// (as normalized tokens) removed.
+pub fn amended_clause(previous: &str, next: &str) -> String {
+    let left = tokens(previous).join(" ");
+    let right = tokens(next).join(" ");
+    let clause = if left.is_empty() {
+        right
+    } else {
+        right.replacen(&left, " ", 1)
+    };
+    let clause = clause.split_whitespace().collect::<Vec<_>>().join(" ");
+    if clause.is_empty() {
+        next.trim().to_string()
+    } else {
+        clause
+    }
+}
+
 /// How a later answer relates to the one before it.
 pub fn answer_relation(previous: &str, next: &str) -> crate::RevisionRelation {
     let left = tokens(previous).join(" ");

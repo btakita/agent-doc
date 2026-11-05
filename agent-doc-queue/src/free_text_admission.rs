@@ -115,6 +115,92 @@ pub fn free_text_prompt_is_backlog_task(text: &str) -> bool {
         && !free_text_looks_unfinished(&trimmed)
 }
 
+/// Whether the queue entry at `index` sits in an operator-reply slot
+/// (`#replyasbacklog`): text the operator typed to answer something agent-doc
+/// asked, not work of its own.
+///
+/// A reply is decision evidence for the row it answers and must stay the
+/// operator's words. Coining it into a backlog id and replacing the row with
+/// `do [#id]` made the dispatch preamble quote `do [#want]` instead of "Why do
+/// we want this?", and turned an answer under an offered choice into
+/// `do [#q-c2010d98af04]` (its own stable handle minted as the backlog id).
+///
+/// The slot is structural, never a text guess:
+/// - any row inside a waiting item's packet
+///   ([`crate::waiting_packet::is_packet_row`]);
+/// - any row beneath a `**Choices:**` label (an offered choice and its
+///   answers);
+/// - any row beneath an operator request: the request-key row
+///   `[#subagent-operator-request-x]`, or a work row carrying that request
+///   annotation, whose live sub-prompt is the answer (`#subpromptanswer`).
+///
+/// Free text nested under an ordinary work row is not a reply and keeps its
+/// in-place promotion (`#queuenest`).
+pub fn entry_is_operator_reply_slot(
+    entries: &[crate::document_queue::QueueEntry],
+    index: usize,
+) -> bool {
+    use crate::waiting_packet::entry_list_indent;
+    if crate::waiting_packet::is_packet_row(entries, index) {
+        return true;
+    }
+    let Some(mut depth) = entries.get(index).and_then(entry_list_indent) else {
+        return false;
+    };
+    for candidate in (0..index).rev() {
+        let Some(indent) = entry_list_indent(&entries[candidate]) else {
+            continue;
+        };
+        if indent >= depth {
+            continue;
+        }
+        if row_solicits_operator_reply(&entries[candidate]) {
+            return true;
+        }
+        if indent == 0 {
+            return false;
+        }
+        depth = indent;
+    }
+    false
+}
+
+/// An ancestor row whose descendants are answers: a `**Choices:**` label or an
+/// operator request (key row or request-annotated work row).
+fn row_solicits_operator_reply(entry: &crate::document_queue::QueueEntry) -> bool {
+    let body = match entry {
+        crate::document_queue::QueueEntry::Prompt(prompt)
+        | crate::document_queue::QueueEntry::Completed(prompt) => {
+            agent_doc_element_queue::subprompts::head_without_subprompts(&prompt.text).to_string()
+        }
+        crate::document_queue::QueueEntry::Freeform(line) => {
+            let first = line.lines().next().unwrap_or_default().trim_start();
+            match ["- ", "* ", "+ "]
+                .iter()
+                .find_map(|bullet| first.strip_prefix(bullet))
+            {
+                Some(body) => body.to_string(),
+                None => return false,
+            }
+        }
+        _ => return false,
+    };
+    let row = agent_doc_markdown_ast::reply_row::reply_row_text(&body);
+    let work = agent_doc_element_queue::strip_attempt_projection_prefix(&row).trim();
+    if work == "**Choices:**" {
+        return true;
+    }
+    if let Some((id, after)) = work
+        .strip_prefix("[#")
+        .and_then(|rest| rest.split_once(']'))
+        && agent_doc_document::queue_projection::is_reserved_operator_action_id(id)
+        && matches!(after.trim(), "" | ":")
+    {
+        return true;
+    }
+    !agent_doc_document::queue_projection::operator_request_annotation_ids(work).is_empty()
+}
+
 /// The item opens with a question sentence and then continues.
 ///
 /// A query-string `?` (`https://host/path?x=1`) has no whitespace after it and
@@ -270,11 +356,11 @@ pub fn gate_free_text_admission_scope(
     }
     let mut allowed = HashSet::new();
     let mut held = Vec::new();
-    for entry in entries {
+    for (index, entry) in entries.iter().enumerate() {
         let crate::document_queue::QueueEntry::Prompt(prompt) = entry else {
             continue;
         };
-        if !scope.allows_prompt(&prompt.text) {
+        if !scope.allows_prompt(&prompt.text) || entry_is_operator_reply_slot(entries, index) {
             continue;
         }
         if gate.allows_coining(&prompt.text) {
@@ -310,6 +396,9 @@ fn adjacent_snapshot_extension_claims(
         let crate::document_queue::QueueEntry::Prompt(prompt) = entry else {
             continue;
         };
+        if entry_is_operator_reply_slot(entries, index) {
+            continue;
+        }
         let new_text = admitted_prompt_text(prompt);
         let new_key = crate::queue_response::normalize_for_answer_match(&new_text);
         if new_key.is_empty() || !actionable_keys.contains(&new_key) {
@@ -717,14 +806,16 @@ pub fn collect_actionable_free_text_prompts(
     let mut prompts = Vec::new();
     if let Some(exchange_prompt) = exchange_prompt
         && free_text_prompt_is_backlog_task(exchange_prompt)
+        && !exchange_prompt_echoes_operator_reply(exchange_prompt, entries)
     {
         prompts.push(FreeTextWorkPrompt {
             text: normalize_admitted_free_text(exchange_prompt),
         });
     }
-    for entry in entries {
+    for (index, entry) in entries.iter().enumerate() {
         if let crate::document_queue::QueueEntry::Prompt(prompt) = entry
             && queue_scope.allows_prompt(&prompt.text)
+            && !entry_is_operator_reply_slot(entries, index)
         {
             prompts.push(FreeTextWorkPrompt {
                 text: admitted_prompt_text(prompt),
@@ -737,6 +828,26 @@ pub fn collect_actionable_free_text_prompts(
         !key.is_empty() && seen.insert(key)
     });
     ActionableFreeTextPrompts { prompts }
+}
+
+/// `#replyasbacklog`: the exchange prompt is the same text as an operator
+/// reply in the queue. It is that reply, seen again; admitting it would file
+/// the reply as backlog work beside the verbatim row.
+fn exchange_prompt_echoes_operator_reply(
+    exchange_prompt: &str,
+    entries: &[crate::document_queue::QueueEntry],
+) -> bool {
+    let key = crate::queue_response::normalize_for_answer_match(&normalize_admitted_free_text(
+        exchange_prompt,
+    ));
+    !key.is_empty()
+        && entries.iter().enumerate().any(|(index, entry)| {
+            matches!(entry, crate::document_queue::QueueEntry::Prompt(prompt)
+                if crate::queue_response::normalize_for_answer_match(
+                    &admitted_prompt_text(prompt),
+                ) == key)
+                && entry_is_operator_reply_slot(entries, index)
+        })
 }
 
 pub fn prepare_free_text_admission(
@@ -962,6 +1073,11 @@ fn prepare_free_text_admission_for_queue(
                 &normalize_admitted_free_text(&prompt.text),
             );
             if key.is_empty() || !admitted_keys.contains(&key) {
+                return entry.clone();
+            }
+            // `#replyasbacklog`: an operator reply keeps its words even when
+            // the same text was admitted from another slot or the exchange.
+            if entry_is_operator_reply_slot(entries, entry_index) {
                 return entry.clone();
             }
             let nested = prompt.indent > 0;
@@ -1191,11 +1307,13 @@ pub fn queue_free_text_admission_scope(
     };
     let snapshot_keys = snapshot_queue_free_text_prompt_keys(snapshot_content);
     let mut new_keys = HashSet::new();
-    for entry in entries {
+    for (index, entry) in entries.iter().enumerate() {
         let crate::document_queue::QueueEntry::Prompt(prompt) = entry else {
             continue;
         };
-        if !free_text_prompt_is_backlog_task(&prompt.text) {
+        if !free_text_prompt_is_backlog_task(&prompt.text)
+            || entry_is_operator_reply_slot(entries, index)
+        {
             continue;
         }
         let key = crate::queue_response::normalize_for_answer_match(&normalize_admitted_free_text(
@@ -1642,7 +1760,7 @@ mod tests {
         const CHILD: &str = "Is this tree still blocked? If not, update the head run item.";
         let content = concat!(
             "<!-- agent:run subagents priority go -->\n",
-            "- do [#push] [#subagent-operator-request-push-target]\n",
+            "- do [#push]\n",
             "  - Is this tree still blocked? If not, update the head run item.\n",
             "<!-- /agent:run -->\n",
         );
@@ -1714,7 +1832,7 @@ mod tests {
         const CHILD: &str = "Is this tree still blocked? If not, update the head run item.";
         let content = concat!(
             "<!-- agent:run subagents priority go -->\n",
-            "- do [#push] [#subagent-operator-request-push-target]\n",
+            "- do [#push]\n",
             "  - Is this tree still blocked? If not, update the head run item.\n",
             "<!-- /agent:run -->\n",
         );
@@ -2429,5 +2547,184 @@ mod tests {
                 text: "Investigate the flaky route test it fails only under nextest".to_string()
             }]
         );
+    }
+
+    /// `#replyasbacklog` (agent-doc-bugs.md, 2026-11-04): the operator typed
+    /// "Why do we want this?" beneath the `#hookcreatedsubmodules` waiting
+    /// item. Admission coined backlog `#want` from it and replaced the reply
+    /// with `- do [#want]`, so the dispatch preamble quoted `do [#want]`
+    /// instead of the operator's words. A reply inside a waiting packet is
+    /// decision evidence for that item, never work of its own.
+    #[test]
+    fn reply_under_waiting_item_stays_a_verbatim_reply() {
+        const REPLY: &str = "Why do we want this?";
+        let content = concat!(
+            "<!-- agent:queue priority -->\n",
+            "- ### do [#before]\n",
+            "  - ~~[#hookcreatedsubmodules] Keep or remove the .claude/settings.json files make install created at 16:20 in 18 submodules with only .agent-doc state; untracked in each repo <!-- agent-doc:waiting-item -->~~\n",
+            "    - **Next:** you — reply under this item with the decision or result it asks for (evidence: no answer or attempt in its packet yet) ▫️\n",
+            "    - **Response:** Keep or remove the .claude/settings.json files make install created at 16:20 in 18 submodules with only .agent-doc state; untracked in each repo ▫️\n",
+            "      - **Timestamp:** 2026-11-04T21:30-05:00 ▫️\n",
+            "      - **Question:** What decision or completion result should be recorded? ▫️\n",
+            "      - **Next actions:** ▫️\n",
+            "        - **Action:** Keep or remove the .claude/settings.json files make install created at 16:20 in 18 submodules with only .agent-doc state; untracked in each repo ▫️\n",
+            "      - Why do we want this?\n",
+            "- ### do [#after]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let entries = queue_entries_from_content(content);
+        assert!(
+            free_text_prompt_is_backlog_task(REPLY),
+            "the reply reads as a prompt target on its own; only its slot makes it a reply"
+        );
+        let actionable =
+            collect_actionable_free_text_prompts(None, &entries, &FreeTextAdmissionScope::All);
+        assert!(
+            actionable.prompts.is_empty(),
+            "a waiting-packet reply is not backlog work: {actionable:?}"
+        );
+        // The same words seen again as the exchange prompt are that reply,
+        // not new work: nothing is coined and the row is untouched.
+        for exchange in [None, Some(REPLY)] {
+            let prepared = prepare_free_text_admission(
+                content,
+                &entries,
+                exchange,
+                &FreeTextAdmissionScope::All,
+                false,
+                "doc-id",
+            )
+            .unwrap();
+            assert!(
+                prepared.is_none(),
+                "{exchange:?}: nothing to admit: {:?}",
+                prepared.map(|prepared| prepared.content)
+            );
+        }
+    }
+
+    /// `#replyasbacklog` (haiven-dev sdk-dev.md, 2026-11-03): the operator's
+    /// answer "Add Dillon + Eddie. ..." beneath an offered choice of a
+    /// subagent operator request was replaced by `do [#q-c2010d98af04]`, the
+    /// row's own stable handle coined into a backlog id. An answer under a
+    /// request's offered choice stays the operator's words.
+    #[test]
+    fn answer_under_offered_choice_stays_verbatim() {
+        let content = concat!(
+            "<!-- agent:run subagents priority go -->\n",
+            "- [#tdadr0046approvers] ADR 0046 approvers\n",
+            "  - **Done as-is**: Dillon's approval on #88 counts as his review. Leave the ADR naming Luke and close `#tdadr0046approvers`. [#q-865c445b9b8a]\n",
+            "    - **Closed by:** [#r-3b817c02c2e8]\n",
+            "      - **Choices:**\n",
+            "        - **Request**: [#subagent-operator-request-adr0046-sibling-pick]\n",
+            "        - **Done as-is**: treat Dillon's approval on #88 as his review, leave the ADR naming Luke, and close `#tdadr0046approvers`.\n",
+            "        - **Add Dillon by follow-up PR**: branch from `origin/main` in that worktree, name Luke Richey and Dillon Storm on line 76, then commit, push, open a haiven-docs pull request, and request Luke's review.\n",
+            "          - ☑️ [#subagent:c238dillon#2] Add Dillon + Eddie. We usually have a consensus over the decision. Luke has the final say on the policy policy and we follow the policy. Dillon or Eddie will speak with Luke to grant a decision. [#q-c2010d98af04]\n",
+            "        - **Something else**: say how to record his role, for example as a reviewer rather than an approver.\n",
+            "<!-- /agent:run -->\n",
+        );
+        let entries = queue_entries_from_content(content);
+        let actionable =
+            collect_actionable_free_text_prompts(None, &entries, &FreeTextAdmissionScope::All);
+        assert!(
+            !actionable
+                .prompts
+                .iter()
+                .any(|prompt| prompt.text.contains("Add Dillon + Eddie")),
+            "an answer under an offered choice is not backlog work: {actionable:?}"
+        );
+        let prepared = prepare_free_text_admission(
+            content,
+            &entries,
+            None,
+            &FreeTextAdmissionScope::All,
+            false,
+            "doc-id",
+        )
+        .unwrap();
+        assert!(
+            prepared.is_none(),
+            "the answer's handle must not become a backlog id: {:?}",
+            prepared.map(|prepared| prepared.content)
+        );
+    }
+
+    /// `#replyasbacklog`: a nested answer under a request-key row
+    /// (`[#subagent-operator-request-x]`) or under a work row that carries a
+    /// request annotation (`#subpromptanswer`) answers that request.
+    #[test]
+    fn answer_under_operator_request_row_stays_verbatim() {
+        for parent in [
+            "- [#subagent-operator-request-push-target]\n",
+            "- do [#push] [#subagent-operator-request-push-target]\n",
+        ] {
+            let content = format!(
+                "<!-- agent:run subagents priority go -->\n{parent}  - Should this push to main? Use origin/main.\n<!-- /agent:run -->\n"
+            );
+            let entries = queue_entries_from_content(&content);
+            let actionable =
+                collect_actionable_free_text_prompts(None, &entries, &FreeTextAdmissionScope::All);
+            assert!(
+                actionable.prompts.is_empty(),
+                "{parent:?}: an answer under a request is not backlog work: {actionable:?}"
+            );
+            // Typed again as the exchange prompt it is the same answer: no
+            // backlog id and no second top-level row beside it.
+            let prepared = prepare_free_text_admission(
+                &content,
+                &entries,
+                Some("Should this push to main? Use origin/main."),
+                &FreeTextAdmissionScope::None,
+                false,
+                "doc-id",
+            )
+            .unwrap();
+            assert!(prepared.is_none(), "{parent:?}");
+        }
+    }
+
+    /// Prose that merely contains the word "do" is neither a `do [#id]`
+    /// directive nor an id-backed head.
+    #[test]
+    fn prose_containing_do_is_not_a_do_directive() {
+        for prose in [
+            "Why do we want this?",
+            "What do you think? Do we still need it?",
+            "Please do the rollout after review",
+        ] {
+            assert!(!crate::queue_heads::is_do_directive(prose), "{prose}");
+            let entry = crate::document_queue::QueueEntry::Prompt(
+                crate::document_queue::QueuePrompt::new(prose),
+            );
+            assert_eq!(
+                crate::queue_projection::queue_entry_do_id(&entry),
+                None,
+                "{prose}"
+            );
+        }
+    }
+
+    /// Free text nested under an ordinary work row (no waiting item, choice,
+    /// or request) is still promoted in its slot (`#queuenest`).
+    #[test]
+    fn free_text_under_plain_work_parent_is_still_promoted() {
+        let content = concat!(
+            "<!-- agent:run subagents priority go -->\n",
+            "- do [#push]\n",
+            "  - Is this tree still blocked? If not, update the head run item.\n",
+            "<!-- /agent:run -->\n",
+        );
+        let entries = queue_entries_from_content(content);
+        let prepared = prepare_free_text_admission(
+            content,
+            &entries,
+            None,
+            &FreeTextAdmissionScope::All,
+            false,
+            "doc-id",
+        )
+        .unwrap()
+        .expect("nested free text is admitted");
+        assert_eq!(prepared.promotions.len(), 1);
     }
 }

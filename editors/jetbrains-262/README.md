@@ -152,6 +152,17 @@ Every snapshot ingress writes `controller_editor_view_snapshot_observed` to
 completeness, terminal capability, and surface count. Parse, identity, projection,
 stale, and frozen refusals are therefore distinguishable from accepted projections.
 
+The controller's `(connection_generation, sequence)` fence orders snapshots
+within one backend process. The backend restarts its connection generation and
+sequence with the IDE, so the controller also records the publishing process
+from the connection's peer credentials (`SO_PEERCRED`; no wire field). A
+regressed revision from a different process, while the process that set the
+fence is gone, retires that predecessor (its detached bindings release as
+`client_retired`), applies at once, and logs
+`controller_editor_view_frontend_instance_reset` with both pids and revisions
+(`#viewsnapshotgenreset`). A regression from the same process, from a second
+live process sharing the client id, or with an unknown peer pid stays `stale`.
+
 The controller returns an explicit, revision-fenced presentation list. The
 frontend adapter resolves the exact split containing the document, mounts a
 controller-session terminal or non-writable placeholder, restores originals on

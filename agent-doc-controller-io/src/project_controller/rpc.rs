@@ -32,7 +32,8 @@ use agent_doc_editor_surface::terminal_ownership::{
 };
 use agent_doc_editor_surface::{
     EditorSurface, EditorSurfaceObservation, EditorSurfaceProjection, EditorSurfaceState,
-    EditorViewId, EditorViewPlaceholderReason, EditorViewPolicy, EditorViewPolicyBinding,
+    EditorViewFrontendInstance, EditorViewFrontendInstanceReset, EditorViewId,
+    EditorViewObservation, EditorViewPlaceholderReason, EditorViewPolicy, EditorViewPolicyBinding,
     EditorViewPolicyProjection, EditorViewPolicyStatus, EditorViewPresentation,
     EditorViewSessionKey, EditorViewSnapshot, MutedLiveEndpoint, RETIRED_ENDPOINT_MUTE_THRESHOLD,
     RetiredEndpointMonitor, SurfaceColumn, SurfaceIntent, SurfaceObservationReceipt,
@@ -486,17 +487,31 @@ impl ControllerEditorViewPolicyGraph {
         }
     }
 
+    #[cfg(test)]
     fn observe(
         &self,
         snapshot: EditorViewSnapshot,
         persist: impl FnOnce(&EditorViewPolicyProjection) -> Result<()>,
     ) -> Result<EditorViewPolicyProjection> {
+        self.observe_from_instance(snapshot, None, |_| true, persist)
+            .map(|observation| observation.projection)
+    }
+
+    /// [`EditorViewPolicy::observe_from_instance`] under the persist-then-commit
+    /// rule: a failed persist leaves the fence and the instance record unchanged.
+    fn observe_from_instance(
+        &self,
+        snapshot: EditorViewSnapshot,
+        instance: Option<EditorViewFrontendInstance>,
+        predecessor_live: impl FnOnce(EditorViewFrontendInstance) -> bool,
+        persist: impl FnOnce(&EditorViewPolicyProjection) -> Result<()>,
+    ) -> Result<EditorViewObservation> {
         let mut policy = self.policy.lock();
         let mut candidate = policy.clone();
-        let projection = candidate.observe(snapshot);
-        persist(&projection)?;
+        let observation = candidate.observe_from_instance(snapshot, instance, predecessor_live);
+        persist(&observation.projection)?;
         *policy = candidate;
-        Ok(projection)
+        Ok(observation)
     }
 
     fn retire_client(
@@ -22732,6 +22747,38 @@ fn controller_binary_is_stale_for_shutdown(bootstrap: &ControllerBootstrap) -> b
     )
 }
 
+thread_local! {
+    /// `#viewsnapshotgenreset`: OS pid of the process on the other end of the
+    /// connection this request thread serves, from the socket's peer
+    /// credentials. `None` where the platform does not report one (macOS
+    /// `xucred` carries no pid) or outside a served connection.
+    static CONTROLLER_REQUEST_PEER_PID: std::cell::Cell<Option<u32>> =
+        const { std::cell::Cell::new(None) };
+}
+
+/// Restores the previous peer pid when a served request leaves its scope.
+struct ControllerRequestPeerScope(Option<u32>);
+
+impl Drop for ControllerRequestPeerScope {
+    fn drop(&mut self) {
+        CONTROLLER_REQUEST_PEER_PID.set(self.0);
+    }
+}
+
+fn enter_controller_request_peer(pid: Option<u32>) -> ControllerRequestPeerScope {
+    ControllerRequestPeerScope(CONTROLLER_REQUEST_PEER_PID.replace(pid))
+}
+
+fn controller_request_peer_pid() -> Option<u32> {
+    CONTROLLER_REQUEST_PEER_PID.get()
+}
+
+fn stream_peer_pid(stream: &interprocess::local_socket::Stream) -> Option<u32> {
+    use interprocess::local_socket::traits::StreamCommon as _;
+    let pid = stream.peer_creds().ok()?.pid()?;
+    u32::try_from(pid).ok().filter(|pid| *pid != 0)
+}
+
 pub(crate) fn serve_client(
     stream: interprocess::local_socket::Stream,
     runtime: &Arc<ControllerRuntime>,
@@ -22739,6 +22786,7 @@ pub(crate) fn serve_client(
     sock: &Path,
 ) -> Result<()> {
     install_controller_request_thread_context(runtime);
+    let _peer = enter_controller_request_peer(stream_peer_pid(&stream));
     stream
         .set_recv_timeout(Some(CONTROLLER_IDLE_CLIENT_TIMEOUT))
         .context("failed to set project controller client read timeout")?;
@@ -33330,12 +33378,18 @@ fn handle_editor_view_snapshot_observe(
     let client_id = snapshot.client_id.clone();
     let connection_generation = snapshot.connection_generation;
     let presentation_revision = snapshot.sequence;
-    let projection = match runtime
-        .editor_view_policy_graph
-        .observe(snapshot, |projection| {
-            persist_editor_view_transitions(bootstrap, runtime, projection)
-        }) {
-        Ok(projection) => projection,
+    // `#viewsnapshotgenreset`: the publishing process, from the connection's
+    // peer credentials, lets the policy tell a restarted editor backend (whose
+    // generation and sequence restart at 1) from a reordered delivery.
+    let frontend_instance =
+        controller_request_peer_pid().map(|pid| EditorViewFrontendInstance(u64::from(pid)));
+    let observation = match runtime.editor_view_policy_graph.observe_from_instance(
+        snapshot,
+        frontend_instance,
+        editor_view_frontend_instance_live,
+        |projection| persist_editor_view_transitions(bootstrap, runtime, projection),
+    ) {
+        Ok(observation) => observation,
         Err(error) => {
             log_editor_view_snapshot_observation(
                 bootstrap,
@@ -33349,6 +33403,10 @@ fn handle_editor_view_snapshot_observe(
             return Err(error);
         }
     };
+    if let Some(reset) = &observation.instance_reset {
+        log_editor_view_frontend_instance_reset(bootstrap, reset);
+    }
+    let projection = observation.projection;
     let (accepted, status) = match &projection.status {
         EditorViewPolicyStatus::Applied => (true, "applied"),
         EditorViewPolicyStatus::Stale => (false, "stale"),
@@ -33370,6 +33428,37 @@ fn handle_editor_view_snapshot_observe(
         connection_generation,
         presentation_revision,
     ))
+}
+
+/// Whether the frontend instance that set a client's revision fence is still
+/// running. Biased toward alive on an ambiguous probe, which keeps the fence.
+fn editor_view_frontend_instance_live(instance: EditorViewFrontendInstance) -> bool {
+    u32::try_from(instance.0)
+        .ok()
+        .is_none_or(crate::process_exit_watcher::process_is_live)
+}
+
+fn editor_view_frontend_instance_reset_line(reset: &EditorViewFrontendInstanceReset) -> String {
+    format!(
+        "controller_editor_view_frontend_instance_reset client={} previous_pid={} pid={} previous_generation={} previous_sequence={} generation={} sequence={}",
+        reset.client_id,
+        reset.previous_instance.0,
+        reset.instance.0,
+        reset.previous_revision.0,
+        reset.previous_revision.1,
+        reset.revision.0,
+        reset.revision.1,
+    )
+}
+
+fn log_editor_view_frontend_instance_reset(
+    bootstrap: &ControllerBootstrap,
+    reset: &EditorViewFrontendInstanceReset,
+) {
+    agent_doc_ops_log_io::log_op(
+        &bootstrap.project_root,
+        &editor_view_frontend_instance_reset_line(reset),
+    );
 }
 
 fn log_editor_view_snapshot_observation(
@@ -47880,6 +47969,134 @@ mod tests {
             projection.transitions.as_slice(),
             [EditorViewLifecycleTransition::ReleasePending { .. }]
         ));
+    }
+
+    /// Above every platform's pid ceiling (Linux `PID_MAX_LIMIT` is 2^22), so
+    /// the liveness probe deterministically reports it gone.
+    const VIEW_SNAPSHOT_DEAD_PEER_PID: u32 = 0x3FFF_FFFF;
+
+    fn editor_view_snapshot_observe_request(snapshot: &EditorViewSnapshot) -> ControllerRequest {
+        ControllerRequest {
+            command: "editor_view_snapshot_observe".to_string(),
+            file: None,
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: Some(snapshot.connection_generation),
+            state: None,
+            caller: Some(snapshot.client_id.clone()),
+            reason: Some("complete_editor_view_snapshot".to_string()),
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: Some(serde_json::to_string(snapshot).unwrap()),
+            sequence: Some(snapshot.sequence),
+        }
+    }
+
+    /// `#viewsnapshotgenreset`: after an IDE restart the JetBrains split
+    /// backend sent `generation=1` again, and both controllers answered every
+    /// snapshot `status=stale` until the sequence passed the dead IDE's
+    /// high-water mark (sequence 27 through 1231, 17 minutes). The connection's
+    /// peer pid identifies the successor; a regression from a different
+    /// process whose predecessor is gone resets the fence at once.
+    #[test]
+    fn editor_view_snapshot_from_a_restarted_editor_process_resets_the_revision_fence() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let main = dir.path().join("main.md");
+        std::fs::write(&main, "# main\n").unwrap();
+        let bootstrap = ControllerBootstrap {
+            project_root: dir.path().to_path_buf(),
+            socket_path: socket_path(dir.path()),
+            launch_mode: LaunchMode::Lazy,
+            bootstrap_epoch: 0,
+            pid: std::process::id(),
+            controller_binary: current_binary_identity().ok(),
+            controller_generation: 1,
+            handoff_state: ControllerHandoffState::Stable,
+            handoff_started_at: None,
+            previous_controller_pid: None,
+        };
+        let runtime = ControllerRuntime::new_arc(bootstrap.clone()).unwrap();
+        let observe = |sequence: u64, peer: Option<u32>| {
+            let _peer = enter_controller_request_peer(peer);
+            let snapshot = editor_view_snapshot("jetbrains-rd:Host", 1, sequence, &[&main], &main);
+            handle_editor_view_snapshot_observe(
+                &bootstrap,
+                runtime.as_ref(),
+                editor_view_snapshot_observe_request(&snapshot),
+            )
+            .unwrap()
+            .status
+        };
+        let live_pid = std::process::id();
+
+        // The predecessor IDE (now gone) set the fence high.
+        assert_eq!(
+            observe(1231, Some(VIEW_SNAPSHOT_DEAD_PEER_PID)),
+            "applied"
+        );
+        // Its successor restarts at a low sequence from a different process.
+        assert_eq!(observe(27, Some(live_pid)), "applied");
+        let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops_log.contains(&format!(
+                "controller_editor_view_frontend_instance_reset client=jetbrains-rd:Host previous_pid={VIEW_SNAPSHOT_DEAD_PEER_PID} pid={live_pid} previous_generation=1 previous_sequence=1231 generation=1 sequence=27"
+            )),
+            "{ops_log}"
+        );
+        assert!(ops_log.contains(
+            "controller_editor_view_snapshot_observed client=jetbrains-rd:Host generation=1 sequence=27 accepted=true status=applied"
+        ));
+        // The successor's own fence now holds.
+        assert_eq!(observe(28, Some(live_pid)), "applied");
+        assert_eq!(observe(28, Some(live_pid)), "stale");
+        // While the fence's owner is alive, another process cannot reset it,
+        // and a peer the transport cannot identify never can.
+        assert_eq!(observe(3, Some(VIEW_SNAPSHOT_DEAD_PEER_PID)), "stale");
+        assert_eq!(observe(2, None), "stale");
+        let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert_eq!(
+            ops_log
+                .matches("controller_editor_view_frontend_instance_reset")
+                .count(),
+            1,
+            "{ops_log}"
+        );
+    }
+
+    /// The scope restores the previous peer so a nested or reused request
+    /// thread never inherits another connection's identity.
+    #[test]
+    fn controller_request_peer_scope_restores_the_previous_peer() {
+        assert_eq!(controller_request_peer_pid(), None);
+        {
+            let _outer = enter_controller_request_peer(Some(11));
+            {
+                let _inner = enter_controller_request_peer(None);
+                assert_eq!(controller_request_peer_pid(), None);
+            }
+            assert_eq!(controller_request_peer_pid(), Some(11));
+        }
+        assert_eq!(controller_request_peer_pid(), None);
+    }
+
+    /// `serve_client` reads the peer pid from the accepted connection's
+    /// credentials (`SO_PEERCRED`), so an installed editor needs no new wire field.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn accepted_controller_connection_reports_the_connecting_process_pid() {
+        let dir = tempfile::tempdir().unwrap();
+        let sock = dir.path().join("peer.sock");
+        let listener = ListenerOptions::new()
+            .name(sock.clone().to_fs_name::<GenericFilePath>().unwrap())
+            .create_sync()
+            .unwrap();
+        let client = connect_path(&sock).unwrap();
+        let accepted = interprocess::local_socket::traits::Listener::accept(&listener).unwrap();
+        assert_eq!(stream_peer_pid(&accepted), Some(std::process::id()));
+        drop(client);
     }
 
     #[test]

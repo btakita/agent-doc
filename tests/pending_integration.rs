@@ -1278,6 +1278,80 @@ fn write_review_add_and_edit_mutate_review_component() {
     assert!(review.contains("- [/] [#rvw1] review text updated"));
 }
 
+/// `#trackedworkdropped`: a closeout whose `--todo-add` / `--backlog-add`
+/// quotes a document line carrying a literal component marker (the
+/// 2026-11-04 `fpe.md` `<!-- /agent:run -->` shape) lands BOTH halves: the
+/// marker is quoted as inline code, the document keeps its component
+/// structure, and stderr names the rewritten item. Before the fix the marker
+/// closed a component inside `agent:todo`, the tracked-work write was refused
+/// as structurally invalid after the response landed, and every tracked item
+/// in the closeout was lost.
+#[test]
+fn write_quotes_literal_component_marker_in_tracked_item_text() {
+    let (_tmp, doc) = setup_doc("- [ ] [#open] backlog task");
+    let output = agent_doc()
+        .args([
+            "write",
+            doc.to_str().unwrap(),
+            "--force-disk",
+            "--todo-add",
+            "Check fpe.md ends with <!-- /agent:run --> before re-dispatch",
+            "--backlog-add",
+            "id=fpefollow Verify the <!-- agent:run --> opener in fpe.md",
+        ])
+        .write_stdin("<!-- patch:exchange -->\nresponse landed\n<!-- /patch:exchange -->\n")
+        .assert()
+        .success();
+    let stderr = String::from_utf8_lossy(&output.get_output().stderr);
+    assert!(
+        stderr.contains("--todo-add: item") && stderr.contains("#trackedworkdropped"),
+        "the rewrite is reported naming the item: {stderr}"
+    );
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(content.contains("response landed"), "{content}");
+    assert!(
+        component_body(&content, "todo")
+            .contains("Check fpe.md ends with `<!-- /agent:run -->` before re-dispatch"),
+        "{content}"
+    );
+    assert!(
+        component_body(&content, "pending")
+            .contains("[#fpefollow] Verify the `<!-- agent:run -->` opener in fpe.md"),
+        "{content}"
+    );
+    assert_eq!(
+        agent_doc_element::element::component_parse_failure(&content),
+        None,
+        "{content}"
+    );
+}
+
+/// `#trackedworkdropped`: a direct tracked-item writer that bypasses
+/// closeout's quoting refuses the marker-bearing item by name and writes
+/// nothing.
+#[test]
+fn backlog_add_cli_refuses_literal_component_marker() {
+    let (_tmp, doc) = setup_doc("- [ ] [#open] backlog task");
+    let before = fs::read_to_string(&doc).unwrap();
+    let output = agent_doc()
+        .args([
+            "backlog",
+            doc.to_str().unwrap(),
+            "--force-disk",
+            "add",
+            "Quote <!-- /agent:run --> verbatim",
+        ])
+        .assert()
+        .failure();
+    let stderr = String::from_utf8_lossy(&output.get_output().stderr);
+    assert!(
+        stderr.contains("Quote <!-- /agent:run --> verbatim")
+            && stderr.contains("`<!-- /agent:run -->`"),
+        "the refusal names the item and the marker: {stderr}"
+    );
+    assert_eq!(fs::read_to_string(&doc).unwrap(), before);
+}
+
 /// The own id `--todo-add` gave the todo item whose action is `action`.
 fn todo_item_id(content: &str, action: &str) -> String {
     let body = component_body(content, "todo");

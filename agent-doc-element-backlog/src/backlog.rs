@@ -2314,6 +2314,26 @@ pub fn explicit_custom_id(item: &str) -> Option<String> {
     }
 }
 
+/// `#trackedworkdropped`: backlog/icebox/review adds and edits refuse item
+/// text carrying a literal component marker, naming the item; a backtick-quoted
+/// marker is prose and is accepted.
+#[test]
+fn add_and_edit_refuse_literal_component_marker_in_item_text() {
+    let body = "- [ ] [#keep] keep me\n";
+    let err = op_add(body, "quote <!-- /agent:run --> verbatim", "doc", false)
+        .expect_err("a live marker must be refused")
+        .to_string();
+    assert!(err.starts_with("pending add: item "), "{err}");
+    assert!(err.contains("quote <!-- /agent:run --> verbatim"), "{err}");
+    let err = op_edit(body, "keep", "now <!-- agent:queue --> here")
+        .expect_err("a live marker must be refused")
+        .to_string();
+    assert!(err.starts_with("pending edit: item "), "{err}");
+    let (added, _) = op_add(body, "quote `<!-- /agent:run -->` safely", "doc", false)
+        .expect("a quoted marker is prose");
+    assert!(added.contains("`<!-- /agent:run -->`"), "{added}");
+}
+
 #[test]
 fn add_rejects_edit_shaped_id_prefix_instead_of_swallowing_it() {
     // The exact string that produced `#resumeuuidstallsdrainbug` on
@@ -2585,6 +2605,7 @@ pub fn canonicalize_preserving_non_item_lines(body: &str) -> String {
 }
 
 fn parse_pending_edit_payload(new_text: &str) -> Result<(String, String)> {
+    element::ensure_item_text_has_no_live_component_marker("pending edit", new_text)?;
     let synthetic = format!("- [ ] [#edit] {}", new_text);
     let layout = PendingLayout::parse(&synthetic);
     let items = layout.items();
@@ -2620,6 +2641,9 @@ fn parse_pending_edit_payload(new_text: &str) -> Result<(String, String)> {
 /// continuation. Existing indentation is preserved.
 fn normalize_pending_add_payload(text: &str) -> Result<(String, String)> {
     let text = text.trim();
+    // `#trackedworkdropped`: a literal component marker inserted verbatim
+    // breaks the document's component structure and the write is refused.
+    element::ensure_item_text_has_no_live_component_marker("pending add", text)?;
     let (first, rest) = text.split_once('\n').unwrap_or((text, ""));
     let first = first.trim().to_string();
     if first.is_empty() {

@@ -3218,6 +3218,115 @@ fn run_command_inner(
     })
 }
 
+/// `#trackedworkdropped`: the tracked-item text flags of one closeout, by flag
+/// name, as mutable references so their values can be rewritten in place.
+fn tracked_item_text_inputs_mut(options: &mut CommandOptions) -> Vec<(&'static str, &mut String)> {
+    let CommandOptions {
+        pending_add,
+        pending_add_to,
+        pending_add_gated,
+        pending_add_after,
+        pending_add_before,
+        pending_add_back,
+        icebox_add,
+        icebox_add_after,
+        icebox_add_before,
+        icebox_add_back,
+        icebox_edit,
+        pending_edit,
+        pending_upsert,
+        review_add,
+        review_edit,
+        todo_add,
+        todo_edit,
+        ..
+    } = options;
+    let mut inputs: Vec<(&'static str, &mut String)> = Vec::new();
+    for (flag, values) in [
+        ("--backlog-add", pending_add),
+        ("--backlog-add-to", pending_add_to),
+        ("--backlog-add-gated", pending_add_gated),
+        ("--backlog-add-after", pending_add_after),
+        ("--backlog-add-before", pending_add_before),
+        ("--backlog-add-back", pending_add_back),
+        ("--icebox-add", icebox_add),
+        ("--icebox-add-after", icebox_add_after),
+        ("--icebox-add-before", icebox_add_before),
+        ("--icebox-add-back", icebox_add_back),
+        ("--icebox-edit", icebox_edit),
+        ("--backlog-edit", pending_edit),
+        ("--backlog-upsert", pending_upsert),
+        ("--review-add", review_add),
+        ("--review-edit", review_edit),
+        ("--todo-add", todo_add),
+        ("--todo-edit", todo_edit),
+    ] {
+        inputs.extend(values.iter_mut().map(|value| (flag, value)));
+    }
+    inputs
+}
+
+/// `#trackedworkdropped`: quote literal component markers in this closeout's
+/// tracked-item text before anything plans or records the mutation envelope.
+///
+/// Tracked-item text is inserted verbatim into a component body, so an item
+/// that quotes a document line such as `<!-- /agent:run -->` closed a component
+/// in the middle of `agent:todo`. The tracked-work write was then refused as
+/// structurally invalid AFTER the response cell was durable, and the response
+/// committed while every `--backlog-add` / `--todo-add` in the closeout was
+/// lost. Quoting the marker as an inline code span keeps the item's words and
+/// the document's structure; each rewrite is reported naming the flag, the
+/// item, and the marker. A marker that cannot be neutralized refuses the whole
+/// closeout here, before the response is written.
+fn quote_component_markers_in_tracked_item_inputs(
+    file: &Path,
+    options: &mut CommandOptions,
+) -> Result<()> {
+    for (flag, value) in tracked_item_text_inputs_mut(options) {
+        let markers: Vec<String> =
+            agent_doc_element::element::live_component_markers_in_item_text(value)
+                .iter()
+                .map(|marker| marker.text(value).to_string())
+                .collect();
+        let quoted = agent_doc_element::element::quote_live_component_markers_in_item_text(value)
+            .with_context(|| {
+                format!(
+                    "{flag}: item {:?} contains a literal agent-doc component marker that would break {}; \
+                     nothing was written. Quote the marker in backticks or rephrase it, then rerun \
+                     (#trackedworkdropped)",
+                    agent_doc_element::element::item_text_preview(value),
+                    file.display()
+                )
+            })?;
+        let Some(quoted) = quoted else {
+            continue;
+        };
+        eprintln!(
+            "[tracked-work] {flag}: item {:?} contained the literal component marker(s) {} — quoted \
+             them as inline code so the item cannot break the document's component structure \
+             (#trackedworkdropped)",
+            agent_doc_element::element::item_text_preview(value),
+            markers
+                .iter()
+                .map(|marker| format!("`{marker}`"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "tracked_item_component_marker_quoted file={} flag={} markers={} item_hash={}",
+                file.display(),
+                flag,
+                markers.len(),
+                agent_doc_hash::content_hash(value)
+            ),
+        );
+        *value = quoted;
+    }
+    Ok(())
+}
+
 fn run_command_inner_within_pass(
     options: CommandOptions,
     commit_mode: CommitMode,
@@ -3228,6 +3337,7 @@ fn run_command_inner_within_pass(
     let mut options = options;
     let file_buf = options.file.clone();
     let file = file_buf.as_path();
+    quote_component_markers_in_tracked_item_inputs(file, &mut options)?;
     let closeout_role = WriteCloseoutOwnerRole::from_origin(options.origin.as_deref());
     let mut _closeout_owner = claim_foreground_closeout_owner(file, closeout_role)?;
     let _force_disk_authority_scope = if options.force_disk {
@@ -3557,6 +3667,9 @@ fn run_command_inner_within_pass(
     options
         .queue_operator_actions
         .extend(derived_packet_requests.queue_actions);
+    // `#trackedworkdropped`: packet-derived todo text quotes the packet, which
+    // can itself quote a document line; quote its markers like caller input.
+    quote_component_markers_in_tracked_item_inputs(file, &mut options)?;
     let has_pending_ops = options.has_pending_mutation();
 
     // Validate the response half first. The tracked-work pass below is virtual,
@@ -6554,6 +6667,46 @@ mod tests {
         ) -> Result<usize> {
             Ok(0)
         }
+    }
+
+    /// `#trackedworkdropped`: closeout quotes literal component markers in
+    /// every tracked-item text flag before the envelope is planned or captured,
+    /// so the item keeps its words and the document keeps its structure.
+    #[test]
+    fn closeout_quotes_component_markers_in_tracked_item_inputs() {
+        let tmp = tempfile::tempdir().unwrap();
+        let doc = tmp.path().join("session.md");
+        std::fs::write(&doc, "# s\n").unwrap();
+        let mut options =
+            agent_doc_write_command_io::CommandOptions::recovery_from_captured_closeout_mutation_plan(
+                &doc,
+                agent_doc_write_command_io::CapturedCloseoutMutationPlan::default(),
+            );
+        options.todo_add = vec!["Check fpe.md ends with <!-- /agent:run --> first".to_string()];
+        options.pending_add = vec!["id=keep plain text stays".to_string()];
+        options.pending_edit = vec!["keep=see <!-- agent:queue --> now".to_string()];
+        options.review_add = vec!["already `<!-- /agent:run -->` quoted".to_string()];
+
+        quote_component_markers_in_tracked_item_inputs(&doc, &mut options).unwrap();
+
+        assert_eq!(
+            options.todo_add,
+            vec!["Check fpe.md ends with `<!-- /agent:run -->` first"]
+        );
+        assert_eq!(options.pending_add, vec!["id=keep plain text stays"]);
+        assert_eq!(
+            options.pending_edit,
+            vec!["keep=see `<!-- agent:queue -->` now"]
+        );
+        assert_eq!(
+            options.review_add,
+            vec!["already `<!-- /agent:run -->` quoted"]
+        );
+
+        // Idempotent: a captured plan replayed through closeout again is stable.
+        let before = options.captured_closeout_mutation_plan();
+        quote_component_markers_in_tracked_item_inputs(&doc, &mut options).unwrap();
+        assert_eq!(options.captured_closeout_mutation_plan(), before);
     }
 
     /// `#packettodo`: the derived todo always owns the packet id; a uniquely

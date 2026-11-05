@@ -185,6 +185,63 @@ pub struct CommandOptions {
     pub commit_sibling_message: Vec<String>,
 }
 
+impl CapturedCloseoutMutationPlan {
+    /// `#trackedworkdropped`: every tracked-work mutation this plan carries, one
+    /// `--flag value` line each, so a closeout whose tracked-work half never
+    /// landed can name exactly what was lost instead of committing silently.
+    pub fn mutation_summary(&self) -> Vec<String> {
+        let mut lines = Vec::new();
+        for (flag, values) in [
+            ("--backlog-add", &self.pending_add),
+            ("--backlog-add-to", &self.pending_add_to),
+            ("--backlog-add-gated", &self.pending_add_gated),
+            ("--backlog-add-after", &self.pending_add_after),
+            ("--backlog-add-before", &self.pending_add_before),
+            ("--backlog-add-back", &self.pending_add_back),
+            ("--icebox-add", &self.icebox_add),
+            ("--icebox-add-after", &self.icebox_add_after),
+            ("--icebox-add-before", &self.icebox_add_before),
+            ("--icebox-add-back", &self.icebox_add_back),
+            ("--icebox-edit", &self.icebox_edit),
+            ("--done", &self.pending_done),
+            ("--backlog-edit", &self.pending_edit),
+            ("--backlog-gate", &self.pending_gate),
+            ("--backlog-ungate", &self.pending_ungate),
+            ("--backlog-resolve-gate", &self.pending_resolve_gate),
+            ("--backlog-set-gate-type", &self.pending_set_gate_type),
+            ("--backlog-set-verify", &self.pending_set_verify),
+            ("--backlog-upsert", &self.pending_upsert),
+            ("--review-add", &self.review_add),
+            ("--review-edit", &self.review_edit),
+            ("--review-remove", &self.review_remove),
+            ("--review-resolve", &self.review_resolve),
+            ("--todo-add", &self.todo_add),
+            ("--todo-done", &self.todo_done),
+            ("--todo-edit", &self.todo_edit),
+            ("--todo-reopen", &self.todo_reopen),
+            ("--todo-remove", &self.todo_remove),
+        ] {
+            lines.extend(values.iter().map(|value| format!("{flag} {value}")));
+        }
+        if self.pending_clear {
+            lines.push("--backlog-clear".to_string());
+        }
+        if self.icebox_clear {
+            lines.push("--icebox-clear".to_string());
+        }
+        if let Some(order) = &self.pending_reorder {
+            lines.push(format!("--backlog-reorder {order}"));
+        }
+        if let Some(order) = &self.icebox_reorder {
+            lines.push(format!("--icebox-reorder {order}"));
+        }
+        if let Some(status) = &self.status {
+            lines.push(format!("--status {status}"));
+        }
+        lines
+    }
+}
+
 impl CommandOptions {
     pub fn captured_closeout_mutation_plan(&self) -> CapturedCloseoutMutationPlan {
         CapturedCloseoutMutationPlan {

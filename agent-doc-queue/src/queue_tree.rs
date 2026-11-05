@@ -173,6 +173,10 @@ pub struct QueueTreeNode {
     /// The waiting item's roll-up, for a live waiting head.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rollup: Option<WaitingRollup>,
+    /// `#answerack`: a waiting head whose own `agent:todo` item is still open.
+    /// A struck copy of it is not deletable: the Todo it projects is open.
+    #[serde(skip)]
+    pub todo_open: bool,
     /// The gutter icon's tooltip: the state label, then the roll-up of a live
     /// waiting head (`waiting on you · you 1 · agent 0 · done 2`). Editors show
     /// it verbatim so every plugin words a node the same way.
@@ -403,8 +407,20 @@ fn is_waiting_root_line(line: &str) -> bool {
             .trim_start_matches("- ")
             .trim_start_matches("### "),
     );
-    agent_doc_element_queue::struck_work_text(&text).trim()
-        == crate::queue_consume::WAITING_ON_YOU_ROOT_TEXT
+    let work = agent_doc_element_queue::struck_work_text(&text).trim();
+    // `#answerack`: an older binary stamped the root with a generated
+    // `[#q-…]` id (sdk-dev.md); it is still the root, never live work.
+    let work = match work.rsplit_once(" [#q-") {
+        Some((root, id))
+            if id.strip_suffix(']').is_some_and(|hash| {
+                !hash.is_empty() && hash.chars().all(|c| c.is_ascii_hexdigit())
+            }) =>
+        {
+            root.trim_end()
+        }
+        _ => work,
+    };
+    work == crate::queue_consume::WAITING_ON_YOU_ROOT_TEXT
 }
 
 /// Build the queue tree of `document`.
@@ -463,6 +479,8 @@ pub fn queue_tree(document: &str, options: &QueueTreeOptions) -> anyhow::Result<
                 id: own_id(raw),
                 closed: state.is_closed(),
                 waiting_item: waiting_packet::is_waiting_item_head(entry),
+                todo_open: waiting_packet::is_waiting_item_head(entry)
+                    && own_id(raw).is_some_and(|id| open_todo_ids.contains(&id)),
                 rollup,
                 tooltip: node_tooltip(state, rollup),
             });
@@ -665,7 +683,7 @@ pub struct RowRef {
 }
 
 impl RowRef {
-    fn of(node: &QueueTreeNode) -> Self {
+    pub fn of(node: &QueueTreeNode) -> Self {
         Self {
             line: node.line,
             id: node.id.clone(),
@@ -712,7 +730,12 @@ fn nested_indexes(nodes: &[QueueTreeNode], index: usize) -> std::ops::Range<usiz
 /// Whether the node at `index` keeps its subtree and tree alive.
 fn keeps_tree_alive(nodes: &[QueueTreeNode], index: usize) -> bool {
     let node = &nodes[index];
-    if node.closed || node.state == QueueNodeState::Group {
+    if node.closed {
+        // `#answerack`: a waiting head struck while its Todo is still open
+        // still projects open work.
+        return node.waiting_item && node.todo_open;
+    }
+    if node.state == QueueNodeState::Group {
         return false;
     }
     // A plain live group parent is a label; its nested rows decide. A parent
@@ -760,6 +783,12 @@ pub fn row_closure(tree: &QueueTree, index: usize) -> Option<RowClosure> {
         top_level: Some(RowRef::of(&nodes[top_index])),
         first_open_in_tree: first_open(nodes, tree_range),
     })
+}
+
+/// Whether the node at `index` of an unfiltered [`queue_tree`] keeps its
+/// subtree and top-level tree alive (the per-row rule [`row_closure`] reads).
+pub fn row_keeps_tree_alive(tree: &QueueTree, index: usize) -> bool {
+    index < tree.nodes.len() && keeps_tree_alive(&tree.nodes, index)
 }
 
 /// The node index of the queue row on 1-based document `line`.

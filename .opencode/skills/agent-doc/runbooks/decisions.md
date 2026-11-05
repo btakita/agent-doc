@@ -63,6 +63,15 @@ preflight and every closeout (`#answerbyrequestid`):
 - Answers that were pruned from the document before the ledger existed are
   recovered once from the document's git history. `preflight --probe` shows the
   same `answered_decisions` without writing anything.
+- When a response uses an answer typed in a waiting item's packet, cite the
+  answer's `[#q-…]` id. At closeout the binary strikes that answer and adds a
+  `**Consumed by:** [#r-…]` row under it, naming the response
+  (`#answerack`). Answers under a row the closeout strikes are consumed the
+  same way. Do not strike answer rows yourself.
+- The binary, not your prose, says whether the tree can go: the
+  `**Consumed by:**` row says "Safe to delete this waiting item…" or names
+  the row that keeps it open, computed from the queue tree like a completed
+  row's `**Guidance:**`. Do not write "safe to delete" in a response.
 
 `agent-doc decision answered <FILE> [--json]` prints the ledger for debugging.
 `agent-doc decision validate --document <FILE>` also lists near-duplicate

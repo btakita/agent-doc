@@ -1371,8 +1371,7 @@ pub fn answered_free_text_strike_decision(
                     .any(|prefix| node.node_key.starts_with(prefix))
             }) {
                 let text = node.item.text.trim();
-                let normalized =
-                    crate::queue_response::normalized_authored_queue_prompt_text(text);
+                let normalized = crate::queue_response::normalized_authored_queue_prompt_text(text);
                 let occurrence = occurrences.entry(normalized.clone()).or_default();
                 let head = row_heads
                     .get(&normalized)
@@ -2167,10 +2166,7 @@ pub fn struck_queue_contains_owned_head(content: &str, heads: &[String]) -> bool
 /// the strike while a separately persisted recovery snapshot still needs the
 /// same terminal projection. Pending rows are excluded before answer matching,
 /// so a weak mention or dispatch veto cannot manufacture a terminal effect.
-pub fn struck_queue_contains_head_answered_by(
-    content: &str,
-    response_body: &str,
-) -> bool {
+pub fn struck_queue_contains_head_answered_by(content: &str, response_body: &str) -> bool {
     agent_doc_markdown_ast::mutations::item_nodes_all(content, "queue")
         .ok()
         .is_some_and(|nodes| {
@@ -2269,8 +2265,7 @@ fn project_free_text_strike_of_node_keys(
     // A terminal request/decision row and its operator-owned receipt are one
     // lifecycle fact. Reconcile them in this same derived target so the async
     // strike effect cannot publish a struck request beside an open todo.
-    let annotated =
-        reconcile_terminal_operator_request_todos(&annotated, &consumed_heads)?.content;
+    let annotated = reconcile_terminal_operator_request_todos(&annotated, &consumed_heads)?.content;
     let remaining = crate::queue_heads::active_queue_heads(&annotated).len();
     let mut target_content = annotated;
     if remaining == 0 {
@@ -3857,6 +3852,10 @@ pub fn annotate_newly_struck_queue_items_with_response_id_at(
             .entry(response_id.clone())
             .or_default() += 1;
     }
+    // `#guidancescope`: deletion guidance is scoped by the queue tree, not by
+    // the closing row's own response alone.
+    let closure_tree =
+        crate::queue_tree::queue_tree(&after, &crate::queue_tree::QueueTreeOptions::default()).ok();
     let mut canonical_response_owners = HashMap::<String, String>::new();
     let mut request_response_owners = HashMap::<String, String>::new();
     for node in &nodes {
@@ -3895,9 +3894,9 @@ pub fn annotate_newly_struck_queue_items_with_response_id_at(
         // not part of its public identity. A detached replay can recompute the
         // same response/request after the wall clock crosses a second boundary.
         // Compare the complete rendered subtree with only generated timestamp
-        // lines normalized so choices, summaries, details, and response ids
-        // must still match exactly.
-        let normalized_owned_scope = normalize_response_projection_timestamp_metadata(owned_scope);
+        // and tree-scoped guidance lines normalized so choices, summaries,
+        // details, and response ids must still match exactly.
+        let normalized_owned_scope = normalize_response_projection_volatile_metadata(owned_scope);
         let child_indent = " ".repeat(indent + 2);
         let response_mode = queue_response_ranges
             .iter()
@@ -3931,6 +3930,9 @@ pub fn annotate_newly_struck_queue_items_with_response_id_at(
                     } else {
                         *shared_batch
                     },
+                    closure: closure_tree.as_ref().and_then(|tree| {
+                        crate::queue_tree::row_closure_at_offset(tree, &after, node.item.start_byte)
+                    }),
                 },
                 response_mode,
                 &mut rendered_choice_packet_ids,
@@ -3948,7 +3950,7 @@ pub fn annotate_newly_struck_queue_items_with_response_id_at(
             .filter(|child| {
                 let rendered = render_response_lookup_child(child, &child_indent);
                 !normalized_owned_scope
-                    .contains(&normalize_response_projection_timestamp_metadata(&rendered))
+                    .contains(&normalize_response_projection_volatile_metadata(&rendered))
             })
             .cloned()
             .collect::<Vec<_>>();
@@ -4090,6 +4092,9 @@ struct ResponseLookupContext<'a> {
     response_id: &'a str,
     addressed_at: &'a str,
     shared_batch: bool,
+    /// Closability of the queue tree around the closing row, read from the
+    /// queue as it stands after this response struck its rows.
+    closure: Option<crate::queue_tree::RowClosure>,
 }
 
 fn response_lookup_children(
@@ -4106,16 +4111,8 @@ fn response_lookup_children(
     let mut children = Vec::new();
     match mode {
         QueueResponseMode::Summary => children.push(
-            response_summary_row_child(
-                context.source_document,
-                context.queue_item,
-                response_body,
-                context.response_id,
-                context.addressed_at,
-                rendered_choice_packet_ids,
-                context.shared_batch,
-            )
-            .expect("response lookup ids are canonical response ids"),
+            response_summary_row_child(&context, response_body, rendered_choice_packet_ids)
+                .expect("response lookup ids are canonical response ids"),
         ),
         QueueResponseMode::Inline => {
             let marker = agent_doc_markdown_ast::exchange_tree::response_id_lookup_marker(
@@ -4206,14 +4203,19 @@ const ACTIONABLE_RESPONSE_LEAD_LABELS: &[&str] = &[
 ];
 
 fn response_summary_row_child(
-    source_document: &str,
-    queue_item: &str,
+    context: &ResponseLookupContext<'_>,
     response_body: &str,
-    response_id: &str,
-    addressed_at: &str,
     rendered_choice_packet_ids: &mut HashSet<String>,
-    shared_batch: bool,
 ) -> Option<String> {
+    let ResponseLookupContext {
+        source_document,
+        queue_item,
+        response_id,
+        addressed_at,
+        shared_batch,
+        ref closure,
+        ..
+    } = *context;
     if !agent_doc_markdown_ast::exchange_tree::is_compact_response_id(response_id) {
         return None;
     }
@@ -4330,9 +4332,7 @@ fn response_summary_row_child(
     } else if !next_actions.is_empty() {
         child.push_str("More work remains. Keep this tree and follow the next actions below.");
     } else {
-        child.push_str(
-            "Safe to delete this completed tree; the item is complete and has no remaining tracked or unpublished work.",
-        );
+        child.push_str(&completed_row_deletion_guidance(closure.as_ref()));
     }
     if let Some(projection) = decision_projection {
         if let Some(context) = projection.context {
@@ -4394,6 +4394,49 @@ fn response_summary_row_child(
         }
     }
     Some(child)
+}
+
+/// Deletion guidance for a completed row with no tracked or unpublished work
+/// (`#guidancescope`). The row's own response decides that the row is done;
+/// the queue tree decides how much of it may go: the row alone, the row with
+/// its nested rows, or the whole tree under its top-level row. When an open
+/// row keeps the subtree or the tree alive, the guidance names it.
+fn completed_row_deletion_guidance(closure: Option<&crate::queue_tree::RowClosure>) -> String {
+    const DONE: &str = "the item is complete and has no remaining tracked or unpublished work.";
+    let Some(closure) = closure else {
+        return format!(
+            "This row is complete; {DONE} Its nested rows and tree were not checked, so confirm they are struck before deleting it."
+        );
+    };
+    let nested = match closure.nested_rows {
+        1 => "1 nested row".to_string(),
+        count => format!("{count} nested rows"),
+    };
+    if let Some(open) = &closure.first_open_nested {
+        return format!(
+            "More work remains beneath this row. This item is complete, but keep this row and its {nested}: {} is still open.",
+            open.label()
+        );
+    }
+    let row_scope = if closure.nested_rows == 0 {
+        "Safe to delete this completed row".to_string()
+    } else {
+        format!("Safe to delete this row and its {nested}")
+    };
+    match &closure.top_level {
+        None => format!("{row_scope}; {DONE}"),
+        Some(top) => match &closure.first_open_in_tree {
+            None => format!(
+                "Safe to delete the whole tree under {}; every row in it is struck and {DONE}",
+                top.label()
+            ),
+            Some(open) => format!(
+                "{row_scope}; {DONE} Keep the tree under {}: {} is still open.",
+                top.label(),
+                open.label()
+            ),
+        },
+    }
 }
 
 /// Whether `queue_item` is itself one of `packet`'s offered options (an
@@ -5035,7 +5078,7 @@ fn render_response_lookup_child(child: &str, child_indent: &str) -> String {
     rendered
 }
 
-fn normalize_response_projection_timestamp_metadata(content: &str) -> String {
+fn normalize_response_projection_volatile_metadata(content: &str) -> String {
     let mut normalized = String::with_capacity(content.len());
     for line in content.split_inclusive('\n') {
         let (core, newline) = line
@@ -5047,6 +5090,14 @@ fn normalize_response_projection_timestamp_metadata(content: &str) -> String {
         if trimmed.starts_with("- **Timestamp:** ") {
             normalized.push_str(&core[..core.len() - trimmed.len()]);
             normalized.push_str("- **Timestamp:** <response-timestamp>");
+            normalized.push_str(newline);
+        } else if trimmed.starts_with("- **Guidance:** ") {
+            // `#guidancescope`: deletion guidance reads the surrounding queue
+            // tree, which a sibling row can change between a projection and
+            // its replay. The guidance is advice about that tree, not part of
+            // the response's identity, so a replay never stacks a second copy.
+            normalized.push_str(&core[..core.len() - trimmed.len()]);
+            normalized.push_str("- **Guidance:** <tree-scoped-guidance>");
             normalized.push_str(newline);
         } else {
             normalized.push_str(line);
@@ -5356,12 +5407,8 @@ fn project_waiting_items_from_todos(document: &str, response_body: &str) -> Resu
     // a struck head of an open Todo) but holds operator text stays in the
     // tree after the item it followed. Only binary-only segments of still
     // open Todos, which the rebuild regenerates, are dropped.
-    let dispositions = waiting_segment_dispositions(
-        projected_document,
-        &location,
-        &kept_raws,
-        &open_ids,
-    );
+    let dispositions =
+        waiting_segment_dispositions(projected_document, &location, &kept_raws, &open_ids);
     let mut archived = Vec::new();
     let mut retained = Vec::new();
     for (segment, disposition) in dispositions {
@@ -5490,9 +5537,9 @@ fn waiting_segment_dispositions(
             continue;
         }
         let disposition = match segment.id.as_deref() {
-            Some(id) if !open_ids.contains(id) => SegmentDisposition::Archive(
-                crate::waiting_archive::ArchiveReason::TodoClosed,
-            ),
+            Some(id) if !open_ids.contains(id) => {
+                SegmentDisposition::Archive(crate::waiting_archive::ArchiveReason::TodoClosed)
+            }
             _ if crate::waiting_archive::segment_has_operator_rows(&segment.raw) => {
                 SegmentDisposition::Retain { after: anchor }
             }
@@ -5663,9 +5710,7 @@ fn project_external_waiting_items(
 fn normalize_agent_doc_reply_rows(raw: &str) -> Result<String> {
     let without_lifecycle =
         agent_doc_markdown_ast::overlay::normalize_generated_response_lifecycle_markers(raw);
-    Ok(agent_doc_markdown_ast::overlay::normalize_agent_doc_reply_rows(
-        &without_lifecycle,
-    ))
+    Ok(agent_doc_markdown_ast::overlay::normalize_agent_doc_reply_rows(&without_lifecycle))
 }
 
 #[derive(Debug, Clone)]
@@ -6073,12 +6118,13 @@ fn latest_response_timestamp(source: &str) -> Option<&str> {
 
 fn ensure_waiting_response_timestamp(child: &str, response_timestamp: &str) -> String {
     let lines = child.split_inclusive('\n').collect::<Vec<_>>();
-    let is_reply = |index: usize| {
-        agent_doc_markdown_ast::reply_row::is_agent_doc_reply_row_at(&lines, index)
-    };
-    if lines.iter().enumerate().any(|(index, line)| {
-        line.trim_start().starts_with("- **Timestamp:** ") && is_reply(index)
-    }) {
+    let is_reply =
+        |index: usize| agent_doc_markdown_ast::reply_row::is_agent_doc_reply_row_at(&lines, index);
+    if lines
+        .iter()
+        .enumerate()
+        .any(|(index, line)| line.trim_start().starts_with("- **Timestamp:** ") && is_reply(index))
+    {
         return child.to_string();
     }
 
@@ -6402,9 +6448,7 @@ mod tests {
             .find(|component| component.name == "queue")
             .unwrap();
         assert!(
-            !queue
-                .content(&projected)
-                .contains("> **Queue prompt:**"),
+            !queue.content(&projected).contains("> **Queue prompt:**"),
             "generated queue content must not contain the exchange boundary token: {projected}"
         );
     }
@@ -6612,7 +6656,10 @@ mod tests {
         assert_eq!(executable.len(), 1, "{entries:#?}");
         let head = document_queue::lineage_claim_text(&entries, executable[0]).unwrap();
         assert!(head.contains("[#approve-pr]"), "{head}");
-        assert!(!head.contains("approved"), "response evidence is not work: {head}");
+        assert!(
+            !head.contains("approved"),
+            "response evidence is not work: {head}"
+        );
         let packet = document_queue::prompt_context_packet_at(&entries, executable[0]).unwrap();
         assert_eq!(packet.decision_evidence, ["approved"]);
 
@@ -6701,7 +6748,10 @@ mod tests {
             without_token.contains(&migrated),
             "the operator-answered packet must survive byte-for-byte:\n{refreshed}"
         );
-        assert!(!refreshed.contains(LEGACY_AGENT_DOC_REPLY_MARKER), "{refreshed}");
+        assert!(
+            !refreshed.contains(LEGACY_AGENT_DOC_REPLY_MARKER),
+            "{refreshed}"
+        );
         assert!(refreshed.contains("          - commit + integrate + push\n"));
         assert!(!refreshed.contains("What decision or completion result should be recorded?"));
     }
@@ -7356,7 +7406,7 @@ mod tests {
         );
         assert_eq!(
             annotated
-                .matches("**Guidance:** Safe to delete this completed tree")
+                .matches("**Guidance:** Safe to delete the whole tree under `docs`")
                 .count(),
             1,
             "canonical guidance must not be duplicated:\n{annotated}"
@@ -7365,6 +7415,133 @@ mod tests {
             annotated.matches("- **Closed by:** [#r-").count(),
             1,
             "the duplicate row must point to the canonical response:\n{annotated}"
+        );
+    }
+
+    /// `#guidancescope`: render the Guidance line a complete response gives
+    /// the row `closed` once `before_queue` becomes `after_queue`.
+    fn completed_row_guidance(before_queue: &str, after_queue: &str, closed: &str) -> String {
+        let response = format!(
+            "### Re: {closed} — test\n\n> **Queue prompt:** do [#{closed}]\n\n**Outcome:** The {closed} work is complete and verified.\n"
+        );
+        let before = doc_with_queue_and_exchange(before_queue, "");
+        let after = doc_with_queue_and_exchange(after_queue, &response);
+        let annotated =
+            annotate_newly_struck_queue_items_with_response_id(&before, &after, &response).unwrap();
+        let guidance = annotated
+            .lines()
+            .filter_map(|line| line.trim_start().strip_prefix("- **Guidance:** "))
+            .collect::<Vec<_>>();
+        assert_eq!(guidance.len(), 1, "{annotated}");
+        guidance[0].to_string()
+    }
+
+    #[test]
+    fn guidance_scopes_a_lone_top_level_row_to_the_row() {
+        let guidance = completed_row_guidance(
+            "- do [#solo]\n- do [#other]\n",
+            "- ~~do [#solo]~~\n- do [#other]\n",
+            "solo",
+        );
+        assert_eq!(
+            guidance,
+            "Safe to delete this completed row; the item is complete and has no remaining tracked or unpublished work."
+        );
+    }
+
+    #[test]
+    fn guidance_counts_the_struck_rows_nested_beneath_a_top_level_row() {
+        let guidance = completed_row_guidance(
+            "- do [#parent]\n  - ~~step one~~\n  - ~~step two~~\n",
+            "- ~~do [#parent]~~\n  - ~~step one~~\n  - ~~step two~~\n",
+            "parent",
+        );
+        assert!(
+            guidance.starts_with("Safe to delete this row and its 2 nested rows;"),
+            "{guidance}"
+        );
+    }
+
+    #[test]
+    fn guidance_names_the_open_nested_row_that_keeps_the_subtree_alive() {
+        let guidance = completed_row_guidance(
+            "- do [#parent]\n  - ~~do [#first]~~\n  - do [#second]\n",
+            "- ~~do [#parent]~~\n  - ~~do [#first]~~\n  - do [#second]\n",
+            "parent",
+        );
+        assert!(
+            guidance.starts_with("More work remains beneath this row."),
+            "{guidance}"
+        );
+        assert!(
+            guidance.contains("keep this row and its 2 nested rows: [#second] is still open."),
+            "{guidance}"
+        );
+        assert!(!guidance.contains("Safe to delete"), "{guidance}");
+    }
+
+    #[test]
+    fn guidance_keeps_the_tree_alive_while_a_sibling_is_open() {
+        let guidance = completed_row_guidance(
+            "- ### epic\n  - do [#done-child]\n  - do [#open-child]\n",
+            "- ### epic\n  - ~~do [#done-child]~~\n  - do [#open-child]\n",
+            "done-child",
+        );
+        assert_eq!(
+            guidance,
+            "Safe to delete this completed row; the item is complete and has no remaining tracked or unpublished work. Keep the tree under `epic`: [#open-child] is still open."
+        );
+    }
+
+    #[test]
+    fn guidance_offers_the_whole_tree_only_when_every_row_in_it_is_struck() {
+        let guidance = completed_row_guidance(
+            "- ### epic\n  - ~~do [#earlier]~~\n  - do [#last]\n    - ~~step~~\n",
+            "- ### epic\n  - ~~do [#earlier]~~\n  - ~~do [#last]~~\n    - ~~step~~\n",
+            "last",
+        );
+        assert_eq!(
+            guidance,
+            "Safe to delete the whole tree under `epic`; every row in it is struck and the item is complete and has no remaining tracked or unpublished work."
+        );
+    }
+
+    #[test]
+    fn replaying_a_projection_after_the_tree_changed_never_stacks_guidance() {
+        let response = "### Re: replay — test\n\n> **Queue prompt:** do [#done-child]\n\n**Outcome:** The work is complete and verified.\n";
+        let before = doc_with_queue_and_exchange(
+            "- ### epic\n  - do [#done-child]\n  - do [#open-child]\n",
+            "",
+        );
+        let after = doc_with_queue_and_exchange(
+            "- ### epic\n  - ~~do [#done-child]~~\n  - do [#open-child]\n",
+            response,
+        );
+        let first =
+            annotate_newly_struck_queue_items_with_response_id(&before, &after, response).unwrap();
+        assert!(first.contains("[#open-child] is still open"), "{first}");
+        // The sibling closes before a detached replay of the same response.
+        let changed = first.replace("  - do [#open-child]", "  - ~~do [#open-child]~~");
+        let replayed =
+            annotate_newly_struck_queue_items_with_response_id(&before, &changed, response)
+                .unwrap();
+        assert_eq!(
+            replayed.matches("**Guidance:**").count(),
+            1,
+            "a replay keeps the existing projection:\n{replayed}"
+        );
+    }
+
+    #[test]
+    fn guidance_tree_scope_ignores_rows_of_other_top_level_trees() {
+        let guidance = completed_row_guidance(
+            "- ### epic\n  - do [#only]\n- ### other\n  - do [#elsewhere]\n",
+            "- ### epic\n  - ~~do [#only]~~\n- ### other\n  - do [#elsewhere]\n",
+            "only",
+        );
+        assert!(
+            guidance.starts_with("Safe to delete the whole tree under `epic`;"),
+            "{guidance}"
         );
     }
 
@@ -7790,9 +7967,7 @@ mod tests {
                 "the section must expose the id of its own response cell: {annotated}"
             );
             assert!(
-                annotated.contains(&format!(
-                    "~~{prompt}~~\n  - **Response {response_id}**"
-                )),
+                annotated.contains(&format!("~~{prompt}~~\n  - **Response {response_id}**")),
                 "the completed prompt and its heading must share one id: {annotated}"
             );
             assert_eq!(
@@ -10631,10 +10806,7 @@ Old.
 
             let updated = consume_queue_nodes_by_key(&content, &[key]).unwrap();
 
-            assert!(
-                updated.contains("- ### ~~finish sdk demo~~\n"),
-                "{updated}"
-            );
+            assert!(updated.contains("- ### ~~finish sdk demo~~\n"), "{updated}");
             assert!(!updated.contains(annotation), "{updated}");
         }
     }
@@ -11037,8 +11209,7 @@ Old.
         );
 
         let vector = "https://github.com/haiven-dev/haiven-api/pull/823: #adversarial-pr";
-        let response_heads =
-            crate::queue_response::queue_heads_by_normalized_prompt_text(document);
+        let response_heads = crate::queue_response::queue_heads_by_normalized_prompt_text(document);
         assert_eq!(
             response_heads.get("#adversarial-pr"),
             Some(&vec![

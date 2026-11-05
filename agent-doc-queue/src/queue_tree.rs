@@ -625,6 +625,156 @@ pub fn item_matched(tree: &QueueTree, options: &QueueTreeOptions) -> bool {
     options.item.is_none() || !tree.nodes.is_empty() || options.open_only
 }
 
+/// Closability of the queue tree around one row (`#guidancescope`).
+///
+/// This is the one tree-scoped closability computation: the queue Response
+/// row's deletion Guidance and any other projection that says whether a row,
+/// its nested rows, or its whole top-level tree may be deleted read it, so no
+/// caller derives "closed" from one row's own state alone.
+///
+/// A row keeps a tree alive while it is not struck, unless it is only a label:
+/// the binary-owned Waiting-on-you root, or a plain group parent (a live row
+/// with nested rows and no projected state), which leaf-only execution never
+/// runs (`#queuenest`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RowClosure {
+    /// Rows nested beneath the row, at any depth.
+    pub nested_rows: usize,
+    /// The first row (document order) nested beneath the row that keeps it
+    /// alive.
+    pub first_open_nested: Option<RowRef>,
+    /// The top-level row whose tree holds the row; `None` when the row is
+    /// itself top-level (its own subtree is then the whole tree).
+    pub top_level: Option<RowRef>,
+    /// The first row anywhere in the top-level tree, the top-level row
+    /// included, that keeps it alive.
+    pub first_open_in_tree: Option<RowRef>,
+}
+
+/// A queue row named in operator-facing text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RowRef {
+    /// 1-based document line.
+    pub line: usize,
+    /// The row's own `[#id]`, when it has one.
+    pub id: Option<String>,
+    /// One line of display text.
+    pub text: String,
+}
+
+impl RowRef {
+    fn of(node: &QueueTreeNode) -> Self {
+        Self {
+            line: node.line,
+            id: node.id.clone(),
+            text: node.text.clone(),
+        }
+    }
+
+    /// `[#id]` when the row has one, otherwise its quoted display text.
+    pub fn label(&self) -> String {
+        match &self.id {
+            Some(id) => format!("[#{id}]"),
+            None => {
+                let text = truncate(&self.text.replace('`', "'"), 60);
+                format!("`{text}`")
+            }
+        }
+    }
+}
+
+impl RowClosure {
+    /// Every row nested beneath the row is struck (or only a label).
+    pub fn subtree_closed(&self) -> bool {
+        self.first_open_nested.is_none()
+    }
+
+    /// Every row of the whole top-level tree is struck (or only a label).
+    pub fn tree_closed(&self) -> bool {
+        self.first_open_in_tree.is_none()
+    }
+}
+
+/// Indexes of the nodes nested beneath `index` (its subtree, without itself).
+fn nested_indexes(nodes: &[QueueTreeNode], index: usize) -> std::ops::Range<usize> {
+    let root = &nodes[index];
+    let end = nodes[index + 1..]
+        .iter()
+        .position(|node| {
+            node.queue != root.queue || node.line > root.end_line || node.depth <= root.depth
+        })
+        .map_or(nodes.len(), |offset| index + 1 + offset);
+    index + 1..end
+}
+
+/// Whether the node at `index` keeps its subtree and tree alive.
+fn keeps_tree_alive(nodes: &[QueueTreeNode], index: usize) -> bool {
+    let node = &nodes[index];
+    if node.closed || node.state == QueueNodeState::Group {
+        return false;
+    }
+    // A plain live group parent is a label; its nested rows decide. A parent
+    // with any projected state (an attempt, a waiting item's open ask) is
+    // live work of its own.
+    node.state != QueueNodeState::Open
+        || node.waiting_item
+        || nested_indexes(nodes, index).is_empty()
+}
+
+fn first_open(nodes: &[QueueTreeNode], range: std::ops::Range<usize>) -> Option<RowRef> {
+    range
+        .into_iter()
+        .find(|&index| keeps_tree_alive(nodes, index))
+        .map(|index| RowRef::of(&nodes[index]))
+}
+
+/// The closability of the tree around the node at `index` of an unfiltered
+/// [`queue_tree`] (built with [`QueueTreeOptions::default`]).
+pub fn row_closure(tree: &QueueTree, index: usize) -> Option<RowClosure> {
+    let nodes = &tree.nodes;
+    let node = nodes.get(index)?;
+    let nested = nested_indexes(nodes, index);
+    let nested_rows = nested.len();
+    let first_open_nested = first_open(nodes, nested.clone());
+    let top_index = (0..=index).rev().find(|&candidate| {
+        let candidate = &nodes[candidate];
+        candidate.depth == 0
+            && candidate.queue == node.queue
+            && candidate.line <= node.line
+            && candidate.end_line >= node.line
+    })?;
+    if top_index == index {
+        return Some(RowClosure {
+            nested_rows,
+            first_open_in_tree: first_open_nested.clone(),
+            first_open_nested,
+            top_level: None,
+        });
+    }
+    let tree_range = top_index..nested_indexes(nodes, top_index).end;
+    Some(RowClosure {
+        nested_rows,
+        first_open_nested,
+        top_level: Some(RowRef::of(&nodes[top_index])),
+        first_open_in_tree: first_open(nodes, tree_range),
+    })
+}
+
+/// The node index of the queue row on 1-based document `line`.
+pub fn node_at_line(tree: &QueueTree, line: usize) -> Option<usize> {
+    tree.nodes.iter().position(|node| node.line == line)
+}
+
+/// [`row_closure`] for the queue row starting at byte `offset` of `document`,
+/// given the unfiltered tree of that same document.
+pub fn row_closure_at_offset(
+    tree: &QueueTree,
+    document: &str,
+    offset: usize,
+) -> Option<RowClosure> {
+    row_closure(tree, node_at_line(tree, line_of(document, offset))?)
+}
+
 /// Render the compact text view: the summary, then one line per node.
 pub fn render_text(tree: &QueueTree) -> String {
     let mut out = tree.summary.line();
@@ -848,5 +998,73 @@ mod tests {
         assert_eq!(tooltips[7], "answered · you 0 · agent 1 · done 1");
         let json = serde_json::to_value(&tree).unwrap();
         assert_eq!(json["nodes"][3]["tooltip"], "needs integration");
+    }
+
+    fn closure_of(document: &str, id: &str) -> RowClosure {
+        let tree = queue_tree(document, &QueueTreeOptions::default()).unwrap();
+        let index = tree
+            .nodes
+            .iter()
+            .position(|node| node.id.as_deref() == Some(id))
+            .unwrap();
+        row_closure(&tree, index).unwrap()
+    }
+
+    /// `#guidancescope`: a row's closability reads its subtree and its whole
+    /// top-level tree; a plain live group parent is a label, never open work.
+    #[test]
+    fn row_closure_reads_the_subtree_and_the_top_level_tree() {
+        let doc = "\
+<!-- agent:queue -->
+- ### epic
+  - ~~do [#a]~~
+    - ~~step~~
+  - do [#b]
+- ### ~~do [#solo]~~
+<!-- /agent:queue -->
+";
+        let a = closure_of(doc, "a");
+        assert_eq!(a.nested_rows, 1);
+        assert!(a.subtree_closed());
+        assert_eq!(a.top_level.as_ref().unwrap().label(), "`epic`");
+        assert_eq!(a.first_open_in_tree.as_ref().unwrap().label(), "[#b]");
+        assert!(!a.tree_closed());
+
+        let solo = closure_of(doc, "solo");
+        assert_eq!(solo.nested_rows, 0);
+        assert!(solo.top_level.is_none());
+        assert!(solo.tree_closed(), "the open sibling tree is not this tree");
+
+        let closed = doc.replace("  - do [#b]", "  - ~~do [#b]~~");
+        assert!(
+            closure_of(&closed, "a").tree_closed(),
+            "the label `epic` is not work"
+        );
+    }
+
+    #[test]
+    fn a_parent_with_projected_state_keeps_its_tree_alive() {
+        let doc = "\
+<!-- agent:queue -->
+- ### 🚧 [#subagent:p#1] Build parent [#p]
+  - ~~do [#c]~~
+<!-- /agent:queue -->
+";
+        let c = closure_of(doc, "c");
+        assert!(c.subtree_closed());
+        assert_eq!(c.first_open_in_tree.as_ref().unwrap().label(), "[#p]");
+    }
+
+    #[test]
+    fn a_waiting_item_head_is_never_a_label() {
+        let tree = tree(QueueTreeOptions::default());
+        let older = tree
+            .nodes
+            .iter()
+            .position(|node| node.text == "older note")
+            .unwrap();
+        let closure = row_closure(&tree, older).unwrap();
+        assert!(closure.subtree_closed());
+        assert!(!closure.tree_closed(), "the waiting items stay open");
     }
 }

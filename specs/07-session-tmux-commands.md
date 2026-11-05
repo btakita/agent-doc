@@ -666,6 +666,23 @@ reconcile. Only an actual publication error leaves the original focus refusal
 actionable. This is load-bearing when Remote Dev supplies flat evidence: a
 forced `sync_tmux_layout` has the same missing geometry and is certain to be
 refused, so it cannot be a recovery for the deferral (GH #357).
+A nested controller never retains the editor's layout for a cross-root split: the editor sends
+its spanning frame to the enclosing root's controller and only the focus-only projection to the
+document's own controller (`#focusnosnapshotrestart`). When its escalation defers with
+`no_frontend_layout_snapshot`, it reads the `@agent_doc_layout_claim` of the `agent-doc` window in
+the refused pane's session and, when that claim names a root that strictly encloses its own
+(`focus_escalation_owner`), hands the escalation to that controller (`focus_escalation` RPC,
+bounded at 2 s, never launching a controller). The owner runs its own escalation against its
+retained frontend layout and returns the disposition, which replaces the local deferral
+(`controller_editor_surface_focus_escalation_delegated ... outcome=`). No claim, a claim held by
+this root or a sibling, or an unreachable owner keeps the local deferral
+(`..._delegation_failed fallback=local_deferral`). On the owner, the nested refusal is evidence
+its own unchanged frame never carried: when its retained generation already reached a terminal
+effect, the republication is a fresh effect generation instead of coalescing into it
+(`controller_editor_surface_focus_escalation_delegation_received ... retained_terminal=true`).
+Observed 2026-11-05 after two IDE restarts: haiven-dev answered every `sdk-dev.md` selection with
+`focus_deferred:no_frontend_layout_snapshot` while agent-loop, holding
+`[agent-doc-bugs, sdk-dev]`, only saw `pane_action=none` frames.
 An `outside_agent_doc_window` refusal always publishes a fresh structural effect generation even
 when its columns, order, and focus are identical to the retained escalation: selecting the
 `agent-doc` tmux window is itself the missing consequence. Other identical escalation reasons may

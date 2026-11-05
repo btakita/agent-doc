@@ -486,7 +486,54 @@ pub struct TmuxEffectAttemptLedger {
     attempts: u64,
     claim_stamp_ms: Option<u64>,
     publication: Option<crate::layout_owner::EditorPublicationOrder>,
+    /// `#focusnosnapshotrestart`: the editor surface (frame) whose
+    /// publication [`Self::publication`] records, when the frame named one.
+    publication_surface: Option<String>,
     retired: Option<TmuxEffectRetirement>,
+}
+
+/// What one `editor_surface_forget` names (`#focusnosnapshotrestart`).
+///
+/// The editor retires endpoints, not clients: one plugin client publishes one
+/// frame per editor window (`root`, `frame-<id>`), and closing or re-rooting one
+/// window forgets that `(client, surface)` endpoint only.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EditorSurfaceForget<'a> {
+    pub client_id: &'a str,
+    /// The client's connection generation the forget was issued for.
+    pub connection_generation: u64,
+    /// `Some(surface)` for an endpoint-scoped forget; `None` for a whole
+    /// client (or client family).
+    pub surface_id: Option<&'a str>,
+}
+
+/// `#focusnosnapshotrestart`: does `forget` retire a generation the editor
+/// published as `publication` from `publication_surface`?
+///
+/// `#stalecontrollerhotupdate` (d) retired the retained generation whenever its
+/// publishing CLIENT was forgotten. A post-restart IDE publishes its restored
+/// two-window layout from its `root` surface and, in the same delivery, retires
+/// a stale sibling frame endpoint (`frame-598fb057`) of the same client. Live
+/// 2026-11-05 16:52:12 that sibling forget retired agent-loop's generation 6
+/// (`[agent-doc-bugs, sdk-dev]`, focus `sdk-dev`) 0 ms after it was published:
+/// the frame the editor was actually showing. Only a forget of the publishing
+/// endpoint, or of the whole client at the publishing connection generation or
+/// later, retires it. A publication with no recorded surface keeps the
+/// client-wide rule (no evidence that another endpoint published it).
+pub fn editor_forget_retires_publication(
+    publication: &crate::layout_owner::EditorPublicationOrder,
+    publication_surface: Option<&str>,
+    forget: EditorSurfaceForget<'_>,
+) -> bool {
+    if publication.client_id != forget.client_id
+        || publication.generation > forget.connection_generation
+    {
+        return false;
+    }
+    match (forget.surface_id, publication_surface) {
+        (Some(forgotten), Some(published)) => forgotten == published,
+        _ => true,
+    }
 }
 
 impl TmuxEffectAttemptLedger {
@@ -575,6 +622,19 @@ impl TmuxEffectAttemptLedger {
         now_ms: u64,
         publication: Option<crate::layout_owner::EditorPublicationOrder>,
     ) {
+        self.note_published_from_surface(generation, now_ms, publication, None);
+    }
+
+    /// [`Self::note_published`] that also records which editor surface
+    /// published the frame (`#focusnosnapshotrestart`), so a forget of a
+    /// sibling surface of the same client cannot retire it.
+    pub fn note_published_from_surface(
+        &mut self,
+        generation: u64,
+        now_ms: u64,
+        publication: Option<crate::layout_owner::EditorPublicationOrder>,
+        surface: Option<String>,
+    ) {
         if !self.track(generation) {
             return;
         }
@@ -586,8 +646,28 @@ impl TmuxEffectAttemptLedger {
                 .is_none_or(|current| publication.is_newer_than(current) != Some(false));
             if newer {
                 self.publication = Some(publication);
+                self.publication_surface = surface;
             }
         }
+    }
+
+    /// `#focusnosnapshotrestart`: retire `generation` when `forget` names the
+    /// editor endpoint that published it ([`editor_forget_retires_publication`]).
+    /// True only for the first retirement.
+    pub fn retire_forgotten_by_editor(
+        &mut self,
+        generation: u64,
+        forget: EditorSurfaceForget<'_>,
+    ) -> bool {
+        let forgotten = self.generation == generation
+            && self.publication.as_ref().is_some_and(|publication| {
+                editor_forget_retires_publication(
+                    publication,
+                    self.publication_surface.as_deref(),
+                    forget,
+                )
+            });
+        forgotten && self.retire(generation, TmuxEffectRetirement::EditorSurfaceForgotten)
     }
 
     /// The editor publication order of `generation`, if an editor frame
@@ -746,6 +826,106 @@ mod tests {
         assert_eq!(
             ledger.begin_attempt(5),
             TmuxEffectAttemptAdmission::Attempt { number: 1 }
+        );
+    }
+
+    /// `#focusnosnapshotrestart`: live 2026-11-05 16:52:12 the restarted IDE
+    /// published `[agent-doc-bugs, sdk-dev]` from its `root` surface and in the
+    /// same delivery forgot a stale sibling frame of the same client; that
+    /// forget retired the generation the editor was showing.
+    #[test]
+    fn only_a_forget_of_the_publishing_endpoint_retires_its_generation() {
+        use crate::layout_owner::EditorPublicationOrder;
+        const CLIENT: &str = "jetbrains@IU.c1c7a146-pid:2781751";
+        let order = EditorPublicationOrder {
+            client_id: CLIENT.to_string(),
+            generation: 689_953_018_807_896,
+            sequence: 8,
+        };
+        let forget = |surface_id, connection_generation| EditorSurfaceForget {
+            client_id: CLIENT,
+            connection_generation,
+            surface_id,
+        };
+        let published = |surface: Option<&str>| {
+            let mut ledger = TmuxEffectAttemptLedger::default();
+            ledger.note_published_from_surface(
+                6,
+                1_000,
+                Some(order.clone()),
+                surface.map(str::to_string),
+            );
+            ledger
+        };
+
+        // The incident: a sibling frame's forget leaves `root`'s generation live.
+        let mut ledger = published(Some("root"));
+        assert!(
+            !ledger
+                .retire_forgotten_by_editor(6, forget(Some("frame-598fb057"), 689_953_018_807_896))
+        );
+        assert_eq!(ledger.retired(6), None);
+        assert_eq!(
+            ledger.begin_attempt(6),
+            TmuxEffectAttemptAdmission::Attempt { number: 1 }
+        );
+
+        // The publishing endpoint's own forget still retires it, once.
+        let mut ledger = published(Some("root"));
+        assert!(ledger.retire_forgotten_by_editor(6, forget(Some("root"), 689_953_018_807_896)));
+        assert!(!ledger.retire_forgotten_by_editor(6, forget(Some("root"), 689_953_018_807_896)));
+        assert_eq!(
+            ledger.retired(6),
+            Some(TmuxEffectRetirement::EditorSurfaceForgotten)
+        );
+
+        // A whole-client forget at (or after) the publishing connection retires it.
+        let mut ledger = published(Some("root"));
+        assert!(ledger.retire_forgotten_by_editor(6, forget(None, 689_953_018_807_897)));
+
+        // A late forget for an OLDER connection never retires a newer one's frame.
+        let mut ledger = published(Some("root"));
+        assert!(!ledger.retire_forgotten_by_editor(6, forget(None, 689_953_018_807_895)));
+        assert!(!ledger.retire_forgotten_by_editor(6, forget(Some("root"), 689_953_018_807_895)));
+
+        // Another client never retires it.
+        let mut ledger = published(Some("root"));
+        assert!(!ledger.retire_forgotten_by_editor(
+            6,
+            EditorSurfaceForget {
+                client_id: "jetbrains-focus@IU.c1c7a146-pid:2781751",
+                ..forget(Some("root"), 689_953_018_807_896)
+            }
+        ));
+
+        // No recorded surface keeps the client-wide rule.
+        let mut ledger = published(None);
+        assert!(
+            ledger
+                .retire_forgotten_by_editor(6, forget(Some("frame-598fb057"), 689_953_018_807_896))
+        );
+
+        // A generation the ledger is not tracking, or one no editor published.
+        let mut ledger = published(Some("root"));
+        assert!(!ledger.retire_forgotten_by_editor(5, forget(None, u64::MAX)));
+        let mut unpublished = TmuxEffectAttemptLedger::default();
+        unpublished.note_published(6, 1_000, None);
+        assert!(!unpublished.retire_forgotten_by_editor(6, forget(None, u64::MAX)));
+
+        // A newer frame from another surface re-attributes the generation.
+        let mut ledger = published(Some("frame-598fb057"));
+        ledger.note_published_from_surface(
+            6,
+            2_000,
+            Some(EditorPublicationOrder {
+                sequence: 9,
+                ..order.clone()
+            }),
+            Some("root".to_string()),
+        );
+        assert!(
+            !ledger
+                .retire_forgotten_by_editor(6, forget(Some("frame-598fb057"), 689_953_018_807_896))
         );
     }
 

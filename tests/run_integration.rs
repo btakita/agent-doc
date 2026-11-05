@@ -1956,3 +1956,111 @@ fn interrupted_run_leaves_write_applied_and_preflight_finishes_commit() {
     );
     assert_terminal_closeout_proof(tmp.path(), &doc);
 }
+
+/// `#interruptedhealgap`: observed 2026-11-04 on agent-doc-bugs.md, cycle
+/// `cycle-1793828280709`. The response write landed (`write_applied`) but the
+/// retained closeout never reached the commit boundary. `session-check`
+/// reported `INTERRUPTED: ... still write_applied ... no terminal commit
+/// followed.` and named no command; `agent-doc repair <FILE>
+/// --session-check-heal` printed the same line and changed nothing; only
+/// `agent-doc commit <FILE>` closed it. Every report of that state (the
+/// status-only check AND the heal) must name the command that resolves it, and
+/// that command must actually resolve it.
+#[test]
+fn write_applied_interruption_names_the_commit_that_resolves_it() {
+    let tmp = TempDir::new().unwrap();
+    let doc = tmp.path().join("session.md");
+    fs::write(&doc, template_doc()).unwrap();
+    init_git_repo(tmp.path(), &doc);
+
+    let script = write_mock_agent(
+        tmp.path(),
+        "<!-- patch:exchange -->\n### Re: stranded write — gpt-5\nbody\n<!-- /patch:exchange -->\n",
+    );
+    let config_root = write_config(tmp.path(), &script);
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .env("XDG_CONFIG_HOME", &config_root)
+        .env("AGENT_DOC_TEST_ABORT_AFTER_RUN_WRITE_APPLIED", "1")
+        .args(["run", doc.to_str().unwrap()])
+        .assert()
+        .failure();
+    assert_eq!(read_cycle_phase(&doc), "write_applied");
+    assert!(
+        fs::read_to_string(&doc)
+            .unwrap()
+            .contains("### Re: stranded write — gpt-5"),
+        "fixture: the response write must already be visible"
+    );
+
+    let resolver = format!("agent-doc commit {}", doc.display());
+    let head_before = ProcessCommand::new("git")
+        .current_dir(tmp.path())
+        .args(["rev-parse", "HEAD"])
+        .output()
+        .unwrap()
+        .stdout;
+    for args in [
+        vec!["session-check", doc.to_str().unwrap()],
+        vec!["repair", doc.to_str().unwrap(), "--session-check-heal"],
+    ] {
+        let out = agent_doc()
+            .current_dir(tmp.path())
+            .env("XDG_CONFIG_HOME", &config_root)
+            .env("AGENT_DOC_SESSION_CHECK_SETTLE_SECS", "0")
+            .args(&args)
+            .output()
+            .unwrap();
+        let text = format!(
+            "{}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(
+            !out.status.success(),
+            "{args:?}: must stay interrupted\n{text}"
+        );
+        assert!(
+            text.contains("INTERRUPTED") && text.contains("write_applied"),
+            "{args:?}: must report the stranded write_applied cycle\n{text}"
+        );
+        assert!(
+            text.contains(&format!("`{resolver}`")),
+            "{args:?}: must name the command that resolves it\n{text}"
+        );
+        assert_eq!(read_cycle_phase(&doc), "write_applied", "{args:?}");
+    }
+    let head_after_reports = ProcessCommand::new("git")
+        .current_dir(tmp.path())
+        .args(["rev-parse", "HEAD"])
+        .output()
+        .unwrap()
+        .stdout;
+    assert_eq!(
+        head_before, head_after_reports,
+        "neither report may commit on its own"
+    );
+
+    // Anti-vacuity: the named command really is the resolver.
+    agent_doc()
+        .current_dir(tmp.path())
+        .env("XDG_CONFIG_HOME", &config_root)
+        .args(["commit", doc.to_str().unwrap()])
+        .assert()
+        .success();
+    assert_eq!(read_cycle_phase(&doc), "committed");
+    let head = ProcessCommand::new("git")
+        .current_dir(tmp.path())
+        .args(["show", "HEAD:session.md"])
+        .output()
+        .unwrap();
+    assert!(String::from_utf8_lossy(&head.stdout).contains("### Re: stranded write — gpt-5"));
+    agent_doc()
+        .current_dir(tmp.path())
+        .env("XDG_CONFIG_HOME", &config_root)
+        .env("AGENT_DOC_SESSION_CHECK_SETTLE_SECS", "0")
+        .args(["session-check", doc.to_str().unwrap()])
+        .assert()
+        .success();
+}

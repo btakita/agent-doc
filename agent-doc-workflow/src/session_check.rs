@@ -962,6 +962,71 @@ pub struct OpenCycleMessage<'a> {
     /// positive liveness evidence, never inferred from elapsed time or another
     /// pane's project-wide marker.
     pub active_owner_pane: Option<&'a str>,
+    /// `#interruptedhealgap`: whether the open cycle's captured response is
+    /// visible in the current document authority. Selects the command the
+    /// generic report names; see [`open_cycle_resolution`].
+    pub captured_response: CapturedResponseVisibility,
+}
+
+/// `#interruptedhealgap`: whether an open cycle's durably captured response is
+/// already visible in the current document authority.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CapturedResponseVisibility {
+    /// No durable capture identifies the response body, so nothing can be
+    /// compared. For `write_applied` the phase itself records that the write
+    /// landed.
+    NoCapture,
+    /// The captured response body is materialized in the current document.
+    Visible,
+    /// The cycle owns a captured response the current document does not carry.
+    Missing,
+}
+
+/// `#interruptedhealgap`: the sentence naming the command that closes a
+/// generic open cycle.
+///
+/// Observed 2026-11-04 (agent-doc-bugs.md, `cycle-1793828280709`): a
+/// `write_applied` cycle whose retained closeout never reached the commit
+/// boundary was reported as `INTERRUPTED: ... no terminal commit followed.`
+/// with no command, by both `session-check` and `repair --session-check-heal`;
+/// only `agent-doc commit <FILE>` closed it. Every open phase now names its
+/// resolver:
+/// - `write_applied` with the response visible (or no capture to compare): the
+///   write already landed, so only the binary-owned commit boundary is missing
+///   — `agent-doc commit <FILE>`.
+/// - `write_applied` / `response_captured` with a capture the document does
+///   not carry: replay that same durable capture —
+///   `agent-doc repair <FILE> --resume-capture`.
+/// - `response_captured` without a capture: persist the response through
+///   `agent-doc write --commit <FILE>`.
+/// - `preflight_started`: no response was captured; the turn persists one with
+///   `agent-doc finalize <FILE>`, or `agent-doc cancel <FILE>` abandons an
+///   empty preflight.
+///
+/// Terminal phases have nothing to resolve and return `None`.
+pub fn open_cycle_resolution(
+    file: &str,
+    phase: CyclePhase,
+    captured_response: CapturedResponseVisibility,
+) -> Option<String> {
+    let rerun = format!("then rerun `agent-doc session-check {file}`");
+    Some(match (phase, captured_response) {
+        (CyclePhase::WriteApplied, CapturedResponseVisibility::Missing)
+        | (CyclePhase::ResponseCaptured, CapturedResponseVisibility::Missing)
+        | (CyclePhase::ResponseCaptured, CapturedResponseVisibility::Visible) => format!(
+            "To resolve it, run `agent-doc repair {file} --resume-capture` to replay the same durable capture through its closeout and commit, {rerun}."
+        ),
+        (CyclePhase::WriteApplied, _) => format!(
+            "The response is already in the document; if the retained closeout does not commit it on its own, run `agent-doc commit {file}` to close the binary-owned commit boundary, {rerun}."
+        ),
+        (CyclePhase::ResponseCaptured, CapturedResponseVisibility::NoCapture) => format!(
+            "To resolve it, persist the response with `agent-doc write --commit {file}`, {rerun}."
+        ),
+        (CyclePhase::PreflightStarted, _) => format!(
+            "To resolve it, persist the turn's response with `agent-doc finalize {file}` (or `agent-doc write --commit {file}`); if no response will be written, `agent-doc cancel {file}` abandons the empty preflight; {rerun}."
+        ),
+        (CyclePhase::Committed | CyclePhase::Abandoned, _) => return None,
+    })
 }
 
 pub fn open_cycle_message(input: OpenCycleMessage<'_>) -> String {
@@ -993,12 +1058,16 @@ pub fn open_cycle_message(input: OpenCycleMessage<'_>) -> String {
             input.ipc_hint
         );
     }
+    let resolution = open_cycle_resolution(input.file, input.phase, input.captured_response)
+        .map(|sentence| format!(" {sentence}"))
+        .unwrap_or_default();
     format!(
-        "[session-check] INTERRUPTED: cycle `{}` is still `{}` ({}) — {}.{}",
+        "[session-check] INTERRUPTED: cycle `{}` is still `{}` ({}) — {}.{}{}",
         input.cycle_id,
         input.phase.as_str(),
         input.last_event,
         open_cycle_detail(input.phase),
+        resolution,
         input.ipc_hint
     )
 }
@@ -1585,6 +1654,7 @@ mod tests {
             last_event: "direct_invocation_timeout after 30s",
             ipc_hint: " ipc proof pending",
             active_owner_pane: None,
+            captured_response: CapturedResponseVisibility::NoCapture,
         });
 
         assert!(message.contains("direct invocation did not reach response capture"));
@@ -1602,9 +1672,93 @@ mod tests {
             last_event: "capture_response",
             ipc_hint: "",
             active_owner_pane: None,
+            captured_response: CapturedResponseVisibility::NoCapture,
         });
 
         assert!(message.contains("response was captured but no write/commit followed"));
+    }
+
+    /// `#interruptedhealgap`: the 2026-11-04 `cycle-1793828280709` report
+    /// named no command; `agent-doc commit <FILE>` was the resolver.
+    #[test]
+    fn open_cycle_message_names_commit_for_a_landed_write_applied_cycle() {
+        for captured_response in [
+            CapturedResponseVisibility::Visible,
+            CapturedResponseVisibility::NoCapture,
+        ] {
+            let message = open_cycle_message(OpenCycleMessage {
+                file: "doc.md",
+                cycle_id: "cycle-1793828280709",
+                phase: CyclePhase::WriteApplied,
+                last_event: "write_applied",
+                ipc_hint: "",
+                active_owner_pane: None,
+                captured_response,
+            });
+            assert!(
+                message.contains("response write landed but no terminal commit followed"),
+                "the settle-window token must survive: {message}"
+            );
+            assert!(
+                message.contains("run `agent-doc commit doc.md`"),
+                "{captured_response:?}: {message}"
+            );
+            assert!(message.contains("rerun `agent-doc session-check doc.md`"));
+        }
+    }
+
+    #[test]
+    fn open_cycle_message_names_resume_capture_when_the_capture_is_not_visible() {
+        for phase in [CyclePhase::WriteApplied, CyclePhase::ResponseCaptured] {
+            let message = open_cycle_message(OpenCycleMessage {
+                file: "doc.md",
+                cycle_id: "cycle-6",
+                phase,
+                last_event: phase.as_str(),
+                ipc_hint: "",
+                active_owner_pane: None,
+                captured_response: CapturedResponseVisibility::Missing,
+            });
+            assert!(
+                message.contains("`agent-doc repair doc.md --resume-capture`"),
+                "{phase:?}: {message}"
+            );
+            assert!(
+                !message.contains("`agent-doc commit doc.md`"),
+                "{phase:?}: committing would drop the captured response: {message}"
+            );
+        }
+    }
+
+    /// Every open phase names a resolver; terminal phases have none.
+    #[test]
+    fn every_open_phase_names_an_agent_doc_resolver() {
+        for phase in [
+            CyclePhase::PreflightStarted,
+            CyclePhase::ResponseCaptured,
+            CyclePhase::WriteApplied,
+            CyclePhase::Committed,
+            CyclePhase::Abandoned,
+        ] {
+            for captured_response in [
+                CapturedResponseVisibility::NoCapture,
+                CapturedResponseVisibility::Visible,
+                CapturedResponseVisibility::Missing,
+            ] {
+                let resolution = open_cycle_resolution("doc.md", phase, captured_response);
+                assert_eq!(
+                    resolution.is_some(),
+                    phase.is_open(),
+                    "{phase:?}/{captured_response:?}: {resolution:?}"
+                );
+                if let Some(sentence) = resolution {
+                    assert!(
+                        sentence.contains("`agent-doc ") && sentence.contains(" doc.md"),
+                        "{phase:?}/{captured_response:?}: {sentence}"
+                    );
+                }
+            }
+        }
     }
 
     #[test]
@@ -1616,6 +1770,7 @@ mod tests {
             last_event: "preflight_started",
             ipc_hint: "",
             active_owner_pane: Some("%152"),
+            captured_response: CapturedResponseVisibility::NoCapture,
         });
 
         assert!(message.starts_with("[session-check] IN PROGRESS:"));

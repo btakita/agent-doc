@@ -59,6 +59,13 @@ import {
 } from './popupMenu.js';
 import { DASHBOARD_COMMAND_ARGS, dashboardPath } from './dashboard.js';
 import {
+    glyphIconDataUri,
+    planQueueTreeAutoFolds,
+    queueTreeFolds,
+    queueTreeTooltip,
+    type QueueTreeFold,
+} from './queueTreeGutter.js';
+import {
     AGENT_DOC_EXTENSION_ID,
     installedExtension,
     staleExtensionVerdict,
@@ -773,6 +780,13 @@ function refreshActiveTurnStatus(): void {
 class SyntaxDecorationController implements vscode.Disposable {
     private readonly disposables: vscode.Disposable[] = [];
     private readonly refreshTimers = new Map<string, ReturnType<typeof setTimeout>>();
+    /** `#queuetreegutter`: one gutter decoration per native glyph, created on first use. */
+    private readonly queueGlyphDecorations = new Map<string, vscode.TextEditorDecorationType>();
+    /** Closed-subtree folds per document URI, served by the folding range provider. */
+    private readonly queueFolds = new Map<string, QueueTreeFold[]>();
+    /** Fold keys already collapsed once per document URI (an operator may reopen them). */
+    private readonly queueAutoFolded = new Map<string, Set<string>>();
+    private readonly queueFoldsChanged = new vscode.EventEmitter<void>();
     private readonly componentBodyDecoration = vscode.window.createTextEditorDecorationType({
         backgroundColor: new vscode.ThemeColor('editor.rangeHighlightBackground'),
     });
@@ -854,6 +868,17 @@ class SyntaxDecorationController implements vscode.Disposable {
             this.queueReportLocalDecoration,
             this.queueReportPublishedDecoration,
             this.queueReportPublishedLocalDecoration,
+            this.queueFoldsChanged,
+            vscode.languages.registerFoldingRangeProvider(
+                { language: 'markdown' },
+                {
+                    onDidChangeFoldingRanges: this.queueFoldsChanged.event,
+                    provideFoldingRanges: (document) =>
+                        (this.queueFolds.get(document.uri.toString()) ?? []).map(
+                            (fold) => new vscode.FoldingRange(fold.start, fold.end, vscode.FoldingRangeKind.Region),
+                        ),
+                },
+            ),
         );
         this.disposables.push(
             vscode.window.onDidChangeVisibleTextEditors((editors) => {
@@ -865,6 +890,8 @@ class SyntaxDecorationController implements vscode.Disposable {
             vscode.workspace.onDidOpenTextDocument((document) => this.scheduleRefresh(document)),
             vscode.workspace.onDidChangeTextDocument((event) => this.scheduleRefresh(event.document)),
             vscode.workspace.onDidCloseTextDocument((document) => {
+                this.queueFolds.delete(document.uri.toString());
+                this.queueAutoFolded.delete(document.uri.toString());
                 const timer = this.refreshTimers.get(document.uri.toString());
                 if (timer) {
                     clearTimeout(timer);
@@ -994,6 +1021,64 @@ class SyntaxDecorationController implements vscode.Disposable {
         editor.setDecorations(this.queueReportLocalDecoration, ranges.queueReportLocal);
         editor.setDecorations(this.queueReportPublishedDecoration, ranges.queueReportPublished);
         editor.setDecorations(this.queueReportPublishedLocalDecoration, ranges.queueReportPublishedLocal);
+        this.refreshQueueTree(editor, root);
+    }
+
+    /**
+     * `#queuetreegutter`: one gutter icon per queue tree node (glyph and tooltip
+     * from the binary), and a fold over each closed subtree. A tree that is
+     * unavailable (older library, or a document that does not parse mid-edit)
+     * keeps the last icons and folds.
+     */
+    private refreshQueueTree(editor: vscode.TextEditor, root: string | undefined): void {
+        const nodes = native.queueTreeNodes(editor.document.getText(), root);
+        if (nodes === null) return;
+        const byGlyph = new Map<string, vscode.DecorationOptions[]>();
+        for (const node of nodes) {
+            if (node.line > editor.document.lineCount) continue;
+            const range = editor.document.lineAt(node.line - 1).range;
+            const options = byGlyph.get(node.glyph) ?? [];
+            options.push({ range, hoverMessage: queueTreeTooltip(node) });
+            byGlyph.set(node.glyph, options);
+        }
+        for (const glyph of byGlyph.keys()) {
+            if (!this.queueGlyphDecorations.has(glyph)) {
+                this.queueGlyphDecorations.set(
+                    glyph,
+                    vscode.window.createTextEditorDecorationType({
+                        gutterIconPath: vscode.Uri.parse(glyphIconDataUri(glyph)),
+                        gutterIconSize: 'contain',
+                    }),
+                );
+            }
+        }
+        for (const [glyph, decoration] of this.queueGlyphDecorations) {
+            editor.setDecorations(decoration, byGlyph.get(glyph) ?? []);
+        }
+
+        const key = editor.document.uri.toString();
+        const folds = queueTreeFolds(nodes).filter((fold) => fold.end < editor.document.lineCount);
+        const previous = this.queueFolds.get(key) ?? [];
+        if (JSON.stringify(previous) !== JSON.stringify(folds)) {
+            this.queueFolds.set(key, folds);
+            this.queueFoldsChanged.fire();
+        }
+        // Each closed subtree collapses once when it first appears closed. The
+        // fold command acts on the active editor only, so others wait their turn.
+        if (editor !== vscode.window.activeTextEditor) return;
+        const plan = planQueueTreeAutoFolds(
+            folds,
+            this.queueAutoFolded.get(key) ?? new Set(),
+            editor.selections.map((selection) => selection.active.line),
+        );
+        this.queueAutoFolded.set(key, plan.remembered);
+        if (plan.collapse.length === 0) return;
+        const selectionLines = plan.collapse.map((fold) => fold.start);
+        // Let the folding model pick up the provider's new ranges first.
+        setTimeout(() => {
+            if (vscode.window.activeTextEditor !== editor) return;
+            void vscode.commands.executeCommand('editor.fold', { levels: 1, direction: 'down', selectionLines });
+        }, 150);
     }
 
     private clearEditor(editor: vscode.TextEditor): void {
@@ -1012,6 +1097,9 @@ class SyntaxDecorationController implements vscode.Disposable {
         editor.setDecorations(this.queueReportLocalDecoration, []);
         editor.setDecorations(this.queueReportPublishedDecoration, []);
         editor.setDecorations(this.queueReportPublishedLocalDecoration, []);
+        for (const decoration of this.queueGlyphDecorations.values()) {
+            editor.setDecorations(decoration, []);
+        }
     }
 
     dispose(): void {
@@ -1025,6 +1113,10 @@ class SyntaxDecorationController implements vscode.Disposable {
         for (const disposable of this.disposables) {
             disposable.dispose();
         }
+        for (const decoration of this.queueGlyphDecorations.values()) {
+            decoration.dispose();
+        }
+        this.queueGlyphDecorations.clear();
     }
 }
 

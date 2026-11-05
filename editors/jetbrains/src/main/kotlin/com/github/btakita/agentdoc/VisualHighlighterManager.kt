@@ -15,6 +15,7 @@ import com.intellij.openapi.editor.event.DocumentEvent
 import com.intellij.openapi.editor.event.DocumentListener
 import com.intellij.openapi.editor.event.EditorFactoryEvent
 import com.intellij.openapi.editor.event.EditorFactoryListener
+import com.intellij.openapi.editor.FoldRegion
 import com.intellij.openapi.editor.markup.EffectType
 import com.intellij.openapi.editor.markup.GutterIconRenderer
 import com.intellij.openapi.editor.markup.HighlighterLayer
@@ -56,21 +57,47 @@ internal data class VisualHighlightKey(
     val layer: Int,
     val kind: String,
     val attributes: Any?,
+    /** `#queuetreegutter`: the gutter icon's `[glyph, tooltip]`, part of the identity. */
+    val gutter: List<String>? = null,
 ) {
     /** GH #339 R1: the identity a highlighter carries, as JDK values only (never this class). */
-    fun toUserData(): List<Any?> = listOf(start, end, layer, kind, attributes)
+    fun toUserData(): List<Any?> = listOf(start, end, layer, kind, attributes, gutter)
 
     companion object {
         fun fromUserData(data: List<Any?>): VisualHighlightKey? {
-            if (data.size != 5) return null
+            if (data.size != 5 && data.size != 6) return null
             val start = data[0] as? Int ?: return null
             val end = data[1] as? Int ?: return null
             val layer = data[2] as? Int ?: return null
             val kind = data[3] as? String ?: return null
-            return VisualHighlightKey(start, end, layer, kind, data[4])
+            @Suppress("UNCHECKED_CAST")
+            val gutter = data.getOrNull(5)?.let { it as? List<String> ?: return null }
+            return VisualHighlightKey(start, end, layer, kind, data[4], gutter)
         }
     }
 }
+
+/**
+ * `#queuetreegutter`: the gutter keys of the queue tree nodes. When the native tree is
+ * unavailable ([nodes] null: an older library, or a document that does not parse mid-edit) the
+ * queue icons the editor already shows are kept, at the offsets their range markers track.
+ */
+internal fun queueTreeGutterKeys(
+    nodes: List<QueueTreeGutterNode>?,
+    tracked: List<VisualHighlightKey>,
+    layer: Int,
+    attributes: Any?,
+): List<VisualHighlightKey> =
+    nodes?.map { node ->
+        VisualHighlightKey(
+            start = node.rowStart,
+            end = node.rowEnd,
+            layer = layer,
+            kind = QueueTreeGutter.KIND,
+            attributes = attributes,
+            gutter = listOf(node.glyph, node.tooltip),
+        )
+    } ?: tracked.filter { it.kind == QueueTreeGutter.KIND }
 
 internal data class VisualHighlightPlan<H>(
     val remove: List<H>,
@@ -170,6 +197,11 @@ class VisualHighlighterManager private constructor(private val project: Project)
          * document is mid-edit unparseable, which keeps the last tracked outline.
          */
         val components: List<AgentDocComponentOutline.ComponentSpan>?,
+        /**
+         * `#queuetreegutter`: queue tree nodes for the same text. Empty for a document without
+         * a queue; null when the native tree was unavailable, which keeps the last icons and folds.
+         */
+        val queueNodes: List<QueueTreeGutterNode>?,
     )
 
     /** Component boundaries consumed by folding, gutter markers, and the structure view. */
@@ -341,6 +373,12 @@ class VisualHighlighterManager private constructor(private val project: Project)
                     } else {
                         emptyList()
                     },
+                queueNodes =
+                    if (isAgentDocDocumentTextUtil(snapshot.text)) {
+                        QueueTreeGutter.nodesOrNull(snapshot.text)
+                    } else {
+                        emptyList()
+                    },
             )
         } catch (e: Throwable) {
             LOG.debug("[visual] token refresh skipped: ${e.message}")
@@ -351,7 +389,10 @@ class VisualHighlighterManager private constructor(private val project: Project)
     private fun applyVisualTokens(document: Document, snapshot: VisualTokenSnapshot) {
         if (!isMarkdown(document)) return
         if (document.modificationStamp != snapshot.modificationStamp) return
-        EditorFactory.getInstance().getEditors(document, project).forEach { refreshEditor(it, snapshot.tokens) }
+        EditorFactory.getInstance().getEditors(document, project).forEach {
+            refreshEditor(it, snapshot.tokens, snapshot.queueNodes)
+            snapshot.queueNodes?.let { nodes -> refreshQueueTreeFolds(it, nodes) }
+        }
         snapshot.components?.let { installComponentOutline(document, it) }
     }
 
@@ -384,7 +425,11 @@ class VisualHighlighterManager private constructor(private val project: Project)
      * track offset drift, so after a keystroke almost every highlighter still
      * matches its token and only the changed ones are touched.
      */
-    private fun refreshEditor(editor: Editor, tokens: List<NativePatching.VisualToken>) {
+    private fun refreshEditor(
+        editor: Editor,
+        tokens: List<NativePatching.VisualToken>,
+        queueNodes: List<QueueTreeGutterNode>?,
+    ) {
         if (editor.isDisposed) return
         if (!isMarkdown(editor.document)) {
             clearEditor(editor)
@@ -424,16 +469,22 @@ class VisualHighlighterManager private constructor(private val project: Project)
                 clearEditor(editor)
                 emptyList()
             }
-        val plan =
-            planVisualHighlightReconcile(
-                tracked.map { highlighter -> highlighter to highlighter.visualHighlightKey() },
-                desired,
-            )
+        val trackedKeys = tracked.map { highlighter -> highlighter to highlighter.visualHighlightKey() }
+        val queueAttributes = attrsByKind.getOrPut(QueueTreeGutter.KIND) { TextAttributes() }
+        val desiredWithQueue =
+            desired +
+                queueTreeGutterKeys(
+                    queueNodes,
+                    trackedKeys.mapNotNull { it.second },
+                    HighlighterLayer.ADDITIONAL_SYNTAX,
+                    queueAttributes,
+                ).filter { it.end > it.start && it.end <= textLength }
+        val plan = planVisualHighlightReconcile(trackedKeys, desiredWithQueue)
         for (highlighter in plan.remove) {
             if (highlighter.isValid) markup.removeHighlighter(highlighter)
         }
         val removed = plan.remove.toHashSet()
-        val next = ArrayList<RangeHighlighter>(desired.size)
+        val next = ArrayList<RangeHighlighter>(desiredWithQueue.size)
         tracked.filterTo(next) { it !in removed }
         for (key in plan.add) {
             val highlighter = markup.addRangeHighlighter(
@@ -445,7 +496,10 @@ class VisualHighlighterManager private constructor(private val project: Project)
             )
             highlighter.putUserData(HIGHLIGHTER_KEY, true)
             highlighter.putUserData(HIGHLIGHT_IDENTITY_KEY, key.toUserData())
-            if (key.kind.startsWith("recent_rank_")) {
+            val gutter = key.gutter
+            if (key.kind == QueueTreeGutter.KIND && gutter != null && gutter.size == 2) {
+                highlighter.gutterIconRenderer = ShellQueueReportGutterIconRenderer(gutter[0], gutter[1])
+            } else if (key.kind.startsWith("recent_rank_")) {
                 val rank = key.kind.removePrefix("recent_rank_").toInt()
                 highlighter.gutterIconRenderer = RecencyRankGutterRenderer(
                     rank,
@@ -536,6 +590,54 @@ class VisualHighlighterManager private constructor(private val project: Project)
         markup.allHighlighters
             .filter { it.getUserData(HIGHLIGHTER_KEY) == true }
             .forEach { markup.removeHighlighter(it) }
+        clearQueueTreeFolds(editor)
+    }
+
+    /**
+     * `#queuetreegutter`: fold each closed queue subtree (`line + 1 ..= end_line`). The folds are
+     * this manager's own regions, reconciled per refresh by [planQueueTreeFolds]: a kept fold keeps
+     * the operator's expansion, a new one starts collapsed. EDT, document at the snapshot stamp.
+     */
+    private fun refreshQueueTreeFolds(editor: Editor, nodes: List<QueueTreeGutterNode>) {
+        if (editor.isDisposed) return
+        val folding = editor.foldingModel
+        val tracked = editor.getUserData(QUEUE_FOLDS_KEY).orEmpty()
+        val desired = QueueTreeGutter.folds(nodes, editor.document.charsSequence)
+        val existing =
+            tracked.map { region ->
+                ExistingQueueTreeFold(
+                    region,
+                    if (region.isValid) region.startOffset else -1,
+                    if (region.isValid) region.endOffset else -1,
+                    region.isExpanded,
+                )
+            }
+        val plan =
+            planQueueTreeFolds(existing, desired, editor.caretModel.allCarets.map { it.offset })
+        if (plan.remove.isEmpty() && plan.add.isEmpty()) return
+        val removed = plan.remove.toHashSet()
+        val next = tracked.filterTo(ArrayList()) { it !in removed && it.isValid }
+        folding.runBatchFoldingOperation {
+            for (region in plan.remove) {
+                if (region.isValid) folding.removeFoldRegion(region)
+            }
+            for ((fold, expanded) in plan.add) {
+                val region = folding.addFoldRegion(fold.start, fold.end, fold.placeholder) ?: continue
+                region.isExpanded = expanded
+                next.add(region)
+            }
+        }
+        editor.putUserData(QUEUE_FOLDS_KEY, next)
+    }
+
+    private fun clearQueueTreeFolds(editor: Editor) {
+        val tracked = editor.getUserData(QUEUE_FOLDS_KEY) ?: return
+        editor.putUserData(QUEUE_FOLDS_KEY, null)
+        if (editor.isDisposed) return
+        val folding = editor.foldingModel
+        folding.runBatchFoldingOperation {
+            tracked.filter { it.isValid }.forEach { folding.removeFoldRegion(it) }
+        }
     }
 
     private fun isMarkdown(document: Document): Boolean {
@@ -687,6 +789,7 @@ class VisualHighlighterManager private constructor(private val project: Project)
         private val TRACKED_HIGHLIGHTERS_KEY = GenerationKeys.create<List<RangeHighlighter>>("agent-doc.visual.tracked-highlighters")
         private val RECENCY_STATE_KEY = GenerationKeys.create<MutableMap<String, Any>>("agent-doc.visual.recency-state")
         private val RECENCY_CARET_LISTENER_KEY = GenerationKeys.create<Boolean>("agent-doc.visual.recency-caret-listener")
+        private val QUEUE_FOLDS_KEY = GenerationKeys.create<List<FoldRegion>>("agent-doc.visual.queue-tree-folds")
         private val INSTANCES = ConcurrentHashMap<Project, VisualHighlighterManager>()
         private const val ADDRESSED_AT_PREFIX = "⟦addressed-at:"
 

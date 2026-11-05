@@ -14,6 +14,7 @@ agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.568
 agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.568" }
 agent-doc-merge = { path = "../agent-doc-merge", version = "0.35.568" }
 agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.35.568" }
+agent-doc-queue = { path = "../agent-doc-queue", version = "0.35.568" }
 anyhow = "1"
 base64 = "0.22"
 serde = { version = "1", features = ["derive"] }

@@ -7,6 +7,7 @@
 
 mod handoff;
 mod input;
+mod queue_tree_view;
 
 use agent_doc_document_realtime::editor_contract::{
     DOCUMENT_ONLY_LAYOUT_AUTHORITY, ZED_EDITOR_KIND, ZED_LSP_CAPABILITIES,
@@ -105,6 +106,10 @@ struct Server<W, I> {
     /// Bytes read from Zed that do not yet form a complete frame.
     pending_input: Vec<u8>,
     documents: HashMap<String, OpenDocument>,
+    /// `#queuetreegutter`: the latest full text of each agent-doc-mode buffer,
+    /// for queue tree folding ranges and inlay hints. Kept apart from
+    /// `documents` so the view never depends on controller registration.
+    queue_views: HashMap<String, String>,
     next_request_id: u64,
     shutdown_requested: bool,
     binary_watch: Option<BinaryWatch>,
@@ -117,6 +122,7 @@ impl<W: Write, I: LspInput> Server<W, I> {
             input,
             pending_input: Vec::new(),
             documents: HashMap::new(),
+            queue_views: HashMap::new(),
             next_request_id: 1,
             shutdown_requested: false,
             binary_watch: None,
@@ -235,7 +241,9 @@ impl<W: Write, I: LspInput> Server<W, I> {
                                     "openClose": true,
                                     "change": 1,
                                     "save": { "includeText": true }
-                                }
+                                },
+                                "foldingRangeProvider": true,
+                                "inlayHintProvider": true
                             },
                             "serverInfo": {
                                 "name": "agent-doc-zed-lsp",
@@ -272,7 +280,34 @@ impl<W: Write, I: LspInput> Server<W, I> {
                     .pointer("/params/textDocument/uri")
                     .and_then(Value::as_str)
                 {
+                    self.queue_views.remove(uri);
                     self.detach(uri);
+                }
+            }
+            Some("textDocument/foldingRange") => {
+                if let Some(id) = id {
+                    let result = self
+                        .queue_view_text(&message)
+                        .map(queue_tree_view::folding_ranges)
+                        .unwrap_or(Value::Null);
+                    self.respond(id, result)?;
+                }
+            }
+            Some("textDocument/inlayHint") => {
+                if let Some(id) = id {
+                    let line = |pointer: &str| {
+                        message
+                            .pointer(pointer)
+                            .and_then(Value::as_u64)
+                            .map(|line| line as usize)
+                    };
+                    let start = line("/params/range/start/line").unwrap_or(0);
+                    let end = line("/params/range/end/line").unwrap_or(usize::MAX);
+                    let result = self
+                        .queue_view_text(&message)
+                        .map(|text| queue_tree_view::inlay_hints(text, start, end))
+                        .unwrap_or(Value::Null);
+                    self.respond(id, result)?;
                 }
             }
             Some(_) if id.is_some() => {
@@ -283,6 +318,27 @@ impl<W: Write, I: LspInput> Server<W, I> {
         Ok(self.shutdown_requested && method == Some("exit"))
     }
 
+    /// The agent-doc-mode text a queue view request names, or None (a strict
+    /// no-op answer) for any other Markdown buffer.
+    fn queue_view_text(&self, message: &Value) -> Option<&str> {
+        let uri = message
+            .pointer("/params/textDocument/uri")
+            .and_then(Value::as_str)?;
+        self.queue_views.get(uri).map(String::as_str).or_else(|| {
+            self.documents
+                .get(uri)
+                .map(|document| document.shadow.as_str())
+        })
+    }
+
+    fn track_queue_view(&mut self, uri: &str, text: &str) {
+        if is_agent_doc_markdown(text) {
+            self.queue_views.insert(uri.to_string(), text.to_string());
+        } else {
+            self.queue_views.remove(uri);
+        }
+    }
+
     fn did_open(&mut self, params: &Value) {
         let Some(uri) = params.pointer("/textDocument/uri").and_then(Value::as_str) else {
             return;
@@ -290,6 +346,7 @@ impl<W: Write, I: LspInput> Server<W, I> {
         let Some(text) = params.pointer("/textDocument/text").and_then(Value::as_str) else {
             return;
         };
+        self.track_queue_view(uri, text);
         self.reconcile_mode(uri, text);
     }
 
@@ -303,6 +360,7 @@ impl<W: Write, I: LspInput> Server<W, I> {
         else {
             return;
         };
+        self.track_queue_view(uri, text);
 
         if !is_agent_doc_markdown(text) {
             self.detach(uri);
@@ -856,6 +914,46 @@ mod tests {
         assert_eq!(fields["capabilities"], json!(ZED_LSP_CAPABILITIES));
         assert_eq!(fields["layout_authority"], json!("document_only"));
         assert!(fields["editor_version"].is_string());
+    }
+
+    /// `#queuetreegutter`: an agent-doc buffer answers queue folds and glyph
+    /// hints from its tracked text; any other Markdown buffer answers null.
+    #[test]
+    fn queue_view_requests_answer_only_agent_doc_buffers() {
+        let (mut server, _sender) = scripted_server();
+        let doc = concat!(
+            "---\nagent_doc_session: s\n---\n",
+            "<!-- agent:queue id=\"main\" -->\n",
+            "- ### ~~Ship alpha [#q-alpha]~~\n",
+            "  - ~~step one~~\n",
+            "<!-- /agent:queue -->\n",
+        );
+        server.track_queue_view("file:///s.md", doc);
+        server.track_queue_view("file:///plain.md", "# notes\n<!-- agent:queue -->\n");
+        let request = |id: u64, method: &str, uri: &str| {
+            json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "method": method,
+                "params": {
+                    "textDocument": { "uri": uri },
+                    "range": { "start": { "line": 0, "character": 0 }, "end": { "line": 9, "character": 0 } }
+                }
+            })
+        };
+        for message in [
+            request(1, "textDocument/foldingRange", "file:///s.md"),
+            request(2, "textDocument/inlayHint", "file:///s.md"),
+            request(3, "textDocument/foldingRange", "file:///plain.md"),
+        ] {
+            server.handle_message(message).unwrap();
+        }
+        let output = decode_output(std::mem::take(&mut server.writer));
+        assert_eq!(output[0]["result"][0]["startLine"], 4, "{output:?}");
+        assert_eq!(output[0]["result"][0]["endLine"], 5);
+        assert_eq!(output[1]["result"][0]["label"], "✓");
+        assert_eq!(output[1]["result"][0]["tooltip"], "agent-doc queue: done");
+        assert_eq!(output[2]["result"], Value::Null);
     }
 
     type ScriptedInput = std::sync::mpsc::Sender<std::io::Result<Vec<u8>>>;

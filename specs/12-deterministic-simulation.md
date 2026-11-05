@@ -278,6 +278,17 @@ of at a deadline. The 120s wait is only a hang ceiling below nextest's 180s
 per-test guard. After the announcement the test makes one request (a
 controller `status`, or an IPC hello round trip) to confirm it was not early.
 
+The serve-ready promise also holds after the announcement: the controller's
+accept loop runs no blocking work between accepts (`#controllerstatusflake`).
+The supervisor watchdog and orphan drain ticks it finds due run on a dedicated
+maintenance worker, and a tick still running when the next comes due is
+skipped, not queued. When those ticks ran inline, the first idle tick started
+right after the announcement, so a readiness `status` that connected just after
+the first empty accept sat in the listen backlog for the whole tick; under
+check-fast load that outlasted its 2s test deadline. A test gate
+(`background_maintenance_test_gate`) holds the first tick open, so the
+regression test reproduces that interleaving deterministically.
+
 To replay one seed while reducing a failure, run a focused test with the seed
 mentioned in the panic trace and temporarily promote that schedule into a named
 regression test in `src/sim_world.rs`. To validate the wider budget locally

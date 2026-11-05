@@ -1737,6 +1737,22 @@ pub fn annotate_newly_completed_queue_prompts_with_response_id(
             response_ids.join(",")
         ),
     );
+    // `#answerack`: operator answers this response consumed are struck with a
+    // `**Consumed by:**` child naming it.
+    let consumed_answers =
+        consumed_answer_rows(&target).saturating_sub(consumed_answer_rows(&current));
+    if consumed_answers > 0 {
+        eprintln!(
+            "[queue] acknowledged {consumed_answers} consumed operator answer(s) in their waiting packets"
+        );
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "queue_answer_ack file={} answers={consumed_answers}",
+                file.display()
+            ),
+        );
+    }
     Ok(annotated)
 }
 
@@ -1811,6 +1827,17 @@ fn project_closeout_snapshot_strike_with_response_backlink(
             struck_snapshot
         }
     }
+}
+
+fn consumed_answer_rows(content: &str) -> usize {
+    content
+        .lines()
+        .filter(|line| {
+            line.trim_start()
+                .strip_prefix("- ")
+                .is_some_and(agent_doc_queue::answer_ack::is_consumed_by)
+        })
+        .count()
 }
 
 fn projected_queue_response_ids(content: &str) -> Result<Vec<String>> {

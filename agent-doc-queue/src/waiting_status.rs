@@ -216,8 +216,11 @@ pub fn waiting_status(
                     }
                     WaitingMember::Operator => {
                         let reply = agent_doc_element_queue::struck_work_text(&prompt.text).trim();
+                        // A bold `**label**` row (`**Consumed by:**`, a
+                        // `**Response [#r-…]**` link) is generated, never a reply.
                         if !crate::waiting_packet::is_agent_doc_reply_entry(entries, index)
                             && !reply.is_empty()
+                            && !reply.starts_with("**")
                         {
                             answered = true;
                             latest_reply = Some(without_generated_id(reply));
@@ -236,6 +239,11 @@ pub fn waiting_status(
                 if let Some(reply) = crate::waiting_packet::operator_freeform_text(entries, index) {
                     answered = true;
                     latest_reply = Some(without_generated_id(reply));
+                }
+                // `#answerack`: a consumed (struck) operator answer is closed
+                // packet work, exactly like a struck prompt row.
+                if crate::waiting_packet::is_struck_operator_freeform(entries, index) {
+                    done += 1;
                 }
                 if let Some(value) = metadata_value(line, "**Question:**")
                     && value != GENERIC_QUESTION

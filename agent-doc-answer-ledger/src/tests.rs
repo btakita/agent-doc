@@ -578,3 +578,37 @@ fn a_copied_stamp_is_identity_not_a_citation() {
     assert_eq!(reasks.len(), 1, "{reasks:?}");
     assert_eq!(reasks[0].decision_id, id);
 }
+
+/// `#answerack`: the closeout's visible acknowledgement of a consumed answer
+/// is the record this ledger already reads (a struck operator row), never a
+/// second answer: its `**Consumed by:**` child is generated text.
+#[test]
+fn an_acknowledged_answer_is_one_consumed_answer() {
+    const DOC: &str = concat!(
+        "<!-- agent:queue id=\"main\" -->\n",
+        "- ### 📥 Waiting on you — answer by adding a child line under an item [#q-4775b8697412]\n",
+        "  - [#dl] Decide how private haiven-cli serves release downloads <!-- agent-doc:waiting-item -->\n",
+        "    - **Response:** Decide how private haiven-cli serves release downloads <!-- agent-doc:waiting-metadata -->\n",
+        "    - **Next actions:** <!-- agent-doc:waiting-metadata -->\n",
+        "        - **Action:** Decide how private haiven-cli serves release downloads <!-- agent-doc:waiting-metadata -->\n",
+        "          - haiven-cli will be public + open source [#q-f09f08bcf721]\n",
+        "<!-- /agent:queue -->\n",
+        "<!-- agent:todo -->\n",
+        "- [ ] [#dl] Decide how private haiven-cli serves release downloads\n",
+        "<!-- /agent:todo -->\n",
+    );
+    let live = extract::observe(DOC, &[]);
+    let answers = agent_doc_queue::answer_ack::live_packet_answers(DOC).unwrap();
+    let acked = agent_doc_queue::answer_ack::apply_answer_acknowledgements(
+        DOC,
+        &[(answers[0].row, "[#r-0123456789ab]".to_string())],
+    )
+    .unwrap();
+    let consumed = extract::observe(&acked, &[]);
+    assert_eq!(live.answers.len(), 1, "{:#?}", live.answers);
+    assert!(!live.answers[0].consumed);
+    assert_eq!(consumed.answers.len(), 1, "{:#?}", consumed.answers);
+    assert!(consumed.answers[0].consumed);
+    assert_eq!(consumed.answers[0].text, live.answers[0].text);
+    assert_eq!(consumed.answers[0].targets, live.answers[0].targets);
+}

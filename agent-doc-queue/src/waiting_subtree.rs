@@ -340,7 +340,7 @@ fn request_row_id(body: &str) -> Option<String> {
 }
 
 fn is_closed_by(body: &str) -> bool {
-    body.trim().starts_with("**Closed by:** [#r-")
+    body.trim().starts_with("**Closed by:** [#r-") || crate::answer_ack::is_consumed_by(body)
 }
 
 /// Generated rows the triage itself renders; never read back as input.
@@ -679,7 +679,7 @@ fn root_label(entries: &[QueueEntry], root: usize) -> String {
 
 /// Whether an operator reply at `index` was picked up: something generated
 /// (a `**label**` row), attempted, or struck sits beneath it.
-fn reply_picked_up(entries: &[QueueEntry], index: usize) -> bool {
+pub(crate) fn reply_picked_up(entries: &[QueueEntry], index: usize) -> bool {
     (index + 1..subtree_end(entries, index)).any(|child| match &entries[child] {
         QueueEntry::Completed(_) => true,
         QueueEntry::Prompt(prompt) => {

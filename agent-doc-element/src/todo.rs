@@ -1997,17 +1997,79 @@ pub fn todo_item_owning_id(content: &str, id: &str) -> Option<OwnedTodoItem> {
         .items
         .iter()
         .find(|item| item.own_id.as_deref() == Some(id.as_str()))?;
+    Some(owned_todo_item(&body, item, id))
+}
+
+fn owned_todo_item(body: &TodoBody, item: &LocatedItem, id: String) -> OwnedTodoItem {
     let span = body.item_span(item);
     let mut text = item.action.trim_end().to_string();
     for line in &body.lines[span.start + 1..span.end] {
         text.push('\n');
         text.push_str(line.trim_end_matches(['\n', '\r']));
     }
-    Some(OwnedTodoItem {
+    OwnedTodoItem {
         id,
         state: item.state,
         text,
-    })
+    }
+}
+
+/// `#preflightqueuescale`: [`open_todo_ids`] and [`todo_item_owning_id`] for
+/// every id from ONE parse of the `agent:todo` body.
+///
+/// Calling [`todo_item_owning_id`] once per open id re-parses the whole
+/// document per todo, so a document-wide pass over the open todos costs
+/// `todos x document`. Callers that already hold the parsed components build
+/// this index once and look ids up in it; the answers are identical to the
+/// per-id functions (first owning item wins, a citation is not ownership).
+#[derive(Debug, Clone, Default)]
+pub struct OwnedTodoIndex {
+    open_ids: std::collections::HashSet<String>,
+    first_owner: std::collections::HashMap<String, OwnedTodoItem>,
+}
+
+impl OwnedTodoIndex {
+    /// Index the first `agent:todo` component among `components` (the
+    /// component [`find_todo_component`] would return).
+    pub fn from_components(content: &str, components: &[Component]) -> Self {
+        let Some(todo) = components
+            .iter()
+            .find(|component| is_todo_component(&component.name))
+        else {
+            return Self::default();
+        };
+        let body = TodoBody::parse(todo.content(content));
+        let mut index = Self::default();
+        for item in &body.items {
+            let Some(own) = item.own_id.as_deref() else {
+                continue;
+            };
+            if item.state.is_open() {
+                index.open_ids.insert(own.to_ascii_lowercase());
+            }
+            if !index.first_owner.contains_key(own) {
+                index.first_owner.insert(
+                    own.to_string(),
+                    owned_todo_item(&body, item, own.to_string()),
+                );
+            }
+        }
+        index
+    }
+
+    /// [`open_todo_ids`].
+    pub fn open_ids(&self) -> &std::collections::HashSet<String> {
+        &self.open_ids
+    }
+
+    /// [`todo_item_owning_id`].
+    pub fn owning(&self, id: &str) -> Option<&OwnedTodoItem> {
+        let id = normalize_link_id(id);
+        if id.is_empty() {
+            return None;
+        }
+        self.first_owner.get(&id)
+    }
 }
 
 /// `#todosync`: own ids that the operator has checked off: every `agent:todo`
@@ -2543,6 +2605,38 @@ mod tests {
         );
         assert!(todo_item_owning_id(content, "nope").is_none());
         assert!(todo_item_owning_id("no todo here\n", "pmq").is_none());
+    }
+
+    /// `#preflightqueuescale`: the one-parse index answers exactly what the
+    /// per-id functions answer, including a duplicate own id (first owner
+    /// wins, even when it is closed and a later duplicate is open), a citation
+    /// that is not ownership, and `#`/case spellings of the lookup id.
+    #[test]
+    fn owned_todo_index_matches_the_per_id_functions() {
+        let content = concat!(
+            "<!-- agent:todo -->\n",
+            "- [ ] Verify [#pmq] after release\n",
+            "- [ ] [#pmq] Answer the questions\n",
+            "  - One per provider?\n",
+            "- [x] [#dup] closed first owner\n",
+            "- [ ] [#dup] open later duplicate\n",
+            "- [x] [#done] finished\n",
+            "- [/] [#half] in progress\n",
+            "<!-- /agent:todo -->\n",
+        );
+        let components = element::parse(content).unwrap();
+        let index = OwnedTodoIndex::from_components(content, &components);
+        assert_eq!(index.open_ids(), &open_todo_ids(content));
+        for id in ["pmq", "#PMQ", "dup", "done", "half", "nope", "", "#"] {
+            assert_eq!(
+                index.owning(id),
+                todo_item_owning_id(content, id).as_ref(),
+                "lookup {id:?}"
+            );
+        }
+        let none = OwnedTodoIndex::from_components("no todo\n", &[]);
+        assert!(none.open_ids().is_empty());
+        assert!(none.owning("pmq").is_none());
     }
 
     /// `#todosync`: an id is checked only when every Todo row owning it is

@@ -130,14 +130,17 @@ impl QueueBlockers {
                 }
             }
         }
-        for id in todo::open_todo_ids(content) {
-            let id = backlog::normalize_pending_id(&id);
+        // `#preflightqueuescale`: one todo parse for every open id, not one
+        // whole-document parse per open todo.
+        let todos = todo::OwnedTodoIndex::from_components(content, &components);
+        for id in todos.open_ids() {
+            let id = backlog::normalize_pending_id(id);
             if id.is_empty() {
                 continue;
             }
             open.insert(id.clone());
-            if let Some(item) = todo::todo_item_owning_id(content, &id) {
-                texts.entry(id).or_default().push(item.text);
+            if let Some(item) = todos.owning(&id) {
+                texts.entry(id).or_default().push(item.text.clone());
             }
         }
         if open.is_empty() {

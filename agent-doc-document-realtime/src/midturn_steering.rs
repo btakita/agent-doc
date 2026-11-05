@@ -2516,28 +2516,86 @@ pub fn queue_component_subagent_heads(
     Vec<String>,
     Vec<String>,
 )> {
+    agent_doc_queue::subagent_intent::queue_subagents_mode(&component.attrs)?;
+    queue_component_subagent_heads_with_facts(
+        content,
+        component,
+        prompt_presets,
+        &QueueDispatchDocumentFacts::from_content(content),
+    )
+}
+
+/// `#preflightqueuescale`: the document-wide inputs of
+/// [`queue_component_subagent_heads`]. They depend only on the document text,
+/// not on the queue block, so a caller planning every queue block of one
+/// document derives them once instead of once per block (each is a full
+/// document derivation).
+#[derive(Debug, Clone)]
+pub struct QueueDispatchDocumentFacts {
+    awaiting_operator: std::collections::HashSet<String>,
+    blockers: agent_doc_queue::queue_blocked::QueueBlockers,
+    answer_rows: agent_doc_queue::queue_continuation::AnswerRowRouting,
+}
+
+thread_local! {
+    static QUEUE_DISPATCH_FACT_DERIVATIONS: std::cell::Cell<u64> =
+        const { std::cell::Cell::new(0) };
+}
+
+impl QueueDispatchDocumentFacts {
+    pub fn from_content(content: &str) -> Self {
+        QUEUE_DISPATCH_FACT_DERIVATIONS.with(|count| count.set(count.get() + 1));
+        Self {
+            awaiting_operator: agent_doc_queue::queue_continuation::awaiting_operator_head_ids(
+                content,
+            ),
+            // `#queueblocked`: a row whose tracked item waits on open blockers
+            // is not dispatchable, so it never fills a subagent slot.
+            blockers: agent_doc_queue::queue_blocked::queue_blockers(content),
+            answer_rows: agent_doc_queue::queue_continuation::AnswerRowRouting::for_content(
+                content,
+            ),
+        }
+    }
+}
+
+impl QueueDispatchDocumentFacts {
+    /// How many times this thread derived the facts. Bounded-work regression
+    /// tests read the delta across one plan: it must not grow with the number
+    /// of queue blocks.
+    pub fn derivations() -> u64 {
+        QUEUE_DISPATCH_FACT_DERIVATIONS.with(std::cell::Cell::get)
+    }
+}
+
+/// [`queue_component_subagent_heads`] with document facts the caller already
+/// derived from the same `content`.
+pub fn queue_component_subagent_heads_with_facts(
+    content: &str,
+    component: &agent_doc_element::element::Component,
+    prompt_presets: &agent_doc_frontmatter::frontmatter::PromptPresets,
+    facts: &QueueDispatchDocumentFacts,
+) -> Option<(
+    agent_doc_queue::subagent_intent::QueueSubagentsMode,
+    Vec<String>,
+    Vec<String>,
+)> {
     let mode = agent_doc_queue::subagent_intent::queue_subagents_mode(&component.attrs)?;
     let presets = PresetContext::for_queue_component(content, component, &[], prompt_presets);
     let items = queue_component_dispatch_rows(content, component);
-    let awaiting_operator =
-        agent_doc_queue::queue_continuation::awaiting_operator_head_ids(content);
-    // `#queueblocked`: a row whose tracked item waits on open blockers is not
-    // dispatchable, so it never fills a subagent slot.
-    let blockers = agent_doc_queue::queue_blocked::queue_blockers(content);
-    let answer_rows = agent_doc_queue::queue_continuation::AnswerRowRouting::for_content(content);
     let eligible = items
         .iter()
         .filter(|item| {
             presets.classify(&item.raw, SteeringSource::Queue).0 == SteeringDispatch::Subagent
         })
-        .filter(|item| !head_awaits_operator(&item.norm, &awaiting_operator))
+        .filter(|item| !head_awaits_operator(&item.norm, &facts.awaiting_operator))
         .filter(|item| {
             // `🙋` plus a trailing `[#id]` is operator-gated, not a worker head.
             agent_doc_document::queue_projection::operator_action_ids(&item.raw).is_empty()
         })
-        .filter(|item| !blockers.blocks_row(&item.norm))
+        .filter(|item| !facts.blockers.blocks_row(&item.norm))
         // `#queueoperatoranswer`: an operator answer row goes to the worker that asked.
-        .filter(|item| !answer_rows.holds_from_dispatch(&item.raw))
+        .filter(|item| !facts.answer_rows.holds_from_dispatch(&item.raw))
         .map(|item| item.head.clone())
         .collect();
     let live = items.into_iter().map(|item| item.head).collect();

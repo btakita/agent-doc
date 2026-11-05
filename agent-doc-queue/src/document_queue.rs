@@ -428,6 +428,49 @@ pub fn normalize_top_level_navigation_headings(body: &str) -> Option<String> {
 /// lock its ordering to this parser (#qnoise-multiline-strike,
 /// #multilineheadbullet).
 pub fn parse_spans(body: &str) -> Result<Vec<(QueueEntry, std::ops::Range<usize>)>> {
+    agent_doc_element::content_memo::memoized(&parse_spans_memo::MEMO, body, parse_spans_uncached)
+}
+
+/// `#preflightqueuescale`: a bounded, content-keyed memo for [`parse_spans`]
+/// (see [`agent_doc_element::content_memo`]).
+///
+/// One preflight or closeout pass derives the queue graph from the same
+/// document text dozens of times (ownership plans, claim holds, continuation,
+/// blockers), and every derivation re-parsed every queue body with the inline
+/// Markdown grammar. On a 684 KB session whose largest queue body was 49 KB,
+/// that one body cost ~65 ms per parse and was parsed hundreds of times per
+/// pass. [`parse_spans`] is a pure function of the body text, so a memo keyed
+/// by the exact body bytes cannot go stale.
+pub mod parse_spans_memo {
+    use super::QueueEntry;
+    use agent_doc_element::content_memo::ContentMemo;
+    use std::cell::{Cell, RefCell};
+
+    type Spans = Vec<(QueueEntry, std::ops::Range<usize>)>;
+
+    /// Bodies at least this large are memoized and counted by
+    /// [`large_evaluations`]; smaller ones parse in well under a millisecond.
+    pub const LARGE_BODY_BYTES: usize = 1024;
+
+    thread_local! {
+        pub(super) static MEMO: RefCell<ContentMemo<Spans>> =
+            const { RefCell::new(ContentMemo::new(LARGE_BODY_BYTES, 16, 2 * 1024 * 1024)) };
+        pub(super) static LARGE_EVALUATIONS: Cell<u64> = const { Cell::new(0) };
+    }
+
+    /// How many times this thread actually parsed a queue body of at least
+    /// [`LARGE_BODY_BYTES`] (memo hits are not parses). Counted inside the
+    /// parser, so bounded-work regression tests read the delta across a pass
+    /// independently of wall-clock time and of the memo being in place.
+    pub fn large_evaluations() -> u64 {
+        LARGE_EVALUATIONS.with(Cell::get)
+    }
+}
+
+fn parse_spans_uncached(body: &str) -> Result<Vec<(QueueEntry, std::ops::Range<usize>)>> {
+    if body.len() >= parse_spans_memo::LARGE_BODY_BYTES {
+        parse_spans_memo::LARGE_EVALUATIONS.with(|count| count.set(count.get() + 1));
+    }
     let body_len = body.len();
     // A code span opened inside a list item ends before the next list item
     // (`#operatorrepliesnested`). The marker offset mirrors the item test

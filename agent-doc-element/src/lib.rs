@@ -13,6 +13,7 @@
 
 pub mod baseline_attribution;
 pub mod component_scope;
+pub mod content_memo;
 pub mod element;
 pub mod id;
 pub mod rules;

@@ -431,6 +431,7 @@ fn queue_attr_subagent_plan_with_presets(
     }
     let after_deps = agent_doc_queue::backlog_sync::collect_after_deps(&components, content);
     let queue_control = agent_doc_queue::queue_continuation::document_queue_control(content);
+    let mut document_facts: Option<core::QueueDispatchDocumentFacts> = None;
     let mut combined = agent_doc_queue::subagent_intent::QueueSubagentPlan::default();
     let mut saw_attr = false;
     for block in graph.blocks() {
@@ -454,9 +455,20 @@ fn queue_attr_subagent_plan_with_presets(
         }
         let owner_state =
             block.state_excluding_claimed_with_control(&excluded, queue_control.as_deref());
-        let Some((mode, eligible, live)) =
-            core::queue_component_subagent_heads(content, block.component, prompt_presets)
-        else {
+        // `#preflightqueuescale`: the document-wide dispatch facts are derived
+        // once per plan, not once per queue block.
+        let heads = agent_doc_queue::subagent_intent::queue_subagents_mode(&block.component.attrs)
+            .and_then(|_| {
+                let facts = document_facts
+                    .get_or_insert_with(|| core::QueueDispatchDocumentFacts::from_content(content));
+                core::queue_component_subagent_heads_with_facts(
+                    content,
+                    block.component,
+                    prompt_presets,
+                    facts,
+                )
+            });
+        let Some((mode, eligible, live)) = heads else {
             // Inline owner work gates later queues. A paused or empty inline
             // queue does not.
             if owner_state == agent_doc_queue::queue_set::QueueNodeState::Ready {
@@ -1522,6 +1534,50 @@ queue: go
         assert!(
             format!("{error:#}").contains("use canonical `subagents`"),
             "{error:#}"
+        );
+    }
+
+    /// `#preflightqueuescale`: one plan derives the document-wide dispatch
+    /// facts (operator-awaiting heads, blockers, answer routing) once, however
+    /// many `subagents` queue blocks the document has. Each derivation is a
+    /// whole-document pass, so per-block derivation made every plan cost
+    /// `blocks x document`; the plan runs many times per preflight.
+    #[test]
+    fn subagent_plan_derives_document_facts_once_for_any_number_of_queue_blocks() {
+        fn doc(blocks: usize) -> String {
+            let mut out = String::from("---\nagent_doc_format: template\n---\n\n");
+            for block in 0..blocks {
+                out.push_str(&format!(
+                    "## Run {block} <!-- agent:run id=\"r{block}\" subagents go -->\n"
+                ));
+                for row in 0..4 {
+                    out.push_str(&format!("- do [#b{block}r{row}]\n"));
+                }
+                out.push_str("<!-- /agent:run -->\n\n");
+            }
+            out.push_str("## Todo <!-- agent:todo -->\n");
+            for todo in 0..10 {
+                out.push_str(&format!("- [ ] [#t{todo}] operator step {todo}\n"));
+            }
+            out.push_str("<!-- /agent:todo -->\n");
+            out
+        }
+        let derivations_for = |blocks: usize| {
+            let dir = tempfile::tempdir().unwrap();
+            std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+            let file = dir.path().join("task.md");
+            let content = doc(blocks);
+            std::fs::write(&file, &content).unwrap();
+            let before = core::QueueDispatchDocumentFacts::derivations();
+            let plan = queue_attr_subagent_plan(&file, &content).unwrap().unwrap();
+            assert!(!plan.dispatch.is_empty(), "the fixture must dispatch work");
+            core::QueueDispatchDocumentFacts::derivations() - before
+        };
+        assert_eq!(derivations_for(1), 1);
+        assert_eq!(
+            derivations_for(12),
+            1,
+            "document facts must be derived once per plan, not once per queue block"
         );
     }
 

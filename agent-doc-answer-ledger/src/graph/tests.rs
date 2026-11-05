@@ -271,6 +271,10 @@ fn why_walks_revisions_evidence_and_premises() {
         Some(approver.as_str())
     );
     assert_eq!(
+        graph.decisions_applying_to("tdrequestreview"),
+        vec![approver.clone()]
+    );
+    assert_eq!(
         graph.resolve_decision("[#tdapprover]").as_deref(),
         Some(approver.as_str())
     );
@@ -348,4 +352,41 @@ fn evidence_refs_find_responses_and_commits_only() {
         ]
     );
     assert!(evidence_refs("Keep the approver as is").is_empty());
+}
+
+#[test]
+fn a_cached_operator_relation_outranks_a_rebuilt_proposal() {
+    let (_, mut graph) = build(DOC);
+    let port = decision(&graph, "tdport");
+    let revisions: Vec<String> = graph
+        .revisions_of(&port)
+        .iter()
+        .map(|node| node.id.clone())
+        .collect();
+    assert_eq!(
+        graph.relation_of(&revisions[1]).unwrap().source,
+        EdgeSource::Proposed
+    );
+    // The operator's `amend:` row was pruned; the cache still remembers it.
+    graph.merge_prior(
+        Vec::new(),
+        vec![GraphEdge {
+            from: revisions[1].clone(),
+            kind: EdgeKind::Amends,
+            to: revisions[0].clone(),
+            source: EdgeSource::Operator,
+            clause: Some("Use the standard http ports.".into()),
+        }],
+    );
+    let relation = graph.relation_of(&revisions[1]).unwrap();
+    assert_eq!(relation.kind, EdgeKind::Amends);
+    assert_eq!(relation.source, EdgeSource::Operator);
+    assert_eq!(
+        graph
+            .edges
+            .iter()
+            .filter(|edge| edge.kind.is_revision_relation() && edge.from == revisions[1])
+            .count(),
+        1
+    );
 }

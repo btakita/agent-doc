@@ -390,3 +390,113 @@ fn a_probe_preflight_reports_answered_decisions_without_writing() {
         "{content}"
     );
 }
+
+/// `#decisiongraph`: an operator `change:` reply supersedes a decision. The
+/// impact walk reopens the closed item done on the old answer, flags the
+/// decision that `depends on` it, and lists the commit made on the old answer
+/// for the operator to keep or undo; `why` from that item walks back to the
+/// operator's words. Preflight pushes the same impact into the contract.
+#[test]
+fn a_changed_decision_reports_its_impact_and_why() {
+    let dir = tempfile::tempdir().unwrap();
+    let doc = session(
+        dir.path(),
+        concat!(
+            "- ### Waiting on you <!-- agent-doc:waiting-on-you -->\n",
+            "  - 🙋 [#tdapprover] Name the approver for docs PR #88 <!-- agent-doc:waiting-item -->\n",
+            "    - Add Alex + Sam, requested in 3f2a9c1\n",
+            "    - change: Keep the approver as is\n",
+            "  - 🙋 [#tdnotify] Decide whether to email the approvers about the review <!-- agent-doc:waiting-item -->\n",
+            "    - Yes, email them.\n",
+            "    - depends on [#tdapprover]\n",
+        ),
+        concat!(
+            "- [ ] [#tdapprover] Name the approver for docs PR #88\n",
+            "- [ ] [#tdnotify] Decide whether to email the approvers about the review\n",
+            "- [x] [#tdrequestreview] Request review from Alex + Sam on PR #88 (source: [#tdapprover])\n",
+        ),
+    );
+    let path = doc.to_str().unwrap();
+
+    let output = run_agent_doc(
+        dir.path(),
+        &["decision", "impact", path, "tdapprover", "--json"],
+    );
+    assert_ok(&output, "decision impact");
+    let impact: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(impact["change"], "supersedes", "{impact:#}");
+    assert_eq!(impact["change_source"], "operator", "{impact:#}");
+    assert_eq!(impact["to_answer"], "Keep the approver as is", "{impact:#}");
+    let flagged = impact["flagged"].as_array().unwrap();
+    assert!(
+        flagged
+            .iter()
+            .any(|row| row["node"] == "tdrequestreview" && row["action"] == "reopen"),
+        "{impact:#}"
+    );
+    assert!(
+        flagged
+            .iter()
+            .any(|row| row["relation"] == "depends_on" && row["action"] == "flag"),
+        "{impact:#}"
+    );
+    assert!(
+        impact["actions_taken"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["node"] == "commit:3f2a9c1" && row["action"] == "keep_or_undo"),
+        "{impact:#}"
+    );
+
+    let output = run_agent_doc(
+        dir.path(),
+        &["decision", "why", path, "tdrequestreview", "--json"],
+    );
+    assert_ok(&output, "decision why");
+    let whys: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let why = &whys[0];
+    assert_eq!(why["current_answer"], "Keep the approver as is", "{whys:#}");
+    let revisions = why["revisions"].as_array().unwrap();
+    assert_eq!(revisions.len(), 2, "{whys:#}");
+    assert_eq!(revisions[0]["evidence"][0], "commit:3f2a9c1", "{whys:#}");
+    assert_eq!(revisions[1]["relation"], "supersedes", "{whys:#}");
+
+    let output = run_agent_doc(dir.path(), &["decision", "graph", path, "--json"]);
+    assert_ok(&output, "decision graph");
+    let graph: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(
+        graph["edges"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|edge| edge["kind"] == "depends_on" && edge["source"] == "operator"),
+        "{graph:#}"
+    );
+
+    let output = run_agent_doc(dir.path(), &["preflight", path]);
+    assert_ok(&output, "preflight");
+    let contract: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let fact = contract["answered_decisions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|fact| fact["answer"] == "Keep the approver as is")
+        .cloned()
+        .unwrap_or_else(|| panic!("{contract:#}"));
+    assert_eq!(
+        fact["changed_from"], "Add Alex + Sam, requested in 3f2a9c1",
+        "{fact:#}"
+    );
+    assert!(
+        fact["change_impact"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|line| line
+                .as_str()
+                .unwrap()
+                .starts_with("reopen #tdrequestreview")),
+        "{fact:#}"
+    );
+}

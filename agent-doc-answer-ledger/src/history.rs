@@ -173,6 +173,17 @@ pub fn seed_index(
             if revision.location.starts_with("git history ") {
                 recovered += 1;
             }
+        } else {
+            // `index_rows` marks the latest superseding revision flagged
+            // because the pass that writes it also reports it. The seed
+            // reports nothing, so a live revision keeps the flag the index
+            // already held; the ordinary pass flags (and reports) the change
+            // once (`#decisiongraph`).
+            revision.change_flagged = prior.revisions.iter().any(|old| {
+                old.decision_id == revision.decision_id
+                    && old.change_flagged
+                    && answer_hash(&old.answer) == hash
+            });
         }
     }
     HistorySeed {
@@ -247,6 +258,39 @@ mod tests {
     }
 
     /// The seed keeps the decision id the existing index already gave a key.
+    /// A live `change:` is news on the first pass: the seed must not mark it
+    /// already flagged, or the contract never says "decision changed".
+    #[test]
+    fn the_seed_leaves_a_live_change_unflagged() {
+        let changed = concat!(
+            "<!-- agent:queue -->\n",
+            "- ~~[#tdport]: Use port 3000.~~\n",
+            "- [#tdport]: change: Use the standard http ports.\n",
+            "<!-- /agent:queue -->\n",
+            "<!-- agent:todo -->\n",
+            "- [ ] [#tdport] Choose the demo callback port for local sign-in runs\n",
+            "<!-- /agent:todo -->\n",
+        );
+        let current = extract::observe(changed, &[]);
+        let versions = [HistoryVersion {
+            committed_at: 100,
+            revision: "1111111",
+            content: changed,
+        }];
+        let seed = seed_index(&versions, &current, &PriorIndex::default(), 1_000);
+        assert_eq!(seed.index.revisions.len(), 2, "{seed:?}");
+        assert!(
+            seed.index
+                .revisions
+                .iter()
+                .all(|revision| !revision.change_flagged),
+            "{seed:?}"
+        );
+        let ledger = Ledger::build(&current, &seed.index, 1_000, None);
+        let fact = &ledger.answered_facts()[0];
+        assert_eq!(fact.changed_from.as_deref(), Some("Use port 3000."));
+    }
+
     #[test]
     fn the_seed_keeps_existing_decision_ids() {
         let current = extract::observe(ANSWERED, &[]);

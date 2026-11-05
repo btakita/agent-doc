@@ -1,0 +1,6 @@
+- `[#q-1]` — Since we changed direction to https://git.example.com/group/project/-/merge_requests/1234
+- [ ] [#bl-1] see the notes in the tracker before you start, then https://git.example.com/group/project/-/issues/42
+- See [the notes](#notes) before you start working on the item, then https://git.example.com/group/project/-/issues/42
+- See (the notes) before you start working on this item today, then https://git.example.com/group/project/-/issues/42 (ok)
+- `[#q-1]` — Since we changed direction to <https://git.example.com/group/project/-/merge_requests/1234>
+- Since we changed direction to the plan, see https://git.example.com/group/project/-/merge_requests/1234

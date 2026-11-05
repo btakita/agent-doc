@@ -32,6 +32,7 @@ members = [
     "agent-doc-debounce",
     "agent-doc-decision-io",
     "agent-doc-answer-ledger",
+    "agent-doc-principles",
     "agent-doc-template",
     "agent-doc-template-io",
     "agent-doc-diff",
@@ -213,6 +214,7 @@ agent-doc-document = { path = "agent-doc-document", version = "0.35.568" }
 agent-doc-document-realtime = { path = "agent-doc-document-realtime", version = "0.35.568" }
 agent-doc-decision-io = { path = "agent-doc-decision-io", version = "0.35.568" }
 agent-doc-answer-ledger = { path = "agent-doc-answer-ledger", version = "0.35.568" }
+agent-doc-principles = { path = "agent-doc-principles", version = "0.35.568" }
 agent-doc-document-realtime-io = { path = "agent-doc-document-realtime-io", version = "0.35.568" }
 agent-doc-element = { path = "agent-doc-element", version = "0.35.568" }
 agent-doc-element-backlog = { path = "agent-doc-element-backlog", version = "0.35.568" }

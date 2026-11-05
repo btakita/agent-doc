@@ -164,6 +164,13 @@ fn config_path() -> PathBuf {
     dirs_config_dir().join("agent-doc").join("config.toml")
 }
 
+/// The operator's global first-principles file (`#firstprinciples`):
+/// `~/.config/agent-doc/principles.md` (or under `$XDG_CONFIG_HOME`). Its
+/// `agent:rules` principle items apply to every project.
+pub fn global_principles_path() -> PathBuf {
+    dirs_config_dir().join("agent-doc").join("principles.md")
+}
+
 fn dirs_config_dir() -> PathBuf {
     std::env::var("XDG_CONFIG_HOME")
         .map(PathBuf::from)

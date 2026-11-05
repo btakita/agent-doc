@@ -75,6 +75,13 @@ only the compact routing table that survives context compaction.
   add to them and do not replace them. Editing
   `agent:rules` does not by itself start a turn. A real exchange or queue turn
   still carries the current composed rules.
+- When the cycle contract includes `principles` (`#firstprinciples`), follow
+  `principles_guidance`. Principles are the operator's first principles, the
+  top of the decision hierarchy. When they settle a question, decide without
+  asking: cite each as `[#id]` and state the inference in one sentence
+  (`Derived from [#id]: …`). When they bear on a question but do not settle
+  it, ask once, listing the bearing principles, the missing premise, and the
+  answer they recommend. Never act against a principle silently.
 
 ## Mid-turn steering and work
 

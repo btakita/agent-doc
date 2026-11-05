@@ -1344,11 +1344,24 @@ pub struct PreflightOutput {
     /// the session document, in file order. A nested `.git` does not hide an
     /// ancestor project file. Session rules add to project rules. A list item
     /// is one entry. Free text that contains blank lines stays one entry.
+    /// A well-formed `principle [#id]:` item goes to [`Self::principles`]
+    /// instead.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub agent_rules: Vec<String>,
     /// How to apply [`Self::agent_rules`]. Present only when that list is non-empty.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_rules_guidance: Option<String>,
+    /// `#firstprinciples`: the operator's first principles in scope for this
+    /// turn, the top of the decision hierarchy. They are `principle [#id]:`
+    /// items in `agent:rules`, read from the global principles file, every
+    /// ancestor `.agent-doc/project.md` (farthest first), and the session
+    /// document; a nearer principle with the same id replaces a farther one.
+    /// A principle item is not also an [`Self::agent_rules`] entry.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub principles: Vec<agent_doc_principles::Principle>,
+    /// How to apply [`Self::principles`]. Present only when that list is non-empty.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub principles_guidance: Option<String>,
     /// Canonical serialized list of user-authored changes that should preempt
     /// or guide the current response cycle.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

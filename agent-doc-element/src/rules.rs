@@ -30,6 +30,10 @@
 //!   yields no rules.
 //! - [`compose_rules`] concatenates project rules, then session rules. It does
 //!   not deduplicate and does not let the session replace the project.
+//! - Rule texts whose first line reads `principle [#id]: …` are first
+//!   principles (`#firstprinciples`). `agent-doc-principles::compose` takes
+//!   them out of the rule list and composes them separately; this module
+//!   does not know about them.
 
 use crate::element::{self, Component};
 

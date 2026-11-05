@@ -101,6 +101,68 @@ not parse contributes no rules and does not by itself fail admission. Preset
 resolution still fail-closes when that same file cannot be read or its
 frontmatter is malformed.
 
+### First principles (`#firstprinciples`)
+
+A principle is the top layer of the decision hierarchy: principles, then
+standing decisions, then decisions, then tracked items. It is an
+`agent:rules` list item (or free-text rule) whose first line reads
+`principle [#id]: <statement>` (`principle` in any case; `#id` without
+brackets is accepted). The id uses ASCII letters, digits, `-`, `_` and `.`,
+starting with a letter or digit. Indented continuation lines may carry a
+`rationale:` (later lines extend it) and a `scope:` (`global`, `project`, or
+`document`; `session` means `document`); continuation lines before the first
+field extend the statement. A field line may start with `- `.
+
+```markdown
+<!-- agent:rules -->
+- principle [#editor-authority]: Editor-visible operator text is authoritative.
+  rationale: The operator reads and edits the editor buffer; disk can lag.
+- Run the focused test before the full suite.
+<!-- /agent:rules -->
+```
+
+Preflight reads principles from three layers, farthest first: the global
+principles file `~/.config/agent-doc/principles.md` (or under
+`$XDG_CONFIG_HOME`; its `agent:rules` blocks hold principles only, and a plain
+rule there is reported and ignored), every ancestor `.agent-doc/project.md`
+(the same walk as `agent_rules`), and the session document. The effective
+scope is where a principle is written (`global`, `project`, `document`); a
+declared `scope:` that disagrees is a `principle_scope_mismatch` warning that
+names where to move it, and the binary never copies a principle between
+files. A nearer principle with the same id replaces the farther one in place
+and lists the replaced sources in `overrides`; a second principle with one id
+in the same file is a `principle_duplicate_id` warning and the first applies.
+A principle-shaped rule with no valid id or no statement stays an ordinary
+`agent_rules` entry with a `principle_malformed` warning, so nothing the
+operator wrote is dropped. Principle items are not also `agent_rules` entries.
+
+The composed list is `principles` on the cycle contract (`id`, `statement`,
+optional `rationale`, `scope`, `source`, optional `overrides`), with
+`principles_guidance` when the list is non-empty: decide without asking when
+the principles settle a question, citing each as `[#id]` with a one-sentence
+inference; otherwise ask once, listing the bearing principles, the missing
+premise, and the answer they recommend; never act against a principle
+silently. Content-only edits of principles do not start a turn. Principle
+problems are preflight warnings and never fail admission.
+
+The global file is the hook for an operator philosophy repository: the
+binary reads only that file and never reads a philosophy repository itself,
+so an operator who keeps values elsewhere (for example `axiology.md`)
+generates or symlinks the global file from it.
+
+The pure model lives in crate `agent-doc-principles`. Its `derivation`
+module models derivations for the decision graph: a derivation links premises
+(principles, standing decisions, decisions, and facts) through a stated
+inference to a conclusion (a decision's answer), with status
+`operator_confirmed`, `agent_derived_unreviewed`, or `rejected` (rejecting a
+step never rejects its premises). It answers "why was this decided" as a
+cycle-safe chain through derived premises, lists every live conclusion a
+changed premise reaches (unreviewed derivations are re-derived; confirmed
+ones are flagged for the operator, never rewritten), and flags live
+derivations of one decision that reach different answers (same premises: an
+inference is wrong; different premises: the premises conflict). Derivations
+have no durable store or CLI yet.
+
 ## Components
 
 Documents can contain named, re-renderable regions called components:

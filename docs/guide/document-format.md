@@ -97,7 +97,11 @@ does not hide an ancestor project file. Session rules add to those project
 rules. They do not replace them. A markdown list is one rule per item.
 Free text is included as written. Multiple `agent:rules` elements are allowed
 in a project file or the session document. The rest of a project file's body
-is not inherited.
+is not inherited. An `agent:rules` item written `principle [#id]: <statement>`
+is a first principle: the agent decides from it without asking when it
+settles a question, and cites it. Principles also come from the global file
+`~/.config/agent-doc/principles.md`; a nearer principle with the same id
+replaces a farther one.
 
 ## Interaction modes
 

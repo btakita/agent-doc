@@ -779,6 +779,9 @@ pub fn inert_list_child_end(
         .or_else(|| response_next_action_decision_child_end(lines, opener_index, item_indent))
         .or_else(|| response_action_child_end(lines, opener_index, item_indent))
         .or_else(|| related_row_child_end(lines, opener_index, item_indent))
+        // `#treestatusquery`: a `status?` query line and the binary-owned
+        // Status reply rows answering it are never queue work.
+        .or_else(|| crate::tree_status_row::tree_status_child_end(lines, opener_index))
 }
 
 /// Normalize binary-owned reply rows to the bare trailing-glyph form and

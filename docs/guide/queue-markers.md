@@ -368,6 +368,35 @@ subtree, and `--json` prints the nodes editors read through the
 for folding, `state`, `glyph`, `closed`, `rollup`). The view never writes the
 document.
 
+## Asking a subtree's status
+
+To ask whether part of a queue still needs anything, add a child line
+`status?` under the row (or put `[status?]` on the row itself). A top-level
+`status?` asks about the whole queue. On the next preflight the binary answers
+from the queue tree, without a model turn (`#treestatusquery`):
+
+```text
+- ~~do [#release]~~
+  - 🙋 Approve the changelog
+  - do [#publish]
+  - ~~do [#build]~~
+  - **Status:** snapshot — 1 you · 1 agent · 1 deletable · 0 need review ▫️
+    - **Next: you:** “Approve the changelog” — answer the operator gate on this row ▫️
+    - **Next: agent:** “do `#publish`” — pick up this queued item ▫️
+    - **Deletable:** “do `#build`” — every row is struck and its response records no remaining work ▫️
+```
+
+(The Status rows replace the `status?` line, here typed as the last child.)
+
+The Status rows are a snapshot: asking again replaces them, and you can delete
+them. A row the binary cannot classify (a skipped row, a response with
+follow-up actions of unknown owner) is listed under **Needs agent review**;
+ask `status? deep` instead to have one agent turn look at those rows.
+
+`agent-doc queue tree-status FILE --line N [--json]` prints the same answer for
+the row on line N; editors read it through the `agent_doc_queue_tree_status_json`
+FFI export.
+
 ## Custom palettes
 
 Each prefix can be overridden in `[queue_icons]` in

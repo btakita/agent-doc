@@ -113,6 +113,8 @@ pub fn free_text_prompt_is_backlog_task(text: &str) -> bool {
         && (agent_doc_prompt_lines::text_line_looks_like_prompt_target(&trimmed)
             || line_has_interior_question(&trimmed))
         && !free_text_looks_unfinished(&trimmed)
+        // `#treestatusquery`: the binary answers a status query itself.
+        && agent_doc_markdown_ast::tree_status_row::status_query_kind(&trimmed).is_none()
 }
 
 /// Whether the queue entry at `index` sits in an operator-reply slot

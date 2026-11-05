@@ -5248,6 +5248,27 @@ enum QueueAction {
         #[arg(long)]
         json: bool,
     },
+    /// Answer whether the queue subtree at a line has actionable or deletable
+    /// work (`#treestatusquery`), from the queue tree alone, without a model
+    /// turn: the rows waiting on you (`Next: you`), the rows the agent owes
+    /// (`Next: agent`), the outermost subtrees that are safe to delete (with
+    /// their line ranges), and the rows the binary cannot classify (`needs
+    /// agent review`). The subtree is the deepest queue row whose subtree holds
+    /// `--line`; a line inside a queue component but on no row selects the
+    /// whole queue. The document form is a `status?` child line (or a
+    /// `[status?]` token on the row), which preflight answers with Status
+    /// reply rows. Never writes the document.
+    #[command(after_help = agent_doc_frontmatter::frontmatter::queue_marker_legend_help())]
+    TreeStatus {
+        /// Path to the session document
+        file: PathBuf,
+        /// 1-based document line inside the subtree to ask about
+        #[arg(long, value_name = "N")]
+        line: usize,
+        /// Print the answer as JSON (the same rows the editor actions read)
+        #[arg(long)]
+        json: bool,
+    },
     /// Print the queue marker legend (`#queuemarkerlegend`): what each
     /// binary-owned prefix on a queue row means, using the configured
     /// `[queue_icons]` palette. `--line` prints the one-line legend the binary
@@ -9349,6 +9370,18 @@ fn try_main() -> anyhow::Result<()> {
                     println!("{}", serde_json::to_string_pretty(&tree)?);
                 } else {
                     print!("{}", agent_doc_queue::queue_tree::render_text(&tree));
+                }
+                Ok(())
+            }
+            QueueAction::TreeStatus { file, line, json } => {
+                let content = std::fs::read_to_string(&file)
+                    .with_context(|| format!("failed to read {}", file.display()))?;
+                let status = agent_doc_queue::tree_status::tree_status(&content, line)
+                    .with_context(|| format!("no queue tree status for {}", file.display()))?;
+                if json {
+                    println!("{}", serde_json::to_string_pretty(&status)?);
+                } else {
+                    print!("{}", agent_doc_queue::tree_status::render_text(&status));
                 }
                 Ok(())
             }

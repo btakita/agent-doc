@@ -165,6 +165,9 @@ pub trait QueueCommandEffects {
     fn converge_captured_answered_free_text_projection(&self, _file: &Path) -> Result<usize> {
         Ok(0)
     }
+
+    /// See [`QueueRuntimeProjectionEffects::settle_before_projection_retry`].
+    fn settle_before_projection_retry(&self, _file: &Path) {}
 }
 
 /// The narrow effect boundary for re-projecting derived queue runtime state.
@@ -195,6 +198,11 @@ pub trait QueueRuntimeProjectionEffects {
         self.converge_document_or_disk(file, target_content, source_content, reason)?;
         Ok(true)
     }
+
+    /// Let an in-flight CRDT delivery settle before a projection retries a
+    /// `retry_crdt_merge` CAS refusal (`#claimprojectionretry`). The default is
+    /// actorless: the retry's fresh authority read is the only observation.
+    fn settle_before_projection_retry(&self, _file: &Path) {}
 }
 
 impl<T: QueueCommandEffects + ?Sized> QueueRuntimeProjectionEffects for T {
@@ -234,6 +242,10 @@ impl<T: QueueCommandEffects + ?Sized> QueueRuntimeProjectionEffects for T {
             reason,
             generation,
         )
+    }
+
+    fn settle_before_projection_retry(&self, file: &Path) {
+        QueueCommandEffects::settle_before_projection_retry(self, file)
     }
 }
 
@@ -1381,6 +1393,14 @@ pub fn clean_slate_with_effects(
     })
 }
 
+/// A projection CAS refusal from the owning CRDT actor: the relay current
+/// advanced past the cut the successor was derived from
+/// (`recovery=retry_crdt_merge`). Retrying from a fresh authority cut is safe
+/// because the projection is a pure function of that cut and the ledger.
+fn is_retryable_projection_cas_refusal(error: &anyhow::Error) -> bool {
+    format!("{error:#}").contains("recovery=retry_crdt_merge")
+}
+
 #[derive(Debug)]
 struct QueueRuntimeProjectionSuperseded;
 
@@ -1474,16 +1494,45 @@ fn project_runtime_state_with_effects(
             if queue_repair_generation(file)? != repair_generation {
                 return Err(QueueRuntimeProjectionSuperseded.into());
             }
-            if !effects.converge_document_or_disk_for_generation(
+            match effects.converge_document_or_disk_for_generation(
                 file,
                 &target_content,
                 &current,
                 "queue_claim_runtime_projection",
                 repair_generation,
-            )? {
-                return Err(QueueRuntimeProjectionSuperseded.into());
+            ) {
+                Ok(true) => wrote_successor = true,
+                Ok(false) => return Err(QueueRuntimeProjectionSuperseded.into()),
+                // `#claimprojectionretry`: a CAS refusal means a concurrent
+                // CRDT write moved the relay current past the cut this attempt
+                // derived its successor from. The marker overlay is rederived
+                // by stable work identity, so the same lifecycle transition
+                // (and the same claim generation) retries its projection from
+                // a fresh authority cut instead of surfacing a
+                // `projection_failure` the caller can only clear by claiming
+                // again. Every retry is earned by an explicit refusal and
+                // shares the bounded attempt budget.
+                Err(error)
+                    if attempt < max_attempts && is_retryable_projection_cas_refusal(&error) =>
+                {
+                    agent_doc_ops_log_io::log_op(
+                        file,
+                        &format!(
+                            "queue_claim_runtime_projection_cas_retry attempt={attempt} max={max_attempts} expected_hash={} attempted_hash={} recovery=retry_crdt_merge (#claimprojectionretry)",
+                            agent_doc_hash::content_hash(&current),
+                            agent_doc_hash::content_hash(&target_content),
+                        ),
+                    );
+                    effects.settle_before_projection_retry(file);
+                    continue;
+                }
+                Err(error) if max_attempts > 1 && is_retryable_projection_cas_refusal(&error) => {
+                    return Err(error).context(format!(
+                        "queue claim runtime projection CAS was refused on all {max_attempts} attempts; concurrent CRDT writes kept advancing the document (#claimprojectionretry)"
+                    ));
+                }
+                Err(error) => return Err(error),
             }
-            wrote_successor = true;
         }
 
         // Convergence may legitimately preserve a concurrent editor cell over
@@ -5486,5 +5535,217 @@ mod waiting_item_claim_projection_tests {
         assert!(error.downcast_ref::<ClaimAdmissionRefused>().is_none(), "{error:#}");
         let lineage = crate::queue_lineage::load(&doc).unwrap();
         assert!(crate::queue_lineage::admission_refused_identities(&lineage).is_empty());
+    }
+
+    /// A CRDT relay modeled as a compare-and-swap register: a projection write
+    /// lands only when its `source_content` still equals the relay current,
+    /// otherwise it is refused exactly as `crdt_cp_write` refuses it
+    /// (`recovery=retry_crdt_merge`). For the first `race_rounds` writes a
+    /// concurrent writer thread lands an unrelated CRDT edit between the
+    /// projection's authority read and its CAS, so the refusal is a real
+    /// consequence of the interleaving, not a scripted error.
+    struct CasRelayEffects {
+        current: std::sync::Mutex<String>,
+        race_rounds: usize,
+        converges: std::sync::atomic::AtomicUsize,
+        refusals: std::sync::atomic::AtomicUsize,
+        race_open: std::sync::Mutex<Option<std::sync::mpsc::Sender<()>>>,
+        race_landed: std::sync::Mutex<std::sync::mpsc::Receiver<()>>,
+    }
+
+    /// The concurrent CRDT writer's half of the race channels.
+    struct ConcurrentWriter {
+        race_open: std::sync::mpsc::Receiver<()>,
+        race_landed: std::sync::mpsc::Sender<()>,
+    }
+
+    const CONCURRENT_EDIT: &str = "concurrent operator note\n";
+
+    impl CasRelayEffects {
+        fn new(current: String, race_rounds: usize) -> (Self, ConcurrentWriter) {
+            let (open_tx, open_rx) = std::sync::mpsc::channel();
+            let (landed_tx, landed_rx) = std::sync::mpsc::channel();
+            (
+                Self {
+                    current: std::sync::Mutex::new(current),
+                    race_rounds,
+                    converges: Default::default(),
+                    refusals: Default::default(),
+                    race_open: std::sync::Mutex::new(Some(open_tx)),
+                    race_landed: std::sync::Mutex::new(landed_rx),
+                },
+                ConcurrentWriter {
+                    race_open: open_rx,
+                    race_landed: landed_tx,
+                },
+            )
+        }
+
+        /// The concurrent CRDT writer: lands one edit each time a raced
+        /// projection write is between its authority read and its CAS. It
+        /// exits when the claim returns (`close_race`), so a regression fails
+        /// the assertions instead of deadlocking the scope.
+        fn run_concurrent_writer(&self, writer: ConcurrentWriter, file: &Path) {
+            while writer.race_open.recv().is_ok() {
+                let mut current = self.current.lock().unwrap();
+                current.push_str(CONCURRENT_EDIT);
+                std::fs::write(file, current.as_str()).unwrap();
+                drop(current);
+                writer.race_landed.send(()).unwrap();
+            }
+        }
+
+        fn close_race(&self) {
+            self.race_open.lock().unwrap().take();
+        }
+
+        fn claim_racing_writer(
+            &self,
+            writer: ConcurrentWriter,
+            file: &Path,
+        ) -> Result<(
+            agent_doc_queue::queue_claim::ClaimOutcome,
+            agent_doc_queue::queue_claim::QueueClaim,
+        )> {
+            std::thread::scope(|scope| {
+                scope.spawn(|| self.run_concurrent_writer(writer, file));
+                let claimed =
+                    claim_with_runtime_projection(self, file, "#answered", "subagent:worker", 600);
+                self.close_race();
+                claimed
+            })
+        }
+    }
+
+    impl QueueRuntimeProjectionEffects for CasRelayEffects {
+        fn current_document_content(&self, _file: &Path, _source: &str) -> Result<String> {
+            Ok(self.current.lock().unwrap().clone())
+        }
+
+        fn converge_document_or_disk(
+            &self,
+            file: &Path,
+            target_content: &str,
+            source_content: &str,
+            _reason: &str,
+        ) -> Result<()> {
+            use std::sync::atomic::Ordering;
+            if self.converges.fetch_add(1, Ordering::SeqCst) < self.race_rounds
+                && let Some(open) = self.race_open.lock().unwrap().as_ref()
+            {
+                open.send(()).unwrap();
+                self.race_landed.lock().unwrap().recv().unwrap();
+            }
+            let mut current = self.current.lock().unwrap();
+            if *current != source_content {
+                self.refusals.fetch_add(1, Ordering::SeqCst);
+                bail!(
+                    "project controller command `crdt_cp_write` failed: CP relay write refused for {}: expected_hash={} current_hash={} recovery=retry_crdt_merge",
+                    file.display(),
+                    agent_doc_hash::content_hash(source_content),
+                    agent_doc_hash::content_hash(&current),
+                );
+            }
+            *current = target_content.to_string();
+            std::fs::write(file, target_content)?;
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn claim_projection_retries_a_concurrent_crdt_write_without_burning_its_generation() {
+        use std::sync::atomic::Ordering;
+        let dir = tempfile::tempdir().unwrap();
+        let doc = write_doc(dir.path(), &waiting_doc());
+        let (effects, writer) = CasRelayEffects::new(waiting_doc(), 1);
+
+        let (_, claim) = effects
+            .claim_racing_writer(writer, &doc)
+            .expect("a CAS refusal from a concurrent CRDT write is retried inside the claim");
+
+        // The race really happened: one write was refused, the retry landed.
+        assert_eq!(effects.refusals.load(Ordering::SeqCst), 1);
+        assert_eq!(effects.converges.load(Ordering::SeqCst), 2);
+
+        // One admission, one generation: the projection retried, the ledger
+        // transition was neither rolled back nor re-allocated.
+        assert_eq!(claim.generation, 1);
+        let ledger = crate::queue_claim::load_ledger(&doc).unwrap();
+        assert_eq!(ledger.claims.len(), 1, "{ledger:#?}");
+        assert_eq!(ledger.claims[0].generation, 1);
+        let lineage = crate::queue_lineage::load(&doc).unwrap();
+        assert!(crate::queue_lineage::admission_refused_identities(&lineage).is_empty());
+
+        // The retry rebased onto the concurrent write instead of clobbering it.
+        let landed = std::fs::read_to_string(&doc).unwrap();
+        assert!(landed.ends_with(CONCURRENT_EDIT), "{landed}");
+        assert!(
+            answered_row(&landed).starts_with("  - 🟡 [#subagent:worker#1] ⟦"),
+            "{}",
+            answered_row(&landed)
+        );
+        let ops = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops.contains("queue_claim_runtime_projection_cas_retry attempt=1 max=8")
+                && ops.contains("recovery=retry_crdt_merge (#claimprojectionretry)"),
+            "{ops}"
+        );
+    }
+
+    #[test]
+    fn claim_projection_cas_retry_is_bounded_and_rolls_back_once_exhausted() {
+        use std::sync::atomic::Ordering;
+        let dir = tempfile::tempdir().unwrap();
+        let doc = write_doc(dir.path(), &waiting_doc());
+        // Every projection write races a concurrent CRDT write.
+        let (effects, writer) =
+            CasRelayEffects::new(waiting_doc(), CLAIM_RUNTIME_PROJECTION_MAX_ATTEMPTS);
+
+        let error = effects
+            .claim_racing_writer(writer, &doc)
+            .expect_err("a document that never stops moving exhausts the bounded retry");
+
+        assert_eq!(
+            effects.refusals.load(Ordering::SeqCst),
+            CLAIM_RUNTIME_PROJECTION_MAX_ATTEMPTS
+        );
+        let rendered = format!("{error:#}");
+        assert!(rendered.contains("refused on all 8 attempts"), "{rendered}");
+        assert!(rendered.contains("no worker may be spawned"), "{rendered}");
+        // Still transient: rolled back, not terminalized as a held blocker.
+        assert!(error.downcast_ref::<ClaimAdmissionRefused>().is_none(), "{rendered}");
+        assert!(crate::queue_claim::load_ledger(&doc).unwrap().claims.is_empty());
+        let lineage = crate::queue_lineage::load(&doc).unwrap();
+        assert!(crate::queue_lineage::admission_refused_identities(&lineage).is_empty());
+    }
+
+    #[test]
+    fn non_cas_projection_failure_is_not_retried() {
+        struct CountingRefusal(std::cell::Cell<usize>);
+        impl QueueRuntimeProjectionEffects for CountingRefusal {
+            fn current_document_content(&self, file: &Path, _source: &str) -> Result<String> {
+                Ok(std::fs::read_to_string(file)?)
+            }
+            fn converge_document_or_disk(
+                &self,
+                _file: &Path,
+                target_content: &str,
+                _source_content: &str,
+                _reason: &str,
+            ) -> Result<()> {
+                // The rollback repair writes the cleared projection; only the
+                // admission write (which carries the marker) is counted.
+                if target_content.contains("[#subagent:w#1]") {
+                    self.0.set(self.0.get() + 1);
+                }
+                bail!("synthetic editor delivery refusal")
+            }
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+        let doc = write_doc(dir.path(), &waiting_doc());
+        let effects = CountingRefusal(std::cell::Cell::new(0));
+        claim_with_runtime_projection(&effects, &doc, "#answered", "subagent:w", 600).unwrap_err();
+        assert_eq!(effects.0.get(), 1, "only `retry_crdt_merge` refusals earn a retry");
     }
 }

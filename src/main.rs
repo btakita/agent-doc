@@ -1614,6 +1614,32 @@ impl agent_doc_queue_io::queue_cmd::QueueCommandEffects for CliQueueCommandEffec
         Ok(())
     }
 
+    /// `#claimprojectionretry`: a `retry_crdt_merge` refusal means a concurrent
+    /// CRDT write is landing. Wait (bounded, returns early on convergence) for
+    /// that delivery, then drop the cached authority cut so the retry reads the
+    /// relay current rather than re-deriving from the refused base.
+    fn settle_before_projection_retry(&self, file: &Path) {
+        if let Err(error) =
+            agent_doc_controller_io::project_controller::await_delivery_convergence_for_file(
+                file,
+                std::time::Duration::from_millis(500),
+            )
+        {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "queue_claim_runtime_projection_settle_unavailable fallback=immediate_reread detail={}",
+                    format!("{error:#}")
+                        .replace('\n', " | ")
+                        .chars()
+                        .take(160)
+                        .collect::<String>()
+                ),
+            );
+        }
+        agent_doc_document_realtime_io::invalidate_current_document_projection(file);
+    }
+
     fn consume_free_text_queue_prompts_force_disk(
         &self,
         file: &Path,

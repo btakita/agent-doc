@@ -591,6 +591,115 @@ fn push_proof(
     }
 }
 
+/// How a closeout would close a worker-owned row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClaimedRowCloseoutSource {
+    /// The response's `> **Queue prompt:**` echo answers the row.
+    QueuePromptEcho,
+    /// `--done <id>` completes the tracked work the row names.
+    DoneId,
+}
+
+/// A live queue row this closeout would strike while a subagent's attempt on
+/// it is still claimed or running and has not reported.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnreportedClaimedRowCloseout {
+    /// The row's claim key (its nest vector when nested).
+    pub lineage: String,
+    pub owner: String,
+    pub generation: u64,
+    pub state: crate::queue_claim::QueueClaimState,
+    pub source: ClaimedRowCloseoutSource,
+}
+
+/// `#claimedechostrike`: rows a closeout would strike although their worker
+/// attempt is still `Claimed` or `Running` and never reported.
+///
+/// haiven-dev `sdk-dev.md` (2026-11-03): `subagent:c252dillon` was running on
+/// `do [#q-c2010d98af04]`, its `queue report-complete` found no claim, and the
+/// coordinator then closed the row from its own `> **Queue prompt:**` echo and
+/// `--done`. The strike ended the claim without any worker report, so the
+/// recorded result never passed the report/integration boundary and the
+/// operator's decision was never carried out. A worker's row closes from that
+/// worker's report: the closeout must refuse until `queue report-complete`
+/// records it (or `queue release --requeue` abandons the attempt).
+///
+/// `claims` are the live claim records for `content` (expired attempts already
+/// presented as lost). Only `subagent:*` attempts in `Claimed`/`Running` count:
+/// a `Reported` attempt is exactly the case a closeout integrates, a `Lost`
+/// attempt has no live worker, and a `coordinator:*` claim is the
+/// coordinator's own work. An echo the response itself defers
+/// (`#ftstrikedefer`) does not close the row.
+pub fn unreported_claimed_rows_closed_by_closeout(
+    content: &str,
+    response_body: &str,
+    done_ids: &[String],
+    claims: &[crate::queue_claim::QueueClaim],
+) -> Vec<UnreportedClaimedRowCloseout> {
+    use crate::queue_claim::QueueClaimState;
+    let live_attempts = claims
+        .iter()
+        .filter(|claim| {
+            matches!(
+                claim.state,
+                QueueClaimState::Claimed | QueueClaimState::Running
+            ) && claim.owner.starts_with("subagent:")
+        })
+        .collect::<Vec<_>>();
+    if live_attempts.is_empty() {
+        return Vec::new();
+    }
+    let done_ids = done_ids
+        .iter()
+        .map(|id| queue_response::normalize_done_id(id))
+        .filter(|id| !id.is_empty())
+        .collect::<HashSet<_>>();
+    let mut out = Vec::<UnreportedClaimedRowCloseout>::new();
+    for (display, lineage) in
+        queue_continuation::all_executable_row_keys(content).unwrap_or_default()
+    {
+        let identity = crate::queue_claim::claim_identity(&lineage);
+        let Some(claim) = live_attempts
+            .iter()
+            .find(|claim| claim.identity == identity)
+        else {
+            continue;
+        };
+        let source = if queue_response::queue_prompt_done_id(&display)
+            .is_some_and(|id| done_ids.contains(&id))
+        {
+            Some(ClaimedRowCloseoutSource::DoneId)
+        } else if !response_body.trim().is_empty()
+            && [lineage.as_str(), display.as_str()].iter().any(|head| {
+                queue_response::queue_head_answered_by_response_with_claim(
+                    content,
+                    response_body,
+                    head,
+                    true,
+                ) && !queue_response::response_defers_queue_head(content, response_body, head)
+            })
+        {
+            Some(ClaimedRowCloseoutSource::QueuePromptEcho)
+        } else {
+            None
+        };
+        let Some(source) = source else {
+            continue;
+        };
+        if out.iter().any(|row| row.lineage == lineage) {
+            continue;
+        }
+        out.push(UnreportedClaimedRowCloseout {
+            lineage,
+            owner: claim.owner.clone(),
+            generation: claim.generation,
+            state: claim.state,
+            source,
+        });
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1272,5 +1381,148 @@ mod tests {
             "Approve [#fperuntranscription]. What are the next steps?",
             &done
         ));
+    }
+
+    /// `#claimedechostrike` fixture: the haiven-dev sdk-dev.md 2026-11-03 shape.
+    /// The decision row is nested under a choice; `subagent:c252dillon` is
+    /// bound to it and has not reported.
+    fn claimed_echo_doc() -> String {
+        concat!(
+            "<!-- agent:queue subagents -->\n",
+            "- ADR 0046 approvers\n",
+            "  - **Add Dillon by follow-up PR**: branch and request Luke's review.\n",
+            "    - 🚧 [#subagent:c252dillon#1] do [#q-c2010d98af04]\n",
+            "- do [#later]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#q-c2010d98af04] Add Dillon + Eddie.\n",
+            "- [ ] [#later] Later work.\n",
+            "<!-- /agent:backlog -->\n",
+        )
+        .to_string()
+    }
+
+    fn claimed_echo_ledger(
+        content: &str,
+        owner: &str,
+        report: bool,
+    ) -> (crate::queue_claim::QueueClaimLedger, String) {
+        let lineage = queue_continuation::all_executable_row_keys(content)
+            .unwrap()
+            .into_iter()
+            .find(|(display, _)| display.contains("q-c2010d98af04"))
+            .map(|(_, lineage)| lineage)
+            .unwrap();
+        let mut ledger = crate::queue_claim::QueueClaimLedger::default();
+        ledger.claim(&lineage, owner, 100, 3600);
+        let generation = ledger.claims[0].generation;
+        ledger
+            .start(
+                &lineage,
+                owner,
+                "worker:dillon",
+                100,
+                3600,
+                Some(generation),
+            )
+            .unwrap();
+        if report {
+            ledger.report(&lineage, Some(generation)).unwrap();
+        }
+        (ledger, lineage)
+    }
+
+    const DILLON_ECHO: &str =
+        "### Re: dillon\n\n> **Queue prompt:** do [#q-c2010d98af04]\n\nRecorded the decision.\n";
+
+    #[test]
+    fn claimed_echo_strike_of_a_running_row_is_refused() {
+        let content = claimed_echo_doc();
+        let (ledger, lineage) = claimed_echo_ledger(&content, "subagent:c252dillon", false);
+
+        let rows =
+            unreported_claimed_rows_closed_by_closeout(&content, DILLON_ECHO, &[], &ledger.claims);
+        assert_eq!(rows.len(), 1, "{rows:?}");
+        assert_eq!(rows[0].lineage, lineage);
+        assert_eq!(rows[0].owner, "subagent:c252dillon");
+        assert_eq!(rows[0].generation, 1);
+        assert_eq!(rows[0].state, crate::queue_claim::QueueClaimState::Running);
+        assert_eq!(rows[0].source, ClaimedRowCloseoutSource::QueuePromptEcho);
+
+        // `--done` of the row's id closes it just the same.
+        let rows = unreported_claimed_rows_closed_by_closeout(
+            &content,
+            "### Re: other\n\nUnrelated.\n",
+            &["#q-c2010d98af04".to_string()],
+            &ledger.claims,
+        );
+        assert_eq!(rows.len(), 1, "{rows:?}");
+        assert_eq!(rows[0].source, ClaimedRowCloseoutSource::DoneId);
+    }
+
+    #[test]
+    fn claimed_echo_guard_allows_reported_deferred_unrelated_and_coordinator_rows() {
+        let content = claimed_echo_doc();
+        let (reported, _) = claimed_echo_ledger(&content, "subagent:c252dillon", true);
+        assert!(
+            unreported_claimed_rows_closed_by_closeout(
+                &content,
+                DILLON_ECHO,
+                &["q-c2010d98af04".to_string()],
+                &reported.claims,
+            )
+            .is_empty(),
+            "a reported attempt is exactly what a closeout integrates"
+        );
+
+        let (running, _) = claimed_echo_ledger(&content, "subagent:c252dillon", false);
+        let deferred = "### Re: dillon\n\n> **Queue prompt:** do [#q-c2010d98af04]\n\n**Deferred:** waiting for the worker's report.\n";
+        assert!(
+            unreported_claimed_rows_closed_by_closeout(&content, deferred, &[], &running.claims)
+                .is_empty(),
+            "a deferred echo leaves the row queued"
+        );
+        assert!(
+            unreported_claimed_rows_closed_by_closeout(
+                &content,
+                "### Re: later\n\n> **Queue prompt:** do [#later]\n\nDone.\n",
+                &["later".to_string()],
+                &running.claims,
+            )
+            .is_empty(),
+            "closing another row is unaffected"
+        );
+
+        let (coordinator, _) = claimed_echo_ledger(&content, "coordinator:main", false);
+        assert!(
+            unreported_claimed_rows_closed_by_closeout(
+                &content,
+                DILLON_ECHO,
+                &[],
+                &coordinator.claims,
+            )
+            .is_empty(),
+            "the coordinator's own claim is its own work"
+        );
+    }
+
+    /// `#lifecyclewordfusion` + `#claimedechostrike`: the fused `running🚧`
+    /// word no longer hides the row from its own attempt, so the guard still
+    /// sees the running claim (the live row could not be matched in 2026-11-03).
+    #[test]
+    fn claimed_echo_guard_sees_a_row_whose_state_word_was_fused() {
+        let content = claimed_echo_doc();
+        let (ledger, _) = claimed_echo_ledger(&content, "subagent:c252dillon", false);
+        let fused = content.replace(
+            "🚧 [#subagent:c252dillon#1] do [#q-c2010d98af04]",
+            "📥 running🚧 do [#q-c2010d98af04]",
+        );
+        let rows = unreported_claimed_rows_closed_by_closeout(
+            &fused,
+            "### Re: dillon\n\n> **Queue prompt:** running🚧 do [#q-c2010d98af04]\n\nRecorded.\n",
+            &["q-c2010d98af04".to_string()],
+            &ledger.claims,
+        );
+        assert_eq!(rows.len(), 1, "{rows:?}");
     }
 }

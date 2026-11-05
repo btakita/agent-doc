@@ -148,6 +148,86 @@ impl QueueLifecycleMarker {
             Self::AwaitingOperator => "⏳",
         }
     }
+
+    /// The words agent-doc itself uses to name this state: its
+    /// `[queue_icons]` key, the legend label, and their hyphenated spellings
+    /// (`lost_running`, `lost + running`, `lost-running`). These are binary
+    /// vocabulary for the state, never queue work text (`#lifecyclewordfusion`).
+    pub const fn state_words(self) -> &'static [&'static str] {
+        match self {
+            Self::Pending => &["pending"],
+            Self::Blocked => &["blocked"],
+            Self::Claimed => &["claimed"],
+            Self::Running => &["running"],
+            Self::Reported => &["reported"],
+            Self::Lost => &["lost"],
+            Self::LostClaimed => &["lost_claimed", "lost-claimed", "lost+claimed"],
+            Self::LostRunning => &["lost_running", "lost-running", "lost+running"],
+            Self::LostReported => &["lost_reported", "lost-reported", "lost+reported"],
+            Self::Reconciling => &["reconciling"],
+            Self::Unknown => &["unknown"],
+            Self::Skipped => &["skipped"],
+            Self::AwaitingOperator => &["awaiting_operator", "awaiting-operator"],
+        }
+    }
+}
+
+/// Former reported spellings still accepted on rendered rows.
+const LEGACY_REPORTED_PREFIXES: [&str; 2] = ["📫", "📤"];
+
+/// `#lifecyclewordfusion`: a leading lifecycle state word fused to a lifecycle
+/// glyph, `running🚧`, is a torn projection token, never work text.
+///
+/// haiven-dev `sdk-dev.md` (2026-11-03) carried `📥 running🚧 do [#q-…]` after
+/// a dispatch: the state's name had been written into the row in front of its
+/// glyph. Because no parser read `running🚧` as projection, it became part of
+/// the row's work text and nest vector, `queue report-complete` found no claim
+/// for the exact running attempt, and the closeout struck the row by its echo
+/// text instead. Reading the fused token as one lifecycle token lets every
+/// projection pass repaint the row canonically (one glyph, no word) and keeps
+/// identity, claim matching and strikes on the real work text.
+///
+/// Recognition is exact: one of the binary's own state words
+/// ([`QueueLifecycleMarker::state_words`], ASCII case-insensitive) immediately
+/// followed, with no whitespace, by a lifecycle glyph (configured or built-in).
+/// The glyph names the state; the word is discarded. Operator prose such as
+/// `running tests` never matches because no glyph follows the word.
+///
+/// Returns the glyph's state and the byte length of the whole fused token.
+pub fn fused_lifecycle_word_token(text: &str) -> Option<(QueueLifecycleMarker, usize)> {
+    let word_len = ALL_LIFECYCLE_STATES
+        .iter()
+        .flat_map(|state| state.state_words().iter())
+        .filter(|word| {
+            text.len() >= word.len()
+                && text.is_char_boundary(word.len())
+                && text[..word.len()].eq_ignore_ascii_case(word)
+        })
+        .map(|word| word.len())
+        .max()?;
+    let after_word = &text[word_len..];
+    let (state, glyph_len) = ALL_LIFECYCLE_STATES
+        .iter()
+        .flat_map(|state| {
+            let legacy: &[&str] = if *state == QueueLifecycleMarker::Reported {
+                &LEGACY_REPORTED_PREFIXES
+            } else {
+                &[]
+            };
+            [state.prefix(), state.default_prefix()]
+                .into_iter()
+                .chain(legacy.iter().copied())
+                .map(move |glyph| (*state, glyph))
+        })
+        // A configured ASCII-word palette entry is not a glyph; only a prefix
+        // that does not itself start with a letter can be fused to a word.
+        .filter(|(_, glyph)| {
+            !glyph.is_empty() && !glyph.starts_with(|ch: char| ch.is_ascii_alphanumeric())
+        })
+        .filter(|(_, glyph)| after_word.starts_with(glyph))
+        .map(|(state, glyph)| (state, glyph.len()))
+        .max_by_key(|(_, len)| *len)?;
+    Some((state, word_len + glyph_len))
 }
 
 impl Default for QueueIconSet {
@@ -314,6 +394,44 @@ pub fn queue_icons() -> &'static QueueIconSet {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `#lifecyclewordfusion`: haiven-dev sdk-dev.md 2026-11-03 carried
+    /// `📥 running🚧 do [#q-c2010d98af04]`. The fused state word and glyph is
+    /// one torn lifecycle token whose glyph names the state.
+    #[test]
+    fn fused_state_word_and_glyph_is_one_lifecycle_token() {
+        let row = "running🚧 do [#q-c2010d98af04]";
+        let (state, len) = fused_lifecycle_word_token(row).expect("fused token");
+        assert_eq!(state, QueueLifecycleMarker::Running);
+        assert_eq!(&row[len..], " do [#q-c2010d98af04]");
+
+        // The glyph decides the state; the word is discarded, any case.
+        assert_eq!(
+            fused_lifecycle_word_token("Claimed🚧 do [#a]").map(|(state, _)| state),
+            Some(QueueLifecycleMarker::Running)
+        );
+        let (state, len) = fused_lifecycle_word_token("lost_running⚠️🚧 do [#a]").unwrap();
+        assert_eq!(state, QueueLifecycleMarker::LostRunning);
+        assert_eq!(len, "lost_running⚠️🚧".len());
+        assert_eq!(
+            fused_lifecycle_word_token("reported📤 x").map(|(state, _)| state),
+            Some(QueueLifecycleMarker::Reported)
+        );
+    }
+
+    #[test]
+    fn operator_prose_is_never_a_fused_lifecycle_token() {
+        for text in [
+            "running tests on the branch",
+            "running 🚧 do [#a]",
+            "🚧 do [#a]",
+            "runningX🚧 do [#a]",
+            "do [#a] running🚧",
+            "",
+        ] {
+            assert_eq!(fused_lifecycle_word_token(text), None, "{text:?}");
+        }
+    }
 
     #[test]
     fn reported_default_is_worker_complete_handoff() {

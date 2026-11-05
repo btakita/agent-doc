@@ -286,6 +286,12 @@ pub fn blocked_marker_ids(text: &str) -> Vec<String> {
 }
 
 fn lifecycle_marker_prefix(text: &str) -> Option<(QueueLifecycleMarker, &str, &str)> {
+    // `#lifecyclewordfusion`: `running🚧` is one torn lifecycle token, so the
+    // state word never survives a repaint or enters work identity.
+    if let Some((state, len)) = agent_doc_frontmatter::frontmatter::fused_lifecycle_word_token(text)
+    {
+        return Some((state, &text[..len], &text[len..]));
+    }
     ALL_LIFECYCLE_STATES
         .into_iter()
         .flat_map(|state| {
@@ -2381,5 +2387,43 @@ mod tests {
         assert!(in_progress_marker_retarget_requested(
             moved_diff, &moved, &projected
         ));
+    }
+
+    /// `#lifecyclewordfusion`: the live haiven-dev row `📥 running🚧 do
+    /// [#q-c2010d98af04]` (sdk-dev.md, 2026-11-03). The fused state word is
+    /// projection, so a repaint writes one glyph and never the word, and the
+    /// row's work text is the authored `do [#q-c2010d98af04]`.
+    #[test]
+    fn fused_state_word_is_stripped_and_never_repainted() {
+        let fused = "📥 running🚧 do [#q-c2010d98af04]";
+        assert_eq!(lifecycle_marker(fused), Some(QueueLifecycleMarker::Pending));
+        assert_eq!(
+            lifecycle_marker("running🚧 do [#q-c2010d98af04]"),
+            Some(QueueLifecycleMarker::Running)
+        );
+        assert_eq!(strip_in_progress_marker(fused), "do [#q-c2010d98af04]");
+        assert_eq!(strip_priority_markers(fused), "do [#q-c2010d98af04]");
+        assert_eq!(
+            apply_lifecycle_marker(fused, QueueLifecycleMarker::Running),
+            "🚧 do [#q-c2010d98af04]"
+        );
+        let owner = QueueOwnerProjection {
+            owner: "subagent:c252dillon".to_string(),
+            generation: 1,
+        };
+        let repainted = apply_owner_projection(
+            &apply_lifecycle_marker(fused, QueueLifecycleMarker::Reported),
+            Some(&owner),
+        );
+        assert_eq!(
+            repainted,
+            "☑️ [#subagent:c252dillon#1] do [#q-c2010d98af04]"
+        );
+        assert!(!repainted.contains("running"), "{repainted}");
+        // Operator prose that merely starts with the word stays work text.
+        assert_eq!(
+            strip_in_progress_marker("📥 running tests on main"),
+            "running tests on main"
+        );
     }
 }

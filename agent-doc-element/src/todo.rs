@@ -822,7 +822,12 @@ fn existing_children(body: &TodoBody, index: usize) -> Vec<String> {
 
 /// Collapse whitespace so two spellings of one action compare equal.
 fn normalize_action_text(action: &str) -> String {
-    action.split_whitespace().collect::<Vec<_>>().join(" ")
+    // `#decisionidstamp`: the binary-owned decision stamp is not part of the
+    // action, so a replayed add of the unstamped text still finds its row.
+    crate::decision_stamp::strip_decision_stamps(action)
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// Make the tracked-work source of a singly linked todo visible in the checklist.
@@ -2691,6 +2696,20 @@ mod tests {
         format!(
             "<!-- agent:exchange -->\nhi\n<!-- /agent:exchange -->\n<!-- agent:todo -->\n{body}<!-- /agent:todo -->\n"
         )
+    }
+
+    /// `#decisionidstamp`: a request todo the binary re-adds by its explicit
+    /// id on a later closeout still finds its row after the answer ledger
+    /// stamped the decision id on it. Without this the text no longer matched
+    /// and the add was refused as an id collision.
+    #[test]
+    fn a_replayed_add_finds_its_decision_stamped_row() {
+        let content = wrap(
+            "- [ ] [#subagent-operator-request-x] Choose a port ⟦decision:dec-0123456789⟧\n",
+        );
+        let outcome = add(&content, "[#subagent-operator-request-x] Choose a port").unwrap();
+        assert!(!outcome.inserted, "{}", outcome.content);
+        assert_eq!(outcome.content, content);
     }
 
     /// `#trackedworkdropped`: a `--todo-add` / `--todo-edit` whose item line

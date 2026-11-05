@@ -1260,6 +1260,13 @@ fn run_with_options_to_writer_in_pass(
     let mut answer_ledger_report =
         agent_doc_preflight_io::answer_ledger::AnswerLedgerReport::default();
     let queue_state = if options.probe {
+        // `#decisionidstamp`: a probe reports the same answered facts the
+        // real pass would, from a read-only simulation (no document write, no
+        // index write, no history rebuild).
+        match agent_doc_preflight_io::answer_ledger::probe_answer_ledger(file) {
+            Ok(report) => answer_ledger_report = report,
+            Err(err) => eprintln!("[preflight] answer ledger probe warning: {err:#}"),
+        }
         inspect_queue_state(file, diff_result.as_deref()).unwrap_or_else(|e| {
             eprintln!("[preflight] queue probe warning: {}", e);
             QueueState::default()

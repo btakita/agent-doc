@@ -56,6 +56,13 @@ preflight and every closeout (`#answerbyrequestid`):
 - Only operator words change a decision. A newer operator answer becomes the
   latest revision. Earlier answers are kept, and the cycle contract shows a
   changed decision once as `decision changed: <old> -> <new>`.
+- The binary writes each answered decision's id onto every open todo copy of
+  the question as `⟦decision:dec-…⟧` (`#decisionidstamp`). It is a binary
+  token, not prose: leave it in place, never type or copy one yourself, and
+  cite the decision id in words when a request truly needs to.
+- Answers that were pruned from the document before the ledger existed are
+  recovered once from the document's git history. `preflight --probe` shows the
+  same `answered_decisions` without writing anything.
 
 `agent-doc decision answered <FILE> [--json]` prints the ledger for debugging.
 `agent-doc decision validate --document <FILE>` also lists near-duplicate

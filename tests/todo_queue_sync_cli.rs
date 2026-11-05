@@ -332,3 +332,61 @@ fn an_answered_question_closes_its_duplicate_and_a_reask_is_refused() {
         "nothing is written before the refusal"
     );
 }
+
+/// `#decisionidstamp`: `preflight --probe` carries the same answered facts as
+/// a real preflight, from a read-only simulation. It writes no closure and no
+/// decision stamp into the document. A real preflight then stamps the open
+/// copy with the decision id the facts name.
+#[test]
+fn a_probe_preflight_reports_answered_decisions_without_writing() {
+    let dir = tempfile::tempdir().unwrap();
+    let doc = session(
+        dir.path(),
+        "- ~~[#subagent-operator-request-tdport-pick]: Use port 3000.~~\n",
+        concat!(
+            "- [ ] [#tdport] Choose the demo callback port for local sign-in runs\n",
+            "- [ ] [#subagent-operator-request-tdport-pick] Choose the demo callback port for local sign-in runs: 3000 or 47616\n",
+        ),
+    );
+    let path = doc.to_str().unwrap();
+    let before = fs::read_to_string(&doc).unwrap();
+    let output = run_agent_doc(dir.path(), &["preflight", "--probe", path]);
+    assert_ok(&output, "preflight --probe");
+    let contract: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let answered = contract["answered_decisions"]
+        .as_array()
+        .unwrap_or_else(|| panic!("probe carries answered_decisions: {contract:#}"));
+    let fact = answered
+        .iter()
+        .find(|fact| {
+            fact["open_items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|item| item == "tdport")
+        })
+        .unwrap_or_else(|| panic!("{contract:#}"));
+    assert_eq!(fact["answer"], "Use port 3000.", "{fact:#}");
+    assert!(
+        contract["answered_decisions_guidance"]
+            .as_str()
+            .is_some_and(|guidance| guidance.contains("do not ask again")),
+        "{contract:#}"
+    );
+    assert_eq!(
+        fs::read_to_string(&doc).unwrap(),
+        before,
+        "probe wrote nothing"
+    );
+
+    let output = run_agent_doc(dir.path(), &["preflight", path]);
+    assert_ok(&output, "preflight");
+    let decision = fact["decision_id"].as_str().unwrap();
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(
+        content.contains(&format!(
+            "- [ ] [#tdport] Choose the demo callback port for local sign-in runs ⟦decision:{decision}⟧"
+        )),
+        "{content}"
+    );
+}

@@ -452,3 +452,129 @@ fn semantic_neighbours_only_annotate() {
     );
     assert_eq!(ledger.near_duplicates.len(), 1);
 }
+
+/// `#decisionidstamp`: every open todo copy of an answered question gets the
+/// decision id as a binary-owned token, placed before the source locator. The
+/// prose, the normalized question text and the grouping are unchanged, and a
+/// second pass writes nothing.
+#[test]
+fn every_open_copy_of_an_answered_question_is_stamped_once() {
+    let (_, ledger) = build(FIXTURE);
+    let stamps = ledger.decision_stamps();
+    let alpha = ledger
+        .decision_for_key(&id_key("tdalphahandoff"))
+        .unwrap()
+        .id
+        .clone();
+    assert_eq!(stamps.get("tdalphahandoff"), Some(&alpha));
+    assert_eq!(
+        stamps.get("subagent-operator-request-tdalphahandoff-d1d4"),
+        Some(&alpha),
+        "the request copy carries the same id"
+    );
+    assert!(
+        !stamps.contains_key("tdcap20"),
+        "an unanswered question is not stamped"
+    );
+    let stamped = apply_decision_stamps(FIXTURE, &stamps).expect("stamps written");
+    assert!(
+        stamped.contains(&format!(
+            "- [ ] [#tdalphahandoff] Record the Monday public-Alpha decision: a no-go on a public v0.1.0-alpha.1 tag, or a cutoff for a conditional go, and the release owner. ⟦decision:{alpha}⟧\n"
+        )),
+        "{stamped}"
+    );
+    assert_eq!(apply_decision_stamps(&stamped, &stamps), None, "idempotent");
+
+    let (observations, again) = build(&stamped);
+    for question in observations
+        .questions
+        .iter()
+        .filter(|question| question.source == QuestionSource::Todo && question.open)
+    {
+        let id = question.id.as_deref().unwrap();
+        assert_eq!(
+            question.stamp.as_ref(),
+            stamps.get(id),
+            "stamp read back for {id}"
+        );
+    }
+    let before: Vec<_> = ledger
+        .decisions
+        .iter()
+        .map(|d| (d.id.clone(), d.open_items.clone()))
+        .collect();
+    let after: Vec<_> = again
+        .decisions
+        .iter()
+        .map(|d| (d.id.clone(), d.open_items.clone()))
+        .collect();
+    assert_eq!(before, after, "stamping changes no decision");
+}
+
+/// `#decisionidstamp`: with no index, the id a copy carries is the decision
+/// id, even after the copy whose key derived it is gone.
+#[test]
+fn a_stamped_copy_keeps_its_decision_id_without_the_index() {
+    let content = concat!(
+        "<!-- agent:queue -->\n",
+        "- ~~[#subagent-operator-request-tdport-pick]: Use port 3000.~~\n",
+        "<!-- /agent:queue -->\n",
+        "<!-- agent:todo -->\n",
+        "- [ ] [#tdport] Choose the demo callback port for local sign-in runs\n",
+        "- [ ] [#subagent-operator-request-tdport-pick] Choose the demo callback port: 3000 or 47616\n",
+        "<!-- /agent:todo -->\n",
+    );
+    let (_, ledger) = build(content);
+    let id = ledger
+        .decision_for_key(&id_key("tdport"))
+        .unwrap()
+        .id
+        .clone();
+    let stamped = apply_decision_stamps(content, &ledger.decision_stamps()).unwrap();
+    // The request copy and its answer row are pruned, so the key that derived
+    // the id is gone; the stamp on the work todo still names the decision.
+    let pruned = stamped
+        .lines()
+        .filter(|line| !line.contains("tdport-pick"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let (_, later) = build(&pruned);
+    assert_eq!(later.decision_for_key(&id_key("tdport")).unwrap().id, id);
+    // A stamp also wins over a different id the index holds.
+    let prior = PriorIndex {
+        keys: vec![PriorKey {
+            key: id_key("tdport"),
+            decision_id: "dec-other".into(),
+            first_seen_at: 1,
+        }],
+        revisions: Vec::new(),
+    };
+    let (_, indexed) = build_with(&pruned, &prior);
+    assert_eq!(indexed.decision_for_key(&id_key("tdport")).unwrap().id, id);
+}
+
+/// `#decisionidstamp`: an id-less question that copies a stamp is that
+/// decision, so re-asking it is refused; the copied stamp is not a citation.
+#[test]
+fn a_copied_stamp_is_identity_not_a_citation() {
+    let content = concat!(
+        "<!-- agent:queue -->\n",
+        "- ~~[#tdport]: Use port 3000.~~\n",
+        "<!-- /agent:queue -->\n",
+        "<!-- agent:todo -->\n",
+        "- [ ] [#tdport] Choose the demo callback port for local sign-in runs\n",
+        "<!-- /agent:todo -->\n",
+    );
+    let (_, ledger) = build(content);
+    let id = ledger
+        .decision_for_key(&id_key("tdport"))
+        .unwrap()
+        .id
+        .clone();
+    let reasks = ledger.reasks(&extract::observe_new_questions(
+        "",
+        &[format!("Pick a port ⟦decision:{id}⟧")],
+    ));
+    assert_eq!(reasks.len(), 1, "{reasks:?}");
+    assert_eq!(reasks[0].decision_id, id);
+}

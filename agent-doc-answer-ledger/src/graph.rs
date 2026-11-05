@@ -409,9 +409,10 @@ impl DecisionGraph {
     }
 
     /// Add cached nodes and edges the current document no longer produces.
-    /// The current build wins: a cached revision relation between the same
-    /// two revisions under another kind (a proposal the operator since
-    /// corrected) is dropped.
+    /// For a revision pair the current build wins (a cached proposal the
+    /// operator since corrected is dropped), except that the operator's
+    /// cached word outranks a proposal the current build fell back to after
+    /// the operator's `change:` / `amend:` row was pruned.
     pub fn merge_prior(&mut self, nodes: Vec<Node>, edges: Vec<GraphEdge>) {
         for mut node in nodes {
             if !self.nodes.contains_key(&node.id) {
@@ -419,20 +420,22 @@ impl DecisionGraph {
                 self.nodes.insert(node.id.clone(), node);
             }
         }
-        let current: BTreeSet<(String, String)> = self
-            .edges
-            .iter()
-            .filter(|edge| edge.kind.is_revision_relation())
-            .map(|edge| (edge.from.clone(), edge.to.clone()))
-            .collect();
         for edge in edges {
             if !self.nodes.contains_key(&edge.from) || !self.nodes.contains_key(&edge.to) {
                 continue;
             }
-            if edge.kind.is_revision_relation()
-                && current.contains(&(edge.from.clone(), edge.to.clone()))
-            {
-                continue;
+            if edge.kind.is_revision_relation() {
+                let current = self.edges.iter().position(|e| {
+                    e.kind.is_revision_relation() && e.from == edge.from && e.to == edge.to
+                });
+                if let Some(index) = current {
+                    if edge.source == EdgeSource::Operator
+                        && self.edges[index].source == EdgeSource::Proposed
+                    {
+                        self.edges[index] = edge;
+                    }
+                    continue;
+                }
             }
             if self
                 .edges
@@ -488,20 +491,18 @@ impl DecisionGraph {
         }
     }
 
-    /// The decisions that apply to an item.
+    /// The decisions an item is tied to by `applies_to`, either way: the
+    /// decisions that concern it and the decisions it cites.
     pub fn decisions_applying_to(&self, id: &str) -> Vec<String> {
-        let mut out: Vec<String> = self
+        let mut out: BTreeSet<String> = self
             .incoming(id, EdgeKind::AppliesTo)
-            .filter_map(|edge| {
-                self.nodes
-                    .get(&edge.from)
-                    .filter(|node| node.kind == NodeKind::Decision)
-                    .map(|node| node.id.clone())
-            })
+            .filter_map(|edge| self.resolve_decision(&edge.from))
             .collect();
-        out.sort();
-        out.dedup();
-        out
+        out.extend(
+            self.outgoing(id, EdgeKind::AppliesTo)
+                .filter_map(|edge| self.resolve_decision(&edge.to)),
+        );
+        out.into_iter().collect()
     }
 
     /// A decision's revisions, oldest first, following the revision-relation

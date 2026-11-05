@@ -4369,6 +4369,42 @@ enum DecisionAction {
         #[arg(long)]
         json: bool,
     },
+    /// Print a session document's decision graph (`#decisiongraph`): typed
+    /// nodes (questions, decisions, revisions, items, evidence) and edges
+    /// (answers, supersedes, amends, depends_on, conflicts_with, applies_to,
+    /// evidenced_by, ...) with their source (derived / operator / proposed)
+    Graph {
+        /// Session document
+        file: PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
+    /// What a decision change disturbs (`#decisiongraph`): a supersede flags
+    /// or reopens every dependent and lists actions taken on the old answer;
+    /// an amend flags only rows touching the amended clause
+    Impact {
+        /// Session document
+        file: PathBuf,
+        /// Decision id, revision id, or the id of any copy of the question
+        id: String,
+        /// Revision to evaluate (default: the latest)
+        #[arg(long)]
+        revision: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Why a decision holds (`#decisiongraph`): every revision verbatim with
+    /// where and when the operator gave it, its evidence, and the decisions
+    /// it depends on
+    Why {
+        /// Session document
+        file: PathBuf,
+        /// Decision id, revision id, a question copy id, or an item id (the
+        /// decisions that apply to it)
+        id: String,
+        #[arg(long)]
+        json: bool,
+    },
     /// Read immutable revision entries for one stable decision id
     History {
         #[arg(long, default_value = ".")]
@@ -4377,6 +4413,30 @@ enum DecisionAction {
         #[arg(long)]
         json: bool,
     },
+}
+
+/// The decision graph for a session document (`#decisiongraph`).
+fn load_decision_graph(
+    file: &Path,
+) -> anyhow::Result<(agent_doc_answer_ledger::Ledger, agent_doc_answer_ledger::graph::DecisionGraph)> {
+    let content = std::fs::read_to_string(file)
+        .with_context(|| format!("failed to read {}", file.display()))?;
+    Ok(agent_doc_preflight_io::answer_ledger::build_graph(file, &content))
+}
+
+fn resolve_graph_decision(
+    graph: &agent_doc_answer_ledger::graph::DecisionGraph,
+    id: &str,
+) -> anyhow::Result<String> {
+    if let Some(decision) = graph.resolve_decision(id) {
+        return Ok(decision);
+    }
+    let bare = id.trim_start_matches("[#").trim_start_matches('#').trim_end_matches(']');
+    match graph.decisions_applying_to(bare).as_slice() {
+        [one] => Ok(one.clone()),
+        [] => anyhow::bail!("{id} is not a decision, a revision, or a question copy"),
+        many => anyhow::bail!("{id} is an item several decisions apply to; name one: {}", many.join(", ")),
+    }
 }
 
 fn run_decision_action(action: DecisionAction) -> anyhow::Result<()> {
@@ -4469,6 +4529,100 @@ fn run_decision_action(action: DecisionAction) -> anyhow::Result<()> {
                 }
                 if let Some(guidance) = agent_doc_answer_ledger::contract_guidance(&facts, &ledger.possible) {
                     println!("\n{guidance}");
+                }
+            }
+            Ok(())
+        }
+        DecisionAction::Graph { file, json } => {
+            let (_, graph) = load_decision_graph(&file)?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&serde_json::json!({
+                    "nodes": graph.nodes.values().collect::<Vec<_>>(),
+                    "edges": graph.edges,
+                }))?);
+            } else {
+                for node in graph.nodes.values() {
+                    println!("{} [{}] {}", node.id, node.kind.as_str(), node.label);
+                }
+                println!();
+                for edge in &graph.edges {
+                    println!("{} {} {} ({})", edge.from, edge.kind.as_str(), edge.to, edge.source.as_str());
+                }
+            }
+            Ok(())
+        }
+        DecisionAction::Impact { file, id, revision, json } => {
+            let (_, graph) = load_decision_graph(&file)?;
+            let decision = resolve_graph_decision(&graph, &id)?;
+            let impact = graph.impact(&decision, revision.as_deref()).with_context(|| match &revision {
+                Some(revision) => format!("decision {decision} has no revision {revision}"),
+                None => format!("decision {decision} has no answer yet"),
+            })?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&impact)?);
+            } else {
+                println!("{} {}", impact.decision_id, impact.question);
+                println!("  change: {} ({})", impact.change, impact.change_source.as_str());
+                if let Some(from) = &impact.from_answer {
+                    println!("  from: “{from}”");
+                }
+                println!("  to: “{}”", impact.to_answer);
+                if let Some(clause) = &impact.clause {
+                    println!("  clause: “{clause}”");
+                }
+                for line in agent_doc_answer_ledger::graph::render_impact(&impact) {
+                    println!("  - {line}");
+                }
+                if !impact.conflicts_with.is_empty() {
+                    println!("  conflicts with: {}", impact.conflicts_with.join(", "));
+                }
+                if impact.unaffected > 0 {
+                    println!("  unaffected dependents: {}", impact.unaffected);
+                }
+            }
+            Ok(())
+        }
+        DecisionAction::Why { file, id, json } => {
+            let (_, graph) = load_decision_graph(&file)?;
+            let decisions = match graph.resolve_decision(&id) {
+                Some(decision) => vec![decision],
+                None => {
+                    let applying = graph.decisions_applying_to(id.trim_start_matches("[#").trim_start_matches('#').trim_end_matches(']'));
+                    anyhow::ensure!(!applying.is_empty(), "{id} is not a decision, a revision, a question copy, or an item a decision applies to");
+                    applying
+                }
+            };
+            let whys: Vec<_> = decisions.iter().filter_map(|decision| graph.why(decision)).collect();
+            if json {
+                println!("{}", serde_json::to_string_pretty(&whys)?);
+            } else {
+                for why in &whys {
+                    println!("{} {}", why.decision_id, why.question);
+                    if let Some(answer) = &why.current_answer {
+                        println!("  holds: “{answer}”");
+                    }
+                    for revision in &why.revisions {
+                        println!(
+                            "  {} ({}) “{}” — {}{}",
+                            revision.relation,
+                            revision.relation_source.as_str(),
+                            revision.answer,
+                            revision.location.as_deref().unwrap_or("unknown location"),
+                            if revision.evidence.is_empty() { String::new() } else { format!("; evidence: {}", revision.evidence.join(", ")) },
+                        );
+                    }
+                    for premise in &why.depends_on {
+                        println!("  depends on {} “{}”{}", premise.id, premise.label, premise.answer.as_deref().map(|answer| format!(": “{answer}”")).unwrap_or_default());
+                    }
+                    if !why.conflicts_with.is_empty() {
+                        println!("  conflicts with: {}", why.conflicts_with.join(", "));
+                    }
+                    if !why.copies.is_empty() {
+                        println!("  copies: {}", why.copies.join(", "));
+                    }
+                    if !why.applies_to.is_empty() {
+                        println!("  applies to: {}", why.applies_to.join(", "));
+                    }
                 }
             }
             Ok(())

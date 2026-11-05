@@ -138,6 +138,116 @@ pub fn is_recognized_bare_flag_attr(component: &str, key: &str) -> bool {
     matches!(key, "subagents" | "subagent" | "fan-out")
 }
 
+/// What a `queue=<value>` attribute on `agent:backlog` / `agent:pending` names,
+/// judged against the document's own queue graph (`#queueidlintfalse`).
+///
+/// This is the rule backlog sync applies (`project_explicit_backlog_queue_routes`
+/// and `collect_backlog_queue_placement_debt` in [`crate::backlog_sync`]): a sync
+/// mode, or an id that [`crate::queue_set::QueueSet::block`] resolves. Lint
+/// adapters consult it so a supported explicit route is never reported as an
+/// unrecognized sync mode.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BacklogQueueAttrTarget {
+    /// `sync`, `append`, `prepend`, or the bare flag.
+    SyncMode,
+    /// An id naming a queue block declared in this document.
+    ExistingQueue,
+    /// A well-formed id that names no queue block in this document.
+    UnknownQueue { available: Vec<String> },
+    /// Neither a sync mode nor a well-formed queue id. `available` is `None`
+    /// when the document's queue graph does not resolve.
+    InvalidValue { available: Option<Vec<String>> },
+    /// A well-formed id that cannot be checked because the document's queue
+    /// graph does not resolve; that topology error owns the diagnostic.
+    UnverifiedQueue { topology_error: String },
+}
+
+impl BacklogQueueAttrTarget {
+    /// Whether backlog sync treats the value as a supported route.
+    pub fn is_supported(&self) -> bool {
+        matches!(self, Self::SyncMode | Self::ExistingQueue)
+    }
+}
+
+/// Classify a backlog `queue=<value>` attribute against `content`'s queue graph.
+pub fn classify_backlog_queue_attr(content: &str, value: &str) -> BacklogQueueAttrTarget {
+    if BacklogQueueSyncMode::parse(value).is_some() {
+        return BacklogQueueAttrTarget::SyncMode;
+    }
+    let well_formed_id = crate::queue_set::QueueId::parse(value).is_ok();
+    let topology = element::parse(content)
+        .map_err(|error| error.to_string())
+        .and_then(|components| {
+            let queues = crate::queue_set::QueueSet::parse(content, &components)
+                .map_err(|error| error.to_string())?;
+            let exists = queues.block(value).is_some();
+            let available = queues
+                .blocks()
+                .iter()
+                .map(|queue| queue.id.clone())
+                .collect::<Vec<_>>();
+            Ok((exists, available))
+        });
+    match (well_formed_id, topology) {
+        (true, Ok((true, _))) => BacklogQueueAttrTarget::ExistingQueue,
+        (true, Ok((false, available))) => BacklogQueueAttrTarget::UnknownQueue { available },
+        (true, Err(topology_error)) => BacklogQueueAttrTarget::UnverifiedQueue { topology_error },
+        (false, topology) => BacklogQueueAttrTarget::InvalidValue {
+            available: topology.ok().map(|(_, available)| available),
+        },
+    }
+}
+
+/// The operator-facing finding for an unsupported backlog `queue=<value>`
+/// attribute, as `(message, fix_hint)`; `None` when the value is a supported
+/// route.
+pub fn backlog_queue_attr_finding(
+    component: &str,
+    value: &str,
+    target: &BacklogQueueAttrTarget,
+) -> Option<(String, String)> {
+    let declared = |available: &[String]| {
+        if available.is_empty() {
+            "this document declares no queue block".to_string()
+        } else {
+            format!(
+                "declared queue ids: {}",
+                available
+                    .iter()
+                    .map(|id| format!("`{id}`"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        }
+    };
+    let modes = "use `queue=sync`, `queue=append`, `queue=prepend`, bare `queue` (= append), or `queue=<queue id>`";
+    match target {
+        BacklogQueueAttrTarget::SyncMode | BacklogQueueAttrTarget::ExistingQueue => None,
+        BacklogQueueAttrTarget::UnknownQueue { available } => Some((
+            format!(
+                "`queue={value}` on `{component}` is not a sync mode and names no queue in this document"
+            ),
+            format!("{modes}; {}", declared(available)),
+        )),
+        BacklogQueueAttrTarget::InvalidValue { available } => Some((
+            format!(
+                "`queue={value}` on `{component}` is neither a recognized sync mode nor a valid queue id"
+            ),
+            match available {
+                Some(available) => format!("{modes}; {}", declared(available)),
+                None => modes.to_string(),
+            },
+        )),
+        BacklogQueueAttrTarget::UnverifiedQueue { topology_error } => Some((
+            format!(
+                "`queue={value}` on `{component}` names a queue id that cannot be verified because the document's queue graph does not resolve: {topology_error}"
+            ),
+            "fix the queue graph error, then confirm the id names a declared queue block"
+                .to_string(),
+        )),
+    }
+}
+
 /// Component attribute keys recognized anywhere in the document, excluding the
 /// queue-only set above.
 const KNOWN_COMPONENT_ATTRS: &[&str] = &[
@@ -217,9 +327,7 @@ pub fn component_attr_warning(content: &str) -> Option<ComponentAttrWarning> {
             if matches!(component.name.as_str(), "queue" | "exchange")
                 && crate::subagent_intent::is_queue_subagents_compat_alias(key)
                 && match component.name.as_str() {
-                    "queue" => {
-                        crate::subagent_intent::parse_queue_subagents_value(value).is_ok()
-                    }
+                    "queue" => crate::subagent_intent::parse_queue_subagents_value(value).is_ok(),
                     "exchange" => value.trim().is_empty(),
                     _ => false,
                 }
@@ -549,6 +657,72 @@ mod tests {
         }
     }
 
+    /// `#queueidlintfalse`: an explicit route naming a declared queue block is
+    /// supported; only a value that is neither a sync mode nor a declared id is
+    /// an issue, and the hint names the ids the document does declare.
+    #[test]
+    fn classify_backlog_queue_attr_follows_backlog_sync_routing_rule() {
+        let content = concat!(
+            "<!-- agent:queue id=main priority -->\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:run id=build -->\n",
+            "<!-- /agent:run -->\n\n",
+            "<!-- agent:backlog priority queue=\"main\" -->\n",
+            "- [ ] [#x1] keep this\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        for value in ["", "sync", "append", "prepend"] {
+            assert_eq!(
+                classify_backlog_queue_attr(content, value),
+                BacklogQueueAttrTarget::SyncMode,
+                "{value:?}"
+            );
+        }
+        for value in ["main", "build", "#main"] {
+            let target = classify_backlog_queue_attr(content, value);
+            assert_eq!(target, BacklogQueueAttrTarget::ExistingQueue, "{value}");
+            assert!(backlog_queue_attr_finding("agent:backlog", value, &target).is_none());
+        }
+
+        let unknown = classify_backlog_queue_attr(content, "nightly");
+        assert_eq!(
+            unknown,
+            BacklogQueueAttrTarget::UnknownQueue {
+                available: vec!["main".to_string(), "build".to_string()]
+            }
+        );
+        let (message, hint) = backlog_queue_attr_finding("agent:backlog", "nightly", &unknown)
+            .expect("an id naming no queue is an issue");
+        assert!(
+            message.contains("names no queue in this document"),
+            "{message}"
+        );
+        assert!(
+            hint.contains("declared queue ids: `main`, `build`"),
+            "{hint}"
+        );
+
+        let invalid = classify_backlog_queue_attr(content, "not an id!");
+        assert!(matches!(
+            invalid,
+            BacklogQueueAttrTarget::InvalidValue { available: Some(_) }
+        ));
+        let (message, hint) = backlog_queue_attr_finding("agent:backlog", "not an id!", &invalid)
+            .expect("garbage is an issue");
+        assert!(message.contains("neither a recognized sync mode nor a valid queue id"));
+        assert!(hint.contains("`main`, `build`"), "{hint}");
+
+        let no_queue =
+            "<!-- agent:backlog queue=main -->\n- [ ] [#x1] a\n<!-- /agent:backlog -->\n";
+        let target = classify_backlog_queue_attr(no_queue, "main");
+        assert_eq!(
+            target,
+            BacklogQueueAttrTarget::UnknownQueue { available: vec![] }
+        );
+        let (_, hint) = backlog_queue_attr_finding("agent:backlog", "main", &target).unwrap();
+        assert!(hint.contains("declares no queue block"), "{hint}");
+    }
+
     #[test]
     fn component_attr_warning_flags_queue_sync_attr_on_icebox() {
         let content = concat!(
@@ -807,8 +981,7 @@ mod tests {
             assert!(!body.contains("attribute is ignored"), "{body}");
         }
 
-        let limited =
-            "<!-- agent:queue subagent=2 -->\n- do [#a]\n<!-- /agent:queue -->\n";
+        let limited = "<!-- agent:queue subagent=2 -->\n- do [#a]\n<!-- /agent:queue -->\n";
         let body = component_attr_warning(limited).unwrap().message_body();
         assert!(body.contains("ownership is preserved"), "{body}");
     }

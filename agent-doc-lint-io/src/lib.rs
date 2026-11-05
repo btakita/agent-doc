@@ -328,7 +328,7 @@ fn dialect_findings(file: &Path, content: &str) -> Vec<LintFinding> {
     };
     // GH #93: tagpath must see the same structure agent-doc's parser sees.
     let lint_content = mask_prose_comment_delimiters(content);
-    reconcile_findings_with_agent_doc_registry(lint_agent_doc(file, &lint_content, &opts))
+    reconcile_findings_with_agent_doc_registry(content, lint_agent_doc(file, &lint_content, &opts))
 }
 
 fn is_blocking(finding: &LintFinding, mode: LintDialectMode) -> bool {
@@ -561,7 +561,10 @@ fn validate_boundary_markers(file: &Path, content: &str) -> Result<()> {
     Ok(())
 }
 
-fn reconcile_findings_with_agent_doc_registry(findings: Vec<LintFinding>) -> Vec<LintFinding> {
+fn reconcile_findings_with_agent_doc_registry(
+    content: &str,
+    findings: Vec<LintFinding>,
+) -> Vec<LintFinding> {
     findings
         .into_iter()
         .filter(|finding| {
@@ -571,8 +574,41 @@ fn reconcile_findings_with_agent_doc_registry(findings: Vec<LintFinding>) -> Vec
                 && !is_agent_doc_done_bare_archive_finding(finding)
                 && !is_explicit_no_preset_finding(finding)
         })
+        .filter_map(|finding| reconcile_backlog_queue_route_finding(content, finding))
         .map(rewrite_empty_attr_value_hint)
         .collect()
+}
+
+/// `#queueidlintfalse`: tagpath only knows the backlog sync modes, so it reports
+/// ``queue sync mode `main` on `agent:backlog` is not recognized`` for an
+/// explicit route that backlog sync supports. Reconcile against the queue
+/// crate's routing rule: a value naming a declared queue block is dropped, and
+/// anything else keeps its warning, reworded to say why and to name the queue
+/// ids the document declares. `agent:icebox` findings stay as tagpath wrote
+/// them, because icebox never routes into a queue.
+fn reconcile_backlog_queue_route_finding(
+    content: &str,
+    mut finding: LintFinding,
+) -> Option<LintFinding> {
+    if finding.rule != "agent-doc/invalid-attr-value"
+        || !finding.message.starts_with("queue sync mode ")
+    {
+        return Some(finding);
+    }
+    let mut quoted = finding.message.split('`');
+    let (Some(value), Some(component)) = (quoted.nth(1), quoted.nth(1)) else {
+        return Some(finding);
+    };
+    if !matches!(component, "agent:backlog" | "agent:pending") {
+        return Some(finding);
+    }
+    let (value, component) = (value.to_string(), component.to_string());
+    let target = agent_doc_queue::component_attrs::classify_backlog_queue_attr(content, &value);
+    let (message, fix_hint) =
+        agent_doc_queue::component_attrs::backlog_queue_attr_finding(&component, &value, &target)?;
+    finding.message = message;
+    finding.fix_hint = Some(fix_hint);
+    Some(finding)
 }
 
 /// Tagpath's attribute allowlist can lag agent-doc's domain. Reconcile its
@@ -1396,6 +1432,83 @@ operator-owned scratch state\n\
                 panic!("`preset=\"\"` in {name} must pass strict lint: {error:#}")
             });
         }
+    }
+
+    /// `#queueidlintfalse`: `queue="main"` on `agent:backlog` naming a declared
+    /// queue block is a supported explicit route, so tagpath's "queue sync mode
+    /// is not recognized" warning is reconciled away (strict lint passes). An
+    /// id naming no queue keeps a warning that names the declared ids.
+    #[test]
+    fn backlog_queue_attr_naming_declared_queue_passes_lint() {
+        let dir = TempDir::new().unwrap();
+        let doc = "---\nagent_doc_session: test\n---\n\n\
+            <!-- agent:exchange -->\n\
+            prompt\n\
+            <!-- /agent:exchange -->\n\n\
+            <!-- agent:queue id=main priority -->\n\
+            - do [#a]\n\
+            <!-- /agent:queue -->\n\n\
+            <!-- agent:run id=build -->\n\
+            <!-- /agent:run -->\n\n\
+            <!-- agent:backlog priority queue=\"main\" -->\n\
+            - [ ] [#a] keep this\n\
+            <!-- /agent:backlog -->\n";
+        for route in ["queue=\"main\"", "queue=build", "queue=sync", "queue"] {
+            let content = doc.replace("queue=\"main\" -->", &format!("{route} -->"));
+            let file = write_doc(&dir, "backlog-route.md", &content);
+            let findings = dialect_findings(&file, &content);
+            assert!(
+                findings
+                    .iter()
+                    .all(|finding| finding.rule != "agent-doc/invalid-attr-value"),
+                "{route}: {findings:?}"
+            );
+            run(&file, Some(LintCliMode::Strict)).unwrap_or_else(|error| {
+                panic!("backlog `{route}` must pass strict lint: {error:#}")
+            });
+        }
+
+        let unknown = doc.replace("queue=\"main\" -->", "queue=nightly -->");
+        let file = write_doc(&dir, "backlog-unknown.md", &unknown);
+        let findings = dialect_findings(&file, &unknown);
+        let finding = findings
+            .iter()
+            .find(|finding| finding.rule == "agent-doc/invalid-attr-value")
+            .unwrap_or_else(|| panic!("an unknown queue id must still warn: {findings:?}"));
+        assert_eq!(finding.severity, LintSeverity::Warning);
+        assert!(
+            finding.message.contains(
+                "`queue=nightly` on `agent:backlog` is not a sync mode and names no queue"
+            ),
+            "{}",
+            finding.message
+        );
+        let hint = finding.fix_hint.as_deref().unwrap_or_default();
+        assert!(
+            hint.contains("declared queue ids: `main`, `build`"),
+            "{hint}"
+        );
+        run(&file, None).expect("an unknown queue id is warning-only by default");
+        assert!(run(&file, Some(LintCliMode::Strict)).is_err());
+
+        // Icebox never routes into a queue; tagpath's finding stays verbatim.
+        let icebox = doc
+            .replace(
+                "agent:backlog priority queue=\"main\"",
+                "agent:icebox queue=main",
+            )
+            .replace("/agent:backlog", "/agent:icebox");
+        let file = write_doc(&dir, "icebox-route.md", &icebox);
+        let findings = dialect_findings(&file, &icebox);
+        assert!(
+            findings
+                .iter()
+                .any(|finding| finding.rule == "agent-doc/invalid-attr-value"
+                    && finding
+                        .message
+                        .contains("queue sync mode `main` on `agent:icebox`")),
+            "{findings:?}"
+        );
     }
 
     #[test]

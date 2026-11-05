@@ -622,6 +622,12 @@ Semantics:
   backlog/pending attribute (the `tagpath` agent-doc lint accepts bare `queue`
   and `queue=sync|append|prepend`, warning `agent-doc/invalid-attr-value` on an
   unrecognized mode; preflight's `misplaced_component_attr` mirrors this).
+  `queue=<id>` naming a queue block declared in the document is an explicit
+  route, so agent-doc's lint gate reconciles tagpath's mode-only warning against
+  `component_attrs::classify_backlog_queue_attr` (the rule backlog sync routes
+  by, `#queueidlintfalse`): a declared id passes, and a value that is neither a
+  sync mode nor a declared id keeps the warning with a hint naming the declared
+  queue ids.
 - **Priority interplay (`#backlog-priority-attribute`).** A bare `priority`
   attribute on the source backlog/icebox marker stable-sorts its items by their
   per-item `priority=<1..9>` token before the sync runs (in `run_pending_maintenance`,

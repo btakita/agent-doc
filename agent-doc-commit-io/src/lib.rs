@@ -2573,7 +2573,137 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
     })
 }
 
+/// `#trackedworkdropped`: a cycle whose closeout requested tracked-work
+/// mutations that were neither applied nor retained for later delivery — the
+/// tracked-work half was rejected — observed before the commit runs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct UnlandedTrackedWorkHalf {
+    cycle_id: String,
+    /// The captured plan's mutations, when the capture is still recorded.
+    lost: Vec<String>,
+}
+
+/// Pure decision: does this cycle state describe a closeout whose tracked-work
+/// half never landed and never will without a rerun?
+///
+/// A retained envelope still lands once delivery converges, an applied one has
+/// landed, and a closed cycle was already reported by the commit that closed it.
+fn tracked_work_half_unlanded(
+    cycle_open: bool,
+    requested: bool,
+    applied: bool,
+    retained: bool,
+) -> bool {
+    cycle_open && requested && !applied && !retained
+}
+
+fn observe_unlanded_tracked_work_half(file: &Path) -> Option<UnlandedTrackedWorkHalf> {
+    let state = match agent_doc_cycle_state_io::load(file) {
+        Ok(state) => state?,
+        Err(err) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "commit_tracked_work_half_probe_failed file={} error={}",
+                    file.display(),
+                    format!("{err:#}").replace('\n', "\\n")
+                ),
+            );
+            return None;
+        }
+    };
+    if !tracked_work_half_unlanded(
+        state.is_open(),
+        state.requested_tracked_work_mutations,
+        state.tracked_work_mutations_applied,
+        state.tracked_work_mutations_retained,
+    ) {
+        return None;
+    }
+    let capture = agent_doc_cycle_state_io::load_projected_retained_captured_response(file)
+        .ok()
+        .flatten()
+        .filter(|capture| capture.cycle_id == state.cycle_id)
+        .or_else(|| {
+            state.capture_id.as_deref().and_then(|capture_id| {
+                agent_doc_cycle_state_io::load_projected_captured_response(file, capture_id)
+                    .ok()
+                    .flatten()
+            })
+        });
+    let lost = capture
+        .and_then(|capture| capture.mutation_plan_json)
+        .and_then(|plan| {
+            serde_json::from_str::<agent_doc_write_command_io::CapturedCloseoutMutationPlan>(&plan)
+                .ok()
+        })
+        .map(|plan| plan.mutation_summary())
+        .unwrap_or_default();
+    Some(UnlandedTrackedWorkHalf {
+        cycle_id: state.cycle_id,
+        lost,
+    })
+}
+
+/// The operator-facing report for a commit that landed a response without its
+/// tracked-work half. Pure so the wording is pinned by a unit test.
+fn unlanded_tracked_work_half_report(file: &Path, half: &UnlandedTrackedWorkHalf) -> String {
+    let lost = if half.lost.is_empty() {
+        "the captured mutation plan is no longer recorded; check this cycle's \
+         `--backlog-add` / `--todo-add` / `--done` flags in the transcript"
+            .to_string()
+    } else {
+        half.lost
+            .iter()
+            .map(|line| format!("\n    {line}"))
+            .collect::<String>()
+    };
+    format!(
+        "[commit] WARNING: committed the response for {} WITHOUT its tracked-work half — cycle \
+         `{}` requested tracked-work mutations that were rejected and never applied, so none of \
+         them are in the document or this commit. Re-apply them with `agent-doc write {} \
+         --backlog-only --commit <flags>` (fix the rejected item first). Lost mutations: {lost} \
+         (#trackedworkdropped)",
+        file.display(),
+        half.cycle_id,
+        file.display(),
+    )
+}
+
+fn report_unlanded_tracked_work_half(file: &Path, half: Option<UnlandedTrackedWorkHalf>) {
+    let Some(half) = half else {
+        return;
+    };
+    eprintln!("{}", unlanded_tracked_work_half_report(file, &half));
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "commit_landed_response_without_tracked_work_half file={} cycle_id={} lost={}",
+            file.display(),
+            half.cycle_id,
+            half.lost.len()
+        ),
+    );
+}
+
 fn commit_with_outcome_scoped(file: &Path) -> Result<CommitOutcome> {
+    // `#trackedworkdropped`: a recovery `commit` after a rejected tracked-work
+    // half used to land the response silently while every `--backlog-add` /
+    // `--todo-add` in the closeout was lost. Observe the half BEFORE the commit
+    // (the commit closes the cycle) and report it once the commit lands.
+    let unlanded_half = if controller_commit_in_progress() {
+        None
+    } else {
+        observe_unlanded_tracked_work_half(file)
+    };
+    let outcome = commit_with_outcome_scoped_inner(file)?;
+    if outcome.did_commit {
+        report_unlanded_tracked_work_half(file, unlanded_half);
+    }
+    Ok(outcome)
+}
+
+fn commit_with_outcome_scoped_inner(file: &Path) -> Result<CommitOutcome> {
     if !controller_commit_in_progress() {
         let _ =
             agent_doc_controller_io::project_controller::recycle_stale_supervisor_for_turn_stage(
@@ -4501,6 +4631,67 @@ fn chrono_timestamp() -> String {
     match output {
         Some(o) => String::from_utf8_lossy(&o.stdout).trim().to_string(),
         None => "unknown".to_string(),
+    }
+}
+
+#[cfg(test)]
+mod unlanded_tracked_work_half_tests {
+    use super::*;
+
+    /// `#trackedworkdropped`: only an open cycle whose requested envelope was
+    /// neither applied nor retained is reported.
+    #[test]
+    fn tracked_work_half_unlanded_only_for_rejected_envelopes() {
+        assert!(tracked_work_half_unlanded(true, true, false, false));
+        assert!(
+            !tracked_work_half_unlanded(true, false, false, false),
+            "nothing requested"
+        );
+        assert!(
+            !tracked_work_half_unlanded(true, true, true, false),
+            "applied"
+        );
+        assert!(
+            !tracked_work_half_unlanded(true, true, false, true),
+            "retained, lands later"
+        );
+        assert!(
+            !tracked_work_half_unlanded(false, true, false, false),
+            "cycle closed"
+        );
+    }
+
+    #[test]
+    fn unlanded_tracked_work_half_report_names_cycle_and_lost_mutations() {
+        let file = Path::new("tasks/session.md");
+        let report = unlanded_tracked_work_half_report(
+            file,
+            &UnlandedTrackedWorkHalf {
+                cycle_id: "cycle-42".to_string(),
+                lost: vec![
+                    "--backlog-add id=newitem follow up".to_string(),
+                    "--todo-add Check fpe.md ends with <!-- /agent:run -->".to_string(),
+                ],
+            },
+        );
+        assert!(report.starts_with("[commit] WARNING:"), "{report}");
+        assert!(report.contains("WITHOUT its tracked-work half"), "{report}");
+        assert!(report.contains("`cycle-42`"), "{report}");
+        assert!(
+            report.contains("\n    --backlog-add id=newitem follow up"),
+            "{report}"
+        );
+        assert!(report.contains("\n    --todo-add Check fpe.md"), "{report}");
+        assert!(report.contains("--backlog-only --commit"), "{report}");
+
+        let unknown = unlanded_tracked_work_half_report(
+            file,
+            &UnlandedTrackedWorkHalf {
+                cycle_id: "cycle-43".to_string(),
+                lost: Vec::new(),
+            },
+        );
+        assert!(unknown.contains("no longer recorded"), "{unknown}");
     }
 }
 

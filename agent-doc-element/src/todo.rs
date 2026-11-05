@@ -762,6 +762,9 @@ fn split_todo_payload<'a>(text: &'a str, flag: &str) -> Result<(&'a str, Vec<Str
 /// the compatibility form `[#<id>] <action>`. Both belong to the first line.
 fn parse_todo_input(text: &str, flag: &str) -> Result<TodoInput> {
     let (first, children) = split_todo_payload(text, flag)?;
+    // `#trackedworkdropped`: the item line is inserted verbatim into
+    // `agent:todo`; a literal component marker in it breaks the document.
+    crate::element::ensure_item_text_has_no_live_component_marker(flag, first)?;
     let action = normalize_todo_action_for(first, flag)?;
     if let Some(rest) = action.strip_prefix("id=") {
         let (id, tail) = rest.split_once(char::is_whitespace).unwrap_or((rest, ""));
@@ -2594,6 +2597,38 @@ mod tests {
         format!(
             "<!-- agent:exchange -->\nhi\n<!-- /agent:exchange -->\n<!-- agent:todo -->\n{body}<!-- /agent:todo -->\n"
         )
+    }
+
+    /// `#trackedworkdropped`: a `--todo-add` / `--todo-edit` whose item line
+    /// quotes a document line verbatim (`<!-- /agent:run -->`) is refused,
+    /// naming the item, instead of closing a component inside `agent:todo`. A
+    /// backtick-quoted marker is prose and lands unchanged.
+    #[test]
+    fn todo_add_and_edit_refuse_literal_component_marker() {
+        let content = wrap("- [ ] [#keep] keep me\n");
+        let error = add(&content, "Check fpe.md ends with <!-- /agent:run --> first")
+            .unwrap_err()
+            .to_string();
+        assert!(error.starts_with("--todo-add: item "), "{error}");
+        assert!(error.contains("Check fpe.md ends with"), "{error}");
+        assert!(error.contains("`<!-- /agent:run -->`"), "{error}");
+
+        let quoted = add(
+            &content,
+            "Check fpe.md ends with `<!-- /agent:run -->` first",
+        )
+        .expect("a quoted marker is prose");
+        assert_eq!(
+            crate::element::component_parse_failure(&quoted.content),
+            None,
+            "{}",
+            quoted.content
+        );
+
+        let error = edit_todo_item_in_document(&content, "keep", "now <!-- agent:queue --> here")
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("`<!-- agent:queue -->`"), "{error}");
     }
 
     #[test]

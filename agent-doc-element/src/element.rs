@@ -1514,6 +1514,153 @@ pub fn structural_marker_occurrences(text: &str) -> Vec<StructuralMarkerOccurren
     out
 }
 
+/// `#trackedworkdropped`: one live agent-doc component marker found inside the
+/// text of a tracked item (`--backlog-add`, `--todo-add`, an edit, ...).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ItemTextComponentMarker {
+    /// Byte offset of the marker's `<!--` within the item text.
+    pub start: usize,
+    /// Byte offset just past the marker: past its `-->`, or the end of its line
+    /// when the marker is unterminated.
+    pub end: usize,
+    /// 1-based line of the marker within the item text.
+    pub line: usize,
+}
+
+impl ItemTextComponentMarker {
+    /// The marker exactly as written in the item text.
+    pub fn text<'a>(&self, item_text: &'a str) -> &'a str {
+        &item_text[self.start..self.end]
+    }
+}
+
+/// `#trackedworkdropped`: every component marker (`<!-- agent:NAME -->`,
+/// `<!-- /agent:NAME -->`, boundary markers included) in tracked-item text that
+/// is NOT already quoted as prose by the shared masking rule
+/// ([`find_marker_prose_ranges`]: code spans, fences, double-quoted spans).
+///
+/// Tracked-item text is inserted verbatim into a component body, so a live
+/// marker in it — typically an agent quoting a document line such as
+/// `<!-- /agent:run -->` — closes or opens a component in the middle of
+/// `agent:backlog` / `agent:todo` and the whole tracked-work write is refused
+/// as structurally invalid. Unterminated markers are reported too: a
+/// `<!-- /agent:run` with no `-->` is still marker-shaped structure.
+pub fn live_component_markers_in_item_text(text: &str) -> Vec<ItemTextComponentMarker> {
+    if !text.contains("<!--") {
+        return Vec::new();
+    }
+    let masked = find_marker_prose_ranges(text);
+    let mut out = Vec::new();
+    let mut search_from = 0usize;
+    while let Some(relative) = text[search_from..].find("<!--") {
+        let start = search_from + relative;
+        search_from = start + "<!--".len();
+        let inner = text[search_from..].trim_start_matches([' ', '\t']);
+        if !(inner.starts_with("agent:") || inner.starts_with("/agent:")) {
+            continue;
+        }
+        if byte_in_ranges(start, &masked) {
+            continue;
+        }
+        let line_end = text[start..]
+            .find('\n')
+            .map_or(text.len(), |relative| start + relative);
+        let end = text[start..line_end]
+            .find("-->")
+            .map_or(line_end, |relative| start + relative + "-->".len());
+        out.push(ItemTextComponentMarker {
+            start,
+            end,
+            line: text[..start].bytes().filter(|byte| *byte == b'\n').count() + 1,
+        });
+        search_from = end.max(search_from);
+    }
+    out
+}
+
+/// `#trackedworkdropped`: quote every live component marker in tracked-item
+/// text as an inline code span, so the item keeps the text it was given while
+/// the document keeps its component structure.
+///
+/// Returns `Ok(None)` when the text carries no live marker, `Ok(Some(quoted))`
+/// when it quoted at least one, and `Err` naming the marker when quoting could
+/// not neutralize it (the caller must refuse the item rather than insert it).
+/// Each marker is wrapped in a backtick run one longer than any run already on
+/// its line, so the new span pairs only with itself (CommonMark pairs runs of
+/// equal length) and cannot capture or be captured by the line's other spans.
+pub fn quote_live_component_markers_in_item_text(text: &str) -> Result<Option<String>> {
+    let markers = live_component_markers_in_item_text(text);
+    if markers.is_empty() {
+        return Ok(None);
+    }
+    let mut quoted = text.to_string();
+    for marker in markers.iter().rev() {
+        let line_start = text[..marker.start].rfind('\n').map_or(0, |pos| pos + 1);
+        let line_end = text[marker.end..]
+            .find('\n')
+            .map_or(text.len(), |relative| marker.end + relative);
+        let longest_run = text[line_start..line_end]
+            .split(|ch| ch != '`')
+            .map(str::len)
+            .max()
+            .unwrap_or(0);
+        let fence = "`".repeat(longest_run + 1);
+        let body = marker.text(text);
+        let pad = if body.starts_with('`') || body.ends_with('`') {
+            " "
+        } else {
+            ""
+        };
+        quoted.replace_range(
+            marker.start..marker.end,
+            &format!("{fence}{pad}{body}{pad}{fence}"),
+        );
+    }
+    if let Some(remaining) = live_component_markers_in_item_text(&quoted).first() {
+        anyhow::bail!(
+            "could not quote the literal component marker `{}` (line {} of the item)",
+            remaining.text(&quoted),
+            remaining.line
+        );
+    }
+    Ok(Some(quoted))
+}
+
+/// `#trackedworkdropped`: refuse tracked-item text that carries a live
+/// component marker, naming the item and the marker.
+///
+/// `surface` is the writer's own label (`pending add`, `--todo-add`, ...).
+/// Every tracked-item writer runs this before inserting text, so a marker can
+/// never reach a component body verbatim; closeout pre-quotes markers with
+/// [`quote_live_component_markers_in_item_text`] and reports it, so only a
+/// writer that bypassed that step reaches this refusal.
+pub fn ensure_item_text_has_no_live_component_marker(surface: &str, text: &str) -> Result<()> {
+    let Some(marker) = live_component_markers_in_item_text(text).into_iter().next() else {
+        return Ok(());
+    };
+    anyhow::bail!(
+        "{surface}: item {:?} contains the literal agent-doc component marker `{}` (line {} of the item). \
+         Inserted verbatim it would open or close a document component inside the tracked-work list and \
+         break the document's component structure, so the item was refused and nothing was written. \
+         Quote the marker in backticks (`` `{}` ``) or rephrase it, then rerun (#trackedworkdropped)",
+        item_text_preview(text),
+        marker.text(text),
+        marker.line,
+        marker.text(text),
+    )
+}
+
+/// A bounded single-line preview of tracked-item text for diagnostics.
+pub fn item_text_preview(text: &str) -> String {
+    const MAX_CHARS: usize = 120;
+    let first_line = text.trim().lines().next().unwrap_or("");
+    let mut preview: String = first_line.chars().take(MAX_CHARS).collect();
+    if first_line.chars().count() > MAX_CHARS || text.trim().lines().nth(1).is_some() {
+        preview.push('…');
+    }
+    preview
+}
+
 /// Find byte ranges of same-line double-quoted spans (`"..."`) — `#0kjc`/`#mdastquote`.
 ///
 /// A `<!-- agent:* -->` marker (or other tag-looking token) embedded inside a
@@ -2800,6 +2947,115 @@ fn match_html_comment_at(content: &str, pos: usize) -> Option<(usize, &str)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `#trackedworkdropped`: the item text from the 2026-11-04 incident, an
+    /// agent quoting an `fpe.md` line verbatim into a `--todo-add`.
+    const QUOTED_FPE_LINE: &str =
+        "Check the fpe.md run block ends with <!-- /agent:run --> before re-dispatch";
+
+    fn todo_doc_with_item(item: &str) -> String {
+        format!(
+            "<!-- agent:run -->\nrun body\n<!-- /agent:run -->\n<!-- agent:todo -->\n- [ ] {item}\n<!-- /agent:todo -->\n"
+        )
+    }
+
+    #[test]
+    fn item_text_marker_breaks_components_when_inserted_verbatim() {
+        // The defect itself: the verbatim insert is a structural failure.
+        let doc = todo_doc_with_item(QUOTED_FPE_LINE);
+        let failure = component_parse_failure(&doc).expect("verbatim marker breaks parsing");
+        assert!(failure.contains("mismatched component tags"), "{failure}");
+    }
+
+    #[test]
+    fn live_component_markers_in_item_text_finds_unquoted_markers_only() {
+        let markers = live_component_markers_in_item_text(QUOTED_FPE_LINE);
+        assert_eq!(markers.len(), 1);
+        assert_eq!(markers[0].text(QUOTED_FPE_LINE), "<!-- /agent:run -->");
+        assert_eq!(markers[0].line, 1);
+
+        for safe in [
+            "plain text",
+            "quoted `<!-- /agent:run -->` in a code span",
+            "quoted \"<!-- agent:queue -->\" in a string",
+            "an ordinary <!-- note --> comment",
+        ] {
+            assert!(
+                live_component_markers_in_item_text(safe).is_empty(),
+                "{safe:?} must not report a live marker"
+            );
+        }
+
+        let multi = "first\n  second <!-- agent:boundary:abc --> and <!-- /agent:todo";
+        let found = live_component_markers_in_item_text(multi);
+        assert_eq!(found.len(), 2);
+        assert_eq!(found[0].text(multi), "<!-- agent:boundary:abc -->");
+        assert_eq!(found[0].line, 2);
+        assert_eq!(found[1].text(multi), "<!-- /agent:todo");
+    }
+
+    #[test]
+    fn quote_live_component_markers_keeps_text_and_document_structure() {
+        assert_eq!(
+            quote_live_component_markers_in_item_text("no markers").unwrap(),
+            None
+        );
+        let quoted = quote_live_component_markers_in_item_text(QUOTED_FPE_LINE)
+            .unwrap()
+            .expect("marker quoted");
+        assert_eq!(
+            quoted,
+            "Check the fpe.md run block ends with `<!-- /agent:run -->` before re-dispatch"
+        );
+        let doc = todo_doc_with_item(&quoted);
+        assert_eq!(component_parse_failure(&doc), None, "{doc}");
+        let components = parse(&doc).unwrap();
+        assert_eq!(
+            components
+                .iter()
+                .map(|c| c.name.as_str())
+                .collect::<Vec<_>>(),
+            vec![canonical_component_name("run"), "todo"]
+        );
+
+        // A stray backtick earlier on the line must not pair with the quote.
+        let stray = "see ` then <!-- /agent:run --> and <!-- agent:todo -->";
+        let quoted = quote_live_component_markers_in_item_text(stray)
+            .unwrap()
+            .expect("markers quoted");
+        assert!(
+            live_component_markers_in_item_text(&quoted).is_empty(),
+            "{quoted}"
+        );
+        assert_eq!(
+            component_parse_failure(&todo_doc_with_item(&quoted)),
+            None,
+            "{quoted}"
+        );
+
+        // Idempotent: quoting already-quoted text is a no-op.
+        assert_eq!(
+            quote_live_component_markers_in_item_text(&quoted).unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn ensure_item_text_has_no_live_component_marker_names_item_and_marker() {
+        ensure_item_text_has_no_live_component_marker("--todo-add", "fine").unwrap();
+        ensure_item_text_has_no_live_component_marker(
+            "--todo-add",
+            "fine `<!-- /agent:run -->` quoted",
+        )
+        .unwrap();
+        let error = ensure_item_text_has_no_live_component_marker("--todo-add", QUOTED_FPE_LINE)
+            .unwrap_err()
+            .to_string();
+        assert!(error.starts_with("--todo-add: item "), "{error}");
+        assert!(error.contains("Check the fpe.md run block"), "{error}");
+        assert!(error.contains("`<!-- /agent:run -->`"), "{error}");
+        assert!(error.contains("nothing was written"), "{error}");
+    }
 
     #[test]
     fn single_range() {

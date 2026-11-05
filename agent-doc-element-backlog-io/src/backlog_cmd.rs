@@ -468,6 +468,54 @@ pub fn with_pending_write_transaction_dry_run<T>(
     run_pending_write_transaction(primary_file, false, f)
 }
 
+/// `#trackedworkdropped`: a structural refusal when this envelope's target for
+/// `document` has broken component markers that its initial content did not.
+///
+/// A document that was already broken is left to the existing write-boundary
+/// guards and repair paths; this gate only refuses breakage the envelope itself
+/// introduced, and names the target line that carries the offending marker so
+/// the tracked item responsible is identifiable.
+fn tracked_work_structure_refusal(document: &DeferredPendingWrite) -> Option<anyhow::Error> {
+    if document.initial == document.target {
+        return None;
+    }
+    let reason = agent_doc_element::element::component_parse_failure(&document.target)?;
+    if agent_doc_element::element::component_parse_failure(&document.initial).is_some() {
+        return None;
+    }
+    let offending_lines: Vec<String> = document
+        .target
+        .lines()
+        .enumerate()
+        .filter(|(_, line)| {
+            !agent_doc_element::element::live_component_markers_in_item_text(line).is_empty()
+                && !document.initial.lines().any(|initial| initial == *line)
+        })
+        .map(|(index, line)| {
+            format!(
+                "line {}: {}",
+                index + 1,
+                agent_doc_element::element::item_text_preview(line)
+            )
+        })
+        .collect();
+    let offending = if offending_lines.is_empty() {
+        String::new()
+    } else {
+        format!(
+            " Offending tracked-work line(s): {}.",
+            offending_lines.join("; ")
+        )
+    };
+    Some(anyhow::anyhow!(
+        "tracked-work mutations for {} would break its component structure ({reason}), so \
+         the whole tracked-work envelope was refused and nothing was written.{offending} A \
+         tracked item's text must not carry a literal agent-doc component marker; quote it \
+         in backticks or rephrase it, then rerun (#trackedworkdropped)",
+        document.file.display()
+    ))
+}
+
 fn run_pending_write_transaction<T>(
     primary_file: &Path,
     publish: bool,
@@ -498,6 +546,19 @@ fn run_pending_write_transaction<T>(
         Ok(Err(err)) => return Err(err),
         Err(payload) => std::panic::resume_unwind(payload),
     };
+
+    // `#trackedworkdropped`: the envelope must not be the thing that breaks a
+    // document's component structure. The write boundary would refuse such a
+    // target anyway ("refusing structurally invalid canonical target") — but
+    // only at publish time, after the response cell is already durable, which
+    // strands the response beside a tracked-work half that can never land.
+    // Checking here makes the validation pass (`publish == false`) refuse it
+    // first, while nothing is authoritative.
+    for document in &transaction.documents {
+        if let Some(refusal) = tracked_work_structure_refusal(document) {
+            return Err(refusal);
+        }
+    }
 
     if !publish {
         // Validation-only pass: the whole envelope planned successfully, so the
@@ -3835,6 +3896,90 @@ mod tests {
         assert!(
             fs::read_to_string(&doc).unwrap().contains("- [/] [#a1b2]"),
             "dry run must not resolve the item"
+        );
+    }
+
+    /// `#trackedworkdropped`: an add whose text carries a literal component
+    /// marker is refused at input, naming the item, and nothing is written.
+    #[test]
+    fn add_refuses_item_text_with_literal_component_marker() {
+        let (_tmp, doc) = doc_with_pending("- [ ] [#c3d4] Other");
+        let before = fs::read_to_string(&doc).unwrap();
+        let error = with_test_effects(|| {
+            with_force_disk_pending_writes(true, || {
+                add(
+                    &doc,
+                    "Quote the fpe.md line <!-- /agent:run --> here",
+                    false,
+                )
+            })
+        })
+        .unwrap_err();
+        let message = format!("{error:#}");
+        assert!(message.contains("Quote the fpe.md line"), "{message}");
+        assert!(message.contains("`<!-- /agent:run -->`"), "{message}");
+        assert_eq!(fs::read_to_string(&doc).unwrap(), before, "nothing written");
+    }
+
+    /// `#trackedworkdropped`: the envelope-level gate refuses a mutation that
+    /// would break the document's component structure in BOTH passes — the
+    /// validation dry run included — so closeout rejects it before the response
+    /// cell is published instead of at the publish-time write boundary.
+    #[test]
+    fn transaction_refuses_envelope_that_breaks_component_structure() {
+        let (_tmp, doc) = doc_with_pending("- [ ] [#c3d4] Other");
+        let before = fs::read_to_string(&doc).unwrap();
+        let breaking = |current: &str| {
+            Ok(Some(current.replacen(
+                "- [ ] [#c3d4] Other",
+                "- [ ] [#c3d4] Other <!-- /agent:run -->",
+                1,
+            )))
+        };
+        for dry_run in [true, false] {
+            let error = with_test_effects(|| {
+                with_force_disk_pending_writes(true, || {
+                    let envelope =
+                        || apply_document_rewrite(&doc, "test_breaking_rewrite", breaking);
+                    if dry_run {
+                        with_pending_write_transaction_dry_run(&doc, envelope)
+                    } else {
+                        with_pending_write_transaction(&doc, envelope)
+                    }
+                })
+            })
+            .unwrap_err();
+            let message = format!("{error:#}");
+            assert!(
+                message.contains("would break its component structure"),
+                "dry_run={dry_run}: {message}"
+            );
+            assert!(
+                message.contains("line 6: - [ ] [#c3d4] Other <!-- /agent:run -->"),
+                "the refusal names the offending line: {message}"
+            );
+            assert_eq!(fs::read_to_string(&doc).unwrap(), before, "nothing written");
+        }
+
+        // A structure-preserving envelope still publishes.
+        with_test_effects(|| {
+            with_force_disk_pending_writes(true, || {
+                with_pending_write_transaction(&doc, || {
+                    apply_document_rewrite(&doc, "test_safe_rewrite", |current| {
+                        Ok(Some(current.replacen(
+                            "- [ ] [#c3d4] Other",
+                            "- [ ] [#c3d4] Other `<!-- /agent:run -->`",
+                            1,
+                        )))
+                    })
+                })
+            })
+        })
+        .unwrap();
+        assert!(
+            fs::read_to_string(&doc)
+                .unwrap()
+                .contains("Other `<!-- /agent:run -->`")
         );
     }
 

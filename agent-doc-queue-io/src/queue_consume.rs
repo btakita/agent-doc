@@ -2555,6 +2555,7 @@ pub fn strike_orphan_id_backed_queue_head(
         &keys,
         guard.reported.as_ref(),
         None,
+        None,
         "orphan_id_head_strike",
     )? {
         return Ok(false);
@@ -2867,12 +2868,23 @@ fn converge_id_backed_head_strike(
     keys: &[String],
     reported_attempt: Option<&(String, u64)>,
     orphan_completion_key: Option<&str>,
+    ack_note: Option<&str>,
     source: &str,
 ) -> Result<bool> {
     let content = content.to_string();
-    let new_document = consume_queue_nodes_by_key(&content, keys)?;
+    let mut new_document = consume_queue_nodes_by_key(&content, keys)?;
     if new_document == content {
         return Ok(false);
+    }
+    // `#ackstrikeopenbacklog`: an acknowledged head whose tracked item stays
+    // open says so on the struck row, so it never reads as done.
+    if let Some(note) = ack_note {
+        new_document = agent_doc_queue::ack_stays_open::annotate_acknowledged_heads(
+            &content,
+            &new_document,
+            keys,
+            note,
+        );
     }
     // `#strikeretires`: the orphan strike closes the row's finished work like
     // any other strike. Its completion cell (and, after the write, its
@@ -2899,7 +2911,12 @@ fn converge_id_backed_head_strike(
             if snap_keys.is_empty() {
                 Ok(None)
             } else {
-                let consumed = consume_queue_nodes_by_key(&snap, &snap_keys)?;
+                let mut consumed = consume_queue_nodes_by_key(&snap, &snap_keys)?;
+                if let Some(note) = ack_note {
+                    consumed = agent_doc_queue::ack_stays_open::annotate_acknowledged_heads(
+                        &snap, &consumed, &snap_keys, note,
+                    );
+                }
                 let mut retired =
                     agent_doc_queue::queue_consume::retire_consumed_completion_feedback(
                         &consumed,
@@ -3153,6 +3170,8 @@ pub fn acknowledge_open_id_backed_queue_head(
         .as_ref()
         .or(orphan_attempt.as_ref())
         .or(receipt_attempt.as_ref());
+    let open_item = agent_doc_queue::ack_stays_open::open_tracked_item(&content, &target_id);
+    let ack_note = open_item.as_ref().map(|item| item.note());
     if !converge_id_backed_head_strike(
         file,
         effects,
@@ -3163,6 +3182,7 @@ pub fn acknowledge_open_id_backed_queue_head(
         orphan_completion
             .as_ref()
             .map(|orphan| orphan.completion_key.as_str()),
+        ack_note.as_deref(),
         "open_id_head_ack",
     )? {
         return Ok(false);
@@ -3202,16 +3222,30 @@ pub fn acknowledge_open_id_backed_queue_head(
         keys.len(),
         proof.outcome_token(),
     );
+    if let Some(item) = open_item.as_ref() {
+        eprintln!(
+            "[queue] {}",
+            agent_doc_queue::ack_stays_open::ack_stays_open_guidance(
+                &file.display().to_string(),
+                item,
+            )
+        );
+    }
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "open_id_head_ack file={} id={} struck={} base_hash={} preserved={preserved} claim_outcome={} source_component=queue operation=strike_head proof={}",
+            "open_id_head_ack file={} id={} struck={} base_hash={} preserved={preserved} claim_outcome={} source_component=queue operation=strike_head proof={} stays_open_note={}",
             file.display(),
             target_id,
             keys.len(),
             agent_doc_hash::content_hash(&content),
             proof.outcome_token(),
             proof.audit_token(),
+            if open_item.as_ref().is_some_and(|item| item.reason.is_some()) {
+                "recorded"
+            } else {
+                "missing"
+            },
         ),
     );
     Ok(true)
@@ -10843,6 +10877,98 @@ Old.
                 .claims
                 .iter()
                 .all(|claim| claim.owner != "subagent:reported")
+        );
+    }
+
+    /// `#ackstrikeopenbacklog` live shape (haiven-dev `tasks/sdk/sdk-dev.md`,
+    /// 2026-11-04): the coordinator acknowledged the reported
+    /// `do [#livestreamtree]` row with `--ack-id` while the backlog item stayed
+    /// open. The bare strike `- ### ~~do [#livestreamtree]~~` sat beside the
+    /// unchecked item and read as done. The acknowledged row must name the
+    /// open item and its stays-open reason, stay a completed (never live) row,
+    /// and keep the backlog item open; the snapshot converges on the same row.
+    #[test]
+    fn ackstrikeopenbacklog_struck_head_names_the_open_backlog_item_and_reason() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("sdk-dev.md");
+        let content = concat!(
+            "---\nsession: sid\nagent_doc_format: template\nqueue_active: true\n---\n\n",
+            "<!-- agent:exchange -->\n### Re: prior\n\nDone.\n<!-- /agent:exchange -->\n\n",
+            "## Run <!-- agent:run id=main subagents priority go -->\n",
+            "- do [#livestreamtree]\n",
+            "- do [#p7d7]\n",
+            "<!-- /agent:run -->\n\n",
+            "## Backlog <!-- agent:backlog priority queue=\"main\" -->\n",
+            "- [ ] [#livestreamtree] No livestream. Is this tree done? (stays open: no ",
+            "livestream and nothing was trimmed, and [#tdoauthcodestream] still has unstruck ",
+            "children)\n",
+            "- [ ] [#p7d7] Is this done?\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        let generation = running_claim(&doc, "#livestreamtree", "subagent:c465live");
+        let reported =
+            crate::queue_claim::report_attempt(&doc, "#livestreamtree", Some(generation)).unwrap();
+        crate::queue_lineage::record_prose_only(&doc, &reported, "no livestream").unwrap();
+
+        assert!(acknowledge_open_id_backed_queue_head(&doc, "livestreamtree").unwrap());
+
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        let expected = format!(
+            "- ### ~~do [#livestreamtree]~~{}acknowledged; backlog #livestreamtree stays open: \
+             no livestream and nothing was trimmed, and #tdoauthcodestream still has unstruck \
+             children\n",
+            agent_doc_markdown_ast::overlay::STRUCK_ANNOTATION_SEPARATOR,
+        );
+        assert!(updated.contains(&expected), "{updated}");
+        assert!(
+            updated.contains("- [ ] [#livestreamtree] No livestream. Is this tree done?"),
+            "the backlog item stays open:\n{updated}"
+        );
+        assert!(updated.contains("- do [#p7d7]\n"), "{updated}");
+        let components = element::parse(&updated).unwrap();
+        let queue = components.iter().find(|c| c.name == "queue").unwrap();
+        let entries = agent_doc_queue::document_queue::parse(queue.content(&updated)).unwrap();
+        assert!(
+            entries.iter().any(|entry| matches!(
+                entry,
+                agent_doc_queue::document_queue::QueueEntry::Completed(prompt)
+                    if prompt.text == "do [#livestreamtree]"
+            )),
+            "{entries:?}"
+        );
+        assert!(
+            !entries.iter().any(|entry| matches!(
+                entry,
+                agent_doc_queue::document_queue::QueueEntry::Prompt(prompt)
+                    if prompt.text.contains("livestreamtree")
+            )),
+            "the note must never make the acknowledged row live: {entries:?}"
+        );
+        let snapshot =
+            load_snapshot_recovery_only(&doc, "ackstrikeopenbacklog test").expect("snapshot");
+        assert!(snapshot.contains(&expected), "{snapshot}");
+        let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops_log.contains("id=livestreamtree") && ops_log.contains("stays_open_note=recorded"),
+            "{ops_log}"
+        );
+
+        // A retry after the exact strike is still the idempotent no-op, and it
+        // never stacks a second note.
+        assert!(!acknowledge_open_id_backed_queue_head(&doc, "livestreamtree").unwrap());
+        let retried = std::fs::read_to_string(&doc).unwrap();
+        assert_eq!(
+            retried.matches("acknowledged; backlog").count(),
+            1,
+            "{retried}"
         );
     }
 

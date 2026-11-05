@@ -545,7 +545,16 @@ and the pending granular-flags-only rule. This runbook carries the rest.
      it), close the ☑️ row with
      `agent-doc queue consume <FILE> --ack-id <id>` instead; it ends the
      reported attempt, keeps the item open, and refuses a claimed, running or
-     lost attempt (`#nestedechostrike`). That closeout also ends the claim,
+     lost attempt (`#nestedechostrike`). The struck row keeps saying the item
+     is open: `~~do [#id]~~ — auto-struck: acknowledged; backlog #id stays
+     open: <reason>`, where the reason is the item's own `(stays open: ...)`
+     clause (`#ackstrikeopenbacklog`), so write that clause accurately. Use
+     `--ack-id` only when the item really stays open: when the worker's or the
+     operator's answer resolves it (for example "no livestream" answers the
+     check its parent asked for), close the item with `--done <id>` (or
+     `agent-doc backlog <FILE> done <id>`) and close the parent item or
+     waiting row the same answer resolves, instead of acknowledging the head
+     only. That closeout also ends the claim,
      and the same queue-strike successor retires the matching binary completion
      cell; unmatched worker reports remain visible. Thus the integrated response
      replaces its temporary “awaiting integration” notice instead of leaving a

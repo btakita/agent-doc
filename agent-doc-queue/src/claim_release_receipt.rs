@@ -509,7 +509,7 @@ pub fn queue_line_closeout(document: &str, item_text: &str) -> String {
     };
     match id {
         Some(id) => format!(
-            "strike the reported row with `agent-doc queue consume {document} --ack-id {id}` (the tracked backlog/Todo item stays open; this also closes a `☑️` row nested under a waiting parent); only when the tracked work itself is complete, pass `--done {id}` to `agent-doc finalize {document}` instead"
+            "strike the reported row with `agent-doc queue consume {document} --ack-id {id}` (the tracked backlog/Todo item stays open and the struck row names its `(stays open: ...)` reason; this also closes a `☑️` row nested under a waiting parent); when the answer resolves the tracked item, pass `--done {id}` to `agent-doc finalize {document}` instead and close any parent item the same answer resolves (#ackstrikeopenbacklog)"
         ),
         None => format!(
             "open the response with the verbatim echo `> **Queue prompt:** {item}` and persist it with `agent-doc finalize {document}`; a `### Re:` heading alone leaves the line queued"

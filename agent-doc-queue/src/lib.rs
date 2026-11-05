@@ -4,6 +4,7 @@
 //! supervisors, turn executors, and orchestration. It does not inspect panes,
 //! read documents, submit commands, or mutate files.
 
+pub mod ack_stays_open;
 pub mod backlog_sync;
 pub mod capture_scope;
 pub mod claim_release_receipt;

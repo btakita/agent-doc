@@ -31,6 +31,41 @@ use std::time::Duration;
 /// Optional tmux socket override used by headless integrations and isolated tests.
 pub use agent_doc_tmux_io::AGENT_DOC_TMUX_SOCKET_ENV;
 
+/// `#starttimeoutload`: opt-in phase progress for editor-facing bootstrap
+/// commands (`tmux start`, `tmux ensure`). An editor sets this to `1` and
+/// reads `[progress] phase=<name>` lines from stderr, so its wait can extend
+/// while the command advances and a timeout can name the phase it stalled in.
+/// Unset, nothing is printed: a person or another caller sees the same output
+/// as before.
+pub const AGENT_DOC_PROGRESS_ENV: &str = "AGENT_DOC_PROGRESS";
+
+/// The stderr prefix of one progress line (`[progress] phase=<name>`).
+pub const PROGRESS_LINE_PREFIX: &str = "[progress] phase=";
+
+/// Whether this process reports bootstrap phases (`AGENT_DOC_PROGRESS=1`).
+pub fn progress_reporting_enabled() -> bool {
+    progress_reporting_enabled_from(std::env::var(AGENT_DOC_PROGRESS_ENV).ok().as_deref())
+}
+
+fn progress_reporting_enabled_from(value: Option<&str>) -> bool {
+    value.is_some_and(|value| matches!(value.trim(), "1" | "true" | "yes"))
+}
+
+/// The progress line for `phase`.
+pub fn progress_line(phase: &str) -> String {
+    format!("{PROGRESS_LINE_PREFIX}{phase}")
+}
+
+/// Report that a bootstrap command entered `phase`. A no-op unless
+/// [`progress_reporting_enabled`]; never fails the command.
+pub fn report_progress_phase(phase: &str) {
+    if progress_reporting_enabled() {
+        let mut stderr = std::io::stderr().lock();
+        let _ = writeln!(stderr, "{}", progress_line(phase));
+        let _ = stderr.flush();
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TmuxEnsureOutcome {
     pub session_name: String,
@@ -151,6 +186,15 @@ fn ensure_tmux_session_with_ide_client(
         anyhow::bail!("file not found: {}", file.display());
     }
 
+    // `#starttimeoutload`: one `list-panes -a` listing answers every pane
+    // liveness and pane-session question below. Without it the registry scan
+    // spawned two tmux clients per registry row (`list-panes -a` +
+    // `display-message`): 28 spawns for 11 rows, which took a no-op start for
+    // an already-running document past the editor's bound at load ~100.
+    // Every tmux call that changes the pane set drops the cached listing.
+    let _pane_snapshot = tmux_router::begin_pane_snapshot_scope();
+
+    report_progress_phase("terminal_host");
     let report = terminal_host_report(tmux);
     if !report.classification.tmux_installed {
         anyhow::bail!("{}", report.reason);
@@ -159,7 +203,10 @@ fn ensure_tmux_session_with_ide_client(
     let canonical = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
     let project_root = start_project_root(&canonical);
 
-    let reconciled_server_before_lookup = if tmux.running() {
+    // The report already observed whether the server runs; asking again cost
+    // one more tmux client spawn on every start.
+    let reconciled_server_before_lookup = if report.classification.tmux_server_running {
+        report_progress_phase("tmux_server_identity");
         reconcile_tmux_server_identity(tmux, &project_root)?;
         true
     } else {
@@ -188,12 +235,14 @@ fn ensure_tmux_session_with_ide_client(
         )?;
     }
 
+    report_progress_phase("registry_lookup");
     if let Some(target) = live_registry_target(tmux, &project_root, &canonical, |session| {
         session_policy.allows(session)
             && document_binding
                 .as_deref()
                 .is_none_or(|binding| binding == session)
     })? {
+        report_progress_phase("terminal_policy");
         let state = if is_session_attached(tmux, &target.session_name) {
             TerminalSessionState::Attached
         } else {
@@ -226,6 +275,7 @@ fn ensure_tmux_session_with_ide_client(
         ));
     }
 
+    report_progress_phase("session_resolve");
     let configured = project_config.tmux_session.clone();
     let (session_name, resolution) = match (explicit_session, document_binding.as_deref()) {
         (None, Some(binding)) => (binding.to_string(), "document_binding"),
@@ -453,12 +503,17 @@ pub fn start_in_tmux_pane_for_client(
     harness_override: Option<&str>,
     client_id: Option<&str>,
 ) -> Result<TmuxEnsureOutcome> {
+    report_progress_phase("document_admission");
     prepare_start_document_for_tmux_bootstrap(file)?;
     let tmux = tmux_for_environment();
     let target = match start_bootstrap_target(&tmux, file, force, client_id)? {
-        StartBootstrap::Reuse(outcome) => return Ok(outcome),
+        StartBootstrap::Reuse(outcome) => {
+            report_progress_phase("reused");
+            return Ok(outcome);
+        }
         StartBootstrap::Start(target) => target,
     };
+    report_progress_phase("dispatch");
     let command = start_reexec_command(
         file,
         force,
@@ -540,6 +595,7 @@ fn start_bootstrap_target(
         // one idle pane; the start takes it over.
         outcome.pane_id.clone()
     } else {
+        report_progress_phase("pane_provision");
         tmux.new_window(&outcome.session_name, &project_root)
             .with_context(|| {
                 format!(
@@ -3734,6 +3790,109 @@ mod tests {
             StartBootstrap::Start(target) => panic!("started a second pane: {target:?}"),
         }
         assert_eq!(tmux.list_session_panes("proj-IU-0a1b2c3d"), panes_before);
+    }
+
+    #[test]
+    fn progress_reporting_is_opt_in_and_lines_are_parseable() {
+        assert!(!progress_reporting_enabled_from(None));
+        assert!(!progress_reporting_enabled_from(Some("")));
+        assert!(!progress_reporting_enabled_from(Some("0")));
+        assert!(progress_reporting_enabled_from(Some("1")));
+        assert!(progress_reporting_enabled_from(Some(" true ")));
+        assert_eq!(
+            progress_line("registry_lookup"),
+            "[progress] phase=registry_lookup"
+        );
+        assert_eq!(
+            progress_line("reused").strip_prefix(PROGRESS_LINE_PREFIX),
+            Some("reused")
+        );
+    }
+
+    /// `#starttimeoutload`: a no-op start for a document whose supervisor pane
+    /// is already live costs a fixed number of tmux client spawns, whatever the
+    /// registry holds. It used to spawn two per registry row, which at load
+    /// ~100 pushed the start past the editor's bound. Counted through a logging
+    /// wrapper around the real tmux; isolated tmux server only.
+    #[cfg(unix)]
+    #[test]
+    fn reuse_start_tmux_spawns_do_not_grow_with_the_registry() {
+        use std::os::unix::fs::PermissionsExt;
+
+        fn reuse_spawns(rows: usize) -> usize {
+            let dir = tempfile::tempdir().unwrap();
+            std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+            std::fs::write(
+                dir.path().join(".agent-doc/config.toml"),
+                "tmux_session = \"proj\"\n",
+            )
+            .unwrap();
+            let file = dir.path().join("session.md");
+            std::fs::write(&file, "---\nagent_doc_session: tmux-reuse-cost\n---\n").unwrap();
+            let isolated = agent_doc_tmux_io::isolated_test_tmux("agent-doc-reuse-cost");
+            let log = dir.path().join("tmux-calls.log");
+            let wrapper = dir.path().join("tmux-wrapper");
+            std::fs::write(
+                &wrapper,
+                format!(
+                    "#!/bin/sh\necho \"$*\" >> '{}'\nexec '{}' \"$@\"\n",
+                    log.display(),
+                    isolated.binary_path().display()
+                ),
+            )
+            .unwrap();
+            std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o755)).unwrap();
+            let counted = tmux_router::Tmux::default_server_with_binary(&wrapper)
+                .with_server_socket(isolated.server_socket.clone());
+
+            ensure_tmux_session_with(&isolated, &file, None).unwrap();
+            let mut registry = tmux_router::Registry::new();
+            for row in 0..rows {
+                let pane = isolated.new_window("proj", dir.path()).unwrap();
+                let row_file = if row == 0 {
+                    file.clone()
+                } else {
+                    let other = dir.path().join(format!("other-{row}.md"));
+                    std::fs::write(&other, "---\nagent_doc_session: other\n---\n").unwrap();
+                    other
+                };
+                registry.insert(
+                    format!("key-{row}"),
+                    tmux_router::RegistryEntry {
+                        pane,
+                        pid: 1,
+                        cwd: dir.path().display().to_string(),
+                        started: "2026-11-05T00:00:00Z".to_string(),
+                        session_id: format!("session-{row}"),
+                        file: row_file.display().to_string(),
+                        window: String::new(),
+                        supervisor_instance_id: String::new(),
+                    },
+                );
+            }
+            agent_doc_session_registry_io::save_in(dir.path(), &registry).unwrap();
+            // The first observation records the server identity; measure the
+            // steady state every later editor start sees.
+            ensure_tmux_session_with(&counted, &file, None).unwrap();
+            std::fs::write(&log, "").unwrap();
+
+            match start_bootstrap_target(&counted, &file, false, None).unwrap() {
+                StartBootstrap::Reuse(outcome) => {
+                    assert_eq!(outcome.session_name, "proj");
+                    assert!(outcome.document_pane.is_some());
+                }
+                StartBootstrap::Start(target) => panic!("started a second pane: {target:?}"),
+            }
+            std::fs::read_to_string(&log).unwrap().lines().count()
+        }
+
+        let one = reuse_spawns(1);
+        let many = reuse_spawns(12);
+        assert_eq!(
+            one, many,
+            "a no-op start must not spawn tmux per registry row"
+        );
+        assert!(one <= 6, "a no-op start spawned {one} tmux clients");
     }
 
     #[test]

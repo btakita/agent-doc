@@ -6500,6 +6500,10 @@ fn try_main() -> anyhow::Result<()> {
     // supervisor's `pid` response refreshes its process-scoped Lazily projection;
     // a proven-stale owner is marked for the existing safe-boundary recycle.
     let document_argument = dogfood_document_argument();
+    // `#starttimeoutload`: an editor running `tmux start`/`tmux ensure` with
+    // `AGENT_DOC_PROGRESS=1` sees each bootstrap phase, so a slow phase extends
+    // its wait and a timeout names where the command was.
+    agent_doc_start_io::report_progress_phase("supervisor_freshness_probe");
     if let Some(file) = document_argument.as_deref()
         && let Some(message) =
             agent_doc_controller_io::project_controller::recycle_stale_supervisor_for_command(
@@ -6514,9 +6518,17 @@ fn try_main() -> anyhow::Result<()> {
 
     // `lib-path` is a machine-only bootstrap query. Neither stream may carry
     // an unrelated upgrade notice (including when called by an older editor).
+    //
+    // `tmux start`/`tmux ensure` are editor bootstrap commands run under the
+    // editor's bound (`#starttimeoutload`). With an expired version cache the
+    // check is a GitHub request with a 10 s timeout, by itself enough to blow
+    // that bound, and the editor shows their stderr only on failure.
     if !matches!(
         cli.command,
-        Commands::Upgrade { .. } | Commands::LibPath | Commands::Version { .. }
+        Commands::Upgrade { .. }
+            | Commands::LibPath
+            | Commands::Version { .. }
+            | Commands::Tmux { .. }
     ) {
         upgrade::warn_if_outdated();
     }
@@ -6527,6 +6539,7 @@ fn try_main() -> anyhow::Result<()> {
         );
     }
 
+    agent_doc_start_io::report_progress_phase("config");
     let global_config = agent_doc_config::load()?;
     let project_config = match document_argument {
         Some(file) => agent_doc_project_config_io::load_project_for_doc(&file),

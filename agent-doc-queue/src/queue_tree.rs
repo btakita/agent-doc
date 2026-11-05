@@ -381,7 +381,9 @@ fn live_row_state(text: &str) -> (QueueNodeState, Option<QueueLifecycleMarker>) 
 fn waiting_head_state(state: &WaitingState) -> (QueueNodeState, Option<QueueLifecycleMarker>) {
     match state {
         WaitingState::Attempt(marker) => (QueueNodeState::of_marker(*marker), Some(*marker)),
-        WaitingState::Operator | WaitingState::Done => (QueueNodeState::WaitingOnYou, None),
+        WaitingState::Operator | WaitingState::Complete | WaitingState::Done => {
+            (QueueNodeState::WaitingOnYou, None)
+        }
         WaitingState::Answered => (QueueNodeState::Answered, None),
     }
 }

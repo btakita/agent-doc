@@ -65,3 +65,5 @@ pub mod waiting_subtree;
 mod stray_close_text_tests;
 #[cfg(test)]
 mod waiting_fixture_tests;
+#[cfg(test)]
+mod waiting_done_tests;

@@ -100,7 +100,14 @@ a proposal. A store never replaces an `operator` relation with a `proposed` or
 that recovers the operator's word fills a revision that lacked it. A database
 that predates the column gains it in place, and its rows adopt the operator's
 word from the graph cache (a revision node whose label is the answer and whose
-revision-relation edge is `operator`). `depends on [#id]`, `assumes [#id]`,
+revision-relation edge is `operator`). The append-only archive
+(`answer_ledger_archive_revisions`, `#decisionprune`) keeps the same
+`relation_source` (`#decisionrevisionsource`, archive): the write-through
+backfill and every archived row copy it, an operator word for an archived row
+is never lost to an earlier derived or proposed row with the same key, and a
+dormant decision the document names again revives each answer with the
+latest operator relation any of its archived rows recorded.
+`depends on [#id]`, `assumes [#id]`,
 `builds on [#id]`, `relies on [#id]` record `depends_on`; `conflicts with
 [#id]`, `contradicts [#id]` record `conflicts_with`. Both ends are lifted onto
 their decisions. A row that holds nothing but such phrases is a link, not an

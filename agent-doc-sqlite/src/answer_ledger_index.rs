@@ -158,6 +158,10 @@ pub(crate) fn ensure_schema(conn: &Connection) -> Result<()> {
         conn.execute_batch("ALTER TABLE answer_ledger_edges ADD COLUMN clause TEXT")?;
     }
     ensure_revision_relation_source(conn, "answer_ledger_revisions")?;
+    // `#decisionrevisionsource`, archive: an archived revision keeps who
+    // decided its relation too, so a dormant decision revives with the
+    // operator's `change:` / `amend:` still the operator's call.
+    ensure_revision_relation_source(conn, "answer_ledger_archive_revisions")?;
     Ok(())
 }
 
@@ -328,8 +332,22 @@ pub fn load_with_archive(
          WHERE document_id = ?1 AND decision_id = ?2 GROUP BY key ORDER BY key",
     )?;
     let mut revision_statement = conn.prepare(
-        "SELECT decision_id, answer, location, relation, MIN(first_seen_at), MAX(change_flagged)
-         FROM answer_ledger_archive_revisions
+        // An operator `change:` / `amend:` on any archived row of an answer
+        // is the operator's call (`#decisionrevisionsource`, archive); the
+        // latest such word wins.
+        "SELECT decision_id, answer, location,
+                COALESCE(
+                    (SELECT operator.relation FROM answer_ledger_archive_revisions AS operator
+                     WHERE operator.document_id = archive.document_id
+                       AND operator.decision_id = archive.decision_id
+                       AND operator.answer = archive.answer
+                       AND operator.relation_source = 'operator'
+                     ORDER BY operator.recorded_at DESC, operator.rowid DESC LIMIT 1),
+                    relation),
+                MIN(first_seen_at), MAX(change_flagged),
+                CASE WHEN MAX(relation_source = 'operator') = 1 THEN 'operator'
+                     ELSE relation_source END
+         FROM answer_ledger_archive_revisions AS archive
          WHERE document_id = ?1 AND decision_id = ?2
          GROUP BY answer ORDER BY MIN(first_seen_at), MIN(rowid)",
     )?;
@@ -358,8 +376,7 @@ pub fn load_with_archive(
                 answer: row.get(1)?,
                 location: row.get(2)?,
                 relation: row.get(3)?,
-                // The archive does not record who decided the relation.
-                relation_source: "derived".into(),
+                relation_source: row.get(6)?,
                 first_seen_at: sql_u64(row.get(4)?),
                 change_flagged: row.get::<_, i64>(5)? != 0,
             })
@@ -438,10 +455,18 @@ fn archive_revision(
     revision: &AnswerRevisionRow,
     now: u64,
 ) -> Result<()> {
+    // Append-only: a row already archived is kept, except that an operator
+    // word for it (`#decisionrevisionsource`, archive) is never lost to an
+    // earlier derived or proposed row with the same key.
     tx.execute(
-        "INSERT OR IGNORE INTO answer_ledger_archive_revisions
-            (document_id, decision_id, answer, location, relation, first_seen_at, change_flagged, recorded_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        "INSERT INTO answer_ledger_archive_revisions
+            (document_id, decision_id, answer, location, relation, first_seen_at, change_flagged,
+             recorded_at, relation_source)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+         ON CONFLICT(document_id, decision_id, answer, change_flagged) DO UPDATE SET
+            relation = excluded.relation,
+            relation_source = excluded.relation_source
+         WHERE relation_source <> 'operator' AND excluded.relation_source = 'operator'",
         params![
             document_id,
             revision.decision_id,
@@ -451,6 +476,7 @@ fn archive_revision(
             sql_i64(revision.first_seen_at),
             i64::from(revision.change_flagged),
             sql_i64(now),
+            revision.relation_source,
         ],
     )?;
     Ok(())
@@ -484,8 +510,10 @@ pub fn store_partitioned(
     )?;
     tx.execute(
         "INSERT OR IGNORE INTO answer_ledger_archive_revisions
-            (document_id, decision_id, answer, location, relation, first_seen_at, change_flagged, recorded_at)
-         SELECT document_id, decision_id, answer, location, relation, first_seen_at, change_flagged, ?2
+            (document_id, decision_id, answer, location, relation, first_seen_at, change_flagged, recorded_at,
+             relation_source)
+         SELECT document_id, decision_id, answer, location, relation, first_seen_at, change_flagged, ?2,
+                relation_source
          FROM answer_ledger_revisions WHERE document_id = ?1",
         params![document_id, sql_i64(now)],
     )?;
@@ -1436,5 +1464,104 @@ mod tests {
         let loaded = load_with_archive(&conn, "doc", &["id:appr".to_string()].into()).unwrap();
         assert_eq!(loaded.revisions, vec![old, new]);
         assert!(loaded.archived_decisions.is_empty());
+    }
+
+    /// `#decisionrevisionsource`, archive: an operator `amend:` / `change:`
+    /// whose decision went dormant revives from the archive as the
+    /// operator's call, never as the binary's proposal. A later derived or
+    /// proposed copy of the same archived row does not overwrite it, and the
+    /// write-through backfill copies the hot row's source.
+    #[test]
+    fn an_archived_operator_revision_revives_as_the_operators_call() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        let first = revision("dec-port", "Use port 8080.", 1);
+        let amend = AnswerRevisionRow {
+            relation: "amends".into(),
+            relation_source: "operator".into(),
+            ..revision("dec-port", "but only on the demo host", 5)
+        };
+        let change = AnswerRevisionRow {
+            relation: "supersedes".into(),
+            relation_source: "operator".into(),
+            change_flagged: true,
+            ..revision("dec-port", "Use port 9090.", 9)
+        };
+        // A hot row stored before the archive existed: only the write-through
+        // backfill archives it, and it must carry the operator's source.
+        ensure_schema(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO answer_ledger_revisions
+                (document_id, decision_id, answer, location, relation, first_seen_at,
+                 change_flagged, relation_source)
+             VALUES ('doc', 'dec-port', ?1, 'under [#x]', 'amends', 5, 0, 'operator')",
+            params![amend.answer],
+        )
+        .unwrap();
+        // The decision goes dormant: every row moves to the archive.
+        store_partitioned(
+            &mut conn,
+            "doc",
+            &[],
+            &[],
+            &[key("id:port", "dec-port", 1)],
+            &[first.clone(), change.clone()],
+            &[],
+            10,
+        )
+        .unwrap();
+        let (_, hot) = load(&conn, "doc").unwrap();
+        assert_eq!(
+            hot.len(),
+            1,
+            "the backfilled row is not one this build archived"
+        );
+        conn.execute("DELETE FROM answer_ledger_revisions", [])
+            .unwrap();
+        // A later build archives proposed / derived copies of the same rows.
+        let reproposed = AnswerRevisionRow {
+            relation: "restates".into(),
+            relation_source: "proposed".into(),
+            ..change.clone()
+        };
+        let rederived = AnswerRevisionRow {
+            relation: "initial".into(),
+            relation_source: "derived".into(),
+            ..amend.clone()
+        };
+        store_partitioned(
+            &mut conn,
+            "doc",
+            &[],
+            &[],
+            &[],
+            &[reproposed, rederived],
+            &[],
+            20,
+        )
+        .unwrap();
+        let counts = counts(&conn, "doc").unwrap();
+        assert_eq!((counts.hot_keys, counts.hot_revisions), (0, 0));
+
+        let loaded = load_with_archive(&conn, "doc", &["id:port".to_string()].into()).unwrap();
+        assert!(loaded.archived_decisions.contains("dec-port"));
+        let revived: Vec<(&str, &str, &str)> = loaded
+            .revisions
+            .iter()
+            .map(|row| {
+                (
+                    row.answer.as_str(),
+                    row.relation.as_str(),
+                    row.relation_source.as_str(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            revived,
+            vec![
+                ("Use port 8080.", "initial", "derived"),
+                ("but only on the demo host", "amends", "operator"),
+                ("Use port 9090.", "supersedes", "operator"),
+            ]
+        );
     }
 }

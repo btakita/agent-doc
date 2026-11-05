@@ -41,10 +41,18 @@ preflight and every closeout (`#answerbyrequestid`):
 
 - Each operator answer in the document is recorded under every copy of its
   question: the todo, its Waiting-on-you item, and requests raised for that
-  item. Answers in the done archive count too.
+  item. Answers in the done archive count too, and so does an answer under a
+  waiting packet that lost its waiting item and now sits under a `do [#id]`
+  queue row.
 - The cycle contract lists `answered_decisions`. Each entry has the operator's
   latest answer word for word, where it was given, and the open copies it
   covers. Act on that answer. Do not ask it again.
+- An entry with `via` is a related answer, not the same question
+  (`#answeroutsidewaiting`). The open copy is a request raised for work item
+  `via`, and the operator answered that work item, or a question with the same
+  subject. Read it before asking: act on it when it resolves the copy, and
+  when it does not, cite the decision id and say what is still open. It never
+  closes a copy or refuses a closeout.
 - `possibly_answered` entries are only likely matches. If one is the same
   question, ask the operator once whether it is the same. They confirm by
   replying `same as [#id]` under the item. Never merge two questions yourself.

@@ -500,3 +500,63 @@ fn a_changed_decision_reports_its_impact_and_why() {
         "{fact:#}"
     );
 }
+
+/// `#decisionstaleaudit`: the agent-free path for a stale todo. The operator's
+/// answer to the todo's own id was consumed, and nothing still works on it. A
+/// plain preflight closes the todo citing the decision, and a todo whose
+/// waiting tree still has an operator row stays open, reported as a typed
+/// `stale_tracked_item` signal that `decision validate --document` repeats
+/// without failing.
+#[test]
+fn a_delivered_answer_closes_its_idle_todo_and_reports_the_rest() {
+    let dir = tempfile::tempdir().unwrap();
+    let doc = session(
+        dir.path(),
+        concat!(
+            "- ### 📥 Waiting on you — answer by adding a child line under an item [#q-4775b8697412]\n",
+            "  - 🙋 ⟦you: 1 · agent: 0 · done: 0⟧ [#tdalpha] Record the public-Alpha decision and the release owner. <!-- agent-doc:waiting-item -->\n",
+            "    - **Next:** you — reply under this item ▫️\n",
+            "- ~~[#tdapprovers]: Keep the approver as is.~~\n",
+            "- ~~[#tdalpha]: build the preview release~~\n",
+        ),
+        concat!(
+            "- [ ] [#tdapprovers] Name the approver for docs PR #88 and request their review\n",
+            "- [ ] [#tdalpha] Record the public-Alpha decision and the release owner.\n",
+        ),
+    );
+    let path = doc.to_str().unwrap();
+    let output = run_agent_doc(dir.path(), &["preflight", path]);
+    assert_ok(&output, "preflight");
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(content.contains("- [x] [#tdapprovers]"), "{content}");
+    assert!(content.contains("already answered `dec-"), "{content}");
+    assert!(content.contains("- [ ] [#tdalpha]"), "{content}");
+    let contract: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let signals = contract["todo_signals"].as_array().expect("todo signals");
+    let stale = signals
+        .iter()
+        .find(|signal| signal["kind"] == "stale_tracked_item")
+        .unwrap_or_else(|| panic!("{contract:#}"));
+    assert_eq!(stale["todo"], "tdalpha", "{stale:#}");
+    assert_eq!(stale["component"], "todo", "{stale:#}");
+    assert_eq!(stale["stale_kind"], "answered_but_open", "{stale:#}");
+    let decision = stale["decision"].as_str().unwrap().to_string();
+    assert!(
+        stale["action"]
+            .as_str()
+            .unwrap()
+            .contains("--todo-done tdalpha"),
+        "{stale:#}"
+    );
+
+    let output = run_agent_doc(
+        dir.path(),
+        &["decision", "validate", "--json", "--document", path],
+    );
+    assert_ok(&output, "decision validate");
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["valid"], true, "{report:#}");
+    let reported = report["stale_tracked_items"].as_array().unwrap();
+    assert_eq!(reported.len(), 1, "{report:#}");
+    assert_eq!(reported[0]["decision"], decision.as_str(), "{report:#}");
+}

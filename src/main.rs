@@ -4355,7 +4355,9 @@ enum DecisionAction {
         #[arg(long)]
         json: bool,
         /// Also report near-duplicate question clusters remaining in this
-        /// session document's answer ledger (`#answerbyrequestid`)
+        /// session document's answer ledger (`#answerbyrequestid`) and the
+        /// tracked items a delivered decision already settles
+        /// (`stale_tracked_item`, `#decisionstaleaudit`; advisory)
         #[arg(long)]
         document: Option<PathBuf>,
     },
@@ -4506,7 +4508,7 @@ fn run_decision_action(action: DecisionAction) -> anyhow::Result<()> {
         DecisionAction::Answered { file, json } => {
             let content = std::fs::read_to_string(&file)
                 .with_context(|| format!("failed to read {}", file.display()))?;
-            let (_, ledger) = agent_doc_preflight_io::answer_ledger::build_ledger(&file, &content);
+            let (observations, ledger) = agent_doc_preflight_io::answer_ledger::build_ledger(&file, &content);
             let facts = ledger.answered_facts();
             if json {
                 let value = serde_json::json!({
@@ -4515,6 +4517,7 @@ fn run_decision_action(action: DecisionAction) -> anyhow::Result<()> {
                     "possibly_answered": ledger.possible,
                     "near_duplicates": ledger.near_duplicates,
                     "edges": ledger.edges,
+                    "stale_tracked_items": ledger.stale_tracked_items(&observations),
                 });
                 println!("{}", serde_json::to_string_pretty(&value)?);
             } else {
@@ -4628,17 +4631,41 @@ fn run_decision_action(action: DecisionAction) -> anyhow::Result<()> {
             Ok(())
         }
         DecisionAction::Validate { project_root, json, document } => {
+            // `#decisionstaleaudit`: with a session document, also report the
+            // tracked items a delivered decision already settles. Advisory:
+            // they never fail validation, and validate never writes.
+            let mut stale_signals = Vec::new();
             if let Some(document) = &document {
                 let content = std::fs::read_to_string(document)
                     .with_context(|| format!("failed to read {}", document.display()))?;
-                let (_, ledger) = agent_doc_preflight_io::answer_ledger::build_ledger(document, &content);
+                let (observations, ledger) = agent_doc_preflight_io::answer_ledger::build_ledger(document, &content);
                 for cluster in &ledger.near_duplicates {
                     eprintln!("near-duplicate questions (confirm once with the operator): {}", cluster.join(", "));
+                }
+                for stale in ledger.stale_tracked_items(&observations) {
+                    if !json {
+                        eprintln!(
+                            "stale tracked item: agent:{} [#{}] {} — decision `{}`{}: {}",
+                            stale.component.as_str(),
+                            stale.item,
+                            stale.kind.as_str(),
+                            stale.decision_id,
+                            if stale.auto_close { " (preflight closes it)" } else { "" },
+                            stale.action
+                        );
+                    }
+                    stale_signals.push(agent_doc_preflight_io::stale_tracked_signal(&stale));
                 }
             }
             let report = agent_doc_decision_io::validate(&project_root)?;
             if json {
-                println!("{}", serde_json::to_string_pretty(&report)?);
+                let mut value = serde_json::to_value(&report)?;
+                if document.is_some()
+                    && let Some(object) = value.as_object_mut()
+                {
+                    object.insert("stale_tracked_items".to_string(), serde_json::to_value(&stale_signals)?);
+                }
+                println!("{}", serde_json::to_string_pretty(&value)?);
             } else if report.valid {
                 println!("decision registry valid: {} decisions, {} pinned responses", report.decision_count, report.pinned_response_ids.len());
             } else {

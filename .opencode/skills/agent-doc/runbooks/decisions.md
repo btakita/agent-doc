@@ -62,6 +62,12 @@ preflight and every closeout (`#answerbyrequestid`):
   the recorded answer. If the answer truly leaves a new question open, cite
   the decision id, or write `already answered: <answer>`, in the request and
   say what is still open.
+- A tracked item a delivered decision already settles is reported as a
+  `stale_tracked_item` todo signal (`#decisionstaleaudit`) with the decision
+  id and the flag to apply. Preflight itself closes only an idle todo whose own
+  id the delivered operator answer addresses; apply the rest, citing the
+  decision. An operator question back (`[#id]: Is this done?`) is never
+  recorded as an answer.
 - Only operator words change a decision. A newer operator answer becomes the
   latest revision. Earlier answers are kept, and the cycle contract shows a
   changed decision once as `decision changed: <old> -> <new>`.
@@ -84,7 +90,8 @@ preflight and every closeout (`#answerbyrequestid`):
 
 `agent-doc decision answered <FILE> [--json]` prints the ledger for debugging.
 `agent-doc decision validate --document <FILE>` also lists near-duplicate
-question clusters.
+question clusters and stale tracked items (advisory; validation never fails on
+them and never writes).
 
 ## Changing, amending and linking decisions (`#decisiongraph`)
 

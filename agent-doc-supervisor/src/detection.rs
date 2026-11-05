@@ -704,6 +704,57 @@ mod tests {
         );
     }
 
+    /// `#watcherbusyrestart`: the deferred in-place restart waits for a turn
+    /// boundary (`prompt_visible && !turn_active`). While the actor is not
+    /// `Ready`, `prompt_visible` comes from the child's own output plus a live
+    /// pane probe. A Grok pane idle at its boxed prompt with a background
+    /// watcher panel used to read `Hidden` there (no bare `❯` line), so the
+    /// restart waited forever; a real turn under the same panel must still wait.
+    #[test]
+    fn grok_idle_prompt_with_watcher_panel_lets_the_deferred_restart_fire() {
+        use crate::lifecycle::{SupervisorRestartAction, supervisor_restart_action};
+        const IDLE_WITH_WATCHER_PANEL: &str =
+            include_str!("../../agent-doc-harness/src/fixtures/grok_idle_with_watcher_panel.txt");
+        let harness = agent_doc_harness::HarnessConfig::grok();
+        let restart_action = |output: &str| {
+            let prompt_visible = match idle_queue_prompt_visibility(output, &harness, false) {
+                IdleQueuePromptVisibility::Visible => true,
+                IdleQueuePromptVisibility::Hidden => false,
+                IdleQueuePromptVisibility::NeedsLivePaneDispatchReady => {
+                    idle_queue_prompt_visible_after_live_pane_dispatch_ready(Some(
+                        pane_dispatch_ready_at_cursor(output, &harness, None),
+                    ))
+                }
+            };
+            let turn_active = false;
+            supervisor_restart_action(true, true, prompt_visible && !turn_active, true, false)
+        };
+
+        assert_eq!(
+            idle_queue_prompt_visibility(IDLE_WITH_WATCHER_PANEL, &harness, false),
+            IdleQueuePromptVisibility::NeedsLivePaneDispatchReady
+        );
+        assert!(pane_dispatch_ready_at_cursor(
+            IDLE_WITH_WATCHER_PANEL,
+            &harness,
+            None
+        ));
+        assert_eq!(
+            restart_action(IDLE_WITH_WATCHER_PANEL),
+            SupervisorRestartAction::ReexecInPlace
+        );
+
+        let running_turn = IDLE_WITH_WATCHER_PANEL.replace("Ctrl+x", "Ctrl+c:cancel  │  Ctrl+x");
+        assert_eq!(
+            idle_queue_prompt_visibility(&running_turn, &harness, false),
+            IdleQueuePromptVisibility::Hidden
+        );
+        assert_eq!(
+            restart_action(&running_turn),
+            SupervisorRestartAction::AwaitDrain
+        );
+    }
+
     #[test]
     fn idle_queue_prompt_visible_after_live_probe_preserves_fallback_semantics() {
         assert!(idle_queue_prompt_visible_after_live_pane_dispatch_ready(

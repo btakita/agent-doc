@@ -174,6 +174,36 @@ pub fn actor_busy_is_self_induced_restart(last_transition_reason: &str) -> bool 
     SELF_RESTART_REASONS.contains(&last_transition_reason.trim())
 }
 
+/// Facts the project controller holds when it decides whether its own pane
+/// observation may retire a `Busy` record before dispatch admission.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RestartBusyReadyPromptFacts<'a> {
+    pub actor_state: RouteActorState,
+    pub last_transition_reason: &'a str,
+    /// The controller's own fresh ANSI capture projects an empty (or
+    /// ghost-only) dispatch-ready composer with no active-turn cue.
+    pub pane_ready_prompt: bool,
+    /// A fresh harness-hook turn lease exists for the actor's pane.
+    pub harness_turn_active: bool,
+}
+
+/// `#watcherbusyrestart`: whether a `Busy` record written by the actor's own
+/// restart (never by a dispatched turn) is disproved by the controller's
+/// current pane evidence.
+///
+/// The drain gate (`#drainbusymask`) trusts only the durable record, so a
+/// restart-induced `Busy` whose supervisor never reconciles it (a stale binary,
+/// or every tmux probe timing out under load) blocked every dispatch while the
+/// harness sat idle at its prompt. Only restart reasons qualify: a `Busy` from a
+/// dispatch or turn start still needs the supervisor's `idle_pane_reconcile`,
+/// and a live harness turn lease always wins over a rendered prompt.
+pub fn restart_busy_disproved_by_ready_prompt(facts: RestartBusyReadyPromptFacts<'_>) -> bool {
+    facts.actor_state == RouteActorState::Busy
+        && actor_busy_is_self_induced_restart(facts.last_transition_reason)
+        && facts.pane_ready_prompt
+        && !facts.harness_turn_active
+}
+
 /// Build the operator-actionable recovery suffix for a route defer to the
 /// supervisor's boundary restart.
 pub fn defer_to_boundary_restart_recovery_hint(
@@ -483,6 +513,65 @@ mod tests {
             recovery_command: command,
         });
         assert!(paused.contains("queue is paused"));
+    }
+
+    #[test]
+    fn restart_busy_is_disproved_only_by_a_ready_prompt_without_a_live_turn() {
+        let facts = |state, reason, ready, turn| RestartBusyReadyPromptFacts {
+            actor_state: state,
+            last_transition_reason: reason,
+            pane_ready_prompt: ready,
+            harness_turn_active: turn,
+        };
+        // The live wedge: busy since the restart request, idle prompt, no turn.
+        assert!(restart_busy_disproved_by_ready_prompt(facts(
+            RouteActorState::Busy,
+            "ipc_restart_requested",
+            true,
+            false
+        )));
+        assert!(restart_busy_disproved_by_ready_prompt(facts(
+            RouteActorState::Busy,
+            "restart_continue_spawn",
+            true,
+            false
+        )));
+        // No ready proof (probe timed out, busy cue, draft): stays busy.
+        assert!(!restart_busy_disproved_by_ready_prompt(facts(
+            RouteActorState::Busy,
+            "ipc_restart_requested",
+            false,
+            false
+        )));
+        // A live harness turn lease always wins over a rendered prompt.
+        assert!(!restart_busy_disproved_by_ready_prompt(facts(
+            RouteActorState::Busy,
+            "ipc_restart_requested",
+            true,
+            true
+        )));
+        // A dispatched turn's Busy is the supervisor's to reconcile
+        // (`#drainbusymask`), never the controller's.
+        for reason in ["ipc_inject", "dispatch_submit", "auto_trigger_inject", ""] {
+            assert!(!restart_busy_disproved_by_ready_prompt(facts(
+                RouteActorState::Busy,
+                reason,
+                true,
+                false
+            )));
+        }
+        for state in [
+            RouteActorState::Ready,
+            RouteActorState::Starting,
+            RouteActorState::WaitingInput,
+        ] {
+            assert!(!restart_busy_disproved_by_ready_prompt(facts(
+                state,
+                "ipc_restart_requested",
+                true,
+                false
+            )));
+        }
     }
 
     #[test]

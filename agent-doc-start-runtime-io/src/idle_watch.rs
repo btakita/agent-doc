@@ -3759,12 +3759,16 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     );
                 let dispatch_grace_active = actor_busy
                     && shared.prompt_dispatch_grace_active(std::time::Duration::from_secs(15));
-                match pane_busy_cue {
-                    Some(false) if !turn_active && !dispatch_grace_active => {
-                        idle_busy_ticks = idle_busy_ticks.saturating_add(1)
-                    }
-                    _ => idle_busy_ticks = 0,
-                }
+                // `#watcherbusyrestart`: a probe that timed out is unknown, not
+                // busy; it holds the debounce instead of restarting it.
+                idle_busy_ticks = agent_doc_supervisor::idle_reconcile::next_stale_busy_idle_ticks(
+                    idle_busy_ticks,
+                    actor_busy,
+                    clear_cooldown_active,
+                    pane_busy_cue,
+                    turn_active,
+                    dispatch_grace_active,
+                );
                 let stale_busy_reconcile_due = stale_busy_idle_reconcile_decision(
                     actor_busy,
                     pane_busy_cue == Some(true),

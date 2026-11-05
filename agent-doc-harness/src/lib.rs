@@ -1032,6 +1032,22 @@ impl HarnessConfig {
         if self.binary == "opencode" && self.is_bottom_idle_chrome(output, 12) {
             return true;
         }
+        // `#watcherbusyrestart`: Grok Build draws its composer as a box
+        // (`│ ❯ … │`), so the bare-glyph prompt match below never fires and a
+        // grok actor that left `Ready` (for example a supervisor restart
+        // request) could never be observed idle again from its own output. The
+        // structural projection is the same proof dispatch already uses: an
+        // empty or ghost-only box followed only by idle footer chrome, with no
+        // active-turn cue. A background watcher panel above the box is
+        // scrollback, not a running turn.
+        if self.binary == "grok"
+            && matches!(
+                project_pane_composer(output, self),
+                PaneComposerProjection::ReadyEmpty { .. }
+            )
+        {
+            return true;
+        }
         if self.is_idle_chrome_only_output(output) {
             return true;
         }

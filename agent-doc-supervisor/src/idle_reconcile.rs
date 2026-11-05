@@ -147,6 +147,34 @@ pub fn stale_busy_idle_reconcile_decision(
         && consecutive_idle_busy_ticks >= required_ticks
 }
 
+/// Advance the consecutive idle-pane debounce behind the stale-busy repair.
+///
+/// `pane_busy_cue` is one live-pane probe: `Some(false)` = idle, `Some(true)`
+/// = active-turn cue, `None` = the probe produced no answer (`#watcherbusyrestart`:
+/// a tmux capture that timed out under load). An unanswered probe is unknown,
+/// not busy: it holds the count instead of resetting it, so a host at load ~100
+/// whose 250 ms captures keep timing out can still accumulate the idle proof.
+/// It never advances the count either, so only observed idle panes reach the
+/// threshold. A non-busy actor, a cooldown, a live turn lease, or a fresh
+/// dispatch grace restarts the episode.
+pub fn next_stale_busy_idle_ticks(
+    ticks: u32,
+    actor_busy: bool,
+    clear_cooldown_active: bool,
+    pane_busy_cue: Option<bool>,
+    turn_active: bool,
+    dispatch_grace_active: bool,
+) -> u32 {
+    if !actor_busy || clear_cooldown_active || turn_active || dispatch_grace_active {
+        return 0;
+    }
+    match pane_busy_cue {
+        Some(false) => ticks.saturating_add(1),
+        Some(true) => 0,
+        None => ticks,
+    }
+}
+
 pub fn reconcile_stale_busy_idle_queue_state(
     last_dispatched: Option<String>,
     idle_busy_ticks: &mut u32,
@@ -160,6 +188,58 @@ mod tests {
     use super::*;
 
     const REQUIRED_TICKS: u32 = 4;
+
+    /// `#watcherbusyrestart`: under load the live-pane capture times out
+    /// (`None`) between idle observations. Those gaps must not restart the
+    /// debounce, or the stale `Busy` is never repaired.
+    #[test]
+    fn unanswered_pane_probes_hold_the_idle_debounce() {
+        let step = |ticks, cue| next_stale_busy_idle_ticks(ticks, true, false, cue, false, false);
+        let mut ticks = 0;
+        for cue in [
+            Some(false),
+            None,
+            Some(false),
+            None,
+            None,
+            Some(false),
+            None,
+            Some(false),
+        ] {
+            ticks = step(ticks, cue);
+        }
+        assert_eq!(ticks, REQUIRED_TICKS);
+        assert!(stale_busy_idle_reconcile_decision(
+            true,
+            false,
+            false,
+            false,
+            false,
+            ticks,
+            REQUIRED_TICKS
+        ));
+        // Unknown never advances: timeouts alone cannot prove idle.
+        assert_eq!((0..10).fold(0, |ticks, _| step(ticks, None)), 0);
+        // An observed busy cue restarts the episode.
+        assert_eq!(step(3, Some(true)), 0);
+        // So do a non-busy actor, a cooldown, a live turn, and a dispatch grace.
+        assert_eq!(
+            next_stale_busy_idle_ticks(3, false, false, None, false, false),
+            0
+        );
+        assert_eq!(
+            next_stale_busy_idle_ticks(3, true, true, None, false, false),
+            0
+        );
+        assert_eq!(
+            next_stale_busy_idle_ticks(3, true, false, Some(false), true, false),
+            0
+        );
+        assert_eq!(
+            next_stale_busy_idle_ticks(3, true, false, Some(false), false, true),
+            0
+        );
+    }
 
     #[test]
     fn stale_busy_reconcile_effect_fires_once_per_dispatch_epoch() {

@@ -28909,16 +28909,46 @@ fn capture_dispatch_pane_retrying_timeouts(
     }
 }
 
-fn controller_dispatch_pane_observation(
+/// One controller pane capture, classified twice from the same bytes: the
+/// active-turn fence and (`#watcherbusyrestart`) whether the composer is a
+/// proven empty dispatch-ready prompt.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ControllerDispatchPaneEvidence {
+    observation: ControllerDispatchPaneObservation,
+    ready_prompt: bool,
+}
+
+fn classify_controller_dispatch_pane_evidence(
+    harness: &str,
+    captured: Result<String, agent_doc_tmux_io::TmuxIoError>,
+) -> ControllerDispatchPaneEvidence {
+    let ready_prompt = captured.as_ref().is_ok_and(|content| {
+        agent_doc_harness::ready_prompt_candidate(
+            content,
+            &agent_doc_harness::HarnessConfig::from_agent_name(harness),
+        )
+        .is_some()
+    });
+    let observation = classify_controller_dispatch_pane(harness, captured);
+    ControllerDispatchPaneEvidence {
+        ready_prompt: ready_prompt && observation == ControllerDispatchPaneObservation::Clear,
+        observation,
+    }
+}
+
+fn controller_dispatch_pane_evidence(
     record: &agent_doc_controller::actor::ActorRecord,
-) -> ControllerDispatchPaneObservation {
+) -> ControllerDispatchPaneEvidence {
     if record.pane_id.is_empty() {
-        return ControllerDispatchPaneObservation::Unavailable(
-            "actor record has no pane id".to_string(),
-        );
+        return ControllerDispatchPaneEvidence {
+            observation: ControllerDispatchPaneObservation::Unavailable(
+                "actor record has no pane id".to_string(),
+            ),
+            ready_prompt: false,
+        };
     }
     let tmux = agent_doc_tmux_io::configured_tmux();
-    let observation = classify_controller_dispatch_pane(
+    let evidence = classify_controller_dispatch_pane_evidence(
         &record.harness,
         capture_dispatch_pane_retrying_timeouts(
             CONTROLLER_DISPATCH_PANE_CAPTURE_ATTEMPTS,
@@ -28932,11 +28962,139 @@ fn controller_dispatch_pane_observation(
     // Unit controller fixtures use synthetic pane ids without owning a tmux
     // server. Preserve those actor-state tests; the classifier regression
     // above directly pins unavailable => fail-closed for production builds.
+    // An unavailable capture never proves a ready prompt.
     #[cfg(test)]
-    if matches!(observation, ControllerDispatchPaneObservation::Unavailable(_)) {
-        return ControllerDispatchPaneObservation::Clear;
+    if matches!(
+        evidence.observation,
+        ControllerDispatchPaneObservation::Unavailable(_)
+    ) {
+        return ControllerDispatchPaneEvidence {
+            observation: ControllerDispatchPaneObservation::Clear,
+            ready_prompt: false,
+        };
     }
-    observation
+    evidence
+}
+
+/// True when a fresh harness-hook turn lease names `pane` (pane-scoped, or the
+/// legacy project singleton held by that pane). Unreadable state reads as a
+/// live turn: this only ever vetoes a repair.
+fn controller_harness_turn_lease_active(project_root: &Path, pane: &str) -> bool {
+    let Ok(conn) = open_state_db(project_root) else {
+        return true;
+    };
+    let lease = match state_store::load_coordination_lease_from_db(&conn, "turn_active", pane) {
+        Ok(Some(lease)) => Some(lease),
+        Ok(None) => {
+            match state_store::load_coordination_lease_from_db(&conn, "turn_active", "project") {
+                Ok(legacy) => legacy.filter(|legacy| legacy.holder == pane),
+                Err(_) => return true,
+            }
+        }
+        Err(_) => return true,
+    };
+    lease.is_some_and(|lease| {
+        agent_doc_turn::turn_status::turn_active_marker_is_fresh(
+            &agent_doc_turn::turn_status::TurnActiveMarker {
+                pane: pane.to_string(),
+                written_at: lease.heartbeat_secs,
+            },
+            timestamp_secs(),
+        )
+    })
+}
+
+/// `#watcherbusyrestart`: retire a `Busy` record that the actor's own restart
+/// wrote when this controller's pane capture proves an idle dispatch-ready
+/// prompt and no harness turn lease is live. The `Ready` is published through
+/// the fenced lifecycle write, so the durable record, `admin inspect`, and the
+/// drain gate agree with the pane. Any failure keeps the `Busy` record
+/// (fail closed).
+fn repair_restart_busy_before_dispatch(
+    bootstrap: &ControllerBootstrap,
+    runtime: Option<&ControllerRuntime>,
+    file: &Path,
+    document_id: &str,
+    record: agent_doc_controller::actor::ActorRecord,
+    pane_ready_prompt: bool,
+) -> agent_doc_controller::actor::ActorRecord {
+    let Some(actor_state) =
+        agent_doc_supervisor::route_runtime::RouteActorState::parse(record.state.as_str())
+    else {
+        return record;
+    };
+    let harness_turn_active = pane_ready_prompt
+        && controller_harness_turn_lease_active(&bootstrap.project_root, &record.pane_id);
+    if !agent_doc_supervisor::route_runtime::restart_busy_disproved_by_ready_prompt(
+        agent_doc_supervisor::route_runtime::RestartBusyReadyPromptFacts {
+            actor_state,
+            last_transition_reason: &record.last_transition.reason,
+            pane_ready_prompt,
+            harness_turn_active,
+        },
+    ) {
+        return record;
+    }
+    let expected_revision = match open_state_db(&bootstrap.project_root)
+        .and_then(|conn| state_store::load_actor_record_with_revision_from_db(&conn, document_id))
+    {
+        Ok((_, revision)) => revision,
+        Err(_) => return record,
+    };
+    let prior_reason = record.last_transition.reason.clone();
+    match handle_mark_lifecycle(
+        bootstrap,
+        runtime,
+        ControllerRequest {
+            command: "mark_lifecycle".to_string(),
+            file: Some(file.to_path_buf()),
+            session_id: Some(record.session_id.clone()),
+            pane_id: Some(record.pane_id.clone()),
+            window_id: None,
+            generation: Some(record.generation),
+            state: Some(
+                agent_doc_controller::actor::ActorState::Ready
+                    .as_str()
+                    .to_string(),
+            ),
+            caller: Some("controller".to_string()),
+            reason: Some("dispatch_ready_prompt".to_string()),
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: LifecycleFencePayload::encode(Some(expected_revision)),
+            sequence: level_update_send_stamp(),
+        },
+    ) {
+        Ok(repaired) if repaired.state == agent_doc_controller::actor::ActorState::Ready => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "controller_dispatch_restart_busy_repaired file={} pane={} generation={} prior_reason={} evidence=controller_ready_prompt harness_turn_active=false (#watcherbusyrestart)",
+                    file.display(),
+                    repaired.pane_id,
+                    repaired.generation,
+                    prior_reason,
+                ),
+            );
+            repaired
+        }
+        Ok(_) => record,
+        Err(err) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "controller_dispatch_restart_busy_repair_refused file={} pane={} generation={} prior_reason={} error={:?} (#watcherbusyrestart)",
+                    file.display(),
+                    record.pane_id,
+                    record.generation,
+                    prior_reason,
+                    format!("{err:#}"),
+                ),
+            );
+            record
+        }
+    }
 }
 
 pub(crate) fn handle_dispatch(
@@ -29072,7 +29230,16 @@ pub(crate) fn handle_dispatch(
     // Ready projection can race a still-running turn between that probe and
     // this RPC. Re-observe the authoritative pane here before issuing a
     // dispatch receipt so no caller can inject into a live turn.
-    let pane_observation = controller_dispatch_pane_observation(&record);
+    let pane_evidence = controller_dispatch_pane_evidence(&record);
+    let record = repair_restart_busy_before_dispatch(
+        bootstrap,
+        runtime,
+        &file,
+        &document_id,
+        record,
+        pane_evidence.ready_prompt,
+    );
+    let pane_observation = pane_evidence.observation;
     let mut queue_control = {
         let conn = open_state_db(&bootstrap.project_root)?;
         state_store::load_effective_queue_control_from_db(
@@ -65241,6 +65408,198 @@ mod tests {
         assert!(
             format!("{err:#}").contains("actor_busy_draining"),
             "{err:#}"
+        );
+    }
+
+    /// `#watcherbusyrestart` (haiven-dev `sdk-dev.md`, 2026-11-05 16:22): a
+    /// Grok pane idle at its prompt with only a background watcher kept the
+    /// record `busy reason=ipc_restart_requested` for hours, so an `admin queue
+    /// drain` derived `drain_actor_live:busy` from it and every Run Agent Doc
+    /// failed `actor_busy_draining`. The controller's own ready-prompt capture
+    /// retires a restart-induced `Busy` (and publishes `Ready`); a dispatched
+    /// turn's `Busy`, a missing proof, or a live turn lease still fail closed.
+    #[test]
+    fn controller_ready_prompt_retires_a_restart_busy_through_the_drain_gate() {
+        use agent_doc_controller::actor::ActorState;
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("tasks/watcherbusyrestart.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: session-wbr\nagent: grok\n---\nBody\n",
+        )
+        .unwrap();
+        agent_doc_session_actor_io::record_session_start_direct(
+            &doc,
+            "session-wbr",
+            "%43",
+            "@1",
+            1,
+        )
+        .unwrap();
+        let bootstrap = ControllerBootstrap {
+            project_root: dir.path().to_path_buf(),
+            socket_path: socket_path(dir.path()),
+            launch_mode: LaunchMode::Lazy,
+            bootstrap_epoch: 0,
+            pid: std::process::id(),
+            controller_binary: Some(current_binary_identity().unwrap()),
+            controller_generation: 1,
+            handoff_state: ControllerHandoffState::Stable,
+            handoff_started_at: None,
+            previous_controller_pid: None,
+        };
+        let document_id = agent_doc_session_actor_io::canonical_document_id_in(
+            dir.path(),
+            &doc.to_string_lossy(),
+        );
+        let lifecycle = |state: ActorState, caller: &str, reason: &str| {
+            mark_lifecycle(
+                dir.path(),
+                LifecycleRequest {
+                    file: doc.clone(),
+                    session_id: "session-wbr".to_string(),
+                    pane_id: "%43".to_string(),
+                    generation: 1,
+                    state,
+                    caller: caller.to_string(),
+                    reason: reason.to_string(),
+                    expected_revision: None,
+                },
+            )
+            .unwrap()
+        };
+        let dispatch = || {
+            authorize_dispatch(
+                dir.path(),
+                DispatchRequest {
+                    file: doc.clone(),
+                    session_id: "session-wbr".to_string(),
+                    pane_id: "%43".to_string(),
+                    generation: 1,
+                    command_kind: "dispatch_only_reopen".to_string(),
+                    diagnostic_payload: "submit=direct_pane actor_state=ready harness=grok"
+                        .to_string(),
+                },
+            )
+        };
+        let repair = |record, ready_prompt| {
+            repair_restart_busy_before_dispatch(
+                &bootstrap,
+                None,
+                &doc,
+                &document_id,
+                record,
+                ready_prompt,
+            )
+        };
+
+        let busy = lifecycle(ActorState::Busy, "supervisor", "ipc_restart_requested");
+        control_queue(
+            dir.path(),
+            Some(&doc),
+            "drain",
+            Some(1),
+            Some("watcherbusyrestart test"),
+            None,
+        )
+        .unwrap();
+        let err = dispatch().expect_err("the restart busy blocks the drain without proof");
+        assert!(
+            format!("{err:#}").contains("actor_busy_draining"),
+            "{err:#}"
+        );
+
+        // No ready-prompt proof (probe timed out, draft, busy cue): unchanged.
+        assert_eq!(repair(busy.clone(), false).state, ActorState::Busy);
+
+        // A live harness turn lease vetoes the repair even with a ready prompt.
+        write_test_turn_lease(dir.path(), "%43", timestamp_secs());
+        assert_eq!(repair(busy.clone(), true).state, ActorState::Busy);
+        clear_test_turn_lease(dir.path(), "%43");
+
+        // The controller's own ready-prompt proof retires it and publishes Ready.
+        let repaired = repair(busy, true);
+        assert_eq!(repaired.state, ActorState::Ready);
+        assert_eq!(repaired.last_transition.reason, "dispatch_ready_prompt");
+        let conn = open_state_db(dir.path()).unwrap();
+        let (stored, _) =
+            state_store::load_actor_record_with_revision_from_db(&conn, &document_id).unwrap();
+        assert_eq!(stored.unwrap().state, ActorState::Ready);
+        dispatch().expect("the repaired actor drains");
+
+        // A dispatched turn's Busy is never the controller's to retire.
+        let turn = lifecycle(ActorState::Busy, "dispatch", "ipc_inject");
+        assert_eq!(repair(turn, true).state, ActorState::Busy);
+        let err = dispatch().expect_err("a live Busy turn must stay blocked during a drain");
+        assert!(
+            format!("{err:#}").contains("actor_busy_draining"),
+            "{err:#}"
+        );
+        let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops_log.contains("controller_dispatch_restart_busy_repaired"),
+            "the repair must leave a receipt:\n{ops_log}"
+        );
+    }
+
+    fn write_test_turn_lease(root: &Path, pane: &str, heartbeat_secs: u64) {
+        let conn = open_state_db(root).unwrap();
+        state_store::upsert_coordination_lease_in_db(
+            &conn,
+            &state_store::CoordinationLeaseRecord {
+                scope_kind: "turn_active".to_string(),
+                scope_id: pane.to_string(),
+                holder: pane.to_string(),
+                holder_pid: Some(std::process::id()),
+                heartbeat_secs,
+            },
+        )
+        .unwrap();
+    }
+
+    fn clear_test_turn_lease(root: &Path, pane: &str) {
+        let conn = open_state_db(root).unwrap();
+        state_store::clear_coordination_lease_in_db(&conn, "turn_active", pane).unwrap();
+    }
+
+    #[test]
+    fn controller_pane_evidence_reads_grok_idle_with_watcher_panel_as_ready() {
+        const IDLE_WITH_WATCHER_PANEL: &str = include_str!(
+            "../../../agent-doc-harness/src/fixtures/grok_idle_with_watcher_panel.txt"
+        );
+        let idle = classify_controller_dispatch_pane_evidence(
+            "grok",
+            Ok(IDLE_WITH_WATCHER_PANEL.to_string()),
+        );
+        assert_eq!(idle.observation, ControllerDispatchPaneObservation::Clear);
+        assert!(idle.ready_prompt);
+
+        let running = classify_controller_dispatch_pane_evidence(
+            "grok",
+            Ok(IDLE_WITH_WATCHER_PANEL.replace("Ctrl+x", "Ctrl+c:cancel  │  Ctrl+x")),
+        );
+        assert!(matches!(
+            running.observation,
+            ControllerDispatchPaneObservation::Blocked(_)
+        ));
+        assert!(!running.ready_prompt);
+
+        let timed_out = classify_controller_dispatch_pane_evidence(
+            "grok",
+            Err(agent_doc_tmux_io::TmuxIoError::Timeout {
+                binary: "tmux".to_string(),
+                timeout_ms: 250,
+            }),
+        );
+        assert!(matches!(
+            timed_out.observation,
+            ControllerDispatchPaneObservation::Unavailable(_)
+        ));
+        assert!(
+            !timed_out.ready_prompt,
+            "an unknown pane never proves ready"
         );
     }
 

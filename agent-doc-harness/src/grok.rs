@@ -339,4 +339,63 @@ mod tests {
             PaneComposerProjection::Absent
         );
     }
+
+    /// `#watcherbusyrestart`: a live Grok 4.7 pane (ANSI capture, text
+    /// anonymized) whose turn finished ("Worked for …") while a background
+    /// `Monitor` watcher keeps running. The `▾ Watchers 1` panel sits above an
+    /// empty composer box and an idle footer.
+    const IDLE_WITH_WATCHER_PANEL: &str = include_str!("fixtures/grok_idle_with_watcher_panel.txt");
+
+    #[test]
+    fn idle_prompt_with_background_watcher_panel_is_not_a_running_turn() {
+        let h = HarnessConfig::grok();
+        assert!(IDLE_WITH_WATCHER_PANEL.contains("Watchers"));
+        assert_eq!(h.dispatch_blocker_reason(IDLE_WITH_WATCHER_PANEL), None);
+        assert!(!h.has_busy_cue(IDLE_WITH_WATCHER_PANEL));
+        assert!(matches!(
+            project_pane_composer(IDLE_WITH_WATCHER_PANEL, &h),
+            PaneComposerProjection::ReadyEmpty { .. }
+        ));
+        assert!(crate::ready_prompt_candidate(IDLE_WITH_WATCHER_PANEL, &h).is_some());
+        // The supervisor's own-output idle proof must agree with the pane
+        // projection; before the fix every boxed Grok composer read as hidden.
+        assert!(h.output_prompt_visible(IDLE_WITH_WATCHER_PANEL));
+        assert!(h.output_prompt_visible(IDLE));
+        assert!(h.output_prompt_visible(LIVE_GROK_47_IDLE_GHOST));
+    }
+
+    #[test]
+    fn watcher_panel_over_a_running_turn_or_draft_stays_not_ready() {
+        let h = HarnessConfig::grok();
+        // The same panel while a turn is still running: the cancel footer is
+        // the active-turn cue, and the watcher panel must not mask it.
+        let busy = IDLE_WITH_WATCHER_PANEL.replace("Ctrl+x", "Ctrl+c:cancel  │  Ctrl+x");
+        assert_ne!(busy, IDLE_WITH_WATCHER_PANEL);
+        assert_eq!(
+            h.dispatch_blocker_reason(&busy).as_deref(),
+            Some("active Grok Build turn")
+        );
+        assert_eq!(
+            project_pane_composer(&busy, &h),
+            PaneComposerProjection::Busy
+        );
+        assert!(!h.output_prompt_visible(&busy));
+
+        // Typed operator text in the box keeps the composer protected.
+        let draft = IDLE_WITH_WATCHER_PANEL.replacen(
+            "❯ \x1b[38;2;225;225;225m ",
+            "❯ \x1b[38;2;225;225;225mx",
+            1,
+        );
+        assert_ne!(draft, IDLE_WITH_WATCHER_PANEL);
+        assert!(matches!(
+            project_pane_composer(&draft, &h),
+            PaneComposerProjection::OperatorDraft { .. }
+        ));
+        assert!(!h.output_prompt_visible(&draft));
+
+        // Unknown UI below the box remains fail-closed.
+        let unknown = format!("{IDLE_WITH_WATCHER_PANEL}Authorize this tool?\n");
+        assert!(!h.output_prompt_visible(&unknown));
+    }
 }

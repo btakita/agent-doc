@@ -628,15 +628,38 @@ pub fn reported_result_recorded_in_document(
     claim: &agent_doc_queue::queue_claim::QueueClaim,
     durable_receipts: &[agent_doc_queue::claim_release_receipt::ClaimReleaseReceipt],
 ) -> bool {
-    let Ok(key) = crate::queue_claim::completion_feedback_key(claim) else {
-        return false;
-    };
+    reported_result_record_in_document(content, claim, durable_receipts).is_some()
+}
+
+/// Where `content` records a reported attempt's result
+/// ([`reported_result_recorded_in_document`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReportedResultRecord {
+    /// The attempt's generation-fenced, hash-attested `### Re: Subagent
+    /// completed` cell (written by `queue report-complete`) is present.
+    CompletionCell,
+    /// No such cell, but the attempt's durable captured response is
+    /// consolidated into a root-authored exchange response.
+    ConsolidatedResponse,
+}
+
+/// `#repositoryreportcell`: [`reported_result_recorded_in_document`] that also
+/// says which document evidence records the result, so a reminder can name
+/// what is actually there instead of assuming the completion cell.
+pub fn reported_result_record_in_document(
+    content: &str,
+    claim: &agent_doc_queue::queue_claim::QueueClaim,
+    durable_receipts: &[agent_doc_queue::claim_release_receipt::ClaimReleaseReceipt],
+) -> Option<ReportedResultRecord> {
+    let key = crate::queue_claim::completion_feedback_key(claim).ok()?;
     if completion_cell_has_response(content, &key) {
-        return true;
+        return Some(ReportedResultRecord::CompletionCell);
     }
-    durable_completion_response(claim, &key, content, durable_receipts, &[]).is_some_and(
-        |response| response_is_consolidated(&root_authored_exchange(content), &response),
-    )
+    durable_completion_response(claim, &key, content, durable_receipts, &[])
+        .is_some_and(|response| {
+            response_is_consolidated(&root_authored_exchange(content), &response)
+        })
+        .then_some(ReportedResultRecord::ConsolidatedResponse)
 }
 
 fn response_is_consolidated(root_exchange: &str, response: &str) -> bool {

@@ -6,6 +6,7 @@ pub mod answer_recall;
 pub mod debounce;
 pub mod gc;
 pub mod layout;
+pub mod premise_rederive;
 pub mod sweep;
 pub mod tree_status_query;
 pub mod warnings;
@@ -1426,6 +1427,20 @@ pub struct PreflightOutput {
     /// How to apply [`Self::principles`]. Present only when that list is non-empty.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub principles_guidance: Option<String>,
+    /// `#firstprinciplesrederive`: principles and facts whose statement
+    /// changed or that were removed since the last turn started, each with
+    /// the live derivations that rested on it (`rederive` an unreviewed one,
+    /// `flag` a confirmed one). See [`premise_rederive`].
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub premise_changes: Vec<agent_doc_principles::rederive::PremiseChangeReport>,
+    /// `#firstprinciplesrederive`: live derivations of one decision that
+    /// reach different answers (`Graph::contradictions`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub derivation_contradictions: Vec<agent_doc_principles::derivation::Contradiction>,
+    /// How to act on [`Self::premise_changes`] and
+    /// [`Self::derivation_contradictions`]; present only when either is non-empty.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub premise_changes_guidance: Option<String>,
     /// Canonical serialized list of user-authored changes that should preempt
     /// or guide the current response cycle.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

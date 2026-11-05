@@ -167,6 +167,43 @@ derivations of one decision that reach different answers (same premises: an
 inference is wrong; different premises: the premises conflict). Derivations
 have no durable store or CLI yet.
 
+#### Premise changes (`#firstprinciplesrederive`)
+
+A fact is an `agent:rules` item whose first line reads
+`fact [#id]: <statement>` (`fact` in any case; `#id` without brackets is
+accepted; continuation lines extend the statement). Facts are premises such
+as "credentials are JWS". They are read from every ancestor
+`.agent-doc/project.md` and the session document (not the global principles
+file); a nearer fact with the same id replaces a farther one. A fact item
+stays in `agent_rules` as written.
+
+Every preflight takes a SHA-256 digest of each principle's and fact's
+statement in scope for the document (whitespace runs collapse first, so
+reflowing a statement is not a change) and compares the digests with the ones
+in the project `state.db` (`premise_statement_hashes`, per document). A
+premise whose digest differs is `changed`; one that is gone is `removed`. A
+new premise, or one that only moved to another file, is not a change. The
+first pass for a document records a baseline and reports nothing.
+
+Each change reaches the cycle contract as a `premise_changes` entry:
+`premise` (`kind` `principle` or `fact`, `id`), `change`,
+`previous_statement`, `statement` (absent when removed), `source`, and
+`affected`: every live derivation that rested on the premise, directly or
+through a derived decision, with action `rederive` (an unreviewed agent
+derivation: derive it again from the current premises) or `flag` (an
+operator-confirmed derivation: show the operator, never rewrite it).
+`derivation_contradictions` carries `Graph::contradictions()` (live
+derivations of one decision reaching different answers, `same_premises` or
+`different_premises`). `premise_changes_guidance` is present when either list
+is non-empty.
+
+The stored digests advance only when a turn starts (a preflight that is not a
+probe and has document changes or selected queue prompts). A principle edited
+on its own starts no turn, so its change is reported again on the next turn
+that runs instead of being spent on a contract nobody acts on. Until
+derivations have a durable store, `affected` is empty and there are no
+contradictions; the premise changes themselves are still reported.
+
 ## Components
 
 Documents can contain named, re-renderable regions called components:

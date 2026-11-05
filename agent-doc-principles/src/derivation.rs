@@ -25,10 +25,10 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// What a premise is.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum NodeKind {
     Principle,
@@ -54,7 +54,7 @@ impl NodeKind {
 }
 
 /// A premise reference.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct NodeRef {
     pub kind: NodeKind,
     pub id: String,
@@ -70,7 +70,7 @@ impl NodeRef {
 }
 
 /// Review status of one inference step.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DerivationStatus {
     /// The operator confirmed this inference.
@@ -173,7 +173,7 @@ impl Why {
 }
 
 /// What to do with a conclusion whose premise changed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ImpactAction {
     /// An unreviewed agent derivation: derive it again from current premises.
@@ -183,7 +183,7 @@ pub enum ImpactAction {
 }
 
 /// One conclusion affected by a changed premise.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Impact {
     pub derivation: String,
     pub decision: String,
@@ -193,7 +193,7 @@ pub struct Impact {
 }
 
 /// Which way two derivations of one decision disagree.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ContradictionKind {
     /// Identical premises, different answers: an inference step is wrong.
@@ -203,7 +203,7 @@ pub enum ContradictionKind {
 }
 
 /// Two or more live derivations of one decision reaching different answers.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Contradiction {
     pub decision: String,
     pub kind: ContradictionKind,

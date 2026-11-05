@@ -2968,13 +2968,24 @@ fn run_with_options_to_writer_in_pass(
             claimed_queue_items: &queue_state.claimed_queue_heads,
         })
     });
+    let rule_layers = rule_layers(file, queue_authoritative_content);
     let agent_doc_principles::Composition {
         rules: agent_rules,
         principles,
         issues: principle_issues,
-    } = composed_rules_and_principles(file, queue_authoritative_content);
+    } = agent_doc_principles::compose(&rule_layers);
     let agent_rules_guidance = agent_doc_element::rules::agent_rules_guidance(&agent_rules);
     let principles_guidance = agent_doc_principles::principles_guidance(&principles);
+    // `#firstprinciplesrederive`: the stored premise digests advance only
+    // when a turn starts, so a principle edited on its own (which starts no
+    // turn) is still reported on the next turn that runs.
+    let premise_rederive = agent_doc_preflight_io::premise_rederive::premise_rederive(
+        file,
+        &principles,
+        &rule_layers,
+        agent_doc_preflight_io::premise_rederive::stored_derivations(file),
+        !options.probe && (!no_changes || !selected_queue_heads.is_empty()),
+    );
     warnings.extend(principle_issues.into_iter().map(|issue| PreflightWarning {
         code: issue.code.to_string(),
         message: format!("{} ({})", issue.message, issue.source),
@@ -3044,6 +3055,9 @@ fn run_with_options_to_writer_in_pass(
         agent_rules_guidance,
         principles,
         principles_guidance,
+        premise_changes_guidance: premise_rederive.guidance(),
+        premise_changes: premise_rederive.premise_changes,
+        derivation_contradictions: premise_rederive.contradictions,
         agent_model: preflight_read_projection.tiers.agent_model.clone(),
         queue_prompts: preflight_read_projection.queue.prompts.clone(),
         selected_queue_prompts,
@@ -3109,6 +3123,12 @@ pub fn composed_rules_and_principles(
     file: &Path,
     session_content: &str,
 ) -> agent_doc_principles::Composition {
+    agent_doc_principles::compose(&rule_layers(file, session_content))
+}
+
+/// The rule layers [`composed_rules_and_principles`] composes, farthest first.
+/// `#firstprinciplesrederive` also reads fact items from them.
+pub fn rule_layers(file: &Path, session_content: &str) -> Vec<agent_doc_principles::Layer> {
     use agent_doc_principles::{Layer, PrincipleScope};
     let mut layers = Vec::new();
     if let Some(global) = global_principles_path()
@@ -3135,7 +3155,7 @@ pub fn composed_rules_and_principles(
         source: file.display().to_string(),
         rules: agent_doc_element::rules::rules_from_document(session_content),
     });
-    agent_doc_principles::compose(&layers)
+    layers
 }
 
 /// Every existing ancestor `.agent-doc/project.md` other than `file`, farthest first.
@@ -11088,6 +11108,170 @@ mod tests {
             contract.get("principles_guidance").is_none(),
             "{contract:#}"
         );
+    }
+
+    /// `#firstprinciplesrederive`: preflight compares each principle and fact
+    /// statement with the digests in state.db. A reworded principle and a
+    /// deleted fact reach `premise_changes` with guidance. A probe and a
+    /// preflight that starts no turn report them without consuming them; the
+    /// turn that starts records the current digests, so they are reported once.
+    #[test]
+    fn preflight_reports_changed_and_removed_premises_until_a_turn_starts() {
+        let dir = setup_project();
+        let doc = dir.path().join("doc.md");
+        let missing_global = dir.path().join("no-such-config/principles.md");
+        let reworded = "Correctness over velocity.";
+        let document = |prompt: &str| {
+            format!(
+                concat!(
+                    "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+                    "<!-- agent:rules -->\n",
+                    "- principle [#velocity]: {reworded}\n",
+                    "- fact [#jws]: Credentials are JWS.\n",
+                    "<!-- /agent:rules -->\n",
+                    "<!-- agent:exchange patch=append -->\n",
+                    "{prompt}",
+                    "<!-- /agent:exchange -->\n",
+                ),
+                reworded = reworded,
+                prompt = prompt,
+            )
+        };
+        let idle = document("");
+        std::fs::write(&doc, &idle).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &idle,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        let root = agent_doc_project_root_io::project_root_containing(&doc).unwrap();
+        let document_id = agent_doc_hash::document_id_for_path(&doc);
+        let stored = |kind: &str, id: &str, statement: &str| {
+            agent_doc_sqlite::premise_statement_index::PremiseStatementRow {
+                kind: kind.into(),
+                premise_id: id.into(),
+                digest: agent_doc_hash::content_hash(statement),
+                statement: statement.into(),
+                source: doc.display().to_string(),
+            }
+        };
+        agent_doc_sqlite::premise_statement_index::replace_for_project(
+            &root,
+            &document_id,
+            &[
+                stored(
+                    "principle",
+                    "velocity",
+                    "When a release is blocked, velocity over polish.",
+                ),
+                stored("fact", "blocked", "The release is blocked on review."),
+                stored("fact", "jws", "Credentials are JWS."),
+            ],
+            1,
+        )
+        .unwrap();
+        let run = |options: PreflightOptions| -> serde_json::Value {
+            let mut output = Vec::new();
+            with_global_principles_path(&missing_global, || {
+                run_with_options_to_writer(&doc, options, &mut output)
+            })
+            .unwrap_or_else(|error| panic!("preflight failed: {error}"));
+            serde_json::from_slice(&output).unwrap()
+        };
+        let summary = |contract: &serde_json::Value| -> Vec<(String, String, String)> {
+            contract["premise_changes"]
+                .as_array()
+                .map(|changes| {
+                    changes
+                        .iter()
+                        .map(|change| {
+                            (
+                                change["premise"]["kind"].as_str().unwrap().to_string(),
+                                change["premise"]["id"].as_str().unwrap().to_string(),
+                                change["change"].as_str().unwrap().to_string(),
+                            )
+                        })
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
+        let expected = vec![
+            ("principle".into(), "velocity".into(), "changed".into()),
+            ("fact".into(), "blocked".into(), "removed".into()),
+        ];
+
+        let probe = run(PreflightOptions {
+            probe: true,
+            ..Default::default()
+        });
+        assert_eq!(summary(&probe), expected, "{probe:#}");
+        let no_turn = run(PreflightOptions::default());
+        assert_eq!(no_turn["no_changes"], true, "{no_turn:#}");
+        assert_eq!(
+            summary(&no_turn),
+            expected,
+            "the probe consumed nothing: {no_turn:#}"
+        );
+
+        std::fs::write(&doc, document("Ship without the polish pass?\n")).unwrap();
+        let contract = run(PreflightOptions::default());
+        assert_eq!(contract["no_changes"], false, "{contract:#}");
+        assert_eq!(
+            summary(&contract),
+            expected,
+            "a no-turn preflight consumed nothing: {contract:#}"
+        );
+        let changes = &contract["premise_changes"];
+        assert_eq!(
+            changes[0]["previous_statement"],
+            "When a release is blocked, velocity over polish."
+        );
+        assert_eq!(changes[0]["statement"], reworded);
+        assert!(changes[1].get("statement").is_none(), "{contract:#}");
+        assert_eq!(changes[0]["affected"], serde_json::json!([]));
+        assert!(
+            contract["premise_changes_guidance"]
+                .as_str()
+                .is_some_and(|guidance| guidance.contains("rederive")),
+            "{contract:#}"
+        );
+        assert!(
+            contract.get("derivation_contradictions").is_none(),
+            "{contract:#}"
+        );
+        assert!(
+            contract["agent_rules"]
+                .as_array()
+                .is_some_and(|rules| rules.iter().any(|rule| rule
+                    .as_str()
+                    .is_some_and(|rule| rule.starts_with("fact [#jws]")))),
+            "a fact item stays in agent_rules as written: {contract:#}"
+        );
+
+        let rows = agent_doc_sqlite::premise_statement_index::load_for_project(&root, &document_id)
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            rows.iter()
+                .map(|row| (
+                    row.kind.as_str(),
+                    row.premise_id.as_str(),
+                    row.statement.as_str()
+                ))
+                .collect::<Vec<_>>(),
+            vec![
+                ("fact", "jws", "Credentials are JWS."),
+                ("principle", "velocity", reworded),
+            ],
+            "the turn recorded the current statements"
+        );
+        let after = run(PreflightOptions {
+            probe: true,
+            ..Default::default()
+        });
+        assert!(after.get("premise_changes").is_none(), "{after:#}");
     }
 
     /// A nested project with its own `.git` still reads that project's

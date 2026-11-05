@@ -23592,6 +23592,11 @@ pub(crate) fn handle_request_locked(
         "editor_route_layout_release" => controller_envelope(
             handle_editor_route_layout_release_rpc(&bootstrap_snapshot, runtime.as_ref(), request),
         ),
+        "focus_escalation" => controller_envelope(handle_focus_escalation_rpc(
+            &bootstrap_snapshot,
+            runtime.as_ref(),
+            request,
+        )),
         "queue_control" => controller_envelope(handle_queue_control(&bootstrap_snapshot, request)),
         "admin_control" => controller_envelope(handle_admin_control(
             &bootstrap_snapshot,
@@ -31066,6 +31071,28 @@ fn escalate_focus_to_structural_layout_disposition(
     surface_column_order: agent_doc_editor_surface::SurfaceColumnOrder,
     reason: &str,
 ) -> FocusEscalationDisposition {
+    escalate_focus_to_structural_layout_disposition_with(
+        bootstrap,
+        runtime,
+        document,
+        columns,
+        surface_column_order,
+        reason,
+        None,
+    )
+}
+
+/// [`escalate_focus_to_structural_layout_disposition`] with an explicit
+/// publication policy (`#focusnosnapshotrestart`: a delegated escalation).
+fn escalate_focus_to_structural_layout_disposition_with(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    document: &str,
+    columns: &[SurfaceColumn],
+    surface_column_order: agent_doc_editor_surface::SurfaceColumnOrder,
+    reason: &str,
+    publication_override: Option<PaneLayoutPublication>,
+) -> FocusEscalationDisposition {
     let FocusEscalationColumns {
         columns,
         source,
@@ -31117,7 +31144,7 @@ fn escalate_focus_to_structural_layout_disposition(
     let previous_generation = runtime
         .pane_layout_desired()
         .map(|desired| desired.generation);
-    let publication = focus_escalation_publication(reason);
+    let publication = publication_override.unwrap_or_else(|| focus_escalation_publication(reason));
     let published = publish_pane_layout_desired_invocation(
         bootstrap,
         runtime,
@@ -31184,6 +31211,247 @@ fn focus_escalation_publication(reason: &str) -> PaneLayoutPublication {
         PaneLayoutPublication::CoalesceIdentical
     }
 }
+
+/// `#focusnosnapshotrestart`: one focus escalation re-addressed to the
+/// controller that drives the shared main window
+/// ([`agent_doc_controller::layout_owner::focus_escalation_owner`]).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+struct FocusEscalationDelegation {
+    /// The focused document, canonical and absolute.
+    document: String,
+    /// The local focus refusal (`actor_pane_not_visible`, ...).
+    reason: String,
+    /// The delegating controller's project root, for attribution only.
+    delegated_by: String,
+}
+
+/// The owner's answer: the disposition its own escalation reached.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+struct FocusEscalationDelegationReceipt {
+    /// `published`, `deferred`, or `failed`.
+    outcome: String,
+    #[serde(default)]
+    cause: Option<String>,
+}
+
+impl FocusEscalationDisposition {
+    fn delegation_receipt(self) -> FocusEscalationDelegationReceipt {
+        let (outcome, cause) = match self {
+            Self::Published => ("published", None),
+            Self::Deferred(cause) => ("deferred", Some(cause.to_string())),
+            Self::Failed => ("failed", None),
+        };
+        FocusEscalationDelegationReceipt {
+            outcome: outcome.to_string(),
+            cause,
+        }
+    }
+
+    /// The disposition the owner reported. A deferral keeps its typed cause
+    /// when it is one this controller can name; anything unrecognised stays a
+    /// deferral (`owner_deferred`) rather than becoming a retryable failure.
+    fn from_delegation_receipt(receipt: &FocusEscalationDelegationReceipt) -> Self {
+        match receipt.outcome.as_str() {
+            "published" => Self::Published,
+            "failed" => Self::Failed,
+            _ => Self::Deferred(match receipt.cause.as_deref() {
+                Some("no_frontend_layout_snapshot") => "no_frontend_layout_snapshot",
+                Some("focus_requires_frontend_layout") => "focus_requires_frontend_layout",
+                Some("document_bound_to_editor_view") => "document_bound_to_editor_view",
+                _ => "owner_deferred",
+            }),
+        }
+    }
+}
+
+/// `#focusnosnapshotrestart`: a nested controller that refused a focus because
+/// the pane is outside the shared window, and holds no frontend layout to
+/// republish, hands the escalation to the controller whose window claim shows
+/// it drives that window: the one the editor sends its cross-root frame to.
+///
+/// Live 2026-11-05 (two IDE restarts) haiven-dev answered every `sdk-dev.md`
+/// tab selection with `focus_deferred:no_frontend_layout_snapshot` (pane `%10`
+/// stashed) while agent-loop, holding `[agent-doc-bugs, sdk-dev]`, only saw
+/// `pane_action=none` frames: nobody that could repair it was ever asked.
+///
+/// Only `no_frontend_layout_snapshot` is delegated: every other disposition
+/// was decided against a layout this controller does hold. A missing claim,
+/// a claim this root (or a sibling) holds, or an unreachable owner keeps the
+/// local deferral; the owner's answer replaces it otherwise.
+fn delegate_snapshotless_focus_escalation(
+    bootstrap: &ControllerBootstrap,
+    document: &str,
+    reason: &str,
+    local: FocusEscalationDisposition,
+    window_claim_root: impl FnOnce() -> Option<PathBuf>,
+    delegate: impl FnOnce(&Path, &FocusEscalationDelegation) -> Result<FocusEscalationDelegationReceipt>,
+) -> FocusEscalationDisposition {
+    if local != FocusEscalationDisposition::Deferred("no_frontend_layout_snapshot") {
+        return local;
+    }
+    let controller_root = bootstrap
+        .project_root
+        .canonicalize()
+        .unwrap_or_else(|_| bootstrap.project_root.clone());
+    let claim_root = window_claim_root();
+    let agent_doc_controller::layout_owner::LayoutOwner::Delegate(owner_root) =
+        agent_doc_controller::layout_owner::focus_escalation_owner(
+            &controller_root,
+            claim_root.as_deref(),
+        )
+    else {
+        return local;
+    };
+    let delegation = FocusEscalationDelegation {
+        document: document.to_string(),
+        reason: reason.to_string(),
+        delegated_by: controller_root.display().to_string(),
+    };
+    match delegate(owner_root, &delegation) {
+        Ok(receipt) => {
+            let disposition = FocusEscalationDisposition::from_delegation_receipt(&receipt);
+            agent_doc_ops_log_io::log_op(
+                &bootstrap.project_root,
+                &format!(
+                    "controller_editor_surface_focus_escalation_delegated document={document} reason={reason} owner_root={} outcome={} cause={}",
+                    owner_root.display(),
+                    receipt.outcome,
+                    receipt.cause.as_deref().unwrap_or("-"),
+                ),
+            );
+            disposition
+        }
+        Err(error) => {
+            agent_doc_ops_log_io::log_op(
+                &bootstrap.project_root,
+                &format!(
+                    "controller_editor_surface_focus_escalation_delegation_failed document={document} reason={reason} owner_root={} fallback=local_deferral error={}",
+                    owner_root.display(),
+                    format!("{error:#}").replace('\n', " "),
+                ),
+            );
+            local
+        }
+    }
+}
+
+/// The project root whose layout claim sits on the `agent-doc` window of the
+/// session holding the refused pane (`#focusnosnapshotrestart`).
+fn focus_refusal_window_claim_root(
+    tmux: &tmux_router::Tmux,
+    refusal: &ControllerTmuxFocusReceipt,
+) -> Option<PathBuf> {
+    use agent_doc_controller::layout_owner::{WINDOW_LAYOUT_CLAIM_OPTION, WindowLayoutClaim};
+    let session = refusal.session_name.as_deref()?;
+    let window = resolve_agent_doc_window_id_for_session(tmux, session)?;
+    agent_doc_tmux_io::window_user_option(tmux, &window, WINDOW_LAYOUT_CLAIM_OPTION)
+        .and_then(|value| WindowLayoutClaim::decode(&value))
+        .map(|claim| claim.project_root)
+}
+
+/// Owner side of [`delegate_snapshotless_focus_escalation`]: run this
+/// controller's own escalation for a document a nested controller could not
+/// show.
+///
+/// The nested refusal is fresh evidence the owner never received: its own
+/// editor frame was unchanged, so it derived no intent. When the owner's
+/// retained generation already reached a terminal effect, that generation is
+/// demonstrably not showing the document, so an identical republication must
+/// run a new effect instead of coalescing into it. A generation still in flight
+/// keeps the ordinary coalescing (GH #112).
+fn handle_focus_escalation_rpc(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    request: ControllerRequest,
+) -> Result<FocusEscalationDelegationReceipt> {
+    if bootstrap.handoff_state != ControllerHandoffState::Stable {
+        anyhow::bail!(
+            "focus escalation refused: controller not authoritative (handoff_state={:?})",
+            bootstrap.handoff_state
+        );
+    }
+    let payload_json = request_string(&request.diagnostic_payload, "diagnostic_payload")?;
+    let delegation: FocusEscalationDelegation = serde_json::from_str(&payload_json)
+        .context("failed to parse delegated focus escalation")?;
+    Ok(escalate_delegated_focus(bootstrap, runtime, &delegation).delegation_receipt())
+}
+
+fn escalate_delegated_focus(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    delegation: &FocusEscalationDelegation,
+) -> FocusEscalationDisposition {
+    let graph = runtime.pane_layout_graph();
+    let retained_terminal = graph.desired().is_some_and(|desired| {
+        matches!(
+            graph.effect_state(),
+            TmuxLayoutEffectState::Refused(ref terminal)
+                | TmuxLayoutEffectState::OperatorOwned(ref terminal)
+                | TmuxLayoutEffectState::Converged(ref terminal)
+                if terminal.generation == desired.generation
+        )
+    });
+    agent_doc_ops_log_io::log_op(
+        &bootstrap.project_root,
+        &format!(
+            "controller_editor_surface_focus_escalation_delegation_received document={} reason={} delegated_by={} retained_terminal={retained_terminal}",
+            delegation.document, delegation.reason, delegation.delegated_by,
+        ),
+    );
+    escalate_focus_to_structural_layout_disposition_with(
+        bootstrap,
+        runtime,
+        &delegation.document,
+        &[],
+        agent_doc_editor_surface::SurfaceColumnOrder::Editor,
+        &delegation.reason,
+        retained_terminal.then_some(PaneLayoutPublication::FreshIntent),
+    )
+}
+
+/// Client side: ask the running window owner to escalate. Never launches a
+/// controller; an owner that is not running leaves the local deferral.
+fn delegate_focus_escalation(
+    owner_root: &Path,
+    delegation: &FocusEscalationDelegation,
+) -> Result<FocusEscalationDelegationReceipt> {
+    let diagnostic_payload =
+        serde_json::to_string(delegation).context("serialize delegated focus escalation")?;
+    #[cfg(any(test, feature = "test-support"))]
+    {
+        let _ = (owner_root, diagnostic_payload);
+        anyhow::bail!("cross-root focus escalation has no transport under test-support")
+    }
+    #[cfg(not(any(test, feature = "test-support")))]
+    {
+        request_existing_controller_with_timeout(
+            owner_root,
+            ControllerRequest {
+                command: "focus_escalation".to_string(),
+                file: Some(PathBuf::from(&delegation.document)),
+                session_id: None,
+                pane_id: None,
+                window_id: None,
+                generation: None,
+                state: None,
+                caller: None,
+                reason: Some(delegation.reason.clone()),
+                supervisor_pid: None,
+                supervisor_socket: None,
+                command_kind: None,
+                diagnostic_payload: Some(diagnostic_payload),
+                sequence: None,
+            },
+            FOCUS_ESCALATION_DELEGATION_TIMEOUT,
+        )
+    }
+}
+
+/// The owner only publishes a desired generation (the tmux effect runs on its
+/// worker), so the answer is quick; the bound keeps an unresponsive owner from
+/// holding the editor's focus projection.
+#[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
+const FOCUS_ESCALATION_DELEGATION_TIMEOUT: Duration = Duration::from_secs(2);
 
 fn record_editor_surface_focus_outcome(
     project_root: &Path,
@@ -32202,8 +32470,10 @@ fn handle_editor_surface_observe(
                         hook();
                     }
                 });
-                let publish_result =
-                    super::with_pane_layout_editor_publication(editor_order, || {
+                let publish_result = super::with_pane_layout_editor_surface_publication(
+                    editor_order,
+                    Some(projection_identity.1.clone()),
+                    || {
                         publish_pane_layout_desired_invocation_in_lane(
                             bootstrap,
                             runtime,
@@ -32213,7 +32483,8 @@ fn handle_editor_surface_observe(
                             PaneLayoutPublication::CoalesceIdentical,
                             PaneLayoutPublisher::EditorSurface,
                         )
-                    });
+                    },
+                );
                 record_editor_surface_effect(
                     &bootstrap.project_root,
                     &focus_client_id,
@@ -32338,13 +32609,31 @@ fn handle_editor_surface_observe(
                     let mut effect_failed = focus_result.is_err();
                     if let Some(reason) = structural_refusal {
                         if navigation_lane.is_shared() {
-                            let disposition = escalate_focus_to_structural_layout_disposition(
+                            let local = escalate_focus_to_structural_layout_disposition(
                                 bootstrap,
                                 runtime,
                                 &document,
                                 &surface_columns,
                                 surface_column_order,
                                 &reason,
+                            );
+                            // `#focusnosnapshotrestart`: a nested controller
+                            // never retains the editor's cross-root layout.
+                            let refusal = focus_result.as_ref().ok().cloned();
+                            let disposition = delegate_snapshotless_focus_escalation(
+                                bootstrap,
+                                &document,
+                                &reason,
+                                local,
+                                || {
+                                    refusal.as_ref().and_then(|refusal| {
+                                        focus_refusal_window_claim_root(
+                                            &agent_doc_tmux_io::configured_tmux(),
+                                            refusal,
+                                        )
+                                    })
+                                },
+                                delegate_focus_escalation,
                             );
                             effect_failed = disposition.apply_to(&mut focus_result);
                         } else {
@@ -32458,7 +32747,11 @@ fn handle_editor_surface_forget(
         retire_pane_layout_generations_forgotten_by_editor(
             &bootstrap.project_root,
             runtime,
-            &client_id,
+            agent_doc_controller::pane_layout::EditorSurfaceForget {
+                client_id: &client_id,
+                connection_generation: generation,
+                surface_id: surface_id.as_deref(),
+            },
         );
     }
     // `#surfaceobservesilent`: a stray or early retirement is the leading cause of
@@ -32489,15 +32782,20 @@ fn handle_editor_surface_forget(
 /// re-applying it: live 2026-10-15, haiven-dev was told to forget at 19:57 and
 /// re-applied the forgotten `[sdk, sdk]` generation 292 times until 20:30,
 /// collapsing the operator's 2-pane window back to 1 pane on every attempt.
+///
+/// `#focusnosnapshotrestart`: a forget names one `(client, surface)` endpoint;
+/// it retires only a generation that endpoint published, never one a sibling
+/// frame of the same client published.
 fn retire_pane_layout_generations_forgotten_by_editor(
     project_root: &Path,
     runtime: &ControllerRuntime,
-    client_id: &str,
+    forget: agent_doc_controller::pane_layout::EditorSurfaceForget<'_>,
 ) {
     use agent_doc_controller::pane_layout::TmuxEffectRetirement;
+    let client_id = forget.client_id;
     for lane in runtime.pane_layout_lane_ids() {
         let graph = runtime.pane_layout_graph_for_lane(&lane);
-        let Some(desired) = graph.retire_generation_forgotten_by_editor(client_id) else {
+        let Some(desired) = graph.retire_generation_forgotten_by_editor(forget) else {
             continue;
         };
         let retirement = TmuxEffectRetirement::EditorSurfaceForgotten;
@@ -52715,6 +53013,324 @@ mod tests {
         }
     }
 
+    /// `#focusnosnapshotrestart`, the live incident: after an IDE restart the
+    /// editor sends its cross-root `[agent-doc-bugs, sdk-dev]` frame to the
+    /// enclosing controller and only the narrow focus projection to the nested
+    /// one. The nested controller refuses (`actor_pane_not_visible`, pane in the
+    /// stash) and holds no layout, so it must hand the escalation to the
+    /// enclosing window owner rather than defer forever.
+    #[test]
+    fn snapshotless_nested_focus_escalates_on_the_enclosing_window_owner() {
+        let fx = CrossRootLayoutFixture::new();
+        let outer_root = fx.outer_bootstrap.project_root.canonicalize().unwrap();
+        let inner_root = fx.inner_bootstrap.project_root.canonicalize().unwrap();
+        let mut frame = automatic_layout_sync_invocation(
+            vec![fx.bugs.clone(), fx.contracts.clone()],
+            &fx.bugs,
+            false,
+        );
+        frame.column_order = agent_doc_tmux::LayoutColumnOrder::Editor;
+        let (shown, _) = publish_pane_layout_desired_invocation(
+            &fx.outer_bootstrap,
+            fx.outer_runtime.as_ref(),
+            frame,
+            None,
+            PaneLayoutPublication::FreshIntent,
+            PaneLayoutPublisher::EditorSurface,
+        )
+        .unwrap();
+
+        let local = escalate_focus_to_structural_layout_disposition(
+            &fx.inner_bootstrap,
+            fx.inner_runtime.as_ref(),
+            &fx.contracts,
+            &[],
+            agent_doc_editor_surface::SurfaceColumnOrder::Editor,
+            "actor_pane_not_visible",
+        );
+        assert_eq!(
+            local,
+            FocusEscalationDisposition::Deferred("no_frontend_layout_snapshot"),
+            "the nested controller never holds the cross-root frame"
+        );
+        // The owner side, reached through the real RPC payload shape.
+        let deliver = |owner: &Path, delegation: &FocusEscalationDelegation| {
+            assert_eq!(owner, outer_root.as_path());
+            assert_eq!(delegation.document, fx.contracts);
+            assert_eq!(delegation.reason, "actor_pane_not_visible");
+            assert_eq!(delegation.delegated_by, inner_root.display().to_string());
+            handle_focus_escalation_rpc(
+                &fx.outer_bootstrap,
+                fx.outer_runtime.as_ref(),
+                ControllerRequest {
+                    command: "focus_escalation".to_string(),
+                    file: Some(PathBuf::from(&delegation.document)),
+                    session_id: None,
+                    pane_id: None,
+                    window_id: None,
+                    generation: None,
+                    state: None,
+                    caller: None,
+                    reason: Some(delegation.reason.clone()),
+                    supervisor_pid: None,
+                    supervisor_socket: None,
+                    command_kind: None,
+                    diagnostic_payload: Some(serde_json::to_string(delegation).unwrap()),
+                    sequence: None,
+                },
+            )
+        };
+        let delegated = delegate_snapshotless_focus_escalation(
+            &fx.inner_bootstrap,
+            &fx.contracts,
+            "actor_pane_not_visible",
+            local,
+            || Some(outer_root.clone()),
+            deliver,
+        );
+        assert_eq!(delegated, FocusEscalationDisposition::Published);
+        let mut receipt = Ok(tmux_focus_receipt(
+            false,
+            "actor_pane_not_visible",
+            Some(fx.contracts.clone()),
+            Some("%10".to_string()),
+            Some("0".to_string()),
+            Some("@1".to_string()),
+            Some("stash".to_string()),
+        ));
+        assert!(!delegated.apply_to(&mut receipt));
+        assert_eq!(
+            receipt.unwrap().reason,
+            "focus_escalated_to_structural_layout"
+        );
+        let refocused = fx.outer_runtime.pane_layout_desired().unwrap();
+        assert!(refocused.generation > shown.generation);
+        assert_eq!(
+            refocused.invocation.columns,
+            vec![fx.bugs.clone(), fx.contracts.clone()],
+            "the owner republishes the editor's own layout, never a backend-derived one"
+        );
+        assert_eq!(
+            refocused.invocation.focus.as_deref(),
+            Some(fx.contracts.as_str())
+        );
+
+        // A repeat while that generation is still in flight coalesces (GH #112).
+        let again = delegate_snapshotless_focus_escalation(
+            &fx.inner_bootstrap,
+            &fx.contracts,
+            "actor_pane_not_visible",
+            local,
+            || Some(outer_root.clone()),
+            deliver,
+        );
+        assert_eq!(again, FocusEscalationDisposition::Published);
+        assert_eq!(
+            fx.outer_runtime.pane_layout_desired().unwrap().generation,
+            refocused.generation
+        );
+
+        // Once that generation's effect is terminal and the nested controller
+        // still cannot see the pane, the owner must run a fresh effect: its own
+        // editor frame is unchanged, so nothing else will ever ask.
+        let graph = fx.outer_runtime.pane_layout_graph();
+        graph.record_receipt(PaneLayoutEffectReceipt {
+            generation: refocused.generation,
+            actor_bindings: graph.actor_bindings(),
+            attempt: 1,
+            phase: PaneLayoutEffectPhase::Refused,
+            reason: "test_terminal".to_string(),
+            file_panes: Vec::new(),
+            focus_required: true,
+            focus_applied: false,
+        });
+        let fresh = delegate_snapshotless_focus_escalation(
+            &fx.inner_bootstrap,
+            &fx.contracts,
+            "actor_pane_not_visible",
+            local,
+            || Some(outer_root.clone()),
+            deliver,
+        );
+        assert_eq!(fresh, FocusEscalationDisposition::Published);
+        let rerun = fx.outer_runtime.pane_layout_desired().unwrap();
+        assert!(rerun.generation > refocused.generation);
+        assert_eq!(rerun.invocation.columns, refocused.invocation.columns);
+
+        let inner_log =
+            std::fs::read_to_string(inner_root.join(".agent-doc/logs/ops.log")).unwrap_or_default();
+        assert!(
+            inner_log.contains(&format!(
+                "controller_editor_surface_focus_escalation_delegated document={} \
+                 reason=actor_pane_not_visible owner_root={} outcome=published",
+                fx.contracts,
+                outer_root.display()
+            )),
+            "the handoff must be provable on the nested controller: {inner_log}"
+        );
+        let outer_log =
+            std::fs::read_to_string(outer_root.join(".agent-doc/logs/ops.log")).unwrap_or_default();
+        assert!(
+            outer_log.contains("controller_editor_surface_focus_escalation_delegation_received")
+                && outer_log.contains("retained_terminal=true"),
+            "the owner must record what it was asked and why it re-ran: {outer_log}"
+        );
+    }
+
+    /// `#focusnosnapshotrestart`: delegation is evidence-bound. Without a
+    /// window claim from a strictly enclosing root, or when that owner is not
+    /// running, the honest local deferral stands; and any disposition other
+    /// than "no layout here" was decided against a layout this controller holds.
+    #[test]
+    fn focus_escalation_delegation_requires_an_enclosing_reachable_window_owner() {
+        let fx = CrossRootLayoutFixture::new();
+        let outer_root = fx.outer_bootstrap.project_root.canonicalize().unwrap();
+        let inner_root = fx.inner_bootstrap.project_root.canonicalize().unwrap();
+        let deferred = FocusEscalationDisposition::Deferred("no_frontend_layout_snapshot");
+        let never =
+            |_: &Path, _: &FocusEscalationDelegation| -> Result<FocusEscalationDelegationReceipt> {
+                panic!("no enclosing window owner may be asked")
+            };
+        for claim in [
+            None,
+            Some(inner_root.clone()),
+            Some(PathBuf::from("/elsewhere")),
+        ] {
+            assert_eq!(
+                delegate_snapshotless_focus_escalation(
+                    &fx.inner_bootstrap,
+                    &fx.contracts,
+                    "actor_pane_not_visible",
+                    deferred,
+                    || claim.clone(),
+                    never,
+                ),
+                deferred
+            );
+        }
+        // The outermost owner never hands its escalation down to a nested root.
+        assert_eq!(
+            delegate_snapshotless_focus_escalation(
+                &fx.outer_bootstrap,
+                &fx.bugs,
+                "actor_pane_not_visible",
+                deferred,
+                || Some(inner_root.clone()),
+                never,
+            ),
+            deferred
+        );
+        for decided in [
+            FocusEscalationDisposition::Published,
+            FocusEscalationDisposition::Failed,
+            FocusEscalationDisposition::Deferred("focus_requires_frontend_layout"),
+            FocusEscalationDisposition::Deferred("document_bound_to_editor_view"),
+        ] {
+            assert_eq!(
+                delegate_snapshotless_focus_escalation(
+                    &fx.inner_bootstrap,
+                    &fx.contracts,
+                    "actor_pane_not_visible",
+                    decided,
+                    || panic!("a decided escalation never reads the window claim"),
+                    never,
+                ),
+                decided
+            );
+        }
+        // An unreachable owner leaves the local deferral, with a receipt.
+        assert_eq!(
+            delegate_snapshotless_focus_escalation(
+                &fx.inner_bootstrap,
+                &fx.contracts,
+                "actor_pane_not_visible",
+                deferred,
+                || Some(outer_root.clone()),
+                delegate_focus_escalation,
+            ),
+            deferred
+        );
+        let inner_log =
+            std::fs::read_to_string(inner_root.join(".agent-doc/logs/ops.log")).unwrap_or_default();
+        assert!(
+            inner_log.contains("controller_editor_surface_focus_escalation_delegation_failed")
+                && inner_log.contains("fallback=local_deferral"),
+            "{inner_log}"
+        );
+        // The owner's deferral keeps its typed cause across the wire.
+        for disposition in [
+            FocusEscalationDisposition::Published,
+            FocusEscalationDisposition::Failed,
+            FocusEscalationDisposition::Deferred("no_frontend_layout_snapshot"),
+            FocusEscalationDisposition::Deferred("focus_requires_frontend_layout"),
+            FocusEscalationDisposition::Deferred("document_bound_to_editor_view"),
+        ] {
+            let wire: FocusEscalationDelegationReceipt = serde_json::from_str(
+                &serde_json::to_string(&disposition.delegation_receipt()).unwrap(),
+            )
+            .unwrap();
+            assert_eq!(
+                FocusEscalationDisposition::from_delegation_receipt(&wire),
+                disposition
+            );
+        }
+        assert_eq!(
+            FocusEscalationDisposition::from_delegation_receipt(
+                &FocusEscalationDelegationReceipt {
+                    outcome: "deferred".to_string(),
+                    cause: Some("something_new".to_string()),
+                }
+            ),
+            FocusEscalationDisposition::Deferred("owner_deferred")
+        );
+    }
+
+    /// `#focusnosnapshotrestart`: the owner is read from the layout claim on
+    /// the `agent-doc` window of the session that holds the refused pane.
+    #[test]
+    fn focus_refusal_reads_the_window_claim_of_its_session() {
+        use agent_doc_controller::layout_owner::{WINDOW_LAYOUT_CLAIM_OPTION, WindowLayoutClaim};
+        let tmux = agent_doc_tmux_io::isolated_test_tmux("focusnosnapshot-claim");
+        tmux.raw_cmd(&["new-session", "-d", "-s", "agent-doc", "-n", "agent-doc"])
+            .unwrap();
+        tmux.raw_cmd(&["new-window", "-d", "-t", "agent-doc:", "-n", "stash"])
+            .unwrap();
+        let window = agent_doc_tmux_io::target_window_id(&*tmux, "agent-doc:agent-doc")
+            .expect("agent-doc window id");
+        let refusal = tmux_focus_receipt(
+            false,
+            "actor_pane_not_visible",
+            Some("/w/agent-loop/src/haiven-dev/tasks/sdk/sdk-dev.md".to_string()),
+            Some("%10".to_string()),
+            Some("agent-doc".to_string()),
+            Some("@9".to_string()),
+            Some("stash".to_string()),
+        );
+        assert_eq!(focus_refusal_window_claim_root(&tmux, &refusal), None);
+        agent_doc_tmux_io::set_window_user_option(
+            &*tmux,
+            &window,
+            WINDOW_LAYOUT_CLAIM_OPTION,
+            &WindowLayoutClaim {
+                project_root: PathBuf::from("/w/agent-loop"),
+                stamp_ms: 1,
+                generation: 6,
+                publication: None,
+            }
+            .encode(),
+        )
+        .unwrap();
+        assert_eq!(
+            focus_refusal_window_claim_root(&tmux, &refusal),
+            Some(PathBuf::from("/w/agent-loop"))
+        );
+        let sessionless = ControllerTmuxFocusReceipt {
+            session_name: None,
+            ..refusal
+        };
+        assert_eq!(focus_refusal_window_claim_root(&tmux, &sessionless), None);
+    }
+
     /// `#crossrootcolumnflip` regression: a nested controller's editor route
     /// whose layout names a superproject document used to publish its own
     /// generation into the shared window (haiven-dev gen 21) while the
@@ -55262,6 +55878,74 @@ mod tests {
         drop(inner_dir);
     }
 
+    /// `#focusnosnapshotrestart`: live 2026-11-05 16:52:12 the restarted IDE
+    /// published its restored `[agent-doc-bugs, sdk-dev]` layout from the
+    /// `root` surface (agent-loop generation 6, focus `sdk-dev`) and, in the
+    /// same delivery, forgot a stale sibling frame `frame-598fb057` of the same
+    /// client. That sibling forget retired generation 6 within the same second.
+    /// The publishing surface now travels with the generation, so only the
+    /// publishing endpoint's forget retires it.
+    #[test]
+    fn a_sibling_frame_forget_never_retires_the_root_surface_generation() {
+        use agent_doc_controller::layout_owner::EditorPublicationOrder;
+        use agent_doc_controller::pane_layout::{
+            EditorSurfaceForget, TmuxEffectAttemptAdmission, TmuxEffectRetirement,
+        };
+        let fixture = RouteLayoutFixture::new(&["bugs", "sdk"]);
+        let client = "jetbrains@IU.c1c7a146-pid:2781751";
+        let connection_generation = 689_953_018_807_896;
+        let published = super::super::with_pane_layout_editor_surface_publication(
+            EditorPublicationOrder {
+                client_id: client.to_string(),
+                generation: connection_generation,
+                sequence: 8,
+            },
+            Some("root".to_string()),
+            || {
+                publish_pane_layout_desired_invocation(
+                    &fixture.bootstrap,
+                    fixture.runtime.as_ref(),
+                    automatic_layout_sync_invocation(
+                        vec![fixture.id("bugs"), fixture.id("sdk")],
+                        &fixture.id("sdk"),
+                        false,
+                    ),
+                    None,
+                    PaneLayoutPublication::CoalesceIdentical,
+                    PaneLayoutPublisher::EditorSurface,
+                )
+            },
+        )
+        .unwrap()
+        .0;
+        let graph = fixture.runtime.pane_layout_graph();
+        let forget = |surface_id| EditorSurfaceForget {
+            client_id: client,
+            connection_generation,
+            surface_id,
+        };
+
+        assert!(
+            graph
+                .retire_generation_forgotten_by_editor(forget(Some("frame-598fb057")))
+                .is_none(),
+            "a sibling frame's forget must not retire the root surface's generation"
+        );
+        assert_eq!(
+            graph.begin_tmux_effect_attempt(published.generation),
+            TmuxEffectAttemptAdmission::Attempt { number: 1 },
+            "the restored layout must still reach tmux"
+        );
+        let retired = graph
+            .retire_generation_forgotten_by_editor(forget(Some("root")))
+            .expect("the publishing endpoint's own forget still retires it");
+        assert_eq!(retired.generation, published.generation);
+        assert_eq!(
+            graph.begin_tmux_effect_attempt(published.generation),
+            TmuxEffectAttemptAdmission::Retired(TmuxEffectRetirement::EditorSurfaceForgotten)
+        );
+    }
+
     /// `#stalecontrollerhotupdate` (d), the queue item: the editor goes 2 -> 1
     /// -> 2 panes. Its 1-pane frame (seq 84) goes to haiven-dev, its 2-pane
     /// frame (seq 86) to agent-loop. Under load agent-loop publishes FIRST and
@@ -55354,13 +56038,18 @@ mod tests {
         );
 
         // The editor forgets haiven-dev's surface: its generation retires.
+        let client_forget = agent_doc_controller::pane_layout::EditorSurfaceForget {
+            client_id: client,
+            connection_generation: 1_454_943_840_525_411,
+            surface_id: None,
+        };
         let retired = inner_graph
-            .retire_generation_forgotten_by_editor(client)
+            .retire_generation_forgotten_by_editor(client_forget)
             .expect("the forgotten frame's generation retires");
         assert_eq!(retired.generation, one_pane.generation);
         assert!(
             inner_graph
-                .retire_generation_forgotten_by_editor(client)
+                .retire_generation_forgotten_by_editor(client_forget)
                 .is_none()
         );
         assert_eq!(
@@ -55370,7 +56059,12 @@ mod tests {
         // Another client's forget never touches it.
         assert!(
             outer_graph
-                .retire_generation_forgotten_by_editor("vscode-1")
+                .retire_generation_forgotten_by_editor(
+                    agent_doc_controller::pane_layout::EditorSurfaceForget {
+                        client_id: "vscode-1",
+                        ..client_forget
+                    }
+                )
                 .is_none()
         );
 

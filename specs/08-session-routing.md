@@ -528,6 +528,16 @@ controller. The invariants:
   An identical later frame from that editor mints a fresh generation instead of
   coalescing into the retired one; a budget-exhausted generation does not
   re-arm on an identical frame, which would rebuild the unbounded loop.
+- A forget names one `(client, surface)` endpoint (`#focusnosnapshotrestart`).
+  The ledger records which editor surface published a generation
+  (`note_published_from_surface`), and a surface-scoped forget retires it only
+  when it names that surface; a whole-client forget retires it only at or after
+  the publishing connection generation (`editor_forget_retires_publication`).
+  A generation with no recorded surface keeps the client-wide rule. Observed
+  2026-11-05 16:52:12: a restarted IDE published its restored
+  `[agent-doc-bugs, sdk-dev]` layout from its `root` surface and, in the same
+  delivery, forgot a stale sibling frame `frame-598fb057` of the same client;
+  that sibling forget retired the generation the editor was showing.
 - A pane whose live owner document belongs to a root that is neither the
   controller's own nor nested beneath it (`pane_owner_is_foreign`) is protected
   from that controller's stash and ignored by its convergence check ONLY while

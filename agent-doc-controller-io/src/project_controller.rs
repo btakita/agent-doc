@@ -1498,6 +1498,11 @@ thread_local! {
     static PANE_LAYOUT_EDITOR_PUBLICATION: std::cell::RefCell<
         Option<agent_doc_controller::layout_owner::EditorPublicationOrder>,
     > = const { std::cell::RefCell::new(None) };
+    /// `#focusnosnapshotrestart`: the editor surface (frame endpoint) that
+    /// published [`PANE_LAYOUT_EDITOR_PUBLICATION`], so forgetting a sibling
+    /// frame of the same client cannot retire this generation.
+    static PANE_LAYOUT_EDITOR_PUBLICATION_SURFACE: std::cell::RefCell<Option<String>> =
+        const { std::cell::RefCell::new(None) };
 }
 
 #[cfg(test)]
@@ -1516,24 +1521,48 @@ fn set_authority_overlay_read_test_hook(hook: Option<Box<dyn FnOnce()>>) {
 /// Run `publish` with `order` as the publishing editor frame (see
 /// [`PANE_LAYOUT_EDITOR_PUBLICATION`]). The previous value is restored even if
 /// `publish` panics.
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn with_pane_layout_editor_publication<T>(
     order: agent_doc_controller::layout_owner::EditorPublicationOrder,
     publish: impl FnOnce() -> T,
 ) -> T {
-    struct Restore(Option<agent_doc_controller::layout_owner::EditorPublicationOrder>);
+    with_pane_layout_editor_surface_publication(order, None, publish)
+}
+
+/// [`with_pane_layout_editor_publication`] naming the editor surface (frame
+/// endpoint) that published the frame (`#focusnosnapshotrestart`).
+pub(crate) fn with_pane_layout_editor_surface_publication<T>(
+    order: agent_doc_controller::layout_owner::EditorPublicationOrder,
+    surface: Option<String>,
+    publish: impl FnOnce() -> T,
+) -> T {
+    struct Restore(
+        Option<agent_doc_controller::layout_owner::EditorPublicationOrder>,
+        Option<String>,
+    );
     impl Drop for Restore {
         fn drop(&mut self) {
             let previous = self.0.take();
+            let previous_surface = self.1.take();
             PANE_LAYOUT_EDITOR_PUBLICATION.with(|slot| *slot.borrow_mut() = previous);
+            PANE_LAYOUT_EDITOR_PUBLICATION_SURFACE
+                .with(|slot| *slot.borrow_mut() = previous_surface);
         }
     }
-    let _restore = Restore(PANE_LAYOUT_EDITOR_PUBLICATION.with(|slot| slot.replace(Some(order))));
+    let _restore = Restore(
+        PANE_LAYOUT_EDITOR_PUBLICATION.with(|slot| slot.replace(Some(order))),
+        PANE_LAYOUT_EDITOR_PUBLICATION_SURFACE.with(|slot| slot.replace(surface)),
+    );
     publish()
 }
 
 fn current_pane_layout_editor_publication()
 -> Option<agent_doc_controller::layout_owner::EditorPublicationOrder> {
     PANE_LAYOUT_EDITOR_PUBLICATION.with(|slot| slot.borrow().clone())
+}
+
+fn current_pane_layout_editor_publication_surface() -> Option<String> {
+    PANE_LAYOUT_EDITOR_PUBLICATION_SURFACE.with(|slot| slot.borrow().clone())
 }
 
 fn pane_layout_publication_now_ms() -> u64 {
@@ -2061,6 +2090,9 @@ impl ControllerPaneLayoutGraph {
     ) -> PaneLayoutDesired {
         let publisher = claim.publisher;
         let editor_publication = current_pane_layout_editor_publication();
+        let editor_publication_surface = editor_publication
+            .as_ref()
+            .and_then(|_| current_pane_layout_editor_publication_surface());
         // GH #322: a positive editor split observation propagates the set of
         // documents the editor shows; a derived publication (escalation,
         // `ensure` route, recycle or lane republish) only reconstructs one.
@@ -2080,10 +2112,11 @@ impl ControllerPaneLayoutGraph {
                 .retired(current.generation)
                 .is_some_and(|retired| retired.rearms_on_identical_republication())
         {
-            self.attempt_ledger.lock().note_published(
+            self.attempt_ledger.lock().note_published_from_surface(
                 current.generation,
                 pane_layout_publication_now_ms(),
                 editor_publication,
+                editor_publication_surface,
             );
             if source_plane_version > current.source_plane_version {
                 current.source_plane_version = source_plane_version;
@@ -2158,10 +2191,11 @@ impl ControllerPaneLayoutGraph {
         // the generation. Stamping at the first projection attempt let a busy
         // controller's older frame outrank a newer one another controller had
         // already projected.
-        self.attempt_ledger.lock().note_published(
+        self.attempt_ledger.lock().note_published_from_surface(
             generation,
             pane_layout_publication_now_ms(),
             editor_publication,
+            editor_publication_surface,
         );
         self.ctx.batch(|ctx| {
             ctx.set(&self.observed, None);
@@ -2455,24 +2489,22 @@ impl ControllerPaneLayoutGraph {
     /// by that client's frame, retire it (first time only) and return it so the
     /// caller can record the terminal receipt; the editor's later frame, here or
     /// on another controller, is the layout it actually shows.
+    ///
+    /// `#focusnosnapshotrestart`: only a forget of the publishing endpoint (or
+    /// of the whole client at that connection generation) retires it; see
+    /// [`agent_doc_controller::pane_layout::editor_forget_retires_publication`].
     pub(crate) fn retire_generation_forgotten_by_editor(
         &self,
-        client_id: &str,
+        forget: agent_doc_controller::pane_layout::EditorSurfaceForget<'_>,
     ) -> Option<PaneLayoutDesired> {
         let desired = self.desired()?;
         if desired.provenance.publisher != PaneLayoutPublisher::EditorSurface {
             return None;
         }
-        let mut ledger = self.attempt_ledger.lock();
-        let published_by_client = ledger
-            .publication(desired.generation)
-            .is_some_and(|publication| publication.client_id == client_id);
-        (published_by_client
-            && ledger.retire(
-                desired.generation,
-                agent_doc_controller::pane_layout::TmuxEffectRetirement::EditorSurfaceForgotten,
-            ))
-        .then_some(desired)
+        self.attempt_ledger
+            .lock()
+            .retire_forgotten_by_editor(desired.generation, forget)
+            .then_some(desired)
     }
 
     /// The window-claim stamp of `generation` (minted once).

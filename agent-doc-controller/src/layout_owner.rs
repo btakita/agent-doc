@@ -58,6 +58,30 @@ pub fn main_window_layout_owner<'a>(
         .map_or(LayoutOwner::Local, LayoutOwner::Delegate)
 }
 
+/// `#focusnosnapshotrestart`: who can repair a focus this controller refused
+/// because the document's pane sits outside the shared main window, when this
+/// controller holds no frontend layout of its own.
+///
+/// The editor publishes its spanning (cross-root) frame only to the outermost
+/// root's controller ([`main_window_layout_owner`]) and the narrow focus-only
+/// projection to the document's own controller. A nested controller therefore
+/// never retains the editor's layout for a cross-root split: after an IDE
+/// restart haiven-dev answered every `sdk-dev.md` selection with
+/// `focus_deferred:no_frontend_layout_snapshot` while agent-loop, which held
+/// `[agent-doc-bugs, sdk-dev]`, saw only an unchanged (idle) frame.
+///
+/// The evidence of who holds that layout is the window's
+/// [`WindowLayoutClaim`]: the newest publisher to drive the window. Delegate
+/// only to a claim root that **strictly encloses** this controller, the same
+/// containment rule as [`main_window_layout_owner`]; a sibling, this root, or
+/// no claim keeps the honest local deferral.
+pub fn focus_escalation_owner<'a>(
+    controller_root: &Path,
+    window_claim_root: Option<&'a Path>,
+) -> LayoutOwner<'a> {
+    main_window_layout_owner(controller_root, [window_claim_root])
+}
+
 /// `#stalecontrollerhotupdate` (d): where one desired layout sits in the
 /// editor's own publication order.
 ///
@@ -236,6 +260,31 @@ mod tests {
             generation,
             publication: None,
         }
+    }
+
+    #[test]
+    fn focus_escalation_delegates_only_to_an_enclosing_window_claim() {
+        let outer = PathBuf::from("/w/agent-loop");
+        let inner = PathBuf::from("/w/agent-loop/src/haiven-dev");
+        assert_eq!(
+            focus_escalation_owner(&inner, Some(outer.as_path())),
+            LayoutOwner::Delegate(outer.as_path()),
+            "the enclosing root driving the window holds the cross-root layout"
+        );
+        assert_eq!(
+            focus_escalation_owner(&inner, Some(inner.as_path())),
+            LayoutOwner::Local
+        );
+        assert_eq!(
+            focus_escalation_owner(&outer, Some(inner.as_path())),
+            LayoutOwner::Local,
+            "the outer owner never hands its own escalation down to a nested root"
+        );
+        assert_eq!(
+            focus_escalation_owner(&inner, Some(Path::new("/w/other"))),
+            LayoutOwner::Local
+        );
+        assert_eq!(focus_escalation_owner(&inner, None), LayoutOwner::Local);
     }
 
     #[test]

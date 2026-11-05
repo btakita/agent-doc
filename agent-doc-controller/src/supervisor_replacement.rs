@@ -306,6 +306,67 @@ pub const fn decide_supervisor_replacement_pane(
     }
 }
 
+/// `#stalesupervisorhidden`: which witness named the supervisor a replacement
+/// targets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SupervisorReplacementTargetSource {
+    /// The recorded owner pane's own process tree.
+    PaneProcessTree,
+    /// The global `/proc` scan for a `start --route-owned` supervisor.
+    RouteOwnedScan,
+    /// The authoritative actor binding's supervisor lease.
+    ActorLease,
+}
+
+impl SupervisorReplacementTargetSource {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::PaneProcessTree => "pane_process_tree",
+            Self::RouteOwnedScan => "route_owned_scan",
+            Self::ActorLease => "actor_lease",
+        }
+    }
+}
+
+/// `#stalesupervisorhidden`: the candidate supervisor pids a replacement may
+/// target, each already VERIFIED by the IO layer as a live direct
+/// `agent-doc start` process serving exactly this document (route-owned or
+/// operator-started), not a fork image of one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub struct SupervisorReplacementTargetFacts {
+    pub pane_tree_pid: Option<u32>,
+    pub route_owned_scan_pid: Option<u32>,
+    pub lease_pid: Option<u32>,
+}
+
+/// `#stalesupervisorhidden`: the supervisor a replacement stops.
+///
+/// The route-owned `/proc` scan used to be the only witness. It never sees an
+/// operator-started `agent-doc start <FILE>` supervisor (no `--route-owned` on
+/// its command line), so the 2026-11-05 replacement of `sdk-dev.md` read
+/// `initial_pid=none`, recorded `cleared_no_pid`, killed nothing
+/// (`NoSupervisor`), and then failed closed on the live harness that very
+/// supervisor was still serving in the pane. The supervisor lease named the
+/// pid all along, and the pane's process tree held it.
+///
+/// The pane tree outranks the global scan: the cold start that follows types
+/// into THAT pane, so stopping a same-document supervisor elsewhere would leave
+/// this pane live and the replacement failed closed anyway. The lease is the
+/// last resort, for a replacement with no recorded pane.
+pub const fn resolve_supervisor_replacement_target(
+    facts: SupervisorReplacementTargetFacts,
+) -> Option<(u32, SupervisorReplacementTargetSource)> {
+    if let Some(pid) = facts.pane_tree_pid {
+        Some((pid, SupervisorReplacementTargetSource::PaneProcessTree))
+    } else if let Some(pid) = facts.route_owned_scan_pid {
+        Some((pid, SupervisorReplacementTargetSource::RouteOwnedScan))
+    } else if let Some(pid) = facts.lease_pid {
+        Some((pid, SupervisorReplacementTargetSource::ActorLease))
+    } else {
+        None
+    }
+}
+
 pub fn parse_supervisor_replacement_request(
     fields: SupervisorReplacementRequestFields<'_>,
 ) -> Result<ParsedSupervisorReplacementRequest, SupervisorReplacementParseError> {
@@ -685,5 +746,137 @@ mod tests {
             err.to_string(),
             "unsupported supervisor replacement mode `restart`"
         );
+    }
+
+    /// `#stalesupervisorhidden`: a deterministic world for one replacement of
+    /// the 2026-11-05 `sdk-dev.md` pane `%10`: zsh `1423217` -> supervisor
+    /// `2612299` (operator-started `agent-doc start <FILE>`, no
+    /// `--route-owned`) -> `grok` `1977436`, whose lease names `2612299`.
+    struct ReplacementSimWorld {
+        /// The supervisor, while alive, and whether it was route-owned.
+        supervisor: Option<(u32, bool)>,
+        /// The harness lives on the supervisor's PTY: it gets SIGHUP and
+        /// exits with the supervisor.
+        harness_alive: bool,
+        lease_pid: Option<u32>,
+        /// The pane id recorded by the replacement, `None` for a paneless one.
+        pane_recorded: bool,
+    }
+
+    impl ReplacementSimWorld {
+        fn sdk_dev(route_owned: bool) -> Self {
+            Self {
+                supervisor: Some((2_612_299, route_owned)),
+                harness_alive: true,
+                lease_pid: Some(2_612_299),
+                pane_recorded: true,
+            }
+        }
+
+        /// The IO layer's verified witnesses. Each one names only a live
+        /// direct `agent-doc start` for this document.
+        fn facts(&self) -> SupervisorReplacementTargetFacts {
+            let live = self.supervisor;
+            SupervisorReplacementTargetFacts {
+                pane_tree_pid: live.filter(|_| self.pane_recorded).map(|(pid, _)| pid),
+                route_owned_scan_pid: live
+                    .filter(|(_, route_owned)| *route_owned)
+                    .map(|(pid, _)| pid),
+                lease_pid: self
+                    .lease_pid
+                    .filter(|pid| live.is_some_and(|(live_pid, _)| live_pid == *pid)),
+            }
+        }
+
+        /// Kill the target (verified again at signal time), then classify the
+        /// pane for the continue-mode cold start.
+        fn replace(&mut self, target: Option<u32>) -> SupervisorReplacementPaneDecision {
+            if let (Some(pid), Some((live, _))) = (target, self.supervisor)
+                && pid == live
+            {
+                self.supervisor = None;
+                self.harness_alive = false;
+            }
+            let shell = self.supervisor.is_none() && !self.harness_alive;
+            decide_supervisor_replacement_pane(
+                SupervisorReplacementIntent::parse("continue").unwrap(),
+                SupervisorReplacementPaneFacts {
+                    pane_alive: true,
+                    current_command_is_shell: shell,
+                    runs_document_harness: !shell,
+                },
+            )
+        }
+    }
+
+    /// The incident, replayed: the route-owned scan alone found nothing, so
+    /// nothing was killed and continue mode failed closed on the live grok.
+    /// The pane tree names the supervisor, so the kill lands, the PTY child
+    /// exits, and the pane is a shell the resumed start is typed into.
+    #[test]
+    fn operator_started_supervisor_is_replaced_from_the_pane_tree() {
+        let mut pre_fix = ReplacementSimWorld::sdk_dev(false);
+        let route_owned_only = pre_fix.facts().route_owned_scan_pid;
+        assert_eq!(route_owned_only, None, "cleared_no_pid / NoSupervisor");
+        assert_eq!(
+            pre_fix.replace(route_owned_only),
+            SupervisorReplacementPaneDecision::PreserveLiveHarness
+        );
+
+        let mut world = ReplacementSimWorld::sdk_dev(false);
+        let target = resolve_supervisor_replacement_target(world.facts());
+        assert_eq!(
+            target,
+            Some((
+                2_612_299,
+                SupervisorReplacementTargetSource::PaneProcessTree
+            ))
+        );
+        assert_eq!(
+            world.replace(target.map(|(pid, _)| pid)),
+            SupervisorReplacementPaneDecision::PreserveExistingShell
+        );
+    }
+
+    /// Every world shape: a live supervisor is always targeted whatever
+    /// witness survives, the pane tree wins whenever it has one, and a world
+    /// with no live supervisor targets nothing (never a stale lease pid).
+    #[test]
+    fn replacement_target_resolution_is_total_over_the_world_shapes() {
+        for route_owned in [false, true] {
+            for pane_recorded in [false, true] {
+                for lease in [None, Some(2_612_299), Some(7)] {
+                    for alive in [false, true] {
+                        let mut world = ReplacementSimWorld::sdk_dev(route_owned);
+                        world.pane_recorded = pane_recorded;
+                        world.lease_pid = lease;
+                        if !alive {
+                            world.supervisor = None;
+                            world.harness_alive = false;
+                        }
+                        let target = resolve_supervisor_replacement_target(world.facts());
+                        let reachable =
+                            alive && (pane_recorded || route_owned || lease == Some(2_612_299));
+                        assert_eq!(
+                            target.map(|(pid, _)| pid),
+                            reachable.then_some(2_612_299),
+                            "route_owned={route_owned} pane={pane_recorded} lease={lease:?} alive={alive}"
+                        );
+                        if alive && pane_recorded {
+                            assert_eq!(
+                                target.map(|(_, source)| source),
+                                Some(SupervisorReplacementTargetSource::PaneProcessTree)
+                            );
+                        }
+                        if reachable {
+                            assert_eq!(
+                                world.replace(target.map(|(pid, _)| pid)),
+                                SupervisorReplacementPaneDecision::PreserveExistingShell
+                            );
+                        }
+                    }
+                }
+            }
+        }
     }
 }

@@ -723,8 +723,18 @@ take the place of a column, never add one (`admission=excluded_focused_stash_wou
 The request is *overdue* when the FIRST unconsumed request (the oldest
 `SupervisorRecycleRequested` epoch above the highest `Started`/`Settled` epoch)
 is older than `AGENT_DOC_STALE_RECYCLE_CONSUME_BOUND_SECS` (default 120s) while
-the pane has no active-interaction proof (`admission=excluded_focused_recycle_overdue`,
-`prior_request=overdue:reason=...:age_secs=...`). That proof is a fresh
+the pane has no active-interaction proof (`prior_request=overdue:reason=...:age_secs=...`).
+An overdue recycle is not coming, so the pane is no longer gated for it: a
+desired stale own pane outside the target window whose request is overdue,
+focused or not, is promoted FLAGGED (`layout_column_pane_stale_stash_promoted_flagged`,
+`admission=promoted_flagged_recycle_overdue:<focused|unfocused>`; the post-router
+audit records `admission=stale_stash_promoted_flagged`) instead of being hidden
+in the stash until a consumption that may never happen (`#stalesupervisorhidden`:
+an operator-started supervisor whose controller replacement kept failing left
+`sdk-dev.md` hidden for hours while the same pane, had it been visible, would
+have stayed visible). A flagged promotion realises exactly the published
+layout and is bounded only by the GH #124 live-turn guard
+(`admission=excluded_live_turn_protected:<panes>` for an unfocused column). That proof is a fresh
 turn-active lease from the document's owning project root, a live foreground
 harness blocker (including an active turn or permission prompt), or a matching
 generation-fenced `Busy`/`WaitingInput` actor with a fresh live supervisor
@@ -733,7 +743,7 @@ documents and operator interactions that outlive short coordination markers;
 they read
 `pending:...:deferred_by_turn`. Re-requests and install fan-outs refresh the
 request's reason but never its clock, so an overdue refusal cannot flap back
-into an admission until the request is consumed. The bound is a liveness
+into a recycle-backed admission until the request is consumed. The bound is a liveness
 budget for a local process, never a safety argument: every invariant holds for
 any value (`formal/tla/StaleColumnRecycle.tla`, where it is an arbitrary
 `Expire` event).

@@ -150,6 +150,15 @@ fn process_is_alive(pid: u32) -> bool {
 /// Re-exported so existing kill-path callers keep working.
 pub use crate::process::supervisor_pid_for_doc;
 
+/// The kill-time ownership proof: `pid` is a supervisor for exactly `target`,
+/// either a route-owned one (any shape the route-owned scan accepts) or a
+/// direct operator-started `agent-doc start <FILE>` (`#stalesupervisorhidden`).
+#[cfg(unix)]
+fn supervisor_pid_serves_doc(pid: u32, target: &Path) -> bool {
+    crate::process::supervisor_pid_matches_doc(pid, target)
+        || crate::process::start_supervisor_pid_matches_doc(pid, target)
+}
+
 /// `#supkill-b` — verified force-kill of a supervisor pid: SIGTERM, brief wait, then
 /// SIGKILL if still alive. Re-verifies the cmdline before *each* signal so a recycled
 /// pid is never killed, and refuses self/ancestor pids. Returns `true` once the pid
@@ -159,7 +168,7 @@ pub fn force_kill_verified_supervisor_pid(target: &Path, pid: u32) -> bool {
     if pid == std::process::id() || pid_is_self_or_ancestor(pid) {
         return false;
     }
-    if !crate::process::supervisor_pid_matches_doc(pid, target) {
+    if !supervisor_pid_serves_doc(pid, target) {
         return false;
     }
     unsafe {
@@ -172,7 +181,7 @@ pub fn force_kill_verified_supervisor_pid(target: &Path, pid: u32) -> bool {
         }
         std::thread::sleep(Duration::from_millis(25));
     }
-    if crate::process::supervisor_pid_matches_doc(pid, target) {
+    if supervisor_pid_serves_doc(pid, target) {
         unsafe {
             libc::kill(pid as libc::pid_t, libc::SIGKILL);
         }
@@ -228,12 +237,36 @@ pub fn drive_supervisor_kill_unless<G>(
     file: &Path,
     grace: Duration,
     dry_run: bool,
+    goal_satisfied: G,
+) -> Result<SupervisorKillOutcome>
+where
+    G: FnMut() -> bool,
+{
+    drive_supervisor_kill_target_unless(
+        file,
+        supervisor_pid_for_doc(file),
+        grace,
+        dry_run,
+        goal_satisfied,
+    )
+}
+
+/// `#stalesupervisorhidden`: [`drive_supervisor_kill_unless`] for a caller that
+/// already resolved the supervisor pid from a witness the route-owned scan
+/// cannot see (the owner pane's process tree, the supervisor lease). The pid is
+/// re-verified against `file` before every signal, exactly as a scanned one is.
+#[cfg(unix)]
+pub fn drive_supervisor_kill_target_unless<G>(
+    file: &Path,
+    target: Option<u32>,
+    grace: Duration,
+    dry_run: bool,
     mut goal_satisfied: G,
 ) -> Result<SupervisorKillOutcome>
 where
     G: FnMut() -> bool,
 {
-    let Some(pid) = supervisor_pid_for_doc(file) else {
+    let Some(pid) = target.filter(|pid| supervisor_pid_serves_doc(*pid, file)) else {
         return Ok(SupervisorKillOutcome::NoSupervisor);
     };
     if pid == std::process::id() || pid_is_self_or_ancestor(pid) {
@@ -295,6 +328,20 @@ pub fn drive_supervisor_kill(
 }
 
 #[cfg(not(unix))]
+pub fn drive_supervisor_kill_target_unless<G>(
+    _file: &Path,
+    _target: Option<u32>,
+    _grace: Duration,
+    _dry_run: bool,
+    _goal_satisfied: G,
+) -> Result<SupervisorKillOutcome>
+where
+    G: FnMut() -> bool,
+{
+    Ok(SupervisorKillOutcome::NoSupervisor)
+}
+
+#[cfg(not(unix))]
 pub fn drive_supervisor_kill_unless<G>(
     _file: &Path,
     _grace: Duration,
@@ -324,5 +371,46 @@ mod tests {
             &tmp,
             std::process::id()
         ));
+    }
+
+    /// `#stalesupervisorhidden`: the kill driver acts on a pid resolved from
+    /// the pane tree or lease for an operator-started supervisor the
+    /// route-owned scan cannot see, and still refuses a pid that does not
+    /// serve the document.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn targeted_kill_driver_stops_an_operator_started_supervisor() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join("tasks")).unwrap();
+        let doc = dir.path().join("tasks/sdk-dev.md");
+        let sibling = dir.path().join("tasks/other.md");
+        std::fs::write(&doc, "body").unwrap();
+        std::fs::write(&sibling, "body").unwrap();
+        let mut supervisor = crate::process::tests::spawn_operator_started_fake_supervisor(
+            dir.path(),
+            "tasks/sdk-dev.md",
+        );
+        let pid = supervisor.id();
+        let grace = Duration::from_millis(200);
+        let scanned = drive_supervisor_kill(&doc, grace, true).unwrap();
+        let wrong_doc =
+            drive_supervisor_kill_target_unless(&sibling, Some(pid), grace, true, || false)
+                .unwrap();
+        let dry =
+            drive_supervisor_kill_target_unless(&doc, Some(pid), grace, true, || false).unwrap();
+        let killed =
+            drive_supervisor_kill_target_unless(&doc, Some(pid), grace, false, || false).unwrap();
+        let _ = supervisor.kill();
+        let _ = supervisor.wait();
+
+        assert_eq!(
+            scanned,
+            SupervisorKillOutcome::NoSupervisor,
+            "pre-fix witness"
+        );
+        assert_eq!(wrong_doc, SupervisorKillOutcome::NoSupervisor);
+        assert_eq!(dry, SupervisorKillOutcome::WouldKill(pid));
+        assert_eq!(killed, SupervisorKillOutcome::Forced(pid));
+        assert!(!self_kill_requested(&doc), "the sentinel is cleared");
     }
 }

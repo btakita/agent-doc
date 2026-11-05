@@ -81,6 +81,83 @@ pub fn supervisor_doc_canonical(_pid: u32) -> Option<PathBuf> {
     None
 }
 
+/// `#stalesupervisorhidden`: the document a DIRECT `agent-doc start` process
+/// serves, route-owned or operator-started (`agent-doc start <FILE>`, the
+/// command agent-doc's own recovery guidance tells an operator to type).
+///
+/// [`supervisor_doc_canonical`] keys on `--route-owned` and so never sees an
+/// operator-started supervisor, although that process runs the same supervisor
+/// loop, answers the same IPC socket, and parents the harness the same way.
+/// The process itself must be the `agent-doc` binary (`argv[0]`), never a
+/// shell wrapper whose command string mentions it.
+pub fn direct_start_supervisor_doc_from_args(args: &[String]) -> Option<PathBuf> {
+    (agent_doc_controller::command_line::agent_doc_start_arg_index(args) == Some(0))
+        .then(|| agent_doc_controller::command_line::start_supervisor_document_from_args(args))?
+}
+
+/// Canonical owned-document path for any direct `agent-doc start` supervisor
+/// pid (see [`direct_start_supervisor_doc_from_args`]).
+#[cfg(unix)]
+pub fn start_supervisor_doc_canonical(pid: u32) -> Option<PathBuf> {
+    let args = read_proc_args(pid)?;
+    let doc = direct_start_supervisor_doc_from_args(&args)?;
+    if doc.is_absolute() {
+        doc.canonicalize().ok()
+    } else {
+        let cwd = std::fs::read_link(format!("/proc/{pid}/cwd")).ok()?;
+        cwd.join(doc).canonicalize().ok()
+    }
+}
+
+#[cfg(not(unix))]
+pub fn start_supervisor_doc_canonical(_pid: u32) -> Option<PathBuf> {
+    None
+}
+
+/// Does `pid` run a direct `agent-doc start` (route-owned or operator-started)
+/// for exactly `target`? The verified kill uses this, so a supervisor resolved
+/// from a pane's process tree or a lease can be signalled under the same
+/// "this exact document" proof as one the route-owned scan found.
+#[cfg(unix)]
+pub fn start_supervisor_pid_matches_doc(pid: u32, target: &Path) -> bool {
+    match (
+        start_supervisor_doc_canonical(pid),
+        target.canonicalize().ok(),
+    ) {
+        (Some(doc), Some(want)) => doc == want,
+        _ => false,
+    }
+}
+
+#[cfg(not(unix))]
+pub fn start_supervisor_pid_matches_doc(_pid: u32, _target: &Path) -> bool {
+    false
+}
+
+/// `#stalesupervisorhidden`: the first pid of `candidates` (a pane's process
+/// tree, root first, or a recorded lease pid) that is a live direct
+/// `agent-doc start` for `target` and not an un-exec'd fork image of one.
+#[cfg(unix)]
+pub fn verified_start_supervisor_pid(
+    candidates: impl IntoIterator<Item = u32>,
+    target: &Path,
+) -> Option<u32> {
+    first_supervisor_pid(
+        candidates,
+        std::process::id(),
+        |pid| start_supervisor_pid_matches_doc(pid, target),
+        is_unexeced_fork_of_parent,
+    )
+}
+
+#[cfg(not(unix))]
+pub fn verified_start_supervisor_pid(
+    _candidates: impl IntoIterator<Item = u32>,
+    _target: &Path,
+) -> Option<u32> {
+    None
+}
+
 /// Does `pid` own `target` (same canonical document)? Used to verify a kill target
 /// before signalling — never SIGKILL a pid whose cmdline is not the expected
 /// supervisor for this exact document.
@@ -141,7 +218,7 @@ pub fn supervisor_pid_for_doc(_target: &Path) -> Option<u32> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     #[test]
@@ -271,5 +348,110 @@ mod tests {
         let doc = dir.path().join("plan.md");
         std::fs::write(&doc, "body").unwrap();
         assert!(!supervisor_pid_matches_doc(std::process::id(), &doc));
+    }
+
+    /// A live process whose `/proc/<pid>/cmdline` is exactly the operator-
+    /// started supervisor shape `agent-doc start <rel_doc>`, with cwd `dir`:
+    /// `sh` runs the script `./start` while keeping the argv it was given.
+    /// Returns once the process is running.
+    #[cfg(target_os = "linux")]
+    pub(crate) fn spawn_operator_started_fake_supervisor(
+        dir: &Path,
+        rel_doc: &str,
+    ) -> std::process::Child {
+        use std::io::BufRead;
+        use std::os::unix::process::CommandExt;
+        use std::process::{Command, Stdio};
+
+        std::fs::write(dir.join("start"), "echo ready; read _\n").unwrap();
+        let mut child = Command::new("sh")
+            .arg0("agent-doc")
+            .args(["start", rel_doc])
+            .current_dir(dir)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        let mut line = String::new();
+        std::io::BufReader::new(child.stdout.take().unwrap())
+            .read_line(&mut line)
+            .unwrap();
+        assert_eq!(line.trim(), "ready", "fake supervisor did not start");
+        child
+    }
+
+    fn split(command_line: &str) -> Vec<String> {
+        command_line
+            .split_whitespace()
+            .map(str::to_string)
+            .collect()
+    }
+
+    /// `#stalesupervisorhidden`: the exact command line of the 2026-11-05
+    /// `sdk-dev.md` supervisor 2612299 is a supervisor, route-owned shapes still
+    /// are, and a shell wrapper or another subcommand never is.
+    #[test]
+    fn direct_start_parser_accepts_operator_started_supervisors_only_as_argv0() {
+        let operator_started = "/home/u/.cargo/bin/agent-doc start \
+             /home/u/work/haiven-dev/tasks/sdk/sdk-dev.md";
+        assert_eq!(
+            direct_start_supervisor_doc_from_args(&split(operator_started)),
+            Some(PathBuf::from(
+                "/home/u/work/haiven-dev/tasks/sdk/sdk-dev.md"
+            ))
+        );
+        assert_eq!(
+            agent_doc_supervisor::selfkill::start_route_owned_doc_from_args(&split(
+                operator_started
+            )),
+            None,
+            "the route-owned parser is what missed it"
+        );
+        let route_owned = "/home/u/.cargo/bin/agent-doc start --route-owned \
+             --route-owned-reap-policy auto --resume=abc -- tasks/fpe.md";
+        assert_eq!(
+            direct_start_supervisor_doc_from_args(&split(route_owned)),
+            Some(PathBuf::from("tasks/fpe.md"))
+        );
+        for not_a_supervisor in [
+            "sh -c sleep agent-doc start tasks/fpe.md",
+            "/home/u/.cargo/bin/agent-doc route tasks/fpe.md",
+            "/home/u/.cargo/bin/agent-doc start",
+            "grok --resume 32a2e65f tasks/fpe.md",
+        ] {
+            assert_eq!(
+                direct_start_supervisor_doc_from_args(&split(not_a_supervisor)),
+                None,
+                "{not_a_supervisor}"
+            );
+        }
+    }
+
+    /// A live operator-started supervisor (`argv[0]` = `agent-doc`, document
+    /// relative to its cwd) is found by the verified resolver and by the kill
+    /// verification, and is invisible to the route-owned scan. A non-matching
+    /// candidate and a sibling document are rejected.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn operator_started_supervisor_is_verified_from_candidate_pids() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join("tasks")).unwrap();
+        let doc = dir.path().join("tasks/sdk-dev.md");
+        let sibling = dir.path().join("tasks/sdk-dev-loop.md");
+        std::fs::write(&doc, "body").unwrap();
+        std::fs::write(&sibling, "body").unwrap();
+        let mut supervisor = spawn_operator_started_fake_supervisor(dir.path(), "tasks/sdk-dev.md");
+        let pid = supervisor.id();
+        let observed = (
+            verified_start_supervisor_pid([std::process::id(), pid], &doc),
+            verified_start_supervisor_pid([pid], &sibling),
+            start_supervisor_pid_matches_doc(pid, &doc),
+            supervisor_pid_matches_doc(pid, &doc),
+        );
+        let _ = supervisor.kill();
+        let _ = supervisor.wait();
+
+        assert_eq!(observed, (Some(pid), None, true, false));
     }
 }

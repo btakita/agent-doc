@@ -100,6 +100,7 @@ pub fn run_with_logger(file: &Path, cli: Option<LintCliMode>, ops_logger: OpsLog
         file,
         "lint_gate_document",
     )?;
+    emit_stray_close_marker_notices(file, &content, ops_logger);
     run_on_content_with_logger(file, &content, cli, ops_logger)
 }
 
@@ -113,6 +114,7 @@ pub fn run_force_disk_with_logger(
         file,
         "lint_gate_document_force_disk",
     )?;
+    emit_stray_close_marker_notices(file, &content, ops_logger);
     run_on_content_with_logger(file, &content, cli, ops_logger)
 }
 
@@ -343,9 +345,68 @@ fn is_blocking(finding: &LintFinding, mode: LintDialectMode) -> bool {
 pub fn validate_integrity_on_content_with_logger(
     file: &Path,
     content: &str,
-    _ops_logger: OpsLogger,
+    ops_logger: OpsLogger,
 ) -> Result<()> {
-    validate_structure_on_content(file, content)
+    validate_structure_on_content(file, content)?;
+    emit_stray_close_marker_notices(file, content, ops_logger);
+    Ok(())
+}
+
+/// Rule id of the `#strayclosemarker` notice.
+pub const STRAY_CLOSE_MARKER_RULE: &str = "agent-doc/stray-text-before-close-marker";
+
+/// `#strayclosemarker`: one finding per component closing marker that carries
+/// stray operator text before it on its line (`t<!-- /agent:run -->`).
+///
+/// The structural gate tolerates this shape (the text is the component's last
+/// content), so these findings are advisory only. They never enter
+/// [`classify_and_emit`], which means no lint mode, `strict` included, can turn
+/// a stray keystroke back into a document-wide refusal.
+pub fn stray_close_marker_findings(file: &Path, content: &str) -> Vec<LintFinding> {
+    agent_doc_element::element::stray_text_before_close_markers(content)
+        .into_iter()
+        .map(|stray| LintFinding {
+            path: file.to_path_buf(),
+            line: stray.line,
+            col: 1,
+            rule: STRAY_CLOSE_MARKER_RULE.to_string(),
+            severity: LintSeverity::Warning,
+            message: format!(
+                "text `{}` sits before the `<!-- {} -->` closing marker on the same line; agent-doc reads it as the component's last line",
+                stray.text.trim(),
+                stray.tag
+            ),
+            fix_hint: Some(format!(
+                "move `{}` onto its own line above the marker, or delete it if it was a stray keystroke",
+                stray.text.trim()
+            )),
+        })
+        .collect()
+}
+
+/// Print and log the non-blocking `#strayclosemarker` notices for `content`.
+/// Never fails and never blocks, in any lint mode.
+fn emit_stray_close_marker_notices(file: &Path, content: &str, ops_logger: OpsLogger) {
+    let findings = stray_close_marker_findings(file, content);
+    let Some(first) = findings.first() else {
+        return;
+    };
+    eprintln!(
+        "[lint] {} non-blocking notice(s) for {}:",
+        findings.len(),
+        file.display()
+    );
+    eprint!("{}", format_findings_text(&findings));
+    ops_logger(
+        file,
+        &format!(
+            "lint_stray_close_marker_tolerated file={} count={} first_line={} rule={}",
+            file.display(),
+            findings.len(),
+            first.line,
+            STRAY_CLOSE_MARKER_RULE,
+        ),
+    );
 }
 
 /// Validate the component tree at every lint boundary, including transient
@@ -1410,6 +1471,46 @@ operator-owned scratch state\n\
         let file = write_doc(&dir, "cli_off.md", doc);
         // CLI off must win over frontmatter strict.
         run(&file, Some(LintCliMode::Off)).expect("CLI off must override frontmatter strict");
+    }
+
+    /// `#strayclosemarker`: a stray keystroke before a closing marker is a
+    /// non-blocking notice in every mode, `strict` included, at both the
+    /// integrity boundary (preflight) and the final lint gate.
+    #[test]
+    fn stray_text_before_a_close_marker_never_blocks_any_lint_mode() {
+        let dir = TempDir::new().unwrap();
+        let doc = "---\nagent_doc_session: test\nagent_doc_lint_dialect: strict\n---\n\n\
+            <!-- agent:exchange -->\n\
+            prompt\n\
+            <!-- /agent:exchange -->\n\n\
+            ## fpe-prs <!-- agent:run id=\"fpe-prs\" subagents priority go -->\n\
+            - do [#a] task\n\
+            t<!-- /agent:run -->\n";
+        let file = write_doc(&dir, "stray.md", doc);
+        validate_integrity_on_content_with_logger(&file, doc, noop_ops_logger)
+            .expect("integrity boundary tolerates stray close-marker text");
+        for mode in [None, Some(LintCliMode::Warn), Some(LintCliMode::Strict)] {
+            run(&file, mode).unwrap_or_else(|error| {
+                panic!("lint mode {mode:?} must not block on stray text: {error:#}")
+            });
+        }
+        let findings = stray_close_marker_findings(&file, doc);
+        assert_eq!(findings.len(), 1, "{findings:?}");
+        assert_eq!(findings[0].rule, STRAY_CLOSE_MARKER_RULE);
+        assert_eq!(findings[0].line, 12);
+        assert!(
+            findings[0].message.contains("`t`"),
+            "{}",
+            findings[0].message
+        );
+        assert!(
+            findings[0].message.contains("/agent:run"),
+            "{}",
+            findings[0].message
+        );
+
+        let sound = doc.replace("t<!-- /agent:run -->", "<!-- /agent:run -->");
+        assert!(stray_close_marker_findings(&file, &sound).is_empty());
     }
 
     #[test]

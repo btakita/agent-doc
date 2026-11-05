@@ -17433,7 +17433,18 @@ mod tests {
             "Directories should be created as needed.\n<!-- /agent:queue -->",
             "Directories should be created as needed.t should create a c<!-- /agent:queue -->",
         );
-        assert!(agent_doc_element::element::structural_corruption_reason(&invalid).is_some());
+        // `#strayclosemarker`: the structural gate now tolerates text welded
+        // before a closer (non-blocking lint), but the historical typing-suffix
+        // shape is still repaired (suffix pruned, closer re-split) at every
+        // durable-intent seam.
+        assert_eq!(
+            agent_doc_element::element::structural_corruption_reason(&invalid),
+            None
+        );
+        assert_eq!(
+            agent_doc_element::element::stray_text_before_close_markers(&invalid).len(),
+            1
+        );
         let (_dir, file, _canonical) = temp_doc(&invalid);
         let identity = "test-retained-capture-welded-queue-close";
         seed_reliable_sync_open(&file, identity);

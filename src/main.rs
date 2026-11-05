@@ -6214,6 +6214,10 @@ fn main() -> ExitCode {
         env!("OUT_DIR"),
         "/source_anchors.txt"
     )));
+    // `#tmuxrouterboundedlock`: every registry lock tmux-router takes, its
+    // internal ones included, waits at most the configured bound and reports
+    // `registry_lock_wait` progress.
+    agent_doc_session_registry_io::registry_lock::install_process_registry_lock_wait();
     match try_main() {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {

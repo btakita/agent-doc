@@ -10,7 +10,7 @@ Concurrency hazards in agent-doc and tmux-router, with mitigations.
 
 `sessions.json` is shared state between concurrent `agent-doc` processes (claim, route, sync, resync). Without protection, two processes could read the same registry, each make a change, and one would clobber the other.
 
-**Mitigation:** `RegistryLock` (flock-based advisory lock via `fs2`). All mutating operations acquire the lock: `register_full()`, `prune()`, `update_window_for_entry()`, `with_registry()`, `with_registry_val()`.
+**Mitigation:** `RegistryLock` (flock-based advisory lock via `fs2`). All mutating operations acquire the lock: `register_full()`, `prune()`, `update_window_for_entry()`, `with_registry()`, `with_registry_val()`. Every acquisition waits at most a bound (`#tmuxrouterboundedlock`: 30 s, `AGENT_DOC_REGISTRY_LOCK_WAIT_MS` overrides, installed as tmux-router's process-wide policy at startup) by polling a non-blocking lock on the guard's own file, and gives up with `RegistryLockWaitExceeded` naming the lock file, purpose and holder.
 
 **Since:** v0.2.1 / v0.9.5
 

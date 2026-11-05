@@ -68,16 +68,35 @@ pub fn load(file: &Path) -> Result<ClaimReleaseReceiptLedger> {
     load_from_conn(&conn, &document_hash)
 }
 
-/// `#nestedreceiptack`: the one exact worker attempt (`owner`, `generation`)
-/// whose reported-release receipt was recorded for a queue row whose directive
-/// id is `target_id`. Only receipts that attest an exact attempt qualify;
-/// several distinct attempts are ambiguous and refused.
-pub fn reported_receipt_attempt_for_parent_id(
+/// One open, exactly attested reported-release receipt whose queue row's
+/// directive id names a tracked item (`#nestedreceiptack`,
+/// `#dupreceiptconsume`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParentIdReceiptAttempt {
+    pub owner: String,
+    pub generation: u64,
+    /// The released claim's queue row text.
+    pub item_text: String,
+    /// Whether that row was keyed by its directive id (`do [#id]`) rather than
+    /// as free text (`[#id]: answer`).
+    pub id_backed: bool,
+}
+
+/// `#dupreceiptconsume`: every distinct exact worker attempt whose open
+/// reported-release receipt was recorded for a queue row whose directive id is
+/// `target_id`, oldest claim first. Closed attempts and legacy owner-only
+/// receipts never qualify. More than one is normal: an open Todo answered
+/// twice, or dispatched as a waiting row and later answered by a queue row,
+/// leaves one receipt per attempt, and only the caller can tell which of them
+/// still has a reported row in the document.
+pub fn reported_receipt_attempts_for_parent_id(
     file: &Path,
     target_id: &str,
-) -> Result<Option<(String, u64)>> {
-    let mut attempts = std::collections::BTreeSet::new();
-    for receipt in load(file)?.receipts {
+) -> Result<Vec<ParentIdReceiptAttempt>> {
+    let mut receipts = load(file)?.receipts;
+    receipts.sort_by_key(|receipt| receipt.claimed_at_secs);
+    let mut attempts: Vec<ParentIdReceiptAttempt> = Vec::new();
+    for receipt in receipts {
         // `#todoeditrevivesrow`: a closed attempt is consumed work, never the
         // receipt a re-projected parent row of the same id acknowledges.
         if receipt.attempt_closed() || !receipt.attests_exact_attempt() {
@@ -88,18 +107,53 @@ pub fn reported_receipt_attempt_for_parent_id(
         else {
             continue;
         };
-        if id.eq_ignore_ascii_case(target_id) {
-            attempts.insert((receipt.owner.clone(), receipt.generation));
+        if !id.eq_ignore_ascii_case(target_id)
+            || attempts.iter().any(|attempt| {
+                attempt.owner == receipt.owner && attempt.generation == receipt.generation
+            })
+        {
+            continue;
         }
+        attempts.push(ParentIdReceiptAttempt {
+            id_backed: matches!(
+                receipt.identity,
+                agent_doc_element_queue::QueueItemIdentity::Id(_)
+            ),
+            owner: receipt.owner,
+            generation: receipt.generation,
+            item_text: receipt.item_text,
+        });
     }
+    Ok(attempts)
+}
+
+/// `#nestedreceiptack`: the one exact worker attempt (`owner`, `generation`)
+/// whose reported-release receipt was recorded for a queue row whose directive
+/// id is `target_id`. Only receipts that attest an exact attempt qualify;
+/// several distinct attempts are ambiguous and refused here. `queue consume
+/// --ack-id` resolves them against the document instead
+/// ([`reported_receipt_attempts_for_parent_id`], `#dupreceiptconsume`).
+pub fn reported_receipt_attempt_for_parent_id(
+    file: &Path,
+    target_id: &str,
+) -> Result<Option<(String, u64)>> {
+    let attempts = reported_receipt_attempts_for_parent_id(file, target_id)?;
     if attempts.len() > 1 {
         anyhow::bail!(
-            "{}: [#{target_id}] has {} reported-release receipts from distinct attempts; preserve them for explicit repair",
+            "{}: [#{target_id}] has {} reported-release receipts from distinct attempts ({}); preserve them for explicit repair",
             file.display(),
-            attempts.len()
+            attempts.len(),
+            attempts
+                .iter()
+                .map(|attempt| format!("{}#{}", attempt.owner, attempt.generation))
+                .collect::<Vec<_>>()
+                .join(", ")
         );
     }
-    Ok(attempts.into_iter().next())
+    Ok(attempts
+        .into_iter()
+        .next()
+        .map(|attempt| (attempt.owner, attempt.generation)))
 }
 
 /// End the reported-release receipt of exactly `owner`/`generation`

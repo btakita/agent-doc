@@ -3161,6 +3161,67 @@ fn converge_id_backed_head_strike(
     Ok(true)
 }
 
+/// `#dupreceiptconsume`: the refusal for `--ack-id <id>` when more than one
+/// reported row for `[#id]` is visible, each from a distinct worker attempt.
+/// It names every competing receipt and the exact command that settles each
+/// row on its own (fenced to that attempt), and says the refusal gates only
+/// this id, so a coordinator neither stalls later independent rows nor ends
+/// the turn without a next step.
+fn competing_reported_receipts_refusal(
+    file: &Path,
+    target_id: &str,
+    attempts: &[crate::claim_release_receipt::ParentIdReceiptAttempt],
+) -> String {
+    let document = file.display().to_string();
+    let settle_last_by_id = attempts.iter().any(|attempt| attempt.id_backed);
+    let rows = attempts
+        .iter()
+        .map(|attempt| {
+            let owner = format!("{}#{}", attempt.owner, attempt.generation);
+            let settle = if attempt.id_backed {
+                format!(
+                    "after the other rows are struck, `{}`",
+                    agent_doc_queue::reported_closeout::shell_command(&[
+                        "agent-doc".to_string(),
+                        "queue".to_string(),
+                        "consume".to_string(),
+                        document.clone(),
+                        "--ack-id".to_string(),
+                        target_id.to_string(),
+                    ])
+                )
+            } else {
+                format!(
+                    "`{}`",
+                    agent_doc_queue::reported_closeout::shell_command(&[
+                        "agent-doc".to_string(),
+                        "queue".to_string(),
+                        "consume".to_string(),
+                        document.clone(),
+                        "--ack-text".to_string(),
+                        agent_doc_queue::queue_claim::claim_item_handle(&attempt.item_text),
+                        "--ack-owner".to_string(),
+                        owner.clone(),
+                    ])
+                )
+            };
+            format!(
+                "\n  - {owner} reported row {:?}: settle with {settle}",
+                attempt.item_text.trim()
+            )
+        })
+        .collect::<String>();
+    let order = if settle_last_by_id {
+        " Settle the free-text rows first; the id-backed row then resolves by `--ack-id`."
+    } else {
+        ""
+    };
+    format!(
+        "{document}: [#{target_id}] has {} visible reported rows from distinct worker attempts, so `--ack-id {target_id}` cannot tell which one to strike. Competing reported-release receipts:{rows}\nEach command strikes only its own attempt's row and keeps the tracked item open; pass `--done {target_id}` to `agent-doc finalize {document}` instead only when an answer resolves the tracked item.{order} This refusal gates only [#{target_id}]: drain every later independent queue row now, and quote these commands in the exchange response (#dupreceiptconsume).",
+        attempts.len(),
+    )
+}
+
 /// Acknowledge an exact id-backed queue head whose id still names open tracked
 /// work, without marking that item done or gated (#freshqueueauth).
 ///
@@ -3239,19 +3300,42 @@ pub fn acknowledge_open_id_backed_queue_head(
         // (the closeout the Stop hook prescribes) refused every receipt-backed
         // nested row as "free-text prose" because the queue head is the
         // `### Waiting on you` group row (agent-doc-bugs.md, 2026-11-03).
-        if keys.is_empty()
-            && candidate.reported.is_none()
-            && let Some((owner, generation)) =
-                crate::claim_release_receipt::reported_receipt_attempt_for_parent_id(
-                    file, &target_id,
-                )?
-        {
-            keys = reported_attempt_projection_node_keys_under_parent_id(
-                &content, &target_id, &owner, generation,
-            )?;
-            if !keys.is_empty() {
+        //
+        // `#dupreceiptconsume`: several open receipts may resolve to one
+        // tracked id (haiven-dev sdk-dev.md, 2026-11-05: a Todo dispatched as
+        // a waiting row, then answered by an operator queue row; both workers
+        // reported). Only an attempt whose reported row is still visible in
+        // the document can be the one this ack strikes, so resolve the
+        // receipts against the document instead of refusing every id with
+        // more than one.
+        if keys.is_empty() && candidate.reported.is_none() {
+            let mut visible = Vec::new();
+            for attempt in crate::claim_release_receipt::reported_receipt_attempts_for_parent_id(
+                file, &target_id,
+            )? {
+                let attempt_keys = reported_attempt_projection_node_keys_under_parent_id(
+                    &content,
+                    &target_id,
+                    &attempt.owner,
+                    attempt.generation,
+                )?;
+                if !attempt_keys.is_empty() {
+                    visible.push((attempt, attempt_keys));
+                }
+            }
+            if visible.len() > 1 {
+                let attempts = visible
+                    .into_iter()
+                    .map(|(attempt, _)| attempt)
+                    .collect::<Vec<_>>();
+                anyhow::bail!(competing_reported_receipts_refusal(
+                    file, &target_id, &attempts
+                ));
+            }
+            if let Some((attempt, attempt_keys)) = visible.pop() {
+                keys = attempt_keys;
                 candidate.reported_receipt = true;
-                receipt_attempt = Some((owner, generation));
+                receipt_attempt = Some((attempt.owner, attempt.generation));
             }
         }
         if keys.is_empty() && candidate.reported.is_none() {
@@ -11049,6 +11133,204 @@ Old.
     fn nestedreceiptack_ack_id_strikes_released_reported_child_of_waiting_parent() {
         assert_released_nested_attempt_acknowledged(false);
     }
+    /// `#dupreceiptconsume`: the 2026-11-05 haiven-dev sdk-dev.md shape. The
+    /// Todo `[#tdclireleasedownloads]` was dispatched earlier as a waiting row
+    /// (`subagent:c960cli#45`); that row closed, but its reported-release
+    /// receipt stayed open. The operator then answered the Todo with a queue
+    /// row `[#tdclireleasedownloads]: haiven-cli will be public`, which
+    /// `subagent:c690cli#1` worked and reported. The completion feedback
+    /// prescribed `--ack-id tdclireleasedownloads`, and it refused: "has 2
+    /// reported-release receipts from distinct attempts; preserve them for
+    /// explicit repair", with no next step. Only one of those attempts still
+    /// has a reported row in the document.
+    const DUP_TODO: &str = concat!(
+        "[#tdclireleasedownloads] Decide how private haiven-cli serves release ",
+        "downloads"
+    );
+    const DUP_ANSWER: &str = "[#tdclireleasedownloads]: haiven-cli will be public";
+
+    fn dup_receipt_doc(root: &Path, answer_rows: &[(&str, &str, u64)]) -> (PathBuf, String) {
+        std::fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        let doc = root.join("sdk-dev.md");
+        let page = |run: &str| {
+            format!(
+                concat!(
+                    "---\nsession: sid\nagent_doc_format: template\nqueue_active: true\n---\n\n",
+                    "<!-- agent:exchange -->\n### Re: worker report\n\nreported.\n",
+                    "<!-- /agent:exchange -->\n\n",
+                    "## Run <!-- agent:run subagents priority go -->\n",
+                    "{run}",
+                    "- [#later] keep later work live\n",
+                    "<!-- /agent:run -->\n\n",
+                    "## Todo <!-- agent:todo priority -->\n",
+                    "- [ ] [#tdclireleasedownloads] Decide how private haiven-cli serves release downloads\n",
+                    "<!-- /agent:todo -->\n",
+                ),
+                run = run,
+            )
+        };
+        // Every row is live while its worker reports, as on 2026-11-05 when the
+        // open Todo kept the earlier attempt's receipt open.
+        let selectable_rows = std::iter::once(DUP_TODO)
+            .chain(answer_rows.iter().map(|(text, _, _)| *text))
+            .map(|text| format!("- {text}\n"))
+            .collect::<String>();
+        let report = |item: &str, owner: &str, body: &str| {
+            let selectable = page(&selectable_rows);
+            std::fs::write(&doc, &selectable).unwrap();
+            agent_doc_snapshot_io::checkpoint_document_baseline(
+                &doc,
+                &selectable,
+                agent_doc_ops_log_io::log_op,
+            )
+            .unwrap();
+            let generation = running_claim(&doc, item, owner);
+            let reported =
+                crate::queue_claim::report_attempt(&doc, item, Some(generation)).unwrap();
+            crate::queue_lineage::record_prose_only(&doc, &reported, "prose result").unwrap();
+            crate::claim_release_receipt::capture_response_for_attempt(
+                &doc, item, generation, body,
+            )
+            .unwrap();
+            crate::claim_release_receipt::release(
+                &doc,
+                item,
+                crate::claim_release_receipt::ReleaseKind::Reported,
+            )
+            .unwrap();
+            generation
+        };
+        // The earlier Todo dispatch: reported, then its row closed while the
+        // receipt stayed open.
+        report(DUP_TODO, "subagent:c960cli", "Decision still pending.");
+        let mut run = format!("- ~~{DUP_TODO}~~\n");
+        for (text, owner, generation) in answer_rows {
+            let reported = report(text, owner, &format!("{owner} answer result"));
+            assert_eq!(reported, *generation);
+            run.push_str(&format!("- ☑️ [#{owner}#{reported}] {text}\n"));
+        }
+        let content = page(&run);
+        std::fs::write(&doc, &content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        (doc, content)
+    }
+
+    #[test]
+    fn dupreceiptconsume_ack_id_picks_the_receipt_whose_reported_row_is_visible() {
+        let dir = tempfile::tempdir().unwrap();
+        let (doc, _) = dup_receipt_doc(dir.path(), &[(DUP_ANSWER, "subagent:c690cli", 1)]);
+        let open = crate::claim_release_receipt::load(&doc)
+            .unwrap()
+            .receipts
+            .into_iter()
+            .filter(|receipt| !receipt.attempt_closed())
+            .count();
+        assert_eq!(open, 2, "two open receipts resolve to the same Todo id");
+
+        assert!(acknowledge_open_id_backed_queue_head(&doc, "tdclireleasedownloads").unwrap());
+
+        let result = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            !result.contains("- ☑️ [#subagent:c690cli#1]"),
+            "the visible reported answer row is struck:\n{result}"
+        );
+        assert!(
+            result.contains("- [ ] [#tdclireleasedownloads] Decide how private"),
+            "the Todo stays open:\n{result}"
+        );
+        assert!(
+            result.contains("- [#later] keep later work live\n"),
+            "{result}"
+        );
+        let receipts = crate::claim_release_receipt::load(&doc).unwrap().receipts;
+        assert!(
+            receipts
+                .iter()
+                .filter(|receipt| receipt.owner == "subagent:c690cli")
+                .all(|receipt| receipt.attempt_closed()),
+            "the struck attempt's receipt is closed: {receipts:?}"
+        );
+    }
+
+    #[test]
+    fn dupreceiptconsume_ack_id_names_competing_visible_receipts_and_settle_commands() {
+        let dir = tempfile::tempdir().unwrap();
+        let second = "[#tdclireleasedownloads]: also add token support";
+        let (doc, before) = dup_receipt_doc(
+            dir.path(),
+            &[
+                (DUP_ANSWER, "subagent:c690cli", 1),
+                (second, "subagent:c691cli", 1),
+            ],
+        );
+
+        let err = acknowledge_open_id_backed_queue_head(&doc, "tdclireleasedownloads")
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("subagent:c690cli#1"), "{err}");
+        assert!(err.contains("subagent:c691cli#1"), "{err}");
+        assert!(
+            err.contains(&format!(
+                "agent-doc queue consume {} --ack-text '{DUP_ANSWER}' --ack-owner 'subagent:c690cli#1'",
+                doc.display()
+            )),
+            "{err}"
+        );
+        assert!(
+            err.contains(&format!(
+                "--ack-text '{second}' --ack-owner 'subagent:c691cli#1'"
+            )),
+            "{err}"
+        );
+        assert!(
+            !err.contains("subagent:c960cli"),
+            "an attempt with no visible reported row does not compete: {err}"
+        );
+        assert!(err.contains("independent"), "{err}");
+        assert_eq!(
+            std::fs::read_to_string(&doc).unwrap(),
+            before,
+            "a refused ack changes nothing"
+        );
+
+        // The named settle command works: it strikes only its own attempt's
+        // row, after which `--ack-id` resolves the one remaining row.
+        let selector = super::AckTextSelector::Owner(
+            agent_doc_document::queue_projection::QueueOwnerProjection {
+                owner: "subagent:c691cli".to_string(),
+                generation: 1,
+            },
+        );
+        super::acknowledge_paused_free_text_queue_head_with_selector_and_outcome(
+            &doc,
+            second,
+            Some(&selector),
+            &TEST_EFFECTS,
+        )
+        .unwrap()
+        .expect("the named --ack-text/--ack-owner command settles its row");
+        let settled = std::fs::read_to_string(&doc).unwrap();
+        assert!(!settled.contains("- ☑️ [#subagent:c691cli#1]"), "{settled}");
+        assert!(settled.contains("- ☑️ [#subagent:c690cli#1]"), "{settled}");
+
+        assert!(acknowledge_open_id_backed_queue_head(&doc, "tdclireleasedownloads").unwrap());
+        let result = std::fs::read_to_string(&doc).unwrap();
+        assert!(!result.contains("- ☑️ [#subagent:c690cli#1]"), "{result}");
+        assert!(
+            result.contains("- [ ] [#tdclireleasedownloads] Decide how private"),
+            "the Todo stays open:\n{result}"
+        );
+        assert!(
+            result.contains("- [#later] keep later work live\n"),
+            "{result}"
+        );
+    }
+
 
     #[test]
     fn nestedreceiptack_ack_id_strikes_released_reported_row_inside_response_tree() {

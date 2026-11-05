@@ -877,6 +877,16 @@ lifecycle the way a backlog-backed row shares its backlog item's:
 | `--done <id>` | resolves the item, strikes the row | checks the Todo off, strikes the row (`#sdktododone`) |
 | Worker reported, item must stay open | `queue consume --ack-id <id>` | `queue consume --ack-id <id>` (`#nestedechostrike`) |
 
+`--ack-id <id>` may find more than one open reported-release receipt for the
+id, for example a Todo first dispatched as a waiting row and later answered
+by an operator queue row `[#id]: answer` (`#dupreceiptconsume`). It strikes
+the one attempt whose reported `☑️` row is still visible in the document; an
+attempt without a visible row never competes. When two or more reported rows
+are visible, it refuses and names each competing `owner#generation` with the
+command that settles that row alone (`queue consume --ack-text '<row>'
+--ack-owner '<owner>#<generation>'`), and says the refusal gates only that
+id, so later independent rows still drain.
+
 The preflight strike is queue maintenance's done-id strike: it runs in the same
 pass, ends a reported attempt the same way, and never edits the Todo. It fires
 only when every Todo row owning the id is `[x]`, and it never fires for an id

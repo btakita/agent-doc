@@ -753,13 +753,29 @@ fn cargo_target_debug_dir_honors_default_relative_and_absolute_targets() {
     );
 }
 
+/// [`agent_doc_test_support::init_repo_with_doc`] for a document the project
+/// opts in through `[documents] include`. The controller admits a replica only
+/// for an agent-doc session document, even when the editor already holds the
+/// document open on the liveness plane (`#replicamergeduplicates`); the opt-in
+/// lives in config so each fixture's exact bytes stay unchanged.
+fn init_session_repo_with_doc(dir: &Path, name: &str, body: &str) -> PathBuf {
+    let file = agent_doc_test_support::init_repo_with_doc(dir, name, body);
+    std::fs::create_dir_all(dir.join(".agent-doc")).unwrap();
+    std::fs::write(
+        dir.join(".agent-doc/config.toml"),
+        format!("[documents]\ninclude = [\"{name}\"]\n"),
+    )
+    .unwrap();
+    file
+}
+
 #[test]
 fn cross_editor_plugin_protocol_harnesses_peer_through_real_agent_doc_controller() {
     let _env_guard = agent_doc_test_support::env_lock();
     let temp = tempfile::TempDir::new().unwrap();
     let project_root = temp.path();
     let baseline = "shared controller baseline\n";
-    let file = agent_doc_test_support::init_repo_with_doc(project_root, "network.md", baseline);
+    let file = init_session_repo_with_doc(project_root, "network.md", baseline);
     std::fs::create_dir_all(project_root.join(".agent-doc/logs")).unwrap();
     std::fs::create_dir_all(project_root.join(".agent-doc/snapshots")).unwrap();
 
@@ -868,7 +884,7 @@ fn captured_editor_splice_recovery_lands_translated_offsets_across_an_independen
         "- 📥 fix bug\n",
         "<!-- /agent:queue -->\n",
     );
-    let file = agent_doc_test_support::init_repo_with_doc(project_root, "splice.md", baseline);
+    let file = init_session_repo_with_doc(project_root, "splice.md", baseline);
     std::fs::create_dir_all(project_root.join(".agent-doc/logs")).unwrap();
     std::fs::create_dir_all(project_root.join(".agent-doc/snapshots")).unwrap();
 
@@ -1035,7 +1051,7 @@ fn held_captured_batch_beside_head_marker_and_closeout_merges_forward_across_pee
         "- 📥 do [#a]: first\n",
         "<!-- /agent:queue -->\n",
     );
-    let file = agent_doc_test_support::init_repo_with_doc(project_root, "held.md", baseline);
+    let file = init_session_repo_with_doc(project_root, "held.md", baseline);
     std::fs::create_dir_all(project_root.join(".agent-doc/logs")).unwrap();
     std::fs::create_dir_all(project_root.join(".agent-doc/snapshots")).unwrap();
     agent_doc_test_support::seed_reliable_sync_editor_registration(
@@ -1194,7 +1210,7 @@ fn stale_baseline_roll_forward_case(retarget: bool) {
         "- 📥 do [#sdkdocs]\n",
         "<!-- /agent:queue -->\n",
     );
-    let file = agent_doc_test_support::init_repo_with_doc(project_root, "sdk.md", baseline);
+    let file = init_session_repo_with_doc(project_root, "sdk.md", baseline);
     std::fs::create_dir_all(project_root.join(".agent-doc/logs")).unwrap();
     std::fs::create_dir_all(project_root.join(".agent-doc/snapshots")).unwrap();
     agent_doc_test_support::seed_reliable_sync_editor_registration(
@@ -1385,7 +1401,7 @@ fn session_check_reports_exhausted_replica_rebuilds_as_an_operator_state() {
     let temp = tempfile::TempDir::new().unwrap();
     let project_root = temp.path();
     let baseline = "<!-- agent:exchange -->\nanswer\n<!-- /agent:exchange -->\n";
-    let file = agent_doc_test_support::init_repo_with_doc(project_root, "held.md", baseline);
+    let file = init_session_repo_with_doc(project_root, "held.md", baseline);
     std::fs::create_dir_all(project_root.join(".agent-doc/logs")).unwrap();
     std::fs::create_dir_all(project_root.join(".agent-doc/snapshots")).unwrap();
     agent_doc_test_support::seed_reliable_sync_editor_registration(
@@ -1503,7 +1519,7 @@ fn native_plugin_harnesses_peer_through_real_agent_doc_controller() {
     let project_root = temp.path();
     let baseline = "shared native-plugin baseline\n";
     let file =
-        agent_doc_test_support::init_repo_with_doc(project_root, "native-network.md", baseline);
+        init_session_repo_with_doc(project_root, "native-network.md", baseline);
     std::fs::create_dir_all(project_root.join(".agent-doc/logs")).unwrap();
     std::fs::create_dir_all(project_root.join(".agent-doc/snapshots")).unwrap();
 

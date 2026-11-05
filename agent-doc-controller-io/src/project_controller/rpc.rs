@@ -59660,7 +59660,16 @@ mod tests {
             sequence: None,
         };
         assert!(handle_document_authority_handoff(&bootstrap, &runtime, request).unwrap());
-        std::thread::sleep(Duration::from_millis(250));
+        // `#timingtestsunderload`: drive the drain directly instead of sleeping
+        // and hoping the background worker tried. While the fixture holds
+        // state.db's write lock the apply must be deferred and the row kept
+        // retryable -- a definite result, whatever the host load.
+        assert!(
+            runtime
+                .drain_document_authority_handoffs(dir.path())
+                .unwrap(),
+            "state.db contention must defer the apply and keep the handoff retryable"
+        );
         assert_eq!(
             state_store::load_document_authority_handoffs(dir.path())
                 .unwrap()
@@ -59678,7 +59687,27 @@ mod tests {
             "the durable pending handoff must fail closed against detached-disk fallback"
         );
         runtime.retire_after_successor_promotion();
+        // `#timingtestsunderload`: release the contention only once the
+        // predecessor can no longer write. Its handoff worker holds a strong
+        // reference for the whole of a drain (including an apply parked in
+        // SQLite's busy handler), so a zero strong count proves no predecessor
+        // apply is in flight. Releasing the lock earlier let that parked apply
+        // land in the ledger AFTER the successor loaded it: the successor then
+        // saw `inserted == false`, acknowledged the row, and cleared its
+        // pending-authority overlay without ever folding the event, so its
+        // projection lacked the authority forever -- a 5 s deadline reported
+        // that as "slow". The ceiling only turns a leaked reference into a
+        // failure; it bounds no latency.
+        let predecessor = Arc::downgrade(&runtime);
         drop(runtime);
+        let ceiling = Instant::now() + super::blocking_effect_gate::HANG_CEILING;
+        while predecessor.strong_count() > 0 {
+            assert!(
+                Instant::now() < ceiling,
+                "the retired predecessor's threads never released the runtime"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
         writer.execute_batch("ROLLBACK").unwrap();
 
         let successor = ControllerRuntime::new_arc(ControllerBootstrap {
@@ -59687,31 +59716,48 @@ mod tests {
             ..bootstrap
         })
         .unwrap();
-        let deadline = Instant::now() + Duration::from_secs(5);
-        loop {
-            let projection = successor.document_state_projection("doc").unwrap();
-            let projected = projection.as_ref().is_some_and(|projection| {
-                projection.document.latest_authority.as_ref().is_some_and(
-                    |authority| authority.authority_epoch == 202,
-                )
-            });
-            if projected
-                && state_store::load_document_authority_handoffs(dir.path())
-                    .unwrap()
-                    .is_empty()
-            {
-                break;
-            }
+        // `#timingtestsunderload`: the successor's claim+apply is driven
+        // synchronously, not awaited on a wall-clock deadline (its background
+        // worker backs off up to seconds per retry, which a loaded host turns
+        // into a missed 5 s deadline). A drain returning `false` has claimed,
+        // applied, and acknowledged every row it could fence. It may race the
+        // successor's own worker; both run under generation 2, so either one's
+        // apply and ACK settles the row. A transient `true` (another writer held
+        // state.db past the authority-ingress busy timeout) retries; the
+        // attempt cap is a clock-free hang guard, never a latency bound.
+        let mut drains = 0;
+        while successor
+            .drain_document_authority_handoffs(dir.path())
+            .unwrap()
+        {
+            drains += 1;
             assert!(
-                Instant::now() < deadline,
-                "the successor must claim and apply its predecessor's durable handoff"
+                drains < 100,
+                "the successor could never apply its predecessor's durable handoff"
             );
-            std::thread::sleep(Duration::from_millis(10));
         }
         assert!(
             state_store::load_document_authority_handoffs(dir.path())
                 .unwrap()
-                .is_empty()
+                .is_empty(),
+            "the successor must claim and acknowledge its predecessor's durable handoff"
+        );
+        assert!(
+            load_state_event_ledger(dir.path())
+                .unwrap()
+                .events()
+                .iter()
+                .any(|stored| stored.event_id == event.event_id),
+            "the successor must apply the handoff to the durable main ledger"
+        );
+        assert_eq!(
+            successor
+                .document_state_projection("doc")
+                .unwrap()
+                .and_then(|projection| projection.document.latest_authority)
+                .map(|authority| authority.authority_epoch),
+            Some(202),
+            "the successor's projection must carry the recovered authority"
         );
     }
 

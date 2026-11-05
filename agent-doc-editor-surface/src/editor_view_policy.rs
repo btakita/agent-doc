@@ -1119,6 +1119,44 @@ mod tests {
         }
     }
 
+    /// `#viewsnapshotgenseedmac`: macOS sockets report no peer pid, so the
+    /// instance reset above cannot fire there. The JetBrains 262 backend seeds
+    /// its connection generation from wall-clock milliseconds, so a restarted
+    /// IDE publishes above its predecessor's high-water mark and the fence
+    /// accepts it as an ordinary newer revision, with no transport identity.
+    #[test]
+    fn wall_clock_seeded_generation_from_a_restarted_backend_applies_without_a_peer_pid() {
+        let mut policy = EditorViewPolicy::default();
+        let predecessor_high_water = 1_762_300_000_051;
+        let accepted = policy.observe(main_only(
+            "rd:Host",
+            predecessor_high_water,
+            1231,
+            "/p/old.md",
+        ));
+        assert_eq!(accepted.status, EditorViewPolicyStatus::Applied);
+
+        let restarted = policy.observe_from_instance(
+            main_only("rd:Host", 1_762_300_060_001, 1, "/p/new.md"),
+            None,
+            dead,
+        );
+        assert_eq!(restarted.projection.status, EditorViewPolicyStatus::Applied);
+        assert_eq!(restarted.instance_reset, None);
+        assert!(restarted.projection.main_visible.contains("/p/new.md"));
+        assert!(!restarted.projection.main_visible.contains("/p/old.md"));
+
+        // A late delivery from the dead process stays fenced.
+        let late = policy.observe(main_only(
+            "rd:Host",
+            predecessor_high_water,
+            1232,
+            "/p/old.md",
+        ));
+        assert_eq!(late.status, EditorViewPolicyStatus::Stale);
+        assert!(late.main_visible.contains("/p/new.md"));
+    }
+
     /// The successor retires its predecessor: the dead instance's detached
     /// binding releases as `ClientRetired` even when the successor reuses the
     /// same surface key (both processes start at generation 1, surface 1).

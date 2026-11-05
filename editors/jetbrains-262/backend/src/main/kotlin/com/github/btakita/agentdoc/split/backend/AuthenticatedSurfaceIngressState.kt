@@ -75,11 +75,24 @@ private class ControllerSurfaceIngress(project: Project) : SurfaceIngress {
 internal class AuthenticatedSurfaceIngressState(
     private val publisher: SurfaceSnapshotPublisher,
     private val layoutForwarder: RemoteClientLayoutForwarder = RemoteClientLayoutForwarder.Disabled,
+    /**
+     * `#viewsnapshotgenseedmac`: the first lease's connection generation is `generationSeed + 1`.
+     * The controller fences `editor_view_snapshot_observe` by `(connection_generation, sequence)`
+     * per client, and this state (with its counter) is recreated with the IDE process. A counter
+     * starting at 0 made every restarted backend publish generation 1 again, below the dead IDE's
+     * high-water mark, and only the controller's peer-pid successor check (`#viewsnapshotgenreset`,
+     * `SO_PEERCRED`) could tell the restart apart; macOS Unix sockets report no peer pid, so there
+     * every snapshot stayed stale. Seeding from wall-clock milliseconds makes each process start
+     * above every generation its predecessor issued (one per reconnect, far fewer than the
+     * milliseconds it lived), so a restart reads as an ordinary newer generation on every platform
+     * and needs no wire field or transport identity.
+     */
+    generationSeed: Long = System.currentTimeMillis(),
     /** GH #339 R1: called when a connection reports a new frontend activation receipt. */
     private val onFrontendReceipt: (clientId: String, connectionGeneration: Long, receipt: ActivationReceipt) -> Unit =
         ::logFrontendReceipt,
 ) {
-    private val generation = AtomicLong(0)
+    private val generation = AtomicLong(generationSeed)
     private val mutex = Mutex()
     private val connections = mutableMapOf<String, ConnectionState>()
     private val mutableFrontendAuthorityActive = MutableStateFlow(false)

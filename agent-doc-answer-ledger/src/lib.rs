@@ -41,6 +41,7 @@
 //! `restates`, `applies_to`, `same_as`).
 
 pub mod extract;
+pub mod graph;
 pub mod text;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -73,18 +74,60 @@ impl RevisionRelation {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+/// A typed decision-graph edge kind (`#decisiongraph`). Every edge reads
+/// `from <kind> to`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum EdgeKind {
+    /// revision `answers` decision.
     Answers,
+    /// revision `restates` the previous revision (same decision, other words).
     Restates,
+    /// revision `amends` the previous revision: the decision stands and one
+    /// clause changes or is added.
     Amends,
+    /// revision `supersedes` the previous revision: an outright change or
+    /// reversal.
     Supersedes,
+    /// question/decision `applies_to` an item it concerns.
     AppliesTo,
+    /// operator-confirmed merge of two question copies.
     SameAs,
+    /// decision B `depends_on` decision (or item) A: B assumes A.
+    DependsOn,
+    /// two decisions that cannot both hold.
+    ConflictsWith,
+    /// revision/decision `evidenced_by` a response or commit.
+    EvidencedBy,
+    /// a question copy (todo, waiting item, request) `copy_of` its decision.
+    CopyOf,
+    /// decision `derived_from` a derivation, principle, fact or standing
+    /// decision (`#firstprinciples`).
+    DerivedFrom,
+    /// higher-order decision `subsumes` a lower-order one (`#decisionprune`).
+    Subsumes,
+    /// lower-order decision is an explicit `exception_to` the decision that
+    /// would otherwise subsume it (`#decisionprune`).
+    ExceptionTo,
 }
 
 impl EdgeKind {
+    pub const ALL: [Self; 13] = [
+        Self::Answers,
+        Self::Restates,
+        Self::Amends,
+        Self::Supersedes,
+        Self::AppliesTo,
+        Self::SameAs,
+        Self::DependsOn,
+        Self::ConflictsWith,
+        Self::EvidencedBy,
+        Self::CopyOf,
+        Self::DerivedFrom,
+        Self::Subsumes,
+        Self::ExceptionTo,
+    ];
+
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Answers => "answers",
@@ -93,7 +136,23 @@ impl EdgeKind {
             Self::Supersedes => "supersedes",
             Self::AppliesTo => "applies_to",
             Self::SameAs => "same_as",
+            Self::DependsOn => "depends_on",
+            Self::ConflictsWith => "conflicts_with",
+            Self::EvidencedBy => "evidenced_by",
+            Self::CopyOf => "copy_of",
+            Self::DerivedFrom => "derived_from",
+            Self::Subsumes => "subsumes",
+            Self::ExceptionTo => "exception_to",
         }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|kind| kind.as_str() == value)
+    }
+
+    /// The edge kinds that relate one revision to its predecessor.
+    pub const fn is_revision_relation(self) -> bool {
+        matches!(self, Self::Restates | Self::Amends | Self::Supersedes)
     }
 }
 
@@ -137,6 +196,13 @@ pub struct Revision {
     /// Unix seconds the binary first observed this answer (from the index).
     pub first_seen_at: Option<u64>,
     pub relation: RevisionRelation,
+    /// `operator` when the operator's reply said `change:` / `amend:`;
+    /// `proposed` when the binary classified the relation; `derived` for the
+    /// initial revision (`#decisiongraph`).
+    pub relation_source: graph::EdgeSource,
+    /// For `amends`: the clause the amendment changes or adds.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub clause: Option<String>,
     /// Struck or archived source row.
     pub consumed: bool,
     /// False when only the index still remembers it.
@@ -229,6 +295,20 @@ pub struct AnsweredFact {
     /// Set once when the latest answer supersedes the previous one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub changed_from: Option<String>,
+    /// `operator` when the operator said `change:` / `amend:`; `proposed`
+    /// when the binary classified the latest revision (`#decisiongraph`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub change_source: Option<graph::EdgeSource>,
+    /// When the latest revisions amend an earlier answer: that answer, which
+    /// still stands, and the amended clauses after it, oldest first.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub amends: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub amended_clauses: Vec<String>,
+    /// What the change disturbs (`#decisiongraph` impact walk), one line per
+    /// dependent or action; filled by the maintenance pass.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub change_impact: Vec<String>,
     pub tier: MatchTier,
 }
 
@@ -407,7 +487,20 @@ impl Ledger {
                         to: link.to.clone(),
                     });
                 }
-                _ => {
+                LinkKind::OperatorDependsOn | LinkKind::OperatorConflictsWith => {
+                    uf.add(&from);
+                    uf.add(&to);
+                    edges.insert(Edge {
+                        from: link.from.clone(),
+                        kind: if link.kind == LinkKind::OperatorDependsOn {
+                            EdgeKind::DependsOn
+                        } else {
+                            EdgeKind::ConflictsWith
+                        },
+                        to: link.to.clone(),
+                    });
+                }
+                LinkKind::RequestGraft | LinkKind::RequestInfix | LinkKind::QueueItem => {
                     if kinds.contains_key(&link.to) {
                         uf.union(&from, &to);
                     } else {
@@ -643,6 +736,10 @@ impl Ledger {
                 .find(|(_, _, revision)| revision.id.ends_with(&hash))
             {
                 existing.2.consumed |= answer.consumed;
+                if let Some(explicit) = answer.explicit {
+                    existing.2.relation = explicit;
+                    existing.2.relation_source = graph::EdgeSource::Operator;
+                }
                 continue;
             }
             entry.push((
@@ -653,7 +750,13 @@ impl Ledger {
                     answer: answer.text.clone(),
                     location: answer.location.clone(),
                     first_seen_at: Some(remembered.map_or(now, |revision| revision.first_seen_at)),
-                    relation: RevisionRelation::Initial,
+                    relation: answer.explicit.unwrap_or(RevisionRelation::Initial),
+                    relation_source: if answer.explicit.is_some() {
+                        graph::EdgeSource::Operator
+                    } else {
+                        graph::EdgeSource::Derived
+                    },
+                    clause: None,
                     consumed: answer.consumed,
                     in_document: true,
                     change_flagged: remembered.is_some_and(|revision| revision.change_flagged),
@@ -696,6 +799,8 @@ impl Ledger {
                     location: format!("{} (no longer in the document)", revision.location),
                     first_seen_at: Some(revision.first_seen_at),
                     relation: RevisionRelation::Initial,
+                    relation_source: graph::EdgeSource::Derived,
+                    clause: None,
                     consumed: true,
                     in_document: false,
                     change_flagged: revision.change_flagged,
@@ -707,7 +812,23 @@ impl Ledger {
             let mut ordered: Vec<Revision> = Vec::new();
             for (_, _, mut revision) in revisions {
                 if let Some(previous) = ordered.last() {
-                    revision.relation = text::answer_relation(&previous.answer, &revision.answer);
+                    // The operator's `change:` / `amend:` decides the kind;
+                    // otherwise the binary proposes one (`#decisiongraph`).
+                    if revision.relation_source != graph::EdgeSource::Operator {
+                        revision.relation =
+                            text::answer_relation(&previous.answer, &revision.answer);
+                        revision.relation_source = graph::EdgeSource::Proposed;
+                    }
+                    if revision.relation == RevisionRelation::Initial {
+                        revision.relation = RevisionRelation::Restates;
+                    }
+                    revision.clause = (revision.relation == RevisionRelation::Amends).then(|| {
+                        if revision.relation_source == graph::EdgeSource::Operator {
+                            revision.answer.clone()
+                        } else {
+                            text::amended_clause(&previous.answer, &revision.answer)
+                        }
+                    });
                     let kind = match revision.relation {
                         RevisionRelation::Supersedes => EdgeKind::Supersedes,
                         RevisionRelation::Amends => EdgeKind::Amends,
@@ -718,6 +839,10 @@ impl Ledger {
                         kind,
                         to: previous.id.clone(),
                     });
+                }
+                if ordered.is_empty() {
+                    revision.relation = RevisionRelation::Initial;
+                    revision.relation_source = graph::EdgeSource::Derived;
                 }
                 edges.insert(Edge {
                     from: revision.id.clone(),
@@ -875,6 +1000,33 @@ impl Ledger {
                             .answer
                             .clone()
                     });
+                let amending = decision
+                    .revisions
+                    .iter()
+                    .rev()
+                    .take_while(|revision| revision.relation == RevisionRelation::Amends)
+                    .count();
+                let (amends, amended_clauses) =
+                    if amending > 0 && amending < decision.revisions.len() {
+                        let base = decision.revisions.len() - amending - 1;
+                        (
+                            Some(decision.revisions[base].answer.clone()),
+                            decision.revisions[base + 1..]
+                                .iter()
+                                .map(|revision| {
+                                    revision
+                                        .clause
+                                        .clone()
+                                        .unwrap_or_else(|| revision.answer.clone())
+                                })
+                                .collect(),
+                        )
+                    } else {
+                        (None, Vec::new())
+                    };
+                let change_source = (latest.relation != RevisionRelation::Initial
+                    && latest.relation != RevisionRelation::Restates)
+                    .then_some(latest.relation_source);
                 Some(AnsweredFact {
                     decision_id: decision.id.clone(),
                     open_items: decision.open_items.clone(),
@@ -884,6 +1036,10 @@ impl Ledger {
                     first_seen_at: latest.first_seen_at,
                     earlier_answers,
                     changed_from,
+                    change_source,
+                    amends,
+                    amended_clauses,
+                    change_impact: Vec::new(),
                     tier: decision.tier,
                 })
             })
@@ -1170,6 +1326,26 @@ pub fn contract_guidance(facts: &[AnsweredFact], possible: &[PossibleMatch]) -> 
                 " — decision changed: “{from}” -> “{}”",
                 fact.answer
             ));
+        }
+        if let Some(base) = &fact.amends {
+            out.push_str(&format!(
+                " — amends “{base}”, which still stands, with: {}",
+                fact.amended_clauses
+                    .iter()
+                    .map(|clause| format!("“{clause}”"))
+                    .collect::<Vec<_>>()
+                    .join("; ")
+            ));
+        }
+        if fact.change_source == Some(graph::EdgeSource::Proposed)
+            && (fact.changed_from.is_some() || fact.amends.is_some())
+        {
+            out.push_str(
+                " (the binary classified this as a change or an amend; the operator confirms or corrects it by starting the reply with `change:` or `amend:`)",
+            );
+        }
+        for line in &fact.change_impact {
+            out.push_str(&format!("\n  - {line}"));
         }
     }
     for candidate in possible {

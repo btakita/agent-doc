@@ -12,6 +12,7 @@
 
 use std::path::Path;
 
+use agent_doc_answer_ledger::graph::{DecisionGraph, EdgeSource, GraphEdge, Node, NodeKind};
 use agent_doc_answer_ledger::{
     AnsweredFact, DuplicateClosure, Ledger, PossibleMatch, PriorIndex, PriorKey, PriorRevision,
     Reask,
@@ -86,7 +87,112 @@ fn load_prior(file: &Path) -> PriorIndex {
     }
 }
 
-fn store_index(file: &Path, ledger: &Ledger, now: u64) {
+fn graph_rows(
+    graph: &DecisionGraph,
+) -> (
+    Vec<agent_doc_sqlite::answer_ledger_index::AnswerNodeRow>,
+    Vec<agent_doc_sqlite::answer_ledger_index::AnswerEdgeRow>,
+) {
+    let nodes = graph
+        .nodes
+        .values()
+        .filter(|node| node.in_document)
+        .map(
+            |node| agent_doc_sqlite::answer_ledger_index::AnswerNodeRow {
+                id: node.id.clone(),
+                kind: node.kind.as_str().to_string(),
+                label: node.label.clone(),
+                open: node.open,
+                location: node.location.clone(),
+                first_seen_at: node.first_seen_at,
+            },
+        )
+        .collect();
+    let edges = graph
+        .edges
+        .iter()
+        .map(
+            |edge| agent_doc_sqlite::answer_ledger_index::AnswerEdgeRow {
+                from: edge.from.clone(),
+                kind: edge.kind.as_str().to_string(),
+                to: edge.to.clone(),
+                source: edge.source.as_str().to_string(),
+                clause: edge.clause.clone(),
+            },
+        )
+        .collect();
+    (nodes, edges)
+}
+
+/// The cached graph rows for `file`, as graph values. Rows with an unknown
+/// kind (written by a newer binary) are skipped.
+fn load_prior_graph(file: &Path) -> (Vec<Node>, Vec<GraphEdge>) {
+    let Some((root, document_id)) = index_target(file) else {
+        return (Vec::new(), Vec::new());
+    };
+    match agent_doc_sqlite::answer_ledger_index::load_graph_for_project(&root, &document_id) {
+        None => (Vec::new(), Vec::new()),
+        Some(Ok((nodes, edges))) => (
+            nodes
+                .into_iter()
+                .filter_map(|row| {
+                    Some(Node {
+                        kind: NodeKind::parse(&row.kind)?,
+                        id: row.id,
+                        label: row.label,
+                        open: row.open,
+                        location: row.location,
+                        first_seen_at: row.first_seen_at,
+                        in_document: false,
+                    })
+                })
+                .collect(),
+            edges
+                .into_iter()
+                .filter_map(|row| {
+                    Some(GraphEdge {
+                        kind: agent_doc_answer_ledger::EdgeKind::parse(&row.kind)?,
+                        source: EdgeSource::parse(&row.source).unwrap_or_default(),
+                        from: row.from,
+                        to: row.to,
+                        clause: row.clause,
+                    })
+                })
+                .collect(),
+        ),
+        Some(Err(err)) => {
+            eprintln!(
+                "[preflight] decision graph: cache unreadable ({err:#}); using the document only"
+            );
+            (Vec::new(), Vec::new())
+        }
+    }
+}
+
+/// The decision graph for `content`: the ledger projection plus cached
+/// history the document no longer shows (`#decisiongraph`). Read-only.
+pub fn build_graph(file: &Path, content: &str) -> (Ledger, DecisionGraph) {
+    let (observations, ledger) = build_ledger(file, content);
+    let mut graph = DecisionGraph::build(&ledger, &observations);
+    let (nodes, edges) = load_prior_graph(file);
+    graph.merge_prior(nodes, edges);
+    (ledger, graph)
+}
+
+/// Fill `change_impact` on every fact whose latest revision changes or
+/// amends the decision.
+fn attach_change_impact(facts: &mut [AnsweredFact], graph: &DecisionGraph) {
+    for fact in facts {
+        if fact.changed_from.is_none() && fact.amends.is_none() {
+            continue;
+        }
+        if let Some(impact) = graph.impact(&fact.decision_id, None) {
+            fact.change_impact = agent_doc_answer_ledger::graph::render_impact(&impact);
+        }
+    }
+}
+
+fn store_index(file: &Path, ledger: &Ledger, graph: &DecisionGraph, now: u64) {
     let Some((root, document_id)) = index_target(file) else {
         return;
     };
@@ -112,17 +218,7 @@ fn store_index(file: &Path, ledger: &Ledger, now: u64) {
             },
         )
         .collect();
-    let edges: Vec<_> = ledger
-        .edges
-        .iter()
-        .map(
-            |edge| agent_doc_sqlite::answer_ledger_index::AnswerEdgeRow {
-                from: edge.from.clone(),
-                kind: edge.kind.as_str().to_string(),
-                to: edge.to.clone(),
-            },
-        )
-        .collect();
+    let (nodes, edges) = graph_rows(graph);
     if let Err(err) = agent_doc_sqlite::answer_ledger_index::store_for_project(
         &root,
         &document_id,
@@ -132,6 +228,14 @@ fn store_index(file: &Path, ledger: &Ledger, now: u64) {
         now,
     ) {
         eprintln!("[preflight] answer ledger: index not refreshed ({err:#})");
+    }
+    if let Err(err) = agent_doc_sqlite::answer_ledger_index::store_nodes_for_project(
+        &root,
+        &document_id,
+        &nodes,
+        now,
+    ) {
+        eprintln!("[preflight] decision graph: nodes not refreshed ({err:#})");
     }
 }
 
@@ -196,6 +300,7 @@ fn run_answer_ledger_maintenance_with_options(
     let (observations, ledger) = build_ledger(file, &content);
     let closed = ledger.duplicate_closures(&observations);
     let mut report_ledger = ledger;
+    let mut report_observations = observations;
     if !closed.is_empty()
         && let Some(target) = agent_doc_answer_ledger::apply_duplicate_closures(&content, &closed)?
     {
@@ -236,11 +341,16 @@ fn run_answer_ledger_maintenance_with_options(
                 ),
             );
         }
-        let (_, rebuilt) = build_ledger(file, &persisted);
+        let (rebuilt_observations, rebuilt) = build_ledger(file, &persisted);
         report_ledger = rebuilt;
+        report_observations = rebuilt_observations;
     }
-    store_index(file, &report_ledger, now);
-    let facts = report_ledger.answered_facts();
+    let mut graph = DecisionGraph::build(&report_ledger, &report_observations);
+    let (prior_nodes, prior_edges) = load_prior_graph(file);
+    graph.merge_prior(prior_nodes, prior_edges);
+    store_index(file, &report_ledger, &graph, now);
+    let mut facts = report_ledger.answered_facts();
+    attach_change_impact(&mut facts, &graph);
     for fact in &facts {
         eprintln!(
             "[preflight] answer ledger: already answered `{}` ({}): “{}”",

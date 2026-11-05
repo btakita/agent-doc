@@ -1752,6 +1752,21 @@ fn reconcile_durable_queue_attempts_on_hub(
 /// [`with_hub_seeded_from_file`], this never creates a hub from disk: callers use
 /// it when disk is a recovery projection and an absent hub means the live model is
 /// not available.
+/// The canonical text of `file`'s live hub, or `None` when this process hosts
+/// no hub for it.
+///
+/// Observational only: it never allocates a hub, never seeds one from disk or
+/// a retained projection, never drives a commit barrier, and never writes the
+/// ops log. `#replicamergeduplicates`: the controller's admission check uses it
+/// to ask whether an already-attached document's own authority still carries
+/// agent-doc opt-in when its disk projection does not.
+pub fn existing_hub_canonical_text_for_file(file: &Path) -> Option<String> {
+    let hash = agent_doc_fs::document_state_hash(file).ok()?;
+    let handle = hub_handle(&hash)?;
+    let text = handle.lock().canonical_text();
+    Some(text)
+}
+
 fn with_existing_hub<T>(file: &Path, f: impl FnOnce(&mut RelayHub) -> T) -> Result<Option<T>> {
     let hash = agent_doc_fs::document_state_hash(file)?;
     let Some(handle) = hub_handle(&hash) else {

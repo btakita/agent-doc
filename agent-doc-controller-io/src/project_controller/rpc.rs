@@ -12214,6 +12214,92 @@ fn is_agent_doc_document(file: &Path) -> bool {
     result
 }
 
+/// `#replicamergeduplicates`: whether an editor-attached document is still an
+/// agent-doc session document.
+///
+/// The disk check ([`is_agent_doc_document`]) answers first. Only when it says
+/// no does the live hub's own canonical text get a say, so a real session
+/// document whose disk projection is mid-save, deleted, or not yet written
+/// keeps its replicas, while a document neither copy opts in is refused.
+fn attached_document_is_agent_doc_document(file: &Path) -> bool {
+    is_agent_doc_document(file)
+        || agent_doc_crdt_relay_io::existing_hub_canonical_text_for_file(file).is_some_and(|text| {
+            agent_doc_frontmatter_io::session::is_agent_doc_document_for_file(&text, file)
+        })
+}
+
+/// `#replicamergeduplicates`: refuse, and drop, a replica of a non-session
+/// document that is already editor-attached.
+///
+/// Admission used to run only while a document was detached, so a document
+/// whose replicas registered under the older body-marker rule (specs, docs,
+/// fixtures) stayed grandfathered: the durable reliable-sync liveness plane
+/// still held it open after a controller recycle, the authority read
+/// `editor_attached`, and the editor's retained replica re-registered through
+/// `fresh_controller_retained_replica`. On 2026-11-04 that reseed merged the
+/// editor's stale lineage with the committed text and wrote duplicated
+/// paragraphs into `specs/07-orchestration-commands.md`,
+/// `specs/02-document-format.md`, and `docs/guide/queue-markers.md`.
+///
+/// Every non-deregister method now passes the same opt-in check whatever the
+/// authority says. The requesting identity is deregistered on contact, so a
+/// replica that survived an install or reload is dropped on its next pull or
+/// update, and the refusal is the terminal `not_agent_doc_document` the editor
+/// already stops retrying on.
+fn drop_attached_non_session_replica(
+    file: &Path,
+    method: ControllerCrdtReplicaMethod,
+    identity: &str,
+    payload: &ControllerCrdtReplicaPayload,
+    source: &str,
+) -> serde_json::Value {
+    let editor_pid = payload
+        .editor_pid
+        .or_else(|| agent_doc_crdt_relay_io::editor_process_id_from_identity(identity));
+    let removed = match editor_pid {
+        Some(pid) => {
+            agent_doc_crdt_relay_io::deregister_editor_replica_for_file(file, identity, pid)
+        }
+        None => agent_doc_crdt_relay_io::deregister_replica_for_file(file, identity),
+    };
+    // A refused registration never joined, and a replica already dropped has
+    // nothing left to say: log only the edges that change something, so a
+    // stale editor polling a refused path cannot storm the ops log.
+    let log = match &removed {
+        Ok(removed) => *removed || method == ControllerCrdtReplicaMethod::Register,
+        Err(_) => true,
+    };
+    if log {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "crdt_replica_non_session_dropped file={} method={} source={} identity={} removed={} live_replicas={} reason=not_agent_doc_document (#replicamergeduplicates)",
+                file.display(),
+                method.label(),
+                source,
+                identity,
+                match &removed {
+                    Ok(removed) => removed.to_string(),
+                    Err(error) => format!("error:{error}"),
+                },
+                agent_doc_crdt_relay_io::live_replica_count_for_file(file),
+            ),
+        );
+    }
+    crdt_replica_refused_data("not_agent_doc_document")
+}
+
+/// Whether this is the first ignored document-op frame for `file` in this
+/// controller process. An editor typing into a non-session document may push a
+/// frame per edit batch; one ops-log line names the cause.
+fn note_non_session_document_op_ignored(file: &Path) -> bool {
+    static LOGGED: OnceLock<Mutex<std::collections::BTreeSet<PathBuf>>> = OnceLock::new();
+    LOGGED
+        .get_or_init(|| Mutex::new(std::collections::BTreeSet::new()))
+        .lock()
+        .insert(file.to_path_buf())
+}
+
 pub(super) fn replica_registration_session_identity_refusal(
     project_root: &Path,
     file: &Path,
@@ -12308,6 +12394,18 @@ fn handle_crdt_replica_rpc(
         return Ok(crdt_replica_refused_data(reason));
     }
     let authority = crdt_authority_for_file(&file_arg);
+    // `#replicamergeduplicates`: an attached authority is not admission. A
+    // replica registered under an older rule must not be grandfathered past
+    // an install, reload, or controller recycle; the editor may always shed
+    // its own membership.
+    if authority.editor_attached()
+        && method != ControllerCrdtReplicaMethod::Deregister
+        && !attached_document_is_agent_doc_document(&canonical)
+    {
+        return Ok(drop_attached_non_session_replica(
+            &canonical, method, identity, &payload, source,
+        ));
+    }
     // `#replicarefusalstorm` / `#replicaendpointtakeover`: a non-agent-doc
     // markdown file (README, AGENTS, CONTRIBUTING, a draft, a test fixture — no
     // `agent_doc_*` frontmatter and no `[documents]` opt-in, whatever
@@ -25227,16 +25325,35 @@ fn handle_reliable_sync(
         let batch = decoded.with_context(|| {
             format!("reliable_sync_document_op_frame_malformed hash={document_hash}")
         })?;
-        let delta =
-            agent_doc_merge::crdt_sync::encode_update_ops(&batch.ops).with_context(|| {
-                format!("reliable_sync_document_op_reencode_failed hash={document_hash}")
+        // `#replicamergeduplicates`: a document-op frame for a document that is
+        // not an agent-doc session document never folds into a hub, even one a
+        // replica of the older admission rule left allocated. The frame is still
+        // a terminal receive outcome, so the cursor below advances and the
+        // sender is not wedged retrying it.
+        if attached_document_is_agent_doc_document(file) {
+            let delta =
+                agent_doc_merge::crdt_sync::encode_update_ops(&batch.ops).with_context(|| {
+                    format!("reliable_sync_document_op_reencode_failed hash={document_hash}")
+                })?;
+            agent_doc_crdt_relay_io::apply_document_op_delta_for_file_in_lineage(
+                file,
+                batch.lineage.as_deref(),
+                &delta,
+            )
+            .with_context(|| {
+                format!("reliable_sync_document_op_fold_failed hash={document_hash}")
             })?;
-        agent_doc_crdt_relay_io::apply_document_op_delta_for_file_in_lineage(
-            file,
-            batch.lineage.as_deref(),
-            &delta,
-        )
-        .with_context(|| format!("reliable_sync_document_op_fold_failed hash={document_hash}"))?;
+        } else if note_non_session_document_op_ignored(file) {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "reliable_sync_document_op_ignored file={} hash={} ops={} reason=not_agent_doc_document (#replicamergeduplicates)",
+                    file.display(),
+                    document_hash,
+                    batch.ops.len(),
+                ),
+            );
+        }
     }
 
     // P4 receive durability boundary: every document-side effect above completes
@@ -67775,7 +67892,12 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let file = dir.path().join("structural-document-op.md");
+        // A session document: a frontmatterless one never folds
+        // (`#replicamergeduplicates`).
         let base = concat!(
+            "---\n",
+            "agent_doc_session: structural-document-op\n",
+            "---\n",
             "<!-- agent:exchange -->\n",
             "Prompt.\n",
             "<!-- /agent:exchange -->\n",
@@ -69366,6 +69488,272 @@ body
             pid,
         )
         .unwrap();
+    }
+
+    fn replica_rpc_request(file: &Path, payload: serde_json::Value) -> ControllerRequest {
+        ControllerRequest {
+            command: "crdt_replica".to_string(),
+            file: Some(file.to_path_buf()),
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: None,
+            state: None,
+            caller: None,
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: Some(payload.to_string()),
+            sequence: None,
+        }
+    }
+
+    /// `#replicamergeduplicates` (fresh controller): on 2026-11-04 an install
+    /// recycled the controller while the JetBrains plugin still held retained
+    /// replicas of `specs/07-orchestration-commands.md` and two other
+    /// frontmatterless docs, registered under the older body-marker rule. The
+    /// durable reliable-sync plane still held them open, so the replacement
+    /// controller read `editor_attached`, skipped the detached-only admission
+    /// check, and reseeded a hub from the editor's stale lineage
+    /// (`fresh_controller_retained_replica`); the merge duplicated paragraphs on
+    /// disk. An attached authority must not stand in for admission.
+    #[test]
+    fn replica_registration_refuses_non_session_document_the_liveness_plane_still_holds_open() {
+        let _env = reliable_sync_env_lock();
+        use agent_doc_reliable_sync_io::liveness::{LivenessOp, encode_liveness_frame};
+
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let spec = dir.path().join("specs/07-orchestration-commands.md");
+        std::fs::create_dir_all(spec.parent().unwrap()).unwrap();
+        let spec_text = "# Orchestration Commands\n\nA paragraph.\n\n<!-- agent:run -->\n- quoted\n<!-- /agent:run -->\n";
+        std::fs::write(&spec, spec_text).unwrap();
+        let canonical = spec.canonicalize().unwrap();
+        let document_hash = agent_doc_hash::document_id_for_path(&canonical);
+        let pid = std::process::id();
+
+        // The replacement controller restores the plane from its journal: the
+        // editor still holds the document open, but no hub exists yet.
+        let open = encode_liveness_frame(&[LivenessOp::Open {
+            document_hash: document_hash.clone(),
+            pid: u64::from(pid),
+            tag: "pre-install-open".into(),
+        }])
+        .unwrap();
+        controller_liveness_plane()
+            .lock()
+            .ingest(&document_hash, 1, &open)
+            .unwrap();
+        assert!(
+            crdt_authority_for_file(&canonical.to_string_lossy()).editor_attached(),
+            "the regression requires a plane-attached authority with no hub"
+        );
+        assert_eq!(
+            agent_doc_crdt_relay_io::live_replica_count_for_file(&canonical),
+            0
+        );
+
+        let bootstrap = crate::project_controller::test_bootstrap(&dir);
+        let refused = handle_crdt_replica_rpc(
+            &bootstrap,
+            None,
+            replica_rpc_request(
+                &canonical,
+                serde_json::json!({
+                    "method": "replica_register",
+                    "identity": format!("jetbrains-{pid}-retained-spec:refresh-7"),
+                    "editor_pid": pid,
+                    "source": "jetbrains_plugin",
+                }),
+            ),
+        )
+        .unwrap();
+
+        let close = encode_liveness_frame(&[LivenessOp::Close {
+            document_hash: document_hash.clone(),
+            pid: u64::from(pid),
+            observed_tags: vec!["pre-install-open".into()],
+        }])
+        .unwrap();
+        controller_liveness_plane()
+            .lock()
+            .ingest(&document_hash, 2, &close)
+            .unwrap();
+
+        assert_eq!(
+            refused["reason"], "not_agent_doc_document",
+            "a plane-attached non-session document must still be refused: {refused}"
+        );
+        assert!(refused.get("client_id").is_none(), "{refused}");
+        assert_eq!(
+            agent_doc_crdt_relay_io::live_replica_count_for_file(&canonical),
+            0,
+            "the refused registration must not reseed a hub"
+        );
+        assert_eq!(std::fs::read_to_string(&canonical).unwrap(), spec_text);
+        let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops_log.contains("crdt_replica_non_session_dropped")
+                && ops_log.contains("method=replica_register"),
+            "{ops_log}"
+        );
+        assert!(
+            !ops_log.contains("crdt_replica_register_retained_reseed"),
+            "{ops_log}"
+        );
+    }
+
+    /// `#replicamergeduplicates` (live controller): a replica that registered
+    /// under the older rule and is still a member when the plugin reloads must
+    /// be dropped on its next request, not merged into. The plugin's re-register
+    /// is refused, its surviving member's pull and update are refused and
+    /// deregister it, and a document-op frame for the path folds nothing. The
+    /// same steps against a frontmatter session document keep working.
+    #[test]
+    fn grandfathered_non_session_replica_is_dropped_on_its_next_request() {
+        let _env = reliable_sync_env_lock();
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let guide = dir.path().join("docs/guide/queue-markers.md");
+        std::fs::create_dir_all(guide.parent().unwrap()).unwrap();
+        let guide_text =
+            "# Queue markers\n\n| glyph | meaning |\n|---|---|\n| `▫️` | generated row |\n";
+        std::fs::write(&guide, guide_text).unwrap();
+        let session = dir.path().join("tasks/session.md");
+        std::fs::create_dir_all(session.parent().unwrap()).unwrap();
+        let session_text = "---\nagent_doc_session: replicamergeduplicates-control\n---\n\nbody\n";
+        std::fs::write(&session, session_text).unwrap();
+
+        let bootstrap = crate::project_controller::test_bootstrap(&dir);
+        let pid = std::process::id();
+        for (file, text, tag, admitted) in [
+            (&guide, guide_text, "guide", false),
+            (&session, session_text, "session", true),
+        ] {
+            let canonical = file.canonicalize().unwrap();
+            let old_identity = format!("jetbrains-{pid}-{tag}:refresh-1");
+            // The older admission rule: the replica joined the relay directly.
+            agent_doc_crdt_relay_io::register_editor_replica_for_file_incremental(
+                &canonical,
+                &old_identity,
+                None,
+                pid,
+            )
+            .unwrap()
+            .expect("the older rule registered the replica");
+            assert_eq!(
+                agent_doc_crdt_relay_io::live_replica_count_for_file(&canonical),
+                1
+            );
+
+            // The generation that survived the reload makes its next pull.
+            let pull = handle_crdt_replica_rpc(
+                &bootstrap,
+                None,
+                replica_rpc_request(
+                    &canonical,
+                    serde_json::json!({
+                        "method": "replica_pull",
+                        "identity": old_identity,
+                        "editor_pid": pid,
+                        "source": "jetbrains_plugin",
+                    }),
+                ),
+            )
+            .unwrap();
+
+            // Then the reloaded plugin registers a new generation.
+            let reregister = handle_crdt_replica_rpc(
+                &bootstrap,
+                None,
+                replica_rpc_request(
+                    &canonical,
+                    serde_json::json!({
+                        "method": "replica_register",
+                        "identity": format!("jetbrains-{pid}-{tag}:refresh-2"),
+                        "editor_pid": pid,
+                        "source": "jetbrains_plugin",
+                    }),
+                ),
+            )
+            .unwrap();
+            // A document-op frame carrying an edit the surviving lineage made.
+            let (lineage, encoded) = agent_doc_crdt_relay_io::with_hub(&canonical, |hub| {
+                (hub.lineage().to_string(), hub.canonical_encoded_state())
+            })
+            .unwrap();
+            let editor =
+                agent_doc_merge::crdt_sync::ReplicaState::from_encoded(9131, &encoded).unwrap();
+            let frontier = editor.state_vector();
+            editor.apply_local_edit(text.chars().count() as u32, 0, "STALE\n");
+            let ops =
+                agent_doc_merge::crdt_sync::decode_update_ops(&editor.diff(&frontier).unwrap())
+                    .unwrap();
+            let document_hash = agent_doc_hash::document_id_for_path(&canonical);
+            let channel = format!("{document_hash}:document-op");
+            let frame =
+                agent_doc_reliable_sync_io::document_op::encode_document_op_frame_in_lineage(
+                    Some(&lineage),
+                    &ops,
+                )
+                .unwrap();
+            let envelope = agent_doc_reliable_sync_io::encode_envelope(&channel, &frame).unwrap();
+            let mut request = replica_rpc_request(&canonical, serde_json::Value::Null);
+            request.command = "reliable_sync".to_string();
+            request.generation = Some(41);
+            request.caller = Some("test".to_string());
+            request.diagnostic_payload = Some(envelope.to_string());
+            let response = handle_reliable_sync(dir.path(), request)
+                .expect("an ignored document-op frame is a terminal receive outcome");
+            assert_eq!(response.ack_through, 41, "{tag}: the sender must not wedge");
+            let folded = agent_doc_crdt_relay_io::existing_hub_canonical_text_for_file(&canonical);
+
+            if admitted {
+                assert!(reregister.get("client_id").is_some(), "{reregister}");
+                assert!(pull.get("refused").is_none(), "{pull}");
+                assert_eq!(folded.as_deref(), Some(format!("{text}STALE\n").as_str()));
+                for identity in [
+                    old_identity.clone(),
+                    format!("jetbrains-{pid}-{tag}:refresh-2"),
+                ] {
+                    agent_doc_crdt_relay_io::deregister_editor_replica_for_file(
+                        &canonical, &identity, pid,
+                    )
+                    .unwrap();
+                }
+            } else {
+                assert_eq!(
+                    reregister["reason"], "not_agent_doc_document",
+                    "{reregister}"
+                );
+                assert!(reregister.get("client_id").is_none(), "{reregister}");
+                assert_eq!(pull["reason"], "not_agent_doc_document", "{pull}");
+                assert_eq!(
+                    agent_doc_crdt_relay_io::live_replica_count_for_file(&canonical),
+                    0,
+                    "the grandfathered member must be dropped on contact"
+                );
+                assert_eq!(
+                    folded.as_deref().unwrap_or(text),
+                    text,
+                    "a non-session document-op frame must not fold into the hub"
+                );
+                assert_eq!(std::fs::read_to_string(&canonical).unwrap(), text);
+                let ops_log =
+                    std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+                assert!(
+                    ops_log.contains("crdt_replica_non_session_dropped")
+                        && ops_log.contains("method=replica_pull")
+                        && ops_log.contains("removed=true"),
+                    "{ops_log}"
+                );
+                assert!(
+                    ops_log.contains("reliable_sync_document_op_ignored"),
+                    "{ops_log}"
+                );
+            }
+        }
     }
 
     #[test]

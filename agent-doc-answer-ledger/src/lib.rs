@@ -44,6 +44,13 @@
 //!    [`SemanticNeighbours`] implementation (for example a tsift embedding
 //!    index). Absent, the ledger degrades to tiers 1-3.
 //!
+//! **Attached facts** (`#answeroutsidewaiting`, annotate only): an open,
+//! unanswered copy also gets the answer of a *distinct* decision when it is a
+//! request raised for a work item the operator answered
+//! ([`MatchTier::WorkItem`]), or when it matches an answered question by
+//! subject anchors and that work item shares a subject anchor with it
+//! ([`MatchTier::AnchorViaWork`]). Nothing is merged and nothing acts.
+//!
 //! The data model is graph-ready: decisions and revisions have stable ids, and
 //! every relation is a typed [`Edge`] (`answers`, `supersedes`, `amends`,
 //! `restates`, `applies_to`, `same_as`).
@@ -124,6 +131,14 @@ pub enum MatchTier {
     Anchor,
     Text,
     Semantic,
+    /// Attached, never merged (`#answeroutsidewaiting`): a request raised for
+    /// a work item the operator answered gets that answer as a fact.
+    WorkItem,
+    /// Attached, never merged: same decision kind and subject anchors as an
+    /// answered question, and the work item the copy was raised for shares a
+    /// subject anchor with it (the id-backed context the plain anchor tier
+    /// lacks).
+    AnchorViaWork,
 }
 
 impl MatchTier {
@@ -239,6 +254,11 @@ pub struct AnsweredFact {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub changed_from: Option<String>,
     pub tier: MatchTier,
+    /// Set on an attached fact: the work item the open copy was raised for,
+    /// through which the answer reaches it. The answer belongs to a distinct
+    /// decision, so an attached fact never closes or refuses anything.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub via: Option<String>,
 }
 
 /// A duplicate open todo copy the binary closes.
@@ -281,6 +301,10 @@ pub struct Ledger {
     /// Near-duplicate clusters among open, unanswered decisions (tiers 2-4
     /// without an id overlap), for `decision validate`.
     pub near_duplicates: Vec<Vec<String>>,
+    /// Answers attached to an open copy from a distinct decision
+    /// ([`MatchTier::WorkItem`], [`MatchTier::AnchorViaWork`]); see
+    /// [`Ledger::answered_facts`].
+    pub attached: Vec<AnsweredFact>,
     key_to_decision: BTreeMap<String, usize>,
     key_first_seen: BTreeMap<String, u64>,
     live_queue_ids: BTreeSet<String>,
@@ -842,6 +866,12 @@ impl Ledger {
                 }
             }
         }
+        ledger.attached = ledger.attached_facts(&edges, &profiles);
+        possible.retain(|candidate| {
+            !ledger.attached.iter().any(|fact| {
+                fact.decision_id == candidate.decision_id && fact.open_items == candidate.open_items
+            })
+        });
         ledger.possible = possible;
         ledger.near_duplicates = near_duplicates
             .into_iter()
@@ -879,6 +909,104 @@ impl Ledger {
             })
     }
 
+    /// Facts attached to an open, unanswered copy from a *distinct* decision
+    /// (`#answeroutsidewaiting`). Nothing is merged, and an attached fact
+    /// never closes a copy or refuses a closeout: it only puts the operator's
+    /// answer in front of the agent. Two shapes, both id-backed:
+    ///
+    /// - [`MatchTier::WorkItem`]: a request copy was raised for a work item
+    ///   (an `applies_to` edge from a request id) and the operator answered
+    ///   that work item.
+    /// - [`MatchTier::AnchorViaWork`]: the copy asks the same kind of decision
+    ///   with matching subject anchors as an answered question, and the work
+    ///   item it was raised for shares a subject anchor with that question
+    ///   without contradicting it (the `ADR 0041` work item behind a cap
+    ///   question whose option sets match the answered `ADR 0041` cap
+    ///   question).
+    ///
+    /// `profiles[i]` is decision `i`'s (longest question text, anchors).
+    fn attached_facts(
+        &self,
+        edges: &BTreeSet<Edge>,
+        profiles: &[(String, BTreeSet<String>)],
+    ) -> Vec<AnsweredFact> {
+        let mut out: Vec<AnsweredFact> = Vec::new();
+        for (index, decision) in self.decisions.iter().enumerate() {
+            if decision.open_items.is_empty() || !decision.revisions.is_empty() {
+                continue;
+            }
+            let raised_for: BTreeSet<&str> = edges
+                .iter()
+                .filter(|edge| {
+                    edge.kind == EdgeKind::AppliesTo
+                        && is_request(&edge.from)
+                        && decision.keys.contains(&id_key(&edge.from))
+                        // A decision item is identity when linked; a mere
+                        // citation of one is not attached here.
+                        && !self.kinds.contains_key(&edge.to)
+                })
+                .map(|edge| edge.to.as_str())
+                .collect();
+            let kind = text::decision_kind(&decision.question);
+            let own_anchors = &profiles[index].1;
+            let mut push = |source: &Decision, tier: MatchTier, via: &str| {
+                if out.iter().any(|fact| {
+                    fact.decision_id == source.id && fact.open_items == decision.open_items
+                }) {
+                    return;
+                }
+                let Some(latest) = source.latest() else {
+                    return;
+                };
+                out.push(AnsweredFact {
+                    decision_id: source.id.clone(),
+                    open_items: decision.open_items.clone(),
+                    question: decision.question.clone(),
+                    answer: latest.answer.clone(),
+                    location: latest.location.clone(),
+                    first_seen_at: latest.first_seen_at,
+                    earlier_answers: Vec::new(),
+                    changed_from: None,
+                    tier,
+                    via: Some(via.to_string()),
+                });
+            };
+            for work in raised_for {
+                let Some(&work_index) = self.key_to_decision.get(&id_key(work)) else {
+                    continue;
+                };
+                if work_index == index {
+                    continue;
+                }
+                let work_decision = &self.decisions[work_index];
+                push(work_decision, MatchTier::WorkItem, work);
+                let work_anchors = &profiles[work_index].1;
+                if kind.is_none() || work_anchors.is_empty() {
+                    continue;
+                }
+                let with_work: BTreeSet<String> =
+                    own_anchors.union(work_anchors).cloned().collect();
+                for (other_index, other) in self.decisions.iter().enumerate() {
+                    if other_index == index
+                        || other_index == work_index
+                        || other.revisions.is_empty()
+                        || text::decision_kind(&other.question) != kind
+                    {
+                        continue;
+                    }
+                    let anchors = &profiles[other_index].1;
+                    if text::anchors_match(own_anchors, anchors)
+                        && !work_anchors.is_disjoint(anchors)
+                        && text::anchors_match(&with_work, anchors)
+                    {
+                        push(other, MatchTier::AnchorViaWork, work);
+                    }
+                }
+            }
+        }
+        out
+    }
+
     fn groups(uf: &mut UnionFind, questions: &[QuestionObs]) -> Vec<Group> {
         let keys: Vec<String> = uf.parent.keys().cloned().collect();
         let mut by_root: BTreeMap<String, Group> = BTreeMap::new();
@@ -913,9 +1041,12 @@ impl Ledger {
             .map(|&index| &self.decisions[index])
     }
 
-    /// "Already answered" facts for every answered decision with open copies.
+    /// "Already answered" facts for every answered decision with open copies,
+    /// then the facts attached to unanswered copies from a distinct decision
+    /// (their `via` is set; they never act).
     pub fn answered_facts(&self) -> Vec<AnsweredFact> {
-        self.decisions
+        let mut facts: Vec<AnsweredFact> = self
+            .decisions
             .iter()
             .filter(|decision| !decision.open_items.is_empty())
             .filter_map(|decision| {
@@ -941,9 +1072,12 @@ impl Ledger {
                     earlier_answers,
                     changed_from,
                     tier: decision.tier,
+                    via: None,
                 })
             })
-            .collect()
+            .collect();
+        facts.extend(self.attached.iter().cloned());
+        facts
     }
 
     /// Duplicate open todo copies the binary closes on its own.
@@ -1257,9 +1391,14 @@ pub fn contract_guidance(facts: &[AnsweredFact], possible: &[PossibleMatch]) -> 
     if facts.is_empty() && possible.is_empty() {
         return None;
     }
-    let mut out = String::from(
-        "The operator already answered these questions (#answerbyrequestid). Act on the recorded answer; do not ask again, and do not open a new request, todo or waiting question for them. A closeout that re-asks one is refused unless it cites the decision id and says why the answer does not resolve it.",
-    );
+    let (attached, facts): (Vec<&AnsweredFact>, Vec<&AnsweredFact>) =
+        facts.iter().partition(|fact| fact.via.is_some());
+    let mut out = String::new();
+    if !facts.is_empty() || !possible.is_empty() {
+        out.push_str(
+            "The operator already answered these questions (#answerbyrequestid). Act on the recorded answer; do not ask again, and do not open a new request, todo or waiting question for them. A closeout that re-asks one is refused unless it cites the decision id and says why the answer does not resolve it.",
+        );
+    }
     for fact in facts {
         out.push_str(&format!(
             "\n- already answered `{}` ({}): “{}” ({})",
@@ -1293,6 +1432,34 @@ pub fn contract_guidance(facts: &[AnsweredFact], possible: &[PossibleMatch]) -> 
             candidate.location
         ));
     }
+    if !attached.is_empty() {
+        if !out.is_empty() {
+            out.push('\n');
+        }
+        out.push_str(
+            "Related operator answers (#answeroutsidewaiting): each open copy below was not answered itself, but the operator answered the work item it was raised for, or a question with the same subject. Read that answer before asking: act on it when it resolves the copy. When it does not, cite the decision id in the request and say what is still open. These are distinct questions; never merge them yourself.",
+        );
+        for fact in attached {
+            let via = fact.via.as_deref().unwrap_or_default();
+            out.push_str(&format!(
+                "\n- {} — {}: “{}” under `{}` ({})",
+                fact.open_items
+                    .iter()
+                    .map(|item| format!("#{item}"))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                match fact.tier {
+                    MatchTier::AnchorViaWork => format!(
+                        "same subject as an answered question, raised for work item #{via}"
+                    ),
+                    _ => format!("raised for work item #{via}, which the operator answered"),
+                },
+                fact.answer,
+                fact.decision_id,
+                fact.location
+            ));
+        }
+    }
     Some(out)
 }
 
@@ -1323,3 +1490,6 @@ pub fn reask_refusal(reasks: &[Reask]) -> String {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod outside_waiting_tests;

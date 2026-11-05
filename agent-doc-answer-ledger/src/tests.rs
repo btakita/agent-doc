@@ -107,8 +107,54 @@ fn a_request_raised_for_work_only_applies_to_it() {
 }
 
 #[test]
+fn same_anchors_through_the_work_item_attach_the_answer_without_merging() {
+    // The cap request shares no id with y2fn, but it was raised for the ADR
+    // 0041 work item and asks y2fn's option sets: the answer is attached as a
+    // fact (`#answeroutsidewaiting`). The decisions stay distinct.
+    let (observations, ledger) = build(FIXTURE);
+    let facts = ledger.answered_facts();
+    let fact = fact_for(&facts, "subagent-operator-request-c690prov-cap")
+        .expect("y2fn's answer attached to the cap request copy");
+    assert_eq!(
+        fact.answer,
+        "JWS makes the cap moot. We don't store credentials."
+    );
+    assert_eq!(fact.tier, MatchTier::AnchorViaWork);
+    assert_eq!(fact.via.as_deref(), Some("tdprovauth"));
+    let y2fn = ledger.decision_for_key(&id_key("y2fn")).unwrap();
+    let cap = ledger
+        .decision_for_key(&id_key("subagent-operator-request-c690prov-cap"))
+        .unwrap();
+    assert_eq!(fact.decision_id, y2fn.id);
+    assert_ne!(cap.id, y2fn.id, "attached, not merged");
+    // The attached fact replaces the gray-zone note for that pair.
+    assert!(
+        ledger.possible.iter().all(|candidate| !candidate
+            .open_items
+            .contains(&"subagent-operator-request-c690prov-cap".to_string())),
+        "{:?}",
+        ledger.possible
+    );
+    // Attaching never closes the copy and never refuses a question.
+    assert!(
+        ledger
+            .duplicate_closures(&observations)
+            .iter()
+            .all(|closure| closure.todo_id != "subagent-operator-request-c690prov-cap")
+    );
+    // The same-numbered cap question with conflicting options gets nothing.
+    assert!(fact_for(&facts, "tdcap20").is_none());
+}
+
+#[test]
 fn same_anchors_without_an_id_overlap_only_annotate() {
-    let (_, ledger) = build(FIXTURE);
+    // Without the work item's subject anchor (ADR 0041), shared option sets
+    // alone are a gray-zone note only.
+    let unanchored = FIXTURE.replace(
+        "- [ ] [#tdprovauth] Implement and reconcile accepted ADR 0041 durable game credentials across docs, API, contracts, and SDKs.",
+        "- [ ] [#tdprovauth] Implement and reconcile durable game credentials across docs, API, contracts, and SDKs.",
+    );
+    let (_, ledger) = build(&unanchored);
     let facts = ledger.answered_facts();
     assert!(fact_for(&facts, "subagent-operator-request-c690prov-cap").is_none());
     let possible = ledger
@@ -129,7 +175,7 @@ fn same_anchors_without_an_id_overlap_only_annotate() {
     assert!(guidance.contains("possibly already answered"), "{guidance}");
     assert!(guidance.contains("already answered `"), "{guidance}");
     // Annotation never closes anything.
-    let (observations, _) = build(FIXTURE);
+    let (observations, _) = build(&unanchored);
     assert!(
         ledger
             .duplicate_closures(&observations)

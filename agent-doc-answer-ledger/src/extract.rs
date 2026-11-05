@@ -13,7 +13,13 @@
 //!   attempt / binary follow-up row; a struck row is a consumed answer and
 //!   still counts, a binary `auto-struck` row does not);
 //! - queue rows that address an id: `[#id]: answer`, `re [#id]: answer`, or
-//!   operator text ending in `[#subagent-operator-request-…]`.
+//!   operator text ending in `[#subagent-operator-request-…]`;
+//! - operator rows in a waiting packet that sits in a queue outside any
+//!   waiting item (its `**Response:**` row survived, its waiting-item marker
+//!   did not). The packet belongs to the id its parent queue row addresses
+//!   (`do [#id]`, `[#id]: …`); follow-up rows directly under a queue row are
+//!   the operator talking, not answering, and are never captured
+//!   (`#answeroutsidewaiting`).
 //!
 //! Links record why two ids may be the same question: a `**Request**: [#req]`
 //! graft or trailing request id on an item head, a request id that embeds an
@@ -444,34 +450,195 @@ fn scan_waiting_item(
                         }
                     }
                 }
-            } else if let Some((text, consumed)) = operator_row(row_body) {
-                if let Some(same) = same_as_target(&text) {
-                    if let Some(own) = &own {
-                        out.links.push(LinkObs {
-                            from: own.clone(),
-                            to: same,
-                            kind: LinkKind::OperatorSameAs,
-                        });
-                    }
-                } else {
-                    let (row_targets, answer, in_own) = match addressed_answer(&text) {
-                        Some((id, answer)) if Some(&id) != own.as_ref() => {
-                            (vec![id], answer, false)
-                        }
-                        Some((_, answer)) => (targets.clone(), answer, true),
-                        None => (targets.clone(), text, true),
-                    };
-                    out.answers.push(AnswerObs {
-                        targets: row_targets,
-                        head_text: own.is_none().then(|| question_text.clone()),
-                        text: answer,
-                        location: format!("{location_prefix}under {label}"),
-                        line: row + 1,
-                        consumed: consumed || archived,
-                        in_own_packet: in_own && !archived,
-                    });
-                }
+            } else {
+                record_operator_row(
+                    row_body,
+                    row + 1,
+                    &PacketScope {
+                        own: own.as_deref(),
+                        targets: &targets,
+                        head_text: &question_text,
+                        location: &format!("{location_prefix}under {label}"),
+                        consumed: archived,
+                        dispatch: !archived,
+                    },
+                    out,
+                );
             }
+        }
+        row += 1;
+    }
+}
+
+/// Where an operator row in a packet sits: the packet's own id, the ids its
+/// answers address, and how the row is recorded.
+struct PacketScope<'a> {
+    own: Option<&'a str>,
+    targets: &'a [String],
+    /// Question text, keying the answer when the packet has no id.
+    head_text: &'a str,
+    location: &'a str,
+    /// Every answer in the packet is consumed (archived, or the queue row
+    /// that carried the packet is struck).
+    consumed: bool,
+    /// The packet is its target's dispatch path (not an archive quote).
+    dispatch: bool,
+}
+
+/// Record one packet row as an operator answer or a `same as [#id]` merge;
+/// generated rows are ignored.
+fn record_operator_row(row_body: &str, line: usize, scope: &PacketScope, out: &mut Observations) {
+    let Some((text, consumed)) = operator_row(row_body) else {
+        return;
+    };
+    if let Some(same) = same_as_target(&text) {
+        if let Some(own) = scope.own {
+            out.links.push(LinkObs {
+                from: own.to_string(),
+                to: same,
+                kind: LinkKind::OperatorSameAs,
+            });
+        }
+        return;
+    }
+    let (targets, answer, in_own) = match addressed_answer(&text) {
+        Some((id, answer)) if Some(id.as_str()) != scope.own => (vec![id], answer, false),
+        Some((_, answer)) => (scope.targets.to_vec(), answer, true),
+        None => (scope.targets.to_vec(), text, true),
+    };
+    out.answers.push(AnswerObs {
+        targets,
+        head_text: scope.own.is_none().then(|| scope.head_text.to_string()),
+        text: answer,
+        location: scope.location.to_string(),
+        line,
+        consumed: consumed || scope.consumed,
+        in_own_packet: in_own && scope.dispatch,
+    });
+}
+
+/// A waiting packet's `**Response:** <question>` row (generated: it carries
+/// the waiting-metadata marker or the `▫️` reply marker).
+fn packet_question(body: &str) -> Option<String> {
+    let (work, _) = work_text(body);
+    let rest = work.strip_prefix("**Response:**")?;
+    let generated = body.contains("<!-- agent-doc:waiting-metadata -->")
+        || body.ends_with('▫')
+        || body.ends_with("▫️");
+    generated.then(|| strip_decorations(rest))
+}
+
+/// The id a queue row addresses: `do [#id]`, `re [#id]`, `[#id]: …` or a
+/// leading `[#id] …`. Attempt handles and queue handles are not ids. Also
+/// reports whether the row is struck.
+fn queue_row_owner(body: &str) -> Option<(String, bool)> {
+    let (work, struck) = work_text(body);
+    let lower = work.to_ascii_lowercase();
+    let rest = lower
+        .strip_prefix("do ")
+        .or_else(|| lower.strip_prefix("re "))
+        .map_or(lower.as_str(), str::trim_start);
+    if !rest.starts_with("[#") {
+        return None;
+    }
+    let id = bracket_ids(rest).into_iter().next()?;
+    (!is_handle(&id) && rest[2..].starts_with(id.as_str())).then_some((id, struck))
+}
+
+/// Line ranges of waiting packets that sit in a queue outside any waiting
+/// item: the packet lost its waiting-item marker (a `do [#id]` row now
+/// carries it), yet the operator's answer under its `**Action:**` row is
+/// still an answer (`#answeroutsidewaiting`).
+fn orphan_packet_ranges(
+    lines: &[&str],
+    waiting: &[std::ops::Range<usize>],
+) -> Vec<std::ops::Range<usize>> {
+    let mut ranges = Vec::new();
+    let mut index = 0;
+    while index < lines.len() {
+        let is_root = !waiting.iter().any(|range| range.contains(&index))
+            && list_body(lines[index]).is_some_and(|body| packet_question(body).is_some());
+        if !is_root {
+            index += 1;
+            continue;
+        }
+        let indent = indent_of(lines[index]);
+        let mut end = index + 1;
+        while end < lines.len() && (lines[end].trim().is_empty() || indent_of(lines[end]) > indent)
+        {
+            end += 1;
+        }
+        ranges.push(index..end);
+        index = end;
+    }
+    ranges
+}
+
+/// Capture the question and operator answers of one orphan packet. The
+/// packet belongs to the id its parent queue row addresses; with no such
+/// parent the answer is keyed by the question text alone. Only the parent is
+/// consulted, never a further ancestor, so an answer is never credited to an
+/// unrelated item higher up the queue.
+fn scan_orphan_packet(
+    lines: &[&str],
+    range: std::ops::Range<usize>,
+    line_offset: usize,
+    out: &mut Observations,
+) {
+    let root = range.start;
+    let indent = indent_of(lines[root]);
+    let Some(question_text) = list_body(lines[root]).and_then(packet_question) else {
+        return;
+    };
+    let parent = (0..root)
+        .rev()
+        .find(|&index| !lines[index].trim().is_empty() && indent_of(lines[index]) < indent);
+    let (own, owner_struck) = parent
+        .and_then(|index| list_body(lines[index]))
+        .and_then(queue_row_owner)
+        .map_or((None, false), |(id, struck)| (Some(id), struck));
+    if own.is_some() || !question_text.is_empty() {
+        out.questions.push(QuestionObs {
+            references: references(&question_text, own.as_deref()),
+            id: own.clone(),
+            text: question_text.clone(),
+            source: QuestionSource::Waiting,
+            // The live copies are the todo and any waiting item; this packet
+            // is what was asked.
+            open: false,
+            line: line_offset + root + 1,
+            stamp: list_body(lines[root]).and_then(stamp_of),
+        });
+    }
+    let targets: Vec<String> = own.iter().cloned().collect();
+    let label = own.as_deref().map_or_else(
+        || format!("“{}”", short(&question_text)),
+        |id| format!("[#{id}]"),
+    );
+    let location = format!("queue row, under {label} outside a waiting item");
+    let scope = PacketScope {
+        own: own.as_deref(),
+        targets: &targets,
+        head_text: &question_text,
+        location: &location,
+        consumed: owner_struck,
+        dispatch: true,
+    };
+    let mut row = root + 1;
+    while row < range.end {
+        let line = lines[row];
+        if line.contains(WAITING_ITEM_MARKER) {
+            let nested = indent_of(line);
+            row += 1;
+            while row < range.end
+                && (lines[row].trim().is_empty() || indent_of(lines[row]) > nested)
+            {
+                row += 1;
+            }
+            continue;
+        }
+        if let Some(row_body) = list_body(line) {
+            record_operator_row(row_body, line_offset + row + 1, &scope, out);
         }
         row += 1;
     }
@@ -520,6 +687,10 @@ fn scan_queue_rows(content: &str, out: &mut Observations) {
         let line_offset = content[..component.open_end].lines().count();
         let lines: Vec<&str> = body.lines().collect();
         let ranges = waiting_line_ranges(&lines);
+        let orphans = orphan_packet_ranges(&lines, &ranges);
+        for range in &orphans {
+            scan_orphan_packet(&lines, range.clone(), line_offset, out);
+        }
         for (index, line) in lines.iter().enumerate() {
             if ranges.iter().any(|range| range.contains(&index)) {
                 continue;
@@ -532,6 +703,10 @@ fn scan_queue_rows(content: &str, out: &mut Observations) {
                 for id in bracket_ids(row_body) {
                     out.live_queue_ids.insert(id);
                 }
+            }
+            // Orphan packet rows were captured above.
+            if orphans.iter().any(|range| range.contains(&index)) {
+                continue;
             }
             if work.contains("auto-struck")
                 || row_body.ends_with('▫')

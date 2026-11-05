@@ -7740,10 +7740,33 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
     } else {
         std::collections::HashSet::new()
     };
+    // `#queueskipsubagents`: a head routed to subagent dispatch (its queue or
+    // run block is `subagents` / `fan-out`, or the row carries `#subagents`)
+    // is never run by the inline turn. Unclaimed, it was not dispatched; a
+    // chat turn that came back without consuming it says nothing about it.
+    // Before this, an `agent:run subagents` head an earlier chat turn left
+    // alone was blamed by the fallback and stamped `⏭️` (observed 2026-11-05
+    // on `tasks/agent-doc/agent-doc-bugs.md`: `#decisiontsiftrecall`).
+    // Dropping it from the skip set also clears a stale `⏭️` below.
+    let subagent_routed_head_ids: std::collections::HashSet<String> = if activation.active {
+        agent_doc_queue_io::subagent_dispatch::subagent_routed_head_ids_for_content(
+            file,
+            &current_content,
+        )
+        .unwrap_or_else(|err| {
+            eprintln!(
+                "[preflight] queue: could not resolve subagent-routed heads; none exempt from #queueskip ({err:#})"
+            );
+            std::collections::HashSet::new()
+        })
+    } else {
+        std::collections::HashSet::new()
+    };
     let skip_exempt_ids: std::collections::HashSet<String> = claimed_head_ids
         .union(&awaiting_operator_ids)
         .cloned()
         .chain(blocked_head_ids.iter().cloned())
+        .chain(subagent_routed_head_ids.iter().cloned())
         .collect();
     let mut claims_held_after_report = awaiting_operator_all
         .intersection(&claimed_head_ids)
@@ -11521,6 +11544,116 @@ mod tests {
                     .lines()
                     .any(|l| l.contains("⏭\u{fe0f}") && l.contains("[#sy71]")),
             "the skipped #sy71 head must carry the ⏭️ marker:\n{updated}"
+        );
+    }
+
+    /// `#queueskipsubagents` fixture: an `agent:run subagents` queue (the
+    /// `tasks/agent-doc/agent-doc-bugs.md` shape of 2026-11-05) whose first
+    /// head no worker has claimed, after a prior chat turn that hosted a
+    /// response without consuming it.
+    fn subagents_run_skip_fixture(first_head: &str) -> (tempfile::TempDir, PathBuf) {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = format!(
+            concat!(
+                "---\n",
+                "agent_doc_session: test\n",
+                "agent_doc_format: template\n",
+                "agent_doc_write: crdt\n",
+                "queue_active: true\n",
+                "---\n\n",
+                "<!-- agent:exchange patch=append -->\n",
+                "### Re: prior — test\n\nAnswered a chat question.\n",
+                "<!-- /agent:exchange -->\n\n",
+                "<!-- agent:run id=\"main\" subagents go -->\n",
+                "- {first_head}\n",
+                "- do [#later]\n",
+                "<!-- /agent:run -->\n\n",
+                "<!-- agent:backlog -->\n",
+                "- [ ] [#tsift] fan-out work no worker has claimed yet\n",
+                "- [ ] [#later] more fan-out work\n",
+                "<!-- /agent:backlog -->\n",
+            ),
+            first_head = first_head,
+        );
+        std::fs::write(&doc, &content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(&content), Some(&content)).unwrap();
+        agent_doc_cycle_state_io::record_active_queue_heads(
+            &doc,
+            &["do [#tsift]".to_string(), "do [#later]".to_string()],
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::mark_response_captured(
+            &doc,
+            "response_captured",
+            Some(&content),
+            Some(&content),
+            &agent_doc_hash::content_hash("### Re: chat\n\nunrelated answer\n"),
+            None,
+        )
+        .unwrap();
+        (dir, doc)
+    }
+
+    /// `#queueskipsubagents` (live, `tasks/agent-doc/agent-doc-bugs.md`
+    /// 2026-11-05T05:47Z): a head of an `agent:run subagents` queue is never
+    /// run inline, so a chat turn that came back without consuming it is no
+    /// evidence it was dispatched. The fallback blame used to land on it and
+    /// stamp `⏭️` on `#decisiontsiftrecall`. Now nothing is skipped, across
+    /// repeated passes.
+    #[test]
+    fn run_queue_maintenance_never_skips_an_unclaimed_subagents_run_head() {
+        let (_dir, doc) = subagents_run_skip_fixture("do [#tsift]");
+        let content = std::fs::read_to_string(&doc).unwrap();
+        agent_doc_cycle_state_io::mark_committed(&doc, "committed", Some(&content), Some(&content))
+            .unwrap();
+        for pass in 0..2 {
+            run_queue_maintenance(&doc, None).unwrap();
+            let updated = std::fs::read_to_string(&doc).unwrap();
+            assert!(
+                !queue_line(&updated, "tsift").contains('\u{23ed}'),
+                "pass {pass}: an undispatched subagent head is never skipped:\n{updated}"
+            );
+            let persisted = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
+            assert!(
+                persisted.skipped_queue_head_ids.is_empty(),
+                "pass {pass}: {:?}",
+                persisted.skipped_queue_head_ids
+            );
+        }
+    }
+
+    /// `#queueskipsubagents`: a `⏭️` already stamped on a subagents-run head
+    /// (the carried skip of the pre-fix binary) is cleared, both from the
+    /// document and from the persisted skip set.
+    #[test]
+    fn run_queue_maintenance_clears_stale_skip_on_a_subagents_run_head() {
+        let (_dir, doc) = subagents_run_skip_fixture("\u{23ed}\u{fe0f} do [#tsift]");
+        agent_doc_cycle_state_io::set_skipped_queue_head_ids(&doc, &["tsift".to_string()]).unwrap();
+        let content = std::fs::read_to_string(&doc).unwrap();
+        agent_doc_cycle_state_io::mark_committed(&doc, "committed", Some(&content), Some(&content))
+            .unwrap();
+        run_queue_maintenance(&doc, None).unwrap();
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            !queue_line(&updated, "tsift").contains('\u{23ed}'),
+            "the stale skip marker is cleared:\n{updated}"
+        );
+        assert!(
+            updated.contains("do [#tsift]"),
+            "the head itself stays queued:\n{updated}"
+        );
+        let persisted = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
+        assert!(
+            persisted.skipped_queue_head_ids.is_empty(),
+            "{:?}",
+            persisted.skipped_queue_head_ids
         );
     }
 

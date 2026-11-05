@@ -16,15 +16,22 @@ GH #346 additionally rejects a JetBrains generation whose Kotlin delta is only
 comments/formatting or a consistent identifier rename, and pins the schema-3
 Remote Dev grouping path behind the hot-reloaded `client_measured_layout`
 derivation before its frozen compatibility floor.
+
+`#editorbumpgeneration`: for VS Code and Zed, `--bump` writes the COMPLETE
+generation (`GENERATION_PINS`), and the fence rejects a generation whose files
+disagree, naming the version-pin guard tests a bump must keep green
+(`VERSION_PIN_GUARDS`). See editors/SPEC.md section 14.
 """
 
 from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import re
 import subprocess
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 
 
@@ -348,6 +355,282 @@ def write_property(path: str, key: str, value: str) -> None:
         handle.write(text)
 
 
+SEMVER = re.compile(r"\d+\.\d+\.\d+")
+
+
+@dataclass(frozen=True)
+class VersionPin:
+    """One place a package generation's version string lives (`#editorbumpgeneration`).
+
+    `read` and `write` operate on the file's text. `write` replaces only the
+    version bytes, so a bump's diff is exactly the version lines.
+    """
+
+    path: str
+    label: str
+    read: Callable[[str], str | None]
+    write: Callable[[str, str], str]
+
+
+def _json_value(text: str, key_path: tuple[str, ...]) -> str | None:
+    value: object = json.loads(text)
+    for key in key_path:
+        if not isinstance(value, dict) or key not in value:
+            return None
+        value = value[key]
+    return value if isinstance(value, str) else None
+
+
+def _json_version_pin(path: str, key_path: tuple[str, ...], scope_marker: str | None) -> VersionPin:
+    """A `"version"` string in npm-formatted (2-space) JSON at `key_path`.
+
+    The replacement is textual, so the rest of the file is byte-identical, and is
+    then verified structurally: the reparsed document must equal the original
+    with exactly `key_path` changed, or the write refuses.
+    """
+    label = key_path[0] + "".join('[""]' if key == "" else f".{key}" for key in key_path[1:])
+    indent = " " * (2 * len(key_path))
+    pattern = re.compile(rf'(?m)^{indent}"{re.escape(key_path[-1])}": "([^"]*)"')
+
+    def write(text: str, version: str) -> str:
+        start = 0 if scope_marker is None else text.find(scope_marker)
+        match = pattern.search(text, start) if start >= 0 else None
+        if match is None:
+            raise SystemExit(f"{path}: no {label} string to bump")
+        rendered = text[: match.start(1)] + version + text[match.end(1) :]
+        expected = json.loads(text)
+        node = expected
+        for key in key_path[:-1]:
+            node = node[key]
+        node[key_path[-1]] = version
+        if json.loads(rendered) != expected:
+            raise SystemExit(f"{path}: rewriting {label} would change more than {label}")
+        return rendered
+
+    return VersionPin(path, label, lambda text: _json_value(text, key_path), write)
+
+
+def _single_match_pin(path: str, label: str, pattern: re.Pattern[str], region: Callable[[str], str]) -> VersionPin:
+    """A version captured by exactly one match of `pattern` within `region(text)`."""
+
+    def find(text: str) -> re.Match[str] | None:
+        matches = list(pattern.finditer(region(text)))
+        if len(matches) != 1:
+            return None
+        return matches[0]
+
+    def read(text: str) -> str | None:
+        match = find(text)
+        return match.group(1) if match else None
+
+    def write(text: str, version: str) -> str:
+        match = find(text)
+        if match is None:
+            raise SystemExit(f"{path}: expected exactly one {label} to bump")
+        return text[: match.start(1)] + version + text[match.end(1) :]
+
+    return VersionPin(path, label, read, write)
+
+
+def _toml_root_table(text: str) -> str:
+    """The TOML text before the first `[table]` header: the manifest's own keys."""
+    header = re.search(r"(?m)^\s*\[", text)
+    return text if header is None else text[: header.start()]
+
+
+VSCODE_PACKAGE = "editors/vscode/package.json"
+VSCODE_LOCK = "editors/vscode/package-lock.json"
+VSCODE_NATIVE = "editors/vscode/src/native.ts"
+ZED_MANIFEST = "editors/zed/extension.toml"
+
+# Every file of one package generation, per editor target. JetBrains targets
+# carry theirs in gradle.properties (`pluginVersion` plus the source digest) and
+# bump through the digest path instead.
+GENERATION_PINS: dict[str, tuple[VersionPin, ...]] = {
+    "VS Code": (
+        _json_version_pin(VSCODE_PACKAGE, ("version",), None),
+        _json_version_pin(VSCODE_LOCK, ("version",), None),
+        _json_version_pin(VSCODE_LOCK, ("packages", "", "version"), '\n  "packages": {\n    "": {\n'),
+        _single_match_pin(
+            VSCODE_NATIVE,
+            "EDITOR_PLUGIN_VERSION",
+            re.compile(r"(?m)^export const EDITOR_PLUGIN_VERSION = '([^']*)';"),
+            lambda text: text,
+        ),
+    ),
+    "Zed": (
+        _single_match_pin(
+            ZED_MANIFEST,
+            "version",
+            re.compile(r'(?m)^version\s*=\s*"([^"]*)"\s*$'),
+            _toml_root_table,
+        ),
+    ),
+}
+
+# The tests that pin each generation's version to something else. A bump must
+# keep every one green, so the fence and the bump name them
+# (`#editorbumpgeneration`). Each entry is (file, test function).
+VERSION_PIN_GUARDS: dict[str, tuple[tuple[str, str], ...]] = {
+    "VS Code": (
+        # package.json `version` == native.ts EDITOR_PLUGIN_VERSION (the version
+        # the extension reports over FFI, which stale-plugin detection reads).
+        ("tests/full_content_static_guard.rs", "vscode_manifest_exposes_jetbrains_parity_commands"),
+    ),
+    "Zed": (
+        # agent-doc-reliable-sync-io/build.rs bakes extension.toml `version` as
+        # the Zed generation this build pairs with.
+        (
+            "agent-doc-controller-io/src/project_controller/rpc.rs",
+            "sidecar_registration_reports_the_running_generation",
+        ),
+    ),
+}
+
+
+def render_guards(target_name: str) -> str:
+    return ", ".join(f"{path}::{test}" for path, test in VERSION_PIN_GUARDS.get(target_name, ()))
+
+
+def version_key(version: str) -> tuple[int, ...]:
+    return tuple(int(part) for part in version.split("."))
+
+
+def read_generation(target: Target, revision: str | None = None) -> list[tuple[VersionPin, str | None]]:
+    """Each pin's version, from the working tree or (with `revision`) a commit."""
+    texts: dict[str, str | None] = {}
+    pins = []
+    for pin in GENERATION_PINS[target.name]:
+        if pin.path not in texts:
+            if revision is None:
+                try:
+                    texts[pin.path] = open(pin.path, encoding="utf-8").read()
+                except FileNotFoundError:
+                    texts[pin.path] = None
+            else:
+                texts[pin.path] = git_text("show", f"{revision}:{pin.path}")
+        text = texts[pin.path]
+        pins.append((pin, None if text is None else pin.read(text)))
+    return pins
+
+
+def generation_version(pins: list[tuple[VersionPin, str | None]]) -> str | None:
+    """The generation a set of pins claims: the highest numeric version among them.
+
+    The highest, not the primary file's, because a version any pin already
+    carried may already have shipped and must not be reused.
+    """
+    numeric = [version for _, version in pins if version is not None and SEMVER.fullmatch(version)]
+    return max(numeric, key=version_key) if numeric else None
+
+
+def generation_coherence_failure(target: Target) -> str | None:
+    """Fail when the files of one generation disagree (the f14a185b30 class)."""
+    pins = read_generation(target)
+    rendered = "; ".join(f"{pin.path} {pin.label} {version or '<missing>'}" for pin, version in pins)
+    versions = {version for _, version in pins}
+    if len(versions) == 1 and None not in versions and SEMVER.fullmatch(next(iter(versions)) or ""):
+        return None
+    return (
+        f"{target.name}: incomplete package generation ({rendered}); run "
+        f"`python3 scripts/check_plugin_versions.py --bump {target.name!r}` to complete it. "
+        f"Version-pin guards it must keep green: {render_guards(target.name)}"
+    )
+
+
+def write_generation(target: Target, version: str) -> list[str]:
+    """Write `version` into every pin of the target's generation; return what changed.
+
+    Every file is rewritten in memory first, so a missing pin refuses the whole
+    bump instead of leaving a partial generation on disk.
+    """
+    changed: list[str] = []
+    rewrites: dict[str, tuple[str, str]] = {}
+    for path in dict.fromkeys(pin.path for pin in GENERATION_PINS[target.name]):
+        with open(path, encoding="utf-8") as handle:
+            original = handle.read()
+        text = original
+        for pin in GENERATION_PINS[target.name]:
+            if pin.path == path and pin.read(text) != version:
+                text = pin.write(text, version)
+                changed.append(f"{path} ({pin.label})")
+        rewrites[path] = (original, text)
+    for path, (original, text) in rewrites.items():
+        if text != original:
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write(text)
+    return changed
+
+
+def last_generation_commit(target: Target) -> str | None:
+    commits = git("log", "-1", "--format=%H", "--", target.primary_version)
+    return commits[0] if commits else None
+
+
+def committed_source_drift(target: Target) -> bool:
+    """Sources committed since the commit that last touched the primary version file."""
+    version_commit = last_generation_commit(target)
+    if version_commit is None:
+        return False
+    changed = git("diff", "--name-only", f"{version_commit}..HEAD", "--")
+    return any(is_source(target, path) for path in changed)
+
+
+def working_tree_source_changes(target: Target) -> bool:
+    """Staged, unstaged, or untracked sources: the build packages what is on disk."""
+    changed = set(git("diff", "HEAD", "--name-only", "--", *target.source_prefixes))
+    changed |= set(git("ls-files", "--others", "--exclude-standard", "--", *target.source_prefixes))
+    return any(is_source(target, path) for path in changed)
+
+
+def bump_generation(target: Target) -> int:
+    """`--bump` for a target without a source digest: write the COMPLETE generation.
+
+    The predicate is the fence's own: a source changed since the commit that last
+    touched the primary version file, or a source differs on disk. A generation
+    already allocated in the working tree (disk differs from HEAD) holds, so a
+    repeated bump is a no-op rather than one bump per invocation. Holding still
+    completes an incomplete generation, so a hand bump of one file is repaired.
+    """
+    disk = read_generation(target)
+    current = generation_version(disk)
+    if current is None:
+        raise SystemExit(
+            f"{target.name}: no numeric X.Y.Z version in "
+            + ", ".join(f"{pin.path} ({pin.label})" for pin, _ in disk)
+        )
+    head = generation_version(read_generation(target, "HEAD"))
+    guards = render_guards(target.name)
+    if head is not None and current != head:
+        hold_reason = f"generation {current} already allocated in the working tree (HEAD has {head})"
+    elif not (committed_source_drift(target) or working_tree_source_changes(target)):
+        hold_reason = f"no source changes since generation {current}"
+    else:
+        hold_reason = None
+
+    if hold_reason is not None:
+        completed = write_generation(target, current)
+        if completed:
+            print(
+                f"[bump-if-changed] {target.name}: {hold_reason}; completed the generation in "
+                + ", ".join(completed)
+                + f". Keep green: {guards}"
+            )
+        else:
+            print(f"[bump-if-changed] {target.name}: {hold_reason}; holding version")
+        return 0
+
+    major, minor, patch = version_key(current)
+    new = f"{major}.{minor}.{patch + 1}"
+    changed = write_generation(target, new)
+    print(
+        f"[bump-if-changed] {target.name}: sources changed; {current} -> {new} in "
+        + ", ".join(changed)
+        + f". Keep green: {guards}"
+    )
+    return 0
+
+
 def jetbrains_targets() -> tuple[Target, ...]:
     return tuple(target for target in TARGETS if target.name.startswith("JetBrains"))
 
@@ -408,6 +691,10 @@ def bump(target_name: str) -> int:
     if not matches:
         raise SystemExit(f"unknown target {target_name!r}")
     target = matches[0]
+    if target.name in GENERATION_PINS:
+        return bump_generation(target)
+    if not target.name.startswith("JetBrains"):
+        raise SystemExit(f"{target.name}: no package generation is defined for --bump")
     current = source_digest(target)
     recorded = read_property(target.primary_version, DIGEST_KEY)
     if recorded == current:
@@ -416,14 +703,11 @@ def bump(target_name: str) -> int:
             f"generation; holding version"
         )
         return 0
-    if target.name.startswith("JetBrains"):
-        old_version = read_gradle_version(target.primary_version)
-        new_version = next_jetbrains_version()
-        old = ".".join(map(str, old_version))
-        new = ".".join(map(str, new_version))
-        write_gradle_version(target.primary_version, new_version)
-    else:
-        old, new = bump_gradle_patch(target.primary_version)
+    old_version = read_gradle_version(target.primary_version)
+    new_version = next_jetbrains_version()
+    old = ".".join(map(str, old_version))
+    new = ".".join(map(str, new_version))
+    write_gradle_version(target.primary_version, new_version)
     write_property(target.primary_version, DIGEST_KEY, current)
     reason = "no digest recorded" if recorded is None else "sources changed"
     print(f"[bump-if-changed] {target.name}: {reason}; pluginVersion {old} -> {new}")
@@ -787,8 +1071,194 @@ def self_test() -> int:
         "the explicit Lazily checkout must resolve its own adjacent spec checkout"
     )
 
+    editor_generation_self_test(repo_root)
+
     print("[self-test] check_plugin_versions: ok")
     return 0
+
+
+def editor_generation_self_test(repo_root: str) -> None:
+    """`#editorbumpgeneration`: `--bump` writes every file of a VS Code / Zed generation.
+
+    On 2026-11-05 `--bump 'VS Code'` and `--bump Zed` failed with "no numeric
+    pluginVersion line", so batch k bumped package.json by hand without
+    native.ts EDITOR_PLUGIN_VERSION and reddened
+    vscode_manifest_exposes_jetbrains_parity_commands on main f14a185b30. This
+    runs the bump against copies of the REAL generation files in a scratch git
+    repository, then re-checks the shape each named version-pin guard reads.
+    """
+    import os
+    import shutil
+    import tempfile
+
+    for target in TARGETS:
+        assert target.name.startswith("JetBrains") or target.name in GENERATION_PINS, (
+            f"{target.name}: every non-JetBrains target needs GENERATION_PINS or --bump cannot write it"
+        )
+        if target.name in GENERATION_PINS:
+            pinned = {pin.path for pin in GENERATION_PINS[target.name]}
+            assert pinned == set(target.version_files), (
+                f"{target.name}: the fence's version_files and the generation --bump writes must agree",
+                pinned,
+                target.version_files,
+            )
+            assert GENERATION_PINS[target.name][0].path == target.primary_version
+            assert VERSION_PIN_GUARDS.get(target.name), f"{target.name}: name its version-pin guards"
+
+    # The named guards exist, and still read the shapes the emulation below checks.
+    for target_name, guards in VERSION_PIN_GUARDS.items():
+        for path, test in guards:
+            source = open(os.path.join(repo_root, path), encoding="utf-8").read()
+            assert re.search(rf"(?m)^\s*fn {re.escape(test)}\(", source), f"{target_name}: {path}::{test} is gone"
+    vscode_guard = open(os.path.join(repo_root, "tests/full_content_static_guard.rs"), encoding="utf-8").read()
+    assert "export const EDITOR_PLUGIN_VERSION = '" in vscode_guard
+    assert '"\\"version\\": \\"{reported_version}\\""' in vscode_guard, (
+        "the VS Code guard changed what it pins; update vscode_guard_green below"
+    )
+    bake = open(os.path.join(repo_root, "agent-doc-reliable-sync-io/build.rs"), encoding="utf-8").read()
+    assert 'read_json_string(&vscode_pkg, "version")' in bake
+    assert 'read_property(&zed_manifest, "version")' in bake
+
+    def vscode_guard_green() -> bool:
+        """tests/full_content_static_guard.rs::vscode_manifest_exposes_jetbrains_parity_commands."""
+        native = open(VSCODE_NATIVE, encoding="utf-8").read()
+        marker = "export const EDITOR_PLUGIN_VERSION = '"
+        reported = native[native.index(marker) + len(marker) :].split("'", 1)[0]
+        return f'"version": "{reported}"' in open(VSCODE_PACKAGE, encoding="utf-8").read()
+
+    def baked_zed_version() -> str | None:
+        """agent-doc-reliable-sync-io/build.rs `read_property(extension.toml, "version")`."""
+        for line in open(ZED_MANIFEST, encoding="utf-8").read().splitlines():
+            line = line.strip()
+            if line.startswith("version"):
+                rest = line[len("version") :].lstrip()
+                if rest.startswith("="):
+                    value = rest[1:].strip().strip('"')
+                    if value:
+                        return value
+        return None
+
+    def assert_only_version_lines(path: str, before: str, old: str, new: str, pins: int) -> None:
+        """A bump changes exactly `pins` lines of `path`, each only in its version."""
+        after = open(path, encoding="utf-8").read()
+        old_lines, new_lines = before.splitlines(keepends=True), after.splitlines(keepends=True)
+        assert len(old_lines) == len(new_lines), f"{path}: a bump must not add or remove lines"
+        differing = [(a, b) for a, b in zip(old_lines, new_lines) if a != b]
+        assert len(differing) == pins, (path, differing)
+        for a, b in differing:
+            assert b == a.replace(old, new, 1), f"{path}: a bump must change only the version bytes: {a!r} -> {b!r}"
+
+    saved_git_env = {key: value for key, value in os.environ.items() if key.startswith("GIT_")}
+    cwd = os.getcwd()
+    with tempfile.TemporaryDirectory() as tmp:
+        try:
+            # A hook-run `make check` exports GIT_DIR/GIT_INDEX_FILE for the real
+            # repository; the scratch repository must not inherit them.
+            for key in saved_git_env:
+                del os.environ[key]
+            for path in (VSCODE_PACKAGE, VSCODE_LOCK, VSCODE_NATIVE, ZED_MANIFEST):
+                os.makedirs(os.path.join(tmp, os.path.dirname(path)), exist_ok=True)
+                shutil.copyfile(os.path.join(repo_root, path), os.path.join(tmp, path))
+            os.makedirs(os.path.join(tmp, "editors/zed/src"), exist_ok=True)
+            with open(os.path.join(tmp, "editors/zed/src/lib.rs"), "w", encoding="utf-8") as handle:
+                handle.write("pub fn zed() {}\n")
+            os.chdir(tmp)
+
+            def run_git(*args: str) -> None:
+                subprocess.run(
+                    ("git", "-c", "user.name=self-test", "-c", "user.email=self-test@invalid",
+                     "-c", "commit.gpgsign=false", *args),
+                    check=True,
+                    capture_output=True,
+                )
+
+            run_git("init", "-q")
+            run_git("add", "-A")
+            run_git("commit", "-q", "-m", "generation")
+
+            vscode, zed = (next(t for t in TARGETS if t.name == name) for name in ("VS Code", "Zed"))
+            originals = {path: open(path, encoding="utf-8").read() for path in (VSCODE_PACKAGE, VSCODE_LOCK, VSCODE_NATIVE, ZED_MANIFEST)}
+            start = generation_version(read_generation(vscode))
+            zed_start = generation_version(read_generation(zed))
+            assert start and zed_start and generation_coherence_failure(vscode) is None
+            assert vscode_guard_green(), "the real VS Code generation must start coherent"
+
+            def bumped(version: str) -> str:
+                major, minor, patch = version_key(version)
+                return f"{major}.{minor}.{patch + 1}"
+
+            # Unchanged sources hold every file byte-for-byte.
+            bump("VS Code")
+            bump("Zed")
+            assert all(open(path, encoding="utf-8").read() == text for path, text in originals.items())
+
+            # A VS Code source change bumps all four pins, and only those bytes.
+            with open(VSCODE_NATIVE, "a", encoding="utf-8") as handle:
+                handle.write("// changed\n")
+            native_edited = open(VSCODE_NATIVE, encoding="utf-8").read()
+            bump("VS Code")
+            new = bumped(start)
+            assert [version for _, version in read_generation(vscode)] == [new] * 4, read_generation(vscode)
+            assert generation_coherence_failure(vscode) is None
+            assert vscode_guard_green(), "a VS Code bump must keep the manifest/FFI version guard green"
+            for path, before, pins in (
+                (VSCODE_PACKAGE, originals[VSCODE_PACKAGE], 1),
+                (VSCODE_LOCK, originals[VSCODE_LOCK], 2),
+                (VSCODE_NATIVE, native_edited, 1),
+            ):
+                assert_only_version_lines(path, before, start, new, pins)
+            assert open(ZED_MANIFEST, encoding="utf-8").read() == originals[ZED_MANIFEST], "a VS Code bump must not touch Zed"
+
+            # A repeated bump on the same dirty tree holds: one bump per distinct state.
+            bump("VS Code")
+            assert generation_version(read_generation(vscode)) == new, "a second --bump must not bump again"
+
+            # A Zed source change bumps extension.toml, which is the whole generation.
+            with open("editors/zed/src/lib.rs", "a", encoding="utf-8") as handle:
+                handle.write("pub fn changed() {}\n")
+            bump("Zed")
+            zed_new = bumped(zed_start)
+            assert baked_zed_version() == zed_new, "build.rs must bake the bumped Zed generation"
+            assert_only_version_lines(ZED_MANIFEST, originals[ZED_MANIFEST], zed_start, zed_new, 1)
+            assert generation_coherence_failure(zed) is None
+            bump("Zed")
+            assert baked_zed_version() == zed_new, "a second --bump must not bump Zed again"
+
+            # The f14a185b30 shape: a committed hand bump of package.json and the
+            # lockfile only. The fence names the guard; --bump completes it.
+            run_git("checkout", "-q", "--", ".")
+            run_git("clean", "-qfd")
+            for path in (VSCODE_PACKAGE, VSCODE_LOCK):
+                text = open(path, encoding="utf-8").read()
+                for pin in GENERATION_PINS["VS Code"]:
+                    if pin.path == path:
+                        text = pin.write(text, new)
+                with open(path, "w", encoding="utf-8") as handle:
+                    handle.write(text)
+            run_git("commit", "-qam", "hand bump")
+            assert not vscode_guard_green()
+            failure = generation_coherence_failure(vscode)
+            assert failure and "vscode_manifest_exposes_jetbrains_parity_commands" in failure, failure
+            assert f"EDITOR_PLUGIN_VERSION {start}" in failure, failure
+            bump("VS Code")
+            assert generation_coherence_failure(vscode) is None
+            assert generation_version(read_generation(vscode)) == new, (
+                "completing a generation reuses its highest version, never an older one"
+            )
+            assert vscode_guard_green()
+
+            # A file without its pin is refused, never silently skipped.
+            with open(VSCODE_NATIVE, "w", encoding="utf-8") as handle:
+                handle.write("export const OTHER = 1;\n")
+            try:
+                write_generation(vscode, bumped(new))
+            except SystemExit as error:
+                assert "EDITOR_PLUGIN_VERSION" in str(error), error
+            else:
+                raise AssertionError("a missing EDITOR_PLUGIN_VERSION must refuse the bump")
+        finally:
+            os.chdir(cwd)
+            os.environ.update(saved_git_env)
 
 
 def main() -> int:
@@ -894,18 +1364,18 @@ def check() -> int:
                 )
             continue
 
-        version_commit = git("log", "-1", "--format=%H", "--", target.primary_version)
-        drifted_source = False
-        if version_commit:
-            changed_since_version = git(
-                "diff", "--name-only", f"{version_commit[0]}..HEAD", "--"
-            )
-            drifted_source = any(is_source(target, path) for path in changed_since_version)
+        coherence = generation_coherence_failure(target)
+        if coherence is not None:
+            failures.append(coherence)
+        drifted_source = committed_source_drift(target)
         if (staged_source or drifted_source) and missing_versions:
             reason = "staged source changes" if staged_source else "source changes since the last package generation"
             failures.append(
                 f"{target.name}: {reason} require staged generation files: "
                 + ", ".join(missing_versions)
+                + f"; run `python3 scripts/check_plugin_versions.py --bump {target.name!r}`, which "
+                "writes the complete generation. Version-pin guards it must keep green: "
+                + render_guards(target.name)
             )
 
     if failures:

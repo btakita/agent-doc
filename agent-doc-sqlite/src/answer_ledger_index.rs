@@ -57,7 +57,7 @@ pub struct AnswerNodeRow {
 
 const REVISION_RELATION_KINDS: &str = "('restates', 'amends', 'supersedes')";
 
-fn ensure_schema(conn: &Connection) -> Result<()> {
+pub(crate) fn ensure_schema(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         r#"
         CREATE TABLE IF NOT EXISTS answer_ledger_keys (

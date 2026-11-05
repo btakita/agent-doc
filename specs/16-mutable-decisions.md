@@ -70,14 +70,15 @@ operator, `copy_of` its decision), `decision`, `revision` (one per distinct
 operator answer, id `<decision>@<hash>`), `item` (work the decisions apply
 to; a work todo nobody asked about is an item, never a decision), and
 `evidence` (`r-<hex>` response ids, `commit:<sha>`). `principle`, `fact` and
-`derivation` are reserved for `#firstprinciples`.
+`derivation` nodes hold first-principles derivations (below).
 
 **Edges** read `from <kind> to`: `answers` (revision → decision),
 `restates` / `amends` / `supersedes` (revision → previous revision),
 `depends_on` (B assumes A), `conflicts_with`, `applies_to` (from concerns
-to), `evidenced_by` (revision or decision → evidence), `copy_of`, `same_as`;
-`derived_from`, `subsumes` and `exception_to` are reserved for
-`#firstprinciples` and `#decisionprune`. Each edge has a source: `derived`
+to), `evidenced_by` (revision or decision → evidence), `copy_of`, `same_as`,
+`derived_from` (derivation → premise) and `concludes` (derivation →
+decision, its clause the concluded answer); `subsumes` and `exception_to`
+are reserved for `#decisionprune`. Each edge has a source: `derived`
 (read off document structure), `operator` (the operator's explicit words), or
 `proposed` (the binary's classification, standing until the operator confirms
 or corrects it). An `amends` edge carries the amended clause.
@@ -122,3 +123,50 @@ current answers; conflicts, copies, applied items and `same_as` merges.
 [--json]`. `<id>` may be a decision id, a revision id, a question copy id, or
 (for `why`, and for `impact` when unambiguous) an item a decision applies to.
 tsift graph-db may index the cached rows as an optional traversal layer.
+
+### First-principles derivations (`#firstprinciplesstore`)
+
+A derivation is one inference step from premises to an answer for one
+decision (the `#firstprinciples` model, `agent_doc_principles::derivation`).
+It is stored in the same per-document `state.db` decision-graph tables, not
+a parallel store (`agent_doc_sqlite::answer_ledger_derivations`):
+
+- a `derivation` node, id `drv-<hex>`: `label` is the stated inference;
+  `status` is `agent_derived_unreviewed`, `operator_confirmed` or `rejected`,
+  with `status_at` and `status_note` (the operator's reason). These three
+  columns are added to `answer_ledger_nodes` in place by their own migration;
+- premise nodes `principle:<id>` and `fact:<id>` whose label is the
+  statement, and decision premises as the decision's own node;
+- one `derived_from` edge to each premise and one `concludes` edge to the
+  decision whose `clause` is the concluded answer. Their source is `proposed`
+  until the operator confirms the step, then `operator`.
+
+**Authoring.** `agent-doc decision derive FILE --premise principle:<id>
+--premise fact:<id>[=<statement>] --premise decision:<id> --inference <one
+sentence> --decision <id> --answer <answer> [--id drv-…] [--json]`. A
+principle premise must be in scope for FILE (global file, ancestor
+`.agent-doc/project.md`, the document; nearest wins) and takes its statement;
+a fact needs a statement the first time; a decision premise and `--decision`
+resolve like `decision why` (decision, revision, question copy, or an item
+exactly one decision applies to), and a step may not be its own premise. The
+default id is a hash of the decision, the normalized answer and inference,
+and the sorted premises, so authoring the same step again reports it on
+record (`created: false`) with its review status kept; a different step
+under an explicit id already in use is refused. The command stores the step
+as `agent_derived_unreviewed`, reports live derivations of the same decision
+that reach another answer (`same_premises` / `different_premises`), and
+prints the operator forms.
+
+**Operator review.** Only the operator's words change a step's status:
+`confirm [#drv-…]` / `reject [#drv-…]` (optionally `: <why>`), `[#drv-…]:
+confirm`, `re [#drv-…]: reject — <why>`, or a bare `confirm` / `reject:
+<why>` row under a waiting item whose own id is the derivation's.
+`confirmed` / `rejected` are accepted too. Such a row (queue or waiting
+packet) is never an answer, question or link. When several rows review one
+step, a live row outranks a struck one, which outranks an archived one, and
+the later row wins among equals. Every preflight ledger pass records the
+deciding review in `state.db`, so the status survives after the row is
+pruned; reads overlay the reviews the document currently shows. A review
+naming a step this document never stored is reported and skipped. Rejecting
+a step never rejects its premises; a rejected step does not propagate
+impact or count toward contradictions.

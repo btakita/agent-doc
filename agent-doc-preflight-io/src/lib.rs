@@ -4,6 +4,7 @@ pub mod admission_replica_hold;
 pub mod answer_ledger;
 pub mod answer_recall;
 pub mod debounce;
+pub mod derivation_store;
 pub mod gc;
 pub mod layout;
 pub mod sweep;

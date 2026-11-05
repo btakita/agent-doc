@@ -9,6 +9,8 @@
 //! - `answer_ledger_index` — per-document operator answer-ledger cache
 //!   (`#answerbyrequestid`): first-seen times, key -> decision ids, pruned
 //!   answers, and decision-graph edges. Markdown stays authoritative.
+//! - `answer_ledger_derivations` — first-principles derivations in the same
+//!   decision-graph tables (`#firstprinciplesstore`).
 //! - `archive_index` — derived sqlite index over compacted-turn markdown archives.
 //! - `context_injection_ledger` — durable per-cycle prompt-context manifests and
 //!   duplicate-detection records in the sole controller `state.db`.
@@ -22,6 +24,7 @@
 //! - `write_lock` — `BEGIN IMMEDIATE` write transactions and busy-timeout
 //!   openers (`#sqlitebusyupgrade`); every transaction that may write uses it.
 
+pub mod answer_ledger_derivations;
 pub mod answer_ledger_index;
 pub mod archive_index;
 pub mod context_injection_ledger;

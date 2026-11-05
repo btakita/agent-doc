@@ -790,6 +790,9 @@ fn run_answer_ledger_maintenance_with_options(
     }
     let graph = graph_of(file, &report_ledger, &report_observations);
     store_index(file, &report_ledger, &graph, now);
+    // `#firstprinciplesstore`: operator confirm / reject rows for stored
+    // derivation steps.
+    crate::derivation_store::apply_reviews(file, &report_observations, now);
     // `#decisiontsiftrecall`: annotation only, after the index and graph are
     // stored, so neither depends on whether tsift is available.
     let mut recalled = Vec::new();

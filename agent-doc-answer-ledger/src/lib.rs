@@ -51,6 +51,7 @@
 //! every relation is a typed [`Edge`] (`answers`, `supersedes`, `amends`,
 //! `restates`, `applies_to`, `same_as`).
 
+pub mod derivation_review;
 pub mod extract;
 pub mod graph;
 pub mod history;
@@ -115,18 +116,21 @@ pub enum EdgeKind {
     EvidencedBy,
     /// a question copy (todo, waiting item, request) `copy_of` its decision.
     CopyOf,
-    /// decision `derived_from` a derivation, principle, fact or standing
-    /// decision (`#firstprinciples`).
+    /// derivation `derived_from` one premise: a principle, fact or decision
+    /// (`#firstprinciples`, `#firstprinciplesstore`).
     DerivedFrom,
     /// higher-order decision `subsumes` a lower-order one (`#decisionprune`).
     Subsumes,
     /// lower-order decision is an explicit `exception_to` the decision that
     /// would otherwise subsume it (`#decisionprune`).
     ExceptionTo,
+    /// derivation `concludes` the decision it answers; the edge's clause is
+    /// the concluded answer (`#firstprinciplesstore`).
+    Concludes,
 }
 
 impl EdgeKind {
-    pub const ALL: [Self; 13] = [
+    pub const ALL: [Self; 14] = [
         Self::Answers,
         Self::Restates,
         Self::Amends,
@@ -140,6 +144,7 @@ impl EdgeKind {
         Self::DerivedFrom,
         Self::Subsumes,
         Self::ExceptionTo,
+        Self::Concludes,
     ];
 
     pub const fn as_str(self) -> &'static str {
@@ -157,6 +162,7 @@ impl EdgeKind {
             Self::DerivedFrom => "derived_from",
             Self::Subsumes => "subsumes",
             Self::ExceptionTo => "exception_to",
+            Self::Concludes => "concludes",
         }
     }
 

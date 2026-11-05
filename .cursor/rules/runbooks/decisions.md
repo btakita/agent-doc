@@ -116,3 +116,15 @@ else alone.
 `agent-doc decision why <FILE> <id> [--json]` shows why a decision holds:
 the operator's words for every revision, the evidence, and what it depends
 on. `agent-doc decision graph <FILE> [--json]` prints the whole graph.
+
+## First-principles derivations (`#firstprinciplesstore`)
+
+When principles in the contract settle a question, record the step:
+`agent-doc decision derive <FILE> --premise principle:<id> [--premise
+fact:<id>=<statement>] [--premise decision:<id>] --inference "<one
+sentence>" --decision <id> --answer "<answer>"`. It prints the derivation
+id (`drv-…`) as `agent_derived_unreviewed` and any contradicting step.
+Cite the id in your response and tell the operator how to review it:
+`confirm [#drv-…]` or `reject [#drv-…]: <why>` in the queue. Never write
+those forms yourself: they are the operator's words. A rejected step
+leaves its premises standing.

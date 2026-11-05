@@ -154,6 +154,9 @@ pub struct Observations {
     /// operator or the agent (`⟦… you: N · agent: M …⟧` with N or M above
     /// zero): that tree is still being worked, so its todo never auto-closes.
     pub busy_waiting_ids: std::collections::BTreeSet<String>,
+    /// `#firstprinciplesstore`: operator `confirm` / `reject` rows for one
+    /// derivation step. Never answers, questions or links.
+    pub derivation_reviews: Vec<crate::derivation_review::DerivationReviewObs>,
 }
 
 /// Whether operator text asks something back instead of answering
@@ -636,7 +639,20 @@ fn scan_waiting_item(
                     }
                 }
             } else if let Some((text, consumed)) = operator_row(row_body) {
-                if let Some(same) = same_as_target(&text) {
+                if let Some((derivation, verdict, note)) =
+                    crate::derivation_review::parse_review(&text, own.as_deref())
+                {
+                    out.derivation_reviews
+                        .push(crate::derivation_review::DerivationReviewObs {
+                            derivation,
+                            verdict,
+                            note,
+                            location: format!("{location_prefix}under {label}"),
+                            line: row + 1,
+                            consumed,
+                            archived,
+                        });
+                } else if let Some(same) = same_as_target(&text) {
                     if let Some(own) = &own {
                         out.links.push(LinkObs {
                             from: own.clone(),
@@ -745,6 +761,25 @@ fn scan_queue_rows(content: &str, out: &mut Observations) {
                 || row_body.ends_with("▫️")
                 || row_body.contains("<!-- agent-doc:")
             {
+                continue;
+            }
+            if let Some((derivation, verdict, note)) =
+                crate::derivation_review::parse_review(&work, None)
+            {
+                out.derivation_reviews
+                    .push(crate::derivation_review::DerivationReviewObs {
+                        derivation,
+                        verdict,
+                        note,
+                        location: if struck {
+                            "consumed queue row".into()
+                        } else {
+                            "queue row".into()
+                        },
+                        line: line_offset + index + 1,
+                        consumed: struck,
+                        archived: false,
+                    });
                 continue;
             }
             if let Some((id, answer)) = addressed_answer(&work) {

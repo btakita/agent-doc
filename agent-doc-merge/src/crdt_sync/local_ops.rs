@@ -420,6 +420,12 @@ impl OrderIndex {
         deleted
     }
 
+    /// The stored element `id`, reachable or not, for a caller comparing an
+    /// incoming op against this replica's history (`#replicapositiondrift`).
+    pub(super) fn stored_elem(&self, id: &OpId) -> Option<OrderElem> {
+        self.state_of(id)
+    }
+
     /// The stored state of `id`, reachable or not.
     fn state_of(&self, id: &OpId) -> Option<OrderElem> {
         if let Some(elem) = self.unreachable.get(id) {

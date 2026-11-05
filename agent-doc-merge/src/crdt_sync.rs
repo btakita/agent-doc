@@ -425,6 +425,47 @@ pub fn validate_text_ops(ops: &[TextOp]) -> Result<()> {
     Ok(())
 }
 
+/// Largest incoming batch checked through the order index's per-id lookup
+/// (`#replicapositiondrift`); a larger one is checked in one pass over the graph.
+const HISTORY_CHECK_INDEX_LIMIT: usize = 1024;
+
+/// A remote update restated an element this replica already stores with a
+/// different character or origin (`#replicapositiondrift`).
+///
+/// Op ids are unique within one history, so the update was encoded against a
+/// different history that reuses this replica's ids (typically a controller
+/// epoch rebuilt from text under the same canonical client id). Applying it
+/// would tombstone and anchor by id onto unrelated characters.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DivergentHistory {
+    /// Incoming ops whose id is stored here with different content.
+    pub conflicting_ops: usize,
+    /// Peer of the first conflicting op id.
+    pub first_peer: u64,
+    /// Lamport counter of the first conflicting op id.
+    pub first_counter: u64,
+    /// The character this replica stores under that id.
+    pub local_ch: char,
+    /// The character the update claims for that id.
+    pub incoming_ch: char,
+}
+
+impl std::fmt::Display for DivergentHistory {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "remote update was encoded against a different CRDT history: {} op(s) restate stored ids with different content (first id {}@{}: stored {:?}, incoming {:?}); refusing the apply so nothing lands at a stale position (#replicapositiondrift)",
+            self.conflicting_ops,
+            self.first_counter,
+            self.first_peer,
+            self.local_ch,
+            self.incoming_ch,
+        )
+    }
+}
+
+impl std::error::Error for DivergentHistory {}
+
 impl ReplicaState {
     /// Create a fresh empty replica with a stable `client_id` (the CRDT peer id).
     /// Distinct replicas MUST use distinct ids so concurrent inserts order
@@ -865,24 +906,125 @@ impl ReplicaState {
     /// duplicate or out-of-order delivery converges rather than corrupting.
     pub fn apply_update(&self, update: &[u8]) -> Result<()> {
         let ops = decode_update_ops(update).context("decode delta")?;
-        if ops.is_empty()
+        if self.is_known_update(&ops, update) {
+            return Ok(());
+        }
+        self.apply_decoded_update(update, &ops);
+        Ok(())
+    }
+
+    /// [`Self::apply_update`] for an update this replica did not author and
+    /// cannot vouch for (`#replicapositiondrift`): an editor applying a
+    /// controller delivery.
+    ///
+    /// Every op that names an id this replica already stores must restate that
+    /// element exactly (its character and its origin). The CRDT merge itself
+    /// never checks: an incoming op with a known id only merges its tombstone,
+    /// and a new op hangs off whatever element its origin id names here. A
+    /// delta encoded against a *different* history that reuses the same ids
+    /// therefore lands at the wrong place without any error. That happens
+    /// whenever a controller rebuilds its canonical from text (a compacted or
+    /// re-seeded epoch mints `(canonical, 1..n)` again for different text) while
+    /// an editor replica still holds the previous epoch: on 2026-11-05 00:53Z
+    /// the old JetBrains replica applied a fresh-epoch strike 674 code points
+    /// past its row, deleting the middle of the next row.
+    ///
+    /// Such an update is refused whole, before anything is applied, with a
+    /// [`DivergentHistory`] error the caller can downcast; this replica is
+    /// unchanged and must be re-registered from its visible buffer. A legitimate
+    /// redelivery restates known elements exactly, so it still applies.
+    pub fn apply_update_verified(&self, update: &[u8]) -> Result<()> {
+        let ops = decode_update_ops(update).context("decode delta")?;
+        if self.is_known_update(&ops, update) {
+            return Ok(());
+        }
+        if let Some(divergence) = self.history_divergence(&ops) {
+            return Err(anyhow::Error::new(divergence));
+        }
+        self.apply_decoded_update(update, &ops);
+        Ok(())
+    }
+
+    /// Whether `update` restates a known element differently from this
+    /// replica's history, without applying it. See
+    /// [`Self::apply_update_verified`].
+    pub fn update_history_divergence(&self, update: &[u8]) -> Result<Option<DivergentHistory>> {
+        let ops = decode_update_ops(update).context("decode delta")?;
+        Ok(self.history_divergence(&ops))
+    }
+
+    fn is_known_update(&self, ops: &[TextOp], update: &[u8]) -> bool {
+        ops.is_empty()
             || self
                 .last_applied_update
                 .borrow()
                 .as_deref()
                 .is_some_and(|known| known == update)
-        {
-            return Ok(());
-        }
+    }
+
+    /// Compare every incoming op whose id this replica stores against the
+    /// stored element. Small batches use the order index's id lookup; large
+    /// ones (or a replica without an index) take one pass over the graph,
+    /// which is the same order of work the merge itself costs.
+    fn history_divergence(&self, ops: &[TextOp]) -> Option<DivergentHistory> {
         self.flush_pending_local_edits();
-        if self.text.borrow_mut().apply_delta_unprojected(&ops) {
-            self.fold_remote_ops(&ops);
+        let mut divergence: Option<DivergentHistory> = None;
+        let mut record = |op: &TextOp, local_ch: char, local_origin: Option<OpId>| {
+            if local_ch == op.ch && local_origin == op.origin {
+                return;
+            }
+            match divergence.as_mut() {
+                Some(found) => found.conflicting_ops += 1,
+                None => {
+                    divergence = Some(DivergentHistory {
+                        conflicting_ops: 1,
+                        first_peer: op.id.peer(),
+                        first_counter: op.id.counter(),
+                        local_ch,
+                        incoming_ch: op.ch,
+                    })
+                }
+            }
+        };
+        let indexed = ops.len() <= HISTORY_CHECK_INDEX_LIMIT && {
+            self.ensure_visible_order();
+            self.visible_order.borrow().is_some()
+        };
+        if indexed {
+            let order = self.visible_order.borrow();
+            let order = order.as_ref().expect("checked above");
+            for op in ops {
+                if let Some(local) = order.stored_elem(&op.id) {
+                    record(op, local.ch, local.origin);
+                }
+            }
+        } else {
+            let mut incoming: std::collections::HashMap<OpId, Vec<&TextOp>> =
+                std::collections::HashMap::with_capacity(ops.len());
+            for op in ops {
+                incoming.entry(op.id).or_default().push(op);
+            }
+            let stored = self.text.borrow().delta_since(&TextVersionVector::new());
+            for local in &stored {
+                if let Some(restated) = incoming.get(&local.id) {
+                    for op in restated {
+                        record(op, local.ch, local.origin);
+                    }
+                }
+            }
+        }
+        divergence
+    }
+
+    fn apply_decoded_update(&self, update: &[u8], ops: &[TextOp]) {
+        self.flush_pending_local_edits();
+        if self.text.borrow_mut().apply_delta_unprojected(ops) {
+            self.fold_remote_ops(ops);
             *self.cached_text.borrow_mut() = None;
             self.cached_text_chars.set(None);
             self.cached_edit_anchor.set(None);
         }
         *self.last_applied_update.borrow_mut() = Some(update.to_vec());
-        Ok(())
     }
 
     /// Fold a remote batch lazily just stored into the order, the version
@@ -1568,5 +1710,131 @@ mod tests {
             !commit_barrier_ready(&canonical, &[&e1, &e2]).unwrap(),
             "a new editor op after the cut must re-open the barrier"
         );
+    }
+
+    /// The 2026-11-05 shape (`#replicapositiondrift`): an editor replica holds
+    /// epoch A; the controller rebuilds its canonical from the current text
+    /// under the same canonical client id (epoch B mints `(canonical, 1..n)`
+    /// again) and strikes a row. Returns `(retired editor, B's strike delta,
+    /// B's text after the strike, the text both epochs spelled before it,
+    /// the struck row, its offset, the growth above the rows)`.
+    fn retired_epoch_strike() -> (ReplicaState, Vec<u8>, String, String, String, usize, usize) {
+        const CANONICAL: u64 = 1;
+        let rows: String = (0..40)
+            .map(|index| format!("- do [#row{index:02}] keep this row intact\n"))
+            .collect();
+        let epoch_a = ReplicaState::new(CANONICAL);
+        epoch_a.apply_local_edit(0, 0, &rows);
+        let editor = ReplicaState::from_encoded(7, &epoch_a.encode_state()).unwrap();
+        // Operator text grows the document above the rows: 674 code points.
+        let growth = format!("{}\n", "x".repeat(673));
+        editor.apply_local_edit(0, 0, &growth);
+        let current = editor.text();
+
+        let epoch_b = ReplicaState::new(CANONICAL);
+        epoch_b.apply_local_edit(0, 0, &current);
+        assert_eq!(epoch_b.text(), current, "both epochs spell the same text");
+        let row = "- do [#row10] keep this row intact\n";
+        let struck = "- ~~do [#row10]~~ keep this row intact\n";
+        let at = current.find(row).unwrap();
+        let frontier = epoch_b.state_vector();
+        epoch_b.apply_local_edit(at as u32, row.chars().count() as u32, struck);
+        let delta = epoch_b.diff(&frontier).unwrap();
+        (
+            editor,
+            delta,
+            epoch_b.text(),
+            current,
+            struck.to_string(),
+            at,
+            growth.chars().count(),
+        )
+    }
+
+    #[test]
+    fn an_unverified_apply_lands_a_fresh_epoch_strike_one_growth_past_its_row() {
+        let (editor, delta, expected, current, struck, at, growth) = retired_epoch_strike();
+        editor.apply_update(&delta).unwrap();
+        let landed = editor.text();
+        assert_ne!(
+            landed, expected,
+            "the merge accepted a delta from another history"
+        );
+        assert_eq!(
+            landed.find(&struck),
+            Some(at + growth),
+            "the strike lands exactly the growth since the retired epoch past its row"
+        );
+        assert!(
+            landed.contains("- do [#row10] keep this row intact\n"),
+            "the row the controller struck is still unstruck"
+        );
+        assert_eq!(
+            landed.chars().count(),
+            current.chars().count() + 4,
+            "the strike replaced the same span length, just somewhere else"
+        );
+    }
+
+    #[test]
+    fn verified_apply_refuses_a_fresh_epoch_delta_that_reuses_retired_history_ids() {
+        let (editor, delta, _expected, current, _struck, _at, _growth) = retired_epoch_strike();
+        let error = editor
+            .apply_update_verified(&delta)
+            .expect_err("a delta from a rebuilt history must be refused at the replica");
+        let divergence = error
+            .downcast_ref::<DivergentHistory>()
+            .expect("the refusal is typed so editors can re-register");
+        assert!(divergence.conflicting_ops > 0);
+        assert_eq!(
+            divergence.first_peer, 1,
+            "the reused ids are the canonical's"
+        );
+        assert_ne!(divergence.local_ch, divergence.incoming_ch);
+        assert_eq!(editor.text(), current, "nothing was applied");
+        assert_eq!(
+            editor.update_history_divergence(&delta).unwrap().as_ref(),
+            Some(divergence),
+            "the probe reports the same divergence without applying"
+        );
+    }
+
+    #[test]
+    fn verified_apply_refuses_a_full_fresh_epoch_snapshot_through_the_graph_scan() {
+        let (editor, _delta, _expected, current, _struck, _at, _growth) = retired_epoch_strike();
+        let epoch_b = ReplicaState::new(1);
+        epoch_b.apply_local_edit(0, 0, &current);
+        let snapshot = epoch_b.encode_state();
+        assert!(
+            decode_update_ops(&snapshot).unwrap().len() > HISTORY_CHECK_INDEX_LIMIT,
+            "the snapshot takes the large-batch path"
+        );
+        let error = editor.apply_update_verified(&snapshot).unwrap_err();
+        assert!(error.is::<DivergentHistory>());
+        assert_eq!(editor.text(), current);
+    }
+
+    #[test]
+    fn verified_apply_accepts_same_history_deltas_redeliveries_and_full_restatements() {
+        let canonical = ReplicaState::new(1);
+        canonical.apply_local_edit(0, 0, "- do [#a]\n- do [#b]\n");
+        let editor = ReplicaState::from_encoded(7, &canonical.encode_state()).unwrap();
+        editor.apply_local_edit(0, 0, "operator note\n");
+        let typed = editor.diff(&canonical.state_vector()).unwrap();
+        canonical.apply_update_verified(&typed).unwrap();
+
+        let frontier = canonical.state_vector();
+        canonical.apply_local_edit(14, 9, "- ~~do [#a]~~");
+        let strike = canonical.diff(&frontier).unwrap();
+        editor.apply_update_verified(&strike).unwrap();
+        assert_eq!(editor.text(), canonical.text());
+        // A redelivery of the same frame, and a full restatement of every op
+        // the editor already stores, are idempotent and still verify.
+        editor.apply_update_verified(&strike).unwrap();
+        editor
+            .apply_update_verified(&canonical.encode_state())
+            .unwrap();
+        assert_eq!(editor.text(), "operator note\n- ~~do [#a]~~\n- do [#b]\n");
+        assert_eq!(editor.update_history_divergence(&strike).unwrap(), None);
     }
 }

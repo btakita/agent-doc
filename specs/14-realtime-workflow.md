@@ -2149,6 +2149,31 @@ who copies a delivered row elsewhere keeps canonical's change at its row too,
 and one who types text canonical independently wrote elsewhere inserts rather
 than replaces base text, so neither is mistaken for a replay.
 
+**A controller delivery never crosses CRDT histories (`#replicapositiondrift`).**
+The replayed strike above had a cause upstream of registration. At 00:52:56Z
+the restarted controller compacted the canonical into a fresh epoch (lineage
+`6e5e67f0` to `7db62b18`). A fresh epoch is rebuilt from text under the same
+canonical client id, so it mints op ids `(canonical, 1..n)` that the retired
+history already used for other characters. The old JetBrains replica consumed
+the replace delivery, failed to reattach, and kept pulling as the same member,
+whose hub-side mirror had been reset to the fresh epoch. At 00:53:39Z the
+`open_id_head_ack` strike was handed to it as a fresh-epoch delta. The CRDT
+merge resolves ops by id and never compares content: the strike's tombstones
+hit the retired characters with those ids and its insertion hung off a
+retired origin, both exactly the 674 code points the document had grown above
+the row since the retired epoch. Two guards now hold. The controller retires
+every member registered before a text rebuild (all four rebuild paths); a
+retired member's pull is refused as `missing_replica` so the editor
+re-registers, and its registration always installs a full bootstrap. Only a
+new registration un-retires a member, because a replace delivery or a matching
+visible projection proves the buffer text, not the replica's history. The
+editor replica itself refuses, before applying anything, any delivery that
+restates an op id it stores with a different character or origin: op ids are
+unique within one history, so such a delta was encoded against another one.
+The FFI apply returns `-4` and the Zed sidecar re-registers from its visible
+buffer. A cross-history delta whose ids are all new to the replica cannot be
+told apart there; the controller-side retirement is what stops those.
+
 The answer is the canonical-relative splices that produce the merge, so the
 plugin forwards them exactly like a translated batch: on the attached endpoint
 when it already holds that canonical, otherwise on a replacement registered at

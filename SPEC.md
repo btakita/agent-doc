@@ -224,6 +224,18 @@
   reverts to its base lines; other captured hunks still roll forward); anything
   fused with other changed text refuses. No fallback adopts it. See
   [Real-Time Workflow](specs/14-realtime-workflow.md).
+- `#replicapositiondrift`: a controller delivery is applied to an editor
+  replica only within the CRDT history the replica holds. A canonical rebuilt
+  from text (Compact Exchange, the automatic history budget, an authoritative
+  adopt, an out-of-band disk correction) mints the same canonical op ids again
+  for different text, so every member registered before the rebuild is
+  retired: its pulls are refused as `missing_replica` until it registers again,
+  and that registration is always a full bootstrap. A replace delivery or an
+  equal visible text never un-retires it. The editor-side apply
+  (`ReplicaState::apply_update_verified`, the FFI `agent_doc_replica_apply_update`,
+  and the Zed sidecar) refuses whole any update that restates a stored op id
+  with a different character or origin, leaving the replica and buffer
+  untouched. See [Real-Time Workflow](specs/14-realtime-workflow.md).
 - A selected-document focus that resolves a proven live-owner pane outside the
   active `agent-doc` window must surface that pane before selection. Promotion
   and selection share the editor focus-generation fence, and the controller

@@ -8,11 +8,13 @@
 //!   ask the operator something), decisions, revisions (one per distinct
 //!   operator answer), items (work the decisions apply to) and evidence
 //!   (responses `r-<hex>`, commits `commit:<sha>`). Principle, fact and
-//!   derivation nodes are reserved for `#firstprinciples`.
+//!   derivation nodes hold first-principles derivations
+//!   (`#firstprinciplesstore`, written by `agent-doc decision derive`).
 //! - **Edges** ([`EdgeKind`]): `answers`, `supersedes`, `amends`,
 //!   `restates`, `depends_on`, `conflicts_with`, `applies_to`,
-//!   `evidenced_by`, `copy_of`, `same_as`, plus `derived_from` / `subsumes` /
-//!   `exception_to` reserved for `#firstprinciples` and `#decisionprune`.
+//!   `evidenced_by`, `copy_of`, `same_as`, `derived_from` / `concludes`
+//!   (derivation → premise / decision), plus `subsumes` / `exception_to`
+//!   reserved for `#decisionprune`.
 //!   Each edge carries its [`EdgeSource`]: `derived` (the binary read it off
 //!   the document structure), `operator` (the operator's explicit words:
 //!   `change:`, `amend:`, `same as [#id]`, `depends on [#id]`), or `proposed`
@@ -41,11 +43,11 @@ pub enum NodeKind {
     Revision,
     Item,
     Evidence,
-    /// Reserved for `#firstprinciples`.
+    /// A first principle cited as a derivation premise (`principle:<id>`).
     Principle,
-    /// Reserved for `#firstprinciples`.
+    /// A fact cited as a derivation premise (`fact:<id>`).
     Fact,
-    /// Reserved for `#firstprinciples`.
+    /// One inference step (`drv-<hex>`, `#firstprinciplesstore`).
     Derivation,
 }
 

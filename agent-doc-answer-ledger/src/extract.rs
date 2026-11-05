@@ -165,6 +165,9 @@ pub struct Observations {
     /// waiting heads, and live queue rows. A decision that `applies_to` one of
     /// them stays in the hot set.
     pub open_item_ids: std::collections::BTreeSet<String>,
+    /// `#firstprinciplesstore`: operator `confirm` / `reject` rows for one
+    /// derivation step. Never answers, questions or links.
+    pub derivation_reviews: Vec<crate::derivation_review::DerivationReviewObs>,
 }
 
 /// Whether operator text asks something back instead of answering
@@ -687,6 +690,24 @@ fn record_operator_row(row_body: &str, line: usize, scope: &PacketScope, out: &m
     let Some((text, consumed)) = operator_row(row_body) else {
         return;
     };
+    // `#firstprinciplesstore`: a confirm / reject row for one derivation step
+    // is a review, never an answer, question or link. An archive quote
+    // (`!dispatch`) is archived; a struck carrier row consumes it.
+    if let Some((derivation, verdict, note)) =
+        crate::derivation_review::parse_review(&text, scope.own)
+    {
+        out.derivation_reviews
+            .push(crate::derivation_review::DerivationReviewObs {
+                derivation,
+                verdict,
+                note,
+                location: scope.location.to_string(),
+                line,
+                consumed: consumed || (scope.consumed && scope.dispatch),
+                archived: !scope.dispatch,
+            });
+        return;
+    }
     if let Some(same) = same_as_target(&text) {
         if let Some(own) = scope.own {
             out.links.push(LinkObs {
@@ -926,6 +947,25 @@ fn scan_queue_rows(content: &str, out: &mut Observations) {
                 || row_body.ends_with("▫️")
                 || row_body.contains("<!-- agent-doc:")
             {
+                continue;
+            }
+            if let Some((derivation, verdict, note)) =
+                crate::derivation_review::parse_review(&work, None)
+            {
+                out.derivation_reviews
+                    .push(crate::derivation_review::DerivationReviewObs {
+                        derivation,
+                        verdict,
+                        note,
+                        location: if struck {
+                            "consumed queue row".into()
+                        } else {
+                            "queue row".into()
+                        },
+                        line: line_offset + index + 1,
+                        consumed: struck,
+                        archived: false,
+                    });
                 continue;
             }
             if let Some((id, answer)) = addressed_answer(&work) {

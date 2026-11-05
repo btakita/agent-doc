@@ -58,6 +58,7 @@ mod conversation_holders;
 mod convert;
 mod crash_resilience;
 mod dashboard_cmd;
+mod decision_derive;
 mod dedupe_cmd;
 mod describe_image;
 mod dogfood_cmd;
@@ -4418,6 +4419,35 @@ enum DecisionAction {
         #[arg(long)]
         json: bool,
     },
+    /// Author one first-principles derivation step (`#firstprinciplesstore`):
+    /// premises (principles in scope, facts, decisions), one stated
+    /// inference, and the answer it concludes for a decision. The step is
+    /// stored in the document's decision graph as `agent_derived_unreviewed`;
+    /// the operator confirms or rejects it with `confirm [#drv-…]` /
+    /// `reject [#drv-…]: <why>`
+    Derive {
+        /// Session document
+        file: PathBuf,
+        /// `principle:<id>`, `fact:<id>[=<statement>]` or `decision:<id>`;
+        /// repeat for each premise
+        #[arg(long = "premise", required = true)]
+        premises: Vec<String>,
+        /// The inference step, in one sentence
+        #[arg(long)]
+        inference: String,
+        /// Decision id, revision id, question copy id, or an item exactly one
+        /// decision applies to
+        #[arg(long)]
+        decision: String,
+        /// The answer the step concludes
+        #[arg(long)]
+        answer: String,
+        /// Explicit `drv-…` id (default: derived from the step's content)
+        #[arg(long)]
+        id: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
     /// Read immutable revision entries for one stable decision id
     History {
         #[arg(long, default_value = ".")]
@@ -4648,6 +4678,13 @@ fn run_decision_action(action: DecisionAction) -> anyhow::Result<()> {
                 }
             }
             Ok(())
+        }
+        DecisionAction::Derive { file, premises, inference, decision, answer, id, json } => {
+            decision_derive::run_derive(
+                &file,
+                &agent_doc_preflight_io::derivation_store::DeriveRequest { premises, inference, decision, answer, id },
+                json,
+            )
         }
         DecisionAction::Validate { project_root, json, document } => {
             // `#decisionstaleaudit`: with a session document, also report the

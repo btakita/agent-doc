@@ -41,7 +41,10 @@
 //! `restates`, `applies_to`, `same_as`).
 
 pub mod extract;
+pub mod liveness;
 pub mod text;
+
+pub use liveness::{HotStoreSize, IndexPartition, LiveReason, Liveness, NamedEdge};
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -191,6 +194,9 @@ pub struct PriorRevision {
 pub struct PriorIndex {
     pub keys: Vec<PriorKey>,
     pub revisions: Vec<PriorRevision>,
+    /// Decisions these rows hold only because the archive was searched for a
+    /// key the document names (`#decisionprune`); hot again means revived.
+    pub archived_decisions: BTreeSet<String>,
 }
 
 /// Tier 4 hook. An implementation may consult an embedding index (tsift);
@@ -272,6 +278,9 @@ pub struct Ledger {
     /// Near-duplicate clusters among open, unanswered decisions (tiers 2-4
     /// without an id overlap), for `decision validate`.
     pub near_duplicates: Vec<Vec<String>>,
+    /// Hot / archived partition (`#decisionprune`).
+    pub liveness: Liveness,
+    prior_archived: BTreeSet<String>,
     key_to_decision: BTreeMap<String, usize>,
     key_first_seen: BTreeMap<String, u64>,
     live_queue_ids: BTreeSet<String>,
@@ -325,6 +334,14 @@ pub fn text_key(text: &str) -> Option<String> {
     let normalized = text::normalize_question(text);
     (normalized.split(' ').count() >= 4)
         .then(|| format!("qt:{}", &agent_doc_hash::content_hash(&normalized)[..16]))
+}
+
+/// The keys a question can be found under in the index: its own keys plus
+/// the id key of every id it references (`#decisionprune` archive lookup).
+pub fn lookup_keys_for(question: &QuestionObs) -> Vec<String> {
+    let mut keys = question_keys(question);
+    keys.extend(question.references.iter().map(|id| id_key(id)));
+    keys
 }
 
 fn question_keys(question: &QuestionObs) -> Vec<String> {
@@ -529,6 +546,7 @@ impl Ledger {
             .collect();
         let mut ledger = Ledger {
             live_queue_ids: observations.live_queue_ids.clone(),
+            prior_archived: prior.archived_decisions.clone(),
             key_first_seen,
             now,
             kinds,
@@ -729,8 +747,16 @@ impl Ledger {
             ledger.decisions[index].revisions = ordered;
         }
 
+        // Liveness (`#decisionprune`): the gray zone below and the index
+        // partition both work on the hot set.
+        ledger.edges = edges;
+        ledger.liveness =
+            ledger.compute_liveness(&observations.open_item_ids, &prior.archived_decisions, &[]);
+
         // Gray zone: tier 2 without an id overlap, tier 3, tier 4. These only
-        // annotate; they never merge decisions.
+        // annotate; they never merge decisions. A pair of two dormant
+        // decisions is skipped: neither side is asked or applied any more, so
+        // the comparison is hot x all instead of all x all.
         let profiles: Vec<(String, BTreeSet<String>)> = groups
             .iter()
             .map(|group| {
@@ -760,6 +786,11 @@ impl Ledger {
                     continue;
                 };
                 if a == b || profiles[left].0.is_empty() || profiles[right].0.is_empty() {
+                    continue;
+                }
+                if !ledger.liveness.is_hot(&ledger.decisions[a].id)
+                    && !ledger.liveness.is_hot(&ledger.decisions[b].id)
+                {
                     continue;
                 }
                 let kind = text::decision_kind(&profiles[left].0);
@@ -819,7 +850,6 @@ impl Ledger {
             .into_iter()
             .map(|cluster| cluster.into_iter().collect())
             .collect();
-        ledger.edges = edges;
         ledger
     }
 
@@ -1055,38 +1085,57 @@ impl Ledger {
         out
     }
 
-    /// The index rows this build implies (keys, revisions, edges).
+    /// Whether a decision's rows belong in the index at all.
+    pub(crate) fn stored(decision: &Decision) -> bool {
+        !decision.revisions.is_empty() || !decision.open_items.is_empty()
+    }
+
+    /// The index rows of one decision (every key, every revision).
+    pub(crate) fn decision_rows(&self, decision: &Decision) -> (Vec<PriorKey>, Vec<PriorRevision>) {
+        let keys = decision
+            .keys
+            .iter()
+            .map(|key| PriorKey {
+                key: key.clone(),
+                decision_id: decision.id.clone(),
+                first_seen_at: self.key_first_seen.get(key).copied().unwrap_or(self.now),
+            })
+            .collect();
+        let revisions = decision
+            .revisions
+            .iter()
+            .map(|revision| PriorRevision {
+                decision_id: decision.id.clone(),
+                answer: revision.answer.clone(),
+                location: revision
+                    .location
+                    .trim_end_matches(" (no longer in the document)")
+                    .to_string(),
+                relation: revision.relation.as_str().to_string(),
+                first_seen_at: revision.first_seen_at.unwrap_or(0),
+                change_flagged: revision.change_flagged
+                    || (revision.relation == RevisionRelation::Supersedes
+                        && decision
+                            .latest()
+                            .is_some_and(|latest| latest.id == revision.id)),
+            })
+            .collect();
+        (keys, revisions)
+    }
+
+    /// Every index row this build implies (keys, revisions), hot and
+    /// archived alike. [`Ledger::partitioned_index_rows`] splits them.
     pub fn index_rows(&self) -> (Vec<PriorKey>, Vec<PriorRevision>) {
         let mut keys = Vec::new();
         let mut revisions = Vec::new();
-        for decision in &self.decisions {
-            if decision.revisions.is_empty() && decision.open_items.is_empty() {
-                continue;
-            }
-            for key in &decision.keys {
-                keys.push(PriorKey {
-                    key: key.clone(),
-                    decision_id: decision.id.clone(),
-                    first_seen_at: self.key_first_seen.get(key).copied().unwrap_or(self.now),
-                });
-            }
-            for revision in &decision.revisions {
-                revisions.push(PriorRevision {
-                    decision_id: decision.id.clone(),
-                    answer: revision.answer.clone(),
-                    location: revision
-                        .location
-                        .trim_end_matches(" (no longer in the document)")
-                        .to_string(),
-                    relation: revision.relation.as_str().to_string(),
-                    first_seen_at: revision.first_seen_at.unwrap_or(0),
-                    change_flagged: revision.change_flagged
-                        || (revision.relation == RevisionRelation::Supersedes
-                            && decision
-                                .latest()
-                                .is_some_and(|latest| latest.id == revision.id)),
-                });
-            }
+        for decision in self
+            .decisions
+            .iter()
+            .filter(|decision| Self::stored(decision))
+        {
+            let (decision_keys, decision_revisions) = self.decision_rows(decision);
+            keys.extend(decision_keys);
+            revisions.extend(decision_revisions);
         }
         (keys, revisions)
     }

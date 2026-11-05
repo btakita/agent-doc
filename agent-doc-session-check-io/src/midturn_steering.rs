@@ -523,9 +523,20 @@ fn route_claimed_items(
             })
             .or_insert_with(|| receipt.claim.clone());
     }
+    // Identities a live ledger claim owns, before reported receipts join the
+    // attempt map as cancellation/mismatch evidence (`#consumedclaimmismatch`).
+    let live_claimed = attempts
+        .keys()
+        .cloned()
+        .collect::<std::collections::HashSet<_>>();
     let released = agent_doc_queue_io::claim_release_receipt::load(file)
         .with_context(|| format!("read reported receipts while routing {}", file.display()))?;
     for receipt in &released.receipts {
+        // `#consumedclaimmismatch`: a receipt whose row a binary strike closed
+        // is a retained response capture, not a reported attempt that owns work.
+        if receipt.attempt_closed() {
+            continue;
+        }
         if ledger.cancellations.iter().any(|cancelled| {
             cancelled.claim.identity == receipt.identity
                 && cancelled.claim.generation == receipt.generation
@@ -600,8 +611,14 @@ fn route_claimed_items(
             .or_else(|| cancellations.get(&identity))
             .cloned()
     });
-    let struck_removals =
-        append_struck_removal_mismatches(file, content, watermark, &attempts, items)?;
+    let struck_removals = append_struck_removal_mismatches(
+        file,
+        content,
+        watermark,
+        &attempts,
+        &live_claimed,
+        items,
+    )?;
     for item in items
         .iter()
         .filter(|item| item.dispatch == core::SteeringDispatch::CancelClaimed)
@@ -715,6 +732,16 @@ fn completed_queue_identities(
 /// is cleanup, not an operator deletion of owned work. A mismatch is reported
 /// once per owning attempt per consumer: the returned keys join the consumer's
 /// watermark, and a key already there is never re-reported.
+///
+/// `#consumedclaimmismatch`: a struck row whose attempt was integrated and
+/// consumed (`queue lineage-record --event integrated`, then `queue consume
+/// --ack-id` / `--done`) has no live claim; only the reported receipt that
+/// retains its full response capture survives. That receipt is closed at the
+/// strike boundary, and a receipt from before that boundary (or a deferred
+/// strike) is terminal when lineage records the exact attempt as integrated.
+/// Either way it owns nothing, so deleting the struck row is plain cleanup.
+/// `live_claimed` holds the identities a live ledger claim owns, which always
+/// stay degraded evidence.
 fn append_struck_removal_mismatches(
     file: &Path,
     content: &str,
@@ -723,6 +750,7 @@ fn append_struck_removal_mismatches(
         agent_doc_element_queue::QueueItemIdentity,
         agent_doc_queue::queue_claim::QueueClaim,
     >,
+    live_claimed: &std::collections::HashSet<agent_doc_element_queue::QueueItemIdentity>,
     items: &mut Vec<SteeringItem>,
 ) -> Result<BTreeSet<String>> {
     let mut reported = BTreeSet::new();
@@ -737,14 +765,40 @@ fn append_struck_removal_mismatches(
     let receipts = agent_doc_queue_io::claim_release_receipt::load(file)
         .with_context(|| format!("read reported receipts while routing {}", file.display()))?;
 
+    let mut lineage = None;
     for (identity, text) in deleted {
-        let claim = attempts.get(&identity);
         let receipt = receipts
             .receipts
             .iter()
-            .find(|receipt| receipt.identity == identity);
+            .find(|receipt| receipt.identity == identity && !receipt.attempt_closed());
+        let claim = attempts.get(&identity);
         if claim.is_none() && receipt.is_none() {
             continue;
+        }
+        if !live_claimed.contains(&identity)
+            && let Some(receipt) = receipt
+        {
+            // An unreadable lineage proves nothing: the deletion stays degraded.
+            let lineage = lineage.get_or_insert_with(|| {
+                agent_doc_queue_io::queue_lineage::load(file)
+                    .inspect_err(|err| {
+                        eprintln!(
+                            "[steering] could not read queue lineage for {}: {err:#}",
+                            file.display()
+                        )
+                    })
+                    .ok()
+            });
+            if lineage.as_ref().is_some_and(|lineage| {
+                agent_doc_queue_io::queue_lineage::attempt_recorded_integrated(
+                    lineage,
+                    &identity,
+                    &receipt.owner,
+                    receipt.generation,
+                )
+            }) {
+                continue;
+            }
         }
         let owner = claim
             .map(|claim| claim.owner.clone())
@@ -5275,6 +5329,329 @@ mod tests {
                 .all(|item| item.dispatch != core::SteeringDispatch::DegradedClaimMismatch),
             "a closed claim's leftover completion cell must not own the pruned row: {report:?}"
         );
+    }
+
+    /// Detached-disk queue write effects for the `queue consume --ack-id`
+    /// step of the `#consumedclaimmismatch` sequence.
+    struct DiskQueueConsumeEffects;
+
+    impl agent_doc_queue_io::queue_consume::QueueConsumeWriteEffects for DiskQueueConsumeEffects {
+        fn current_document_content(&self, file: &Path, _source: &str) -> Result<String> {
+            Ok(std::fs::read_to_string(file)?)
+        }
+
+        fn atomic_write(&self, file: &Path, content: &str) -> Result<()> {
+            agent_doc_fs::write_atomic(file, content.as_bytes())
+        }
+
+        fn converge_document_or_disk(
+            &self,
+            file: &Path,
+            target_content: &str,
+            _source_content: &str,
+            _reason: &str,
+        ) -> Result<()> {
+            agent_doc_fs::write_atomic(file, target_content.as_bytes())
+        }
+    }
+
+    fn consumed_claim_git(root: &Path, args: &[&str]) -> String {
+        let output = std::process::Command::new("git")
+            .current_dir(root)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "git {} failed: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8_lossy(&output.stdout).trim().to_string()
+    }
+
+    /// One dispatched `do [#id]` row whose tracked Todo stays open, in a git
+    /// repository so lineage can verify the worker's integration.
+    fn consumed_claim_doc(root: &Path, id: &str) -> std::path::PathBuf {
+        std::fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        let doc = root.join("plan.md");
+        let content = format!(
+            concat!(
+                "---\nagent_doc_steering_debounce_ms: 0\nsession: sid\nagent_doc_format: template\n---\n# S\n\n",
+                "<!-- agent:exchange -->\n### Re: prior\n\nDone.\n<!-- /agent:exchange -->\n\n",
+                "<!-- agent:queue subagents priority go -->\n",
+                "- do [#{id}]\n",
+                "- current task\n",
+                "<!-- /agent:queue -->\n\n",
+                "## Todo <!-- agent:todo priority -->\n",
+                "- [ ] [#{id}] Track the worker result\n",
+                "<!-- /agent:todo -->\n",
+            ),
+            id = id,
+        );
+        std::fs::write(&doc, &content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        consumed_claim_git(root, &["init", "-q"]);
+        consumed_claim_git(root, &["config", "user.email", "queue-test@example.com"]);
+        consumed_claim_git(root, &["config", "user.name", "Queue Test"]);
+        std::fs::write(root.join("base.txt"), "base\n").unwrap();
+        consumed_claim_git(root, &["add", "base.txt"]);
+        consumed_claim_git(root, &["commit", "-qm", "base"]);
+        doc
+    }
+
+    /// The coordinator's per-item sequence up to the ack: claim + `queue
+    /// start`, a worker commit, `queue report-complete` (full response capture,
+    /// lineage, `Reported`), then optionally `queue lineage-record --event
+    /// integrated --method fast-forward`. Returns the claim generation.
+    fn reported_attempt_with_response(
+        root: &Path,
+        doc: &Path,
+        item: &str,
+        owner: &str,
+        integrate: bool,
+    ) -> u64 {
+        let (_, claimed) = agent_doc_queue_io::queue_claim::claim(doc, item, owner, 3600).unwrap();
+        let worker = format!("worker:{owner}");
+        agent_doc_queue_io::queue_claim::start_attempt(
+            doc,
+            item,
+            owner,
+            &worker,
+            3600,
+            claimed.generation,
+        )
+        .unwrap();
+        let base = consumed_claim_git(root, &["rev-parse", "HEAD"]);
+        let branch = consumed_claim_git(root, &["branch", "--show-current"]);
+        std::fs::write(root.join("work.txt"), format!("{item}\n")).unwrap();
+        consumed_claim_git(root, &["add", "work.txt"]);
+        consumed_claim_git(root, &["commit", "-qm", "worker work"]);
+        let source = consumed_claim_git(root, &["rev-parse", "HEAD"]);
+
+        let claim = agent_doc_queue_io::queue_claim::load_ledger(doc)
+            .unwrap()
+            .claims
+            .into_iter()
+            .find(|claim| claim.owner == owner)
+            .expect("started claim");
+        agent_doc_queue_io::claim_release_receipt::capture_response(
+            doc,
+            &claim,
+            "Fixed and verified; branch pushed.",
+        )
+        .unwrap();
+        agent_doc_queue_io::queue_lineage::record_claim(doc, &claim).unwrap();
+        agent_doc_queue_io::queue_lineage::record(
+            doc,
+            &claim.item_text,
+            claim.generation,
+            agent_doc_queue_io::queue_lineage::RecordRequest {
+                kind: agent_doc_queue_io::queue_lineage::QueueLineageEventKind::Committed,
+                worker_id: Some(worker.clone()),
+                source_repo_path: Some(root.to_path_buf()),
+                sink_repo_path: Some(root.to_path_buf()),
+                worktree_path: Some(root.to_path_buf()),
+                branch: Some(branch.clone()),
+                base_sha: Some(base),
+                source_sha: Some(source.clone()),
+                sink_ref: Some(branch.clone()),
+                ..agent_doc_queue_io::queue_lineage::RecordRequest::default()
+            },
+        )
+        .unwrap();
+        agent_doc_queue_io::queue_claim::report_exact_worker_attempt_with_publication_state(
+            doc,
+            &claim.item_text,
+            claim.generation,
+            &worker,
+            None,
+        )
+        .unwrap();
+        if integrate {
+            agent_doc_queue_io::queue_lineage::record(
+                doc,
+                &claim.item_text,
+                claim.generation,
+                agent_doc_queue_io::queue_lineage::RecordRequest {
+                    kind: agent_doc_queue_io::queue_lineage::QueueLineageEventKind::Integrated,
+                    source_sha: Some(source.clone()),
+                    integration_sha: Some(source),
+                    sink_ref: Some(branch),
+                    integration_method: Some(
+                        agent_doc_queue_io::queue_lineage::IntegrationMethod::FastForward,
+                    ),
+                    ..agent_doc_queue_io::queue_lineage::RecordRequest::default()
+                },
+            )
+            .unwrap();
+        }
+        claim.generation
+    }
+
+    /// Seed the steering cycle on the struck document, then delete the struck
+    /// row the way the operator did, and observe.
+    fn observe_struck_row_deletion(file: &Path, struck_row: &str) -> Option<SteeringReport> {
+        let struck = std::fs::read_to_string(file).unwrap();
+        assert!(struck.contains(struck_row), "{struck}");
+        let cycle =
+            agent_doc_cycle_state_io::start_preflight(file, Some(&struck), Some(&struck)).unwrap();
+        seed_for_cycle(
+            file,
+            &cycle.cycle_id,
+            &struck,
+            Some("current task"),
+            Vec::new(),
+        )
+        .unwrap();
+        let deleted = struck.replace(&format!("{struck_row}\n"), "");
+        assert_ne!(deleted, struck);
+        std::fs::write(file, &deleted).unwrap();
+        backdate(file);
+        observe(file, CONSUMER_HOOK, true).unwrap()
+    }
+
+    fn degraded_claim_mismatches(report: &Option<SteeringReport>) -> usize {
+        report.as_ref().map_or(0, |report| {
+            report
+                .items
+                .iter()
+                .filter(|item| item.dispatch == core::SteeringDispatch::DegradedClaimMismatch)
+                .count()
+        })
+    }
+
+    /// `#consumedclaimmismatch` (agent-doc-bugs.md, 2026-11-04): eight
+    /// dispatched `do [#id]` rows went `report-complete` -> `lineage-record
+    /// --event integrated` -> `queue consume --ack-id` (`reported_attempt_closed`)
+    /// -> closeout `--done`. The strike retired each claim, but the reported
+    /// receipt carrying the full response capture is retained as recovery
+    /// authority, and steering read it as live ownership: the operator
+    /// deleting the eight struck rows reported `degraded_claim_mismatch` for
+    /// each. The strike now closes the retained receipt's attempt, keeping its
+    /// response, so the deletion is plain cleanup.
+    #[test]
+    fn deleting_struck_row_of_integrated_consumed_attempt_is_cleanup() {
+        let dir = tempfile::tempdir().unwrap();
+        let id = "integratedwork";
+        let item = format!("#{id}");
+        let owner = "subagent:integratedwork";
+        let doc = consumed_claim_doc(dir.path(), id);
+        let generation = reported_attempt_with_response(dir.path(), &doc, &item, owner, true);
+
+        assert!(
+            agent_doc_queue_io::queue_consume::acknowledge_open_id_backed_queue_head(
+                &doc,
+                id,
+                &DiskQueueConsumeEffects,
+            )
+            .unwrap()
+        );
+        let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops_log.contains(&format!(
+                "claim_outcome=reported_attempt_closed owner={owner} generation={generation}"
+            )),
+            "{ops_log}"
+        );
+        // Closeout `--done` after the ack is a no-op on the already-struck row.
+        agent_doc_queue_io::queue_consume::mark_completed_queue_prompts_for_done_ids(
+            &doc,
+            &[id.to_string()],
+            false,
+            &DiskQueueConsumeEffects,
+        )
+        .unwrap();
+        assert!(
+            agent_doc_queue_io::queue_claim::load_ledger(&doc)
+                .unwrap()
+                .claims
+                .iter()
+                .all(|claim| claim.owner != owner),
+            "the consumed attempt's claim ended"
+        );
+        let receipts = agent_doc_queue_io::claim_release_receipt::load(&doc).unwrap();
+        let retained = receipts
+            .receipts
+            .iter()
+            .find(|receipt| receipt.owner == owner)
+            .expect("the full response capture stays as recovery authority");
+        assert!(retained.response.is_some(), "{retained:?}");
+        assert!(
+            retained.attempt_closed(),
+            "the strike must close the retained receipt's attempt: {retained:?}"
+        );
+
+        let struck = std::fs::read_to_string(&doc).unwrap();
+        let struck_row = struck
+            .lines()
+            .find(|line| line.contains(&format!("~~do [#{id}]")))
+            .unwrap_or_else(|| panic!("struck row: {struck}"))
+            .to_string();
+        let report = observe_struck_row_deletion(&doc, &struck_row);
+        assert_eq!(
+            degraded_claim_mismatches(&report),
+            0,
+            "deleting the struck row of integrated, consumed work is cleanup: {report:?}"
+        );
+        assert!(
+            agent_doc_queue_io::claim_release_receipt::load(&doc)
+                .unwrap()
+                .receipts
+                .iter()
+                .any(|receipt| receipt.owner == owner && receipt.response.is_some()),
+            "cleanup never discards the retained response capture"
+        );
+    }
+
+    /// `#consumedclaimmismatch`: a receipt retained before the strike boundary
+    /// closed attempts (or by a deferred strike) carries no close mark. With
+    /// no live claim, lineage that records the exact attempt as integrated is
+    /// the terminality proof; without it the same deletion stays degraded.
+    #[test]
+    fn unclosed_receipt_is_cleanup_only_when_lineage_records_the_attempt_integrated() {
+        for integrate in [true, false] {
+            let dir = tempfile::tempdir().unwrap();
+            let id = "legacyreceipt";
+            let item = format!("#{id}");
+            let owner = "subagent:legacyreceipt";
+            let doc = consumed_claim_doc(dir.path(), id);
+            let generation =
+                reported_attempt_with_response(dir.path(), &doc, &item, owner, integrate);
+            // `queue release` (reported): the claim ends, the receipt stays.
+            agent_doc_queue_io::claim_release_receipt::release_attempt(
+                &doc,
+                &item,
+                agent_doc_queue_io::claim_release_receipt::ReleaseKind::Reported,
+                Some(generation),
+            )
+            .unwrap()
+            .expect("released claim");
+            // A hand strike: no binary strike boundary closes the receipt.
+            let content = std::fs::read_to_string(&doc).unwrap();
+            let struck_row = format!("- ~~do [#{id}]~~");
+            std::fs::write(&doc, content.replace(&format!("- do [#{id}]"), &struck_row)).unwrap();
+            let receipts = agent_doc_queue_io::claim_release_receipt::load(&doc).unwrap();
+            assert!(
+                receipts
+                    .receipts
+                    .iter()
+                    .any(|receipt| receipt.owner == owner && !receipt.attempt_closed()),
+                "{receipts:?}"
+            );
+
+            let report = observe_struck_row_deletion(&doc, &struck_row);
+            assert_eq!(
+                degraded_claim_mismatches(&report),
+                usize::from(!integrate),
+                "integrate={integrate}: {report:?}"
+            );
+        }
     }
 
     /// `#deletedstruckmismatch`: the struck row is diffed against the cycle

@@ -609,18 +609,37 @@ pub fn retire_struck(
         .iter()
         .map(|head| agent_doc_queue::queue_claim::claim_identity(head))
         .collect::<std::collections::HashSet<_>>();
+    // `#consumedclaimmismatch`: a full response capture is kept as recovery
+    // authority, but the strike still closes its attempt. Without the close
+    // mark the retained receipt read as live ownership forever, and deleting
+    // the struck row reported `degraded_claim_mismatch` for integrated,
+    // consumed work.
+    let mut retained = std::collections::HashSet::new();
     for receipt in load(file)?.receipts {
-        if receipt.response.is_some() {
-            struck.remove(&receipt.identity);
+        if receipt.response.is_some() && struck.remove(&receipt.identity) {
+            retained.insert(receipt.identity);
         }
     }
     let live = agent_doc_queue::queue_consume::live_work_identities(after);
-    let retired = mutate(file, |ledger| ledger.retire_struck(&struck, Some(&live)))?;
+    let now = now_secs();
+    let (retired, closed) = mutate(file, |ledger| {
+        let retired = ledger.retire_struck(&struck, Some(&live));
+        let closed = ledger.close_struck(&retained, Some(&live), now);
+        (retired, closed)
+    })?;
     if retired > 0 {
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "queue_claim_release_receipt_retired_on_strike retired={retired} source={source} (#strikeretires)"
+            ),
+        );
+    }
+    if closed > 0 {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "queue_claim_release_receipt_closed_on_strike closed={closed} source={source} response=retained (#consumedclaimmismatch)"
             ),
         );
     }

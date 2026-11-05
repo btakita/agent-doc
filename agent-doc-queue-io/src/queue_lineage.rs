@@ -460,6 +460,39 @@ pub fn max_generation(file: &Path, item: &str) -> Result<u64> {
         .unwrap_or(0))
 }
 
+/// `#consumedclaimmismatch`: whether durable lineage records this exact
+/// attempt (`identity`, `owner`, `generation`) as integrated, with no later
+/// cancellation. The integration event was validated against the repository
+/// when it was recorded; this read is the cheap terminality check used once a
+/// struck row's live claim is gone. Absence or a generation-0 legacy attempt
+/// fails closed.
+pub fn attempt_recorded_integrated(
+    ledger: &QueueLineageLedger,
+    identity: &agent_doc_element_queue::QueueItemIdentity,
+    owner: &str,
+    generation: u64,
+) -> bool {
+    generation > 0
+        && ledger.attempts.iter().any(|attempt| {
+            attempt.generation == generation
+                && attempt.owner == owner
+                && attempt.matches_identity(identity)
+                && attempt
+                    .events
+                    .iter()
+                    .rposition(|event| event.kind == QueueLineageEventKind::Integrated)
+                    .is_some_and(|integrated| {
+                        attempt.events[integrated..].iter().all(|event| {
+                            !matches!(
+                                event.kind,
+                                QueueLineageEventKind::Cancelled
+                                    | QueueLineageEventKind::AdmissionRefused
+                            )
+                        })
+                    })
+        })
+}
+
 /// Whether durable lineage proves this exact attempt never advanced past
 /// creation. Absence, ambiguity, a bound worker, or any later event all fail
 /// closed so callers cannot turn unknown execution into duplicate work.

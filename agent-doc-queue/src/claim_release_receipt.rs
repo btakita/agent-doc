@@ -82,6 +82,13 @@ pub struct ClaimReleaseReceipt {
     pub response: Option<CapturedQueueResponse>,
     pub released_at_secs: u64,
     pub expires_at_secs: u64,
+    /// `#consumedclaimmismatch`: when a binary strike closed this attempt's
+    /// row (`queue consume --ack-id` / `--done`, a closeout strike) while the
+    /// receipt was retained only because it carries the full response
+    /// capture. A closed receipt is response-recovery evidence, never
+    /// ownership: deleting its struck row is plain cleanup.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attempt_closed_at_secs: Option<u64>,
 }
 
 /// Durable response receipt for one exact `(generation, worker)` attempt.
@@ -116,6 +123,13 @@ impl CapturedQueueResponse {
 impl ClaimReleaseReceipt {
     pub fn is_expired(&self, now_secs: u64) -> bool {
         now_secs >= self.expires_at_secs
+    }
+
+    /// Whether a binary strike already closed this attempt's row
+    /// (`#consumedclaimmismatch`). The receipt then survives only as the
+    /// retained response capture and owns no queue work.
+    pub fn attempt_closed(&self) -> bool {
+        self.attempt_closed_at_secs.is_some()
     }
 
     /// Whether this receipt proves one exact started worker attempt. Legacy
@@ -290,6 +304,7 @@ impl ClaimReleaseReceiptLedger {
             response: Some(response),
             released_at_secs: 0,
             expires_at_secs: now_secs.saturating_add(ttl_secs),
+            attempt_closed_at_secs: None,
         });
         Ok(())
     }
@@ -334,6 +349,7 @@ impl ClaimReleaseReceiptLedger {
             response: Some(response),
             released_at_secs: now_secs,
             expires_at_secs: now_secs.saturating_add(ttl_secs),
+            attempt_closed_at_secs: None,
         });
         Ok(())
     }
@@ -372,6 +388,31 @@ impl ClaimReleaseReceiptLedger {
                 || live.is_some_and(|live| live.contains(&receipt.identity))
         });
         before - self.receipts.len()
+    }
+
+    /// Mark the retained receipts of rows a strike closed
+    /// (`#consumedclaimmismatch`): every receipt [`Self::retire_struck`] keeps
+    /// only because it carries the full response capture, whose identity is in
+    /// `struck` and has no live row in `live`. The response stays; the
+    /// attempt stops reading as owned work. Returns how many were marked.
+    pub fn close_struck(
+        &mut self,
+        struck: &HashSet<QueueItemIdentity>,
+        live: Option<&HashSet<QueueItemIdentity>>,
+        now_secs: u64,
+    ) -> usize {
+        let mut closed = 0;
+        for receipt in &mut self.receipts {
+            if receipt.attempt_closed()
+                || !struck.contains(&receipt.identity)
+                || live.is_some_and(|live| live.contains(&receipt.identity))
+            {
+                continue;
+            }
+            receipt.attempt_closed_at_secs = Some(now_secs.max(1));
+            closed += 1;
+        }
+        closed
     }
 
     /// The receipt that governs the live line `text`: still queued and not
@@ -818,6 +859,7 @@ mod tests {
             response: None,
             released_at_secs: 1,
             expires_at_secs: 2,
+            attempt_closed_at_secs: None,
         };
         assert!(
             !legacy.attests_exact_attempt(),

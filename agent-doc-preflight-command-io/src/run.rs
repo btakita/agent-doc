@@ -1257,6 +1257,8 @@ fn run_with_options_to_writer_in_pass(
     // is otherwise empty, an active queue head item becomes the prompt diff for
     // this cycle. This preserves bare no-op invocations while letting persisted
     // `queue_active: true` advance without requiring a fresh document edit.
+    let mut answer_ledger_report =
+        agent_doc_preflight_io::answer_ledger::AnswerLedgerReport::default();
     let queue_state = if options.probe {
         inspect_queue_state(file, diff_result.as_deref()).unwrap_or_else(|e| {
             eprintln!("[preflight] queue probe warning: {}", e);
@@ -1272,6 +1274,14 @@ fn run_with_options_to_writer_in_pass(
         // nothing and never blocks admission.
         if let Err(err) = agent_doc_preflight_io::run_todo_id_maintenance(file, &coin_gate) {
             eprintln!("[preflight] todo: id backfill not applied this pass: {err:#}");
+        }
+        // `#answerbyrequestid`: capture every operator answer, close duplicate
+        // todo copies of answered questions, and collect the "already
+        // answered" facts this cycle contract carries. Best-effort: a failure
+        // closes nothing and never blocks admission.
+        match agent_doc_preflight_io::answer_ledger::run_answer_ledger_maintenance(file) {
+            Ok(report) => answer_ledger_report = report,
+            Err(err) => eprintln!("[preflight] answer ledger: not applied this pass: {err:#}"),
         }
         match run_queue_maintenance_with_coin_gate_and_snapshot(
             file,
@@ -3011,6 +3021,9 @@ fn run_with_options_to_writer_in_pass(
                 &queue_head_annotations,
             ),
         queue_head_annotations,
+        answered_decisions_guidance: answer_ledger_report.guidance(),
+        answered_decisions: answer_ledger_report.facts,
+        possibly_answered: answer_ledger_report.possible,
         queue_active: preflight_read_projection.queue.active,
         queue_deferred: preflight_read_projection.queue.deferred,
         queue_start_at: preflight_read_projection.queue.start_at.clone(),

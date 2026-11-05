@@ -1,6 +1,7 @@
 //! Preflight maintenance I/O adapters.
 
 pub mod admission_replica_hold;
+pub mod answer_ledger;
 pub mod debounce;
 pub mod gc;
 pub mod layout;
@@ -1427,6 +1428,22 @@ pub struct PreflightOutput {
     /// How to address `queue_head_annotations`; present only when non-empty.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub queue_head_annotation_guidance: Option<String>,
+    /// `#answerbyrequestid`: questions the operator already answered that
+    /// still have open copies (todo, waiting item, request). Each carries the
+    /// verbatim latest answer, where and when it was given, and the open copy
+    /// ids. Derived by the binary from the document and its answer ledger on
+    /// every preflight; the agent acts on these answers and never re-asks.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub answered_decisions: Vec<agent_doc_answer_ledger::AnsweredFact>,
+    /// `#answerbyrequestid`: gray-zone candidates (same subject anchors or
+    /// similar wording without an id link). Annotation only: confirm with the
+    /// operator once before treating one as answered.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub possibly_answered: Vec<agent_doc_answer_ledger::PossibleMatch>,
+    /// How to treat `answered_decisions` / `possibly_answered`; present only
+    /// when either is non-empty.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub answered_decisions_guidance: Option<String>,
     /// Whether the queue is currently active (consuming prompts).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub queue_active: Option<bool>,

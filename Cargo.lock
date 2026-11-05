@@ -25,6 +25,7 @@ version = "0.35.568"
 dependencies = [
  "agent-doc-admin-io",
  "agent-doc-agent-io",
+ "agent-doc-answer-ledger",
  "agent-doc-archive-io",
  "agent-doc-boundary-io",
  "agent-doc-callback-io",
@@ -213,6 +214,18 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+]
+
+[[package]]
+name = "agent-doc-answer-ledger"
+version = "0.35.568"
+dependencies = [
+ "agent-doc-element",
+ "agent-doc-hash",
+ "agent-doc-queue",
+ "anyhow",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -1594,6 +1607,7 @@ dependencies = [
 name = "agent-doc-preflight-io"
 version = "0.35.568"
 dependencies = [
+ "agent-doc-answer-ledger",
  "agent-doc-config",
  "agent-doc-controller-io",
  "agent-doc-crdt-relay-io",
@@ -3180,6 +3194,7 @@ dependencies = [
 name = "agent-doc-write-runtime-io"
 version = "0.35.568"
 dependencies = [
+ "agent-doc-answer-ledger",
  "agent-doc-capture-io",
  "agent-doc-closeout-runtime-io",
  "agent-doc-controller-io",

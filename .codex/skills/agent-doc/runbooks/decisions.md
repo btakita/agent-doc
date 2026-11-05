@@ -33,3 +33,30 @@ Evidence uses canonical response IDs such as `[#r-0123456789ab]`. These IDs
 pin their responses for archive GC through
 `agent_doc_decision_io::pinned_response_ids`. Validation reports response IDs
 that are no longer materialized and decision links whose records do not exist.
+
+## Operator answers in a session document
+
+You do not look operator answers up. The binary does it for you on every
+preflight and every closeout (`#answerbyrequestid`):
+
+- Each operator answer in the document is recorded under every copy of its
+  question: the todo, its Waiting-on-you item, and requests raised for that
+  item. Answers in the done archive count too.
+- The cycle contract lists `answered_decisions`. Each entry has the operator's
+  latest answer word for word, where it was given, and the open copies it
+  covers. Act on that answer. Do not ask it again.
+- `possibly_answered` entries are only likely matches. If one is the same
+  question, ask the operator once whether it is the same. They confirm by
+  replying `same as [#id]` under the item. Never merge two questions yourself.
+- The binary closes duplicate request copies once their answer has been
+  delivered. A closeout that asks an answered question again is refused, with
+  the recorded answer. If the answer truly leaves a new question open, cite
+  the decision id, or write `already answered: <answer>`, in the request and
+  say what is still open.
+- Only operator words change a decision. A newer operator answer becomes the
+  latest revision. Earlier answers are kept, and the cycle contract shows a
+  changed decision once as `decision changed: <old> -> <new>`.
+
+`agent-doc decision answered <FILE> [--json]` prints the ledger for debugging.
+`agent-doc decision validate --document <FILE>` also lists near-duplicate
+question clusters.

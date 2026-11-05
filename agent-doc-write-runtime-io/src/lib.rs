@@ -3662,6 +3662,9 @@ fn run_command_inner_within_pass(
     // ordinary `--todo-add` dedupe and id layering. Only the caller's own
     // flags count as "tracked-work mutations" for the committed-replay gate.
     let operator_todo_add_supplied = !options.todo_add.is_empty();
+    // `#answerbyrequestid`: refuse, before anything is written, a closeout
+    // that asks the operator something they already answered.
+    refuse_answered_reasks(file, &options)?;
     let derived_packet_requests = derive_blocking_operator_requests(file, &options)?;
     options.todo_add.extend(derived_packet_requests.todo_inputs);
     options
@@ -4094,6 +4097,21 @@ fn run_command_inner_within_pass(
             )?;
         } else {
             agent_doc_preflight_io::run_todo_id_maintenance(file, &coin_gate)?;
+        }
+        // `#answerbyrequestid`: chat turns may never run preflight, so the
+        // closeout is where duplicate copies of answered questions close and
+        // the answer ledger index refreshes. Best-effort: a failure closes
+        // nothing and never fails the closeout.
+        let ledger = if options.force_disk {
+            agent_doc_preflight_io::answer_ledger::run_answer_ledger_maintenance_force_disk(
+                file,
+                &agent_doc_preflight_runtime_io::PREFLIGHT_MAINTENANCE_WRITE_EFFECTS,
+            )
+        } else {
+            agent_doc_preflight_io::answer_ledger::run_answer_ledger_maintenance(file)
+        };
+        if let Err(err) = ledger {
+            eprintln!("[write] answer ledger: not applied this closeout: {err:#}");
         }
         let before_todo = current_content
             .as_deref()
@@ -4979,6 +4997,56 @@ fn validate_blocking_operator_request_recommendations(
         anyhow::bail!("blocking subagent operator-request packet is invalid: {error}");
     }
     Ok(())
+}
+
+/// `#answerbyrequestid`: a request packet or `--todo-add` that an acting
+/// matcher tier resolves to an operator-answered decision is a re-ask. The
+/// closeout is refused with the recorded answer unless the new question cites
+/// it explicitly (its decision id, or the words "already answered"). This runs on
+/// every closeout, including chat turns that never ran preflight.
+fn refuse_answered_reasks(file: &Path, options: &CommandOptions) -> Result<()> {
+    if options.pending_only || options.response_input_provenance.is_binary_owned_replay() {
+        return Ok(());
+    }
+    let response = peek_response_input()?;
+    if options.todo_add.is_empty()
+        && agent_doc_turn::response_text::blocking_operator_request_packets(&response).is_empty()
+    {
+        return Ok(());
+    }
+    let content = if options.force_disk {
+        std::fs::read_to_string(file).ok()
+    } else {
+        resolve_current_document(file, "answer_ledger_reask_gate")
+            .ok()
+            .map(|current| current.into_content())
+            .or_else(|| std::fs::read_to_string(file).ok())
+    };
+    let Some(content) = content else {
+        return Ok(());
+    };
+    let reasks = agent_doc_preflight_io::answer_ledger::reasks_for_closeout(
+        file,
+        &content,
+        &response,
+        &options.todo_add,
+    );
+    if reasks.is_empty() {
+        return Ok(());
+    }
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "answer_ledger_reask_refused file={} decisions={}",
+            file.display(),
+            reasks
+                .iter()
+                .map(|reask| reask.decision_id.as_str())
+                .collect::<Vec<_>>()
+                .join(",")
+        ),
+    );
+    anyhow::bail!("{}", agent_doc_answer_ledger::reask_refusal(&reasks));
 }
 
 #[derive(Default)]

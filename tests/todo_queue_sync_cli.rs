@@ -224,3 +224,111 @@ fn a_checked_todo_sharing_an_open_backlog_id_keeps_the_backlog_row() {
     assert!(body.contains("- ### 📥 do [#bk1]\n"), "{body}");
     assert!(!body.contains("~~"), "{body}");
 }
+
+/// `#answerbyrequestid`: the agent-free path. The operator answered a request
+/// copy of a question in a queue row that has been consumed. A plain preflight
+/// (no agent command) closes the stale request copy, keeps the decision todo
+/// open, and puts the verbatim answer in the cycle contract. A later closeout
+/// that re-asks the question is refused with the recorded answer.
+#[test]
+fn an_answered_question_closes_its_duplicate_and_a_reask_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let doc = session(
+        dir.path(),
+        "- ~~[#subagent-operator-request-tdport-pick]: Use port 3000.~~\n",
+        concat!(
+            "- [ ] [#tdport] Choose the demo callback port for local sign-in runs\n",
+            "- [ ] [#subagent-operator-request-tdport-pick] Choose the demo callback port for local sign-in runs: 3000 or 47616\n",
+        ),
+    );
+    let path = doc.to_str().unwrap();
+    let output = run_agent_doc(dir.path(), &["preflight", path]);
+    assert_ok(&output, "preflight");
+    let contract: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let answered = contract["answered_decisions"]
+        .as_array()
+        .expect("answered decisions");
+    let fact = answered
+        .iter()
+        .find(|fact| {
+            fact["open_items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|item| item == "tdport")
+        })
+        .unwrap_or_else(|| panic!("{contract:#}"));
+    assert_eq!(fact["answer"], "Use port 3000.", "{fact:#}");
+    assert!(
+        contract["answered_decisions_guidance"]
+            .as_str()
+            .unwrap()
+            .contains("do not ask again"),
+        "{contract:#}"
+    );
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(
+        content.contains("- [x] [#subagent-operator-request-tdport-pick]"),
+        "{content}"
+    );
+    assert!(content.contains("already answered `dec-"), "{content}");
+    assert!(content.contains("- [ ] [#tdport]"), "{content}");
+
+    let response = concat!(
+        "<!-- patch:exchange -->\n",
+        "The port is still open.\n\n",
+        "[#subagent-operator-request-tdport-again] subagent operator request\n",
+        "- *queue_item:*\n",
+        "  - do [#tdport]\n",
+        "- *kind:* question\n",
+        "- *blocking:* true\n",
+        "- *request:*\n",
+        "  - Which demo callback port should local sign-in runs use?\n",
+        "- *context:*\n",
+        "  - The demo needs a fixed port.\n",
+        "- *choices:*\n",
+        "  - **3000**: use port 3000.\n",
+        "  - **47616**: use port 47616.\n",
+        "<!-- /agent:exchange -->\n",
+    )
+    .replace("<!-- /agent:exchange -->", "<!-- /patch:exchange -->");
+    let mut child = Command::new(env!("CARGO_BIN_EXE_agent-doc"))
+        .env(
+            agent_doc_controller_io::project_controller::TEST_CONTROLLER_LAUNCH_REASON_ENV,
+            CONTROLLER_LAUNCH_REASON,
+        )
+        .env(
+            "AGENT_DOC_ROOT_CEILING_DIRECTORIES",
+            dir.path().parent().unwrap(),
+        )
+        .current_dir(dir.path())
+        .args(["write", "--commit", path])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    {
+        use std::io::Write as _;
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(response.as_bytes())
+            .unwrap();
+    }
+    let output = child.wait_with_output().unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success(), "re-ask must be refused: {stderr}");
+    assert!(
+        stderr.contains("closeout refused (#answerbyrequestid)"),
+        "{stderr}"
+    );
+    assert!(stderr.contains("Use port 3000."), "{stderr}");
+    assert!(
+        !fs::read_to_string(&doc)
+            .unwrap()
+            .contains("Which demo callback port"),
+        "nothing is written before the refusal"
+    );
+}

@@ -13,6 +13,7 @@ name = "agent_doc_preflight_io"
 [dependencies]
 agent-doc-config = { path = "../agent-doc-config", version = "0.35.568" }
 agent-doc-controller-io = { path = "../agent-doc-controller-io", version = "0.35.568" }
+agent-doc-answer-ledger = { path = "../agent-doc-answer-ledger", version = "0.35.568" }
 agent-doc-crdt-relay-io = { path = "../agent-doc-crdt-relay-io", version = "0.35.568" }
 agent-doc-cycle-state-io = { path = "../agent-doc-cycle-state-io", version = "0.35.568" }
 agent-doc-debounce = { path = "../agent-doc-debounce", version = "0.35.568" }

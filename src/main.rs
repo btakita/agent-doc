@@ -4328,6 +4328,20 @@ enum DecisionAction {
         project_root: PathBuf,
         #[arg(long)]
         json: bool,
+        /// Also report near-duplicate question clusters remaining in this
+        /// session document's answer ledger (`#answerbyrequestid`)
+        #[arg(long)]
+        document: Option<PathBuf>,
+    },
+    /// Debug view of a session document's operator answer ledger
+    /// (`#answerbyrequestid`): decisions, answer revisions, open copies,
+    /// gray-zone candidates and decision-graph edges. Enforcement never
+    /// depends on running this; preflight and closeout apply the ledger.
+    Answered {
+        /// Session document
+        file: PathBuf,
+        #[arg(long)]
+        json: bool,
     },
     /// Read immutable revision entries for one stable decision id
     History {
@@ -4403,7 +4417,45 @@ fn run_decision_action(action: DecisionAction) -> anyhow::Result<()> {
             }
             Ok(())
         }
-        DecisionAction::Validate { project_root, json } => {
+        DecisionAction::Answered { file, json } => {
+            let content = std::fs::read_to_string(&file)
+                .with_context(|| format!("failed to read {}", file.display()))?;
+            let (_, ledger) = agent_doc_preflight_io::answer_ledger::build_ledger(&file, &content);
+            let facts = ledger.answered_facts();
+            if json {
+                let value = serde_json::json!({
+                    "decisions": ledger.decisions,
+                    "answered": facts,
+                    "possibly_answered": ledger.possible,
+                    "near_duplicates": ledger.near_duplicates,
+                    "edges": ledger.edges,
+                });
+                println!("{}", serde_json::to_string_pretty(&value)?);
+            } else {
+                for decision in ledger.decisions.iter().filter(|decision| !decision.revisions.is_empty()) {
+                    println!("{} {}", decision.id, decision.question);
+                    for revision in &decision.revisions {
+                        println!("  {} “{}” ({})", revision.relation.as_str(), revision.answer, revision.location);
+                    }
+                    if !decision.open_items.is_empty() {
+                        println!("  open copies: {}", decision.open_items.join(", "));
+                    }
+                }
+                if let Some(guidance) = agent_doc_answer_ledger::contract_guidance(&facts, &ledger.possible) {
+                    println!("\n{guidance}");
+                }
+            }
+            Ok(())
+        }
+        DecisionAction::Validate { project_root, json, document } => {
+            if let Some(document) = &document {
+                let content = std::fs::read_to_string(document)
+                    .with_context(|| format!("failed to read {}", document.display()))?;
+                let (_, ledger) = agent_doc_preflight_io::answer_ledger::build_ledger(document, &content);
+                for cluster in &ledger.near_duplicates {
+                    eprintln!("near-duplicate questions (confirm once with the operator): {}", cluster.join(", "));
+                }
+            }
             let report = agent_doc_decision_io::validate(&project_root)?;
             if json {
                 println!("{}", serde_json::to_string_pretty(&report)?);

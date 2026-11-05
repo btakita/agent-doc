@@ -68,6 +68,15 @@ preflight and every closeout (`#answerbyrequestid`):
   id the delivered operator answer addresses; apply the rest, citing the
   decision. An operator question back (`[#id]: Is this done?`) is never
   recorded as an answer.
+- Three more kinds come from the decision graph and are only flagged
+  (`#decisionstalegraph`): `moot_by_decision` (the latest answer turns the
+  item's work down, or chose an option the item does not assume),
+  `built_on_superseded` (the item applies to or depends on a decision whose
+  earlier answer was superseded), and `contradicts_decision` (the item is
+  linked `conflicts with` an answered decision, or restates a superseded
+  answer). Close the item, or rewrite it against the current answer and keep
+  the cited revision id (`<decision>@<hash>`) in its text; that id marks it
+  reconciled.
 - Only operator words change a decision. A newer operator answer becomes the
   latest revision. Earlier answers are kept, and the cycle contract shows a
   changed decision once as `decision changed: <old> -> <new>`.

@@ -86,7 +86,11 @@ its suggested flag in this closeout (`--todo-done`, `--done`, or
 `--review-resolve`) and cite the decision id in the response, or rewrite the
 item as the action the answer asks for. Icebox items are only flagged: decide
 what to do with them yourself. Preflight already closed a todo whose own id the
-delivered answer settled; it never closes anything else.
+delivered answer settled; it never closes anything else. For the graph kinds
+`moot_by_decision`, `built_on_superseded`, and `contradicts_decision`
+(`#decisionstalegraph`), either close the item or rewrite it against the
+current answer with the cited revision id (`<decision>@<hash>`) kept in its
+text, which marks it reconciled.
 
 Finalize also auto-dedupes identical same-id review entries during closeout maintenance, so an interleaved-finalize duplicate collapses without an explicit flag; distinct items that merely share an id are preserved so the ambiguity warning still surfaces.
 

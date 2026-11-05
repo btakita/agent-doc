@@ -560,3 +560,122 @@ fn a_delivered_answer_closes_its_idle_todo_and_reports_the_rest() {
     assert_eq!(reported.len(), 1, "{report:#}");
     assert_eq!(reported[0]["decision"], decision.as_str(), "{report:#}");
 }
+
+/// `#firstprincipleswhy`: `decision why` reconciles the ledger's answer with
+/// the first-principles derivation chain. Principles come from all three
+/// layers (the global file under `$XDG_CONFIG_HOME`, the project's
+/// `.agent-doc/project.md`, the session's own `agent:rules`); an operator
+/// answer citing `[#id]`, or a `depends on [#id]` link, makes an
+/// operator-confirmed step, and a decision that depends on another walks
+/// through that decision's step down to its principle.
+#[test]
+fn decision_why_walks_the_first_principles_chain() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = dir.path().join("config");
+    fs::create_dir_all(config.join("agent-doc")).unwrap();
+    fs::write(
+        config.join("agent-doc/principles.md"),
+        "<!-- agent:rules -->\n- principle [#open-by-default]: Tools are public unless they hold secrets.\n<!-- /agent:rules -->\n",
+    )
+    .unwrap();
+    let root = dir.path().join("repo");
+    fs::create_dir_all(root.join(".agent-doc/locks")).unwrap();
+    fs::write(
+        root.join(".agent-doc/project.md"),
+        "<!-- agent:rules -->\n- principle [#least-surprise]: Pick the default a new user expects.\n<!-- /agent:rules -->\n",
+    )
+    .unwrap();
+    let doc = root.join("session.md");
+    fs::write(
+        &doc,
+        concat!(
+            "---\nagent_doc_session: why-chain\nagent_doc_format: template\n---\n\n",
+            "## Rules <!-- agent:rules -->\n",
+            "- principle [#no-tokens]: Install scripts never embed credentials.\n",
+            "<!-- /agent:rules -->\n\n",
+            "## Run <!-- agent:run -->\n",
+            "- ### Waiting on you <!-- agent-doc:waiting-on-you -->\n",
+            "  - 🙋 [#tdpublic] Decide whether haiven-cli is public and open source <!-- agent-doc:waiting-item -->\n",
+            "    - Public and open source, per [#open-by-default].\n",
+            "  - 🙋 [#tdtoken] Decide whether install.sh embeds a download token <!-- agent-doc:waiting-item -->\n",
+            "    - No token in install.sh, per [#no-tokens].\n",
+            "    - depends on [#tdpublic]\n",
+            "  - 🙋 [#tdport] Choose the demo callback port <!-- agent-doc:waiting-item -->\n",
+            "    - Use port 8080.\n",
+            "    - depends on [#least-surprise]\n",
+            "<!-- /agent:run -->\n\n",
+            "## Todo <!-- agent:todo -->\n",
+            "- [ ] [#tdpublic] Decide whether haiven-cli is public and open source\n",
+            "- [ ] [#tdtoken] Decide whether install.sh embeds a download token\n",
+            "- [ ] [#tdport] Choose the demo callback port\n",
+            "<!-- /agent:todo -->\n",
+        ),
+    )
+    .unwrap();
+    git(&root, &["init", "-q"]);
+    let path = doc.to_str().unwrap();
+    let why = |args: &[&str]| {
+        let output = Command::new(env!("CARGO_BIN_EXE_agent-doc"))
+            .env(
+                agent_doc_controller_io::project_controller::TEST_CONTROLLER_LAUNCH_REASON_ENV,
+                CONTROLLER_LAUNCH_REASON,
+            )
+            .env("AGENT_DOC_ROOT_CEILING_DIRECTORIES", dir.path())
+            .env("XDG_CONFIG_HOME", &config)
+            .current_dir(&root)
+            .args(args)
+            .output()
+            .unwrap();
+        assert_ok(&output, "decision why");
+        output
+    };
+
+    let output = why(&["decision", "why", path, "tdtoken", "--json"]);
+    let whys: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let token = &whys[0];
+    assert_eq!(
+        token["current_answer"], "No token in install.sh, per [#no-tokens].",
+        "{whys:#}"
+    );
+    assert_eq!(token["derivation_supported"], true, "{whys:#}");
+    let step = &token["derived_from"][0];
+    assert_eq!(step["status"], "operator_confirmed", "{whys:#}");
+    let premises = step["premises"].as_array().unwrap();
+    assert_eq!(premises[0]["node"]["kind"], "principle", "{whys:#}");
+    assert_eq!(premises[0]["node"]["id"], "no-tokens", "{whys:#}");
+    assert_eq!(premises[1]["node"]["kind"], "decision", "{whys:#}");
+    let public_premise = &premises[1]["because"]["steps"][0]["premises"][0]["node"];
+    assert_eq!(public_premise["kind"], "principle", "{whys:#}");
+    assert_eq!(public_premise["id"], "open-by-default", "{whys:#}");
+    let scopes: Vec<(String, String)> = token["principles"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|principle| {
+            (
+                principle["id"].as_str().unwrap().to_string(),
+                principle["scope"].as_str().unwrap().to_string(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        scopes,
+        vec![
+            ("no-tokens".to_string(), "document".to_string()),
+            ("open-by-default".to_string(), "global".to_string()),
+        ],
+        "{whys:#}"
+    );
+    // The ledger half is unchanged.
+    assert_eq!(token["revisions"][0]["relation"], "initial", "{whys:#}");
+    assert_eq!(token["depends_on"][0]["kind"], "decision", "{whys:#}");
+
+    let output = why(&["decision", "why", path, "tdport"]);
+    let text = String::from_utf8(output.stdout).unwrap();
+    assert!(
+        text.contains("depends on principle least-surprise “Pick the default a new user expects.”"),
+        "{text}"
+    );
+    assert!(text.contains("  derived from:"), "{text}");
+    assert!(text.contains("(project, "), "{text}");
+}

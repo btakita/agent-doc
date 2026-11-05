@@ -117,11 +117,40 @@ operator's verbatim words, location, first-seen time, relation and its
 source, clause and evidence; the transitive `depends_on` premises with their
 current answers; conflicts, copies, applied items and `same_as` merges.
 
+**First-principles chain** (`#firstprincipleswhy`,
+`agent_doc_answer_ledger::graph::why_chain`). `decision why` joins that
+answer with the `#firstprinciples` derivation chain
+(`agent_doc_principles::derivation::Graph::why`) into one record: the ledger
+fields above, flattened, plus `derived_from` (the derivation steps that
+conclude the decision, each with `status`, `inference`, `answer` and
+`premises`; a premise that is itself a derived decision carries its own
+`because` chain, and a premise already on the chain is marked `cycle`),
+`derivation_supported` (some step is not `rejected`; absent when no step
+concludes it), `principles` (every in-scope principle the chain or
+`depends_on` reaches, with statement, scope and source) and
+`missing_principles` (principle premises no longer in scope). Principles are
+the cycle contract's composed set for the document (global, project,
+document). The binary states a derivation for every answered decision whose
+holding revisions (the latest back through amends and restatements to the
+one that superseded or began the answer) cite an in-scope principle as
+`[#id]`, or that has a `depends on [#id]` link to a principle or another
+decision: id `op:<latest revision id>`, the holding revisions verbatim as
+the inference, the latest as the answer, status `operator_confirmed`. A
+superseded answer's citations no longer count. A `depends_on` premise that
+names a principle reads as kind `principle` with its statement. Stored
+derivations join the same graph with their decision references resolved
+onto ledger decision ids, and win over an operator-stated derivation with
+the same id; an invalid one (no premises, no inference, its own conclusion
+as a premise, a duplicate id) is skipped with a stderr note. A decision only
+a derivation concludes still answers, with empty `question` and the live
+step's answer as `current_answer`.
+
 **CLI** (debugging and operator lookup; enforcement never depends on it):
 `agent-doc decision graph FILE [--json]`, `agent-doc decision impact FILE
 <id> [--revision <rev>] [--json]`, `agent-doc decision why FILE <id>
-[--json]`. `<id>` may be a decision id, a revision id, a question copy id, or
-(for `why`, and for `impact` when unambiguous) an item a decision applies to.
+[--json]`. `<id>` may be a decision id, a revision id, a question copy id,
+(for `why`, and for `impact` when unambiguous) an item a decision applies to,
+or (for `why`) a decision only a derivation concludes.
 tsift graph-db may index the cached rows as an optional traversal layer.
 
 ### First-principles derivations (`#firstprinciplesstore`)

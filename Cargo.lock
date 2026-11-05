@@ -224,6 +224,7 @@ dependencies = [
  "agent-doc-element",
  "agent-doc-element-backlog",
  "agent-doc-hash",
+ "agent-doc-principles",
  "agent-doc-queue",
  "anyhow",
  "serde",

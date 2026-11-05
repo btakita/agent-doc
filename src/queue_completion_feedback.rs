@@ -88,7 +88,7 @@ pub(crate) fn report_complete(
     publication_state: Option<QueueReportState>,
     repository: Option<&RepositoryCompletion>,
     response: &str,
-) -> Result<Option<CompletionFeedbackOutcome>> {
+) -> Result<CompletionFeedbackOutcome> {
     anyhow::ensure!(
         !response.trim().is_empty(),
         "subagent completion response must not be empty"
@@ -112,7 +112,7 @@ fn report_complete_with_lock_wait(
     repository: Option<&RepositoryCompletion>,
     response: &str,
     lock_wait: Duration,
-) -> Result<Option<CompletionFeedbackOutcome>> {
+) -> Result<CompletionFeedbackOutcome> {
     // `#subagentcompletionfeedback`: unlike SESSION_ACTOR_WRITE_QUEUE, this
     // lock serializes independent CLI processes. Re-resolve and rebuild inside
     // the owner so stale full-document successors cannot lose sibling notices.
@@ -135,11 +135,20 @@ fn report_complete_with_lock_wait(
     let current =
         agent_doc_document_realtime_io::deferred_document_write_reconnect_content(file, &resolved)?
             .unwrap_or(resolved);
+    // `#reportcompletenomatch`: a report that matches no subagent claim is a
+    // failure, never a silent success. The worker result it carried would
+    // otherwise be lost while the coordinator reads exit 0 as "recorded".
     let Some(claim) = observed_claim(file, item, &current)? else {
-        return Ok(None);
+        return Err(no_matching_claim_error(file, item, generation, &current, None));
     };
     if !claim.owner.starts_with("subagent:") {
-        return Ok(None);
+        return Err(no_matching_claim_error(
+            file,
+            item,
+            generation,
+            &current,
+            Some(&claim),
+        ));
     }
     let worker_id = claim
         .worker
@@ -204,13 +213,109 @@ fn report_complete_with_lock_wait(
     let (appended, replaced, intent_id) =
         upsert_completion_feedback(file, &current, &projection.target_content, &claim, response)?;
     agent_doc_queue_io::queue_cmd::record_claim_runtime_projection(file, &projection, None)?;
-    Ok(Some(CompletionFeedbackOutcome {
+    Ok(CompletionFeedbackOutcome {
         claim,
         appended,
         replaced,
         projection_pending: intent_id.is_some(),
         intent_id,
-    }))
+    })
+}
+
+/// Most rows/claims named in a no-match refusal; the rest are counted.
+const NO_MATCH_LIST_LIMIT: usize = 20;
+
+/// `#reportcompletenomatch`: the refusal for a `report-complete` whose item
+/// resolves to no subagent claim. It names what the item could have meant —
+/// the document's queue rows and the ledger's claims with owner, generation,
+/// and state — so the coordinator can re-run against the exact attempt
+/// instead of losing the worker result.
+fn no_matching_claim_error(
+    file: &Path,
+    item: &str,
+    generation: Option<u64>,
+    current: &str,
+    non_subagent: Option<&QueueClaim>,
+) -> anyhow::Error {
+    let requested_generation = generation
+        .map(|generation| format!(" generation {generation}"))
+        .unwrap_or_default();
+    let reason = match non_subagent {
+        Some(claim) => format!(
+            "the claim on {:?} is held by {} generation {}, not a `subagent:` owner",
+            claim.item_text, claim.owner, claim.generation
+        ),
+        None => "no claim in the ledger matches it".to_string(),
+    };
+    let rows = agent_doc_queue::queue_continuation::all_queue_head_texts(current)
+        .unwrap_or_default();
+    let ledger = agent_doc_queue_io::queue_claim::load_ledger_following(file, current);
+    let mut message = format!(
+        "queue report-complete matched no subagent claim for {item:?}{requested_generation} in {}: {reason}. No completion feedback was written; the worker result is NOT recorded (#reportcompletenomatch).",
+        file.display(),
+    );
+    push_named_list(
+        &mut message,
+        "candidate rows",
+        rows.iter().map(|row| format!("{row:?}")),
+    );
+    match &ledger {
+        Ok(ledger) => {
+            push_named_list(
+                &mut message,
+                "claims",
+                ledger.claims.iter().map(describe_claim),
+            );
+            let identity = agent_doc_queue::queue_claim::claim_identity(item);
+            push_named_list(
+                &mut message,
+                "cancelled attempts for this item",
+                ledger
+                    .cancellations
+                    .iter()
+                    .filter(|receipt| receipt.claim.identity == identity)
+                    .map(|receipt| describe_claim(&receipt.claim)),
+            );
+        }
+        Err(err) => message.push_str(&format!("\nclaims: unreadable ({err:#})")),
+    }
+    message.push_str(
+        "\nNext: re-run `agent-doc queue report-complete` with --item set to the exact claimed row text and --generation from the claims above; if no claim fits, the attempt was released, cancelled, or never claimed, so keep the worker response and re-claim the row before reporting.",
+    );
+    anyhow::anyhow!(message)
+}
+
+fn describe_claim(claim: &QueueClaim) -> String {
+    format!(
+        "{:?} owner={} generation={} state={}{}",
+        claim.item_text,
+        claim.owner,
+        claim.generation,
+        format!("{:?}", claim.state).to_lowercase(),
+        claim
+            .worker
+            .as_ref()
+            .map(|worker| format!(" worker={}", worker.worker_id))
+            .unwrap_or_default(),
+    )
+}
+
+fn push_named_list(message: &mut String, label: &str, entries: impl Iterator<Item = String>) {
+    let entries: Vec<String> = entries.collect();
+    if entries.is_empty() {
+        message.push_str(&format!("\n{label}: none"));
+        return;
+    }
+    message.push_str(&format!("\n{label} ({}):", entries.len()));
+    for entry in entries.iter().take(NO_MATCH_LIST_LIMIT) {
+        message.push_str(&format!("\n  - {entry}"));
+    }
+    if entries.len() > NO_MATCH_LIST_LIMIT {
+        message.push_str(&format!(
+            "\n  - ... and {} more",
+            entries.len() - NO_MATCH_LIST_LIMIT
+        ));
+    }
 }
 
 fn observed_claim(file: &Path, item: &str, current: &str) -> Result<Option<QueueClaim>> {
@@ -1127,7 +1232,6 @@ mod tests {
                 .is_empty()
         );
         let reported = report_complete(&doc, ROW, Some(generation), None, None, clean)
-            .unwrap()
             .expect("the final-state hand-back is reported normally");
         assert!(reported.appended);
     }
@@ -1176,7 +1280,6 @@ mod tests {
             None,
             "Implemented SDK support.\n\nTests: 12 passed.",
         )
-        .unwrap()
         .unwrap();
         assert!(first.appended);
         assert!(!first.projection_pending);
@@ -1219,7 +1322,6 @@ mod tests {
             None,
             "Implemented SDK support.\n\nTests: 12 passed.",
         )
-        .unwrap()
         .unwrap();
         assert!(
             !second.appended,
@@ -1235,7 +1337,6 @@ mod tests {
             None,
             "Implemented SDK support.\n\nTests: 18 passed.",
         )
-        .unwrap()
         .unwrap();
         assert!(!updated.appended);
         assert!(
@@ -1429,18 +1530,26 @@ mod tests {
         .unwrap();
         agent_doc_queue_io::queue_claim::cancel_removed_attempt(&doc, item, Some(first.generation))
             .unwrap();
+        let cancelled = report_complete(
+            &doc,
+            item,
+            Some(first.generation),
+            None,
+            None,
+            "worker one completed",
+        )
+        .expect_err("a tombstoned attempt cannot manufacture completion feedback")
+        .to_string();
+        // `#reportcompletenomatch`: the refusal names the cancelled attempt
+        // instead of exiting quietly.
         assert!(
-            report_complete(
-                &doc,
-                item,
-                Some(first.generation),
-                None,
-                None,
-                "worker one completed"
-            )
-            .unwrap()
-            .is_none(),
-            "a tombstoned attempt cannot manufacture completion feedback"
+            cancelled.contains("matched no subagent claim for \"finish sdk\" generation 1"),
+            "{cancelled}"
+        );
+        assert!(
+            cancelled.contains("cancelled attempts for this item (1):")
+                && cancelled.contains("owner=subagent:first generation=1"),
+            "{cancelled}"
         );
 
         let (_, replacement) =
@@ -1540,7 +1649,6 @@ mod tests {
                 std::thread::spawn(move || {
                     report_complete(&doc, item, Some(1), None, None, "concurrent worker completed")
                         .unwrap()
-                        .unwrap()
                 })
             })
             .collect::<Vec<_>>();
@@ -1633,7 +1741,6 @@ mod tests {
         .expect("editor replica attaches");
 
         let first = report_complete(&doc, "first worker", Some(1), None, None, "first result")
-            .unwrap()
             .unwrap();
         assert!(first.projection_pending);
 
@@ -1663,7 +1770,6 @@ mod tests {
         );
 
         let second = report_complete(&doc, "second worker", Some(1), None, None, "second result")
-            .unwrap()
             .unwrap();
         assert!(second.projection_pending);
         let pending = agent_doc_document_realtime_io::pending_document_write(&doc)

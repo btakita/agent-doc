@@ -97,6 +97,10 @@ The queue coordinator protocol is three-boundary and worker-fenced
    wholly struck prompt tree is terminal and safe to delete. The marker is the
    worker-complete handoff/outbox. Integrate and persist the result in the same
    turn so closeout strikes the queue line and ends the claim.
+   A report that matches no subagent claim exits non-zero and names the
+   candidate rows and claims (owner, generation, state); re-run it against the
+   exact claimed row and generation it lists, never treat it as recorded
+   (`#reportcompletenomatch`).
 
 Never infer running from a label, intended spawn, process poll, or heartbeat.
 `queue claim --refresh --generation <N>` only extends an already-started attempt.

@@ -897,6 +897,17 @@ and retries the exact current generation. Convergence, supersession, or
 controller teardown ends that ownership.
 Tmux observation and retry must not run on the Project Controller IPC accept
 thread or in a detached periodic timer.
+- The layout focus effect finds the focus pane by canonical document
+  identity, never by path text (`#focusmatchcanonical`). Both the focus and
+  each file→pane assignment are anchored at the project root and canonicalized
+  — the same `canonical_layout_document_id` the layout, gating and drift survey
+  key on — so a relative, `./`-prefixed, symlinked, or otherwise differently
+  spelled focus (`tasks//doc.md`, `tasks/sub/../doc.md`) selects the same pane
+  as the editor's absolute path instead of settling as
+  `focus_pane_not_found:<focus>`. A path that does not resolve on disk falls
+  back to its lexical form with `.` components and repeated separators
+  dropped; `..` stays lexical because collapsing it is wrong across a
+  symlinked parent. The receipt keeps the caller's spelling of the focus.
 - Layout focus is refused for a pane that is not co-visible
   (`#panewindowdrift`). A file→pane assignment, the actor row, and the registry
   entry each carry the window captured when the pane was bound, and none of them

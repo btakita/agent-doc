@@ -30588,6 +30588,13 @@ fn resolve_flat_sync_command(
     )
 }
 
+/// The document identity every layout surface keys on: the path anchored at
+/// the project root and canonicalized (symlinks, `..`, `.` and repeated
+/// separators resolved). A path that does not resolve on disk falls back to
+/// its lexical form with `.` components and repeated separators dropped, so a
+/// `./`-prefixed spelling of a not-yet-existing document still names the same
+/// identity as its plain spelling; `..` is kept, because collapsing it
+/// lexically is wrong across a symlinked parent.
 fn canonical_layout_document_id(project_root: &Path, file: &str) -> String {
     let trimmed = file.trim();
     let path = if Path::new(trimmed).is_absolute() {
@@ -30596,7 +30603,7 @@ fn canonical_layout_document_id(project_root: &Path, file: &str) -> String {
         project_root.join(trimmed)
     };
     path.canonicalize()
-        .unwrap_or(path)
+        .unwrap_or_else(|_| path.components().collect())
         .to_string_lossy()
         .to_string()
 }
@@ -36536,7 +36543,9 @@ struct PaneLayoutFocusCoVisibility<'a, F: FnOnce(&str) -> Option<LivePaneWindow>
 /// A refusal keeps `applied: false`, so the caller neither converges nor counts
 /// it toward `observation=synced`; the structural reconcile runs and the retry
 /// focuses the pane once it is back in the layout window.
+#[allow(clippy::too_many_arguments)]
 fn apply_pane_layout_focus_effect(
+    project_root: &Path,
     worker_state: &Mutex<agent_doc_controller::pane_layout::LatestTmuxEffectWorkerState>,
     generation: u64,
     focus: Option<&str>,
@@ -36560,9 +36569,15 @@ fn apply_pane_layout_focus_effect(
             },
         };
     };
+    // `#focusmatchcanonical`: match by canonical document identity, the same
+    // identity the layout/registry keys on, never by path text. An editor
+    // sends absolute paths today, but a relative, `./`-prefixed, symlinked or
+    // otherwise differently spelled focus names the same document and must
+    // find its pane rather than settle as `focus_pane_not_found`.
+    let focus_id = canonical_layout_document_id(project_root, focus);
     let Some((_, pane)) = file_panes
         .iter()
-        .find(|(document, _)| Path::new(document) == Path::new(focus))
+        .find(|(document, _)| canonical_layout_document_id(project_root, document) == focus_id)
     else {
         return PaneLayoutFocusEffectReceipt {
             required: true,
@@ -37309,6 +37324,7 @@ fn pane_layout_effect_worker(
                 lane_observation_session.as_deref(),
             );
             let focus_receipt = apply_pane_layout_focus_effect(
+                &bootstrap.project_root,
                 &state,
                 work_revision,
                 projected_focus.as_deref(),
@@ -37498,6 +37514,7 @@ fn pane_layout_effect_worker(
                 lane_observation_session.as_deref(),
             );
             apply_pane_layout_focus_effect(
+                &bootstrap.project_root,
                 &state,
                 work_revision,
                 projected_focus.as_deref(),
@@ -40725,6 +40742,7 @@ mod tmux_layout_effect_state_dispatch_tests {
         let mut selected = None;
 
         let receipt = apply_pane_layout_focus_effect(
+            Path::new("/project"),
             &state,
             7,
             Some("/tasks/new-left.md"),
@@ -40748,6 +40766,135 @@ mod tmux_layout_effect_state_dispatch_tests {
         assert_eq!(selected.as_deref(), Some("%76"));
         assert!(receipt.required);
         assert!(receipt.applied);
+    }
+
+    /// Run the pane-layout focus effect against a co-visible layout window and
+    /// return (selected pane, receipt).
+    fn focus_effect_selects(
+        project_root: &Path,
+        focus: &str,
+        file_panes: &[(String, String)],
+    ) -> (Option<String>, PaneLayoutFocusEffectReceipt) {
+        let state =
+            Mutex::new(agent_doc_controller::pane_layout::LatestTmuxEffectWorkerState::default());
+        assert!(state.lock().schedule(7));
+        let mut selected = None;
+        let receipt = apply_pane_layout_focus_effect(
+            project_root,
+            &state,
+            7,
+            Some(focus),
+            false,
+            file_panes,
+            PaneLayoutFocusCoVisibility {
+                layout_window: Some("@894"),
+                observe_pane_window: |_| {
+                    Some(LivePaneWindow::from((
+                        "@894".to_string(),
+                        "agent-doc".to_string(),
+                    )))
+                },
+            },
+            |pane| {
+                selected = Some(pane.to_string());
+                Ok(())
+            },
+        );
+        (selected, receipt)
+    }
+
+    /// `#focusmatchcanonical`: the focus effect matches a pane by canonical
+    /// document identity, so every spelling of the same document focuses its
+    /// pane instead of settling as `focus_pane_not_found`.
+    #[test]
+    fn focus_effect_matches_differently_spelled_focus_by_canonical_document_identity() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("project");
+        std::fs::create_dir_all(root.join("tasks/sub")).unwrap();
+        std::fs::write(root.join("tasks/left.md"), "left\n").unwrap();
+        std::fs::write(root.join("tasks/right.md"), "right\n").unwrap();
+        // A symlinked spelling of the project root, and a symlinked document.
+        let root_link = temp.path().join("project-link");
+        std::os::unix::fs::symlink(&root, &root_link).unwrap();
+        std::os::unix::fs::symlink(root.join("tasks/left.md"), root.join("tasks/left-alias.md"))
+            .unwrap();
+
+        let absolute_left = root.join("tasks/left.md").to_string_lossy().to_string();
+        let absolute_right = root.join("tasks/right.md").to_string_lossy().to_string();
+        // The registry spelling an editor produces today: absolute paths.
+        let file_panes = vec![
+            (absolute_left.clone(), "%76".to_string()),
+            (absolute_right.clone(), "%75".to_string()),
+        ];
+
+        let spellings = [
+            absolute_left.clone(),
+            "tasks/left.md".to_string(),
+            "./tasks/left.md".to_string(),
+            " tasks/left.md ".to_string(),
+            "tasks//left.md".to_string(),
+            "tasks/./left.md".to_string(),
+            "tasks/sub/../left.md".to_string(),
+            "tasks/left-alias.md".to_string(),
+            root_link.join("tasks/left.md").to_string_lossy().to_string(),
+            format!("{}/./tasks/left.md", root.display()),
+        ];
+        for focus in &spellings {
+            let (selected, receipt) = focus_effect_selects(&root, focus, &file_panes);
+            assert_eq!(
+                selected.as_deref(),
+                Some("%76"),
+                "focus spelling {focus:?} must select the left pane, got {receipt:?}"
+            );
+            assert!(receipt.applied, "focus spelling {focus:?}: {receipt:?}");
+        }
+
+        // The reverse direction: a relative / symlinked registry spelling still
+        // matches an absolute focus.
+        let relative_registry = vec![
+            ("./tasks/right.md".to_string(), "%75".to_string()),
+            (
+                root_link.join("tasks/left.md").to_string_lossy().to_string(),
+                "%76".to_string(),
+            ),
+        ];
+        let (selected, receipt) = focus_effect_selects(&root, &absolute_left, &relative_registry);
+        assert_eq!(selected.as_deref(), Some("%76"), "{receipt:?}");
+        let (selected, receipt) = focus_effect_selects(&root, &absolute_right, &relative_registry);
+        assert_eq!(selected.as_deref(), Some("%75"), "{receipt:?}");
+
+        // A genuinely different document is still not found, and the receipt
+        // keeps the caller's spelling of the focus.
+        let (selected, receipt) = focus_effect_selects(&root, "tasks/other.md", &file_panes);
+        assert_eq!(selected, None);
+        assert!(!receipt.applied);
+        assert_eq!(receipt.reason, "focus_pane_not_found:tasks/other.md");
+    }
+
+    /// `#focusmatchcanonical`: a document that does not resolve on disk keeps
+    /// a lexical identity, so a `./`-prefixed or doubled-separator spelling
+    /// still names it; `..` is never collapsed lexically.
+    #[test]
+    fn canonical_layout_document_id_normalizes_unresolved_paths_lexically() {
+        let root = Path::new("/agent-doc-focusmatchcanonical-missing/project");
+        let plain = canonical_layout_document_id(root, "tasks/left.md");
+        assert_eq!(
+            plain,
+            "/agent-doc-focusmatchcanonical-missing/project/tasks/left.md"
+        );
+        assert_eq!(canonical_layout_document_id(root, "./tasks/left.md"), plain);
+        assert_eq!(canonical_layout_document_id(root, "tasks//left.md"), plain);
+        assert_eq!(canonical_layout_document_id(root, "tasks/./left.md"), plain);
+        assert_eq!(canonical_layout_document_id(root, &plain), plain);
+        assert_ne!(
+            canonical_layout_document_id(root, "tasks/sub/../left.md"),
+            plain,
+            "`..` stays lexical for an unresolved path"
+        );
+
+        let file_panes = vec![(plain.clone(), "%76".to_string())];
+        let (selected, receipt) = focus_effect_selects(root, "./tasks/left.md", &file_panes);
+        assert_eq!(selected.as_deref(), Some("%76"), "{receipt:?}");
     }
 
     #[test]
@@ -40855,6 +41002,7 @@ mod tmux_layout_effect_state_dispatch_tests {
         let mut selected = None;
 
         let receipt = apply_pane_layout_focus_effect(
+            Path::new("/project"),
             &state,
             7,
             Some("/tasks/new-left.md"),
@@ -40939,6 +41087,7 @@ mod tmux_layout_effect_state_dispatch_tests {
             let mut selected = None;
 
             let receipt = apply_pane_layout_focus_effect(
+                Path::new("/project"),
                 &state,
                 7,
                 Some("/tasks/sample-session.md"),
@@ -40997,6 +41146,7 @@ mod tmux_layout_effect_state_dispatch_tests {
             let mut selected = None;
 
             let receipt = apply_pane_layout_focus_effect(
+                Path::new("/project"),
                 &state,
                 7,
                 Some("/tasks/sample-session.md"),
@@ -41081,6 +41231,7 @@ mod tmux_layout_effect_state_dispatch_tests {
             let mut selected = None;
 
             let receipt = apply_pane_layout_focus_effect(
+                Path::new("/project"),
                 &state,
                 7,
                 Some("/tasks/sample-session.md"),
@@ -41122,6 +41273,7 @@ mod tmux_layout_effect_state_dispatch_tests {
         let mut selected = None;
 
         let receipt = apply_pane_layout_focus_effect(
+            Path::new("/project"),
             &state,
             7,
             Some("/tasks/left.md"),
@@ -41174,6 +41326,7 @@ mod tmux_layout_effect_state_dispatch_tests {
             let mut selected = None;
 
             let receipt = apply_pane_layout_focus_effect(
+                Path::new("/project"),
                 &state,
                 7,
                 Some("/tasks/left.md"),
@@ -41282,6 +41435,7 @@ mod tmux_layout_effect_state_dispatch_tests {
         let mut selected = false;
 
         let receipt = apply_pane_layout_focus_effect(
+            Path::new("/project"),
             &state,
             7,
             Some("/tasks/old-left.md"),

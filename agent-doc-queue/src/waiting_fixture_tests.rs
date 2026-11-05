@@ -407,7 +407,8 @@ fn the_head_lines_and_their_next_rows_alone_tell_each_items_status() {
         .unwrap();
     assert_eq!(
         lines[release + 1],
-        "    - **Next:** agent — integrate the reported results, then close the item or ask what remains (evidence: ☑️ `subagent:0f24a54c#1` and 10 more attempts) ▫️"
+        "    - **Next:** you — answer the open request `#subagent-operator-request-adr0046-sibling-pick`: choose **Done as-is** or **Add Dillon by follow-up PR**, or reply with another (evidence: open request in this item's packet); then agent — integrate the reported results, then close the item or ask what remains (evidence: ☑️ `subagent:0f24a54c#1` and 10 more attempts) ▫️",
+        "the operator's open ask leads even while attempts are live (`#waitingtriage`)"
     );
 }
 
@@ -834,4 +835,83 @@ fn a_rebuild_keeps_every_operator_reply_of_unmatched_items() {
         "retaining unmatched items reaches a fixed point:\n{}",
         similar::TextDiff::from_lines(&twice, &thrice).unified_diff()
     );
+}
+
+/// The release item's tree as the operator sees it, head first.
+fn release_item_lines(document: &str) -> Vec<String> {
+    let body = main_queue_body(document);
+    let lines = body.lines().collect::<Vec<_>>();
+    let start = lines
+        .iter()
+        .position(|line| line.contains("[#tdsdkreleaseapp] haiven-release App"))
+        .unwrap();
+    let indent = lines[start].len() - lines[start].trim_start().len();
+    let end = (start + 1..lines.len())
+        .find(|index| {
+            let line = lines[*index];
+            !line.trim().is_empty() && line.len() - line.trim_start().len() <= indent
+        })
+        .unwrap_or(lines.len());
+    lines[start..end]
+        .iter()
+        .map(|line| line.to_string())
+        .collect()
+}
+
+/// `#waitingtriage`: the 34-line `tdsdkreleaseapp` tree grafted three
+/// decisions into one packet, and its head said only "agent — integrate"
+/// while an operator ask sat inside it. The head's Next row now leads with
+/// the exact ask, a Roll-up row spells out the counts, and each decision
+/// subtree gets one row naming its owner and action; agent-owned debt idle
+/// for over a day (by the document's newest response time) is flagged.
+#[test]
+fn a_grafted_multi_decision_item_says_what_each_subtree_needs() {
+    let document = format!("{FIXTURE}\n### Re: later turn — test · 2026-11-04T19:08-06:00\n");
+    let settled = maintenance_cycle(&document);
+    let item = release_item_lines(&settled);
+    let ask = "answer the open request `#subagent-operator-request-adr0046-sibling-pick`: choose **Done as-is** or **Add Dillon by follow-up PR**, or reply with another";
+    let stale = "⏰ stale: agent-owned, no recorded activity since 2026-11-02 (over a day)";
+    assert_eq!(
+        item[1],
+        format!(
+            "    - **Next:** you — {ask} (evidence: open request in this item's packet); then agent — integrate the reported results, then close the item or ask what remains (evidence: ☑️ `subagent:0f24a54c#1` and 10 more attempts) {stale} ▫️"
+        )
+    );
+    assert_eq!(
+        item[2],
+        "      - **Roll-up:** you 1 = open asks to you (`#subagent-operator-request-adr0046-sibling-pick`) · agent 11 = 11 worker results not yet integrated + 0 answers not yet picked up · done 3 = struck rows ▫️"
+    );
+    assert_eq!(
+        item[3..7],
+        [
+            format!(
+                "      - **Subtree:** “steps: an org owner (tmstorm recommended) adds haiven-sdk…” — Next: you — {ask}; then agent — integrate 10 reported results (`subagent:0f24a54c#1` and 9 more) {stale} ▫️"
+            ),
+            format!(
+                "        - **Subtree:** “Operator does it in the UI” — Next: agent — integrate 1 reported result (`subagent:29de5653#1`) {stale} ▫️"
+            ),
+            format!(
+                "        - **Subtree:** “Done as-is” — Next: you — {ask}; then agent — integrate 1 reported result (`subagent:865c445b#1`) {stale} ▫️"
+            ),
+            format!(
+                "      - **Subtree:** “do `#q-c4dbe51b8e36`” — Next: agent — integrate 1 reported result (`subagent:c252releaseapp#1`) {stale} ▫️"
+            ),
+        ]
+    );
+    assert!(item[7].contains("%% steps:"), "{}", item[7]);
+    // Output only: a second pass is byte-identical, and the triage rows are
+    // inert generated rows, never queue work or operator replies.
+    assert_eq!(maintenance_cycle(&settled), settled);
+    let entries = main_entries(&settled);
+    let head = head_index(&entries, "tdsdkreleaseapp");
+    for index in head + 1..head + 7 {
+        assert!(
+            crate::waiting_status::is_status_row(&entries, index),
+            "{:?}",
+            entries[index]
+        );
+    }
+    for index in head + 1..head + 7 {
+        assert!(crate::waiting_packet::operator_freeform_text(&entries, index).is_none());
+    }
 }

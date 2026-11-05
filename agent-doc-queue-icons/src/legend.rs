@@ -202,7 +202,7 @@ pub struct QueueMarkerAnnotation {
 
 /// Annotations and legacy spellings that appear on queue rows. Like the
 /// prefixes, every one is stripped before queue work identity is computed.
-pub const QUEUE_MARKER_ANNOTATIONS: [QueueMarkerAnnotation; 11] = [
+pub const QUEUE_MARKER_ANNOTATIONS: [QueueMarkerAnnotation; 12] = [
     QueueMarkerAnnotation {
         token: QUEUE_TERMINAL_TOKEN,
         meaning: QUEUE_TERMINAL_MEANING,
@@ -233,7 +233,11 @@ pub const QUEUE_MARKER_ANNOTATIONS: [QueueMarkerAnnotation; 11] = [
     },
     QueueMarkerAnnotation {
         token: "**Next:** <owner> — <action> (evidence: …)",
-        meaning: "First child of a Waiting-on-you item: the single remaining action, whose it is (`you` or `agent`), and the packet row or attempt it was derived from. When no action can be derived it says so instead of inventing one. Rewritten every closeout; never queue work.",
+        meaning: "First child of a Waiting-on-you item: the single remaining action, whose it is (`you` or `agent`), and the packet row or attempt it was derived from. An open ask to you is named first, with the options offered for it, even while attempts are live; agent-owned work with no recorded activity for over a day ends with `⏰ stale`. When no action can be derived it says so instead of inventing one. Rewritten every closeout; never queue work.",
+    },
+    QueueMarkerAnnotation {
+        token: "**Roll-up:** / **Subtree:** “<part>” — Next: <owner> — <action>, or 🗑️ deletable",
+        meaning: "Beneath the Next row of a Waiting-on-you item with two or more decisions: the Roll-up row spells out the item's counts (`you` = open asks to you, `agent` = worker results not yet integrated plus answers not yet picked up, `done` = struck rows), and one Subtree row per decision says what that part needs: `Next: you — <exact ask>`, `Next: agent — <action>`, or `🗑️ deletable` when every row in it is struck or integrated. Rewritten every closeout; never queue work.",
     },
     QueueMarkerAnnotation {
         token: "⟦local⟧ / ⟦published⟧ / ⟦published+local⟧",

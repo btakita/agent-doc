@@ -1,6 +1,7 @@
 //! Binary-owned reply rows inside a Waiting-on-you packet (`#barereplymarker`).
 //!
-//! agent-doc renders each generated packet row (`**Next:**`, `**Response:**`,
+//! agent-doc renders each generated packet row (`**Next:**`, its nested
+//! `**Roll-up:**` / `**Subtree:**` triage rows, `**Response:**`,
 //! `**Timestamp:**`, `**Question:**`, `**Choices:**`, offered choices,
 //! `**Next actions:**`, `**Action:**`, ...) with a trailing
 //! [`AGENT_DOC_REPLY_GLYPH`]. That glyph is the row's only ownership mark.
@@ -44,8 +45,10 @@ pub const LEGACY_WAITING_METADATA_MARKER: &str = "<!-- agent-doc:waiting-metadat
 pub const WAITING_ITEM_MARKER: &str = "<!-- agent-doc:waiting-item -->";
 
 /// Labels that open a generated (non-choice) packet row.
-pub const REPLY_ROW_LABELS: [&str; 8] = [
+pub const REPLY_ROW_LABELS: [&str; 10] = [
     "**Next:**",
+    "**Roll-up:**",
+    "**Subtree:**",
     "**Response:**",
     "**Timestamp:**",
     "**Context:**",

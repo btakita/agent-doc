@@ -827,8 +827,11 @@ fn validate_file_claim(file: &Path, store_root: &Path) -> Result<()> {
     if !registry_path.is_file() {
         return Ok(());
     }
-    let _lock = tmux_router::RegistryLock::acquire(&registry_path)
-        .with_context(|| format!("failed to lock registry before claiming {}", file.display()))?;
+    let _lock = agent_doc_session_registry_io::registry_lock::acquire(
+        &registry_path,
+        "validate a file claim",
+    )
+    .with_context(|| format!("failed to lock registry before claiming {}", file.display()))?;
     let registry = agent_doc_session_registry_io::load_in(store_root)
         .with_context(|| format!("failed to load registry before claiming {}", file.display()))?;
 

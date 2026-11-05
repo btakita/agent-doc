@@ -89,7 +89,7 @@ use anyhow::Result;
 use std::io::Write;
 use std::path::Path;
 
-use tmux_router::{Registry as SessionRegistry, RegistryEntry as SessionEntry, RegistryLock};
+use tmux_router::{Registry as SessionRegistry, RegistryEntry as SessionEntry};
 
 // ---------------------------------------------------------------------------
 // Free functions — registration operations and env-based checks
@@ -147,7 +147,10 @@ pub fn register_with_pid_and_cwd_in(
 ) -> Result<()> {
     let tmux = agent_doc_tmux_io::configured_tmux();
     let window = agent_doc_tmux_io::target_window_id(&tmux, pane_id).unwrap_or_default();
-    let _lock = RegistryLock::acquire(&session_registry_io::registry_path_in(base_dir))?;
+    let _lock = crate::registry_lock::acquire(
+        &session_registry_io::registry_path_in(base_dir),
+        "register a session",
+    )?;
     let mut registry = session_registry_io::load_in(base_dir)?;
     register_full_internal(
         base_dir,
@@ -174,7 +177,10 @@ pub fn attach_with_pid_and_cwd_in(
     window: &str,
     cwd: &str,
 ) -> Result<()> {
-    let _lock = RegistryLock::acquire(&session_registry_io::registry_path_in(base_dir))?;
+    let _lock = crate::registry_lock::acquire(
+        &session_registry_io::registry_path_in(base_dir),
+        "attach a session",
+    )?;
     let mut registry = session_registry_io::load_in(base_dir)?;
     register_full_internal(
         base_dir,
@@ -200,7 +206,10 @@ pub fn attach_projection_only_in(
     window: &str,
     cwd: &str,
 ) -> Result<()> {
-    let _lock = RegistryLock::acquire(&session_registry_io::registry_path_in(base_dir))?;
+    let _lock = crate::registry_lock::acquire(
+        &session_registry_io::registry_path_in(base_dir),
+        "attach a session projection",
+    )?;
     let mut registry = session_registry_io::load_in(base_dir)?;
     let started = chrono_now();
     let replacement = session_registry::replace_registry_entry(
@@ -324,7 +333,10 @@ pub fn register_full_in(
     pid: u32,
     window: &str,
 ) -> Result<()> {
-    let _lock = RegistryLock::acquire(&session_registry_io::registry_path_in(base_dir))?;
+    let _lock = crate::registry_lock::acquire(
+        &session_registry_io::registry_path_in(base_dir),
+        "register a session",
+    )?;
     let mut registry = session_registry_io::load_in(base_dir)?;
     let cwd = std::env::current_dir()
         .map(|p| p.to_string_lossy().to_string())
@@ -377,7 +389,10 @@ pub fn register_full_with_cwd_in(
     window: &str,
     cwd: &str,
 ) -> Result<()> {
-    let _lock = RegistryLock::acquire(&session_registry_io::registry_path_in(base_dir))?;
+    let _lock = crate::registry_lock::acquire(
+        &session_registry_io::registry_path_in(base_dir),
+        "register a session",
+    )?;
     let mut registry = session_registry_io::load_in(base_dir)?;
     register_full_internal(
         base_dir,
@@ -559,7 +574,10 @@ pub fn bind_dispatch_target_after_owner_launch_with_hook_in(
             PostLaunchBindDecision::Reclaim(fence) => fence,
         };
         between_decision_and_write();
-        let _lock = RegistryLock::acquire(&session_registry_io::registry_path_in(base_dir))?;
+        let _lock = crate::registry_lock::acquire(
+            &session_registry_io::registry_path_in(base_dir),
+            "bind a dispatch target",
+        )?;
         let mut registry = session_registry_io::load_in(base_dir)?;
         match register_full_internal_fenced(
             base_dir,
@@ -776,7 +794,10 @@ pub fn bind_running_dispatch_target_with_hook_in(
             PreDispatchBindDecision::Bind(fence) => (ActorBindingWrite::Fenced(fence), None),
         };
         between_decision_and_write();
-        let _lock = RegistryLock::acquire(&session_registry_io::registry_path_in(base_dir))?;
+        let _lock = crate::registry_lock::acquire(
+            &session_registry_io::registry_path_in(base_dir),
+            "bind a running dispatch target",
+        )?;
         let mut registry = session_registry_io::load_in(base_dir)?;
         match register_full_internal_fenced(
             base_dir,
@@ -941,7 +962,10 @@ pub fn rebind_recovered_owner_with_hook_in(
             })
         };
         between_decision_and_write();
-        let _lock = RegistryLock::acquire(&session_registry_io::registry_path_in(base_dir))?;
+        let _lock = crate::registry_lock::acquire(
+            &session_registry_io::registry_path_in(base_dir),
+            "rebind a recovered owner",
+        )?;
         let mut registry = session_registry_io::load_in(base_dir)?;
         match register_full_internal_fenced(
             base_dir,
@@ -990,7 +1014,10 @@ fn register_full_with_cwd_and_instance_in(
     transition_caller: &'static str,
     transition_reason: &'static str,
 ) -> Result<()> {
-    let _lock = RegistryLock::acquire(&session_registry_io::registry_path_in(base_dir))?;
+    let _lock = crate::registry_lock::acquire(
+        &session_registry_io::registry_path_in(base_dir),
+        "register a session",
+    )?;
     let mut registry = session_registry_io::load_in(base_dir)?;
     register_full_internal(
         base_dir,
@@ -1023,7 +1050,10 @@ fn register_full_internal_call(
     let resolved_cwd = cwd
         .map(ToOwned::to_owned)
         .unwrap_or_else(|| base_dir.to_string_lossy().to_string());
-    let _lock = RegistryLock::acquire(&session_registry_io::registry_path_in(&base_dir))?;
+    let _lock = crate::registry_lock::acquire(
+        &session_registry_io::registry_path_in(&base_dir),
+        "register a session",
+    )?;
     let mut registry = session_registry_io::load_in(&base_dir)?;
     register_full_internal(
         &base_dir,
@@ -1053,7 +1083,10 @@ fn register_full_with_cwd_internal_call(
     transition_reason: &'static str,
 ) -> Result<()> {
     let base_dir = std::env::current_dir()?;
-    let _lock = RegistryLock::acquire(&session_registry_io::registry_path_in(&base_dir))?;
+    let _lock = crate::registry_lock::acquire(
+        &session_registry_io::registry_path_in(&base_dir),
+        "register a session",
+    )?;
     let mut registry = session_registry_io::load_in(&base_dir)?;
     register_full_internal(
         &base_dir,

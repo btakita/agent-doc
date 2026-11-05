@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tmux_router::registry::canonical_registry_key_in;
 use tmux_router::registry::normalize_registry;
-use tmux_router::{Registry, RegistryEntry, RegistryLock};
+use tmux_router::{Registry, RegistryEntry};
 
 pub use agent_doc_session_registry::{
     SessionIdentityClaim, SessionIdentityConflict, SessionIdentityObservation, SessionIdentityOwner,
@@ -17,6 +17,7 @@ pub use agent_doc_session_registry::{
 pub mod dispatch_registry;
 pub mod pane_document;
 pub mod registration;
+pub mod registry_lock;
 pub mod tmux_server;
 
 pub const SESSIONS_FILE: &str = ".agent-doc/state.db";
@@ -34,7 +35,7 @@ pub fn registry_path_in(base_dir: &Path) -> PathBuf {
 /// Load the session registry from durable controller state.
 ///
 /// This is not locked internally. Callers performing read-modify-write must
-/// acquire `tmux_router::RegistryLock` first.
+/// take the registry lock first (`registry_lock::acquire`, `#registrylockbound`).
 pub fn load() -> Result<Registry> {
     if !cwd_registry_in_test_scope() {
         return Ok(Registry::default());
@@ -229,7 +230,7 @@ pub fn deregister(session_id: &str) -> Result<bool> {
 /// Remove a session from `base_dir`'s registry under the registry lock.
 pub fn deregister_in(base_dir: &Path, session_id: &str) -> Result<bool> {
     let registry_path = registry_path_in(base_dir);
-    let _lock = RegistryLock::acquire(&registry_path)?;
+    let _lock = crate::registry_lock::acquire(&registry_path, "deregister a session")?;
     let mut registry = load_in(base_dir)?;
     let removed = agent_doc_session_registry::remove_session_by_id(&mut registry, session_id);
     if removed {
@@ -253,7 +254,8 @@ pub fn update_session_file_in(
     if !registry_path.exists() {
         return Ok(0);
     }
-    let _lock = RegistryLock::acquire(&registry_path)?;
+    let _lock =
+        crate::registry_lock::acquire(&registry_path, "move a session to a new document path")?;
     let mut registry = load_in(base_dir)?;
     let doc_path = file.to_string_lossy().to_string();
     let canonical_path = canonical_file.to_string_lossy().to_string();
@@ -304,7 +306,7 @@ pub fn update_file_pane_placement_in(
     if !registry_path.exists() {
         return Ok(false);
     }
-    let _lock = RegistryLock::acquire(&registry_path)?;
+    let _lock = crate::registry_lock::acquire(&registry_path, "update a pane placement")?;
     let mut registry = load_in(base_dir)?;
     let key = canonical_registry_key_in(base_dir, &file.to_string_lossy());
     let Some(entry) = registry.get_mut(&key) else {

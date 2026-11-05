@@ -2596,7 +2596,10 @@ fn force_close_actor_record(ctx: &SessionContext) -> bool {
 
 fn force_remove_registry_entry(ctx: &SessionContext) -> Result<bool> {
     let registry_path = agent_doc_session_registry_io::registry_path_in(&ctx.base_dir);
-    let _lock = tmux_router::RegistryLock::acquire(&registry_path)?;
+    let _lock = agent_doc_session_registry_io::registry_lock::acquire(
+        &registry_path,
+        "force-remove a registry entry",
+    )?;
     let mut registry = agent_doc_session_registry_io::load_in(&ctx.base_dir)?;
     let canonical = ctx.canonical_file.to_string_lossy().to_string();
     let mut session_ids = BTreeSet::new();

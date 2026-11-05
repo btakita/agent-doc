@@ -1003,7 +1003,10 @@ fn apply_fixes_with_base_and_main_layout_eligibility(
         }
     };
     let registry_path = agent_doc_session_registry_io::registry_path_in(effective_base);
-    let _lock = tmux_router::RegistryLock::acquire(&registry_path)?;
+    let _lock = agent_doc_session_registry_io::registry_lock::acquire(
+        &registry_path,
+        "apply resync fixes",
+    )?;
     let mut registry = agent_doc_session_registry_io::load_in(effective_base)?;
     let target_scope = target_file.map(|target| TargetFixScope {
         target,

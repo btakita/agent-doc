@@ -2384,6 +2384,7 @@ dependencies = [
  "agent-doc-supervisor",
  "agent-doc-tmux-io",
  "anyhow",
+ "fs2",
  "serde_json",
  "tempfile",
  "tmux-router",

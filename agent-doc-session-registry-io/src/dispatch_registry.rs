@@ -47,7 +47,8 @@ pub fn lookup_dispatch_registration(file_path: &str, session_id: &str) -> Result
 pub fn deregister_dispatch_registration(file_path: &str, session_id: &str) -> Result<bool> {
     let base_dir = registry_base_dir_for_dispatch(file_path);
     let registry_path = crate::registry_path_in(&base_dir);
-    let _lock = tmux_router::RegistryLock::acquire(&registry_path)?;
+    let _lock =
+        crate::registry_lock::acquire(&registry_path, "deregister a dispatch registration")?;
     let mut registry = load_registry_in(&base_dir)?;
     let removed_key = registry.iter().find_map(|(key, entry)| {
         ((entry.session_id == session_id) || (entry.session_id.is_empty() && key == session_id))

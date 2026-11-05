@@ -3,11 +3,12 @@
 use std::path::Path;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+pub use agent_doc_session_registry::tmux_server::TmuxServerIdentity;
 use agent_doc_session_registry::tmux_server::{
-    TmuxServerIdentity, TmuxServerIdentityAction, tmux_server_identity_action,
+    TmuxServerIdentityAction, tmux_server_identity_action,
 };
 use anyhow::{Context, Result};
-use tmux_router::{Registry, RegistryLock, Tmux};
+use tmux_router::{Registry, Tmux};
 
 const TMUX_SERVER_IDENTITY_KEY: &str = "tmux_server_identity_v1";
 const TMUX_SERVER_IDENTITY_FORMAT: &str = "#{pid} #{start_time}";
@@ -30,6 +31,71 @@ pub fn reconcile_tmux_server_identity_in(
         return Ok(TmuxServerReconcileOutcome::default());
     };
     reconcile_observed_identity_in(project_root, current)
+}
+
+/// What one tmux client spawn says about the server (`#startupcriticalpath`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TmuxServerObservation {
+    /// The tmux binary could be run.
+    pub installed: bool,
+    /// A server answers on the configured socket.
+    pub running: bool,
+    /// The server's identity, when the same query returned it.
+    pub identity: Option<TmuxServerIdentity>,
+}
+
+/// Answer "is tmux installed", "is its server running" and "which server is
+/// it" with one `display-message` in the common case.
+///
+/// A start used to ask each separately (`tmux -V`, `has-session`, then
+/// `display-message` for the identity): three client spawns before it looked
+/// at a single pane, each slow on a loaded machine. Only when the query fails
+/// to run successfully does this ask `has-session`, so the uncommon answers
+/// (no server, a server that would not answer) keep their old meaning.
+pub fn observe_tmux_server(tmux: &Tmux) -> TmuxServerObservation {
+    let output = match tmux
+        .cmd()
+        .args(["display-message", "-p", TMUX_SERVER_IDENTITY_FORMAT])
+        .stdin(std::process::Stdio::null())
+        .output()
+    {
+        Ok(output) => output,
+        Err(_not_runnable) => {
+            return TmuxServerObservation {
+                installed: false,
+                running: false,
+                identity: None,
+            };
+        }
+    };
+    if output.status.success()
+        && let Ok(identity) = parse_tmux_server_identity(&String::from_utf8_lossy(&output.stdout))
+    {
+        return TmuxServerObservation {
+            installed: true,
+            running: true,
+            identity: Some(identity),
+        };
+    }
+    TmuxServerObservation {
+        installed: true,
+        running: tmux.running(),
+        identity: None,
+    }
+}
+
+/// [`reconcile_tmux_server_identity_in`] for an identity the caller already
+/// observed ([`observe_tmux_server`]); without one it queries as before, so a
+/// malformed or failing identity answer still surfaces as an error.
+pub fn reconcile_tmux_server_identity_observed_in(
+    project_root: &Path,
+    tmux: &Tmux,
+    observed: Option<TmuxServerIdentity>,
+) -> Result<TmuxServerReconcileOutcome> {
+    match observed {
+        Some(current) => reconcile_observed_identity_in(project_root, current),
+        None => reconcile_tmux_server_identity_in(project_root, tmux),
+    }
 }
 
 fn observe_tmux_server_identity(tmux: &Tmux) -> Result<Option<TmuxServerIdentity>> {
@@ -93,7 +159,7 @@ fn reconcile_observed_identity_in(
         return Ok(TmuxServerReconcileOutcome::default());
     }
     let registry_path = crate::registry_path_in(project_root);
-    let _lock = RegistryLock::acquire(&registry_path)?;
+    let _lock = crate::registry_lock::acquire(&registry_path, "record the tmux server identity")?;
     let previous = load_identity(project_root)?;
     let action = tmux_server_identity_action(previous, current);
     let mut outcome = TmuxServerReconcileOutcome::default();
@@ -308,7 +374,11 @@ mod tests {
         registry.insert("a.md".to_string(), entry("a", "%0"));
         crate::save_in(project.path(), &registry).unwrap();
 
-        let _held = RegistryLock::acquire(&crate::registry_path_in(project.path())).unwrap();
+        let _held = crate::registry_lock::acquire(
+            &crate::registry_path_in(project.path()),
+            "hold the lock for the test",
+        )
+        .unwrap();
 
         assert_eq!(
             reconcile_observed_identity_in(project.path(), server).unwrap(),

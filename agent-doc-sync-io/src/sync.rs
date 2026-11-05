@@ -582,7 +582,10 @@ fn registry_window_for_pane(base_dir: &Path, pane: &str) -> Result<Option<String
 /// Returns whether an entry changed.
 fn rebind_registry_pane_window(base_dir: &Path, pane: &str, live_window: &str) -> Result<bool> {
     let registry_path = agent_doc_session_registry_io::registry_path_in(base_dir);
-    let _lock = tmux_router::RegistryLock::acquire(&registry_path)?;
+    let _lock = agent_doc_session_registry_io::registry_lock::acquire(
+        &registry_path,
+        "rebind a registry pane window",
+    )?;
     let mut registry = agent_doc_session_registry_io::load_in(base_dir)?;
     let Some(key) = registry
         .iter()
@@ -6156,8 +6159,20 @@ fn register_synced_files_with_cache(
             continue;
         };
         let registry_path = agent_doc_session_registry_io::registry_path_in(&project_root);
-        let Ok(_lock) = tmux_router::RegistryLock::acquire(&registry_path) else {
-            continue;
+        // `#registrylockbound`: a wait that gives up names the lock and its
+        // holder; skip this file's registration rather than the whole sync.
+        let _lock = match agent_doc_session_registry_io::registry_lock::acquire(
+            &registry_path,
+            "register synced files",
+        ) {
+            Ok(lock) => lock,
+            Err(error) => {
+                eprintln!(
+                    "[sync] warning: skipped registering {}: {error:#}",
+                    file_path.display()
+                );
+                continue;
+            }
         };
         let Ok(mut registry) = agent_doc_session_registry_io::load_in(&project_root) else {
             continue;

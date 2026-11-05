@@ -6447,6 +6447,30 @@ fn write_terminal_error_report(writer: &mut impl Write, report: &str) -> std::io
     writer.flush()
 }
 
+/// Whether a command runs the command-entry stale-supervisor probe
+/// (`recycle_stale_supervisor_for_command`).
+///
+/// `#startupcriticalpath`: not for `tmux start` / `tmux ensure`. The editor
+/// waits on them, and their answer (the document's pane, reuse or cold start)
+/// does not depend on the supervisor's binary freshness. The probe is a socket
+/// round-trip of up to 250 ms plus, for a stale owner, a recycle-request write
+/// through the controller, and it only duplicated evaluations that already run
+/// on the edges right after a bootstrap, each in its own lifecycle scope and
+/// each leaving a receipt:
+///
+/// - the supervisor's own idle watch refreshes its binary-freshness projection
+///   and recycles itself at a safe boundary
+///   (`supervisor_binary_stale_self_recycled`);
+/// - the layout publication the editor makes for its visible columns next
+///   checks every column's supervisor (`pane_supervisor_freshness`) and asks
+///   the controller to replace a stale idle one
+///   (`controller_replacement_requested:...:receipt=`);
+/// - every turn stage re-checks before it writes
+///   (`recycle_stale_supervisor_for_turn_stage`).
+fn command_entry_supervisor_probe_applies(command: &Commands) -> bool {
+    !matches!(command, Commands::Tmux { .. })
+}
+
 fn try_main() -> anyhow::Result<()> {
     // `#supresilience` — crash resilience before any output (SIGPIPE reset + panic hook).
     crash_resilience::install();
@@ -6502,16 +6526,20 @@ fn try_main() -> anyhow::Result<()> {
     // supervisor's `pid` response refreshes its process-scoped Lazily projection;
     // a proven-stale owner is marked for the existing safe-boundary recycle.
     let document_argument = dogfood_document_argument();
-    // `#starttimeoutload`: an editor running `tmux start`/`tmux ensure` with
-    // `AGENT_DOC_PROGRESS=1` sees each bootstrap phase, so a slow phase extends
-    // its wait and a timeout names where the command was.
-    agent_doc_start_io::report_progress_phase("supervisor_freshness_probe");
-    if let Some(file) = document_argument.as_deref()
-        && let Some(message) =
+    // `#starttimeoutload`: an editor running a bootstrap command with
+    // `AGENT_DOC_PROGRESS=1` sees each phase, so a slow phase extends its wait
+    // and a timeout names where the command was. `#startupcriticalpath`: the
+    // editor bootstrap commands skip this probe; see
+    // [`command_entry_supervisor_probe_applies`].
+    if command_entry_supervisor_probe_applies(&cli.command)
+        && let Some(file) = document_argument.as_deref()
+        && let Some(message) = {
+            agent_doc_start_io::report_progress_phase("supervisor_freshness_probe");
             agent_doc_controller_io::project_controller::recycle_stale_supervisor_for_command(
                 file,
                 "cli_command_entry",
             )
+        }
     {
         eprintln!("[agent-doc] {message}");
         // GH #235: session-check's report must not print this supervisor again.
@@ -11010,5 +11038,45 @@ mod usage_error_report_tests {
 
         assert!(is_operator_usage_error(&err));
         assert!(format!("{err:#}").contains("valid components: exchange, queue"));
+    }
+}
+
+#[cfg(test)]
+mod startup_critical_path_tests {
+    use super::*;
+
+    fn parse(args: &[&str]) -> Commands {
+        let owned: Vec<String> = args.iter().map(|s| s.to_string()).collect();
+        // The full clap tree overflows a default test-thread stack in debug.
+        std::thread::Builder::new()
+            .stack_size(16 * 1024 * 1024)
+            .spawn(move || Cli::try_parse_from(&owned).expect("parse").command)
+            .expect("spawn parse thread")
+            .join()
+            .expect("parse thread")
+    }
+
+    /// `#startupcriticalpath`: the editor bootstrap commands leave the
+    /// stale-supervisor evaluation to the idle watch, the layout publication
+    /// and the turn stages; every other document command still probes.
+    #[test]
+    fn editor_bootstrap_commands_skip_the_command_entry_supervisor_probe() {
+        assert!(!command_entry_supervisor_probe_applies(&parse(&[
+            "agent-doc", "tmux", "start", "plan.md",
+        ])));
+        assert!(!command_entry_supervisor_probe_applies(&parse(&[
+            "agent-doc",
+            "tmux",
+            "ensure",
+            "plan.md",
+            "--ide-terminal",
+            "--json",
+        ])));
+        assert!(command_entry_supervisor_probe_applies(&parse(&[
+            "agent-doc", "preflight", "plan.md",
+        ])));
+        assert!(command_entry_supervisor_probe_applies(&parse(&[
+            "agent-doc", "start", "plan.md",
+        ])));
     }
 }

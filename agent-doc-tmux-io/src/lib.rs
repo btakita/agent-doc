@@ -3,6 +3,7 @@
 //! This crate owns subprocess effects for tmux commands. It does not own
 //! document authority, merge behavior, queue projection, or turn commits.
 
+pub mod bootstrap_progress;
 pub mod client_visibility;
 pub mod editor_view;
 pub mod isolated_test_server;

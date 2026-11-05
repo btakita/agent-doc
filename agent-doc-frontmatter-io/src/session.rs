@@ -247,6 +247,25 @@ pub fn ensure_session_for_file(content: &str, file: &Path) -> Result<(String, St
     ensure_session_with_ssh_resolver(content, &ctx)
 }
 
+/// The document's `terminal_host` preference as saved on disk
+/// (`#startpolicyeditorread`).
+///
+/// A read-only bootstrap proof like [`session_metadata_ready_on_disk`]:
+/// `tmux start` / `tmux ensure` run while the editor waits on them, so reading
+/// through the editor's live copy waited on the waiter and failed the start on
+/// a transient missing replica. An unsaved `terminal_host` edit takes effect
+/// once it is saved.
+pub fn terminal_host_preference_on_disk(
+    file: &Path,
+) -> Result<Option<agent_doc_frontmatter::frontmatter::TerminalHostPreference>> {
+    use anyhow::Context as _;
+    let content = std::fs::read_to_string(file)
+        .with_context(|| format!("failed to read terminal policy from {}", file.display()))?;
+    let (document, _) = agent_doc_frontmatter::frontmatter::parse(&content)
+        .with_context(|| format!("failed to parse terminal policy from {}", file.display()))?;
+    Ok(document.terminal_host)
+}
+
 /// Return whether the disk replica is already a valid agent-doc document with
 /// complete session metadata. This is a read-only bootstrap proof for callers
 /// that must not wait for live editor authority when no metadata write is needed.

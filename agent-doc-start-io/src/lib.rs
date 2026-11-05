@@ -25,46 +25,18 @@ use std::collections::BTreeMap;
 use std::ffi::OsStr;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
 use std::time::Duration;
 
 /// Optional tmux socket override used by headless integrations and isolated tests.
 pub use agent_doc_tmux_io::AGENT_DOC_TMUX_SOCKET_ENV;
 
 /// `#starttimeoutload`: opt-in phase progress for editor-facing bootstrap
-/// commands (`tmux start`, `tmux ensure`). An editor sets this to `1` and
-/// reads `[progress] phase=<name>` lines from stderr, so its wait can extend
-/// while the command advances and a timeout can name the phase it stalled in.
-/// Unset, nothing is printed: a person or another caller sees the same output
-/// as before.
-pub const AGENT_DOC_PROGRESS_ENV: &str = "AGENT_DOC_PROGRESS";
-
-/// The stderr prefix of one progress line (`[progress] phase=<name>`).
-pub const PROGRESS_LINE_PREFIX: &str = "[progress] phase=";
-
-/// Whether this process reports bootstrap phases (`AGENT_DOC_PROGRESS=1`).
-pub fn progress_reporting_enabled() -> bool {
-    progress_reporting_enabled_from(std::env::var(AGENT_DOC_PROGRESS_ENV).ok().as_deref())
-}
-
-fn progress_reporting_enabled_from(value: Option<&str>) -> bool {
-    value.is_some_and(|value| matches!(value.trim(), "1" | "true" | "yes"))
-}
-
-/// The progress line for `phase`.
-pub fn progress_line(phase: &str) -> String {
-    format!("{PROGRESS_LINE_PREFIX}{phase}")
-}
-
-/// Report that a bootstrap command entered `phase`. A no-op unless
-/// [`progress_reporting_enabled`]; never fails the command.
-pub fn report_progress_phase(phase: &str) {
-    if progress_reporting_enabled() {
-        let mut stderr = std::io::stderr().lock();
-        let _ = writeln!(stderr, "{}", progress_line(phase));
-        let _ = stderr.flush();
-    }
-}
+/// commands. Owned by `agent-doc-tmux-io` so the bounded registry lock wait
+/// (`#registrylockbound`) can report a heartbeat from below this crate.
+pub use agent_doc_tmux_io::bootstrap_progress::{
+    AGENT_DOC_PROGRESS_ENV, PROGRESS_LINE_PREFIX, progress_line, progress_reporting_enabled,
+    report_progress_phase,
+};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TmuxEnsureOutcome {
@@ -195,7 +167,11 @@ fn ensure_tmux_session_with_ide_client(
     let _pane_snapshot = tmux_router::begin_pane_snapshot_scope();
 
     report_progress_phase("terminal_host");
-    let report = terminal_host_report(tmux);
+    // `#startupcriticalpath`: one `display-message` answers installed,
+    // running and the server identity (it was `tmux -V`, `has-session` and
+    // `display-message`).
+    let server = agent_doc_session_registry_io::tmux_server::observe_tmux_server(tmux);
+    let report = terminal_host_report(server.installed, server.running);
     if !report.classification.tmux_installed {
         anyhow::bail!("{}", report.reason);
     }
@@ -207,7 +183,7 @@ fn ensure_tmux_session_with_ide_client(
     // one more tmux client spawn on every start.
     let reconciled_server_before_lookup = if report.classification.tmux_server_running {
         report_progress_phase("tmux_server_identity");
-        reconcile_tmux_server_identity(tmux, &project_root)?;
+        reconcile_tmux_server_identity(tmux, &project_root, server.identity)?;
         true
     } else {
         false
@@ -243,12 +219,15 @@ fn ensure_tmux_session_with_ide_client(
                 .is_none_or(|binding| binding == session)
     })? {
         report_progress_phase("terminal_policy");
-        let state = if is_session_attached(tmux, &target.session_name) {
+        let attached = is_session_attached(tmux, &target.session_name);
+        let state = if attached {
             TerminalSessionState::Attached
         } else {
             TerminalSessionState::Detached
         };
-        let policy = terminal_policy_for_file(&canonical, &report, ide_available, state)?;
+        let policy =
+            terminal_policy_for_file(&canonical, &project_config, &report, ide_available, state)?;
+        let known_attachment = KnownAttachment::new(&target.session_name, attached);
         if let Some(failure) = policy.failure.as_deref() {
             anyhow::bail!("{failure}");
         }
@@ -272,6 +251,7 @@ fn ensure_tmux_session_with_ide_client(
             target.resolution,
             target.document_pane,
             &policy,
+            Some(&known_attachment),
         ));
     }
 
@@ -286,8 +266,9 @@ fn ensure_tmux_session_with_ide_client(
         agent_doc_sync::LayoutSessionAuthority::ScopedProject,
     )?;
     let session_exists = tmux.session_exists(&session_name);
+    let attached = session_exists && is_session_attached(tmux, &session_name);
     let state = if session_exists {
-        if is_session_attached(tmux, &session_name) {
+        if attached {
             TerminalSessionState::Attached
         } else {
             TerminalSessionState::Detached
@@ -295,7 +276,10 @@ fn ensure_tmux_session_with_ide_client(
     } else {
         TerminalSessionState::Missing
     };
-    let policy = terminal_policy_for_file(&canonical, &report, ide_available, state)?;
+    let policy =
+        terminal_policy_for_file(&canonical, &project_config, &report, ide_available, state)?;
+    // A session created below is created detached (`new-session -d`).
+    let known_attachment = KnownAttachment::new(&session_name, attached);
     if let Some(failure) = policy.failure.as_deref() {
         anyhow::bail!("{failure}");
     }
@@ -322,7 +306,7 @@ fn ensure_tmux_session_with_ide_client(
         }
     };
     if !reconciled_server_before_lookup {
-        reconcile_tmux_server_identity(tmux, &project_root)?;
+        reconcile_tmux_server_identity(tmux, &project_root, None)?;
     }
 
     let target = navigation_lane_ensure_target(
@@ -345,7 +329,33 @@ fn ensure_tmux_session_with_ide_client(
         target.resolution,
         target.document_pane,
         &policy,
+        Some(&known_attachment),
     ))
+}
+
+/// Whether one session had an attached client, as this ensure already
+/// observed it (`#startupcriticalpath`): the outcome reuses the answer instead
+/// of spawning `list-clients` a second time. It applies only to that session;
+/// a navigation lane retarget asks about the lane's own session.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct KnownAttachment {
+    session_name: String,
+    attached: bool,
+}
+
+impl KnownAttachment {
+    fn new(session_name: &str, attached: bool) -> Self {
+        Self {
+            session_name: session_name.to_string(),
+            attached,
+        }
+    }
+
+    fn for_session(known: Option<&Self>, session_name: &str) -> Option<bool> {
+        known
+            .filter(|known| known.session_name == session_name)
+            .map(|known| known.attached)
+    }
 }
 
 /// The session an ensure outcome targets before its attach command is rendered.
@@ -395,11 +405,17 @@ fn navigation_lane_ensure_target(
     })
 }
 
-fn reconcile_tmux_server_identity(tmux: &tmux_router::Tmux, project_root: &Path) -> Result<()> {
-    let outcome = agent_doc_session_registry_io::tmux_server::reconcile_tmux_server_identity_in(
-        project_root,
-        tmux,
-    )?;
+fn reconcile_tmux_server_identity(
+    tmux: &tmux_router::Tmux,
+    project_root: &Path,
+    observed: Option<agent_doc_session_registry_io::tmux_server::TmuxServerIdentity>,
+) -> Result<()> {
+    let outcome =
+        agent_doc_session_registry_io::tmux_server::reconcile_tmux_server_identity_observed_in(
+            project_root,
+            tmux,
+            observed,
+        )?;
     if outcome.server_replaced {
         let stale_editor_sockets_removed =
             agent_doc_ipc_io::prune_stale_editor_sockets(project_root)?;
@@ -679,33 +695,25 @@ fn tmux_for_environment() -> tmux_router::Tmux {
     agent_doc_tmux_io::configured_tmux()
 }
 
-fn terminal_host_report(tmux: &tmux_router::Tmux) -> TerminalHostReport {
+fn terminal_host_report(tmux_installed: bool, tmux_server_running: bool) -> TerminalHostReport {
     let env: BTreeMap<String, String> = std::env::vars().collect();
-    let tmux_installed = tmux
-        .cmd()
-        .arg("-V")
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .is_ok_and(|status| status.success());
     agent_doc_config::terminal_host::classify(
         &env,
         tmux_installed,
-        tmux_installed && tmux.running(),
+        tmux_installed && tmux_server_running,
     )
 }
 
+/// The terminal policy for `file`. `project` is the project config this
+/// ensure already loaded for the document's store.
 fn terminal_policy_for_file(
     file: &Path,
+    project: &agent_doc_frontmatter::project_config::ProjectConfig,
     report: &TerminalHostReport,
     ide_available: bool,
     session_state: TerminalSessionState,
 ) -> Result<ResolvedTerminalPolicy> {
     let frontmatter_host = frontmatter_terminal_host_for_file(file, session_state)?;
-    let canonical = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
-    let project =
-        agent_doc_project_config_io::load_project_for_root(&start_project_root(&canonical));
     let global = agent_doc_config::load()?;
     let command_available = project
         .terminal
@@ -742,15 +750,9 @@ fn frontmatter_terminal_host_for_file(
     if session_state == TerminalSessionState::Attached {
         return Ok(None);
     }
-    let content = agent_doc_document_realtime_io::try_resolve_current_document_with_source(
-        file,
-        "start-terminal-policy",
-    )
-    .with_context(|| format!("failed to resolve terminal policy from {}", file.display()))?
-    .into_content();
-    let (document, _) = frontmatter::parse(&content)
-        .with_context(|| format!("failed to parse terminal policy from {}", file.display()))?;
-    Ok(document.terminal_host)
+    // `#startpolicyeditorread`: the preference is read from disk, never
+    // through the editor's live copy the editor is waiting behind.
+    agent_doc_frontmatter_io::session::terminal_host_preference_on_disk(file)
 }
 
 fn live_registry_target(
@@ -818,6 +820,7 @@ fn first_session_pane(tmux: &tmux_router::Tmux, session_name: &str) -> Result<St
         .with_context(|| format!("tmux session {session_name} exists but has no live pane"))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn tmux_ensure_outcome(
     tmux: &tmux_router::Tmux,
     session_name: String,
@@ -826,12 +829,14 @@ fn tmux_ensure_outcome(
     resolution: &str,
     document_pane: Option<String>,
     policy: &ResolvedTerminalPolicy,
+    known_attachment: Option<&KnownAttachment>,
 ) -> TmuxEnsureOutcome {
     let tmux_prefix = tmux.server_socket.as_deref().map_or_else(
         || "tmux".to_string(),
         |socket| format!("tmux -L {} -f /dev/null", shell_escape(socket)),
     );
-    let attached = is_session_attached(tmux, &session_name);
+    let attached = KnownAttachment::for_session(known_attachment, &session_name)
+        .unwrap_or_else(|| is_session_attached(tmux, &session_name));
     let default_attach_command = format!(
         "{tmux_prefix} attach-session -t {}",
         shell_escape(&session_name)
@@ -2261,8 +2266,9 @@ fn ensure_inside_tmux(file: &Path) -> Result<()> {
     if agent_doc_tmux_io::in_tmux() {
         return Ok(());
     }
-    let tmux = tmux_for_environment();
-    let report = terminal_host_report(&tmux);
+    let server =
+        agent_doc_session_registry_io::tmux_server::observe_tmux_server(&tmux_for_environment());
+    let report = terminal_host_report(server.installed, server.running);
     anyhow::bail!(
         "start for {} is still outside tmux after bootstrap: {}. Retry `agent-doc start {}`; inspect `agent-doc env --json` if the host cannot provision a pane",
         file.display(),
@@ -3792,34 +3798,32 @@ mod tests {
         assert_eq!(tmux.list_session_panes("proj-IU-0a1b2c3d"), panes_before);
     }
 
-    #[test]
-    fn progress_reporting_is_opt_in_and_lines_are_parseable() {
-        assert!(!progress_reporting_enabled_from(None));
-        assert!(!progress_reporting_enabled_from(Some("")));
-        assert!(!progress_reporting_enabled_from(Some("0")));
-        assert!(progress_reporting_enabled_from(Some("1")));
-        assert!(progress_reporting_enabled_from(Some(" true ")));
-        assert_eq!(
-            progress_line("registry_lookup"),
-            "[progress] phase=registry_lookup"
-        );
-        assert_eq!(
-            progress_line("reused").strip_prefix(PROGRESS_LINE_PREFIX),
-            Some("reused")
-        );
+    /// What one start cost, counted (`#startupcriticalpath`): every tmux
+    /// client the start spawned (by verb) and every registry lock it took.
+    #[cfg(unix)]
+    #[derive(Debug)]
+    struct StartCost {
+        tmux_verbs: Vec<String>,
+        registry_locks: u64,
     }
 
-    /// `#starttimeoutload`: a no-op start for a document whose supervisor pane
-    /// is already live costs a fixed number of tmux client spawns, whatever the
-    /// registry holds. It used to spawn two per registry row, which at load
-    /// ~100 pushed the start past the editor's bound. Counted through a logging
-    /// wrapper around the real tmux; isolated tmux server only.
+    /// A project pinned to session `proj` with `rows` live registry rows (row
+    /// 0 is `session.md` itself when `document_registered`), on an isolated
+    /// server, and a tmux handle that logs every client spawn.
     #[cfg(unix)]
-    #[test]
-    fn reuse_start_tmux_spawns_do_not_grow_with_the_registry() {
-        use std::os::unix::fs::PermissionsExt;
+    struct CountedStartFixture {
+        dir: tempfile::TempDir,
+        file: PathBuf,
+        log: PathBuf,
+        counted: tmux_router::Tmux,
+        _isolated: agent_doc_tmux_io::IsolatedTestTmux,
+    }
 
-        fn reuse_spawns(rows: usize) -> usize {
+    #[cfg(unix)]
+    impl CountedStartFixture {
+        fn new(rows: usize, document_registered: bool, record_identity: bool) -> Self {
+            use std::os::unix::fs::PermissionsExt;
+
             let dir = tempfile::tempdir().unwrap();
             std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
             std::fs::write(
@@ -3828,8 +3832,8 @@ mod tests {
             )
             .unwrap();
             let file = dir.path().join("session.md");
-            std::fs::write(&file, "---\nagent_doc_session: tmux-reuse-cost\n---\n").unwrap();
-            let isolated = agent_doc_tmux_io::isolated_test_tmux("agent-doc-reuse-cost");
+            std::fs::write(&file, "---\nagent_doc_session: tmux-start-cost\n---\n").unwrap();
+            let isolated = agent_doc_tmux_io::isolated_test_tmux("agent-doc-start-cost");
             let log = dir.path().join("tmux-calls.log");
             let wrapper = dir.path().join("tmux-wrapper");
             std::fs::write(
@@ -3845,11 +3849,12 @@ mod tests {
             let counted = tmux_router::Tmux::default_server_with_binary(&wrapper)
                 .with_server_socket(isolated.server_socket.clone());
 
+            // Provision the session (this also records the server identity).
             ensure_tmux_session_with(&isolated, &file, None).unwrap();
             let mut registry = tmux_router::Registry::new();
             for row in 0..rows {
                 let pane = isolated.new_window("proj", dir.path()).unwrap();
-                let row_file = if row == 0 {
+                let row_file = if row == 0 && document_registered {
                     file.clone()
                 } else {
                     let other = dir.path().join(format!("other-{row}.md"));
@@ -3871,28 +3876,165 @@ mod tests {
                 );
             }
             agent_doc_session_registry_io::save_in(dir.path(), &registry).unwrap();
-            // The first observation records the server identity; measure the
-            // steady state every later editor start sees.
-            ensure_tmux_session_with(&counted, &file, None).unwrap();
-            std::fs::write(&log, "").unwrap();
+            if !record_identity {
+                // A store that never saw this server: the first start records it.
+                let conn = agent_doc_sqlite::state_store::open_state_db(dir.path()).unwrap();
+                conn.execute(
+                    "DELETE FROM project_runtime_state WHERE state_key = 'tmux_server_identity_v1'",
+                    [],
+                )
+                .unwrap();
+            }
+            Self {
+                dir,
+                file,
+                log,
+                counted,
+                _isolated: isolated,
+            }
+        }
 
-            match start_bootstrap_target(&counted, &file, false, None).unwrap() {
+        fn start(&self) -> (StartBootstrap, StartCost) {
+            std::fs::write(&self.log, "").unwrap();
+            let locks_before =
+                agent_doc_session_registry_io::registry_lock::registry_lock_acquisitions_on_this_thread();
+            let bootstrap = start_bootstrap_target(&self.counted, &self.file, false, None).unwrap();
+            let registry_locks =
+                agent_doc_session_registry_io::registry_lock::registry_lock_acquisitions_on_this_thread()
+                    - locks_before;
+            let tmux_verbs = std::fs::read_to_string(&self.log)
+                .unwrap()
+                .lines()
+                .map(|line| {
+                    // `-L <socket> [-f /dev/null] <verb> ...`
+                    let mut words = line.split_whitespace().peekable();
+                    while let Some(word) = words.next() {
+                        if matches!(word, "-L" | "-S" | "-f") {
+                            words.next();
+                            continue;
+                        }
+                        return word.to_string();
+                    }
+                    String::new()
+                })
+                .collect();
+            (
+                bootstrap,
+                StartCost {
+                    tmux_verbs,
+                    registry_locks,
+                },
+            )
+        }
+    }
+
+    /// `#starttimeoutload` / `#startupcriticalpath`: a no-op start for a
+    /// document whose supervisor pane is already live is the critical path and
+    /// nothing else: one `display-message` (tmux installed, server running,
+    /// server identity), one `list-panes -a` (every registry row's liveness and
+    /// session), one `list-clients` (attached or detached), and no registry
+    /// lock, whatever the registry holds. It was 2N+6 spawns before
+    /// `#starttimeoutload` and 6 after it (`tmux -V`, `has-session` and a
+    /// second `list-clients`). Counts, not wall clock; isolated tmux server.
+    #[cfg(unix)]
+    #[test]
+    fn reuse_start_is_three_tmux_spawns_and_no_registry_lock() {
+        for rows in [1, 12] {
+            let fixture = CountedStartFixture::new(rows, true, true);
+            let (bootstrap, cost) = fixture.start();
+            match bootstrap {
                 StartBootstrap::Reuse(outcome) => {
                     assert_eq!(outcome.session_name, "proj");
                     assert!(outcome.document_pane.is_some());
+                    assert!(!outcome.attached);
                 }
                 StartBootstrap::Start(target) => panic!("started a second pane: {target:?}"),
             }
-            std::fs::read_to_string(&log).unwrap().lines().count()
+            assert_eq!(
+                cost.tmux_verbs,
+                ["display-message", "list-panes", "list-clients"],
+                "{rows} registry row(s): {cost:?}"
+            );
+            assert_eq!(cost.registry_locks, 0, "{rows} registry row(s): {cost:?}");
+            drop(fixture.dir);
         }
+    }
 
-        let one = reuse_spawns(1);
-        let many = reuse_spawns(12);
-        assert_eq!(
-            one, many,
-            "a no-op start must not spawn tmux per registry row"
+    /// `#startupcriticalpath`: a cold start (no live pane for the document, the
+    /// project session live) adds only the window it starts in: the same
+    /// listing that found no document pane named the live project session.
+    /// Still no registry lock while the store already
+    /// recorded this server; the first start against a server the store never
+    /// saw takes exactly one, to record it.
+    #[cfg(unix)]
+    #[test]
+    fn cold_start_tmux_spawns_and_registry_locks_are_bounded() {
+        let fixture = CountedStartFixture::new(3, false, true);
+        let (bootstrap, cost) = fixture.start();
+        assert!(
+            matches!(bootstrap, StartBootstrap::Start(_)),
+            "{bootstrap:?}"
         );
-        assert!(one <= 6, "a no-op start spawned {one} tmux clients");
+        assert_eq!(
+            cost.tmux_verbs,
+            [
+                "display-message",
+                "list-panes",
+                "list-clients",
+                "new-window"
+            ],
+            "{cost:?}"
+        );
+        assert_eq!(cost.registry_locks, 0, "{cost:?}");
+
+        let unrecorded = CountedStartFixture::new(3, true, false);
+        let (bootstrap, cost) = unrecorded.start();
+        assert!(
+            matches!(bootstrap, StartBootstrap::Reuse(_)),
+            "{bootstrap:?}"
+        );
+        assert_eq!(
+            cost.tmux_verbs,
+            ["display-message", "list-panes", "list-clients"],
+            "{cost:?}"
+        );
+        assert_eq!(cost.registry_locks, 1, "records the new server: {cost:?}");
+        let (_, again) = unrecorded.start();
+        assert_eq!(again.registry_locks, 0, "recorded once: {again:?}");
+    }
+
+    /// `#startpolicyeditorread`: start/ensure read the terminal-host preference
+    /// from disk. The editor waits on these commands, so reading through its
+    /// live copy waited on the waiter and failed on a transient missing
+    /// replica.
+    #[test]
+    fn terminal_policy_reads_the_terminal_host_preference_from_disk() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("session.md");
+        std::fs::write(
+            &file,
+            "---\nagent_doc_session: policy-disk\nterminal_host: external\n---\n",
+        )
+        .unwrap();
+        assert_eq!(
+            frontmatter_terminal_host_for_file(&file, TerminalSessionState::Detached).unwrap(),
+            Some(TerminalHostPreference::External)
+        );
+        assert_eq!(
+            frontmatter_terminal_host_for_file(&file, TerminalSessionState::Attached).unwrap(),
+            None,
+            "an attached session needs no read"
+        );
+        let source = include_str!("lib.rs");
+        let body = source
+            .split("fn frontmatter_terminal_host_for_file(")
+            .nth(1)
+            .and_then(|rest| rest.split("\nfn ").next())
+            .unwrap();
+        assert!(
+            !body.contains(concat!("try_resolve_current_", "document")),
+            "the terminal-policy read must not go through the editor's live copy"
+        );
     }
 
     #[test]

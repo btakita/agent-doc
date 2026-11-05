@@ -39,7 +39,6 @@ use std::path::Path;
 use std::time::Duration;
 
 use agent_doc_supervisor_io::ipc;
-use tmux_router::RegistryLock;
 
 pub mod retired_store;
 pub use retired_store::{
@@ -939,7 +938,14 @@ fn clean_orphaned_sockets(project_root: &Path, dry_run: bool) -> Result<(usize, 
     // Apply registry pruning
     if !keys_to_prune.is_empty() && !dry_run {
         let registry_path = agent_doc_session_registry_io::registry_path_in(project_root);
-        if let Ok(_lock) = RegistryLock::acquire(&registry_path) {
+        let lock = agent_doc_session_registry_io::registry_lock::acquire(
+            &registry_path,
+            "prune stale sessions",
+        );
+        if let Err(error) = &lock {
+            eprintln!("[gc] warning: skipped pruning stale sessions: {error:#}");
+        }
+        if let Ok(_lock) = lock {
             // Reload under lock to avoid stale reads
             if let Ok(mut reg) = agent_doc_session_registry_io::load_in(project_root) {
                 for key in &keys_to_prune {

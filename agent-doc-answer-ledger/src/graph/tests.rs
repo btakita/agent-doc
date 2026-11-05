@@ -390,3 +390,99 @@ fn a_cached_operator_relation_outranks_a_rebuilt_proposal() {
         1
     );
 }
+
+/// `#decisionrevisionsource`: the index remembers who decided a revision's
+/// kind, so once the operator's `change:` / `amend:` row is pruned the cycle
+/// contract still reports the operator's call, not the binary's proposal.
+#[test]
+fn a_pruned_operator_word_stays_the_operators_call_in_the_cycle_contract() {
+    let (ledger, _) = build(DOC);
+    let (keys, revisions) = ledger.index_rows();
+    let prior = PriorIndex { keys, revisions };
+    let operator_rows: BTreeSet<(&str, &str)> = prior
+        .revisions
+        .iter()
+        .filter(|revision| revision.relation_source == EdgeSource::Operator)
+        .map(|revision| (revision.answer.as_str(), revision.relation.as_str()))
+        .collect();
+    assert_eq!(
+        operator_rows,
+        BTreeSet::from([
+            ("but keep the release App private", "amends"),
+            ("Keep the approver as is", "supersedes"),
+        ])
+    );
+    let pruned = DOC
+        .replace("    - amend: but keep the release App private\n", "")
+        .replace("    - change: Keep the approver as is\n", "");
+    let rebuild = |prior: &PriorIndex| {
+        let observations = extract::observe(&pruned, &[]);
+        let ledger = Ledger::build(&observations, prior, NOW + 60, None);
+        let graph = DecisionGraph::build(&ledger, &observations);
+        (ledger, graph)
+    };
+    let (ledger, graph) = rebuild(&prior);
+    let public = decision(&graph, "tdpublic");
+    let revisions = graph.revisions_of(&public);
+    assert_eq!(revisions.len(), 2);
+    assert!(!revisions[1].in_document);
+    let amend = graph.relation_of(&revisions[1].id).unwrap();
+    assert_eq!(
+        (amend.kind, amend.source, amend.clause.as_deref()),
+        (
+            EdgeKind::Amends,
+            EdgeSource::Operator,
+            Some("but keep the release App private")
+        )
+    );
+    let facts = ledger.answered_facts();
+    let fact = facts
+        .iter()
+        .find(|fact| fact.decision_id == public)
+        .unwrap();
+    assert_eq!(fact.change_source, Some(EdgeSource::Operator));
+    assert_eq!(
+        fact.amends.as_deref(),
+        Some("Public and open source. Downloads come from public GitHub releases.")
+    );
+    assert_eq!(
+        fact.amended_clauses,
+        vec!["but keep the release App private".to_string()]
+    );
+    let approver = decision(&graph, "tdapprover");
+    let fact = facts
+        .iter()
+        .find(|fact| fact.decision_id == approver)
+        .unwrap();
+    assert_eq!(fact.answer, "Keep the approver as is");
+    assert_eq!(fact.change_source, Some(EdgeSource::Operator));
+    let change = graph
+        .relation_of(&graph.revisions_of(&approver)[1].id)
+        .unwrap();
+    assert_eq!(
+        (change.kind, change.source),
+        (EdgeKind::Supersedes, EdgeSource::Operator)
+    );
+    // The rebuilt index keeps the operator's word for the next cycle.
+    let (_, rows) = ledger.index_rows();
+    assert!(
+        rows.iter()
+            .any(|row| row.answer == "but keep the release App private"
+                && row.relation == "amends"
+                && row.relation_source == EdgeSource::Operator)
+    );
+
+    // Control: an index that never recorded the source (a legacy row) falls
+    // back to the binary's proposal, which is what this item fixes.
+    let mut legacy = prior.clone();
+    for revision in &mut legacy.revisions {
+        revision.relation_source = EdgeSource::Derived;
+    }
+    let (ledger, _) = rebuild(&legacy);
+    let fact = ledger
+        .answered_facts()
+        .into_iter()
+        .find(|fact| fact.decision_id == public)
+        .unwrap();
+    assert_ne!(fact.change_source, Some(EdgeSource::Operator));
+}

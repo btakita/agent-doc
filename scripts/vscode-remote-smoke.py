@@ -24,7 +24,17 @@ Steps 2-6 need the operator: connect VS Code (Coder Remote, Remote-SSH, or a
 code-server browser tab) to this host, open the document, and run an Agent Doc
 command that attaches the IDE terminal. The script prints what it waits for
 and polls until `--timeout`. Each step prints PASS, FAIL or SKIP; the exit
-status is 1 when any step failed.
+status is 1 when any step failed. A step whose prerequisite failed is skipped
+(install -> register -> remote-host -> tmux-attach -> remote-name, and
+register -> layout-sync), so the first FAIL is the one to fix. A wait that
+times out says whether any VS Code server extension host is running here,
+which tells "nobody connected VS Code" apart from "the extension did not
+register the document".
+
+`--doc` must be an agent-doc session document: the extension registers only
+those. The script asks the agent-doc library (`agent-doc lib-path`) the same
+question the extension asks and exits 2 before any step when the answer is no.
+Without an operator, only `--steps install` can pass.
 
 `--self-test` checks the parsing helpers without a workspace.
 """
@@ -36,6 +46,7 @@ import glob
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -48,6 +59,27 @@ REMOTE_NAME_ENV = "AGENT_DOC_VSCODE_REMOTE_NAME"
 EXTENSION_ID = "btakita.agent-doc"
 SERVER_ROOT_NAMES = (".vscode-server", ".vscode-server-insiders", ".vscodium-server", ".cursor-server")
 STEPS = ("install", "register", "remote-host", "tmux-attach", "remote-name", "layout-sync")
+# The step each step needs to have passed, when both were selected.
+PREREQUISITE = {
+    "register": "install",
+    "remote-host": "register",
+    "tmux-attach": "remote-host",
+    "remote-name": "tmux-attach",
+    "layout-sync": "register",
+}
+# code-server installs off PATH, as `agent-doc plugin install vscode` probes them
+# (src/plugin.rs CODE_SERVER_OFF_PATH_CLIS): relative entries are under $HOME.
+# Coder's code-server module installs into /tmp/code-server by default.
+CODE_SERVER_OFF_PATH_CLIS = (".local/bin/code-server", "/tmp/code-server/bin/code-server")
+SERVER_CLI_NAMES = ("code-server", "code-server-insiders", "codium-server", "cursor-server")
+SESSION_DOC_PROBE = (
+    "import ctypes, sys\n"
+    "lib = ctypes.CDLL(sys.argv[1])\n"
+    "probe = lib.agent_doc_is_session_document\n"
+    "probe.argtypes = [ctypes.c_char_p]\n"
+    "probe.restype = ctypes.c_int\n"
+    "print(probe(sys.argv[2].encode()))\n"
+)
 
 
 # --- pure helpers (covered by --self-test) ---------------------------------
@@ -84,7 +116,8 @@ def workspace_target_lines(plugin_list: str) -> List[str]:
     return [
         line.strip()
         for line in plugin_list.splitlines()
-        if line.startswith("vscode") and ("remote-ssh:" in line or line.rstrip().endswith("code-server"))
+        if line.startswith("vscode")
+        and ("remote-ssh:" in line or "code-server:" in line or line.rstrip().endswith("code-server"))
     ]
 
 
@@ -125,6 +158,46 @@ def environ_value(environ: bytes, key: str) -> Optional[str]:
     return None
 
 
+def prerequisite_failure(step: str, results: List[Tuple[str, str, str]]) -> Optional[str]:
+    """Why `step` must be skipped: its prerequisite ran and did not pass."""
+    needed = PREREQUISITE.get(step)
+    for name, verdict, _ in results:
+        if name == needed and verdict != "PASS":
+            return f"{needed} did not pass"
+    return None
+
+
+def summary_line(results: List[Tuple[str, str, str]]) -> str:
+    """One line counting each verdict; a skipped step is not a passed one."""
+    def named(verdict: str) -> List[str]:
+        return [step for step, seen, _ in results if seen == verdict]
+    passed, skipped, failed = named("PASS"), named("SKIP"), named("FAIL")
+    return (f"vscode-remote-smoke: {len(passed)} passed, {len(skipped)} skipped, {len(failed)} failed"
+            f" of {len(results)} steps" + (f"; failed: {', '.join(failed)}" if failed else ""))
+
+
+def install_failure_detail(hosts: List[str], install_mode: str) -> str:
+    """Actionable detail for an install step that found no workspace listing."""
+    if not hosts:
+        return ("no workspace extension host is installed on this host: connect VS Code to it once "
+                "(Coder Remote or Remote-SSH installs ~/.vscode-server), or install code-server")
+    remedy = ("rerun without `--install skip`, or run `agent-doc plugin install vscode`"
+              if install_mode == "skip"
+              else "check the `agent-doc plugin install vscode` output above")
+    return (f"the extension is not installed in any workspace extension host ({', '.join(hosts)}): "
+            f"{remedy}, then reload the remote window")
+
+
+def wait_failure_detail(last: str, running_hosts: List[Tuple[int, str]], what: str) -> str:
+    """A timed-out operator wait, naming whether any VS Code is connected at all."""
+    if not running_hosts:
+        return (f"{last}; no VS Code server extension host is running on this host, so no VS Code "
+                f"window is connected: connect VS Code to this workspace and {what}")
+    hosts = ", ".join(f"pid {pid} under {root}" for pid, root in running_hosts)
+    return (f"{last}; extension host(s) running ({hosts}): {what} in that window, "
+            "and if it is already open check the Agent Doc output channel for an activation error")
+
+
 # --- host access ------------------------------------------------------------
 
 
@@ -155,11 +228,76 @@ def proc_ancestors(pid: int) -> List[int]:
     return chain
 
 
+def running_server_extension_hosts() -> List[Tuple[int, str]]:
+    """(pid, server root) of every VS Code Server / code-server extension host here."""
+    hosts = []
+    for entry in Path("/proc").iterdir() if Path("/proc").is_dir() else []:
+        if not entry.name.isdigit():
+            continue
+        argv = proc_argv(int(entry.name))
+        if is_server_extension_host(argv):
+            hosts.append((int(entry.name), server_root_of(argv) or "?"))
+    return sorted(hosts)
+
+
+def installed_workspace_hosts() -> List[str]:
+    """Workspace extension hosts installed here, probed as `agent-doc plugin install vscode` does."""
+    home = Path.home()
+    hosts = []
+    on_path = shutil.which("code-server")
+    if on_path:
+        hosts.append(f"code-server ({on_path})")
+    else:
+        for candidate in CODE_SERVER_OFF_PATH_CLIS:
+            path = Path(candidate) if candidate.startswith("/") else home / candidate
+            if os.access(path, os.X_OK) and path.is_file():
+                hosts.append(f"code-server:{path}")
+                break
+    roots = [os.environ.get("VSCODE_AGENT_FOLDER", "")] + [str(home / name) for name in SERVER_ROOT_NAMES]
+    seen = set()
+    for root in roots:
+        if not root or root in seen:
+            continue
+        seen.add(root)
+        clis = [path for name in SERVER_CLI_NAMES
+                for path in glob.glob(os.path.join(root, "bin", "*", "bin", name))
+                + glob.glob(os.path.join(root, "cli", "servers", "*", "server", "bin", name))
+                if os.access(path, os.X_OK)]
+        if clis:
+            hosts.append(f"remote-ssh:{root}")
+    return hosts
+
+
+def session_document_verdict(agent_doc: str, document: str) -> Tuple[Optional[bool], str]:
+    """Whether the extension would treat `document` as a session document.
+
+    Asks the agent-doc library the extension loads (`agent_doc_is_session_document`)
+    in a child interpreter, so a library fault cannot take the smoke down. None
+    when the question could not be asked.
+    """
+    try:
+        lib = subprocess.run([agent_doc, "lib-path"], capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        return None, f"`{agent_doc} lib-path` did not run: {error}"
+    library = lib.stdout.strip()
+    if lib.returncode != 0 or not library:
+        return None, f"`{agent_doc} lib-path` exited {lib.returncode}: {lib.stderr.strip()[-200:]}"
+    try:
+        probe = subprocess.run([sys.executable, "-I", "-c", SESSION_DOC_PROBE, library, document],
+                               capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        return None, f"the session-document probe did not run: {error}"
+    answer = probe.stdout.strip()
+    if probe.returncode != 0 or answer not in ("0", "1"):
+        return None, f"the session-document probe against {library} failed: {probe.stderr.strip()[-200:]}"
+    return answer == "1", library
+
+
 class Smoke:
     def __init__(self, args: argparse.Namespace) -> None:
         self.args = args
         self.project = Path(args.project).resolve()
-        self.document = str((self.project / args.doc).resolve())
+        self.document = str((self.project / (args.doc or "")).resolve())
         self.results: List[Tuple[str, str, str]] = []
         self.registration: Optional[dict] = None
         self.server_root: Optional[str] = None
@@ -211,8 +349,7 @@ class Smoke:
         listing = self.agent_doc("plugin", "list").stdout
         lines = workspace_target_lines(listing)
         if not lines:
-            self.record("install", "FAIL", "no workspace extension host lists the extension "
-                        "(connect VS Code to this host once so its server is installed, or install code-server)")
+            self.record("install", "FAIL", install_failure_detail(installed_workspace_hosts(), self.args.install))
             return
         manifests = self.installed_manifests()
         kinds = {tuple(json.loads(Path(m).read_text()).get("extensionKind") or ()) for m in manifests}
@@ -249,7 +386,8 @@ class Smoke:
 
         detail, last = self.wait_for(f"open {self.args.doc} in VS Code connected to this host "
                                      "(reload the window after an install)", probe)
-        self.record("register", "PASS" if detail else "FAIL", detail or last)
+        self.record("register", "PASS" if detail else "FAIL", detail or wait_failure_detail(
+            last, running_server_extension_hosts(), f"open {self.args.doc}"))
 
     def step_remote_host(self) -> None:
         if not self.registration:
@@ -321,7 +459,25 @@ class Smoke:
             return f"observation from {observation.get('client_id')} shows the document; no pane divergence"
 
         detail, last = self.wait_for("keep the document visible; run Agent Doc: Sync Layout", probe)
-        self.record("layout-sync", "PASS" if detail else "FAIL", detail or last)
+        self.record("layout-sync", "PASS" if detail else "FAIL", detail or wait_failure_detail(
+            last, running_server_extension_hosts(), f"keep {self.args.doc} visible and run Agent Doc: Sync Layout"))
+
+    def document_preflight(self) -> Optional[str]:
+        """Why the operator steps cannot pass for `--doc`, or None to go on."""
+        if not os.path.isfile(self.document):
+            return f"vscode-remote-smoke: --doc {self.args.doc}: no such file {self.document}"
+        verdict, detail = session_document_verdict(self.args.agent_doc, self.document)
+        if verdict is None:
+            print(f"WARN document: cannot tell whether {self.args.doc} is a session document ({detail}); "
+                  "continuing", flush=True)
+            return None
+        if not verdict:
+            return (f"vscode-remote-smoke: --doc {self.args.doc} is not an agent-doc session document "
+                    f"(asked {detail}), so the extension never registers it and register and "
+                    "layout-sync cannot pass. Pass a document with agent-doc frontmatter (for example "
+                    "`agent_doc_format: template`) or one matched by `[documents] include` in "
+                    ".agent-doc/config.toml; `--steps install` needs no document.")
+        return None
 
     def main(self) -> int:
         selected = [step.strip() for step in self.args.steps.split(",") if step.strip()]
@@ -329,13 +485,20 @@ class Smoke:
         if unknown:
             print(f"unknown steps: {unknown}; known: {', '.join(STEPS)}", file=sys.stderr)
             return 2
+        if any(step != "install" for step in selected):
+            refusal = self.document_preflight()
+            if refusal:
+                print(refusal, file=sys.stderr)
+                return 2
         for step in STEPS:
             if step in selected:
+                skipped = prerequisite_failure(step, self.results)
+                if skipped:
+                    self.record(step, "SKIP", skipped)
+                    continue
                 getattr(self, "step_" + step.replace("-", "_"))()
-        failed = [step for step, verdict, _ in self.results if verdict == "FAIL"]
-        print(f"vscode-remote-smoke: {len(self.results) - len(failed)} of {len(self.results)} steps did not fail"
-              + (f"; failed: {', '.join(failed)}" if failed else ""))
-        return 1 if failed else 0
+        print(summary_line(self.results))
+        return 1 if any(verdict == "FAIL" for _, verdict, _ in self.results) else 0
 
 
 # --- self-test --------------------------------------------------------------
@@ -367,6 +530,37 @@ def self_test() -> int:
         "vscode     btakita.agent-doc@0.2.84  remote-ssh:/home/u/.vscode-server",
         "vscode     btakita.agent-doc@0.2.84  code-server",
     ]
+    coder = "vscode     btakita.agent-doc@0.2.84  code-server:/tmp/code-server/bin/code-server\n"
+    assert workspace_target_lines(coder) == [coder.strip()]
+
+    # The 2026-11-04 Coder run: install failed, so register must not wait and
+    # remote-host onward must not run; layout-sync follows register.
+    results = [("install", "FAIL", "x")]
+    assert prerequisite_failure("register", results) == "install did not pass"
+    assert prerequisite_failure("install", results) is None
+    results = [("install", "PASS", ""), ("register", "FAIL", "x")]
+    assert prerequisite_failure("register", results) is None
+    assert prerequisite_failure("remote-host", results) == "register did not pass"
+    assert prerequisite_failure("layout-sync", results) == "register did not pass"
+    assert prerequisite_failure("layout-sync", [("install", "PASS", "")]) is None
+    assert prerequisite_failure("tmux-attach", [("remote-host", "SKIP", "")]) == "remote-host did not pass"
+
+    assert summary_line([("install", "FAIL", ""), ("register", "SKIP", ""), ("layout-sync", "SKIP", "")]) == (
+        "vscode-remote-smoke: 0 passed, 2 skipped, 1 failed of 3 steps; failed: install")
+    assert summary_line([("install", "PASS", "")]) == "vscode-remote-smoke: 1 passed, 0 skipped, 0 failed of 1 steps"
+
+    no_host = install_failure_detail([], "skip")
+    assert "no workspace extension host is installed" in no_host and ".vscode-server" in no_host, no_host
+    skipped = install_failure_detail(["remote-ssh:/home/u/.vscode-server"], "skip")
+    assert "not installed in any workspace extension host" in skipped, skipped
+    assert "without `--install skip`" in skipped and "agent-doc plugin install vscode" in skipped, skipped
+    assert "--install skip" not in install_failure_detail(["code-server (/usr/bin/code-server)"], "release")
+
+    unattended = wait_failure_detail("no VS Code registration for the document", [], "open plan.md")
+    assert "no VS Code window is connected" in unattended, unattended
+    attended = wait_failure_detail("no VS Code registration for the document",
+                                   [(42, "/home/u/.vscode-server")], "open plan.md")
+    assert "pid 42 under /home/u/.vscode-server" in attended and "output channel" in attended, attended
 
     remote = ["/home/u/.vscode-server/bin/abc/node", "/home/u/.vscode-server/bin/abc/out/bootstrap-fork",
               "--type=extensionHost", "--transformURIs"]
@@ -401,8 +595,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     args = parser.parse_args(argv)
     if args.self_test:
         return self_test()
-    if not args.doc:
-        parser.error("--doc is required")
+    if not args.doc and any(step.strip() not in ("", "install") for step in args.steps.split(",")):
+        parser.error("--doc is required unless --steps is install")
     return Smoke(args).main()
 
 

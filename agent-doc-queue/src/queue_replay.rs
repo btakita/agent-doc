@@ -22,6 +22,7 @@ pub fn queue_entry_commit_signature(entry: &QueueEntry) -> String {
         QueueEntry::StartFence(None) => "start:".to_string(),
         QueueEntry::StopFence => "stop:".to_string(),
         QueueEntry::Freeform(line) => format!("freeform:{}", line.trim()),
+        QueueEntry::StrayCloseText(text) => format!("stray-close-text:{}", text.trim()),
     }
 }
 

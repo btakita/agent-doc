@@ -5632,7 +5632,7 @@ fn project_external_waiting_items(
                 prompt.indent + 2,
                 response_timestamp,
             );
-            insertions.push((subtree_end, document_queue::parse(&metadata)?));
+            insertions.push((subtree_end, document_queue::parse_fragment(&metadata)?));
         }
 
         if insertions.is_empty() {

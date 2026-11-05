@@ -63,6 +63,20 @@ pub enum QueueEntry {
     /// queue, such lines are captured as `Freeform`: rendered back verbatim and
     /// never treated as an actionable prompt/dispatch target.
     Freeform(String),
+    /// Stray operator text glued before the component's closing marker on the
+    /// same line (`t<!-- /agent:run -->`, `#strayclosemarker`), verbatim and
+    /// without a line terminator (`#straytextqueueitem`).
+    ///
+    /// The structural gate tolerates this shape and lint names it; the queue
+    /// treats it as lint-only content. Unlike non-noise `Freeform` (which
+    /// several schedulers still surface as operator work), it is never a
+    /// prompt, never a continuation of the row above it, and never dispatched,
+    /// claimed, steered, or synced; it does count as operator text that blocks
+    /// a lossless clear. [`render`] always emits it LAST and without a
+    /// newline, so the text stays welded to the closer: moving it onto its own
+    /// line would turn it into an ordinary column-zero prompt
+    /// (`#queuefreetextsplit`).
+    StrayCloseText(String),
 }
 
 /// Render the inert receipt retained when an ordinary `agent:run` drains.
@@ -298,11 +312,37 @@ pub fn strip_auto_from_tag(tag: &str) -> String {
     rewrite_queue_tag_attrs(tag, |token| token != "auto")
 }
 
+/// Parse one whole queue/run/loop component BODY: `&doc[open_end..close_start]`,
+/// i.e. `component.content(doc)`, or a body this module rendered.
+///
+/// `#straytextqueueitem`: a standalone closing marker starts its own line, so
+/// a body's only unterminated final segment is stray text glued before the
+/// closer (`t<!-- /agent:run -->`, `#strayclosemarker`). That segment becomes
+/// one inert [`QueueEntry::StrayCloseText`] entry, never a prompt; text typed
+/// on its own line parses exactly as before. Text that is not a whole body (a
+/// single row, an operator-inserted run, synthesized rows that may end
+/// without a newline) goes through [`parse_fragment`] instead.
 pub fn parse(body: &str) -> Result<Vec<QueueEntry>> {
     Ok(parse_spans(body)?
         .into_iter()
         .map(|(entry, _)| entry)
         .collect())
+}
+
+/// Parse queue text that is NOT a whole component body: one row, an
+/// operator-inserted run, or synthesized rows. An unterminated final line is
+/// ordinary queue text here, never stray close-marker text.
+pub fn parse_fragment(text: &str) -> Result<Vec<QueueEntry>> {
+    Ok(parse_fragment_spans(text)?
+        .into_iter()
+        .map(|(entry, _)| entry)
+        .collect())
+}
+
+/// [`parse_spans`] for text that is not a whole component body; see
+/// [`parse_fragment`].
+pub fn parse_fragment_spans(text: &str) -> Result<Vec<(QueueEntry, std::ops::Range<usize>)>> {
+    agent_doc_element::content_memo::memoized(&parse_spans_memo::MEMO, text, parse_spans_uncached)
 }
 
 /// Parse one Markdown queue-list item while retaining its source shape.
@@ -427,8 +467,19 @@ pub fn normalize_top_level_navigation_headings(body: &str) -> Option<String> {
 /// `---`/`~~~prompt`/`~~~done` item surfaces and cross-crate integration tests
 /// lock its ordering to this parser (#qnoise-multiline-strike,
 /// #multilineheadbullet).
+/// [`parse`] with each entry's byte range in `body`. A
+/// [`QueueEntry::StrayCloseText`] entry spans from the stray text to the end
+/// of the body.
 pub fn parse_spans(body: &str) -> Result<Vec<(QueueEntry, std::ops::Range<usize>)>> {
-    agent_doc_element::content_memo::memoized(&parse_spans_memo::MEMO, body, parse_spans_uncached)
+    let Some(stray_start) = agent_doc_element::element::stray_close_text_start_in_body(body) else {
+        return parse_fragment_spans(body);
+    };
+    let mut entries = parse_fragment_spans(&body[..stray_start])?;
+    entries.push((
+        QueueEntry::StrayCloseText(body[stray_start..].to_string()),
+        stray_start..body.len(),
+    ));
+    Ok(entries)
 }
 
 /// `#preflightqueuescale`: a bounded, content-keyed memo for [`parse_spans`]
@@ -1129,8 +1180,15 @@ fn tail_is_explicit_request(text: &str) -> bool {
 
 pub fn render(entries: &[QueueEntry]) -> String {
     let mut out = String::new();
+    // `#straytextqueueitem`: stray close-marker text is emitted after every
+    // other entry and without a newline, wherever a mutation moved it, so it
+    // stays glued to the closer and stays lint-only content.
+    let mut stray_close_text = String::new();
     for entry in entries {
         match entry {
+            QueueEntry::StrayCloseText(text) => {
+                stray_close_text.push_str(text);
+            }
             QueueEntry::Prompt(p) => {
                 if p.multiline {
                     out.push_str("---\n");
@@ -1244,6 +1302,7 @@ pub fn render(entries: &[QueueEntry]) -> String {
             }
         }
     }
+    out.push_str(&stray_close_text);
     out
 }
 
@@ -6672,7 +6731,7 @@ pub fn operator_retyped_queue_identities(
             if line.is_empty() || line.contains("~~") {
                 continue;
             }
-            let Ok(entries) = parse(line) else {
+            let Ok(entries) = parse_fragment(line) else {
                 continue;
             };
             for entry in &entries {
@@ -6718,7 +6777,7 @@ pub fn operator_repeated_queue_identity_allowances(
             if line.trim().is_empty() || line.contains("~~") {
                 continue;
             }
-            let Ok(entries) = parse(line) else {
+            let Ok(entries) = parse_fragment(line) else {
                 continue;
             };
             for entry in &entries {

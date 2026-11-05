@@ -61,4 +61,6 @@ pub mod waiting_packet;
 pub mod waiting_status;
 pub mod waiting_subtree;
 #[cfg(test)]
+mod stray_close_text_tests;
+#[cfg(test)]
 mod waiting_fixture_tests;

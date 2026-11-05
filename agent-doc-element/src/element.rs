@@ -1566,6 +1566,34 @@ pub fn split_tolerated_close_marker_line(line: &str) -> Option<usize> {
     Some(marker_start)
 }
 
+/// Byte offset, inside one component BODY (`&doc[open_end..close_start]`),
+/// where tolerated stray close-marker text begins (`#straytextqueueitem`).
+///
+/// A standalone closing marker starts its own line, so a component body
+/// always ends with a line terminator (or is empty). The only body whose
+/// final segment is unterminated is one whose closer had text glued before
+/// it on the same line (`t<!-- /agent:run -->`, `#strayclosemarker`): that
+/// unterminated final segment IS the stray text. It is returned only when it
+/// is non-blank and passes [`stray_close_marker_prefix_is_tolerated`], so the
+/// shape is exactly the one the structural gate tolerates and
+/// [`stray_text_before_close_markers`] lints.
+///
+/// Readers that interpret a body (queue parsing, dispatch, steering) treat
+/// the bytes from this offset to the end of the body as lint-only content,
+/// never as work. Text on its own line above a standalone closer is ordinary
+/// content and is not matched.
+///
+/// The caller must pass a real component body. A hand-built string without a
+/// trailing newline is indistinguishable from a body that ends at a welded
+/// closer.
+pub fn stray_close_text_start_in_body(body: &str) -> Option<usize> {
+    if body.is_empty() || body.ends_with('\n') {
+        return None;
+    }
+    let start = body.rfind('\n').map_or(0, |newline| newline + 1);
+    stray_close_marker_prefix_is_tolerated(&body[start..]).then_some(start)
+}
+
 /// Stray text typed before a component closing marker on the same line.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StrayCloseMarkerText {
@@ -5555,6 +5583,49 @@ Agreed:\n- **On by default for an active queue.**\n{prose}\
                 "{line:?}"
             );
         }
+    }
+
+    /// `#straytextqueueitem`: the stray text of a welded closer is exactly the
+    /// body's unterminated final segment, and the lint names the same bytes.
+    #[test]
+    fn stray_close_text_start_in_body_matches_the_lint() {
+        for (doc, stray) in [
+            (
+                "<!-- agent:run go -->\n- do [#a]\nt<!-- /agent:run -->\n",
+                "t",
+            ),
+            (
+                "<!-- agent:run go -->\n- do [#a]\n- t<!-- /agent:run -->\n",
+                "- t",
+            ),
+            ("<!-- agent:queue -->\n  t <!-- /agent:queue -->\n", "  t "),
+        ] {
+            let component = &parse(doc).unwrap()[0];
+            let body = component.content(doc);
+            let start = stray_close_text_start_in_body(body).expect(doc);
+            assert_eq!(&body[start..], stray, "{doc:?}");
+            let linted = stray_text_before_close_markers(doc);
+            assert_eq!(linted.len(), 1, "{doc:?}");
+            assert_eq!(linted[0].text, stray, "{doc:?}");
+        }
+        for doc in [
+            // Text on its own line above a standalone closer is content.
+            "<!-- agent:run go -->\n- do [#a]\nt\n<!-- /agent:run -->\n",
+            "<!-- agent:run go -->\n<!-- /agent:run -->\n",
+            "<!-- agent:run go -->\n\n<!-- /agent:run -->\n",
+        ] {
+            let component = &parse(doc).unwrap()[0];
+            assert_eq!(
+                stray_close_text_start_in_body(component.content(doc)),
+                None,
+                "{doc:?}"
+            );
+            assert!(stray_text_before_close_markers(doc).is_empty(), "{doc:?}");
+        }
+        // Shapes the structural gate refuses are never reported as tolerated.
+        assert_eq!(stray_close_text_start_in_body("- do [#a]\n## Done"), None);
+        assert_eq!(stray_close_text_start_in_body("- do [#a]\n   "), None);
+        assert_eq!(stray_close_text_start_in_body(""), None);
     }
 
     /// `#markertrailingtypo` — the 2026-08-23 `tsift.md` wedge.

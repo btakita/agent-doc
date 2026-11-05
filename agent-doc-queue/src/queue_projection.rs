@@ -286,7 +286,8 @@ pub fn queue_worklist_entries(content: &str, entries: &[QueueEntry]) -> Vec<Queu
             QueueEntry::Completed(_)
             | QueueEntry::StartFence(_)
             | QueueEntry::StopFence
-            | QueueEntry::Freeform(_) => None,
+            | QueueEntry::Freeform(_)
+            | QueueEntry::StrayCloseText(_) => None,
         })
         .collect()
 }

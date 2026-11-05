@@ -31,7 +31,13 @@
   conflicts with claim or receipt evidence emits a degraded mismatch, once per
   owning attempt, and preserves/fences the work instead of cancelling or
   integrating it. A completion cell whose claim closed and whose receipt ended
-  is stale residue, never ownership (`#deletedstruckmismatch`).
+  is stale residue, never ownership (`#deletedstruckmismatch`). A binary
+  strike that keeps a reported receipt only for its full response capture
+  marks that receipt's attempt closed (`attempt_closed_at_secs`; the response
+  stays as recovery authority), and a closed receipt owns no work. With no
+  live claim, an unclosed receipt whose exact attempt lineage records as
+  integrated (no later cancellation) is terminal too, so deleting the struck
+  row of integrated, consumed work is cleanup (`#consumedclaimmismatch`).
 
 - Newly scaffolded and auto-created todo components use `<!-- agent:todo priority -->`; existing todo markers remain operator-owned and unchanged.
 

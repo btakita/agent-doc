@@ -5186,6 +5186,7 @@ mod tests {
             response: Some(response.clone()),
             released_at_secs: 1,
             expires_at_secs: 2,
+            attempt_closed_at_secs: None,
         };
         upsert_test_state(
             &doc,

@@ -52,8 +52,9 @@ pub mod window_layout;
 pub use attach_failure::{AttachFailureDiagnosis, AttachFailureEvidence, diagnose_attach_failure};
 pub use editor_view_policy::{
     EditorSurfaceRole, EditorViewBindSource, EditorViewBindingPhase, EditorViewFreezeReason,
-    EditorViewId, EditorViewLifecycleTransition, EditorViewPlaceholderReason, EditorViewPolicy,
-    EditorViewPolicyBinding, EditorViewPolicyProjection, EditorViewPolicyStatus,
+    EditorViewFrontendInstance, EditorViewFrontendInstanceReset, EditorViewId,
+    EditorViewLifecycleTransition, EditorViewObservation, EditorViewPlaceholderReason,
+    EditorViewPolicy, EditorViewPolicyBinding, EditorViewPolicyProjection, EditorViewPolicyStatus,
     EditorViewPresentation, EditorViewReleaseDestination, EditorViewReleaseReason,
     EditorViewSessionKey, EditorViewSnapshot, EditorViewSurface, EditorViewSurfaceKey,
     MainLayoutEligibility, isolated_view_session_name,

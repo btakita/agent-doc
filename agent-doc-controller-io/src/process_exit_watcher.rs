@@ -297,7 +297,7 @@ fn pids_to_reap(candidates: &HashSet<u32>, is_live: impl Fn(u32) -> bool) -> Vec
 /// ambiguous permission error so a live editor is never falsely demoted to disk (the
 /// File-Cache-Conflict-avoidance bias, matching the plugin-owner lease predicate).
 #[cfg(unix)]
-fn process_is_live(pid: u32) -> bool {
+pub(crate) fn process_is_live(pid: u32) -> bool {
     // `kill(pid, 0)` (POSIX; Linux + macOS): 0 ⇒ exists; EPERM ⇒ exists (not permitted);
     // only ESRCH ⇒ no such process.
     let ret = unsafe { libc::kill(pid as libc::pid_t, 0) };
@@ -307,7 +307,7 @@ fn process_is_live(pid: u32) -> bool {
 /// Windows liveness via a process handle. A process handle is *signaled* once the process
 /// exits, so a zero-millisecond wait that returns `WAIT_OBJECT_0` means it has exited.
 #[cfg(windows)]
-fn process_is_live(pid: u32) -> bool {
+pub(crate) fn process_is_live(pid: u32) -> bool {
     use windows_sys::Win32::Foundation::{
         CloseHandle, ERROR_ACCESS_DENIED, GetLastError, WAIT_OBJECT_0,
     };
@@ -332,7 +332,7 @@ fn process_is_live(pid: u32) -> bool {
 /// the plugin-owner lease predicate's non-Unix fallback). Graceful `deregister` still
 /// drives detach cross-platform; only crash auto-detection is unavailable here.
 #[cfg(not(any(unix, windows)))]
-fn process_is_live(_pid: u32) -> bool {
+pub(crate) fn process_is_live(_pid: u32) -> bool {
     true
 }
 

@@ -247,11 +247,44 @@ impl MainLayoutEligibility {
     }
 }
 
+/// Identity of the process that published a snapshot, as the transport
+/// observed it (for example the OS pid of the connecting editor backend).
+///
+/// It is not part of the snapshot payload: the controller reads it from the
+/// connection, so a frontend cannot claim another instance's identity and an
+/// already-installed editor needs no new wire field (`#viewsnapshotgenreset`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub struct EditorViewFrontendInstance(pub u64);
+
+/// A revision regression the policy accepted because it came from a new
+/// frontend instance rather than from a reordered delivery of the old one.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EditorViewFrontendInstanceReset {
+    pub client_id: String,
+    pub previous_instance: EditorViewFrontendInstance,
+    pub instance: EditorViewFrontendInstance,
+    /// `(connection_generation, sequence)` high-water mark of the predecessor.
+    pub previous_revision: (u64, u64),
+    /// `(connection_generation, sequence)` of the snapshot that reset it.
+    pub revision: (u64, u64),
+}
+
+/// Result of [`EditorViewPolicy::observe_from_instance`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EditorViewObservation {
+    pub projection: EditorViewPolicyProjection,
+    /// Set when this snapshot retired a predecessor frontend instance.
+    pub instance_reset: Option<EditorViewFrontendInstanceReset>,
+}
+
 /// Sole pure owner of main precedence and detached terminal ownership.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct EditorViewPolicy {
     clients: BTreeMap<String, AcceptedClientSnapshot>,
     revisions: BTreeMap<String, (u64, u64)>,
+    /// Frontend instance that set each client's revision high-water mark, when
+    /// the transport could identify it.
+    instances: BTreeMap<String, EditorViewFrontendInstance>,
     bindings: BTreeMap<String, EditorViewPolicyBinding>,
     next_binding_epoch: u64,
 }
@@ -270,30 +303,103 @@ impl EditorViewPolicy {
         MainLayoutEligibility::new(self.bindings.keys().cloned())
     }
 
+    /// Observe a snapshot whose publishing process is unknown.
+    ///
+    /// The `(connection_generation, sequence)` fence is then absolute: any
+    /// revision at or below the client's high-water mark is stale.
     pub fn observe(&mut self, snapshot: EditorViewSnapshot) -> EditorViewPolicyProjection {
+        self.observe_from_instance(snapshot, None, |_| true)
+            .projection
+    }
+
+    /// Observe a snapshot published by `instance`.
+    ///
+    /// The revision fence orders snapshots *within one frontend instance*. An
+    /// editor backend restarts its connection generation and sequence with its
+    /// process (`#viewsnapshotgenreset`: a restarted JetBrains IDE sent
+    /// generation 1 again and every snapshot was stale until its sequence passed
+    /// the previous IDE's high-water mark). A regressed revision names a
+    /// successor, not a reordered delivery, only when both the high-water
+    /// mark's instance and `instance` are known, they differ, and
+    /// `predecessor_live` reports the predecessor gone. The predecessor is then
+    /// retired (its bindings release as [`EditorViewReleaseReason::ClientRetired`])
+    /// and the snapshot is observed against a fresh fence. Otherwise a
+    /// regression stays stale: with an identity unknown, from the same instance,
+    /// or from a second live process sharing the client id (two IDEs whose
+    /// backends both authenticate as the same client), the fence keeps
+    /// deciding, so two live publishers cannot reset each other back and forth.
+    pub fn observe_from_instance(
+        &mut self,
+        snapshot: EditorViewSnapshot,
+        instance: Option<EditorViewFrontendInstance>,
+        predecessor_live: impl FnOnce(EditorViewFrontendInstance) -> bool,
+    ) -> EditorViewObservation {
         let incoming = (snapshot.connection_generation, snapshot.sequence);
-        if self
-            .revisions
-            .get(&snapshot.client_id)
-            .is_some_and(|current| incoming <= *current)
+        let mut retirement_transitions = Vec::new();
+        let mut instance_reset = None;
+        if let Some(current) = self.revisions.get(&snapshot.client_id).copied()
+            && incoming <= current
         {
-            return self.project(EditorViewPolicyStatus::Stale, Vec::new());
+            let previous_instance = self.instances.get(&snapshot.client_id).copied();
+            let (Some(previous_instance), Some(instance)) = (previous_instance, instance) else {
+                return self.stale_observation();
+            };
+            if previous_instance == instance || predecessor_live(previous_instance) {
+                return self.stale_observation();
+            }
+            self.revisions.remove(&snapshot.client_id);
+            self.instances.remove(&snapshot.client_id);
+            if self.clients.remove(&snapshot.client_id).is_some() {
+                retirement_transitions = self
+                    .recompute(Some(EditorViewReleaseReason::ClientRetired))
+                    .transitions;
+            }
+            instance_reset = Some(EditorViewFrontendInstanceReset {
+                client_id: snapshot.client_id.clone(),
+                previous_instance,
+                instance,
+                previous_revision: current,
+                revision: incoming,
+            });
         }
         self.revisions.insert(snapshot.client_id.clone(), incoming);
-
-        let freeze = validate_snapshot(&snapshot);
-        if let Some(reason) = freeze {
-            return self.project(EditorViewPolicyStatus::Frozen { reason }, Vec::new());
+        match instance {
+            Some(instance) => {
+                self.instances.insert(snapshot.client_id.clone(), instance);
+            }
+            None => {
+                self.instances.remove(&snapshot.client_id);
+            }
         }
 
-        self.clients.insert(
-            snapshot.client_id,
-            AcceptedClientSnapshot {
-                connection_generation: snapshot.connection_generation,
-                surfaces: snapshot.surfaces,
-            },
-        );
-        self.recompute(None)
+        let mut projection = match validate_snapshot(&snapshot) {
+            Some(reason) => self.project(EditorViewPolicyStatus::Frozen { reason }, Vec::new()),
+            None => {
+                self.clients.insert(
+                    snapshot.client_id,
+                    AcceptedClientSnapshot {
+                        connection_generation: snapshot.connection_generation,
+                        surfaces: snapshot.surfaces,
+                    },
+                );
+                self.recompute(None)
+            }
+        };
+        if !retirement_transitions.is_empty() {
+            retirement_transitions.append(&mut projection.transitions);
+            projection.transitions = retirement_transitions;
+        }
+        EditorViewObservation {
+            projection,
+            instance_reset,
+        }
+    }
+
+    fn stale_observation(&self) -> EditorViewObservation {
+        EditorViewObservation {
+            projection: self.project(EditorViewPolicyStatus::Stale, Vec::new()),
+            instance_reset: None,
+        }
     }
 
     pub fn retire_client(
@@ -905,6 +1011,195 @@ mod tests {
             }
         );
         assert!(frozen.main_visible.contains("/p/main.md"));
+    }
+
+    fn main_only(client: &str, generation: u64, sequence: u64, doc: &str) -> EditorViewSnapshot {
+        snapshot(
+            client,
+            generation,
+            sequence,
+            vec![surface("root", EditorSurfaceRole::Main, doc, &[doc])],
+        )
+    }
+
+    const OLD_IDE: EditorViewFrontendInstance = EditorViewFrontendInstance(4101);
+    const NEW_IDE: EditorViewFrontendInstance = EditorViewFrontendInstance(5202);
+
+    fn dead(_: EditorViewFrontendInstance) -> bool {
+        false
+    }
+
+    fn live(_: EditorViewFrontendInstance) -> bool {
+        true
+    }
+
+    /// `#viewsnapshotgenreset`: a restarted editor backend restarts its
+    /// connection generation and sequence at 1. A regressed revision from a
+    /// different process is a successor, applied at once, not a stale replay
+    /// that waits for the sequence to pass the predecessor's high-water mark.
+    #[test]
+    fn regressed_revision_from_a_new_frontend_instance_resets_the_fence() {
+        let mut policy = EditorViewPolicy::default();
+        let accepted = policy.observe_from_instance(
+            main_only("rd:Host", 1, 1231, "/p/old.md"),
+            Some(OLD_IDE),
+            dead,
+        );
+        assert_eq!(accepted.projection.status, EditorViewPolicyStatus::Applied);
+        assert_eq!(accepted.instance_reset, None);
+
+        let restarted = policy.observe_from_instance(
+            main_only("rd:Host", 1, 27, "/p/new.md"),
+            Some(NEW_IDE),
+            dead,
+        );
+        assert_eq!(restarted.projection.status, EditorViewPolicyStatus::Applied);
+        assert_eq!(
+            restarted.instance_reset,
+            Some(EditorViewFrontendInstanceReset {
+                client_id: "rd:Host".to_string(),
+                previous_instance: OLD_IDE,
+                instance: NEW_IDE,
+                previous_revision: (1, 1231),
+                revision: (1, 27),
+            })
+        );
+        assert!(restarted.projection.main_visible.contains("/p/new.md"));
+        assert!(!restarted.projection.main_visible.contains("/p/old.md"));
+
+        // The fence now orders the successor's own deliveries.
+        let next = policy.observe_from_instance(
+            main_only("rd:Host", 1, 28, "/p/next.md"),
+            Some(NEW_IDE),
+            dead,
+        );
+        assert_eq!(next.projection.status, EditorViewPolicyStatus::Applied);
+        assert_eq!(next.instance_reset, None);
+        let replay = policy.observe_from_instance(
+            main_only("rd:Host", 1, 27, "/p/new.md"),
+            Some(NEW_IDE),
+            dead,
+        );
+        assert_eq!(replay.projection.status, EditorViewPolicyStatus::Stale);
+        assert!(replay.projection.main_visible.contains("/p/next.md"));
+        let same = policy.observe_from_instance(
+            main_only("rd:Host", 1, 5, "/p/x.md"),
+            Some(NEW_IDE),
+            dead,
+        );
+        assert_eq!(same.projection.status, EditorViewPolicyStatus::Stale);
+    }
+
+    /// Without a transport identity on either side the fence stays absolute, so
+    /// a reordered delivery can never roll the policy back.
+    #[test]
+    fn regressed_revision_without_instance_identity_stays_stale() {
+        for (previous, incoming) in [
+            (None, None),
+            (Some(OLD_IDE), None),
+            (None, Some(NEW_IDE)),
+            (Some(OLD_IDE), Some(OLD_IDE)),
+        ] {
+            let mut policy = EditorViewPolicy::default();
+            policy.observe_from_instance(main_only("rd:Host", 1, 40, "/p/main.md"), previous, dead);
+            for regressed in [(1, 40), (1, 39), (1, 1)] {
+                let stale = policy.observe_from_instance(
+                    main_only("rd:Host", regressed.0, regressed.1, "/p/stale.md"),
+                    incoming,
+                    dead,
+                );
+                assert_eq!(
+                    stale.projection.status,
+                    EditorViewPolicyStatus::Stale,
+                    "{previous:?} -> {incoming:?} at {regressed:?}"
+                );
+                assert_eq!(stale.instance_reset, None);
+                assert!(stale.projection.main_visible.contains("/p/main.md"));
+            }
+        }
+    }
+
+    /// The successor retires its predecessor: the dead instance's detached
+    /// binding releases as `ClientRetired` even when the successor reuses the
+    /// same surface key (both processes start at generation 1, surface 1).
+    #[test]
+    fn instance_reset_retires_the_predecessor_bindings() {
+        let detached = |sequence: u64, focused: &str| {
+            snapshot(
+                "rd:Host",
+                1,
+                sequence,
+                vec![
+                    surface("root", EditorSurfaceRole::Main, "", &[]),
+                    surface("dock-1", EditorSurfaceRole::Detached, focused, &[focused]),
+                ],
+            )
+        };
+        let mut policy = EditorViewPolicy::default();
+        let bound = policy.observe_from_instance(detached(900, "/p/a.md"), Some(OLD_IDE), dead);
+        let binding = first_binding(&bound.projection);
+        assert_eq!(binding.phase, EditorViewBindingPhase::BindPending);
+
+        let restarted = policy.observe_from_instance(detached(3, "/p/a.md"), Some(NEW_IDE), dead);
+        assert_eq!(restarted.projection.status, EditorViewPolicyStatus::Applied);
+        assert!(restarted.instance_reset.is_some());
+        assert_eq!(
+            restarted.projection.transitions,
+            vec![EditorViewLifecycleTransition::ReleasePending {
+                binding: EditorViewPolicyBinding {
+                    phase: EditorViewBindingPhase::ReleasePending,
+                    ..binding
+                },
+                reason: EditorViewReleaseReason::ClientRetired,
+                destination: EditorViewReleaseDestination::MainStash,
+            }]
+        );
+    }
+
+    /// Two live processes sharing one client id (two IDEs whose backends both
+    /// authenticate as `Host`) must not reset each other back and forth: while
+    /// the fence's owner is alive, the fence still decides.
+    #[test]
+    fn regression_from_another_live_instance_stays_stale() {
+        let mut policy = EditorViewPolicy::default();
+        policy.observe_from_instance(
+            main_only("rd:Host", 1, 40, "/p/main.md"),
+            Some(OLD_IDE),
+            dead,
+        );
+        let mut asked = None;
+        let stale = policy.observe_from_instance(
+            main_only("rd:Host", 1, 3, "/p/other.md"),
+            Some(NEW_IDE),
+            |predecessor| {
+                asked = Some(predecessor);
+                live(predecessor)
+            },
+        );
+        assert_eq!(asked, Some(OLD_IDE));
+        assert_eq!(stale.projection.status, EditorViewPolicyStatus::Stale);
+        assert_eq!(stale.instance_reset, None);
+        assert!(stale.projection.main_visible.contains("/p/main.md"));
+    }
+
+    /// A newer revision from a new instance needs no reset; it is simply newer,
+    /// and the liveness probe is never consulted for an advancing revision.
+    #[test]
+    fn advancing_revision_from_a_new_instance_is_not_a_reset() {
+        let mut policy = EditorViewPolicy::default();
+        policy.observe_from_instance(main_only("rd:Host", 1, 10, "/p/a.md"), Some(OLD_IDE), dead);
+        let advanced = policy.observe_from_instance(
+            main_only("rd:Host", 2, 1, "/p/b.md"),
+            Some(NEW_IDE),
+            |_| unreachable!("an advancing revision needs no predecessor probe"),
+        );
+        assert_eq!(advanced.projection.status, EditorViewPolicyStatus::Applied);
+        assert_eq!(advanced.instance_reset, None);
+        // Clients are fenced independently.
+        let unrelated =
+            policy.observe_from_instance(main_only("other", 1, 1, "/p/c.md"), Some(OLD_IDE), dead);
+        assert_eq!(unrelated.projection.status, EditorViewPolicyStatus::Applied);
+        assert_eq!(unrelated.instance_reset, None);
     }
 
     #[test]

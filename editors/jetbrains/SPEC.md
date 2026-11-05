@@ -1503,6 +1503,14 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
   across bounded later-EDT reads. A surface is not published while any restored
   editor window still has no selected file; the completed file lifecycle edge
   republishes the settled surface without invoking tmux directly.
+- An agent-document `fileOpened` first runs that document's `agent-doc tmux start`
+  (the root `SPEC.md` open/reopen start ordering). Overlapping starts form one batch
+  (`#restartstartcoalesce`): at IDE restart every restored tab starts its document,
+  and the listener requests one `FileOpened` surface observation when the last
+  running start finishes, preferring the selected editor's file (falling back to the
+  batch's last ready document that is still open), instead of one observation per
+  start receipt. A batch in which no start became ready for a still-open document
+  publishes nothing, as a lone failed start never did; a lone open is a batch of one.
 - A Remote Dev selection can arrive before its visible-editor membership update.
   That selection and every later flat visible/selected/open observation update focus/liveness
   evidence only and preserve the last authoritative columns exactly; they never choose a

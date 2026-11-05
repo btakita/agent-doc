@@ -1469,13 +1469,87 @@ previousSelectionPath = "/repo/tasks/tsift.md",
         assertTrue(surfacePublish > startCall)
         assertTrue(startBeforeObservation.contains("onReady ="))
         assertTrue(startBeforeObservation.contains("isFileOpen(file)"))
-        assertTrue(startBeforeObservation.contains("preferredFile = file"))
         assertTrue(startBeforeObservation.contains("authority = ObservationAuthority.FileOpened"))
         assertFalse(
             startBeforeObservation
                 .substringBefore("onReady =")
                 .contains("requestObservation("),
         )
+    }
+
+    @Test
+    fun `restored-tab starts request one surface observation when the last start finishes`() {
+        val source =
+            Files.readString(
+                Paths.get("src/main/kotlin/com/github/btakita/agentdoc/EditorTabSyncListener.kt")
+                    .takeIf { Files.exists(it) }
+                    ?: Paths.get(
+                        "editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/EditorTabSyncListener.kt",
+                    ),
+            )
+        val start =
+            source
+                .substringAfter("private fun startOpenedSessionBeforeObservation(")
+                .substringBefore("private fun finishOpenedSessionStartLater(")
+        // Every start joins the batch before its pooled work, and every exit path finishes it.
+        assertTrue(start.contains("openedSessionStarts.begin()"))
+        assertTrue(start.indexOf("openedSessionStarts.begin()") < start.indexOf("executeOnPooledThread"))
+        assertFalse(start.contains("requestObservation("))
+        assertEquals(2, Regex("""finishOpenedSessionStartLater\(project\)""").findAll(start).count())
+        assertTrue(start.contains("finishOpenedSessionStart(project, file.takeIf { stillOpen })"))
+        assertTrue(start.contains("finishOpenedSessionStart(project, null)"))
+
+        val finish =
+            source
+                .substringAfter("private fun finishOpenedSessionStart(")
+                .substringBefore("override fun fileClosed")
+        val settled = finish.indexOf("openedSessionStarts.finish(readyFile) ?: return")
+        assertTrue(settled >= 0)
+        assertTrue(finish.indexOf("requestObservation(") > settled)
+        assertTrue(finish.contains("manager.selectedEditor?.file"))
+        assertTrue(finish.contains("preferredFile = preferredFile"))
+        assertTrue(finish.contains("authority = ObservationAuthority.FileOpened"))
+    }
+
+    @Test
+    fun `opened-session start batch publishes once after the last of overlapping starts`() {
+        val batch = EditorTabSyncListener.OpenedSessionStartBatch<String>()
+        repeat(3) { batch.begin() }
+
+        assertNull(batch.finish("/repo/a.md"))
+        assertNull(batch.finish(null))
+        assertEquals(1, batch.running())
+        assertEquals("/repo/a.md", batch.finish(null))
+        assertEquals(0, batch.running())
+
+        // The batch is spent: a stray finish never publishes, and the next start is a new batch.
+        assertNull(batch.finish("/repo/stray.md"))
+        batch.begin()
+        assertEquals("/repo/b.md", batch.finish("/repo/b.md"))
+    }
+
+    @Test
+    fun `opened-session start batch publishes nothing when every start failed or closed`() {
+        val batch = EditorTabSyncListener.OpenedSessionStartBatch<String>()
+        batch.begin()
+        batch.begin()
+        assertNull(batch.finish(null))
+        assertNull(batch.finish(null))
+
+        // A failed batch leaves no ready document behind for the next one.
+        batch.begin()
+        assertNull(batch.finish(null))
+    }
+
+    @Test
+    fun `opened-session start batch extends while a start joins before the last finishes`() {
+        val batch = EditorTabSyncListener.OpenedSessionStartBatch<String>()
+        batch.begin()
+        batch.begin()
+        assertNull(batch.finish("/repo/a.md"))
+        batch.begin()
+        assertNull(batch.finish(null))
+        assertEquals("/repo/c.md", batch.finish("/repo/c.md"))
     }
 
     @Test

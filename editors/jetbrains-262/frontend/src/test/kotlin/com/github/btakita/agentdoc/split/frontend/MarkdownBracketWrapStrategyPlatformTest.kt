@@ -84,18 +84,24 @@ class MarkdownBracketWrapStrategyPlatformTest : BasePlatformTestCase() {
     }
 
     fun testRealLinksAndPlainLinesKeepTheBundledAnswer() {
+        val titled = "- see [the coder workspace runbook](runbooks/coder-workspace.md \"with a title\") for (the details) now"
+        val inline = "- [#id] then [a real link](http://example.com/a/long/path) for (the details) and more words here"
+        val reference = "- see [a full reference][coder] for (the details) and more words here to wrap"
+        // Each line with the last margin at which the two strategies must agree. A titled
+        // destination may hide a `)`, so it keeps the bundled answer everywhere; a link without a
+        // title holds the wrap only until it closes (`#activesummaryurl`).
         val lines = listOf(
-            "- see [the coder workspace runbook](runbooks/coder-workspace.md \"with a title\") for (the details) now",
-            "- [#id] then [a real link](http://example.com/a/long/path) for (the details) and more words here",
-            "- see [a full reference][coder] for (the details) and more words here to wrap",
-            "- no brackets on this line, only (a parenthetical remark) and more words here",
-            "## [#id] a heading never wraps in the bundled strategy (even with a paren) here",
-            "- a bare autolink https://example.com/a/very/long/path/that/keeps/going and (more)",
+            titled to titled.length,
+            inline to inline.indexOf(')'),
+            reference to reference.indexOf("[coder]") + "[coder]".length - 1,
+            "- no brackets on this line, only (a parenthetical remark) and more words here".let { it to it.length },
+            "## [#id] a heading never wraps in the bundled strategy (even with a paren) here".let { it to it.length },
+            "- a bare autolink https://example.com/a/very/long/path/that/keeps/going and (more)".let { it to it.length },
         )
-        for (line in lines) {
+        for ((line, lastMargin) in lines) {
             val editor = open(line)
             for (start in listOf(0, line.indexOf(' ', line.length / 2) + 1)) {
-                for (margin in margins(editor, start + 2)) {
+                for (margin in margins(editor, start + 2).filter { it <= lastMargin }) {
                     assertEquals(
                         "line `$line` from $start at margin $margin",
                         bundled.wrap(editor, start, margin),
@@ -103,6 +109,40 @@ class MarkdownBracketWrapStrategyPlatformTest : BasePlatformTestCase() {
                     )
                 }
             }
+        }
+    }
+
+    /**
+     * `#activesummaryurl`: a real link that closed earlier on the line does not own a later bare
+     * URL. The bundled guard moves the wrap in front of that link (stranding the list marker), and
+     * on a continuation visual line it refuses to wrap, so the URL is split mid-word.
+     */
+    fun testAClosedLinkBeforeABareUrlDoesNotPullTheWrapBack() {
+        val line = "- See [the notes](#notes) before you start working on the item, then " +
+            "https://example.com/group/project/-/issues/42/a/very/long/path"
+        val editor = open(line)
+        val bracket = line.indexOf('[')
+        val linkEnd = line.indexOf(')')
+        val url = line.indexOf("https://")
+        val margins = margins(editor, url + 1)
+        if (bundledHasTheBug) {
+            assertFalse(
+                "the bundled strategy no longer moves the wrap to the closed link; #activesummaryurl's rule may retire",
+                margins.none { bundled.wrap(editor, 0, it) in 0..bracket },
+            )
+        }
+        for (margin in margins) {
+            val wrap = ours.wrap(editor, 0, margin)
+            assertEquals("margin $margin wrapped at $wrap, not in front of the bare URL", url, wrap)
+        }
+        val start = line.indexOf("before")
+        assertTrue(start > linkEnd)
+        if (bundledHasTheBug) {
+            assertTrue(margins.any { bundled.wrap(editor, start, it) == MarkdownBracketWrapPolicy.NEVER_WRAP })
+        }
+        for (margin in margins) {
+            val wrap = ours.wrap(editor, start, margin)
+            assertEquals("margin $margin from $start wrapped at $wrap", url, wrap)
         }
     }
 }

@@ -232,6 +232,19 @@ fn unguarded_registration_action(
         } else {
             HoldOperatorBuffer
         }
+    } else if unproven_canonical_over_shadowless_buffer(e) {
+        // `#restartadoptscanonical`: a plain IDE restart discards the JVM-local
+        // settled shadow while the controller hub survives with its own text.
+        // Adopting that canonical was the "historical fail-closed" fallback, but
+        // with no shadow nothing says which side is newer: the buffer may hold
+        // operator text saved to disk (or typed) that the controller never
+        // accepted. Editor-visible text is authoritative; a canonical replaces
+        // it only with proof that it already holds every operator edit.
+        if e.canonical_contains_operator_edits == Some(true) {
+            ApplyCanonical
+        } else {
+            HoldOperatorBuffer
+        }
     } else if e.canonical_projection_retained {
         causal_action(e, e.canonical_covers_retained_frontier)
     } else if e.has_published_shadow
@@ -249,6 +262,20 @@ fn unguarded_registration_action(
     }
 }
 
+/// `#restartadoptscanonical`: the registering editor has no settled shadow (a
+/// restarted IDE, or a document this editor never settled), and its readable,
+/// non-empty buffer differs from a known canonical. Nothing orders the two
+/// generations, so the canonical is unproven. An unreadable buffer, an unknown
+/// canonical, and an empty buffer (which holds no text to lose) keep the
+/// historical adoption.
+fn unproven_canonical_over_shadowless_buffer(e: &RegistrationProjectionEvidence) -> bool {
+    !e.has_published_shadow
+        && e.has_buffer
+        && e.has_canonical
+        && !e.buffer_equals_canonical
+        && e.buffer_empty != Some(true)
+}
+
 /// The causal three-generation decision: a live buffer is published only when
 /// canonical is exactly the shadow it was derived from; three distinct
 /// generations hold unless a proof or a clean merge gives an exit.
@@ -262,8 +289,10 @@ fn causal_action(
         // terminal edge for a prior ambiguity hold.
         ApplyCanonical
     } else if !e.has_published_shadow || !e.has_buffer {
-        // A restarted IDE has no shadow, and an unreadable buffer is not
-        // divergence: the historical fail-closed adoption stands.
+        // An unreadable buffer is not divergence. A shadowless buffer reaches
+        // here only when adoption loses nothing (`#restartadoptscanonical`:
+        // unknown canonical or empty buffer); every other shadowless buffer was
+        // held or proven above.
         ApplyCanonical
     } else if e.buffer_equals_shadow && canonical_covers_retained_frontier == Some(true) {
         // The buffer has not advanced past the last accepted projection and
@@ -446,18 +475,26 @@ mod tests {
             answer.hold_reason.as_deref(),
             Some(HOLD_AMBIGUOUS_REREGISTER_PROJECTION)
         );
-        // Without the hold fact the historical restarted-IDE adoption stands.
+        // `#restartadoptscanonical`: without the hold fact (a restarted IDE
+        // forgot it) the shadowless buffer still holds; there is no adoption
+        // fallback left to fall back to.
         let fresh = RegistrationProjectionEvidence {
             attach_held_for_operator: None,
             ..evidence.clone()
         };
-        assert_eq!(derive_registration_projection(&fresh).action, ApplyCanonical);
+        assert_eq!(
+            derive_registration_projection(&fresh).action,
+            HoldOperatorBuffer
+        );
         // A proof that canonical contains the operator edits still adopts.
         let proven = RegistrationProjectionEvidence {
             canonical_contains_operator_edits: Some(true),
             ..evidence.clone()
         };
-        assert_eq!(derive_registration_projection(&proven).action, ApplyCanonical);
+        assert_eq!(
+            derive_registration_projection(&proven).action,
+            ApplyCanonical
+        );
         // Convergence ends the hold.
         let converged = RegistrationProjectionEvidence {
             attach_held_for_operator: Some(true),
@@ -466,6 +503,108 @@ mod tests {
         assert_eq!(
             derive_registration_projection(&converged).action,
             ApplyCanonical
+        );
+    }
+
+    /// `#restartadoptscanonical`: a plain IDE restart while the controller hub
+    /// survives. The JVM-local settled shadow is gone and the surviving
+    /// canonical differs from the buffer (saved or unsaved, retained
+    /// projection or not, whatever the frontier, merge, disk, or forgotten-hold
+    /// facts say). Without a containment proof the buffer is held, never
+    /// overwritten.
+    #[test]
+    fn a_restarted_editor_never_adopts_a_differing_canonical_without_proof() {
+        for retained in [false, true] {
+            for covers in [None, Some(false), Some(true)] {
+                for merge in [None, Some(false), Some(true)] {
+                    for disk in [None, Some(false), Some(true)] {
+                        for held in [None, Some(true)] {
+                            for contains in [None, Some(false), Some(true)] {
+                                let evidence = RegistrationProjectionEvidence {
+                                    canonical_projection_retained: retained,
+                                    canonical_covers_retained_frontier: covers,
+                                    clean_merge_available: merge,
+                                    buffer_equals_disk: disk,
+                                    attach_held_for_operator: held,
+                                    canonical_contains_operator_edits: contains,
+                                    ..facts(
+                                        None,
+                                        Some("# doc\n\nsaved operator text\n"),
+                                        Some("# doc\n\nsurviving controller text\n"),
+                                    )
+                                };
+                                let answer = derive_registration_projection(&evidence);
+                                if contains == Some(true) {
+                                    // The proof the canonical is newer.
+                                    assert_eq!(answer.action, ApplyCanonical, "{evidence:?}");
+                                    continue;
+                                }
+                                assert_eq!(answer.action, HoldOperatorBuffer, "{evidence:?}");
+                                assert_eq!(
+                                    answer.hold_reason.as_deref(),
+                                    Some(if retained {
+                                        HOLD_AMBIGUOUS_RETAINED_PROJECTION
+                                    } else {
+                                        HOLD_AMBIGUOUS_REREGISTER_PROJECTION
+                                    }),
+                                    "{evidence:?}"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // An older plugin that reports no emptiness facts holds the same way.
+        let unreported = RegistrationProjectionEvidence {
+            canonical_empty: None,
+            buffer_empty: None,
+            ..facts(None, Some("buffer"), Some("canonical"))
+        };
+        assert_eq!(
+            derive_registration_projection(&unreported).action,
+            HoldOperatorBuffer
+        );
+    }
+
+    /// `#restartadoptscanonical`: a shadowless registration still adopts
+    /// whenever adoption loses nothing.
+    #[test]
+    fn a_restarted_editor_adopts_canonical_only_when_nothing_is_lost() {
+        for retained in [false, true] {
+            let with = |e: RegistrationProjectionEvidence| RegistrationProjectionEvidence {
+                canonical_projection_retained: retained,
+                ..e
+            };
+            for (name, evidence) in [
+                ("converged", with(facts(None, Some("same"), Some("same")))),
+                (
+                    "empty buffer",
+                    with(facts(None, Some(""), Some("canonical"))),
+                ),
+                (
+                    "unreadable buffer",
+                    with(facts(None, None, Some("canonical"))),
+                ),
+                ("unknown canonical", with(facts(None, Some("buffer"), None))),
+            ] {
+                assert_eq!(
+                    derive_registration_projection(&evidence).action,
+                    ApplyCanonical,
+                    "{name} retained={retained}"
+                );
+            }
+        }
+        // A restored settled shadow (the persisted one) re-enters the causal
+        // decision: a buffer still at its shadow adopts the newer canonical,
+        // and a controller still at the shadow takes the operator's buffer.
+        assert_eq!(
+            derive_registration_projection(&facts(Some("s"), Some("s"), Some("c"))).action,
+            ApplyCanonical
+        );
+        assert_eq!(
+            derive_registration_projection(&facts(Some("s"), Some("b"), Some("s"))).action,
+            PublishOperatorBuffer
         );
     }
 

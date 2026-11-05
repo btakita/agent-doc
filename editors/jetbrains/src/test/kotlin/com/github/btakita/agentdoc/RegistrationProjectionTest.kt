@@ -198,7 +198,10 @@ class RegistrationProjectionTest {
     fun `GH 326 frozen registration floor answers the exhaustive parity table`() {
         val table = fixture().getAsJsonObject("exhaustive")
         val dimensions = table.getAsJsonArray("dimensions").map { it.asJsonObject }
-        val answers = table.get("answers").asString
+        // `#restartadoptscanonical`: where the native rules diverged on purpose, the frozen floor's
+        // own answers sit beside them in `frozen_answers` (same order, same codes).
+        val answers = (table.get("frozen_answers") ?: table.get("answers")).asString
+        assertEquals("one frozen answer per native answer", table.get("answers").asString.length, answers.length)
         val codes = table.getAsJsonObject("codes")
         val combinations = dimensions.fold(1) { product, dimension -> product * dimension.getAsJsonArray("values").size() }
         assertEquals("one answer per combination", combinations, answers.length)
@@ -306,5 +309,99 @@ class RegistrationProjectionTest {
         )
         assertFalse(registration.contains("publishedShadowAtRegistration!!"))
         assertFalse(registration.contains("bufferTextAtRegistration!!"))
+    }
+
+    private fun restartedOver(
+        buffer: String,
+        canonical: String?,
+        retained: Boolean,
+        contains: Boolean? = null,
+        defer: Boolean = false,
+    ) = RegistrationProjection.Observation(
+        deferCanonicalProjectionForPendingLocal = defer,
+        canonicalProjectionRetained = retained,
+        retainedReplicaReseedPending = false,
+        canonicalCoversRetainedFrontier = null,
+        publishedShadow = null,
+        bufferText = buffer,
+        canonicalText = canonical,
+        canonicalContainsOperatorEdits = contains,
+        cleanMergeAvailable = null,
+        diskText = buffer,
+    )
+
+    @Test
+    fun `a restarted editor never adopts a differing canonical whichever rules answer`() {
+        // #restartadoptscanonical: a plain IDE restart while the controller hub survives. The
+        // frozen floor and an older native generation still answer the restarted-IDE adoption; the
+        // execution guard holds the saved operator buffer instead, with the same reason the native
+        // rules give.
+        val saved = "# doc\n\noperator text saved before the restart\n"
+        val hub = "# doc\n\nsurviving controller text\n"
+        for (retained in listOf(false, true)) {
+            val observation = restartedOver(saved, hub, retained)
+            assertTrue(unprovenCanonicalOverShadowlessBufferUtil(observation))
+            val reason = if (retained) "ambiguous-retained-projection" else RegistrationProjection.AMBIGUOUS_REREGISTER_PROJECTION
+            assertEquals(
+                "the frozen floor alone still adopts (retained=$retained)",
+                RetainedRegistrationProjectionAction.ApplyCanonical,
+                RegistrationProjection.frozen(observation).action,
+            )
+            val floor = RegistrationProjection.decide(observation, EditorDerivation.Unavailable)
+            assertEquals(RegistrationProjection.Decision(RetainedRegistrationProjectionAction.HoldOperatorBuffer, reason), floor)
+            val older = RegistrationProjection.decide(observation) { _, _ -> """{"action":"apply_canonical","hold_reason":null}""" }
+            assertEquals(RegistrationProjection.Decision(RetainedRegistrationProjectionAction.HoldOperatorBuffer, reason), older)
+            val native =
+                RegistrationProjection.decide(observation) { _, _ -> """{"action":"hold_operator_buffer","hold_reason":"$reason"}""" }
+            assertEquals(RegistrationProjection.Decision(RetainedRegistrationProjectionAction.HoldOperatorBuffer, reason), native)
+        }
+        val adopt = """{"action":"apply_canonical","hold_reason":null}"""
+        val apply = RetainedRegistrationProjectionAction.ApplyCanonical
+        // Proof that canonical holds every operator edit still adopts.
+        val proven = restartedOver(saved, saved + "agent response\n", retained = false, contains = true)
+        assertEquals(apply, RegistrationProjection.decide(proven) { _, _ -> adopt }.action)
+        // Adoption that loses nothing still adopts: convergence, an empty buffer, an unknown canonical.
+        assertEquals(apply, RegistrationProjection.decide(restartedOver(hub, hub, retained = true)) { _, _ -> adopt }.action)
+        assertEquals(apply, RegistrationProjection.decide(restartedOver("", hub, retained = true)) { _, _ -> adopt }.action)
+        assertEquals(apply, RegistrationProjection.decide(restartedOver(saved, null, retained = false)) { _, _ -> adopt }.action)
+        // A restored settled shadow is an ordinary causal decision again.
+        val restored = restartedOver(saved, saved + "agent response\n", retained = false).copy(publishedShadow = saved)
+        assertFalse(unprovenCanonicalOverShadowlessBufferUtil(restored))
+        assertEquals(apply, RegistrationProjection.decide(restored) { _, _ -> adopt }.action)
+        // A captured local delta that owns the buffer defers; the guard never rewrites that.
+        assertFalse(unprovenCanonicalOverShadowlessBufferUtil(restartedOver(saved, hub, retained = false, defer = true)))
+    }
+
+    @Test
+    fun `registration restores the persisted settled shadow and every settle persists it`() {
+        // #restartadoptscanonical: the settled shadow survives an IDE restart.
+        val source =
+            Files.readString(Paths.get("src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"))
+        val registration =
+            source.substringAfter("    private fun forwarderFor(")
+                .substringBefore("    /** Complete the causal projection decision")
+        assertTrue(
+            "registration falls back to the durable shadow after memory",
+            registration.contains(
+                "settledShadows[filePath] ?: nativeReloadSettledShadows[filePath] ?: restorePersistedSettledShadow(filePath)",
+            ),
+        )
+        assertTrue(
+            "the restored shadow is captured before the decision",
+            registration.indexOf("restorePersistedSettledShadow(filePath)") < registration.indexOf("RegistrationProjection.decide("),
+        )
+        val settle =
+            source.substringAfter("    private fun projectSettledVisibleState(")
+                .substringBefore("    private fun restorePersistedSettledShadow(")
+        assertTrue(settle.contains("settledShadowStore.save(filePath, visibleText)"))
+        assertTrue(
+            "only an accepted projection is persisted",
+            settle.indexOf("if (projected) {") < settle.indexOf("settledShadowStore.save("),
+        )
+        val restore = source.substringAfter("    private fun restorePersistedSettledShadow(").substringBefore("\n    }\n")
+        assertTrue(
+            "the restored shadow joins the in-memory map the publication-edge rechecks read",
+            restore.contains("settledShadows.putIfAbsent(filePath, restored)"),
+        )
     }
 }

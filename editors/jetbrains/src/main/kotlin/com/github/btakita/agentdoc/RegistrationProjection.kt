@@ -127,7 +127,28 @@ internal object RegistrationProjection {
                 derivation.derive("registration_projection", GSON.toJson(evidence(observation)))
                     ?.let { parseNative(it, observation) }
             }
-        return guardEmptyCanonical(native ?: frozen(observation), observation)
+        return guardUnprovenCanonical(guardEmptyCanonical(native ?: frozen(observation), observation), observation)
+    }
+
+    /**
+     * `#restartadoptscanonical`: whichever rules answered (a native generation older than this
+     * plugin, or the frozen floor, both of which still take the restarted-IDE adoption fallback),
+     * a registration with no settled shadow never adopts a canonical that differs from a non-empty
+     * buffer unless canonical is proven to contain the operator edits. Nothing orders the two
+     * generations, so the buffer is held exactly as the operator left it.
+     */
+    internal fun guardUnprovenCanonical(decision: Decision, observation: Observation): Decision {
+        if (
+            decision.action != RetainedRegistrationProjectionAction.ApplyCanonical ||
+            !unprovenCanonicalOverShadowlessBufferUtil(observation)
+        ) {
+            return decision
+        }
+        LOG.warn(
+            "[crdt-replica] registration answered apply_canonical over a differing buffer with no settled " +
+                "shadow and no containment proof; holding the operator buffer instead (#restartadoptscanonical)",
+        )
+        return Decision(RetainedRegistrationProjectionAction.HoldOperatorBuffer, frozenHoldReason(observation))
     }
 
     /**
@@ -234,3 +255,22 @@ internal object RegistrationProjection {
  */
 internal fun emptyCanonicalWouldClobberBufferUtil(canonical: String?, buffer: String?): Boolean =
     canonical != null && canonical.isEmpty() && !buffer.isNullOrEmpty()
+
+/**
+ * `#restartadoptscanonical`: [observation] registers with no settled shadow (a restarted IDE, or a
+ * document this editor never settled) and its readable, non-empty buffer differs from a known
+ * canonical that is not proven to contain the operator edits. Adopting that canonical could replace
+ * operator text the controller never accepted. A captured local delta that owns the buffer defers
+ * instead of adopting, so it is never this case. Mirrors the native
+ * `unproven_canonical_over_shadowless_buffer`.
+ */
+internal fun unprovenCanonicalOverShadowlessBufferUtil(observation: RegistrationProjection.Observation): Boolean {
+    val buffer = observation.bufferText
+    val canonical = observation.canonicalText
+    return observation.publishedShadow == null &&
+        !observation.deferCanonicalProjectionForPendingLocal &&
+        !buffer.isNullOrEmpty() &&
+        canonical != null &&
+        buffer != canonical &&
+        observation.canonicalContainsOperatorEdits != true
+}

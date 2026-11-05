@@ -1702,6 +1702,27 @@ ancestor. The hold notification names the exact `EditorAttachAwaitsOperator`
 action for the document (`operator_action=close_tab_repair_detached_reopen`)
 and carries a `Copy details` action, since balloon text cannot be selected.
 
+A plain IDE restart never adopts a surviving canonical over the buffer without
+proof (`#restartadoptscanonical`). The settled shadow lived only in JVM memory,
+so a restart while the controller hub survived registered with no settled
+ancestor, and the rules took the restarted-IDE adoption fallback: the surviving
+canonical was projected over a buffer that could hold operator text saved to
+disk but never accepted by the controller. The `registration_projection`
+derivation now holds (`ambiguous-retained-projection` for a retained
+projection, else `ambiguous-reregister-projection`) whenever a registration has
+no settled shadow and its readable, non-empty buffer differs from a known
+canonical, saved or unsaved, unless canonical is proven to contain the operator
+edits. An unreadable buffer, an unknown canonical, and an empty buffer still
+adopt, since nothing is lost. The JetBrains plugin persists every settled shadow
+(`SettledShadowStore`, one atomic, self-verifying record per document under the
+IDE system directory) and restores it at registration, so a restart is an
+ordinary causal decision again: a canonical that advanced past an unchanged
+buffer is adopted, a buffer over a hub that never moved is published, and a
+three-generation divergence proves, merges, or holds. A restored shadow
+reproduces any earlier hold from the same texts, so the hold itself need not be
+persisted. The plugin also refuses the unproven adoption whichever rules
+answer (an older native generation or the frozen floor).
+
 Exhaustion is resolved in place, not by a recycle (`#jetbrainsreplicaloops`).
 Measured on sdk.md 2026-10-16T05:57Z-06:05Z: the JetBrains replica looped every
 30 s on a stale-baseline local delta (`local delta found a stale native baseline

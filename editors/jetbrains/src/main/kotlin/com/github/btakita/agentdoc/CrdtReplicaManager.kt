@@ -1291,6 +1291,11 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
     // durable lineage is stale; treating that local baseline as settled lets a
     // replacement controller project an older snapshot over operator text.
     private val settledShadows = ConcurrentHashMap<String, String>()
+    // `#restartadoptscanonical`: the durable copy of [settledShadows]. An IDE restart used to
+    // discard the settled ancestor while the controller hub survived, so registration adopted the
+    // surviving canonical over operator text. Written whenever the settled shadow advances, read
+    // once at registration when memory holds none.
+    private val settledShadowStore: SettledShadowStore = SettledShadowStore.Default
     private val applyingRemote = ConcurrentHashMap.newKeySet<String>()
     // #opcapturedormant: `beforeFileContentReload` and `fileContentReloaded` are two
     // separate callbacks with no `finally` between them, so a reload that is vetoed,
@@ -4156,7 +4161,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             return null
         }
         val publishedShadowAtRegistration =
-            settledShadows[filePath] ?: nativeReloadSettledShadows[filePath]
+            settledShadows[filePath] ?: nativeReloadSettledShadows[filePath] ?: restorePersistedSettledShadow(filePath)
         val bufferTextAtRegistration = editorBufferText(filePath) ?: initialEditorText
         val canonicalTextAtRegistration = forwarder.replicaText()
         val acknowledgedBaseAtRegistration =
@@ -4701,8 +4706,27 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         if (projected) {
             settledShadows[filePath] = visibleText
             nativeReloadSettledShadows.remove(filePath)
+            // `#restartadoptscanonical`: the same proof, durable across an IDE restart.
+            settledShadowStore.save(filePath, visibleText)
         }
         return projected
+    }
+
+    /**
+     * `#restartadoptscanonical`: the settled shadow a previous run of this IDE proved, restored
+     * into [settledShadows] so the publication-edge rechecks compare against the same ancestor the
+     * registration decided from. Null when no valid record exists: registration then has no
+     * settled ancestor, and the rules hold a differing buffer instead of adopting canonical.
+     * Registration workers only (it reads a file).
+     */
+    private fun restorePersistedSettledShadow(filePath: String): String? {
+        val restored = settledShadowStore.load(filePath) ?: return null
+        val winner = settledShadows.putIfAbsent(filePath, restored) ?: restored
+        log.info(
+            "[crdt-replica] restored the persisted settled shadow for ${File(filePath).name}; " +
+                "settled_hash=${contentHash(winner)} (#restartadoptscanonical)",
+        )
+        return winner
     }
 
     private fun refreshReplicaAfterTransportLoss(

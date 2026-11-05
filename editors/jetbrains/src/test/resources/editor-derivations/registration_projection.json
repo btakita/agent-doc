@@ -1,6 +1,6 @@
 {
   "derivation": "registration_projection",
-  "about": "GH #326 phase 5 parity cases. The Rust `registration_projection` derivation (agent-doc-editor-surface-io) and the plugin's frozen Kotlin floor (RegistrationProjectionTest) both answer every case. `texts` are the three generations the plugin holds (null: unavailable); the plugin turns them into the presence and equality facts in `input`, which is all the derivation sees, and the Kotlin test checks that capture. The frozen floor decides from `texts`; the derivation decides from `input`. A native rule change updates this file and may diverge from the frozen floor only on purpose. `texts.disk` (optional) is the saved document the plugin compares the buffer with. `frozen_expected` is the frozen floor's answer where a native rule diverged from it on purpose (`#emptycanonicaldeadlock`); the plugin's empty-canonical execution guard still refuses an empty adoption whichever answers.",
+  "about": "GH #326 phase 5 parity cases. The Rust `registration_projection` derivation (agent-doc-editor-surface-io) and the plugin's frozen Kotlin floor (RegistrationProjectionTest) both answer every case. `texts` are the three generations the plugin holds (null: unavailable); the plugin turns them into the presence and equality facts in `input`, which is all the derivation sees, and the Kotlin test checks that capture. The frozen floor decides from `texts`; the derivation decides from `input`. A native rule change updates this file and may diverge from the frozen floor only on purpose. `texts.disk` (optional) is the saved document the plugin compares the buffer with. `frozen_expected` is the frozen floor's answer where a native rule diverged from it on purpose (`#emptycanonicaldeadlock`); the plugin's empty-canonical execution guard still refuses an empty adoption whichever answers. `#restartadoptscanonical`: a registration with no settled shadow whose readable, non-empty buffer differs from a known canonical holds unless canonical is proven to contain the operator edits; the frozen floor still adopts (its answers are `frozen_expected` and the exhaustive table's `frozen_answers`), and the plugin's unproven-canonical execution guard holds whichever answers.",
   "cases": [
     {
       "name": "a fresh-controller reseed publishes a proven live buffer instead of the temporary empty canonical",
@@ -431,7 +431,7 @@
       }
     },
     {
-      "name": "a restarted IDE has no shadow, so retained adoption stays the recovery",
+      "name": "#restartadoptscanonical: a restarted IDE with no settled shadow holds its buffer instead of adopting the retained canonical",
       "texts": {
         "published_shadow": null,
         "buffer": "# doc\n\nanything at all\n",
@@ -454,7 +454,199 @@
         "buffer_empty": false
       },
       "expected": {
+        "action": "hold_operator_buffer",
+        "hold_reason": "ambiguous-retained-projection"
+      },
+      "frozen_expected": {
         "action": "apply_canonical",
+        "hold_reason": null
+      }
+    },
+    {
+      "name": "#restartadoptscanonical: a plain IDE restart over a surviving controller hub holds the saved buffer",
+      "texts": {
+        "published_shadow": null,
+        "buffer": "# doc\n\noperator text saved before the restart\n",
+        "canonical": "# doc\n\nsurviving controller text\n",
+        "disk": "# doc\n\noperator text saved before the restart\n"
+      },
+      "input": {
+        "defer_canonical_projection_for_pending_local": false,
+        "canonical_projection_retained": false,
+        "retained_replica_reseed_pending": false,
+        "canonical_covers_retained_frontier": null,
+        "has_published_shadow": false,
+        "has_buffer": true,
+        "has_canonical": true,
+        "buffer_equals_canonical": false,
+        "buffer_equals_shadow": false,
+        "canonical_equals_shadow": false,
+        "canonical_contains_operator_edits": null,
+        "clean_merge_available": null,
+        "canonical_empty": false,
+        "buffer_empty": false,
+        "buffer_equals_disk": true
+      },
+      "expected": {
+        "action": "hold_operator_buffer",
+        "hold_reason": "ambiguous-reregister-projection"
+      },
+      "frozen_expected": {
+        "action": "apply_canonical",
+        "hold_reason": null
+      }
+    },
+    {
+      "name": "#restartadoptscanonical: a restarted unsaved buffer that differs from the surviving hub holds too",
+      "texts": {
+        "published_shadow": null,
+        "buffer": "# doc\n\noperator text saved before the restart\ntyped after load\n",
+        "canonical": "# doc\n\nsurviving controller text\n",
+        "disk": "# doc\n\noperator text saved before the restart\n"
+      },
+      "input": {
+        "defer_canonical_projection_for_pending_local": false,
+        "canonical_projection_retained": false,
+        "retained_replica_reseed_pending": false,
+        "canonical_covers_retained_frontier": null,
+        "has_published_shadow": false,
+        "has_buffer": true,
+        "has_canonical": true,
+        "buffer_equals_canonical": false,
+        "buffer_equals_shadow": false,
+        "canonical_equals_shadow": false,
+        "canonical_contains_operator_edits": null,
+        "clean_merge_available": null,
+        "canonical_empty": false,
+        "buffer_empty": false,
+        "buffer_equals_disk": false
+      },
+      "expected": {
+        "action": "hold_operator_buffer",
+        "hold_reason": "ambiguous-reregister-projection"
+      },
+      "frozen_expected": {
+        "action": "apply_canonical",
+        "hold_reason": null
+      }
+    },
+    {
+      "name": "#restartadoptscanonical: a restarted buffer adopts canonical proven to contain its operator edits",
+      "texts": {
+        "published_shadow": null,
+        "buffer": "# doc\n\noperator text saved before the restart\n",
+        "canonical": "# doc\n\noperator text saved before the restart\nagent response\n",
+        "disk": "# doc\n\noperator text saved before the restart\n"
+      },
+      "input": {
+        "defer_canonical_projection_for_pending_local": false,
+        "canonical_projection_retained": false,
+        "retained_replica_reseed_pending": false,
+        "canonical_covers_retained_frontier": null,
+        "has_published_shadow": false,
+        "has_buffer": true,
+        "has_canonical": true,
+        "buffer_equals_canonical": false,
+        "buffer_equals_shadow": false,
+        "canonical_equals_shadow": false,
+        "canonical_contains_operator_edits": true,
+        "clean_merge_available": null,
+        "canonical_empty": false,
+        "buffer_empty": false,
+        "buffer_equals_disk": true
+      },
+      "expected": {
+        "action": "apply_canonical",
+        "hold_reason": null
+      }
+    },
+    {
+      "name": "#restartadoptscanonical: an empty restarted buffer holds no text, so it adopts canonical",
+      "texts": {
+        "published_shadow": null,
+        "buffer": "",
+        "canonical": "# doc\n\nsurviving controller text\n",
+        "disk": ""
+      },
+      "input": {
+        "defer_canonical_projection_for_pending_local": false,
+        "canonical_projection_retained": false,
+        "retained_replica_reseed_pending": false,
+        "canonical_covers_retained_frontier": null,
+        "has_published_shadow": false,
+        "has_buffer": true,
+        "has_canonical": true,
+        "buffer_equals_canonical": false,
+        "buffer_equals_shadow": false,
+        "canonical_equals_shadow": false,
+        "canonical_contains_operator_edits": null,
+        "clean_merge_available": null,
+        "canonical_empty": false,
+        "buffer_empty": true,
+        "buffer_equals_disk": true
+      },
+      "expected": {
+        "action": "apply_canonical",
+        "hold_reason": null
+      }
+    },
+    {
+      "name": "#restartadoptscanonical: a restored settled shadow adopts a canonical that advanced past an unchanged buffer",
+      "texts": {
+        "published_shadow": "# doc\n\noperator text saved before the restart\n",
+        "buffer": "# doc\n\noperator text saved before the restart\n",
+        "canonical": "# doc\n\noperator text saved before the restart\nagent response\n",
+        "disk": "# doc\n\noperator text saved before the restart\n"
+      },
+      "input": {
+        "defer_canonical_projection_for_pending_local": false,
+        "canonical_projection_retained": false,
+        "retained_replica_reseed_pending": false,
+        "canonical_covers_retained_frontier": null,
+        "has_published_shadow": true,
+        "has_buffer": true,
+        "has_canonical": true,
+        "buffer_equals_canonical": false,
+        "buffer_equals_shadow": true,
+        "canonical_equals_shadow": false,
+        "canonical_contains_operator_edits": null,
+        "clean_merge_available": null,
+        "canonical_empty": false,
+        "buffer_empty": false,
+        "buffer_equals_disk": true
+      },
+      "expected": {
+        "action": "apply_canonical",
+        "hold_reason": null
+      }
+    },
+    {
+      "name": "#restartadoptscanonical: a restored settled shadow publishes the buffer over a hub that never moved",
+      "texts": {
+        "published_shadow": "# doc\n\noperator text saved before the restart\n",
+        "buffer": "# doc\n\noperator text saved before the restart\noperator text the hub never saw\n",
+        "canonical": "# doc\n\noperator text saved before the restart\n",
+        "disk": "# doc\n\noperator text saved before the restart\noperator text the hub never saw\n"
+      },
+      "input": {
+        "defer_canonical_projection_for_pending_local": false,
+        "canonical_projection_retained": false,
+        "retained_replica_reseed_pending": false,
+        "canonical_covers_retained_frontier": null,
+        "has_published_shadow": true,
+        "has_buffer": true,
+        "has_canonical": true,
+        "buffer_equals_canonical": false,
+        "buffer_equals_shadow": false,
+        "canonical_equals_shadow": true,
+        "canonical_contains_operator_edits": null,
+        "clean_merge_available": null,
+        "canonical_empty": false,
+        "buffer_empty": false,
+        "buffer_equals_disk": true
+      },
+      "expected": {
+        "action": "publish_operator_buffer",
         "hold_reason": null
       }
     },
@@ -812,7 +1004,7 @@
     }
   ],
   "exhaustive": {
-    "about": "Every combination of the dimensions below, outermost first (the last dimension varies fastest). The three text dimensions are literal texts: the frozen floor decides from them and the derivation from the facts the plugin captures from them. Every other dimension is an `input` field. `answers` holds one code per combination, in order; `codes` maps each code to the expected answer.",
+    "about": "Every combination of the dimensions below, outermost first (the last dimension varies fastest). The three text dimensions are literal texts: the frozen floor decides from them and the derivation from the facts the plugin captures from them. Every other dimension is an `input` field. `answers` holds one code per combination, in order; `codes` maps each code to the expected answer. `frozen_answers` (same order and codes) is the frozen floor's answer where the native rules diverged from it on purpose (`#restartadoptscanonical`).",
     "dimensions": [
       {
         "name": "defer_canonical_projection_for_pending_local",
@@ -914,6 +1106,7 @@
         "hold_reason": "ambiguous-reregister-projection"
       }
     },
-    "answers": "AAAAAAAAAAAAAAAAAAAAgPAgAAAAAAAAAAAAAAAAAAAAgPAgAAAAAAAAAAAAAAAAAAAAMPAMAAAAAAAAAAAAAAAAAAAAgPAgAAAAAAAAAAAAAAAAAAAAgPAgAAAAAAAAAAAAAAAAAAAAMPAMAAAAAAAAAAAAAAAAAAAAAPAAAAAAAAAAAAAAAAAAAAAAAPAAAAAAAAAAAAAAAAAAAAAAAPAAAAAAAAAAAAAAAAAAAAAAgPAgAAAAAAAAAAAAAAAAAAAAgPAgAAAAAAAAAAAAAAAAAAAAMPAMAAAAAAAAAAAAAAAAAAAAgPAgAAAAAAAAAAAAAAAAAAAAgPAgAAAAAAAAAAAAAAAAAAAAMPAMAAAAAAAAAAAAAAAAAAAAAPAAAAAAAAAAAAAAAAAAAAAAAPAAAAAAAAAAAAAAAAAAAAAAAPAAAAAAAAAAAAAAAAAAAAAAgPAgAAAAAAAAAAAAAAAAAAAAgPAgAAAAAAAAAAAAAAAAAAAAMPAMAAAAAAAAAAAAAAAAAAAAgPAgAAAAAAAAAAAAAAAAAAAAgPAgAAAAAAAAAAAAAAAAAAAAMPAMAAAAAAAAAAAAAAAAAAAAAPAAAAAAAAAAAAAAAAAAAAAAAPAAAAAAAAAAAAAAAAAAAAAAAPAAsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPAAAAAAAAAAAAAAAArArrrPArAAAAAAAAAAAAAAAArArrrPArAAAAAAAAAAAAAAAAMAMMMPAMAAAAAAAAAAAAAAAArArrrPArAAAAAAAAAAAAAAAArArrrPArAAAAAAAAAAAAAAAAMAMMMPAMAAAAAAAAAAAAAAAAAAAAAPAAAAAAAAAAAAAAAAAAAAAAAPAAAAAAAAAAAAAAAAAAAAAAAPAAAAAAAAAAAAAAAAAArArrrPArAAAAAAAAAAAAAAAArArrrPArAAAAAAAAAAAAAAAAMAMMMPAMAAAAAAAAAAAAAAAArArrrPArAAAAAAAAAAAAAAAArArrrPArAAAAAAAAAAAAAAAAMAMMMPAMAAAAAAAAAAAAAAAAAAAAAPAAAAAAAAAAAAAAAAAAAAAAAPAAAAAAAAAAAAAAAAAAAAAAAPAAAAAAAAAAAAAAAAAAAAAArPArAAAAAAAAAAAAAAAAAAAArPArAAAAAAAAAAAAAAAAAAAAMPAMAAAAAAAAAAAAAAAAAAAArPArAAAAAAAAAAAAAAAAAAAArPArAAAAAAAAAAAAAAAAAAAAMPAMAAAAAAAAAAAAAAAAAAAAAPAAAAAAAAAAAAAAAAAAAAAAAPAAAAAAAAAAAAAAAAAAAAAAAPAAsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD"
+    "answers": "AAAAAAggAgAgAAAAAAAAgPAgAAAAAAggAgAgAAAAAAAAgPAgAAAAAAggAgAgAAAAAAAAMPAMAAAAAAggAgAgAAAAAAAAgPAgAAAAAAggAgAgAAAAAAAAgPAgAAAAAAggAgAgAAAAAAAAMPAMAAAAAAAAAAAAAAAAAAAAAPAAAAAAAAAAAAAAAAAAAAAAAPAAAAAAAAAAAAAAAAAAAAAAAPAAAAAAAAggAgAgAAAAAAAAgPAgAAAAAAggAgAgAAAAAAAAgPAgAAAAAAggAgAgAAAAAAAAMPAMAAAAAAggAgAgAAAAAAAAgPAgAAAAAAggAgAgAAAAAAAAgPAgAAAAAAggAgAgAAAAAAAAMPAMAAAAAAAAAAAAAAAAAAAAAPAAAAAAAAAAAAAAAAAAAAAAAPAAAAAAAAAAAAAAAAAAAAAAAPAAAAAAAAggAgAgAAAAAAAAgPAgAAAAAAggAgAgAAAAAAAAgPAgAAAAAAggAgAgAAAAAAAAMPAMAAAAAAggAgAgAAAAAAAAgPAgAAAAAAggAgAgAAAAAAAAgPAgAAAAAAggAgAgAAAAAAAAMPAMAAAAAAAAAAAAAAAAAAAAAPAAAAAAAAAAAAAAAAAAAAAAAPAAAAAAAAAAAAAAAAAAAAAAAPAAsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPAAAAAArrArArAAAArArrrPArAAAAAArrArArAAAArArrrPArAAAAAArrArArAAAAMAMMMPAMAAAAAArrArArAAAArArrrPArAAAAAArrArArAAAArArrrPArAAAAAArrArArAAAAMAMMMPAMAAAAAAAAAAAAAAAAAAAAAPAAAAAAAAAAAAAAAAAAAAAAAPAAAAAAAAAAAAAAAAAAAAAAAPAAAAAAAArrArArAAAArArrrPArAAAAAArrArArAAAArArrrPArAAAAAArrArArAAAAMAMMMPAMAAAAAArrArArAAAArArrrPArAAAAAArrArArAAAArArrrPArAAAAAArrArArAAAAMAMMMPAMAAAAAAAAAAAAAAAAAAAAAPAAAAAAAAAAAAAAAAAAAAAAAPAAAAAAAAAAAAAAAAAAAAAAAPAAAAAAAArrArArAAAAAAAArPArAAAAAArrArArAAAAAAAArPArAAAAAArrArArAAAAAAAAMPAMAAAAAArrArArAAAAAAAArPArAAAAAArrArArAAAAAAAArPArAAAAAArrArArAAAAAAAAMPAMAAAAAAAAAAAAAAAAAAAAAPAAAAAAAAAAAAAAAAAAAAAAAPAAAAAAAAAAAAAAAAAAAAAAAPAAsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD",
+    "frozen_answers": "AAAAAAAAAAAAAAAAAAAAgPAgAAAAAAAAAAAAAAAAAAAAgPAgAAAAAAAAAAAAAAAAAAAAMPAMAAAAAAAAAAAAAAAAAAAAgPAgAAAAAAAAAAAAAAAAAAAAgPAgAAAAAAAAAAAAAAAAAAAAMPAMAAAAAAAAAAAAAAAAAAAAAPAAAAAAAAAAAAAAAAAAAAAAAPAAAAAAAAAAAAAAAAAAAAAAAPAAAAAAAAAAAAAAAAAAAAAAgPAgAAAAAAAAAAAAAAAAAAAAgPAgAAAAAAAAAAAAAAAAAAAAMPAMAAAAAAAAAAAAAAAAAAAAgPAgAAAAAAAAAAAAAAAAAAAAgPAgAAAAAAAAAAAAAAAAAAAAMPAMAAAAAAAAAAAAAAAAAAAAAPAAAAAAAAAAAAAAAAAAAAAAAPAAAAAAAAAAAAAAAAAAAAAAAPAAAAAAAAAAAAAAAAAAAAAAgPAgAAAAAAAAAAAAAAAAAAAAgPAgAAAAAAAAAAAAAAAAAAAAMPAMAAAAAAAAAAAAAAAAAAAAgPAgAAAAAAAAAAAAAAAAAAAAgPAgAAAAAAAAAAAAAAAAAAAAMPAMAAAAAAAAAAAAAAAAAAAAAPAAAAAAAAAAAAAAAAAAAAAAAPAAAAAAAAAAAAAAAAAAAAAAAPAAsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPAAAAAAAAAAAAAAAArArrrPArAAAAAAAAAAAAAAAArArrrPArAAAAAAAAAAAAAAAAMAMMMPAMAAAAAAAAAAAAAAAArArrrPArAAAAAAAAAAAAAAAArArrrPArAAAAAAAAAAAAAAAAMAMMMPAMAAAAAAAAAAAAAAAAAAAAAPAAAAAAAAAAAAAAAAAAAAAAAPAAAAAAAAAAAAAAAAAAAAAAAPAAAAAAAAAAAAAAAAAArArrrPArAAAAAAAAAAAAAAAArArrrPArAAAAAAAAAAAAAAAAMAMMMPAMAAAAAAAAAAAAAAAArArrrPArAAAAAAAAAAAAAAAArArrrPArAAAAAAAAAAAAAAAAMAMMMPAMAAAAAAAAAAAAAAAAAAAAAPAAAAAAAAAAAAAAAAAAAAAAAPAAAAAAAAAAAAAAAAAAAAAAAPAAAAAAAAAAAAAAAAAAAAAArPArAAAAAAAAAAAAAAAAAAAArPArAAAAAAAAAAAAAAAAAAAAMPAMAAAAAAAAAAAAAAAAAAAArPArAAAAAAAAAAAAAAAAAAAArPArAAAAAAAAAAAAAAAAAAAAMPAMAAAAAAAAAAAAAAAAAAAAAPAAAAAAAAAAAAAAAAAAAAAAAPAAAAAAAAAAAAAAAAAAAAAAAPAAsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD"
   }
 }

@@ -19051,6 +19051,68 @@ pub(crate) fn serve_announcing_ready(
     )
 }
 
+/// `#controllerstatusflake`: test-only hold on a controller's background
+/// maintenance (the supervisor watchdog and orphan drain ticks).
+///
+/// A test installs a gate for one project root; the first maintenance tick of
+/// the controller serving that root announces on `entered` and then blocks
+/// until `release` is sent or dropped. This makes "a client connects while
+/// maintenance is running" a deterministic interleaving instead of something
+/// only a loaded runner produces.
+#[cfg(test)]
+pub(crate) mod background_maintenance_test_gate {
+    use std::collections::BTreeMap;
+    use std::path::{Path, PathBuf};
+    use std::sync::mpsc::{Receiver, Sender, channel};
+    use std::sync::{Mutex, OnceLock};
+
+    struct Gate {
+        entered: Sender<()>,
+        release: Receiver<()>,
+    }
+
+    fn gates() -> &'static Mutex<BTreeMap<PathBuf, Gate>> {
+        static GATES: OnceLock<Mutex<BTreeMap<PathBuf, Gate>>> = OnceLock::new();
+        GATES.get_or_init(|| Mutex::new(BTreeMap::new()))
+    }
+
+    fn key(project_root: &Path) -> PathBuf {
+        project_root
+            .canonicalize()
+            .unwrap_or_else(|_| project_root.to_path_buf())
+    }
+
+    /// Hold the next maintenance tick for `project_root`. Returns the
+    /// `entered` receiver and the `release` sender.
+    pub(crate) fn install(project_root: &Path) -> (Receiver<()>, Sender<()>) {
+        let (entered_tx, entered_rx) = channel();
+        let (release_tx, release_rx) = channel();
+        gates()
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .insert(
+                key(project_root),
+                Gate {
+                    entered: entered_tx,
+                    release: release_rx,
+                },
+            );
+        (entered_rx, release_tx)
+    }
+
+    /// Called at the top of a maintenance tick: blocks while a gate is held.
+    pub(crate) fn pass(project_root: &Path) {
+        let gate = gates()
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .remove(&key(project_root));
+        if let Some(gate) = gate {
+            let _ = gate.entered.send(());
+            let _ = gate.release.recv();
+        }
+    }
+}
+
 /// Minimal live Lazily actor used by cross-crate tests.
 ///
 /// This deliberately omits controller process-global services (relay-hub
@@ -19693,18 +19755,14 @@ pub(crate) fn serve_with_options(
     let recycle_handoff_in_flight = Arc::new(AtomicBool::new(false));
     let recycle_handoff_promoted = Arc::new(AtomicBool::new(false));
     let recycle_handoff_drain_deadline_secs = Arc::new(AtomicU64::new(0));
-    // #supresilience Part B — autonomous route-owned supervisor watchdog. Runs on
-    // the controller's idle serve tick, throttled to `SUPERVISOR_WATCHDOG_INTERVAL`.
-    // `watchdog_halt_notified` dedups the operator halt diagnostic per document so a
-    // budget-exhausted supervisor is reported once, not every tick.
+    // #supresilience Part B — autonomous route-owned supervisor watchdog. Due on
+    // the controller's idle serve tick, throttled to `SUPERVISOR_WATCHDOG_INTERVAL`,
+    // and run on the maintenance worker (`#controllerstatusflake`) so it never
+    // holds the accept loop.
     let supervisor_watchdog_interval = supervisor_watchdog_interval();
     let mut supervisor_watchdog_last_run: Option<Instant> = None;
-    let mut supervisor_watchdog_halt_notified: std::collections::HashSet<String> =
-        std::collections::HashSet::new();
-    // `#watchdogbindinglive` (GH #133): dedups the "not respawning: binding not
-    // live" diagnostic per document+dead pid so a stashed corpse is reported once.
-    let mut supervisor_watchdog_binding_skip_notified: std::collections::HashSet<String> =
-        std::collections::HashSet::new();
+    let mut background_maintenance =
+        ControllerBackgroundMaintenance::spawn(Arc::clone(&runtime), project_root.to_path_buf());
     // `#tmuxscopesteward`: the host-wide tmux-spawn scope sweep. Checked once a
     // minute on the idle tick; the real cadence is a host-wide stamp shared by
     // every controller, so N projects still sweep once per interval.
@@ -20170,16 +20228,7 @@ pub(crate) fn serve_with_options(
                     &mut supervisor_watchdog_last_run,
                     supervisor_watchdog_interval,
                     Instant::now(),
-                    |runtime| {
-                        controller_supervisor_watchdog_tick(
-                            runtime,
-                            &mut supervisor_watchdog_halt_notified,
-                            &mut supervisor_watchdog_binding_skip_notified,
-                        );
-                        // `#orphandrain`: sweep the documents the supervisor
-                        // watchdog cannot help — those with no supervisor to revive.
-                        controller_orphan_drain_tick(runtime);
-                    },
+                    |_| background_maintenance.dispatch(project_root),
                 );
                 // `#tmuxscopesteward`: same `#drainingpredecessor` gate — the
                 // promoted successor owns the host-wide sweep.
@@ -20204,7 +20253,121 @@ pub(crate) fn serve_with_options(
         &sock,
         recycle_handoff_promoted.load(Ordering::SeqCst) || socket_pathname_relinquished,
     );
+    // Retire the socket first so no client connects into a listener nobody
+    // accepts on while an in-flight maintenance tick finishes.
+    background_maintenance.shutdown();
     Ok(())
+}
+
+/// `#controllerstatusflake`: the controller's periodic background maintenance
+/// (the #supresilience supervisor watchdog and the `#orphandrain` sweep), run
+/// on one worker thread instead of the accept loop.
+///
+/// Both ticks open SQLite, load the actor store and session registry, and
+/// probe processes and tmux, so their cost grows with load. They used to run
+/// inline on the accept thread: a client that connected while a tick was
+/// running sat unaccepted in the listen backlog until it finished. The first
+/// idle tick fires right after the serve-ready announcement, so a readiness
+/// probe that connected just after the first `WouldBlock` waited out the
+/// whole tick and, under check-fast load, its 2s test deadline. The accept
+/// loop still decides when a tick is due; it only hands the tick off here.
+///
+/// A tick that is still running when the next one comes due is not queued
+/// behind it: the due tick is skipped and the interval tries again. The
+/// worker installs the controller request thread context, so the ticks read
+/// the live projection exactly as they did on the serve thread.
+struct ControllerBackgroundMaintenance {
+    ticks: Option<std::sync::mpsc::Sender<()>>,
+    in_flight: Arc<AtomicBool>,
+    worker: Option<std::thread::JoinHandle<()>>,
+}
+
+impl ControllerBackgroundMaintenance {
+    fn spawn(runtime: Arc<ControllerRuntime>, project_root: PathBuf) -> Self {
+        let (ticks, due) = std::sync::mpsc::channel::<()>();
+        let in_flight = Arc::new(AtomicBool::new(false));
+        let worker_in_flight = Arc::clone(&in_flight);
+        let worker = std::thread::Builder::new()
+            .name("controller-background-maintenance".to_string())
+            .spawn(move || {
+                install_controller_request_thread_context(&runtime);
+                // `watchdog_halt_notified` dedups the operator halt diagnostic per
+                // document so a budget-exhausted supervisor is reported once, not
+                // every tick. `#watchdogbindinglive` (GH #133): `binding_skip_notified`
+                // dedups the "not respawning: binding not live" diagnostic per
+                // document+dead pid so a stashed corpse is reported once.
+                let mut halt_notified = std::collections::HashSet::<String>::new();
+                let mut binding_skip_notified = std::collections::HashSet::<String>::new();
+                while due.recv().is_ok() {
+                    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        #[cfg(test)]
+                        background_maintenance_test_gate::pass(&project_root);
+                        controller_supervisor_watchdog_tick(
+                            &runtime,
+                            &mut halt_notified,
+                            &mut binding_skip_notified,
+                        );
+                        // `#orphandrain`: sweep the documents the supervisor
+                        // watchdog cannot help — those with no supervisor to revive.
+                        controller_orphan_drain_tick(&runtime);
+                    }));
+                    if outcome.is_err() {
+                        eprintln!(
+                            "[controller] background maintenance tick panicked in {}",
+                            project_root.display()
+                        );
+                    }
+                    worker_in_flight.store(false, Ordering::SeqCst);
+                }
+            });
+        let worker = match worker {
+            Ok(worker) => Some(worker),
+            Err(err) => {
+                eprintln!("[controller] failed to start background maintenance worker: {err}");
+                None
+            }
+        };
+        Self {
+            ticks: worker.as_ref().map(|_| ticks),
+            in_flight,
+            worker,
+        }
+    }
+
+    /// Hand one due tick to the worker; never blocks the caller.
+    fn dispatch(&self, project_root: &Path) {
+        let Some(ticks) = self.ticks.as_ref() else {
+            return;
+        };
+        if self.in_flight.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        if ticks.send(()).is_err() {
+            self.in_flight.store(false, Ordering::SeqCst);
+            agent_doc_ops_log_io::log_op(
+                project_root,
+                "controller_background_maintenance status=worker_gone",
+            );
+        }
+    }
+
+    /// Stop accepting ticks and wait for an in-flight one to finish, so the
+    /// controller never outlives `serve` with maintenance still touching its
+    /// project root.
+    fn shutdown(&mut self) {
+        self.ticks = None;
+        if let Some(worker) = self.worker.take()
+            && worker.join().is_err()
+        {
+            eprintln!("[controller] background maintenance worker panicked");
+        }
+    }
+}
+
+impl Drop for ControllerBackgroundMaintenance {
+    fn drop(&mut self) {
+        self.shutdown();
+    }
 }
 
 /// Run the controller's periodic background work (supervisor watchdog, orphan
@@ -62082,6 +62245,44 @@ mod tests {
             .expect("a cycle state exists");
         assert_eq!(readback.phase, agent_doc_turn::CyclePhase::WriteApplied);
 
+        let shutdown = request_with_reason(&project_root, "shutdown", "test_shutdown").unwrap();
+        assert!(shutdown.contains("\"ok\":true"), "{shutdown}");
+        handle.join().unwrap();
+    }
+
+    /// `#controllerstatusflake`: the serve-ready announcement promises that a
+    /// client connecting from then on is served. The controller's first idle
+    /// tick runs its background maintenance (supervisor watchdog, orphan
+    /// drain), and that maintenance used to run on the accept thread itself: a
+    /// readiness `status` that connected after the first `WouldBlock` sat
+    /// unaccepted in the listen backlog until the tick finished, and under
+    /// check-fast load the tick outlasted the client's 2s test deadline
+    /// ("announced readiness but did not answer a status request"). The gate
+    /// holds that first tick open, so the interleaving is deterministic.
+    #[test]
+    fn controller_serves_requests_while_background_maintenance_is_in_flight() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let project_root = dir.path().to_path_buf();
+        let (maintenance_entered, release_maintenance) =
+            background_maintenance_test_gate::install(&project_root);
+
+        let server_root = project_root.clone();
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+        let handle = std::thread::spawn(move || {
+            serve_announcing_ready(&server_root, LaunchMode::Lazy, ready_tx).unwrap()
+        });
+        maintenance_entered
+            .recv_timeout(Duration::from_secs(120))
+            .expect("the controller's first idle tick runs background maintenance");
+
+        // Maintenance is now in flight and held. Readiness confirmation and an
+        // ordinary request must still be accepted and answered.
+        wait_for_test_controller(&project_root, &ready_rx);
+        let response = request(&project_root, "handoff_status").unwrap();
+        let status: ControllerStatus = serde_json::from_str(&response).unwrap();
+        assert_eq!(status.project_root, project_root);
+
+        drop(release_maintenance);
         let shutdown = request_with_reason(&project_root, "shutdown", "test_shutdown").unwrap();
         assert!(shutdown.contains("\"ok\":true"), "{shutdown}");
         handle.join().unwrap();

@@ -15015,12 +15015,14 @@ pub(crate) fn wait_for_test_controller(
     }
     // One request, not a poll: an announcement that preceded the bind or the
     // accept loop is a lie this exposes (the request finds no socket, or no
-    // one accepting it).
-    let served = status(project_root).expect("read test controller status after readiness");
-    assert!(
-        served.active,
-        "test controller announced readiness but did not answer a status request"
-    );
+    // one accepting it). The transport error is kept: `status()` folds every
+    // failure into an inactive status, which hid whether the request found no
+    // socket or timed out behind the accept loop (`#controllerstatusflake`).
+    let response = request(project_root, "status").unwrap_or_else(|err| {
+        panic!("test controller announced readiness but did not answer a status request: {err:#}")
+    });
+    serde_json::from_str::<ControllerStatus>(&response)
+        .unwrap_or_else(|err| panic!("test controller status response {response:?}: {err}"));
 }
 
 #[cfg(test)]

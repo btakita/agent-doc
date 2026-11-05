@@ -3598,6 +3598,16 @@ pub fn annotate_newly_struck_queue_items_with_response_id_at(
                 && !struck_before.contains(&node.node_key)
                 && node.item.surface
                     != agent_doc_markdown_ast::overlay::ItemSurface::MultilinePrompt
+                // `#answerack`: an answer this projection struck already names
+                // its consuming response in its `**Consumed by:**` child.
+                && !after
+                    .get(node.item.end_byte..)
+                    .and_then(|rest| rest.trim_start_matches('\n').lines().next())
+                    .is_some_and(|line| {
+                        line.trim_start()
+                            .strip_prefix("- ")
+                            .is_some_and(crate::tree_closability::is_consumed_by)
+                    })
         })
         .collect::<Vec<_>>();
     // `#operatorrequestresponsesubtree`: a blocking worker handback deliberately
@@ -3633,7 +3643,31 @@ pub fn annotate_newly_struck_queue_items_with_response_id_at(
             })
         })
         .collect::<Vec<_>>();
-    if newly_struck.is_empty() && operator_request_nodes.is_empty() {
+    // `#answerack`: operator answers inside waiting packets that this response
+    // consumed. An answer whose stable id the response cites is consumed by the
+    // one section citing it (or by the whole response when several do); an
+    // answer beneath a row this closeout terminalizes is consumed below.
+    let live_answers = crate::answer_ack::live_packet_answers(after).unwrap_or_default();
+    let mut answer_acks = Vec::<(crate::answer_ack::AnswerRow, ResponseCandidate)>::new();
+    for answer in &live_answers {
+        let cited = |body: &str| {
+            answer
+                .ids
+                .iter()
+                .any(|id| crate::answer_ack::cites_id(body, id))
+        };
+        let matching = response_candidates
+            .iter()
+            .filter(|candidate| cited(&candidate.body))
+            .collect::<Vec<_>>();
+        let candidate = match matching.as_slice() {
+            [one] => (*one).clone(),
+            _ if cited(&composite_candidate.body) => composite_candidate.clone(),
+            _ => continue,
+        };
+        answer_acks.push((answer.row, candidate));
+    }
+    if newly_struck.is_empty() && operator_request_nodes.is_empty() && answer_acks.is_empty() {
         return Ok(after.to_string());
     }
 
@@ -3796,6 +3830,24 @@ pub fn annotate_newly_struck_queue_items_with_response_id_at(
         }
     }
 
+    for (node_key, candidate, terminal, _) in &candidates_by_node_key {
+        if !*terminal {
+            continue;
+        }
+        let Some(node) = nodes.iter().find(|node| &node.node_key == node_key) else {
+            continue;
+        };
+        for row in crate::answer_ack::answers_under_row(after, node.item.start_byte, &live_answers)?
+        {
+            let unpicked = live_answers
+                .iter()
+                .any(|answer| answer.row == row && !answer.picked_up);
+            if unpicked && !answer_acks.iter().any(|(acked, _)| *acked == row) {
+                answer_acks.push((row, candidate.clone()));
+            }
+        }
+    }
+
     let mut after = after.to_string();
     let mut identities_by_binding = HashMap::<usize, HashSet<ProjectionIdentity>>::new();
     for (_, candidate, _, identity) in &candidates_by_node_key {
@@ -3824,6 +3876,17 @@ pub fn annotate_newly_struck_queue_items_with_response_id_at(
             ),
         );
     }
+
+    let mut resolved_acks = Vec::new();
+    for (row, candidate) in answer_acks {
+        let response_id = response_lookup_id_for_document(&after, &candidate.policy)?;
+        if response_id.is_empty() {
+            continue;
+        }
+        after = annotate_exchange_response_with_lookup_id(&after, &candidate.policy, &response_id)?;
+        resolved_acks.push((row, response_id));
+    }
+    after = crate::answer_ack::apply_answer_acknowledgements(&after, &resolved_acks)?;
 
     let nodes = match agent_doc_markdown_ast::mutations::item_nodes_all(&after, "queue") {
         Ok(nodes) => nodes,
@@ -3914,6 +3977,10 @@ pub fn annotate_newly_struck_queue_items_with_response_id_at(
                 ResponseLookupContext {
                     source_document: before,
                     queue_item: &node.item.text,
+                    tree_guidance: crate::tree_closability::closability_sentence_at(
+                        &after,
+                        node.item.start_byte,
+                    ),
                     // Distinct addressed cells can inherit one heading and
                     // therefore one response id. Once their projection is
                     // canonicalized, the owner must retain the complete turn,
@@ -4086,6 +4153,8 @@ impl QueueResponseMode {
 struct ResponseLookupContext<'a> {
     source_document: &'a str,
     queue_item: &'a str,
+    /// `#answerack`: the binary-computed closability of the row's tree.
+    tree_guidance: Option<String>,
     response_body: &'a str,
     response_id: &'a str,
     addressed_at: &'a str,
@@ -4106,15 +4175,7 @@ fn response_lookup_children(
     let mut children = Vec::new();
     match mode {
         QueueResponseMode::Summary => children.push(
-            response_summary_row_child(
-                context.source_document,
-                context.queue_item,
-                response_body,
-                context.response_id,
-                context.addressed_at,
-                rendered_choice_packet_ids,
-                context.shared_batch,
-            )
+            response_summary_row_child(&context, response_body, rendered_choice_packet_ids)
             .expect("response lookup ids are canonical response ids"),
         ),
         QueueResponseMode::Inline => {
@@ -4206,14 +4267,16 @@ const ACTIONABLE_RESPONSE_LEAD_LABELS: &[&str] = &[
 ];
 
 fn response_summary_row_child(
-    source_document: &str,
-    queue_item: &str,
+    context: &ResponseLookupContext<'_>,
     response_body: &str,
-    response_id: &str,
-    addressed_at: &str,
     rendered_choice_packet_ids: &mut HashSet<String>,
-    shared_batch: bool,
 ) -> Option<String> {
+    let source_document = context.source_document;
+    let queue_item = context.queue_item;
+    let response_id = context.response_id;
+    let addressed_at = context.addressed_at;
+    let shared_batch = context.shared_batch;
+    let tree_guidance = context.tree_guidance.as_deref();
     if !agent_doc_markdown_ast::exchange_tree::is_compact_response_id(response_id) {
         return None;
     }
@@ -4329,6 +4392,11 @@ fn response_summary_row_child(
         child.push_str("More work remains. Keep this tree and answer the operator request below.");
     } else if !next_actions.is_empty() {
         child.push_str("More work remains. Keep this tree and follow the next actions below.");
+    } else if let Some(tree) = tree_guidance {
+        // `#answerack`: "complete" describes this row; whether the tree can go
+        // is computed from the tree, which may still hold another open row.
+        child.push_str("The item is complete. ");
+        child.push_str(tree);
     } else {
         child.push_str(
             "Safe to delete this completed tree; the item is complete and has no remaining tracked or unpublished work.",
@@ -6212,6 +6280,144 @@ mod tests {
         )
     }
 
+    /// `#answerack`: the `tdclireleasedownloads` shape from `sdk-dev.md`. The
+    /// operator answered the waiting item inside its packet; the response
+    /// deferred the work but cited the answer's id.
+    const ANSWERACK_QUEUE: &str = concat!(
+        "- ### 📥 Waiting on you — answer by adding a child line under an item [#q-4775b8697412]\n",
+        "  - [#tdclireleasedownloads] Decide how private haiven-cli serves release downloads <!-- agent-doc:waiting-item -->\n",
+        "    - **Response:** Decide how private haiven-cli serves release downloads <!-- agent-doc:waiting-metadata -->\n",
+        "    - **Next actions:** <!-- agent-doc:waiting-metadata -->\n",
+        "        - **Action:** Decide how private haiven-cli serves release downloads <!-- agent-doc:waiting-metadata -->\n",
+        "          - haiven-cli will be public + open source [#q-f09f08bcf721]\n",
+    );
+    const ANSWERACK_TODO: &str =
+        "- [ ] [#tdclireleasedownloads] Decide how private haiven-cli serves release downloads\n";
+    const ANSWERACK_RESPONSE: &str = concat!(
+        "### Re: haiven-cli public downloads — test\n\n",
+        "> **Queue prompt:** [#tdclireleasedownloads] Decide how private haiven-cli serves release downloads\n\n",
+        "**Deferred:** The operator reply on this leaf is public and open source (`[#q-f09f08bcf721]`). An org owner sets the repository public.\n",
+    );
+
+    #[test]
+    fn a_deferred_response_that_cites_an_answer_acknowledges_it_as_consumed() {
+        let before = waiting_tree_document(ANSWERACK_QUEUE, ANSWERACK_TODO, "");
+        let after = waiting_tree_document(ANSWERACK_QUEUE, ANSWERACK_TODO, ANSWERACK_RESPONSE);
+
+        let annotated =
+            annotate_newly_struck_queue_items_with_response_id(&before, &after, ANSWERACK_RESPONSE)
+                .unwrap();
+        let response_id = annotated
+            .lines()
+            .find_map(|line| {
+                line.strip_prefix("### Re: haiven-cli public downloads — test ")
+                    .map(str::to_string)
+            })
+            .expect("the consuming response receives a lookup id");
+        assert!(
+            annotated.contains(&format!(
+                concat!(
+                    "          - ~~haiven-cli will be public + open source [#q-f09f08bcf721]~~\n",
+                    "            - **Consumed by:** {}. You can delete this subtree, but keep the tree: ",
+                    "“`#tdclireleasedownloads` Decide how private haiven-cli…” ",
+                    "keeps it open (its todo `#tdclireleasedownloads` is still open).\n",
+                ),
+                response_id
+            )),
+            "{annotated}"
+        );
+        // The deferred head itself stays live: only its consumed answer closed.
+        assert!(annotated.contains(
+            "  - [#tdclireleasedownloads] Decide how private haiven-cli serves release downloads <!-- agent-doc:waiting-item -->\n"
+        ));
+        // Replaying the same closeout changes nothing.
+        let replayed = annotate_newly_struck_queue_items_with_response_id(
+            &before,
+            &annotated,
+            ANSWERACK_RESPONSE,
+        )
+        .unwrap();
+        assert_eq!(replayed, annotated);
+        // The waiting refresh keeps the acknowledgement and no longer asks the
+        // operator for an answer the packet already holds.
+        let refreshed = project_waiting_on_you_tree(&annotated, ANSWERACK_RESPONSE)
+            .unwrap()
+            .unwrap_or_else(|| annotated.clone());
+        assert!(
+            refreshed.contains("- ~~haiven-cli will be public + open source [#q-f09f08bcf721]~~"),
+            "{refreshed}"
+        );
+        assert!(
+            refreshed.contains(&format!("- **Consumed by:** {response_id}.")),
+            "{refreshed}"
+        );
+        assert!(
+            !refreshed.contains("no answer or attempt in its packet yet"),
+            "{refreshed}"
+        );
+    }
+
+    #[test]
+    fn an_uncited_answer_stays_live() {
+        let response = ANSWERACK_RESPONSE.replace(" (`[#q-f09f08bcf721]`)", "");
+        let before = waiting_tree_document(ANSWERACK_QUEUE, ANSWERACK_TODO, "");
+        let after = waiting_tree_document(ANSWERACK_QUEUE, ANSWERACK_TODO, &response);
+        let annotated =
+            annotate_newly_struck_queue_items_with_response_id(&before, &after, &response).unwrap();
+        assert_eq!(
+            annotated,
+            agent_doc_markdown_ast::overlay::normalize_generated_response_lifecycle_markers(&after)
+        );
+    }
+
+    #[test]
+    fn terminalizing_a_waiting_item_consumes_its_answers_and_states_tree_closability() {
+        let queue = ANSWERACK_QUEUE.replace(
+            "          - haiven-cli will be public + open source [#q-f09f08bcf721]\n",
+            concat!(
+                "          - haiven-cli will be public + open source [#q-f09f08bcf721]\n",
+                "          - mark [#tdclireleasedownloads] as done unless there's more left to do\n",
+            ),
+        );
+        let struck = queue.replace(
+            "  - [#tdclireleasedownloads] Decide how private haiven-cli serves release downloads <!-- agent-doc:waiting-item -->\n",
+            "  - ~~[#tdclireleasedownloads] Decide how private haiven-cli serves release downloads <!-- agent-doc:waiting-item -->~~\n",
+        );
+        let response = ANSWERACK_RESPONSE.replace("**Deferred:**", "**Outcome:**");
+        let done_todo = ANSWERACK_TODO.replace("- [ ]", "- [x]");
+        let before = waiting_tree_document(&queue, ANSWERACK_TODO, "");
+        let after = waiting_tree_document(&struck, &done_todo, &response);
+
+        let annotated =
+            annotate_newly_struck_queue_items_with_response_id(&before, &after, &response).unwrap();
+        assert_eq!(
+            annotated.matches("- **Consumed by:** [#r-").count(),
+            2,
+            "both the cited and the uncited answer under the terminalized item are consumed:\n{annotated}"
+        );
+        assert!(
+            annotated.contains(
+                "- ~~mark [#tdclireleasedownloads] as done unless there's more left to do~~\n"
+            ),
+            "{annotated}"
+        );
+        assert!(
+            annotated.contains("**Guidance:** The item is complete. You can delete this whole tree: every row in it is struck or integrated."),
+            "{annotated}"
+        );
+
+        // With the todo still open, the struck copy is not deletable, and the
+        // guidance names the row that keeps it open.
+        let after_open = waiting_tree_document(&struck, ANSWERACK_TODO, &response);
+        let annotated =
+            annotate_newly_struck_queue_items_with_response_id(&before, &after_open, &response)
+                .unwrap();
+        assert!(
+            annotated.contains("**Guidance:** The item is complete. Keep this tree: “`#tdclireleasedownloads` Decide how private haiven-cli…” keeps it open (it is struck, but its todo `#tdclireleasedownloads` is still open)."),
+            "{annotated}"
+        );
+    }
+
     #[test]
     fn struck_consolidate_choice_request_closes_its_todo_and_only_its_todo() {
         let request_id = "subagent-operator-request-consolidate-choice-receipt";
@@ -7356,7 +7562,7 @@ mod tests {
         );
         assert_eq!(
             annotated
-                .matches("**Guidance:** Safe to delete this completed tree")
+                .matches("**Guidance:** The item is complete. You can delete this whole tree")
                 .count(),
             1,
             "canonical guidance must not be duplicated:\n{annotated}"

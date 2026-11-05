@@ -56,6 +56,17 @@ preflight and every closeout (`#answerbyrequestid`):
 - Only operator words change a decision. A newer operator answer becomes the
   latest revision. Earlier answers are kept, and the cycle contract shows a
   changed decision once as `decision changed: <old> -> <new>`.
+- When a response uses an answer typed in a waiting item's packet, cite the
+  answer's `[#q-…]` id. At closeout the binary strikes that answer and adds a
+  `**Consumed by:** [#r-…]` row under it, naming the response
+  (`#answerack`). Answers under a row the closeout strikes are consumed the
+  same way. Do not strike answer rows yourself.
+- The binary, not your prose, says whether the tree can go: the
+  `**Consumed by:**` row and a completed row's `**Guidance:**` say "You can
+  delete this whole tree", "You can delete this subtree, but keep the tree",
+  or "Keep this tree", and name the one row that keeps it open (an open todo,
+  an unpicked reply, a live attempt, or an open request). Do not write "safe
+  to delete" in a response.
 
 `agent-doc decision answered <FILE> [--json]` prints the ledger for debugging.
 `agent-doc decision validate --document <FILE>` also lists near-duplicate

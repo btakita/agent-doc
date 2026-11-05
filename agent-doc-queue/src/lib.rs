@@ -5,6 +5,7 @@
 //! read documents, submit commands, or mutate files.
 
 pub mod ack_stays_open;
+pub mod answer_ack;
 pub mod backlog_sync;
 pub mod capture_scope;
 pub mod claim_release_receipt;
@@ -56,6 +57,7 @@ pub mod route_dispatch;
 pub mod stale_completion_evidence;
 pub mod subagent_brief;
 pub mod subagent_intent;
+pub mod tree_closability;
 pub mod waiting_archive;
 pub mod waiting_packet;
 pub mod waiting_status;

@@ -280,6 +280,37 @@ pub fn operator_freeform_text(entries: &[QueueEntry], index: usize) -> Option<&s
     Some(body)
 }
 
+/// Whether an inert (`Freeform`) packet row is a struck operator answer
+/// (`- ~~answer~~`): a consumed answer, never generated metadata (a struck
+/// `~~**Response:** …~~` row) or a reply row.
+pub fn is_struck_operator_freeform(entries: &[QueueEntry], index: usize) -> bool {
+    let Some(QueueEntry::Freeform(line)) = entries.get(index) else {
+        return false;
+    };
+    let Some(body) = line
+        .lines()
+        .next()
+        .and_then(|first| first.trim_start().strip_prefix("- "))
+        .map(str::trim)
+    else {
+        return false;
+    };
+    let Some(inner) = body
+        .strip_prefix("~~")
+        .and_then(|rest| rest.strip_suffix("~~"))
+        .map(str::trim)
+    else {
+        return false;
+    };
+    !inner.is_empty()
+        && !is_agent_doc_reply_entry(entries, index)
+        && !inner.contains("<!-- agent-doc:")
+        && !inner.contains("auto-struck")
+        && !["**", "%%", "<", ">", "&gt;"]
+            .iter()
+            .any(|prefix| inner.starts_with(prefix))
+}
+
 /// Whether the waiting item at `head` has live operator-authored evidence.
 pub fn has_operator_reply(entries: &[QueueEntry], head: usize) -> bool {
     packet_member_indexes(entries, head)

@@ -288,7 +288,7 @@ fn quote(text: &str, limit: usize) -> String {
 }
 
 /// The first line of an entry, without its bullet.
-fn entry_body(entry: &QueueEntry) -> Option<&str> {
+pub(crate) fn entry_body(entry: &QueueEntry) -> Option<&str> {
     match entry {
         QueueEntry::Prompt(prompt) | QueueEntry::Completed(prompt) => {
             Some(prompt.text.lines().next().unwrap_or_default())
@@ -304,7 +304,7 @@ fn entry_body(entry: &QueueEntry) -> Option<&str> {
     }
 }
 
-fn is_struck_body(body: &str) -> bool {
+pub(crate) fn is_struck_body(body: &str) -> bool {
     body.trim_start().starts_with("~~")
 }
 
@@ -328,12 +328,12 @@ fn request_row_id(body: &str) -> Option<String> {
     rest.split_once(']').map(|(id, _)| id.to_ascii_lowercase())
 }
 
-fn is_closed_by(body: &str) -> bool {
-    body.trim().starts_with("**Closed by:** [#r-")
+pub(crate) fn is_closed_by(body: &str) -> bool {
+    body.trim().starts_with("**Closed by:** [#r-") || crate::tree_closability::is_consumed_by(body)
 }
 
 /// Generated rows the triage itself renders; never read back as input.
-fn is_triage_output(entries: &[QueueEntry], index: usize) -> bool {
+pub(crate) fn is_triage_output(entries: &[QueueEntry], index: usize) -> bool {
     crate::waiting_status::is_status_row(entries, index)
 }
 
@@ -474,7 +474,7 @@ fn request_choices(entries: &[QueueEntry], head: usize) -> BTreeMap<String, Vec<
 /// Short display label of a root row: an offered choice's label, else its
 /// work text without projection, comments, or `%%` fences, with each `[#id]`
 /// reference written as a `` `#id` `` code span.
-fn root_label(entries: &[QueueEntry], root: usize) -> String {
+pub(crate) fn root_label(entries: &[QueueEntry], root: usize) -> String {
     let body = entry_body(&entries[root]).unwrap_or_default();
     if let Some(label) = choice_label(body) {
         return quote(&label, LABEL_CHARS);
@@ -523,7 +523,7 @@ fn root_label(entries: &[QueueEntry], root: usize) -> String {
 
 /// Whether an operator reply at `index` was picked up: something generated
 /// (a `**label**` row), attempted, or struck sits beneath it.
-fn reply_picked_up(entries: &[QueueEntry], index: usize) -> bool {
+pub(crate) fn reply_picked_up(entries: &[QueueEntry], index: usize) -> bool {
     (index + 1..subtree_end(entries, index)).any(|child| match &entries[child] {
         QueueEntry::Completed(_) => true,
         QueueEntry::Prompt(prompt) => {
@@ -540,7 +540,7 @@ fn owner_label(text: &str) -> Option<String> {
         .map(|owner| format!("{}#{}", owner.owner, owner.generation))
 }
 
-fn attempt_on(text: &str) -> Option<SubtreeAttempt> {
+pub(crate) fn attempt_on(text: &str) -> Option<SubtreeAttempt> {
     let marker = lifecycle_marker(text)?;
     matches!(
         marker,

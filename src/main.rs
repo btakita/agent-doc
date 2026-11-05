@@ -59,6 +59,7 @@ mod convert;
 mod crash_resilience;
 mod dashboard_cmd;
 mod decision_derive;
+mod decision_search;
 mod dedupe_cmd;
 mod describe_image;
 mod dogfood_cmd;
@@ -4423,6 +4424,25 @@ enum DecisionAction {
         #[arg(long)]
         json: bool,
     },
+    /// Look an answer up before asking the operator (`#decisionsearchmenu`):
+    /// rank a session document's answered decisions against a question, an
+    /// id or a decision stamp (exact id, then stamp, then normalized
+    /// question text, then wording and optional tsift recall across session
+    /// documents), each with its verbatim answer, where and when it was
+    /// given, and the copies still open. Read-only.
+    Search {
+        /// Session document
+        file: PathBuf,
+        /// Question text, `[#id]`, decision / revision id, or
+        /// `⟦decision:<id>⟧` stamp; several words need no quotes
+        #[arg(required = true, num_args = 1..)]
+        query: Vec<String>,
+        /// Most hits to show
+        #[arg(long, default_value_t = 10)]
+        limit: usize,
+        #[arg(long)]
+        json: bool,
+    },
     /// Author one first-principles derivation step (`#firstprinciplesstore`):
     /// premises (principles in scope, facts, decisions), one stated
     /// inference, and the answer it concludes for a decision. The step is
@@ -4691,6 +4711,9 @@ fn run_decision_action(action: DecisionAction) -> anyhow::Result<()> {
                 }
             }
             Ok(())
+        }
+        DecisionAction::Search { file, query, limit, json } => {
+            decision_search::run_search(&file, &query.join(" "), limit, json)
         }
         DecisionAction::Derive { file, premises, inference, decision, answer, id, json } => {
             decision_derive::run_derive(

@@ -118,6 +118,25 @@ preflight and every closeout (`#answerbyrequestid`):
   back by itself when a new question names it. You never prune or revive by
   hand; the answer still counts as already answered.
 
+## Look it up before you ask (`#decisionsearchmenu`)
+
+Before you raise any operator question (a waiting item, a request packet, a
+choices block, a question todo), search the recorded answers:
+`agent-doc decision search <FILE> <question, [#id], decision id or
+⟦decision:…⟧ stamp> [--json]`. It ranks answered decisions: exact id first,
+then a decision stamp, then the same normalized question, then the work
+item a request was raised for, then wording and tsift recall (which also finds answers in other session documents). Each hit
+shows the verbatim answer, where and when it was given, and the copies still
+open. The last line says whether tsift recall ran; when tsift is missing or
+its index is stale, the ranking is the ledger's alone. If a hit answers your
+question, act on it and cite its decision id; ask only when nothing does,
+and say you searched.
+
+When a turn is about to ask the operator something (its prompt names an
+open question or asks for a decision, or the contract already pushes an
+answer for an open copy), the cycle contract carries `decision_lookup_menu`
+with these commands for the document. It is absent on ordinary work turns.
+
 `agent-doc decision answered <FILE> [--json]` prints the ledger for debugging,
 including its hot-store size and why each hot decision is live.
 `agent-doc decision validate --document <FILE>` also lists near-duplicate

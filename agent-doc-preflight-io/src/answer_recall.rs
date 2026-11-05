@@ -96,22 +96,37 @@ impl TsiftRecall {
     /// the project has no tsift index, or no tsift executable is found. No
     /// process is started to find out.
     pub fn discover(file: &Path, env: &RecallEnv) -> Option<Self> {
+        Self::discover_or_reason(file, env).ok()
+    }
+
+    /// [`Self::discover`], or why there is no source (`#decisionsearchmenu`
+    /// reports it instead of silently ranking without tsift).
+    pub fn discover_or_reason(file: &Path, env: &RecallEnv) -> Result<Self, &'static str> {
         if env.disabled {
-            return None;
+            return Err("disabled by AGENT_DOC_ANSWER_RECALL");
         }
-        let root = agent_doc_project_root_io::project_root_containing(file)?;
+        let root = agent_doc_project_root_io::project_root_containing(file)
+            .ok_or("no project root")?;
         if !root.join(".tsift/index.db").is_file() {
-            return None;
+            return Err("no .tsift/index.db in the project");
         }
         let bin = resolve_bin(
             env.tsift_bin.as_deref().unwrap_or("tsift"),
             env.path.as_ref(),
-        )?;
-        Some(Self {
+        )
+        .ok_or("no tsift executable on PATH")?;
+        Ok(Self {
             bin,
             root: std::fs::canonicalize(&root).unwrap_or(root),
             deadline: Duration::from_millis(env.timeout_ms.unwrap_or(DEFAULT_TIMEOUT_MS).max(100)),
         })
+    }
+
+    /// Modification time of the tsift index, when readable.
+    pub fn index_modified(&self) -> Option<std::time::SystemTime> {
+        std::fs::metadata(self.root.join(".tsift/index.db"))
+            .and_then(|meta| meta.modified())
+            .ok()
     }
 
     pub fn root(&self) -> &Path {
@@ -217,8 +232,43 @@ pub fn parse_report(report: &Value) -> Vec<(String, usize, f64, bool)> {
         .collect()
 }
 
+/// How one recall pass went, beyond its hits.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct RecallOutcome {
+    /// Queries killed at the shared deadline.
+    pub timed_out: usize,
+    /// Queries whose search failed (spawn error, non-zero exit, oversized or
+    /// unparsable report).
+    pub failed: usize,
+}
+
 impl AnswerRecall for TsiftRecall {
     fn recall(&self, queries: &[String], limit: usize) -> Vec<Vec<RecallHit>> {
+        let (results, outcome) = self.recall_with_outcome(queries, limit);
+        if outcome.timed_out > 0 {
+            eprintln!(
+                "[preflight] answer ledger: tsift recall hit its {}ms deadline ({} of {} queries); continuing without them",
+                self.deadline.as_millis(),
+                outcome.timed_out,
+                queries.len()
+            );
+        }
+        results
+    }
+}
+
+impl TsiftRecall {
+    /// The configured deadline for one pass.
+    pub fn deadline(&self) -> Duration {
+        self.deadline
+    }
+
+    /// [`AnswerRecall::recall`] plus how many queries timed out or failed.
+    pub fn recall_with_outcome(
+        &self,
+        queries: &[String],
+        limit: usize,
+    ) -> (Vec<Vec<RecallHit>>, RecallOutcome) {
         let started = Instant::now();
         // All queries run at once against one shared deadline.
         // The reader hands its bytes over a channel so a descendant that keeps
@@ -240,9 +290,10 @@ impl AnswerRecall for TsiftRecall {
             })
             .collect();
         let mut results = Vec::with_capacity(queries.len());
-        let mut timed_out = 0usize;
+        let mut outcome = RecallOutcome::default();
         for slot in &mut running {
             let Some((mut child, reader)) = slot.take() else {
+                outcome.failed += 1;
                 results.push(Vec::new());
                 continue;
             };
@@ -251,7 +302,7 @@ impl AnswerRecall for TsiftRecall {
                 Ok(Some(status)) => Some(status),
                 _ => {
                     kill_tree(&mut child);
-                    timed_out += 1;
+                    outcome.timed_out += 1;
                     None
                 }
             };
@@ -266,11 +317,19 @@ impl AnswerRecall for TsiftRecall {
             };
             let hits = match status {
                 Some(status) if status.success() && (bytes.len() as u64) <= MAX_REPORT_BYTES => {
-                    serde_json::from_slice::<Value>(&bytes)
-                        .map(|report| parse_report(&report))
-                        .unwrap_or_default()
+                    match serde_json::from_slice::<Value>(&bytes) {
+                        Ok(report) => parse_report(&report),
+                        Err(_) => {
+                            outcome.failed += 1;
+                            Vec::new()
+                        }
+                    }
                 }
-                _ => Vec::new(),
+                Some(_) => {
+                    outcome.failed += 1;
+                    Vec::new()
+                }
+                None => Vec::new(),
             };
             results.push(
                 hits.into_iter()
@@ -286,14 +345,7 @@ impl AnswerRecall for TsiftRecall {
                     .collect(),
             );
         }
-        if timed_out > 0 {
-            eprintln!(
-                "[preflight] answer ledger: tsift recall hit its {}ms deadline ({timed_out} of {} queries); continuing without them",
-                self.deadline.as_millis(),
-                queries.len()
-            );
-        }
-        results
+        (results, outcome)
     }
 }
 

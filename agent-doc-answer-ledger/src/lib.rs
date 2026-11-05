@@ -64,6 +64,7 @@ pub mod graph;
 pub mod history;
 pub mod liveness;
 pub mod recall;
+pub mod search;
 pub mod stale;
 pub mod text;
 
@@ -1782,7 +1783,7 @@ pub fn reask_refusal(reasks: &[Reask]) -> String {
         ));
     }
     out.push_str(
-        "\nAct on the recorded answer instead. If the answer truly does not resolve a new question, cite the decision id or write `already answered: <answer>` in the request and state what is still open.",
+        "\nAct on the recorded answer instead. If the answer truly does not resolve a new question, cite the decision id or write `already answered: <answer>` in the request and state what is still open. Look answers up first with `agent-doc decision search <FILE> <question>` (#decisionsearchmenu).",
     );
     out
 }

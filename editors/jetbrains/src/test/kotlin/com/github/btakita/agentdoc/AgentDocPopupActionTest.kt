@@ -31,6 +31,7 @@ class AgentDocPopupActionTest {
                 "AgentDoc.LoadTmuxWindow",
                 "AgentDoc.RefreshEnvironment",
                 "AgentDoc.Dashboard",
+                "AgentDoc.TreeStatus",
             ),
             AgentDocPopupAction.PRIMARY_ACTION_IDS,
         )

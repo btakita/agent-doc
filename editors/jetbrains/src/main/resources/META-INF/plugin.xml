@@ -284,5 +284,15 @@
             <add-to-group group-id="EditorPopupMenu" anchor="last"/>
             <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
         </action>
+        <action id="AgentDoc.TreeStatus"
+                class="com.github.btakita.agentdoc.shell.TreeStatusForwarder"
+                text="Agent Doc: Tree Status"
+                description="Show what the queue subtree at the caret line still needs, and delete its deletable subtrees">
+            <!-- `#treestatusjetbrains`: the editors/SPEC.md suggested key. Unbound in the
+                 bundled $default keymap; rebind under Settings > Keymap. -->
+            <keyboard-shortcut first-keystroke="alt shift S" keymap="$default"/>
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+        </action>
     </actions>
 </idea-plugin>

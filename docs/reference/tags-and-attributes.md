@@ -107,6 +107,13 @@ principles settle a question, the agent decides without asking and cites them
 as `[#id]`; otherwise it asks once, naming the principles that bear on it and
 the answer they recommend.
 
+An item whose first line reads `fact [#id]: <statement>` is a fact, a premise
+that derivations rest on. It stays an ordinary `agent_rules` entry. When a
+principle or fact is reworded or removed, the next turn's cycle contract lists
+it in `premise_changes` with every conclusion derived from it: the agent
+re-derives unreviewed conclusions and asks the operator about confirmed ones.
+Reflowing a statement's whitespace is not a change.
+
 Names such as `input`, `output`, `findings`, `log`, and `architecture` are
 conventional generic patch slots. Any syntactically valid unregistered
 `agent:NAME` is parsed as a component, remains a turn trigger by default, and

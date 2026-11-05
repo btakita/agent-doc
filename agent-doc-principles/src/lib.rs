@@ -59,6 +59,7 @@
 //! in the same layer: the first wins and the second is reported.
 
 pub mod derivation;
+pub mod rederive;
 
 use serde::{Deserialize, Serialize};
 

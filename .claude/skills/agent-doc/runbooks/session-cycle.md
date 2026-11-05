@@ -82,6 +82,13 @@ only the compact routing table that survives context compaction.
   (`Derived from [#id]: …`). When they bear on a question but do not settle
   it, ask once, listing the bearing principles, the missing premise, and the
   answer they recommend. Never act against a principle silently.
+- When the cycle contract includes `premise_changes` or
+  `derivation_contradictions` (`#firstprinciplesrederive`), follow
+  `premise_changes_guidance`. Each change is a principle or `fact [#id]:`
+  statement that was reworded or removed since the last turn, with the
+  conclusions that rested on it: re-derive an `affected` entry whose action is
+  `rederive`; for `flag` (operator-confirmed), show the operator the
+  conclusion and the old and new premise and ask, never rewrite it.
 
 ## Mid-turn steering and work
 

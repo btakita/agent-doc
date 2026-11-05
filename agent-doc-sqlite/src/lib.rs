@@ -12,6 +12,9 @@
 //! - `archive_index` — derived sqlite index over compacted-turn markdown archives.
 //! - `context_injection_ledger` — durable per-cycle prompt-context manifests and
 //!   duplicate-detection records in the sole controller `state.db`.
+//! - `premise_statement_index` — per-document principle and fact statement
+//!   digests (`#firstprinciplesrederive`); a changed or removed premise puts
+//!   its derived conclusions in the cycle contract.
 //! - `op_log` — operation-log tables (actor + causal/Lamport tagging) in the sole
 //!   controller `state.db` for the operation-scoped drift model.
 //! - `steering_gate_log` — the steering typing-completion gate's decision
@@ -26,6 +29,7 @@ pub mod answer_ledger_index;
 pub mod archive_index;
 pub mod context_injection_ledger;
 pub mod op_log;
+pub mod premise_statement_index;
 pub mod reliable_sync_inbox;
 pub mod state_store;
 pub mod steering_gate_log;

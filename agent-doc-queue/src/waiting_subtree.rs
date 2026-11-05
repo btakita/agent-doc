@@ -43,9 +43,12 @@ const LABEL_CHARS: usize = 60;
 /// One open operator ask inside a subtree.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OpenAsk {
-    /// The reserved request id (`subagent-operator-request-…`).
-    pub id: String,
-    /// Labels of the options offered beneath that request's `**Request**` row.
+    /// The reserved request id (`subagent-operator-request-…`), or `None` for
+    /// an offered decision no request row governs and nothing has acted on
+    /// yet (`#waitingdonetodoopen`).
+    pub id: Option<String>,
+    /// Labels of the options offered beneath that request's `**Request**` row,
+    /// or of the open decision's options.
     pub choices: Vec<String>,
 }
 
@@ -258,15 +261,23 @@ pub fn ask_text(asks: &[OpenAsk]) -> String {
                 .iter()
                 .map(|label| format!("**{label}**"))
                 .collect::<Vec<_>>();
+            let Some(id) = ask.id.as_deref() else {
+                return match choices.as_slice() {
+                    [] => "answer the open choice under this item".to_string(),
+                    [one] => format!("answer the open choice: confirm {one} or reply with another"),
+                    [rest @ .., last] => format!(
+                        "answer the open choice: choose {} or {last}, or reply with another",
+                        rest.join(", ")
+                    ),
+                };
+            };
             match choices.as_slice() {
-                [] => format!("answer the open request `#{}`", ask.id),
-                [one] => format!(
-                    "answer the open request `#{}`: confirm {one} or reply with another",
-                    ask.id
-                ),
+                [] => format!("answer the open request `#{id}`"),
+                [one] => {
+                    format!("answer the open request `#{id}`: confirm {one} or reply with another")
+                }
                 [rest @ .., last] => format!(
-                    "answer the open request `#{}`: choose {} or {last}, or reply with another",
-                    ask.id,
+                    "answer the open request `#{id}`: choose {} or {last}, or reply with another",
                     rest.join(", ")
                 ),
             }
@@ -471,6 +482,151 @@ fn request_choices(entries: &[QueueEntry], head: usize) -> BTreeMap<String, Vec<
     out
 }
 
+/// The nearest earlier entry indented less than `index` (its list parent).
+fn list_parent(entries: &[QueueEntry], index: usize) -> Option<usize> {
+    let indent = entries.get(index).and_then(entry_list_indent)?;
+    (0..index).rev().find(|candidate| {
+        entry_list_indent(&entries[*candidate]).is_some_and(|other| other < indent)
+    })
+}
+
+/// Whether a row is generated metadata (`**label**`), never operator text.
+fn is_generated_body(body: &str) -> bool {
+    agent_doc_element_queue::strip_attempt_projection_prefix(body)
+        .trim_start()
+        .trim_start_matches("~~")
+        .starts_with("**")
+}
+
+/// Whether the row at `index` shows that someone acted inside a decision:
+/// a struck row, a worker attempt, a `**Closed by:**` link, or operator text.
+fn is_action_evidence(entries: &[QueueEntry], index: usize) -> bool {
+    match &entries[index] {
+        QueueEntry::Completed(_) => true,
+        QueueEntry::Prompt(prompt) => match classify_member(prompt) {
+            WaitingMember::Attempt(_) => true,
+            WaitingMember::Operator => {
+                let text = agent_doc_element_queue::struck_work_text(&prompt.text).trim();
+                !waiting_packet::is_agent_doc_reply_entry(entries, index)
+                    && !text.is_empty()
+                    && !text.starts_with("**")
+            }
+            WaitingMember::BinaryFollowUp | WaitingMember::OfferedChoice => false,
+        },
+        QueueEntry::Freeform(_) => {
+            let body = entry_body(&entries[index]).unwrap_or_default();
+            is_struck_body(body)
+                || is_closed_by(body)
+                || waiting_packet::operator_freeform_text(entries, index).is_some()
+        }
+        _ => false,
+    }
+}
+
+/// Offered decisions inside the subtree rooted at `root` that nobody has
+/// acted on yet (`#waitingdonetodoopen`): each is one open ask to the
+/// operator, so a tree holding one never reads as complete.
+///
+/// A decision is the run of sibling options (`**label**: effect`) under one
+/// parent row. It is not an ask of its own when:
+///
+/// - a `**Request**: [#id]` row governs it (the options after that row belong
+///   to the request, which is counted while its id is open in Todo);
+/// - its options are the binary's own reply rows (`▫️`) — those offer the
+///   item's own ask, which the item's own state already counts;
+/// - it sits inside a `**Closed by:**` back-reference (a copy, not a decision);
+/// - any option is struck, carries an attempt, or has rows beneath it (a pick,
+///   a `**Closed by:**`, a nested response);
+/// - anything else inside its decision scope (the subtree of the nearest
+///   enclosing operator row, or the whole packet) is struck, attempted,
+///   closed, or operator text: the operator already answered there.
+pub fn open_choice_asks(entries: &[QueueEntry], head: usize, root: usize) -> Vec<OpenAsk> {
+    let rows = owned_rows(entries, head, root);
+    let mut closed_by_ranges = Vec::new();
+    // parent -> (options in order, whether a Request row was seen first)
+    let mut groups = BTreeMap::<usize, (Vec<usize>, bool)>::new();
+    for &index in &rows {
+        let body = entry_body(&entries[index]).unwrap_or_default();
+        if is_closed_by(body) {
+            closed_by_ranges.push(index..subtree_end(entries, index));
+            continue;
+        }
+        if closed_by_ranges.iter().any(|range| range.contains(&index)) {
+            continue;
+        }
+        let Some(parent) = list_parent(entries, index) else {
+            continue;
+        };
+        let group = groups.entry(parent).or_default();
+        if request_row_id(body).is_some() {
+            group.1 = true;
+            continue;
+        }
+        if group.1
+            || choice_label(body).is_none()
+            || waiting_packet::is_agent_doc_reply_entry(entries, index)
+        {
+            continue;
+        }
+        group.0.push(index);
+    }
+    let owned = owned_rows(entries, head, head)
+        .into_iter()
+        .collect::<HashSet<_>>();
+    let mut asks = Vec::new();
+    for (parent, (options, _)) in groups {
+        if options.is_empty() {
+            continue;
+        }
+        let acted_on_option = options.iter().any(|&option| {
+            matches!(entries[option], QueueEntry::Completed(_))
+                || is_struck_body(entry_body(&entries[option]).unwrap_or_default())
+                || matches!(&entries[option], QueueEntry::Prompt(prompt)
+                    if matches!(classify_member(prompt), WaitingMember::Attempt(_)))
+                || subtree_end(entries, option) > option + 1
+        });
+        if acted_on_option {
+            continue;
+        }
+        // The decision's scope: the nearest enclosing operator row, else the
+        // whole packet.
+        let mut scope = parent;
+        while scope != head {
+            let body = entry_body(&entries[scope]).unwrap_or_default();
+            if owned.contains(&scope)
+                && !is_generated_body(body)
+                && !waiting_packet::is_agent_doc_reply_entry(entries, scope)
+            {
+                break;
+            }
+            match list_parent(entries, scope) {
+                Some(up) if up >= head => scope = up,
+                _ => {
+                    scope = head;
+                    break;
+                }
+            }
+        }
+        let answered_in_scope = (scope + 1..subtree_end(entries, scope))
+            .filter(|index| owned.contains(index) && !options.contains(index))
+            .filter(|index| !is_triage_output(entries, *index))
+            .any(|index| is_action_evidence(entries, index));
+        if answered_in_scope {
+            continue;
+        }
+        asks.push(OpenAsk {
+            id: None,
+            choices: options
+                .iter()
+                .filter_map(|&option| {
+                    choice_label(entry_body(&entries[option]).unwrap_or_default())
+                })
+                .collect(),
+        });
+    }
+    asks
+}
+
 /// Short display label of a root row: an offered choice's label, else its
 /// work text without projection, comments, or `%%` fences, with each `[#id]`
 /// reference written as a `` `#id` `` code span.
@@ -572,11 +728,11 @@ fn collect_asks(
         if is_reserved_operator_action_id(&id)
             && open_todo_ids.contains(&id)
             && !own_ids.contains(&id)
-            && !out.iter().any(|ask| ask.id == id)
+            && !out.iter().any(|ask| ask.id.as_deref() == Some(id.as_str()))
         {
             out.push(OpenAsk {
                 choices: choices.get(&id).cloned().unwrap_or_default(),
-                id,
+                id: Some(id),
             });
         }
     }
@@ -689,6 +845,11 @@ pub fn subtree_status(
             _ => {}
         }
     }
+    // `#waitingdonetodoopen`: an offered decision nobody acted on is an open
+    // ask, so a subtree holding one is never deletable.
+    status
+        .open_asks
+        .extend(open_choice_asks(entries, head, root));
     if status.latest_activity.is_none() && root != head {
         // A subtree without its own timestamp inherits the item's newest one.
         for index in owned_rows(entries, head, head) {

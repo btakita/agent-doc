@@ -5098,14 +5098,90 @@ fn remove_inline_response_id(line: &str, response_id: &str) -> String {
 /// metadata marker. Queue parsing treats the entire waiting subtree as one
 /// graph projection: metadata and operator answer edges are never independent
 /// work; an answer selects the durable waiting item parent.
+///
+/// `#waitingdonetodoopen`: a response closeout (non-empty `response_body`)
+/// also checks off the Todo of every waiting item whose tree is complete
+/// (every row closed, no open ask, choice, attempt, or unpicked reply) and
+/// archives the item, instead of leaving a Next row that asks the operator to
+/// tick the box. A declarative sync (empty `response_body`) never changes
+/// `agent:todo`; it shows such an item as one open ask (`you: 1`).
 pub fn project_waiting_on_you_tree(document: &str, response_body: &str) -> Result<Option<String>> {
+    let first = project_waiting_on_you_tree_pass(document, response_body, &HashSet::new())?;
+    if response_body.trim().is_empty() {
+        return Ok(first);
+    }
+    let projected = first.as_deref().unwrap_or(document);
+    let (checked, completed) = check_off_complete_waiting_todos(projected)?;
+    if completed.is_empty() {
+        return Ok(first);
+    }
+    let rerun = project_waiting_on_you_tree_pass(&checked, response_body, &completed)?;
+    let out = rerun.unwrap_or(checked);
+    Ok((out != document).then_some(out))
+}
+
+fn project_waiting_on_you_tree_pass(
+    document: &str,
+    response_body: &str,
+    completed: &HashSet<String>,
+) -> Result<Option<String>> {
     let adopted = adopt_legacy_waiting_items(document)?;
     let base = adopted.as_deref().unwrap_or(document);
-    let projected = project_waiting_items_from_todos(base, response_body)?;
+    let projected = project_waiting_items_from_todos(base, response_body, completed)?;
     let projected = projected.as_deref().unwrap_or(base);
     let normalized = normalize_waiting_queues(projected)?;
     let out = normalized.as_deref().unwrap_or(projected);
     Ok((out != document).then(|| out.to_string()))
+}
+
+/// `#waitingdonetodoopen`: check off, in `agent:todo`, the open Todo of every
+/// projected waiting item whose tree is complete. Returns the updated
+/// document and the ids it checked off. A Todo that cannot be resolved
+/// unambiguously is left open; its item keeps asking once.
+fn check_off_complete_waiting_todos(document: &str) -> Result<(String, HashSet<String>)> {
+    let todos = open_waiting_todos(document);
+    let by_lower = todos
+        .iter()
+        .map(|todo| (todo.id.to_ascii_lowercase(), todo.id.clone()))
+        .collect::<HashMap<_, _>>();
+    let open_todo_ids = by_lower.keys().cloned().collect::<HashSet<_>>();
+    let mut complete = Vec::new();
+    for component in element::parse(document)?
+        .into_iter()
+        .filter(|component| component.name == "queue")
+    {
+        let body = component.content(document);
+        if !body.contains(WAITING_ON_YOU_ITEM_MARKER) {
+            continue;
+        }
+        let entries = document_queue::parse(body)?;
+        complete.extend(crate::waiting_status::complete_waiting_todo_ids(
+            &entries,
+            &open_todo_ids,
+        ));
+    }
+    let mut out = document.to_string();
+    let mut completed = HashSet::new();
+    for id in complete {
+        let Some(todo_id) = by_lower.get(&id) else {
+            continue;
+        };
+        if completed.contains(todo_id) || !agent_doc_element::todo::todo_owns_id(&out, todo_id) {
+            continue;
+        }
+        let Ok(outcome) = agent_doc_element::todo::set_todo_item_state_in_document(
+            &out,
+            todo_id,
+            agent_doc_element::todo::TodoTransition::Done,
+        ) else {
+            continue;
+        };
+        if outcome.changed {
+            out = outcome.content;
+            completed.insert(todo_id.clone());
+        }
+    }
+    Ok((out, completed))
 }
 
 /// `#waitingpacketowner`: adopt the items of a legacy, unmarked Waiting-on-you
@@ -5265,7 +5341,11 @@ fn normalize_waiting_queues(document: &str) -> Result<Option<String>> {
     Ok(Some(out))
 }
 
-fn project_waiting_items_from_todos(document: &str, response_body: &str) -> Result<Option<String>> {
+fn project_waiting_items_from_todos(
+    document: &str,
+    response_body: &str,
+    completed: &HashSet<String>,
+) -> Result<Option<String>> {
     let packets = waiting_operator_packets(document, response_body);
     let todos = open_waiting_todos(document);
     // An operator may answer a request directly beneath its original queue
@@ -5361,6 +5441,7 @@ fn project_waiting_items_from_todos(document: &str, response_body: &str) -> Resu
         &location,
         &kept_raws,
         &open_ids,
+        completed,
     );
     let mut archived = Vec::new();
     let mut retained = Vec::new();
@@ -5472,6 +5553,7 @@ fn waiting_segment_dispositions(
     location: &WaitingTreeLocation,
     kept_raws: &HashSet<String>,
     open_ids: &HashSet<String>,
+    completed: &HashSet<String>,
 ) -> Vec<(crate::waiting_archive::WaitingSegment, SegmentDisposition)> {
     if location.start == location.end {
         return Vec::new();
@@ -5490,6 +5572,9 @@ fn waiting_segment_dispositions(
             continue;
         }
         let disposition = match segment.id.as_deref() {
+            Some(id) if !open_ids.contains(id) && completed.contains(id) => {
+                SegmentDisposition::Archive(crate::waiting_archive::ArchiveReason::TreeComplete)
+            }
             Some(id) if !open_ids.contains(id) => SegmentDisposition::Archive(
                 crate::waiting_archive::ArchiveReason::TodoClosed,
             ),

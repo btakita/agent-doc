@@ -166,12 +166,16 @@ fn receipt_text(segment: &WaitingSegment) -> String {
 pub enum ArchiveReason {
     /// The item's Todo is closed (or gone).
     TodoClosed,
+    /// Every row under the item closed, so the response closeout checked its
+    /// Todo off (`#waitingdonetodoopen`).
+    TreeComplete,
 }
 
 impl ArchiveReason {
     fn phrase(self) -> &'static str {
         match self {
             Self::TodoClosed => "its Todo closed",
+            Self::TreeComplete => "every row under it closed, so closeout checked its Todo off",
         }
     }
 }

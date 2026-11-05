@@ -16,10 +16,17 @@
 //! - `🙋`: the operator owes an answer (the item's own ask, or an open request
 //!   inside its packet);
 //! - `📥`: the operator answered and no attempt has picked the answer up yet;
-//! - `✅`: every row under the item is closed; only the Todo is still open.
+//! - complete: every row under the item is closed and no offered decision is
+//!   open, but its Todo is still open. The open Todo is the operator's, so it
+//!   counts as `you: 1` and the head shows the `🙋` gate, never `✅`
+//!   (`#waitingdonetodoopen`); a response closeout checks such a Todo off
+//!   ([`complete_waiting_todo_ids`]) and the item leaves the tree;
+//! - `✅`: every row under the item is closed and its Todo is closed too.
 //!
-//! The counts: `you` open operator asks, `agent` live attempts plus an answer
-//! waiting to be picked up, `done` struck rows in the packet.
+//! The counts: `you` open operator asks (the item's own ask, open requests,
+//! offered decisions nobody acted on, and a complete item's still-open Todo),
+//! `agent` live attempts plus an answer waiting to be picked up, `done` struck
+//! rows in the packet.
 //!
 //! The same pass renders the head's first child, a binary-owned reply row
 //! `**Next:** <owner> — <action> (evidence: …)` naming the single remaining
@@ -37,7 +44,7 @@ use agent_doc_document::queue_projection::{QueueLifecycleMarker, is_reserved_ope
 
 use crate::document_queue::QueueEntry;
 use crate::waiting_packet::{WaitingMember, classify_member, packet_member_indexes};
-use crate::waiting_subtree::WaitingTriage;
+use crate::waiting_subtree::{OpenAsk, WaitingTriage};
 
 /// Attempt states in the order they win the item's state.
 const ATTEMPT_PRECEDENCE: [QueueLifecycleMarker; 9] = [
@@ -52,7 +59,7 @@ const ATTEMPT_PRECEDENCE: [QueueLifecycleMarker; 9] = [
     QueueLifecycleMarker::Reported,
 ];
 
-/// `✅`: every row under the item is closed; only its Todo is still open.
+/// `✅`: every row under the item is closed and its Todo is closed too.
 pub const WAITING_DONE_GLYPH: &str = "✅";
 
 /// Who owns the item's next step.
@@ -64,7 +71,10 @@ pub enum WaitingState {
     Operator,
     /// The operator answered; no attempt has picked it up yet.
     Answered,
-    /// Every row under the item is closed.
+    /// Every row under the item is closed, but its Todo is still open
+    /// (`#waitingdonetodoopen`): the closeout checks it off.
+    Complete,
+    /// Every row under the item is closed and its Todo is closed.
     Done,
 }
 
@@ -72,7 +82,7 @@ impl WaitingState {
     pub fn glyph(&self) -> String {
         match self {
             Self::Attempt(marker) => marker.prefix().to_string(),
-            Self::Operator => {
+            Self::Operator | Self::Complete => {
                 agent_doc_document::queue_projection::operator_action_marker().to_string()
             }
             Self::Answered => QueueLifecycleMarker::Pending.prefix().to_string(),
@@ -90,6 +100,9 @@ pub struct WaitingStatus {
     pub done: usize,
     /// Open operator requests inside the packet, other than the item itself.
     pub open_requests: Vec<String>,
+    /// Offered decisions inside the packet nobody has acted on yet
+    /// (`#waitingdonetodoopen`).
+    pub open_choices: Vec<OpenAsk>,
     /// Whether the item's own ask is still unanswered.
     pub own_ask_open: bool,
     /// The item's Todo id.
@@ -125,7 +138,7 @@ impl WaitingStatus {
     /// is one fixed point in either pass order. Both forms parse as the same
     /// projection token.
     pub fn head_token(&self) -> String {
-        if self.state == WaitingState::Operator {
+        if matches!(self.state, WaitingState::Operator | WaitingState::Complete) {
             return agent_doc_element_queue::render_waiting_status_token(
                 "",
                 self.you,
@@ -241,7 +254,14 @@ pub fn waiting_status(
     }
 
     let own_ask_open = !answered && attempts.is_empty() && done == 0;
-    let you = usize::from(own_ask_open) + open_requests.len();
+    // `#waitingdonetodoopen`: an offered decision nobody acted on is still an
+    // ask. While the item's own ask is open its options are that ask.
+    let open_choices = if own_ask_open {
+        Vec::new()
+    } else {
+        crate::waiting_subtree::open_choice_asks(entries, head, head)
+    };
+    let mut you = usize::from(own_ask_open) + open_requests.len() + open_choices.len();
     let attempt = ATTEMPT_PRECEDENCE
         .iter()
         .find(|marker| attempts.iter().any(|(candidate, _)| candidate == *marker))
@@ -252,10 +272,18 @@ pub fn waiting_status(
             .find(|(candidate, _)| *candidate == marker)
             .and_then(|(_, owner)| owner.clone())
     });
+    // The item is the view of its Todo; one without a resolvable id is
+    // treated as open, so it never reads `✅`.
+    let todo_open = item_id.as_ref().is_none_or(|id| open_todo_ids.contains(id));
     let state = match attempt {
         Some(marker) => WaitingState::Attempt(marker),
         None if you > 0 => WaitingState::Operator,
         None if answered => WaitingState::Answered,
+        None if todo_open => {
+            // The open Todo is the operator's last open row.
+            you += 1;
+            WaitingState::Complete
+        }
         None => WaitingState::Done,
     };
     let agent = attempts.len() + usize::from(state == WaitingState::Answered);
@@ -265,6 +293,7 @@ pub fn waiting_status(
         agent,
         done,
         open_requests: open_requests.into_iter().collect(),
+        open_choices,
         own_ask_open,
         item_id,
         attempt_owner,
@@ -464,6 +493,10 @@ impl WaitingStatus {
                     "you — reply under this item with the decision or result it asks for (evidence: no answer or attempt in its packet yet)".to_string()
                 }
             }
+            WaitingState::Operator if self.open_requests.is_empty() => {
+                let ask = crate::waiting_subtree::ask_text(&self.open_choices);
+                format!("you — {ask} (evidence: open choice in this item's packet)")
+            }
             WaitingState::Operator => {
                 let requests = self
                     .open_requests
@@ -471,8 +504,13 @@ impl WaitingStatus {
                     .map(|id| format!("`#{id}`"))
                     .collect::<Vec<_>>()
                     .join(", ");
+                let choices = if self.open_choices.is_empty() {
+                    String::new()
+                } else {
+                    format!("; {}", crate::waiting_subtree::ask_text(&self.open_choices))
+                };
                 format!(
-                    "you — answer the open request {requests} (evidence: open request in this item's packet)"
+                    "you — answer the open request {requests}{choices} (evidence: open request in this item's packet)"
                 )
             }
             WaitingState::Answered => {
@@ -482,8 +520,14 @@ impl WaitingStatus {
                     quote(reply)
                 )
             }
-            WaitingState::Done => format!(
+            WaitingState::Complete if self.item_id.is_some() => format!(
+                "you — nothing is left but the Todo: the next response closeout checks off {item}; reply under this item if anything remains (evidence: every row under the item is closed)"
+            ),
+            WaitingState::Complete => format!(
                 "you — check off {item} in Todo, or reply with what remains (evidence: every row under the item is closed)"
+            ),
+            WaitingState::Done => format!(
+                "agent — nothing is owed; {item} is closed in Todo (evidence: every row under the item is closed)"
             ),
         }
     }
@@ -533,6 +577,18 @@ impl WaitingStatus {
             asks.push("this item's own ask".to_string());
         }
         asks.extend(self.open_requests.iter().map(|id| format!("`#{id}`")));
+        asks.extend(self.open_choices.iter().map(|ask| {
+            let labels = ask
+                .choices
+                .iter()
+                .map(|label| format!("**{label}**"))
+                .collect::<Vec<_>>()
+                .join(" / ");
+            format!("open choice {labels}")
+        }));
+        if self.state == WaitingState::Complete {
+            asks.push("this item's open Todo".to_string());
+        }
         let asks = if asks.is_empty() {
             String::new()
         } else {
@@ -619,6 +675,26 @@ fn remove_status_tokens(prefix: &str) -> String {
     }
     out.push_str(rest);
     out
+}
+
+/// Todo ids of the live waiting items in one queue body whose tree is complete
+/// while their Todo is still open (`#waitingdonetodoopen`). A response
+/// closeout checks each off instead of leaving a Next row that asks the
+/// operator to tick its box.
+pub fn complete_waiting_todo_ids(
+    entries: &[QueueEntry],
+    open_todo_ids: &HashSet<String>,
+) -> Vec<String> {
+    (0..entries.len())
+        .filter(|index| {
+            matches!(&entries[*index], QueueEntry::Prompt(_))
+                && crate::waiting_packet::is_waiting_item_head(&entries[*index])
+        })
+        .filter_map(|index| waiting_status(entries, index, open_todo_ids))
+        .filter(|status| status.state == WaitingState::Complete)
+        .filter_map(|status| status.item_id)
+        .filter(|id| open_todo_ids.contains(id))
+        .collect()
 }
 
 /// Project the state token and the Next row onto every live waiting head in
@@ -821,8 +897,10 @@ mod tests {
                 .contains("⟦☑️ you: 0 · agent: 1 · done: 0⟧ [#reported]"),
             "{projected}"
         );
+        // `#waitingdonetodoopen`: a complete tree whose Todo is still open
+        // counts that Todo as the operator's and never reads `✅`.
         assert!(
-            head_line(&projected, "closed").contains("⟦✅ you: 0 · agent: 0 · done: 1⟧ [#closed]"),
+            head_line(&projected, "closed").contains("⟦you: 1 · agent: 0 · done: 1⟧ [#closed]"),
             "{projected}"
         );
         assert!(
@@ -930,7 +1008,7 @@ mod tests {
         assert_eq!(
             next_line(&projected, "closed"),
             format!(
-                "  - **Next:** you — check off `#closed` in Todo, or reply with what remains (evidence: every row under the item is closed){reply}"
+                "  - **Next:** you — nothing is left but the Todo: the next response closeout checks off `#closed`; reply under this item if anything remains (evidence: every row under the item is closed){reply}"
             )
         );
         assert_eq!(projected.matches("**Next:**").count(), 5);

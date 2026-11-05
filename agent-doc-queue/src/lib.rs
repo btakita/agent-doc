@@ -62,3 +62,5 @@ pub mod waiting_status;
 pub mod waiting_subtree;
 #[cfg(test)]
 mod waiting_fixture_tests;
+#[cfg(test)]
+mod waiting_done_tests;

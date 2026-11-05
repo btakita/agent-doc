@@ -928,7 +928,15 @@ change with no new JNA method and no plugin generation. Shipped derivations:
   atomic JSON record per document naming its path and content hash), and
   registration restores it into `settledShadows` when memory holds none, so a
   restarted IDE decides from the same ancestor it would have held in memory. A
-  record that does not verify is no record. With no settled shadow, a
+  record that does not verify is no record. `#shadowstorecost`: the save does no
+  I/O on the replica worker. A newer settle deletes the older record at once (a
+  crash before the write leaves no record, the hold, never an older ancestor),
+  and one debounced write (250 ms up to 5 s, proportional to document size)
+  persists whatever is newest when it runs, so an older settle never lands over
+  a newer one. `CrdtReplicaManager.dispose` flushes, and the plugin generation
+  closes the store on unload and IDE exit. Records whose document is gone, or
+  that were neither written nor read for 30 days, are collected in the
+  background at most daily; a document this session touched never is. With no settled shadow, a
   registration whose non-empty buffer differs from a known canonical holds
   unless canonical is proven to contain the operator edits;
   `RegistrationProjection.guardUnprovenCanonical` enforces that over any answer,

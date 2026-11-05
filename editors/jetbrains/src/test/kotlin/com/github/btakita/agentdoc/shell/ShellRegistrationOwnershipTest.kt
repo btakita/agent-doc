@@ -316,7 +316,7 @@ class ShellRegistrationOwnershipTest {
             "newSingleThreadExecutor" to 1,
             "newSingleThreadScheduledExecutor" to 8,
             "newThread" to 14,
-            "schedule" to 5,
+            "schedule" to 6,
             "scheduleWithFixedDelay" to 1,
             "submit" to 1,
         )

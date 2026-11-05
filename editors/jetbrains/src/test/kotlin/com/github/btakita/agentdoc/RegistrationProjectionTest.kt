@@ -398,6 +398,16 @@ class RegistrationProjectionTest {
             "only an accepted projection is persisted",
             settle.indexOf("if (projected) {") < settle.indexOf("settledShadowStore.save("),
         )
+        // #shadowstorecost: the save is backgrounded, so a closing project writes it before a
+        // restart can need it, and the generation closes the store on unload and IDE exit.
+        val dispose = source.substringAfter("    override fun dispose() {").substringBefore("\n    }\n")
+        assertTrue("dispose flushes the pending settled shadows", dispose.contains("settledShadowStore.flush()"))
+        val store =
+            Files.readString(Paths.get("src/main/kotlin/com/github/btakita/agentdoc/SettledShadowStore.kt"))
+        assertTrue(
+            "the generation closes the store",
+            store.contains("PluginGeneration.registerResource(\"settled-shadow-store\") { store.close() }"),
+        )
         val restore = source.substringAfter("    private fun restorePersistedSettledShadow(").substringBefore("\n    }\n")
         assertTrue(
             "the restored shadow joins the in-memory map the publication-edge rechecks read",

@@ -1427,6 +1427,10 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         extractFrozenPaths.clear()
         shadows.clear()
         settledShadows.clear()
+        // `#shadowstorecost`: settles persist in the background; a closing project (or an
+        // unloading plugin, which disposes every project first) writes its last settled shadow now,
+        // before a restart can need it.
+        settledShadowStore.flush()
         templateValidation.clear()
         fileCacheConflicts.clear()
     }
@@ -4706,7 +4710,8 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         if (projected) {
             settledShadows[filePath] = visibleText
             nativeReloadSettledShadows.remove(filePath)
-            // `#restartadoptscanonical`: the same proof, durable across an IDE restart.
+            // `#restartadoptscanonical`: the same proof, durable across an IDE restart. No I/O
+            // here (`#shadowstorecost`): the store writes in the background and flushes on dispose.
             settledShadowStore.save(filePath, visibleText)
         }
         return projected

@@ -1734,7 +1734,11 @@ canonical, saved or unsaved, unless canonical is proven to contain the operator
 edits. An unreadable buffer, an unknown canonical, and an empty buffer still
 adopt, since nothing is lost. The JetBrains plugin persists every settled shadow
 (`SettledShadowStore`, one atomic, self-verifying record per document under the
-IDE system directory) and restores it at registration, so a restart is an
+IDE system directory; written off the replica worker, debounced by document
+size, and flushed on project close, plugin unload, and IDE exit; a newer settle
+first removes the older record, so a crash leaves no record rather than an older
+one; records for deleted or 30-days-unopened documents are collected,
+`#shadowstorecost`) and restores it at registration, so a restart is an
 ordinary causal decision again: a canonical that advanced past an unchanged
 buffer is adopted, a buffer over a hub that never moved is published, and a
 three-generation divergence proves, merges, or holds. A restored shadow

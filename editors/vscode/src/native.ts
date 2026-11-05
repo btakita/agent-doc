@@ -22,6 +22,9 @@ import {
     applyIpcMessageToView,
     type AgentDocProjection,
 } from './stateMirror.js';
+import { parseQueueTreeJson, type QueueTreeNode } from './queueTreeGutter.js';
+
+export type { QueueTreeNode } from './queueTreeGutter.js';
 
 const requireFromExtension = createRequire(import.meta.url);
 /** Owned Rust C strings must remain pointers until decoded and explicitly freed. */
@@ -226,6 +229,7 @@ function resetBindings(): void {
     _admin_handoff_json = null;
     _admin_repair_projection_json = null;
     _visual_tokens_json = null;
+    _queue_tree_json = null;
     _lazily_current_observed_v1 = null;
     _document_closed_for_editor = null;
     _deferred_write_reconnect_content = null;
@@ -476,6 +480,7 @@ let _admin_reap_json: any = null;
 let _admin_handoff_json: any = null;
 let _admin_repair_projection_json: any = null;
 let _visual_tokens_json: any = null;
+let _queue_tree_json: any = null;
 let _lazily_current_observed_v1: any = null;
 let _document_closed_for_editor: any = null;
 let _deferred_write_reconnect_content: any = null;
@@ -621,6 +626,13 @@ function bindFunctions(): void {
         _admin_repair_projection_json = null;
     }
     _visual_tokens_json = lib.func('agent_doc_visual_tokens_json', OWNED_C_STRING_POINTER, ['str']);
+    try {
+        // #queuetreegutter: an older cdylib without the export shows no queue icons.
+        _queue_tree_json = lib.func('agent_doc_queue_tree_json', OWNED_C_STRING_POINTER, ['str']);
+    } catch (e: any) {
+        console.log(`[agent-doc/native] queue tree unavailable: ${e.message}`);
+        _queue_tree_json = null;
+    }
     try {
         _document_id_for_path = lib.func(
             'agent_doc_document_id_for_path',
@@ -2115,6 +2127,30 @@ export function visualTokens(doc: string, projectRoot?: string): VisualToken[] {
     } catch (err: any) {
         console.warn(`[agent-doc/native] visual_tokens_json error: ${err.message}`);
         return [];
+    } finally {
+        if (ptr) freeOwnedCString(ptr);
+    }
+}
+
+/**
+ * `#queuetreegutter`: the read-only queue tree of the live buffer text
+ * (`agent_doc_queue_tree_json`). Returns null when the library or its export is
+ * unavailable or the document does not parse mid-edit, so the caller keeps its
+ * last presentation; a document without a queue yields an empty list.
+ */
+export function queueTreeNodes(doc: string, projectRoot?: string): QueueTreeNode[] | null {
+    if (!doc.includes('<!-- agent:queue')) return [];
+    if (!ensureLoaded(projectRoot)) return null;
+    bindFunctions();
+    if (!_queue_tree_json) return null;
+
+    const ptr = _queue_tree_json(doc);
+    try {
+        if (!ptr) return null;
+        return parseQueueTreeJson(koffi.decode(ptr, 'char', -1));
+    } catch (err: any) {
+        console.warn(`[agent-doc/native] queue_tree_json error: ${err.message}`);
+        return null;
     } finally {
         if (ptr) freeOwnedCString(ptr);
     }

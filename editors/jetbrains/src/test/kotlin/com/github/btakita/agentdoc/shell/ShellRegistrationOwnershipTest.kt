@@ -246,6 +246,8 @@ class ShellRegistrationOwnershipTest {
                 "agent-doc.visual.tracked-highlighters" to "List<RangeHighlighter>",
                 "agent-doc.visual.recency-state" to "MutableMap<String, Any>",
                 "agent-doc.visual.recency-caret-listener" to "Boolean",
+                // #queuetreegutter: the closed-subtree folds this manager owns (platform values).
+                "agent-doc.visual.queue-tree-folds" to "List<FoldRegion>",
             ),
             keys,
         )

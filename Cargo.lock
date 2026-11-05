@@ -3257,6 +3257,7 @@ dependencies = [
  "agent-doc-hash",
  "agent-doc-merge",
  "agent-doc-project-root-io",
+ "agent-doc-queue",
  "anyhow",
  "base64 0.22.1",
  "libc",

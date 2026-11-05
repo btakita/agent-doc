@@ -565,6 +565,13 @@ interface AgentDocLib : Library {
     fun agent_doc_visual_tokens_json(doc: String): Pointer?
 
     /**
+     * `#queuetreegutter`: the read-only queue tree of the live buffer text as JSON (`nodes` with
+     * 1-based `line`/`end_line`, `state`, `glyph`, `closed`, `rollup`, `tooltip`). Null when the
+     * document does not parse. Caller must free result. Older libraries lack the symbol.
+     */
+    fun agent_doc_queue_tree_json(doc: String): Pointer?
+
+    /**
      * #falsetyping-guard: per-editor full-content report carrying replica-churn provenance.
      * `no_unsaved_operator_edits` is 1 when the buffer holds no unsaved local operator edits ahead
      * of disk (any divergence is a `remoteCrdtApply`), letting the CLI re-merge on replica churn

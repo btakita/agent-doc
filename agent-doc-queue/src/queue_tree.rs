@@ -173,6 +173,10 @@ pub struct QueueTreeNode {
     /// The waiting item's roll-up, for a live waiting head.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rollup: Option<WaitingRollup>,
+    /// The gutter icon's tooltip: the state label, then the roll-up of a live
+    /// waiting head (`waiting on you · you 1 · agent 0 · done 2`). Editors show
+    /// it verbatim so every plugin words a node the same way.
+    pub tooltip: String,
 }
 
 /// One state and how many nodes carry it.
@@ -337,6 +341,20 @@ fn own_id(text: &str) -> Option<String> {
         .map(|id| id.to_ascii_lowercase())
 }
 
+/// The tooltip an editor gutter icon shows for a node.
+fn node_tooltip(state: QueueNodeState, rollup: Option<WaitingRollup>) -> String {
+    match rollup {
+        Some(rollup) => format!(
+            "{} · you {} · agent {} · done {}",
+            state.label(),
+            rollup.you,
+            rollup.agent,
+            rollup.done
+        ),
+        None => state.label().to_string(),
+    }
+}
+
 fn line_of(document: &str, offset: usize) -> usize {
     document[..offset.min(document.len())]
         .bytes()
@@ -444,6 +462,7 @@ pub fn queue_tree(document: &str, options: &QueueTreeOptions) -> anyhow::Result<
                 closed: state.is_closed(),
                 waiting_item: waiting_packet::is_waiting_item_head(entry),
                 rollup,
+                tooltip: node_tooltip(state, rollup),
             });
         }
     }
@@ -810,5 +829,24 @@ mod tests {
         assert_eq!(json["nodes"][3]["state"], "needs-integration");
         assert_eq!(json["nodes"][0]["closed"], true);
         assert_eq!(json["nodes"][6]["rollup"]["you"], 1);
+    }
+
+    /// `#queuetreegutter`: editors show the native tooltip verbatim, so the
+    /// wording (state label, then a waiting head's roll-up) is pinned here.
+    #[test]
+    fn each_node_carries_its_gutter_tooltip() {
+        let tree = tree(QueueTreeOptions::default());
+        let tooltips = tree
+            .nodes
+            .iter()
+            .map(|node| node.tooltip.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(tooltips[0], "done");
+        assert_eq!(tooltips[3], "needs integration");
+        assert_eq!(tooltips[5], "group");
+        assert_eq!(tooltips[6], "waiting on you · you 1 · agent 0 · done 0");
+        assert_eq!(tooltips[7], "answered · you 0 · agent 1 · done 1");
+        let json = serde_json::to_value(&tree).unwrap();
+        assert_eq!(json["nodes"][3]["tooltip"], "needs integration");
     }
 }

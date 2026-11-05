@@ -666,9 +666,10 @@ pub unsafe extern "C" fn agent_doc_exchange_nodes(file_path: *const c_char) -> *
 /// `waiting-on-you`, `answered`, `running`, `needs-integration`, `lost`,
 /// `reconciling`, `blocked`, `pending`, `open`, `skipped`, `unknown`, `reply`,
 /// `choice`, `follow-up`, `group`), the `glyph` a gutter icon shows, and a
-/// waiting item's `rollup` (`you`, `agent`, `done`). Editor plugins render
+/// waiting item's `rollup` (`you`, `agent`, `done`), and the `tooltip` the
+/// gutter icon shows verbatim (`#queuetreegutter`). Editor plugins render
 /// these as gutter icons and fold closed subtrees; they never derive state
-/// themselves (FFI-first).
+/// or word it themselves (FFI-first).
 ///
 /// Returns null when `doc` is not UTF-8 or the document's components do not
 /// parse (the reason goes to stderr). Caller must free with
@@ -5635,6 +5636,7 @@ mod tests {
         assert_eq!(nodes[0]["state"], "done");
         assert_eq!(nodes[0]["closed"], true);
         assert_eq!(nodes[2]["state"], "needs-integration");
+        assert_eq!(nodes[2]["tooltip"], "needs integration");
         assert_eq!(tree["summary"]["items"], 3);
         assert!(unsafe { agent_doc_queue_tree_json(std::ptr::null()) }.is_null());
     }

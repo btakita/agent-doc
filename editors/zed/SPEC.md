@@ -58,6 +58,12 @@
   `execve` leaves the running server serving. It is then refused once and the
   operator is asked, with `window/showMessage`, to run
   `editor: restart language server`.
+- The queue tree (`#queuetreegutter`, `editors/SPEC.md`) has no gutter
+  surface in Zed. For an agent-doc-mode buffer the language server answers
+  `textDocument/inlayHint` with each queue row's native glyph (and tooltip) at
+  the start of its line, and `textDocument/foldingRange` with each closed
+  subtree. Both read the buffer's latest full-sync text, so they do not depend
+  on controller registration; any other Markdown buffer answers `null`.
 - Zed extensions have no editor action or menu surface, so the shared
   `About Agent Doc` action (`editors/SPEC.md` section 6b) does not exist here.
   The language server reports its version in the LSP `initialize` response's

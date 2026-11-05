@@ -10675,13 +10675,17 @@ mod tests {
         let seed = tempfile::TempDir::new()?;
         {
             let conn = open_state_db(seed.path())?;
+            // One transaction: 5k autocommit inserts are one fsync each and
+            // overran the test timeout on a loaded machine.
+            let tx = crate::immediate_transaction_unchecked(&conn)?;
             for i in 0..(DOCUMENT_AUTHORITY_OBSERVED_MAX_ROWS + 25) {
-                conn.execute(
+                tx.execute(
                     "INSERT INTO state_events (event_id, document_hash, domain, fact_type, payload_json, timestamp) \
                      VALUES (?1, 'docA', 'document', 'document_authority_observed', '{}', 0)",
                     [format!("obs-{i}")],
                 )?;
             }
+            tx.commit()?;
         }
 
         let clone_seed = |root: &Path| -> Result<()> {

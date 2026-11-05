@@ -115,6 +115,11 @@ pub struct Observations {
     /// that row is pending work that carries its answer. Closing the question
     /// would race it.
     pub live_queue_ids: std::collections::BTreeSet<String>,
+    /// Ids of open tracked items (`#decisionprune`): unchecked rows in
+    /// `agent:todo`, `agent:backlog`, `agent:icebox` and `agent:review`, live
+    /// waiting heads, and live queue rows. A decision that `applies_to` one of
+    /// them stays in the hot set.
+    pub open_item_ids: std::collections::BTreeSet<String>,
 }
 
 fn indent_of(line: &str) -> usize {
@@ -835,6 +840,77 @@ fn archive_blocks(text: &str) -> Vec<String> {
     blocks
 }
 
+/// Components whose unchecked rows are open tracked items.
+const TRACKED_COMPONENTS: &[&str] = &["todo", "backlog", "icebox", "review"];
+
+/// The leading own id of a checklist row's text, skipping status glyphs
+/// (`☑️ [#id] …`).
+fn leading_row_id(action: &str) -> Option<String> {
+    let rest = action.trim_start_matches(|c: char| c.is_whitespace() || !c.is_ascii());
+    if !rest.starts_with("[#") {
+        return None;
+    }
+    bracket_ids(rest).into_iter().next()
+}
+
+fn scan_open_items(content: &str, out: &mut Observations) {
+    if let Ok(components) = agent_doc_element::element::parse(content) {
+        for component in components
+            .iter()
+            .filter(|component| TRACKED_COMPONENTS.contains(&component.name.as_str()))
+        {
+            for line in component.content(content).lines() {
+                let Some(parsed) = agent_doc_element::todo::parse_todo_line(line) else {
+                    continue;
+                };
+                if !parsed.state.is_open() {
+                    continue;
+                }
+                let id = parsed
+                    .own_id
+                    .map(str::to_ascii_lowercase)
+                    .or_else(|| leading_row_id(parsed.action));
+                if let Some(id) = id {
+                    out.open_item_ids.insert(id);
+                }
+            }
+        }
+    }
+    let open_heads: Vec<String> = out
+        .questions
+        .iter()
+        .filter(|question| question.open && question.source != QuestionSource::Request)
+        .filter_map(|question| question.id.clone())
+        .collect();
+    out.open_item_ids.extend(open_heads);
+    out.open_item_ids.extend(out.live_queue_ids.iter().cloned());
+}
+
+impl Observations {
+    /// Every key this document can name (`#decisionprune`): the id key of
+    /// every question, reference, answer target and link endpoint, and the
+    /// text key of every question and id-less answer head. The index loads
+    /// archived decisions for exactly these keys, so a dormant decision
+    /// revives as soon as the document names it again.
+    pub fn lookup_keys(&self) -> std::collections::BTreeSet<String> {
+        let mut keys = std::collections::BTreeSet::new();
+        for question in &self.questions {
+            keys.extend(crate::lookup_keys_for(question));
+        }
+        for answer in &self.answers {
+            keys.extend(answer.targets.iter().map(|id| crate::id_key(id)));
+            if let Some(key) = answer.head_text.as_deref().and_then(crate::text_key) {
+                keys.insert(key);
+            }
+        }
+        for link in &self.links {
+            keys.insert(crate::id_key(&link.from));
+            keys.insert(crate::id_key(&link.to));
+        }
+        keys
+    }
+}
+
 /// Observe one session document plus the text of its done archives.
 pub fn observe(content: &str, archives: &[&str]) -> Observations {
     let mut out = Observations::default();
@@ -854,6 +930,7 @@ pub fn observe(content: &str, archives: &[&str]) -> Observations {
     // is inline; the inline scan skips them because quoted lines are not list
     // rows, so nothing is double counted.
     infix_links(&mut out);
+    scan_open_items(content, &mut out);
     out
 }
 

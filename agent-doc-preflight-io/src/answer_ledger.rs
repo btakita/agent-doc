@@ -14,7 +14,14 @@
 //! answered question with its decision id, rebuilds the index once from the
 //! document's git history, and [`probe_answer_ledger`] reports the same facts
 //! read-only for `preflight --probe`.
+//!
+//! The index is pruned by relevance (`#decisionprune`): each pass stores the
+//! ledger's hot / archived partition, so the hot tables hold only live
+//! decisions (liveness also follows the decision graph's edges), and loads the
+//! archived decisions the document (or the closeout's new questions) names, so
+//! a dormant decision revives on demand.
 
+use std::collections::BTreeSet;
 use std::path::Path;
 
 use agent_doc_answer_ledger::graph::{DecisionGraph, EdgeSource, GraphEdge, Node, NodeKind};
@@ -30,6 +37,9 @@ pub struct AnswerLedgerReport {
     pub facts: Vec<AnsweredFact>,
     pub possible: Vec<PossibleMatch>,
     pub closed: Vec<DuplicateClosure>,
+    /// Archived decisions a new question named this pass (`#decisionprune`).
+    pub revived: Vec<String>,
+    pub hot_store: agent_doc_answer_ledger::HotStoreSize,
 }
 
 impl AnswerLedgerReport {
@@ -80,16 +90,27 @@ fn prior_from_rows(
                 change_flagged: row.change_flagged,
             })
             .collect(),
+        archived_decisions: BTreeSet::new(),
     }
 }
 
-fn load_prior(file: &Path) -> PriorIndex {
+/// The hot index rows plus the archived decisions `lookup_keys` name
+/// (`#decisionprune`): a dormant decision revives as soon as the document, or
+/// a question a closeout is about to add, names one of its keys.
+fn load_prior(file: &Path, lookup_keys: &BTreeSet<String>) -> PriorIndex {
     let Some((root, document_id)) = index_target(file) else {
         return PriorIndex::default();
     };
-    match agent_doc_sqlite::answer_ledger_index::load_for_project(&root, &document_id) {
+    match agent_doc_sqlite::answer_ledger_index::load_with_archive_for_project(
+        &root,
+        &document_id,
+        lookup_keys,
+    ) {
         None => PriorIndex::default(),
-        Some(Ok((keys, revisions))) => prior_from_rows(keys, revisions),
+        Some(Ok(loaded)) => PriorIndex {
+            archived_decisions: loaded.archived_decisions,
+            ..prior_from_rows(loaded.keys, loaded.revisions)
+        },
         Some(Err(err)) => {
             eprintln!(
                 "[preflight] answer ledger: index unreadable ({err:#}); rebuilding from the document"
@@ -275,13 +296,17 @@ fn store_index(file: &Path, ledger: &Ledger, graph: &DecisionGraph, now: u64) {
     let Some((root, document_id)) = index_target(file) else {
         return;
     };
-    let (keys, revisions) = ledger.index_rows();
+    // `#decisionprune`: live rows go to the hot tables; dormant decisions
+    // and surfaced superseded revisions only to the append-only archive.
+    let partition = ledger.partitioned_index_rows();
     let (nodes, edges) = graph_rows(graph);
-    if let Err(err) = agent_doc_sqlite::answer_ledger_index::store_for_project(
+    if let Err(err) = agent_doc_sqlite::answer_ledger_index::store_partitioned_for_project(
         &root,
         &document_id,
-        &key_rows(keys),
-        &revision_rows(revisions),
+        &key_rows(partition.hot_keys),
+        &revision_rows(partition.hot_revisions),
+        &key_rows(partition.archived_keys),
+        &revision_rows(partition.archived_revisions),
         &edges,
         now,
     ) {
@@ -310,6 +335,7 @@ fn seed_index_from_history_once(
     file: &Path,
     content: &str,
     prior: PriorIndex,
+    lookup_keys: &BTreeSet<String>,
     now: u64,
 ) -> PriorIndex {
     let Some((root, document_id)) = index_target(file) else {
@@ -377,7 +403,7 @@ fn seed_index_from_history_once(
             seed.recovered
         ),
     );
-    load_prior(file)
+    load_prior(file, lookup_keys)
 }
 
 fn observe_document(file: &Path, content: &str) -> agent_doc_answer_ledger::extract::Observations {
@@ -402,12 +428,42 @@ pub fn build_ledger(
     file: &Path,
     content: &str,
 ) -> (agent_doc_answer_ledger::extract::Observations, Ledger) {
+    build_ledger_naming(file, content, &BTreeSet::new())
+}
+
+/// The index keys `content` names, plus `extra_keys` (`#decisionprune`).
+fn lookup_keys(file: &Path, content: &str, extra_keys: &BTreeSet<String>) -> BTreeSet<String> {
+    let mut keys = observe_document(file, content).lookup_keys();
+    keys.extend(extra_keys.iter().cloned());
+    keys
+}
+
+/// [`build_ledger`], also loading the archived decisions `extra_keys` name
+/// (the keys of questions a closeout is about to add).
+pub fn build_ledger_naming(
+    file: &Path,
+    content: &str,
+    extra_keys: &BTreeSet<String>,
+) -> (agent_doc_answer_ledger::extract::Observations, Ledger) {
     build_with_prior(
         file,
         content,
-        &load_prior(file),
+        &load_prior(file, &lookup_keys(file, content, extra_keys)),
         agent_doc_log_time::current_epoch_secs(),
     )
+}
+
+/// Decision-graph edges by kind name, for liveness (`#decisionprune`).
+fn named_edges(graph: &DecisionGraph) -> Vec<agent_doc_answer_ledger::NamedEdge> {
+    graph
+        .edges
+        .iter()
+        .map(|edge| agent_doc_answer_ledger::NamedEdge {
+            from: edge.from.clone(),
+            kind: edge.kind.as_str().to_string(),
+            to: edge.to.clone(),
+        })
+        .collect()
 }
 
 /// One planned ledger pass over `content`, nothing written yet.
@@ -473,6 +529,8 @@ fn report_of(
         facts,
         possible: ledger.possible.clone(),
         closed,
+        revived: ledger.liveness.revived.iter().cloned().collect(),
+        hot_store: ledger.hot_store_size(),
     }
 }
 
@@ -517,9 +575,12 @@ pub fn probe_answer_ledger(file: &Path) -> Result<AnswerLedgerReport> {
         return Ok(AnswerLedgerReport::default());
     };
     let now = agent_doc_log_time::current_epoch_secs();
-    let pass = plan_pass(file, &content, &load_prior(file), now)?;
-    let graph = graph_of(file, &pass.ledger, &pass.observations);
-    Ok(report_of(&pass.ledger, &graph, pass.closed))
+    let keys = lookup_keys(file, &content, &BTreeSet::new());
+    let pass = plan_pass(file, &content, &load_prior(file, &keys), now)?;
+    let mut ledger = pass.ledger;
+    let graph = graph_of(file, &ledger, &pass.observations);
+    ledger.recompute_liveness(&pass.observations.open_item_ids, &named_edges(&graph));
+    Ok(report_of(&ledger, &graph, pass.closed))
 }
 
 fn run_answer_ledger_maintenance_with_options(
@@ -532,7 +593,8 @@ fn run_answer_ledger_maintenance_with_options(
         return Ok(AnswerLedgerReport::default());
     };
     let now = agent_doc_log_time::current_epoch_secs();
-    let prior = seed_index_from_history_once(file, &content, load_prior(file), now);
+    let keys = lookup_keys(file, &content, &BTreeSet::new());
+    let prior = seed_index_from_history_once(file, &content, load_prior(file, &keys), &keys, now);
     let pass = plan_pass(file, &content, &prior, now)?;
     let closed = pass.closed;
     let mut report_ledger = pass.ledger;
@@ -596,8 +658,23 @@ fn run_answer_ledger_maintenance_with_options(
         (report_observations, report_ledger) = build_with_prior(file, &persisted, &prior, now);
     }
     let graph = graph_of(file, &report_ledger, &report_observations);
+    // `#decisionprune` x `#decisiongraph`: graph edges (depends_on,
+    // conflicts_with, derived_from, exception_to, ...) carry liveness too.
+    report_ledger.recompute_liveness(&report_observations.open_item_ids, &named_edges(&graph));
     store_index(file, &report_ledger, &graph, now);
     let report = report_of(&report_ledger, &graph, closed);
+    for decision in &report.revived {
+        eprintln!(
+            "[preflight] answer ledger: revived archived decision `{decision}`: a question names it again (#decisionprune)"
+        );
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "answer_ledger_decision_revived file={} decision={decision}",
+                file.display()
+            ),
+        );
+    }
     for fact in &report.facts {
         eprintln!(
             "[preflight] answer ledger: already answered `{}` ({}): “{}”",
@@ -622,13 +699,129 @@ pub fn reasks_for_closeout(
     if new_questions.is_empty() {
         return Vec::new();
     }
-    let (_, ledger) = build_ledger(file, content);
+    let keys: BTreeSet<String> = new_questions
+        .iter()
+        .flat_map(|new| agent_doc_answer_ledger::lookup_keys_for(&new.question))
+        .collect();
+    let (_, ledger) = build_ledger_naming(file, content, &keys);
     ledger.reasks(&new_questions)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct DiskEffects;
+    impl crate::PreflightMaintenanceWriteEffects for DiskEffects {
+        fn record_document_write_provenance(&self, _file: &Path, _content: &str) {}
+
+        fn guard_visible_write_expected_current(
+            &self,
+            _file: &Path,
+            _source: &str,
+            _expected: &str,
+        ) -> Result<()> {
+            Ok(())
+        }
+
+        fn converge_or_disk_write(
+            &self,
+            file: &Path,
+            _current: &str,
+            target: &str,
+            _source: &str,
+        ) -> Result<()> {
+            std::fs::write(file, target)?;
+            Ok(())
+        }
+    }
+
+    fn index_counts(doc: &Path) -> agent_doc_sqlite::answer_ledger_index::IndexCounts {
+        let (root, document_id) = index_target(doc).unwrap();
+        agent_doc_sqlite::answer_ledger_index::counts_for_project(&root, &document_id)
+            .unwrap()
+            .unwrap()
+    }
+
+    /// `#decisionprune` end to end through state.db: a dormant decision leaves
+    /// the hot tables, stays in the archive after the document forgets it,
+    /// and revives with its recorded answer when a new question names it.
+    #[test]
+    fn dormant_decisions_leave_the_hot_tables_and_revive_from_the_archive() {
+        const PRUNED: &str = concat!(
+            "---\nagent_doc_session: answer-ledger-prune\n---\n\n",
+            "<!-- agent:queue -->\n",
+            "- ~~[#tdbranch]: Target sdk-dev. Keep 0.3.0-preview.1~~\n",
+            "- ~~[#tdport]: Use port 8080.~~\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:todo -->\n",
+            "- [x] [#tdbranch] Choose the target branch for the telemetry pull request: sdk-dev or dev\n",
+            "- [ ] [#tdport] Choose the demo port for the sign-in redirect: 8080 or 9090\n",
+            "<!-- /agent:todo -->\n",
+        );
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("session.md");
+        std::fs::write(&doc, PRUNED).unwrap();
+        let first = run_answer_ledger_maintenance_force_disk(&doc, &DiskEffects).unwrap();
+        assert_eq!(first.hot_store.hot_decisions, 1, "{:?}", first.hot_store);
+        assert_eq!(first.hot_store.archived_decisions, 1);
+        let counts = index_counts(&doc);
+        // `#decisionidstamp` stamps the open answered todo: id, text and
+        // stamp keys.
+        assert_eq!(
+            (counts.hot_keys, counts.hot_revisions),
+            (3, 1),
+            "{counts:?}"
+        );
+        assert_eq!((counts.archived_keys, counts.archived_revisions), (5, 2));
+
+        // The document forgets the dormant decision entirely.
+        let forgotten = PRUNED
+            .replace("- ~~[#tdbranch]: Target sdk-dev. Keep 0.3.0-preview.1~~\n", "")
+            .replace(
+                "- [x] [#tdbranch] Choose the target branch for the telemetry pull request: sdk-dev or dev\n",
+                "",
+            );
+        std::fs::write(&doc, &forgotten).unwrap();
+        let quiet = run_answer_ledger_maintenance_force_disk(&doc, &DiskEffects).unwrap();
+        assert!(quiet.revived.is_empty());
+        assert_eq!(
+            quiet.hot_store.decisions, 1,
+            "not loaded: {:?}",
+            quiet.hot_store
+        );
+        assert_eq!(index_counts(&doc), counts, "the archive never shrinks");
+
+        // A new question with the same id revives it with its answer.
+        let reasked = forgotten.replace(
+            "<!-- /agent:todo -->",
+            "- [ ] [#tdbranch] Choose the target branch for the telemetry pull request: sdk-dev or dev\n<!-- /agent:todo -->",
+        );
+        std::fs::write(&doc, &reasked).unwrap();
+        let revived = run_answer_ledger_maintenance_force_disk(&doc, &DiskEffects).unwrap();
+        assert_eq!(revived.revived.len(), 1, "{revived:?}");
+        let fact = revived
+            .facts
+            .iter()
+            .find(|fact| fact.open_items.contains(&"tdbranch".to_string()))
+            .expect("the archived answer is pushed again");
+        assert_eq!(fact.answer, "Target sdk-dev. Keep 0.3.0-preview.1");
+        let after = index_counts(&doc);
+        assert_eq!((after.hot_keys, after.hot_revisions), (6, 2), "{after:?}");
+
+        // A closeout re-asking a dormant decision's question is refused even
+        // though the document no longer shows it.
+        std::fs::write(&doc, &forgotten).unwrap();
+        run_answer_ledger_maintenance_force_disk(&doc, &DiskEffects).unwrap();
+        let reasks = reasks_for_closeout(
+            &doc,
+            &forgotten,
+            "",
+            &["[#tdbranch] Choose the target branch for the telemetry pull request: sdk-dev or dev".to_string()],
+        );
+        assert_eq!(reasks.len(), 1, "{reasks:?}");
+    }
 
     const DOC: &str = concat!(
         "---\nagent_doc_session: answer-ledger\n---\n\n",

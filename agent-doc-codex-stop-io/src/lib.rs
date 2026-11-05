@@ -718,6 +718,12 @@ struct ReportedWritebackDebt {
     /// Completion was recovered only after this exact attempt became Lost.
     /// This is urgent reconciliation debt, never a one-shot reminder.
     recovered_after_loss: bool,
+    /// `#repositoryreportcell`: the document already records this attempt's
+    /// result: its attested `### Re: Subagent completed` cell is in
+    /// `agent:exchange`, or the captured response is consolidated into a
+    /// root-authored response. Decided from the document for every row, so
+    /// the reminder never claims a cell the document does not hold.
+    result_record: Option<agent_doc_queue_io::sync_payload::ReportedResultRecord>,
     /// `#reportedhookintegrationwait`: the attempt recorded repository work
     /// with no verified integration, so `queue consume` refuses the strike
     /// until the closeout's integration steps run.
@@ -732,9 +738,6 @@ struct AwaitingIntegration {
     shape: &'static str,
     /// The closeout's next move, from the same derivation `queue claims` uses.
     next_move: String,
-    /// The document already records the worker's result (completion cell or
-    /// consolidated response), so only integration and the strike remain.
-    result_recorded: bool,
 }
 
 /// `#reportedhookintegrationwait`: classify one reported attempt with the
@@ -743,10 +746,8 @@ struct AwaitingIntegration {
 /// the persist/strike reminder unchanged.
 fn awaiting_integration(
     file: &Path,
-    content: &str,
     claim: &agent_doc_queue::queue_claim::QueueClaim,
     lineage: Option<&agent_doc_queue_io::queue_lineage::QueueLineageLedger>,
-    receipts: &[agent_doc_queue::claim_release_receipt::ClaimReleaseReceipt],
 ) -> Option<AwaitingIntegration> {
     use agent_doc_queue::reported_closeout::ReportedRepoEvidence;
     let evidence = agent_doc_queue_io::queue_lineage::reported_claim_evidence_in(lineage?, claim);
@@ -765,9 +766,6 @@ fn awaiting_integration(
     Some(AwaitingIntegration {
         shape: closeout.shape.as_str(),
         next_move: agent_doc_queue::reported_closeout::closeout_next_move(&closeout),
-        result_recorded: agent_doc_queue_io::sync_payload::reported_result_recorded_in_document(
-            content, claim, receipts,
-        ),
     })
 }
 
@@ -808,13 +806,17 @@ fn reported_writeback_debts(file: &Path, content: &str) -> Result<Vec<ReportedWr
                 awaiting_operator += 1;
                 continue;
             }
-            let awaiting_integration =
-                awaiting_integration(file, content, &claim, lineage.as_ref(), &receipts);
+            let awaiting_integration = awaiting_integration(file, &claim, lineage.as_ref());
+            let result_record =
+                agent_doc_queue_io::sync_payload::reported_result_record_in_document(
+                    content, &claim, &receipts,
+                );
             debts.push(ReportedWritebackDebt {
                 item_text: claim.item_text,
                 owner: claim.owner,
                 held_generation: Some(claim.generation),
                 recovered_after_loss: claim.completion_recovered_after_loss,
+                result_record,
                 awaiting_integration,
             });
         }
@@ -845,11 +847,12 @@ fn reported_writeback_debts(file: &Path, content: &str) -> Result<Vec<ReportedWr
             continue;
         }
         let awaiting_integration = receipt.and_then(|receipt| {
-            awaiting_integration(
-                file,
+            awaiting_integration(file, &receipt.as_reported_claim(), lineage.as_ref())
+        });
+        let result_record = receipt.and_then(|receipt| {
+            agent_doc_queue_io::sync_payload::reported_result_record_in_document(
                 content,
                 &receipt.as_reported_claim(),
-                lineage.as_ref(),
                 &receipts,
             )
         });
@@ -862,6 +865,7 @@ fn reported_writeback_debts(file: &Path, content: &str) -> Result<Vec<ReportedWr
             held_generation: None,
             recovered_after_loss: receipt
                 .is_some_and(|receipt| receipt.completion_recovered_after_loss),
+            result_record,
             awaiting_integration,
         });
     }
@@ -898,11 +902,9 @@ fn awaiting_operator_answer(
 
 /// The Claude Stop reminder for [`ReportedWritebackDebt`] rows.
 fn claude_reported_writeback_reason(file_display: &str, debts: &[ReportedWritebackDebt]) -> String {
-    let (integration, unpersisted): (Vec<_>, Vec<_>) = debts.iter().partition(|debt| {
-        debt.awaiting_integration
-            .as_ref()
-            .is_some_and(|awaiting| awaiting.result_recorded)
-    });
+    let (integration, unpersisted): (Vec<_>, Vec<_>) = debts
+        .iter()
+        .partition(|debt| debt.result_record.is_some() && debt.awaiting_integration.is_some());
     let integration_rows = integration
         .iter()
         .filter_map(|debt| Some((debt, debt.awaiting_integration.as_ref()?)))
@@ -944,8 +946,30 @@ fn claude_reported_writeback_reason(file_display: &str, debts: &[ReportedWriteba
     }
 }
 
-/// The persist-now half of [`claude_reported_writeback_reason`]: rows whose
-/// result the document does not record yet.
+/// What the document holds for a row whose result it records.
+fn recorded_result_phrase(
+    record: agent_doc_queue_io::sync_payload::ReportedResultRecord,
+) -> &'static str {
+    match record {
+        agent_doc_queue_io::sync_payload::ReportedResultRecord::CompletionCell => {
+            "the binary-owned `### Re: Subagent completed` cell that `queue report-complete` wrote is in this document's `agent:exchange`"
+        }
+        agent_doc_queue_io::sync_payload::ReportedResultRecord::ConsolidatedResponse => {
+            "the worker's captured response is consolidated into a response in this document's `agent:exchange`"
+        }
+    }
+}
+
+/// The close-now half of [`claude_reported_writeback_reason`]: rows whose
+/// strike is not waiting on integration of an already-recorded result.
+///
+/// `#repositoryreportcell`: every row states what the document actually
+/// holds. A row whose attested completion cell is in `agent:exchange` is told
+/// to close it; a row with no cell (a `queue report-complete` projection that
+/// never landed, or a cell a later write removed) is told the document does
+/// not record the result, never that a cell "sits" there. The reminder used
+/// to assert the cell for every held claim, which sent a coordinator looking
+/// for an exchange cell that was not in the document.
 fn claude_unpersisted_writeback_reason(
     file_display: &str,
     debts: &[&ReportedWritebackDebt],
@@ -968,15 +992,27 @@ fn claude_unpersisted_writeback_reason(
                     )
                 })
                 .unwrap_or_default();
-            let row = match debt.held_generation {
-                Some(generation) => format!(
-                    "- `{}` reported for `{}` (claim generation {generation}; recovered_after_loss={}; its `### Re: Subagent completed` cell sits in `agent:exchange`, uncommitted). Close it: {closeout}. If integration or verification must finish first, run `agent-doc queue release {file_display} --item {:?} --generation {generation}` and still persist the result with that closeout.",
+            let recorded = debt.result_record.map(recorded_result_phrase);
+            let row = match (debt.held_generation, recorded) {
+                (Some(generation), Some(recorded)) => format!(
+                    "- `{}` reported for `{}` (claim generation {generation}; recovered_after_loss={}). Its result is recorded: {recorded}; do NOT re-answer it, only close the row: {closeout}. If integration or verification must finish first, run `agent-doc queue release {file_display} --item {:?} --generation {generation}`, then close the row with that closeout.",
                     debt.owner,
                     debt.item_text.trim(),
                     debt.recovered_after_loss,
                     agent_doc_queue::queue_claim::claim_item_handle(&debt.item_text),
                 ),
-                None => format!(
+                (Some(generation), None) => format!(
+                    "- `{}` reported for `{}` (claim generation {generation}; recovered_after_loss={}). The document does not record its result: no `### Re: Subagent completed` cell for this attempt is in `agent:exchange` (its `queue report-complete` cell never reached the document, or a later write removed it), so persist the worker's result yourself: {closeout}. If integration or verification must finish first, run `agent-doc queue release {file_display} --item {:?} --generation {generation}` and still persist the result with that closeout.",
+                    debt.owner,
+                    debt.item_text.trim(),
+                    debt.recovered_after_loss,
+                    agent_doc_queue::queue_claim::claim_item_handle(&debt.item_text),
+                ),
+                (None, Some(recorded)) => format!(
+                    "- {} already reported and its claim was released. Its result is recorded ({recorded}), but the queue line is still open. Do NOT re-answer it, only close the row in THIS turn: {closeout}.",
+                    debt.owner,
+                ),
+                (None, None) => format!(
                     "- {}",
                     agent_doc_queue::claim_release_receipt::persist_reported_instruction(
                         file_display,
@@ -989,14 +1025,22 @@ fn claude_unpersisted_writeback_reason(
         })
         .collect::<Vec<_>>()
         .join("\n");
+    let recorded = debts
+        .iter()
+        .filter(|debt| debt.result_record.is_some())
+        .count();
+    let evidence = if recorded == debts.len() {
+        "The document already records each result below; only the strike is missing."
+    } else {
+        "A result the document does not record yet is durable in agent-doc's completion evidence \
+         (preflight surfaces it as `queue_sync.reported_checkmark` `recovered_response`), so a harness \
+         switch or `/clear` does not lose it, but the document has not recorded it."
+    };
     format!(
         "{REPORTED_WRITEBACK_MARKER}\n\
-         {count} queue row(s) in {file_display} have a worker result that no closeout has persisted. \
-         The result is durable in agent-doc's completion evidence (preflight surfaces it as \
-         `queue_sync.reported_checkmark` `recovered_response`), so a harness switch or `/clear` does \
-         not lose it, but the document has not recorded it: the row stays open and is served again \
-         until a closeout strikes it. Persist it in THIS turn before the final \
-         answer (`#reportedwritebackdebt`):\n{rows}\n\
+         {count} queue row(s) in {file_display} have a reported worker result whose row no closeout has \
+         struck: the row stays open and is served again until a closeout strikes it. {evidence} Close \
+         each row in THIS turn before the final answer (`#reportedwritebackdebt`):\n{rows}\n\
          Do NOT dispatch a new subagent for these rows and do NOT re-claim them. If a concrete \
          blocker prevents persisting now, keep the row open and surface that blocker. A recovered-after-loss \
          row (`⚠️☑️`) is urgent, nonterminal reconciliation debt and this gate continues refusing terminal \
@@ -1120,7 +1164,7 @@ fn claude_reported_writeback_continuation_with(
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "claude_stop_reported_writeback_unpersisted rows={} held={} released={} recovered_after_loss={} action={} awaiting_integration={} (#reportedwritebackdebt)",
+            "claude_stop_reported_writeback_unpersisted rows={} held={} released={} recovered_after_loss={} action={} awaiting_integration={} result_recorded={} (#reportedwritebackdebt)",
             debts.len(),
             debts
                 .iter()
@@ -1142,6 +1186,10 @@ fn claude_reported_writeback_continuation_with(
             debts
                 .iter()
                 .filter(|debt| debt.awaiting_integration.is_some())
+                .count(),
+            debts
+                .iter()
+                .filter(|debt| debt.result_record.is_some())
                 .count(),
         ),
     );
@@ -9808,11 +9856,28 @@ Reviewed the gated items.\n\
             held.reason
         );
         assert!(held.reason.contains("do NOT re-claim"), "{}", held.reason);
+        // `#repositoryreportcell`: this fixture has no completion cell, so the
+        // reminder must not describe one sitting in `agent:exchange`.
+        assert!(
+            held.reason
+                .contains("The document does not record its result")
+                && held
+                    .reason
+                    .contains("no `### Re: Subagent completed` cell for this attempt"),
+            "{}",
+            held.reason
+        );
+        assert!(
+            !held.reason.contains("cell sits") && !held.reason.contains("is in this document"),
+            "{}",
+            held.reason
+        );
         let ops = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
             ops.contains("claude_stop_reported_writeback_unpersisted rows=1 held=1 released=0"),
             "{ops}"
         );
+        assert!(ops.contains("result_recorded=0"), "{ops}");
 
         // Bounded: the recursive stop passes through.
         input.stop_hook_active = true;
@@ -10166,6 +10231,220 @@ Reviewed the gated items.\n\
             ops.contains("claude_stop_reported_writeback_awaiting_operator rows=1"),
             "{ops}"
         );
+    }
+
+    /// `#repositoryreportcell` (2026-11-04, tasks/agent-doc/agent-doc-bugs.md):
+    /// the reminder for a held `Reported` claim said its `### Re: Subagent
+    /// completed` cell "sits in `agent:exchange`, uncommitted" whenever the
+    /// row landed in the persist half, which for repository work is exactly
+    /// when the document holds NO cell for the attempt. Every held row now
+    /// states what the document actually holds: an absent cell is named
+    /// absent, and a present one routes the repository row to its integration
+    /// step without asking to re-persist the result.
+    #[test]
+    fn claude_stop_held_reported_row_names_the_completion_cell_only_when_present() {
+        let dir = setup_project();
+        let doc = write_claimed_subagent_queue_doc(&dir, "Dispatched `do [#held]`.");
+        init_git_repo(dir.path(), &doc);
+        let head = String::from_utf8(
+            ProcessCommand::new("git")
+                .current_dir(dir.path())
+                .args(["rev-parse", "HEAD"])
+                .output()
+                .unwrap()
+                .stdout,
+        )
+        .unwrap()
+        .trim()
+        .to_string();
+        let (_, claim) =
+            agent_doc_queue_io::queue_claim::claim(&doc, "do [#held]", "subagent:held", 3600)
+                .unwrap();
+        let running = agent_doc_queue_io::queue_claim::start_attempt(
+            &doc,
+            "do [#held]",
+            "subagent:held",
+            "worker:held",
+            3600,
+            claim.generation,
+        )
+        .unwrap();
+        agent_doc_queue_io::queue_lineage::record(
+            &doc,
+            "do [#held]",
+            claim.generation,
+            agent_doc_queue_io::queue_lineage::RecordRequest {
+                kind: agent_doc_queue_io::queue_lineage::QueueLineageEventKind::Committed,
+                source_repo_path: Some(dir.path().to_path_buf()),
+                sink_repo_path: Some(dir.path().to_path_buf()),
+                source_sha: Some(head.clone()),
+                sink_ref: Some("HEAD".to_string()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        track_doc(&dir, &doc, "");
+        complete_run(&doc);
+        let response = "Fixed the held item on fix/held; branch pushed.";
+        agent_doc_queue_io::claim_release_receipt::capture_response_for_attempt(
+            &doc,
+            "do [#held]",
+            claim.generation,
+            response,
+        )
+        .unwrap();
+        agent_doc_queue_io::queue_claim::report_attempt(&doc, "do [#held]", Some(claim.generation))
+            .unwrap();
+        let input = |session: &str| ClaudeStopInput {
+            session_id: session.to_string(),
+            cwd: dir.path().display().to_string(),
+            stop_hook_active: false,
+            transcript_path: None,
+            reason: None,
+            subagent_type: None,
+        };
+
+        // No cell in the document: name it absent and keep the integration wait.
+        let absent = claude_reported_writeback_continuation_with(&input("absent"), &doc, |_| false)
+            .expect("a reported repository row with no recorded result holds the final answer");
+        assert!(
+            absent
+                .reason
+                .contains("The document does not record its result")
+                && absent
+                    .reason
+                    .contains("no `### Re: Subagent completed` cell for this attempt"),
+            "{}",
+            absent.reason
+        );
+        assert!(
+            !absent.reason.contains("cell sits") && !absent.reason.contains("uncommitted)"),
+            "an absent cell must never be described as sitting in agent:exchange: {}",
+            absent.reason
+        );
+        assert!(
+            absent.reason.contains("not integrated yet"),
+            "{}",
+            absent.reason
+        );
+        assert!(absent.reason.contains("--generation"), "{}", absent.reason);
+
+        // The binary-owned cell `queue report-complete` writes for this attempt.
+        let cell = agent_doc_document::subagent_completion::cell_with_response(
+            &running.owner,
+            &running.item_text,
+            &agent_doc_queue_io::queue_claim::completion_feedback_key(&running).unwrap(),
+            response,
+        )
+        .unwrap();
+        let without_cell = fs::read_to_string(&doc).unwrap();
+        fs::write(
+            &doc,
+            without_cell.replace(
+                "<!-- /agent:exchange -->",
+                &format!("{cell}\n<!-- /agent:exchange -->"),
+            ),
+        )
+        .unwrap();
+        invalidate_stop_document_cache();
+        let present =
+            claude_reported_writeback_continuation_with(&input("present"), &doc, |_| false)
+                .expect("an un-integrated row still owes its integration step");
+        assert!(
+            present.reason.contains("already recorded"),
+            "{}",
+            present.reason
+        );
+        assert!(
+            present.reason.contains("do NOT re-persist"),
+            "{}",
+            present.reason
+        );
+        assert!(
+            !present.reason.contains("does not record") && !present.reason.contains("cell sits"),
+            "{}",
+            present.reason
+        );
+    }
+
+    /// `#repositoryreportcell`: a held `Reported` row with no repository debt
+    /// whose completion cell IS in the document is told the result is recorded
+    /// and only the strike remains, never that the document lacks it.
+    #[test]
+    fn claude_stop_held_reported_row_with_its_cell_asks_only_for_the_strike() {
+        let dir = setup_project();
+        let doc = write_claimed_subagent_queue_doc(&dir, "Dispatched `do [#held]`.");
+        init_git_repo(dir.path(), &doc);
+        let (_, claim) =
+            agent_doc_queue_io::queue_claim::claim(&doc, "do [#held]", "subagent:held", 3600)
+                .unwrap();
+        let running = agent_doc_queue_io::queue_claim::start_attempt(
+            &doc,
+            "do [#held]",
+            "subagent:held",
+            "worker:held",
+            3600,
+            claim.generation,
+        )
+        .unwrap();
+        track_doc(&dir, &doc, "");
+        complete_run(&doc);
+        agent_doc_queue_io::queue_claim::report_attempt(&doc, "do [#held]", Some(claim.generation))
+            .unwrap();
+        let cell = agent_doc_document::subagent_completion::cell_with_response(
+            &running.owner,
+            &running.item_text,
+            &agent_doc_queue_io::queue_claim::completion_feedback_key(&running).unwrap(),
+            "Answered the held question; no repository change.",
+        )
+        .unwrap();
+        let current = fs::read_to_string(&doc).unwrap().replace(
+            "<!-- /agent:exchange -->",
+            &format!("{cell}\n<!-- /agent:exchange -->"),
+        );
+        fs::write(&doc, &current).unwrap();
+        invalidate_stop_document_cache();
+        let input = ClaudeStopInput {
+            session_id: "recorded-session".to_string(),
+            cwd: dir.path().display().to_string(),
+            stop_hook_active: false,
+            transcript_path: None,
+            reason: None,
+            subagent_type: None,
+        };
+        let recorded = claude_reported_writeback_continuation_with(&input, &doc, |_| false)
+            .expect("a recorded result whose row is unstruck holds the final answer");
+        assert!(
+            recorded.reason.starts_with(REPORTED_WRITEBACK_MARKER),
+            "{}",
+            recorded.reason
+        );
+        assert!(
+            recorded.reason.contains("Its result is recorded")
+                && recorded.reason.contains(
+                    "cell that `queue report-complete` wrote is in this document's `agent:exchange`"
+                ),
+            "{}",
+            recorded.reason
+        );
+        assert!(
+            recorded.reason.contains("only the strike is missing"),
+            "{}",
+            recorded.reason
+        );
+        assert!(
+            !recorded.reason.contains("has not recorded")
+                && !recorded.reason.contains("does not record"),
+            "{}",
+            recorded.reason
+        );
+        assert!(
+            recorded.reason.contains("--done held"),
+            "{}",
+            recorded.reason
+        );
+        let ops = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(ops.contains("result_recorded=1"), "{ops}");
     }
 
     /// `#stopneedsclosedcycle`: the marker is document-level and outlives the

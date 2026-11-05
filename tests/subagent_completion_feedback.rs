@@ -855,6 +855,28 @@ fn report_complete_joins_repository_provenance_to_the_exact_attempt() {
     ]);
     assert_ok(&report, "report repository completion");
     assert!(String::from_utf8_lossy(&report.stderr).contains("is not integrated"));
+    // `#repositoryreportcell`: a repository result writes the same
+    // binary-owned, digest-attested completion cell into `agent:exchange` as a
+    // prose result, so the coordinator sees every worker result in exchange.
+    let written = fs::read_to_string(&doc).unwrap();
+    let evidence = agent_doc_document::subagent_completion::completion_evidence(&written);
+    assert_eq!(evidence.len(), 1, "{written}");
+    assert_eq!(evidence[0].owner, "subagent:repo");
+    assert_eq!(evidence[0].item, "repository work");
+    let exchange_end = written.find("<!-- /agent:exchange -->").unwrap();
+    let cell_at = written
+        .find("### Re: Subagent completed: `subagent:repo` returned work for queue item “repository work” — agent-doc")
+        .expect("repository report must write its completion cell");
+    assert!(
+        cell_at < exchange_end,
+        "the cell belongs inside agent:exchange: {written}"
+    );
+    assert_eq!(
+        agent_doc_document::subagent_completion::completion_response(&written, &evidence[0].key)
+            .as_deref(),
+        Some("implemented and tested"),
+        "{written}"
+    );
     let lineage = run_agent_doc(dir.path(), &["queue", "lineage", path, "--item", "repository work", "--generation", "1", "--json"]);
     assert_ok(&lineage, "query lineage");
     let json: serde_json::Value = serde_json::from_slice(&lineage.stdout).unwrap();

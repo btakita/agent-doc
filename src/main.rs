@@ -4386,7 +4386,9 @@ enum DecisionAction {
     /// Print a session document's decision graph (`#decisiongraph`): typed
     /// nodes (questions, decisions, revisions, items, evidence) and edges
     /// (answers, supersedes, amends, depends_on, conflicts_with, applies_to,
-    /// evidenced_by, ...) with their source (derived / operator / proposed)
+    /// evidenced_by, ...) with their source (derived / operator / proposed),
+    /// plus the project `decisions.md` records and their supersedes links
+    /// (`#decisionregistrygraph`)
     Graph {
         /// Session document
         file: PathBuf,
@@ -4628,6 +4630,9 @@ fn run_decision_action(action: DecisionAction) -> anyhow::Result<()> {
                 }
                 if !impact.conflicts_with.is_empty() {
                     println!("  conflicts with: {}", impact.conflicts_with.join(", "));
+                }
+                if !impact.superseded_decisions.is_empty() {
+                    println!("  supersedes decisions: {}", impact.superseded_decisions.join(", "));
                 }
                 if impact.unaffected > 0 {
                     println!("  unaffected dependents: {}", impact.unaffected);

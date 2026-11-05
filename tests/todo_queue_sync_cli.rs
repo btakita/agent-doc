@@ -501,6 +501,78 @@ fn a_changed_decision_reports_its_impact_and_why() {
     );
 }
 
+/// `#decisionregistrygraph`: the project `decisions.md` records and their
+/// `Supersedes:` links are in the session's decision graph. A record that
+/// supersedes another reopens the closed item done under the old record,
+/// lists the old record's evidence to keep or undo, and `why` names both
+/// directions of the link.
+#[test]
+fn registry_records_and_supersedes_links_reach_impact_and_why() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(
+        dir.path().join("decisions.md"),
+        concat!(
+            "# Decisions\n\nThis file is the authoritative current decision registry.\n\n",
+            "<!-- agent:decision id=\"DEC-store-v1\" -->\n## DEC-store-v1\n- State: superseded\n",
+            "- Updated: 2026-10-01T00:00:00Z\n- Evidence: [#r-aaa111bbb222]\n- Supersedes: (none)\n",
+            "### Decision\nUse SQLite for the cache\n### Rationale\nOne file.\n<!-- /agent:decision -->\n\n",
+            "<!-- agent:decision id=\"DEC-store-v2\" -->\n## DEC-store-v2\n- State: accepted\n",
+            "- Updated: 2026-11-01T00:00:00Z\n- Evidence: (none)\n- Supersedes: DEC-store-v1\n",
+            "### Decision\nUse Postgres for the cache\n### Rationale\nConcurrent writers.\n<!-- /agent:decision -->\n\n",
+        ),
+    )
+    .unwrap();
+    let doc = session(
+        dir.path(),
+        "",
+        "- [x] [#tdbackfill] Backfill the cache under [DEC-store-v1](decision:DEC-store-v1)\n",
+    );
+    let path = doc.to_str().unwrap();
+
+    let output = run_agent_doc(
+        dir.path(),
+        &["decision", "impact", path, "DEC-store-v2", "--json"],
+    );
+    assert_ok(&output, "decision impact");
+    let impact: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(impact["change"], "supersedes", "{impact:#}");
+    assert_eq!(impact["from_answer"], "Use SQLite for the cache", "{impact:#}");
+    assert_eq!(impact["superseded_decisions"][0], "DEC-store-v1", "{impact:#}");
+    assert!(
+        impact["flagged"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["node"] == "tdbackfill" && row["action"] == "reopen"),
+        "{impact:#}"
+    );
+    assert!(
+        impact["actions_taken"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["node"] == "r-aaa111bbb222" && row["action"] == "keep_or_undo"),
+        "{impact:#}"
+    );
+
+    let output = run_agent_doc(
+        dir.path(),
+        &["decision", "why", path, "tdbackfill", "--json"],
+    );
+    assert_ok(&output, "decision why");
+    let whys: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(whys[0]["decision_id"], "DEC-store-v1", "{whys:#}");
+    assert_eq!(whys[0]["superseded_by"][0], "DEC-store-v2", "{whys:#}");
+
+    let output = run_agent_doc(dir.path(), &["decision", "why", path, "DEC-store-v2"]);
+    assert_ok(&output, "decision why text");
+    let text = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        text.contains("supersedes DEC-store-v1: “Use SQLite for the cache”"),
+        "{text}"
+    );
+}
+
 /// `#decisionstaleaudit`: the agent-free path for a stale todo. The operator's
 /// answer to the todo's own id was consumed, and nothing still works on it. A
 /// plain preflight closes the todo citing the decision, and a todo whose

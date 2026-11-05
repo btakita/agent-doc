@@ -288,6 +288,8 @@ pub fn reasoned_why(
             applies_to: Vec::new(),
             evidence: Vec::new(),
             merged: Vec::new(),
+            supersedes: Vec::new(),
+            superseded_by: Vec::new(),
         },
         None => return None,
     };
@@ -425,6 +427,19 @@ pub fn render_reasoned_why(reasoned: &ReasonedWhy) -> Vec<String> {
             "  conflicts with: {}",
             why.conflicts_with.join(", ")
         ));
+    }
+    for old in &why.supersedes {
+        lines.push(format!(
+            "  supersedes {}{}",
+            old.id,
+            old.answer
+                .as_deref()
+                .map(|answer| format!(": {}", quote(answer)))
+                .unwrap_or_default()
+        ));
+    }
+    if !why.superseded_by.is_empty() {
+        lines.push(format!("  superseded by: {}", why.superseded_by.join(", ")));
     }
     if !why.copies.is_empty() {
         lines.push(format!("  copies: {}", why.copies.join(", ")));

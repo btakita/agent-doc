@@ -3253,6 +3253,33 @@ fn run_with_options_internal(
     )
 }
 
+/// `#syncrelativecolpaths`: the column and focus paths a sync pass works with,
+/// each anchored once to the caller's working directory.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SyncEntryPaths {
+    columns: Vec<String>,
+    focus: Option<String>,
+}
+
+/// Absolutize the sync request's paths at entry (`#syncrelativecolpaths`).
+///
+/// Every later consumer — the lock scope, column memory, actor lookups, the
+/// stale-supervisor replacement request, recycle requests — then carries an
+/// absolute document path, so no controller request can depend on which
+/// process's working directory or project root resolves it. `#ctrlrelroot`
+/// is kept: the anchor is the process cwd, and without one the paths pass
+/// through unchanged rather than being anchored to a guessed root.
+fn sync_entry_paths(
+    col_args: &[String],
+    focus: Option<&str>,
+    cwd: Option<&Path>,
+) -> SyncEntryPaths {
+    SyncEntryPaths {
+        columns: agent_doc_sync::absolutize_sync_columns(col_args, cwd),
+        focus: focus.map(|focus| agent_doc_sync::absolutize_sync_document(focus, cwd)),
+    }
+}
+
 /// Resolve `project_root` to its canonical nearest `.agent-doc` root so
 /// cross-root comparisons in [`document_belongs_to_sync_root`] are stable.
 fn canonical_sync_project_root(project_root: &Path) -> PathBuf {
@@ -3423,7 +3450,19 @@ fn run_with_options_internal_at_root(
     tmux: &Tmux,
 ) -> Result<()> {
     let window = agent_doc_sync::normalize_scope_arg(window);
-    let focus = agent_doc_sync::normalize_scope_arg(focus);
+    // `#syncrelativecolpaths`: absolutize every column path and the focus once,
+    // here, before any of them reaches a lock scope, layout memory, an actor
+    // lookup, or a controller request. Downstream requests to a NESTED
+    // project's controller would otherwise be re-anchored at that controller's
+    // root (receipts 5604/5605, `stage=missing_actor`).
+    let sync_caller_cwd = std::env::current_dir().ok();
+    let entry_paths = sync_entry_paths(
+        col_args,
+        agent_doc_sync::normalize_scope_arg(focus),
+        sync_caller_cwd.as_deref(),
+    );
+    let col_args = entry_paths.columns.as_slice();
+    let focus = entry_paths.focus.as_deref();
     reset_sync_run_report();
     tracing::debug!(
         cols = ?col_args,
@@ -3565,9 +3604,14 @@ fn run_with_options_internal_at_root(
     // agent doc so the reconciler preserves the pane from the previous layout.
     // When sync is called without explicit columns, fall back to that recorded layout.
     let layout_state_root = scope_root;
+    // `#syncrelativecolpaths`: remembered columns persisted by an older sync may
+    // be relative; they join the absolutized request columns in column memory
+    // (string-keyed), so they take the same spelling.
     let saved_layout =
         match agent_doc_controller_io::project_controller::load_layout_state(&layout_state_root) {
-            Ok(layout) => layout,
+            Ok(layout) => {
+                agent_doc_sync::absolutize_sync_columns(&layout, sync_caller_cwd.as_deref())
+            }
             Err(err) => {
                 eprintln!(
                     "[sync] warning: failed to load controller layout state from {}: {}",
@@ -8078,6 +8122,92 @@ mod tests {
             !document_belongs_to_sync_root(&cross_root_doc, &sync_root),
             "submodule-owned document must NOT belong to the superproject sync root"
         );
+    }
+
+    /// `#syncrelativecolpaths`: the 2026-11-05 haiven-dev incident. A sync run
+    /// from the enclosing workspace with a relative column naming a document of
+    /// a NESTED project must hand downstream controller requests a path that
+    /// the nested controller resolves to that same document. The controller
+    /// joins a request's `file` onto its own root; the pre-fix relative column
+    /// resolved to `<haiven-dev>/src/haiven-dev/...` (no such document, so
+    /// `stage=missing_actor`), the absolutized one to the document itself.
+    #[test]
+    fn sync_entry_paths_absolutize_nested_project_columns_for_controller_requests() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let workspace = tmp.path().canonicalize().unwrap();
+        let nested_root = workspace.join("src/haiven-dev");
+        std::fs::create_dir_all(workspace.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(workspace.join("tasks/agent-doc")).unwrap();
+        std::fs::create_dir_all(nested_root.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(nested_root.join("tasks/sdk")).unwrap();
+        let workspace_doc = workspace.join("tasks/agent-doc/agent-doc-bugs.md");
+        let nested_doc = nested_root.join("tasks/sdk/sdk-dev.md");
+        std::fs::write(&workspace_doc, "---\n---\n").unwrap();
+        std::fs::write(&nested_doc, "---\n---\n").unwrap();
+
+        let relative_nested = "src/haiven-dev/tasks/sdk/sdk-dev.md";
+        let columns = vec![
+            "tasks/agent-doc/agent-doc-bugs.md".to_string(),
+            relative_nested.to_string(),
+        ];
+        let paths = sync_entry_paths(&columns, Some(relative_nested), Some(&workspace));
+
+        assert_eq!(
+            paths.columns,
+            vec![
+                workspace_doc.to_string_lossy().to_string(),
+                nested_doc.to_string_lossy().to_string(),
+            ]
+        );
+        assert_eq!(
+            paths.focus.as_deref(),
+            Some(nested_doc.to_string_lossy().as_ref())
+        );
+
+        // The request is addressed to the nested project's controller...
+        let file = PathBuf::from(&paths.columns[1]);
+        assert_eq!(
+            agent_doc_project_root_io::project_root_containing(&file).as_deref(),
+            Some(nested_root.as_path())
+        );
+        // ...which resolves the request file against its own root.
+        assert!(
+            !nested_root.join(relative_nested).exists(),
+            "pre-fix shape: the relative column re-anchored at the nested root names no document"
+        );
+        assert_eq!(nested_root.join(&file), nested_doc);
+        assert!(nested_root.join(&file).exists());
+    }
+
+    /// `#syncrelativecolpaths`: the absolutization is the sync body's first
+    /// path use. Every consumer of `col_args`/`focus` — the lock scope root,
+    /// layout memory, the stale-supervisor replacement request — sits after
+    /// it, and the remembered layout takes the same spelling.
+    #[test]
+    fn sync_entry_absolutizes_paths_before_any_downstream_consumer() {
+        let source = include_str!("sync.rs");
+        let entry = source
+            .find("fn run_with_options_internal_at_root(")
+            .expect("sync body entry");
+        let body = &source[entry..];
+        let absolutize = body
+            .find("sync_entry_paths(")
+            .expect("entry absolutization");
+        let scope_root = body
+            .find("layout_state_scope_root(")
+            .expect("lock scope root");
+        let saved_layout = body
+            .find("load_layout_state(&layout_state_root)")
+            .expect("remembered layout load");
+        let remembered_absolutize = body[saved_layout..]
+            .find("absolutize_sync_columns(&layout")
+            .map(|offset| saved_layout + offset)
+            .expect("remembered layout absolutization");
+        let columns = body
+            .find("effective_sync_columns(")
+            .expect("effective columns");
+        assert!(absolutize < scope_root);
+        assert!(remembered_absolutize < columns);
     }
 
     #[test]

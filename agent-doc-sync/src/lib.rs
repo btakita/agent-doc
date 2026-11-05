@@ -559,6 +559,65 @@ pub fn normalize_scope_arg(value: Option<&str>) -> Option<&str> {
     })
 }
 
+/// `#syncrelativecolpaths`: one layout document path, made independent of the
+/// working directory of whichever process later receives it.
+///
+/// A relative column path means "relative to the sync caller's working
+/// directory" (`#ctrlrelroot`: relative paths anchor to the process cwd), but a
+/// path forwarded to another project's controller is resolved against THAT
+/// controller's root. A layout sync run from the enclosing workspace sent
+/// `src/haiven-dev/tasks/sdk/sdk-dev.md` to the nested `haiven-dev` controller,
+/// which looked up `<haiven-dev>/src/haiven-dev/...` and rejected every retry
+/// `stage=missing_actor` (2026-11-05 receipts 5604/5605).
+///
+/// The join is lexical: interior `.` components are dropped, `..` and symlinks
+/// are preserved so the document's spelled identity is not rewritten. An
+/// absolute or blank path is returned trimmed and otherwise unchanged. Without
+/// an absolute `cwd` the path is left as given: an unresolvable anchor must
+/// never be replaced by a guessed root.
+pub fn absolutize_sync_document(document: &str, cwd: Option<&Path>) -> String {
+    let trimmed = document.trim();
+    let path = Path::new(trimmed);
+    if trimmed.is_empty() || path.is_absolute() {
+        return trimmed.to_string();
+    }
+    match cwd.filter(|cwd| cwd.is_absolute()) {
+        Some(cwd) => cwd
+            .join(path)
+            .components()
+            .collect::<PathBuf>()
+            .to_string_lossy()
+            .into_owned(),
+        None => trimmed.to_string(),
+    }
+}
+
+/// `#syncrelativecolpaths`: every document of every layout column, absolutized
+/// once at sync entry by [`absolutize_sync_document`].
+///
+/// Column structure is preserved: a column keeps its position and its
+/// comma-separated document order, and a column with no documents (a
+/// remembered-layout placeholder) is returned unchanged so index-based column
+/// memory still lines up.
+pub fn absolutize_sync_columns(columns: &[String], cwd: Option<&Path>) -> Vec<String> {
+    columns
+        .iter()
+        .map(|column| {
+            let documents: Vec<String> = column
+                .split(',')
+                .map(str::trim)
+                .filter(|document| !document.is_empty())
+                .map(|document| absolutize_sync_document(document, cwd))
+                .collect();
+            if documents.is_empty() {
+                column.clone()
+            } else {
+                documents.join(",")
+            }
+        })
+        .collect()
+}
+
 /// Return focused and column-projected candidate files in sync processing order.
 pub fn sync_candidate_files(col_args: &[String], focus: Option<&str>) -> Vec<PathBuf> {
     let mut files = Vec::new();
@@ -1157,6 +1216,72 @@ fn resolve_absolute_file_path(file: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `#syncrelativecolpaths`: the 2026-11-05 incident shape. The enclosing
+    /// workspace's relative column must reach the nested controller as the
+    /// document's absolute path, never as a path the nested root re-anchors.
+    #[test]
+    fn absolutize_sync_columns_anchors_nested_project_documents_to_caller_cwd() {
+        let cwd = Path::new("/ws/agent-loop");
+        let columns = vec![
+            "tasks/agent-doc/agent-doc-bugs.md".to_string(),
+            "src/haiven-dev/tasks/sdk/sdk-dev.md".to_string(),
+        ];
+        assert_eq!(
+            absolutize_sync_columns(&columns, Some(cwd)),
+            vec![
+                "/ws/agent-loop/tasks/agent-doc/agent-doc-bugs.md".to_string(),
+                "/ws/agent-loop/src/haiven-dev/tasks/sdk/sdk-dev.md".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn absolutize_sync_columns_preserves_structure_and_absolute_spellings() {
+        let cwd = Path::new("/ws");
+        let columns = vec![
+            " left.md , /abs/right.md ".to_string(),
+            String::new(),
+            " , ".to_string(),
+            "./tasks/./a.md,../sibling/b.md".to_string(),
+        ];
+        assert_eq!(
+            absolutize_sync_columns(&columns, Some(cwd)),
+            vec![
+                "/ws/left.md,/abs/right.md".to_string(),
+                String::new(),
+                " , ".to_string(),
+                "/ws/tasks/a.md,/ws/../sibling/b.md".to_string(),
+            ]
+        );
+        // Idempotent: a second pass is the identity, so no downstream layer
+        // can re-anchor an already-absolutized column.
+        let once = absolutize_sync_columns(&columns, Some(cwd));
+        assert_eq!(
+            absolutize_sync_columns(&once, Some(Path::new("/elsewhere"))),
+            once
+        );
+    }
+
+    /// `#ctrlrelroot`: without an absolute anchor the path is left as given,
+    /// never anchored to a guessed or empty root.
+    #[test]
+    fn absolutize_sync_document_never_anchors_to_an_unresolved_cwd() {
+        assert_eq!(absolutize_sync_document(" a.md ", None), "a.md");
+        assert_eq!(
+            absolutize_sync_document("a.md", Some(Path::new("relative/root"))),
+            "a.md"
+        );
+        assert_eq!(
+            absolutize_sync_document("a.md", Some(Path::new(""))),
+            "a.md"
+        );
+        assert_eq!(absolutize_sync_document("  ", Some(Path::new("/ws"))), "");
+        assert_eq!(
+            absolutize_sync_document("/abs/a.md", Some(Path::new("/ws"))),
+            "/abs/a.md"
+        );
+    }
 
     #[test]
     fn sync_lock_acquire_decision_self_heals_wedged_holder() {

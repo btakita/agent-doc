@@ -51,3 +51,74 @@ dangling decision links.
 trailer/history search is fallback, not the hot path. A rebuildable cache may
 accelerate the same lookup. Scale coverage exercises 5,000 records and affected
 ID/trailer extraction.
+
+## Session decision graph (`#decisiongraph`)
+
+The per-document answer ledger (`#answerbyrequestid`, crate
+`agent-doc-answer-ledger`) is projected onto a typed graph
+(`agent_doc_answer_ledger::graph`). It is not a parallel store: the session
+document and its done archives stay the authority, and the graph is rebuilt
+on every preflight and strict closeout ledger pass, then cached in the same
+`state.db` index (`answer_ledger_nodes`; `answer_ledger_edges` with `source`
+and `clause` columns, added in place to older databases). Cached rows the
+document no longer produces are merged back as history (`in_document:
+false`); for a revision pair the current build's relation wins over a cached
+one of another kind.
+
+**Nodes.** `question` (a todo, waiting or request copy that asks the
+operator, `copy_of` its decision), `decision`, `revision` (one per distinct
+operator answer, id `<decision>@<hash>`), `item` (work the decisions apply
+to; a work todo nobody asked about is an item, never a decision), and
+`evidence` (`r-<hex>` response ids, `commit:<sha>`). `principle`, `fact` and
+`derivation` are reserved for `#firstprinciples`.
+
+**Edges** read `from <kind> to`: `answers` (revision → decision),
+`restates` / `amends` / `supersedes` (revision → previous revision),
+`depends_on` (B assumes A), `conflicts_with`, `applies_to` (from concerns
+to), `evidenced_by` (revision or decision → evidence), `copy_of`, `same_as`;
+`derived_from`, `subsumes` and `exception_to` are reserved for
+`#firstprinciples` and `#decisionprune`. Each edge has a source: `derived`
+(read off document structure), `operator` (the operator's explicit words), or
+`proposed` (the binary's classification, standing until the operator confirms
+or corrects it). An `amends` edge carries the amended clause.
+
+**Operator forms.** A reply under any copy of the question (or a queue row
+`[#id]: …`) that starts with `change:` (also `changed:`, `reverse:`,
+`supersede:`) records a superseding revision; `amend:` records an amending
+one whose clause is the reply text. The lead-in is stripped before the answer
+is hashed, so adding it to an earlier reply confirms that same revision.
+Without a lead-in the binary classifies the revision (`answer_relation`) as
+`proposed`, and the cycle-contract guidance tells the agent the operator
+confirms with `change:` or `amend:`. `depends on [#id]`, `assumes [#id]`,
+`builds on [#id]`, `relies on [#id]` record `depends_on`; `conflicts with
+[#id]`, `contradicts [#id]` record `conflicts_with`. Both ends are lifted onto
+their decisions. A row that holds nothing but such phrases is a link, not an
+answer. Commit SHAs and `[#r-…]` ids in an answer, or on a closed copy,
+become `evidenced_by` edges.
+
+**Impact walk** (`DecisionGraph::impact`). Dependents of a decision are its
+copies, items tied to it or its copies by `applies_to` in either direction,
+and decisions or items that `depends_on` it, transitively (each row names the
+decisions walked). For a `supersedes` revision every open dependent is
+flagged (`flag`), every closed one is to be reopened (`reopen`), and closed
+copies plus the evidence of the replaced revisions are listed as
+`actions_taken` for the operator to keep or undo. For an `amends` revision
+only open dependents whose text touches the clause (a shared id, a shared
+subject anchor, or two shared content tokens) are flagged
+(`review_clause`); the rest are counted as unaffected and nothing is
+reopened. `restates` and `initial` disturb nothing. Each `answered_decisions`
+contract entry whose decision changed or was amended carries
+`change_source`, `amends` + `amended_clauses`, and `change_impact` lines; the
+binary reports the walk and never reopens anything itself.
+
+**Why** (`DecisionGraph::why`): every revision oldest first with the
+operator's verbatim words, location, first-seen time, relation and its
+source, clause and evidence; the transitive `depends_on` premises with their
+current answers; conflicts, copies, applied items and `same_as` merges.
+
+**CLI** (debugging and operator lookup; enforcement never depends on it):
+`agent-doc decision graph FILE [--json]`, `agent-doc decision impact FILE
+<id> [--revision <rev>] [--json]`, `agent-doc decision why FILE <id>
+[--json]`. `<id>` may be a decision id, a revision id, a question copy id, or
+(for `why`, and for `impact` when unambiguous) an item a decision applies to.
+tsift graph-db may index the cached rows as an optional traversal layer.

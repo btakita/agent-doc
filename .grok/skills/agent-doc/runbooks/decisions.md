@@ -60,3 +60,27 @@ preflight and every closeout (`#answerbyrequestid`):
 `agent-doc decision answered <FILE> [--json]` prints the ledger for debugging.
 `agent-doc decision validate --document <FILE>` also lists near-duplicate
 question clusters.
+
+## Changing, amending and linking decisions (`#decisiongraph`)
+
+The operator changes a decision by replying under the item or any copy of
+it. `change: <new answer>` replaces the old answer. `amend: <clause>` keeps
+the decision and changes or adds one clause. `depends on [#id]` says this
+decision assumes another; `conflicts with [#id]` says they cannot both hold.
+Never write these forms yourself: they are the operator's words.
+
+When a reply has no `change:` or `amend:`, the binary proposes the kind and
+the contract says so. If it matters, ask the operator once to confirm by
+starting the reply with `change:` or `amend:`.
+
+A changed or amended entry in `answered_decisions` carries `change_impact`:
+items to reopen or re-evaluate, rows that touch an amended clause, and work
+already done on the old answer (closed copies, commits, responses). Act on
+it: re-evaluate or reopen what it names, and ask the operator once whether
+to keep or undo the work done on the old answer. An amend leaves everything
+else alone.
+
+`agent-doc decision impact <FILE> <id> [--json]` shows the same walk.
+`agent-doc decision why <FILE> <id> [--json]` shows why a decision holds:
+the operator's words for every revision, the evidence, and what it depends
+on. `agent-doc decision graph <FILE> [--json]` prints the whole graph.

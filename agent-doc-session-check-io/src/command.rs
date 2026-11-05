@@ -45,6 +45,14 @@
 //!   commit resumes, and retained projection settlement) read-only and reports
 //!   each with [`session_check_heal_command`]; `agent-doc repair <FILE>
 //!   --session-check-heal` ([`run_self_heal`]) applies them.
+//! - `#interruptedhealgap`: the generic open-cycle INTERRUPTED report names the
+//!   command that closes the cycle
+//!   ([`agent_doc_workflow::session_check::open_cycle_resolution`]): a
+//!   `write_applied` cycle whose captured response is visible in the current
+//!   document (or that has no capture) names `agent-doc commit <FILE>`; a
+//!   capture the document does not carry names `agent-doc repair <FILE>
+//!   --resume-capture`. The heal never commits an open cycle, so it reports the
+//!   same command.
 //! - Exit 0 when the current cycle state is committed, when state/log files
 //!   are missing, or when the fallback `ops.log` event is terminal and no
 //!   likely bypassed patchback is present.

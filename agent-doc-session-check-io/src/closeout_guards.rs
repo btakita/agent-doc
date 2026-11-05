@@ -457,6 +457,7 @@ pub fn open_cycle_message(
             active_owner_pane: agent_doc_turn_status_io::active_turn_owner_for_file(file)
                 .as_ref()
                 .map(|marker| marker.pane.as_str()),
+            captured_response: crate::open_cycle_captured_response_visibility(file, state)?,
         },
     ))
 }

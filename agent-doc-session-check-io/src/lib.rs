@@ -192,6 +192,35 @@ pub(crate) fn captured_response_guard_evidence(
     Ok(None)
 }
 
+/// `#interruptedhealgap`: whether the open cycle's captured response is
+/// visible in the current document authority, so the generic open-cycle report
+/// names the one command that closes it (`agent-doc commit` when the write
+/// already landed, `repair --resume-capture` when the capture is not in the
+/// document). Read-only.
+pub(crate) fn open_cycle_captured_response_visibility(
+    file: &Path,
+    state: &agent_doc_cycle_state_io::CycleState,
+) -> Result<agent_doc_workflow::session_check::CapturedResponseVisibility> {
+    use agent_doc_workflow::session_check::CapturedResponseVisibility;
+    let Some(capture_id) = state.capture_id.as_deref() else {
+        return Ok(CapturedResponseVisibility::NoCapture);
+    };
+    let Some(evidence) = captured_response_guard_evidence(file, state, capture_id)? else {
+        return Ok(CapturedResponseVisibility::NoCapture);
+    };
+    let current = resolve_current_document_content(file, "session_check_open_cycle_resolution")?;
+    Ok(
+        if agent_doc_turn::response_replay::response_materialized_in_content(
+            &evidence.response_body,
+            &current,
+        ) {
+            CapturedResponseVisibility::Visible
+        } else {
+            CapturedResponseVisibility::Missing
+        },
+    )
+}
+
 pub(crate) fn operator_live_buffer_contains_heading(file: &Path, heading: &str) -> bool {
     let heading = heading.trim();
     if heading.is_empty() {

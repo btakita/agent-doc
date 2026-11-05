@@ -37,11 +37,13 @@ use crate::{Ledger, PriorKey, PriorRevision, RevisionRelation};
 pub enum LivenessFlow {
     /// A live `from` keeps `to` live (`B depends_on A`: B assumes A).
     Forward,
-    /// A live `to` keeps `from` live (`R applies_to W`: open work W still
-    /// needs the answer R holds).
-    Backward,
-    /// Either side keeps the other live (`exception_to`, `conflicts_with`,
-    /// `same_as`): one cannot be read correctly without the other.
+    /// Either side keeps the other live. `applies_to` runs both ways because
+    /// the ledger records it in both senses: a request `applies_to` the work
+    /// it was raised for (open work still needs the answer), and a work row
+    /// citing `(source: [#d])` `applies_to` the decision it carries out (the
+    /// decision must stay hot while that work is open). `exception_to`,
+    /// `conflicts_with` and `same_as`: one side cannot be read without the
+    /// other.
     Both,
     /// The edge carries no liveness (`answers`, `restates`, `amends`,
     /// `supersedes` relate revisions of one decision).
@@ -53,8 +55,7 @@ pub enum LivenessFlow {
 pub fn liveness_flow(kind: &str) -> LivenessFlow {
     match kind {
         "depends_on" | "derived_from" | "refines" | "evidenced_by" => LivenessFlow::Forward,
-        "applies_to" => LivenessFlow::Backward,
-        "exception_to" | "conflicts_with" | "same_as" => LivenessFlow::Both,
+        "applies_to" | "exception_to" | "conflicts_with" | "same_as" => LivenessFlow::Both,
         _ => LivenessFlow::None,
     }
 }
@@ -181,12 +182,19 @@ impl Ledger {
                 mark(index, LiveReason::OpenCopy, &mut queue);
             }
         }
+        // An open tracked item at either end of a two-way edge keeps the
+        // decision at the other end live, even when the item itself is not a
+        // ledger question (a backlog row, a live queue row).
         for edge in &edges {
-            if liveness_flow(&edge.kind) == LivenessFlow::Backward
-                && open_item_ids.contains(&edge.to.to_ascii_lowercase())
-                && let Some(index) = self.endpoint_decision(&edge.from, &by_id)
-            {
-                mark(index, LiveReason::OpenItem(edge.to.clone()), &mut queue);
+            if liveness_flow(&edge.kind) != LivenessFlow::Both {
+                continue;
+            }
+            for (item, other) in [(&edge.to, &edge.from), (&edge.from, &edge.to)] {
+                if open_item_ids.contains(&item.to_ascii_lowercase())
+                    && let Some(index) = self.endpoint_decision(other, &by_id)
+                {
+                    mark(index, LiveReason::OpenItem(item.clone()), &mut queue);
+                }
             }
         }
         for (index, decision) in self.decisions.iter().enumerate() {
@@ -213,10 +221,8 @@ impl Ledger {
             if from == to {
                 continue;
             }
-            if matches!(flow, LivenessFlow::Forward | LivenessFlow::Both) {
-                keeps.entry(from).or_default().insert(to);
-            }
-            if matches!(flow, LivenessFlow::Backward | LivenessFlow::Both) {
+            keeps.entry(from).or_default().insert(to);
+            if flow == LivenessFlow::Both {
                 keeps.entry(to).or_default().insert(from);
             }
         }
@@ -457,6 +463,31 @@ mod tests {
             "{:?}",
             ledger.liveness
         );
+    }
+
+    #[test]
+    fn open_work_citing_its_source_decision_keeps_it_hot() {
+        // The decision is answered and closed; the work that carries it out
+        // cites it as its source and is still open.
+        let doc = concat!(
+            "<!-- agent:queue -->\n",
+            "- ~~[#tdpublic]: Public and open source.~~\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:todo -->\n",
+            "- [x] [#tdpublic] Decide whether the CLI is public and open source\n",
+            "- [ ] [#tdreleaseapp] Configure the release App permissions (source: [#tdpublic])\n",
+            "<!-- /agent:todo -->\n",
+        );
+        let ledger = build(doc);
+        let public = id_of(&ledger, "tdpublic");
+        assert_eq!(
+            ledger.liveness.hot.get(&public),
+            Some(&LiveReason::OpenItem("tdreleaseapp".into())),
+            "{:?}",
+            ledger.liveness
+        );
+        let done = doc.replace("- [ ] [#tdreleaseapp]", "- [x] [#tdreleaseapp]");
+        assert!(build(&done).liveness.archived.contains(&public));
     }
 
     #[test]

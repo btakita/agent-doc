@@ -10193,6 +10193,80 @@ mod tests {
         assert_eq!(replay.content.matches("agent:boundary:").count(), 1);
     }
 
+    /// `#completioncellslost`: the closeout seam that dropped the
+    /// 2026-11-05 cells. `queue report-complete` projected attested completion
+    /// cells into the live canonical after HEAD; the coordinator's final
+    /// response then reached the relay with HEAD as `committed_content`, and
+    /// the uncommitted-tail supersession deleted every cell. The cells must
+    /// survive the response add while the stale checkpoint is still replaced.
+    #[test]
+    fn response_cell_relay_keeps_completion_cells_accepted_after_head() {
+        let (_dir, doc) = temp_doc("completion-cells-survive-closeout.md");
+        let committed = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ operator prompt\n\n",
+            "### Re: committed — gpt-5 (HEAD)\n\nCommitted.\n",
+            "<!-- agent:boundary:old -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let cells = [
+            ("subagent:atomicstrike", "do [#atomicstrikeresponse]", "k1"),
+            ("subagent:queueskip", "do [#queueskipsubagents]", "k2"),
+            ("subagent:answerack", "do [#answerack]", "k3"),
+        ]
+        .map(|(owner, item, key)| {
+            agent_doc_document::subagent_completion::cell_with_response(
+                owner,
+                item,
+                key,
+                &format!("{owner} finished {item}; make check green."),
+            )
+            .unwrap()
+        });
+        let current = committed.replace(
+            "<!-- agent:boundary:old -->",
+            &format!(
+                "{}\n\n### Re: stale checkpoint — gpt-5\n\nStale.\n\n{}\n\n{}\n<!-- agent:boundary:new -->",
+                cells[0], cells[1], cells[2]
+            ),
+        );
+        std::fs::write(&doc, &current).unwrap();
+        let file_str = doc.display().to_string();
+        seed_live_reliable_sync_open(&file_str);
+        register_replica_for_file(&doc, "intellij:completion-cells-survive")
+            .unwrap()
+            .expect("live editor should register with the relay");
+
+        let latest = "### Re: wave integrated — gpt-5\n\nIntegrated.";
+        let write = add_response_cell_for_file(&doc, Some(committed), latest, "test-closeout")
+            .unwrap()
+            .expect("editor-attached response add should use the relay");
+
+        assert!(write.applied);
+        assert!(!write.content.contains("Stale."));
+        assert_eq!(write.content.matches(latest).count(), 1);
+        for cell in &cells {
+            assert_eq!(
+                write.content.matches(cell.as_str()).count(),
+                1,
+                "accepted completion cell dropped by the closeout:\n{}",
+                write.content
+            );
+        }
+        assert_eq!(
+            agent_doc_document::subagent_completion::completion_evidence(&write.content).len(),
+            cells.len()
+        );
+
+        let replay =
+            add_response_cell_for_file(&doc, Some(committed), latest, "test-closeout-replay")
+                .unwrap()
+                .expect("exact replay should still use the relay");
+        assert!(!replay.applied);
+        assert_eq!(replay.content, write.content);
+    }
+
     #[test]
     fn register_replica_seeds_fresh_hub_from_current_document_text() {
         let (_dir, doc) = temp_doc("seed-register.md");

@@ -22,7 +22,8 @@ export type PopupMenuActionId =
     | 'resyncFixSessions'
     | 'gcStaleSessions'
     | 'about'
-    | 'dashboard';
+    | 'dashboard'
+    | 'treeStatus';
 
 export interface PopupMenuItem {
     label: string;
@@ -45,6 +46,7 @@ export function buildPrimaryPopupMenuItems(): PopupMenuItem[] {
         { label: '[12] $(warning) Interrupt and Clear Session Context', id: 'interruptClear' },
         { label: '[13] $(copy) Copy Session Diagnostics', id: 'doctor' },
         { label: '[14] $(dashboard) Dashboard', id: 'dashboard' },
+        { label: '[15] $(list-tree) Tree Status', id: 'treeStatus' },
         { label: '$(kebab-horizontal) More Actions', id: 'more' },
     ];
 }

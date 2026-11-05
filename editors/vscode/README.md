@@ -32,6 +32,7 @@ Interactive document sessions with AI agents. Edit markdown documents in your ed
 | Agent Doc: Stop Agent | none | Stop the agent harness while leaving the supervisor running |
 | Agent Doc: Clear Session Context | none | Clear the current document's session context through `agent-doc session clear` |
 | Agent Doc: Copy Session Diagnostics | none | Copy binary-owned session diagnostics |
+| Agent Doc: Tree Status | `Alt+Shift+S` | Show the queue subtree's tree status at the caret, with a delete action per deletable subtree |
 | Agent Doc: Menu | `Alt+Enter` | Show action menu |
 
 ## How It Works

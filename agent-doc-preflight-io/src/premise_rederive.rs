@@ -22,12 +22,28 @@ use agent_doc_principles::rederive::{self, PremiseRecord, RederiveReport};
 use agent_doc_principles::{Layer, Principle};
 use agent_doc_sqlite::premise_statement_index::PremiseStatementRow;
 
-/// The live derivations for `file`. Derivations have no durable store on this
-/// base yet; `#firstprinciplesstore` keeps them in the decision-graph tables
-/// and returns them here. With none, premise changes are still reported, each
-/// with an empty `affected` list, and there are no contradictions.
-pub fn stored_derivations(_file: &Path) -> Vec<Derivation> {
-    Vec::new()
+/// The derivations stored for `file` (`#firstprinciplesstore`: the
+/// decision-graph tables in the project `state.db`), with the operator
+/// reviews `content` shows applied, so a confirmed step is flagged and an
+/// unreviewed one re-derived. Read-only. With none (or no project, or an
+/// unreadable store), premise changes are still reported, each with an empty
+/// `affected` list, and there are no contradictions.
+pub fn stored_derivations(file: &Path, content: &str) -> Vec<Derivation> {
+    if agent_doc_project_root_io::project_root_containing(file).is_none() {
+        return Vec::new();
+    }
+    match crate::derivation_store::load(file, content) {
+        Ok(stored) => stored
+            .iter()
+            .map(crate::derivation_store::StoredDerivation::to_model)
+            .collect(),
+        Err(err) => {
+            eprintln!(
+                "[preflight] stored derivations unreadable ({err:#}); premise changes reach no conclusions this turn"
+            );
+            Vec::new()
+        }
+    }
 }
 
 fn index_target(file: &Path) -> Option<(std::path::PathBuf, String)> {
@@ -242,6 +258,94 @@ mod tests {
         "principle [#velocity]: When a release is blocked, velocity over polish.",
         "fact [#blocked]: The 0.36 release is blocked on review.",
     ];
+
+    /// The stored derivations (`#firstprinciplesstore`) reach the premise
+    /// check: a changed fact re-derives a stored unreviewed step and flags a
+    /// stored step the operator confirmed; a rejected step is not affected.
+    #[test]
+    fn a_changed_fact_reaches_the_stored_derivations() {
+        let fixture = fixture();
+        let content = concat!(
+            "---\nagent_doc_session: stored-rederive\n---\n\n",
+            "<!-- agent:todo -->\n",
+            "- [ ] [#tdcap] Decide whether to cap the session token lifetime\n",
+            "- [ ] [#tdrot] Decide whether to rotate the signing key monthly\n",
+            "<!-- /agent:todo -->\n",
+        );
+        std::fs::write(&fixture.doc, content).unwrap();
+        let rules: &[&str] = &[
+            "principle [#simple]: Prefer the simplest mechanism that is correct.",
+            "fact [#jws]: Session tokens are JWS and carry their own expiry.",
+        ];
+        let base_layers = layers(&fixture.doc, rules);
+        let principles = compose(&base_layers).principles;
+        let step = |decision: &str, answer: &str, inference: &str| {
+            crate::derivation_store::derive(
+                &fixture.doc,
+                content,
+                &principles,
+                &crate::derivation_store::DeriveRequest {
+                    premises: vec![
+                        "principle:simple".into(),
+                        "fact:jws=Session tokens are JWS and carry their own expiry.".into(),
+                    ],
+                    inference: inference.into(),
+                    decision: decision.into(),
+                    answer: answer.into(),
+                    id: None,
+                },
+            )
+            .unwrap()
+            .derivation
+            .id
+        };
+        let unreviewed = step("tdcap", "No cap.", "A self-expiring JWS already bounds it.");
+        let confirmed = step("tdrot", "Rotate yearly.", "JWS expiry bounds a leaked key.");
+        let rejected = step("tdrot", "Never rotate.", "JWS expiry is enough.");
+        let (root, document_id) = index_target(&fixture.doc).unwrap();
+        for (id, status) in [(&confirmed, "operator_confirmed"), (&rejected, "rejected")] {
+            assert!(
+                agent_doc_sqlite::answer_ledger_derivations::set_derivation_status_for_project(
+                    &root,
+                    &document_id,
+                    id,
+                    status,
+                    None,
+                    1,
+                )
+                .unwrap()
+            );
+        }
+        let stored = stored_derivations(&fixture.doc, content);
+        assert_eq!(stored.len(), 3, "{stored:?}");
+
+        let pass = |rules: &[&str]| {
+            let rule_layers = layers(&fixture.doc, rules);
+            let principles = compose(&rule_layers).principles;
+            premise_rederive(
+                &fixture.doc,
+                &principles,
+                &rule_layers,
+                stored_derivations(&fixture.doc, content),
+                true,
+            )
+        };
+        assert!(pass(rules).premise_changes.is_empty(), "baseline");
+        let report = pass(&[
+            "principle [#simple]: Prefer the simplest mechanism that is correct.",
+            "fact [#jws]: Session tokens are opaque and never expire on their own.",
+        ]);
+        let mut expected = vec![
+            (unreviewed.clone(), ImpactAction::Rederive),
+            (confirmed.clone(), ImpactAction::Flag),
+        ];
+        expected.sort_by(|a, b| a.0.cmp(&b.0));
+        let mut got = affected(&report);
+        assert_eq!(got.len(), 1, "{got:?}");
+        assert_eq!(got[0].0, "fact:jws");
+        got[0].1.sort_by(|a, b| a.0.cmp(&b.0));
+        assert_eq!(got[0].1, expected);
+    }
 
     #[test]
     fn the_first_pass_records_a_baseline_and_reports_nothing() {

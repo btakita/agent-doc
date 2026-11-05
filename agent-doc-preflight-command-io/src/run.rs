@@ -2983,7 +2983,10 @@ fn run_with_options_to_writer_in_pass(
         file,
         &principles,
         &rule_layers,
-        agent_doc_preflight_io::premise_rederive::stored_derivations(file),
+        agent_doc_preflight_io::premise_rederive::stored_derivations(
+            file,
+            queue_authoritative_content,
+        ),
         !options.probe && (!no_changes || !selected_queue_heads.is_empty()),
     );
     warnings.extend(principle_issues.into_iter().map(|issue| PreflightWarning {

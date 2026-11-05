@@ -372,7 +372,7 @@ pub fn stray_close_marker_findings(file: &Path, content: &str) -> Vec<LintFindin
             rule: STRAY_CLOSE_MARKER_RULE.to_string(),
             severity: LintSeverity::Warning,
             message: format!(
-                "text `{}` sits before the `<!-- {} -->` closing marker on the same line; agent-doc reads it as the component's last line",
+                "text `{}` sits before the `<!-- {} -->` closing marker on the same line; agent-doc keeps it as lint-only content and never runs or dispatches it as queue work",
                 stray.text.trim(),
                 stray.tag
             ),
@@ -1618,6 +1618,15 @@ operator-owned scratch state\n\
         );
         assert!(
             findings[0].message.contains("/agent:run"),
+            "{}",
+            findings[0].message
+        );
+        // `#straytextqueueitem`: the notice tells the operator the text is not
+        // queue work, so a stray keystroke never looks like a pending item.
+        assert!(
+            findings[0]
+                .message
+                .contains("never runs or dispatches it as queue work"),
             "{}",
             findings[0].message
         );

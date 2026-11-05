@@ -1820,13 +1820,19 @@ pub fn components(source: &str) -> Vec<Component> {
     // the closer, which is how the element parser places the bytes (the text
     // is the component's last content). The text keeps its exact source
     // offsets; only the line table is split.
+    //
+    // `#straytextqueueitem`: that stray line is lint-only content. It is never
+    // a queue item and never a continuation of the item above it, so a
+    // dispatcher addressing items through this overlay cannot select it.
     let mut raw_lines: Vec<&str> = Vec::new();
+    let mut stray_close_text_lines: Vec<usize> = Vec::new();
     {
         let mut line_start = 0usize;
         for line in source.split_inclusive('\n') {
             let content = line.trim_end_matches('\n');
             match markers.close_split_at(line_start, content) {
                 Some((_, prefix_len)) if prefix_len > 0 => {
+                    stray_close_text_lines.push(raw_lines.len());
                     raw_lines.push(&line[..prefix_len]);
                     raw_lines.push(&line[prefix_len..]);
                 }
@@ -1867,6 +1873,11 @@ pub fn components(source: &str) -> Vec<Component> {
         let content = content_lines[index];
         let trimmed = content.trim();
 
+        if stray_close_text_lines.binary_search(&index).is_ok() {
+            continuable_item = None;
+            continue;
+        }
+
         if let Some((raw_start, state)) = continuable_item.as_mut() {
             if state.accepts_line(content)
                 && let Some(comp) = open.as_mut()
@@ -1885,11 +1896,19 @@ pub fn components(source: &str) -> Vec<Component> {
         }
 
         if let Some(name) = markers.close_at(line_start, trimmed) {
+            // `#straytextqueueitem`: multiline/bare-prompt recovery scans the
+            // body up to, but never into, stray text welded to this closer.
+            let body_end = match index.checked_sub(1) {
+                Some(previous) if stray_close_text_lines.binary_search(&previous).is_ok() => {
+                    line_offsets[previous]
+                }
+                _ => line_start,
+            };
             if let Some(mut comp) = open.take() {
                 if comp.name == name {
                     comp.end_byte = offset;
                     project_runnable_component(&mut comp);
-                    include_queue_multiline_items(source, &mut comp, line_start, &ranges);
+                    include_queue_multiline_items(source, &mut comp, body_end, &ranges);
                     out.push(comp);
                     continue;
                 }
@@ -1899,7 +1918,7 @@ pub fn components(source: &str) -> Vec<Component> {
                 // the opener line) so rows after a sibling's close are never
                 // absorbed into it as items.
                 project_runnable_component(&mut comp);
-                include_queue_multiline_items(source, &mut comp, line_start, &ranges);
+                include_queue_multiline_items(source, &mut comp, body_end, &ranges);
                 out.push(comp);
             }
             continue;
@@ -2025,6 +2044,39 @@ mod tests {
             scan.close_at(line_start, "## Done <!-- /agent:run -->"),
             None
         );
+    }
+
+    /// `#straytextqueueitem`: stray text welded to a closer is lint-only
+    /// content, so the item overlay (which `queue consume` and node-key
+    /// addressing use) never exposes it as an item or folds it into the item
+    /// above. The same text on its own line is an item.
+    #[test]
+    fn stray_text_before_a_closer_is_never_an_item() {
+        for name in ["run", "queue", "loop"] {
+            for stray in ["t", "- t", "  t", "- fix the build"] {
+                let welded = format!(
+                    "<!-- agent:{name} go -->\n- do [#a] task\n- investigate the route test\n{stray}<!-- /agent:{name} -->\n"
+                );
+                let items: Vec<String> = components(&welded)[0]
+                    .items
+                    .iter()
+                    .map(|item| item.text.clone())
+                    .collect();
+                assert_eq!(
+                    items,
+                    vec!["do [#a] task", "investigate the route test"],
+                    "{name} {stray:?}"
+                );
+            }
+            let own_line =
+                format!("<!-- agent:{name} go -->\n- do [#a] task\n- t\n<!-- /agent:{name} -->\n");
+            let items: Vec<String> = components(&own_line)[0]
+                .items
+                .iter()
+                .map(|item| item.text.clone())
+                .collect();
+            assert_eq!(items, vec!["do [#a] task", "t"], "{name}");
+        }
     }
 
     #[test]

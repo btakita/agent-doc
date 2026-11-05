@@ -1599,11 +1599,13 @@ fn merge_components_into_body(
 
         if let Some((name, theirs_idx)) = open.as_ref() {
             // Inside a component: look for its close marker.
-            if let Some((close, prefix_len)) = markers.close_split_at(body_line_start, content)
+            if let Some((close, _)) = markers.close_split_at(body_line_start, content)
                 && &close == name
             {
-                // `#strayclosemarker`: the stray text is the last inner line.
-                let close_line = split_stray_close_prefix(line, prefix_len, &mut component_inner);
+                // `#strayclosemarker` / `#straytextqueueitem`: the operator's
+                // stray text stays welded to its closer, verbatim and outside
+                // the merged items. Split onto its own line it would become an
+                // ordinary column-zero queue prompt and be dispatched.
                 let merged = sides.merge_component(
                     *theirs_idx,
                     &component_inner,
@@ -1613,7 +1615,7 @@ fn merge_components_into_body(
                 );
                 out.push_str(&merged);
                 component_inner.clear();
-                out.push_str(close_line); // close marker line, verbatim
+                out.push_str(line); // stray text + close marker line, verbatim
                 open = None;
             } else {
                 // Buffer the inner line verbatim for the reconstruction pass.
@@ -2952,8 +2954,9 @@ Run Agent Doc on sdk-demo.md still wedged:
     /// `#strayclosemarker`: the 2026-11-04 fpe.md shape. A lone `t` typed in
     /// front of the first run's closer must not leave that run open in the
     /// merge scan (it would swallow the next run's opener and rows). The text
-    /// stays the run's last content, split onto its own line; the agent's
-    /// strike still lands and both runs survive.
+    /// stays welded to the run's closer (`#straytextqueueitem`: on its own line
+    /// it would be dispatchable queue work); the agent's strike still lands and
+    /// both runs survive.
     #[test]
     fn stray_text_before_a_closer_does_not_swallow_the_next_component() {
         let doc = |row: &str| {
@@ -2969,12 +2972,7 @@ Run Agent Doc on sdk-demo.md still wedged:
 
         let m = document_cell_merge(&base, &ours, &theirs);
 
-        assert_eq!(
-            m.merged_doc,
-            ours.replace("t<!-- /agent:run -->", "t\n<!-- /agent:run -->"),
-            "merged:\n{}",
-            m.merged_doc
-        );
+        assert_eq!(m.merged_doc, ours, "merged:\n{}", m.merged_doc);
         assert_eq!(
             components(&m.merged_doc)
                 .iter()

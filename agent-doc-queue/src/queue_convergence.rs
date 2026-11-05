@@ -200,9 +200,12 @@ fn queue_entries_are_discardable(entries: &[document_queue::QueueEntry]) -> bool
                     return false;
                 }
             }
+            // `#straytextqueueitem`: stray close-marker text is lint-only
+            // operator content; clearing the body would silently delete it.
             document_queue::QueueEntry::Prompt(_)
             | document_queue::QueueEntry::StartFence(_)
-            | document_queue::QueueEntry::StopFence => return false,
+            | document_queue::QueueEntry::StopFence
+            | document_queue::QueueEntry::StrayCloseText(_) => return false,
         }
     }
 

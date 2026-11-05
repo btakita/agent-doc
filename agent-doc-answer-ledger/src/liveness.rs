@@ -490,6 +490,53 @@ mod tests {
         assert!(build(&done).liveness.archived.contains(&public));
     }
 
+    /// `#decisiongraph` x `#decisionprune`: an operator `depends on [#id]`
+    /// reply is a `depends_on` edge, so a closed decision another live
+    /// decision assumes stays hot; once nothing assumes it, it goes dormant.
+    #[test]
+    fn an_operator_depends_on_reply_keeps_the_assumed_decision_hot() {
+        let doc = concat!(
+            "## Main <!-- agent:run id=\"main\" -->\n",
+            "- ### Waiting on you <!-- agent-doc:waiting-on-you -->\n",
+            "  - ~~[#tdpublic] Decide whether the CLI is public and open source <!-- agent-doc:waiting-item -->~~\n",
+            "    - **Next:** you — reply under this item ▫️\n",
+            "    - ~~Public and open source.~~\n",
+            "  - 🙋 [#tdtoken] Decide whether install.sh embeds a download token <!-- agent-doc:waiting-item -->\n",
+            "    - **Next:** you — reply under this item ▫️\n",
+            "    - No token in install.sh; depends on [#tdpublic]\n",
+            "<!-- /agent:run -->\n\n",
+            "## Todo <!-- agent:todo -->\n",
+            "- [x] [#tdpublic] Decide whether the CLI is public and open source\n",
+            "- [ ] [#tdtoken] Decide whether install.sh embeds a download token\n",
+            "<!-- /agent:todo -->\n",
+        );
+        let ledger = build(doc);
+        let public = id_of(&ledger, "tdpublic");
+        let token = id_of(&ledger, "tdtoken");
+        assert!(ledger.liveness.is_hot(&token), "{:?}", ledger.liveness);
+        assert_eq!(
+            ledger.liveness.hot.get(&public),
+            Some(&LiveReason::LiveDependent(token.clone())),
+            "{:?}",
+            ledger.liveness
+        );
+        let closed = doc.replace("- [ ] [#tdtoken]", "- [x] [#tdtoken]").replace(
+            "  - 🙋 [#tdtoken] Decide whether install.sh embeds a download token <!-- agent-doc:waiting-item -->",
+            "  - ~~[#tdtoken] Decide whether install.sh embeds a download token <!-- agent-doc:waiting-item -->~~",
+        );
+        let ledger = build(&closed);
+        assert!(
+            ledger.liveness.archived.contains(&token),
+            "{:?}",
+            ledger.liveness
+        );
+        assert!(
+            ledger.liveness.archived.contains(&public),
+            "{:?}",
+            ledger.liveness
+        );
+    }
+
     #[test]
     fn a_standing_policy_stays_hot_with_nothing_open() {
         let doc = concat!(

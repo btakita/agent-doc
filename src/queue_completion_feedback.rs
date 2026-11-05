@@ -214,10 +214,13 @@ fn report_complete_with_lock_wait(
 }
 
 fn observed_claim(file: &Path, item: &str, current: &str) -> Result<Option<QueueClaim>> {
-    let mut ledger = agent_doc_queue_io::queue_claim::load_ledger_following(file, current)?;
+    let ledger = agent_doc_queue_io::queue_claim::load_ledger_following(file, current)?;
     // Use the same pure identity/continuation matching as release without
-    // mutating the durable ledger.
-    Ok(ledger.release(item))
+    // mutating the durable ledger; an id selector (`lazilyreleasedecision`,
+    // `#id`, `do [#id]`) also resolves a row claimed by its full text, and an
+    // id carried by several claims refuses with the candidates
+    // (`#reportcompleteselector`).
+    Ok(ledger.resolve_selector(item)?.cloned())
 }
 
 fn upsert_completion_feedback(

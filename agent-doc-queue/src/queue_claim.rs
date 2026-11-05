@@ -1705,38 +1705,82 @@ impl QueueClaimLedger {
         expected_generation: Option<u64>,
         enforce_generation: bool,
     ) -> Result<Option<QueueClaim>, QueueClaimTransitionRefused> {
-        let identity = claim_identity(item);
-        let index = match self
-            .claims
-            .iter()
-            .position(|claim| claim.identity == identity)
-        {
-            Some(index) => index,
-            // `#claimfollowedit`: released by the text the worker was given,
-            // after the claim followed an operator edit of its line.
-            None => match self.followed_claim_index(item) {
-                Some(index) => index,
-                // `#claimfollowsedit`: an annotation followed by a claim
-                // stored before `followed_from` existed.
-                None => {
-                    let continuing: Vec<usize> = self
-                        .claims
-                        .iter()
-                        .enumerate()
-                        .filter(|(_, claim)| is_edit_continuation(&identity, &claim.identity))
-                        .map(|(index, _)| index)
-                        .collect();
-                    match continuing.as_slice() {
-                        [only] => *only,
-                        _ => return Ok(None),
-                    }
-                }
-            },
+        let Some(index) = self.claim_index(item) else {
+            return Ok(None);
         };
         if enforce_generation {
             validate_generation(&self.claims[index], expected_generation)?;
         }
         Ok(Some(self.claims.remove(index)))
+    }
+
+    /// The claim keyed by `item`'s exact identity, the one claim that
+    /// followed an operator edit away from it, or the one claim it continues.
+    fn claim_index(&self, item: &str) -> Option<usize> {
+        let identity = claim_identity(item);
+        if let Some(index) = self
+            .claims
+            .iter()
+            .position(|claim| claim.identity == identity)
+        {
+            return Some(index);
+        }
+        // `#claimfollowedit`: released by the text the worker was given,
+        // after the claim followed an operator edit of its line.
+        if let Some(index) = self.followed_claim_index(item) {
+            return Some(index);
+        }
+        // `#claimfollowsedit`: an annotation followed by a claim stored
+        // before `followed_from` existed.
+        let continuing: Vec<usize> = self
+            .claims
+            .iter()
+            .enumerate()
+            .filter(|(_, claim)| is_edit_continuation(&identity, &claim.identity))
+            .map(|(index, _)| index)
+            .collect();
+        match continuing.as_slice() {
+            [only] => Some(*only),
+            _ => None,
+        }
+    }
+
+    /// The claim `selector` names, without mutating the ledger
+    /// (`#reportcompleteselector`).
+    ///
+    /// The exact claim identity (and its edit-following fallbacks) wins.
+    /// Otherwise a selector that names a tracked id — a bare `id`, `#id`,
+    /// `do [#id]`, the row's full text, or a nest vector ending in one —
+    /// resolves to the one claim whose row carries that id, whichever of those
+    /// selectors the claim itself was taken with. A row whose text contains
+    /// `: ` keys as a free-text nest vector, so a bare `#id` never equals its
+    /// claim identity; the id is the selector that both sides share. Two or
+    /// more claims carrying the id refuse with the candidates instead of
+    /// guessing.
+    pub fn resolve_selector(
+        &self,
+        selector: &str,
+    ) -> Result<Option<&QueueClaim>, AmbiguousClaimSelector> {
+        if let Some(index) = self.claim_index(selector) {
+            return Ok(Some(&self.claims[index]));
+        }
+        let Some(id) = claim_selector_id(selector) else {
+            return Ok(None);
+        };
+        let matching: Vec<&QueueClaim> = self
+            .claims
+            .iter()
+            .filter(|claim| claim_row_id(&claim.item_text).as_deref() == Some(id.as_str()))
+            .collect();
+        match matching.as_slice() {
+            [] => Ok(None),
+            [only] => Ok(Some(only)),
+            many => Err(AmbiguousClaimSelector {
+                selector: selector.trim().to_string(),
+                id,
+                candidates: many.iter().map(|claim| claim.item_text.clone()).collect(),
+            }),
+        }
     }
 
     /// The one claim that followed an operator edit away from `item`
@@ -2643,6 +2687,72 @@ pub fn claim_item_handle(item: &str) -> String {
                 .to_string()
         }
     }
+}
+
+/// A claim selector naming a tracked id carried by more than one claim
+/// (`#reportcompleteselector`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AmbiguousClaimSelector {
+    pub selector: String,
+    pub id: String,
+    /// The claimed item text of every matching claim, in ledger order.
+    pub candidates: Vec<String>,
+}
+
+impl std::fmt::Display for AmbiguousClaimSelector {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "queue item selector {:?} names id `#{}`, which {} claims carry; pass one claimed row's exact text with --item:",
+            self.selector,
+            self.id,
+            self.candidates.len(),
+        )?;
+        for candidate in &self.candidates {
+            write!(f, "\n  - {candidate}")?;
+        }
+        Ok(())
+    }
+}
+
+impl std::error::Error for AmbiguousClaimSelector {}
+
+/// The tracked id a claim selector names (`#reportcompleteselector`): the
+/// row id of [`claim_row_id`], or a bare id word (`lazilyreleasedecision`).
+pub fn claim_selector_id(selector: &str) -> Option<String> {
+    if let Some(id) = claim_row_id(selector) {
+        return Some(id);
+    }
+    let bare = selector.trim();
+    (!bare.is_empty()
+        && bare
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_')))
+    .then(|| bare.to_ascii_lowercase())
+}
+
+/// The tracked id a queue row's text carries (`#reportcompleteselector`):
+/// its id-backed claim identity; else, after the attempt projection and
+/// markers, the id of a nest vector's leaf (`parent: do [#id]`); else the id
+/// of the row's own head (`[#id] prose: more prose`, which keys as a
+/// free-text nest vector). `None` for free-text work naming no id.
+pub fn claim_row_id(text: &str) -> Option<String> {
+    if let QueueItemIdentity::Id(id) = claim_identity(text) {
+        return Some(id);
+    }
+    let work = agent_doc_element_queue::strip_attempt_projection_prefix(text);
+    let head = agent_doc_element_queue::subprompts::head_without_subprompts(work);
+    let head = agent_doc_element_queue::strip_priority_markers(head.trim());
+    let head = head.trim();
+    let id_of = |text: &str| match QueueItemIdentity::from_prompt(text.trim()) {
+        QueueItemIdentity::Id(id) => Some(id),
+        QueueItemIdentity::FreeText(_) => None,
+    };
+    head.rsplit_once(": ")
+        .and_then(|(_, leaf)| id_of(leaf))
+        .or_else(|| id_of(head))
+        // A binary-admitted trailing `[#q-…]` names otherwise free-text work.
+        .or_else(|| queue_prompt_stable_id(head))
 }
 
 /// Whether `new` is the same free-text work as `old` with a note appended,
@@ -3604,6 +3714,117 @@ mod tests {
         assert_eq!(ledger.claims[0].generation, 2);
         assert_eq!(ledger.release("do [#a]").unwrap().owner, "subagent:b");
         assert!(ledger.release("do [#a]").is_none());
+    }
+
+    /// `#reportcompleteselector` (agent-doc-bugs.md, 2026-11-04): the
+    /// waiting row `⟦you: 1 · …⟧ [#lazilyreleasedecision] Decide … (#x): push
+    /// it …` was claimed by its full text. Its `: ` makes that text a
+    /// free-text nest vector, so `report-complete --item
+    /// '#lazilyreleasedecision'` found "no subagent claim". Every id selector
+    /// resolves the row, whichever selector the claim used.
+    #[test]
+    fn id_selectors_resolve_a_row_claimed_by_its_full_text() {
+        let full = concat!(
+            "⟦you: 1 · agent: 0 · done: 0⟧ [#lazilyreleasedecision] Decide for lazily-rs ",
+            "29fde5a8c6 (#lazilysqlitestoreopen): push it to lazily-rs main, and publish ",
+            "a lazily release (source: agent:backlog [#lazilysqlitestoreopen]) ",
+            "<!-- agent-doc:waiting-item -->",
+        );
+        assert!(
+            !claim_identity(full).is_id_backed(),
+            "the regression premise: the full text keys as free text"
+        );
+        let mut ledger = QueueClaimLedger::default();
+        ledger.claim(full, "subagent:lazilyrelease", 100, 600);
+        for selector in [
+            full,
+            "lazilyreleasedecision",
+            "#lazilyreleasedecision",
+            "[#lazilyreleasedecision]",
+            "do [#lazilyreleasedecision]",
+            "  #LazilyReleaseDecision  ",
+        ] {
+            let claim = ledger
+                .resolve_selector(selector)
+                .unwrap()
+                .unwrap_or_else(|| panic!("{selector:?} must resolve the claimed row"));
+            assert_eq!(claim.item_text, full, "{selector:?}");
+        }
+        for unrelated in ["lazilysqlitestoreopen", "#other", "do [#other]", "push it"] {
+            assert!(
+                ledger.resolve_selector(unrelated).unwrap().is_none(),
+                "{unrelated:?} names another row"
+            );
+        }
+        assert_eq!(ledger.claims.len(), 1, "resolution never mutates the ledger");
+    }
+
+    /// The reverse direction and nest vectors: a row claimed by `do [#id]`
+    /// resolves from its full row text and from a nest vector ending in it;
+    /// a row claimed as a nest vector resolves from its bare id.
+    #[test]
+    fn id_selectors_resolve_bare_and_nest_vector_claims_both_ways() {
+        let mut ledger = QueueClaimLedger::default();
+        ledger.claim("do [#alpha]", "subagent:alpha", 100, 600);
+        ledger.claim("Release prep: do [#beta]", "subagent:beta", 100, 600);
+        for (selector, expected) in [
+            ("🚧 [#subagent:alpha#1] do [#alpha]", "do [#alpha]"),
+            ("Some parent: do [#alpha]", "do [#alpha]"),
+            ("alpha", "do [#alpha]"),
+            ("Release prep: do [#beta]", "Release prep: do [#beta]"),
+            ("beta", "Release prep: do [#beta]"),
+            ("#beta", "Release prep: do [#beta]"),
+            ("do [#beta]", "Release prep: do [#beta]"),
+        ] {
+            let claim = ledger.resolve_selector(selector).unwrap();
+            assert_eq!(
+                claim.map(|claim| claim.item_text.as_str()),
+                Some(expected),
+                "{selector:?}"
+            );
+        }
+    }
+
+    /// An id two claims carry (the same bare `#tag` under two parents is two
+    /// claims, `#nestlistlineage`) is not a
+    /// selector for either: it refuses with both candidates, while each
+    /// exact nest vector still resolves its own claim.
+    #[test]
+    fn an_id_selector_carried_by_two_claims_refuses_with_the_candidates() {
+        let mut ledger = QueueClaimLedger::default();
+        ledger.claim("Parent one: #rebase", "subagent:one", 100, 600);
+        ledger.claim("Parent two: #rebase", "subagent:two", 100, 600);
+        let refused = ledger.resolve_selector("#rebase").unwrap_err();
+        assert_eq!(refused.id, "rebase");
+        assert_eq!(
+            refused.candidates,
+            vec!["Parent one: #rebase", "Parent two: #rebase"]
+        );
+        let message = refused.to_string();
+        assert!(message.contains("Parent one: #rebase"), "{message}");
+        assert!(message.contains("Parent two: #rebase"), "{message}");
+        assert_eq!(
+            ledger
+                .resolve_selector("Parent two: #rebase")
+                .unwrap()
+                .map(|claim| claim.owner.as_str()),
+            Some("subagent:two")
+        );
+    }
+
+    /// A binary-admitted trailing `[#q-…]` names otherwise free-text work.
+    #[test]
+    fn a_generated_prompt_id_selector_resolves_its_free_text_row() {
+        let mut ledger = QueueClaimLedger::default();
+        let row = "Add Dillon and Eddie to the approvers list [#q-c2010d98af04]";
+        ledger.claim(row, "subagent:dillon", 100, 600);
+        assert_eq!(
+            ledger
+                .resolve_selector("#q-c2010d98af04")
+                .unwrap()
+                .map(|claim| claim.item_text.as_str()),
+            Some(row)
+        );
     }
 
     #[test]

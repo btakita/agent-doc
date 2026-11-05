@@ -149,8 +149,9 @@ pub fn requeue_nonterminal_hand_back(
     generation: Option<u64>,
     response: &str,
 ) -> Result<Option<GoalLoopRequeue>> {
-    let mut ledger = crate::queue_claim::load_ledger_following(file, content)?;
-    let Some(claim) = ledger.release(item) else {
+    let ledger = crate::queue_claim::load_ledger_following(file, content)?;
+    // `#reportcompleteselector`: the same selector resolution as the report.
+    let Some(claim) = ledger.resolve_selector(item)?.cloned() else {
         return Ok(None);
     };
     if !claim.owner.starts_with("subagent:") {

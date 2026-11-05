@@ -25,7 +25,6 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 use anyhow::{Context, Result};
 use serde::Serialize;
@@ -837,14 +836,13 @@ fn append_struck_removal_mismatches(
 /// shared lock closes the report-marked/cell-not-yet-retained race; the
 /// retained `queue_consume` composition closes the delayed-outbox replay race.
 fn cancel_removed_claim_attempt(file: &Path, content: &str, item: &SteeringItem) -> Result<()> {
-    let lock_path = agent_doc_queue_io::queue_claim::completion_feedback_lock_path(file)?;
-    let lock = agent_doc_sync_io::acquire_sync_lock(&lock_path, Duration::from_secs(5), |_| {});
-    let agent_doc_sync_io::SyncLockAcquire::Acquired(_lock) = lock else {
-        anyhow::bail!(
-            "timed out waiting to tombstone removed queue claim for {}; no cancellation state was changed",
-            file.display()
-        );
-    };
+    // `#completionlockload`: the same progress-aware wait as report-complete,
+    // so this owner's handoff is visible to the reporters queued behind it.
+    let _lock = agent_doc_queue_io::completion_feedback_lock::acquire_completion_feedback_lock(
+        file,
+        "tombstone removed queue claim",
+        |_| {},
+    )?;
     let receipt = match agent_doc_queue_io::queue_claim::cancel_removed_attempt(
         file,
         &item.verbatim,

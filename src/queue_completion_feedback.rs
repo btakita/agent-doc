@@ -8,7 +8,6 @@
 //! ordinary claim release never implies that a worker completed successfully.
 
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 use agent_doc_element::component_scope::{changed_component_scope, with_component_write_scope};
 use agent_doc_queue::QueueReportState;
@@ -16,7 +15,9 @@ use agent_doc_queue::queue_claim::QueueClaim;
 use anyhow::{Context, Result, bail};
 
 const SOURCE: &str = "queue_subagent_completion_feedback";
-const COMPLETION_LOCK_WAIT: Duration = Duration::from_secs(5);
+use agent_doc_queue_io::completion_feedback_lock::{
+    COMPLETION_FEEDBACK_LOCK_WAIT, CompletionFeedbackLock, ProgressLockRound, ProgressLockWait,
+};
 // The cell grammar and its structural recognition are shared with every
 // recovery/closeout classifier (`agent_doc_document::subagent_completion`).
 use agent_doc_document::subagent_completion::{
@@ -62,15 +63,11 @@ pub(crate) fn requeue_nonterminal_goal_hand_back(
     generation: Option<u64>,
     response: &str,
 ) -> Result<Option<agent_doc_queue_io::goal_loop_handoff::GoalLoopRequeue>> {
-    let lock_path = agent_doc_queue_io::queue_claim::completion_feedback_lock_path(file)?;
-    let lock = agent_doc_sync_io::acquire_sync_lock(&lock_path, COMPLETION_LOCK_WAIT, |_| {});
-    let agent_doc_sync_io::SyncLockAcquire::Acquired(_lock) = lock else {
-        bail!(
-            "timed out after {}ms waiting to report subagent completion for {}; no document mutation was attempted",
-            COMPLETION_LOCK_WAIT.as_millis(),
-            file.display(),
-        );
-    };
+    let _lock = acquire_completion_lock(
+        file,
+        "report subagent completion",
+        COMPLETION_FEEDBACK_LOCK_WAIT,
+    )?;
     let resolved =
         agent_doc_document_realtime_io::try_resolve_current_document_content(file, SOURCE)?;
     let current =
@@ -100,7 +97,32 @@ pub(crate) fn report_complete(
         publication_state,
         repository,
         response,
-        COMPLETION_LOCK_WAIT,
+        COMPLETION_FEEDBACK_LOCK_WAIT,
+    )
+}
+
+/// `#completionlockload`: every completion-feedback owner waits on the same
+/// progress-aware lock, so a long queue of reporters on a loaded machine keeps
+/// waiting while owners hand off and fails fast only on a stuck owner.
+fn acquire_completion_lock(
+    file: &Path,
+    action: &str,
+    wait: ProgressLockWait,
+) -> Result<CompletionFeedbackLock> {
+    agent_doc_queue_io::completion_feedback_lock::acquire_completion_feedback_lock_with(
+        file,
+        action,
+        wait,
+        |round: &ProgressLockRound| {
+            eprintln!(
+                "[queue] still waiting to {action} for {}: {} owner handoff(s) in the last window, {} since the wait began ({}ms waited, ceiling {}ms)",
+                file.display(),
+                round.handoffs,
+                round.total_handoffs,
+                round.waited.as_millis(),
+                wait.max_wait.as_millis(),
+            );
+        },
     )
 }
 
@@ -111,20 +133,12 @@ fn report_complete_with_lock_wait(
     publication_state: Option<QueueReportState>,
     repository: Option<&RepositoryCompletion>,
     response: &str,
-    lock_wait: Duration,
+    lock_wait: ProgressLockWait,
 ) -> Result<CompletionFeedbackOutcome> {
     // `#subagentcompletionfeedback`: unlike SESSION_ACTOR_WRITE_QUEUE, this
     // lock serializes independent CLI processes. Re-resolve and rebuild inside
     // the owner so stale full-document successors cannot lose sibling notices.
-    let lock_path = agent_doc_queue_io::queue_claim::completion_feedback_lock_path(file)?;
-    let lock = agent_doc_sync_io::acquire_sync_lock(&lock_path, lock_wait, |_| {});
-    let agent_doc_sync_io::SyncLockAcquire::Acquired(_lock) = lock else {
-        bail!(
-            "timed out after {}ms waiting to publish subagent completion feedback for {}; no document mutation was attempted",
-            lock_wait.as_millis(),
-            file.display(),
-        );
-    };
+    let _lock = acquire_completion_lock(file, "publish subagent completion feedback", lock_wait)?;
     let resolved =
         agent_doc_document_realtime_io::try_resolve_current_document_content(file, SOURCE)?;
     // A retained successor is the latest complete desired cut even while the
@@ -413,16 +427,14 @@ pub(crate) fn repair_claim_projection(
     file: &Path,
     effects: &impl agent_doc_queue_io::queue_cmd::QueueCommandEffects,
 ) -> Result<bool> {
-    let lock_path = agent_doc_queue_io::queue_claim::completion_feedback_lock_path(file)?;
-    let lock = agent_doc_sync_io::acquire_sync_lock(&lock_path, COMPLETION_LOCK_WAIT, |_| {});
-    let agent_doc_sync_io::SyncLockAcquire::Acquired(_lock) = lock else {
-        bail!(
-            "timed out after {}ms waiting to repair queue projection for {}; retry `agent-doc queue repair-projection {:?}`",
-            COMPLETION_LOCK_WAIT.as_millis(),
-            file.display(),
-            file,
-        );
-    };
+    let _lock = acquire_completion_lock(
+        file,
+        "repair queue projection",
+        COMPLETION_FEEDBACK_LOCK_WAIT,
+    )
+    .map_err(|err| {
+        anyhow::anyhow!("{err:#}; retry `agent-doc queue repair-projection {file:?}`")
+    })?;
 
     if agent_doc_document_realtime_io::pending_document_write(file).is_some() {
         agent_doc_document_realtime_io::recover_retained_document_write_before_new_cycle(
@@ -452,15 +464,7 @@ pub(crate) fn repair_claim_projection(
 pub(crate) fn repair_legacy_completion_feedback(
     file: &Path,
 ) -> Result<CompletionFeedbackRepairOutcome> {
-    let lock_path = agent_doc_queue_io::queue_claim::completion_feedback_lock_path(file)?;
-    let lock = agent_doc_sync_io::acquire_sync_lock(&lock_path, COMPLETION_LOCK_WAIT, |_| {});
-    let agent_doc_sync_io::SyncLockAcquire::Acquired(_lock) = lock else {
-        bail!(
-            "timed out after {}ms waiting to repair subagent completion feedback for {}; no document mutation was attempted",
-            COMPLETION_LOCK_WAIT.as_millis(),
-            file.display(),
-        );
-    };
+    let _lock = acquire_completion_lock(file, "repair subagent completion feedback", COMPLETION_FEEDBACK_LOCK_WAIT)?;
     let current =
         agent_doc_document_realtime_io::try_resolve_current_document_content(file, SOURCE)?;
     let (updated, repaired) = repair_legacy_completion_feedback_content(&current);
@@ -514,15 +518,7 @@ pub(crate) fn repair_stale_completion(
             &crate::CLI_QUEUE_CONSUME_WRITE_EFFECTS,
         );
     }
-    let lock_path = agent_doc_queue_io::queue_claim::completion_feedback_lock_path(file)?;
-    let lock = agent_doc_sync_io::acquire_sync_lock(&lock_path, COMPLETION_LOCK_WAIT, |_| {});
-    let agent_doc_sync_io::SyncLockAcquire::Acquired(_lock) = lock else {
-        bail!(
-            "timed out after {}ms waiting to repair stale completion evidence for {}; no document mutation was attempted",
-            COMPLETION_LOCK_WAIT.as_millis(),
-            file.display(),
-        );
-    };
+    let _lock = acquire_completion_lock(file, "repair stale completion evidence", COMPLETION_FEEDBACK_LOCK_WAIT)?;
     if let Some(pending) = agent_doc_document_realtime_io::pending_document_write(file) {
         bail!(
             "{} has a retained editor write (intent {}) that has not landed; open it in the active editor/project and run `agent-doc queue repair-projection {:?}`, then rerun; nothing was changed",
@@ -600,15 +596,7 @@ pub(crate) fn repair_managed_state(
     apply: bool,
     keys: &std::collections::HashSet<String>,
 ) -> Result<ManagedStateRepairReport> {
-    let lock_path = agent_doc_queue_io::queue_claim::completion_feedback_lock_path(file)?;
-    let lock = agent_doc_sync_io::acquire_sync_lock(&lock_path, COMPLETION_LOCK_WAIT, |_| {});
-    let agent_doc_sync_io::SyncLockAcquire::Acquired(_lock) = lock else {
-        bail!(
-            "timed out after {}ms waiting to audit managed queue state for {}; no document mutation was attempted",
-            COMPLETION_LOCK_WAIT.as_millis(),
-            file.display(),
-        );
-    };
+    let _lock = acquire_completion_lock(file, "audit managed queue state", COMPLETION_FEEDBACK_LOCK_WAIT)?;
 
     if apply
         && let Some(pending) = agent_doc_document_realtime_io::pending_document_write(file)
@@ -888,6 +876,7 @@ mod tests {
     use super::*;
     use agent_doc_element_queue::QueueItemIdentity;
     use std::fs;
+    use std::time::Duration;
 
     fn test_claim() -> QueueClaim {
         QueueClaim {
@@ -1830,14 +1819,19 @@ mod tests {
         .unwrap();
         agent_doc_queue_io::queue_claim::claim(&doc, "finish sdk", "subagent:sdk-feedback", 600)
             .unwrap();
-        let lock_path =
-            agent_doc_queue_io::queue_claim::completion_feedback_lock_path(&doc).unwrap();
-        let agent_doc_sync_io::SyncLockAcquire::Acquired(_held) =
-            agent_doc_sync_io::acquire_sync_lock(&lock_path, Duration::ZERO, |_| {})
-        else {
-            panic!("fixture must acquire completion lock");
-        };
-        let started = std::time::Instant::now();
+        let _held = acquire_completion_lock(
+            &doc,
+            "hold the fixture lock",
+            ProgressLockWait {
+                stall_window: Duration::ZERO,
+                max_wait: Duration::ZERO,
+            },
+        )
+        .expect("fixture must acquire completion lock");
+        // `#completionlockload`: the bound is structural, not a wall-clock
+        // assertion. The fixture owner never hands off, so the waiter refuses
+        // after exactly one stall window however slow the machine is, and the
+        // hour-long ceiling proves the refusal came from the stall, not the cap.
         let error = report_complete_with_lock_wait(
             &doc,
             "finish sdk",
@@ -1845,11 +1839,20 @@ mod tests {
             None,
             None,
             "worker completed",
-            Duration::from_millis(50),
+            ProgressLockWait {
+                stall_window: Duration::from_millis(50),
+                max_wait: Duration::from_secs(3600),
+            },
         )
         .unwrap_err();
-        assert!(started.elapsed() < Duration::from_secs(1));
-        assert!(error.to_string().contains("timed out after 50ms"));
+        let message = error.to_string();
+        assert!(
+            message.contains("waiting to publish subagent completion feedback")
+                && message.contains("made no progress for 50ms")
+                && message.contains("over 1 window(s), 0 owner handoff(s)")
+                && message.contains("no document mutation was attempted"),
+            "{message}"
+        );
         assert!(
             !fs::read_to_string(&doc)
                 .unwrap()

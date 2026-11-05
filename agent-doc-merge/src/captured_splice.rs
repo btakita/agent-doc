@@ -3,7 +3,7 @@
 
 use std::ops::Range;
 
-use anyhow::{Result, ensure};
+use anyhow::{Result, bail, ensure};
 use serde::{Deserialize, Serialize};
 use similar::{Algorithm, DiffOp, DiffTag, capture_diff_slices};
 
@@ -62,6 +62,31 @@ pub fn rebase(
             edits: Vec::new(),
             resulting_text: canonical.to_owned(),
         });
+    }
+    // `#staleretainedwrite`: a captured line that newly carries text canonical
+    // wrote at a DIFFERENT row is canonical's own write replayed at a stale
+    // anchor, not operator typing. It re-anchors on canonical's row (where
+    // canonical already holds it) or, when it cannot be separated from other
+    // changed text, the rebase refuses. It is never replayed as a code-point
+    // range, and no fallback below may adopt it.
+    match reanchor_misplaced_canonical_echoes(base, canonical, &batch.resulting_text) {
+        EchoAnchoring::None => {}
+        EchoAnchoring::Refused(reason) => bail!(reason),
+        EchoAnchoring::Reanchored(cut) => {
+            if cut == base {
+                return Ok(CapturedSpliceBatch {
+                    edits: Vec::new(),
+                    resulting_text: canonical.to_owned(),
+                });
+            }
+            let base_chars: Vec<char> = base.chars().collect();
+            let cut_chars: Vec<char> = cut.chars().collect();
+            let reanchored = CapturedSpliceBatch {
+                edits: splices_between(&base_chars, &cut_chars),
+                resulting_text: cut,
+            };
+            return rebase(base, canonical, &reanchored);
+        }
     }
     let planned = (|| -> Result<CapturedSpliceBatch> {
         // `#struckqueuepruneattach`: a settled struck queue row is already
@@ -184,6 +209,170 @@ pub fn rebase(
             }
         }
     }
+}
+
+/// Shortest canonical-written text (non-whitespace code points) that counts as
+/// evidence of a misplaced echo. Shorter cores (`~~`, a glyph, a bracket) recur
+/// by coincidence in operator text.
+const ECHO_MIN_CORE_CHARS: usize = 12;
+
+/// The answer of [`reanchor_misplaced_canonical_echoes`].
+#[derive(Debug, PartialEq, Eq)]
+enum EchoAnchoring {
+    /// No captured line carries canonical's text away from canonical's row.
+    None,
+    /// The cut with every misplaced echo reverted to its base lines.
+    Reanchored(String),
+    /// A misplaced echo shares its line hunk with other changed text.
+    Refused(String),
+}
+
+/// One whole-line change of a side over `base`, as text.
+struct TextHunk {
+    old: Range<usize>,
+    old_text: String,
+    new_text: String,
+}
+
+fn text_hunks(base_lines: &[&str], side: &str) -> Vec<TextHunk> {
+    let side_lines: Vec<&str> = side.split_inclusive('\n').collect();
+    capture_diff_slices(Algorithm::Myers, base_lines, &side_lines)
+        .into_iter()
+        .filter(|op| op.tag() != DiffTag::Equal)
+        .map(|op| TextHunk {
+            old: op.old_range(),
+            old_text: base_lines[op.old_range()].concat(),
+            new_text: side_lines[op.new_range()].concat(),
+        })
+        .collect()
+}
+
+/// The code points a change deleted and inserted: `old` and `new` without
+/// their common prefix and suffix.
+fn changed_cores(old: &str, new: &str) -> (usize, String) {
+    let old: Vec<char> = old.chars().collect();
+    let new: Vec<char> = new.chars().collect();
+    let mut prefix = 0;
+    while prefix < old.len() && prefix < new.len() && old[prefix] == new[prefix] {
+        prefix += 1;
+    }
+    let mut suffix = 0;
+    while suffix < old.len() - prefix
+        && suffix < new.len() - prefix
+        && old[old.len() - 1 - suffix] == new[new.len() - 1 - suffix]
+    {
+        suffix += 1;
+    }
+    (
+        old.len() - prefix - suffix,
+        new[prefix..new.len() - suffix].iter().collect(),
+    )
+}
+
+/// Whether two base line ranges are the same anchor: they overlap, or touch at
+/// one boundary.
+fn hunks_share_anchor(a: &Range<usize>, b: &Range<usize>) -> bool {
+    a.start <= b.end && b.start <= a.end
+}
+
+/// `#staleretainedwrite`: find captured lines that are canonical's own write
+/// replayed at a stale anchor.
+///
+/// Live 2026-11-04 (agent-doc-bugs.md, commit `259bd34e42`): the controller
+/// struck `[#trackedworkdropped]`'s dispatch row while `make install` recycled
+/// the controller and the old IDE replica went away. The replica's buffer then
+/// held that strike replayed as a code-point range taken from an older
+/// document, 674 code points past the row, so the row text replaced the middle
+/// of the `agent:loop` row and deleted its Response child. Registration read
+/// shadow → buffer as operator typing and merged it "forward" onto canonical,
+/// which already held the correct strike, and the fused row was committed.
+///
+/// The signature is a shifted range replay: canonical REPLACED a span (it
+/// deleted `n` code points and inserted a core of at least
+/// [`ECHO_MIN_CORE_CHARS`] non-whitespace code points that `base` does not
+/// contain), and a captured hunk away from canonical's anchor replaced base
+/// text with text carrying that same core, while the cut still lacks the change
+/// at canonical's own anchor. An operator who copies a delivered row elsewhere
+/// keeps canonical's change at its row too, and an operator who types text
+/// canonical independently wrote elsewhere inserts it rather than replacing
+/// base text; neither matches.
+///
+/// When the hunk is exactly the replay (its new text is its base text with
+/// one span of `n` code points replaced by the core), it re-anchors on
+/// canonical's row: canonical already holds the change there, so the hunk
+/// reverts to its base lines and every other captured hunk still rolls
+/// forward. Any other matching hunk cannot be separated from operator text by
+/// line, and the rebase refuses rather than splice the range.
+fn reanchor_misplaced_canonical_echoes(base: &str, canonical: &str, cut: &str) -> EchoAnchoring {
+    let base_lines: Vec<&str> = base.split_inclusive('\n').collect();
+    let canonical_writes: Vec<(Range<usize>, usize, String)> = text_hunks(&base_lines, canonical)
+        .into_iter()
+        .filter_map(|hunk| {
+            let (deleted, core) = changed_cores(&hunk.old_text, &hunk.new_text);
+            let meaningful = core.chars().filter(|ch| !ch.is_whitespace()).count();
+            (deleted > 0 && meaningful >= ECHO_MIN_CORE_CHARS && !base.contains(&core))
+                .then_some((hunk.old, deleted, core))
+        })
+        .collect();
+    if canonical_writes.is_empty() {
+        return EchoAnchoring::None;
+    }
+    let captured = text_hunks(&base_lines, cut);
+    let mut reverted = vec![false; captured.len()];
+    for (index, hunk) in captured.iter().enumerate() {
+        if hunk.old_text.is_empty() {
+            continue;
+        }
+        let echo = canonical_writes.iter().find(|(anchor, _, core)| {
+            hunk.new_text.contains(core.as_str())
+                && !hunk.old_text.contains(core.as_str())
+                && !hunks_share_anchor(&hunk.old, anchor)
+                && !captured
+                    .iter()
+                    .any(|other| hunks_share_anchor(&other.old, anchor))
+        });
+        let Some((_, canonical_deleted, core)) = echo else {
+            continue;
+        };
+        let at = hunk
+            .new_text
+            .find(core.as_str())
+            .expect("echo core is present");
+        let (prefix, suffix) = (&hunk.new_text[..at], &hunk.new_text[at + core.len()..]);
+        let exact_replay = hunk.old_text.len() >= prefix.len() + suffix.len()
+            && hunk.old_text.starts_with(prefix)
+            && hunk.old_text.ends_with(suffix)
+            && hunk.old_text[prefix.len()..hunk.old_text.len() - suffix.len()]
+                .chars()
+                .count()
+                == *canonical_deleted;
+        if !exact_replay {
+            return EchoAnchoring::Refused(format!(
+                "captured cut carries canonical's own write `{core}` at a stale anchor (base \
+                 lines {}..{}, away from the row canonical changed) fused with other changed \
+                 text; refusing to replay it as a code-point range (#staleretainedwrite)",
+                hunk.old.start + 1,
+                hunk.old.end + 1,
+            ));
+        }
+        reverted[index] = true;
+    }
+    if !reverted.contains(&true) {
+        return EchoAnchoring::None;
+    }
+    let mut out = String::with_capacity(cut.len());
+    let mut at = 0;
+    for (hunk, revert) in captured.iter().zip(reverted) {
+        out.extend(base_lines[at..hunk.old.start].iter().copied());
+        out.push_str(if revert {
+            &hunk.old_text
+        } else {
+            &hunk.new_text
+        });
+        at = hunk.old.end;
+    }
+    out.extend(base_lines[at..].iter().copied());
+    EchoAnchoring::Reanchored(out)
 }
 
 /// `#lagcanonicalrowmerge`: the attach merge for a canonical that both lags the
@@ -3219,5 +3408,140 @@ mod tests {
              answered {registration_answered} refused {registration_refused} char-level \
              reanchored {char_level_reanchored}"
         );
+    }
+
+    // ---- `#staleretainedwrite` ------------------------------------------
+
+    /// The binary-owned dispatch row the controller strikes on `--ack-id`.
+    const STALE_RUN_ROW: &str =
+        "- ### ☑️ [#subagent:trackedworkdrop#1] do [#trackedworkdropped] ⟦published⟧\n";
+    /// The same row as canonical's strike writes it.
+    const STALE_RUN_ROW_STRUCK: &str = "- ### ~~do [#trackedworkdropped] ⟦published⟧~~\n";
+    /// The `agent:loop` row and its Response child the stale replay overwrote.
+    const STALE_LOOP_ROWS: &str = "- ~~Watch issues except #40 + #45. [#q-241aecb69d4f]~~ — auto-struck: addressed this cycle; response: [#r-fc6c69471418]\n  - **Response [#r-fc6c69471418]:** The scheduled pass found only open issues #40 and #45, both explicitly excluded. No backlog or queue item was added.\n";
+
+    fn stale_retained_doc(active: &str, loop_rows: &str) -> String {
+        format!(
+            "## Active <!-- agent:active priority -->\n{active}<!-- /agent:active -->\n\n\
+             ## Run <!-- agent:run id=\"main\" subagents -->\n\
+             - ### ~~do [#queuetreegutter] ⟦published⟧~~\n\
+             {STALE_RUN_ROW}\
+             - ### ~~do [#controllerstatusflake] ⟦published⟧~~\n\
+             <!-- /agent:run -->\n\n\
+             ## Loop <!-- agent:loop interval=\"1h\" priority keep stop -->\n\
+             {loop_rows}<!-- /agent:loop -->\n\n\
+             ## Exchange <!-- agent:exchange patch=append -->\n\
+             Operator notes.\n\
+             <!-- /agent:exchange -->\n"
+        )
+    }
+
+    fn char_offset(text: &str, needle: &str) -> usize {
+        text[..text.find(needle).unwrap()].chars().count()
+    }
+
+    /// The live 2026-11-04 shape (agent-doc-bugs.md, commit 259bd34e42). The
+    /// controller struck `[#trackedworkdropped]`'s dispatch row while the old
+    /// IDE replica was going away. The replica's text then carried that strike
+    /// replayed as a code-point range computed against an older document whose
+    /// Active block was longer, so the row text replaced 69 code points of the
+    /// `agent:loop` row and its Response child. Registration then merged that
+    /// buffer "forward" onto canonical as if it were operator text.
+    ///
+    /// Returns `(base, canonical, cut)`: the settled shadow, canonical's own
+    /// correct strike, and the buffer holding the misplaced replay.
+    fn stale_replayed_strike() -> (String, String, String) {
+        let base = stale_retained_doc("", STALE_LOOP_ROWS);
+        let row_core = STALE_RUN_ROW
+            .trim_start_matches("- ### ")
+            .trim_end_matches('\n');
+        let struck_core = STALE_RUN_ROW_STRUCK
+            .trim_start_matches("- ### ")
+            .trim_end_matches('\n');
+        // The older document: the same text with a longer Active block, so the
+        // row's code-point offset there is exactly the offset of `418]` here.
+        let shift = char_offset(&base, "418]\n") - char_offset(&base, row_core);
+        let padding = format!("{}\n", "x".repeat(shift - 1));
+        let older = stale_retained_doc(&padding, STALE_LOOP_ROWS);
+        let stale_offset = char_offset(&older, row_core);
+        let replay = edit(stale_offset, row_core.chars().count(), struck_core);
+        let cut = batch(&base, vec![replay]).resulting_text;
+        assert!(
+            cut.contains("[#r-fc6c69471~~do [#trackedworkdropped] ⟦published⟧~~"),
+            "fixture must reproduce the live splice:\n{cut}"
+        );
+        assert!(
+            cut.contains(STALE_RUN_ROW),
+            "the real row is untouched in the cut"
+        );
+        let canonical = base.replacen(STALE_RUN_ROW, STALE_RUN_ROW_STRUCK, 1);
+        (base, canonical, cut)
+    }
+
+    /// A captured cut whose only change is canonical's own write replayed at
+    /// a stale anchor is not operator text. It re-anchors on canonical's row,
+    /// where canonical already holds it, so the answer is canonical: the loop
+    /// row and its Response child survive and nothing is spliced.
+    #[test]
+    fn stale_replayed_canonical_strike_reanchors_on_its_row() {
+        let (base, canonical, cut) = stale_replayed_strike();
+        let answer = rebase(&base, &canonical, &single_splice(&base, &cut)).unwrap();
+        assert_eq!(answer.resulting_text, canonical, "the replay must not land");
+        assert!(answer.edits.is_empty());
+        assert!(answer.resulting_text.contains(STALE_LOOP_ROWS));
+        // The registration entry point the plugin calls answers the same.
+        let registration =
+            crate::captured_splice_request::registration_rebase(&base, &cut, &canonical).unwrap();
+        assert_eq!(registration.resulting_text, canonical);
+    }
+
+    /// Re-anchoring drops only the misplaced echo: an independent operator
+    /// edit elsewhere in the same cut still rolls forward onto canonical.
+    #[test]
+    fn stale_replayed_strike_keeps_independent_operator_edits() {
+        let (base, canonical, cut) = stale_replayed_strike();
+        let cut = cut.replace("Operator notes.\n", "Operator notes, now longer.\n");
+        let answer = rebase(&base, &canonical, &single_splice(&base, &cut)).unwrap();
+        let expected = canonical.replace("Operator notes.\n", "Operator notes, now longer.\n");
+        assert_eq!(answer.resulting_text, expected);
+        assert!(answer.resulting_text.contains(STALE_LOOP_ROWS));
+    }
+
+    /// When the misplaced echo shares its line hunk with other changed text,
+    /// the echo cannot be separated from operator typing by line, so the
+    /// rebase refuses (the plugin keeps the buffer held) rather than replay
+    /// the code-point range onto canonical.
+    #[test]
+    fn stale_replayed_strike_fused_with_other_text_is_refused() {
+        let (base, canonical, cut) = stale_replayed_strike();
+        let cut = cut.replace("y open issues #40", "y open issues (typed) #40");
+        let refusal = rebase(&base, &canonical, &single_splice(&base, &cut)).unwrap_err();
+        let message = format!("{refusal:#}");
+        assert!(message.contains("stale anchor"), "{message}");
+        assert!(message.contains("~~do [#trackedworkdropped]"), "{message}");
+    }
+
+    /// Non-vacuity: canonical's strike delivered at its OWN row is the
+    /// healthy path and is still recognised as contained.
+    #[test]
+    fn canonical_strike_delivered_at_its_row_is_contained() {
+        let (base, canonical, _) = stale_replayed_strike();
+        let answer = rebase(&base, &canonical, &single_splice(&base, &canonical)).unwrap();
+        assert_eq!(answer.resulting_text, canonical);
+        assert!(answer.edits.is_empty());
+    }
+
+    /// An operator who copies a delivered row elsewhere keeps the copy: the
+    /// cut also carries canonical's change at its own row, so the copy is not
+    /// a misplaced echo.
+    #[test]
+    fn operator_copy_of_a_delivered_row_is_not_an_echo() {
+        let (base, canonical, _) = stale_replayed_strike();
+        let cut = canonical.replace(
+            "Operator notes.\n",
+            "Operator notes.\nSee ~~do [#trackedworkdropped] ⟦published⟧~~ above.\n",
+        );
+        let answer = rebase(&base, &canonical, &single_splice(&base, &cut)).unwrap();
+        assert_eq!(answer.resulting_text, cut);
     }
 }

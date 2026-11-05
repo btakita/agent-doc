@@ -1025,6 +1025,8 @@ Tracked-work extraction is Markdown-structural. Checklist-shaped text inside fen
 
 One or more `agent:run` components hold batches of prompts consumed sequentially. The default template scaffolds one unkeyed `<!-- agent:run priority subagents clear -->` queue between `exchange` and `backlog`; it stable-sorts id-backed work by source priority, dispatches eligible heads to background subagents, and explicitly declares fresh-context clearing. The marker omits `go` (and `start`, `pause`, and `stop`) and the scaffold writes no `queue:` field, because a queue with no control already runs in go-mode (`#queuegodefault`). The unkeyed shape remains the implicit `default` queue. Existing explicitly authored queue markers retain their attributes and behavior; this default applies when Agent Doc creates a new scaffold.
 
+**No template patch writes queue rows (`#staleretainedwrite`).** `agent:queue`, `agent:run`, and `agent:loop` all parse as the internal `queue` component, and their rows are owned by agent-doc's queue commands (claims, strikes, reported markers, CRDT node ops). A response carrying `<!-- patch:queue -->`, `<!-- patch:run -->`, or `<!-- patch:loop -->` is refused at patch parsing with a message that names the component and the supported paths (`agent-doc queue` commands, or an operator edit in the editor); the block is never silently dropped or routed into the exchange. Quoted markers inside a code fence are examples and stay ignored.
+
 **Syntax:** hybrid list items and fenced prompts.
 
 | Form | Example | Description |

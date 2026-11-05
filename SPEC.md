@@ -96,6 +96,16 @@
   memory. See [Real-Time Workflow Authority](specs/14-realtime-workflow.md#retained-writes-never-replace-operator-text)
   and [Document Format](specs/02-document-format.md).
 
+- A template patch whose target no patch path applies is refused with a
+  message, never dropped (`#staleretainedwrite`): `patch:queue`, `patch:run`,
+  and `patch:loop` target runnable queue components, which all parse as the
+  internal `queue` component and whose rows agent-doc's queue commands own, so
+  `parse_patches` refuses the response, naming the component and pointing at
+  `agent-doc queue` commands or an editor edit. Before, `patch:loop` and
+  `patch:run` never matched (overflowed into the exchange on the pure path and
+  vanished on the editor IPC path), and `patch:queue` hit the first
+  queue-family component.
+
 - A sync-managed `status:sync` payload is derived state owned by the `sync`
   instruction (`#statussyncrevert`): every status writer records the payload
   it landed, and preflight plus the mid-turn and final checkpoints demand a
@@ -198,6 +208,13 @@
   row's work text that the buffer does not carry (a rewrite, a strike, a close
   marker), or a controller insertion at the same boundary as an operator
   insertion, is a true conflict and still holds.
+- `#staleretainedwrite`: a captured line hunk that replaces base text with a
+  core canonical itself wrote at a different row (the cut still lacking that
+  change at canonical's row) is canonical's write replayed at a stale anchor,
+  never operator text. An exact replay re-anchors on canonical's row (the hunk
+  reverts to its base lines; other captured hunks still roll forward); anything
+  fused with other changed text refuses. No fallback adopts it. See
+  [Real-Time Workflow](specs/14-realtime-workflow.md).
 - A selected-document focus that resolves a proven live-owner pane outside the
   active `agent-doc` window must surface that pane before selection. Promotion
   and selection share the editor focus-generation fence, and the controller

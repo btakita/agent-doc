@@ -139,6 +139,33 @@ pub fn is_template_mode(mode: Option<&str>) -> bool {
     matches!(mode, Some("template"))
 }
 
+/// `#staleretainedwrite`: refuse, with a message, a patch block whose target
+/// no patch path ever applies.
+///
+/// `agent:queue`, `agent:run`, and `agent:loop` all parse as the internal
+/// `queue` component, and their rows are owned by agent-doc's queue commands
+/// (claims, strikes, reported markers, CRDT node ops). A `patch:loop` or
+/// `patch:run` therefore never matched a component: the binary's pure path
+/// routed it into the exchange as overflow while the editor IPC path dropped
+/// it, so a closeout that tried to restore a corrupted `agent:loop` row on
+/// 2026-11-04 (agent-doc-bugs.md) reported success while HEAD kept the spliced
+/// row. `patch:queue` instead matched the FIRST queue-family component, which
+/// may be `agent:run` rather than the queue the response meant.
+fn refuse_unappliable_patch_target(prefix_kind: &str, name: &str) -> Result<()> {
+    if prefix_kind == "patch" && element::canonical_component_name(name) == element::QUEUE_COMPONENT
+    {
+        anyhow::bail!(
+            "`<!-- patch:{name} -->` targets `agent:{name}`, a runnable queue component whose \
+             rows agent-doc owns (claims, strikes, reported markers); a template patch is never \
+             applied there, so this response is refused instead of being silently dropped \
+             (#staleretainedwrite). Change queue rows with `agent-doc queue` commands, or ask \
+             the operator to edit the row in the editor, then resend the response without the \
+             `patch:{name}` block."
+        );
+    }
+    Ok(())
+}
+
 /// Parse `<!-- patch:name -->...<!-- /patch:name -->` blocks from an agent response.
 ///
 /// Content outside patch blocks is collected as "unmatched" and returned separately.
@@ -237,6 +264,7 @@ pub fn parse_patches(response: &str) -> Result<(Vec<PatchBlock>, String)> {
                     "legacy pending patch block is no longer supported; use `<!-- replace:pending -->` instead"
                 );
             }
+            refuse_unappliable_patch_target(prefix_kind, name)?;
 
             // Consume trailing newline after opening marker
             let mut content_start = close;
@@ -2740,6 +2768,46 @@ This is just an example.
             "code block content should be preserved"
         );
         assert!(unmatched.is_empty());
+    }
+
+    /// `#staleretainedwrite`: a closeout carried `patch:loop` to restore a
+    /// corrupted `agent:loop` row. No patch path applies a queue-family target
+    /// (they all parse as the internal `queue` component), so the block used
+    /// to vanish while the response reported the repair. It is refused with a
+    /// message naming the component and the supported path.
+    #[test]
+    fn parse_patches_refuses_queue_family_targets_with_a_message() {
+        for name in ["loop", "run", "queue"] {
+            let response = format!(
+                "<!-- patch:{name} -->\n- restored row\n<!-- /patch:{name} -->\n\n\
+                 <!-- patch:exchange -->\nDone.\n<!-- /patch:exchange -->\n"
+            );
+            let error = parse_patches(&response).unwrap_err().to_string();
+            assert!(error.contains(&format!("agent:{name}")), "{error}");
+            assert!(error.contains("agent-doc queue"), "{error}");
+            assert!(error.contains("never"), "{error}");
+        }
+        // The same markers quoted in a fence are an example, not a patch.
+        let quoted = "<!-- patch:exchange -->\n```\n<!-- patch:loop -->\nx\n<!-- /patch:loop -->\n```\n<!-- /patch:exchange -->\n";
+        let (patches, _) = parse_patches(quoted).unwrap();
+        assert_eq!(patches.len(), 1);
+        assert_eq!(patches[0].name, "exchange");
+        // Other components are unaffected.
+        let (patches, _) =
+            parse_patches("<!-- patch:status -->\nok\n<!-- /patch:status -->\n").unwrap();
+        assert_eq!(patches[0].name, "status");
+    }
+
+    /// Before the refusal, the pure apply path never matched `patch:loop`
+    /// against `agent:loop` (it parses as `queue`) and routed its body into the
+    /// exchange. Pin that the component name projection that made the patch
+    /// unappliable still holds, so the refusal above stays the only answer.
+    #[test]
+    fn queue_family_patch_target_never_matches_its_component_by_name() {
+        let doc = "<!-- agent:loop interval=\"1h\" -->\n- row\n<!-- /agent:loop -->\n";
+        let components = element::parse(doc).unwrap();
+        assert!(components.iter().all(|component| component.name != "loop"));
+        assert_eq!(components[0].name, element::QUEUE_COMPONENT);
     }
     #[test]
     fn parse_patches_ignores_markers_in_tilde_fence() {

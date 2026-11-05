@@ -24,12 +24,39 @@ pub struct AnswerLedgerReport {
     pub facts: Vec<AnsweredFact>,
     pub possible: Vec<PossibleMatch>,
     pub closed: Vec<DuplicateClosure>,
+    /// `#decisionstaleaudit`: open todo rows a delivered operator answer
+    /// already settled (identity tier), closed by this pass.
+    pub stale_closed: Vec<DuplicateClosure>,
 }
 
 impl AnswerLedgerReport {
     /// Cycle-contract guidance; `None` when nothing is answered or possible.
     pub fn guidance(&self) -> Option<String> {
         agent_doc_answer_ledger::contract_guidance(&self.facts, &self.possible)
+    }
+
+    /// `#decisionstaleaudit`: todo signals computed before this pass, minus
+    /// the ones about todo rows this pass closed (their audit obligation is
+    /// already met, so the contract never asks to close a closed row).
+    pub fn without_closed_todos(&self, signals: &[crate::TodoSignal]) -> Vec<crate::TodoSignal> {
+        let closed: std::collections::BTreeSet<String> = self
+            .closed
+            .iter()
+            .chain(&self.stale_closed)
+            .map(|closure| closure.todo_id.to_ascii_lowercase())
+            .collect();
+        signals
+            .iter()
+            .filter(|signal| {
+                let about_todo_row = match signal.kind.as_str() {
+                    "tracked_work_missing_todo_backlink" => false,
+                    "stale_tracked_item" => signal.component.as_deref() == Some("todo"),
+                    _ => true,
+                };
+                !(about_todo_row && closed.contains(&signal.todo.to_ascii_lowercase()))
+            })
+            .cloned()
+            .collect()
     }
 }
 
@@ -195,9 +222,19 @@ fn run_answer_ledger_maintenance_with_options(
     let now = agent_doc_log_time::current_epoch_secs();
     let (observations, ledger) = build_ledger(file, &content);
     let closed = ledger.duplicate_closures(&observations);
+    // `#decisionstaleaudit`: identity-tier stale todo rows close in the same
+    // write; every other stale finding is only a signal.
+    let stale_closed: Vec<DuplicateClosure> = ledger
+        .stale_auto_closures(&observations)
+        .into_iter()
+        .filter(|stale| !closed.iter().any(|dup| dup.todo_id == stale.todo_id))
+        .collect();
+    let all_closed: Vec<DuplicateClosure> =
+        closed.iter().chain(stale_closed.iter()).cloned().collect();
     let mut report_ledger = ledger;
-    if !closed.is_empty()
-        && let Some(target) = agent_doc_answer_ledger::apply_duplicate_closures(&content, &closed)?
+    if !all_closed.is_empty()
+        && let Some(target) =
+            agent_doc_answer_ledger::apply_duplicate_closures(&content, &all_closed)?
     {
         let persisted = if force_disk {
             let effects = write_effects.ok_or_else(|| {
@@ -236,6 +273,21 @@ fn run_answer_ledger_maintenance_with_options(
                 ),
             );
         }
+        for closure in &stale_closed {
+            eprintln!(
+                "[preflight] answer ledger: closed answered todo [#{}] — already answered `{}`: “{}” ({}) (#decisionstaleaudit)",
+                closure.todo_id, closure.decision_id, closure.answer, closure.location
+            );
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "answer_ledger_stale_closed file={} todo={} decision={}",
+                    file.display(),
+                    closure.todo_id,
+                    closure.decision_id
+                ),
+            );
+        }
         let (_, rebuilt) = build_ledger(file, &persisted);
         report_ledger = rebuilt;
     }
@@ -253,7 +305,18 @@ fn run_answer_ledger_maintenance_with_options(
         facts,
         possible: report_ledger.possible.clone(),
         closed,
+        stale_closed,
     })
+}
+
+/// `#decisionstaleaudit`: every open tracked item a delivered decision makes
+/// stale, read-only (no index write, no document write).
+pub fn stale_tracked_items(
+    file: &Path,
+    content: &str,
+) -> Vec<agent_doc_answer_ledger::stale::StaleTrackedItem> {
+    let (observations, ledger) = build_ledger(file, content);
+    ledger.stale_tracked_items(&observations)
 }
 
 /// Pre-write closeout gate: the questions this closeout would add that the
@@ -287,6 +350,70 @@ mod tests {
         "- [ ] [#subagent-operator-request-tdport-allowlist] Choose how to add the demo callback: stop, studio append, or local demo only\n",
         "<!-- /agent:todo -->\n",
     );
+
+    /// `#decisionstaleaudit`: an idle todo whose own id a delivered operator
+    /// answer settled closes in the maintenance write (identity tier), once;
+    /// a backlog question with the same kind of answer is never closed.
+    #[test]
+    fn maintenance_closes_a_settled_todo_once_and_leaves_tracked_work_open() {
+        const STALE_DOC: &str = concat!(
+            "---\nagent_doc_session: stale-audit\n---\n\n",
+            "<!-- agent:run id=\"main\" -->\n",
+            "- ### ~~[#tdapprovers]: Make a PR to link the ADRs ⟦published⟧~~\n",
+            "- ### ~~[#nextsteps]: Run the go-live checklist first.~~\n",
+            "<!-- /agent:run -->\n\n",
+            "<!-- agent:todo -->\n",
+            "- [ ] [#tdapprovers] Name the approver for docs PR #88 and request their review\n",
+            "<!-- /agent:todo -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#nextsteps] What are next steps to make the docs site public?\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("session.md");
+        std::fs::write(&doc, STALE_DOC).unwrap();
+        let report = run_answer_ledger_maintenance_force_disk(&doc, &DiskEffects).unwrap();
+        assert!(report.closed.is_empty(), "{report:?}");
+        assert_eq!(report.stale_closed.len(), 1, "{report:?}");
+        assert_eq!(report.stale_closed[0].todo_id, "tdapprovers");
+        let written = std::fs::read_to_string(&doc).unwrap();
+        assert!(written.contains("- [x] [#tdapprovers]"), "{written}");
+        assert!(written.contains("already answered `"), "{written}");
+        assert!(written.contains("- [ ] [#nextsteps]"), "{written}");
+        let again = run_answer_ledger_maintenance_force_disk(&doc, &DiskEffects).unwrap();
+        assert!(again.stale_closed.is_empty(), "{again:?}");
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), written);
+        let stale = stale_tracked_items(&doc, &written);
+        assert_eq!(stale.len(), 1, "{stale:?}");
+        assert_eq!(stale[0].item, "nextsteps");
+        assert!(!stale[0].auto_close);
+    }
+
+    struct DiskEffects;
+    impl crate::PreflightMaintenanceWriteEffects for DiskEffects {
+        fn record_document_write_provenance(&self, _file: &Path, _content: &str) {}
+
+        fn guard_visible_write_expected_current(
+            &self,
+            _file: &Path,
+            _source: &str,
+            _expected: &str,
+        ) -> Result<()> {
+            Ok(())
+        }
+
+        fn converge_or_disk_write(
+            &self,
+            file: &Path,
+            _current: &str,
+            target: &str,
+            _source: &str,
+        ) -> Result<()> {
+            std::fs::write(file, target)?;
+            Ok(())
+        }
+    }
 
     /// Agent-free path: a plain force-disk maintenance pass (the closeout
     /// path) closes the stale request copy, keeps the work todo open, and the

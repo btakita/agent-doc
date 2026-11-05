@@ -452,3 +452,156 @@ fn semantic_neighbours_only_annotate() {
     );
     assert_eq!(ledger.near_duplicates.len(), 1);
 }
+
+// `#decisionstaleaudit`: stale tracked items over a sanitized fixture shaped
+// like the live session where an answered, delivered approver todo stayed
+// open until the operator checked it off by hand.
+
+const STALE_FIXTURE: &str = include_str!("../tests/fixtures/stale_session.md");
+
+fn stale_for<'a>(
+    stale: &'a [stale::StaleTrackedItem],
+    item: &str,
+) -> Option<&'a stale::StaleTrackedItem> {
+    stale.iter().find(|found| found.item == item)
+}
+
+#[test]
+fn an_operator_question_back_is_not_an_answer() {
+    let (_, ledger) = build(STALE_FIXTURE);
+    // `📥 [#tdprovauth]: Is this done?` asks; it does not answer.
+    assert!(
+        ledger
+            .decision_for_key(&id_key("tdprovauth"))
+            .is_none_or(|decision| decision.revisions.is_empty()),
+        "{:?}",
+        ledger.decision_for_key(&id_key("tdprovauth"))
+    );
+}
+
+#[test]
+fn a_delivered_answer_to_an_idle_todo_closes_it_at_identity_tier_only() {
+    let (observations, ledger) = build(STALE_FIXTURE);
+    let stale = ledger.stale_tracked_items(&observations);
+
+    let approvers = stale_for(&stale, "tdadrapprovers").expect("approvers stale");
+    assert_eq!(approvers.kind, stale::StaleKind::AnsweredButOpen);
+    assert_eq!(approvers.component, extract::TrackedComponent::Todo);
+    assert!(approvers.auto_close, "{approvers:?}");
+    assert_eq!(approvers.link, stale::StaleLink::Identity);
+
+    // The request copy answered by its own consumed queue row closes too.
+    let port = stale_for(&stale, "subagent-operator-request-docs-port").unwrap();
+    assert!(port.auto_close, "{port:?}");
+
+    // A busy waiting tree (the operator still has a row) keeps it a suggestion.
+    let alpha = stale_for(&stale, "tdalphahandoff").expect("alpha stale");
+    assert!(!alpha.auto_close, "{alpha:?}");
+    assert!(
+        alpha.action.contains("--todo-done tdalphahandoff"),
+        "{alpha:?}"
+    );
+    assert!(alpha.action.contains(&alpha.decision_id), "{alpha:?}");
+
+    // An undelivered answer is in flight, not stale; a live queue row naming
+    // work keeps it out; work items that ask nothing are never "answered".
+    assert!(stale_for(&stale, "tdpending").is_none());
+    assert!(stale_for(&stale, "tdprovauth").is_none());
+    assert!(stale_for(&stale, "buildfeature").is_none());
+
+    let closures = ledger.stale_auto_closures(&observations);
+    let closed: Vec<&str> = closures.iter().map(|c| c.todo_id.as_str()).collect();
+    assert_eq!(
+        closed,
+        vec!["tdadrapprovers", "subagent-operator-request-docs-port"]
+    );
+}
+
+#[test]
+fn tracked_work_outside_todo_is_suggested_never_closed() {
+    let (observations, ledger) = build(STALE_FIXTURE);
+    let stale = ledger.stale_tracked_items(&observations);
+
+    let backlog = stale_for(&stale, "nextstepsdocs").expect("backlog question answered");
+    assert_eq!(backlog.kind, stale::StaleKind::AnsweredButOpen);
+    assert_eq!(backlog.component, extract::TrackedComponent::Backlog);
+    assert!(!backlog.auto_close);
+    assert!(
+        backlog.action.contains("--done nextstepsdocs"),
+        "{backlog:?}"
+    );
+
+    let review = stale_for(&stale, "docsgolive").expect("review done by evidence");
+    assert_eq!(review.kind, stale::StaleKind::DoneByEvidence);
+    assert_eq!(review.evidence, vec!["ref:321".to_string()]);
+    assert!(!review.auto_close);
+    assert!(
+        review.action.contains("--review-resolve docsgolive"),
+        "{review:?}"
+    );
+
+    let icebox = stale_for(&stale, "coldchoice").expect("icebox flagged");
+    assert_eq!(icebox.component, extract::TrackedComponent::Icebox);
+    assert!(!icebox.auto_close);
+    assert!(icebox.action.contains("never closed for you"), "{icebox:?}");
+}
+
+#[test]
+fn a_stale_close_applies_once_and_a_reopen_is_respected() {
+    let (observations, ledger) = build(STALE_FIXTURE);
+    let closures = ledger.stale_auto_closures(&observations);
+    let closed = apply_duplicate_closures(STALE_FIXTURE, &closures)
+        .unwrap()
+        .expect("closes");
+    assert!(
+        closed.contains("- [x] [#tdadrapprovers] Name the approver(s)"),
+        "{closed}"
+    );
+    assert!(closed.contains("already answered `"), "{closed}");
+    // Idempotent: the rebuilt ledger finds nothing more to close.
+    let (observations, ledger) = build(&closed);
+    assert!(ledger.stale_auto_closures(&observations).is_empty());
+
+    // An operator reopen keeps the row open: the note is still there, so the
+    // item is only suggested again.
+    let reopened = closed.replace("- [x] [#tdadrapprovers]", "- [ ] [#tdadrapprovers]");
+    let (observations, ledger) = build(&reopened);
+    let stale = ledger.stale_tracked_items(&observations);
+    let approvers = stale_for(&stale, "tdadrapprovers").expect("still stale");
+    assert!(!approvers.auto_close, "{approvers:?}");
+    assert!(ledger.stale_auto_closures(&observations).is_empty());
+}
+
+#[test]
+fn evidence_must_cover_every_deliverable_and_be_delivered() {
+    let content = concat!(
+        "<!-- agent:queue -->\n",
+        "- ~~[#mergeboth]: PR #10 merged. PR #11 was not merged.~~\n",
+        "- [#mergelive]: PR #12 merged.\n",
+        "- ~~[#tdlive]: Use port 8080.~~\n",
+        "- 🚧 [#subagent:c1live#1] do [#tdlive]\n",
+        "<!-- /agent:queue -->\n\n",
+        "<!-- agent:todo -->\n",
+        "- [ ] [#tdlive] Choose the demo port.\n",
+        "<!-- /agent:todo -->\n\n",
+        "<!-- agent:backlog -->\n",
+        "- [ ] [#mergeboth] Merge PR #10 and PR #11.\n",
+        "- [ ] [#mergeone] Merge PR #10.\n",
+        "- [ ] [#mergelive] Merge PR #12.\n",
+        "<!-- /agent:backlog -->\n",
+    );
+    let (observations, ledger) = build(content);
+    let stale = ledger.stale_tracked_items(&observations);
+    // PR #11 is not merged; #mergeone has no decision linked to it; the
+    // `#mergelive` row is still live; a worker still runs `do [#tdlive]`.
+    assert!(stale.is_empty(), "{stale:?}");
+    // Without the live worker row the delivered answer settles it.
+    let idle = content.replace("- 🚧 [#subagent:c1live#1] do [#tdlive]\n", "");
+    let (observations, ledger) = build(&idle);
+    let stale = ledger.stale_tracked_items(&observations);
+    assert_eq!(stale.len(), 1, "{stale:?}");
+    assert!(
+        stale[0].item == "tdlive" && stale[0].auto_close,
+        "{stale:?}"
+    );
+}

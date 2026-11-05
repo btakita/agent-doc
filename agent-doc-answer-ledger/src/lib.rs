@@ -41,6 +41,7 @@
 //! `restates`, `applies_to`, `same_as`).
 
 pub mod extract;
+pub mod stale;
 pub mod text;
 
 use std::collections::{BTreeMap, BTreeSet};

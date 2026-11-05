@@ -91,6 +91,39 @@ pub struct LinkObs {
     pub kind: LinkKind,
 }
 
+/// The tracked-work component an item lives in (`#decisionstaleaudit`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TrackedComponent {
+    Todo,
+    Backlog,
+    Review,
+    Icebox,
+}
+
+impl TrackedComponent {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Todo => "todo",
+            Self::Backlog => "backlog",
+            Self::Review => "review",
+            Self::Icebox => "icebox",
+        }
+    }
+}
+
+/// One open or closed tracked item: an `agent:todo` row or a
+/// backlog/review/icebox item.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TrackedItemObs {
+    pub component: TrackedComponent,
+    /// Own id, lowercase. Items without an id are not audited.
+    pub id: String,
+    /// Item text without checkbox and own id.
+    pub text: String,
+    pub open: bool,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Observations {
     pub questions: Vec<QuestionObs>,
@@ -100,6 +133,47 @@ pub struct Observations {
     /// that row is pending work that carries its answer. Closing the question
     /// would race it.
     pub live_queue_ids: std::collections::BTreeSet<String>,
+    /// `#decisionstaleaudit`: every todo, backlog, review and icebox item.
+    pub tracked: Vec<TrackedItemObs>,
+    /// Own ids of live waiting heads whose counter still shows work for the
+    /// operator or the agent (`⟦… you: N · agent: M …⟧` with N or M above
+    /// zero): that tree is still being worked, so its todo never auto-closes.
+    pub busy_waiting_ids: std::collections::BTreeSet<String>,
+}
+
+/// Whether operator text asks something back instead of answering
+/// (`Is this done?`, `Could you point it out to me?`). A question is never
+/// recorded as an answer.
+pub fn is_question_text(text: &str) -> bool {
+    text.trim_end().ends_with('?')
+}
+
+/// The open-work counter of a waiting head (`⟦☑️ you: 1 · agent: 0 · done: 2⟧`):
+/// `true` when the operator or the agent still has rows to work.
+fn waiting_head_busy(body: &str) -> bool {
+    let mut rest = body;
+    while let Some(start) = rest.find('⟦') {
+        let after = &rest[start + '⟦'.len_utf8()..];
+        let Some(end) = after.find('⟧') else { break };
+        let token = &after[..end];
+        if token.contains("you:") {
+            let count = |label: &str| -> u64 {
+                token
+                    .split(label)
+                    .nth(1)
+                    .and_then(|tail| {
+                        tail.trim_start()
+                            .split(|c: char| !c.is_ascii_digit())
+                            .next()
+                    })
+                    .and_then(|digits| digits.parse().ok())
+                    .unwrap_or(0)
+            };
+            return count("you:") > 0 || count("agent:") > 0;
+        }
+        rest = &after[end..];
+    }
+    false
 }
 
 fn indent_of(line: &str) -> usize {
@@ -231,7 +305,9 @@ fn operator_row(body: &str) -> Option<(String, bool)> {
             rest.starts_with("[#") && rest.ends_with(']') && !rest[2..].contains(' ')
         })
     });
-    if display.is_empty() || bare_directive {
+    // `#decisionstaleaudit`: an operator question back (`Is this done?`) is
+    // not an answer.
+    if display.is_empty() || bare_directive || is_question_text(&display) {
         return None;
     }
     Some((display, struck))
@@ -271,6 +347,7 @@ fn addressed_answer(text: &str) -> Option<(String, String)> {
             if is_request_id(&id)
                 && !before.is_empty()
                 && !before.starts_with("**")
+                && !is_question_text(before)
                 && !matches!(first_word.as_str(), "do" | "close" | "re")
             {
                 return Some((id, before.to_string()));
@@ -287,7 +364,7 @@ fn addressed_answer(text: &str) -> Option<(String, String)> {
     let rest = after[end + 1..].trim_start();
     let answer = rest.strip_prefix(':')?.trim();
     let answer = answer_display(answer);
-    (!answer.is_empty()).then_some((id, answer))
+    (!answer.is_empty() && !is_question_text(&answer)).then_some((id, answer))
 }
 
 /// The ids on a waiting head: own id first (leading, else the first non-request
@@ -363,6 +440,13 @@ fn scan_waiting_item(
     let (own, grafts) = head_ids(body);
     let (_, struck) = work_text(body);
     let question_text = strip_decorations(body);
+    if !struck
+        && !archived
+        && let Some(own) = &own
+        && waiting_head_busy(body)
+    {
+        out.busy_waiting_ids.insert(own.clone());
+    }
     out.questions.push(QuestionObs {
         id: own.clone(),
         text: question_text.clone(),
@@ -576,6 +660,53 @@ fn scan_todos(content: &str, out: &mut Observations) {
     }
 }
 
+/// `#decisionstaleaudit`: every todo row and backlog/review/icebox item with
+/// an own id.
+fn scan_tracked(content: &str, out: &mut Observations) {
+    if let Ok(Some(todo)) = agent_doc_element::todo::find_todo_component(content) {
+        for line in todo.content(content).lines() {
+            let Some(parsed) = agent_doc_element::todo::parse_todo_line(line) else {
+                continue;
+            };
+            let Some(id) = parsed.own_id else { continue };
+            out.tracked.push(TrackedItemObs {
+                component: TrackedComponent::Todo,
+                id: id.to_ascii_lowercase(),
+                text: parsed.action.to_string(),
+                open: parsed.state.is_open(),
+            });
+        }
+    }
+    let Ok(components) = agent_doc_element::element::parse(content) else {
+        return;
+    };
+    for component in &components {
+        let kind = if agent_doc_element::element::is_review_component(&component.name) {
+            TrackedComponent::Review
+        } else if agent_doc_element::element::is_backlog_component(&component.name) {
+            TrackedComponent::Backlog
+        } else if agent_doc_element::element::is_icebox_component(&component.name) {
+            TrackedComponent::Icebox
+        } else {
+            continue;
+        };
+        let (_, items, _) =
+            agent_doc_element_backlog::backlog::parse_items(component.content(content));
+        for item in items {
+            let id = agent_doc_element_backlog::backlog::normalize_pending_id(&item.id);
+            if id.is_empty() {
+                continue;
+            }
+            out.tracked.push(TrackedItemObs {
+                component: kind,
+                id,
+                open: !item.is_done(),
+                text: item.text,
+            });
+        }
+    }
+}
+
 fn scan_request_packets(content: &str, out: &mut Observations) {
     let Ok(components) = agent_doc_element::element::parse(content) else {
         return;
@@ -685,6 +816,7 @@ fn archive_blocks(text: &str) -> Vec<String> {
 pub fn observe(content: &str, archives: &[&str]) -> Observations {
     let mut out = Observations::default();
     scan_todos(content, &mut out);
+    scan_tracked(content, &mut out);
     scan_waiting(content, false, "", &mut out);
     scan_queue_rows(content, &mut out);
     scan_request_packets(content, &mut out);

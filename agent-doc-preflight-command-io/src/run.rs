@@ -2995,7 +2995,7 @@ fn run_with_options_to_writer_in_pass(
         review_count: pending_report.review_count,
         review_gated_count: pending_report.review_gated_count,
         gate_verify: gate_verify_results,
-        todo_signals: pending_report.todo_signals.clone(),
+        todo_signals: answer_ledger_report.without_closed_todos(&pending_report.todo_signals),
         status_sync,
         status_sync_revert_guidance: status_sync_revert
             .as_ref()

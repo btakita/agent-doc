@@ -584,8 +584,6 @@ pub fn parse_done_archive_items(body: &str) -> Vec<PendingItem> {
                 id,
                 state: PendingState::Done,
                 gate_type: None,
-                in_progress: false,
-                lifecycle_marker: None,
                 text: format!("{date} {text}"),
                 continuation: String::new(),
             });
@@ -1125,8 +1123,6 @@ mod tests {
                 id: "cachefix".to_string(),
                 state: PendingState::Gated,
                 gate_type: None,
-                in_progress: false,
-                lifecycle_marker: None,
                 text: "Repair cache duplication".to_string(),
                 continuation: "  proof: pending\n".to_string(),
             },

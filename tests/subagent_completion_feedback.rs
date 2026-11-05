@@ -1032,6 +1032,16 @@ fn a_claimed_mirrored_id_head_stays_one_row_through_its_whole_attempt() {
     );
     assert_single("re-mirrored", Some("☑️"));
 
+    // The preflight after the report opened a coordinator cycle for the
+    // reported head. Close it before the next edit, as a coordinator closeout
+    // would: an open `preflight_started` cycle plus a fresh queue edit is a
+    // live turn the next preflight must not steal. (Before `#backlogrowmarker`
+    // this passed only because the `☑️` painted onto the backlog rows left the
+    // snapshot ahead of HEAD, so interrupted-cycle recovery committed it.)
+    assert_ok(
+        &run_agent_doc(dir.path(), &["commit", path]),
+        "close the coordinator cycle",
+    );
     // An uncommitted plain copy of each marked head (the shape of a stale
     // editor or CRDT re-emit) exceeds the committed multiplicity.
     let content = fs::read_to_string(&doc).unwrap();

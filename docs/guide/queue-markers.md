@@ -31,9 +31,14 @@ stays.
 Queue rows are deliberately ordinary list rows, not GFM task-list rows. For an
 id-backed row such as `- ⚠️ [#subagent:fix#1] do [#fix]`, the lifecycle marker
 and owner annotation describe the queue attempt; the checkbox lives on the
-referenced tracked-work row, for example `- [ ] ⚠️ [#fix] ...` in
+referenced tracked-work row, for example `- [ ] [#fix] ...` in
 `agent:backlog`. Adding `[ ]` to the queue row would create a second completion
-surface whose state could disagree with the backlog. A lost generation keeps
+surface whose state could disagree with the backlog. For the same reason the
+tracked-work row never carries a queue attempt marker (`#backlogrowmarker`):
+attempt state lives only on the queue row, and preflight strips any marker it
+finds on a backlog, review, or icebox row. A `☑️` left on a backlog row would
+keep reading as done after its queue row was consumed, while the item is still
+open. A lost generation keeps
 its prior phase as `⚠️🟡`, `⚠️🚧`, or `⚠️☑️`. Older durable records without an
 explicit prior-phase field fall back to their worker binding; a bare orphaned
 or otherwise degraded visible record remains plain `⚠️`. Reclaiming creates a

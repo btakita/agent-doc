@@ -1,10 +1,8 @@
-use std::collections::HashSet;
-
 use agent_doc_document::queue_projection::{
     QueueLifecycleMarker, apply_lifecycle_marker, apply_operator_action_ids, lifecycle_marker,
     strip_priority_markers,
 };
-use agent_doc_element_backlog::backlog::{parse_items, set_in_progress_item_ids};
+use agent_doc_element_backlog::backlog::{parse_items, strip_lifecycle_item_markers};
 use agent_doc_element_queue::{QueueItemIdentity, queue_head_identity};
 use agent_doc_queue_icons::{QueueIconConfig, install_queue_icon_config};
 
@@ -63,13 +61,16 @@ fn multi_character_prefixes_render_parse_and_preserve_identity() {
         );
     }
 
-    let ids = HashSet::from(["configurable-icons".to_string()]);
-    let (backlog, changed) = set_in_progress_item_ids(
-        "- [ ] [#configurable-icons] make the prefixes configurable\n",
-        &ids,
+    // `#backlogrowmarker`: a configured lifecycle prefix projected onto a
+    // tracked-work row is stray projection and parses away.
+    let (backlog, changed) = strip_lifecycle_item_markers(
+        "- [ ] WORKING NOW> [#configurable-icons] make the prefixes configurable\n",
     );
     assert!(changed);
-    assert!(backlog.contains("[ ] WORKING NOW> [#configurable-icons]"));
+    assert_eq!(
+        backlog,
+        "- [ ] [#configurable-icons] make the prefixes configurable\n"
+    );
     let (_, parsed, _) = parse_items(&backlog);
-    assert!(parsed[0].in_progress);
+    assert_eq!(parsed[0].id, "configurable-icons");
 }

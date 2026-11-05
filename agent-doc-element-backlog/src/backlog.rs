@@ -22,7 +22,7 @@
 use agent_doc_element::element;
 use agent_doc_frontmatter::frontmatter::{QueueLifecycleMarker, queue_icons};
 use anyhow::{Context, Result, anyhow, bail};
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashSet};
 
 pub const IN_PROGRESS_MARKER: &str = "🚧";
 
@@ -157,13 +157,6 @@ pub struct PendingItem {
     /// Optional typed gate (e.g., "release" for `[/release]`, "deploy" for `[/deploy]`).
     /// Only meaningful when `state == Gated`. `None` means untyped `[/]`.
     pub gate_type: Option<String>,
-    /// Visible, ephemeral marker for the item currently being worked from an
-    /// active queue head. Renders immediately after the checkbox.
-    pub in_progress: bool,
-    /// Typed queue lifecycle projection for this tracked item. `in_progress`
-    /// remains the compatibility view of `Running`; this field preserves the
-    /// other runtime states instead of collapsing them all to `🚧`.
-    pub lifecycle_marker: Option<QueueLifecycleMarker>,
     /// Bullet text after the hash prefix.
     pub text: String,
     /// Raw indented continuation lines that belong to this item (for nested
@@ -183,20 +176,13 @@ impl PendingItem {
             (PendingState::Gated, Some(gt)) => format!("[/{}]", gt),
             _ => format!("[{}]", self.state.box_char()),
         };
-        let lifecycle_marker = self.lifecycle_marker.or_else(|| {
-            self.in_progress
-                .then_some(QueueLifecycleMarker::Running)
-        });
-        let in_progress = if let Some(marker) = lifecycle_marker {
-            format!(" {}", marker.prefix())
-        } else {
-            String::new()
-        };
+        // `#backlogrowmarker`: a tracked-work row never renders a queue
+        // attempt marker (`📥 🟡 🚧 ☑️ ⚠️ 🔄` ...). Attempt state belongs to the
+        // queue row that carries the attempt; the type has no field for it.
         let mut out = format!(
-            "{} {}{} [#{}] {}",
+            "{} {} [#{}] {}",
             self.marker.render_prefix(ordered_index),
             checkbox,
-            in_progress,
             self.id,
             self.text
         );
@@ -1037,8 +1023,11 @@ fn parse_item_line(line: &str) -> Option<PendingItem> {
         (PendingState::Open, None, rest)
     };
 
-    let (lifecycle_marker, after_box) = consume_lifecycle_marker(after_box);
-    let in_progress = lifecycle_marker == Some(QueueLifecycleMarker::Running);
+    // `#backlogrowmarker`: a queue attempt marker projected between the
+    // checkbox and the `[#id]` is stray projection, never work text. Parse
+    // drops it so every render of the row strips it. Text without a following
+    // `[#id]` is operator prose and stays verbatim.
+    let after_box = strip_stray_lifecycle_marker(after_box);
 
     // Hash id?
     let (id, text) = if let Some(after_hash) = after_box.strip_prefix("[#") {
@@ -1077,11 +1066,18 @@ fn parse_item_line(line: &str) -> Option<PendingItem> {
         id,
         state,
         gate_type,
-        in_progress,
-        lifecycle_marker,
         text: text.trim_end().to_string(),
         continuation: String::new(),
     })
+}
+
+fn strip_stray_lifecycle_marker(text: &str) -> &str {
+    let (seen, rest) = consume_lifecycle_marker(text);
+    if seen.is_some() && rest.starts_with("[#") {
+        rest
+    } else {
+        text
+    }
 }
 
 fn consume_lifecycle_marker(text: &str) -> (Option<QueueLifecycleMarker>, &str) {
@@ -3012,47 +3008,15 @@ pub fn active_item_ids(body: &str) -> Vec<String> {
         .collect()
 }
 
-/// Set the ephemeral in-progress marker on exactly the requested tracked item ids,
-/// clearing stale markers from every other parsed item in the body.
-pub fn set_in_progress_item_ids(body: &str, ids: &HashSet<String>) -> (String, bool) {
-    let markers = ids
-        .iter()
-        .map(|id| (id.clone(), QueueLifecycleMarker::Running))
-        .collect();
-    set_lifecycle_item_markers(body, &markers)
-}
-
-/// Project the exact queue lifecycle state onto linked tracked-work rows,
-/// clearing stale markers from rows with no current runtime state.
-pub fn set_lifecycle_item_markers(
-    body: &str,
-    markers: &HashMap<String, QueueLifecycleMarker>,
-) -> (String, bool) {
-    let normalized_markers: HashMap<String, QueueLifecycleMarker> = markers
-        .iter()
-        .filter_map(|(id, marker)| {
-            let id = normalize_pending_id(id);
-            (!id.is_empty()).then_some((id, *marker))
-        })
-        .collect();
-    let mut changed = false;
-    let rewritten = PendingLayout::parse(body).replace_items(|item| {
-        let mut next = item.clone();
-        let marker = (!next.id.is_empty() && !matches!(next.state, PendingState::Done))
-            .then(|| normalized_markers.get(&next.id.to_ascii_lowercase()).copied())
-            .flatten();
-        let in_progress = marker == Some(QueueLifecycleMarker::Running);
-        if next.lifecycle_marker != marker || next.in_progress != in_progress {
-            next.lifecycle_marker = marker;
-            next.in_progress = in_progress;
-            changed = true;
-        }
-        Some(next)
-    });
-    let new_body = rewritten.render();
-    if new_body != body {
-        changed = true;
-    }
+/// Strip every queue attempt marker from tracked-work rows (`#backlogrowmarker`).
+///
+/// Queue attempt markers (`📥 🟡 🚧 ☑️ ⚠️ 🔄` ...) belong only on queue rows;
+/// a tracked row carrying one reads as that attempt state long after the
+/// queue row was consumed (a `☑️` backlog row reads as done while still open).
+/// Returns the rewritten body and whether any row changed.
+pub fn strip_lifecycle_item_markers(body: &str) -> (String, bool) {
+    let new_body = PendingLayout::parse(body).render();
+    let changed = new_body != body;
     (new_body, changed)
 }
 
@@ -4543,8 +4507,6 @@ pub fn op_add_at_with_outcome_reserved(
             PendingState::Open
         },
         gate_type: None,
-        in_progress: false,
-        lifecycle_marker: None,
         text,
         continuation,
     };
@@ -5138,44 +5100,68 @@ mod tests {
     }
 
     #[test]
-    fn in_progress_marker_after_checkbox_preserves_pending_id() {
+    fn stray_lifecycle_marker_after_checkbox_is_dropped_and_preserves_pending_id() {
+        // `#backlogrowmarker`: a projected attempt marker parses away; the row
+        // keeps its id and state and renders without the marker.
         let body = "- [ ] 🚧 [#first] one\n- [/] 🚧 [#gated] blocked\n";
         let (_, items, _) = parse_items(body);
 
         assert_eq!(items[0].id, "first");
-        assert!(items[0].in_progress);
+        assert_eq!(items[0].text, "one");
         assert_eq!(items[1].id, "gated");
-        assert!(items[1].in_progress);
         assert_eq!(active_item_ids(body), vec!["first"]);
-        assert_eq!(render_items("", &items, ""), body);
+        assert_eq!(
+            render_items("", &items, ""),
+            "- [ ] [#first] one\n- [/] [#gated] blocked\n"
+        );
     }
 
     #[test]
-    fn typed_lifecycle_markers_round_trip_and_replace_stale_running_state() {
+    fn strip_lifecycle_item_markers_removes_every_attempt_marker_from_tracked_rows() {
+        // 2026-11-04 21:16:52 (agent-loop 9a4f8d5d05): preflight projected the
+        // queue row's `☑️` onto the backlog row, so the still-open item read
+        // as done after the queue row was consumed.
         let body = concat!(
-            "- [ ] 🚧 [#reported] worker was running\n",
-            "- [ ] 🚧 [#lost] worker disappeared\n",
-            "- [ ] 🚧 [#stale] no longer active\n",
+            "- [ ] ☑️ [#lazilysqlitestoreopen] fix busy_timeout in lazily\n",
+            "- [ ] 📥 [#pending] queued\n",
+            "- [ ] 🟡 [#claimed] dispatching\n",
+            "- [ ] 🚧 [#running] worker running\n",
+            "- [ ] ⚠️ [#lost] worker disappeared\n",
+            "- [ ] 🔄 [#reconciling] reconciling\n",
+            "- [/] ⚠️☑️ [#lostreported] recovered\n",
+            "- [x] 🚧 [#done] finished\n",
+            "- [ ] [#plain] untouched ⚠️ prose stays\n",
         );
-        let markers = HashMap::from([
-            ("reported".to_string(), QueueLifecycleMarker::Reported),
-            ("lost".to_string(), QueueLifecycleMarker::Lost),
-        ]);
 
-        let (updated, changed) = set_lifecycle_item_markers(body, &markers);
+        let (updated, changed) = strip_lifecycle_item_markers(body);
 
         assert!(changed);
-        assert!(updated.contains("- [ ] ☑️ [#reported] worker was running"));
-        assert!(updated.contains("- [ ] ⚠️ [#lost] worker disappeared"));
-        assert!(updated.contains("- [ ] [#stale] no longer active"));
-        let (_, items, _) = parse_items(&updated);
         assert_eq!(
-            items[0].lifecycle_marker,
-            Some(QueueLifecycleMarker::Reported)
+            updated,
+            concat!(
+                "- [ ] [#lazilysqlitestoreopen] fix busy_timeout in lazily\n",
+                "- [ ] [#pending] queued\n",
+                "- [ ] [#claimed] dispatching\n",
+                "- [ ] [#running] worker running\n",
+                "- [ ] [#lost] worker disappeared\n",
+                "- [ ] [#reconciling] reconciling\n",
+                "- [/] [#lostreported] recovered\n",
+                "- [x] [#done] finished\n",
+                "- [ ] [#plain] untouched ⚠️ prose stays\n",
+            )
         );
-        assert_eq!(items[1].lifecycle_marker, Some(QueueLifecycleMarker::Lost));
-        assert!(!items.iter().any(|item| item.in_progress));
-        assert_eq!(render_items("", &items, ""), updated);
+        assert_eq!(
+            strip_lifecycle_item_markers(&updated),
+            (updated.clone(), false)
+        );
+    }
+
+    #[test]
+    fn leading_glyph_on_an_unidentified_row_is_operator_prose() {
+        // Projection only ever targets id-bearing rows; a glyph an operator
+        // typed in front of new, id-less text is the text.
+        let (_, items, _) = parse_items("- [ ] ⚠️ check the deploy\n");
+        assert!(items[0].text.starts_with("⚠️ check the deploy"));
     }
 
     #[test]
@@ -5206,45 +5192,6 @@ mod tests {
                 "real tracked-work content must remain significant"
             );
         }
-    }
-
-    #[test]
-    fn set_in_progress_item_ids_moves_marker_and_clears_stale_items() {
-        let body = "- [ ] 🚧 [#old] old\n- [ ] [#new] new\n";
-        let ids = ["new".to_string()].into_iter().collect();
-
-        let (updated, changed) = set_in_progress_item_ids(body, &ids);
-
-        assert!(changed);
-        assert_eq!(updated, "- [ ] [#old] old\n- [ ] 🚧 [#new] new\n");
-    }
-
-    #[test]
-    fn set_in_progress_item_ids_never_marks_done_items() {
-        let body = concat!(
-            "- [x] 🚧 [#done] finished\n",
-            "- [x] [#target] already finished\n",
-            "- [/] [#review] active review\n",
-        );
-        let ids = [
-            "done".to_string(),
-            "target".to_string(),
-            "review".to_string(),
-        ]
-        .into_iter()
-        .collect();
-
-        let (updated, changed) = set_in_progress_item_ids(body, &ids);
-
-        assert!(changed);
-        assert_eq!(
-            updated,
-            concat!(
-                "- [x] [#done] finished\n",
-                "- [x] [#target] already finished\n",
-                "- [/] 🚧 [#review] active review\n",
-            )
-        );
     }
 
     #[test]
@@ -5857,8 +5804,6 @@ mod tests {
             id: "eg0w".to_string(),
             state: PendingState::Gated,
             gate_type: None,
-            in_progress: false,
-            lifecycle_marker: None,
             text: "CommitLock".to_string(),
             continuation: String::new(),
         };
@@ -6511,8 +6456,6 @@ mod tests {
                 id: "b2c3".to_string(),
                 state: PendingState::Open,
                 gate_type: None,
-                in_progress: false,
-                lifecycle_marker: None,
                 text: "first appended task".to_string(),
                 continuation: String::new(),
             },
@@ -6521,8 +6464,6 @@ mod tests {
                 id: "d4e5".to_string(),
                 state: PendingState::Gated,
                 gate_type: Some("release".to_string()),
-                in_progress: false,
-                lifecycle_marker: None,
                 text: "second appended task".to_string(),
                 continuation: String::new(),
             },
@@ -8081,8 +8022,6 @@ mod tests {
             id: "a1b2".to_string(),
             state: PendingState::Gated,
             gate_type: Some("release".to_string()),
-            in_progress: false,
-            lifecycle_marker: None,
             text: "Release v0.32.4".to_string(),
             continuation: String::new(),
         };

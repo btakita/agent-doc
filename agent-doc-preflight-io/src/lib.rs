@@ -9,7 +9,7 @@ pub mod sweep;
 pub mod warnings;
 
 use agent_doc_document::queue_projection::{
-    set_work_item_lifecycle_markers, strip_in_progress_marker, strip_priority_markers,
+    strip_in_progress_marker, strip_priority_markers, strip_work_item_lifecycle_markers,
     sync_in_progress_marker_regions,
 };
 use agent_doc_element::element::{
@@ -8132,29 +8132,6 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
             })
         })
         .collect::<Vec<_>>();
-    let tracked_work_lifecycle = lifecycle_targets
-        .iter()
-        .filter(|target| {
-            matches!(
-                target.marker,
-                agent_doc_document::queue_projection::QueueLifecycleMarker::Claimed
-                    | agent_doc_document::queue_projection::QueueLifecycleMarker::Running
-                    | agent_doc_document::queue_projection::QueueLifecycleMarker::Reported
-                    | agent_doc_document::queue_projection::QueueLifecycleMarker::Lost
-                    | agent_doc_document::queue_projection::QueueLifecycleMarker::LostClaimed
-                    | agent_doc_document::queue_projection::QueueLifecycleMarker::LostRunning
-                    | agent_doc_document::queue_projection::QueueLifecycleMarker::LostReported
-                    | agent_doc_document::queue_projection::QueueLifecycleMarker::Reconciling
-                    | agent_doc_document::queue_projection::QueueLifecycleMarker::Unknown
-            )
-        })
-        .filter_map(
-            |target| match agent_doc_queue::queue_claim::claim_identity(&target.text) {
-                agent_doc_element_queue::QueueItemIdentity::Id(id) => Some((id, target.marker)),
-                agent_doc_element_queue::QueueItemIdentity::FreeText(_) => None,
-            },
-        )
-        .collect::<std::collections::HashMap<_, _>>();
     if let Some((new_body, marked_entries)) =
         agent_doc_queue::document_queue::project_prompt_runtime_projections(
             &marker_body,
@@ -8256,8 +8233,12 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
             eprintln!("[preflight] queue: sibling queue marker projection skipped ({err:#})");
         }
     }
+    // `#backlogrowmarker`: queue attempt markers belong on queue rows only.
+    // Tracked-work rows never receive one, and any a pre-fix binary projected
+    // there are stripped here, persisted below through the same authority
+    // path as every other queue-maintenance mutation.
     let (marked_content, pending_markers_changed) =
-        set_work_item_lifecycle_markers(&current_content, &tracked_work_lifecycle)?;
+        strip_work_item_lifecycle_markers(&current_content)?;
     if pending_markers_changed {
         current_content = marked_content;
         mutated = true;
@@ -17373,8 +17354,71 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
         );
     }
 
+    /// `#backlogrowmarker`: the 2026-11-04 21:16:52 preflight (agent-loop
+    /// 9a4f8d5d05) projected the queue row's `☑️` onto the backlog row, which
+    /// kept reading as done after the queue row was consumed. Maintenance
+    /// strips every attempt marker from tracked-work rows and never writes one.
     #[test]
-    fn run_queue_maintenance_marks_current_queue_and_work_items_in_progress() {
+    fn run_queue_maintenance_strips_attempt_markers_from_tracked_work_rows() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue_active: true\n",
+            "---\n\n",
+            "<!-- agent:queue go -->\n",
+            "- ~~do [#lazilysqlitestoreopen]~~\n",
+            "- do [#next]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] ☑️ [#lazilysqlitestoreopen] release half still open\n",
+            "- [ ] 🔄 [#next] next work\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:review -->\n",
+            "- [/] ⚠️🚧 [#reviewed] verify externally\n",
+            "<!-- /agent:review -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        run_queue_maintenance(&doc, None).unwrap();
+
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            updated.contains("- ### 🚧 do [#next]"),
+            "the queue row keeps its attempt marker:\n{updated}"
+        );
+        assert!(
+            updated.contains("- [ ] [#lazilysqlitestoreopen] release half still open"),
+            "a stray ☑️ on an open backlog row must be stripped:\n{updated}"
+        );
+        assert!(updated.contains("- [ ] [#next] next work"), "{updated}");
+        assert!(
+            updated.contains("- [/] [#reviewed] verify externally"),
+            "{updated}"
+        );
+        for component in agent_doc_element::element::parse(&updated).unwrap() {
+            if matches!(component.name.as_str(), "backlog" | "review") {
+                let body = component.content(&updated);
+                assert!(
+                    !agent_doc_element_backlog::backlog::strip_lifecycle_item_markers(body).1,
+                    "{} must carry no attempt marker:\n{body}",
+                    component.name
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn run_queue_maintenance_marks_current_queue_head_and_strips_tracked_row_markers() {
         let dir = setup_project();
         let doc = dir.path().join("session.md");
         let content = concat!(
@@ -17412,7 +17456,7 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
             updated.contains("- ### 🚧 do [#alpha]\n- ### 📥 do [#beta]"),
             "queue marker must move to active head:\n{updated}"
         );
-        assert!(updated.contains("- [ ] 🚧 [#alpha] active work"));
+        assert!(updated.contains("- [ ] [#alpha] active work"));
         assert!(updated.contains("- [ ] [#beta] stale work"));
         assert!(updated.contains("- [ ] [#cold] stale parked work"));
 
@@ -17460,11 +17504,12 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
         assert!(projection.queue.worklist_queue_hash.is_some());
     }
 
-    /// `#claimmarker`: every live worker claim mirrors its exact lifecycle in
-    /// both the queue and tracked-work row. Release clears the projection;
-    /// expiry retains the typed lost state rather than stale `🚧`.
+    /// `#claimmarker`: every live worker claim projects its exact lifecycle on
+    /// the queue row. Release clears the projection; expiry retains the typed
+    /// lost state rather than stale `🚧`. `#backlogrowmarker`: the linked
+    /// tracked-work row never carries any of those markers.
     #[test]
-    fn run_queue_maintenance_syncs_claim_lifecycle_into_tracked_work() {
+    fn run_queue_maintenance_projects_claim_lifecycle_on_queue_rows_only() {
         let dir = setup_project();
         let doc = dir.path().join("session.md");
         let content = concat!(
@@ -17518,9 +17563,9 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
             ),
             "selected, claimed, and running queue heads must carry typed state:\n{updated}"
         );
-        assert!(updated.contains("- [ ] 🚧 [#a] inline work"));
-        assert!(updated.contains("- [ ] 🟡 [#b] worker one"));
-        assert!(updated.contains("- [ ] 🚧 [#c] worker two"));
+        assert!(updated.contains("- [ ] [#a] inline work"));
+        assert!(updated.contains("- [ ] [#b] worker one"));
+        assert!(updated.contains("- [ ] [#c] worker two"));
         assert!(updated.contains("- [ ] [#d] later work"));
 
         agent_doc_queue_io::queue_claim::report_attempt(&doc, "#c", Some(c_claim.generation))
@@ -17530,10 +17575,10 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(updated.contains("- ### ☑️ [#subagent:c#1] do [#c]"));
         assert!(
-            updated.contains("- [ ] ☑️ [#c] worker two"),
-            "reported work must replace stale running state in backlog:\n{updated}"
+            updated.contains("- [ ] [#c] worker two"),
+            "reported work stays on the queue row; the backlog row carries no attempt marker (#backlogrowmarker):\n{updated}"
         );
-        assert!(!updated.contains("- [ ] 🚧 [#c] worker two"));
+        assert!(!updated.contains("🚧 [#c] worker two"));
 
         agent_doc_queue_io::queue_claim::release(&doc, "#b").unwrap();
         let state = run_queue_maintenance(&doc, None).unwrap();
@@ -17543,7 +17588,7 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
             "- ### 🚧 do [#a]\n- ### 📥 do [#b]\n- ### ☑️ [#subagent:c#1] do [#c]\n- ### 📥 do [#d]"
         ));
         assert!(updated.contains("- [ ] [#b] worker one"));
-        assert!(updated.contains("- [ ] ☑️ [#c] worker two"));
+        assert!(updated.contains("- [ ] [#c] worker two"));
 
         let (_, d_claim) =
             agent_doc_queue_io::queue_claim::claim(&doc, "#d", "subagent:d", 3600).unwrap();
@@ -17568,8 +17613,8 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
             "- ### ⚠️🚧 [#subagent:d#1] do [#d]",
             "the queue row carries attempt lifecycle, not a second GFM checkbox:\n{updated}"
         );
-        assert!(updated.contains("- [ ] ☑️ [#c] worker two"));
-        assert!(updated.contains("- [ ] ⚠️🚧 [#d] later work"));
+        assert!(updated.contains("- [ ] [#c] worker two"));
+        assert!(updated.contains("- [ ] [#d] later work"));
 
         let (_, replacement) =
             agent_doc_queue_io::queue_claim::claim(&doc, "#d", "subagent:d2", 3600).unwrap();
@@ -17590,7 +17635,7 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
             "- ### 🚧 [#subagent:d2#2] do [#d]",
             "only the replacement generation becomes running:\n{updated}"
         );
-        assert!(updated.contains("- [ ] 🚧 [#d] later work"));
+        assert!(updated.contains("- [ ] [#d] later work"));
     }
 
     #[test]
@@ -17635,7 +17680,7 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
         );
         assert!(updated.contains("- [ ] [#verify] [operator-verify] needs a human"));
         assert!(updated.contains("- [ ] [#focused] [focused-cycle] needs a clean turn"));
-        assert!(updated.contains("- [ ] 🚧 [#ready] active work"));
+        assert!(updated.contains("- [ ] [#ready] active work"));
 
         let ready_node_key = agent_doc_markdown_ast::mutations::item_nodes(&updated, "queue")
             .unwrap()
@@ -17776,10 +17821,8 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
             updated.contains("- ### 🚧 do [#setup]\n- ### 🚧 do [#ship]\n- ### 📥 do [#ops]"),
             "operator retarget must project the selected head and its auto-DAG prerequisite as active:\n{updated}"
         );
-        assert!(updated.contains("- [ ] 🚧 [#setup] priority=1 prerequisite work"));
-        assert!(
-            updated.contains("- [ ] 🚧 [#ship] priority=2 after=#setup selected dependent work")
-        );
+        assert!(updated.contains("- [ ] [#setup] priority=1 prerequisite work"));
+        assert!(updated.contains("- [ ] [#ship] priority=2 after=#setup selected dependent work"));
         assert!(updated.contains("- [ ] [#ops] priority=9 independent work"));
 
         let node_keys = agent_doc_markdown_ast::mutations::item_nodes(&updated, "queue").unwrap();
@@ -17853,8 +17896,8 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
             "queue marker must move to the active head and clear struck items:\n{updated}"
         );
         assert!(
-            updated.contains("- [ ] 🚧 [#alpha] active work"),
-            "active backlog items must be marked:\n{updated}"
+            updated.contains("- [ ] [#alpha] active work"),
+            "active backlog items carry no attempt marker (#backlogrowmarker):\n{updated}"
         );
         assert!(
             updated.contains("- [x] [#done] finished work"),

@@ -922,6 +922,17 @@ change with no new JNA method and no plugin generation. Shipped derivations:
   an adoption proven from the replica text refuses (and retries) unless the live
   buffer is still exactly the text the proof covered. A same-line conflict still
   holds. Model: `formal/tla/RegistrationAcknowledgedBase.tla`.
+  `#restartadoptscanonical`: the settled shadow is durable. Every accepted
+  visible projection (`projectSettledVisibleState`) also writes it to
+  `SettledShadowStore` (`<IDE system dir>/agent-doc/settled-shadows/`, one
+  atomic JSON record per document naming its path and content hash), and
+  registration restores it into `settledShadows` when memory holds none, so a
+  restarted IDE decides from the same ancestor it would have held in memory. A
+  record that does not verify is no record. With no settled shadow, a
+  registration whose non-empty buffer differs from a known canonical holds
+  unless canonical is proven to contain the operator edits;
+  `RegistrationProjection.guardUnprovenCanonical` enforces that over any answer,
+  including the frozen floor's restarted-IDE adoption.
 - `attach_failure_diagnosis` (phase 5b): what a CRDT replica attach failure
   means for the operator. Evidence is the recorded failure reason, for the
   operator notification the document's file name, and `live_replica_attached`

@@ -332,6 +332,21 @@ impl SimPluginEditor {
     fn last(&self) -> &AttemptFacts {
         self.last.as_ref().expect("an attempt")
     }
+
+    /// `#restartadoptscanonical`: a plain IDE restart. The plugin disposes
+    /// (deregistering its endpoint) and the JVM forgets everything it held in
+    /// memory: the cached forwarder, the native resume state, the hold, and the
+    /// settled shadow. The controller and its hub survive. `persisted_shadow`
+    /// is what the plugin's durable settled-shadow store restores (`None`: no
+    /// record, e.g. the first restart after upgrading to it).
+    fn restart_ide(&mut self, persisted_shadow: Option<String>) {
+        if let Some(previous) = self.cached.take() {
+            deregister_replica_for_file(&self.doc, &previous.identity).unwrap();
+        }
+        self.reload_resume_state = None;
+        self.attach_held = false;
+        self.settled_shadow = persisted_shadow;
+    }
 }
 
 /// The facts `RegistrationProjection.evidence` reports, with the containment
@@ -966,4 +981,135 @@ fn a_genuine_two_sided_reseed_conflict_still_holds_for_the_operator() {
         "{facts:#?}"
     );
     assert_eq!(editor.buffer, operator_text);
+}
+
+/// `#restartadoptscanonical`: a plain IDE restart while the controller hub
+/// survives with text that differs from the buffer. The operator's last edit
+/// reached the buffer and disk (IntelliJ saves on exit) but never the
+/// controller. Before the fix the restarted editor had no settled shadow, so
+/// registration took the restarted-IDE adoption fallback and projected the
+/// surviving canonical over the saved operator text. Now it holds: the buffer,
+/// disk, and the hub all keep their own text until something proves a side.
+#[test]
+fn a_plain_ide_restart_never_adopts_a_differing_surviving_canonical() {
+    let (_dir, doc) = temp_doc("restart.md");
+    std::fs::write(&doc, FPE_DOC).unwrap();
+    let mut editor = SimPluginEditor::open(&doc, ResumeRelease::OnCommit);
+    let hub_before = hub_text(&doc);
+    let operator_text = editor.buffer.replacen(
+        "replica row\n",
+        "replica row\n- operator row saved before the restart\n",
+        1,
+    );
+    assert_ne!(operator_text, editor.buffer, "the operator edit landed");
+    editor.type_unapplied(&operator_text);
+    save_buffer(&editor);
+    editor.restart_ide(None);
+
+    let attempt = editor.reregister(false);
+    let facts = editor.last().clone();
+    assert!(
+        !facts.retained_replica_reseed_pending,
+        "the hub survived: {facts:#?}"
+    );
+    assert_eq!(facts.shadow, None, "{facts:#?}");
+    assert_eq!(facts.canonical, hub_before, "{facts:#?}");
+    assert_eq!(facts.evidence.buffer_equals_disk, Some(true));
+    assert!(
+        matches!(&attempt, Attempt::Held(reason) if reason == HOLD || reason == "ambiguous-reregister-projection"),
+        "{attempt:?} {facts:#?}"
+    );
+    assert_eq!(
+        editor.buffer, operator_text,
+        "the hold never touches the buffer"
+    );
+    assert_eq!(std::fs::read_to_string(&doc).unwrap(), operator_text);
+    assert_eq!(
+        hub_text(&doc),
+        hub_before,
+        "the hold never publishes either side"
+    );
+
+    // A controller-driven re-register after the hold holds again.
+    assert!(
+        matches!(editor.reregister(false), Attempt::Held(_)),
+        "{:#?}",
+        editor.last()
+    );
+    assert_eq!(editor.buffer, operator_text);
+}
+
+/// `#restartadoptscanonical`: with the settled shadow restored from the
+/// plugin's durable store, a restart is an ordinary causal decision again. An
+/// agent response the controller wrote while the IDE was down is adopted (the
+/// buffer is still exactly the shadow, so the canonical is provably newer).
+#[test]
+fn a_restored_settled_shadow_adopts_a_canonical_that_advanced_while_the_ide_was_down() {
+    let (_dir, doc) = temp_doc("restart-advanced.md");
+    std::fs::write(&doc, FPE_DOC).unwrap();
+    let mut editor = SimPluginEditor::open(&doc, ResumeRelease::OnCommit);
+    let settled = editor
+        .settled_shadow
+        .clone()
+        .expect("open settles a shadow");
+    editor.restart_ide(Some(settled.clone()));
+    let current = hub_text(&doc);
+    let advanced = format!("{current}\nagent response written while the IDE was down\n");
+    apply_cp_write_for_file(
+        &doc,
+        &current,
+        &advanced,
+        "test_agent_response_while_ide_down",
+    )
+    .unwrap()
+    .expect("the controller write uses the live relay");
+    let advanced = hub_text(&doc);
+    assert_ne!(advanced, settled);
+
+    let attempt = editor.reregister(false);
+    let facts = editor.last().clone();
+    assert_eq!(
+        facts.shadow.as_deref(),
+        Some(settled.as_str()),
+        "{facts:#?}"
+    );
+    assert_eq!(
+        attempt,
+        Attempt::Committed(RegistrationProjectionAction::ApplyCanonical),
+        "{facts:#?}"
+    );
+    assert_eq!(editor.buffer, advanced);
+}
+
+/// `#restartadoptscanonical`: with the settled shadow restored and a hub that
+/// never moved past it, the operator text saved before the restart is
+/// published instead of being overwritten or held.
+#[test]
+fn a_restored_settled_shadow_publishes_the_saved_operator_text_over_an_unmoved_hub() {
+    let (_dir, doc) = temp_doc("restart-unmoved.md");
+    std::fs::write(&doc, FPE_DOC).unwrap();
+    let mut editor = SimPluginEditor::open(&doc, ResumeRelease::OnCommit);
+    let settled = editor
+        .settled_shadow
+        .clone()
+        .expect("open settles a shadow");
+    let operator_text = editor.buffer.replacen(
+        "replica row\n",
+        "replica row\n- operator row saved before the restart\n",
+        1,
+    );
+    editor.type_unapplied(&operator_text);
+    save_buffer(&editor);
+    editor.restart_ide(Some(settled.clone()));
+
+    let attempt = editor.reregister(false);
+    let facts = editor.last().clone();
+    assert_eq!(facts.canonical, settled, "{facts:#?}");
+    assert_eq!(
+        attempt,
+        Attempt::Committed(RegistrationProjectionAction::PublishOperatorBuffer),
+        "{facts:#?}"
+    );
+    assert_eq!(editor.buffer, operator_text);
+    assert_eq!(hub_text(&doc), operator_text);
 }

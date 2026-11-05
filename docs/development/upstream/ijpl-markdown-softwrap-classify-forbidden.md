@@ -1,10 +1,12 @@
-# IJPL report (ready to file): Markdown soft wrap moves wraps to an already-closed `[`
+# IJPL report: Markdown soft wrap moves wraps to an already-closed `[`
 
-Status: **prepared, not filed.** Filing needs the operator's JetBrains YouTrack account
-(<https://youtrack.jetbrains.com/newIssue?project=IJPL>). After filing, record the issue id
-here and in the `#activesummaryurl` / GH #391 notes.
+Status: **filed 2026-11-05 as [IJPL-260670](https://youtrack.jetbrains.com/issue/IJPL-260670)**
+(IntelliJ Platform, Type Bug, Subsystem Lang. Markdown, affected 2026.3 Beta (263.7307.44)).
+The text below is what was filed; check the issue for its current state before retiring the
+agent-doc workarounds (`MarkdownBracketWrapStrategy`, GH #391, and the `<url>` rule in
+`agent:active` summaries).
 
-Attachments to upload with the issue:
+Attached to the issue:
 
 - [`ijpl-markdown-softwrap/repro.md`](ijpl-markdown-softwrap/repro.md): the reproduction file.
 - [`ijpl-markdown-softwrap/WrapSim.java`](ijpl-markdown-softwrap/WrapSim.java): the soft-wrap
@@ -170,7 +172,8 @@ should fall back to the generic position or the end of the forbidden construct, 
 
 The agent-doc JetBrains plugin registers a `lang.lineWrapStrategy` for `Markdown` with
 `order="first"` (`MarkdownBracketWrapStrategy`, GH #391). It asks the bundled strategy first.
-When every `[` before the whitespace wrap closes before it and is not followed by `(`, `[` or a
-definition `:`, it uses the plain whitespace wrap instead. agent-doc also writes bare URLs in
+When every `[` before the whitespace wrap closes before it and opens no link whose destination
+or reference is still open at the wrap (and the line is not a link reference definition), it uses
+the plain whitespace wrap instead. agent-doc also writes bare URLs in
 its generated rows as `<url>`, which the bundled strategy wraps correctly. We would like to
 retire both once this is fixed.

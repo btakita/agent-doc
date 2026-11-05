@@ -194,7 +194,7 @@ pub struct QueueTreeSummary {
 }
 
 impl QueueTreeSummary {
-    fn of(nodes: &[QueueTreeNode]) -> Self {
+    pub(crate) fn of(nodes: &[QueueTreeNode]) -> Self {
         let counted = nodes
             .iter()
             .filter(|node| node.state != QueueNodeState::Group)
@@ -355,7 +355,7 @@ fn node_tooltip(state: QueueNodeState, rollup: Option<WaitingRollup>) -> String 
     }
 }
 
-fn line_of(document: &str, offset: usize) -> usize {
+pub(crate) fn line_of(document: &str, offset: usize) -> usize {
     document[..offset.min(document.len())]
         .bytes()
         .filter(|byte| *byte == b'\n')

@@ -274,6 +274,9 @@ pub fn operator_freeform_text(entries: &[QueueEntry], index: usize) -> Option<&s
         || body.starts_with('>')
         || body.starts_with("~~")
         || body.starts_with("&gt;")
+        // `#treestatusquery`: a status query is answered by the binary, never
+        // an answer to the item.
+        || agent_doc_markdown_ast::tree_status_row::status_query_kind(body).is_some()
     {
         return None;
     }

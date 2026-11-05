@@ -51,6 +51,7 @@ pub mod queue_schedule_runtime;
 pub mod queue_set;
 pub mod queue_tree;
 pub mod reported_closeout;
+pub mod tree_status;
 pub mod queue_sync_payload;
 pub mod route_dispatch;
 pub mod stale_completion_evidence;

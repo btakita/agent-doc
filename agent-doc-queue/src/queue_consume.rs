@@ -4197,6 +4197,16 @@ fn response_details_child(response_body: &str, response_id: &str) -> Option<Stri
 }
 
 const RESPONSE_SUMMARY_SOFT_TARGET_CHARS: usize = 280;
+/// `**State:**` values of a struck row's response summary: the closability
+/// the Guidance row spells out. `#treestatusquery` reads them back to decide
+/// whether a struck subtree is deletable.
+pub const RESPONSE_STATE_UNPUBLISHED: &str = "Unpublished local work remains.";
+pub const RESPONSE_STATE_WAITING_ON_OPERATOR: &str = "Waiting on operator input.";
+pub const RESPONSE_STATE_FOLLOW_UP: &str = "Follow-up work remains.";
+pub const RESPONSE_STATE_COMPLETE: &str = "Complete.";
+/// The `**State:**` label of a response summary row.
+pub const RESPONSE_STATE_LABEL: &str = "**State:**";
+
 const ACTIONABLE_RESPONSE_LEAD_LABELS: &[&str] = &[
     "**outcome:**",
     "**current state:**",
@@ -4296,15 +4306,15 @@ fn response_summary_row_child(
         addressed_at.trim()
     );
     child.push_str("\n- **State:** ");
-    if has_unpublished_work {
-        child.push_str("Unpublished local work remains.");
+    child.push_str(if has_unpublished_work {
+        RESPONSE_STATE_UNPUBLISHED
     } else if has_blocking_request {
-        child.push_str("Waiting on operator input.");
+        RESPONSE_STATE_WAITING_ON_OPERATOR
     } else if !next_actions.is_empty() {
-        child.push_str("Follow-up work remains.");
+        RESPONSE_STATE_FOLLOW_UP
     } else {
-        child.push_str("Complete.");
-    }
+        RESPONSE_STATE_COMPLETE
+    });
     child.push_str("\n- **Guidance:** ");
     if has_unpublished_work {
         child.push_str(
@@ -6064,7 +6074,7 @@ fn response_heading_timestamp(line: &str) -> Option<&str> {
     (!timestamp.is_empty()).then_some(timestamp)
 }
 
-fn latest_response_timestamp(source: &str) -> Option<&str> {
+pub(crate) fn latest_response_timestamp(source: &str) -> Option<&str> {
     source
         .lines()
         .filter_map(response_heading_timestamp)

@@ -713,6 +713,59 @@ pub unsafe extern "C" fn agent_doc_queue_tree_json(doc: *const c_char) -> *mut c
     }
 }
 
+/// Answer the tree-status query for the queue subtree at 1-based `line` of
+/// `doc` (`#treestatusquery`): the same answer `agent-doc queue tree-status
+/// FILE --line N --json` prints, read from the live buffer text, plus a `text`
+/// field holding the CLI's compact rendering. Editor actions show `text`
+/// verbatim and offer a delete quick-fix for each `deletable` row (delete
+/// lines `line..=end_line`); they never derive or word a state themselves.
+///
+/// Returns null when `doc` is not UTF-8, its components do not parse, or the
+/// line is outside every queue component (the reason goes to stderr). Caller
+/// must free with `agent_doc_free_string`.
+///
+/// # Safety
+///
+/// `doc` must be a valid, NUL-terminated string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_queue_tree_status_json(
+    doc: *const c_char,
+    line: u32,
+) -> *mut c_char {
+    if doc.is_null() {
+        return std::ptr::null_mut();
+    }
+    let doc = match unsafe { CStr::from_ptr(doc) }.to_str() {
+        Ok(doc) => doc,
+        Err(error) => {
+            eprintln!("[ffi] agent_doc_queue_tree_status_json: document is not UTF-8: {error}");
+            return std::ptr::null_mut();
+        }
+    };
+    let status = match agent_doc_queue::tree_status::tree_status(doc, line as usize) {
+        Ok(status) => status,
+        Err(error) => {
+            eprintln!("[ffi] agent_doc_queue_tree_status_json: {error:#}");
+            return std::ptr::null_mut();
+        }
+    };
+    let mut value = match serde_json::to_value(&status) {
+        Ok(value) => value,
+        Err(error) => {
+            eprintln!("[ffi] agent_doc_queue_tree_status_json: {error}");
+            return std::ptr::null_mut();
+        }
+    };
+    value["text"] = serde_json::Value::String(agent_doc_queue::tree_status::render_text(&status));
+    match CString::new(value.to_string()) {
+        Ok(json) => json.into_raw(),
+        Err(error) => {
+            eprintln!("[ffi] agent_doc_queue_tree_status_json: {error}");
+            std::ptr::null_mut()
+        }
+    }
+}
+
 /// Check whether a `.md` file is an opted-in agent-doc session document.
 ///
 /// Returns `1` when the file carries agent-doc frontmatter, matches a
@@ -5639,6 +5692,36 @@ mod tests {
         assert_eq!(nodes[2]["tooltip"], "needs integration");
         assert_eq!(tree["summary"]["items"], 3);
         assert!(unsafe { agent_doc_queue_tree_json(std::ptr::null()) }.is_null());
+    }
+
+    /// `#treestatusquery`: an editor action reads one subtree's answer from
+    /// the live buffer text.
+    #[test]
+    fn queue_tree_status_json_answers_for_the_caret_subtree() {
+        let doc = concat!(
+            "<!-- agent:queue id=\"main\" -->\n",
+            "- ~~do [#alpha]~~\n",
+            "  - ~~step one~~\n",
+            "- 🚧 [#subagent:beta#1] do [#beta]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let c_doc = CString::new(doc).unwrap();
+        let ptr = unsafe { agent_doc_queue_tree_status_json(c_doc.as_ptr(), 1) };
+        assert!(!ptr.is_null());
+        let json = unsafe { CStr::from_ptr(ptr) }.to_str().unwrap().to_string();
+        unsafe { agent_doc_free_string(ptr) };
+        let status: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(status["whole_queue"], true, "{json}");
+        assert_eq!(status["deletable"][0]["line"], 2, "{json}");
+        assert_eq!(status["deletable"][0]["end_line"], 3, "{json}");
+        assert_eq!(status["agent"][0]["id"], "beta", "{json}");
+        assert!(
+            status["text"].as_str().unwrap().contains("Deletable:"),
+            "{json}"
+        );
+        let outside = CString::new("# no queue\n").unwrap();
+        assert!(unsafe { agent_doc_queue_tree_status_json(outside.as_ptr(), 1) }.is_null());
+        assert!(unsafe { agent_doc_queue_tree_status_json(std::ptr::null(), 1) }.is_null());
     }
 
     fn parse_visual_tokens_json(doc: &str) -> Vec<serde_json::Value> {

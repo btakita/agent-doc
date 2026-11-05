@@ -1193,6 +1193,26 @@ fn run_with_options_to_writer_in_pass(
         );
     }
 
+    crate::progress::enter("tree_status_query")?;
+    // Step 3d (`#treestatusquery`): answer the operator's `status?` queue
+    // queries from the queue tree before the diff is computed, so a query is
+    // replaced by binary-owned Status rows (carried into the snapshot) and
+    // never reaches the agent as a prompt. Best-effort: a failure answers
+    // nothing and never blocks admission.
+    if !options.probe {
+        let coin_gate = operator_edit_evidence
+            .as_ref()
+            .map(agent_doc_preflight_io::debounce::OperatorEditEvidence::coin_gate)
+            .unwrap_or_default();
+        if let Err(err) =
+            agent_doc_preflight_io::tree_status_query::run_tree_status_query_maintenance(
+                file, &coin_gate,
+            )
+        {
+            eprintln!("[preflight] status query: not answered this pass: {err:#}");
+        }
+    }
+
     crate::progress::enter("compute_diff")?;
     // Step 4: Compute diff between snapshot and current document.
     eprintln!("[preflight] step 4: diff");

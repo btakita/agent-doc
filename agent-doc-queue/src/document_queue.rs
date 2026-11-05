@@ -392,6 +392,10 @@ pub fn normalize_top_level_navigation_headings(body: &str) -> Option<String> {
                 || content.trim().is_empty()
                 || content.starts_with("### ")
                 || agent_doc_markdown_ast::overlay::is_ignored_list_comment(content)
+                // `#treestatusquery`: a status query and its binary-owned
+                // Status row are not navigation rows.
+                || agent_doc_markdown_ast::tree_status_row::status_query_kind(content).is_some()
+                || agent_doc_markdown_ast::tree_status_row::is_tree_status_head_body(content)
             {
                 return None;
             }

@@ -37,6 +37,13 @@
 (*     pane — a flap (`RefreshResetsClock`).                                *)
 (* A fire-and-forget notification (`DurableRequest = FALSE`) is modelled to *)
 (* show why the request must stay durable: under Drop it stalls forever.    *)
+(*                                                                          *)
+(* `#stalesupervisorhidden` (2026-11-05): `GuardOverdue` alone HID an       *)
+(* overdue pane until its request was consumed — for a supervisor that can  *)
+(* never consume it, forever, while the same pane, had it been visible,     *)
+(* stayed visible. `PromoteOverdue` promotes it FLAGGED instead: its own    *)
+(* record, realising exactly the published layout. I1/I2 now bind the       *)
+(* unflagged (recycle-backed) promotion; I4 forbids hiding an overdue pane. *)
 (***************************************************************************)
 EXTENDS Naturals, TLC
 
@@ -49,11 +56,13 @@ CONSTANTS
     DurableRequest,     \* FIX: level-triggered state.db request, re-read each boundary
     LapseFanout,        \* PRE-FIX: an install fan-out request lapses for the consumer
     RefreshResetsClock, \* PRE-FIX: a refresh restarts the consumption clock
+    PromoteOverdue,     \* FIX: an overdue stale stash pane is promoted flagged, not hidden
     MaxCopies,          \* NetChannel: copies of one in-flight message
     MaxGen              \* NetChannel: reconnects (bounds the state space)
 
 ASSUME /\ MaxWidth \in Nat /\ MaxWidth >= 2
        /\ MaxPublications \in Nat /\ MaxFanouts \in Nat
+       /\ PromoteOverdue \in BOOLEAN
 
 VARIABLES
     stale,          \* the 1099.md supervisor runs replaced bytes
@@ -85,7 +94,8 @@ LayoutMsgs == [kind : {"layout"}, width : 1..MaxWidth, focus : BOOLEAN]
 Notify == [kind |-> "notify", width |-> 1, focus |-> FALSE]
 Msgs == LayoutMsgs \cup {Notify}
 
-NoStep == [promotedStale |-> FALSE, reqBefore |-> "none", windowBefore |-> 0,
+NoStep == [promotedStale |-> FALSE, flagged |-> FALSE, hiddenOverdue |-> FALSE,
+           width |-> 0, reqBefore |-> "none", windowBefore |-> 0,
            windowAfter |-> 0, refusedBefore |-> FALSE]
 
 TypeOK ==
@@ -136,8 +146,12 @@ AdversaryStep ==
 
 (* `stale_focus_admission` for a stale focused pane (no live turn here: the  *)
 (* GH #124 guard is orthogonal and checked in Rust).                        *)
+(* The flagged promotion: its recycle is not coming, so it is not hidden.   *)
+FlaggedAdmit == PromoteOverdue /\ req = "overdue"
+
 StaleAdmitted(width) ==
     \/ promoted                                   \* visible: never moved (no flap)
+    \/ FlaggedAdmit
     \/ /\ GuardOverdue => req # "overdue"
        /\ GuardWiden => width <= Max(window, 1)
 
@@ -149,13 +163,17 @@ Deliver(m) ==
            admitted == ~staleFocus \/ StaleAdmitted(m.width)
            realised == IF admitted THEN m.width ELSE m.width - 1
            stalePromotion == staleFocus /\ ~promoted /\ admitted
+           flaggedPromotion == stalePromotion /\ FlaggedAdmit
            requestNow == staleFocus /\ req = "none"
        IN
        /\ promoted' = (m.focus /\ admitted)
        \* Every column gated out: the current layout is preserved (GH #124).
        /\ window' = IF realised = 0 THEN window ELSE realised
        /\ refusedOverdue' = (refusedOverdue \/ (staleFocus /\ ~admitted /\ req = "overdue"))
-       /\ lastStep' = [promotedStale |-> stalePromotion, reqBefore |-> req,
+       /\ lastStep' = [promotedStale |-> stalePromotion,
+                       flagged |-> flaggedPromotion,
+                       hiddenOverdue |-> staleFocus /\ ~admitted /\ req = "overdue",
+                       width |-> m.width, reqBefore |-> req,
                        windowBefore |-> window, windowAfter |-> window',
                        refusedBefore |-> refusedOverdue]
        \* The gate requests on the first stale pass and refreshes after.
@@ -268,14 +286,24 @@ Spec ==
 (* message order, delivery, duplication, and when `Expire` fires.           *)
 
 (* I1: a stale pane is never promoted out of the stash on the strength of a *)
-(* request its consumer already let go overdue.                             *)
+(* request its consumer already let go overdue: an overdue promotion is     *)
+(* always the flagged one.                                                  *)
 NoStashPromotionWhileOverdue ==
-    lastStep.promotedStale => lastStep.reqBefore # "overdue"
+    lastStep.promotedStale /\ ~lastStep.flagged => lastStep.reqBefore # "overdue"
 
 (* I2: promoting a stale stash pane never widens the target window — the    *)
 (* `columns = observed_panes + 1` flap.                                     *)
 StashPromotionNeverWidens ==
-    lastStep.promotedStale => lastStep.windowAfter <= Max(lastStep.windowBefore, 1)
+    lastStep.promotedStale /\ ~lastStep.flagged
+        => lastStep.windowAfter <= Max(lastStep.windowBefore, 1)
+
+(* I4 (`#stalesupervisorhidden`): a layout naming the stale pane while its  *)
+(* recycle is overdue never hides it.                                       *)
+OverdueStalePaneNeverHidden == ~lastStep.hiddenOverdue
+
+(* I5: a flagged promotion realises exactly the published layout.          *)
+FlaggedPromotionRealisesThePublication ==
+    lastStep.flagged => lastStep.windowAfter = lastStep.width
 
 (* I3: once a promotion was refused as overdue, no later promotion happens  *)
 (* until the request is consumed — refreshes and fan-outs cannot re-open    *)
@@ -290,5 +318,6 @@ EventuallyConsumed == (stale /\ req # "none") ~> ~stale
 
 (* Reach obligations (asserted negated; MUST be violated).                  *)
 NeverPromotesStale == ~lastStep.promotedStale
+NeverPromotesFlagged == ~lastStep.flagged
 NeverConsumed == stale
 =============================================================================

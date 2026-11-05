@@ -5724,10 +5724,33 @@ pub fn authorize_operator_command(
     )
 }
 
+/// `#stalesupervisorhidden`: the document path a supervisor-replacement
+/// request carries, made independent of the caller's working directory.
+///
+/// The controller resolves a relative `file` against ITS OWN project root. A
+/// layout sync running from an enclosing workspace sent
+/// `src/haiven-dev/tasks/sdk/sdk-dev.md` to the nested `haiven-dev`
+/// controller, which looked up an actor for `<haiven-dev>/src/haiven-dev/...`
+/// and rejected every retry with `stage=missing_actor` (2026-11-05 receipts
+/// 5604/5605, while receipt 5602 for the same document had been accepted).
+fn supervisor_replacement_request_file(file: &Path, caller_cwd: Option<&Path>) -> PathBuf {
+    if file.is_absolute() {
+        return file.to_path_buf();
+    }
+    let joined = caller_cwd
+        .map(|cwd| cwd.join(file))
+        .unwrap_or_else(|| file.to_path_buf());
+    joined.canonicalize().unwrap_or(joined)
+}
+
 pub fn request_supervisor_replacement(
     project_root: &Path,
-    request: SupervisorReplacementRequest,
+    mut request: SupervisorReplacementRequest,
 ) -> Result<SupervisorReplacementReceipt> {
+    request.file = supervisor_replacement_request_file(
+        &request.file,
+        std::env::current_dir().ok().as_deref(),
+    );
     let diagnostic_payload = serde_json::json!({
         "force": request.force,
         "mode": request.mode.clone(),
@@ -41996,18 +42019,71 @@ fn complete_deferred_supervisor_replacement_admission<T>(
     }
 }
 
+/// `#stalesupervisorhidden`: the supervisor this replacement stops, from every
+/// witness that can name it. The route-owned `/proc` scan alone missed an
+/// operator-started `agent-doc start <FILE>` supervisor, so a replacement
+/// recorded `cleared_no_pid`, killed nothing, and failed closed on the very
+/// harness that supervisor was serving. Each candidate is verified as a live
+/// direct `agent-doc start` for exactly this document before it is offered.
+#[cfg(not(any(test, feature = "test-support")))]
+fn resolve_supervisor_replacement_target_for_work(
+    work: &SupervisorReplacementWork,
+) -> Option<(
+    u32,
+    agent_doc_controller::supervisor_replacement::SupervisorReplacementTargetSource,
+)> {
+    use agent_doc_supervisor_io::process::verified_start_supervisor_pid;
+    let pane_tree_pid = (!work.pane_id.trim().is_empty())
+        .then(|| {
+            agent_doc_tmux_io::pane_pid(&agent_doc_tmux_io::configured_tmux(), &work.pane_id)
+        })
+        .flatten()
+        .and_then(|pane_pid| {
+            let children = agent_doc_process_owner_io::proc_table::observe_proc_children_fresh();
+            let pids = agent_doc_process_owner_io::proc_table::tree_pids(
+                &children,
+                &pane_pid.to_string(),
+            );
+            verified_start_supervisor_pid(
+                pids.iter().filter_map(|pid| pid.parse::<u32>().ok()),
+                &work.file,
+            )
+        });
+    let lease_pid = durable_actor_binding(&work.project_root, &work.file)
+        .ok()
+        .flatten()
+        .and_then(|record| {
+            let conn = open_state_db(&work.project_root).ok()?;
+            load_supervisor_lease_from_db(&conn, &record.document_id, record.generation)
+                .ok()
+                .flatten()?
+                .supervisor_pid
+        })
+        .and_then(|pid| verified_start_supervisor_pid([pid], &work.file));
+    agent_doc_controller::supervisor_replacement::resolve_supervisor_replacement_target(
+        agent_doc_controller::supervisor_replacement::SupervisorReplacementTargetFacts {
+            pane_tree_pid,
+            route_owned_scan_pid: agent_doc_supervisor_io::process::supervisor_pid_for_doc(
+                &work.file,
+            ),
+            lease_pid,
+        },
+    )
+}
+
 #[cfg(not(any(test, feature = "test-support")))]
 fn drive_supervisor_replacement_background(
     work: SupervisorReplacementWork,
     admission_sender: std::sync::mpsc::SyncSender<Result<(), String>>,
 ) -> Result<()> {
-    let initial_pid = agent_doc_supervisor_io::process::supervisor_pid_for_doc(&work.file);
+    let initial_target = resolve_supervisor_replacement_target_for_work(&work);
+    let initial_pid = initial_target.map(|(pid, _)| pid);
     let initial_host_stale = host_supervisor_stale_warning_for_doc(&work.file).is_some();
     let socket = agent_doc_supervisor_io::ipc::socket_path(&work.project_root, &work.session_id);
     agent_doc_ops_log_io::log_op(
         &work.file,
         &format!(
-            "controller_supervisor_replacement_background_started mode={} force={} session={} pane={} generation={} receipt_id={} initial_pid={} initial_host_stale={} socket={}",
+            "controller_supervisor_replacement_background_started mode={} force={} session={} pane={} generation={} receipt_id={} initial_pid={} initial_pid_source={} initial_host_stale={} socket={}",
             work.mode,
             work.force,
             work.session_id,
@@ -42017,6 +42093,9 @@ fn drive_supervisor_replacement_background(
             initial_pid
                 .map(|pid| pid.to_string())
                 .unwrap_or_else(|| "none".to_string()),
+            initial_target
+                .map(|(_, source)| source.as_str())
+                .unwrap_or("none"),
             initial_host_stale,
             socket.display()
         ),
@@ -42064,6 +42143,7 @@ fn drive_supervisor_replacement_background(
                 &work.file,
                 initial_pid,
                 initial_host_stale,
+                || resolve_supervisor_replacement_target_for_work(&work).map(|(pid, _)| pid),
             ) {
                 agent_doc_ops_log_io::log_op(
                     &work.file,
@@ -42115,11 +42195,25 @@ fn drive_supervisor_replacement_background(
     // as an operator stop and nothing ever restarted the document
     // (2026-10-20 `agent-doc-bugs.md`: the predecessor controller exited
     // mid-replacement and the pane was left at a bare shell).
-    mark_replacement_cold_start_pending(
-        &work,
-        agent_doc_supervisor_io::selfkill::supervisor_pid_for_doc(&work.file),
-        "pre_kill",
+    let kill_target = resolve_supervisor_replacement_target_for_work(&work);
+    agent_doc_ops_log_io::log_op(
+        &work.file,
+        &format!(
+            "controller_supervisor_replacement_kill_target session={} pane={} generation={} receipt_id={} pid={} source={} (#stalesupervisorhidden)",
+            work.session_id,
+            work.pane_id,
+            work.generation,
+            work.operator_receipt_id,
+            kill_target
+                .map(|(pid, _)| pid.to_string())
+                .unwrap_or_else(|| "none".to_string()),
+            kill_target
+                .map(|(_, source)| source.as_str())
+                .unwrap_or("none"),
+        ),
     );
+    let kill_target = kill_target.map(|(pid, _)| pid);
+    mark_replacement_cold_start_pending(&work, kill_target, "pre_kill");
     // `#replacementwithdraw`: a stale-binary continue replacement is satisfied
     // by the supervisor's own install re-exec (same pid, child preserved).
     // When that lands while the kill request is pending, withdraw the request
@@ -42127,8 +42221,9 @@ fn drive_supervisor_replacement_background(
     // (2026-10-20: the re-exec landed 3 s after this escalation, and the
     // supervisor then honoured the stale request and killed its Claude child).
     let replacement_intent = SupervisorReplacementIntent::parse(&work.mode)?;
-    let kill_outcome = agent_doc_supervisor_io::selfkill::drive_supervisor_kill_unless(
+    let kill_outcome = agent_doc_supervisor_io::selfkill::drive_supervisor_kill_target_unless(
         &work.file,
+        kill_target,
         agent_doc_supervisor_io::selfkill::selfkill_grace(),
         false,
         || {
@@ -42362,10 +42457,14 @@ fn wait_for_supervisor_replacement_completion(
     file: &Path,
     initial_pid: Option<u32>,
     initial_host_stale: bool,
+    current_supervisor_pid: impl Fn() -> Option<u32>,
 ) -> bool {
     let deadline = Instant::now() + supervisor_replacement_wait_timeout();
     while Instant::now() < deadline {
-        let current_pid = agent_doc_supervisor_io::process::supervisor_pid_for_doc(file);
+        // `#stalesupervisorhidden`: the same witnesses that named the initial
+        // pid; the route-owned scan alone reads an operator-started supervisor
+        // as "gone" and would report a replacement that never happened.
+        let current_pid = current_supervisor_pid();
         if let (Some(initial), Some(current)) = (initial_pid, current_pid)
             && initial != current
         {
@@ -66469,6 +66568,31 @@ mod tests {
     /// `#codexstoplabel`: the ownership probe reads the live supervisor's real
     /// command line. The fake process carries the incident's argv shape
     /// (`start --route-owned --route-owned-reap-policy auto --resume=<id> -- <doc>`).
+    /// `#stalesupervisorhidden`: a replacement request never carries a path
+    /// that only means something in the caller's working directory. The
+    /// nested controller resolved `src/haiven-dev/...` against its own root
+    /// and answered `stage=missing_actor`.
+    #[test]
+    fn supervisor_replacement_request_file_is_absolute_whatever_the_caller_cwd() {
+        let workspace = tempfile::TempDir::new().unwrap();
+        let nested = workspace.path().join("src/haiven-dev/tasks/sdk");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(nested.join("sdk-dev.md"), "body\n").unwrap();
+        let relative = Path::new("src/haiven-dev/tasks/sdk/sdk-dev.md");
+        let resolved = supervisor_replacement_request_file(relative, Some(workspace.path()));
+        assert!(resolved.is_absolute(), "{}", resolved.display());
+        assert_eq!(
+            resolved,
+            nested.join("sdk-dev.md").canonicalize().unwrap(),
+            "resolved against the CALLER's cwd, not the controller's root"
+        );
+        let absolute = nested.join("sdk-dev.md");
+        assert_eq!(
+            supervisor_replacement_request_file(&absolute, Some(Path::new("/elsewhere"))),
+            absolute
+        );
+    }
+
     #[test]
     fn supervisor_process_owns_document_reads_route_owned_start_argv() {
         let dir = tempfile::TempDir::new().unwrap();

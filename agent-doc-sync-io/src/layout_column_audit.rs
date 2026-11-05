@@ -34,8 +34,11 @@
 //!    still parked in the stash is promoted only while that request is
 //!    [`StaleRecycleRequestState::Pending`] and only when promoting it does not
 //!    widen the target window. An idle supervisor that left its request
-//!    unconsumed past [`STALE_RECYCLE_CONSUME_BOUND_SECS`] is `Overdue`, and its
-//!    stash pane stays in the stash. That elapsed bound controls layout admission
+//!    unconsumed past [`STALE_RECYCLE_CONSUME_BOUND_SECS`] is `Overdue`: its
+//!    recycle is not coming, so (`#stalesupervisorhidden`) its pane — focused
+//!    or not — is promoted FLAGGED (`layout_column_pane_stale_stash_promoted_flagged`)
+//!    rather than hidden in the stash indefinitely, the mirror of a visible
+//!    stale pane being preserved. That elapsed bound controls layout admission
 //!    only; it never authorises replacement. See [`stale_focus_admission`] for
 //!    the transition function and `formal/tla/StaleColumnRecycle.tla` for the
 //!    model.
@@ -419,12 +422,20 @@ pub enum ColumnAdmission {
     /// exception does not apply: the column is excluded like any stale column
     /// and the next sync after the recycle (or after the turn) admits it.
     ExcludeStaleFocusedLiveTurn,
-    /// GH #136: the stale focused pane is still in the stash and its recycle
-    /// request is [`StaleRecycleRequestState::Overdue`]: the supervisor sat idle
-    /// past the consumption bound without recycling. The exception was granted
-    /// on the strength of that recycle, so it no longer applies; the pane is
-    /// not promoted.
-    ExcludeStaleFocusedRecycleOverdue,
+    /// `#stalesupervisorhidden`: a desired stale own pane outside the target
+    /// window whose recycle request is [`StaleRecycleRequestState::Overdue`] —
+    /// the supervisor sat idle past the consumption bound without recycling,
+    /// so it will not turn fresh on its own. GH #136 kept such a pane in the
+    /// stash until the request was consumed, which for a supervisor that can
+    /// never consume it (an old binary; a failed controller replacement) hid
+    /// the document's only harness indefinitely while the same pane, had it
+    /// been visible, stayed visible ([`Self::AdmitStaleVisible`]). It is
+    /// promoted instead, flagged under its own record
+    /// (`layout_column_pane_stale_stash_promoted_flagged`), focused or not.
+    /// It realises a column the layout asked for, so it is not bounded by
+    /// the target window's current pane count; it never displaces a live
+    /// turn (GH #124).
+    AdmitStaleStashFlagged,
     /// GH #136: promoting the stale focused pane out of the stash would realise
     /// more columns than the target window holds — the `columns =
     /// observed_panes + 1` flap. A stale stash pane may take the place of a
@@ -437,7 +448,10 @@ impl ColumnAdmission {
     pub fn excludes(self) -> bool {
         !matches!(
             self,
-            Self::Admit | Self::AdmitStaleVisible | Self::AdmitStaleFocused
+            Self::Admit
+                | Self::AdmitStaleVisible
+                | Self::AdmitStaleFocused
+                | Self::AdmitStaleStashFlagged
         )
     }
 }
@@ -470,10 +484,12 @@ pub struct StaleFocusFacts {
 /// Invariants (enumerated exhaustively in the tests and model-checked in
 /// `formal/tla/StaleColumnRecycle.tla`):
 ///
-/// * a pane outside the target window (stash or any other window) is never
-///   moved in while its recycle is overdue;
-/// * such a pane is never moved in when that widens the target window past
+/// * a pane outside the target window (stash or any other window) is moved
+///   in on the strength of its recycle only while that recycle is pending,
+///   and then never when that widens the target window past
 ///   `max(window_panes, 1)` (unknown counts as empty);
+/// * an overdue one is never hidden for it (`#stalesupervisorhidden`): it is
+///   promoted flagged ([`ColumnAdmission::AdmitStaleStashFlagged`]);
 /// * a live turn is never displaced (GH #124);
 /// * a pane already in the target window is never moved by this rule — only
 ///   moving a pane IN is bounded, so a visible stale pane cannot flap.
@@ -485,7 +501,7 @@ pub fn stale_focus_admission(facts: StaleFocusFacts) -> ColumnAdmission {
         return ColumnAdmission::AdmitStaleFocused;
     }
     if facts.recycle_overdue {
-        return ColumnAdmission::ExcludeStaleFocusedRecycleOverdue;
+        return ColumnAdmission::AdmitStaleStashFlagged;
     }
     if facts.realised_columns > facts.window_panes.unwrap_or(0).max(1) {
         return ColumnAdmission::ExcludeStaleFocusedWouldWiden;
@@ -591,12 +607,24 @@ pub fn plan_column_admissions(
                 // move the live session to stash and turn a safe-boundary
                 // recycle into an operator-visible layout regression.
                 ColumnAdmission::AdmitStaleVisible
+            } else if admission == ColumnAdmission::ExcludeStale && fact.recycle.is_overdue() {
+                // `#stalesupervisorhidden`: the symmetric case. Its recycle
+                // is not coming, so excluding it is not a transient gate but
+                // hiding the document's harness for good. Provisional: the
+                // GH #124 live-turn guard below still applies.
+                ColumnAdmission::AdmitStaleStashFlagged
             } else {
                 admission
             }
         })
         .collect();
-    if !base.contains(&ColumnAdmission::AdmitStaleFocused) {
+    let moves_stale_pane_in = |admission: &ColumnAdmission| {
+        matches!(
+            admission,
+            ColumnAdmission::AdmitStaleFocused | ColumnAdmission::AdmitStaleStashFlagged
+        )
+    };
+    if !base.iter().any(moves_stale_pane_in) {
         return base
             .into_iter()
             .map(|admission| (admission, Vec::new()))
@@ -608,12 +636,7 @@ pub fn plan_column_admissions(
         .iter()
         .zip(&base)
         .filter(|(_, admission)| {
-            matches!(
-                admission,
-                ColumnAdmission::Admit
-                    | ColumnAdmission::AdmitStaleVisible
-                    | ColumnAdmission::AdmitStaleFocused
-            )
+            !admission.excludes()
         })
         .map(|(fact, _)| fact.pane.clone())
         .collect();
@@ -621,7 +644,7 @@ pub fn plan_column_admissions(
         .iter()
         .zip(base)
         .map(|(fact, admission)| {
-            if admission != ColumnAdmission::AdmitStaleFocused {
+            if !moves_stale_pane_in(&admission) {
                 return (admission, Vec::new());
             }
             let others: Vec<String> = realised
@@ -635,6 +658,15 @@ pub fn plan_column_admissions(
                 .cloned()
                 .collect();
             let displaced = live_turn_panes_displaced(&live_elsewhere, &others);
+            if !fact.is_focus {
+                // `#stalesupervisorhidden`: a non-focused overdue stash pane
+                // is promoted flagged unless that stashes a live turn.
+                return if !fact.turn_active && !displaced.is_empty() {
+                    (ColumnAdmission::ExcludeStale, displaced)
+                } else {
+                    (ColumnAdmission::AdmitStaleStashFlagged, Vec::new())
+                };
+            }
             let admission = stale_focus_admission(StaleFocusFacts {
                 outside_target_window: fact.outside_target_window,
                 recycle_overdue: fact.recycle.is_overdue(),
@@ -843,8 +875,22 @@ pub fn gate_stale_column_panes(
             ),
             ColumnAdmission::ExcludeStale => {
                 excluded.push(file.clone());
-                ("layout_column_pane_excluded", "excluded".to_string())
+                (
+                    "layout_column_pane_excluded",
+                    if displaced.is_empty() {
+                        "excluded".to_string()
+                    } else {
+                        format!("excluded_live_turn_protected:{}", displaced.join("+"))
+                    },
+                )
             }
+            ColumnAdmission::AdmitStaleStashFlagged => (
+                "layout_column_pane_stale_stash_promoted_flagged",
+                format!(
+                    "promoted_flagged_recycle_overdue:{}",
+                    if fact.is_focus { "focused" } else { "unfocused" }
+                ),
+            ),
             ColumnAdmission::AdmitStaleFocused => (
                 "layout_column_pane_stale_focus_admitted",
                 if fact.turn_active && !displaced.is_empty() {
@@ -864,13 +910,6 @@ pub fn gate_stale_column_panes(
                         "excluded_focused_live_turn_protected:{}",
                         displaced.join("+")
                     ),
-                )
-            }
-            ColumnAdmission::ExcludeStaleFocusedRecycleOverdue => {
-                excluded.push(file.clone());
-                (
-                    "layout_column_pane_excluded",
-                    "excluded_focused_recycle_overdue".to_string(),
                 )
             }
             ColumnAdmission::ExcludeStaleFocusedWouldWiden => {
@@ -1090,6 +1129,9 @@ pub fn audit_layout_column_panes(tmux: &Tmux, input: &LayoutColumnAuditInput<'_>
         };
         let admission = if !freshness.is_stale() {
             ""
+        } else if promoted && observe_stale_recycle_request(file, false).is_overdue() {
+            // `#stalesupervisorhidden`: the gate promoted it flagged.
+            " admission=stale_stash_promoted_flagged"
         } else if is_focus {
             " admission=focused_document_sole_owner"
         } else {
@@ -1656,7 +1698,7 @@ mod tests {
                 ColumnAdmission::AdmitStaleVisible
                 | ColumnAdmission::AdmitStaleFocused
                 | ColumnAdmission::ExcludeStaleFocusedLiveTurn
-                | ColumnAdmission::ExcludeStaleFocusedRecycleOverdue
+                | ColumnAdmission::AdmitStaleStashFlagged
                 | ColumnAdmission::ExcludeStaleFocusedWouldWiden => unreachable!(),
             }
         }
@@ -1732,6 +1774,16 @@ mod tests {
                             };
                             let admission = stale_focus_admission(facts);
                             let admitted = admission == ColumnAdmission::AdmitStaleFocused;
+                            let flagged = admission == ColumnAdmission::AdmitStaleStashFlagged;
+                            // `#stalesupervisorhidden`: an overdue pane outside
+                            // the window is never hidden for being overdue; only
+                            // the live-turn guard can keep it out.
+                            assert_eq!(
+                                flagged,
+                                outside_target_window && recycle_overdue && !displaces_live_turn,
+                                "{facts:?}"
+                            );
+                            assert!(!(flagged && displaces_live_turn), "{facts:?}");
                             // The function only ever answers within the
                             // focused-stale family.
                             assert!(
@@ -1739,14 +1791,15 @@ mod tests {
                                     admission,
                                     ColumnAdmission::AdmitStaleFocused
                                         | ColumnAdmission::ExcludeStaleFocusedLiveTurn
-                                        | ColumnAdmission::ExcludeStaleFocusedRecycleOverdue
+                                        | ColumnAdmission::AdmitStaleStashFlagged
                                         | ColumnAdmission::ExcludeStaleFocusedWouldWiden
                                 ),
                                 "{facts:?}"
                             );
                             // I1: a live turn is never displaced.
                             assert!(!(admitted && displaces_live_turn), "{facts:?}");
-                            // I2: never promoted out of the stash while overdue.
+                            // I2: never promoted UNFLAGGED out of the stash while
+                            // overdue (the flagged promotion is its own record).
                             assert!(
                                 !(admitted && outside_target_window && recycle_overdue),
                                 "{facts:?}"
@@ -1923,17 +1976,38 @@ mod tests {
     }
 
     #[test]
-    fn gh136_overdue_recycle_stops_the_stash_promotion() {
-        // The recorded admission: `%41` stale, request unconsumed for 31,622s
-        // while idle. It may no longer be promoted on the strength of it.
+    fn gh136_overdue_recycle_promotes_the_stash_pane_flagged() {
+        // The recorded GH #136 admission: `%41` stale, request unconsumed for
+        // 31,622s while idle. GH #136 kept it in the stash until consumed;
+        // `#stalesupervisorhidden` (2026-11-05 `sdk-dev.md` pane `%10`, request
+        // overdue for 14,668s, controller replacement failing) showed that is
+        // indefinite. It is promoted, flagged.
         let world = Gh136World::issue_136();
         assert!(world.recycle_state().is_overdue());
         let two = cols(&["tasks/pmt2/mr/1099.md", "tasks/agent-doc/agent-doc.ad.md"]);
-        let window = world.sync(&two, "tasks/pmt2/mr/1099.md");
-        assert_eq!(window, vec!["%434".to_string()]);
-        // An active interaction in the stale pane (including an operator
-        // permission prompt after its short turn marker expires) defers its
-        // recycle: not overdue, admitted.
+        assert_eq!(
+            world.sync(&two, "tasks/pmt2/mr/1099.md"),
+            vec!["%41".to_string(), "%434".to_string()]
+        );
+        // Unfocused, the incident's own shape (`admission=excluded` before):
+        // also promoted, not hidden.
+        assert_eq!(
+            world.sync(&two, "tasks/agent-doc/agent-doc.ad.md"),
+            vec!["%41".to_string(), "%434".to_string()]
+        );
+        // Flagged promotion realises what the layout asked for, nothing more:
+        // a three-column layout over a two-pane window is realised as asked.
+        let three = cols(&[
+            "tasks/pmt2/mr/1099.md",
+            "tasks/agent-doc/agent-doc.ad.md",
+            "tasks/pmt2/tickets/2222.md",
+        ]);
+        assert_eq!(
+            world.sync(&three, "tasks/agent-doc/agent-doc.ad.md"),
+            vec!["%41".to_string(), "%434".to_string(), "%430".to_string()]
+        );
+        // An active interaction in the stale pane defers its recycle: not
+        // overdue, admitted under the GH #136 focus exception as before.
         let mut busy = Gh136World::issue_136();
         busy.stale_pane_interaction_active = true;
         assert!(!busy.recycle_state().is_overdue());
@@ -1941,7 +2015,16 @@ mod tests {
             busy.sync(&two, "tasks/pmt2/mr/1099.md"),
             vec!["%41".to_string(), "%434".to_string()]
         );
-        // Already visible: never moved by the bound (no flap).
+        // ...while a pending, unfocused stash pane is still gated for the
+        // bounded window its recycle is expected in.
+        let mut pending = Gh136World::issue_136();
+        pending.request_age = Some(5);
+        assert!(!pending.recycle_state().is_overdue());
+        assert_eq!(
+            pending.sync(&two, "tasks/agent-doc/agent-doc.ad.md"),
+            vec!["%434".to_string()]
+        );
+        // Already visible: never moved (no flap).
         let mut visible = Gh136World::issue_136();
         visible.window = vec!["%434", "%41"];
         assert_eq!(
@@ -1950,21 +2033,49 @@ mod tests {
         );
     }
 
-    /// GH #136 time evolution: drive the request lifecycle with a clock, an
-    /// operator switching tabs between 1099.md and another document every 50s
-    /// (so `%41` keeps returning to the stash), and a consumer that either
-    /// consumes at a given tick or never does (an old binary stuck deferring).
-    /// At every tick:
+    /// `#stalesupervisorhidden`: the GH #124 guard still binds a flagged
+    /// promotion. A one-column layout naming only the overdue stale pane over
+    /// a window whose pane runs a live turn gates the column out, so the
+    /// layout is preserved and the live turn stays visible.
+    #[test]
+    fn flagged_overdue_promotion_never_stashes_a_live_turn() {
+        let overdue = StaleRecycleRequestState::Overdue {
+            reason: "stale_supervisor_turn_stage".to_string(),
+            age_secs: 14_668,
+        };
+        for is_focus in [false, true] {
+            let facts = vec![ColumnGateFacts {
+                file: PathBuf::from("tasks/sdk/sdk-dev.md"),
+                pane: "%10".to_string(),
+                freshness: classify_pane_supervisor_freshness(Some(2612299), Some(true), false),
+                own_pane: true,
+                is_focus,
+                outside_target_window: true,
+                recycle: overdue.clone(),
+                turn_active: false,
+            }];
+            let live = || vec!["%15".to_string()];
+            let plan = plan_column_admissions(&facts, &|| Some(1), &live);
+            assert!(plan[0].0.excludes(), "focus={is_focus}: {plan:?}");
+            assert_eq!(plan[0].1, vec!["%15".to_string()]);
+            let idle = plan_column_admissions(&facts, &|| Some(1), &Vec::new);
+            assert_eq!(idle[0].0, ColumnAdmission::AdmitStaleStashFlagged);
+        }
+    }
+
+    /// GH #136 time evolution, revised by `#stalesupervisorhidden`: drive the
+    /// request lifecycle with a clock, an operator switching tabs between
+    /// 1099.md and another document every 50s (so `%41` keeps returning to the
+    /// stash), and a consumer that either consumes at a given tick or never
+    /// does (an old binary stuck deferring). At every tick:
     ///
-    /// * `%41` is promoted out of the stash while stale only when its FIRST
-    ///   unconsumed request is within the bound — refreshes do not extend it;
+    /// * a layout that names `%41` realises it: pending, under the bounded
+    ///   focus exception; overdue, as a flagged promotion — it is never hidden;
     /// * no pass realises more columns than the editor asked for or the window
-    ///   held (no widening from the stash);
-    /// * once a promotion is refused as overdue, no later promotion happens
-    ///   while the supervisor is still stale (no flap);
+    ///   held;
     /// * after consumption the pane is promoted as a plain fresh column.
     #[test]
-    fn gh136_request_lifecycle_has_no_flap_and_a_bounded_admission_window() {
+    fn gh136_request_lifecycle_never_hides_a_desired_stale_pane() {
         let with_1099 = cols(&["tasks/pmt2/mr/1099.md", "tasks/agent-doc/agent-doc.ad.md"]);
         let without = cols(&[
             "tasks/pmt2/tickets/2222.md",
@@ -1982,7 +2093,7 @@ mod tests {
             let mut world = Gh136World::issue_136();
             world.request_age = None;
             let mut first_request: Option<u64> = None;
-            let mut refused_overdue_at: Option<u64> = None;
+            let mut flagged_promotions = 0usize;
             let mut fresh_promotions = 0usize;
             for now in 0..=3_600u64 {
                 let focus_1099 = (now / 50) % 2 == 0;
@@ -1996,8 +2107,6 @@ mod tests {
                     first_request = None;
                 }
                 if world.stale && focus_1099 {
-                    // The gate requests on the first stale pass; later passes
-                    // refresh it but never move the first-unconsumed time.
                     first_request.get_or_insert(now);
                 }
                 world.request_age = first_request.map(|first| now - first);
@@ -2008,13 +2117,14 @@ mod tests {
                     "widened at {now}: {window:?}"
                 );
                 let promoted = was_stashed && window.contains(&"%41".to_string());
-                if world.stale && promoted {
-                    let age = world.request_age.unwrap();
-                    assert!(age <= bound, "stale stash pane promoted at age {age}");
-                    assert!(refused_overdue_at.is_none(), "flap at {now}");
+                if focus_1099 {
+                    assert!(
+                        window.contains(&"%41".to_string()),
+                        "1099.md hidden at {now} (consume_at={consume_at:?})"
+                    );
                 }
-                if world.stale && focus_1099 && was_stashed && !promoted {
-                    refused_overdue_at.get_or_insert(now);
+                if world.stale && promoted && world.request_age.unwrap() > bound {
+                    flagged_promotions += 1;
                 }
                 if !world.stale && promoted {
                     fresh_promotions += 1;
@@ -2029,16 +2139,10 @@ mod tests {
                     .collect();
             }
             match consume_at {
-                // Consumed before the first refocus that would read it overdue.
-                Some(at) if at <= 100 + 1 => {
-                    assert!(refused_overdue_at.is_none(), "consume_at={at}")
-                }
-                // The first refocus after the bound (t=100 is inside it; the
-                // next is t=200) is refused and nothing promotes it again.
                 Some(at) if at <= 200 => {
-                    assert!(refused_overdue_at.is_none(), "consume_at={at}")
+                    assert_eq!(flagged_promotions, 0, "consume_at={at}")
                 }
-                _ => assert_eq!(refused_overdue_at, Some(200), "consume_at={consume_at:?}"),
+                _ => assert!(flagged_promotions > 0, "consume_at={consume_at:?}"),
             }
             if consume_at.is_some_and(|at| at < 3_600) {
                 assert!(fresh_promotions > 0, "consume_at={consume_at:?}");
@@ -2323,7 +2427,8 @@ mod tests {
         ];
         assert_eq!(plan(&replace)[0], ColumnAdmission::AdmitStaleFocused);
 
-        // Overdue: never moved in from a non-stash window either.
+        // Overdue: moved in only as a flagged promotion, from a non-stash
+        // window too.
         let overdue_replace = [
             fact("tasks/pmt2/mr/1099.md", "%41", true, overdue.clone()),
             fact(
@@ -2335,7 +2440,8 @@ mod tests {
         ];
         assert_eq!(
             plan(&overdue_replace)[0],
-            ColumnAdmission::ExcludeStaleFocusedRecycleOverdue
+            ColumnAdmission::AdmitStaleStashFlagged,
+            "#stalesupervisorhidden: promoted flagged, never hidden for being overdue"
         );
 
         // Already in the target window: never moved by the bound (no flap),

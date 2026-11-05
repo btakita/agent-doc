@@ -419,6 +419,8 @@ must_violate=(
     StaleColumnRecycle:StaleColumnRecycleDropWedge
     StaleColumnRecycle:StaleColumnRecycleReach
     StaleColumnRecycle:StaleColumnRecycleConsumeReach
+    StaleColumnRecycle:StaleColumnRecycleHiddenWedge
+    StaleColumnRecycle:StaleColumnRecycleFlaggedReach
     # `#netadv2`: the shared adversarial channel (NetChannel) must have teeth.
     # One wedge per obligation the channel imposes on a protocol over it:
     # fire-and-forget stalls on a Drop, a non-idempotent receiver applies a

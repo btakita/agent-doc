@@ -600,7 +600,22 @@ where
         return Ok(RestartRequestOutcome::DeferredUntilCycleCloses);
     }
     let waiting_input = state.actor_waiting_input();
-    state.transition_actor_busy("supervisor", "ipc_restart_requested");
+    // A controller-only continue recycle preserves the live harness child across
+    // an in-place re-exec. An explicit Restart Agent or fresh replacement may
+    // not: those intents exist to replace the harness child.
+    let reexec = preserve_live_child;
+    // `#watcherbusyrestart`: only a child-replacing restart changes the
+    // harness's run state. An in-place re-exec leaves the harness exactly where
+    // it is, so its actor projection must stay where it is too: a busy turn
+    // stays busy, and a harness idle at its prompt stays `Ready`. Marking the
+    // idle harness busy here made the request hide the very boundary it waits
+    // for (haiven-dev `sdk-dev.md`, 2026-11-05: a Grok pane idle at its prompt
+    // with only a background watcher read `actor_state=busy
+    // reason=ipc_restart_requested` for 39 minutes, and route waits timed out
+    // at `route_authoritative_actor_starting_not_ready`).
+    if !reexec {
+        state.transition_actor_busy("supervisor", "ipc_restart_requested");
+    }
     // Preserve the explicit Restart Agent intent through the child-exit
     // boundary. The supervisor loop needs it after the current child is gone
     // so it can re-resolve both `agent:` and the document's exact `resume:`
@@ -611,10 +626,6 @@ where
     state.set_restart_mode(encoded_intent);
     state.set_restart_deferred_until_boundary(false);
     state.set_restart_requested(true);
-    // A controller-only continue recycle preserves the live harness child across
-    // an in-place re-exec. An explicit Restart Agent or fresh replacement may
-    // not: those intents exist to replace the harness child.
-    let reexec = preserve_live_child;
     state.set_restart_reexec(reexec);
     if !reexec {
         state.kill_child_for_ipc();
@@ -1248,6 +1259,8 @@ mod tests {
         child_killed: AtomicBool,
         prompt_woken: AtomicBool,
         restart_mode: Mutex<String>,
+        /// Every `transition_actor_busy` reason the request published.
+        busy_reasons: Mutex<Vec<String>>,
         /// `#haivendupsession`: default false so every pre-existing restart test
         /// keeps its original meaning — the gate only engages when a test
         /// explicitly sets up an open cycle over a live child.
@@ -1299,6 +1312,7 @@ mod tests {
                 child_killed: AtomicBool::new(false),
                 prompt_woken: AtomicBool::new(false),
                 restart_mode: Mutex::new(String::new()),
+                busy_reasons: Mutex::new(Vec::new()),
             };
             request_supervisor_restart(&state, RestartIntent::operator_clear_fresh().encode())
                 .expect("operator clear restart is accepted");
@@ -1324,6 +1338,7 @@ mod tests {
             child_killed: AtomicBool::new(false),
             prompt_woken: AtomicBool::new(false),
             restart_mode: Mutex::new(String::new()),
+            busy_reasons: Mutex::new(Vec::new()),
         };
         request_supervisor_restart(&state, "agent:continue".to_string())
             .expect("the live supervisor must retain the deferred restart");
@@ -1348,6 +1363,7 @@ mod tests {
             child_killed: AtomicBool::new(false),
             prompt_woken: AtomicBool::new(false),
             restart_mode: Mutex::new(String::new()),
+            busy_reasons: Mutex::new(Vec::new()),
         };
         request_supervisor_restart(&state, "continue".to_string())
             .expect("a dead child must not block the restart");
@@ -1367,7 +1383,9 @@ mod tests {
             self.child_alive
         }
 
-        fn transition_actor_busy(&self, _caller: &str, _reason: &str) {}
+        fn transition_actor_busy(&self, _caller: &str, reason: &str) {
+            self.busy_reasons.lock().unwrap().push(reason.to_string());
+        }
         fn transition_actor_waiting_input(&self, _caller: &str, _reason: &str) {}
         fn set_restart_mode(&self, mode: String) {
             *self.restart_mode.lock().unwrap() = mode;
@@ -1494,6 +1512,7 @@ mod tests {
             child_killed: AtomicBool::new(false),
             prompt_woken: AtomicBool::new(false),
             restart_mode: Mutex::new(String::new()),
+            busy_reasons: Mutex::new(Vec::new()),
         };
 
         request_supervisor_restart(&state, "fresh".to_string()).unwrap();
@@ -1515,6 +1534,7 @@ mod tests {
             child_killed: AtomicBool::new(false),
             prompt_woken: AtomicBool::new(false),
             restart_mode: Mutex::new(String::new()),
+            busy_reasons: Mutex::new(Vec::new()),
         };
 
         request_supervisor_restart(&state, "agent:continue".to_string()).unwrap();
@@ -1538,6 +1558,7 @@ mod tests {
             child_killed: AtomicBool::new(false),
             prompt_woken: AtomicBool::new(false),
             restart_mode: Mutex::new(String::new()),
+            busy_reasons: Mutex::new(Vec::new()),
         };
 
         request_supervisor_restart(&state, "continue".to_string()).unwrap();
@@ -1559,6 +1580,7 @@ mod tests {
             child_killed: AtomicBool::new(false),
             prompt_woken: AtomicBool::new(false),
             restart_mode: Mutex::new(String::new()),
+            busy_reasons: Mutex::new(Vec::new()),
         };
 
         request_supervisor_restart(&state, "continue".to_string()).unwrap();
@@ -1582,6 +1604,7 @@ mod tests {
             child_killed: AtomicBool::new(false),
             prompt_woken: AtomicBool::new(false),
             restart_mode: Mutex::new(String::new()),
+            busy_reasons: Mutex::new(Vec::new()),
         };
 
         request_supervisor_restart(&state, "continue".to_string())
@@ -1605,6 +1628,7 @@ mod tests {
             child_killed: AtomicBool::new(false),
             prompt_woken: AtomicBool::new(false),
             restart_mode: Mutex::new(String::new()),
+            busy_reasons: Mutex::new(Vec::new()),
         };
 
         request_supervisor_restart(&state, "fresh".to_string()).unwrap();
@@ -1612,6 +1636,74 @@ mod tests {
         assert!(state.restart_requested.load(Ordering::Relaxed));
         assert!(!state.restart_reexec.load(Ordering::Relaxed));
         assert!(state.child_killed.load(Ordering::Relaxed));
+        // Replacing the child really does take the harness out of `Ready`.
+        assert_eq!(
+            *state.busy_reasons.lock().unwrap(),
+            vec!["ipc_restart_requested".to_string()]
+        );
+    }
+
+    /// `#watcherbusyrestart`: a supervisor-only continue recycle over a live
+    /// child (the stale-binary refresh an operator restart requests) re-execs
+    /// the supervisor in place and never touches the harness. Projecting the
+    /// idle harness `busy` hid the prompt-ready boundary the re-exec waits for,
+    /// so a Grok pane idle at its prompt (only a background watcher running)
+    /// stayed `busy reason=ipc_restart_requested` and the restart never fired.
+    #[test]
+    fn in_place_recycle_leaves_the_live_harness_actor_state_untouched() {
+        for binary_stale in [true, false] {
+            let state = RestartLifecycleState {
+                cycle_open: false,
+                child_alive: true,
+                waiting_input: false,
+                binary_stale,
+                restart_requested: AtomicBool::new(false),
+                restart_deferred: AtomicBool::new(false),
+                restart_reexec: AtomicBool::new(false),
+                child_killed: AtomicBool::new(false),
+                prompt_woken: AtomicBool::new(false),
+                restart_mode: Mutex::new(String::new()),
+                busy_reasons: Mutex::new(Vec::new()),
+            };
+
+            assert_eq!(
+                request_supervisor_restart(&state, "continue".to_string()).unwrap(),
+                RestartRequestOutcome::Armed
+            );
+
+            assert!(state.restart_requested.load(Ordering::Relaxed));
+            assert!(state.restart_reexec.load(Ordering::Relaxed));
+            assert!(!state.restart_deferred.load(Ordering::Relaxed));
+            assert!(!state.child_killed.load(Ordering::Relaxed));
+            assert!(
+                state.busy_reasons.lock().unwrap().is_empty(),
+                "an in-place re-exec must not project the preserved harness busy \
+                 (binary_stale={binary_stale})"
+            );
+        }
+
+        // Restart Agent over the same live child still replaces it, and that
+        // replacement is a real busy window.
+        let state = RestartLifecycleState {
+            cycle_open: false,
+            child_alive: true,
+            waiting_input: false,
+            binary_stale: true,
+            restart_requested: AtomicBool::new(false),
+            restart_deferred: AtomicBool::new(false),
+            restart_reexec: AtomicBool::new(false),
+            child_killed: AtomicBool::new(false),
+            prompt_woken: AtomicBool::new(false),
+            restart_mode: Mutex::new(String::new()),
+            busy_reasons: Mutex::new(Vec::new()),
+        };
+        request_supervisor_restart(&state, "agent:continue".to_string()).unwrap();
+        assert!(!state.restart_reexec.load(Ordering::Relaxed));
+        assert!(state.child_killed.load(Ordering::Relaxed));
+        assert_eq!(
+            *state.busy_reasons.lock().unwrap(),
+            vec!["ipc_restart_requested".to_string()]
+        );
     }
 
     /// `#clearcapturedcycle` fixture: a supervisor whose actor sits at its

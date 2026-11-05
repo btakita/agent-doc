@@ -473,7 +473,7 @@ pub fn promote_starting_authoritative_actor_if_dispatch_ready(
     }
 
     crate::route_focus::focus_route_pane(tmux, file, &record.pane_id, "starting_actor_probe");
-    let pane_ready = agent_doc_tmux_io::capture_pane(tmux, &record.pane_id)
+    let pane_ready = agent_doc_tmux_io::capture_pane_with_ansi(tmux, &record.pane_id)
         .ok()
         .map(|content| {
             pane_ready_prompt_candidate(tmux, &record.pane_id, &content, harness).is_some()
@@ -721,7 +721,9 @@ pub fn wait_for_authoritative_actor_ready(
         agent_doc_ops_log_io::log_op(file, &log_line);
         // Diagnostic: capture the pane content at timeout so we can analyze why
         // ready_prompt_candidate never matched.
-        if let Ok(content) = agent_doc_tmux_io::capture_pane(tmux, &initial.record.pane_id) {
+        if let Ok(content) =
+            agent_doc_tmux_io::capture_pane_with_ansi(tmux, &initial.record.pane_id)
+        {
             let candidate =
                 pane_ready_prompt_candidate(tmux, &initial.record.pane_id, &content, harness);
             agent_doc_ops_log_io::log_op(
@@ -867,12 +869,18 @@ pub fn recover_starting_timeout_blocked_actor_if_dispatch_ready(
     }
 }
 
+/// `#watcherbusyrestart`: every ready-prompt proof here reads an ANSI capture.
+/// `capture-pane -p` strips the faint/italic styling that is the only thing
+/// separating a harness ghost suggestion (Grok's next-prompt prediction, a
+/// Claude/Codex placeholder) from operator-typed text, so a plain capture made
+/// an idle Grok pane with a suggested `agent-doc <FILE>` read as an operator
+/// draft and the route waited out its whole ready budget (`prompt_ready=false`).
 pub fn current_generation_ready_prompt_proven(
     tmux: &Tmux,
     target: &AuthoritativeActorDispatchTarget,
     harness: &HarnessConfig,
 ) -> bool {
-    if agent_doc_tmux_io::capture_pane(tmux, &target.record.pane_id)
+    if agent_doc_tmux_io::capture_pane_with_ansi(tmux, &target.record.pane_id)
         .ok()
         .map(|content| {
             pane_ready_prompt_candidate(tmux, &target.record.pane_id, &content, harness).is_some()
@@ -909,7 +917,7 @@ pub fn current_pane_ready_prompt_proven(
     target: &AuthoritativeActorDispatchTarget,
     harness: &HarnessConfig,
 ) -> bool {
-    agent_doc_tmux_io::capture_pane(tmux, &target.record.pane_id)
+    agent_doc_tmux_io::capture_pane_with_ansi(tmux, &target.record.pane_id)
         .ok()
         .is_some_and(|content| {
             pane_ready_prompt_candidate(tmux, &target.record.pane_id, &content, harness).is_some()
@@ -1359,6 +1367,39 @@ mod tests {
     use agent_doc_supervisor::ipc_protocol::{IpcMethod, IpcResponse};
     use agent_doc_supervisor_io::ipc::SupervisorIpc;
     use tmux_router::IsolatedTmux;
+
+    /// `#watcherbusyrestart`: the ready-prompt proofs classify the composer,
+    /// which needs the SGR styling a plain `capture-pane -p` strips. A Grok
+    /// ghost suggestion in an idle box otherwise reads as an operator draft.
+    #[test]
+    fn ready_prompt_proofs_read_an_ansi_capture() {
+        let full = include_str!("authoritative_actor.rs");
+        let source = full
+            .split_once("\n#[cfg(test)]\nmod tests {")
+            .map(|(production, _)| production)
+            .expect("authoritative_actor.rs must keep its tests behind #[cfg(test)]");
+        assert!(
+            source.contains("pane_ready_prompt_candidate(tmux, &target.record.pane_id"),
+            "ready-prompt proof moved; update this guard"
+        );
+        assert!(
+            !source.contains("agent_doc_tmux_io::capture_pane(tmux,"),
+            "a composer-classifying ready proof is reading a plain capture again"
+        );
+        let harness = agent_doc_harness::HarnessConfig::grok();
+        let idle_with_ghost = concat!(
+            "╭────────────────────────╮\n",
+            "│ ❯ \x1b[3;38;2;88;88;88magent-doc tasks/sample.md\x1b[0m │\n",
+            "╰──── Grok 4.7 (high) ───╯\n",
+            "Tab/→:accept suggestion  │  Shift+Tab:mode  │  Ctrl+x:shortcuts\n",
+        );
+        assert!(agent_doc_harness::ready_prompt_candidate(idle_with_ghost, &harness).is_some());
+        let plain = agent_doc_turn_executor_tmux::prompt::strip_ansi(idle_with_ghost);
+        assert!(
+            agent_doc_harness::ready_prompt_candidate(&plain, &harness).is_none(),
+            "the plain capture is exactly what lost the ghost style"
+        );
+    }
 
     fn test_cwd() -> std::path::PathBuf {
         std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))

@@ -1084,6 +1084,15 @@ thread or in a detached periodic timer.
   confirming its old path is absent, and proving that its pane still owns the
   old path. Existing old paths, duplicate session rows, and unproven panes fail
   closed instead of being rebound or removed.
+- Sync absolutizes every `--col` document and `--focus` once at entry, anchored
+  to the caller's working directory (`#ctrlrelroot`), and gives remembered
+  layout columns the same spelling (`#syncrelativecolpaths`). No downstream
+  controller request (actor lookup, stale-supervisor replacement, recycle) may
+  carry a relative document path: a nested project's controller resolves a
+  relative `file` against its own root, so the enclosing workspace's
+  `src/<nested>/tasks/doc.md` named no document there and every retry was
+  rejected `stage=missing_actor`. Without an absolute working directory the
+  paths pass through unchanged rather than being anchored to a guessed root.
 - Sync must synthesize a per-run tmux-router registry from each visible file's own nearest `.agent-doc` root instead of forcing all files through the caller's current root.
 - When `.agent-doc/state.db` has a live authoritative actor row for a visible
 document, sync must treat that actor-owned pane as the owner-of-record and keep

@@ -81,6 +81,17 @@ fn reconcile_observed_identity_in(
     project_root: &Path,
     current: TmuxServerIdentity,
 ) -> Result<TmuxServerReconcileOutcome> {
+    // `#starttimeoutload`: the common case is a server this store already
+    // recorded. That answer needs no registry lock and no write; taking the
+    // lock (unbounded `flock`) and rewriting the row on every editor start
+    // serialized concurrent starts behind each other and behind every
+    // registry writer. The recorded identity only ever changes to the CURRENT
+    // server's identity, so a read that already matches it cannot be
+    // invalidated by a concurrent writer. Initialize/Replace re-read under the
+    // lock below.
+    if load_identity(project_root)? == Some(current) {
+        return Ok(TmuxServerReconcileOutcome::default());
+    }
     let registry_path = crate::registry_path_in(project_root);
     let _lock = RegistryLock::acquire(&registry_path)?;
     let previous = load_identity(project_root)?;
@@ -279,5 +290,42 @@ mod tests {
         assert_eq!(replaced.stale_rows_removed, 2);
         assert!(crate::load_in(project.path()).unwrap().is_empty());
         assert_eq!(load_identity(project.path()).unwrap(), Some(server_b));
+    }
+
+    /// `#starttimeoutload`: re-observing the recorded server takes no registry
+    /// lock. This thread holds the lock, so any attempt to take it again is
+    /// refused (`flock` is not reentrant); the unchanged identity must still be
+    /// answered, while a replacement still goes through the lock.
+    #[test]
+    fn unchanged_identity_is_answered_without_the_registry_lock() {
+        let project = tempfile::tempdir().unwrap();
+        let server = TmuxServerIdentity {
+            pid: 100,
+            start_time: 1_000,
+        };
+        store_identity(project.path(), server).unwrap();
+        let mut registry = Registry::new();
+        registry.insert("a.md".to_string(), entry("a", "%0"));
+        crate::save_in(project.path(), &registry).unwrap();
+
+        let _held = RegistryLock::acquire(&crate::registry_path_in(project.path())).unwrap();
+
+        assert_eq!(
+            reconcile_observed_identity_in(project.path(), server).unwrap(),
+            TmuxServerReconcileOutcome::default()
+        );
+        assert_eq!(crate::load_in(project.path()).unwrap().len(), 1);
+        let replacement = TmuxServerIdentity {
+            pid: 200,
+            start_time: 2_000,
+        };
+        assert!(
+            reconcile_observed_identity_in(project.path(), replacement)
+                .unwrap_err()
+                .to_string()
+                .contains("already held"),
+            "a replacement must still take the registry lock"
+        );
+        assert_eq!(load_identity(project.path()).unwrap(), Some(server));
     }
 }

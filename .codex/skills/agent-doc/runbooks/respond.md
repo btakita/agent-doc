@@ -409,6 +409,10 @@ and the pending granular-flags-only rule. This runbook carries the rest.
      `agent-doc queue report-complete <FILE> --item <...> --generation <N> --prose-only --response '<worker response>'`
      for prose-only work. For repository work replace `--prose-only` with explicit
      `--source-repo`, `--source-sha`, `--sink-repo`, and designated `--sink-ref`.
+     If `--item`/`--generation` match no subagent claim, the command exits
+     non-zero and lists the candidate rows and claims; the worker result is not
+     recorded until a report against one of those exact attempts succeeds
+     (`#reportcompletenomatch`).
      `--prose-only` records a durable `prose_only` lineage declaration; it is
      the only way an attempt with no repository facts closes as prose
      (`#reportedcloseoutfacts`). A worker that committed, pushed, or left

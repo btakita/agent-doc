@@ -1477,3 +1477,138 @@ fn report_complete_refuses_an_ambiguous_id_selector_with_the_candidates() {
         "a refused selector writes nothing"
     );
 }
+
+/// `#reportcompletenomatch`: `queue report-complete` exited 0 when its item
+/// matched no claim, printing only "no subagent claim", and that silent
+/// success let a lost worker result go unnoticed. A report that matches no
+/// subagent claim now fails, names the document's candidate rows and every
+/// claim with its owner, generation, and state, and writes nothing.
+#[test]
+fn report_complete_without_a_matching_subagent_claim_fails_and_names_candidates() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::create_dir_all(dir.path().join(".agent-doc/locks")).unwrap();
+    let doc = dir.path().join("session.md");
+    fs::write(
+        &doc,
+        concat!(
+            "---\nagent_doc_session: report-complete-no-match\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append subagents -->\n",
+            "### Re: prior — gpt-5\n\nDone.\n",
+            "<!-- agent:boundary:keep -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue subagents -->\n",
+            "- finish sdk\n",
+            "- finish dev\n",
+            "<!-- /agent:queue -->\n",
+        ),
+    )
+    .unwrap();
+    let binary = env!("CARGO_BIN_EXE_agent-doc");
+    let run = |args: &[&str]| {
+        Command::new(binary)
+            .env(
+                agent_doc_controller_io::project_controller::TEST_CONTROLLER_LAUNCH_REASON_ENV,
+                CONTROLLER_LAUNCH_REASON,
+            )
+            .current_dir(dir.path())
+            .args(args)
+            .output()
+            .unwrap()
+    };
+    let path = doc.to_str().unwrap();
+    for args in [
+        &[
+            "queue",
+            "claim",
+            path,
+            "--item",
+            "finish sdk",
+            "--owner",
+            "subagent:sdk",
+        ][..],
+        &[
+            "queue",
+            "start",
+            path,
+            "--item",
+            "finish sdk",
+            "--owner",
+            "subagent:sdk",
+            "--generation",
+            "1",
+            "--worker-id",
+            "worker:sdk",
+        ][..],
+        &[
+            "queue",
+            "claim",
+            path,
+            "--item",
+            "finish dev",
+            "--owner",
+            "operator:brian",
+        ][..],
+    ] {
+        let output = run(args);
+        assert!(
+            output.status.success(),
+            "{args:?} failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    let before = fs::read_to_string(&doc).unwrap();
+    let report = |item: &str| {
+        run(&[
+            "queue",
+            "report-complete",
+            "--prose-only",
+            path,
+            "--item",
+            item,
+            "--generation",
+            "1",
+            "--response",
+            "Implemented the fix.",
+        ])
+    };
+
+    let unmatched = report("finish nothing");
+    let stderr = String::from_utf8_lossy(&unmatched.stderr);
+    assert!(
+        !unmatched.status.success(),
+        "an unmatched report must not exit 0: {stderr}"
+    );
+    assert!(
+        stderr.contains("matched no subagent claim for \"finish nothing\" generation 1"),
+        "{stderr}"
+    );
+    assert!(stderr.contains("the worker result is NOT recorded"), "{stderr}");
+    assert!(
+        stderr.contains("candidate rows (2):")
+            && stderr.contains("  - \"finish sdk\"")
+            && stderr.contains("  - \"finish dev\""),
+        "the refusal names every candidate row: {stderr}"
+    );
+    assert!(
+        stderr.contains(
+            "\"finish sdk\" owner=subagent:sdk generation=1 state=running worker=worker:sdk"
+        ) && stderr.contains("\"finish dev\" owner=operator:brian generation=1 state=claimed"),
+        "the refusal names every claim with owner, generation, and state: {stderr}"
+    );
+
+    let foreign = report("finish dev");
+    let stderr = String::from_utf8_lossy(&foreign.stderr);
+    assert!(
+        !foreign.status.success(),
+        "a report on a non-subagent claim must not exit 0: {stderr}"
+    );
+    assert!(
+        stderr.contains("held by operator:brian generation 1, not a `subagent:` owner"),
+        "{stderr}"
+    );
+    assert_eq!(
+        fs::read_to_string(&doc).unwrap(),
+        before,
+        "a refused report writes nothing"
+    );
+}

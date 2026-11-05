@@ -20,6 +20,14 @@
 //! ([`PriorIndex`]) is a rebuildable cache that keeps first-seen times, stable
 //! decision ids, key grouping, and answers whose source rows were pruned.
 //!
+//! `#decisionidstamp`: the decision id is also written into the document.
+//! [`Ledger::decision_stamps`] / [`apply_decision_stamps`] put a binary-owned
+//! `⟦decision:<id>⟧` token on every open todo copy of an answered question; a
+//! later build reads the stamp back as the decision id (and as an identity
+//! key) instead of deriving it again. [`history::seed_index`] rebuilds the
+//! index once from the document's committed versions, so an answer whose row
+//! was pruned before the index was first written is still on record.
+//!
 //! ## Matching tiers (precision first)
 //!
 //! 1. **Identity** (acts): the same id on two rows; the same normalized
@@ -41,6 +49,7 @@
 //! `restates`, `applies_to`, `same_as`).
 
 pub mod extract;
+pub mod history;
 pub mod text;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -327,6 +336,12 @@ pub fn text_key(text: &str) -> Option<String> {
         .then(|| format!("qt:{}", &agent_doc_hash::content_hash(&normalized)[..16]))
 }
 
+/// `stamp:<decision id>`: copies that carry the same binary decision stamp
+/// are one decision (`#decisionidstamp`).
+pub fn stamp_key(decision_id: &str) -> String {
+    format!("stamp:{}", decision_id.to_ascii_lowercase())
+}
+
 fn question_keys(question: &QuestionObs) -> Vec<String> {
     let mut keys = Vec::new();
     if let Some(id) = &question.id {
@@ -335,7 +350,20 @@ fn question_keys(question: &QuestionObs) -> Vec<String> {
     if let Some(key) = text_key(&question.text) {
         keys.push(key);
     }
+    if let Some(stamp) = &question.stamp {
+        keys.push(stamp_key(stamp));
+    }
     keys
+}
+
+/// The key an operator answer addresses: its first target id, else the
+/// normalized text of the id-less question it sits under.
+fn answer_key(answer: &extract::AnswerObs) -> Option<String> {
+    answer
+        .targets
+        .first()
+        .map(|id| id_key(id))
+        .or_else(|| answer.head_text.as_deref().and_then(text_key))
 }
 
 fn is_request(id: &str) -> bool {
@@ -449,13 +477,6 @@ impl Ledger {
             }
         }
         // Answer keys.
-        let answer_key = |answer: &extract::AnswerObs| -> Option<String> {
-            answer
-                .targets
-                .first()
-                .map(|id| id_key(id))
-                .or_else(|| answer.head_text.as_deref().and_then(text_key))
-        };
         for answer in &observations.answers {
             if let Some(key) = answer_key(answer) {
                 uf.add(&key);
@@ -535,28 +556,35 @@ impl Ledger {
             ..Default::default()
         };
         let mut root_to_decision: BTreeMap<String, usize> = BTreeMap::new();
-        for group in &groups {
-            let id = group
+        let prior_decision_first_seen = |decision_id: &str| {
+            prior
                 .keys
                 .iter()
-                .filter_map(|key| prior_decision_of.get(key.as_str()))
+                .filter(|key| key.decision_id == decision_id)
+                .map(|key| key.first_seen_at)
+                .min()
+                .unwrap_or(u64::MAX)
+        };
+        for group in &groups {
+            // `#decisionidstamp`: the document is the authority. A decision id
+            // the binary stamped on a copy wins over the index and over the
+            // derived hash; when merged copies carry different stamps, the
+            // decision the index saw first keeps its id.
+            let stamped: BTreeSet<&str> = group
+                .questions
+                .iter()
+                .filter_map(|&index| questions[index].stamp.as_deref())
+                .collect();
+            let stamped_id = stamped
+                .iter()
                 .min_by(|a, b| {
-                    a.first_seen_at
-                        .cmp(&b.first_seen_at)
-                        .then(a.decision_id.cmp(&b.decision_id))
+                    prior_decision_first_seen(a)
+                        .cmp(&prior_decision_first_seen(b))
+                        .then(a.cmp(b))
                 })
-                .map(|key| key.decision_id.clone())
-                .unwrap_or_else(|| {
-                    let canonical = group
-                        .keys
-                        .iter()
-                        .find(|key| key.starts_with("id:"))
-                        .or(group.keys.iter().next());
-                    format!(
-                        "dec-{}",
-                        &agent_doc_hash::content_hash(canonical.map_or("", String::as_str))[..10]
-                    )
-                });
+                .map(|id| (*id).to_string());
+            let id =
+                stamped_id.unwrap_or_else(|| Self::derived_decision_id(group, &prior_decision_of));
             let question = group
                 .questions
                 .iter()
@@ -823,6 +851,34 @@ impl Ledger {
         ledger
     }
 
+    /// The decision id of an unstamped group: the id the index already holds
+    /// for one of its keys (the oldest), else `dec-<hash>` of its canonical
+    /// key.
+    fn derived_decision_id(group: &Group, prior_decision_of: &BTreeMap<&str, &PriorKey>) -> String {
+        group
+            .keys
+            .iter()
+            .filter_map(|key| prior_decision_of.get(key.as_str()))
+            .min_by(|a, b| {
+                a.first_seen_at
+                    .cmp(&b.first_seen_at)
+                    .then(a.decision_id.cmp(&b.decision_id))
+            })
+            .map(|key| key.decision_id.clone())
+            .unwrap_or_else(|| {
+                let canonical = group
+                    .keys
+                    .iter()
+                    .find(|key| key.starts_with("id:"))
+                    .or_else(|| group.keys.iter().find(|key| !key.starts_with("stamp:")))
+                    .or(group.keys.iter().next());
+                format!(
+                    "dec-{}",
+                    &agent_doc_hash::content_hash(canonical.map_or("", String::as_str))[..10]
+                )
+            })
+    }
+
     fn groups(uf: &mut UnionFind, questions: &[QuestionObs]) -> Vec<Group> {
         let keys: Vec<String> = uf.parent.keys().cloned().collect();
         let mut by_root: BTreeMap<String, Group> = BTreeMap::new();
@@ -993,6 +1049,16 @@ impl Ledger {
             {
                 candidates.push((index, MatchTier::Identity));
             }
+            // `#decisionidstamp`: a copied stamp names its decision outright.
+            if let Some(stamp) = &question.stamp
+                && let Some(index) = self
+                    .key_to_decision
+                    .get(&stamp_key(stamp))
+                    .copied()
+                    .or_else(|| self.decisions.iter().position(|d| &d.id == stamp))
+            {
+                candidates.push((index, MatchTier::Identity));
+            }
             if question.source == QuestionSource::Request {
                 for reference in &question.references {
                     if self.kinds.contains_key(reference)
@@ -1055,6 +1121,22 @@ impl Ledger {
         out
     }
 
+    /// `#decisionidstamp`: the decision id each open todo copy of an answered
+    /// decision carries, keyed by the copy's todo id. [`apply_decision_stamps`]
+    /// writes them; a copy already stamped with its id is left alone.
+    pub fn decision_stamps(&self) -> BTreeMap<String, String> {
+        self.decisions
+            .iter()
+            .filter(|decision| !decision.revisions.is_empty())
+            .flat_map(|decision| {
+                decision
+                    .open_todos
+                    .iter()
+                    .map(|todo| (todo.clone(), decision.id.clone()))
+            })
+            .collect()
+    }
+
     /// The index rows this build implies (keys, revisions, edges).
     pub fn index_rows(&self) -> (Vec<PriorKey>, Vec<PriorRevision>) {
         let mut keys = Vec::new();
@@ -1102,6 +1184,31 @@ fn open_todo_action(content: &str, id: &str) -> Option<String> {
                 .is_some_and(|own| own.eq_ignore_ascii_case(id)))
         .then(|| parsed.action.trim_end().to_string())
     })
+}
+
+/// `#decisionidstamp`: write each decision id onto its open todo copy as the
+/// binary-owned `⟦decision:<id>⟧` token (replacing a stale one). Returns
+/// `None` when every copy already carries its id. A copy the todo editor
+/// refuses keeps its text; the next pass tries again.
+pub fn apply_decision_stamps(content: &str, stamps: &BTreeMap<String, String>) -> Option<String> {
+    let mut current = content.to_string();
+    for (todo_id, decision_id) in stamps {
+        let Some(action) = open_todo_action(&current, todo_id) else {
+            continue;
+        };
+        let stamped = agent_doc_element::decision_stamp::with_decision_stamp(&action, decision_id);
+        if stamped == action {
+            continue;
+        }
+        if let Ok(edited) = agent_doc_element::todo::edit_todo_item_in_document(
+            &current,
+            todo_id,
+            &format!("[#{todo_id}] {stamped}"),
+        ) {
+            current = edited.content;
+        }
+    }
+    (current != content).then_some(current)
 }
 
 /// Close each duplicate todo in `content`, appending the recorded answer to

@@ -9,6 +9,11 @@
 //! [`reasks_for_closeout`] is the pre-write gate a closeout runs on the
 //! request packets and `--todo-add` texts it is about to record. No agent
 //! command is involved in any of it.
+//!
+//! `#decisionidstamp`: the pass also stamps every open todo copy of an
+//! answered question with its decision id, rebuilds the index once from the
+//! document's git history, and [`probe_answer_ledger`] reports the same facts
+//! read-only for `preflight --probe`.
 
 use std::path::Path;
 
@@ -50,33 +55,40 @@ fn index_target(file: &Path) -> Option<(std::path::PathBuf, String)> {
     Some((root, agent_doc_hash::document_id_for_path(file)))
 }
 
+fn prior_from_rows(
+    keys: Vec<agent_doc_sqlite::answer_ledger_index::AnswerKeyRow>,
+    revisions: Vec<agent_doc_sqlite::answer_ledger_index::AnswerRevisionRow>,
+) -> PriorIndex {
+    PriorIndex {
+        keys: keys
+            .into_iter()
+            .map(|row| PriorKey {
+                key: row.key,
+                decision_id: row.decision_id,
+                first_seen_at: row.first_seen_at,
+            })
+            .collect(),
+        revisions: revisions
+            .into_iter()
+            .map(|row| PriorRevision {
+                decision_id: row.decision_id,
+                answer: row.answer,
+                location: row.location,
+                relation: row.relation,
+                first_seen_at: row.first_seen_at,
+                change_flagged: row.change_flagged,
+            })
+            .collect(),
+    }
+}
+
 fn load_prior(file: &Path) -> PriorIndex {
     let Some((root, document_id)) = index_target(file) else {
         return PriorIndex::default();
     };
     match agent_doc_sqlite::answer_ledger_index::load_for_project(&root, &document_id) {
         None => PriorIndex::default(),
-        Some(Ok((keys, revisions))) => PriorIndex {
-            keys: keys
-                .into_iter()
-                .map(|row| PriorKey {
-                    key: row.key,
-                    decision_id: row.decision_id,
-                    first_seen_at: row.first_seen_at,
-                })
-                .collect(),
-            revisions: revisions
-                .into_iter()
-                .map(|row| PriorRevision {
-                    decision_id: row.decision_id,
-                    answer: row.answer,
-                    location: row.location,
-                    relation: row.relation,
-                    first_seen_at: row.first_seen_at,
-                    change_flagged: row.change_flagged,
-                })
-                .collect(),
-        },
+        Some(Ok((keys, revisions))) => prior_from_rows(keys, revisions),
         Some(Err(err)) => {
             eprintln!(
                 "[preflight] answer ledger: index unreadable ({err:#}); rebuilding from the document"
@@ -86,20 +98,20 @@ fn load_prior(file: &Path) -> PriorIndex {
     }
 }
 
-fn store_index(file: &Path, ledger: &Ledger, now: u64) {
-    let Some((root, document_id)) = index_target(file) else {
-        return;
-    };
-    let (keys, revisions) = ledger.index_rows();
-    let keys: Vec<_> = keys
-        .into_iter()
+fn key_rows(keys: Vec<PriorKey>) -> Vec<agent_doc_sqlite::answer_ledger_index::AnswerKeyRow> {
+    keys.into_iter()
         .map(|key| agent_doc_sqlite::answer_ledger_index::AnswerKeyRow {
             key: key.key,
             decision_id: key.decision_id,
             first_seen_at: key.first_seen_at,
         })
-        .collect();
-    let revisions: Vec<_> = revisions
+        .collect()
+}
+
+fn revision_rows(
+    revisions: Vec<PriorRevision>,
+) -> Vec<agent_doc_sqlite::answer_ledger_index::AnswerRevisionRow> {
+    revisions
         .into_iter()
         .map(
             |revision| agent_doc_sqlite::answer_ledger_index::AnswerRevisionRow {
@@ -111,10 +123,14 @@ fn store_index(file: &Path, ledger: &Ledger, now: u64) {
                 change_flagged: revision.change_flagged,
             },
         )
-        .collect();
-    let edges: Vec<_> = ledger
-        .edges
-        .iter()
+        .collect()
+}
+
+fn edge_rows<'a>(
+    edges: impl IntoIterator<Item = &'a agent_doc_answer_ledger::Edge>,
+) -> Vec<agent_doc_sqlite::answer_ledger_index::AnswerEdgeRow> {
+    edges
+        .into_iter()
         .map(
             |edge| agent_doc_sqlite::answer_ledger_index::AnswerEdgeRow {
                 from: edge.from.clone(),
@@ -122,17 +138,124 @@ fn store_index(file: &Path, ledger: &Ledger, now: u64) {
                 to: edge.to.clone(),
             },
         )
-        .collect();
+        .collect()
+}
+
+fn store_index(file: &Path, ledger: &Ledger, now: u64) {
+    let Some((root, document_id)) = index_target(file) else {
+        return;
+    };
+    let (keys, revisions) = ledger.index_rows();
     if let Err(err) = agent_doc_sqlite::answer_ledger_index::store_for_project(
         &root,
         &document_id,
-        &keys,
-        &revisions,
-        &edges,
+        &key_rows(keys),
+        &revision_rows(revisions),
+        &edge_rows(&ledger.edges),
         now,
     ) {
         eprintln!("[preflight] answer ledger: index not refreshed ({err:#})");
     }
+}
+
+/// Committed versions a one-time history rebuild reads at most, spread evenly
+/// over the document's whole history (`#decisionidstamp`). Session documents
+/// commit every cycle, so an unbounded walk could read thousands of versions.
+pub const ANSWER_LEDGER_HISTORY_MAX_VERSIONS: usize = 512;
+
+/// `#decisionidstamp`: once per document, rebuild the index from the
+/// document's committed versions so answers whose rows were pruned before the
+/// first index write are on record. Runs only where the index is writable;
+/// a failure is reported and the pass continues with the index as it was.
+fn seed_index_from_history_once(
+    file: &Path,
+    content: &str,
+    prior: PriorIndex,
+    now: u64,
+) -> PriorIndex {
+    let Some((root, document_id)) = index_target(file) else {
+        return prior;
+    };
+    match agent_doc_sqlite::answer_ledger_index::history_seeded_for_project(&root, &document_id) {
+        Some(Ok(false)) => {}
+        Some(Err(err)) => {
+            eprintln!("[preflight] answer ledger: history rebuild state unreadable ({err:#})");
+            return prior;
+        }
+        _ => return prior,
+    }
+    let versions = agent_doc_git_io::revision::sampled_file_revisions(
+        file,
+        ANSWER_LEDGER_HISTORY_MAX_VERSIONS,
+    )
+    .unwrap_or_else(|err| {
+        eprintln!("[preflight] answer ledger: git history unreadable ({err:#}); seeding from the document only");
+        Vec::new()
+    });
+    let short: Vec<String> = versions
+        .iter()
+        .map(|revision| revision.sha.chars().take(10).collect())
+        .collect();
+    let history: Vec<agent_doc_answer_ledger::history::HistoryVersion<'_>> = versions
+        .iter()
+        .zip(&short)
+        .map(
+            |(revision, short)| agent_doc_answer_ledger::history::HistoryVersion {
+                committed_at: revision.committed_secs,
+                revision: short,
+                content: &revision.content,
+            },
+        )
+        .collect();
+    let current = observe_document(file, content);
+    let seed = agent_doc_answer_ledger::history::seed_index(&history, &current, &prior, now);
+    if let Err(err) = agent_doc_sqlite::answer_ledger_index::store_history_seed_for_project(
+        &root,
+        &document_id,
+        &key_rows(seed.index.keys),
+        &revision_rows(seed.index.revisions),
+        &edge_rows(&seed.edges),
+        versions.len(),
+        seed.recovered,
+        now,
+    ) {
+        eprintln!("[preflight] answer ledger: history rebuild not stored ({err:#})");
+        return prior;
+    }
+    if seed.recovered > 0 {
+        eprintln!(
+            "[preflight] answer ledger: rebuilt the index from {} committed version(s); {} answer(s) no longer in the document recovered (#decisionidstamp)",
+            versions.len(),
+            seed.recovered
+        );
+    }
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "answer_ledger_history_seeded file={} versions={} recovered={}",
+            file.display(),
+            versions.len(),
+            seed.recovered
+        ),
+    );
+    load_prior(file)
+}
+
+fn observe_document(file: &Path, content: &str) -> agent_doc_answer_ledger::extract::Observations {
+    let archives = archive_texts(file, content);
+    let refs: Vec<&str> = archives.iter().map(String::as_str).collect();
+    agent_doc_answer_ledger::extract::observe(content, &refs)
+}
+
+fn build_with_prior(
+    file: &Path,
+    content: &str,
+    prior: &PriorIndex,
+    now: u64,
+) -> (agent_doc_answer_ledger::extract::Observations, Ledger) {
+    let observations = observe_document(file, content);
+    let ledger = Ledger::build(&observations, prior, now, None);
+    (observations, ledger)
 }
 
 /// Build the ledger for `content` (read-only: no index write).
@@ -140,17 +263,68 @@ pub fn build_ledger(
     file: &Path,
     content: &str,
 ) -> (agent_doc_answer_ledger::extract::Observations, Ledger) {
-    let archives = archive_texts(file, content);
-    let refs: Vec<&str> = archives.iter().map(String::as_str).collect();
-    let observations = agent_doc_answer_ledger::extract::observe(content, &refs);
-    let prior = load_prior(file);
-    let ledger = Ledger::build(
-        &observations,
-        &prior,
+    build_with_prior(
+        file,
+        content,
+        &load_prior(file),
         agent_doc_log_time::current_epoch_secs(),
-        None,
-    );
-    (observations, ledger)
+    )
+}
+
+/// One planned ledger pass over `content`, nothing written yet.
+struct LedgerPass {
+    ledger: Ledger,
+    closed: Vec<DuplicateClosure>,
+    /// Todo copies whose decision stamp this pass writes.
+    stamped: Vec<(String, String)>,
+    /// The document after closures and stamps, when either changed it.
+    target: Option<String>,
+}
+
+/// Close duplicate copies of answered questions, then stamp each remaining
+/// open copy with its decision id (`#decisionidstamp`), in memory.
+fn plan_pass(file: &Path, content: &str, prior: &PriorIndex, now: u64) -> Result<LedgerPass> {
+    let (observations, ledger) = build_with_prior(file, content, prior, now);
+    let closed = ledger.duplicate_closures(&observations);
+    let mut target = content.to_string();
+    let mut ledger = ledger;
+    if !closed.is_empty()
+        && let Some(next) = agent_doc_answer_ledger::apply_duplicate_closures(&target, &closed)?
+    {
+        target = next;
+        ledger = build_with_prior(file, &target, prior, now).1;
+    }
+    let stamps = ledger.decision_stamps();
+    let mut stamped = Vec::new();
+    if let Some(next) = agent_doc_answer_ledger::apply_decision_stamps(&target, &stamps) {
+        let before = agent_doc_answer_ledger::extract::observe(&target, &[]);
+        let after = agent_doc_answer_ledger::extract::observe(&next, &[]);
+        for question in &after.questions {
+            if let (Some(id), Some(stamp)) = (&question.id, &question.stamp)
+                && !before
+                    .questions
+                    .iter()
+                    .any(|old| old.id.as_ref() == Some(id) && old.stamp.as_ref() == Some(stamp))
+            {
+                stamped.push((id.clone(), stamp.clone()));
+            }
+        }
+        target = next;
+    }
+    Ok(LedgerPass {
+        ledger,
+        closed,
+        stamped,
+        target: (target != content).then_some(target),
+    })
+}
+
+fn report_of(ledger: &Ledger, closed: Vec<DuplicateClosure>) -> AnswerLedgerReport {
+    AnswerLedgerReport {
+        facts: ledger.answered_facts(),
+        possible: ledger.possible.clone(),
+        closed,
+    }
 }
 
 fn read_authoritative(file: &Path, force_disk: bool) -> Result<Option<String>> {
@@ -170,7 +344,8 @@ fn read_authoritative(file: &Path, force_disk: bool) -> Result<Option<String>> {
 }
 
 /// Preflight / closeout pass: close duplicate copies of answered questions,
-/// refresh the index, and return the facts for the cycle contract.
+/// stamp the remaining copies with their decision id, refresh the index, and
+/// return the facts for the cycle contract.
 pub fn run_answer_ledger_maintenance(file: &Path) -> Result<AnswerLedgerReport> {
     run_answer_ledger_maintenance_with_options(file, false, None)
 }
@@ -183,6 +358,20 @@ pub fn run_answer_ledger_maintenance_force_disk(
     run_answer_ledger_maintenance_with_options(file, true, Some(write_effects))
 }
 
+/// `#decisionidstamp`: the probe-mode (`preflight --probe`) pass. It reads the
+/// document from disk and the index read-only, simulates the closures and
+/// stamps the real pass would write, and reports the facts of the simulated
+/// document. Nothing is written: not the document, not the index, and no
+/// history rebuild.
+pub fn probe_answer_ledger(file: &Path) -> Result<AnswerLedgerReport> {
+    let Ok(content) = std::fs::read_to_string(file) else {
+        return Ok(AnswerLedgerReport::default());
+    };
+    let now = agent_doc_log_time::current_epoch_secs();
+    let pass = plan_pass(file, &content, &load_prior(file), now)?;
+    Ok(report_of(&pass.ledger, pass.closed))
+}
+
 fn run_answer_ledger_maintenance_with_options(
     file: &Path,
     force_disk: bool,
@@ -193,12 +382,11 @@ fn run_answer_ledger_maintenance_with_options(
         return Ok(AnswerLedgerReport::default());
     };
     let now = agent_doc_log_time::current_epoch_secs();
-    let (observations, ledger) = build_ledger(file, &content);
-    let closed = ledger.duplicate_closures(&observations);
-    let mut report_ledger = ledger;
-    if !closed.is_empty()
-        && let Some(target) = agent_doc_answer_ledger::apply_duplicate_closures(&content, &closed)?
-    {
+    let prior = seed_index_from_history_once(file, &content, load_prior(file), now);
+    let pass = plan_pass(file, &content, &prior, now)?;
+    let closed = pass.closed;
+    let mut report_ledger = pass.ledger;
+    if let Some(target) = pass.target {
         let persisted = if force_disk {
             let effects = write_effects.ok_or_else(|| {
                 anyhow::anyhow!("force-disk answer-ledger maintenance requires write effects")
@@ -209,6 +397,8 @@ fn run_answer_ledger_maintenance_with_options(
             let root = agent_doc_project_root_io::project_root_containing(file);
             super::persist_queue_maintenance_doc(file, &target, &content, root.as_deref(), source)?
         };
+        // Closures and stamps only touch `agent:todo`, so carrying the todo
+        // body keeps the snapshot from reading them as operator edits.
         if let Ok(Some(snapshot)) = agent_doc_snapshot_io::load_document_baseline(file)
             && let Some(new_snapshot) = agent_doc_element::todo::carry_todo_body_into_snapshot(
                 &snapshot, &content, &persisted,
@@ -236,12 +426,27 @@ fn run_answer_ledger_maintenance_with_options(
                 ),
             );
         }
-        let (_, rebuilt) = build_ledger(file, &persisted);
-        report_ledger = rebuilt;
+        for (todo, decision) in &pass.stamped {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "answer_ledger_decision_stamped file={} todo={todo} decision={decision}",
+                    file.display(),
+                ),
+            );
+        }
+        if !pass.stamped.is_empty() {
+            eprintln!(
+                "[preflight] answer ledger: stamped the decision id on {} todo cop{} (#decisionidstamp)",
+                pass.stamped.len(),
+                if pass.stamped.len() == 1 { "y" } else { "ies" }
+            );
+        }
+        report_ledger = build_with_prior(file, &persisted, &prior, now).1;
     }
     store_index(file, &report_ledger, now);
-    let facts = report_ledger.answered_facts();
-    for fact in &facts {
+    let report = report_of(&report_ledger, closed);
+    for fact in &report.facts {
         eprintln!(
             "[preflight] answer ledger: already answered `{}` ({}): “{}”",
             fact.decision_id,
@@ -249,11 +454,7 @@ fn run_answer_ledger_maintenance_with_options(
             fact.answer
         );
     }
-    Ok(AnswerLedgerReport {
-        facts,
-        possible: report_ledger.possible.clone(),
-        closed,
-    })
+    Ok(report)
 }
 
 /// Pre-write closeout gate: the questions this closeout would add that the
@@ -288,35 +489,95 @@ mod tests {
         "<!-- /agent:todo -->\n",
     );
 
+    /// A decision todo and a request copy of it, answered under the request.
+    const DECISION_DOC: &str = concat!(
+        "---\nagent_doc_session: answer-ledger\n---\n\n",
+        "<!-- agent:queue -->\n",
+        "- ~~[#subagent-operator-request-tdport-pick]: Use port 3000.~~\n",
+        "<!-- /agent:queue -->\n\n",
+        "<!-- agent:todo -->\n",
+        "- [ ] [#tdport] Choose the demo callback port for local sign-in runs\n",
+        "- [ ] [#subagent-operator-request-tdport-pick] Choose the demo callback port for local sign-in runs: 3000 or 47616\n",
+        "<!-- /agent:todo -->\n",
+    );
+
+    fn tdport_fact(report: &AnswerLedgerReport) -> &AnsweredFact {
+        report
+            .facts
+            .iter()
+            .find(|fact| fact.open_items.contains(&"tdport".to_string()))
+            .unwrap_or_else(|| panic!("{report:?}"))
+    }
+
+    /// `#decisionidstamp`: the copy kept open carries its decision id after
+    /// the pass, and the next pass writes nothing.
+    #[test]
+    fn maintenance_stamps_the_open_copy_with_its_decision_id() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("session.md");
+        std::fs::write(&doc, DECISION_DOC).unwrap();
+        let report = run_answer_ledger_maintenance_force_disk(&doc, &NoEffects).unwrap();
+        let decision = tdport_fact(&report).decision_id.clone();
+        let written = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            written.contains(&format!(
+                "- [ ] [#tdport] Choose the demo callback port for local sign-in runs ⟦decision:{decision}⟧\n"
+            )),
+            "{written}"
+        );
+        assert!(
+            written.contains("- [x] [#subagent-operator-request-tdport-pick]"),
+            "{written}"
+        );
+        let again = run_answer_ledger_maintenance_force_disk(&doc, &NoEffects).unwrap();
+        assert_eq!(tdport_fact(&again).decision_id, decision);
+        assert_eq!(
+            std::fs::read_to_string(&doc).unwrap(),
+            written,
+            "idempotent"
+        );
+    }
+
+    struct NoEffects;
+    impl crate::PreflightMaintenanceWriteEffects for NoEffects {
+        fn record_document_write_provenance(&self, _file: &Path, _content: &str) {}
+
+        fn guard_visible_write_expected_current(
+            &self,
+            _file: &Path,
+            _source: &str,
+            _expected: &str,
+        ) -> Result<()> {
+            Ok(())
+        }
+
+        fn converge_or_disk_write(
+            &self,
+            file: &Path,
+            _current: &str,
+            target: &str,
+            _source: &str,
+        ) -> Result<()> {
+            std::fs::write(file, target)?;
+            Ok(())
+        }
+    }
+
+    fn git(root: &Path, args: &[&str]) {
+        let output = std::process::Command::new("git")
+            .current_dir(root)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "git {args:?}: {output:?}");
+    }
+
     /// Agent-free path: a plain force-disk maintenance pass (the closeout
     /// path) closes the stale request copy, keeps the work todo open, and the
     /// facts carry the answer; no agent command is involved.
     #[test]
     fn maintenance_closes_the_answered_copy_and_reports_facts() {
-        struct NoEffects;
-        impl crate::PreflightMaintenanceWriteEffects for NoEffects {
-            fn record_document_write_provenance(&self, _file: &Path, _content: &str) {}
-
-            fn guard_visible_write_expected_current(
-                &self,
-                _file: &Path,
-                _source: &str,
-                _expected: &str,
-            ) -> Result<()> {
-                Ok(())
-            }
-
-            fn converge_or_disk_write(
-                &self,
-                file: &Path,
-                _current: &str,
-                target: &str,
-                _source: &str,
-            ) -> Result<()> {
-                std::fs::write(file, target)?;
-                Ok(())
-            }
-        }
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let doc = dir.path().join("session.md");
@@ -330,6 +591,7 @@ mod tests {
         );
         assert!(written.contains("already answered `"), "{written}");
         assert!(written.contains("- [ ] [#tdport]"), "{written}");
+
         // Idempotent second pass.
         let again = run_answer_ledger_maintenance_force_disk(&doc, &NoEffects).unwrap();
         assert!(again.closed.is_empty());
@@ -343,5 +605,83 @@ mod tests {
             agent_doc_answer_ledger::reask_refusal(&reasks)
                 .contains("Use the standard http ports.")
         );
+    }
+
+    /// `#decisionidstamp`: `preflight --probe` gets the same facts the real
+    /// pass reports, from a simulation that writes neither the document nor
+    /// the index.
+    #[test]
+    fn the_probe_reports_facts_without_writing() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("session.md");
+        std::fs::write(&doc, DECISION_DOC).unwrap();
+        let report = probe_answer_ledger(&doc).unwrap();
+        assert_eq!(report.closed.len(), 1, "{report:?}");
+        let fact = tdport_fact(&report);
+        assert_eq!(fact.answer, "Use port 3000.");
+        assert_eq!(
+            fact.open_items,
+            vec!["tdport".to_string()],
+            "the simulated closure is reflected"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&doc).unwrap(),
+            DECISION_DOC,
+            "document untouched"
+        );
+        let (root, document_id) = index_target(&doc).unwrap();
+        if let Some(Ok((keys, _))) =
+            agent_doc_sqlite::answer_ledger_index::load_for_project(&root, &document_id)
+        {
+            assert!(keys.is_empty(), "index untouched: {keys:?}");
+        }
+        if let Some(Ok(seeded)) =
+            agent_doc_sqlite::answer_ledger_index::history_seeded_for_project(&root, &document_id)
+        {
+            assert!(!seeded, "no history rebuild from a probe");
+        }
+    }
+
+    /// `#decisionidstamp`: the consumed answer row was pruned from the
+    /// document before any ledger pass wrote the index. The first pass
+    /// rebuilds the index from git history, so the answer still reaches the
+    /// open copy; the rebuild runs once.
+    #[test]
+    fn the_first_pass_recovers_an_answer_pruned_before_the_index_existed() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        git(root, &["init", "-q"]);
+        git(root, &["config", "user.email", "test@example.com"]);
+        git(root, &["config", "user.name", "Test"]);
+        let doc = root.join("session.md");
+        std::fs::write(&doc, DECISION_DOC).unwrap();
+        git(root, &["add", "session.md"]);
+        git(root, &["commit", "-q", "--no-verify", "-m", "answered"]);
+        let pruned = DECISION_DOC.replace(
+            "- ~~[#subagent-operator-request-tdport-pick]: Use port 3000.~~\n",
+            "",
+        );
+        std::fs::write(&doc, &pruned).unwrap();
+        git(root, &["commit", "-q", "--no-verify", "-am", "pruned"]);
+
+        let report = run_answer_ledger_maintenance_force_disk(&doc, &NoEffects).unwrap();
+        let fact = tdport_fact(&report);
+        assert_eq!(fact.answer, "Use port 3000.");
+        assert!(fact.location.starts_with("git history "), "{fact:?}");
+        let (index_root, document_id) = index_target(&doc).unwrap();
+        assert!(
+            agent_doc_sqlite::answer_ledger_index::history_seeded_for_project(
+                &index_root,
+                &document_id
+            )
+            .unwrap()
+            .unwrap()
+        );
+        // Without the history rebuild the open copy would have no answer.
+        let observations = agent_doc_answer_ledger::extract::observe(&pruned, &[]);
+        let document_only = Ledger::build(&observations, &PriorIndex::default(), 0, None);
+        assert!(document_only.answered_facts().is_empty());
     }
 }

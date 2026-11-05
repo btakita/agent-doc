@@ -107,6 +107,128 @@ pub fn walk_file_revisions_with_time(
     Ok(visited)
 }
 
+/// One committed version of a file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileRevision {
+    pub sha: String,
+    /// Committer time, Unix seconds.
+    pub committed_secs: u64,
+    pub content: String,
+}
+
+/// Indices of at most `max` items spread evenly over `0..len`, always keeping
+/// the first and the last. Deterministic.
+fn even_sample(len: usize, max: usize) -> Vec<usize> {
+    if len <= max {
+        return (0..len).collect();
+    }
+    if max <= 1 {
+        return (0..max.min(len)).collect();
+    }
+    let mut picked: Vec<usize> = (0..max).map(|i| i * (len - 1) / (max - 1)).collect();
+    picked.dedup();
+    picked
+}
+
+/// Committed versions of `file`, oldest first: every commit that touched it
+/// when there are at most `max_versions`, else `max_versions` commits spread
+/// evenly over its whole history (always the oldest and the newest).
+///
+/// The commit list is one `git log`; the blobs stream through one
+/// `git cat-file --batch`, so the cost does not grow with a process per
+/// commit. A commit where the path is absent, and a non-UTF-8 blob, are
+/// skipped. A file outside git, or with no commits, yields nothing. The owning
+/// git root is narrowed to the submodule root, as in [`show_rev`].
+pub fn sampled_file_revisions(file: &Path, max_versions: usize) -> Result<Vec<FileRevision>> {
+    use std::io::{BufRead, BufReader, Read, Write};
+    let Ok((super_root, resolved)) = resolve_to_git_root(file) else {
+        return Ok(Vec::new());
+    };
+    let (git_root, _) = narrow_to_submodule(&super_root, &resolved);
+    let rel = relative_path_for_git_show(&resolved, &git_root)
+        .to_string_lossy()
+        .to_string();
+    let output = Command::new("git")
+        .current_dir(&git_root)
+        .args(["log", "--reverse", "--format=%H %ct", "--", rel.as_str()])
+        .output()?;
+    if !output.status.success() {
+        return Ok(Vec::new());
+    }
+    let commits: Vec<(String, u64)> = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter_map(|line| {
+            let mut fields = line.split_whitespace();
+            let sha = fields.next()?.to_string();
+            let secs = fields.next()?.parse().ok()?;
+            Some((sha, secs))
+        })
+        .collect();
+    let picked: Vec<&(String, u64)> = even_sample(commits.len(), max_versions)
+        .into_iter()
+        .map(|index| &commits[index])
+        .collect();
+    if picked.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut child = Command::new("git")
+        .current_dir(&git_root)
+        .args(["cat-file", "--batch"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()?;
+    let mut stdin = child
+        .stdin
+        .take()
+        .ok_or_else(|| anyhow::anyhow!("git cat-file: no stdin"))?;
+    let requests: String = picked
+        .iter()
+        .map(|(sha, _)| format!("{sha}:{rel}\n"))
+        .collect();
+    // Write from a thread: the batch output can exceed the pipe buffer before
+    // every request is written.
+    let writer = std::thread::spawn(move || stdin.write_all(requests.as_bytes()));
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| anyhow::anyhow!("git cat-file: no stdout"))?;
+    let mut reader = BufReader::new(stdout);
+    let mut revisions = Vec::with_capacity(picked.len());
+    for (sha, secs) in &picked {
+        let mut header = String::new();
+        if reader.read_line(&mut header)? == 0 {
+            break;
+        }
+        // `<oid> blob <size>`, or `<object> missing`.
+        let mut fields = header.split_whitespace();
+        let (Some(_), Some(kind), Some(size)) = (fields.next(), fields.next(), fields.next())
+        else {
+            continue;
+        };
+        let Ok(size) = size.parse::<usize>() else {
+            continue;
+        };
+        let mut blob = vec![0u8; size + 1];
+        reader.read_exact(&mut blob)?;
+        blob.truncate(size);
+        if kind != "blob" {
+            continue;
+        }
+        if let Ok(content) = String::from_utf8(blob) {
+            revisions.push(FileRevision {
+                sha: sha.clone(),
+                committed_secs: *secs,
+                content,
+            });
+        }
+    }
+    drop(reader);
+    let _ = writer.join();
+    let _ = child.wait();
+    Ok(revisions)
+}
+
 /// How many commits touched `file` strictly after `since_secs` (committer
 /// time), counting at most `limit`. A file outside git, or with no commits,
 /// counts zero. The owning git root is narrowed to the submodule root, as in
@@ -523,6 +645,43 @@ mod tests {
         })
         .unwrap();
         assert_eq!(limited, 1);
+    }
+
+    #[test]
+    fn sampled_file_revisions_reads_every_version_oldest_first_or_an_even_sample() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        init_repo(root);
+        let doc = root.join("doc.md");
+        let versions = ["one\n", "two\n", "three\n", "four\n", "five\n"];
+        for version in versions {
+            fs::write(&doc, version).unwrap();
+            for args in [vec!["add", "doc.md"], vec!["commit", "-m", version.trim()]] {
+                Command::new("git")
+                    .current_dir(root)
+                    .args(&args)
+                    .output()
+                    .unwrap();
+            }
+        }
+        let all: Vec<String> = sampled_file_revisions(&doc, 10)
+            .unwrap()
+            .into_iter()
+            .map(|revision| revision.content)
+            .collect();
+        assert_eq!(all, versions.map(String::from).to_vec());
+        let sampled: Vec<String> = sampled_file_revisions(&doc, 3)
+            .unwrap()
+            .into_iter()
+            .map(|revision| revision.content)
+            .collect();
+        assert_eq!(sampled, vec!["one\n", "three\n", "five\n"]);
+        assert!(sampled_file_revisions(&doc, 3).unwrap()[0].committed_secs > 0);
+
+        let outside = tempfile::TempDir::new().unwrap();
+        let loose = outside.path().join("loose.md");
+        fs::write(&loose, "x\n").unwrap();
+        assert!(sampled_file_revisions(&loose, 3).unwrap().is_empty());
     }
 
     #[test]

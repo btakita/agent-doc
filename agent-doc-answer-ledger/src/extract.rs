@@ -20,8 +20,13 @@
 //! item id (`subagent-operator-request-<item>-<suffix>`), a packet's
 //! `queue_item`, a `(source: … [#id])` citation, or an operator `same as
 //! [#id]` reply. The ledger decides which links are identity.
+//!
+//! A todo or waiting copy may also carry the decision id the binary stamped
+//! on it (`⟦decision:<id>⟧`, `#decisionidstamp`); copies that carry the same
+//! stamp are one decision.
 
 use crate::text::strip_decorations;
+use agent_doc_element::decision_stamp::{decision_stamp, strip_decision_stamps};
 
 pub const WAITING_ITEM_MARKER: &str = "<!-- agent-doc:waiting-item -->";
 const ARCHIVE_MARKER: &str = "<!-- agent-doc:waiting-archive -->";
@@ -50,6 +55,9 @@ pub struct QuestionObs {
     /// Ids cited by the row that are not its identity (`(source: … [#x])`,
     /// `queue item ‘do [#x]’`, `#x`).
     pub references: Vec<String>,
+    /// Decision id the binary stamped on this copy (`⟦decision:<id>⟧`,
+    /// `#decisionidstamp`).
+    pub stamp: Option<String>,
 }
 
 /// One operator answer.
@@ -134,6 +142,11 @@ pub fn bracket_ids(text: &str) -> Vec<String> {
         rest = &after[end..];
     }
     ids
+}
+
+/// The decision id stamped on a row (`#decisionidstamp`), lowercase.
+fn stamp_of(text: &str) -> Option<String> {
+    decision_stamp(text).map(str::to_ascii_lowercase)
 }
 
 fn is_request_id(id: &str) -> bool {
@@ -373,6 +386,7 @@ fn scan_waiting_item(
             body.split(WAITING_ITEM_MARKER).next().unwrap_or(body),
             own.as_deref(),
         ),
+        stamp: stamp_of(body),
     });
     if let Some(own) = &own {
         for graft in &grafts {
@@ -567,6 +581,7 @@ fn scan_todos(content: &str, out: &mut Observations) {
         let text = parsed.action.to_string();
         out.questions.push(QuestionObs {
             references: references(&text, id.as_deref()),
+            stamp: stamp_of(&text),
             id,
             text,
             source: QuestionSource::Todo,
@@ -613,6 +628,7 @@ fn scan_request_packets(content: &str, out: &mut Observations) {
                 open: false,
                 line: 0,
                 references,
+                stamp: None,
             });
         }
     }
@@ -717,6 +733,7 @@ pub fn observe_new_questions(response: &str, todo_adds: &[String]) -> Vec<crate:
             .map(bracket_ids)
             .unwrap_or_default();
         let mut full_text = packet.request.clone();
+        // A copied stamp names the decision but is not the agent citing it.
         if let Some(context) = &packet.context {
             full_text.push(' ');
             full_text.push_str(context);
@@ -728,13 +745,14 @@ pub fn observe_new_questions(response: &str, todo_adds: &[String]) -> Vec<crate:
         questions.push(crate::NewQuestion {
             question: QuestionObs {
                 id: Some(id),
+                stamp: stamp_of(&packet.request),
                 text: packet.request.clone(),
                 source: QuestionSource::Request,
                 open: true,
                 line: 0,
                 references,
             },
-            full_text,
+            full_text: strip_decision_stamps(&full_text),
         });
     }
     for add in todo_adds {
@@ -749,13 +767,14 @@ pub fn observe_new_questions(response: &str, todo_adds: &[String]) -> Vec<crate:
         questions.push(crate::NewQuestion {
             question: QuestionObs {
                 references: references(&text, id.as_deref()),
+                stamp: stamp_of(&text),
                 id,
                 text,
                 source: QuestionSource::Todo,
                 open: true,
                 line: 0,
             },
-            full_text: add.clone(),
+            full_text: strip_decision_stamps(add),
         });
     }
     questions

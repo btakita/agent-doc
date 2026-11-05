@@ -4164,14 +4164,15 @@ enum AdminAction {
         #[arg(long)]
         json: bool,
     },
-    /// Kill the `start --route-owned` supervisor for a document: request a graceful
+    /// Kill the supervisor for a document, route-owned or operator-started
+    /// (`agent-doc start <FILE>`, `#killsupervisoroperatorstarted`): request a graceful
     /// idle-gated self-kill, then force-kill the verified pid after a grace window
     /// if it stays alive (`#supkill`). Refuses to kill the caller's own ancestor —
     /// run it from a different pane (or let the project controller drive it) when the
     /// target is the supervisor of the current session.
     #[command(name = "kill-supervisor")]
     KillSupervisor {
-        /// Document whose route-owned supervisor should be killed
+        /// Document whose supervisor should be killed
         document: PathBuf,
         /// Seconds to wait for the graceful self-kill before force-killing the pid
         /// (default: AGENT_DOC_SUPERVISOR_SELFKILL_GRACE_SECS or 10)
@@ -8680,7 +8681,7 @@ fn try_main() -> anyhow::Result<()> {
                                 "no_supervisor",
                                 None,
                                 format!(
-                                    "no running route-owned supervisor for {}",
+                                    "no running supervisor (route-owned or `agent-doc start`) for {}",
                                     document.display()
                                 ),
                             ),

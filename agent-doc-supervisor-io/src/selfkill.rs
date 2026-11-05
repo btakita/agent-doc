@@ -195,7 +195,8 @@ pub fn force_kill_verified_supervisor_pid(_target: &Path, _pid: u32) -> bool {
 /// Outcome of [`drive_supervisor_kill`], so the CLI / CP can report what happened.
 #[derive(Debug, PartialEq, Eq)]
 pub enum SupervisorKillOutcome {
-    /// No live `start --route-owned` supervisor found for the document.
+    /// No live supervisor (route-owned or operator-started `agent-doc start
+    /// <FILE>`) found for the document.
     NoSupervisor,
     /// The target supervisor is this caller's own ancestor — refused (run from
     /// another pane or let the CP drive it). Carries the offending pid.
@@ -230,6 +231,13 @@ pub fn drive_supervisor_kill(
 /// supervisor is kept ([`SupervisorKillOutcome::Withdrawn`]). If the
 /// supervisor had already committed to the self-kill, it is reported as
 /// [`SupervisorKillOutcome::Graceful`] when it is observed gone.
+///
+/// `#killsupervisoroperatorstarted`: the target is resolved with
+/// [`serving_supervisor_pid_for_doc`](crate::process::serving_supervisor_pid_for_doc),
+/// the same scan liveness discovery uses, so a document served by an
+/// operator-started `agent-doc start <FILE>` supervisor is found here too. The
+/// route-owned-only `supervisor_pid_for_doc` reported `NoSupervisor` for it
+/// while `admin kill-supervisor` was the operator's tool for stopping it.
 #[cfg(unix)]
 pub fn drive_supervisor_kill_unless<G>(
     file: &Path,
@@ -242,7 +250,7 @@ where
 {
     drive_supervisor_kill_target_unless(
         file,
-        supervisor_pid_for_doc(file),
+        crate::process::serving_supervisor_pid_for_doc(file),
         grace,
         dry_run,
         goal_satisfied,
@@ -374,7 +382,9 @@ mod tests {
     /// `#stalesupervisorhidden`: the kill driver acts on a pid resolved from
     /// the pane tree or lease for an operator-started supervisor the
     /// route-owned scan cannot see, and still refuses a pid that does not
-    /// serve the document.
+    /// serve the document. `#killsupervisoroperatorstarted`: the scanning
+    /// driver (`admin kill-supervisor`) finds that supervisor itself, and
+    /// stops it.
     #[cfg(target_os = "linux")]
     #[test]
     fn targeted_kill_driver_stops_an_operator_started_supervisor() {
@@ -390,7 +400,8 @@ mod tests {
         );
         let pid = supervisor.id();
         let grace = Duration::from_millis(200);
-        let scanned = drive_supervisor_kill(&doc, grace, true).unwrap();
+        let scanned_dry = drive_supervisor_kill(&doc, grace, true).unwrap();
+        let scanned_sibling = drive_supervisor_kill(&sibling, grace, true).unwrap();
         let wrong_doc =
             drive_supervisor_kill_target_unless(&sibling, Some(pid), grace, true, || false)
                 .unwrap();
@@ -401,14 +412,43 @@ mod tests {
         let _ = supervisor.kill();
         let _ = supervisor.wait();
 
-        assert_eq!(
-            scanned,
-            SupervisorKillOutcome::NoSupervisor,
-            "pre-fix witness"
-        );
+        assert_eq!(scanned_dry, SupervisorKillOutcome::WouldKill(pid));
+        assert_eq!(scanned_sibling, SupervisorKillOutcome::NoSupervisor);
         assert_eq!(wrong_doc, SupervisorKillOutcome::NoSupervisor);
         assert_eq!(dry, SupervisorKillOutcome::WouldKill(pid));
         assert_eq!(killed, SupervisorKillOutcome::Forced(pid));
+        assert!(!self_kill_requested(&doc), "the sentinel is cleared");
+    }
+
+    /// `#killsupervisoroperatorstarted`: `admin kill-supervisor` (the scanning
+    /// driver, no pid witness) stops an operator-started `agent-doc start
+    /// <FILE>` supervisor: it finds the pid by scan, requests the graceful
+    /// self-kill, and force-kills the verified pid after the grace window.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn scanning_kill_driver_stops_an_operator_started_supervisor() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join("tasks")).unwrap();
+        let doc = dir.path().join("tasks/sdk-dev.md");
+        std::fs::write(&doc, "body").unwrap();
+        let mut supervisor = crate::process::tests::spawn_operator_started_fake_supervisor(
+            dir.path(),
+            "tasks/sdk-dev.md",
+        );
+        let pid = supervisor.id();
+        let killed = drive_supervisor_kill(&doc, Duration::from_millis(200), false).unwrap();
+        // Reap without signalling first: the status must carry the driver's
+        // own signal, not a cleanup kill.
+        let status = supervisor.wait().unwrap();
+
+        assert_eq!(killed, SupervisorKillOutcome::Forced(pid));
+        assert!(
+            matches!(
+                std::os::unix::process::ExitStatusExt::signal(&status),
+                Some(libc::SIGTERM) | Some(libc::SIGKILL)
+            ),
+            "the operator-started supervisor is stopped by the driver: {status:?}"
+        );
         assert!(!self_kill_requested(&doc), "the sentinel is cleared");
     }
 }

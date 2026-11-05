@@ -306,7 +306,12 @@ fn inject_exchange_notes(body: String, notes: &[String]) -> String {
             out.push_str(line);
             continue;
         }
-        if markers.close_at(line_start, content).as_deref() == Some(EXCHANGE_COMPONENT) {
+        if let Some((close, prefix_len)) = markers.close_split_at(line_start, content)
+            && close == EXCHANGE_COMPONENT
+        {
+            // `#strayclosemarker`: stray text before the closer is the
+            // exchange's last content line; the closer keeps its own line.
+            let close_line = split_stray_close_prefix(line, prefix_len, &mut inner);
             // Emit the buffered inner with the notes inserted before any trailing
             // boundary marker, then the close marker.
             let boundary_idx = inner
@@ -347,7 +352,7 @@ fn inject_exchange_notes(body: String, notes: &[String]) -> String {
                     out.push_str(&note_block);
                 }
             }
-            out.push_str(line);
+            out.push_str(close_line);
             inside_exchange = false;
             injected = true;
             continue;
@@ -1387,12 +1392,35 @@ fn component_inner_lines(name: &str, source: &str) -> Vec<String> {
             }
             continue;
         }
-        if markers.close_at(line_start, content).as_deref() == Some(name) {
+        if let Some((close, prefix_len)) = markers.close_split_at(line_start, content)
+            && close == name
+        {
+            // `#strayclosemarker`: the stray text is the last inner line.
+            split_stray_close_prefix(line, prefix_len, &mut lines);
             break;
         }
         lines.push(line.to_string());
     }
     lines
+}
+
+/// `#strayclosemarker`: when a closer carries tolerated stray text before it on
+/// its line (`t<!-- /agent:run -->`), push that text onto `inner` as the
+/// component's last content line and return the closer's own line. The split
+/// is lossless: the text gains a line break and nothing else, which is how the
+/// element parser and the overlay already read it. A standalone closer
+/// (`prefix_len == 0`) is returned unchanged.
+fn split_stray_close_prefix<'a>(
+    line: &'a str,
+    prefix_len: usize,
+    inner: &mut Vec<String>,
+) -> &'a str {
+    if prefix_len == 0 {
+        return line;
+    }
+    let newline = if line.ends_with("\r\n") { "\r\n" } else { "\n" };
+    inner.push(format!("{}{newline}", &line[..prefix_len]));
+    &line[prefix_len..]
 }
 
 fn record(outcomes: &mut Vec<NodeOutcome>, comp: &str, id: &str, kind: OutcomeKind) {
@@ -1571,9 +1599,11 @@ fn merge_components_into_body(
 
         if let Some((name, theirs_idx)) = open.as_ref() {
             // Inside a component: look for its close marker.
-            if let Some(close) = markers.close_at(body_line_start, content)
+            if let Some((close, prefix_len)) = markers.close_split_at(body_line_start, content)
                 && &close == name
             {
+                // `#strayclosemarker`: the stray text is the last inner line.
+                let close_line = split_stray_close_prefix(line, prefix_len, &mut component_inner);
                 let merged = sides.merge_component(
                     *theirs_idx,
                     &component_inner,
@@ -1583,7 +1613,7 @@ fn merge_components_into_body(
                 );
                 out.push_str(&merged);
                 component_inner.clear();
-                out.push_str(line); // close marker line, verbatim
+                out.push_str(close_line); // close marker line, verbatim
                 open = None;
             } else {
                 // Buffer the inner line verbatim for the reconstruction pass.
@@ -2917,6 +2947,41 @@ Run Agent Doc on sdk-demo.md still wedged:
         let m = document_cell_merge(&base, &ours, &theirs);
 
         assert_eq!(m.merged_doc, ours, "merged:\n{}", m.merged_doc);
+    }
+
+    /// `#strayclosemarker`: the 2026-11-04 fpe.md shape. A lone `t` typed in
+    /// front of the first run's closer must not leave that run open in the
+    /// merge scan (it would swallow the next run's opener and rows). The text
+    /// stays the run's last content, split onto its own line; the agent's
+    /// strike still lands and both runs survive.
+    #[test]
+    fn stray_text_before_a_closer_does_not_swallow_the_next_component() {
+        let doc = |row: &str| {
+            format!(
+                "# T\n\n## fpe-prs <!-- agent:run id=\"fpe-prs\" subagents go -->\n\
+                 - {row}\nt<!-- /agent:run -->\n\n\
+                 ## main <!-- agent:run id=\"main\" subagents go -->\n- ship it\n<!-- /agent:run -->\n"
+            )
+        };
+        let base = doc("do [#a] task");
+        let ours = doc("~~do [#a] task~~");
+        let theirs = base.clone();
+
+        let m = document_cell_merge(&base, &ours, &theirs);
+
+        assert_eq!(
+            m.merged_doc,
+            ours.replace("t<!-- /agent:run -->", "t\n<!-- /agent:run -->"),
+            "merged:\n{}",
+            m.merged_doc
+        );
+        assert_eq!(
+            components(&m.merged_doc)
+                .iter()
+                .filter(|c| c.name == "queue")
+                .count(),
+            2
+        );
     }
 
     // ----- exchange heading-prose turns (`#semmerge` real format) ----------

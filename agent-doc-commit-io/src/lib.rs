@@ -4744,6 +4744,10 @@ mod controller_commit_scope_tests {
     }
 }
 
+// `#strayclosemarker`: kept out of this FlowCore hot-path file's token budget.
+#[cfg(test)]
+mod stray_close_marker_tests;
+
 #[cfg(test)]
 mod visible_response_absorb_tests {
     use super::{answered_free_text_head_recurs, visible_uncommitted_response_is_absorbable};

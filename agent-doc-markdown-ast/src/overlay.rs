@@ -207,11 +207,35 @@ impl ComponentMarkerScan {
 
     /// The raw name of a component closer (either spelling) on the line
     /// starting at `line_start`, unless the line is code.
+    ///
+    /// A closer preceded by tolerated stray operator text on the same line
+    /// (`t<!-- /agent:run -->`, `#strayclosemarker`) is a closer too; use
+    /// [`Self::close_split_at`] to learn where the stray text ends.
     pub fn close_at(&self, line_start: usize, line: &str) -> Option<String> {
+        self.close_split_at(line_start, line).map(|(name, _)| name)
+    }
+
+    /// The raw name of a component closer on the line starting at
+    /// `line_start`, plus the byte length of the stray text before it
+    /// (`0` for a standalone closer), unless the line is code.
+    ///
+    /// `#strayclosemarker`: the element parser and the structural gate read
+    /// `t<!-- /agent:run -->` as the content line `t` followed by the closer
+    /// (rule owner:
+    /// [`agent_doc_element::element::split_tolerated_close_marker_line`]).
+    /// A line scanner that missed the welded closer would leave the component
+    /// open and swallow the rest of the document into it, so every scanner
+    /// that classifies closers goes through here and handles the prefix as
+    /// one content line.
+    pub fn close_split_at(&self, line_start: usize, line: &str) -> Option<(String, usize)> {
         if self.in_code(line_start) {
             return None;
         }
-        parse_close_marker(line.trim())
+        if let Some(name) = parse_close_marker(line.trim()) {
+            return Some((name, 0));
+        }
+        let prefix_len = agent_doc_element::element::split_tolerated_close_marker_line(line)?;
+        parse_close_marker(line[prefix_len..].trim()).map(|name| (name, prefix_len))
     }
 }
 
@@ -1791,7 +1815,26 @@ pub fn components(source: &str) -> Vec<Component> {
 
     // Walk an indexed line table so continuation and marker ranges retain
     // exact source offsets.
-    let raw_lines: Vec<&str> = source.split_inclusive('\n').collect();
+    // `#strayclosemarker`: a closer with tolerated stray text before it
+    // (`t<!-- /agent:run -->`) is scanned as two lines, the stray text and then
+    // the closer, which is how the element parser places the bytes (the text
+    // is the component's last content). The text keeps its exact source
+    // offsets; only the line table is split.
+    let mut raw_lines: Vec<&str> = Vec::new();
+    {
+        let mut line_start = 0usize;
+        for line in source.split_inclusive('\n') {
+            let content = line.trim_end_matches('\n');
+            match markers.close_split_at(line_start, content) {
+                Some((_, prefix_len)) if prefix_len > 0 => {
+                    raw_lines.push(&line[..prefix_len]);
+                    raw_lines.push(&line[prefix_len..]);
+                }
+                _ => raw_lines.push(line),
+            }
+            line_start += line.len();
+        }
+    }
     let content_lines: Vec<&str> = raw_lines
         .iter()
         .map(|line| {
@@ -1928,6 +1971,61 @@ mod tests {
 2. [x] [#beta] done task
 <!-- /agent:backlog -->
 ";
+
+    /// `#strayclosemarker`: `t<!-- /agent:run -->` closes its run exactly as
+    /// the element parser reads it. The stray text is the run's last content,
+    /// never a reason to leave the run open until the next opener.
+    #[test]
+    fn stray_text_before_a_closer_still_closes_the_component() {
+        let source = concat!(
+            "## fpe-prs <!-- agent:run id=\"fpe-prs\" subagents go -->\n",
+            "- do [#a] task\n",
+            "t<!-- /agent:run -->\n",
+            "\n",
+            "## main <!-- agent:run id=\"main\" subagents go -->\n",
+            "- ship it\n",
+            "<!-- /agent:run -->\n",
+        );
+        let element = agent_doc_element::element::parse(source).expect("element parser accepts");
+        let parsed = components(source);
+        assert_eq!(parsed.len(), 2);
+        let first_close_line_end =
+            source.find("t<!-- /agent:run -->\n").unwrap() + "t<!-- /agent:run -->\n".len();
+        assert_eq!(parsed[0].end_byte, first_close_line_end);
+        assert_eq!(element[0].close_end, first_close_line_end);
+        assert_eq!(parsed[0].items[0].text, "do [#a] task");
+        assert!(
+            parsed[0]
+                .items
+                .iter()
+                .all(|item| item.end_byte <= element[0].close_start),
+            "no item reaches into the closer: {:?}",
+            parsed[0].items
+        );
+        assert_eq!(
+            parsed[1]
+                .items
+                .iter()
+                .map(|item| item.text.as_str())
+                .collect::<Vec<_>>(),
+            vec!["ship it"]
+        );
+
+        let scan = ComponentMarkerScan::new(source);
+        let line_start = source.find("t<!-- /agent:run -->").unwrap();
+        assert_eq!(
+            scan.close_split_at(line_start, "t<!-- /agent:run -->"),
+            Some(("run".to_string(), 1))
+        );
+        assert_eq!(
+            scan.close_at(line_start, "t<!-- /agent:run -->").as_deref(),
+            Some("run")
+        );
+        assert_eq!(
+            scan.close_at(line_start, "## Done <!-- /agent:run -->"),
+            None
+        );
+    }
 
     #[test]
     fn list_comment_items_are_preserved_but_not_typed() {

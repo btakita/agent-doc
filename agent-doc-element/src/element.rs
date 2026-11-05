@@ -1472,6 +1472,151 @@ pub fn component_heading_prefix_matches_tag(prefix: &str, tag: &str) -> bool {
         .any(|&(start, end)| marker_at >= start && marker_at < end)
 }
 
+/// Whether `prefix` — the raw line text before a component CLOSING marker's
+/// `<!--` — is stray operator text the document tolerates (`#strayclosemarker`).
+///
+/// One stray keystroke typed at the start of a closing-marker line
+/// (`t<!-- /agent:run -->`, fpe.md 2026-11-04) used to make the structural
+/// gate refuse the whole document: every turn, every commit, and the
+/// parent-pointer commit. The text is tolerated as component content, exactly
+/// as if it sat on its own line just above the marker: the element parser
+/// already places it inside the component (`open_end..close_start`), and the
+/// markdown overlay and document-cell merge scan the line the same way
+/// through [`split_tolerated_close_marker_line`]. A non-blocking lint
+/// ([`stray_text_before_close_markers`]) names the line so the operator can
+/// move it.
+///
+/// The tolerance is narrow. It refuses (returns `false`):
+/// - blank prefixes (a standalone marker needs no tolerance);
+/// - any prefix carrying another HTML comment delimiter (`<!--` / `-->`): two
+///   markers fused onto one line are structure, not a stray keystroke;
+/// - an ATX heading prefix (`## Done <!-- /agent:run -->`): a heading may
+///   anchor an opener, never a closer, so a heading before a closer stays a
+///   structural refusal;
+/// - a prefix spanning lines.
+///
+/// Opening markers, and any text AFTER a marker, keep their existing rules.
+pub fn stray_close_marker_prefix_is_tolerated(prefix: &str) -> bool {
+    if prefix.trim().is_empty()
+        || prefix.contains(['\n', '\r'])
+        || prefix.contains("<!--")
+        || prefix.contains("-->")
+    {
+        return false;
+    }
+    !is_atx_heading_prefix(prefix)
+}
+
+/// True when `prefix` opens an ATX heading: at most three spaces of
+/// indentation, one to six `#`, then a space, a tab, or the end of the text.
+fn is_atx_heading_prefix(prefix: &str) -> bool {
+    let indent_len = prefix.len() - prefix.trim_start_matches(' ').len();
+    if indent_len > 3 {
+        return false;
+    }
+    let heading = &prefix[indent_len..];
+    let hash_count = heading.bytes().take_while(|byte| *byte == b'#').count();
+    (1..=6).contains(&hash_count)
+        && (heading.len() == hash_count || heading[hash_count..].starts_with([' ', '\t']))
+}
+
+/// Split one source line (without its terminator) that ends with a component
+/// closing marker preceded by tolerated stray text (`#strayclosemarker`).
+///
+/// Returns the byte length of the stray prefix, i.e. the offset of the
+/// marker's `<!--`, when the line is `<prefix><!-- /agent:NAME -->` (or the
+/// legacy `<!-- agent:/NAME -->` spelling) followed only by whitespace, the
+/// prefix passes [`stray_close_marker_prefix_is_tolerated`], and the element
+/// parser would read the marker as structure (it is not inside a code span, a
+/// same-line quote, or an explicit blockquote). Returns `None` for a
+/// standalone marker, any other line, and every shape the structural gate
+/// still refuses.
+///
+/// Line scanners call this so they treat the prefix as one content line and
+/// the marker as the next line, which is the reading the element parser and
+/// the structural gate already apply.
+pub fn split_tolerated_close_marker_line(line: &str) -> Option<usize> {
+    let content = line.strip_suffix('\r').unwrap_or(line).trim_end();
+    if !content.ends_with("-->") {
+        return None;
+    }
+    let marker_start = content.rfind("<!--")?;
+    let prefix = &content[..marker_start];
+    if !stray_close_marker_prefix_is_tolerated(prefix) {
+        return None;
+    }
+    let inner = content[marker_start + 4..content.len() - 3].trim();
+    if inner.contains("-->") {
+        return None;
+    }
+    let tag = inner.split_whitespace().next()?;
+    let name = tag
+        .strip_prefix("/agent:")
+        .or_else(|| tag.strip_prefix("agent:/"))?;
+    if !is_valid_name(name) || inner != tag {
+        return None;
+    }
+    if explicit_blockquote_contains(content, marker_start)
+        || find_marker_prose_ranges(content)
+            .iter()
+            .any(|&(start, end)| marker_start >= start && marker_start < end)
+    {
+        return None;
+    }
+    Some(marker_start)
+}
+
+/// Stray text typed before a component closing marker on the same line.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StrayCloseMarkerText {
+    /// 1-based line number of the closing marker.
+    pub line: usize,
+    /// The exact closing tag token (`/agent:run`).
+    pub tag: String,
+    /// The tolerated stray text, verbatim.
+    pub text: String,
+}
+
+/// Every component closing marker that carries tolerated stray text before it
+/// on its line (`#strayclosemarker`), in document order.
+///
+/// This is the non-blocking lint companion of the structural gate's
+/// tolerance: the document stays writable and committable, and the lint names
+/// each line so the operator can move the text onto its own line. Returns an
+/// empty list when the document does not parse.
+pub fn stray_text_before_close_markers(doc: &str) -> Vec<StrayCloseMarkerText> {
+    let Ok(components) = parse(doc) else {
+        return Vec::new();
+    };
+    let mut out: Vec<StrayCloseMarkerText> = components
+        .iter()
+        .filter_map(|component| {
+            let marker_start = component.close_start;
+            let marker_end = find_comment_end(doc.as_bytes(), marker_start)?;
+            let line_start = doc[..marker_start].rfind('\n').map_or(0, |pos| pos + 1);
+            let line_end = doc[marker_end..]
+                .find('\n')
+                .map_or(doc.len(), |relative| marker_end + relative);
+            let prefix = &doc[line_start..marker_start];
+            // Text after the marker is still refused by the structural gate,
+            // so only the tolerated shape is linted here.
+            if !stray_close_marker_prefix_is_tolerated(prefix)
+                || !doc[marker_end..line_end].trim().is_empty()
+            {
+                return None;
+            }
+            let tag = component_marker_tag(doc, marker_start, marker_end)?;
+            Some(StrayCloseMarkerText {
+                line: line_number_at(doc.as_bytes(), marker_start),
+                tag: tag.to_string(),
+                text: prefix.to_string(),
+            })
+        })
+        .collect();
+    out.sort_by_key(|stray| stray.line);
+    out
+}
+
 /// Every `<!-- agent:` / `<!-- /agent:` occurrence outside code and quoted
 /// prose, in document order (GH 90).
 ///
@@ -2664,8 +2809,13 @@ pub fn structural_corruption_reason(doc: &str) -> Option<String> {
                     "/agent:unknown"
                 });
             let prefix = &doc[line_start..marker_start];
+            // `#strayclosemarker`: stray operator text before a CLOSING marker
+            // is tolerated as component content (non-blocking lint:
+            // [`stray_text_before_close_markers`]); one keystroke must never
+            // make the whole document unwritable.
             let prefix_is_valid = prefix.trim().is_empty()
-                || (kind == "open" && component_heading_prefix_matches_tag(prefix, tag));
+                || (kind == "open" && component_heading_prefix_matches_tag(prefix, tag))
+                || (kind == "close" && stray_close_marker_prefix_is_tolerated(prefix));
             if !prefix_is_valid || !doc[marker_end..line_end].trim().is_empty() {
                 let line = line_number_at(doc.as_bytes(), marker_start);
                 return Some(format!(
@@ -4763,21 +4913,39 @@ Fix applied to skip non-agent <!-- sequences.
     }
 
     #[test]
-    fn gh90_unquoted_welded_marker_still_fails_closed() {
-        // The corruption the backtick exemption must NOT excuse: an errant
-        // keystroke welded onto a real close marker, no code span anywhere.
+    fn gh90_unquoted_welded_marker_is_still_structure() {
+        // The backtick exemption must NOT turn a real marker into prose: an
+        // errant keystroke welded onto a real close marker, no code span
+        // anywhere. Since `#strayclosemarker` the stray text before a CLOSER is
+        // tolerated as content (a non-blocking lint), but the marker is still
+        // the component's structural close, never prose.
         let doc = "<!-- agent:queue -->\n- next\ni<!-- /agent:queue -->\n";
-        let reason = structural_corruption_reason(doc).expect("welded marker must be refused");
-        assert!(
-            reason.starts_with("non_standalone_component_marker:/agent:queue:close"),
-            "reason was: {reason}"
+        assert_eq!(structural_corruption_reason(doc), None);
+        let components = parse(doc).expect("welded closer still closes the component");
+        assert_eq!(components[0].content(doc), "- next\ni");
+        assert_eq!(
+            stray_text_before_close_markers(doc),
+            vec![StrayCloseMarkerText {
+                line: 3,
+                tag: "/agent:queue".to_string(),
+                text: "i".to_string(),
+            }]
         );
         // A backtick pair on an EARLIER line does not reach across the newline.
         let doc = "<!-- agent:queue -->\n- `a` and `b`\ni<!-- /agent:queue -->\n";
-        assert!(
-            structural_corruption_reason(doc)
-                .is_some_and(|reason| reason.starts_with("non_standalone_component_marker")),
+        assert_eq!(structural_corruption_reason(doc), None);
+        assert_eq!(
+            stray_text_before_close_markers(doc).len(),
+            1,
             "a backtick span never masks a marker on another line"
+        );
+        // A welded OPENER still fails closed.
+        let doc = "<!-- agent:notes -->\nx\n<!-- /agent:notes -->\ni<!-- agent:queue -->\n- next\n<!-- /agent:queue -->\n";
+        assert!(
+            structural_corruption_reason(doc).is_some_and(
+                |reason| reason.starts_with("non_standalone_component_marker:agent:queue:open")
+            ),
+            "a welded opener is still refused"
         );
     }
 
@@ -4989,11 +5157,10 @@ Agreed:\n- **On by default for an active queue.**\n{prose}\
 
     #[test]
     fn structural_corruption_flags_component_markers_welded_to_text() {
+        // `#strayclosemarker`: text welded BEFORE a closer is tolerated content.
         let welded_close = "<!-- agent:queue -->\n- do [#x] complete prompt<!-- /agent:queue -->\n";
-        assert_eq!(
-            structural_corruption_reason(welded_close).as_deref(),
-            Some("non_standalone_component_marker:/agent:queue:close:line2")
-        );
+        assert_eq!(structural_corruption_reason(welded_close), None);
+        assert_eq!(stray_text_before_close_markers(welded_close).len(), 1);
 
         let welded_open =
             "operator text<!-- agent:queue -->\n- do [#x] complete prompt\n<!-- /agent:queue -->\n";
@@ -5001,6 +5168,102 @@ Agreed:\n- **On by default for an active queue.**\n{prose}\
             structural_corruption_reason(welded_open).as_deref(),
             Some("non_standalone_component_marker:agent:queue:open:line1")
         );
+    }
+
+    /// `#strayclosemarker` — the 2026-11-04 fpe.md wedge: a lone `t` typed in
+    /// front of the `fpe-prs` run's closing marker made every turn and the
+    /// parent-pointer commit refuse the document.
+    #[test]
+    fn stray_text_before_a_close_marker_is_tolerated_and_linted() {
+        let doc = concat!(
+            "## fpe-prs <!-- agent:run id=\"fpe-prs\" subagents priority go -->\n",
+            "- https://github.com/haiven-dev/fpe/pull/217\n",
+            "  - \u{1f4e5} #adversarial-pr\n",
+            "t<!-- /agent:run -->\n",
+            "\n",
+            "## main <!-- agent:run id=\"main\" subagents priority go -->\n",
+            "- ship it\n",
+            "<!-- /agent:run -->\n",
+        );
+        assert_eq!(structural_corruption_reason(doc), None);
+        let components = parse(doc).expect("the document parses");
+        assert_eq!(components.len(), 2);
+        assert!(
+            components[0].content(doc).ends_with("#adversarial-pr\nt"),
+            "the stray text is the component's last content: {:?}",
+            components[0].content(doc)
+        );
+        assert_eq!(components[1].content(doc), "- ship it\n");
+        assert_eq!(
+            stray_text_before_close_markers(doc),
+            vec![StrayCloseMarkerText {
+                line: 4,
+                tag: "/agent:run".to_string(),
+                text: "t".to_string(),
+            }]
+        );
+        // A sound document reports nothing.
+        let sound = doc.replace("t<!-- /agent:run -->", "<!-- /agent:run -->");
+        assert!(stray_text_before_close_markers(&sound).is_empty());
+    }
+
+    /// The tolerance is narrow: everything else that was refused still is.
+    #[test]
+    fn stray_close_marker_tolerance_keeps_every_other_refusal() {
+        for (doc, reason) in [
+            (
+                "<!-- agent:run -->\n- a\n## Done <!-- /agent:run -->\n",
+                "non_standalone_component_marker:/agent:run:close:line3",
+            ),
+            (
+                "<!-- agent:run -->\n- a\n<!-- /agent:run -->t\n",
+                "non_standalone_component_marker:/agent:run:close:line3",
+            ),
+            (
+                "<!-- agent:run -->\n- a\nt<!-- /agent:run --> u\n",
+                "non_standalone_component_marker:/agent:run:close:line3",
+            ),
+            (
+                "<!-- agent:notes -->\nx\n<!-- /agent:notes -->\nt<!-- agent:run -->\n- a\n<!-- /agent:run -->\n",
+                "non_standalone_component_marker:agent:run:open:line4",
+            ),
+        ] {
+            assert_eq!(
+                structural_corruption_reason(doc).as_deref(),
+                Some(reason),
+                "{doc:?}"
+            );
+            assert!(stray_text_before_close_markers(doc).is_empty(), "{doc:?}");
+        }
+    }
+
+    #[test]
+    fn split_tolerated_close_marker_line_matches_the_structural_gate() {
+        for (line, expected) in [
+            ("t<!-- /agent:run -->", Some(1)),
+            ("- item<!-- /agent:queue -->  ", Some(6)),
+            ("#t<!-- /agent:run -->", Some(2)),
+            ("  ab <!-- agent:/run -->\r", Some(5)),
+            ("<!-- /agent:run -->", None),
+            ("   <!-- /agent:run -->", None),
+            ("## Done <!-- /agent:run -->", None),
+            ("#<!-- /agent:run -->", None),
+            ("t<!-- agent:run -->", None),
+            ("t<!-- /agent:run --> u", None),
+            ("a <!-- x --> b<!-- /agent:run -->", None),
+            ("a --> b<!-- /agent:run -->", None),
+            ("say \"hi<!-- /agent:run -->", None),
+            ("a `<!-- /agent:run -->`", None),
+            ("> t<!-- /agent:run -->", None),
+            ("t<!-- /agent:run extra -->", None),
+            ("t<!-- not:a marker -->", None),
+        ] {
+            assert_eq!(
+                split_tolerated_close_marker_line(line),
+                expected,
+                "{line:?}"
+            );
+        }
     }
 
     /// `#markertrailingtypo` — the 2026-08-23 `tsift.md` wedge.

@@ -785,10 +785,33 @@ fn restore_interrupted_empty_response_shell(
     Some(exchange.replace_content(doc, &restored_exchange))
 }
 
+/// `#completioncellslost`: a binary-owned subagent completion cell
+/// (`agent_doc_document::subagent_completion`) parses as a `### Re:` response
+/// node, but it is queue evidence written by `queue report-complete`, never an
+/// assistant response this closeout could supersede. Treating it as one made
+/// every closeout whose apply-time canonical held completion cells newer than
+/// HEAD delete them (2026-11-05: one coordinator response took the session
+/// from 158088 to 116638 bytes and dropped every accepted-but-uncommitted
+/// cell while their `☑️` rows, re-derived from the claim ledger, survived).
+/// Recognition is structural: the node must open on an attested cell.
+fn is_completion_cell_node(node: &ExchangeNode) -> bool {
+    matches!(node.kind, ExchangeNodeKind::Response { .. })
+        && agent_doc_document::subagent_completion::completion_cell_line_ranges(&node.render())
+            .first()
+            .is_some_and(|range| range.start == 0)
+}
+
+/// Remove the uncommitted response tail after `anchor_id` and add `response`.
+///
+/// A response node after the anchor is stale unless `retained_response_ids`
+/// keeps it. A binary completion cell is stale only when
+/// `removable_completion_ids` names it: the queue closeout that strikes its
+/// row owns its retirement, so an ordinary response supersession keeps it.
 fn supersede_response_tail_after_anchor(
     doc: &str,
     anchor_id: &str,
     retained_response_ids: &HashSet<String>,
+    removable_completion_ids: &HashSet<String>,
     response: &str,
 ) -> anyhow::Result<Option<ResponseCellAddOutcome>> {
     let components = element::parse(doc)?;
@@ -816,7 +839,9 @@ fn supersede_response_tail_after_anchor(
         }
         let stale_response = index > anchor_index
             && matches!(node.kind, ExchangeNodeKind::Response { .. })
-            && !retained_response_ids.contains(&node.node_id());
+            && !retained_response_ids.contains(&node.node_id())
+            && (!is_completion_cell_node(&node)
+                || removable_completion_ids.contains(&node.node_id()));
         if stale_response {
             removed = true;
             continue;
@@ -889,10 +914,13 @@ pub fn supersede_uncommitted_response_tail(
         return add_response_cell(doc, response);
     };
 
+    // A completion cell appended after HEAD is never this response's to
+    // supersede (`#completioncellslost`).
     if let Some(outcome) = supersede_response_tail_after_anchor(
         doc,
         &last_committed_node_id,
         &committed_response_ids,
+        &HashSet::new(),
         response,
     )? {
         Ok(outcome)
@@ -971,6 +999,26 @@ pub fn reconcile_superseded_response_targets(
         .intersection(&latest_response_ids)
         .cloned()
         .collect::<HashSet<_>>();
+    // `#completioncellslost`: only a completion cell the latest target itself
+    // retired (present in the prior target, absent from the latest) may leave
+    // the editor cut. A cell that reached the editor after the prior target
+    // was composed is accepted queue evidence neither target has seen.
+    let retired_completion_ids = prior_nodes
+        .iter()
+        .filter(|node| is_completion_cell_node(node))
+        .map(ExchangeNode::node_id)
+        .filter(|id| !latest_response_ids.contains(id))
+        .collect::<HashSet<_>>();
+    let doc_node_ids = element::parse(doc)?
+        .iter()
+        .find(|component| component.name == "exchange")
+        .map(|exchange| {
+            parse_exchange_nodes(exchange.content(doc))
+                .iter()
+                .map(ExchangeNode::node_id)
+                .collect::<HashSet<_>>()
+        })
+        .unwrap_or_default();
     let mut replacement_nodes = Vec::new();
     let mut fence = MarkdownFence::default();
     for mut node in latest_nodes.into_iter().skip(latest_anchor_index + 1) {
@@ -979,6 +1027,9 @@ pub fn reconcile_superseded_response_targets(
         if matches!(node.kind, ExchangeNodeKind::Response { .. })
             && !prior_response_ids.contains(&node.node_id())
             && !node.lines.is_empty()
+            // The editor already carries this cell, which survives the
+            // supersession in place; installing it again would duplicate it.
+            && !(is_completion_cell_node(&node) && doc_node_ids.contains(&node.node_id()))
         {
             replacement_nodes.push(node);
         }
@@ -988,10 +1039,14 @@ pub fn reconcile_superseded_response_targets(
     }
 
     let response = render_exchange_nodes(&replacement_nodes);
-    Ok(
-        supersede_response_tail_after_anchor(doc, &anchor_id, &common_response_ids, &response)?
-            .map(|outcome| outcome.content),
-    )
+    Ok(supersede_response_tail_after_anchor(
+        doc,
+        &anchor_id,
+        &common_response_ids,
+        &retired_completion_ids,
+        &response,
+    )?
+    .map(|outcome| outcome.content))
 }
 
 #[cfg(test)]
@@ -1750,6 +1805,156 @@ mod tests {
         assert_eq!(replay.content, outcome.content);
         assert_eq!(replay.content.matches("Complete response.").count(), 1);
         assert_eq!(replay.content.matches("agent:boundary:").count(), 1);
+    }
+
+    fn completion_cell(owner: &str, item: &str, key: &str, response: &str) -> String {
+        agent_doc_document::subagent_completion::cell_with_response(owner, item, key, response)
+            .unwrap()
+    }
+
+    /// `#completioncellslost`: the live 2026-11-05 shape. `queue
+    /// report-complete` appended attested completion cells after HEAD (the
+    /// first after the committed response, the second after a stale
+    /// uncommitted checkpoint of the coordinator). The coordinator's closeout
+    /// then superseded its uncommitted response tail and deleted every
+    /// completion cell with it, leaving only the cell HEAD already carried.
+    /// Completion cells are queue evidence, never an assistant response the
+    /// closeout may supersede: they survive in place while the stale
+    /// checkpoint is still replaced, and a replay stays a no-op.
+    #[test]
+    fn response_supersession_keeps_completion_cells_appended_after_head() {
+        let committed_cell = completion_cell(
+            "subagent:softwrap",
+            "do [#softwrap]",
+            "a1",
+            "Committed worker result.",
+        );
+        let committed = format!(
+            concat!(
+                "---\nagent_doc_format: template\n---\n\n",
+                "<!-- agent:exchange patch=append -->\n",
+                "❯ original prompt\n\n",
+                "### Re: committed — gpt-5 (HEAD)\n\nCommitted.\n\n",
+                "{committed_cell}\n",
+                "<!-- agent:boundary:committed -->\n",
+                "<!-- /agent:exchange -->\n",
+            ),
+            committed_cell = committed_cell,
+        );
+        let first = completion_cell(
+            "subagent:atomicstrike",
+            "do [#atomicstrikeresponse]",
+            "b2",
+            "Atomic strike fixed; make check green.",
+        );
+        let second = completion_cell(
+            "subagent:queueskip",
+            "do [#queueskipsubagents]",
+            "c3",
+            "Queue skip fixed; pushed fix/queueskip.",
+        );
+        let current = committed.replace(
+            "<!-- agent:boundary:committed -->",
+            &format!(
+                "{first}\n\n### Re: stale checkpoint — gpt-5\n\nOld checkpoint.\n\n{second}\n<!-- agent:boundary:latest -->"
+            ),
+        );
+        let latest = "### Re: closeout — gpt-5\n\nIntegrated the wave.";
+
+        let outcome = supersede_uncommitted_response_tail(&current, &committed, latest).unwrap();
+
+        assert!(outcome.applied);
+        for cell in [&committed_cell, &first, &second] {
+            assert_eq!(
+                outcome.content.matches(cell.as_str()).count(),
+                1,
+                "every completion cell must survive the closeout:\n{}",
+                outcome.content
+            );
+        }
+        assert!(!outcome.content.contains("Old checkpoint."));
+        assert_eq!(outcome.content.matches("Integrated the wave.").count(), 1);
+        assert_eq!(outcome.content.matches("agent:boundary:").count(), 1);
+        assert!(
+            outcome.content.find(second.as_str()).unwrap()
+                < outcome.content.find("### Re: closeout").unwrap()
+        );
+        assert_eq!(
+            agent_doc_document::subagent_completion::completion_evidence(&outcome.content).len(),
+            3
+        );
+
+        let replay =
+            supersede_uncommitted_response_tail(&outcome.content, &committed, latest).unwrap();
+        assert!(!replay.applied);
+        assert_eq!(replay.content, outcome.content);
+    }
+
+    /// `#completioncellslost`: a superseded deferred target. A completion
+    /// cell that reached the editor after the prior target was composed is
+    /// in neither target and must survive; a cell the latest target retired
+    /// (present in the prior target, absent from the latest) still leaves.
+    #[test]
+    fn superseded_target_reconcile_keeps_editor_only_completion_cells() {
+        let retired = completion_cell(
+            "subagent:retired",
+            "do [#retireditem]",
+            "d4",
+            "Integrated and struck.",
+        );
+        let arrived = completion_cell(
+            "subagent:arrived",
+            "do [#arriveditem]",
+            "e5",
+            "Arrived while the target was retained.",
+        );
+        let prior_target = DOC.replace(
+            "<!-- agent:boundary:abc -->",
+            &format!(
+                "{retired}\n\n### Re: stale — gpt-5\n\nStale response.\n<!-- agent:boundary:stale -->"
+            ),
+        );
+        let latest_target = DOC.replace(
+            "<!-- agent:boundary:abc -->",
+            "### Re: latest — gpt-5\n\nComplete response.\n<!-- agent:boundary:latest -->",
+        );
+        let editor = prior_target.replace(
+            "<!-- agent:boundary:stale -->",
+            &format!("\n{arrived}\n<!-- agent:boundary:editor -->"),
+        );
+
+        let reconciled =
+            reconcile_superseded_response_targets(&editor, &prior_target, &latest_target)
+                .unwrap()
+                .expect("the stale response should be superseded");
+
+        assert!(reconciled.contains("### Re: latest — gpt-5"));
+        assert!(!reconciled.contains("Stale response."));
+        assert!(!reconciled.contains(retired.as_str()));
+        assert_eq!(
+            reconciled.matches(arrived.as_str()).count(),
+            1,
+            "a completion cell newer than both targets must survive:\n{reconciled}"
+        );
+
+        // A cell carried by the latest target that the editor already holds
+        // is kept in place, never installed twice.
+        let latest_with_arrived = DOC.replace(
+            "<!-- agent:boundary:abc -->",
+            &format!(
+                "### Re: latest — gpt-5\n\nComplete response.\n\n{arrived}\n<!-- agent:boundary:latest -->"
+            ),
+        );
+        let reconciled =
+            reconcile_superseded_response_targets(&editor, &prior_target, &latest_with_arrived)
+                .unwrap()
+                .expect("the stale response should be superseded");
+        assert_eq!(
+            reconciled.matches(arrived.as_str()).count(),
+            1,
+            "{reconciled}"
+        );
+        assert!(reconciled.contains("Complete response."));
     }
 
     #[test]

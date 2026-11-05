@@ -2122,6 +2122,33 @@ its anchor and translates exactly, e.g. `- do [#sdkdocs]` edited to
 `- review [#sdkdocs]` while canonical closes it yields
 `- review [#sdkdocs] (closed)`.
 
+**A canonical write replayed at a stale anchor is never operator text
+(`#staleretainedwrite`).** On 2026-11-04 (agent-doc-bugs.md, commit
+`259bd34e42`) the controller struck `[#trackedworkdropped]`'s dispatch row
+while `make install` recycled the controller and the old IDE replica went
+away. The replica's buffer then held that strike replayed as a code-point
+range taken from an older document, 674 code points past the row, so the row
+text replaced the middle of the `agent:loop` row and deleted its Response
+child. Registration read shadow → buffer as operator typing, merged it forward
+onto canonical (which already held the correct strike), and the fused row was
+committed. Before any planner or fallback runs, the rebase therefore checks
+each captured line hunk against canonical's own replacements since the base:
+when canonical replaced a span (deleted `n` code points, inserted a core of at
+least 12 non-whitespace code points absent from the base), and a captured hunk
+away from canonical's anchor replaces base text with text carrying that core
+while the cut still lacks the change at canonical's anchor, the hunk is
+canonical's write echoed at a stale offset. If the hunk is exactly that replay
+(its base text with one span of `n` code points replaced by the core), it
+re-anchors on canonical's row: canonical already holds it there, so the hunk
+reverts to its base lines and every other captured hunk still rolls forward
+(a cut that was only the replay answers canonical, which heals the visible
+buffer). Otherwise the echo cannot be separated from operator text by line and
+the rebase refuses, naming the core and its base lines; no fallback
+(`#lagcanonicalrollforward`, `#lagcanonicalrowmerge`) may adopt it. An operator
+who copies a delivered row elsewhere keeps canonical's change at its row too,
+and one who types text canonical independently wrote elsewhere inserts rather
+than replaces base text, so neither is mistaken for a replay.
+
 The answer is the canonical-relative splices that produce the merge, so the
 plugin forwards them exactly like a translated batch: on the attached endpoint
 when it already holds that canonical, otherwise on a replacement registered at

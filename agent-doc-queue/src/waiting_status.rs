@@ -25,6 +25,11 @@
 //! `**Next:** <owner> — <action> (evidence: …)` naming the single remaining
 //! action derived from that state (`#waitingitemnext`). It is replaced every
 //! pass and never read back as input.
+//!
+//! The Next row names an open operator ask first, even while attempts are
+//! live. An item with several decision subtrees also gets nested `**Roll-up:**`
+//! and `**Subtree:**` rows derived by [`crate::waiting_subtree`]
+//! (`#waitingtriage`); they are output exactly like the Next row.
 
 use std::collections::{BTreeSet, HashSet};
 
@@ -32,6 +37,7 @@ use agent_doc_document::queue_projection::{QueueLifecycleMarker, is_reserved_ope
 
 use crate::document_queue::QueueEntry;
 use crate::waiting_packet::{WaitingMember, classify_member, packet_member_indexes};
+use crate::waiting_subtree::WaitingTriage;
 
 /// Attempt states in the order they win the item's state.
 const ATTEMPT_PRECEDENCE: [QueueLifecycleMarker; 9] = [
@@ -209,8 +215,9 @@ pub fn waiting_status(
                 collect_open_requests(&prompt.text, &own_ids, open_todo_ids, &mut open_requests);
             }
             QueueEntry::Freeform(line) => {
-                // This module's own Next row is output, never input.
-                if is_next_row(entries, index) {
+                // This module's own Next, Roll-up, and Subtree rows are
+                // output, never input.
+                if is_status_row(entries, index) {
                     continue;
                 }
                 if let Some(reply) = crate::waiting_packet::operator_freeform_text(entries, index) {
@@ -278,6 +285,19 @@ const NEXT_QUOTE_CHARS: usize = 140;
 /// Label of the binary-owned Next row.
 pub const NEXT_ROW_LABEL: &str = "**Next:**";
 
+/// Label of the binary-owned roll-up row beneath a triaged item's Next row
+/// (`#waitingtriage`).
+pub const ROLLUP_ROW_LABEL: &str = "**Roll-up:**";
+
+/// Label of a binary-owned per-subtree row beneath a triaged item's Next row
+/// (`#waitingtriage`).
+pub const SUBTREE_ROW_LABEL: &str = "**Subtree:**";
+
+/// Waiting items with at least this many decision subtrees render the
+/// Roll-up row and one Subtree row per decision; below it the head's Next
+/// row already speaks for the whole item.
+pub const TRIAGE_MIN_SUBTREES: usize = 2;
+
 fn owner_label(text: &str) -> Option<String> {
     agent_doc_document::queue_projection::owner_projection(text)
         .map(|owner| format!("{}#{}", owner.owner, owner.generation))
@@ -319,6 +339,19 @@ pub fn is_next_row(entries: &[QueueEntry], index: usize) -> bool {
         .next()
         .and_then(|first| first.trim_start().strip_prefix("- "))
         .is_some_and(is_next_body))
+        && crate::waiting_packet::is_agent_doc_reply_entry(entries, index)
+}
+
+/// Whether `entries[index]` is any row this module renders: the Next row or a
+/// Roll-up / Subtree row beneath it (`#waitingtriage`). Never read as input.
+pub fn is_status_row(entries: &[QueueEntry], index: usize) -> bool {
+    matches!(entries.get(index), Some(QueueEntry::Freeform(line)) if line
+        .lines()
+        .next()
+        .and_then(|first| first.trim_start().strip_prefix("- "))
+        .is_some_and(|body| is_next_body(body)
+            || body.starts_with(ROLLUP_ROW_LABEL)
+            || body.starts_with(SUBTREE_ROW_LABEL)))
         && crate::waiting_packet::is_agent_doc_reply_entry(entries, index)
 }
 
@@ -464,6 +497,56 @@ impl WaitingStatus {
             crate::queue_consume::AGENT_DOC_REPLY_GLYPH
         )
     }
+
+    /// The Next action informed by the item's triage (`#waitingtriage`): an
+    /// open operator ask is surfaced first even while attempts are live, each
+    /// ask names the options offered for it, and agent-owned debt idle for
+    /// over a day is flagged.
+    pub fn triaged_next_action(&self, triage: &WaitingTriage) -> String {
+        let asks = &triage.item.open_asks;
+        let ask = (!asks.is_empty()).then(|| crate::waiting_subtree::ask_text(asks));
+        let mut action = match (&self.state, ask) {
+            (WaitingState::Attempt(_), Some(ask)) if self.you > 0 => {
+                let agent = self.next_action();
+                let agent = agent.strip_prefix("agent — ").unwrap_or(&agent);
+                format!(
+                    "you — {ask} (evidence: open request in this item's packet); then agent — {agent}"
+                )
+            }
+            (WaitingState::Operator, Some(ask)) if !self.own_ask_open => {
+                format!("you — {ask} (evidence: open request in this item's packet)")
+            }
+            _ => self.next_action(),
+        };
+        if triage.item.stale {
+            action.push_str(&triage.item.stale_note());
+        }
+        action
+    }
+
+    /// The Roll-up row body: each count of the head token spelled out.
+    pub fn rollup_text(&self) -> String {
+        let answered = usize::from(self.state == WaitingState::Answered);
+        let attempts = self.agent - answered;
+        let mut asks = Vec::new();
+        if self.own_ask_open {
+            asks.push("this item's own ask".to_string());
+        }
+        asks.extend(self.open_requests.iter().map(|id| format!("`#{id}`")));
+        let asks = if asks.is_empty() {
+            String::new()
+        } else {
+            format!(" ({})", asks.join(", "))
+        };
+        format!(
+            "you {} = open asks to you{asks} · agent {} = {attempts} worker {} not yet integrated + {answered} {} not yet picked up · done {} = struck rows",
+            self.you,
+            self.agent,
+            if attempts == 1 { "result" } else { "results" },
+            if answered == 1 { "answer" } else { "answers" },
+            self.done,
+        )
+    }
 }
 
 fn collect_open_requests(
@@ -541,9 +624,17 @@ fn remove_status_tokens(prefix: &str) -> String {
 /// Project the state token and the Next row onto every live waiting head in
 /// one queue body. The Next row is the head's first child; any earlier Next
 /// row the item owns is replaced, and a struck head keeps none.
+///
+/// An item with [`TRIAGE_MIN_SUBTREES`] or more decision subtrees
+/// (`#waitingtriage`) also gets, beneath its Next row, one Roll-up row that
+/// spells out the token's counts and one Subtree row per decision naming what
+/// that part needs (`Next: you — …`, `Next: agent — …`, or `🗑️ deletable`).
+/// `as_of` (minutes since the Unix epoch; the document's newest response
+/// time) decides which agent-owned debt is stale; `None` flags none.
 pub fn project_waiting_status(
     entries: &[QueueEntry],
     open_todo_ids: &HashSet<String>,
+    as_of: Option<i64>,
 ) -> Option<Vec<QueueEntry>> {
     let mut out = Vec::with_capacity(entries.len() + 8);
     let mut index = 0usize;
@@ -563,7 +654,29 @@ pub fn project_waiting_status(
                 let mut head = prompt.clone();
                 head.text = with_status_token(&prompt.text, &status.head_token());
                 out.push(QueueEntry::Prompt(head));
-                out.push(QueueEntry::Freeform(status.next_row(prompt.indent + 2)));
+                let triage =
+                    crate::waiting_subtree::waiting_triage(entries, index, open_todo_ids, as_of);
+                let glyph = crate::queue_consume::AGENT_DOC_REPLY_GLYPH;
+                let indent = prompt.indent + 2;
+                out.push(QueueEntry::Freeform(format!(
+                    "{}- {NEXT_ROW_LABEL} {} {glyph}",
+                    " ".repeat(indent),
+                    status.triaged_next_action(&triage)
+                )));
+                if triage.subtrees.len() >= TRIAGE_MIN_SUBTREES {
+                    out.push(QueueEntry::Freeform(format!(
+                        "{}- {ROLLUP_ROW_LABEL} {} {glyph}",
+                        " ".repeat(indent + 2),
+                        status.rollup_text()
+                    )));
+                    for (depth, subtree) in &triage.subtrees {
+                        out.push(QueueEntry::Freeform(format!(
+                            "{}- {SUBTREE_ROW_LABEL} {} {glyph}",
+                            " ".repeat(indent + 2 + 2 * depth),
+                            subtree.summary()
+                        )));
+                    }
+                }
             }
             _ => out.push(entry.clone()),
         }
@@ -574,11 +687,16 @@ pub fn project_waiting_status(
             if crate::waiting_packet::is_waiting_item_head(&entries[cursor]) {
                 break;
             }
-            let stale_next = members.contains(&cursor)
-                && is_next_row(entries, cursor);
-            if !stale_next {
-                out.push(entries[cursor].clone());
+            if members.contains(&cursor) && is_status_row(entries, cursor) {
+                // The previous Next row and the triage rows nested beneath it.
+                let mut skip = cursor + 1;
+                while skip < end && is_status_row(entries, skip) {
+                    skip += 1;
+                }
+                cursor = skip;
+                continue;
             }
+            out.push(entries[cursor].clone());
             cursor += 1;
         }
         index = cursor;
@@ -604,7 +722,7 @@ mod tests {
 
     fn project(body: &str, ids: &[&str]) -> String {
         let entries = document_queue::parse(body).unwrap();
-        project_waiting_status(&entries, &open(ids)).map_or_else(
+        project_waiting_status(&entries, &open(ids), None).map_or_else(
             || body.to_string(),
             |entries| document_queue::render(&entries),
         )
@@ -868,6 +986,105 @@ mod tests {
         assert_eq!(
             next_line(&projected, "ask"),
             "  - **Next:** you — answer: Who owns the alpha release? (evidence: Question) ▫️"
+        );
+    }
+
+    /// `#waitingtriage`: triage rows are output. When the item shrinks to one
+    /// decision, the earlier Roll-up and Subtree rows (one naming a request
+    /// that has since closed) are removed with the old Next row, never read
+    /// back as an open ask, and never left behind.
+    #[test]
+    fn stale_triage_rows_are_dropped_with_their_next_row() {
+        let body = concat!(
+            "- [#ask] Choose an owner. <!-- agent-doc:waiting-item -->\n",
+            "  - **Next:** stale ▫️\n",
+            "    - **Roll-up:** you 2 = stale ▫️\n",
+            "    - **Subtree:** “gone” — Next: you — answer the open request `#subagent-operator-request-gone` ▫️\n",
+            "  - **Response:** Choose an owner. ▫️\n",
+            "    - **Question:** Who owns the alpha release? ▫️\n",
+        );
+        let projected = project(body, &["ask", "subagent-operator-request-gone"]);
+        assert!(!projected.contains("Roll-up"), "{projected}");
+        assert!(!projected.contains("Subtree"), "{projected}");
+        assert!(!projected.contains("request-gone"), "{projected}");
+        assert!(
+            projected.contains("⟦you: 1 · agent: 0 · done: 0⟧ [#ask]"),
+            "{projected}"
+        );
+        assert_eq!(
+            next_line(&projected, "ask"),
+            "  - **Next:** you — answer: Who owns the alpha release? (evidence: Question) ▫️"
+        );
+    }
+
+    /// `#waitingtriage`: two decisions under one item get a Roll-up row and
+    /// one Subtree row each; an open ask leads the head's Next row even while
+    /// an attempt is live, and debt idle for over a day is flagged.
+    #[test]
+    fn a_two_decision_item_renders_its_triage_rows_once() {
+        let body = concat!(
+            "- [#rel] Release App access <!-- agent-doc:waiting-item -->\n",
+            "  - **Response [#r-0123456789ab]**\n",
+            "    - **Timestamp:** 2026-11-02T00:20:07.000Z ▫️\n",
+            "  - pick a reviewer\n",
+            "    - **Response [#r-0123456789ac]**\n",
+            "      - **Choices:**\n",
+            "        - **Request**: [#subagent-operator-request-reviewer]\n",
+            "        - **Luke**: Luke reviews.\n",
+            "        - **Dillon**: Dillon reviews.\n",
+            "  - ☑️ [#subagent:grant#1] grant the repo [#q-0123456789ab]\n",
+        );
+        let entries = document_queue::parse(body).unwrap();
+        let as_of = crate::waiting_subtree::parse_timestamp_minutes("2026-11-04T19:08-06:00")
+            .map(|(minutes, _)| minutes);
+        let ids = open(&["rel", "subagent-operator-request-reviewer"]);
+        let once = document_queue::render(&project_waiting_status(&entries, &ids, as_of).unwrap());
+        let stale = "⏰ stale: agent-owned, no recorded activity since 2026-11-02 (over a day)";
+        let ask = "answer the open request `#subagent-operator-request-reviewer`: choose **Luke** or **Dillon**, or reply with another";
+        let lines = once.lines().collect::<Vec<_>>();
+        assert_eq!(
+            lines[1],
+            format!(
+                "  - **Next:** you — {ask} (evidence: open request in this item's packet); then agent — integrate the reported result, then close the item or ask what remains (evidence: ☑️ `subagent:grant#1`) {stale} ▫️"
+            ),
+            "{once}"
+        );
+        assert_eq!(
+            lines[2],
+            "    - **Roll-up:** you 1 = open asks to you (`#subagent-operator-request-reviewer`) · agent 1 = 1 worker result not yet integrated + 0 answers not yet picked up · done 0 = struck rows ▫️"
+        );
+        assert_eq!(
+            lines[3],
+            format!("    - **Subtree:** “pick a reviewer” — Next: you — {ask} ▫️")
+        );
+        assert_eq!(
+            lines[4],
+            format!(
+                "    - **Subtree:** “grant the repo `#q-0123456789ab`” — Next: agent — integrate 1 reported result (`subagent:grant#1`) {stale} ▫️"
+            )
+        );
+        let again = document_queue::parse(&once).unwrap();
+        assert!(
+            project_waiting_status(&again, &ids, as_of).is_none(),
+            "fixed point"
+        );
+        // Once the attempt is integrated (struck), its subtree is deletable.
+        assert!(
+            lines[0].contains("⟦☑️ you: 1 · agent: 1 · done: 0⟧ [#rel]"),
+            "{once}"
+        );
+        let integrated = once.replace(
+            "  - ☑️ [#subagent:grant#1] grant the repo [#q-0123456789ab]",
+            "  - ~~grant the repo [#q-0123456789ab]~~\n    - **Closed by:** [#r-0123456789ad]",
+        );
+        let entries = document_queue::parse(&integrated).unwrap();
+        let rendered =
+            document_queue::render(&project_waiting_status(&entries, &ids, as_of).unwrap());
+        assert!(
+            rendered.contains(
+                "    - **Subtree:** “grant the repo `#q-0123456789ab`” — 🗑️ deletable — every row here is struck or integrated ▫️"
+            ),
+            "{rendered}"
         );
     }
 

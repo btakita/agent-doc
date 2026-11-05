@@ -4263,10 +4263,13 @@ fn response_summary_row_child(
         choice_projections.push((packet.id, packet.choice_rows));
     }
     let decision_projection =
-        structured_choice_projection(source_document, queue_item, response_body);
+        structured_choice_projection(source_document, queue_item, response_body, shared_batch);
     let decision_choices = decision_projection
         .as_ref()
         .map(|projection| projection.choices.clone());
+    let decision_request_id = decision_projection
+        .as_ref()
+        .and_then(|projection| projection.request_id.clone());
     let marker = agent_doc_markdown_ast::exchange_tree::response_id_lookup_marker(response_id)?;
     let has_local_report_state = agent_doc_element_queue::queue_report_state_annotation(queue_item)
         .is_some_and(|(_, state)| {
@@ -4357,10 +4360,16 @@ fn response_summary_row_child(
         for (index, (packet_id, packet_choices)) in choice_projections.into_iter().enumerate() {
             child.push_str("\n- **Choices:**");
             child.push_str(&format!("\n  - **Request**: [#{packet_id}]"));
-            let choices = if index == 0 {
-                decision_choices.clone().unwrap_or(packet_choices)
-            } else {
-                packet_choices
+            // `#waitingtriage`: a decision's options stand in for a packet's
+            // only when that decision records this very request (or names no
+            // request, which only a single-row response keeps); another
+            // decision's options never land under this request's row.
+            let decision_is_this_request = decision_request_id
+                .as_deref()
+                .is_none_or(|id| id.eq_ignore_ascii_case(&packet_id));
+            let choices = match &decision_choices {
+                Some(choices) if index == 0 && decision_is_this_request => choices.clone(),
+                _ => packet_choices,
             };
             for choice in choices {
                 child.push_str("\n  - ");
@@ -4418,6 +4427,8 @@ fn operator_request_packet_belongs_to_row(
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct StructuredChoiceProjection {
+    /// The request the decision records, when it names one.
+    request_id: Option<String>,
     context: Option<String>,
     question: Option<String>,
     selected: String,
@@ -4428,6 +4439,7 @@ fn structured_choice_projection(
     source_document: &str,
     queue_item: &str,
     response_body: &str,
+    shared_batch: bool,
 ) -> Option<StructuredChoiceProjection> {
     // `#waitingpacketowner`: a response may record decisions for several
     // items. A request-scoped decision belongs only to the row that carries
@@ -4450,9 +4462,19 @@ fn structured_choice_projection(
                     && operator_request_packet_belongs_to_row(packet, queue_item)
             })
     };
+    let request_less_decisions = crate::operator_request_packet::structured_choice_decisions(
+        queue_prompt_section_for_row(response_body, queue_item),
+    );
     let decision = crate::operator_request_packet::structured_choice_decisions(response_body)
         .into_iter()
-        .find(|decision| decision.request_id.as_deref().is_none_or(decision_belongs))
+        // `#waitingtriage`: a decision that names no request belongs only to
+        // the row whose `> **Queue prompt:**` section records it, and never
+        // to every row of a shared batch; taking it for each closed row put
+        // one item's options under its siblings.
+        .find(|decision| match decision.request_id.as_deref() {
+            Some(request_id) => decision_belongs(request_id),
+            None => !shared_batch && request_less_decisions.contains(decision),
+        })
         .or_else(|| {
             crate::operator_request_packet::structured_choice_decisions(source_document)
                 .into_iter()
@@ -4497,6 +4519,7 @@ fn structured_choice_projection(
         }
     }
     Some(StructuredChoiceProjection {
+        request_id: decision.request_id.clone(),
         context: decision
             .context
             .or_else(|| packet.as_ref().and_then(|packet| packet.context.clone())),
@@ -4507,6 +4530,55 @@ fn structured_choice_projection(
         selected: decision.selected,
         choices,
     })
+}
+
+/// The part of `response_body` that answers `queue_item` (`#waitingtriage`).
+///
+/// A response that echoes two or more rows as `> **Queue prompt:** …`
+/// sections answers each row in its own section: the section whose echo
+/// names the row (its stable `#id`, or its whole work text), up to the next
+/// echo. A response with at most one echo answers its row as a whole. When
+/// no echo names the row, nothing in the response is scoped to it.
+fn queue_prompt_section_for_row<'a>(response_body: &'a str, queue_item: &str) -> &'a str {
+    const ECHO: &str = "> **Queue prompt:**";
+    let starts = response_body
+        .match_indices('\n')
+        .map(|(offset, _)| offset + 1)
+        .chain(std::iter::once(0))
+        .filter(|offset| response_body[*offset..].starts_with(ECHO))
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    if starts.len() < 2 {
+        return response_body;
+    }
+    let work = struck_work_text(queue_item);
+    let work = work
+        .strip_prefix("~~")
+        .and_then(|inner| inner.strip_suffix("~~"))
+        .unwrap_or(work);
+    let id = agent_doc_element_queue::queue_prompt_stable_id(work)
+        .map(|id| id.to_ascii_lowercase())
+        .filter(|id| !id.is_empty());
+    let (base, _) = document_queue::split_queue_effect_annotation(work);
+    let text = base.split_whitespace().collect::<Vec<_>>().join(" ");
+    for (position, start) in starts.iter().enumerate() {
+        let end = starts
+            .get(position + 1)
+            .copied()
+            .unwrap_or(response_body.len());
+        let section = &response_body[*start..end];
+        let echo = section.lines().next().unwrap_or_default()[ECHO.len()..].trim();
+        let echo_text = echo.split_whitespace().collect::<Vec<_>>().join(" ");
+        let names_row = match id.as_deref() {
+            Some(id) => echo.to_ascii_lowercase().contains(&format!("#{id}]")),
+            None => !text.is_empty() && echo_text == text,
+        };
+        if names_row {
+            return section;
+        }
+    }
+    ""
 }
 
 fn normalized_choice_label(label: &str) -> String {
@@ -5167,7 +5239,13 @@ fn normalize_waiting_queues(document: &str) -> Result<Option<String>> {
         let entries = normalized.as_deref().unwrap_or(&parsed);
         // `#waitingitemstatus`: every live head carries its derived state and
         // roll-up, recomputed from the normalized packet.
-        let with_status = crate::waiting_status::project_waiting_status(entries, &open_todo_ids);
+        // `#waitingtriage`: the document's newest response time is "now", so
+        // the stale-debt flag is a deterministic function of the document.
+        let as_of = latest_response_timestamp(document)
+            .and_then(crate::waiting_subtree::parse_timestamp_minutes)
+            .map(|(minutes, _)| minutes);
+        let with_status =
+            crate::waiting_status::project_waiting_status(entries, &open_todo_ids, as_of);
         if degrafted.is_some() || normalized.is_some() || with_status.is_some() {
             let rendered = with_status.as_deref().unwrap_or(entries);
             replacements.push((
@@ -12379,6 +12457,72 @@ Old.
         );
         assert!(!queue.contains("Which colour"), "{queue}");
         assert!(!queue.contains("**Selected:**"), "{queue}");
+    }
+
+    /// `#waitingtriage`: one response closed two rows and recorded a decision
+    /// that names no request. A shared batch's decision belongs to no single
+    /// row, so neither row receives its options (before the fix, both rows
+    /// carried the same Choices block, and an unrelated waiting item showed
+    /// another decision's options).
+    #[test]
+    fn a_shared_batch_decision_without_a_request_is_grafted_under_no_row() {
+        let response = concat!(
+            "### Re: batch — test\n\n",
+            "> **Queue prompt:** Publish alpha [#q-alpha]\n\n",
+            "**Outcome:** Alpha shipped.\n\n",
+            "> **Queue prompt:** Publish beta [#q-beta]\n\n",
+            "**Outcome:** Beta shipped.\n\n",
+            "**Decision record**:\n",
+            "- **Question:** Which colour should the beta banner use?\n",
+            "- **Choices presented:** red, blue.\n",
+            "- **Selected:** **red**. Paint the beta banner red.\n",
+        );
+        let before = doc_with_queue_and_exchange(
+            "- Publish alpha [#q-alpha]\n- Publish beta [#q-beta]\n",
+            "",
+        );
+        let after = doc_with_queue_and_exchange(
+            "- ~~Publish alpha [#q-alpha]~~\n- ~~Publish beta [#q-beta]~~\n",
+            response,
+        );
+        let annotated =
+            annotate_newly_struck_queue_items_with_response_id(&before, &after, response).unwrap();
+        let queue = element::parse(&annotated)
+            .unwrap()
+            .into_iter()
+            .find(|component| component.name == "queue")
+            .unwrap();
+        let queue = queue.content(&annotated);
+        assert!(
+            queue.contains("[#r-"),
+            "the row links the response: {queue}"
+        );
+        assert!(!queue.contains("**Choices:**"), "{queue}");
+        assert!(!queue.contains("**red**"), "{queue}");
+        assert!(!queue.contains("**Selected:**"), "{queue}");
+
+        // The same decision recorded in alpha's own section is alpha's.
+        let own = response.replace(
+            "**Outcome:** Alpha shipped.\n\n",
+            "**Outcome:** Alpha shipped.\n\n**Decision record**:\n- **Question:** Which colour should the alpha banner use?\n- **Choices presented:** green, gold.\n- **Selected:** **green**. Paint the alpha banner green.\n\n",
+        );
+        let after = doc_with_queue_and_exchange(
+            "- ~~Publish alpha [#q-alpha]~~\n- ~~Publish beta [#q-beta]~~\n",
+            &own,
+        );
+        let annotated =
+            annotate_newly_struck_queue_items_with_response_id(&before, &after, &own).unwrap();
+        let queue = element::parse(&annotated)
+            .unwrap()
+            .into_iter()
+            .find(|component| component.name == "queue")
+            .unwrap();
+        let queue = queue.content(&annotated);
+        assert!(
+            queue.contains("**green**: Offered choice. — **Selected**"),
+            "{queue}"
+        );
+        assert!(!queue.contains("**red**"), "{queue}");
     }
 
     #[test]

@@ -3757,7 +3757,9 @@ mod blocking_effect_gate {
     }
 
     impl Gate {
-        const fn new() -> Self {
+        /// A test-local gate (`static GATE: Gate = Gate::new();`) for a hook
+        /// that is not one of the shared fixture adapters below.
+        pub(super) const fn new() -> Self {
             Self {
                 armed: parking_lot::Mutex::new(None),
             }
@@ -22399,6 +22401,37 @@ agent:queue\n\
             )
         };
 
+        // `#timingtestsunderload`: "the ACK does not wait for the derived
+        // Effect" is proven by ordering, not elapsed time (`#remainingwallclock`).
+        // Each Effect parks on a test-owned gate the test opens only after the
+        // ACK under test has returned; `passed() == 0` at that point means the
+        // Effect had not completed, so the ACK cannot have waited on it. An ACK
+        // that did wait would hold until the gate self-opens at the hang
+        // ceiling, then fail the `passed()` assertion instead of hanging the
+        // suite. `wait_entered()` proves the Effect really ran and is parked,
+        // so the assertion is never vacuous.
+        static PROJECTION_EFFECT: blocking_effect_gate::Gate = blocking_effect_gate::Gate::new();
+        let gated_hook = |key: &str| -> StateProjectionEffectTestHook {
+            let key = key.to_string();
+            Arc::new(move || PROJECTION_EFFECT.pass(&key))
+        };
+        let wait_for_derived_projection = |runtime: &Arc<ControllerRuntime>, hash: &String| {
+            let ceiling = Instant::now() + blocking_effect_gate::HANG_CEILING;
+            while runtime
+                .document_graphs
+                .projection
+                .observe(&runtime.document_graphs.ctx, hash)
+                .flatten()
+                .is_none()
+            {
+                assert!(
+                    Instant::now() < ceiling,
+                    "derived projection for {hash} never completed after its gate opened"
+                );
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        };
+
         // Startup must bind/serve from the authoritative in-memory replay even
         // when derived work for an existing document is slow.
         let startup_hash = "blocked-startup-state-projection".to_string();
@@ -22412,24 +22445,19 @@ agent:queue\n\
             ),
         )
         .unwrap();
-        let (startup_entered_tx, startup_entered_rx) = std::sync::mpsc::sync_channel(1);
-        let (startup_release_tx, startup_release_rx) = std::sync::mpsc::sync_channel(1);
-        let startup_release_rx = Arc::new(Mutex::new(startup_release_rx));
-        let startup_hook: StateProjectionEffectTestHook = Arc::new(move || {
-            let _ = startup_entered_tx.send(());
-            let _ = startup_release_rx.lock().recv();
-        });
-        *state_projection_effect_test_hook().lock() = Some((startup_hash.clone(), startup_hook));
-        let startup_started = Instant::now();
+        let startup_gate = PROJECTION_EFFECT.close(startup_hash.clone());
+        *state_projection_effect_test_hook().lock() =
+            Some((startup_hash.clone(), gated_hook(&startup_hash)));
         let runtime = ControllerRuntime::new_arc(test_bootstrap(&dir)).unwrap();
         assert!(
-            startup_started.elapsed() < Duration::from_millis(500),
-            "controller startup waited on derived projection: {:?}",
-            startup_started.elapsed()
+            startup_gate.wait_entered() >= 1,
+            "the startup derived projection Effect never ran"
         );
-        startup_entered_rx
-            .recv_timeout(Duration::from_secs(2))
-            .unwrap();
+        assert_eq!(
+            startup_gate.passed(),
+            0,
+            "controller startup waited on the derived projection Effect"
+        );
         assert!(
             runtime
                 .document_state_projection(&startup_hash)
@@ -22449,43 +22477,31 @@ agent:queue\n\
                 ..
             } if intent_id == "blocked-startup-intent"
         ));
-        startup_release_tx.send(()).unwrap();
-        let startup_deadline = Instant::now() + Duration::from_secs(2);
-        while runtime
-            .document_graphs
-            .projection
-            .observe(&runtime.document_graphs.ctx, &startup_hash)
-            .flatten()
-            .is_none()
-        {
-            assert!(Instant::now() < startup_deadline, "startup projection never completed");
-            std::thread::sleep(Duration::from_millis(10));
-        }
+        startup_gate.open();
+        wait_for_derived_projection(&runtime, &startup_hash);
         *state_projection_effect_test_hook().lock() = None;
+        drop(startup_gate);
 
         let document_hash = "blocked-state-projection-effect".to_string();
-        let (entered_tx, entered_rx) = std::sync::mpsc::sync_channel(1);
-        let (release_tx, release_rx) = std::sync::mpsc::sync_channel(1);
-        let release_rx = Arc::new(Mutex::new(release_rx));
-        let hook: StateProjectionEffectTestHook = Arc::new(move || {
-            let _ = entered_tx.send(());
-            let _ = release_rx.lock().recv();
-        });
-        *state_projection_effect_test_hook().lock() = Some((document_hash.clone(), hook));
+        let gate = PROJECTION_EFFECT.close(document_hash.clone());
+        *state_projection_effect_test_hook().lock() =
+            Some((document_hash.clone(), gated_hook(&document_hash)));
 
         let event = event_for("bounded-state-event-ack", &document_hash);
-        let started = Instant::now();
         assert!(
             runtime
                 .append_apply_state_event_serialized(dir.path(), &event)
                 .unwrap()
         );
         assert!(
-            started.elapsed() < Duration::from_millis(500),
-            "durable state-event acknowledgement waited on derived projection: {:?}",
-            started.elapsed()
+            gate.wait_entered() >= 1,
+            "the derived projection Effect never ran"
         );
-        entered_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert_eq!(
+            gate.passed(),
+            0,
+            "durable state-event acknowledgement waited on the derived projection Effect"
+        );
         assert!(
             runtime
                 .document_state_projection(&document_hash)
@@ -22501,21 +22517,8 @@ agent:queue\n\
             "the cheap graph Source must advance before acknowledgement"
         );
 
-        release_tx.send(()).unwrap();
-        let deadline = Instant::now() + Duration::from_secs(2);
-        loop {
-            if runtime
-                .document_graphs
-                .projection
-                .observe(&runtime.document_graphs.ctx, &document_hash)
-                .flatten()
-                .is_some()
-            {
-                break;
-            }
-            assert!(Instant::now() < deadline, "derived projection never completed");
-            std::thread::sleep(Duration::from_millis(10));
-        }
+        gate.open();
+        wait_for_derived_projection(&runtime, &document_hash);
         *state_projection_effect_test_hook().lock() = None;
     }
 
@@ -22551,7 +22554,9 @@ agent:queue\n\
                 )
                 .unwrap()
         );
-        entered_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        entered_rx
+            .recv_timeout(blocking_effect_gate::HANG_CEILING)
+            .unwrap();
 
         let second = agent_doc_state_backbone::StateEvent::new(
             format!("response-captured-{document_hash}-2"),
@@ -22580,8 +22585,14 @@ agent:queue\n\
                 )
                 .unwrap();
         });
+        // `#timingtestsunderload`: ordering, not elapsed time. The sink stays
+        // parked until `release_tx` sends below, so an ACK that arrives at all
+        // did not wait on the publication; one that shared its lock would only
+        // arrive after the release and fails at the hang ceiling instead.
         assert!(
-            ack_rx.recv_timeout(Duration::from_millis(500)).unwrap(),
+            ack_rx
+                .recv_timeout(blocking_effect_gate::HANG_CEILING)
+                .expect("capture ingress waited on the parked state-plane publication"),
             "capture ingress must not share the slow state-plane publication lock"
         );
 
@@ -22608,7 +22619,7 @@ agent:queue\n\
                     .unwrap()
             );
         }
-        let activation_deadline = Instant::now() + Duration::from_secs(2);
+        let activation_deadline = Instant::now() + blocking_effect_gate::HANG_CEILING;
         while runtime.state_projection_activation_queue.counts() != (0, 0) {
             assert!(
                 Instant::now() < activation_deadline,
@@ -22647,11 +22658,10 @@ agent:queue\n\
         let project_root = dir.path().to_path_buf();
         let (ack_tx, ack_rx) = std::sync::mpsc::sync_channel(1);
         let append = std::thread::spawn(move || {
-            let started = Instant::now();
             let result = append_runtime.append_apply_state_event_serialized(&project_root, &second);
-            ack_tx.send((result, started.elapsed())).unwrap();
+            ack_tx.send(result).unwrap();
         });
-        if let Err(error) = entered_rx.recv_timeout(Duration::from_secs(2)) {
+        if let Err(error) = entered_rx.recv_timeout(blocking_effect_gate::HANG_CEILING) {
             let ack = ack_rx.recv_timeout(Duration::from_secs(1));
             append.join().unwrap();
             panic!(
@@ -22660,15 +22670,15 @@ agent:queue\n\
                 runtime.controller_generation_poisoned()
             );
         }
-        let ack = ack_rx.recv_timeout(Duration::from_millis(500));
+        // `#timingtestsunderload`: ordering, not elapsed time. The derived
+        // effect is parked until `release_tx` sends, so an ACK received before
+        // that release did not flush it; an ACK that did would only arrive
+        // after the release and fails at the hang ceiling instead.
+        let ack = ack_rx.recv_timeout(blocking_effect_gate::HANG_CEILING);
         release_tx.send(()).unwrap();
         append.join().unwrap();
-        let (result, elapsed) = ack.expect("second ACK waited on the installed derived effect");
+        let result = ack.expect("second ACK flushed (waited on) the installed derived effect");
         assert!(result.unwrap());
-        assert!(
-            elapsed < Duration::from_millis(500),
-            "second ACK flushed an installed derived effect: {elapsed:?}"
-        );
         assert_eq!(
             runtime
                 .document_graphs
@@ -22733,25 +22743,28 @@ agent:queue\n\
             let worker_runtime = Arc::clone(&runtime);
             let (ack_tx, ack_rx) = std::sync::mpsc::sync_channel(1);
             let worker = std::thread::spawn(move || {
-                let started = Instant::now();
                 let result = if refresh {
                     worker_runtime.refresh_memory().map(|_| true)
                 } else {
                     worker_runtime.append_apply_state_event_serialized(&project_root, &event)
                 };
-                ack_tx.send((result, started.elapsed())).unwrap();
+                ack_tx.send(result).unwrap();
             });
-            entered_rx.recv_timeout(Duration::from_secs(2)).unwrap();
-            let ack = ack_rx.recv_timeout(Duration::from_millis(500));
+            entered_rx
+                .recv_timeout(blocking_effect_gate::HANG_CEILING)
+                .unwrap();
+            // `#timingtestsunderload`: ordering, not elapsed time. The Effect is
+            // parked until `release_tx` sends, so an ACK received before that
+            // release did not wait on it; a blocked ACK fails at the ceiling.
+            let ack = ack_rx.recv_timeout(blocking_effect_gate::HANG_CEILING);
             assert!(
                 !runtime.main_layout_eligibility().permits(&canonical_path),
                 "lock-backed layout eligibility must be immediate while its Effect is blocked"
             );
             release_tx.send(()).unwrap();
             worker.join().unwrap();
-            let (result, elapsed) = ack.expect("editor lifecycle Effect blocked controller ACK");
+            let result = ack.expect("editor lifecycle Effect blocked controller ACK");
             assert!(result.unwrap());
-            assert!(elapsed < Duration::from_millis(500));
             rpc::set_editor_view_lifecycle_effect_test_hook(None);
         };
 
@@ -22791,14 +22804,18 @@ agent:queue\n\
         let old = deferred_document_write_event(document_hash, "old-intent", "old-target");
         append_state_event(dir.path(), &old).unwrap();
 
-        let (entered_tx, entered_rx) = std::sync::mpsc::sync_channel(1);
-        let (release_tx, release_rx) = std::sync::mpsc::sync_channel(1);
-        let release_rx = Arc::new(Mutex::new(release_rx));
+        // `#timingtestsunderload`: "returns while activation is blocked" is
+        // proven by ordering, not elapsed time. The first activation parks on a
+        // test-owned gate opened only after every ACK below returned, so
+        // `passed() == 0` after an ACK means it did not wait on the activation;
+        // one that did would hold until the gate self-opens at the hang ceiling
+        // and then fail that assertion.
+        static ACTIVATION: blocking_effect_gate::Gate = blocking_effect_gate::Gate::new();
+        let gate = ACTIVATION.close(document_hash);
         let first = Arc::new(AtomicBool::new(true));
         let hook: StateProjectionEffectTestHook = Arc::new(move || {
             if first.swap(false, Ordering::SeqCst) {
-                let _ = entered_tx.send(());
-                let _ = release_rx.lock().recv();
+                ACTIVATION.pass(document_hash);
             }
         });
         *state_projection_effect_test_hook().lock() =
@@ -22807,13 +22824,12 @@ agent:queue\n\
         // The refresh publishes Sources and returns while derived activation
         // remains blocked on another thread.
         runtime.refresh_memory().unwrap();
-        entered_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert!(gate.wait_entered() >= 1, "the first activation never ran");
 
         let newer = deferred_document_write_event(document_hash, "new-intent", "new-target");
         append_state_event(dir.path(), &newer).unwrap();
-        let refresh_started = Instant::now();
         runtime.refresh_memory().unwrap();
-        assert!(refresh_started.elapsed() < Duration::from_millis(500));
+        assert_eq!(gate.passed(), 0, "refresh waited on the blocked activation");
         assert_eq!(
             runtime
                 .document_graphs
@@ -22828,13 +22844,16 @@ agent:queue\n\
         let unrelated_hash = "refresh-unrelated-ack";
         let unrelated =
             deferred_document_write_event(unrelated_hash, "unrelated-intent", "unrelated-target");
-        let ack_started = Instant::now();
         assert!(
             runtime
                 .append_apply_state_event_serialized(dir.path(), &unrelated)
                 .unwrap()
         );
-        assert!(ack_started.elapsed() < Duration::from_millis(500));
+        assert_eq!(
+            gate.passed(),
+            0,
+            "an unrelated ACK waited on the blocked activation"
+        );
         assert!(
             runtime
                 .document_graphs
@@ -22842,8 +22861,8 @@ agent:queue\n\
                 .is_some()
         );
 
-        release_tx.send(()).unwrap();
-        let deadline = Instant::now() + Duration::from_secs(2);
+        gate.open();
+        let deadline = Instant::now() + blocking_effect_gate::HANG_CEILING;
         while runtime.state_projection_activation_queue.counts() != (0, 0) {
             assert!(Instant::now() < deadline, "activation queue did not drain");
             std::thread::sleep(Duration::from_millis(10));
@@ -22882,7 +22901,9 @@ agent:queue\n\
                 .append_apply_state_event_serialized(dir.path(), &first)
                 .unwrap()
         );
-        entered_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        entered_rx
+            .recv_timeout(blocking_effect_gate::HANG_CEILING)
+            .unwrap();
         for index in 1..=64 {
             let event = deferred_document_write_event(
                 document_hash,
@@ -22910,7 +22931,7 @@ agent:queue\n\
         );
 
         release_tx.send(()).unwrap();
-        let deadline = Instant::now() + Duration::from_secs(2);
+        let deadline = Instant::now() + blocking_effect_gate::HANG_CEILING;
         while runtime.state_projection_activation_queue.counts() != (0, 0) {
             assert!(Instant::now() < deadline, "coalesced activation did not drain");
             std::thread::sleep(Duration::from_millis(10));
@@ -22937,7 +22958,7 @@ agent:queue\n\
                 .append_apply_state_event_serialized(dir.path(), &event)
                 .unwrap()
         );
-        let deadline = Instant::now() + Duration::from_secs(2);
+        let deadline = Instant::now() + blocking_effect_gate::HANG_CEILING;
         while !runtime.controller_generation_poisoned() {
             assert!(Instant::now() < deadline, "worker panic did not poison generation");
             std::thread::sleep(Duration::from_millis(10));
@@ -22952,13 +22973,13 @@ agent:queue\n\
         let unrelated_hash = "post-panic-source";
         let unrelated =
             deferred_document_write_event(unrelated_hash, "post-panic-intent", "post-panic-target");
-        let started = Instant::now();
+        // `#timingtestsunderload`: the dead worker never drains, so an ACK
+        // that returns at all did not wait on it; no elapsed bound is needed.
         assert!(
             runtime
                 .append_apply_state_event_serialized(dir.path(), &unrelated)
                 .unwrap()
         );
-        assert!(started.elapsed() < Duration::from_millis(500));
         assert!(
             runtime
                 .document_graphs
@@ -24865,17 +24886,30 @@ agent:queue\n\
             Some(TELEMETRY_EVENT_INGRESS_BUSY_TIMEOUT),
         );
 
-        let started = Instant::now();
-        let error = append_state_event_with_timeout(
+        // `#timingtestsunderload`: read the busy timeout the telemetry ingress
+        // connection actually installs instead of timing how long SQLite's
+        // busy handler slept (that overshoots arbitrarily on a loaded host).
+        let ingress = open_state_db_for_event_ingress_with_timeout(
+            dir.path(),
+            telemetry_event_ingress_busy_timeout(&event).unwrap(),
+        )
+        .unwrap();
+        let installed_ms: i64 = ingress
+            .query_row("PRAGMA busy_timeout", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(
+            u128::try_from(installed_ms).unwrap(),
+            TELEMETRY_EVENT_INGRESS_BUSY_TIMEOUT.as_millis(),
+            "telemetry must release the lifecycle lane well before its 5s RPC deadline, \
+             not inherit the state-db busy timeout"
+        );
+        drop(ingress);
+        append_state_event_with_timeout(
             dir.path(),
             &event,
             telemetry_event_ingress_busy_timeout(&event).unwrap(),
         )
         .expect_err("the fixture holds SQLite's write lock");
-        assert!(
-            started.elapsed() < Duration::from_secs(1),
-            "telemetry must release the lifecycle lane well before its 5s RPC deadline: {error:#}",
-        );
         writer.execute_batch("ROLLBACK").unwrap();
     }
 
@@ -24890,7 +24924,9 @@ agent:queue\n\
     }
 
     fn wait_for_projection_activation(runtime: &Arc<ControllerRuntime>) {
-        let deadline = Instant::now() + Duration::from_secs(2);
+        // Liveness only: the hang ceiling turns a stuck queue into a failure
+        // without asserting how fast a loaded machine drains it.
+        let deadline = Instant::now() + blocking_effect_gate::HANG_CEILING;
         while runtime.state_projection_activation_queue.counts() != (0, 0) {
             assert!(
                 Instant::now() < deadline,

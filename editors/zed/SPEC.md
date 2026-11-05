@@ -64,6 +64,18 @@
   the start of its line, and `textDocument/foldingRange` with each closed
   subtree. Both read the buffer's latest full-sync text, so they do not depend
   on controller registration; any other Markdown buffer answers `null`.
+- The shared "Agent Doc: Tree Status" action (`#treestatusquery`,
+  `editors/SPEC.md`) is a code action (`#treestatuszed`). For an
+  agent-doc-mode buffer whose caret line is inside a queue component,
+  `textDocument/codeAction` answers `Agent Doc: Tree Status (<counts>)`
+  (kind `source.agent-doc.treeStatus`), whose `agent-doc.treeStatus` command
+  shows the native tree-status `text` verbatim through `window/showMessage`,
+  plus one `quickfix` per `deletable` row whose `WorkspaceEdit` deletes lines
+  `line..=end_line`. The answer comes from the same native query as
+  `agent_doc_queue_tree_status_json`; the server never derives or words a
+  state. An automatic request (`triggerKind` 2, such as an on-save pass) never
+  receives a deletion, `context.only` filters by kind prefix, and any other
+  Markdown buffer answers `null`.
 - Zed extensions have no editor action or menu surface, so the shared
   `About Agent Doc` action (`editors/SPEC.md` section 6b) does not exist here.
   The language server reports its version in the LSP `initialize` response's

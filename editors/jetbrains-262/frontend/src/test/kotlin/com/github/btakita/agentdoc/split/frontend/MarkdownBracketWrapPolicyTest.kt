@@ -35,15 +35,49 @@ class MarkdownBracketWrapPolicyTest {
     }
 
     @Test
-    fun realLinksKeepTheBundledAnswer() {
+    fun aWrapInsideARealLinkKeepsTheBundledAnswer() {
         val lines = listOf(
-            "- see [the coder workspace runbook](runbooks/coder-workspace.md \"a long title\") now",
+            "- see [the coder workspace runbook](runbooks/coder-workspace.md) now" to "coder-workspace.md",
+            "- see ![an image](img/a/long/path.png) and (more)" to "path.png",
+            "- see [a full reference][coder-workspace] and (more)" to "workspace]",
+            "- [#id] then [a real link](http://example.com/a/long/path) and (more)" to "path)",
+            "- [an outer [#id] link](http://example.com/a/long/path) and (more)" to "path)",
+        )
+        for ((line, word) in lines) {
+            // A destination or reference that has no space still holds the wrap the generic
+            // strategy might place inside it; give the policy the offset of `word` as if it had one.
+            val wrap = wrapBefore(line, word)
+            val bracket = line.lastIndexOf('[', wrap)
+            assertEquals(bracket, MarkdownBracketWrapPolicy.correct(line, wrap, bracket) { true }, line)
+        }
+    }
+
+    @Test
+    fun aRealLinkClosedBeforeTheWrapDoesNotPullItBack() {
+        // `#activesummaryurl`: the bundled guard moves a wrap in front of a bare URL or a
+        // parenthesis back to a link that already ended earlier on the line.
+        val lines = listOf(
+            "- see [the notes](#notes) then https://example.com/a/very/long/path",
             "- see ![an image](img.png) and (more)",
             "- see [a full reference][coder] and (more)",
             "- see [a collapsed reference][] and (more)",
-            "[coder]: https://example.com/runbooks/coder-workspace \"a long title\"",
             "- [#id] then [a real link](http://example.com) and (more)",
             "- [an outer [#id] link](http://example.com) and (more)",
+        )
+        for (line in lines) {
+            val wrap = line.lastIndexOf(' ') + 1
+            val bracket = line.indexOf('[')
+            assertEquals(wrap, MarkdownBracketWrapPolicy.correct(line, wrap, bracket) { true }, line)
+        }
+    }
+
+    @Test
+    fun aDefinitionOrADestinationThatMayHideAParenKeepsTheBundledAnswer() {
+        val lines = listOf(
+            "[coder]: https://example.com/runbooks/coder-workspace \"a long title\"",
+            "- see [the runbook](runbooks/coder-workspace.md \"a (long) title\") now",
+            "- see [the runbook](<runbooks/a (b).md>) now",
+            "- see [an unclosed destination](runbooks/coder-workspace.md now",
         )
         for (line in lines) {
             val wrap = line.lastIndexOf(' ') + 1

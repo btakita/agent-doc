@@ -52,7 +52,9 @@ object MarkdownBracketWrapPolicy {
 
     /**
      * True when at least one unescaped `[` lies in [lineStart, wrap) within [SCAN_LIMIT], and every
-     * such bracket closes before [wrap] without being followed by `(`, `[` or a definition `:`.
+     * such bracket closes before [wrap] and opens no link that is still open at [wrap]: it is not
+     * followed by `(` or `[` whose destination or reference ends at or after [wrap], nor by a
+     * definition `:`.
      */
     @JvmStatic
     fun onlyNonLinkBracketsBefore(text: CharSequence, lineStart: Int, lineEnd: Int, wrap: Int): Boolean {
@@ -92,14 +94,32 @@ object MarkdownBracketWrapPolicy {
         val next = close + 1
         if (next >= lineEnd) return false
         return when (text[next]) {
-            // An inline link or image `[text](dest)` and a full or collapsed reference
-            // `[text][ref]`. Each counts as a link whatever its extent.
-            '(', '[' -> true
-            // A link reference definition `[label]: dest "title"`.
+            // An inline link or image `[text](dest)`. It holds the wrap only while its destination
+            // is still open at the wrap (`#activesummaryurl`): a link that closed before the wrap
+            // cannot own a later bare URL or parenthesis, which is what the bundled guard assumes.
+            '(' -> destinationOwnsWrap(text, next, lineEnd, wrap)
+            // A full or collapsed reference `[text][ref]` / `[text][]`, by the same rule.
+            '[' -> closesAtOrAfter(matchingClose(text, next, '[', ']', lineEnd), wrap)
+            // A link reference definition `[label]: dest "title"`: the rest of the line is the link.
             ':' -> isBlank(text, lineStart, open, maxIndent = 3)
             else -> false
         }
     }
+
+    /**
+     * Whether the inline destination opening at [paren] may still be open at [wrap]. A destination
+     * holding `<`, `"` or `'` may hide a `)` inside an angle destination or a title, where the
+     * plain paren match would end it too early; such a link keeps the bundled answer.
+     */
+    private fun destinationOwnsWrap(text: CharSequence, paren: Int, lineEnd: Int, wrap: Int): Boolean {
+        val close = matchingClose(text, paren, '(', ')', lineEnd)
+        if (close < 0) return true
+        for (i in paren + 1 until close) if (text[i] == '<' || text[i] == '"' || text[i] == '\'') return true
+        return closesAtOrAfter(close, wrap)
+    }
+
+    /** An unclosed construct (`close < 0`), or one that ends at or after the wrap, holds the wrap. */
+    private fun closesAtOrAfter(close: Int, wrap: Int): Boolean = close < 0 || close >= wrap
 
     private fun matchingClose(text: CharSequence, open: Int, openChar: Char, closeChar: Char, lineEnd: Int): Int {
         var depth = 0

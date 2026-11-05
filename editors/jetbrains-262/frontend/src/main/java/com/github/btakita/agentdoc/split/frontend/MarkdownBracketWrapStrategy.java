@@ -30,8 +30,9 @@ import org.jetbrains.annotations.Nullable;
  * <p>This strategy is registered first for Markdown in the frontend module, which lays out soft
  * wraps in a JetBrains Client and in a monolithic IDE. It asks the bundled strategy first and
  * replaces that answer with the plain whitespace wrap only when {@link MarkdownBracketWrapPolicy}
- * proves the move came from a bracket that opens no link. A line with a real link keeps the bundled
- * answer. Builds before 262 use a PSI-based Markdown strategy that is unaffected, so the classic
+ * proves the move came from a bracket that opens no link still open at the wrap. A wrap inside a real
+ * link keeps the bundled answer; a link that closed before the wrap no longer pulls a later wrap (in
+ * front of a bare URL or a parenthesis) back to its {@code [} ({@code #activesummaryurl}). Builds before 262 use a PSI-based Markdown strategy that is unaffected, so the classic
  * distribution has no copy of this class.
  *
  * <p>Written in Java on purpose: the editor-based {@code calculateWrapPosition},

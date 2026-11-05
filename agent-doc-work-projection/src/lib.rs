@@ -4,9 +4,11 @@
 //! work-graph crate. The projection is pure text-in/text-out and performs no IO.
 
 pub mod active_lifecycle;
+mod active_summary;
 pub mod managed_list;
 pub mod tracked_lists;
 
+use active_summary::summarize_text;
 use agent_doc_element_backlog::backlog::{self, PendingState};
 use anyhow::{Context, Result};
 use std::collections::HashMap;
@@ -40,16 +42,6 @@ pub struct ManagedActiveItem {
     pub age: Option<String>,
     group: String,
     summary_priority: u8,
-}
-
-fn summarize_text(text: &str) -> String {
-    let first = text.lines().next().unwrap_or("").trim();
-    let bounded: String = first.chars().take(100).collect();
-    if first.chars().count() > 100 {
-        format!("{bounded}…")
-    } else {
-        bounded
-    }
 }
 
 fn push_managed_active_item(

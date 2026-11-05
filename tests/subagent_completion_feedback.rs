@@ -1262,3 +1262,196 @@ fn report_complete_finds_the_attempt_on_a_row_whose_state_word_was_fused() {
     );
     assert!(!reported.contains("running🚧"), "{reported}");
 }
+
+/// `#reportcompleteselector` (agent-doc-bugs.md, 2026-11-04): a row whose text
+/// holds `: ` (`[#lazilyreleasedecision] Decide … (#x): push it …`) was
+/// claimed by its full text, which keys as a free-text nest vector. `queue
+/// report-complete --item '#lazilyreleasedecision'` then printed "no subagent
+/// claim" and wrote nothing; only the full text worked. An id selector names
+/// the claimed row whichever selector the claim used.
+#[test]
+fn report_complete_resolves_an_id_selector_to_a_row_claimed_by_full_text() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::create_dir_all(dir.path().join(".agent-doc/locks")).unwrap();
+    let doc = dir.path().join("session.md");
+    let row = "[#lazilyreleasedecision] Decide for lazily-rs 29fde5a8c6 (#lazilysqlitestoreopen): push it to lazily-rs main";
+    fs::write(
+        &doc,
+        format!(
+            concat!(
+                "---\nagent_doc_session: report-complete-selector\nagent_doc_format: template\n---\n\n",
+                "<!-- agent:exchange patch=append subagents -->\n",
+                "### Re: prior — gpt-5\n\nDone.\n",
+                "<!-- agent:boundary:keep -->\n",
+                "<!-- /agent:exchange -->\n\n",
+                "<!-- agent:queue subagents -->\n",
+                "- {row}\n",
+                "<!-- /agent:queue -->\n\n",
+                "<!-- agent:backlog -->\n",
+                "- [ ] [#lazilyreleasedecision] Decide the lazily release.\n",
+                "<!-- /agent:backlog -->\n",
+            ),
+            row = row,
+        ),
+    )
+    .unwrap();
+    let binary = env!("CARGO_BIN_EXE_agent-doc");
+    let run = |args: &[&str]| {
+        let output = Command::new(binary)
+            .env(
+                agent_doc_controller_io::project_controller::TEST_CONTROLLER_LAUNCH_REASON_ENV,
+                CONTROLLER_LAUNCH_REASON,
+            )
+            .current_dir(dir.path())
+            .args(args)
+            .output()
+            .unwrap();
+        (
+            output.status.success(),
+            String::from_utf8_lossy(&output.stderr).into_owned(),
+        )
+    };
+    let ok = |args: &[&str]| {
+        let (success, stderr) = run(args);
+        assert!(success, "{args:?} failed: {stderr}");
+        stderr
+    };
+    let path = doc.to_str().unwrap();
+    ok(&["queue", "claim", path, "--item", row, "--owner", "subagent:lazilyrelease"]);
+    ok(&[
+        "queue",
+        "start",
+        path,
+        "--item",
+        row,
+        "--owner",
+        "subagent:lazilyrelease",
+        "--generation",
+        "1",
+        "--worker-id",
+        "worker:lazilyrelease",
+    ]);
+
+    for selector in ["#lazilyreleasedecision", "lazilyreleasedecision", "do [#lazilyreleasedecision]"] {
+        let stderr = ok(&[
+            "queue",
+            "report-complete",
+            "--prose-only",
+            path,
+            "--item",
+            selector,
+            "--generation",
+            "1",
+            "--response",
+            "Pushed 29fde5a8c6; the release stays the operator's call.",
+        ]);
+        assert!(
+            !stderr.contains("no subagent claim"),
+            "{selector:?} must resolve the full-text claim: {stderr}"
+        );
+        assert!(
+            stderr.contains("subagent completion feedback accepted")
+                || stderr.contains("subagent completion feedback already present"),
+            "{selector:?} must report the claimed attempt: {stderr}"
+        );
+    }
+    let reported = fs::read_to_string(&doc).unwrap();
+    assert_eq!(
+        reported
+            .matches("Pushed 29fde5a8c6; the release stays the operator's call.")
+            .count(),
+        1,
+        "one completion cell for the one attempt: {reported}"
+    );
+    assert!(
+        reported.contains("☑️ [#subagent:lazilyrelease#1] [#lazilyreleasedecision] Decide"),
+        "{reported}"
+    );
+}
+
+/// `#reportcompleteselector`: an id that two claims carry (the same bare
+/// `#tag` under two parents is two nest-vector claims, `#nestlistlineage`)
+/// refuses with both candidates instead of reporting either attempt.
+#[test]
+fn report_complete_refuses_an_ambiguous_id_selector_with_the_candidates() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::create_dir_all(dir.path().join(".agent-doc/locks")).unwrap();
+    let doc = dir.path().join("session.md");
+    fs::write(
+        &doc,
+        concat!(
+            "---\nagent_doc_session: report-complete-ambiguous\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append subagents -->\n",
+            "### Re: prior — gpt-5\n\nDone.\n",
+            "<!-- agent:boundary:keep -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue subagents -->\n",
+            "- Release prep\n",
+            "  - #rebase\n",
+            "- Hotfix branch\n",
+            "  - #rebase\n",
+            "<!-- /agent:queue -->\n",
+        ),
+    )
+    .unwrap();
+    let binary = env!("CARGO_BIN_EXE_agent-doc");
+    let run = |args: &[&str]| {
+        let output = Command::new(binary)
+            .env(
+                agent_doc_controller_io::project_controller::TEST_CONTROLLER_LAUNCH_REASON_ENV,
+                CONTROLLER_LAUNCH_REASON,
+            )
+            .current_dir(dir.path())
+            .args(args)
+            .output()
+            .unwrap();
+        (
+            output.status.success(),
+            String::from_utf8_lossy(&output.stderr).into_owned(),
+        )
+    };
+    let path = doc.to_str().unwrap();
+    for (vector, owner) in [
+        ("Release prep: #rebase", "subagent:prep"),
+        ("Hotfix branch: #rebase", "subagent:hotfix"),
+    ] {
+        let (success, stderr) = run(&["queue", "claim", path, "--item", vector, "--owner", owner]);
+        assert!(success, "claim {vector:?} failed: {stderr}");
+        let worker = format!("worker:{owner}");
+        let (success, stderr) = run(&[
+            "queue",
+            "start",
+            path,
+            "--item",
+            vector,
+            "--owner",
+            owner,
+            "--generation",
+            "1",
+            "--worker-id",
+            &worker,
+        ]);
+        assert!(success, "start {vector:?} failed: {stderr}");
+    }
+    let before = fs::read_to_string(&doc).unwrap();
+    let (success, stderr) = run(&[
+        "queue",
+        "report-complete",
+        "--prose-only",
+        path,
+        "--item",
+        "#rebase",
+        "--generation",
+        "1",
+        "--response",
+        "Rebased.",
+    ]);
+    assert!(!success, "an ambiguous id must refuse: {stderr}");
+    assert!(stderr.contains("Release prep: #rebase"), "{stderr}");
+    assert!(stderr.contains("Hotfix branch: #rebase"), "{stderr}");
+    assert_eq!(
+        fs::read_to_string(&doc).unwrap(),
+        before,
+        "a refused selector writes nothing"
+    );
+}

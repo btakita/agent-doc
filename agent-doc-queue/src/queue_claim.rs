@@ -2720,6 +2720,32 @@ pub fn referenced_queue_ids(text: &str) -> Vec<String> {
     out
 }
 
+/// [`referenced_queue_ids`] outside inline code and code fences: the ids a
+/// row itself references, for resolving a bare `#id` selector
+/// (`#dupetags`). A row that quotes another row (``see `- do [#a] ...` ``)
+/// is evidence about that row, not work on it, so `--item '#a'` must never
+/// bind the quoting row in place of the tracked one.
+fn selector_referenced_queue_ids(text: &str) -> Vec<String> {
+    let code_ranges = agent_doc_element::element::find_code_ranges(text);
+    if code_ranges.is_empty() {
+        return referenced_queue_ids(text);
+    }
+    let unquoted: String = text
+        .char_indices()
+        .map(|(index, ch)| {
+            if code_ranges
+                .iter()
+                .any(|(start, end)| index >= *start && index < *end)
+            {
+                ' '
+            } else {
+                ch
+            }
+        })
+        .collect();
+    referenced_queue_ids(&unquoted)
+}
+
 /// Why [`QueueClaimLedger::refresh`] refused.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RefreshRefusal {
@@ -2972,7 +2998,7 @@ pub fn resolve_claim_target(item: &str, live_heads: &[String]) -> Result<String,
     if let QueueItemIdentity::Id(id) = &identity {
         let referencing: Vec<String> = live_heads
             .iter()
-            .filter(|head| referenced_queue_ids(head).iter().any(|r| r == id))
+            .filter(|head| selector_referenced_queue_ids(head).iter().any(|r| r == id))
             .cloned()
             .collect();
         match referencing.len() {
@@ -3094,6 +3120,36 @@ impl ClaimedQueueItems {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// agent-doc-bugs.md 2026-11-05 (`#dupetags`): `--item '#activesummaryurl'`
+    /// resolved to the operator's free-text report row that QUOTES the real
+    /// row in backticks, not to the real `do [#activesummaryurl]` row, whose
+    /// repeated request annotations had broken its id-backed identity. A
+    /// reference quoted in inline code is evidence, not a reference.
+    #[test]
+    fn id_selector_names_the_tracked_row_not_a_row_quoting_it_in_code() {
+        let a = "subagent-operator-request-activeurl-file-ijpl";
+        let b = "subagent-operator-request-activeurl-wrap-decision";
+        let mut tags = String::new();
+        for _ in 0..19 {
+            tags.push_str(&format!(" [#{a}] [#{b}]"));
+        }
+        // Parsed head text: the binary `### ` navigation heading is stripped.
+        let real = format!("do [#activesummaryurl]{tags}");
+        let report = format!("📥 Many duplicate tags in `- ### 🙋📥 do [#activesummaryurl]{tags}`");
+        let heads = vec![real.clone(), report.clone()];
+        assert_eq!(
+            resolve_claim_target("#activesummaryurl", &heads).unwrap(),
+            real
+        );
+        // With the tracked row gone, the quoting row is not a reference either.
+        assert!(resolve_claim_target("#activesummaryurl", std::slice::from_ref(&report)).is_err());
+        assert!(selector_referenced_queue_ids(&report).is_empty(), "{report}");
+        assert_eq!(
+            selector_referenced_queue_ids("#subagents do [#a] see `[#b]`"),
+            vec!["a".to_string()]
+        );
+    }
 
     /// A lost attempt retains the lifecycle phase that preceded loss. The
     /// durable worker binding distinguishes a claimed/dispatching attempt from

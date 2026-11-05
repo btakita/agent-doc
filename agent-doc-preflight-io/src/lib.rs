@@ -10681,6 +10681,112 @@ mod tests {
         );
     }
 
+    /// `#preflightqueuescale` synthetic shape of the 684 KB haiven-dev
+    /// `tasks/sdk/sdk-dev.md` that overran the 90 s admission budget: several
+    /// `subagents` run queues (one with a large body), an operator todo list,
+    /// a backlog, and a large exchange. `scale` multiplies rows, todos, backlog
+    /// items, and exchange turns.
+    fn queue_scale_fixture(scale: usize) -> String {
+        let mut doc = String::from(
+            "---\nagent_doc_session: scale\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n",
+        );
+        for block in 0..4 {
+            doc.push_str(&format!(
+                "## Run {block} <!-- agent:run id=\"run{block}\" subagents priority -->\n"
+            ));
+            let rows = if block == 3 { 30 * scale } else { 2 * scale };
+            for row in 0..rows {
+                doc.push_str(&format!(
+                    "- do [#q{block}x{row}] with `code {row}` and **context** for row {row}\n"
+                ));
+                if block == 3 {
+                    doc.push_str(&format!(
+                        "  - **Response:** worker {row} reported `ok`; see [#q{block}x{row}]\n"
+                    ));
+                }
+            }
+            doc.push_str("<!-- /agent:run -->\n\n");
+        }
+        doc.push_str("## Todo <!-- agent:todo priority -->\n");
+        for todo in 0..(5 * scale) {
+            doc.push_str(&format!(
+                "- [ ] [#td{todo}] Approve step {todo} (stays open: blocked behind #bl{todo})\n"
+            ));
+        }
+        doc.push_str("<!-- /agent:todo -->\n\n## Backlog <!-- agent:backlog priority -->\n");
+        for item in 0..(5 * scale) {
+            doc.push_str(&format!("- [ ] [#bl{item}] Backlog item {item}\n"));
+        }
+        doc.push_str("<!-- /agent:backlog -->\n\n## Exchange <!-- agent:exchange patch=append -->\n");
+        for turn in 0..(40 * scale) {
+            doc.push_str(&format!(
+                "### Re: turn {turn}\n\nAnswer {turn} with `inline` code, *emphasis*, and a list:\n\n- one\n- two `x`\n\n"
+            ));
+        }
+        doc.push_str("<!-- /agent:exchange -->\n");
+        doc
+    }
+
+    /// Whole-document parses (distinct large texts) and large queue-body parses
+    /// one `run_queue_maintenance` pass performs on `queue_scale_fixture(scale)`.
+    fn queue_maintenance_parse_misses(scale: usize) -> (u64, u64, usize) {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = queue_scale_fixture(scale);
+        std::fs::write(&doc, &content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        let element_before = agent_doc_element::element::large_parse_evaluations();
+        let queue_before = agent_doc_queue::document_queue::parse_spans_memo::large_evaluations();
+        run_queue_maintenance(&doc, None).unwrap();
+        let revisions = std::fs::read_to_string(&doc).unwrap().len();
+        (
+            agent_doc_element::element::large_parse_evaluations() - element_before,
+            agent_doc_queue::document_queue::parse_spans_memo::large_evaluations() - queue_before,
+            revisions,
+        )
+    }
+
+    /// `#preflightqueuescale` (P1, haiven-dev sdk-dev.md 2026-11-04): queue
+    /// maintenance re-parsed the whole document, and every queue body, once per
+    /// derivation, per queue block, and per open todo, so its cost grew with
+    /// rows x document size (35-41 s on 684 KB). The bounded-work guard counts
+    /// parses of distinct large inputs, which is wall-clock independent: the
+    /// pass may parse each document revision and each distinct large queue
+    /// body it produces, but that count must not grow when the queue rows,
+    /// todos, backlog, and exchange grow eightfold.
+    #[test]
+    fn queue_maintenance_parse_work_does_not_scale_with_rows_or_document_size() {
+        let (small_docs, small_bodies, _) = queue_maintenance_parse_misses(1);
+        let (large_docs, large_bodies, _) = queue_maintenance_parse_misses(8);
+        eprintln!(
+            "queue scale guard: small docs={small_docs} bodies={small_bodies}; large docs={large_docs} bodies={large_bodies}"
+        );
+        assert!(
+            large_docs <= small_docs.max(1) + 2,
+            "whole-document parses grew with the document: {small_docs} -> {large_docs}"
+        );
+        assert!(
+            large_bodies <= small_bodies.max(1) + 2,
+            "large queue-body parses grew with the queue rows: {small_bodies} -> {large_bodies}"
+        );
+        // Absolute bound: one parse per document revision the pass reads or
+        // writes (a handful), never one per derivation. Before the fix the
+        // same pass parsed the document hundreds of times.
+        assert!(
+            large_docs <= 16,
+            "queue maintenance parsed the whole document {large_docs} times in one pass"
+        );
+        assert!(
+            large_bodies <= 8,
+            "queue maintenance parsed large queue bodies {large_bodies} times in one pass"
+        );
+    }
+
     /// `#presetargdedup` (live, agent-doc-bugs.md 2026-09-30): after the first
     /// `#gh-fix <url>` head was answered, its siblings were marked `⏭️` as if
     /// `gh-fix` were a dispatched-but-unresolved tracked item, and the drain

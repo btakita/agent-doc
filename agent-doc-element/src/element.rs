@@ -1932,12 +1932,47 @@ fn line_number_at(bytes: &[u8], offset: usize) -> usize {
     bytes[..offset].iter().filter(|b| **b == b'\n').count() + 1
 }
 
+/// Documents at least this large are memoized by [`parse`] and counted by
+/// [`large_parse_evaluations`].
+pub const LARGE_DOCUMENT_BYTES: usize = 4 * 1024;
+
+thread_local! {
+    /// `#preflightqueuescale`: [`parse`] is a pure function of the document
+    /// text, and one preflight pass parses the same text hundreds of times.
+    static PARSE_MEMO: std::cell::RefCell<crate::content_memo::ContentMemo<Vec<Component>>> =
+        const {
+            std::cell::RefCell::new(crate::content_memo::ContentMemo::new(
+                LARGE_DOCUMENT_BYTES,
+                4,
+                8 * 1024 * 1024,
+            ))
+        };
+    static LARGE_PARSE_EVALUATIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// `#preflightqueuescale`: how many times this thread actually parsed a
+/// document of at least [`LARGE_DOCUMENT_BYTES`] (memo hits are not parses).
+/// Bounded-work regression tests read the delta across a pass to prove that
+/// whole-document work does not grow with rows, todos, or queue blocks; it is
+/// counted inside the parser, so it never depends on wall-clock time or on the
+/// memo being in place.
+pub fn large_parse_evaluations() -> u64 {
+    LARGE_PARSE_EVALUATIONS.with(std::cell::Cell::get)
+}
+
 /// Parse all components from a document.
 ///
 /// Uses a stack for nesting. Returns components sorted by `open_start`.
 /// Errors on unmatched open/close markers or invalid names.
 /// Skips markers inside fenced code blocks and inline code spans.
 pub fn parse(doc: &str) -> Result<Vec<Component>> {
+    crate::content_memo::memoized(&PARSE_MEMO, doc, parse_uncached)
+}
+
+fn parse_uncached(doc: &str) -> Result<Vec<Component>> {
+    if doc.len() >= LARGE_DOCUMENT_BYTES {
+        LARGE_PARSE_EVALUATIONS.with(|count| count.set(count.get() + 1));
+    }
     type OpenComponent = (String, String, HashMap<String, String>, usize, usize);
 
     let bytes = doc.as_bytes();

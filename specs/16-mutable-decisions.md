@@ -165,7 +165,10 @@ step's answer as `current_answer`.
 **CLI** (debugging and operator lookup; enforcement never depends on it):
 `agent-doc decision graph FILE [--json]`, `agent-doc decision impact FILE
 <id> [--revision <rev>] [--json]`, `agent-doc decision why FILE <id>
-[--json]`. `<id>` may be a decision id, a revision id, a question copy id,
+[--json]`, and `agent-doc decision search FILE <query>... [--limit N]
+[--json]` (`#decisionsearchmenu`: answered decisions ranked by exact id,
+decision stamp, normalized question text, then wording and optional tsift
+recall across session documents; see SPEC.md). `<id>` may be a decision id, a revision id, a question copy id,
 (for `why`, and for `impact` when unambiguous) an item a decision applies to,
 or (for `why`) a decision only a derivation concludes.
 tsift graph-db may index the cached rows as an optional traversal layer.

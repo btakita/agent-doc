@@ -2999,6 +2999,17 @@ fn run_with_options_to_writer_in_pass(
         document_agent: None,
         active_harness: None,
     }));
+    // `#decisionsearchmenu`: when this turn is about to ask the operator
+    // something, hand the agent the lookup commands so it searches the
+    // recorded answers instead of re-asking.
+    let decision_lookup_menu = {
+        let prompts: Vec<&str> = selected_queue_prompts
+            .iter()
+            .map(String::as_str)
+            .chain(user_intent_prompt_changes.iter().map(|change| change.text.as_str()))
+            .collect();
+        answer_ledger_report.lookup_menu(&file.display().to_string(), &prompts)
+    };
     let output = PreflightOutput {
         warnings,
         layout_issues,
@@ -3084,6 +3095,7 @@ fn run_with_options_to_writer_in_pass(
             ),
         queue_head_annotations,
         answered_decisions_guidance: answer_ledger_report.guidance(),
+        decision_lookup_menu,
         answered_decisions: answer_ledger_report.facts,
         possibly_answered: answer_ledger_report.possible,
         answers_recalled_elsewhere: answer_ledger_report.recalled,

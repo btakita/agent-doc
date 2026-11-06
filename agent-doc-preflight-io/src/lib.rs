@@ -1546,6 +1546,13 @@ pub struct PreflightOutput {
     /// when either is non-empty.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub answered_decisions_guidance: Option<String>,
+    /// `#decisionsearchmenu`: the short decision-lookup menu (`decision
+    /// search` / `answered` / `why` for this document). Present only when
+    /// this turn is about to ask the operator something: a prompt names an
+    /// open question or asks for a decision, or the ledger already pushes an
+    /// answer for an open copy; and there is an answer to look up.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub decision_lookup_menu: Option<String>,
     /// Whether the queue is currently active (consuming prompts).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub queue_active: Option<bool>,

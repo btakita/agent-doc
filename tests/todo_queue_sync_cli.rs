@@ -333,6 +333,80 @@ fn an_answered_question_closes_its_duplicate_and_a_reask_is_refused() {
     );
 }
 
+/// `#decisionsearchmenu`: `decision search` finds the answered decision by
+/// copy id, decision stamp and question wording, reports the verbatim answer
+/// and open copies, and says when tsift recall did not run. A plain work
+/// turn's contract carries no lookup menu.
+#[test]
+fn decision_search_finds_answers_and_the_menu_stays_off_work_turns() {
+    let dir = tempfile::tempdir().unwrap();
+    let doc = session(
+        dir.path(),
+        "- ~~[#subagent-operator-request-tdport-pick]: Use port 3000.~~\n",
+        concat!(
+            "- [ ] [#tdport] Choose the demo callback port for local sign-in runs\n",
+            "- [ ] [#subagent-operator-request-tdport-pick] Choose the demo callback port for local sign-in runs: 3000 or 47616\n",
+        ),
+    );
+    let path = doc.to_str().unwrap();
+    let search = |query: &[&str]| -> serde_json::Value {
+        let mut args = vec!["decision", "search", path];
+        args.extend_from_slice(query);
+        args.push("--json");
+        let output = Command::new(env!("CARGO_BIN_EXE_agent-doc"))
+            .env("AGENT_DOC_ANSWER_RECALL", "off")
+            .env("AGENT_DOC_ROOT_CEILING_DIRECTORIES", dir.path().parent().unwrap())
+            .current_dir(dir.path())
+            .args(&args)
+            .output()
+            .unwrap();
+        assert_ok(&output, "decision search");
+        serde_json::from_slice(&output.stdout).unwrap()
+    };
+    let by_id = search(&["[#tdport]"]);
+    let top = &by_id["hits"][0];
+    assert_eq!(top["answer"], "Use port 3000.", "{by_id:#}");
+    assert_eq!(top["match"], "copy_id", "{by_id:#}");
+    assert!(top["location"].as_str().is_some_and(|where_| !where_.is_empty()), "{by_id:#}");
+    assert!(
+        top["open_items"].as_array().unwrap().iter().any(|item| item == "tdport"),
+        "{by_id:#}"
+    );
+    assert_eq!(by_id["recall"]["status"], "unavailable", "{by_id:#}");
+    let decision = top["decision_id"].as_str().unwrap().to_string();
+    let by_stamp = search(&[&format!("⟦decision:{decision}⟧")]);
+    assert_eq!(by_stamp["hits"][0]["match"], "stamp", "{by_stamp:#}");
+    let by_words = search(&["callback", "port"]);
+    assert_eq!(by_words["hits"][0]["decision_id"], decision.as_str(), "{by_words:#}");
+    assert_eq!(by_words["hits"][0]["match"], "wording", "{by_words:#}");
+    assert!(search(&["kubernetes", "namespace"])["hits"].as_array().unwrap().is_empty());
+
+    // Human-readable output names the recall outcome.
+    let output = Command::new(env!("CARGO_BIN_EXE_agent-doc"))
+        .env("AGENT_DOC_ANSWER_RECALL", "off")
+        .current_dir(dir.path())
+        .args(["decision", "search", path, "#tdport"])
+        .output()
+        .unwrap();
+    assert_ok(&output, "decision search (text)");
+    let text = String::from_utf8_lossy(&output.stdout);
+    assert!(text.contains("answer: “Use port 3000.”"), "{text}");
+    assert!(text.contains("tsift recall: unavailable"), "{text}");
+
+    // A work turn on a document with no open copy of an answered question
+    // carries no menu.
+    let quiet = tempfile::tempdir().unwrap();
+    let doc = session(
+        quiet.path(),
+        "- ~~[#subagent-operator-request-tdport-pick]: Use port 3000.~~\n",
+        "- [x] [#subagent-operator-request-tdport-pick] Demo callback port: 3000 or 47616?\n",
+    );
+    let output = run_agent_doc(quiet.path(), &["preflight", "--probe", doc.to_str().unwrap()]);
+    assert_ok(&output, "preflight --probe");
+    let contract: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(contract.get("decision_lookup_menu").is_none(), "{contract:#}");
+}
+
 /// `#decisionidstamp`: `preflight --probe` carries the same answered facts as
 /// a real preflight, from a read-only simulation. It writes no closure and no
 /// decision stamp into the document. A real preflight then stamps the open
@@ -371,6 +445,15 @@ fn a_probe_preflight_reports_answered_decisions_without_writing() {
         contract["answered_decisions_guidance"]
             .as_str()
             .is_some_and(|guidance| guidance.contains("do not ask again")),
+        "{contract:#}"
+    );
+    // `#decisionsearchmenu`: an answer is pushed for an open copy, so the
+    // probe carries the lookup menu too.
+    assert!(
+        contract["decision_lookup_menu"]
+            .as_str()
+            .is_some_and(|menu| menu.contains("agent-doc decision search ")
+                && menu.contains("session.md")),
         "{contract:#}"
     );
     assert_eq!(

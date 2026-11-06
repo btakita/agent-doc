@@ -56,6 +56,11 @@ pub struct AnswerLedgerReport {
     /// Archived decisions a new question named this pass (`#decisionprune`).
     pub revived: Vec<String>,
     pub hot_store: agent_doc_answer_ledger::HotStoreSize,
+    /// `#decisionsearchmenu`: ids of open items that ask the operator
+    /// something (open question copies, tracked items worded as decisions).
+    pub question_items: BTreeSet<String>,
+    /// `#decisionsearchmenu`: answered decisions the ledger holds.
+    pub answered_decisions: usize,
 }
 
 impl AnswerLedgerReport {
@@ -70,6 +75,24 @@ impl AnswerLedgerReport {
         .flatten()
         .collect();
         (!parts.is_empty()).then(|| parts.join("\n"))
+    }
+
+    /// `#decisionsearchmenu`: the short decision-lookup menu for the cycle
+    /// contract, present only when this turn is about to ask the operator
+    /// something ([`agent_doc_answer_ledger::search::question_cue`]) and
+    /// there is an answer to look up. `prompts` are the turn's operator
+    /// prompts; `file` is the document as the agent names it.
+    pub fn lookup_menu(&self, file: &str, prompts: &[&str]) -> Option<String> {
+        use agent_doc_answer_ledger::search;
+        search::question_cue(&search::CueInputs {
+            prompts,
+            question_items: &self.question_items,
+            answered_decisions: self.answered_decisions,
+            answers_pushed: !self.facts.is_empty()
+                || !self.possible.is_empty()
+                || !self.recalled.is_empty(),
+        })
+        .map(|_| search::lookup_menu(file))
     }
 
     /// `#decisionstaleaudit`: todo signals computed before this pass, minus
@@ -523,6 +546,49 @@ fn canonical(path: &Path) -> std::path::PathBuf {
     std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
+/// The canonical paths recall never reads as "another document": `file`
+/// itself and its done archives.
+fn recall_excluded(file: &Path, content: &str) -> BTreeSet<std::path::PathBuf> {
+    let mut excluded: BTreeSet<std::path::PathBuf> =
+        agent_doc_element_backlog_io::done_archive::read_done_archive_sources(file, content)
+            .map(|sources| {
+                sources
+                    .into_iter()
+                    .map(|source| canonical(&source.path))
+                    .collect()
+            })
+            .unwrap_or_default();
+    excluded.insert(canonical(file));
+    excluded
+}
+
+/// Another session document a recall hit names, built from its text alone;
+/// `None` when excluded, too large, unreadable, or holding no answer.
+fn load_other_document(
+    path: &Path,
+    excluded: &BTreeSet<std::path::PathBuf>,
+    root: &Path,
+    now: u64,
+) -> Option<OtherDocument> {
+    if excluded.contains(path) || std::fs::metadata(path).ok()?.len() > MAX_RECALL_DOCUMENT_BYTES {
+        return None;
+    }
+    let text = std::fs::read_to_string(path).ok()?;
+    let rows = agent_doc_answer_ledger::extract::observe(&text, &[]);
+    if rows.answers.is_empty() {
+        return None;
+    }
+    Some(OtherDocument {
+        display: path
+            .strip_prefix(root)
+            .unwrap_or(path)
+            .to_string_lossy()
+            .into_owned(),
+        ledger: Ledger::build(&rows, &PriorIndex::default(), now, None),
+        rows,
+    })
+}
+
 /// `#decisiontsiftrecall`: one recall pass over `ledger` (built from
 /// `content`). Returns the ledger rebuilt with in-document neighbours (when
 /// any) and the cross-document notes. Annotation only.
@@ -536,39 +602,9 @@ fn recall_pass(
     root: &Path,
 ) -> (Ledger, Vec<RecalledAnswer>) {
     let here = canonical(file);
-    let mut excluded: std::collections::BTreeSet<std::path::PathBuf> =
-        agent_doc_element_backlog_io::done_archive::read_done_archive_sources(file, content)
-            .map(|sources| {
-                sources
-                    .into_iter()
-                    .map(|source| canonical(&source.path))
-                    .collect()
-            })
-            .unwrap_or_default();
-    excluded.insert(here.clone());
+    let excluded = recall_excluded(file, content);
     let rows = agent_doc_answer_ledger::extract::observe(content, &[]);
-    let mut load = |path: &str| -> Option<OtherDocument> {
-        let path = Path::new(path);
-        if excluded.contains(path)
-            || std::fs::metadata(path).ok()?.len() > MAX_RECALL_DOCUMENT_BYTES
-        {
-            return None;
-        }
-        let text = std::fs::read_to_string(path).ok()?;
-        let rows = agent_doc_answer_ledger::extract::observe(&text, &[]);
-        if rows.answers.is_empty() {
-            return None;
-        }
-        Some(OtherDocument {
-            display: path
-                .strip_prefix(root)
-                .unwrap_or(path)
-                .to_string_lossy()
-                .into_owned(),
-            ledger: Ledger::build(&rows, &PriorIndex::default(), now, None),
-            rows,
-        })
-    };
+    let mut load = |path: &str| load_other_document(Path::new(path), &excluded, root, now);
     let pass = agent_doc_answer_ledger::recall::run_recall(
         &ledger,
         &rows,
@@ -676,6 +712,7 @@ fn plan_pass(file: &Path, content: &str, prior: &PriorIndex, now: u64) -> Result
 
 fn report_of(
     ledger: &Ledger,
+    observations: &agent_doc_answer_ledger::extract::Observations,
     graph: &DecisionGraph,
     closed: Vec<DuplicateClosure>,
     stale_closed: Vec<DuplicateClosure>,
@@ -690,6 +727,12 @@ fn report_of(
         stale_closed,
         revived: ledger.liveness.revived.iter().cloned().collect(),
         hot_store: ledger.hot_store_size(),
+        question_items: agent_doc_answer_ledger::search::question_item_ids(observations),
+        answered_decisions: ledger
+            .decisions
+            .iter()
+            .filter(|decision| !decision.revisions.is_empty())
+            .count(),
     }
 }
 
@@ -754,7 +797,7 @@ pub fn probe_answer_ledger(file: &Path) -> Result<AnswerLedgerReport> {
     let mut ledger = pass.ledger;
     let graph = graph_of(file, &ledger, &pass.observations);
     ledger.recompute_liveness(&pass.observations.open_item_ids, &named_edges(&graph));
-    Ok(report_of(&ledger, &graph, pass.closed, pass.stale_closed))
+    Ok(report_of(&ledger, &pass.observations, &graph, pass.closed, pass.stale_closed))
 }
 
 fn run_answer_ledger_maintenance_with_options(
@@ -877,7 +920,7 @@ fn run_answer_ledger_maintenance_with_options(
         report_ledger.recompute_liveness(&report_observations.open_item_ids, &named_edges(&graph));
         recalled = notes;
     }
-    let mut report = report_of(&report_ledger, &graph, closed, stale_closed);
+    let mut report = report_of(&report_ledger, &report_observations, &graph, closed, stale_closed);
     report.recalled = recalled;
     for decision in &report.revived {
         eprintln!(
@@ -1023,6 +1066,135 @@ pub fn reasks_for_closeout(
         .collect();
     let (_, ledger) = build_ledger_naming(file, content, &keys);
     ledger.reasks(&new_questions)
+}
+
+/// How `decision search` used the optional tsift recall source
+/// (`#decisionsearchmenu`). Without it the ranking is the ledger's own.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum SearchRecallStatus {
+    /// tsift ran; `hits` raw hits came back. `note` says what was skipped.
+    Used {
+        hits: usize,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        note: Option<String>,
+    },
+    /// No source: disabled, no index, or no executable.
+    Unavailable { detail: String },
+    /// The source ran but returned nothing usable (deadline or failure).
+    Failed { detail: String },
+}
+
+impl SearchRecallStatus {
+    /// One line for the human-readable report.
+    pub fn summary(&self) -> String {
+        match self {
+            Self::Used { hits, note: None } => format!("tsift recall: used ({hits} hits)"),
+            Self::Used { hits, note: Some(note) } => {
+                format!("tsift recall: used ({hits} hits); {note}")
+            }
+            Self::Unavailable { detail } => {
+                format!("tsift recall: unavailable ({detail}); ranked by the answer ledger only")
+            }
+            Self::Failed { detail } => {
+                format!("tsift recall: failed ({detail}); ranked by the answer ledger only")
+            }
+        }
+    }
+}
+
+/// What `agent-doc decision search` found (`#decisionsearchmenu`).
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct DecisionSearchReport {
+    pub query: String,
+    pub document: String,
+    pub hits: Vec<agent_doc_answer_ledger::search::SearchHit>,
+    pub recall: SearchRecallStatus,
+}
+
+/// Raw hits asked of tsift per search.
+const SEARCH_RECALL_HITS: usize = 12;
+/// Other documents a search reads at most.
+const SEARCH_MAX_DOCUMENTS: usize = 8;
+
+/// `#decisionsearchmenu`: rank the answered decisions of `file` (its text,
+/// done archives and index, as `decision answered` sees them) against
+/// `query`, best first, plus answered decisions in other session documents
+/// the optional tsift recall source finds. Read-only: nothing is written.
+/// `display` is the document as the caller names it.
+pub fn search_decisions(
+    file: &Path,
+    display: &str,
+    query: &str,
+    env: &RecallEnv,
+    limit: usize,
+) -> Result<DecisionSearchReport> {
+    use agent_doc_answer_ledger::search;
+    let content = std::fs::read_to_string(file)
+        .map_err(|err| anyhow::anyhow!("failed to read {}: {err}", file.display()))?;
+    let (_, ledger) = build_ledger(file, &content);
+    let mut hits = search::search_ledger(&ledger, query, display);
+    let recall = match TsiftRecall::discover_or_reason(file, env) {
+        Err(detail) => SearchRecallStatus::Unavailable {
+            detail: detail.to_string(),
+        },
+        Ok(source) => {
+            let (results, outcome) =
+                source.recall_with_outcome(&[query.to_string()], SEARCH_RECALL_HITS);
+            let raw = results.into_iter().next().unwrap_or_default();
+            if raw.is_empty() && outcome.timed_out > 0 {
+                SearchRecallStatus::Failed {
+                    detail: format!("no result within {}ms", source.deadline().as_millis()),
+                }
+            } else if raw.is_empty() && outcome.failed > 0 {
+                SearchRecallStatus::Failed {
+                    detail: "tsift search failed; the index may be stale or missing".to_string(),
+                }
+            } else {
+                // An index older than the document has stale line numbers
+                // for it: skip those hits rather than map them to the wrong
+                // decision.
+                let document_modified = std::fs::metadata(file).and_then(|meta| meta.modified()).ok();
+                let hits_current = match (source.index_modified(), document_modified) {
+                    (Some(index), Some(document)) => index >= document,
+                    _ => true,
+                };
+                let here = canonical(file);
+                let here_path = here.to_string_lossy().into_owned();
+                let rows = agent_doc_answer_ledger::extract::observe(&content, &[]);
+                let excluded = recall_excluded(file, &content);
+                let now = agent_doc_log_time::current_epoch_secs();
+                let root = source.root().to_path_buf();
+                let mut load = |path: &str| load_other_document(Path::new(path), &excluded, &root, now);
+                search::add_recall_hits(
+                    &mut hits,
+                    &search::SearchDocument {
+                        ledger: &ledger,
+                        rows: &rows,
+                        path: &here_path,
+                        display,
+                        hits_current,
+                    },
+                    &raw,
+                    SEARCH_MAX_DOCUMENTS,
+                    &mut load,
+                );
+                SearchRecallStatus::Used {
+                    hits: raw.len(),
+                    note: (!hits_current).then(|| {
+                        "the tsift index is older than this document, so its hits on this document were skipped (run `tsift status --fix` to reindex)".to_string()
+                    }),
+                }
+            }
+        }
+    };
+    hits.truncate(limit.max(1));
+    Ok(DecisionSearchReport {
+        query: query.to_string(),
+        document: display.to_string(),
+        hits,
+        recall,
+    })
 }
 
 #[cfg(test)]
@@ -1508,6 +1680,135 @@ mod tests {
         );
         assert!(report.recalled.is_empty(), "{report:?}");
         assert_eq!(report.closed.len(), 1, "{report:?}");
+    }
+
+    /// `#decisionsearchmenu`: without tsift the search still ranks the
+    /// ledger's answered decisions and says recall was unavailable.
+    #[test]
+    fn decision_search_without_tsift_ranks_the_ledger_and_says_so() {
+        let (dir, doc, _) = recall_project();
+        let empty_path = dir.path().join("empty-path");
+        std::fs::create_dir_all(&empty_path).unwrap();
+        let env = recall_env(&empty_path, 2000);
+        // The request copy's own id, and the work item it was raised for.
+        let report = search_decisions(
+            &doc,
+            "tasks/session.md",
+            "[#subagent-operator-request-tdport-allowlist]",
+            &env,
+            10,
+        )
+        .unwrap();
+        let top = report.hits.first().unwrap_or_else(|| panic!("{report:?}"));
+        assert_eq!(top.answer, "Use the standard http ports.");
+        assert_eq!(top.matched, agent_doc_answer_ledger::search::SearchMatch::CopyId);
+        assert!(
+            top.open_items
+                .contains(&"subagent-operator-request-tdport-allowlist".to_string()),
+            "{top:?}"
+        );
+        let report = search_decisions(&doc, "tasks/session.md", "#tdport", &env, 10).unwrap();
+        let top = report.hits.first().unwrap_or_else(|| panic!("{report:?}"));
+        assert_eq!(top.answer, "Use the standard http ports.");
+        assert_eq!(top.matched, agent_doc_answer_ledger::search::SearchMatch::AppliesTo);
+        assert_eq!(
+            report.recall,
+            SearchRecallStatus::Unavailable {
+                detail: "no tsift executable on PATH".to_string()
+            }
+        );
+        assert!(report.recall.summary().contains("ranked by the answer ledger only"));
+        // Unanswered: nothing to look up.
+        let none = search_decisions(&doc, "tasks/session.md", "#redir", &env, 10).unwrap();
+        assert!(none.hits.is_empty(), "{none:?}");
+        // Read-only.
+        assert!(std::fs::read_to_string(&doc).unwrap().contains("- [ ] [#subagent-operator-request-tdport-allowlist]"));
+    }
+
+    /// With tsift, an answer in another session document is found; an index
+    /// older than this document is reported, and its hits here skipped.
+    #[test]
+    fn decision_search_with_tsift_finds_answers_in_other_documents() {
+        let (dir, doc, other) = recall_project();
+        let bin_dir = fake_tsift(dir.path(), &other, "0");
+        // Make the index older than the document.
+        let old = std::time::SystemTime::now() - std::time::Duration::from_secs(3600);
+        std::fs::File::options()
+            .write(true)
+            .open(dir.path().join(".tsift/index.db"))
+            .unwrap()
+            .set_modified(old)
+            .unwrap();
+        let env = recall_env(&bin_dir, 10_000);
+        let report = search_decisions(
+            &doc,
+            "tasks/session.md",
+            "which port does the demo redirect use",
+            &env,
+            10,
+        )
+        .unwrap();
+        let hit = report
+            .hits
+            .iter()
+            .find(|hit| hit.document == "tasks/other.md")
+            .unwrap_or_else(|| panic!("{report:?}"));
+        assert_eq!(hit.answer, "Use port 8443.");
+        assert_eq!(
+            hit.matched,
+            agent_doc_answer_ledger::search::SearchMatch::RecallSemantic
+        );
+        match &report.recall {
+            SearchRecallStatus::Used { hits: 1, note: Some(note) } => {
+                assert!(note.contains("older than this document"), "{note}")
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    /// A tsift past its deadline is reported as failed; the ledger ranking
+    /// still comes back.
+    #[test]
+    fn decision_search_reports_a_tsift_deadline() {
+        let (dir, doc, other) = recall_project();
+        let bin_dir = fake_tsift(dir.path(), &other, "30");
+        let env = recall_env(&bin_dir, 300);
+        let report = search_decisions(&doc, "tasks/session.md", "#tdport", &env, 10).unwrap();
+        assert_eq!(report.hits.len(), 1, "{report:?}");
+        assert!(
+            matches!(&report.recall, SearchRecallStatus::Failed { detail } if detail.contains("300ms")),
+            "{:?}",
+            report.recall
+        );
+    }
+
+    /// `#decisionsearchmenu`: the report offers the lookup menu only on a
+    /// turn that is about to ask the operator something.
+    #[test]
+    fn the_lookup_menu_needs_a_question_cue_and_an_answer() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "<!-- agent:queue -->\n",
+            "- ~~[#lic]: Apache-2.0.~~\n",
+            "<!-- /agent:queue -->\n",
+            "<!-- agent:todo -->\n",
+            "- [x] [#lic] Pick the license for the crates\n",
+            "- [ ] [#port] Choose the demo port\n",
+            "- [ ] [#build] Implement the release build\n",
+            "<!-- /agent:todo -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        let report = run_answer_ledger_maintenance_force_disk(&doc, &NoEffects).unwrap();
+        assert_eq!(report.answered_decisions, 1, "{report:?}");
+        assert!(report.facts.is_empty(), "{report:?}");
+        assert!(report.lookup_menu("session.md", &["do [#build]"]).is_none());
+        let menu = report
+            .lookup_menu("session.md", &["do [#port]"])
+            .unwrap_or_else(|| panic!("{report:?}"));
+        assert!(menu.contains("agent-doc decision search session.md"), "{menu}");
+        assert!(AnswerLedgerReport::default().lookup_menu("session.md", &["do [#port]"]).is_none());
     }
 
     /// Agent-free path: a plain force-disk maintenance pass (the closeout

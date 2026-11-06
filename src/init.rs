@@ -281,8 +281,8 @@ mod tests {
                 .map(|component| component.name.as_str())
                 .collect::<Vec<_>>(),
             [
-                "status", "active", "queue", "review", "todo", "backlog", "icebox", "notes",
-                "done", "exchange",
+                "status", "recap", "active", "queue", "review", "todo", "backlog", "icebox",
+                "notes", "done", "exchange",
             ]
         );
         let exchange = components.last().unwrap();

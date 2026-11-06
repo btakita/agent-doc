@@ -31594,8 +31594,8 @@ fn test_operator_todo_authoring_contract_is_documented_across_instruction_surfac
         "**Auto-created `todo` component.**",
         "queue-centric canonical rank",
         "**Default template order.**",
-        "`agent:status`, `agent:active`",
-        "`agent:run`",
+        "`agent:status`, `agent:recap`",
+        "`agent:active`, `agent:run`",
         "`agent:done`, `agent:exchange`",
         "never silently reorders",
         "**Operator-todo advisory.**",
@@ -31619,7 +31619,7 @@ fn test_queue_centric_template_order_is_mirrored_across_harness_runbooks() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let canonical = fs::read_to_string(manifest_dir.join("runbooks/document-format.md")).unwrap();
     for required in [
-        "status, active, run, review, todo, backlog",
+        "status, recap, active, run, review, todo, backlog",
         "icebox, notes, done, then exchange last",
         "previous order are not silently reordered",
     ] {

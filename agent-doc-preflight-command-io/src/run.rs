@@ -726,7 +726,7 @@ fn run_with_options_to_writer_in_pass(
     let response_contract = response_contract_for_content(&content);
     if response_contract.is_some() {
         eprintln!(
-            "[preflight] response contract: strict template; persist with `agent-doc finalize --template <FILE>` (or `write --template --commit`) and wrap stdin in matching `<!-- patch:exchange -->` / `<!-- /patch:exchange -->` markers"
+            "[preflight] response contract: strict template; persist with `agent-doc finalize --template <FILE>` (or `write --template --commit`) and wrap stdin in matching `<!-- patch:exchange -->` / `<!-- /patch:exchange -->` markers, followed by the turn's `<!-- patch:recap -->` / `<!-- /patch:recap -->` block (format: runbooks/recap.md)"
         );
     }
 

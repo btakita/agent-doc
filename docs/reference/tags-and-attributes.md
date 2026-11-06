@@ -52,6 +52,7 @@ is the legacy alias for `backlog`.
 | `agent:icebox` | Granular tracked work parked outside the runnable backlog. |
 | `agent:done` | Completed-work archive, inline or redirected with `archive`. |
 | `agent:status` | Current status projection. It may contain ordinary status prose and protected binary-owned operational lines. |
+| `agent:recap` | The last turn's recap and nothing else. Each closeout's `patch:recap` replaces the whole body. Content changes do not start a turn, and the text is never read as a prompt or a queue row. See [`agent:recap`](#agentrecap) below. |
 | `agent:active` | Binary-owned, read-only index of started, unclosed queue work rendered from the claim ledger, release receipts, and lineage (never from queue markers), grouped as **Running**, **Lost**, and **Needs integration** (with each entry's age); backlog/review/icebox locations of a listed item appear as sources. Preflight replaces its full body; do not author rows here. Legacy `agent:open-items` markers are migrated to this component. |
 | `agent:signals` | Realtime signal definitions/readings reconciled by the signal subsystem. |
 | `agent:todo` | Operator-owned informational checklist. It is not runnable work and is never promoted to the queue. |
@@ -61,6 +62,36 @@ is the legacy alias for `backlog`.
 `agent:model` is a supported preflight control component rather than a
 registry-owned work component. Its trimmed body may be a tier
 (`auto`, `low`, `med`, or `high`) or a model name known to the active harness.
+
+### `agent:recap`
+
+`agent:recap` sits directly below `agent:status` and shows one thing: the recap
+from the last turn. The agent writes it through the closeout, beside the
+response:
+
+```markdown
+<!-- patch:exchange -->
+### Re: topic — model · timestamp
+
+The full response.
+<!-- /patch:exchange -->
+<!-- patch:recap -->
+The cycle is committed, and nothing you need to read changed.
+<!-- /patch:recap -->
+```
+
+The block always replaces the whole body. A `patch=` value on the marker or in
+project configuration cannot make it append, so the component keeps no history.
+When a response has several `patch:recap` blocks, the last non-blank one wins.
+
+A document that predates the component gains it the first time a closeout
+carries a recap, in the canonical slot directly below `agent:status`. A recap is
+never required: a closeout with no recap or a blank one still lands, leaves the
+previous recap in place, and prints an advisory on stderr. So does a recap that
+strays from the format.
+
+Every harness writes the same format, defined in
+[`runbooks/recap.md`](../../runbooks/recap.md).
 
 ### `agent:rules`
 
@@ -294,9 +325,10 @@ Response text.
 `<!-- patch:NAME --> ... <!-- /patch:NAME -->` targets the matching
 `agent:NAME` component. `NAME` is not a fixed allowlist: it must identify a
 component in the destination document. A missing target is routed to the
-exchange/output overflow path rather than silently discarded; `patch:todo` is
-the exception and creates a missing `agent:todo` slot. Strict template
-closeout requires a closed `patch:exchange` containing a `### Re:` heading.
+exchange/output overflow path rather than silently discarded. `patch:todo` and
+`patch:recap` are the exceptions and create a missing `agent:todo` or
+`agent:recap` slot. Strict template closeout requires a closed `patch:exchange`
+containing a `### Re:` heading; `patch:recap` is optional.
 
 Tracked-work body replacement uses the deliberately narrower form
 `<!-- replace:NAME --> ... <!-- /replace:NAME -->`. It accepts `backlog`, the

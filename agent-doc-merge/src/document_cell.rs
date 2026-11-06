@@ -866,7 +866,7 @@ pub enum ConflictPolicy {
 /// *owner* of that component wins, deterministically and cleanly — no in-band
 /// conflict marker.
 ///
-/// - **Agent-owned** components (`exchange`, `status`, `log`) → [`OursWins`]:
+/// - **Agent-owned** components (`exchange`, `status`, `recap`, `log`) → [`OursWins`]:
 ///   the binary authors the response/status/log spine, so the committed (ours)
 ///   side is authoritative there (mirrors the `exchange` history spine and the
 ///   `#pcwcwarn` "agent owns exchange" reconcile rule).
@@ -881,7 +881,7 @@ pub enum ConflictPolicy {
 /// [`TheirsWins`]: ConflictPolicy::TheirsWins
 pub fn component_conflict_policy(component: &str) -> ConflictPolicy {
     match component {
-        "exchange" | "status" | "log" => ConflictPolicy::OursWins,
+        "exchange" | "status" | "recap" | "log" => ConflictPolicy::OursWins,
         _ => ConflictPolicy::TheirsWins,
     }
 }

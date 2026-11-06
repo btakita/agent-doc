@@ -52,6 +52,23 @@ pub const TODO_DESCRIPTOR: ElementDescriptor = ElementDescriptor {
     realtime: true,
 };
 
+/// The last turn's recap (`#agentrecap`). The agent writes it through the
+/// closeout, each closeout replaces the whole body, and the text is never read
+/// back as a prompt, a queue row, or a turn trigger.
+pub const RECAP_DESCRIPTOR: ElementDescriptor = ElementDescriptor {
+    name: agent_doc_element::recap::RECAP_COMPONENT,
+    aliases: &[],
+    source: ElementSource::BuiltIn,
+    shape: ElementShape::Component,
+    authority: ElementAuthority::DerivedProjection,
+    write_policy: ElementWritePolicy::ProjectionOnly,
+    scheduling_role: ElementSchedulingRole::None,
+    turn_role: ElementTurnRole::Informational,
+    realtime_model: ElementRealtimeModel::None,
+    composition_role: ElementCompositionRole::LocalOnly,
+    realtime: true,
+};
+
 /// Binary-owned projection of work that has started and has not closed.
 ///
 /// Unlike `agent:status`, this component is informational: its contents must
@@ -79,6 +96,7 @@ pub const BUILT_IN_ELEMENTS: &[ElementDescriptor] = &[
     agent_doc_element_icebox::DESCRIPTOR,
     agent_doc_element_done::DESCRIPTOR,
     agent_doc_element_status::DESCRIPTOR,
+    RECAP_DESCRIPTOR,
     ACTIVE_DESCRIPTOR,
     agent_doc_element_signals::DESCRIPTOR,
     TODO_DESCRIPTOR,
@@ -159,6 +177,7 @@ mod tests {
         assert_eq!(find_built_in("todo").unwrap().name, "todo");
         assert_eq!(find_built_in("notes").unwrap().name, "notes");
         assert_eq!(find_built_in("rules").unwrap().name, "rules");
+        assert_eq!(find_built_in("recap").unwrap().name, "recap");
         assert_eq!(find_built_in("unknown"), None);
     }
 
@@ -218,6 +237,19 @@ mod tests {
             ElementSchedulingRole::ParkedWorkSource
         );
         assert_eq!(icebox.composition_role, ElementCompositionRole::LocalOnly);
+    }
+
+    #[test]
+    fn recap_is_informational_and_never_schedules_work() {
+        let recap = find_built_in("recap").unwrap();
+        assert_eq!(recap.turn_role, ElementTurnRole::Informational);
+        assert_eq!(
+            recap.turn_role,
+            agent_doc_element::turn_role_for_component_name("recap")
+        );
+        assert_eq!(recap.scheduling_role, ElementSchedulingRole::None);
+        assert_eq!(recap.realtime_model, ElementRealtimeModel::None);
+        assert_eq!(recap.composition_role, ElementCompositionRole::LocalOnly);
     }
 
     #[test]

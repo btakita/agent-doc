@@ -106,6 +106,14 @@
   memory. See [Real-Time Workflow Authority](specs/14-realtime-workflow.md#retained-writes-never-replace-operator-text)
   and [Document Format](specs/02-document-format.md).
 
+- `agent:recap` holds the last turn's recap and nothing else (`#agentrecap`).
+  A closeout's `patch:recap` replaces the whole body in the response's own
+  operation, creating the component below `agent:status` when the document
+  predates it. The text is informational: it never starts a turn and is never
+  read as a prompt or a queue row. A missing recap or a format finding is an
+  advisory, never a refusal. All harnesses write one format, from
+  `runbooks/recap.md`. See [Document Format](specs/02-document-format.md).
+
 - A template patch whose target no patch path applies is refused with a
   message, never dropped (`#staleretainedwrite`): `patch:queue`, `patch:run`,
   and `patch:loop` target runnable queue components, which all parse as the

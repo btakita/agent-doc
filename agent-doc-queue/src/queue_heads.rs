@@ -1154,6 +1154,19 @@ mod tests {
         assert!(!message.contains("supplied neither an exact"));
     }
 
+    /// `#agentrecap`: a recap names queue work, and that text is never a row.
+    #[test]
+    fn a_do_line_in_the_recap_is_not_a_queue_head() {
+        let doc = concat!(
+            "<!-- agent:recap patch=replace -->\n",
+            "Still can't close:\n- do [#from-recap]: blocked.\n",
+            "<!-- /agent:recap -->\n\n",
+            "<!-- agent:run -->\n<!-- /agent:run -->\n",
+        );
+        assert!(active_queue_heads(doc).is_empty());
+        assert_eq!(active_queue_head_text(doc).unwrap(), None);
+    }
+
     #[test]
     fn prompt_preset_skip_diagnostic_names_the_actual_response_contract() {
         let content = concat!(

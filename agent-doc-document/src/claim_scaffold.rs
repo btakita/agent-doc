@@ -5,7 +5,9 @@ use agent_doc_frontmatter::{frontmatter, project_config};
 
 const DEFAULT_TEMPLATE_STATUS_OPEN: &str = "\n\n## Status <!-- agent:status patch=replace -->\n";
 const DEFAULT_TEMPLATE_STATUS_CLOSE: &str = "<!-- /agent:status -->\n";
-const DEFAULT_TEMPLATE_ACTIVE: &str = concat!(
+const DEFAULT_TEMPLATE_RECAP_AND_ACTIVE: &str = concat!(
+    "\n## Recap <!-- agent:recap patch=replace -->\n",
+    "<!-- /agent:recap -->\n",
     "\n## Active <!-- agent:active priority -->\n",
     "<!-- /agent:active -->\n",
 );
@@ -42,7 +44,7 @@ pub fn render_default_template_components(exchange_content: &str) -> String {
         format!("{exchange_body}\n")
     };
     format!(
-        "{DEFAULT_TEMPLATE_STATUS_OPEN}{}{DEFAULT_TEMPLATE_STATUS_CLOSE}{DEFAULT_TEMPLATE_ACTIVE}{DEFAULT_TEMPLATE_COMPONENTS_BEFORE_EXCHANGE}{DEFAULT_TEMPLATE_EXCHANGE_OPEN}{exchange_body}{DEFAULT_TEMPLATE_EXCHANGE_CLOSE}",
+        "{DEFAULT_TEMPLATE_STATUS_OPEN}{}{DEFAULT_TEMPLATE_STATUS_CLOSE}{DEFAULT_TEMPLATE_RECAP_AND_ACTIVE}{DEFAULT_TEMPLATE_COMPONENTS_BEFORE_EXCHANGE}{DEFAULT_TEMPLATE_EXCHANGE_OPEN}{exchange_body}{DEFAULT_TEMPLATE_EXCHANGE_CLOSE}",
         status_body.trim_start_matches('\n'),
     )
 }
@@ -208,6 +210,7 @@ mod tests {
             section_headers,
             [
                 "## Status <!-- agent:status patch=replace -->",
+                "## Recap <!-- agent:recap patch=replace -->",
                 "## Active <!-- agent:active priority -->",
                 "## Run <!-- agent:run priority subagents clear -->",
                 "## Review <!-- agent:review -->",
@@ -248,13 +251,14 @@ mod tests {
         assert_eq!(
             component_names,
             [
-                "status", "active", "queue", "review", "todo", "backlog", "icebox", "notes",
-                "done", "exchange",
+                "status", "recap", "active", "queue", "review", "todo", "backlog", "icebox",
+                "notes", "done", "exchange",
             ],
             "claim scaffolds every canonical component in stable document order"
         );
         assert_eq!(components[0].patch_mode(), Some("replace"));
-        assert_eq!(components[9].patch_mode(), Some("append"));
+        assert_eq!(components[1].patch_mode(), Some("replace"));
+        assert_eq!(components[10].patch_mode(), Some("append"));
         let backlog = components
             .iter()
             .find(|component| component.name == "backlog")
@@ -262,19 +266,19 @@ mod tests {
         assert_eq!(backlog.attrs.get("priority").map(String::as_str), Some(""));
         assert_eq!(backlog.attrs.get("queue").map(String::as_str), Some(""));
         assert_eq!(
-            components[2].attrs.get("priority").map(String::as_str),
+            components[3].attrs.get("priority").map(String::as_str),
             Some("")
         );
         assert_eq!(
-            components[2].attrs.get("subagents").map(String::as_str),
+            components[3].attrs.get("subagents").map(String::as_str),
             Some("")
         );
         assert_eq!(
-            components[2].attrs.get("clear").map(String::as_str),
+            components[3].attrs.get("clear").map(String::as_str),
             Some("")
         );
-        assert_eq!(components[2].attrs.len(), 3);
-        assert_default_run_omits_queue_control(&components[2]);
+        assert_eq!(components[3].attrs.len(), 3);
+        assert_default_run_omits_queue_control(&components[3]);
         assert!(
             !scaffold.contains("\nqueue:"),
             "the scaffold must not write queue: go; absence is already go-mode"
@@ -285,7 +289,7 @@ mod tests {
             .expect("default scaffold includes todo");
         assert_eq!(todo.attrs.get("priority").map(String::as_str), Some(""));
         assert!(
-            components[3..9]
+            components[4..10]
                 .iter()
                 .filter(|component| { component.name != "todo" && component.name != "backlog" })
                 .all(|component| component.attrs.is_empty())
@@ -336,7 +340,7 @@ mod tests {
         assert!(!scaffold.contains("<!-- agent:rogue -->"));
         let components = agent_doc_element::element::parse(&scaffold)
             .expect("an adversarial filename must still produce a parseable component tree");
-        assert_eq!(components.len(), 10);
+        assert_eq!(components.len(), 11);
         assert_eq!(
             scaffold
                 .lines()
@@ -407,8 +411,8 @@ mod tests {
         assert_eq!(
             component_names,
             [
-                "status", "active", "queue", "review", "todo", "backlog", "icebox", "notes",
-                "done", "exchange",
+                "status", "recap", "active", "queue", "review", "todo", "backlog", "icebox",
+                "notes", "done", "exchange",
             ],
             "claim must use the same canonical component sequence for non-empty templates"
         );

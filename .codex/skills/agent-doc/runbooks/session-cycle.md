@@ -167,10 +167,16 @@ cat <<'RESPONSE' | agent-doc respond <FILE> --stream --origin skill
 <!-- patch:exchange -->
 <complete cumulative response>
 <!-- /patch:exchange -->
+<!-- patch:recap -->
+<this turn's recap>
+<!-- /patch:recap -->
 RESPONSE
 ```
 
-Template responses require both patch markers. `respond` must reach `committed`
+Template responses require both `patch:exchange` markers. The `patch:recap` block
+replaces the whole `agent:recap` body with this turn's recap; every harness writes
+it in the shared format in [recap.md](recap.md). A closeout without one still
+lands and only prints an advisory. `respond` must reach `committed`
 and pass its binary-owned post-commit check. Direct-exec Codex/OpenCode paths
 also run `agent-doc session-check <FILE>`; connected clients consume the
 terminal finalize result and do not run a redundant check. After `respond` /

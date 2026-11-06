@@ -61575,6 +61575,7 @@ mod tests {
                             authority_epoch,
                             1,
                             &event.event_id,
+                            &serde_json::to_string(&event).unwrap(),
                         )
                         .unwrap()
                     );
@@ -61671,6 +61672,7 @@ mod tests {
                 505,
                 1,
                 &event.event_id,
+                &serde_json::to_string(&event).unwrap(),
             )
             .unwrap()
         );
@@ -61734,6 +61736,118 @@ mod tests {
                 .unwrap()
         );
         assert_eq!(ledgered_authority_epoch(&successor), Some(606));
+    }
+
+    /// `#sameepochhandoffackloss`: a same-epoch observation upserted after the
+    /// drain loaded the row, and before its ACK, keeps its row. The loaded
+    /// event is folded; the replacement reaches the ledger on the next drain.
+    #[test]
+    fn same_epoch_replacement_survives_the_ack_of_the_loaded_handoff() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let loaded = authority_handoff_test_event("authority-loaded", "doc", 707);
+        let replacement = agent_doc_state_backbone::StateEvent::new(
+            "authority-replacement",
+            agent_doc_state_backbone::StateFact::DocumentAuthorityObserved {
+                document_hash: "doc".to_string(),
+                authority: agent_doc_state_backbone::DocumentAuthority::EditorRelay,
+                authority_epoch: 707,
+                source: "replacement-source".to_string(),
+                reason: "relay_current".to_string(),
+                content_hash: Some("cut-707-replacement".to_string()),
+                editor_id: Some("editor-2".to_string()),
+            },
+        );
+        assert!(
+            state_store::enqueue_document_authority_handoff(
+                dir.path(),
+                &state_store::DocumentAuthorityHandoff {
+                    document_hash: "doc".to_string(),
+                    authority_epoch: 707,
+                    controller_generation: 1,
+                    payload_json: serde_json::to_string(&loaded).unwrap(),
+                },
+            )
+            .unwrap()
+        );
+        let runtime = ControllerRuntime::new(test_bootstrap(&dir)).unwrap();
+        {
+            let project_root = dir.path().to_path_buf();
+            let replacement = replacement.clone();
+            set_authority_handoff_before_ack_test_hook(Some(Box::new(move || {
+                assert!(
+                    state_store::enqueue_document_authority_handoff(
+                        &project_root,
+                        &state_store::DocumentAuthorityHandoff {
+                            document_hash: "doc".to_string(),
+                            authority_epoch: 707,
+                            controller_generation: 1,
+                            payload_json: serde_json::to_string(&replacement).unwrap(),
+                        },
+                    )
+                    .unwrap(),
+                    "the same-epoch replacement must land before the ACK"
+                );
+            })));
+        }
+
+        assert!(
+            runtime
+                .drain_document_authority_handoffs(dir.path())
+                .unwrap(),
+            "the replacement row stays for another drain"
+        );
+        let retained = state_store::load_document_authority_handoffs(dir.path()).unwrap();
+        assert_eq!(retained.len(), 1);
+        assert!(
+            retained[0].payload_json.contains("replacement-source"),
+            "the ACK of the loaded payload must not delete the replacement"
+        );
+        assert!(
+            state_store::load_document_authority_ack_receipts_before(dir.path(), 2)
+                .unwrap()
+                .is_empty(),
+            "no receipt is written for a row the ACK did not delete"
+        );
+        let ledger_has = |event_id: &str| {
+            load_state_event_ledger(dir.path())
+                .unwrap()
+                .events()
+                .iter()
+                .any(|stored| stored.event_id == event_id)
+        };
+        assert!(ledger_has(&loaded.event_id));
+        assert!(!ledger_has(&replacement.event_id));
+
+        assert!(
+            !runtime
+                .drain_document_authority_handoffs(dir.path())
+                .unwrap()
+        );
+        assert!(
+            state_store::load_document_authority_handoffs(dir.path())
+                .unwrap()
+                .is_empty()
+        );
+        assert!(ledger_has(&replacement.event_id));
+        assert_eq!(
+            runtime
+                .memory
+                .lock()
+                .state_projection
+                .document("doc")
+                .and_then(|projection| projection.document.latest_editor_authority.clone())
+                .map(|authority| authority.source),
+            Some("replacement-source".to_string()),
+            "the editor plane accepts the same-epoch replacement once it is folded"
+        );
+        assert_eq!(
+            state_store::load_document_authority_ack_receipts_before(dir.path(), 2)
+                .unwrap()
+                .iter()
+                .map(|receipt| receipt.event_id.as_str())
+                .collect::<Vec<_>>(),
+            vec![replacement.event_id.as_str()]
+        );
     }
 
     /// `#retiredhandoffapplyrace`: the duplicate's ledger sequence, compared
@@ -61852,6 +61966,7 @@ mod tests {
                         authority_epoch,
                         1,
                         &event.event_id,
+                        &serde_json::to_string(&event).unwrap(),
                     )
                     .unwrap(),
                     "the predecessor's generation-fenced ACK removes its own row"

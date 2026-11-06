@@ -4570,13 +4570,14 @@ mod tests {
             agent_doc_state_backbone::DocumentAuthority::EditorRelay,
             11,
         );
+        let pending_payload = serde_json::to_string(&pending_editor).unwrap();
         agent_doc_sqlite::state_store::enqueue_document_authority_handoff(
             dir.path(),
             &agent_doc_sqlite::state_store::DocumentAuthorityHandoff {
                 document_hash: document_hash.clone(),
                 authority_epoch: 11,
                 controller_generation: 2,
-                payload_json: serde_json::to_string(&pending_editor).unwrap(),
+                payload_json: pending_payload.clone(),
             },
         )
         .unwrap();
@@ -4584,6 +4585,7 @@ mod tests {
         let project_root = dir.path().to_path_buf();
         let hook_document_hash = document_hash.clone();
         let folded_editor = pending_editor.clone();
+        let ack_payload = pending_payload;
         set_document_authority_handoff_read_test_hook(Some(Box::new(move || {
             let conn = agent_doc_sqlite::state_store::open_state_db(&project_root).unwrap();
             let payload = serde_json::to_string(&folded_editor).unwrap();
@@ -4605,6 +4607,7 @@ mod tests {
                     11,
                     2,
                     &folded_editor.event_id,
+                    &ack_payload,
                 )
                 .unwrap()
             );

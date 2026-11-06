@@ -502,6 +502,15 @@ queue lines the strike itself added or removed, closeout logs
 publishes both cuts. An operator row the snapshot never held, and a snapshot
 whose queue body already matches the published live queue, stay quiet.
 
+Operator list rows are not position-counted `:duplicate:N` identities
+(`#duplicateordinalshift`). A same-key row inserted ahead keeps the earlier rows
+on the identity they already had; the inserted row is the new one. A second
+byte-identical operator prompt, including a prompt whose text is `yes`, is kept
+(`#identicalpromptdedupe`). Agent response headings still use `:duplicate:N`
+when two responses share a heading, and that keying stays lossless. An agent
+replay copy beyond the operator's count is still removed on the next merge
+over the operator cut.
+
 `agent:run` is the canonical runnable-work component. The former
 `agent:queue` spelling remains a backward-compatible alias with identical queue
 semantics, attributes, node identity, and mutation behavior. Agent Doc accepts

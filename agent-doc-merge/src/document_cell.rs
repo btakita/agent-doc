@@ -192,8 +192,30 @@ pub fn node_key_identity(key: &str) -> &str {
 }
 
 fn duplicate_primary_identity(key: &str) -> Option<&str> {
-    let (primary, ordinal) = key.rsplit_once(":duplicate:")?;
-    (!ordinal.is_empty() && ordinal.bytes().all(|byte| byte.is_ascii_digit())).then_some(primary)
+    // `:duplicate:` is the exchange response-heading disambiguator.
+    // `:repeat:` is an operator row that matched no base row. A base-matched
+    // `:slot:` is the row itself, so it is not a replay marker.
+    for marker in [":duplicate:", ":repeat:"] {
+        if let Some((primary, ordinal)) = key.rsplit_once(marker) {
+            if !ordinal.is_empty() && ordinal.bytes().all(|byte| byte.is_ascii_digit()) {
+                return Some(primary);
+            }
+        }
+    }
+    None
+}
+
+/// Strip a within-document disambiguator so cross-version matching does not
+/// use a position count. `:occ:` exists only inside one projection.
+fn repeat_disambiguator_primary(identity: &str) -> &str {
+    for marker in [":duplicate:", ":repeat:", ":slot:", ":occ:"] {
+        if let Some((primary, ordinal)) = identity.rsplit_once(marker) {
+            if !ordinal.is_empty() && ordinal.bytes().all(|byte| byte.is_ascii_digit()) {
+                return primary;
+            }
+        }
+    }
+    identity
 }
 
 /// One component occurrence projected into an ordered keyed item sequence.
@@ -702,11 +724,13 @@ fn split_keyed_children(name: &str, body: &str) -> Option<Vec<(String, String)>>
         None
     }?;
     // Duplicate prompt text — including duplicate durable `[#id]` prompts — can
-    // be intentional operator input. Preserve every occurrence losslessly and
-    // give later occurrences a stable ordinal identity. This lets the
-    // ownership-aware compose preserve THEIRS' exact multiplicity while
-    // distinguishing replayed copies that exist only on OURS. Disambiguate the
-    // PREAMBLE child, which is always first.
+    // be intentional operator input. Preserve every occurrence. Exchange
+    // response headings keep a forward `:duplicate:N` so two `### Re:` turns
+    // stay distinct (`#dupreheadingcollide`); that keying is lossless and is
+    // not an operator-row identity. Operator rows use `:occ:N` only so this
+    // projection's map keys stay unique. Compose strips it and matches rows by
+    // instruction text against the base, so a same-key row inserted ahead
+    // cannot renumber the others (`#duplicateordinalshift`).
     let mut occurrences = std::collections::HashMap::<String, usize>::new();
     let mut pairs = Vec::with_capacity(children.len());
     for child in &children {
@@ -718,8 +742,10 @@ fn split_keyed_children(name: &str, body: &str) -> Option<Vec<(String, String)>>
         let ordinal = occurrences.entry(base_key.clone()).or_default();
         let key = if *ordinal == 0 {
             base_key
-        } else {
+        } else if name == "exchange" {
             format!("{base_key}:duplicate:{ordinal}")
+        } else {
+            format!("{base_key}:occ:{ordinal}")
         };
         *ordinal += 1;
         pairs.push((key, child.text.clone()));
@@ -727,10 +753,290 @@ fn split_keyed_children(name: &str, body: &str) -> Option<Vec<(String, String)>>
     Some(pairs)
 }
 
+/// Longest common subsequence, reconstructed from the end so that when several
+/// alignments are equally long (byte-identical rows) the later rows keep the
+/// match and the extra row is the earlier one. An ahead insert then does not
+/// take an existing row's identity. Distinct texts have one alignment, so an
+/// end insert of a different row stays an end insert.
+fn lcs_index_pairs(left: &[String], right: &[String]) -> Vec<(usize, usize)> {
+    let n = left.len();
+    let m = right.len();
+    let mut dp = vec![vec![0usize; m + 1]; n + 1];
+    for i in 0..n {
+        for j in 0..m {
+            if left[i] == right[j] {
+                dp[i + 1][j + 1] = dp[i][j] + 1;
+            } else {
+                dp[i + 1][j + 1] = dp[i][j + 1].max(dp[i + 1][j]);
+            }
+        }
+    }
+    let mut pairs = Vec::new();
+    let (mut i, mut j) = (n, m);
+    while i > 0 && j > 0 {
+        if left[i - 1] == right[j - 1] && dp[i][j] == dp[i - 1][j - 1] + 1 {
+            pairs.push((i - 1, j - 1));
+            i -= 1;
+            j -= 1;
+        } else if dp[i - 1][j] >= dp[i][j - 1] {
+            i -= 1;
+        } else {
+            j -= 1;
+        }
+    }
+    pairs.reverse();
+    pairs
+}
+
+fn repeat_indices(ids: &[String], primary: &str) -> Vec<usize> {
+    ids.iter()
+        .enumerate()
+        .filter(|(_, id)| repeat_disambiguator_primary(id) == primary)
+        .map(|(index, _)| index)
+        .collect()
+}
+
+fn repeat_side_needs_align(ids: &[String], indexes: &[usize], primary: &str) -> bool {
+    indexes.len() > 1 || indexes.iter().any(|&index| ids[index] != primary)
+}
+
+/// Match `side` onto `base` by instruction text. When the unmatched counts are
+/// equal, pair those leftovers in order so a pure edit of one repeated row
+/// still lands on that row. Unequal leftovers are inserts or deletes.
+fn match_repeat_side(side_texts: &[String], base_texts: &[String]) -> Vec<Option<usize>> {
+    let mut matched = vec![None; side_texts.len()];
+    let mut base_taken = vec![false; base_texts.len()];
+    for (side, base) in lcs_index_pairs(side_texts, base_texts) {
+        matched[side] = Some(base);
+        base_taken[base] = true;
+    }
+    let unmatched_side: Vec<usize> = matched
+        .iter()
+        .enumerate()
+        .filter(|(_, slot)| slot.is_none())
+        .map(|(index, _)| index)
+        .collect();
+    let unmatched_base: Vec<usize> = base_taken
+        .iter()
+        .enumerate()
+        .filter(|(_, taken)| !**taken)
+        .map(|(index, _)| index)
+        .collect();
+    if unmatched_side.len() == unmatched_base.len() {
+        for (side, base) in unmatched_side.into_iter().zip(unmatched_base) {
+            matched[side] = Some(base);
+        }
+    }
+    matched
+}
+
+fn align_repeat_primary(
+    primary: &str,
+    base_ids: &mut [String],
+    base_text: &[String],
+    ours_ids: &mut [String],
+    ours_text: &[String],
+    theirs_ids: &mut [String],
+    theirs_text: &[String],
+) {
+    let base_at = repeat_indices(base_ids, primary);
+    let ours_at = repeat_indices(ours_ids, primary);
+    let theirs_at = repeat_indices(theirs_ids, primary);
+    if !repeat_side_needs_align(base_ids, &base_at, primary)
+        && !repeat_side_needs_align(ours_ids, &ours_at, primary)
+        && !repeat_side_needs_align(theirs_ids, &theirs_at, primary)
+    {
+        return;
+    }
+    for (slot, &index) in base_at.iter().enumerate() {
+        base_ids[index] = if slot == 0 {
+            primary.to_string()
+        } else {
+            format!("{primary}:slot:{slot}")
+        };
+    }
+    let base_texts: Vec<String> = base_at
+        .iter()
+        .map(|&index| base_text[index].clone())
+        .collect();
+    let ours_texts: Vec<String> = ours_at
+        .iter()
+        .map(|&index| ours_text[index].clone())
+        .collect();
+    let theirs_texts: Vec<String> = theirs_at
+        .iter()
+        .map(|&index| theirs_text[index].clone())
+        .collect();
+    let ours_match = match_repeat_side(&ours_texts, &base_texts);
+    let theirs_match = match_repeat_side(&theirs_texts, &base_texts);
+    for (pos, slot) in ours_match.iter().enumerate() {
+        if let Some(slot) = slot {
+            ours_ids[ours_at[pos]] = base_ids[base_at[*slot]].clone();
+        }
+    }
+    for (pos, slot) in theirs_match.iter().enumerate() {
+        if let Some(slot) = slot {
+            theirs_ids[theirs_at[pos]] = base_ids[base_at[*slot]].clone();
+        }
+    }
+    let ours_left: Vec<usize> = ours_match
+        .iter()
+        .enumerate()
+        .filter(|(_, slot)| slot.is_none())
+        .map(|(pos, _)| pos)
+        .collect();
+    let theirs_left: Vec<usize> = theirs_match
+        .iter()
+        .enumerate()
+        .filter(|(_, slot)| slot.is_none())
+        .map(|(pos, _)| pos)
+        .collect();
+    let ours_left_texts: Vec<String> = ours_left
+        .iter()
+        .map(|&pos| ours_texts[pos].clone())
+        .collect();
+    let theirs_left_texts: Vec<String> = theirs_left
+        .iter()
+        .map(|&pos| theirs_texts[pos].clone())
+        .collect();
+    let mut ours_taken = vec![false; ours_left.len()];
+    let mut theirs_taken = vec![false; theirs_left.len()];
+    for (shared, (ours_pos, theirs_pos)) in lcs_index_pairs(&ours_left_texts, &theirs_left_texts)
+        .into_iter()
+        .enumerate()
+    {
+        let id = if base_at.is_empty() && shared == 0 {
+            primary.to_string()
+        } else {
+            format!("{primary}:repeat:{shared}")
+        };
+        ours_ids[ours_at[ours_left[ours_pos]]] = id.clone();
+        theirs_ids[theirs_at[theirs_left[theirs_pos]]] = id;
+        ours_taken[ours_pos] = true;
+        theirs_taken[theirs_pos] = true;
+    }
+    let mut ours_only = 0usize;
+    for (pos, taken) in ours_taken.iter().enumerate() {
+        if !*taken {
+            ours_ids[ours_at[ours_left[pos]]] = format!("{primary}:repeat:{}", 1000 + ours_only);
+            ours_only += 1;
+        }
+    }
+    let mut theirs_only = 0usize;
+    for (pos, taken) in theirs_taken.iter().enumerate() {
+        if !*taken {
+            theirs_ids[theirs_at[theirs_left[pos]]] =
+                format!("{primary}:repeat:{}", 2000 + theirs_only);
+            theirs_only += 1;
+        }
+    }
+}
+
+fn rewrite_occurrence(occ: &ComponentOccurrence, ids: &[String]) -> ComponentOccurrence {
+    let items = occ
+        .items
+        .iter()
+        .enumerate()
+        .map(|(index, (key, value))| {
+            if node_key_identity(key) == ids[index] {
+                (key.clone(), value.clone())
+            } else {
+                (format!("{}:{index}", ids[index]), value.clone())
+            }
+        })
+        .collect();
+    ComponentOccurrence {
+        component: occ.component.clone(),
+        occurrence: occ.occurrence,
+        items,
+    }
+}
+
+/// Give operator repeats a base-relative identity. A row inserted ahead keeps
+/// a fresh id; rows whose instruction text already existed keep the base row's
+/// id, so a strike on the original row does not slide onto the new one.
+fn align_operator_repeats(
+    base: &ComponentOccurrence,
+    ours: &ComponentOccurrence,
+    theirs: &ComponentOccurrence,
+) -> (
+    ComponentOccurrence,
+    ComponentOccurrence,
+    ComponentOccurrence,
+) {
+    let mut base_ids: Vec<String> = base
+        .items
+        .iter()
+        .map(|(key, _)| node_key_identity(key).to_string())
+        .collect();
+    let mut ours_ids: Vec<String> = ours
+        .items
+        .iter()
+        .map(|(key, _)| node_key_identity(key).to_string())
+        .collect();
+    let mut theirs_ids: Vec<String> = theirs
+        .items
+        .iter()
+        .map(|(key, _)| node_key_identity(key).to_string())
+        .collect();
+    let base_text: Vec<String> = base
+        .items
+        .iter()
+        .map(|(_, value)| crate::crdt::queue_instruction_text(value))
+        .collect();
+    let ours_text: Vec<String> = ours
+        .items
+        .iter()
+        .map(|(_, value)| crate::crdt::queue_instruction_text(value))
+        .collect();
+    let theirs_text: Vec<String> = theirs
+        .items
+        .iter()
+        .map(|(_, value)| crate::crdt::queue_instruction_text(value))
+        .collect();
+    let mut primaries = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for id in base_ids
+        .iter()
+        .chain(ours_ids.iter())
+        .chain(theirs_ids.iter())
+    {
+        let primary = repeat_disambiguator_primary(id).to_string();
+        if seen.insert(primary.clone()) {
+            primaries.push(primary);
+        }
+    }
+    for primary in &primaries {
+        align_repeat_primary(
+            primary,
+            &mut base_ids,
+            &base_text,
+            &mut ours_ids,
+            &ours_text,
+            &mut theirs_ids,
+            &theirs_text,
+        );
+    }
+    (
+        rewrite_occurrence(base, &base_ids),
+        rewrite_occurrence(ours, &ours_ids),
+        rewrite_occurrence(theirs, &theirs_ids),
+    )
+}
+
 /// The minimal per-item op set between two revisions of one component
 /// occurrence. Pure groundwork: a structural edit becomes minimal per-item ops
 /// (the per-cell-merge enabler), not a whole-component replace.
 fn diff_occurrence(old: &ComponentOccurrence, new: &ComponentOccurrence) -> ComponentDiff {
+    let aligned = if old.component == "exchange" || new.component == "exchange" {
+        None
+    } else {
+        Some(align_operator_repeats(old, new, new))
+    };
+    let (old, new) = match &aligned {
+        Some((old, new, _)) => (old, new),
+        None => (old, new),
+    };
     let ops = reconcile(&old.keyed_for_diff(), &new.keyed_for_diff());
     ComponentDiff {
         component: new.component.clone(),
@@ -1040,6 +1346,15 @@ fn compose_occurrence(
     theirs: &ComponentOccurrence,
     policy: ConflictPolicy,
 ) -> Option<ComposedOccurrence> {
+    let aligned = if ours.component == "exchange" {
+        None
+    } else {
+        Some(align_operator_repeats(base, ours, theirs))
+    };
+    let (base, ours, theirs) = match &aligned {
+        Some((base, ours, theirs)) => (base, ours, theirs),
+        None => (base, ours, theirs),
+    };
     // The two keyed op sets the cutover composes: base→ours and base→theirs,
     // each via the lazily LIS keyed `reconcile`. From each we read which item
     // identities that side *touched* (Insert/Update/Move) and which it *removed*.
@@ -1176,6 +1491,8 @@ fn compose_occurrence(
             (Some(o), None) => {
                 let authoritative_theirs_delete =
                     policy == ConflictPolicy::TheirsWins || !ours_updated.contains(id);
+                // An ours-only `:repeat:` (or exchange `:duplicate:`) whose primary
+                // the operator still has is a replay copy, not a second operator row.
                 let replayed_duplicate_omitted_by_operator = policy == ConflictPolicy::TheirsWins
                     && !in_b
                     && duplicate_primary_identity(id)
@@ -3348,6 +3665,134 @@ while I was typing the next queue item\n\
         let out = merge_3way(base, ours, theirs);
         assert!(!out.fell_back);
         assert_eq!(out.merged_text.matches("- do [#same] twice").count(), 2);
+    }
+
+    #[test]
+    fn ahead_insert_of_same_key_row_does_not_steal_a_strike() {
+        let base = concat!(
+            "<!-- agent:queue -->\n",
+            "- do [#same] first\n",
+            "- do [#same] second\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let ours = concat!(
+            "<!-- agent:queue -->\n",
+            "- ~~do [#same] first~~\n",
+            "- do [#same] second\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let theirs = concat!(
+            "<!-- agent:queue -->\n",
+            "- do [#same] inserted\n",
+            "- do [#same] first\n",
+            "- do [#same] second\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let out = merge_3way(base, ours, &theirs);
+        assert!(
+            !out.fell_back,
+            "same-key ahead insert stays on the keyed path"
+        );
+        assert!(
+            !out.merged_text.contains("~~do [#same] inserted~~"),
+            "the strike stays on the original row:\n{}",
+            out.merged_text
+        );
+        assert!(out.merged_text.contains("- ~~do [#same] first~~"));
+        assert!(out.merged_text.contains("- do [#same] second"));
+        assert!(!out.merged_text.contains("~~do [#same] second~~"));
+        let inserted = out.merged_text.find("- do [#same] inserted").unwrap();
+        let first = out.merged_text.find("do [#same] first").unwrap();
+        let second = out.merged_text.find("- do [#same] second").unwrap();
+        assert!(inserted < first && first < second, "{}", out.merged_text);
+    }
+
+    #[test]
+    fn end_insert_of_same_key_row_does_not_steal_a_strike() {
+        let base = concat!(
+            "<!-- agent:queue -->\n",
+            "- do [#same] first\n",
+            "- do [#same] second\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let ours = concat!(
+            "<!-- agent:queue -->\n",
+            "- ~~do [#same] first~~\n",
+            "- do [#same] second\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let theirs = concat!(
+            "<!-- agent:queue -->\n",
+            "- do [#same] first\n",
+            "- do [#same] second\n",
+            "- do [#same] inserted\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let out = merge_3way(base, ours, &theirs);
+        assert!(!out.fell_back);
+        assert!(
+            out.merged_text.contains("- ~~do [#same] first~~"),
+            "{}",
+            out.merged_text
+        );
+        assert!(out.merged_text.contains("- do [#same] inserted"));
+        assert!(!out.merged_text.contains("~~do [#same] inserted~~"));
+        let first = out.merged_text.find("do [#same] first").unwrap();
+        let inserted = out.merged_text.find("- do [#same] inserted").unwrap();
+        assert!(first < inserted, "{}", out.merged_text);
+    }
+
+    #[test]
+    fn ahead_insert_of_same_key_row_is_one_insert() {
+        let old = concat!(
+            "<!-- agent:queue -->\n",
+            "- do [#same] first\n",
+            "- do [#same] second\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let new = concat!(
+            "<!-- agent:queue -->\n",
+            "- do [#same] inserted\n",
+            "- do [#same] first\n",
+            "- do [#same] second\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let diffs = diff_document(old, &new);
+        let queue = queue_diff(&diffs);
+        let inserts: Vec<_> = queue
+            .ops
+            .iter()
+            .filter(|op| matches!(op, DiffOp::Insert { .. }))
+            .collect();
+        assert_eq!(
+            inserts.len(),
+            1,
+            "ahead insert is one insert: {:?}",
+            queue.ops
+        );
+        assert!(
+            !queue
+                .ops
+                .iter()
+                .any(|op| matches!(op, DiffOp::Remove { .. } | DiffOp::Update { .. })),
+            "ahead insert must not renumber the other rows: {:?}",
+            queue.ops
+        );
+    }
+
+    #[test]
+    fn second_byte_identical_queue_yes_is_kept() {
+        let base = "<!-- agent:queue -->\n- yes\n<!-- /agent:queue -->\n";
+        let ours = base;
+        let theirs = "<!-- agent:queue -->\n- yes\n- yes\n<!-- /agent:queue -->\n";
+        let out = merge_3way(base, ours, theirs);
+        assert!(!out.fell_back);
+        assert_eq!(
+            out.merged_text.matches("- yes").count(),
+            2,
+            "{}",
+            out.merged_text
+        );
     }
 
     /// Counterpart: a keyed-vs-body-only mismatch where the body-only side is

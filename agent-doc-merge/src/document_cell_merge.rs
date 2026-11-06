@@ -1322,11 +1322,11 @@ fn merge_exchange_inner(
     }
     // `#exchangeconverge`: with `document_cell_merge_enabled` (default ON) this is the
     // immediate replacement for the non-convergent heading-turn merge — collapse
-    // any mirror-ordered duplicate response/prompt identities a prior poisoned
-    // buffer carries, so the merge output converges instead of accreting
-    // duplicates across cycles (the runaway-growth wedge). Keyed on
-    // `ExchangeNode::node_id`, so only true duplicates collapse; idempotent and
-    // byte-for-byte verbatim when there is nothing to collapse. The kill-switch
+    // mirror-ordered duplicate response cells a prior poisoned buffer carries, so
+    // the merge output converges instead of accreting duplicates across cycles
+    // (the runaway-growth wedge). A byte-identical operator prompt such as `yes`
+    // is kept (`#identicalpromptdedupe`). Idempotent and byte-for-byte verbatim
+    // when there is nothing to collapse. The kill-switch
     // (`document_cell_merge_enabled = false`) restores the prior pass-through behavior.
     if crate::document_cell::document_cell_merge_enabled() {
         crate::exchange_node_merge::dedup_exchange_nodes_by_identity(&out)
@@ -3040,6 +3040,24 @@ Answer to A.
             m.merged_doc
         );
         assert!(m.merged_doc.contains("Answer to A."));
+    }
+
+    #[test]
+    fn exchange_merge_keeps_a_second_byte_identical_yes_prompt() {
+        let _guard = crate::document_cell::CELL_MERGE_ENV_LOCK.lock();
+        unsafe {
+            std::env::remove_var(crate::document_cell::CELL_MERGE_ENV);
+        }
+        let base = "<!-- agent:exchange -->\n❯ yes\n\n### Re: A — opus\n\nAnswer.\n<!-- /agent:exchange -->\n";
+        let ours = base;
+        let theirs = "<!-- agent:exchange -->\n❯ yes\n\n❯ yes\n\n### Re: A — opus\n\nAnswer.\n<!-- /agent:exchange -->\n";
+        let merged = document_cell_merge(base, ours, theirs);
+        assert_eq!(
+            merged.merged_doc.matches("❯ yes").count(),
+            2,
+            "a second yes prompt is not a duplicate:\n{}",
+            merged.merged_doc
+        );
     }
 
     #[test]

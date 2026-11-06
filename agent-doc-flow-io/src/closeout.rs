@@ -2372,10 +2372,10 @@ pub fn classify_closeout_recovery_state_for_file(
         .and_then(|evidence| evidence.snapshot_head_drift)
     {
         // Escaped template markers are a recovery cause only when the
-        // committed HEAD itself moved away from the durable baseline. A
-        // marker already present in both baseline and HEAD is ordinary
-        // response prose and must not mask a separate visible-authority
-        // failure such as a doubled CRDT projection.
+        // committed HEAD itself moved away from the durable baseline and
+        // brought them along. A block already present in both baseline and
+        // HEAD is ordinary response prose and must not mask a separate
+        // visible-authority failure such as a doubled CRDT projection.
         input.head_has_escaped_template_patch = head_exchange_has_escaped_markers(file);
         input.snapshot_head_drift = Some(snapshot_head_drift);
         return classify_closeout_recovery_state_from_input(input);
@@ -2466,18 +2466,33 @@ fn uncommitted_response_duplicates_head(file: &Path, effects: &dyn CloseoutEffec
         .is_some()
 }
 
+/// `#escapedpatchprosefalsepositive`: HEAD added an escaped raw-template block
+/// to `agent:exchange`, the one shape the `escaped_template_patch` recovery can
+/// fix. Marker text that is merely quoted is prose, and a block the durable
+/// baseline already held did not arrive with the drifted commit, so neither
+/// counts; a rewrite of the response could not remove them.
 fn head_exchange_has_escaped_markers(file: &Path) -> bool {
     let Ok(Some(head)) = agent_doc_git_io::revision::show_head(file) else {
         return false;
     };
-    let Ok(components) = agent_doc_element::element::parse(&head) else {
-        return false;
+    let head_blocks = exchange_escaped_component_block_count(&head);
+    head_blocks > 0
+        && agent_doc_snapshot_io::load_document_baseline(file)
+            .ok()
+            .flatten()
+            .is_none_or(|baseline| head_blocks > exchange_escaped_component_block_count(&baseline))
+}
+
+fn exchange_escaped_component_block_count(document: &str) -> usize {
+    let Ok(components) = agent_doc_element::element::parse(document) else {
+        return 0;
     };
-    let Some(exchange) = components.iter().find(|c| c.name == "exchange") else {
-        return false;
-    };
-    let body = exchange.content(&head);
-    body.contains("&lt;!-- agent:") || body.contains("&lt;!-- /agent:")
+    components
+        .iter()
+        .find(|component| component.name == "exchange")
+        .map_or(0, |exchange| {
+            agent_doc_element::element::escaped_component_block_count(exchange.content(document))
+        })
 }
 
 #[derive(Debug)]

@@ -13520,6 +13520,7 @@ fn handle_editor_route_rpc_with_layout_delegate(
             prune_before_lookup: true,
             background_existing_pane_only: false,
             background_recovered_actor_fallback: false,
+            trigger_only: false,
             // An editor Run Agent Doc is operator-initiated.
             dispatch_origin:
                 agent_doc_controller::dispatch::AuthoritativeActorDispatchOrigin::Operator,
@@ -20475,6 +20476,7 @@ impl ControllerBackgroundMaintenance {
                 // document+dead pid so a stashed corpse is reported once.
                 let mut halt_notified = std::collections::HashSet::<String>::new();
                 let mut binding_skip_notified = std::collections::HashSet::<String>::new();
+                let mut pool_heartbeat_tick = pool_heartbeat::PoolHeartbeatTick::default();
                 while due.recv().is_ok() {
                     let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                         #[cfg(test)]
@@ -20487,6 +20489,9 @@ impl ControllerBackgroundMaintenance {
                         // `#orphandrain`: sweep the documents the supervisor
                         // watchdog cannot help — those with no supervisor to revive.
                         controller_orphan_drain_tick(&runtime);
+                        // `#poolidleheartbeat`: reach a coordinator parked on
+                        // background work, which no tool call will reach.
+                        pool_heartbeat_tick.run_if_due(&runtime, Instant::now());
                     }));
                     if outcome.is_err() {
                         eprintln!(
@@ -20716,6 +20721,9 @@ fn drain_predecessor_after_promotion(
     }
 }
 
+#[path = "pool_heartbeat.rs"]
+mod pool_heartbeat;
+
 const ORPHAN_DRAIN_BACKOFF_SCOPE: &str = "queue_orphan_drain_backoff";
 const ORPHAN_DRAIN_BACKOFF_HOLDER: &str = "controller_orphan_drain";
 
@@ -20846,6 +20854,10 @@ struct OrphanDrainRouteJob {
     invocation: ControllerEditorRouteInvocation,
     project_root: PathBuf,
     claims_at_decision: agent_doc_queue::queue_claim::ClaimedQueueItems,
+    /// `#poolidleheartbeat`: this route delivers a heartbeat wake, not a queue
+    /// head. It shares the worker so one document never has two autonomous
+    /// routes in flight, and it settles against the wake's receipt.
+    pool_heartbeat: Option<pool_heartbeat::PoolHeartbeatRoute>,
 }
 
 /// The worker's last gate before a queued orphan-drain route touches the pane
@@ -20930,6 +20942,7 @@ prompt_presets:\n  \"#upgrade\": \"upgrade agent-doc to the latest release\"\n--
             prune_before_lookup: false,
             background_existing_pane_only: true,
             background_recovered_actor_fallback: false,
+            trigger_only: false,
             dispatch_origin:
                 agent_doc_controller::dispatch::AuthoritativeActorDispatchOrigin::AutomatedBackground,
             layout_owned_by_controller: false,
@@ -21034,6 +21047,7 @@ prompt_presets:\n  \"#upgrade\": \"upgrade agent-doc to the latest release\"\n--
             invocation: background_route(&file),
             project_root: dir.path().to_path_buf(),
             claims_at_decision: agent_doc_queue::queue_claim::ClaimedQueueItems::none(),
+            pool_heartbeat: None,
         };
         assert_eq!(
             orphan_drain_route_job_recheck(&job),
@@ -21089,10 +21103,14 @@ fn start_orphan_drain_route_worker() -> Result<OrphanDrainRouteWorker> {
     std::thread::Builder::new()
         .name("controller-orphan-drain-route".to_string())
         .spawn(move || {
-            while let Ok(job) = receiver.recv() {
+            while let Ok(mut job) = receiver.recv() {
                 let file = job.invocation.file.clone();
-                if let Some(detail) =
-                    orphan_drain_route_job_recheck(&job).skip_detail("route_worker")
+                let pool_heartbeat = job.pool_heartbeat.take();
+                // A claim landing cannot make a due heartbeat stale; the
+                // recheck guards a queue head, which this route does not carry.
+                if pool_heartbeat.is_none()
+                    && let Some(detail) =
+                        orphan_drain_route_job_recheck(&job).skip_detail("route_worker")
                 {
                     log_orphan_drain_event(
                         &file,
@@ -21106,6 +21124,11 @@ fn start_orphan_drain_route_worker() -> Result<OrphanDrainRouteWorker> {
                 let route_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     runtime_effects().and_then(|effects| effects.run_editor_route(invocation))
                 }));
+                if let Some(wake) = pool_heartbeat {
+                    wake.settle(&file, &job.project_root, route_result);
+                    worker_in_flight.lock().remove(&file);
+                    continue;
+                }
                 match route_result {
                     Ok(Ok(result)) if result.exit_code == 0 => {
                         log_orphan_drain_event(
@@ -21978,6 +22001,7 @@ fn controller_orphan_drain_tick(runtime: &Arc<ControllerRuntime>) {
             // so its idle watch can own queue auto-clear. A later orphan
             // attempt is the bounded authoritative-actor fallback (GH #307).
             background_recovered_actor_fallback: recovered_actor_fallback,
+            trigger_only: false,
             // GH #319: no operator is watching this pane. A live
             // turn defers this drain to the next backoff interval.
             dispatch_origin:
@@ -21989,6 +22013,7 @@ fn controller_orphan_drain_tick(runtime: &Arc<ControllerRuntime>) {
             invocation,
             project_root: project_root.clone(),
             claims_at_decision,
+            pool_heartbeat: None,
         }) {
             Ok(true) => {}
             Ok(false) => log_orphan_drain_event(

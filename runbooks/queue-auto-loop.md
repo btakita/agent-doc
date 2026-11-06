@@ -111,6 +111,11 @@ pool's running, dispatching, frozen, and free counts.
   warnings list it with the exact `queue claim --refresh --generation <N>`
   command; run it while the worker is alive. A harness notice that a worker is
   waiting on its own background work is proof of life, so refresh it.
+- While you wait with no tool call running, the project controller reaches you
+  instead: it submits the document's trigger into your idle pane once per
+  distinct set of due heartbeats (`#poolidleheartbeat`). When a turn opens with
+  nothing new but `queue_subagent_pool.refresh_due` set, run each listed refresh
+  for a worker you have no evidence stopped, then end quietly and keep waiting.
 - An attempt that expires with its worker still bound is unconfirmed, not
   freed: it holds its slot and its row is not offered again. That same refresh
   revives the attempt (same owner, generation, and worker), so never claim a

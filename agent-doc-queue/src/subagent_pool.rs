@@ -32,6 +32,14 @@
 //!
 //! A running worker's heartbeat falls due at half its claim window, well
 //! before expiry, and every refill lists it with its exact refresh command.
+//! A refill only reaches a coordinator through a boundary (a trigger command,
+//! preflight, `plan`, or a tool call's PostToolUse), so a coordinator parked on
+//! background work with no tool call running would never see one
+//! (`#poolidleheartbeat`, 2026-11-05: 12 live workers' claims expired twice).
+//! [`pool_heartbeat_wake`] is what the project controller's tick derives for
+//! that coordinator. The tick only delivers the wake: a claim is refreshed by
+//! the coordinator, which alone has evidence the worker is alive, so an
+//! unattended refresh could never hide a worker that stopped.
 //!
 //! This module is pure policy. The machine probe (cores, build slots, env
 //! override) lives in `agent-doc-queue-io::subagent_pool`, which feeds
@@ -292,6 +300,74 @@ pub fn heartbeat_due(claim: &QueueClaim, now_secs: u64, frozen_secs: u64) -> boo
     }
 }
 
+/// Seconds past the moment a bound worker's heartbeat fell due; zero before it.
+pub fn heartbeat_overdue_secs(claim: &QueueClaim, now_secs: u64) -> u64 {
+    last_heartbeat_secs(claim).map_or(0, |last| {
+        let window = claim.expires_at_secs.saturating_sub(last);
+        now_secs.saturating_sub(last).saturating_sub(window / 2)
+    })
+}
+
+/// Whether any attempt in `claims` could have a due heartbeat, from the claim
+/// ledger alone. The project controller's tick asks this before it reads a
+/// document, so a quiescent document costs a ledger read and no text. It
+/// ignores the frozen bound on purpose: the exact answer needs the document's
+/// live rows anyway, and a stale worker must not be hidden from that answer.
+pub fn heartbeat_may_be_due<'a>(
+    claims: impl IntoIterator<Item = &'a QueueClaim>,
+    now_secs: u64,
+) -> bool {
+    claims
+        .into_iter()
+        .any(|claim| heartbeat_due(claim, now_secs, u64::MAX))
+}
+
+/// How long a due heartbeat waits for its siblings before an idle coordinator
+/// is woken for it. Workers spawned minutes apart fall due minutes apart, and
+/// each wake costs a coordinator turn, so one wake carries the whole batch.
+/// Well inside the half claim window between due and expiry, and an expired
+/// claim never waits.
+pub const POOL_HEARTBEAT_WAKE_COALESCE_SECS: u64 = 300;
+
+/// What the project controller's tick hands an idle coordinator: one wake for
+/// one distinct set of due heartbeats.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PoolHeartbeatWake {
+    /// Identity of the due set. A refresh moves `last_heartbeat_secs` and an
+    /// expiry flips `expired`, so either is a new set and a fresh wake; an
+    /// unchanged set is delivered once.
+    pub fingerprint: String,
+    pub due: usize,
+    pub expired: usize,
+}
+
+/// The wake `refresh_due` calls for, or `None` while nothing is due or the due
+/// set is still inside [`POOL_HEARTBEAT_WAKE_COALESCE_SECS`].
+pub fn pool_heartbeat_wake(refresh_due: &[RefreshDue]) -> Option<PoolHeartbeatWake> {
+    let expired = refresh_due.iter().filter(|entry| entry.expired).count();
+    let held_past_coalesce = refresh_due
+        .iter()
+        .any(|entry| entry.overdue_secs >= POOL_HEARTBEAT_WAKE_COALESCE_SECS);
+    if expired == 0 && !held_past_coalesce {
+        return None;
+    }
+    let mut parts = refresh_due
+        .iter()
+        .map(|entry| {
+            format!(
+                "{}:{}:{}:{}",
+                entry.generation, entry.last_heartbeat_secs, entry.expired, entry.item
+            )
+        })
+        .collect::<Vec<_>>();
+    parts.sort();
+    Some(PoolHeartbeatWake {
+        fingerprint: agent_doc_hash::content_hash(&parts.join("\n")),
+        due: refresh_due.len(),
+        expired,
+    })
+}
+
 /// Slot accounting for one pool.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PoolOccupancy {
@@ -401,6 +477,9 @@ pub struct RefreshDue {
     pub worker_id: String,
     pub last_heartbeat_secs: u64,
     pub heartbeat_age_secs: u64,
+    /// Seconds past the moment this heartbeat fell due.
+    #[serde(default)]
+    pub overdue_secs: u64,
     /// The claim already expired; the attempt is unconfirmed, not freed.
     pub expired: bool,
     pub refresh_command: String,
@@ -762,6 +841,7 @@ mod tests {
                 worker_id: "w".to_string(),
                 last_heartbeat_secs: 0,
                 heartbeat_age_secs: 3700,
+                overdue_secs: 100,
                 expired: false,
                 refresh_command: "agent-doc queue claim f --item r --refresh".to_string(),
                 freeze_command: "agent-doc queue freeze f --item r".to_string(),
@@ -837,5 +917,96 @@ mod tests {
             !heartbeat_due(&claim, 4_601, u64::MAX),
             "a refresh restarts the window"
         );
+    }
+
+    fn due(item: &str, overdue_secs: u64, expired: bool) -> RefreshDue {
+        RefreshDue {
+            item: item.to_string(),
+            owner: format!("subagent:{item}"),
+            generation: 1,
+            worker_id: format!("w-{item}"),
+            last_heartbeat_secs: 100,
+            heartbeat_age_secs: 3_600 + overdue_secs,
+            overdue_secs,
+            expired,
+            refresh_command: String::new(),
+            freeze_command: String::new(),
+        }
+    }
+
+    /// `#poolidleheartbeat`: workers spawned minutes apart coalesce into one
+    /// wake, the oldest one sets the deadline, and expiry never waits.
+    #[test]
+    fn a_heartbeat_wake_holds_for_its_siblings_until_the_oldest_is_past_the_window() {
+        assert_eq!(pool_heartbeat_wake(&[]), None);
+        let just_due = [due("a", 0, false), due("b", 60, false)];
+        assert_eq!(pool_heartbeat_wake(&just_due), None);
+
+        let oldest_past = [
+            due("a", POOL_HEARTBEAT_WAKE_COALESCE_SECS, false),
+            due("b", 60, false),
+        ];
+        let wake = pool_heartbeat_wake(&oldest_past).expect("the batch wakes");
+        assert_eq!((wake.due, wake.expired), (2, 0));
+
+        let expired = pool_heartbeat_wake(&[due("a", 0, true)]).expect("expiry never waits");
+        assert_eq!((expired.due, expired.expired), (1, 1));
+    }
+
+    /// One wake per distinct due set: order is not identity, a refresh and an
+    /// expiry are.
+    #[test]
+    fn a_heartbeat_wake_fingerprint_follows_the_due_set() {
+        let aged = POOL_HEARTBEAT_WAKE_COALESCE_SECS;
+        let fingerprint =
+            |entries: &[RefreshDue]| pool_heartbeat_wake(entries).unwrap().fingerprint;
+        let base = fingerprint(&[due("a", aged, false), due("b", aged, false)]);
+        assert_eq!(
+            base,
+            fingerprint(&[due("b", aged + 60, false), due("a", aged + 60, false)]),
+            "a later tick over the same set is the same wake"
+        );
+        assert_ne!(
+            base,
+            fingerprint(&[due("a", aged, false)]),
+            "a partial refresh"
+        );
+        assert_ne!(
+            base,
+            fingerprint(&[due("a", aged, true), due("b", aged, false)]),
+            "an expiry"
+        );
+        let mut refreshed = due("a", aged, false);
+        refreshed.last_heartbeat_secs = 3_700;
+        assert_ne!(
+            base,
+            fingerprint(&[refreshed, due("b", aged, false)]),
+            "a refresh"
+        );
+    }
+
+    #[test]
+    fn overdue_counts_from_half_the_claim_window() {
+        let mut running = claim("do [#a]", QueueClaimState::Running, Some(1_000));
+        running.expires_at_secs = 8_200;
+        assert_eq!(heartbeat_overdue_secs(&running, 4_599), 0);
+        assert_eq!(heartbeat_overdue_secs(&running, 4_600), 0);
+        assert_eq!(heartbeat_overdue_secs(&running, 4_900), 300);
+        assert!(heartbeat_due(&running, 4_600, DEFAULT_WORKER_FROZEN_SECS));
+    }
+
+    /// The ledger gate may only ever say "maybe": a worker the exact projection
+    /// calls due must pass it, frozen-stale workers included.
+    #[test]
+    fn the_ledger_gate_never_hides_a_due_heartbeat() {
+        let mut running = claim("do [#a]", QueueClaimState::Running, Some(1_000));
+        running.expires_at_secs = 8_200;
+        let claims = [running];
+        assert!(!heartbeat_may_be_due(&claims, 4_599));
+        for now in [4_600, 8_200, 8_201, 1_000_000] {
+            assert!(heartbeat_may_be_due(&claims, now), "{now}");
+        }
+        let unbound = [claim("do [#b]", QueueClaimState::Claimed, None)];
+        assert!(!heartbeat_may_be_due(&unbound, 1_000_000));
     }
 }

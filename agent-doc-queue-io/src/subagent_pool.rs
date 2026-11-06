@@ -131,6 +131,9 @@ pub fn pool_refill_for_content_at(
                     .unwrap_or_default(),
                 last_heartbeat_secs: last,
                 heartbeat_age_secs: now_secs.saturating_sub(last),
+                overdue_secs: agent_doc_queue::subagent_pool::heartbeat_overdue_secs(
+                    claim, now_secs,
+                ),
                 expired: matches!(
                     agent_doc_queue::subagent_pool::classify_attempt(
                         claim,
@@ -189,6 +192,23 @@ pub fn pool_refill_for_content_at(
         next_heads,
         waiting_for_slot,
     })
+}
+
+/// The heartbeat wake `content` calls for (`#poolidleheartbeat`), by the same
+/// projection preflight hands the woken coordinator, so a wake never fires for
+/// a due set the coordinator would not see. `None` for a document whose queue
+/// dispatches no subagents, which is preflight's own gate on that field.
+pub fn pool_heartbeat_wake_for_content(
+    file: &Path,
+    content: &str,
+) -> Result<Option<agent_doc_queue::subagent_pool::PoolHeartbeatWake>> {
+    if !crate::subagent_dispatch::queue_subagent_dispatch_enabled_for_content(file, content)? {
+        return Ok(None);
+    }
+    let refill = pool_refill_for_content(file, content, PoolRefillTrigger::Plan)?;
+    Ok(agent_doc_queue::subagent_pool::pool_heartbeat_wake(
+        &refill.refresh_due,
+    ))
 }
 
 /// The rendered refill for a command's output; a failure is reported as a
@@ -413,6 +433,73 @@ mod tests {
         let live = pool_refill_for_content(&file, &content, PoolRefillTrigger::Plan).unwrap();
         assert_eq!(live.pools[0].occupancy.running, 1, "{live:#?}");
         assert!(!live.is_actionable(), "{live:#?}");
+    }
+
+    /// `#poolidleheartbeat`, through the real ledger: nothing before the batch
+    /// has had its coalesce window, one wake identity while the due set stands,
+    /// nothing once the coordinator refreshed, and a new identity at expiry.
+    #[test]
+    fn a_heartbeat_wake_follows_the_real_due_set() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("task.md");
+        let content = pool_doc("subagents=2", &["do [#a]", "do [#b]"]);
+        std::fs::write(&file, &content).unwrap();
+        let clock = crate::queue_claim::claim_clock_now_secs();
+        let wake_at = |at: u64| {
+            let _pin = crate::queue_claim::pin_claim_clock_for_current_thread(at);
+            pool_heartbeat_wake_for_content(&file, &content).unwrap()
+        };
+        {
+            let _pin = crate::queue_claim::pin_claim_clock_for_current_thread(clock);
+            start(&file, "do [#a]", "subagent:a");
+            start(&file, "do [#b]", "subagent:b");
+        }
+        let coalesce = agent_doc_queue::subagent_pool::POOL_HEARTBEAT_WAKE_COALESCE_SECS;
+        assert_eq!(wake_at(clock), None, "a fresh worker");
+        assert_eq!(wake_at(clock + 3_600), None, "due, holding for siblings");
+
+        let due = wake_at(clock + 3_600 + coalesce).expect("the batch wakes");
+        assert_eq!((due.due, due.expired), (2, 0));
+        assert_eq!(
+            wake_at(clock + 3_600 + coalesce + 60).map(|wake| wake.fingerprint),
+            Some(due.fingerprint.clone()),
+            "a later tick over the same set is the same wake"
+        );
+
+        let expired = wake_at(clock + 7_300).expect("expiry wakes again");
+        assert_eq!(expired.expired, 2);
+        assert_ne!(expired.fingerprint, due.fingerprint);
+
+        let refreshed = clock + 7_300;
+        {
+            let _pin = crate::queue_claim::pin_claim_clock_for_current_thread(refreshed);
+            for (item, owner) in [("do [#a]", "subagent:a"), ("do [#b]", "subagent:b")] {
+                crate::queue_claim::refresh_attempt(&file, item, owner, 7200, Some(1)).unwrap();
+            }
+        }
+        assert_eq!(wake_at(refreshed + 60), None, "a refresh answers the wake");
+    }
+
+    /// A queue that dispatches no subagents has no preflight pool field, so
+    /// waking its coordinator could hand it nothing.
+    #[test]
+    fn a_queue_without_subagents_never_wakes() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("task.md");
+        let content = pool_doc("auto", &["do [#a]"]);
+        std::fs::write(&file, &content).unwrap();
+        let clock = crate::queue_claim::claim_clock_now_secs();
+        {
+            let _pin = crate::queue_claim::pin_claim_clock_for_current_thread(clock);
+            start(&file, "do [#a]", "subagent:a");
+        }
+        let _pin = crate::queue_claim::pin_claim_clock_for_current_thread(clock + 7_300);
+        assert_eq!(
+            pool_heartbeat_wake_for_content(&file, &content).unwrap(),
+            None
+        );
     }
 
     /// An attempt abandoned with `release --requeue` is evidence the worker no

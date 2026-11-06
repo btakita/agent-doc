@@ -1367,6 +1367,51 @@ mod tests {
             "route must not duplicate an already visible queue prompt:\n{updated}"
         );
     }
+    /// `#poolidleheartbeat`: a trigger-only route delivers its trigger and
+    /// leaves an inactive queue exactly as the operator left it, where any other
+    /// dispatch-only route would activate it.
+    #[test]
+    fn a_trigger_only_route_never_activates_an_inactive_queue() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_format: template\n",
+            "queue_active: false\n",
+            "---\n\n",
+            "<!-- agent:exchange -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue auto go -->\n",
+            "- do [#shipstationaudit]. #spec-test-commit-push\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#shipstationaudit] Audit ShipStation settings.\n",
+            "<!-- /agent:backlog -->\n"
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+                let _force_disk_guard =
+            agent_doc_route_io::invocation::ForceDiskRouteWritesGuard::set(true);
+        let _trigger_only = agent_doc_route_io::invocation::TriggerOnlyGuard::set(true);
+        assert_eq!(
+            activate_existing_route_queue_head(
+                &doc,
+                "dispatch_only_inactive_queue",
+                route_queue_effects(),
+            )
+            .unwrap(),
+            None
+        );
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), content);
+    }
+
     #[test]
     fn route_activates_existing_inactive_auto_go_queue_head_as_go_queue_for_busy_deferral() {
         let dir = tempfile::TempDir::new().unwrap();

@@ -151,6 +151,10 @@ pub struct ControllerEditorRouteInvocation {
     /// recovered after the controller sweep. The next attempt may use the
     /// authoritative actor as the bounded fallback instead of yielding again.
     pub background_recovered_actor_fallback: bool,
+    /// `#poolidleheartbeat`: deliver the trigger and change nothing else. A
+    /// dispatch-only route otherwise writes `queue: go` over an inactive queue
+    /// with a live head; an operator route means that, a heartbeat wake does not.
+    pub trigger_only: bool,
     /// GH #319: who asked for this route. Controller-originated
     /// recovery (the orphan drain) is `AutomatedBackground` and must defer
     /// behind a live turn instead of inheriting the operator plain-trigger
@@ -3511,6 +3515,17 @@ pub trait ProjectControllerRuntimeEffects: Send + Sync + 'static {
     /// depends on this crate, hence the port.
     fn subagent_inline_veto_heads(&self, _file: &Path, _content: &str) -> Vec<String> {
         Vec::new()
+    }
+
+    /// `#poolidleheartbeat`: the heartbeat wake `content` calls for, by the
+    /// projection preflight hands the woken coordinator. The projection lives
+    /// in `agent-doc-queue-io`, which depends on this crate, hence the port.
+    fn subagent_pool_heartbeat_wake(
+        &self,
+        _file: &Path,
+        _content: &str,
+    ) -> Result<Option<agent_doc_queue::subagent_pool::PoolHeartbeatWake>> {
+        Ok(None)
     }
 
     /// Perform the git commit for `file` from inside the controller process, where

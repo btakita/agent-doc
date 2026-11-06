@@ -1,6 +1,8 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
+import { createHash } from 'crypto';
 import {
+    bufferIsBinaryAttributedAncestor,
 CrdtReplicaForwarder,
 CrdtReplicaManager,
 ControllerSocketReplicaTransport,
@@ -1045,6 +1047,176 @@ it('non-operator editor events fence queued deltas and never mutate canonical', 
 });
 });
 
+describe('#attachattributionvscode binary-attributed canonical adoption', () => {
+    const saved = '- https://example.test/pull/14\n  - #adversarial-pr\n- ### do [#implement]\n';
+    const canonical =
+        '- https://example.test/pull/14\n  - marker #adversarial-pr\n- ### [#subagent:impl#3] do [#implement]\n';
+    const hash = (text: string) => createHash('sha256').update(text, 'utf8').digest('hex');
+
+    it('attributes only a buffer the controller recorded against this canonical', () => {
+        assert.equal(
+            bufferIsBinaryAttributedAncestor(saved, canonical, hash(canonical), [hash(saved)]),
+            true,
+        );
+        assert.equal(
+            bufferIsBinaryAttributedAncestor(saved + '- operator typed this\n', canonical, hash(canonical), [hash(saved)]),
+            false,
+        );
+        assert.equal(bufferIsBinaryAttributedAncestor(saved, canonical, hash(canonical), []), false);
+        assert.equal(
+            bufferIsBinaryAttributedAncestor(saved, canonical, hash('a newer canonical\n'), [hash(saved)]),
+            false,
+        );
+        assert.equal(bufferIsBinaryAttributedAncestor(saved, canonical, null, [hash(saved)]), false);
+        assert.equal(bufferIsBinaryAttributedAncestor(null, canonical, hash(canonical), [hash(saved)]), false);
+        assert.equal(
+            bufferIsBinaryAttributedAncestor(canonical, canonical, hash(canonical), [hash(canonical)]),
+            false,
+        );
+    });
+
+    function attributedTransport(ancestors: string[], canonicalHash: string | null = hash(canonical)) {
+        const transport = new FakeTransport();
+        transport.register = async () => {
+            transport.registerCount += 1;
+            return {
+                clientId: 40 + transport.registerCount,
+                bootstrap: Buffer.from([9]),
+                canonicalContentHash: canonicalHash,
+                binaryAttributedAncestorHashes: ancestors,
+            };
+        };
+        return transport;
+    }
+
+    it('adopts canonical when the buffer is a recorded binary-authored ancestor', async () => {
+        const transport = attributedTransport([hash(saved)]);
+        const filePath = '/work/plan.md';
+        let editorText = saved;
+        const applied: string[] = [];
+        const manager = new CrdtReplicaManager({
+            projectRoot: '/work',
+            identity: 'vscode-test',
+            transport,
+            nodeFactory: () => new FakeNode(canonical),
+            listDocuments: () => [],
+            currentText: () => editorText,
+            applyText: async (_file, text, expectedText) => {
+                assert.equal(expectedText, saved);
+                assert.equal(text, canonical);
+                applied.push(text);
+                editorText = text;
+                return true;
+            },
+            observeProjection: () => applied.push('observed'),
+        });
+
+        assert.equal(await manager.attachDocument(filePath, saved), true);
+        assert.deepEqual(applied, [canonical, 'observed']);
+        assert.equal(editorText, canonical);
+        assert.deepEqual(transport.projected, [{ contentHash: hash(canonical), diskPersisted: false }]);
+        manager.dispose();
+    });
+
+    it('adopts on a forced re-register when the still-open buffer is that ancestor', async () => {
+        const transport = attributedTransport([hash(saved)]);
+        const filePath = '/work/plan.md';
+        let editorText = canonical;
+        const applied: Array<{ text: string; expected: string }> = [];
+        const nodes = [new FakeNode(canonical), new FakeNode(canonical)];
+        const manager = new CrdtReplicaManager({
+            projectRoot: '/work',
+            identity: 'vscode-test',
+            transport,
+            nodeFactory: () => nodes.shift() ?? new FakeNode(canonical),
+            listDocuments: () => [],
+            currentText: () => editorText,
+            applyText: async (_file, text, expected) => {
+                applied.push({ text, expected });
+                editorText = text;
+                return true;
+            },
+        });
+
+        assert.equal(await manager.attachDocument(filePath, canonical), true);
+        assert.deepEqual(applied, []);
+        editorText = saved;
+        assert.equal(await manager.attachDocument(filePath, saved, true), true);
+        assert.deepEqual(applied, [{ text: canonical, expected: saved }]);
+        assert.equal(editorText, canonical);
+        manager.dispose();
+    });
+
+    it('leaves an unattributed buffer untouched', async () => {
+        const transport = attributedTransport([hash(saved)]);
+        const filePath = '/work/plan.md';
+        const editorText = saved + '- operator typed this\n';
+        let applied = 0;
+        const manager = new CrdtReplicaManager({
+            projectRoot: '/work',
+            identity: 'vscode-test',
+            transport,
+            nodeFactory: () => new FakeNode(canonical),
+            listDocuments: () => [],
+            currentText: () => editorText,
+            applyText: async () => {
+                applied += 1;
+                return true;
+            },
+        });
+
+        assert.equal(await manager.attachDocument(filePath, editorText), true);
+        assert.equal(applied, 0);
+        assert.deepEqual(transport.projected, []);
+        manager.dispose();
+    });
+
+    it('does not adopt when the canonical hash was not the one the record proved', async () => {
+        const transport = attributedTransport([hash(saved)], hash('a newer canonical\n'));
+        const filePath = '/work/plan.md';
+        let applied = 0;
+        const manager = new CrdtReplicaManager({
+            projectRoot: '/work',
+            identity: 'vscode-test',
+            transport,
+            nodeFactory: () => new FakeNode(canonical),
+            listDocuments: () => [],
+            currentText: () => saved,
+            applyText: async () => {
+                applied += 1;
+                return true;
+            },
+        });
+
+        assert.equal(await manager.attachDocument(filePath, saved), true);
+        assert.equal(applied, 0);
+        manager.dispose();
+    });
+
+    it('retries without moving the shadow when the editor races the adoption', async () => {
+        const transport = attributedTransport([hash(saved)]);
+        const filePath = '/work/plan.md';
+        let editorText = saved;
+        const manager = new CrdtReplicaManager({
+            projectRoot: '/work',
+            identity: 'vscode-test',
+            transport,
+            nodeFactory: () => new FakeNode(canonical),
+            listDocuments: () => [],
+            currentText: () => editorText,
+            applyText: async () => {
+                editorText = saved + '- operator typed this\n';
+                return false;
+            },
+        });
+
+        assert.equal(await manager.attachDocument(filePath, saved), true);
+        assert.equal(editorText, saved + '- operator typed this\n');
+        assert.deepEqual(transport.projected, []);
+        manager.dispose();
+    });
+});
+
 describe('crdt replica IPC response parsing', () => {
     it('parses register and pull responses with base64 update payloads', () => {
         const register = parseRegisterResponse({
@@ -1061,6 +1233,19 @@ describe('crdt replica IPC response parsing', () => {
         assert.strictEqual(register?.bootstrapKind, 'delta');
         assert.deepStrictEqual(register && Array.from(register.canonicalStateVector ?? []), [5, 6]);
         assert.strictEqual(register?.lineage, 'lineage-42');
+        assert.equal(register?.canonicalContentHash, null);
+        assert.deepEqual(register?.binaryAttributedAncestorHashes, []);
+
+        const attributed = parseRegisterResponse({
+            ok: true,
+            data: {
+                client_id: 9,
+                canonical_content_hash: 'abc',
+                binary_attributed_ancestor_hashes: ['one', 2, null, 'two'],
+            },
+        });
+        assert.equal(attributed?.canonicalContentHash, 'abc');
+        assert.deepEqual(attributed?.binaryAttributedAncestorHashes, ['one', 'two']);
 
         const pull = parsePullResponse({
             ok: true,

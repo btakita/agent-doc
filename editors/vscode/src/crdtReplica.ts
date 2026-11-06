@@ -48,6 +48,17 @@ export interface ReplicaRegisterAck {
     canonicalStateVector?: Uint8Array | null;
     /** `#deliverylineagestamp`: the CRDT history the bootstrap belongs to. */
     historyLineage?: string | null;
+    /**
+     * `#attachattributionvscode`: SHA-256 of the canonical text this bootstrap
+     * opened. The ancestor list below is proven only against this hash.
+     */
+    canonicalContentHash?: string | null;
+    /**
+     * `#attachattributionvscode`: canonical generations from which only
+     * agent-doc's own recorded binary-authored writes lead to
+     * `canonicalContentHash`. Empty from a controller that predates the record.
+     */
+    binaryAttributedAncestorHashes?: readonly string[];
 }
 
 export interface ReplicaResumeState {
@@ -178,6 +189,32 @@ function decodeBase64(value: unknown): Uint8Array | null {
 
 function sha256(value: string): string {
     return createHash('sha256').update(value, 'utf8').digest('hex');
+}
+
+/**
+ * `#attachattributionvscode`: true when [bufferText] is a canonical generation
+ * from which only agent-doc's own recorded binary-authored writes lead to
+ * [canonicalText]. Mirrors JetBrains `bufferIsBinaryAttributedAncestorUtil`.
+ *
+ * The proof is the controller's op record, never a reading of the text. A
+ * buffer whose hash is not listed, a canonical the list was not proven against,
+ * or a missing text is unattributed and the buffer stays untouched.
+ */
+export function bufferIsBinaryAttributedAncestor(
+    bufferText: string | null,
+    canonicalText: string | null,
+    canonicalContentHash: string | null,
+    binaryAttributedAncestorHashes: readonly string[],
+): boolean {
+    if (bufferText == null || canonicalText == null || canonicalContentHash == null) return false;
+    if (bufferText === canonicalText || binaryAttributedAncestorHashes.length === 0) return false;
+    if (sha256(canonicalText) !== canonicalContentHash) return false;
+    return binaryAttributedAncestorHashes.includes(sha256(bufferText));
+}
+
+function stringList(value: unknown): string[] {
+    if (!Array.isArray(value)) return [];
+    return value.filter((entry): entry is string => typeof entry === 'string');
 }
 
 export type TemplateStructureProjectionState = 'exact' | 'repair-required' | 'invalid';
@@ -363,6 +400,10 @@ export function parseRegisterResponse(response: ControllerResponse): ReplicaRegi
         historyLineage: typeof response.data.history_lineage === 'string'
             ? response.data.history_lineage
             : null,
+        canonicalContentHash: typeof response.data.canonical_content_hash === 'string'
+            ? response.data.canonical_content_hash
+            : null,
+        binaryAttributedAncestorHashes: stringList(response.data.binary_attributed_ancestor_hashes),
     };
 }
 
@@ -609,6 +650,10 @@ export class CrdtReplicaForwarder {
      */
     private historyLineage: string | null = null;
     private divergent = false;
+    /** `#attachattributionvscode`: see [ReplicaRegisterAck.canonicalContentHash]. */
+    private attributedCanonicalHash: string | null = null;
+    /** `#attachattributionvscode`: see [ReplicaRegisterAck.binaryAttributedAncestorHashes]. */
+    private attributedAncestorHashes: readonly string[] = [];
     private readonly ownership = new MergeOwnershipStateChart();
 
     constructor(
@@ -642,6 +687,8 @@ export class CrdtReplicaForwarder {
         this.clientId = ack.clientId;
         this.lineage = ack.lineage ?? null;
         this.historyLineage = ack.historyLineage ?? null;
+        this.attributedCanonicalHash = ack.canonicalContentHash ?? null;
+        this.attributedAncestorHashes = ack.binaryAttributedAncestorHashes ?? [];
         const incremental = ack.bootstrapKind === 'delta';
         if (incremental && (!this.resumeState || !ack.canonicalStateVector)) {
             await this.transport.deregister(this.filePath, this.identity);
@@ -727,6 +774,16 @@ export class CrdtReplicaForwarder {
         return this.divergent;
     }
 
+    /** `#attachattributionvscode`: the canonical hash the ancestor list was proven against. */
+    get canonicalContentHash(): string | null {
+        return this.attributedCanonicalHash;
+    }
+
+    /** `#attachattributionvscode`: generations only agent-doc's own writes lead from. */
+    get binaryAttributedAncestorHashes(): readonly string[] {
+        return this.attributedAncestorHashes;
+    }
+
     replicaText(): string | null {
         if (!this.attached) return null;
         return this.node.text();
@@ -789,6 +846,8 @@ export class CrdtReplicaForwarder {
         this.pushedVersion = null;
         this.lineage = null;
         this.historyLineage = null;
+        this.attributedCanonicalHash = null;
+        this.attributedAncestorHashes = [];
         if (!this.ownership.send('editor_detached')) {
             throw new Error(
                 `merge-ownership chart rejected editor detach from ${this.ownership.phase}`,
@@ -852,6 +911,11 @@ export class CrdtReplicaManager {
     // `#divergentapplyreregister`: the last divergent-history re-register attempt
     // per document, the loop guard's stamp.
     private readonly divergentHistoryReregisterAtMs = new Map<string, number>();
+    /**
+     * `#attachattributionvscode`: canonical was adopted into the buffer but the
+     * visible-hash receipt has not been accepted yet.
+     */
+    private readonly attributedCanonicalReceipts = new Set<string>();
     private disposed = false;
 
     constructor(private readonly options: CrdtReplicaManagerOptions) {
@@ -908,6 +972,7 @@ export class CrdtReplicaManager {
         this.pendingLocalRebases.clear();
         this.localChangeLanes.clear();
         this.applyingRemote.clear();
+        this.attributedCanonicalReceipts.clear();
         for (const forwarder of this.forwarders.values()) {
             void forwarder.deregister();
         }
@@ -1018,6 +1083,7 @@ export class CrdtReplicaManager {
 
     async handleDocumentClosed(filePath: string): Promise<void> {
         this.shadows.delete(filePath);
+        this.attributedCanonicalReceipts.delete(filePath);
         this.attaching.delete(filePath);
         this.clearReplicaRetryBackoff(filePath);
         this.clearLocalRebaseRetry(filePath);
@@ -1405,6 +1471,24 @@ export class CrdtReplicaManager {
         for (const filePath of new Set(paths)) {
             const forwarder = this.forwarders.get(filePath);
             if (!forwarder) continue;
+            if (this.attributedCanonicalReceipts.has(filePath) && !this.hasPendingLocal(filePath)) {
+                const visible = this.currentEditorText(filePath);
+                const replica = forwarder.replicaText();
+                if (
+                    visible != null
+                    && visible === replica
+                    && visible === this.shadows.get(filePath)
+                ) {
+                    if (await forwarder.projectVisibleState(visible)) {
+                        this.attributedCanonicalReceipts.delete(filePath);
+                        this.options.observeProjection?.(filePath);
+                    } else {
+                        this.scheduleReplicaRetry(filePath, 'attributed-canonical-projection-retry');
+                    }
+                } else {
+                    this.attributedCanonicalReceipts.delete(filePath);
+                }
+            }
             if (this.hasPendingLocal(filePath)) continue;
             // D2: a replace delivery (out-of-band deletion re-bootstrap) installs the
             // corrected canonical wholesale; a normal delta batch merges before one
@@ -1540,7 +1624,15 @@ export class CrdtReplicaManager {
         );
         const timer = setTimeout(() => {
             this.replicaRetryTimers.delete(filePath);
-            if (!this.disposed) this.requestRemoteDrain(filePath);
+            if (this.disposed) return;
+            const forwarder = this.forwarders.get(filePath);
+            void (async () => {
+                if (this.disposed) return;
+                if (forwarder && this.forwarders.get(filePath) === forwarder) {
+                    await this.adoptBinaryAttributedCanonical(filePath, forwarder);
+                }
+                if (!this.disposed) this.requestRemoteDrain(filePath);
+            })();
         }, delayMs);
         timer.unref?.();
         this.replicaRetryTimers.set(filePath, timer);
@@ -1670,6 +1762,7 @@ export class CrdtReplicaManager {
         }
         this.forwarders.set(filePath, replacement);
         await staleForwarder.deregister();
+        await this.adoptBinaryAttributedCanonical(filePath, replacement);
         this.logger.debug(
             `[crdt-replica] atomically replaced cached forwarder for ${filePath}`,
         );
@@ -1855,6 +1948,81 @@ export class CrdtReplicaManager {
         );
     }
 
+    /**
+     * `#attachattributionvscode`: VS Code does not run JetBrains'
+     * `registration_projection` hold. A restarted editor still opens its replica
+     * on canonical while the buffer can be an older generation, and
+     * `baseline-diverged-lazy-canonical-projection` then retries forever when no
+     * pending delivery names that buffer. When the controller's own op record
+     * says every difference was agent-doc's binary-authored write, adopting
+     * canonical is lossless. Anything else leaves the buffer untouched.
+     */
+    private async adoptBinaryAttributedCanonical(
+        filePath: string,
+        forwarder: CrdtReplicaForwarder,
+    ): Promise<void> {
+        if (this.disposed || this.forwarders.get(filePath) !== forwarder) return;
+        if (this.hasPendingLocal(filePath)) return;
+        const bufferText = this.currentEditorText(filePath);
+        const canonicalText = forwarder.replicaText();
+        if (!bufferIsBinaryAttributedAncestor(
+            bufferText,
+            canonicalText,
+            forwarder.canonicalContentHash,
+            forwarder.binaryAttributedAncestorHashes,
+        )) return;
+        const provenBuffer = bufferText as string;
+        const provenCanonical = canonicalText as string;
+        this.logger.debug(
+            `[crdt-replica] registration attributed every canonical difference of ${filePath} ` +
+            `to agent-doc's own recorded writes; adopting canonical is lossless. ` +
+            `buffer_hash=${sha256(provenBuffer)} canonical_hash=${forwarder.canonicalContentHash} ` +
+            `attributed_ancestors=${forwarder.binaryAttributedAncestorHashes.length} ` +
+            '(#attachattributionvscode)',
+        );
+        if (
+            this.currentEditorText(filePath) !== provenBuffer
+            || forwarder.replicaText() !== provenCanonical
+            || this.forwarders.get(filePath) !== forwarder
+        ) {
+            this.scheduleReplicaRetry(filePath, 'attributed-canonical-adoption-raced');
+            return;
+        }
+        this.advanceNonOperatorProjectionEpoch(filePath);
+        this.applyingRemote.add(filePath);
+        let projected = false;
+        try {
+            projected = await this.options.applyText(filePath, provenCanonical, provenBuffer);
+            if (
+                projected
+                && this.currentEditorText(filePath) === provenCanonical
+                && forwarder.replicaText() === provenCanonical
+            ) {
+                this.shadows.set(filePath, provenCanonical);
+            } else {
+                projected = false;
+            }
+        } catch (error: any) {
+            projected = false;
+            this.logger.debug(
+                `[crdt-replica] attributed canonical adoption failed for ${filePath}: ${error?.message ?? error}`,
+            );
+        } finally {
+            this.applyingRemote.delete(filePath);
+        }
+        if (!projected) {
+            this.scheduleReplicaRetry(filePath, 'attributed-canonical-adoption-retry');
+            return;
+        }
+        if (!(await forwarder.projectVisibleState(provenCanonical))) {
+            this.attributedCanonicalReceipts.add(filePath);
+            this.scheduleReplicaRetry(filePath, 'attributed-canonical-projection-retry');
+            return;
+        }
+        this.attributedCanonicalReceipts.delete(filePath);
+        this.options.observeProjection?.(filePath);
+    }
+
     private async forwarderFor(filePath: string): Promise<CrdtReplicaForwarder | null> {
         const existing = this.forwarders.get(filePath);
         if (existing) return existing;
@@ -1872,6 +2040,7 @@ export class CrdtReplicaManager {
             try {
                 if (!(await forwarder.register())) return null;
                 this.forwarders.set(filePath, forwarder);
+                await this.adoptBinaryAttributedCanonical(filePath, forwarder);
                 return forwarder;
             } catch (e: any) {
                 this.logger.debug(`[crdt-replica] attach skipped for ${filePath}: ${e?.message ?? e}`);

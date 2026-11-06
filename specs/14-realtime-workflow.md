@@ -1751,6 +1751,39 @@ reproduces any earlier hold from the same texts, so the hold itself need not be
 persisted. The plugin also refuses the unproven adoption whichever rules
 answer (an older native generation or the frozen floor).
 
+A canonical that differs from the buffer only by agent-doc's own writes is
+adopted (`#attachauthorattribution`). On 2026-11-05, after an IDE restart, a
+JetBrains attach held `ambiguous-retained-projection` although every
+canonical-vs-buffer difference was a queue marker projection (`📥` lifecycle
+icons and subagent claim markers) the document's bound session had written
+itself while no replica was attached. Attribution comes from the controller's
+op record, never from what the text looks like: every binary-authored canonical
+write (`apply_cp_write_for_file`, response and salient cells, the durable
+queue-attempt projection) goes through
+`RelayHub::apply_binary_authored_replace_scoped`, which records the write's
+pre-image hash and `source` in a bounded (64) hash chain
+(`BinaryWriteAttribution`). A write whose pre-image is not the previous write's
+post-image starts a new run, so any canonical change agent-doc did not author
+(an editor relay update, a durable document-op delta, a disk rebuild, a reseed,
+a committed-history roll-forward) ends attribution of everything older, and a
+read returns nothing unless the newest recorded write produced exactly the
+current canonical. The run survives a relay recycle with the retained canonical
+projection and a controller replacement through its durable copy
+(`.agent-doc/state/binary-write-attribution/<doc-hash>.json`, content hashes and
+`source` labels only, rewritten with each recorded write). The copy is
+content-addressed by its tip, so it answers only for a canonical whose hash
+equals that tip; a missing, malformed, or stale record is unattributed, and a
+failure to read or write one never fails the document write. Registration
+returns the run as `binary_attributed_ancestor_hashes` (logged as
+`crdt_replica_register_binary_attributed_ancestors`). The plugin reports
+`canonical_contains_operator_edits = true` when its buffer hashes to one of
+them and its canonical hashes to the `canonical_content_hash` they were proven
+against (`bufferIsBinaryAttributedAncestorUtil`): such a buffer holds no text
+the canonical lacks except what agent-doc's own writes replaced, so adoption is
+lossless under every rule set. Any other difference, including an operator edit
+beside the projections or one that reached the canonical through an earlier
+replica, is unattributed and keeps `ambiguous-retained-projection`.
+
 Exhaustion is resolved in place, not by a recycle (`#jetbrainsreplicaloops`).
 Measured on sdk.md 2026-10-16T05:57Z-06:05Z: the JetBrains replica looped every
 30 s on a stale-baseline local delta (`local delta found a stale native baseline

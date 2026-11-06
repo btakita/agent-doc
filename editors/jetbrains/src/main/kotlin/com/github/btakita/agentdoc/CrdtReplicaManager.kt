@@ -4194,6 +4194,29 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 },
                 merge = { base, buffer, canonical -> cleanRegistrationMerge(base, buffer, canonical) },
             )
+        // `#attachauthorattribution`: the controller's own op record says the buffer is a canonical
+        // generation that only agent-doc's binary-authored writes (queue lifecycle icons, claim
+        // markers, ...) carried forward to this canonical. The buffer then holds no operator text
+        // canonical lacks, so canonical contains every operator edit it has: adoption is lossless.
+        val bufferBinaryAttributed =
+            bufferIsBinaryAttributedAncestorUtil(
+                bufferText = bufferTextAtRegistration,
+                canonicalText = canonicalTextAtRegistration,
+                canonicalContentHash = forwarder.canonicalContentHash,
+                binaryAttributedAncestorHashes = forwarder.binaryAttributedAncestorHashes,
+                contentHash = ::contentHash,
+            )
+        if (bufferBinaryAttributed) {
+            log.info(
+                "[crdt-replica] registration attributed every canonical difference of ${File(filePath).name} " +
+                    "to agent-doc's own recorded writes; adopting canonical is lossless. " +
+                    "buffer_hash=${bufferTextAtRegistration?.let(::contentHash) ?: "unavailable"} " +
+                    "canonical_hash=${forwarder.canonicalContentHash ?: "unknown"} " +
+                    "attributed_ancestors=${forwarder.binaryAttributedAncestorHashes.size} (#attachauthorattribution)",
+            )
+        }
+        val attributedOrProvenContainment =
+            if (bufferBinaryAttributed) true else causalProof.canonicalContainsOperatorEdits
         if (causalProof.mergeBase != null && causalProof.mergeBase != publishedShadowAtRegistration) {
             log.info(
                 "[crdt-replica] registration proved ${File(filePath).name} from the acknowledged replica " +
@@ -4220,7 +4243,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                     bufferText = bufferTextAtRegistration,
                     canonicalText = canonicalTextAtRegistration,
                     cleanMergeAvailable = causalProof.cleanMergeAvailable,
-                    canonicalContainsOperatorEdits = causalProof.canonicalContainsOperatorEdits,
+                    canonicalContainsOperatorEdits = attributedOrProvenContainment,
                     // `#emptycanonicaldeadlock`: the saved document, read only when it can
                     // decide something (the buffer and canonical differ).
                     diskText =
@@ -6967,6 +6990,30 @@ internal fun registrationMergeFromBaseUtil(
     if (buffer == canonical || buffer == base) return null
     if (canonical == base) return buffer
     return merge(base, buffer, canonical)
+}
+
+/**
+ * `#attachauthorattribution`: true when [bufferText] is a canonical generation from which only
+ * agent-doc's own recorded binary-authored writes lead to [canonicalText].
+ *
+ * After the 2026-11-05 IDE restart a replica attach held `ambiguous-retained-projection` although
+ * every canonical-vs-buffer difference was a queue marker projection agent-doc wrote itself while no
+ * replica was attached. The proof is the controller's op record
+ * ([CrdtReplicaForwarder.binaryAttributedAncestorHashes], proven against [canonicalContentHash]),
+ * never a reading of the text: a buffer whose hash is not listed, a canonical the list was not
+ * proven against, or a missing text is unattributed, and the hold rules are unchanged.
+ */
+internal fun bufferIsBinaryAttributedAncestorUtil(
+    bufferText: String?,
+    canonicalText: String?,
+    canonicalContentHash: String?,
+    binaryAttributedAncestorHashes: List<String>,
+    contentHash: (String) -> String,
+): Boolean {
+    if (bufferText == null || canonicalText == null || canonicalContentHash == null) return false
+    if (bufferText == canonicalText || binaryAttributedAncestorHashes.isEmpty()) return false
+    if (contentHash(canonicalText) != canonicalContentHash) return false
+    return contentHash(bufferText) in binaryAttributedAncestorHashes
 }
 
 /** The causal facts registration reports, and the ancestor they were proven from. */

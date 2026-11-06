@@ -445,6 +445,135 @@ fn repair_stale_completion_cli_is_dry_run_first_narrow_and_idempotent() {
     assert_eq!(fs::read_to_string(&doc).unwrap(), repaired);
 }
 
+/// `#completioncellrestore` through the real CLI, on the 2026-11-05 shape:
+/// two workers report through `report-complete`, then a closeout deletes both
+/// completion cells while the rows stay reported. The dry run lists both and
+/// writes nothing; `--apply` adds both back byte for byte from the saved
+/// responses (operator text and queue rows unchanged, session-check still
+/// passes); a rerun is a no-op, and the stale-completion repair keeps them.
+#[test]
+fn repair_completion_cells_cli_restores_deleted_cells_from_saved_responses() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::create_dir_all(dir.path().join(".agent-doc/locks")).unwrap();
+    let doc = dir.path().join("session.md");
+    let items = ["finish sdk", "finish dev"];
+    fs::write(
+        &doc,
+        concat!(
+            "---\nagent_doc_session: completion-cell-restore\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append subagents -->\n",
+            "### Re: prior — gpt-5\n\nDone.\n",
+            "Operator edit that must survive.\n",
+            "<!-- agent:boundary:keep -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue subagents -->\n",
+            "- finish sdk\n- finish dev\n",
+            "<!-- /agent:queue -->\n",
+        ),
+    )
+    .unwrap();
+    let binary = env!("CARGO_BIN_EXE_agent-doc");
+    let run = |args: &[&str]| {
+        let output = Command::new(binary)
+            .env(
+                agent_doc_controller_io::project_controller::TEST_CONTROLLER_LAUNCH_REASON_ENV,
+                CONTROLLER_LAUNCH_REASON,
+            )
+            .current_dir(dir.path())
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{args:?} failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        (
+            String::from_utf8_lossy(&output.stdout).into_owned(),
+            String::from_utf8_lossy(&output.stderr).into_owned(),
+        )
+    };
+    let path = doc.to_str().unwrap();
+    for item in items {
+        let owner = format!("subagent:{}", item.replace(' ', "-"));
+        let worker = format!("worker:{}", item.replace(' ', "-"));
+        run(&["queue", "claim", path, "--item", item, "--owner", &owner]);
+        run(&[
+            "queue",
+            "start",
+            path,
+            "--item",
+            item,
+            "--owner",
+            &owner,
+            "--generation",
+            "1",
+            "--worker-id",
+            &worker,
+        ]);
+        run(&[
+            "queue",
+            "report-complete",
+            "--prose-only",
+            path,
+            "--item",
+            item,
+            "--generation",
+            "1",
+            "--response",
+            &format!("Completed {item}.\n\n- focused tests passed"),
+        ]);
+    }
+    let reported = fs::read_to_string(&doc).unwrap();
+    let lines = reported.lines().collect::<Vec<_>>();
+    let cells = agent_doc_document::subagent_completion::completion_cell_line_ranges(&reported)
+        .into_iter()
+        .map(|range| lines[range].join("\n"))
+        .collect::<Vec<_>>();
+    assert_eq!(cells.len(), 2, "{reported}");
+
+    // The closeout deletion: every cell gone, the reported rows kept.
+    let deleted = agent_doc_document::subagent_completion::strip_completion_cells(&reported);
+    assert!(!deleted.contains("### Re: Subagent completed"), "{deleted}");
+    fs::write(&doc, &deleted).unwrap();
+
+    let (stdout, stderr) = run(&["queue", "repair-completion-cells", path]);
+    assert_eq!(
+        stdout.matches("would restore completion cell key=").count(),
+        2,
+        "{stdout}\n{stderr}"
+    );
+    assert!(stderr.contains("dry run; rerun with --apply"), "{stderr}");
+    assert_eq!(fs::read_to_string(&doc).unwrap(), deleted, "dry run writes nothing");
+
+    let (stdout, _) = run(&["queue", "repair-completion-cells", path, "--apply"]);
+    assert_eq!(
+        stdout.matches("restored completion cell key=").count(),
+        2,
+        "{stdout}"
+    );
+    let restored = fs::read_to_string(&doc).unwrap();
+    for cell in &cells {
+        assert!(restored.contains(cell.as_str()), "{cell}\n---\n{restored}");
+    }
+    assert!(restored.contains("### Re: prior — gpt-5\n\nDone.\nOperator edit that must survive.\n"));
+    let queue = |text: &str| {
+        let start = text.find("<!-- agent:queue").unwrap();
+        text[start..].to_string()
+    };
+    assert_eq!(queue(&restored), queue(&deleted), "queue rows are unchanged");
+    agent_doc_lint_io::validate_structure_on_content(&doc, &restored)
+        .expect("the restored document must pass the session-check integrity classifier");
+
+    let (stdout, stderr) = run(&["queue", "repair-completion-cells", path, "--apply"]);
+    assert!(!stdout.contains("restored completion cell"), "{stdout}");
+    assert!(stderr.contains("0 completion cell(s) to restore; 2 already present"), "{stderr}");
+    assert_eq!(fs::read_to_string(&doc).unwrap(), restored);
+
+    let (stdout, _) = run(&["queue", "repair-stale-completion", path]);
+    assert!(!stdout.contains("would retire completion cell"), "{stdout}");
+}
+
 fn git(root: &std::path::Path, args: &[&str]) -> std::process::Output {
     let output = Command::new("git")
         .current_dir(root)

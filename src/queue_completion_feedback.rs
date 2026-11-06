@@ -535,6 +535,134 @@ pub(crate) fn repair_stale_completion(
     )
 }
 
+/// `#completioncellrestore`: rebuild the completion cells a closeout deleted,
+/// from the worker responses saved in the attempts' receipts, plus the closed
+/// attempts named in `keys`. Dry run unless `apply`. `--apply` serializes with
+/// `report-complete` (whose cells this adds), refuses while a retained editor
+/// write is unsettled, may change only `agent:exchange`, and publishes through
+/// the same editor/CRDT path as `report-complete`. Idempotent.
+pub(crate) fn restore_completion_cells(
+    file: &Path,
+    apply: bool,
+    keys: &std::collections::HashSet<String>,
+) -> Result<agent_doc_queue_io::completion_cell_restore::CompletionCellRestoreReport> {
+    use agent_doc_queue_io::completion_cell_restore::{compose, inspect};
+    const RESTORE_SOURCE: &str = "queue_repair_completion_cells";
+    if !apply {
+        let current = agent_doc_document_realtime_io::try_resolve_current_document_content(
+            file,
+            RESTORE_SOURCE,
+        )?;
+        return inspect(file, &current, keys);
+    }
+    let _lock = acquire_completion_lock(
+        file,
+        "restore subagent completion cells",
+        COMPLETION_FEEDBACK_LOCK_WAIT,
+    )?;
+    if let Some(pending) = agent_doc_document_realtime_io::pending_document_write(file) {
+        bail!(
+            "{} has a retained editor write (intent {}) that has not landed; open it in the active editor/project and run `agent-doc queue repair-projection {:?}`, then rerun; nothing was changed",
+            file.display(),
+            pending.intent_id,
+            file,
+        );
+    }
+    let current =
+        agent_doc_document_realtime_io::try_resolve_current_document_content(file, RESTORE_SOURCE)?;
+    let mut report = inspect(file, &current, keys)?;
+    if report.is_clean() {
+        return Ok(report);
+    }
+    let updated = compose(&current, &report)?;
+    let scope = changed_component_scope(&current, &updated)
+        .context("restored completion cells must change only agent:exchange")?;
+    if !scope.contains("exchange", 0) || scope.components().len() != 1 {
+        bail!("restored completion cells escaped the first agent:exchange component");
+    }
+    let retained_intent = publish_exchange_update(file, &current, &updated, scope)?;
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "queue_completion_cells_restored file={} cells={} keys={} present={} skipped={} delivery={}{} (#completioncellrestore)",
+            file.display(),
+            report.restored.len(),
+            report
+                .restored
+                .iter()
+                .map(|cell| cell.key.as_str())
+                .collect::<Vec<_>>()
+                .join(","),
+            report.present,
+            report.skipped.len(),
+            if retained_intent.is_some() {
+                "retained_controller_projection"
+            } else {
+                "detached_materialized"
+            },
+            retained_intent
+                .as_deref()
+                .map(|intent| format!(" intent_id={intent}"))
+                .unwrap_or_default(),
+        ),
+    );
+    report.applied = true;
+    report.intent_id = retained_intent;
+    Ok(report)
+}
+
+pub(crate) fn print_completion_cell_restore_report(
+    report: &agent_doc_queue_io::completion_cell_restore::CompletionCellRestoreReport,
+) {
+    use agent_doc_queue_io::stale_completion_repair::one_line;
+    let verb = if report.applied {
+        "restored"
+    } else {
+        "would restore"
+    };
+    for cell in &report.restored {
+        println!(
+            "{verb} completion cell key={} owner={} generation={} item=\"{}\"",
+            cell.key,
+            cell.owner,
+            cell.generation,
+            one_line(&cell.item, 100)
+        );
+    }
+    for skipped in &report.skipped {
+        println!(
+            "skipped saved response owner={} generation={} key={} item=\"{}\": {}",
+            skipped.owner,
+            skipped.generation,
+            skipped.key.as_deref().unwrap_or("<none>"),
+            one_line(&skipped.item, 100),
+            skipped.reason
+        );
+    }
+    for key in &report.missing_keys {
+        println!("--key {key}: no receipt carries it");
+    }
+    eprintln!(
+        "[queue] {}: {} completion cell(s) {}; {} already present, {} saved response(s) skipped{}",
+        report.file.display(),
+        report.restored.len(),
+        if report.applied {
+            "restored"
+        } else if report.is_clean() {
+            "to restore"
+        } else {
+            "to restore (dry run; rerun with --apply to restore)"
+        },
+        report.present,
+        report.skipped.len(),
+        report
+            .intent_id
+            .as_deref()
+            .map(|intent| format!("; retained editor intent {intent}"))
+            .unwrap_or_default(),
+    );
+}
+
 /// Combined, evidence-based audit/repair for visible managed queue state.
 ///
 /// The stale-evidence planner proves which completion artifacts no longer

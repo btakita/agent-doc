@@ -9,6 +9,7 @@ pub mod answer_ack;
 pub mod backlog_sync;
 pub mod capture_scope;
 pub mod claim_release_receipt;
+pub mod completion_cell_restore;
 pub mod component_attrs;
 pub mod control_binding;
 pub mod coordinator_drain;

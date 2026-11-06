@@ -5411,6 +5411,40 @@ enum QueueAction {
         #[arg(long, value_name = "DIR", conflicts_with = "file")]
         project_root: Option<PathBuf>,
     },
+    /// Restore deleted subagent completion cells (`#completioncellrestore`).
+    ///
+    /// For each reported or claimed attempt whose worker response
+    /// `report-complete` saved in its receipt but whose completion cell
+    /// (`### Re: Subagent completed` in `agent:exchange`) is gone, rebuild that
+    /// cell byte for byte from the saved response and add it back.
+    ///
+    /// An open attempt is restored when its work still has a live row or an
+    /// active claim. A closed attempt (a strike ended it) is listed with its
+    /// key and restored only when named by `--key`, because a closed attempt
+    /// with no cell is either a cell the strike retired on purpose or one a
+    /// closeout deleted first, and the receipt cannot tell them apart. A
+    /// restored closed attempt has no live row, so `repair-stale-completion`
+    /// or `repair-managed-state --apply` retires it again. A superseded
+    /// attempt, a legacy receipt, a key whose cell was edited, and a closed
+    /// attempt with a live row are never restored.
+    ///
+    /// Dry run by default: lists exactly what `--apply` would add and changes
+    /// nothing. `--apply` changes only `agent:exchange`, serialized with
+    /// `report-complete` and written through the same editor/CRDT path
+    /// (refused while a retained editor write is unsettled). Idempotent: a
+    /// rerun finds nothing.
+    #[command(name = "repair-completion-cells")]
+    RepairCompletionCells {
+        /// Path to the session document
+        file: PathBuf,
+        /// Add the cells the dry run lists (default: dry run, no change)
+        #[arg(long)]
+        apply: bool,
+        /// Also restore the closed attempt with this key (printed by the dry
+        /// run). Repeatable.
+        #[arg(long = "key", value_name = "KEY")]
+        keys: Vec<String>,
+    },
     /// Audit and safely reconcile stuck managed-list lifecycle state.
     ///
     /// This composes stale completion-evidence retirement with durable queue
@@ -9619,6 +9653,13 @@ fn try_main() -> anyhow::Result<()> {
                 let report =
                     queue_completion_feedback::repair_stale_completion(&file, apply, &keys)?;
                 queue_completion_feedback::print_stale_completion_report(&report);
+                Ok(())
+            }
+            QueueAction::RepairCompletionCells { file, apply, keys } => {
+                let keys = keys.into_iter().collect();
+                let report =
+                    queue_completion_feedback::restore_completion_cells(&file, apply, &keys)?;
+                queue_completion_feedback::print_completion_cell_restore_report(&report);
                 Ok(())
             }
             QueueAction::RepairProjection { file } => {

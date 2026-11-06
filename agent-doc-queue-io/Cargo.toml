@@ -21,6 +21,7 @@ agent-doc-debounce = { path = "../agent-doc-debounce", version = "0.35.568" }
 agent-doc-document-realtime = { path = "../agent-doc-document-realtime", version = "0.35.568" }
 agent-doc-element = { path = "../agent-doc-element", version = "0.35.568" }
 agent-doc-element-backlog = { path = "../agent-doc-element-backlog", version = "0.35.568" }
+agent-doc-element-exchange = { path = "../agent-doc-element-exchange", version = "0.35.568" }
 agent-doc-capture-io = { path = "../agent-doc-capture-io", version = "0.35.568" }
 agent-doc-controller-io = { path = "../agent-doc-controller-io", version = "0.35.568" }
 agent-doc-crdt-relay-io = { path = "../agent-doc-crdt-relay-io", version = "0.35.568" }

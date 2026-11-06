@@ -476,7 +476,10 @@ a closed actor record is replaceable through the stale-authority path.
     gate has no edit timestamp, so without the carry a held candidate was "first
     seen" on every observation and re-armed its recheck — a full-text read —
     forever. With it a held candidate settles (or reaches max hold) and the
-    rechecks stop.
+    rechecks stop. A held candidate that is only a claimed queue addition
+    (`#claimsteeringwake`) is not a recheck: the row is already in flight, and
+    the recheck would drain the coordinator with no operator item. An unclaimed
+    row held beside it still rechecks.
   - A queue-head probe whose compact revision answers `Detached` reads disk
     directly instead of asking the controller for the full text it would only
     answer `Detached` to.

@@ -1723,14 +1723,62 @@ pub fn observe_for_wake_with(file: &Path, carry: &mut WakeSettleCarry) -> Result
         }
         core::content_hash(&basis)
     };
-    let pending = hook_report.pending;
-    let recheck_after_ms = hook_report.recheck_after_ms;
+    // `#claimsteeringwake`: a claim projection of a row the committed baseline
+    // has not absorbed yet is a held queue addition (`pending: 1`, no settled
+    // items) until the typing gate's quiet window elapses. The agent channel
+    // still delivers it once settled, labelled already claimed. The idle wake
+    // must not schedule a recheck for that hold: the recheck is itself a
+    // drain edge, so every claim would cost the coordinator a turn even
+    // though the settled addition is filtered above. An operator addition
+    // held beside it keeps the recheck.
+    let claimed_holds = claimed_addition_hold_count(
+        hook.as_ref().and_then(|prepared| prepared.next.as_ref()),
+        &content,
+        &claimed,
+    );
+    let pending = hook_report.pending.saturating_sub(claimed_holds);
+    let recheck_after_ms = if pending == 0 {
+        None
+    } else {
+        hook_report.recheck_after_ms
+    };
     Ok(WakeObservation {
         items,
         fingerprint,
         pending,
         recheck_after_ms,
     })
+}
+
+/// How many candidates the settle gate is still holding are queue additions
+/// a worker has already claimed (`#claimsteeringwake`).
+fn claimed_addition_hold_count(
+    watermark: Option<&SteeringWatermark>,
+    content: &str,
+    claimed: &agent_doc_queue::queue_claim::ClaimedQueueItems,
+) -> usize {
+    let Some(watermark) = watermark else {
+        return 0;
+    };
+    if watermark.pending.is_empty() || claimed.is_empty() {
+        return 0;
+    }
+    let Some(rows) = agent_doc_queue::queue_continuation::live_executable_rows(content) else {
+        return 0;
+    };
+    let mut claimed_add_keys = BTreeSet::new();
+    for (raw, lineage) in rows {
+        if !claimed.claims(&raw) && !claimed.claims(&lineage) {
+            continue;
+        }
+        let norm = core::normalize_queue_text(&lineage);
+        claimed_add_keys.insert(format!("queue:add:{}", core::content_hash(&norm)));
+    }
+    watermark
+        .pending
+        .keys()
+        .filter(|key| claimed_add_keys.contains(key.as_str()))
+        .count()
 }
 
 /// Steering an explicit send (`#claimedsteerwake`) handed to the owning
@@ -6255,6 +6303,169 @@ mod tests {
             )
             .unwrap();
         assert!(dispatch.iter().any(|head| head == response), "{dispatch:?}");
+    }
+
+    /// `#claimsteeringwake`: a claim projection of a row the committed
+    /// baseline has not absorbed is one held queue addition. Peek reports
+    /// `pending: 1` and no items (`committed:` with no cycle, the closed
+    /// cycle id after one). The idle wake does not count that hold or
+    /// schedule its recheck. An unclaimed row beside it still rechecks, and
+    /// the agent channel still delivers the claimed addition once it settles.
+    #[test]
+    fn claim_projection_does_not_schedule_a_steering_wake() {
+        struct DiskEffects;
+        impl agent_doc_queue_io::queue_cmd::QueueRuntimeProjectionEffects for DiskEffects {
+            fn current_document_content(
+                &self,
+                file: &std::path::Path,
+                _source: &str,
+            ) -> anyhow::Result<String> {
+                Ok(std::fs::read_to_string(file)?)
+            }
+
+            fn converge_document_or_disk(
+                &self,
+                file: &std::path::Path,
+                target_content: &str,
+                source_content: &str,
+                _reason: &str,
+            ) -> anyhow::Result<()> {
+                anyhow::ensure!(
+                    std::fs::read_to_string(file)? == source_content,
+                    "projection must converge from the authoritative current cut"
+                );
+                std::fs::write(file, target_content)?;
+                Ok(())
+            }
+        }
+
+        fn project_one(file: &std::path::Path) {
+            let effects = DiskEffects;
+            let (_, claim) = agent_doc_queue_io::queue_cmd::claim_with_runtime_projection(
+                &effects,
+                file,
+                "#one",
+                "subagent:one",
+                3600,
+            )
+            .unwrap();
+            let running = agent_doc_queue_io::queue_claim::start_attempt(
+                file,
+                &claim.item_text,
+                "subagent:one",
+                "worker:one",
+                3600,
+                claim.generation,
+            )
+            .unwrap();
+            agent_doc_queue_io::queue_cmd::project_claim_item_runtime_state_with_effects(
+                &effects,
+                file,
+                &running.item_text,
+                false,
+            )
+            .unwrap();
+        }
+
+        /// The idle supervisor can read the projected document before the
+        /// claim checkpoint copies the queue body into the baseline. Restore
+        /// that baseline so the observation is that window.
+        fn window(
+            run_cycle: bool,
+            with_unclaimed: bool,
+        ) -> (
+            Option<SteeringReport>,
+            WakeObservation,
+            Option<SteeringReport>,
+            WakeObservation,
+        ) {
+            let dir = tempfile::tempdir().unwrap();
+            std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+            let file = dir.path().join("plan.md");
+            let committed = "<!-- agent:queue subagents go -->\n- do [#other]\n<!-- /agent:queue -->\n";
+            let mut live = "<!-- agent:queue subagents go -->\n- do [#one]\n".to_string();
+            if with_unclaimed {
+                live.push_str("- do [#two]\n");
+            }
+            live.push_str("<!-- /agent:queue -->\n");
+            std::fs::write(&file, &live).unwrap();
+            agent_doc_snapshot_io::checkpoint_document_baseline(
+                &file,
+                committed,
+                agent_doc_ops_log_io::log_op,
+            )
+            .unwrap();
+            if run_cycle {
+                let cycle = agent_doc_cycle_state_io::start_preflight(
+                    &file,
+                    Some(committed),
+                    Some(committed),
+                )
+                .unwrap();
+                seed_for_cycle(&file, &cycle.cycle_id, committed, Some("do [#other]"), Vec::new())
+                    .unwrap();
+                close_cycle(&file, committed);
+            }
+            project_one(&file);
+            agent_doc_snapshot_io::checkpoint_document_baseline(
+                &file,
+                committed,
+                agent_doc_ops_log_io::log_op,
+            )
+            .unwrap();
+            let fresh = observe(&file, CONSUMER_CLI, false).unwrap();
+            let fresh_wake = observe_for_wake(&file).unwrap();
+            backdate(&file);
+            let settled = observe(&file, CONSUMER_CLI, false).unwrap();
+            let settled_wake = observe_for_wake(&file).unwrap();
+            (fresh, fresh_wake, settled, settled_wake)
+        }
+
+        for run_cycle in [false, true] {
+            let (fresh, wake, settled, settled_wake) = window(run_cycle, false);
+            let fresh = fresh.expect("peek");
+            let prefix = if run_cycle { "cycle-" } else { "committed:" };
+            assert!(
+                fresh.cycle_id.starts_with(prefix),
+                "run_cycle={run_cycle} cycle_id={}",
+                fresh.cycle_id
+            );
+            assert!(fresh.items.is_empty(), "{fresh:?}");
+            assert_eq!(fresh.pending, 1, "{fresh:?}");
+            assert!(fresh.recheck_after_ms.is_some(), "{fresh:?}");
+            assert!(wake.items.is_empty(), "{wake:?}");
+            assert_eq!(wake.pending, 0, "{wake:?}");
+            assert!(wake.recheck_after_ms.is_none(), "{wake:?}");
+            let settled = settled.expect("settled peek");
+            assert_eq!(settled.pending, 0, "{settled:?}");
+            assert_eq!(settled.items.len(), 1, "{settled:?}");
+            let item = &settled.items[0];
+            assert_eq!(item.source, core::SteeringSource::Queue);
+            assert_eq!(item.change, core::SteeringChange::Added);
+            assert_eq!(item.dispatch, core::SteeringDispatch::ForwardToOwner);
+            assert!(item.verbatim.contains("🚧"), "{item:?}");
+            assert!(item.verbatim.contains("do [#one]"), "{item:?}");
+            assert_eq!(item.owner.as_deref(), Some("subagent:one"));
+            assert_eq!(item.generation, Some(1));
+            assert!(settled_wake.items.is_empty(), "{settled_wake:?}");
+            assert_eq!(settled_wake.pending, 0, "{settled_wake:?}");
+        }
+
+        let (fresh, wake, _settled, settled_wake) = window(false, true);
+        let fresh = fresh.expect("peek");
+        assert_eq!(fresh.pending, 2, "{fresh:?}");
+        assert_eq!(wake.pending, 1, "{wake:?}");
+        assert!(wake.recheck_after_ms.is_some(), "{wake:?}");
+        assert!(wake.items.is_empty(), "{wake:?}");
+        assert_eq!(settled_wake.items.len(), 1, "{settled_wake:?}");
+        assert!(
+            settled_wake.items[0].verbatim.contains("do [#two]"),
+            "{settled_wake:?}"
+        );
+        assert!(
+            !settled_wake.items[0].verbatim.contains("[#one]"),
+            "{settled_wake:?}"
+        );
     }
 
     /// `#steerworks` items 1 + 3 (agent-doc-bugs.md, 2026-10-04): the operator

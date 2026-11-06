@@ -26,6 +26,12 @@
 //!    agent-doc wires tsift) mapped back onto answered decisions, in this
 //!    document or another one.
 //!
+//! [`search_registry`] applies the same bands to the project `decisions.md`
+//! records (`#decisionsearchnofile`): a record has no question of its own, so
+//! its decision text and rationale stand in for one. A record that is no
+//! longer `accepted` still answers an exact lookup, but it is labelled, and it
+//! ranks after the current records of its band.
+//!
 //! Everything here is a lookup: nothing closes a copy, merges a decision, or
 //! refuses a closeout.
 
@@ -34,6 +40,9 @@ use std::collections::BTreeSet;
 use serde::Serialize;
 
 use crate::extract::Observations;
+use crate::graph::{
+    REGISTRY_LOCATION, RegistryDecision, registry_revision_id, registry_revision_location,
+};
 use crate::recall::{OtherDocument, RecallHit};
 use crate::{Decision, EdgeKind, Ledger, id_key, stamp_key, text, text_key};
 
@@ -117,6 +126,24 @@ pub struct SearchHit {
     pub matched: SearchMatch,
     /// `1.0` for exact matches; coverage or normalized recall score otherwise.
     pub score: f64,
+    /// A `decisions.md` record's state (`accepted`, `superseded`, `reversed`,
+    /// `deprecated`); absent on a session-document hit.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub state: Option<String>,
+    /// A `decisions.md` record's rationale.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rationale: Option<String>,
+    /// The `decisions.md` records that supersede this one.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub superseded_by: Vec<String>,
+}
+
+impl SearchHit {
+    /// False for a registry record that no longer stands: an agent must not
+    /// act on its text.
+    pub fn is_current(&self) -> bool {
+        self.state.as_deref().is_none_or(|state| state == "accepted")
+    }
 }
 
 /// The query, read three ways.
@@ -173,6 +200,9 @@ fn hit_for(
         open_items: decision.open_items.clone(),
         matched,
         score,
+        state: None,
+        rationale: None,
+        superseded_by: Vec::new(),
     })
 }
 
@@ -207,28 +237,33 @@ fn exact_match(decision: &Decision, query: &Query) -> Option<SearchMatch> {
         .then_some(SearchMatch::QuestionText)
 }
 
-/// Share of the query's content tokens found in the decision's question
-/// (every copy's comparison text) and answers; `None` below
-/// [`WORDING_MIN_COVERAGE`] or when the numbers conflict.
-fn wording_score(ledger: &Ledger, index: usize, query_tokens: &BTreeSet<String>) -> Option<f64> {
+/// Share of the query's content tokens found in `tokens`; `None` below
+/// [`WORDING_MIN_COVERAGE`] or when the query names a number `tokens` lacks.
+fn coverage(tokens: &BTreeSet<String>, query_tokens: &BTreeSet<String>) -> Option<f64> {
     if query_tokens.is_empty() {
         return None;
     }
-    let decision = &ledger.decisions[index];
-    let mut tokens = text::content_tokens(&decision.question);
-    tokens.extend(text::content_tokens(ledger.profile_text(index)));
-    for revision in &decision.revisions {
-        tokens.extend(text::content_tokens(&revision.answer));
-    }
-    let shared = query_tokens.intersection(&tokens).count();
+    let shared = query_tokens.intersection(tokens).count();
     let only_query_numbers = query_tokens
-        .difference(&tokens)
+        .difference(tokens)
         .any(|token| token.chars().all(|c| c.is_ascii_digit() || c == '.'));
     if shared == 0 || only_query_numbers {
         return None;
     }
     let score = shared as f64 / query_tokens.len() as f64;
     (score >= WORDING_MIN_COVERAGE).then_some(score)
+}
+
+/// [`coverage`] over the decision's question (every copy's comparison text)
+/// and answers.
+fn wording_score(ledger: &Ledger, index: usize, query_tokens: &BTreeSet<String>) -> Option<f64> {
+    let decision = &ledger.decisions[index];
+    let mut tokens = text::content_tokens(&decision.question);
+    tokens.extend(text::content_tokens(ledger.profile_text(index)));
+    for revision in &decision.revisions {
+        tokens.extend(text::content_tokens(&revision.answer));
+    }
+    coverage(&tokens, query_tokens)
 }
 
 /// The answered decisions of `ledger` that match `query`, best first. Only
@@ -271,6 +306,69 @@ pub fn search_ledger(ledger: &Ledger, query: &str, document: &str) -> Vec<Search
     hits
 }
 
+/// How a `decisions.md` record matches a query exactly, if it does.
+fn registry_match(record: &RegistryDecision, query: &Query) -> Option<SearchMatch> {
+    if let Some(stamp) = &query.stamp {
+        return record
+            .id
+            .eq_ignore_ascii_case(stamp)
+            .then_some(SearchMatch::Stamp);
+    }
+    if let Some(id) = &query.id {
+        if record.id.eq_ignore_ascii_case(id) {
+            return Some(SearchMatch::DecisionId);
+        }
+        if registry_revision_id(record).eq_ignore_ascii_case(id) {
+            return Some(SearchMatch::RevisionId);
+        }
+    }
+    let key = text_key(&query.text)?;
+    (text_key(&record.decision).as_ref() == Some(&key)).then_some(SearchMatch::QuestionText)
+}
+
+/// The project `decisions.md` records that match `query`, best first
+/// (`#decisionsearchnofile`).
+pub fn search_registry(records: &[RegistryDecision], query: &str) -> Vec<SearchHit> {
+    let parsed = parse_query(query);
+    let query_tokens = text::content_tokens(&parsed.text);
+    let mut hits = Vec::new();
+    for record in records {
+        let found = match registry_match(record, &parsed) {
+            Some(matched) => Some((matched, 1.0)),
+            None if parsed.stamp.is_some() => None,
+            None => {
+                let mut tokens = text::content_tokens(&record.decision);
+                tokens.extend(text::content_tokens(&record.rationale));
+                coverage(&tokens, &query_tokens).map(|score| (SearchMatch::Wording, score))
+            }
+        };
+        let Some((matched, score)) = found else {
+            continue;
+        };
+        hits.push(SearchHit {
+            document: REGISTRY_LOCATION.to_string(),
+            decision_id: record.id.clone(),
+            question: format!("project decision ({})", record.state),
+            answer: record.decision.clone(),
+            location: registry_revision_location(record),
+            first_seen_at: None,
+            earlier_answers: Vec::new(),
+            open_items: Vec::new(),
+            matched,
+            score,
+            state: Some(record.state.clone()),
+            rationale: Some(record.rationale.clone()),
+            superseded_by: records
+                .iter()
+                .filter(|other| other.supersedes.contains(&record.id))
+                .map(|other| other.id.clone())
+                .collect(),
+        });
+    }
+    rank(&mut hits);
+    hits
+}
+
 /// Normalize recall scores per query so the best hit is `1.0`.
 fn normalized(hits: &[RecallHit]) -> Vec<(&RecallHit, f64)> {
     let top = hits
@@ -290,7 +388,7 @@ fn normalized(hits: &[RecallHit]) -> Vec<(&RecallHit, f64)> {
         .collect()
 }
 
-/// Where [`add_recall_hits`] reads this document.
+/// A document [`add_recall_hits`] already has a ledger for.
 pub struct SearchDocument<'a> {
     pub ledger: &'a Ledger,
     /// Observations of the document text alone (no archives), so its lines
@@ -304,11 +402,11 @@ pub struct SearchDocument<'a> {
     pub hits_current: bool,
 }
 
-/// Map recall hits onto answered decisions (this document's, or another
+/// Map recall hits onto answered decisions (one of `documents`, or another
 /// readable session document's through `load`) and merge them into `hits`.
 pub fn add_recall_hits(
     hits: &mut Vec<SearchHit>,
-    here: &SearchDocument<'_>,
+    documents: &[SearchDocument<'_>],
     recall: &[RecallHit],
     max_documents: usize,
     load: &mut dyn FnMut(&str) -> Option<OtherDocument>,
@@ -321,7 +419,7 @@ pub fn add_recall_hits(
         } else {
             SearchMatch::Recall
         };
-        if hit.path == here.path {
+        if let Some(here) = documents.iter().find(|document| document.path == hit.path) {
             if !here.hits_current {
                 continue;
             }
@@ -359,12 +457,14 @@ pub fn add_recall_hits(
 }
 
 /// Best first, one hit per (document, decision): the better band wins, then
-/// the higher score, then document order and decision id.
+/// a record that still stands over one that does not, then the higher score,
+/// then document order and decision id.
 pub fn rank(hits: &mut Vec<SearchHit>) {
     hits.sort_by(|a, b| {
         a.matched
             .band()
             .cmp(&b.matched.band())
+            .then_with(|| b.is_current().cmp(&a.is_current()))
             .then_with(|| {
                 b.score
                     .partial_cmp(&a.score)
@@ -505,7 +605,7 @@ pub fn question_cue(inputs: &CueInputs<'_>) -> Option<QuestionCue> {
 /// The short decision-lookup menu for `file` (display form).
 pub fn lookup_menu(file: &str) -> String {
     format!(
-        "Before asking the operator anything (#decisionsearchmenu), look it up: `agent-doc decision search {file} <question, id or stamp>` ranks the answered decisions; `agent-doc decision answered {file}` lists them; `agent-doc decision why {file} <id>` shows why one holds. Ask only when nothing answers it, and cite the decision id you checked."
+        "Before asking the operator anything (#decisionsearchmenu), look it up: `agent-doc decision search {file} <question, id or stamp>` ranks the answered decisions; `agent-doc decision answered {file}` lists them; `agent-doc decision why {file} <id>` shows why one holds. Drop the file to search the whole project. Ask only when nothing answers it, and cite the decision id you checked."
     )
 }
 

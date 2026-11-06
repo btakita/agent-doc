@@ -1103,11 +1103,49 @@ impl SearchRecallStatus {
     }
 }
 
+/// The `decisions.md` registry in a project search (`#decisionsearchnofile`).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum RegistrySearchStatus {
+    /// Read; `records` records searched.
+    Read { records: usize },
+    /// The project has no `decisions.md`.
+    Missing,
+    /// `decisions.md` exists but could not be read, so it was not searched.
+    Unreadable { detail: String },
+}
+
+/// A session document a project search found but could not read.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct SkippedDocument {
+    pub document: String,
+    pub reason: String,
+}
+
+/// What a project search covered (`#decisionsearchnofile`). A document that
+/// was not searched is named, so a miss here is never read as "not answered"
+/// when the answer could sit in a document the search passed over.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct ProjectSearchScope {
+    pub root: String,
+    /// Session documents searched.
+    pub documents: usize,
+    pub skipped: Vec<SkippedDocument>,
+    /// The document scan hit its entry budget, so documents may be missing.
+    pub scan_exhausted: bool,
+    pub registry: RegistrySearchStatus,
+}
+
 /// What `agent-doc decision search` found (`#decisionsearchmenu`).
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct DecisionSearchReport {
     pub query: String,
-    pub document: String,
+    /// The document searched, when the search named one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub document: Option<String>,
+    /// What a project search covered, when the search named no document.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project: Option<ProjectSearchScope>,
     pub hits: Vec<agent_doc_answer_ledger::search::SearchHit>,
     pub recall: SearchRecallStatus,
 }
@@ -1117,24 +1155,45 @@ const SEARCH_RECALL_HITS: usize = 12;
 /// Other documents a search reads at most.
 const SEARCH_MAX_DOCUMENTS: usize = 8;
 
-/// `#decisionsearchmenu`: rank the answered decisions of `file` (its text,
-/// done archives and index, as `decision answered` sees them) against
-/// `query`, best first, plus answered decisions in other session documents
-/// the optional tsift recall source finds. Read-only: nothing is written.
-/// `display` is the document as the caller names it.
-pub fn search_decisions(
-    file: &Path,
-    display: &str,
+/// One document's text and ledger, as a search reads them.
+struct LoadedDocument {
+    path: std::path::PathBuf,
+    display: String,
+    content: String,
+    ledger: Ledger,
+    rows: agent_doc_answer_ledger::extract::Observations,
+}
+
+impl LoadedDocument {
+    /// `path`'s ledger as `decision answered` sees it (text, done archives,
+    /// index), and the rows of its text alone, for recall's line numbers.
+    fn load(path: &Path, display: &str, content: String) -> Self {
+        let (_, ledger) = build_ledger(path, &content);
+        let rows = agent_doc_answer_ledger::extract::observe(&content, &[]);
+        Self {
+            path: path.to_path_buf(),
+            display: display.to_string(),
+            content,
+            ledger,
+            rows,
+        }
+    }
+}
+
+/// Run the optional tsift recall source once over `query` and merge its hits
+/// into `hits`, mapped onto `documents` or, for a hit elsewhere, onto another
+/// session document. `anchor` locates the project; `stale_note` words the hits
+/// skipped because `n` of `documents` are newer than the index.
+fn add_search_recall(
+    anchor: &Path,
     query: &str,
     env: &RecallEnv,
-    limit: usize,
-) -> Result<DecisionSearchReport> {
+    documents: &[LoadedDocument],
+    stale_note: &dyn Fn(usize) -> String,
+    hits: &mut Vec<agent_doc_answer_ledger::search::SearchHit>,
+) -> SearchRecallStatus {
     use agent_doc_answer_ledger::search;
-    let content = std::fs::read_to_string(file)
-        .map_err(|err| anyhow::anyhow!("failed to read {}: {err}", file.display()))?;
-    let (_, ledger) = build_ledger(file, &content);
-    let mut hits = search::search_ledger(&ledger, query, display);
-    let recall = match TsiftRecall::discover_or_reason(file, env) {
+    match TsiftRecall::discover_or_reason(anchor, env) {
         Err(detail) => SearchRecallStatus::Unavailable {
             detail: detail.to_string(),
         },
@@ -1154,44 +1213,188 @@ pub fn search_decisions(
                 // An index older than the document has stale line numbers
                 // for it: skip those hits rather than map them to the wrong
                 // decision.
-                let document_modified = std::fs::metadata(file).and_then(|meta| meta.modified()).ok();
-                let hits_current = match (source.index_modified(), document_modified) {
-                    (Some(index), Some(document)) => index >= document,
-                    _ => true,
-                };
-                let here = canonical(file);
-                let here_path = here.to_string_lossy().into_owned();
-                let rows = agent_doc_answer_ledger::extract::observe(&content, &[]);
-                let excluded = recall_excluded(file, &content);
+                let index_modified = source.index_modified();
+                let hits_current: Vec<bool> = documents
+                    .iter()
+                    .map(|document| {
+                        let modified =
+                            std::fs::metadata(&document.path).and_then(|meta| meta.modified());
+                        match (index_modified, modified) {
+                            (Some(index), Ok(document)) => index >= document,
+                            _ => true,
+                        }
+                    })
+                    .collect();
+                let paths: Vec<String> = documents
+                    .iter()
+                    .map(|document| canonical(&document.path).to_string_lossy().into_owned())
+                    .collect();
+                let views: Vec<search::SearchDocument<'_>> = documents
+                    .iter()
+                    .enumerate()
+                    .map(|(index, document)| search::SearchDocument {
+                        ledger: &document.ledger,
+                        rows: &document.rows,
+                        path: &paths[index],
+                        display: &document.display,
+                        hits_current: hits_current[index],
+                    })
+                    .collect();
                 let now = agent_doc_log_time::current_epoch_secs();
                 let root = source.root().to_path_buf();
-                let mut load = |path: &str| load_other_document(Path::new(path), &excluded, &root, now);
-                search::add_recall_hits(
-                    &mut hits,
-                    &search::SearchDocument {
-                        ledger: &ledger,
-                        rows: &rows,
-                        path: &here_path,
-                        display,
-                        hits_current,
-                    },
-                    &raw,
-                    SEARCH_MAX_DOCUMENTS,
-                    &mut load,
-                );
+                // Only a hit outside `documents` needs the excluded set.
+                let mut excluded: Option<BTreeSet<std::path::PathBuf>> = None;
+                let mut load = |path: &str| {
+                    let excluded = excluded.get_or_insert_with(|| {
+                        documents
+                            .iter()
+                            .flat_map(|document| recall_excluded(&document.path, &document.content))
+                            .collect()
+                    });
+                    load_other_document(Path::new(path), excluded, &root, now)
+                };
+                search::add_recall_hits(hits, &views, &raw, SEARCH_MAX_DOCUMENTS, &mut load);
+                let stale = hits_current.iter().filter(|current| !**current).count();
                 SearchRecallStatus::Used {
                     hits: raw.len(),
-                    note: (!hits_current).then(|| {
-                        "the tsift index is older than this document, so its hits on this document were skipped (run `tsift status --fix` to reindex)".to_string()
-                    }),
+                    note: (stale > 0).then(|| stale_note(stale)),
                 }
             }
         }
-    };
+    }
+}
+
+/// `#decisionsearchmenu`: rank the answered decisions of `file` (its text,
+/// done archives and index, as `decision answered` sees them) against
+/// `query`, best first, plus answered decisions in other session documents
+/// the optional tsift recall source finds. Read-only: nothing is written.
+/// `display` is the document as the caller names it.
+pub fn search_decisions(
+    file: &Path,
+    display: &str,
+    query: &str,
+    env: &RecallEnv,
+    limit: usize,
+) -> Result<DecisionSearchReport> {
+    let content = std::fs::read_to_string(file)
+        .map_err(|err| anyhow::anyhow!("failed to read {}: {err}", file.display()))?;
+    let document = LoadedDocument::load(file, display, content);
+    let mut hits = agent_doc_answer_ledger::search::search_ledger(&document.ledger, query, display);
+    let recall = add_search_recall(
+        file,
+        query,
+        env,
+        std::slice::from_ref(&document),
+        &|_| {
+            "the tsift index is older than this document, so its hits on this document were skipped (run `tsift status --fix` to reindex)".to_string()
+        },
+        &mut hits,
+    );
     hits.truncate(limit.max(1));
     Ok(DecisionSearchReport {
         query: query.to_string(),
-        document: display.to_string(),
+        document: Some(display.to_string()),
+        project: None,
+        hits,
+        recall,
+    })
+}
+
+/// The `decisions.md` records at `root`, and how reading them went.
+fn project_registry(
+    root: &Path,
+) -> (
+    Vec<agent_doc_answer_ledger::graph::RegistryDecision>,
+    RegistrySearchStatus,
+) {
+    if !agent_doc_decision_io::registry_path(root).is_file() {
+        return (Vec::new(), RegistrySearchStatus::Missing);
+    }
+    match agent_doc_decision_io::read_registry(root) {
+        Ok(registry) => {
+            let records = crate::decision_registry_graph::registry_decisions(&registry);
+            let status = RegistrySearchStatus::Read {
+                records: records.len(),
+            };
+            (records, status)
+        }
+        Err(err) => (
+            Vec::new(),
+            RegistrySearchStatus::Unreadable {
+                detail: format!("{err:#}"),
+            },
+        ),
+    }
+}
+
+/// The session documents a project search covers.
+#[derive(Debug, Clone, Default)]
+pub struct ProjectDocuments {
+    pub documents: Vec<std::path::PathBuf>,
+    /// The scan that found them ran out of budget.
+    pub scan_exhausted: bool,
+}
+
+/// `#decisionsearchnofile`: [`search_decisions`] over every session document
+/// of the project at `root`, plus its `decisions.md` records. Every hit names
+/// its document, relative to `root`. Read-only: nothing is written.
+pub fn search_project_decisions(
+    root: &Path,
+    project: &ProjectDocuments,
+    query: &str,
+    env: &RecallEnv,
+    limit: usize,
+) -> Result<DecisionSearchReport> {
+    use agent_doc_answer_ledger::search;
+    let mut documents = Vec::new();
+    let mut skipped = Vec::new();
+    for path in &project.documents {
+        let display = path.strip_prefix(root).unwrap_or(path).to_string_lossy().into_owned();
+        let read = match std::fs::metadata(path) {
+            Ok(meta) if meta.len() > MAX_RECALL_DOCUMENT_BYTES => Err(format!(
+                "{} bytes, over the {MAX_RECALL_DOCUMENT_BYTES}-byte project limit; name it as FILE to search it",
+                meta.len()
+            )),
+            Ok(_) => std::fs::read_to_string(path).map_err(|err| err.to_string()),
+            Err(err) => Err(err.to_string()),
+        };
+        match read {
+            Ok(content) => documents.push(LoadedDocument::load(path, &display, content)),
+            Err(reason) => skipped.push(SkippedDocument {
+                document: display,
+                reason,
+            }),
+        }
+    }
+    let (records, registry) = project_registry(root);
+    let mut hits = search::search_registry(&records, query);
+    for document in &documents {
+        hits.extend(search::search_ledger(&document.ledger, query, &document.display));
+    }
+    search::rank(&mut hits);
+    let recall = add_search_recall(
+        root,
+        query,
+        env,
+        &documents,
+        &|stale| {
+            format!(
+                "the tsift index is older than {stale} searched documents, so its hits on them were skipped; the ledger still searched them (run `tsift status --fix` to reindex)"
+            )
+        },
+        &mut hits,
+    );
+    hits.truncate(limit.max(1));
+    Ok(DecisionSearchReport {
+        query: query.to_string(),
+        document: None,
+        project: Some(ProjectSearchScope {
+            root: root.display().to_string(),
+            documents: documents.len(),
+            skipped,
+            scan_exhausted: project.scan_exhausted,
+            registry,
+        }),
         hits,
         recall,
     })
@@ -1780,6 +1983,161 @@ mod tests {
             "{:?}",
             report.recall
         );
+    }
+
+    const SEARCH_REGISTRY: &str = concat!(
+        "# Decisions\n\nThis file is the authoritative current decision registry.\n\n",
+        "<!-- agent:decision id=\"DEC-cache-000\" -->\n## DEC-cache-000\n",
+        "- State: superseded\n- Updated: 2026-11-01T00:00:00Z\n- Evidence: (none)\n- Supersedes: (none)\n",
+        "### Decision\nUse a FIFO cache for the demo sign-in sessions.\n### Rationale\nSimplest.\n<!-- /agent:decision -->\n\n",
+        "<!-- agent:decision id=\"DEC-cache-001\" -->\n## DEC-cache-001\n",
+        "- State: accepted\n- Updated: 2026-11-05T00:00:00Z\n- Evidence: (none)\n- Supersedes: DEC-cache-000\n",
+        "### Decision\nUse an LRU cache for the demo sign-in sessions.\n### Rationale\nHit rate.\n<!-- /agent:decision -->\n\n",
+    );
+
+    fn project_documents(doc: &Path, other: &Path) -> ProjectDocuments {
+        ProjectDocuments {
+            documents: vec![doc.to_path_buf(), other.to_path_buf()],
+            scan_exhausted: false,
+        }
+    }
+
+    /// `#decisionsearchnofile`: with no FILE the ledger of every session
+    /// document and the registry are searched, without tsift, and every hit
+    /// names where it came from.
+    #[test]
+    fn project_search_covers_every_document_and_the_registry() {
+        let (dir, doc, other) = recall_project();
+        std::fs::write(dir.path().join("decisions.md"), SEARCH_REGISTRY).unwrap();
+        let before = std::fs::read_to_string(&doc).unwrap();
+        let empty_path = dir.path().join("empty-path");
+        std::fs::create_dir_all(&empty_path).unwrap();
+        let env = recall_env(&empty_path, 2000);
+        let project = project_documents(&doc, &other);
+        let search = |query: &str| {
+            search_project_decisions(dir.path(), &project, query, &env, 10).unwrap()
+        };
+
+        // One document's answer, by id, from either document.
+        let here = search("#tdport");
+        assert_eq!(here.hits[0].document, "tasks/session.md", "{here:?}");
+        assert_eq!(here.hits[0].answer, "Use the standard http ports.");
+        let there = search("#portpick");
+        assert_eq!(there.hits[0].document, "tasks/other.md", "{there:?}");
+        assert_eq!(there.hits[0].answer, "Use port 8443.");
+
+        // A wording match spans documents and the registry.
+        let report = search("demo sign-in");
+        let documents: BTreeSet<&str> =
+            report.hits.iter().map(|hit| hit.document.as_str()).collect();
+        assert!(documents.contains("tasks/other.md"), "{report:?}");
+        assert!(documents.contains("decisions.md"), "{report:?}");
+
+        // The registry, by id.
+        let record = search("DEC-cache-001");
+        assert_eq!(record.hits[0].document, "decisions.md");
+        assert_eq!(
+            record.hits[0].answer,
+            "Use an LRU cache for the demo sign-in sessions."
+        );
+        let replaced = search("DEC-cache-000");
+        assert_eq!(replaced.hits[0].superseded_by, ["DEC-cache-001"]);
+        assert!(!replaced.hits[0].is_current());
+
+        let scope = report.project.as_ref().unwrap();
+        assert!(report.document.is_none());
+        assert_eq!(scope.documents, 2);
+        assert!(scope.skipped.is_empty());
+        assert_eq!(scope.registry, RegistrySearchStatus::Read { records: 2 });
+        assert!(matches!(report.recall, SearchRecallStatus::Unavailable { .. }));
+
+        // Limits apply to the merged list.
+        let one = search_project_decisions(dir.path(), &project, "demo sign-in", &env, 1).unwrap();
+        assert_eq!(one.hits.len(), 1);
+
+        // Read-only.
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), before);
+    }
+
+    /// A miss must not read as "not answered" when part of the project was
+    /// not searched: every document or registry that was passed over is named.
+    #[test]
+    fn project_search_names_what_it_did_not_search() {
+        let (dir, doc, other) = recall_project();
+        let empty_path = dir.path().join("empty-path");
+        std::fs::create_dir_all(&empty_path).unwrap();
+        let env = recall_env(&empty_path, 2000);
+
+        let report =
+            search_project_decisions(dir.path(), &project_documents(&doc, &other), "#tdport", &env, 10)
+                .unwrap();
+        assert_eq!(
+            report.project.as_ref().unwrap().registry,
+            RegistrySearchStatus::Missing
+        );
+
+        std::fs::write(dir.path().join("decisions.md"), "<!-- agent:decision -->\n").unwrap();
+        let huge = dir.path().join("tasks/huge.md");
+        std::fs::write(&huge, "x").unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(&huge)
+            .unwrap()
+            .set_len(MAX_RECALL_DOCUMENT_BYTES + 1)
+            .unwrap();
+        let project = ProjectDocuments {
+            documents: vec![doc.clone(), huge, dir.path().join("tasks/gone.md")],
+            scan_exhausted: true,
+        };
+        let report = search_project_decisions(dir.path(), &project, "#tdport", &env, 10).unwrap();
+        let scope = report.project.as_ref().unwrap();
+        assert_eq!(report.hits[0].document, "tasks/session.md", "{report:?}");
+        assert_eq!(scope.documents, 1);
+        assert!(scope.scan_exhausted);
+        assert!(
+            matches!(&scope.registry, RegistrySearchStatus::Unreadable { detail } if !detail.is_empty()),
+            "{scope:?}"
+        );
+        let skipped: Vec<&str> = scope.skipped.iter().map(|row| row.document.as_str()).collect();
+        assert_eq!(skipped, ["tasks/huge.md", "tasks/gone.md"], "{scope:?}");
+        assert!(scope.skipped[0].reason.contains("name it as FILE"), "{scope:?}");
+    }
+
+    /// A project search maps a tsift hit onto the document's own ledger and
+    /// says how many documents the index is older than.
+    #[test]
+    fn project_search_maps_recall_onto_the_documents_it_read() {
+        let (dir, doc, other) = recall_project();
+        let bin_dir = fake_tsift(dir.path(), &other, "0");
+        let env = recall_env(&bin_dir, 10_000);
+        let project = project_documents(&doc, &other);
+        let report =
+            search_project_decisions(dir.path(), &project, "kubernetes namespace", &env, 10)
+                .unwrap();
+        assert_eq!(report.hits.len(), 1, "{report:?}");
+        assert_eq!(report.hits[0].document, "tasks/other.md");
+        assert_eq!(
+            report.hits[0].matched,
+            agent_doc_answer_ledger::search::SearchMatch::RecallSemantic
+        );
+
+        let old = std::time::SystemTime::now() - std::time::Duration::from_secs(3600);
+        std::fs::File::options()
+            .write(true)
+            .open(dir.path().join(".tsift/index.db"))
+            .unwrap()
+            .set_modified(old)
+            .unwrap();
+        let report =
+            search_project_decisions(dir.path(), &project, "kubernetes namespace", &env, 10)
+                .unwrap();
+        assert!(report.hits.is_empty(), "{report:?}");
+        match &report.recall {
+            SearchRecallStatus::Used { hits: 1, note: Some(note) } => {
+                assert!(note.contains("older than 2 searched documents"), "{note}")
+            }
+            other => panic!("{other:?}"),
+        }
     }
 
     /// `#decisionsearchmenu`: the report offers the lookup menu only on a

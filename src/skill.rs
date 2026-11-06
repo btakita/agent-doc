@@ -2272,10 +2272,42 @@ fn is_session_document_file(document: &Path) -> bool {
 /// Upper bound on directory entries the session-document scan visits per root.
 const SESSION_DOCUMENT_SCAN_BUDGET: usize = 20_000;
 
-/// Whether `root` holds at least one session document, by a bounded scan that
-/// skips hidden and underscore directories, build output, and nested git
-/// repositories (each is its own project).
+/// What [`session_documents_under`] found.
+pub(crate) struct SessionDocumentScan {
+    /// Sorted, so a search over them is deterministic.
+    pub documents: Vec<std::path::PathBuf>,
+    /// The scan ran out of budget, so `documents` may be incomplete.
+    pub exhausted: bool,
+}
+
+/// Every session document under `root` (`#decisionsearchnofile`).
+pub(crate) fn session_documents_under(root: &Path) -> SessionDocumentScan {
+    let mut documents = Vec::new();
+    let exhausted = visit_session_documents(root, &mut |path| {
+        documents.push(path);
+        std::ops::ControlFlow::Continue(())
+    });
+    documents.sort();
+    SessionDocumentScan { documents, exhausted }
+}
+
+/// Whether `root` holds at least one session document.
 pub(crate) fn root_holds_session_document(root: &Path) -> bool {
+    let mut found = false;
+    visit_session_documents(root, &mut |_| {
+        found = true;
+        std::ops::ControlFlow::Break(())
+    });
+    found
+}
+
+/// Visit `root`'s session documents by a bounded scan that skips hidden and
+/// underscore directories, build output, and nested git repositories (each is
+/// its own project). Returns whether the budget ran out.
+fn visit_session_documents(
+    root: &Path,
+    visit: &mut dyn FnMut(std::path::PathBuf) -> std::ops::ControlFlow<()>,
+) -> bool {
     const SKIP: [&str; 6] = ["node_modules", "target", "dist", "build", "vendor", "tmp"];
     let config = agent_doc_project_config_io::load_project_for_root(root);
     let mut budget = SESSION_DOCUMENT_SCAN_BUDGET;
@@ -2286,7 +2318,7 @@ pub(crate) fn root_holds_session_document(root: &Path) -> bool {
         };
         for entry in entries.flatten() {
             if budget == 0 {
-                return false;
+                return true;
             }
             budget -= 1;
             let path = entry.path();
@@ -2316,8 +2348,9 @@ pub(crate) fn root_holds_session_document(root: &Path) -> bool {
                     .replace('\\', "/");
                 if agent_doc_frontmatter::project_config::is_agent_doc_document(
                     &rel, &content, &config,
-                ) {
-                    return true;
+                ) && visit(path).is_break()
+                {
+                    return false;
                 }
             }
         }

@@ -6185,6 +6185,76 @@ mod status_patch_drop_tests {
         "\nReleased v0.35.559 from `5870713c02`.\n\nQueue markers: 📥 pending · 🚧 running\n";
     const RESPONSE: &str = "### Re: release status — opus\n\nReleased v0.35.559.\n";
 
+    const CLOSED_TREE: &str = concat!(
+        "- ### ~~do [#alpha]~~\n",
+        "  - **Response [#r-0123456789ab]**\n",
+        "    - **Timestamp:** 2026-11-05T19:10:10.000Z\n",
+        "    - **Summary:** Alpha landed.\n",
+        "    - **State:** Complete.\n",
+        "    - **Guidance:** Safe to delete this completed row.\n",
+    );
+    const OPEN_REPLIES: &str = concat!(
+        "- ### re [#parent] response\n",
+        "  - first reply [#q-aaaaaaaaaaaa]\n",
+        "  - second reply [#q-bbbbbbbbbbbb]\n",
+    );
+    const STRUCK_REPLIES: &str = concat!(
+        "- ### re [#parent] response\n",
+        "  - ~~first reply [#q-aaaaaaaaaaaa]~~\n",
+        "    - **Response [#r-0123456789ab]**\n",
+        "      - **Timestamp:** 2026-11-05T19:10:10.000Z\n",
+        "      - **Summary:** The reply landed.\n",
+        "      - **State:** Complete.\n",
+        "      - **Guidance:** Keep the tree under [#parent]: [#parent] is still open.\n",
+        "  - ~~second reply [#q-bbbbbbbbbbbb]~~\n",
+        "    - **Closed by:** [#r-0123456789ab]\n",
+    );
+
+    fn queue_doc(queue: &str) -> String {
+        format!(
+            "---\nagent_doc_session: s1\nagent: claude\n---\n\n<!-- agent:exchange -->\n### Re: closeout\n\nDone.\n<!-- /agent:exchange -->\n\n<!-- agent:queue go -->\n{queue}<!-- /agent:queue -->\n"
+        )
+    }
+
+    /// `#responsewrapperlossrootcause`: on 2026-11-05 the controller derived an
+    /// answered-head strike over one cut, and a backlog route added queue rows
+    /// before the write landed. The rebase over the newer cut kept
+    /// `**Summary:**` and lost `**Response**`, `**Timestamp:**`, `**State:**`,
+    /// `**Guidance:**` and `**Closed by:**`, because each of those repeats an
+    /// earlier row's merge identity.
+    #[test]
+    fn a_stale_strike_target_keeps_its_whole_response_tree_over_a_newer_queue_row() {
+        let routed = "- ### do [#routed]\n";
+        let base = queue_doc(&format!("{CLOSED_TREE}{OPEN_REPLIES}"));
+        let target = queue_doc(&format!("{CLOSED_TREE}{STRUCK_REPLIES}"));
+        let cut = queue_doc(&format!("{routed}{CLOSED_TREE}{OPEN_REPLIES}"));
+
+        let rebased = rebase_agent_candidate_over_editor_cut(&base, &target, &cut).unwrap();
+
+        assert_eq!(
+            rebased,
+            queue_doc(&format!("{routed}{CLOSED_TREE}{STRUCK_REPLIES}"))
+        );
+    }
+
+    /// A tree inserted ahead of an older one must not renumber it: ordinal
+    /// identities made the older tree's rows pair with the new tree's rows, and
+    /// the last occurrence was the one dropped.
+    #[test]
+    fn a_response_tree_added_ahead_of_an_older_tree_leaves_the_older_tree_in_place() {
+        let routed = "- ### do [#routed]\n";
+        let base = queue_doc(&format!("{OPEN_REPLIES}{CLOSED_TREE}"));
+        let target = queue_doc(&format!("{STRUCK_REPLIES}{CLOSED_TREE}"));
+        let cut = queue_doc(&format!("{OPEN_REPLIES}{CLOSED_TREE}{routed}"));
+
+        let rebased = rebase_agent_candidate_over_editor_cut(&base, &target, &cut).unwrap();
+
+        assert_eq!(
+            rebased,
+            queue_doc(&format!("{STRUCK_REPLIES}{CLOSED_TREE}{routed}"))
+        );
+    }
+
     /// The incident shape: the merge base already carries the agent's status,
     /// the operator never touches status, but types a queue row while the
     /// response is in flight. The rebase must keep the status patch, the

@@ -475,6 +475,21 @@ keys (`queue:0:id:<id>`, `queue:0:txt:<work text>`) do not change and
 replicas need no migration. A node patch addressed to an old owner-tag key
 fails closed with `NodeNotFound`.
 
+A binary-generated response row is one row of the tree it hangs under, so its
+per-cell key is `gen:<enclosing key>:<label>`, where the label is the row's
+bold lead (`State:`, `Response [#r-…]`) and excludes its value
+(`#responsewrapperlossrootcause`). A generated row never takes identity from
+its text or from an `[#id]` it mentions: one response repeats its `**Response**`,
+`**Timestamp:**` and `**Closed by:**` rows under each row it closes, every
+completed tree says `**State:** Complete.`, and a `**Guidance:**` row can name an
+open parent. As ordinal duplicates of one key, an agent-added tree read as a
+replayed copy the operator omitted, and a rebase dropped every row but a unique
+`**Summary:**`. The rekeying applies only to the generated ranges
+`response_row_child_ranges` and `response_details_child_ranges` report, so
+operator text beneath a generated choice or action keeps its own key and stays
+queue work. These keys are derived on all three sides by one binary, so
+replicas need no migration.
+
 `agent:run` is the canonical runnable-work component. The former
 `agent:queue` spelling remains a backward-compatible alias with identical queue
 semantics, attributes, node identity, and mutation behavior. Agent Doc accepts

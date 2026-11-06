@@ -329,8 +329,8 @@ pub(super) struct ControllerEditorViewPolicyGraph {
 type EditorViewLifecycleEffectTestHook = Arc<dyn Fn() + Send + Sync>;
 
 #[cfg(test)]
-fn editor_view_lifecycle_effect_test_hook(
-) -> &'static Mutex<Option<EditorViewLifecycleEffectTestHook>> {
+fn editor_view_lifecycle_effect_test_hook()
+-> &'static Mutex<Option<EditorViewLifecycleEffectTestHook>> {
     static HOOK: OnceLock<Mutex<Option<EditorViewLifecycleEffectTestHook>>> = OnceLock::new();
     HOOK.get_or_init(|| Mutex::new(None))
 }
@@ -5769,10 +5769,8 @@ pub fn request_supervisor_replacement(
     project_root: &Path,
     mut request: SupervisorReplacementRequest,
 ) -> Result<SupervisorReplacementReceipt> {
-    request.file = supervisor_replacement_request_file(
-        &request.file,
-        std::env::current_dir().ok().as_deref(),
-    );
+    request.file =
+        supervisor_replacement_request_file(&request.file, std::env::current_dir().ok().as_deref());
     let diagnostic_payload = serde_json::json!({
         "force": request.force,
         "mode": request.mode.clone(),
@@ -12219,8 +12217,7 @@ fn clear_replica_refusals(file: &Path) {
 /// Cached by `(path, document mtime, project config mtime)` so a storming file
 /// that is not being edited is read once; the read is repeated only when the
 /// file or its project's `[documents]` opt-in actually changes.
-type AgentDocDocumentCache =
-    BTreeMap<PathBuf, (Option<SystemTime>, Option<SystemTime>, bool)>;
+type AgentDocDocumentCache = BTreeMap<PathBuf, (Option<SystemTime>, Option<SystemTime>, bool)>;
 
 /// Project-internal state paths are never user documents, regardless of copied
 /// frontmatter or component markers. This path predicate precedes every relay
@@ -20143,8 +20140,7 @@ pub(crate) fn serve_with_options(
                     &runtime,
                     recycle_handoff_in_flight.load(Ordering::SeqCst),
                     recycle_handoff_promoted.load(Ordering::SeqCst),
-                    timestamp_secs()
-                        < recycle_handoff_drain_deadline_secs.load(Ordering::SeqCst),
+                    timestamp_secs() < recycle_handoff_drain_deadline_secs.load(Ordering::SeqCst),
                     handoff_temp_socket.as_deref(),
                     &public_sock,
                     controller_launched_at.elapsed(),
@@ -23397,9 +23393,11 @@ pub(crate) fn handle_request_locked(
             runtime.as_ref(),
             request,
         )),
-        "document_authority_handoff" => controller_envelope(
-            handle_document_authority_handoff(&bootstrap_snapshot, runtime.as_ref(), request),
-        ),
+        "document_authority_handoff" => controller_envelope(handle_document_authority_handoff(
+            &bootstrap_snapshot,
+            runtime.as_ref(),
+            request,
+        )),
         "editor_op_capture_update" => controller_envelope(handle_editor_op_capture_update(
             &bootstrap_snapshot,
             runtime.as_ref(),
@@ -29629,7 +29627,10 @@ pub(crate) fn handle_dispatch(
                 reason.as_str()
             }
             ControllerDispatchPaneObservation::Unavailable(reason)
-                if stage == "actor_turn_observation_unavailable" => reason.as_str(),
+                if stage == "actor_turn_observation_unavailable" =>
+            {
+                reason.as_str()
+            }
             _ => queue_control
                 .as_ref()
                 .and_then(|control| control.reason.as_deref())
@@ -41070,7 +41071,10 @@ mod tmux_layout_effect_state_dispatch_tests {
             "tasks/./left.md".to_string(),
             "tasks/sub/../left.md".to_string(),
             "tasks/left-alias.md".to_string(),
-            root_link.join("tasks/left.md").to_string_lossy().to_string(),
+            root_link
+                .join("tasks/left.md")
+                .to_string_lossy()
+                .to_string(),
             format!("{}/./tasks/left.md", root.display()),
         ];
         for focus in &spellings {
@@ -41088,7 +41092,10 @@ mod tmux_layout_effect_state_dispatch_tests {
         let relative_registry = vec![
             ("./tasks/right.md".to_string(), "%75".to_string()),
             (
-                root_link.join("tasks/left.md").to_string_lossy().to_string(),
+                root_link
+                    .join("tasks/left.md")
+                    .to_string_lossy()
+                    .to_string(),
                 "%76".to_string(),
             ),
         ];
@@ -41216,7 +41223,10 @@ mod tmux_layout_effect_state_dispatch_tests {
         );
         assert!(receipt.applied);
         assert_eq!(receipt.reason, PANE_LAYOUT_ROUTE_FOCUS_READY_REASON);
-        assert_eq!(receipt.file_panes, vec![("tasks/fpe.md".into(), "%15".into())]);
+        assert_eq!(
+            receipt.file_panes,
+            vec![("tasks/fpe.md".into(), "%15".into())]
+        );
     }
 
     /// `#panewindowdrift`: the operator-reported shape. The layout's file→pane
@@ -42988,16 +42998,12 @@ fn resolve_supervisor_replacement_target_for_work(
 )> {
     use agent_doc_supervisor_io::process::verified_start_supervisor_pid;
     let pane_tree_pid = (!work.pane_id.trim().is_empty())
-        .then(|| {
-            agent_doc_tmux_io::pane_pid(&agent_doc_tmux_io::configured_tmux(), &work.pane_id)
-        })
+        .then(|| agent_doc_tmux_io::pane_pid(&agent_doc_tmux_io::configured_tmux(), &work.pane_id))
         .flatten()
         .and_then(|pane_pid| {
             let children = agent_doc_process_owner_io::proc_table::observe_proc_children_fresh();
-            let pids = agent_doc_process_owner_io::proc_table::tree_pids(
-                &children,
-                &pane_pid.to_string(),
-            );
+            let pids =
+                agent_doc_process_owner_io::proc_table::tree_pids(&children, &pane_pid.to_string());
             verified_start_supervisor_pid(
                 pids.iter().filter_map(|pid| pid.parse::<u32>().ok()),
                 &work.file,
@@ -48438,10 +48444,7 @@ mod tests {
         let live_pid = std::process::id();
 
         // The predecessor IDE (now gone) set the fence high.
-        assert_eq!(
-            observe(1231, Some(VIEW_SNAPSHOT_DEAD_PEER_PID)),
-            "applied"
-        );
+        assert_eq!(observe(1231, Some(VIEW_SNAPSHOT_DEAD_PEER_PID)), "applied");
         // Its successor restarts at a low sequence from a different process.
         assert_eq!(observe(27, Some(live_pid)), "applied");
         let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
@@ -72043,7 +72046,8 @@ body
             let canonical = file.canonicalize().unwrap();
             let refused = register(&canonical, tag);
             assert_eq!(
-                refused["reason"], "not_agent_doc_document",
+                refused["reason"],
+                "not_agent_doc_document",
                 "{} has no agent-doc opt-in and must be refused terminally: {refused}",
                 file.display()
             );

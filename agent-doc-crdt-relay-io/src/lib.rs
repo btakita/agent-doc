@@ -10217,7 +10217,7 @@ mod tests {
         assert_eq!(registration.history_lineage, hub_history);
 
         let response = "### Re: operator prompt — gpt-5\n\nStamped.";
-        add_response_cell_for_file(&doc, None, response, "test")
+        add_response_cell_for_file(&doc, None, response, None, "test")
             .unwrap()
             .expect("editor-attached response add should use the relay");
         let pull = pull_replica_updates_for_file(&doc, identity)

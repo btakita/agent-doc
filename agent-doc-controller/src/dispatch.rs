@@ -1703,10 +1703,15 @@ pub const fn fresh_start_admission_outcome(
 /// (#jbtsiftnosub2) Detect whether a freshly-created pane's capture still shows
 /// the injected routed trigger sitting **unsubmitted** in the harness composer.
 ///
-/// The capture is expected to already be ANSI-free (`capture_pane`, not the
-/// `_with_ansi` variant). ALL whitespace is stripped from both sides before the
-/// substring test so a trigger wrapped across terminal columns — tmux splits a
-/// long token onto the next line with a newline and no space — still matches.
+/// The capture is expected to already be ANSI-free AND ghost-free: capture with
+/// `capture_pane_with_ansi` and pass the `composer_text_without_ghost_suggestions`
+/// projection. A plain `capture_pane` is ANSI-free too, but it has lost the
+/// styling that tells a ghost suggestion from typed text, so a ghost of the
+/// trigger would match here (`#plaincaptureghost`).
+///
+/// ALL whitespace is stripped from both sides before the substring test so a
+/// trigger wrapped across terminal columns — tmux splits a long token onto the
+/// next line with a newline and no space — still matches.
 /// On a genuinely-submitted turn the harness clears the composer and the
 /// controller projects a document cycle (so this branch is never reached); on a
 /// brand-new fresh

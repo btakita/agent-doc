@@ -152,7 +152,10 @@ fn subagent_dispatch_candidates_for_content(file: &Path, content: &str) -> Resul
         .filter(|claim| claim.state == agent_doc_queue::queue_claim::QueueClaimState::Lost)
         .collect::<Vec<_>>();
     // `#subagentworkpool`: an attempt that expired with its worker still bound
-    // and no recorded stop may still be working, so its row is never offered.
+    // and was not abandoned may still be working, so its row is never offered.
+    // A harness freeze keeps blocking dispatch after the TTL
+    // (`QueueClaim::retains_frozen_worker_claim`); this filter is only the
+    // unconfirmed slot, which a freeze does not hold.
     let unconfirmed = lost
         .iter()
         .filter(|claim| claim.worker.is_some() && claim.frozen.is_none())

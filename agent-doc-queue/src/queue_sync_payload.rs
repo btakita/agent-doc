@@ -22,9 +22,7 @@ pub const QUEUE_SYNC_GUIDANCE: &str = "Beginning-of-turn queue reconciliation fo
 /// every document in an aggregate scan uses the same notion of "now".
 pub fn normalize_claims_for_queue_sync(claims: &mut [QueueClaim], now_secs: u64) {
     for claim in claims {
-        if claim.state != QueueClaimState::Reported && claim.is_expired(now_secs) {
-            claim.mark_lost();
-        }
+        claim.project_expiry(now_secs);
     }
 }
 

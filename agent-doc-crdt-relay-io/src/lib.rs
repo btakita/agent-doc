@@ -1351,11 +1351,7 @@ fn durable_queue_attempt_projection(file: &Path, current: &str) -> Result<String
         .claims
         .into_iter()
         .map(|mut claim| {
-            if claim.state != agent_doc_queue::queue_claim::QueueClaimState::Reported
-                && claim.is_expired(now_secs)
-            {
-                claim.mark_lost();
-            }
+            claim.project_expiry(now_secs);
             (claim.identity.clone(), claim)
         })
         .collect::<HashMap<_, _>>();

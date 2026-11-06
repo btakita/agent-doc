@@ -444,11 +444,7 @@ fn derive_runtime_projection_scoped(
         .claims
         .into_iter()
         .map(|mut claim| {
-            if claim.state != agent_doc_queue::queue_claim::QueueClaimState::Reported
-                && claim.is_expired(now)
-            {
-                claim.mark_lost();
-            }
+            claim.project_expiry(now);
             (claim.identity.clone(), claim)
         })
         .collect::<std::collections::HashMap<_, _>>();

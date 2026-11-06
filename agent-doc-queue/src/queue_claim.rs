@@ -60,10 +60,12 @@
 //!   no native heartbeat it can observe after dispatch. Without a TTL a lost
 //!   subagent would strand the head forever; with one, the attempt becomes
 //!   nonblocking `Lost` while its row remains visibly worked. `queue claim --refresh`
-//!   ([`QueueClaimLedger::refresh`]) extends only an already-started attempt,
-//!   which lets a long-running owner keep its claim alive; it refuses an
-//!   unstarted, expired, foreign, or missing claim rather than promoting or
-//!   (re)creating one. Under the
+//!   ([`QueueClaimLedger::refresh`]) extends an already-started attempt and,
+//!   with the exact generation, revives one that expired with its worker still
+//!   bound, including a harness freeze whose worker resumed through its
+//!   transcript. It refuses an unstarted, abandoned, foreign, or missing claim
+//!   rather than promoting or (re)creating one. A harness freeze is not lost
+//!   when its TTL elapses. Under the
 //!   queue-level `subagents` attribute an expired claim returns the head to the
 //!   dispatch set, never to inline drainage.
 //!
@@ -219,8 +221,10 @@ pub struct QueueClaim {
     /// "waiting on its own background work" notice is proof of life, never
     /// this record. A frozen worker frees its pool slot so the coordinator
     /// refills it, while the claim, generation, and worker binding stay
-    /// intact: a later report from the same worker is still accepted, and a
-    /// heartbeat on a still-live attempt clears the freeze.
+    /// intact: a later report from the same worker is still accepted, and
+    /// `queue claim --refresh` with the exact owner and generation clears the
+    /// freeze, including after the claim TTL. Expiry does not turn a harness
+    /// freeze into `Lost`. An explicit abandon does.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub frozen: Option<QueueWorkerFreeze>,
     /// What stopped the attempt, while `state` is
@@ -229,11 +233,28 @@ pub struct QueueClaim {
     pub quota_block: Option<crate::worker_quota::WorkerQuotaBlock>,
 }
 
+/// Reason recorded by `queue release --requeue`. A harness `queue freeze`
+/// uses the reported text and is not an abandon.
+pub const ABANDONED_REQUEUE_REASON: &str = "abandoned for requeue";
+
 /// Recorded stop of one bound worker (`#subagentworkpool`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct QueueWorkerFreeze {
     pub frozen_at_secs: u64,
     pub reason: String,
+    /// Explicit `queue release --requeue`. Absent on a harness freeze and on
+    /// ledgers written before the field existed; those still count as an
+    /// abandon when `reason` is [`ABANDONED_REQUEUE_REASON`].
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub abandoned: bool,
+}
+
+impl QueueWorkerFreeze {
+    /// Whether this record abandons the attempt instead of holding it for a
+    /// transcript resume.
+    pub fn is_abandon(&self) -> bool {
+        self.abandoned || self.reason == ABANDONED_REQUEUE_REASON
+    }
 }
 
 fn is_zero(value: &u64) -> bool {
@@ -391,6 +412,8 @@ pub struct QueueLifecycleDiagnosis {
 /// * `Expected(q) = projection(state(a))`.
 /// * `Visible(q) != Expected(q) => ProjectionDrift` and projection is safe.
 /// * `state(a)=Claimed && age(a)>=grace => DispatchEvidenceMissing`.
+/// * A harness freeze that still holds its worker keeps `projection(state(a))`
+///   after the TTL. Expiry is not a lost projection for that attempt.
 /// * Missing worker evidence is `Unknown`; it never authorizes a lifecycle
 ///   transition. Only a generation-fenced start/heartbeat/report can prove work.
 pub fn diagnose_lifecycle(
@@ -399,7 +422,7 @@ pub fn diagnose_lifecycle(
     now_secs: u64,
     dispatch_grace_secs: u64,
 ) -> Option<QueueLifecycleDiagnosis> {
-    let expected = if claim.state == QueueClaimState::Lost {
+    let expected = if claim.retains_frozen_worker_claim() || claim.state == QueueClaimState::Lost {
         claim.projection_marker()
     } else if claim.state != QueueClaimState::Reported && claim.is_expired(now_secs) {
         if claim.worker.is_some() {
@@ -720,7 +743,45 @@ impl QueueClaim {
     }
 
     pub fn blocks_dispatch(&self, now_secs: u64) -> bool {
+        if self.retains_frozen_worker_claim() {
+            return true;
+        }
         self.state.blocks_dispatch() && !self.is_expired(now_secs)
+    }
+
+    /// A harness freeze whose worker is still bound. Expiry and a projected
+    /// `Lost` do not drop it: the same attempt is revived by `queue claim
+    /// --refresh`. An explicit requeue abandon does not hold the row.
+    pub fn retains_frozen_worker_claim(&self) -> bool {
+        self.worker.is_some()
+            && self
+                .frozen
+                .as_ref()
+                .is_some_and(|freeze| !freeze.is_abandon())
+            && matches!(
+                self.state,
+                QueueClaimState::Running | QueueClaimState::Lost
+            )
+    }
+
+    /// The bound worker still owns this attempt, so a lapsed refresh must not
+    /// call the head dispatchable. An explicit abandon does not.
+    pub fn worker_binding_holds_attempt(&self) -> bool {
+        self.worker.is_some()
+            && !self
+                .frozen
+                .as_ref()
+                .is_some_and(QueueWorkerFreeze::is_abandon)
+    }
+
+    /// Project TTL expiry onto this attempt. A harness freeze with its worker
+    /// still bound stays `Running`: expiry is not evidence the worker stopped,
+    /// and marking it `Lost` made refresh say the head was eligible for
+    /// dispatch (`#frozenclaimrefreshrevive`).
+    pub fn project_expiry(&mut self, now_secs: u64) {
+        if self.is_expired(now_secs) && !self.retains_frozen_worker_claim() {
+            self.mark_lost();
+        }
     }
 }
 
@@ -1587,9 +1648,13 @@ impl QueueClaimLedger {
     /// generation of an attempt that expired with its worker still bound
     /// (`#subagentworkpool`). Expiry only means nobody refreshed the claim, so
     /// the coordinator's proof of life revives that same attempt: same owner,
-    /// generation, and worker. It cannot steal work: a reclaim moved the
-    /// generation (refused as stale), an unbound attempt has no worker to
-    /// vouch for, and a recorded stop or abandon stays lost.
+    /// generation, and worker. A harness `queue freeze` is not a stop that
+    /// ends the attempt: the exact heartbeat revives it and clears the freeze,
+    /// including after the TTL, so a worker resumed through its transcript
+    /// keeps this attempt (`#frozenclaimrefreshrevive`). It cannot steal work:
+    /// a reclaim moved the generation (refused as stale), an unbound attempt
+    /// has no worker to vouch for, and an explicit `queue release --requeue`
+    /// abandon stays lost.
     pub fn refresh_or_revive_attempt_in_session(
         &mut self,
         item: &str,
@@ -1616,7 +1681,10 @@ impl QueueClaimLedger {
         let Some(binding) = existing.worker.as_ref() else {
             return false;
         };
-        existing.frozen.is_none()
+        !existing
+            .frozen
+            .as_ref()
+            .is_some_and(QueueWorkerFreeze::is_abandon)
             && !existing.completion_recovered_after_loss
             && matches!(
                 existing.state,
@@ -1672,7 +1740,7 @@ impl QueueClaimLedger {
             return Err(refused(RefreshRefusal::Expired {
                 holder: existing.owner.clone(),
                 expired_at_secs: existing.expires_at_secs,
-                worker_bound: existing.worker.is_some() && existing.frozen.is_none(),
+                worker_bound: existing.worker_binding_holds_attempt(),
             }));
         }
         if revive {
@@ -1747,6 +1815,7 @@ impl QueueClaimLedger {
             claim.frozen = Some(QueueWorkerFreeze {
                 frozen_at_secs: now_secs,
                 reason: reason.trim().to_string(),
+                abandoned: false,
             });
         }
         Ok(claim.clone())
@@ -2693,8 +2762,10 @@ impl QueueClaimLedger {
         let mut kept = Vec::with_capacity(self.claims.len());
         for mut claim in std::mem::take(&mut self.claims) {
             if claim.state != QueueClaimState::Lost && claim.is_expired(now_secs) {
-                claim.mark_lost();
-                pruned.push((claim.clone(), ClaimPruneCause::Expired));
+                claim.project_expiry(now_secs);
+                if claim.state == QueueClaimState::Lost {
+                    pruned.push((claim.clone(), ClaimPruneCause::Expired));
+                }
                 kept.push(claim);
             } else if live_heads.is_some_and(|live| !live.contains(&claim.identity)) {
                 pruned.push((claim, ClaimPruneCause::Closed));
@@ -2724,9 +2795,7 @@ impl QueueClaimLedger {
         let mut kept = Vec::with_capacity(self.claims.len());
         for claim in std::mem::take(&mut self.claims) {
             let mut adjusted = claim.clone();
-            if adjusted.is_expired(now_secs) {
-                adjusted.mark_lost();
-            }
+            adjusted.project_expiry(now_secs);
             if struck.contains(&claim.identity)
                 && !live.contains(&claim.identity)
                 && !struck_row_reopened_by_claim(Some(&adjusted))
@@ -3074,8 +3143,9 @@ fn selector_referenced_queue_ids(text: &str) -> Vec<String> {
 pub enum RefreshRefusal {
     /// No claim on the item at all.
     Unclaimed,
-    /// The claim's TTL already lapsed. With no bound worker the head is back in
-    /// the eligible set; with one, nothing proves the worker stopped.
+    /// The claim's TTL already lapsed. With no bound worker, or an explicit
+    /// abandon, the head is back in the eligible set. A bound worker, including
+    /// one frozen by `queue freeze`, is not evidence the worker stopped.
     Expired {
         holder: String,
         expired_at_secs: u64,
@@ -4636,13 +4706,63 @@ mod tests {
             QueueClaimState::Running
         );
 
-        // A recorded stop stays lost, and its refusal says why it is dispatchable.
-        let mut stopped = live();
-        stopped
+        // A harness freeze that then expires is the same attempt. The exact
+        // heartbeat revives it and clears the freeze; expiry must not turn it
+        // into lost or call the head dispatchable.
+        let mut frozen = live();
+        frozen
             .freeze_attempt("work", Some(1), 105, "ended without a result")
             .unwrap();
-        let refusal = revive(&mut stopped, "subagent:a", Some(1)).unwrap_err();
-        assert!(refusal.to_string().contains("eligible for dispatch again"), "{refusal}");
+        let live_heads = [claim_identity("work")].into_iter().collect();
+        assert_eq!(frozen.prune(200, Some(&live_heads)), 0);
+        assert_eq!(frozen.claims[0].state, QueueClaimState::Running);
+        assert!(frozen.claims[0].blocks_dispatch(200));
+        assert!(frozen.claimed_items(200, Some(&live_heads)).claims("work"));
+        assert!(
+            diagnose_lifecycle(
+                &frozen.claims[0],
+                Some(agent_doc_document::queue_projection::QueueLifecycleMarker::Running),
+                200,
+                DISPATCH_EVIDENCE_GRACE_SECS,
+            )
+            .is_none(),
+            "a harness freeze keeps the running projection"
+        );
+        let wrong_generation = revive(&mut frozen, "subagent:a", Some(2)).unwrap_err();
+        assert!(
+            wrong_generation
+                .to_string()
+                .contains("NOT eligible for dispatch again"),
+            "{wrong_generation}"
+        );
+        let revived_frozen = revive(&mut frozen, "subagent:a", Some(1)).unwrap();
+        assert_eq!(revived_frozen.state, QueueClaimState::Running);
+        assert!(revived_frozen.frozen.is_none());
+        assert_eq!(revived_frozen.generation, 1);
+        assert_eq!(revived_frozen.heartbeat_at_secs, Some(200));
+        assert_eq!(revived_frozen.expires_at_secs, 250);
+
+        // An explicit abandon stays lost and is dispatchable.
+        let mut abandoned = live();
+        abandoned.claims[0].mark_lost();
+        abandoned.claims[0].frozen = Some(QueueWorkerFreeze {
+            frozen_at_secs: 105,
+            reason: ABANDONED_REQUEUE_REASON.to_string(),
+            abandoned: true,
+        });
+        let refusal = revive(&mut abandoned, "subagent:a", Some(1)).unwrap_err();
+        assert!(
+            refusal
+                .to_string()
+                .contains("The head is eligible for dispatch again"),
+            "{refusal}"
+        );
+        assert!(
+            !refusal
+                .to_string()
+                .contains("NOT eligible for dispatch again"),
+            "{refusal}"
+        );
 
         // The worker now holds another live attempt.
         let mut moved = live();

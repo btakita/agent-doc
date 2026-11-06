@@ -229,6 +229,9 @@ pub fn activate_existing_route_queue_head(
     source: &str,
     effects: RouteQueueEffects,
 ) -> Result<Option<RouteQueueEnqueueOutcome>> {
+    if crate::invocation::trigger_only() {
+        return Ok(None);
+    }
     let mut attempt = 0usize;
     loop {
         attempt += 1;

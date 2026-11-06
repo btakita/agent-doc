@@ -18,6 +18,7 @@ pub mod operator_clear;
 pub mod orphan_drain;
 pub mod pane_layout;
 pub mod paths;
+pub mod pool_heartbeat;
 pub mod recycle;
 pub mod sequence;
 pub mod status;

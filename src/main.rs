@@ -307,6 +307,8 @@ impl agent_doc_controller_io::project_controller::ProjectControllerRuntimeEffect
             agent_doc_route_io::invocation::BackgroundRecoveredActorFallbackGuard::set(
                 invocation.background_recovered_actor_fallback,
             );
+        let _trigger_only =
+            agent_doc_route_io::invocation::TriggerOnlyGuard::set(invocation.trigger_only);
         // GH #319: an automated origin defers behind a live turn.
         let _dispatch_origin =
             agent_doc_route_io::invocation::DispatchOriginGuard::set(invocation.dispatch_origin);
@@ -444,6 +446,14 @@ impl agent_doc_controller_io::project_controller::ProjectControllerRuntimeEffect
 
     fn subagent_inline_veto_heads(&self, file: &std::path::Path, content: &str) -> Vec<String> {
         agent_doc_queue_io::subagent_dispatch::inline_answer_vetoed_heads_for_content(file, content)
+    }
+
+    fn subagent_pool_heartbeat_wake(
+        &self,
+        file: &std::path::Path,
+        content: &str,
+    ) -> anyhow::Result<Option<agent_doc_queue::subagent_pool::PoolHeartbeatWake>> {
+        agent_doc_queue_io::subagent_pool::pool_heartbeat_wake_for_content(file, content)
     }
 
     fn project_answered_free_text_strike(

@@ -28,6 +28,11 @@
 //! re-exec yields to the restarting supervisor instead of typing the next item
 //! past the clear (`#autoclearorphandrain`).
 //!
+//! A coordinator parked on background workers, with no tool call running and
+//! its turn ended, is reached by the controller's subagent pool heartbeat tick
+//! (`#poolidleheartbeat`): the trigger lands in the same live harness, with no
+//! clear, and an unchanged due set never wakes it twice.
+//!
 //! A fake Codex harness (`FAKE_CODEX`) covers the Codex delivery: the queued
 //! clear fires after the turn even though Codex's post-turn placeholder is on
 //! no static list (only its faint style marks it), and it arrives as one
@@ -460,7 +465,7 @@ impl LiveClearScenario {
         std::fs::write(
             &run,
             format!(
-                "#!/bin/sh\nexport PATH={path}\nexport HOME={home}\nexport FAKE_CLAUDE_DIR={fake}\nexport AGENT_DOC_TMUX_SOCKET={socket}\nexport AGENT_DOC_ROOT_CEILING_DIRECTORIES={ceiling}\n{hold}unset CLAUDECODE\nif [ \"$(command -v {binary})\" != {claude} ]; then echo 'refusing: {binary} is not the fake harness'; sleep 600; exit 99; fi\ncd {root}\nexec agent-doc start {doc}\n",
+                "#!/bin/sh\nexport PATH={path}\nexport HOME={home}\nexport FAKE_CLAUDE_DIR={fake}\nexport AGENT_DOC_TMUX_SOCKET={socket}\nexport AGENT_DOC_ROOT_CEILING_DIRECTORIES={ceiling}\nexport AGENT_DOC_SUBAGENT_HEARTBEAT_TICK_SECS=1\n{hold}unset CLAUDECODE\nif [ \"$(command -v {binary})\" != {claude} ]; then echo 'refusing: {binary} is not the fake harness'; sleep 600; exit 99; fi\ncd {root}\nexec agent-doc start {doc}\n",
                 path = shell_quote(&path_env),
                 home = shell_quote(&home.to_string_lossy()),
                 fake = shell_quote(&fake.to_string_lossy()),
@@ -1509,6 +1514,125 @@ fn clear_withdraws_a_never_submitted_trigger_and_runs_instead_of_queueing() {
         harness,
         "the clear was typed into the same harness, never a restart: {inputs:?}"
     );
+}
+
+/// `#poolidleheartbeat`, the 2026-11-05 miss end to end. Every head is claimed,
+/// the coordinator ended its turn to wait for its background workers, and it
+/// runs no tool call, so neither PostToolUse nor preflight can tell it a
+/// heartbeat is due. The real controller's tick has to reach the idle pane on
+/// its own, through the supervised route, with no queue head and no document
+/// edit behind the trigger.
+#[test]
+#[ignore = "live tmux integration test; run `make tmux-ci`"]
+fn a_coordinator_parked_on_background_workers_is_woken_for_a_due_heartbeat() {
+    // The watch is held until the worker is bound, so its first look at the
+    // queue already finds every head claimed, as a parked coordinator's does.
+    let scenario = LiveClearScenario::start_with(
+        "pool-idle-heartbeat",
+        &auto_clear_queue_doc("<!-- agent:queue subagents=2 -->")
+            .replace("- answer item one\n- answer item two\n", "- do [#one]\n"),
+        true,
+    );
+    let harness = scenario.harness_pids();
+    let background = scenario.background_pids();
+
+    // Bind the worker far enough in the past that its heartbeat is due and past
+    // the coalesce window: half the 7200 s window plus 300 s, plus a margin.
+    let started = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+        - 3_960;
+    let clock = started.to_string();
+    let envs = [("AGENT_DOC_TEST_QUEUE_CLAIM_NOW_SECS", clock.as_str())];
+    for args in [
+        vec![
+            "queue",
+            "claim",
+            DOC,
+            "--item",
+            "#one",
+            "--owner",
+            "subagent:one",
+            "--ttl-secs",
+            "7200",
+        ],
+        vec![
+            "queue",
+            "start",
+            DOC,
+            "--item",
+            "#one",
+            "--owner",
+            "subagent:one",
+            "--worker-id",
+            "worker-one",
+            "--generation",
+            "1",
+            "--ttl-secs",
+            "7200",
+        ],
+    ] {
+        let output = scenario.agent_doc(&args, &envs, None);
+        assert!(
+            output.status.success(),
+            "{args:?}: {}\n{}",
+            stderr(&output),
+            String::from_utf8_lossy(&output.stdout),
+        );
+    }
+    assert_eq!(scenario.triggers(), 0, "{:?}", scenario.inputs());
+    scenario.release_queue_observation();
+
+    // Counted by submit source: this document has never run a cycle, so the
+    // idle watch may also spend its own fenced `#steeringwake` on it. What this
+    // test pins is what the tick itself put in the pane.
+    let route_submits = || {
+        scenario
+            .ops_log()
+            .matches("source=route.direct_pane_submit destination=pane")
+            .count()
+            / 2 // one line for the text, one for Enter
+    };
+    scenario.wait_until("the wake was receipted", || {
+        scenario
+            .ops_log()
+            .contains("subagent_pool_heartbeat_wake_delivered")
+    });
+    // The fence, observed rather than timed: a later tick sees the same set.
+    scenario.wait_until("the next tick held the delivered set", || {
+        scenario.ops_log().contains("reason=already_delivered")
+    });
+    assert_eq!(
+        (route_submits(), scenario.clears()),
+        (1, 0),
+        "one wake and no context clear: {:?}\n--- ops.log ---\n{}",
+        scenario.inputs(),
+        scenario.ops_log(),
+    );
+    assert!(
+        scenario.triggers() >= 1,
+        "the trigger reached the harness: {:?}",
+        scenario.inputs()
+    );
+    assert_eq!(
+        scenario.harness_pids(),
+        harness,
+        "typed into the same harness: {:?}",
+        scenario.inputs()
+    );
+    let document = std::fs::read_to_string(&scenario.doc).unwrap();
+    assert!(
+        document.contains("<!-- agent:queue subagents=2 -->")
+            && !document.contains("queue: go")
+            && !scenario
+                .ops_log()
+                .contains("route_existing_queue_head_activated"),
+        "a wake never activates the operator's queue:\n{document}"
+    );
+    for pid in background {
+        assert!(process_alive(pid), "background worker {pid} survived");
+    }
 }
 
 /// A two-item `go` queue for the `#bgclearpolicy` auto-clear scenarios.

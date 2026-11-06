@@ -11332,6 +11332,58 @@ Old.
     }
 
 
+    /// `#closeoutguidanceagree`: guidance is only right if the command lands.
+    /// Derive the strike from exactly what the Stop hook reads (the governed
+    /// head text plus the governing receipt's owner and generation), not from
+    /// a hand-written row, and run it. The same row's old `--ack-id q-…`
+    /// prescription is refused, which is the defect this replaced.
+    #[test]
+    fn closeoutguidanceagree_derived_strike_lands_on_released_free_text_rows() {
+        use agent_doc_queue::reported_closeout::{ReportedRowStrike, reported_row_strike};
+        for row in ["Rebuild the SDK docs [#q-7f3a]", DUP_ANSWER, "What are the values?"] {
+            let dir = tempfile::tempdir().unwrap();
+            let (doc, content) = dup_receipt_doc(dir.path(), &[(row, "subagent:agree", 1)]);
+            let heads = crate::claim_release_receipt::reported_head_texts_for_content(&doc, &content);
+            let head = heads
+                .iter()
+                .find(|head| head.contains(row))
+                .unwrap_or_else(|| panic!("{row} is a governed head: {heads:?}"));
+            let owners = crate::claim_release_receipt::reported_owners_for_content(&doc, &content);
+            let identity = agent_doc_queue::queue_claim::claim_identity(head);
+            let (owner, generation) = owners.get(&identity).expect("a governing receipt");
+            assert_eq!((owner.as_str(), *generation), ("subagent:agree", 1));
+
+            let ReportedRowStrike::AckText { handle, .. } =
+                reported_row_strike(head, Some((owner, *generation)))
+            else {
+                panic!("{row} is free text bound to an attempt");
+            };
+            if row.contains("[#q-") {
+                assert!(
+                    acknowledge_open_id_backed_queue_head(&doc, "q-7f3a").is_err(),
+                    "`q-7f3a` is not a tracked id, so `--ack-id` must refuse it"
+                );
+            }
+            let selector = super::AckTextSelector::Owner(
+                agent_doc_document::queue_projection::QueueOwnerProjection {
+                    owner: owner.clone(),
+                    generation: *generation,
+                },
+            );
+            super::acknowledge_paused_free_text_queue_head_with_selector_and_outcome(
+                &doc,
+                &handle,
+                Some(&selector),
+                &TEST_EFFECTS,
+            )
+            .unwrap()
+            .expect("the derived command strikes its row");
+            let result = std::fs::read_to_string(&doc).unwrap();
+            assert!(!result.contains("- ☑️ [#subagent:agree#1]"), "{result}");
+            assert!(result.contains("- [#later] keep later work live\n"), "{result}");
+        }
+    }
+
     #[test]
     fn nestedreceiptack_ack_id_strikes_released_reported_row_inside_response_tree() {
         assert_released_nested_attempt_acknowledged(true);

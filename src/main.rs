@@ -9400,6 +9400,7 @@ fn try_main() -> anyhow::Result<()> {
                                 &file.display().to_string(),
                                 &claim.item_text,
                                 &claim.owner,
+                                Some(claim.generation),
                             )
                         );
                     }
@@ -9546,10 +9547,12 @@ fn try_main() -> anyhow::Result<()> {
                         repository.as_ref(),
                         &response,
                     )?;
+                    // `#closeoutguidanceagree`: the same strike session-check and
+                    // the Stop hook name for this exact attempt.
                     let closeout =
-                        agent_doc_queue::claim_release_receipt::queue_line_closeout(
+                        agent_doc_queue::claim_release_receipt::queue_line_closeout_for_claim(
                             &file.display().to_string(),
-                            &outcome.claim.item_text,
+                            &outcome.claim,
                         );
                     let next = match agent_doc_queue_io::queue_lineage::require_integrated_claim_repo_work(
                         &file,

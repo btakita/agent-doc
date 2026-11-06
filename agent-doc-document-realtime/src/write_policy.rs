@@ -318,6 +318,93 @@ pub fn neutralize_stale_operator_typing_snapshots(
     Some((target, scope))
 }
 
+/// `#rebaseresponseafterboundary`: place the newest target's singleton
+/// `agent:boundary` at exchange end when a rebase left a protocol marker
+/// mid-exchange or repeated one. The drift shortcut appends a missing reply
+/// after an exchange body that already ends in the marker, and a CRDT fallback
+/// can weave that reply after the stale cell that carries it. Fenced examples
+/// are prose. A document that already ends on one standalone marker is returned
+/// unchanged, and a merge that dropped every marker is left without a newly
+/// minted id.
+fn canonicalize_rebase_exchange_boundary(rebased: &str, agent_target: &str) -> String {
+    if !exchange_boundary_needs_terminal_repair(rebased) {
+        return rebased.to_string();
+    }
+    let canonical =
+        agent_doc_template::canonicalize_boundary_after_document_merge(rebased, agent_target);
+    if !exchange_boundary_needs_terminal_repair(&canonical) {
+        return canonical;
+    }
+    let Some(id) = last_standalone_exchange_boundary_id(rebased) else {
+        return rebased.to_string();
+    };
+    let moved =
+        agent_doc_template::reposition_boundary_to_end_preserve_head_with_id(rebased, Some(&id));
+    if exchange_boundary_needs_terminal_repair(&moved) {
+        rebased.to_string()
+    } else {
+        moved
+    }
+}
+
+fn exchange_boundary_needs_terminal_repair(doc: &str) -> bool {
+    let Some((close_start, spans)) = standalone_exchange_boundaries(doc) else {
+        return false;
+    };
+    match spans.as_slice() {
+        [] => false,
+        [(_, line_end, _)] => !doc[*line_end..close_start].trim().is_empty(),
+        _ => true,
+    }
+}
+
+fn last_standalone_exchange_boundary_id(doc: &str) -> Option<String> {
+    standalone_exchange_boundaries(doc)?
+        .1
+        .into_iter()
+        .next_back()
+        .map(|(_, _, id)| id)
+}
+
+/// Standalone protocol boundaries in the exchange, outside fenced code.
+/// `line_end` is the byte just after that marker line.
+fn standalone_exchange_boundaries(doc: &str) -> Option<(usize, Vec<(usize, usize, String)>)> {
+    let components = element::parse(doc).ok()?;
+    let exchange = components
+        .iter()
+        .find(|component| component.name == "exchange")?;
+    let code_ranges = element::find_code_ranges(doc);
+    let mut spans = Vec::new();
+    let mut offset = 0usize;
+    for line in doc[exchange.open_end..exchange.close_start].split_inclusive('\n') {
+        let line_start = exchange.open_end + offset;
+        offset += line.len();
+        let line_end = exchange.open_end + offset;
+        let trimmed = line.trim_end_matches(['\n', '\r']).trim();
+        let Some(id) = standalone_boundary_id(trimmed) else {
+            continue;
+        };
+        let in_code = code_ranges
+            .iter()
+            .any(|&(start, end)| line_start >= start && line_start < end);
+        if in_code {
+            continue;
+        }
+        spans.push((line_start, line_end, id));
+    }
+    Some((exchange.close_start, spans))
+}
+
+fn standalone_boundary_id(trimmed: &str) -> Option<String> {
+    let id = trimmed
+        .strip_prefix("<!-- agent:boundary:")?
+        .strip_suffix(" -->")?;
+    if id.is_empty() || trimmed != format!("<!-- agent:boundary:{id} -->") {
+        return None;
+    }
+    Some(id.to_string())
+}
+
 fn rebase_agent_candidate_over_editor_cut_reconciled(
     merge_base: &str,
     agent_target: &str,
@@ -356,10 +443,7 @@ fn rebase_agent_candidate_over_editor_cut_reconciled(
                 &editor_reconciled,
                 &rebased,
             );
-            return Ok(ReconciledRebase {
-                rebased,
-                editor_reconciled,
-            });
+            return Ok(reconciled_rebase(rebased, editor_reconciled, agent_target));
         }
         if let Some(recovered) = live_prompt_drift_recovery_target(
             agent_target,
@@ -378,10 +462,7 @@ fn rebase_agent_candidate_over_editor_cut_reconciled(
                 &editor_reconciled,
                 &rebased,
             );
-            return Ok(ReconciledRebase {
-                rebased,
-                editor_reconciled,
-            });
+            return Ok(reconciled_rebase(rebased, editor_reconciled, agent_target));
         }
     }
 
@@ -396,10 +477,18 @@ fn rebase_agent_candidate_over_editor_cut_reconciled(
     let (rebased, _) =
         agent_doc_merge::merge_contents_crdt(Some(&base_state), agent_target, &editor_reconciled)?;
     warn_dropped_agent_component_ops(merge_base, agent_target, &editor_reconciled, &rebased);
-    Ok(ReconciledRebase {
-        rebased,
+    Ok(reconciled_rebase(rebased, editor_reconciled, agent_target))
+}
+
+fn reconciled_rebase(
+    rebased: String,
+    editor_reconciled: String,
+    agent_target: &str,
+) -> ReconciledRebase {
+    ReconciledRebase {
+        rebased: canonicalize_rebase_exchange_boundary(&rebased, agent_target),
         editor_reconciled,
-    })
+    }
 }
 
 /// `#statuspatchdrop`: roll every non-response component op the agent made over
@@ -5635,6 +5724,151 @@ Working.
         assert_eq!(rebased.matches("### Verification").count(), 2, "{rebased}");
         assert!(rebased.contains("Latest."), "{rebased}");
         assert!(rebased.contains("Stale."), "{rebased}");
+    }
+
+    /// `#rebaseresponseafterboundary`: with no provable position anchor the
+    /// rebase stays additive. The missing reply used to be appended after an
+    /// exchange body that already ended on `agent:boundary`, so the latest reply
+    /// sat outside the insertion cursor. The stale reply, the operator edit, and
+    /// the latest reply stay, and they sit before one standalone boundary at
+    /// exchange end.
+    #[test]
+    fn rebase_without_anchor_keeps_latest_response_before_terminal_boundary() {
+        const SECTION: &str = "### Verification\n\nmake check exit 0.\n\n";
+        let held = format!("### Re: first\n\nOne.\n\n{SECTION}### Re: second\n\nTwo.\n\n{SECTION}");
+        let base = exchange_doc(&format!("{held}### Re: stale\n\nStale.\n"));
+        let target = exchange_doc(&format!("{held}### Re: latest\n\nLatest.\n"));
+        let last_copy = base.rfind("make check exit 0.").unwrap();
+        let mut cut = base.clone();
+        cut.replace_range(
+            last_copy..last_copy + "make check exit 0.".len(),
+            "make check exit 0, rerun by the operator.",
+        );
+
+        let rebased = rebase_agent_candidate_over_editor_cut(&base, &target, &cut).unwrap();
+
+        assert_singleton_boundary_terminates_exchange(
+            &rebased,
+            &["Latest.", "Stale.", "rerun by the operator"],
+        );
+        assert!(
+            rebased.contains("<!-- agent:boundary:next -->"),
+            "the newest target's boundary id stays, got:\n{rebased}"
+        );
+
+        let opening = "### Re: one\n\nFirst.\n\n";
+        let prior = format!(
+            "---\nagent_doc_format: template\n---\n\n<!-- agent:exchange patch=append -->\n\u{276f} prompt\n\n{opening}### Draft\n\nDraft.\n<!-- agent:boundary:stale -->\n<!-- /agent:exchange -->\n"
+        );
+        let latest = format!(
+            "---\nagent_doc_format: template\n---\n\n<!-- agent:exchange patch=append -->\n\u{276f} prompt\n\n{opening}### Final\n\nFinal.\n<!-- agent:boundary:latest -->\n<!-- /agent:exchange -->\n"
+        );
+        let edited = prior.replace("First.", "First, edited by the operator.");
+
+        let rebased = rebase_agent_candidate_over_editor_cut(&prior, &latest, &edited).unwrap();
+
+        assert_singleton_boundary_terminates_exchange(
+            &rebased,
+            &["Final.", "First, edited by the operator."],
+        );
+        assert!(
+            rebased.contains("<!-- agent:boundary:latest -->"),
+            "fallback keeps the newest target boundary id:\n{rebased}"
+        );
+        assert!(
+            !rebased.contains("<!-- agent:boundary:stale -->"),
+            "the editor marker must not remain beside the target marker:\n{rebased}"
+        );
+    }
+
+    /// A fallback that already ends on one protocol boundary keeps its bytes,
+    /// including an editor-chosen id. Repair must not mint a marker the merge
+    /// dropped, and a fenced example is not the protocol marker it moves.
+    #[test]
+    fn crdt_fallback_boundary_repair_touches_only_a_misplaced_protocol_marker() {
+        let terminal = exchange_doc("### Re: latest\n\nLatest.\n");
+        assert!(
+            !exchange_boundary_needs_terminal_repair(&terminal),
+            "{terminal}"
+        );
+        assert_eq!(
+            canonicalize_rebase_exchange_boundary(&terminal, &terminal),
+            terminal
+        );
+
+        let dropped = "---\nagent_doc_format: template\n---\n\n<!-- agent:exchange patch=append -->\n### Re: latest\n\nLatest.\n<!-- /agent:exchange -->\n";
+        assert_eq!(
+            canonicalize_rebase_exchange_boundary(dropped, &terminal),
+            dropped
+        );
+
+        let merged = "---\nagent_doc_format: template\n---\n\n<!-- agent:exchange patch=append -->\n### Re: stale\n\nStale.\n<!-- agent:boundary:stale -->\n### Re: latest\n\nLatest.\n\n```\n<!-- agent:boundary:quoted -->\n```\n<!-- /agent:exchange -->\n";
+        let target = "---\nagent_doc_format: template\n---\n\n<!-- agent:exchange patch=append -->\n### Re: latest\n\nLatest.\n\n```\n<!-- agent:boundary:quoted -->\n```\n<!-- agent:boundary:latest -->\n<!-- /agent:exchange -->\n";
+        let repaired = canonicalize_rebase_exchange_boundary(merged, target);
+        assert_singleton_boundary_terminates_exchange(
+            &repaired,
+            &["Latest.", "Stale.", "<!-- agent:boundary:quoted -->"],
+        );
+        assert!(
+            repaired.contains("```\n<!-- agent:boundary:quoted -->\n```\n"),
+            "{repaired}"
+        );
+        assert!(
+            repaired.contains("<!-- agent:boundary:latest -->"),
+            "{repaired}"
+        );
+        assert!(
+            !repaired.contains("<!-- agent:boundary:stale -->"),
+            "{repaired}"
+        );
+    }
+
+    fn assert_singleton_boundary_terminates_exchange(doc: &str, needles: &[&str]) {
+        let components = element::parse(doc).unwrap_or_else(|err| panic!("{err}\n{doc:?}"));
+        let exchange = components
+            .iter()
+            .find(|component| component.name == "exchange")
+            .expect("exchange");
+        let code_ranges = element::find_code_ranges(doc);
+        let mut spans = Vec::new();
+        let mut offset = 0usize;
+        for line in doc[exchange.open_end..exchange.close_start].split_inclusive('\n') {
+            let abs = exchange.open_end + offset;
+            let trimmed = line.trim_end_matches(['\n', '\r']).trim();
+            offset += line.len();
+            if let Some(rest) = trimmed.strip_prefix("<!-- agent:boundary:")
+                && let Some(id) = rest.strip_suffix(" -->")
+                && !id.is_empty()
+                && trimmed == format!("<!-- agent:boundary:{id} -->")
+                && !code_ranges
+                    .iter()
+                    .any(|&(start, end)| abs >= start && abs < end)
+            {
+                spans.push(abs);
+            }
+        }
+        assert_eq!(
+            spans.len(),
+            1,
+            "exchange needs one standalone protocol boundary:\n{doc}"
+        );
+        let boundary_at = spans[0];
+        let line_end = doc[boundary_at..]
+            .find('\n')
+            .map_or(doc.len(), |relative| boundary_at + relative + 1);
+        assert!(
+            doc[line_end..exchange.close_start].trim().is_empty(),
+            "protocol boundary is not at exchange end:\n{doc}"
+        );
+        for needle in needles {
+            let at = doc
+                .find(needle)
+                .unwrap_or_else(|| panic!("missing {needle}\n{doc}"));
+            assert!(
+                at < boundary_at,
+                "{needle} landed after the boundary:\n{doc}"
+            );
+        }
     }
 
     /// `#responseblockmovedtail` (agent-doc-bugs.md, 2026-11-05 17:52 EST): the

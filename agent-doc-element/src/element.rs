@@ -212,6 +212,15 @@ fn section_start(content: &str, open_start: usize) -> usize {
     open_start
 }
 
+/// Byte range of the section a component owns: its heading, when one sits on
+/// the opener's line or the line above, through the end of its closing marker.
+pub(crate) fn component_section_span(
+    content: &str,
+    component: &Component,
+) -> std::ops::Range<usize> {
+    section_start(content, component.open_start)..component.close_end
+}
+
 /// Add semantics implied by a component's canonical marker spelling.
 fn apply_component_implied_attrs(name: &str, attrs: &mut HashMap<String, String>) {
     if name == LOOP_COMPONENT {

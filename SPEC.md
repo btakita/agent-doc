@@ -101,7 +101,10 @@
   rolls forward where the operator left the component untouched, a component
   both sides changed goes through the per-cell authorship policy, and any agent
   component op a rebase still leaves at the editor's body is reported on stderr
-  as `agent_component_patch_dropped`. Status-sync checkpoints quote the current
+  as `agent_component_patch_dropped`. A component the agent created (a first
+  `agent:recap`, a `patch:todo` that creates `agent:todo`) is inserted at its
+  canonical slot, or reported the same way when it cannot be carried
+  (`#recapcreaterebasecarry`). Status-sync checkpoints quote the current
   `status:sync` payload and hash so they are answered against the document, not
   memory. See [Real-Time Workflow Authority](specs/14-realtime-workflow.md#retained-writes-never-replace-operator-text)
   and [Document Format](specs/02-document-format.md).

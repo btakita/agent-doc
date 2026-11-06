@@ -1894,7 +1894,11 @@ The rules:
   component at the editor's body prints
   `[write] warning: agent_component_patch_dropped component=<name> …
   operator_changed=<bool>` on stderr, so a dropped patch is never reported as a
-  clean write.
+  clean write. A component the agent created over the merge base (a first
+  `agent:recap`, a `patch:todo` that creates `agent:todo`) is inserted at its
+  canonical slot when the editor cut does not already hold it, and reported
+  with that same warning when the rebase still does not carry its body
+  (`#recapcreaterebasecarry`).
 - `rebase_retained_target_over_editor_cut` then proves it. Every operator-added
   line of the reconciled cut must survive: every copy the cut holds, less the
   base copies the agent removed. A line the operator edited also counts as

@@ -275,7 +275,10 @@ pub fn changed_component_scope(before: &str, after: &str) -> Option<ComponentWri
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TopLevelComponentBody {
     pub component: ScopedComponent,
+    /// Bytes between the opening and closing markers.
     pub body: std::ops::Range<usize>,
+    /// Heading (when one owns the opener) through the closing marker.
+    pub section: std::ops::Range<usize>,
 }
 
 /// Every top-level component occurrence of `doc` with its body range, in
@@ -295,6 +298,7 @@ pub fn top_level_component_bodies(doc: &str) -> Option<Vec<TopLevelComponentBody
             bodies.push(TopLevelComponentBody {
                 component: ScopedComponent::new(component.name.clone(), occurrence),
                 body: component.open_end..component.close_start,
+                section: crate::element::component_section_span(doc, component),
             });
         }
     }

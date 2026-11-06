@@ -2497,12 +2497,25 @@ pub fn retire_exact_reported_attempt(
     source: &str,
 ) -> Result<bool> {
     let identity = agent_doc_queue::queue_claim::claim_identity(&format!("do [#{target_id}]"));
+    retire_exact_reported_attempt_for_identity(file, &identity, owner, generation, source)
+}
+
+/// [`retire_exact_reported_attempt`] for a row addressed by its claim
+/// identity rather than a directive id: the exact-text strike `queue consume
+/// --ack-text <row> --ack-owner <owner#gen>` (`#acktextreceiptclose`).
+pub fn retire_exact_reported_attempt_for_identity(
+    file: &Path,
+    identity: &agent_doc_element_queue::QueueItemIdentity,
+    owner: &str,
+    generation: u64,
+    source: &str,
+) -> Result<bool> {
     let retired = mutate_ledger(file, |ledger| {
         let Some(index) = ledger
             .claims
             .iter()
             .position(|claim| {
-                claim.identity == identity
+                claim.identity == *identity
                     && claim.owner == owner
                     && claim.generation == generation
             })

@@ -662,9 +662,10 @@ fn response_decision_metadata_child_end(
         return None;
     }
     let parent = strip_bullet(lines.get(response_index)?)?;
-    // `#recommendationinrow`: a back-reference that owns a request renders the
-    // recommendation above that request's Choices subtree.
-    if content.starts_with("**Recommendation:** ")
+    // `#recommendationinrow`, `#choicecontextinrow`: a back-reference that owns
+    // a request renders its context and recommendation above its Choices
+    // subtree.
+    if (content.starts_with("**Recommendation:** ") || content.starts_with("**Context:** "))
         && canonical_response_back_reference(parent).is_some()
     {
         return Some(opener_index + 1);
@@ -2244,10 +2245,11 @@ mod tests {
             "    - **Timestamp:** 2026-11-05T19:58:00-05:00\n",
             "    - **Recommendation:** **staging** — Production is frozen.\n",
             "  - **Closed by:** [#r-0123456789ab]\n",
+            "    - **Context:** Production is frozen.\n",
             "    - **Recommendation:** **staging** — Production is frozen.\n",
         );
         let lines = source.lines().collect::<Vec<_>>();
-        for index in [3, 5] {
+        for index in [3, 5, 6] {
             assert_eq!(
                 response_decision_metadata_child_end(&lines, index, 4),
                 Some(index + 1),
@@ -2257,15 +2259,17 @@ mod tests {
         }
 
         // Beneath an ordinary row the same words are the operator's.
-        let operator = [
-            "- ordinary row",
+        for row in [
             "  - **Recommendation:** **staging** — mine.",
-        ];
-        assert_eq!(response_decision_metadata_child_end(&operator, 1, 2), None);
+            "  - **Context:** mine.",
+        ] {
+            let operator = ["- ordinary row", row];
+            assert_eq!(response_decision_metadata_child_end(&operator, 1, 2), None);
+        }
         // The other decision rows stay reserved beneath a response only.
         let back_reference = [
             "- **Closed by:** [#r-0123456789ab]",
-            "  - **Context:** Why.",
+            "  - **Question:** Why.",
         ];
         assert_eq!(
             response_decision_metadata_child_end(&back_reference, 1, 2),

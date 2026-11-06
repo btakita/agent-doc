@@ -1097,6 +1097,8 @@ blockquoted, at most three leading spaces) followed without a blank line by
 canonical list fields `- *kind:* question|permission`, `- *blocking:* true`,
 and a concrete `- *request:*` whose value is nested beneath it. The
 `queue_item`, `request`, and `context` values nest beneath their key bullet,
+the `context` value says what each choice's terms refer to and renders in the
+queue row (`#choicecontextinrow`, [§7](07-orchestration-commands.md)),
 an optional `- *recommendation:*` row names one offered choice
 (`#recommendationinrow`, [§7](07-orchestration-commands.md)),
 and a line nested beneath a field belongs to that field, never to the packet's

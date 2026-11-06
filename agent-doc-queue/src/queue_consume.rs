@@ -4071,6 +4071,10 @@ fn response_back_reference_child(
         .filter(|packet| !row_is_offered_option_of(packet, queue_item))
         .filter(|packet| rendered_choice_packet_ids.insert(packet.id.clone()))
     {
+        if let Some(context) = packet.context_row() {
+            child.push_str("\n- ");
+            child.push_str(&context);
+        }
         let recommendation = packet.choice_recommendation();
         let mut choice_rows = packet.choice_rows;
         if let Some(recommendation) = &recommendation {
@@ -4274,6 +4278,9 @@ pub const RESPONSE_STATE_COMPLETE: &str = "Complete.";
 /// The `**State:**` label of a response summary row.
 pub const RESPONSE_STATE_LABEL: &str = "**State:**";
 
+/// Opens `**Deferred:**` and its bold variants (`**Deferred, not done:**`).
+const DEFERRAL_LEAD: &str = "**deferred";
+
 const ACTIONABLE_RESPONSE_LEAD_LABELS: &[&str] = &[
     "**outcome:**",
     "**current state:**",
@@ -4328,6 +4335,20 @@ fn response_summary_row_child(
         || response_body
             .lines()
             .any(|line| line.trim() == "**Operator input needed**");
+    // `#choicecontextinrow`: a `**Deferred:**` lead is the turn's own
+    // bookkeeping (why the row stayed queued). On a row waiting for an answer
+    // the Summary states what the operator is being asked instead.
+    if has_blocking_request && response_summary_is_deferral(&summary) {
+        summary = if packets.is_empty() {
+            response_summary_lead_without_deferrals(response_body)
+        } else {
+            packets
+                .iter()
+                .map(|packet| packet.request.as_str())
+                .collect::<Vec<_>>()
+                .join(" ")
+        };
+    }
     let mut choice_projections = Vec::new();
     for packet in packets {
         // A request is one live operator decision. If duplicate queue
@@ -4342,12 +4363,13 @@ fn response_summary_row_child(
             }
             summary.push_str(&packet.request);
         }
+        let context = packet.context_row();
         let recommendation = packet.choice_recommendation();
         let mut choice_rows = packet.choice_rows;
         if let Some(recommendation) = &recommendation {
             recommendation.mark_choice_row(&mut choice_rows);
         }
-        choice_projections.push((packet.id, choice_rows, recommendation));
+        choice_projections.push((packet.id, context, choice_rows, recommendation));
     }
     let decision_projection =
         structured_choice_projection(source_document, queue_item, response_body, shared_batch);
@@ -4360,6 +4382,9 @@ fn response_summary_row_child(
     let decision_request_id = decision_projection
         .as_ref()
         .and_then(|projection| projection.request_id.clone());
+    let decision_states_context = decision_projection
+        .as_ref()
+        .is_some_and(|projection| projection.context.is_some());
     let marker = agent_doc_markdown_ast::exchange_tree::response_id_lookup_marker(response_id)?;
     let has_local_report_state = agent_doc_element_queue::queue_report_state_annotation(queue_item)
         .is_some_and(|(_, state)| {
@@ -4449,7 +4474,7 @@ fn response_summary_row_child(
             }
         }
     } else {
-        for (index, (packet_id, packet_choices, packet_recommendation)) in
+        for (index, (packet_id, packet_context, packet_choices, packet_recommendation)) in
             choice_projections.into_iter().enumerate()
         {
             // `#waitingtriage`: a decision's options stand in for a packet's
@@ -4459,12 +4484,18 @@ fn response_summary_row_child(
             let decision_is_this_request = decision_request_id
                 .as_deref()
                 .is_none_or(|id| id.eq_ignore_ascii_case(&packet_id));
-            let (choices, recommendation) = match &decision_choices {
-                Some(choices) if index == 0 && decision_is_this_request => {
-                    (choices.clone(), decision_recommendation.clone())
-                }
-                _ => (packet_choices, packet_recommendation),
+            let (context, choices, recommendation) = match &decision_choices {
+                Some(choices) if index == 0 && decision_is_this_request => (
+                    packet_context.filter(|_| !decision_states_context),
+                    choices.clone(),
+                    decision_recommendation.clone(),
+                ),
+                _ => (packet_context, packet_choices, packet_recommendation),
             };
+            if let Some(context) = &context {
+                child.push_str("\n- ");
+                child.push_str(context);
+            }
             if let Some(recommendation) = &recommendation {
                 child.push_str("\n- ");
                 child.push_str(&recommendation.row());
@@ -4865,6 +4896,25 @@ fn response_next_actions(response_body: &str) -> Vec<ResponseNextActionProjectio
 }
 
 fn response_summary_lead(response_body: &str) -> String {
+    response_summary_lead_among(response_body, |_| true)
+}
+
+/// The lead of a row that waits on the operator with no packet to quote.
+fn response_summary_lead_without_deferrals(response_body: &str) -> String {
+    response_summary_lead_among(response_body, |paragraph| {
+        !response_summary_is_deferral(paragraph)
+    })
+}
+
+/// Whether a summary opens with the `**Deferred…**` lead a response writes to
+/// keep a quoted row queued (`QUEUE_PROMPT_DEFERRAL_MARKER`).
+fn response_summary_is_deferral(summary: &str) -> bool {
+    summary
+        .get(..DEFERRAL_LEAD.len())
+        .is_some_and(|lead| lead.eq_ignore_ascii_case(DEFERRAL_LEAD))
+}
+
+fn response_summary_lead_among(response_body: &str, eligible: impl Fn(&str) -> bool) -> String {
     let mut prose = response_body.to_string();
     for packet in crate::operator_request_packet::blocking_operator_request_blocks(response_body) {
         prose = prose.replacen(packet, "", 1);
@@ -4897,6 +4947,7 @@ fn response_summary_lead(response_body: &str) -> String {
         paragraph.push(trimmed);
     }
     flush(&mut paragraph, &mut paragraphs);
+    paragraphs.retain(|paragraph| eligible(paragraph));
 
     let (lead, actionable_contract) = paragraphs
         .iter()
@@ -6191,12 +6242,9 @@ fn parse_waiting_operator_packets(source: &str) -> Vec<(String, WaitingOperatorP
     }
 
     let lines = source.lines().collect::<Vec<_>>();
-    let recommendations = crate::operator_request_packet::blocking_operator_request_packets(source)
+    let structural = crate::operator_request_packet::blocking_operator_request_packets(source)
         .into_iter()
-        .filter_map(|packet| {
-            let recommendation = packet.choice_recommendation()?;
-            Some((packet.id.to_ascii_lowercase(), recommendation))
-        })
+        .map(|packet| (packet.id.to_ascii_lowercase(), packet))
         .collect::<HashMap<_, _>>();
     let mut packets = Vec::new();
     let mut current_response_timestamp = None;
@@ -6266,8 +6314,18 @@ fn parse_waiting_operator_packets(source: &str) -> Vec<(String, WaitingOperatorP
             }
             index += 1;
         }
+        let structural = structural.get(&id);
+        // `#choicecontextinrow`: the line scan above reads a colon as a field,
+        // so a bullet holding a URL ended the request or context it sat in.
+        // The structural parser keeps every bullet.
+        if let Some(structural) = structural {
+            packet.request = one_line(&structural.request);
+            if let Some(context) = &structural.context {
+                packet.context = one_line(context);
+            }
+        }
         if blocking && !packet.request.is_empty() {
-            packet.recommendation = recommendations.get(&id).cloned();
+            packet.recommendation = structural.and_then(|packet| packet.choice_recommendation());
             if let Some(recommendation) = &packet.recommendation {
                 recommendation.mark_choice_row(&mut packet.choices);
             }
@@ -13359,5 +13417,275 @@ Old.
         assert_eq!(packets.len(), 1);
         assert_eq!(packets[0].1.choices, ["**staging**: Publish to staging."]);
         assert_eq!(packets[0].1.recommendation, None);
+    }
+
+    /// `#choicecontextinrow`: the row a choice label such as `Use #4` could not
+    /// be answered from. Its only explanation of `#1` and `#4` was the packet's
+    /// context, and the turn's first prose was a `**Deferred:**` note.
+    fn choice_context_row_response(queue_item: &str) -> String {
+        format!(
+            "### Re: held rows — test\n\n\
+> **Queue prompt:** {queue_item}\n\n\
+**Deferred:** this request replaces `[#subagent-operator-request-older]`. It has a new id so it attaches to the row.\n\n\
+[#subagent-operator-request-tagmove] subagent operator request\n\
+- *queue_item:*\n  - {queue_item}\n\
+- *kind:* question\n\
+- *blocking:* true\n\
+- *request:*\n  - Which `sample-sdk` pull request should the tag sit on?\n\
+- *context:*\n\
+\x20 - `sample-sdk` #1 converts the sources to JavaScript, and #4 syncs the current source.\n\
+\x20 - They conflict, so only one can land as is.\n\
+- *choices:*\n\
+\x20 - **Use #4**: keep the sync and leave #1 for later.\n\
+\x20 - **Use #1**: land the conversion first.\n"
+        )
+    }
+
+    fn annotated_queue_of(queue_item: &str, response: &str) -> String {
+        let before = queue_doc(&format!("- {queue_item}\n"));
+        let after = doc_with_queue_and_exchange(&format!("- ~~{queue_item}~~\n"), response);
+        let annotated = annotate_newly_struck_queue_items_with_response_id_at(
+            &before,
+            &after,
+            response,
+            "2026-11-05T19:58:00-05:00",
+        )
+        .unwrap();
+        element::parse(&annotated)
+            .unwrap()
+            .into_iter()
+            .find(|component| component.name == "queue")
+            .unwrap()
+            .content(&annotated)
+            .to_string()
+    }
+
+    #[test]
+    fn a_choices_row_states_what_its_terms_refer_to() {
+        let row = "moving the tag: go [#q-7ef51b5d460a]";
+        let queue = annotated_queue_of(row, &choice_context_row_response(row));
+        assert!(
+            queue.contains(concat!(
+                "    - **Guidance:** More work remains. Keep this tree and answer the operator request below.\n",
+                "    - **Context:** `sample-sdk` #1 converts the sources to JavaScript, and #4 syncs the current source. They conflict, so only one can land as is.\n",
+                "    - **Choices:**\n",
+                "      - **Request**: [#subagent-operator-request-tagmove]\n",
+                "      - **Use #4**: keep the sync and leave #1 for later.\n",
+                "      - **Use #1**: land the conversion first.\n",
+            )),
+            "{queue}"
+        );
+    }
+
+    #[test]
+    fn a_waiting_rows_summary_is_its_request_never_a_deferred_note() {
+        let row = "moving the tag: go [#q-7ef51b5d460a]";
+        let queue = annotated_queue_of(row, &choice_context_row_response(row));
+        assert!(
+            queue.contains(
+                "    - **Summary:** Which `sample-sdk` pull request should the tag sit on?\n"
+            ),
+            "{queue}"
+        );
+        assert!(!queue.contains("Deferred"), "{queue}");
+        assert!(queue.contains("Waiting on operator input."), "{queue}");
+
+        // Every bold variant, and a list item naming the row by its id.
+        for lead in [
+            "**Deferred, not done:** this waits on the request.",
+            "- **Deferred:** `#q-7ef51b5d460a` waits on the request.",
+        ] {
+            let response = choice_context_row_response(row).replace(
+                "**Deferred:** this request replaces `[#subagent-operator-request-older]`. It has a new id so it attaches to the row.",
+                lead,
+            );
+            let queue = annotated_queue_of(row, &response);
+            assert!(!queue.contains("eferred"), "{queue}");
+        }
+    }
+
+    #[test]
+    fn a_waiting_row_keeps_the_outcome_a_summary_leads_with() {
+        let row = "moving the tag: go [#q-7ef51b5d460a]";
+        let response = choice_context_row_response(row).replace(
+            "**Deferred:** this request replaces `[#subagent-operator-request-older]`. It has a new id so it attaches to the row.",
+            "**Outcome:** The tag is ready to move.",
+        );
+        let queue = annotated_queue_of(row, &response);
+        assert!(
+            queue.contains(
+                "    - **Summary:** **Outcome:** The tag is ready to move. Which `sample-sdk` pull request should the tag sit on?\n"
+            ),
+            "{queue}"
+        );
+    }
+
+    #[test]
+    fn a_deferred_summary_stays_on_a_row_that_waits_on_no_operator() {
+        let response = "### Re: later — test\n\n**Deferred:** the sibling batch lands first.\n";
+        let queue = annotated_queue_of("do [#later]", response);
+        assert!(
+            queue.contains("    - **Summary:** **Deferred:** the sibling batch lands first.\n"),
+            "{queue}"
+        );
+    }
+
+    #[test]
+    fn a_waiting_row_with_no_packet_skips_the_deferred_note() {
+        let response = concat!(
+            "### Re: target — test\n\n",
+            "**Deferred:** the turn stopped here.\n\n",
+            "**Operator input needed**\n",
+            "Choose the deployment target.\n",
+        );
+        let queue = annotated_queue_of("do [#target]", response);
+        assert!(
+            queue.contains(
+                "    - **Summary:** **Operator input needed** Choose the deployment target.\n"
+            ),
+            "{queue}"
+        );
+    }
+
+    #[test]
+    fn a_packet_with_no_context_renders_no_context_row() {
+        let row = "moving the tag: go [#q-7ef51b5d460a]";
+        let response = choice_context_row_response(row).replace(
+            "- *context:*\n  - `sample-sdk` #1 converts the sources to JavaScript, and #4 syncs the current source.\n  - They conflict, so only one can land as is.\n",
+            "",
+        );
+        assert!(!response.contains("*context:*"), "{response}");
+        let queue = annotated_queue_of(row, &response);
+        assert!(!queue.contains("**Context:**"), "{queue}");
+        assert!(queue.contains("- **Use #4**: keep the sync"), "{queue}");
+    }
+
+    #[test]
+    fn each_request_states_its_own_context_above_its_own_choices() {
+        let row = "do [#pair]";
+        let packet = |id: &str, context: &str, label: &str| {
+            format!(
+                "[#subagent-operator-request-{id}] subagent operator request\n\
+- *queue_item:*\n  - {row}\n\
+- *kind:* question\n\
+- *blocking:* true\n\
+- *request:*\n  - Decide {id}?\n\
+- *context:*\n  - {context}\n\
+- *choices:*\n  - **{label}**: Go.\n"
+            )
+        };
+        let response = format!(
+            "### Re: pair — test\n\n{}\n{}",
+            packet("first", "First fact.", "One"),
+            packet("second", "Second fact.", "Two"),
+        );
+        let queue = annotated_queue_of(row, &response);
+        assert!(
+            queue.contains(concat!(
+                "    - **Context:** First fact.\n",
+                "    - **Choices:**\n",
+                "      - **Request**: [#subagent-operator-request-first]\n",
+                "      - **One**: Go.\n",
+                "    - **Context:** Second fact.\n",
+                "    - **Choices:**\n",
+                "      - **Request**: [#subagent-operator-request-second]\n",
+                "      - **Two**: Go.\n",
+            )),
+            "{queue}"
+        );
+    }
+
+    #[test]
+    fn an_answered_request_states_its_context_once() {
+        let row = "do [#answered]";
+        let response = format!(
+            "### Re: answered — test\n\n\
+[#subagent-operator-request-answered] subagent operator request\n\
+- *queue_item:*\n  - {row}\n\
+- *kind:* question\n\
+- *blocking:* true\n\
+- *request:*\n  - Which target?\n\
+- *context:*\n  - Production is frozen.\n\
+- *choices:*\n  - **staging**: Staging.\n  - **production**: Production.\n\n\
+**Decision record** for `[#subagent-operator-request-answered]`:\n\
+- **Choices presented:** staging, production.\n\
+- **Selected:** **staging**. Use staging.\n"
+        );
+        let queue = annotated_queue_of(row, &response);
+        assert_eq!(queue.matches("**Context:**").count(), 1, "{queue}");
+        assert!(
+            queue.contains("    - **Context:** Production is frozen.\n"),
+            "{queue}"
+        );
+    }
+
+    #[test]
+    fn a_back_reference_row_carries_the_context_of_its_request() {
+        let row = "do [#beta]";
+        let response = format!(
+            "### Re: batch — test\n\n\
+> **Queue prompt:** {row}\n\n\
+[#subagent-operator-request-betatarget] subagent operator request\n\
+- *queue_item:*\n  - {row}\n\
+- *kind:* question\n\
+- *blocking:* true\n\
+- *request:*\n  - Which target?\n\
+- *context:*\n  - Production is frozen: **no**: exceptions.\n\
+- *recommendation:*\n  - **staging**: Production is frozen until Monday.\n\
+- *choices:*\n  - **staging**: Staging.\n  - **production**: Production.\n"
+        );
+        let mut rendered = HashSet::new();
+        let child =
+            response_back_reference_child(row, &response, "[#r-0123456789ab]", &mut rendered);
+        assert_eq!(
+            child,
+            concat!(
+                "**Closed by:** [#r-0123456789ab]\n",
+                "- **Context:** Production is frozen: **no**: exceptions.\n",
+                "- **Recommendation:** **staging** — Production is frozen until Monday.\n",
+                "- **Choices:**\n",
+                "  - **Request**: [#subagent-operator-request-betatarget]\n",
+                "  - **staging**: Staging. — **Recommended**\n",
+                "  - **production**: Production.",
+            )
+        );
+
+        // The row sits under a real back-reference without becoming queue work.
+        let body = format!(
+            "- ~~{row}~~\n{}",
+            render_response_lookup_child(&child, "  ")
+        );
+        let entries = document_queue::parse(&body).unwrap();
+        assert!(
+            document_queue::executable_prompt_indexes(&entries).is_empty(),
+            "{body}\n{entries:#?}"
+        );
+    }
+
+    #[test]
+    fn a_colon_in_a_bullet_ends_neither_the_context_nor_the_request() {
+        let id = "subagent-operator-request-review";
+        let response = format!(
+            "### Re: review — test · 2026-11-02T10:45-05:00\n\n\
+             [#{id}] subagent operator request\n\
+             - *kind:* question\n\
+             - *blocking:* true\n\
+             - *request:*\n  - Review https://example.test/pull/93: merge or hold?\n\
+             - *context:*\n\
+             \x20 - Review https://example.test/pull/93#review upholds both findings.\n\
+             \x20 - The only approval names no license.\n\
+             - *choices:*\n  - **Merge**: Merge it.\n"
+        );
+        let packets = parse_waiting_operator_packets(&response);
+        assert_eq!(packets.len(), 1, "{packets:?}");
+        assert_eq!(
+            packets[0].1.request,
+            "Review https://example.test/pull/93: merge or hold?"
+        );
+        assert_eq!(
+            packets[0].1.context,
+            "Review https://example.test/pull/93#review upholds both findings. The only approval names no license."
+        );
+        assert_eq!(packets[0].1.choices, ["**Merge**: Merge it."]);
     }
 }

@@ -91,6 +91,15 @@ and the pending granular-flags-only rule. This runbook carries the rest.
   `(Recommended)` label, or gives no concrete reason. Omit the field when you
   recommend nothing; the row then renders without either addition.
 
+  **A packet's context explains its choices (`#choicecontextinrow`).** The
+  row built from the packet is answered without opening the exchange, so a
+  term in a choice needs its meaning in `context:`. For `Use #4 and request
+  review`, the context names the repository and says what `#4` does. The
+  context renders as `**Context:** <bullets>` above the `**Recommendation:**`
+  and `**Choices:**` rows of the response row, the `**Closed by:**`
+  back-reference, and the Waiting-on-you tree. On a row with a blocking request
+  a `**Deferred…**` lead never becomes the `**Summary:**`; the request does.
+
   Once the operator answers, retain a compact decision record in the cumulative
   final response: the context, question, choices presented, and selected/free-
   form answer. A record with no request packet states its recommendation as

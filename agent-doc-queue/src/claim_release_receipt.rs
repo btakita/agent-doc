@@ -543,7 +543,7 @@ pub fn queue_line_closeout(
     let command = strike.argv(document).map(|argv| shell_command(&argv));
     match (&strike, command) {
         (ReportedRowStrike::AckId { id, .. }, Some(command)) => format!(
-            "strike the reported row with `{command}` (the tracked backlog/Todo item stays open and the struck row names its `(stays open: ...)` reason; this also closes a `☑️` row nested under a waiting parent); when the answer resolves the tracked item, pass `--done {id}` to `agent-doc finalize {document}` instead and close any parent item the same answer resolves (#ackstrikeopenbacklog)"
+            "strike the reported row with `{command}` only after the open backlog or Todo item records a `(stays open: <reason>)` clause (`--ack-id` refuses and leaves the row unstruck without one, #acknoreason; the struck row then names that reason, and this also closes a `☑️` row nested under a waiting parent). Record the clause on the open item, then run the command. When the answer resolves the tracked item, pass `--done {id}` to `agent-doc finalize {document}` instead and close any parent item the same answer resolves (#ackstrikeopenbacklog)"
         ),
         (ReportedRowStrike::AckText { .. }, Some(command)) => format!(
             "strike the reported row with `{command}` (fenced to this exact worker attempt; any tracked item the row answers stays open, so close it with `--done <id>` to `agent-doc finalize {document}` only when the answer resolves it)"

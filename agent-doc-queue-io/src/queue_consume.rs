@@ -3689,6 +3689,23 @@ pub fn acknowledge_open_id_backed_queue_head_for_attempt(
         .or(orphan_attempt.as_ref())
         .or(receipt_attempt.as_ref());
     let open_item = agent_doc_queue::ack_stays_open::open_tracked_item(&content, &target_id);
+    // `#acknoreason`: a strike with no stays-open reason reads as done beside
+    // an open item and retires the worker response. Refuse before any write.
+    // An already-struck row returned above and is left untouched.
+    if !open_item
+        .as_ref()
+        .is_some_and(|item| item.reason.is_some())
+    {
+        anyhow::bail!(
+            "{}: {}",
+            file.display(),
+            agent_doc_queue::ack_stays_open::missing_stays_open_reason_refusal(
+                &file.display().to_string(),
+                &target_id,
+                open_item.as_ref(),
+            )
+        );
+    }
     let ack_note = open_item.as_ref().map(|item| item.note());
     if !converge_id_backed_head_strike(
         file,
@@ -11154,7 +11171,7 @@ Old.
             "- [#freshqueueauth]\n",
             "<!-- /agent:queue -->\n\n",
             "<!-- agent:backlog -->\n",
-            "- [ ] [#freshqueueauth] preserve fresh operator queue heads\n",
+            "- [ ] [#freshqueueauth] preserve fresh operator queue heads (stays open: the operator kept this head)\n",
             "<!-- /agent:backlog -->\n",
         );
         std::fs::write(&doc, content).unwrap();
@@ -11215,7 +11232,7 @@ Old.
             "- later operator work\n",
             "<!-- /agent:run -->\n\n",
             "## Todo <!-- agent:todo priority -->\n",
-            "- [ ] [#ahfe] Live-check GH #267 on the 263 IDE\n",
+            "- [ ] [#ahfe] Live-check GH #267 on the 263 IDE (stays open: the IDE check is still open)\n",
             "<!-- /agent:todo -->\n",
         );
         std::fs::write(&doc, content).unwrap();
@@ -11533,7 +11550,7 @@ Old.
                 "  - [#later] keep later work live\n",
                 "<!-- /agent:run -->\n\n",
                 "## Todo <!-- agent:todo priority -->\n",
-                "- [ ] {parent}\n",
+                "- [ ] {parent} (stays open: gated on a real Coder workspace)\n",
                 "<!-- /agent:todo -->\n",
             ),
             parent = parent,
@@ -11580,7 +11597,9 @@ Old.
         let result = std::fs::read_to_string(&doc).unwrap();
         assert!(result.contains(&format!("  - {parent}\n")), "{result}");
         assert!(
-            result.contains(&format!("- [ ] {parent}\n")),
+            result.contains(&format!(
+                "- [ ] {parent} (stays open: gated on a real Coder workspace)\n"
+            )),
             "the Todo stays open:\n{result}"
         );
         assert!(
@@ -11639,7 +11658,7 @@ Old.
                     "  - [#later] keep later work live\n",
                     "<!-- /agent:run -->\n\n",
                     "## Todo <!-- agent:todo priority -->\n",
-                    "- [ ] {parent}\n",
+                    "- [ ] {parent} (stays open: the operator has not chosen which files stay)\n",
                     "<!-- /agent:todo -->\n",
                 ),
                 parent = parent,
@@ -11781,7 +11800,7 @@ Old.
                 "  - [#later] keep later work live\n",
                 "<!-- /agent:run -->\n\n",
                 "## Todo <!-- agent:todo priority -->\n",
-                "- [ ] {todo}\n",
+                "- [ ] {todo} (stays open: gated on a real Coder workspace)\n",
                 "<!-- /agent:todo -->\n",
             ),
             parent = parent,
@@ -11842,7 +11861,9 @@ Old.
         );
         assert!(result.contains(&format!("  - {parent}\n")), "{result}");
         assert!(
-            result.contains(&format!("- [ ] {parent}\n")),
+            result.contains(&format!(
+                "- [ ] {parent} (stays open: gated on a real Coder workspace)\n"
+            )),
             "the Todo stays open:\n{result}"
         );
         assert!(
@@ -11896,7 +11917,7 @@ Old.
                     "- [#later] keep later work live\n",
                     "<!-- /agent:run -->\n\n",
                     "## Todo <!-- agent:todo priority -->\n",
-                    "- [ ] [#tdclireleasedownloads] Decide how private haiven-cli serves release downloads\n",
+                    "- [ ] [#tdclireleasedownloads] Decide how private haiven-cli serves release downloads (stays open: the operator has not chosen how downloads are served)\n",
                     "<!-- /agent:todo -->\n",
                 ),
                 run = run,
@@ -12474,7 +12495,7 @@ Old.
                 "  - [#later] keep later work live\n",
                 "<!-- /agent:run -->\n\n",
                 "## Todo <!-- agent:todo priority -->\n",
-                "- [ ] {parent}\n",
+                "- [ ] {parent} (stays open: gated on a real Coder workspace)\n",
                 "<!-- /agent:todo -->\n",
             ),
             completion = completion,
@@ -12506,7 +12527,12 @@ Old.
 
         let result = std::fs::read_to_string(&doc).unwrap();
         assert!(result.contains(&format!("  - {parent}\n")), "{result}");
-        assert!(result.contains(&format!("- [ ] {parent}\n")), "{result}");
+        assert!(
+            result.contains(&format!(
+                "- [ ] {parent} (stays open: gated on a real Coder workspace)\n"
+            )),
+            "{result}"
+        );
         assert!(!result.contains("[#subagent:vscode_smoke#1]"), "{result}");
         assert!(!result.contains("orphan-completion-key"), "{result}");
         assert!(
@@ -12548,7 +12574,7 @@ Old.
             "- keep the sibling worker running\n",
             "<!-- /agent:run -->\n\n",
             "## Todo <!-- agent:todo priority -->\n",
-            "- [ ] [#reported] wait for an operator check\n",
+            "- [ ] [#reported] wait for an operator check (stays open: the operator check is still open)\n",
             "<!-- /agent:todo -->\n",
         );
         std::fs::write(&doc, content).unwrap();
@@ -12679,6 +12705,99 @@ Old.
             1,
             "{retried}"
         );
+    }
+
+    /// `#acknoreason`: a reported `do [#id]` whose open backlog item has no
+    /// `(stays open: ...)` clause is not struck. The worker response stays.
+    #[test]
+    fn acknoreason_ack_id_refuses_an_open_item_with_no_stays_open_clause() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("bugs.md");
+        let content = concat!(
+            "---\nsession: sid\nagent_doc_format: template\nqueue_active: true\n---\n\n",
+            "<!-- agent:exchange -->\n### Re: prior\n\nDone.\n<!-- /agent:exchange -->\n\n",
+            "## Run <!-- agent:run id=main subagents priority go -->\n",
+            "- do [#noreason]\n",
+            "<!-- /agent:run -->\n\n",
+            "## Backlog <!-- agent:backlog priority queue=\"main\" -->\n",
+            "- [ ] [#noreason] explain why this stays open or close it\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        let generation = running_claim(&doc, "#noreason", "subagent:noreason");
+        let reported =
+            crate::queue_claim::report_attempt(&doc, "#noreason", Some(generation)).unwrap();
+        crate::queue_lineage::record_prose_only(&doc, &reported, "still open").unwrap();
+        let before = std::fs::read_to_string(&doc).unwrap();
+
+        let err = acknowledge_open_id_backed_queue_head(&doc, "noreason")
+            .expect_err("an open item with no stays-open reason is not struck");
+        let message = err.to_string();
+        assert!(message.contains("#acknoreason"), "{message}");
+        assert!(message.contains("did not strike"), "{message}");
+        assert!(
+            message.contains(&format!(
+                "agent-doc backlog {} edit noreason",
+                doc.display()
+            )),
+            "{message}"
+        );
+        assert!(
+            message.contains(&format!("agent-doc backlog {} done noreason", doc.display())),
+            "{message}"
+        );
+
+        let after = std::fs::read_to_string(&doc).unwrap();
+        assert_eq!(after, before, "a refused ack leaves the row unstruck");
+        assert!(after.contains("- do [#noreason]\n"), "{after}");
+        assert!(
+            after.contains("- [ ] [#noreason] explain why this stays open or close it\n"),
+            "{after}"
+        );
+        assert!(!after.contains("~~"), "{after}");
+        let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            !ops_log.contains("stays_open_note="),
+            "a refused ack does not record a strike: {ops_log}"
+        );
+    }
+
+    /// `#acknoreason`: a historical bare strike is already terminal. Retrying
+    /// it does not refuse and does not unstrike the row.
+    #[test]
+    fn acknoreason_already_struck_bare_row_is_a_noop() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("bugs.md");
+        let content = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "## Run <!-- agent:run priority go -->\n",
+            "- ### ~~do [#oldstrike]~~\n",
+            "<!-- /agent:run -->\n\n",
+            "## Backlog <!-- agent:backlog -->\n",
+            "- [ ] [#oldstrike] still open with no recorded reason\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        assert!(
+            !acknowledge_open_id_backed_queue_head(&doc, "oldstrike").unwrap(),
+            "an already-struck row is an idempotent no-op"
+        );
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), content);
     }
 
     /// `#taggedidhead` live shape (haiven-dev sdk-demo.md, 2026-10-28): a
@@ -12886,7 +13005,7 @@ Old.
             "- do [#publish-session-contracts]\n",
             "<!-- /agent:run -->\n\n",
             "## Backlog <!-- agent:backlog priority queue -->\n",
-            "- [ ] [#publish-session-contracts] publish the session contract delta\n",
+            "- [ ] [#publish-session-contracts] publish the session contract delta (stays open: the contract delta is not published)\n",
             "<!-- /agent:backlog -->\n",
         );
         std::fs::write(&doc, content).unwrap();
@@ -12965,7 +13084,7 @@ Old.
             "- do [#repo-work]\n",
             "<!-- /agent:run -->\n\n",
             "## Backlog <!-- agent:backlog priority queue -->\n",
-            "- [ ] [#repo-work] integrate repository work\n",
+            "- [ ] [#repo-work] integrate repository work (stays open: integration is still open)\n",
             "<!-- /agent:backlog -->\n",
         );
         std::fs::write(&doc, content).unwrap();

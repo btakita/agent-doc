@@ -795,6 +795,22 @@ pub fn node_replace_ops_from_diff(
     }
     Ok(ops)
 }
+
+/// Whether node-only structural `ops` applied to `before` reproduce `after`
+/// byte for byte (`#responserowqueuehead`).
+///
+/// [`node_replace_ops_from_diff`] sees only queue item spans. Bytes a target
+/// adds outside every item span (the inert `**Response [#r-…]**` tree and
+/// `**Closed by:**` backlink an `#atomicstrikeresponse` strike nests under its
+/// rows, or the lookup marker it inserts into `agent:exchange`) have no node
+/// to ride on, so a node-only write lands the strikes and silently loses them.
+/// A caller may use node ops only when this holds; otherwise the full-text
+/// successor is the faithful write.
+pub fn structural_ops_reproduce_target(before: &str, ops: &[IpcNodeOp], after: &str) -> bool {
+    !ops.is_empty()
+        && apply_structural_ops_to_content(before, ops).is_ok_and(|applied| applied == after)
+}
+
 pub fn first_n_queue_prompt_texts(entries: &[QueueEntry], count: usize) -> Vec<String> {
     document_queue::prompts(entries)
         .into_iter()
@@ -3921,13 +3937,50 @@ pub fn annotate_newly_struck_queue_items_with_response_id_at(
         crate::queue_tree::queue_tree(&after, &crate::queue_tree::QueueTreeOptions::default()).ok();
     let mut canonical_response_owners = HashMap::<String, String>::new();
     let mut request_response_owners = HashMap::<String, String>::new();
+    // `#responserowqueuehead`: when one response closes several rows and every
+    // one of them would show the response's shared lead summary (nothing in the
+    // response names a row by id or verbatim quote), the full tree belongs under
+    // the row that lead answers. Document order alone put a reply leaf's
+    // response under the operator's first sibling reply. Only a strictly higher
+    // affinity moves ownership; a tie, or any row with its own named summary,
+    // keeps document order.
+    // The owner of a repeated response renders the complete turn, so its
+    // summary is read from that one body for every candidate row.
+    let shared_lead = response_summary_lead(response_body);
+    let mut rows_by_response = HashMap::<String, Vec<(String, &str)>>::new();
     for node in &nodes {
         let Some((_, response_id, _, _)) = projection_by_node_key.get(&node.node_key) else {
             continue;
         };
-        canonical_response_owners
+        rows_by_response
             .entry(response_id.clone())
-            .or_insert_with(|| node.node_key.clone());
+            .or_default()
+            .push((node.node_key.clone(), node.item.text.as_str()));
+    }
+    for (response_id, rows) in &rows_by_response {
+        let shared_lead_only = rows.len() > 1
+            && rows
+                .iter()
+                .all(|(_, row)| response_summary_for_queue_item(response_body, row).is_none());
+        let mut owner: Option<(&String, usize)> = None;
+        for (node_key, row) in rows {
+            let affinity = if shared_lead_only {
+                response_summary_row_affinity(&shared_lead, row)
+            } else {
+                0
+            };
+            if owner.is_none_or(|(_, best)| affinity > best) {
+                owner = Some((node_key, affinity));
+            }
+        }
+        if let Some((node_key, _)) = owner {
+            canonical_response_owners.insert(response_id.clone(), node_key.clone());
+        }
+    }
+    for node in &nodes {
+        let Some((_, response_id, _, _)) = projection_by_node_key.get(&node.node_key) else {
+            continue;
+        };
         if operator_request_packets
             .iter()
             .any(|packet| operator_request_packet_belongs_to_row(packet, &node.item.text))
@@ -4836,6 +4889,26 @@ fn response_next_actions(response_body: &str) -> Vec<ResponseNextActionProjectio
         index += 1;
     }
     actions
+}
+
+/// How strongly one queue row is the subject of a response summary: the number
+/// of distinct summary words (four or more alphanumeric characters, which
+/// drops articles and short connectives) that also occur in the row's work
+/// text. Used only to choose which of several rows closed by one response
+/// carries its full tree (`#responserowqueuehead`).
+fn response_summary_row_affinity(summary: &str, queue_item: &str) -> usize {
+    // Placement affinity only, never answer proof: lowercase alphanumeric runs.
+    let words = |text: &str| {
+        text.split(|ch: char| !ch.is_alphanumeric())
+            .filter(|word| word.chars().count() >= 4)
+            .map(str::to_lowercase)
+            .collect::<HashSet<_>>()
+    };
+    let row = words(struck_work_text(queue_item));
+    words(summary)
+        .into_iter()
+        .filter(|word| row.contains(word))
+        .count()
 }
 
 fn response_summary_lead(response_body: &str) -> String {
@@ -7360,6 +7433,131 @@ mod tests {
             1,
             "{annotated}"
         );
+    }
+
+    /// `#responserowqueuehead`: the 2026-11-05 `decisionlookupmenu` shape. One
+    /// coordinator response closed two operator replies under
+    /// `- ### re [#decisionidstamp] response`; its lead answers the nested
+    /// reply leaf, and nothing in it names either row. The full response tree
+    /// belongs under that leaf, intact; the operator's first reply keeps only
+    /// the inert backlink.
+    #[test]
+    fn shared_response_tree_lands_intact_under_the_leaf_its_summary_answers() {
+        let first = "\"Heads are not stamped; the ledger rebuilds from git history.\" should have been added as a response structure. [#q-219d5d67af28]";
+        let leaf = "I like option 1 + 2 as lookups. Does preflight --probe present a search + menu for the agent to look through previous decisions? [#q-4fc03236ecf5]";
+        let response = format!(
+            concat!(
+                "> **Queue prompt:** {first}\n\n",
+                "> **Queue prompt:** {leaf}\n\n",
+                "### Re: decision lookups and response structure\n\n",
+                "**Does `preflight --probe` present a search and menu? No.**\n",
+                "- **What it is:** it pushes answered decisions; it is not a browsable search.\n\n",
+                "**The handback should have been a response structure: agreed.** Filed a follow-up.\n",
+            ),
+            first = first,
+            leaf = leaf,
+        );
+        let queue = |first_row: &str, leaf_row: &str| {
+            format!(
+                "- ### re [#decisionidstamp] response\n  - {first_row}\n  - Heads are not stamped.\n    - {leaf_row}\n"
+            )
+        };
+        let before = doc_with_queue_and_exchange(&queue(first, leaf), "");
+        let after = doc_with_queue_and_exchange(
+            &queue(&format!("~~{first}~~"), &format!("~~{leaf}~~")),
+            &response,
+        );
+        let annotated =
+            annotate_newly_struck_queue_items_with_response_id(&before, &after, &response).unwrap();
+
+        let leaf_row = format!("    - ~~{leaf}~~");
+        let leaf_at = annotated
+            .find(&leaf_row)
+            .unwrap_or_else(|| panic!("missing leaf:\n{annotated}"));
+        let first_at = annotated
+            .find(&format!("  - ~~{first}~~"))
+            .unwrap_or_else(|| panic!("missing first reply:\n{annotated}"));
+        let response_at = annotated
+            .find("**Response [#r-")
+            .unwrap_or_else(|| panic!("missing response row:\n{annotated}"));
+        assert!(
+            response_at > leaf_at,
+            "response must sit under the leaf:\n{annotated}"
+        );
+        // The tree is intact: the wrapper and every generated row sit together
+        // as the leaf's children, one level below the response row.
+        let leaf_tree = &annotated[leaf_at..];
+        let leaf_tree = &leaf_tree[..leaf_tree.find("<!-- /agent:queue -->").unwrap()];
+        let lines = leaf_tree.lines().collect::<Vec<_>>();
+        assert!(
+            lines[1].starts_with("      - **Response [#r-"),
+            "{leaf_tree}"
+        );
+        assert!(
+            lines[2].starts_with("        - **Timestamp:** "),
+            "{leaf_tree}"
+        );
+        assert_eq!(
+            lines[3],
+            "        - **Summary:** **Does `preflight --probe` present a search and menu? No.**",
+            "{leaf_tree}"
+        );
+        // The first reply carries only the backlink, and nothing orphaned.
+        let first_tree = &annotated[first_at..leaf_at];
+        assert!(first_tree.contains("**Closed by:** [#r-"), "{first_tree}");
+        assert!(!first_tree.contains("**Summary:**"), "{first_tree}");
+        assert!(!first_tree.contains("**Response [#r-"), "{first_tree}");
+        // Nothing generated is a queue head.
+        let heads = agent_doc_markdown_ast::mutations::item_nodes_all(&annotated, "queue")
+            .unwrap()
+            .into_iter()
+            .map(|node| node.item.text)
+            .collect::<Vec<_>>();
+        assert!(
+            heads.iter().all(|text| !text.contains("**Summary:**")
+                && !text.contains("**State:**")
+                && !text.contains("**Guidance:**")),
+            "{heads:?}"
+        );
+    }
+
+    /// `#responserowqueuehead`: the operator-visible half of the splice. The
+    /// replica lost the response wrapper and kept the generated Summary row
+    /// orphaned under the first reply; the next preflight minted it a `q-` id
+    /// and handed it out as queue work. It must never parse as a prompt.
+    #[test]
+    fn orphaned_response_summary_row_is_never_a_queue_prompt() {
+        for summary in [
+            "**Summary:** **Does `preflight --probe` present a search and menu? No.**",
+            "📥 **Summary:** **Does `preflight --probe` present a search and menu? No.** [#q-e1a0462c7aee]",
+            "~~**Summary:** **Does `preflight --probe` present a search and menu? No.** [#q-e1a0462c7aee]~~",
+        ] {
+            let body = format!(
+                "- ### re [#decisionidstamp] response\n  - ~~\"Heads are not stamped.\" should have been added as a response structure. [#q-219d5d67af28]~~\n      - {summary}\n  - Heads are not stamped.\n    - 📥 Does preflight --probe present a search + menu? [#q-4fc03236ecf5]\n"
+            );
+            let entries = document_queue::parse(&body).unwrap();
+            let prompts = document_queue::prompts(&entries)
+                .into_iter()
+                .map(|prompt| prompt.text.clone())
+                .collect::<Vec<_>>();
+            assert!(
+                prompts.iter().all(|text| !text.contains("**Summary:**")),
+                "{prompts:?}"
+            );
+            assert!(
+                !crate::free_text_admission::free_text_prompt_is_backlog_task(summary),
+                "{summary}"
+            );
+            let projection = crate::prompt_identity::project(&queue_doc(&body), "agent-doc-bugs");
+            assert!(
+                projection
+                    .assignments
+                    .iter()
+                    .all(|assignment| !assignment.source_text.contains("**Summary:**")),
+                "{:?}",
+                projection.assignments
+            );
+        }
     }
 
     #[test]
@@ -10603,6 +10801,55 @@ mod tests {
                 "claimed head {n} stays live"
             );
         }
+    }
+
+    /// `#responserowqueuehead`: a free-text strike target nests the response
+    /// tree under its rows (`#atomicstrikeresponse`), but node ops carry only
+    /// item spans, so a node-only write lands the strikes and loses the whole
+    /// tree. Such a target must never be written through node ops; a plain
+    /// strike still may.
+    #[test]
+    fn node_ops_never_carry_a_strike_target_with_nested_response_children() {
+        let before = queue_doc(concat!(
+            "- ### re [#decisionidstamp] response\n",
+            "  - \"Heads are not stamped.\" should have been added as a response structure. [#q-219d5d67af28]\n",
+            "  - Heads are not stamped.\n",
+            "    - I like option 1 + 2 as lookups. Does preflight --probe present a search + menu? [#q-4fc03236ecf5]\n",
+        ));
+        let with_response = queue_doc(concat!(
+            "- ### re [#decisionidstamp] response\n",
+            "  - ~~\"Heads are not stamped.\" should have been added as a response structure. [#q-219d5d67af28]~~\n",
+            "    - **Closed by:** [#r-7acba7b1bfc8]\n",
+            "  - Heads are not stamped.\n",
+            "    - ~~I like option 1 + 2 as lookups. Does preflight --probe present a search + menu? [#q-4fc03236ecf5]~~\n",
+            "      - **Response [#r-7acba7b1bfc8]**\n",
+            "        - **Timestamp:** 2026-11-05T19:10:10.000Z\n",
+            "        - **Summary:** **Does `preflight --probe` present a search and menu? No.**\n",
+            "        - **State:** Complete.\n",
+            "        - **Guidance:** Safe to delete this completed row.\n",
+        ));
+        let ops = node_replace_ops_from_diff(&before, &with_response, "queue").unwrap();
+        assert!(!ops.is_empty(), "the strikes alone are node-expressible");
+        let node_only = apply_structural_ops_to_content(&before, &ops).unwrap();
+        assert!(
+            !node_only.contains("**Response [#r-") && !node_only.contains("**Summary:**"),
+            "node ops cannot carry any of the response tree:\n{node_only}"
+        );
+        assert!(!structural_ops_reproduce_target(
+            &before,
+            &ops,
+            &with_response
+        ));
+
+        let strike_only = queue_doc(concat!(
+            "- ### re [#decisionidstamp] response\n",
+            "  - \"Heads are not stamped.\" should have been added as a response structure. [#q-219d5d67af28]\n",
+            "  - Heads are not stamped.\n",
+            "    - ~~I like option 1 + 2 as lookups. Does preflight --probe present a search + menu? [#q-4fc03236ecf5]~~\n",
+        ));
+        let ops = node_replace_ops_from_diff(&before, &strike_only, "queue").unwrap();
+        assert!(structural_ops_reproduce_target(&before, &ops, &strike_only));
+        assert!(!structural_ops_reproduce_target(&before, &[], &strike_only));
     }
 
     #[test]

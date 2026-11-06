@@ -2195,8 +2195,21 @@ fn strike_free_text_queue_heads_with_proof(
     // `#qstrikenote` annotation in the replaced raw). When the diff yields ops,
     // converge via structural ops instead of the full-text write; otherwise
     // (force-disk repair, or a shape the node model can't express) keep full-text.
+    // `#responserowqueuehead`: node ops carry only item spans. A strike target
+    // that also nests its response tree (`#atomicstrikeresponse`) or edits the
+    // exchange cannot be expressed by them; landing it node-only loses the
+    // tree. Use node ops only when they reproduce the full target exactly.
     let replace_ops =
         node_replace_ops_from_diff(&content, &new_document, "queue").unwrap_or_default();
+    let replace_ops = if agent_doc_queue::queue_consume::structural_ops_reproduce_target(
+        &content,
+        &replace_ops,
+        &new_document,
+    ) {
+        replace_ops
+    } else {
+        Vec::new()
+    };
     let activation_changed = frontmatter::parse(&content)?.0.queue_active
         != frontmatter::parse(&new_document)?.0.queue_active;
     if skip_visible_guard {
@@ -3100,7 +3113,17 @@ fn converge_id_backed_head_strike(
             .context("orphan strike: failed to inspect retained completion feedback")?,
     );
     target = reconcile_terminal_active_projection(file, target)?.0;
-    if target == new_document && retired_completion_keys.is_empty() {
+    // `#responserowqueuehead`: node ops are the write only when they reproduce
+    // the whole target; a strike that also nests response children outside
+    // the item spans converges as the full-text successor.
+    if target == new_document
+        && retired_completion_keys.is_empty()
+        && agent_doc_queue::queue_consume::structural_ops_reproduce_target(
+            &content,
+            &strike_ops,
+            &new_document,
+        )
+    {
         effects
             .converge_structural_ops(file, &strike_ops, &content, source)
             .context("orphan strike: failed to write document")?;

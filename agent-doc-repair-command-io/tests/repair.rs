@@ -2934,7 +2934,11 @@ mod tests {
             "{landed:?}"
         );
         let result = std::fs::read_to_string(&doc).unwrap();
-        assert_eq!(result.matches("Fixed.").count(), 1, "{result}");
+        // The response cell landed once. Its text also appears as the struck
+        // row's generated `**Summary:**`, which is the tree staying intact
+        // (`#responserowqueuehead`), not a second application of the response.
+        assert_eq!(result.matches("\nFixed.\n").count(), 1, "{result}");
+        assert!(result.contains("**Summary:** Fixed.\n"), "{result}");
         assert!(
             result.contains(&format!("~~{head}~~")),
             "the lease holder strikes the answered head:\n{result}"

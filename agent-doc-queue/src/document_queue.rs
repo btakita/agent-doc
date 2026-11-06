@@ -720,9 +720,17 @@ fn parse_spans_uncached(body: &str) -> Result<Vec<(QueueEntry, std::ops::Range<u
                 i = end_i;
                 continue;
             }
-            if let Some(end_i) =
-                agent_doc_markdown_ast::overlay::inert_list_child_end(&lines, i, indent)
-            {
+            // `#responserowqueuehead`: an orphaned generated response-structure
+            // row (`**Summary:** …` without its `**Response [#r-…]**` parent)
+            // is binary-owned metadata, never an executable queue head.
+            if let Some(end_i) = agent_doc_markdown_ast::overlay::inert_list_child_end(
+                &lines, i, indent,
+            )
+            .or_else(|| {
+                agent_doc_markdown_ast::overlay::generated_response_structure_row_end(
+                    &lines, i, indent,
+                )
+            }) {
                 entries.push((
                     QueueEntry::Freeform(lines[i..end_i].join("\n")),
                     span(start_i, end_i),

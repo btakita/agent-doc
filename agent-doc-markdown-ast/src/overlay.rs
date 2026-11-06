@@ -725,6 +725,61 @@ fn response_next_action_decision_child_end(
     Some(opener_index + 1)
 }
 
+/// Labels the binary renders only as response-structure rows beneath a
+/// `**Response [#r-…]**` parent (`#responserowqueuehead`). Labels that take a
+/// value end with a space; the container labels stand alone.
+const GENERATED_RESPONSE_STRUCTURE_VALUE_LABELS: [&str; 4] = [
+    "**Timestamp:** ",
+    "**Summary:** ",
+    "**State:** ",
+    "**Guidance:** ",
+];
+const GENERATED_RESPONSE_STRUCTURE_CONTAINER_LABELS: [&str; 2] =
+    ["**Choices:**", "**Next actions:**"];
+
+/// Whether a list item's content is a generated response-structure row
+/// (`**Summary:** …`, `**State:** …`, `**Guidance:** …`, `**Timestamp:** …`,
+/// `**Choices:**`, `**Next actions:**`), whatever its parent is.
+///
+/// `#responserowqueuehead`: on 2026-11-05 a closeout's response tree lost its
+/// `**Response [#r-…]**` wrapper on the editor replica, and the orphaned
+/// `- **Summary:** …` row was parsed as a free-text prompt, minted a `q-` id,
+/// marked 📥, and dispatched as subagent steering. The parent-relative checks
+/// above reserve these rows only under a canonical response row, so an orphan
+/// fell through to operator work. These labels are the reserved response
+/// structure syntax: a row spelled this way is never queue work, with or
+/// without its parent. Queue projection (lifecycle markers such as `📥`, a
+/// strike wrapper) never makes it work either, so a row already mis-admitted
+/// stays inert after the fix. Only the row itself is reserved: an
+/// operator-authored child beneath it keeps normal promptability.
+pub fn is_generated_response_structure_row(item_content: &str) -> bool {
+    let content = item_content.trim();
+    let content = agent_doc_element_queue::strip_attempt_projection_prefix(content).trim();
+    let (_, inner) = split_struck_body(content);
+    let inner = agent_doc_element_queue::strip_attempt_projection_prefix(inner).trim();
+    if GENERATED_RESPONSE_STRUCTURE_CONTAINER_LABELS.contains(&inner) {
+        return true;
+    }
+    GENERATED_RESPONSE_STRUCTURE_VALUE_LABELS
+        .iter()
+        .any(|label| {
+            inner
+                .strip_prefix(label)
+                .is_some_and(|value| !value.trim().is_empty())
+        })
+}
+
+/// Reserve one orphaned generated response-structure row
+/// ([`is_generated_response_structure_row`]) without swallowing any child.
+pub fn generated_response_structure_row_end(
+    lines: &[&str],
+    opener_index: usize,
+    _item_indent: usize,
+) -> Option<usize> {
+    is_generated_response_structure_row(strip_bullet(lines.get(opener_index)?)?)
+        .then_some(opener_index + 1)
+}
+
 /// Reserved, inert relation metadata for one queue prompt. Relations are
 /// navigation edges, never executable queue work and never ordering edges.
 /// Only the declaration row is reserved: an operator-authored child beneath it
@@ -1951,6 +2006,16 @@ pub fn components(source: &str) -> Vec<Component> {
                 line_index = end_index;
                 continue;
             }
+            // `#responserowqueuehead`: a generated response-structure row is
+            // never runnable queue work, even orphaned from its response row.
+            if is_runnable_component(&comp.name)
+                && let Some(end_index) =
+                    generated_response_structure_row_end(&content_lines, index, item_indent)
+            {
+                continuable_item = None;
+                line_index = end_index;
+                continue;
+            }
             if is_ignored_list_comment(item_content) {
                 continue;
             }
@@ -2302,6 +2367,87 @@ mod tests {
                 .iter()
                 .all(|&(start, end)| !source[start..end].contains("Use staging"))
         );
+    }
+
+    /// `#responserowqueuehead`: the 2026-11-05 splice. The `**Response**`
+    /// wrapper, its timestamp, state and guidance were lost, leaving the
+    /// generated `**Summary:**` row orphaned under the operator's first reply.
+    /// It must not become a queue item, in any later projected spelling.
+    #[test]
+    fn orphaned_generated_response_structure_rows_are_never_queue_items() {
+        for summary in [
+            "      - **Summary:** **Does `preflight --probe` present a search and menu? No.**\n",
+            "      - 📥 **Summary:** **Does `preflight --probe` present a search and menu? No.**\n",
+            "      - 📥 **Summary:** **Does `preflight --probe` present a search and menu? No.** [#q-e1a0462c7aee]\n",
+            "      - ~~**Summary:** **Does `preflight --probe` present a search and menu? No.** [#q-e1a0462c7aee]~~\n",
+        ] {
+            let source = format!(
+                concat!(
+                    "<!-- agent:run -->\n",
+                    "- ### re [#decisionidstamp] response\n",
+                    "  - ~~\"Heads are not stamped.\" should have been a response structure. [#q-219d5d67af28]~~\n",
+                    "{}",
+                    "        - Operator follow-up under the orphan.\n",
+                    "      - **State:** Complete.\n",
+                    "      - **Guidance:** Safe to delete this completed row.\n",
+                    "      - **Choices:**\n",
+                    "      - **Next actions:**\n",
+                    "  - Heads are not stamped.\n",
+                    "    - 📥 Does preflight --probe present a search + menu? [#q-4fc03236ecf5]\n",
+                    "<!-- /agent:run -->\n",
+                ),
+                summary
+            );
+            let parsed = components(&source);
+            let texts = parsed[0]
+                .items
+                .iter()
+                .map(|item| item.text.as_str())
+                .collect::<Vec<_>>();
+            assert!(
+                texts.iter().all(|text| !text.contains("**Summary:**")
+                    && !text.contains("**State:**")
+                    && !text.contains("**Guidance:**")
+                    && !text.contains("**Choices:**")
+                    && !text.contains("**Next actions:**")),
+                "{texts:?}\n{source}"
+            );
+            assert!(
+                texts.contains(&"Operator follow-up under the orphan."),
+                "an operator child under an orphan stays typed: {texts:?}"
+            );
+            assert!(
+                texts
+                    .iter()
+                    .any(|text| text.contains("Does preflight --probe present a search + menu?")),
+                "{texts:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn generated_response_structure_row_predicate_requires_the_reserved_spelling() {
+        assert!(is_generated_response_structure_row("**Summary:** Done."));
+        assert!(is_generated_response_structure_row(
+            "📥 **State:** Complete."
+        ));
+        assert!(is_generated_response_structure_row(
+            "~~**Guidance:** Keep it.~~"
+        ));
+        assert!(is_generated_response_structure_row(
+            "**Timestamp:** 2026-11-05T19:10:10.000Z"
+        ));
+        assert!(is_generated_response_structure_row("**Choices:**"));
+        assert!(is_generated_response_structure_row("**Next actions:**"));
+        // Empty values and ordinary operator prose are not the reserved shape.
+        assert!(!is_generated_response_structure_row("**Summary:**"));
+        assert!(!is_generated_response_structure_row("Summary: please do X"));
+        assert!(!is_generated_response_structure_row(
+            "Write a **Summary:** section"
+        ));
+        assert!(!is_generated_response_structure_row(
+            "**Choices:** pick one"
+        ));
     }
 
     #[test]

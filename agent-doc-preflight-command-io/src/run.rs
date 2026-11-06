@@ -11059,6 +11059,7 @@ mod tests {
             concat!(
                 "<!-- agent:rules -->\n",
                 "- principle: forgot the id\n",
+                "- fact [#bad id]: not a premise\n",
                 "- principle [#everywhere]: Applies everywhere.\n",
                 "  scope: global\n",
                 "<!-- /agent:rules -->\n",
@@ -11079,7 +11080,7 @@ mod tests {
         let contract = with_global_principles_path(&missing_global, || probe_contract(&doc));
         assert_eq!(
             contract["agent_rules"],
-            serde_json::json!(["principle: forgot the id"]),
+            serde_json::json!(["principle: forgot the id", "fact [#bad id]: not a premise"]),
             "{contract:#}"
         );
         assert_eq!(contract["principles"][0]["id"], "everywhere");
@@ -11095,6 +11096,18 @@ mod tests {
                 .unwrap()
                 .contains("needs an id"),
             "{malformed:#}"
+        );
+        // `#factmalformedwarning`: reaches preflight the same way.
+        let malformed_fact = warnings
+            .iter()
+            .find(|warning| warning["code"] == agent_doc_principles::ISSUE_FACT_MALFORMED)
+            .unwrap_or_else(|| panic!("{contract:#}"));
+        assert!(
+            malformed_fact["message"]
+                .as_str()
+                .unwrap()
+                .contains("fact id \"bad id\""),
+            "{malformed_fact:#}"
         );
         let mismatch = warnings
             .iter()

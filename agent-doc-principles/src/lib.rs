@@ -63,6 +63,8 @@
 //! and document layers only, nearest wins with `overrides`, a duplicate id in
 //! one file reported as `fact_duplicate_id`, and a fact in the global file
 //! reported as `fact_in_global_file` and ignored. Fact items stay in `rules`.
+//! A fact-shaped item with no valid id or no statement is reported as
+//! `fact_malformed` (`#factmalformedwarning`) and is not a premise.
 
 pub mod derivation;
 pub mod rederive;
@@ -148,6 +150,9 @@ pub const ISSUE_FACT_DUPLICATE_ID: &str = "fact_duplicate_id";
 /// A fact written in the global principles file, which holds principles only
 /// (`#firstprinciplesfactlist`).
 pub const ISSUE_FACT_IN_GLOBAL_FILE: &str = "fact_in_global_file";
+/// A fact-shaped rule with no valid id or no statement, which is not a premise
+/// (`#factmalformedwarning`).
+pub const ISSUE_FACT_MALFORMED: &str = "fact_malformed";
 
 /// A problem with what the operator wrote. Surfaced as a preflight warning;
 /// never fails the turn.
@@ -327,29 +332,38 @@ pub fn compose(layers: &[Layer]) -> Composition {
         for rule in &layer.rules {
             match parse_rule(rule) {
                 RuleForm::Plain => {
-                    if layer.scope == PrincipleScope::Global
-                        && let Some(fact) = rederive::parse_fact(rule)
-                    {
-                        composition.issues.push(PrincipleIssue {
-                            code: ISSUE_FACT_IN_GLOBAL_FILE,
-                            message: format!(
+                    if layer.scope != PrincipleScope::Global {
+                        composition.rules.push(rule.clone());
+                        continue;
+                    }
+                    let (code, message) = match rederive::classify_fact(rule) {
+                        rederive::FactForm::Fact(fact) => (
+                            ISSUE_FACT_IN_GLOBAL_FILE,
+                            format!(
                                 "the global principles file holds principles only; ignored fact [#{}]. Move it to a project's .agent-doc/project.md agent:rules, or the session document's.",
                                 fact.id
                             ),
-                            source: layer.source.clone(),
-                        });
-                    } else if layer.scope == PrincipleScope::Global {
-                        composition.issues.push(PrincipleIssue {
-                            code: ISSUE_GLOBAL_PLAIN_RULE,
-                            message: format!(
+                        ),
+                        rederive::FactForm::Malformed { reason } => (
+                            ISSUE_FACT_MALFORMED,
+                            format!(
+                                "{reason}; ignored {:?}: the global principles file holds principles only. Move the fact to a project's .agent-doc/project.md agent:rules, or the session document's.",
+                                first_line(rule)
+                            ),
+                        ),
+                        rederive::FactForm::Plain => (
+                            ISSUE_GLOBAL_PLAIN_RULE,
+                            format!(
                                 "the global principles file holds principles only; ignored the rule {:?}. Write it as `principle [#id]: <statement>`, or move it to a project's .agent-doc/project.md agent:rules.",
                                 first_line(rule)
                             ),
-                            source: layer.source.clone(),
-                        });
-                    } else {
-                        composition.rules.push(rule.clone());
-                    }
+                        ),
+                    };
+                    composition.issues.push(PrincipleIssue {
+                        code,
+                        message,
+                        source: layer.source.clone(),
+                    });
                 }
                 RuleForm::Malformed { code, reason } => {
                     let global = layer.scope == PrincipleScope::Global;

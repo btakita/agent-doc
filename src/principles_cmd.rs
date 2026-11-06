@@ -19,7 +19,8 @@
 //!   change detection uses): every ancestor `.agent-doc/project.md` and the
 //!   document, nearest wins with the replaced sources in `overrides`. A
 //!   second fact with one id in one file is a `fact_duplicate_id` warning; a
-//!   fact in the global principles file is a `fact_in_global_file` warning.
+//!   fact in the global principles file is a `fact_in_global_file` warning; a
+//!   fact-shaped item with no valid id or no statement is `fact_malformed`.
 //! - The document text is the current authoritative projection (the same
 //!   read `agent-doc lint` and `agent-doc outline` use), so unsaved editor
 //!   text counts.

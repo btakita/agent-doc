@@ -425,3 +425,66 @@ fn compose_lists_facts_with_overrides_and_reports_their_problems() {
         })
     );
 }
+
+/// `#factmalformedwarning`: a fact-shaped item with a bad id or no statement
+/// is a `fact_malformed` issue, not a premise. In a project or document it
+/// stays an ordinary rule. In the global file it is ignored, and it is not
+/// also told to become a principle.
+#[test]
+fn compose_reports_a_malformed_fact_and_keeps_it_out_of_the_premises() {
+    let composition = compose(&[
+        layer(
+            PrincipleScope::Global,
+            "principles.md",
+            &["fact: no id", "Facts are not principles."],
+        ),
+        layer(
+            PrincipleScope::Project,
+            "project.md",
+            &["fact [#bad id]: x"],
+        ),
+        layer(
+            PrincipleScope::Document,
+            "doc.md",
+            &["fact [#empty]:", "fact [#ok]: fine", "Fact checking first."],
+        ),
+    ]);
+    assert_eq!(
+        composition
+            .facts
+            .iter()
+            .map(|fact| fact.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["ok"]
+    );
+    assert_eq!(
+        composition.rules,
+        vec![
+            "fact [#bad id]: x",
+            "fact [#empty]:",
+            "fact [#ok]: fine",
+            "Fact checking first.",
+        ]
+    );
+    let codes: Vec<(&str, &str)> = composition
+        .issues
+        .iter()
+        .map(|issue| (issue.code, issue.source.as_str()))
+        .collect();
+    assert_eq!(
+        codes,
+        vec![
+            (ISSUE_FACT_MALFORMED, "principles.md"),
+            (ISSUE_GLOBAL_PLAIN_RULE, "principles.md"),
+            (ISSUE_FACT_MALFORMED, "project.md"),
+            (ISSUE_FACT_MALFORMED, "doc.md"),
+        ]
+    );
+    let global = &composition.issues[0].message;
+    assert!(global.contains("needs an id"), "{global}");
+    assert!(global.contains("ignored \"fact: no id\""), "{global}");
+    assert!(!global.contains("Write it as `principle"), "{global}");
+    let kept = &composition.issues[2].message;
+    assert!(kept.contains("may use only"), "{kept}");
+    assert!(kept.contains("kept as an ordinary rule"), "{kept}");
+}

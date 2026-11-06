@@ -180,7 +180,13 @@ file); a nearer fact with the same id replaces a farther one and lists the
 replaced sources in `overrides`. A second fact with one id in the same file is
 a `fact_duplicate_id` preflight warning and the first applies; a fact written
 in the global principles file is a `fact_in_global_file` warning and is
-ignored. A fact item stays in `agent_rules` as written. `agent-doc principles`
+ignored. A fact item stays in `agent_rules` as written. An item that starts
+like a fact (`fact` followed by `[#id]`, `#id`, `[id]`, or `:`) but has no
+valid id or no statement is a `fact_malformed` warning
+(`#factmalformedwarning`): it stays an ordinary `agent_rules` entry and is not
+a premise, or is ignored in the global principles file. Prose that merely
+opens with the word ("Fact checking comes first.") is not reported.
+`agent-doc principles`
 lists the facts in scope beside the principles, and `agent-doc lint` prints
 the fact warnings beside the principle warnings (`#firstprinciplesfactlist`).
 

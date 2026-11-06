@@ -10,6 +10,13 @@
 //! cross-document notes. Hits are annotations only; nothing here closes a
 //! copy or refuses a closeout.
 //!
+//! Preflight searches the project's own index (`--scope <root>`). At a
+//! workspace root an unscoped search federates: it checks and searches every
+//! nested scope, one process per scope, which cannot fit a per-turn deadline
+//! at hundreds of scopes, and nested repositories are their own projects.
+//! `agent-doc decision search` has a caller waiting, so it keeps the federated
+//! reach (`#preflightrecallworkspacecost`).
+//!
 //! Environment:
 //! - `AGENT_DOC_ANSWER_RECALL=off` (or `0`, `false`, `no`) disables recall.
 //! - `AGENT_DOC_TSIFT_BIN` names the tsift executable (default `tsift`).
@@ -34,6 +41,8 @@ const DEFAULT_TIMEOUT_MS: u64 = 2500;
 const DEFAULT_SEARCH_TIMEOUT_MS: u64 = 60_000;
 const MIN_TIMEOUT_MS: u64 = 100;
 const MAX_REPORT_BYTES: u64 = 1024 * 1024;
+/// tsift's name for a project's own index, workspace or not.
+const PROJECT_SCOPE: &str = "<root>";
 
 fn env_millis(name: &str) -> Option<u64> {
     std::env::var(name)
@@ -76,6 +85,8 @@ pub struct TsiftRecall {
     bin: PathBuf,
     root: PathBuf,
     deadline: Duration,
+    /// The tsift `--scope`, or `None` for tsift's default reach.
+    scope: Option<&'static str>,
 }
 
 fn is_executable(path: &Path) -> bool {
@@ -135,11 +146,12 @@ impl TsiftRecall {
                     .unwrap_or(DEFAULT_TIMEOUT_MS)
                     .max(MIN_TIMEOUT_MS),
             ),
+            scope: Some(PROJECT_SCOPE),
         })
     }
 
-    /// [`Self::discover_or_reason`] with the on-demand deadline of
-    /// `agent-doc decision search`.
+    /// [`Self::discover_or_reason`] with the on-demand deadline and federated
+    /// reach of `agent-doc decision search`.
     pub fn discover_for_search(file: &Path, env: &RecallEnv) -> Result<Self, &'static str> {
         let mut source = Self::discover_or_reason(file, env)?;
         source.deadline = Duration::from_millis(
@@ -147,6 +159,7 @@ impl TsiftRecall {
                 .unwrap_or(DEFAULT_SEARCH_TIMEOUT_MS)
                 .max(MIN_TIMEOUT_MS),
         );
+        source.scope = None;
         Ok(source)
     }
 
@@ -178,6 +191,7 @@ impl TsiftRecall {
                 .args(["--lang", "markdown"])
                 .arg("--limit")
                 .arg(limit.to_string())
+                .args(self.scope.into_iter().flat_map(|scope| ["--scope", scope]))
                 .current_dir(&self.root)
                 .stdin(Stdio::null())
                 .stdout(Stdio::piped())

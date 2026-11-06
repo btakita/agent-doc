@@ -419,7 +419,13 @@ and the pending granular-flags-only rule. This runbook carries the rest.
      changes anywhere is repository work even when it recorded nothing:
      never declare it prose-only.
      Pass the worker's complete handback verbatim; an empty response is refused,
-     and there is no placeholder-only completion mode.
+     and there is no placeholder-only completion mode. Keep its labelled
+     sections and line breaks, never flatten it onto one line: report-complete
+     renders **Summary**, **What changed**, **Verification**, **Open items**,
+     and **Next actions** into the response structure and queues each Open
+     items bullet as a follow-up row right after the originating head, so do not
+     add those rows again with `queue follow-up` (`#workerresponsestructure`).
+     A handback without those labels is recorded verbatim.
      Before treating the handback as complete, compare it with the queue item,
      resolved presets, nested authorization, and any effect named by the worker.
      A prepared review or other artifact is not complete while an authorized

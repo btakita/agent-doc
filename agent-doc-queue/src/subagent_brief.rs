@@ -202,6 +202,14 @@ fn tracked_work_item(
 /// follow-ups stay in that section. When the selected queue also contains the
 /// head, the origin stays the selected queue: a mirrored head does not move.
 /// An unmatched item keeps the selected queue.
+/// [`origin_queue_id`] for `content`: the queue a worker's follow-up rows
+/// land in. `queue report-complete` uses it to place a hand-back's open items
+/// in the same queue the dispatch brief named (`#workerresponsestructure`).
+pub fn origin_queue_id_for_item(content: &str, item: &str) -> Option<String> {
+    let components = element::parse(content).ok()?;
+    origin_queue_id(content, &components, item)
+}
+
 fn origin_queue_id(content: &str, components: &[element::Component], item: &str) -> Option<String> {
     let queues = crate::queue_graph::QueueSet::parse(content, components).ok()?;
     let contains = |block: &crate::queue_graph::QueueBlock<'_>| block_contains_head(block, item);
@@ -570,6 +578,20 @@ macro_rules! subagent_tmux_isolation_rule {
 /// in every preamble and appended to the exchange-subagent dispatch texts.
 pub const SUBAGENT_TMUX_ISOLATION_RULE: &str = subagent_tmux_isolation_rule!();
 
+/// `#workerresponsestructure`: the hand-back shape every brief asks for.
+/// `queue report-complete` renders a hand-back with these labels into the
+/// response structure and queues each **Open items** entry as a follow-up row
+/// after the originating head, so a limit the worker reports is never buried.
+#[macro_export]
+macro_rules! subagent_handback_shape_rule {
+    () => {
+        "Report back in this shape, one bold label per section, so `agent-doc queue report-complete` renders it into the response structure: **Summary** (one or two sentences); **What changed** (branch, every commit SHA, files changed); **Verification** (the exact commands run and their results); **Open items** (one `- ` bullet per limit, gap, or unfinished piece, or `none`; report-complete queues each bullet as a follow-up row after the originating head, so do not also list those as follow-ups); **Next actions** (remaining steps, and any follow-up queue heads in order)."
+    };
+}
+
+/// [`subagent_handback_shape_rule!`] as a constant.
+pub const SUBAGENT_HANDBACK_SHAPE_RULE: &str = subagent_handback_shape_rule!();
+
 /// Marker line that opens every preamble.
 pub const SUBAGENT_PREAMBLE_MARKER: &str =
     "[agent-doc] operator authorization for a dispatched queue item (#waypostauthorization)";
@@ -868,9 +890,9 @@ fn render_preamble(
         "- Commit and push only when the authorization above includes it. Use your own branch and \
          fast-forward by default. An explicitly named target branch or explicit force-push directive \
          in the verbatim authorization overrides only that default: execute the exact authorized \
-         scope, never broaden it, and route any harness-native permission through the request protocol.\n\
-         - Report back: branch, commit SHA, files changed, and exact test results.\n",
+         scope, never broaden it, and route any harness-native permission through the request protocol.\n",
     );
+    out.push_str(concat!("- ", subagent_handback_shape_rule!(), "\n"));
     out.push('\n');
     let queue_item = agent_doc_document::queue_projection::operator_request_origin_item(&auth.item);
     out.push_str(&SUBAGENT_OPERATOR_REQUEST_PROTOCOL.replace("<origin-queue-item>", &queue_item));
@@ -1696,6 +1718,47 @@ agent_doc_format: template
                 "{p}"
             );
         }
+    }
+
+    /// `#workerresponsestructure`: every preamble asks the worker for the
+    /// labelled hand-back shape that `queue report-complete` parses, as the
+    /// last coordinator rule, and that shape round-trips through the parser.
+    #[test]
+    fn every_status_asks_for_the_labelled_handback_shape() {
+        let resolved = doc(
+            PRESETS,
+            "subagents preset=\"#spec-test-build-install-commit-push\"",
+            &["do [#abc]"],
+            &["[ ] [#abc] x"],
+        );
+        let unresolved = doc("", "subagents preset=\"#nosuch\"", &["do [#abc]"], &[]);
+        let item_only = doc("", "subagents", &["look at foo"], &[]);
+        let bullet = format!("- {SUBAGENT_HANDBACK_SHAPE_RULE}\n");
+        for (content, item) in [
+            (&resolved, "do [#abc]"),
+            (&unresolved, "do [#abc]"),
+            (&item_only, "look at foo"),
+        ] {
+            let p = subagent_authorization("doc.md", content, item).subagent_prompt_preamble;
+            let rule_at = p.find(&bullet).unwrap_or_else(|| panic!("{p}"));
+            assert!(p.find("- Commit and push only when").unwrap() < rule_at, "{p}");
+            assert!(rule_at < p.find("subagent operator request").unwrap(), "{p}");
+            assert!(!p.contains("- Report back: branch, commit SHA"), "{p}");
+        }
+        for label in [
+            "**Summary**",
+            "**What changed**",
+            "**Verification**",
+            "**Open items**",
+            "**Next actions**",
+        ] {
+            assert!(SUBAGENT_HANDBACK_SHAPE_RULE.contains(label), "{label}");
+        }
+        let handback = "**Summary** done\n**What changed** a1b2c3\n**Verification** ok\n**Open items**\n- a limit\n**Next actions** none";
+        assert_eq!(
+            agent_doc_document::worker_handback::open_items(handback),
+            vec!["a limit".to_string()]
+        );
     }
 
     #[test]

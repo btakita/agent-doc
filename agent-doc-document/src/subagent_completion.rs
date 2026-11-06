@@ -103,6 +103,10 @@ pub fn cell(owner: &str, item: &str, key: &str) -> String {
 /// The response is blockquoted so headings, component markers, and other
 /// markdown emitted by a worker remain visible without becoming live session
 /// structure. The digest makes an edited body cease to be binary evidence.
+/// A response that labels its sections is rendered into the response
+/// structure first (`#workerresponsestructure`,
+/// [`crate::worker_handback::structure_response`]); an unlabelled response is
+/// quoted verbatim.
 pub fn cell_with_response(
     owner: &str,
     item: &str,
@@ -114,6 +118,8 @@ pub fn cell_with_response(
         !response.is_empty(),
         "subagent completion response must not be empty"
     );
+    let structured = crate::worker_handback::structure_response(response);
+    let response = structured.trim();
     let mut body = String::from("> **Subagent response:**\n>");
     for line in response.lines() {
         let line = line.trim_end();

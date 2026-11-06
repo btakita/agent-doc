@@ -154,6 +154,22 @@ pub fn ensure_strict_template_patch_markers(
     );
 }
 
+/// Advisories for a strict closeout's recap (`#agentrecap`). None is ever a
+/// refusal: a harness that omits the recap or strays from the format still
+/// closes its turn, and the previous recap stays until a new one lands.
+pub fn recap_closeout_advisories(patches: &[PatchBlock]) -> Vec<String> {
+    let Some(recap) = crate::recap_patch_body(patches) else {
+        return vec![
+            "this closeout carries no `patch:recap`, so the previous recap stays in place; see runbooks/recap.md"
+                .to_string(),
+        ];
+    };
+    agent_doc_element::recap::recap_format_findings(recap)
+        .iter()
+        .map(|finding| format!("{finding}; see runbooks/recap.md"))
+        .collect()
+}
+
 /// Normalize the retired `agent:patch:*` wrapper only while replaying an
 /// already-durable closeout capture.
 ///
@@ -1384,5 +1400,46 @@ mod tests {
     fn trailing_newline_comparison_is_stable() {
         assert!(same_ignoring_trailing_newlines("a\n", "a"));
         assert!(!same_ignoring_trailing_newlines("a\nb", "a"));
+    }
+
+    /// `#agentrecap`: nothing about the recap refuses a closeout. A missing
+    /// recap and a stray format are advisories, for every harness.
+    #[test]
+    fn recap_advisories_cover_a_missing_recap_and_format_findings() {
+        let exchange = PatchBlock::new("exchange", "### Re: x — gpt-5\n\nBody.\n");
+
+        let missing = recap_closeout_advisories(std::slice::from_ref(&exchange));
+        assert_eq!(missing.len(), 1);
+        assert!(missing[0].contains("no `patch:recap`"), "{missing:?}");
+
+        let blank = PatchBlock::new("recap", "\n");
+        assert_eq!(
+            recap_closeout_advisories(&[exchange.clone(), blank]),
+            missing,
+            "a blank recap is no recap"
+        );
+
+        let good = PatchBlock::new("recap", "Committed, nothing to read.\n");
+        assert!(recap_closeout_advisories(&[exchange.clone(), good]).is_empty());
+
+        let stray = PatchBlock::new("recap", "- starts with a list\n");
+        let advisories = recap_closeout_advisories(&[exchange, stray]);
+        assert_eq!(advisories.len(), 1);
+        assert!(
+            advisories[0].contains("outcome paragraph"),
+            "{advisories:?}"
+        );
+    }
+
+    #[test]
+    fn a_recap_is_not_the_response() {
+        let (patches, unmatched) =
+            crate::parse_patches("<!-- patch:recap -->\nDone.\n<!-- /patch:recap -->\n").unwrap();
+        let template = "---\nagent_doc_format: template\n---\n\n<!-- agent:exchange -->\n<!-- /agent:exchange -->\n";
+        assert!(
+            ensure_strict_template_response_heading_for_current_doc(template, &patches, &unmatched)
+                .is_err(),
+            "a recap alone must not satisfy the strict response heading"
+        );
     }
 }

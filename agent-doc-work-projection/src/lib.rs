@@ -331,6 +331,7 @@ pub fn render_managed_active_items(items: &[ManagedActiveItem]) -> String {
     for component in [
         "running",
         "lost",
+        "quota-blocked",
         "needs-integration",
         "queue",
         "backlog",
@@ -347,6 +348,7 @@ pub fn render_managed_active_items(items: &[ManagedActiveItem]) -> String {
         let title = match component {
             "running" => active_lifecycle::ActiveGroup::Running.title(),
             "lost" => active_lifecycle::ActiveGroup::Lost.title(),
+            "quota-blocked" => active_lifecycle::ActiveGroup::QuotaBlocked.title(),
             "needs-integration" => active_lifecycle::ActiveGroup::NeedsIntegration.title(),
             "queue" => "Queue",
             "backlog" => "Backlog",
@@ -364,7 +366,7 @@ pub fn render_managed_active_items(items: &[ManagedActiveItem]) -> String {
             out.push_str(&format!("  - `{identity}` — {}\n", item.summary));
             let primary_component = if matches!(
                 item.group.as_str(),
-                "running" | "lost" | "needs-integration"
+                "running" | "lost" | "quota-blocked" | "needs-integration"
             ) {
                 "queue"
             } else {
@@ -420,6 +422,7 @@ fn is_binary_active_group(line: &str) -> bool {
     [
         "Running",
         "Lost",
+        "Blocked by quota",
         "Needs integration",
         "Queue",
         "Backlog",

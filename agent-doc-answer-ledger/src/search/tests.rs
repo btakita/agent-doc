@@ -222,7 +222,7 @@ fn recall_hits_map_onto_answered_decisions_here_and_elsewhere() {
         },
     ];
     let mut hits = Vec::new();
-    add_recall_hits(&mut hits, &here, &recall, 6, &mut load_other);
+    add_recall_hits(&mut hits, std::slice::from_ref(&here), &recall, 6, &mut load_other);
     assert_eq!(hits.len(), 2, "{hits:?}");
     assert_eq!(hits[0].document, "tasks/there.md");
     assert_eq!(hits[0].answer, "Use port 8443.");
@@ -237,14 +237,123 @@ fn recall_hits_map_onto_answered_decisions_here_and_elsewhere() {
         ..here
     };
     let mut hits = Vec::new();
-    add_recall_hits(&mut hits, &stale, &recall, 6, &mut load_other);
+    add_recall_hits(&mut hits, std::slice::from_ref(&stale), &recall, 6, &mut load_other);
     assert_eq!(hits.len(), 1, "{hits:?}");
     assert_eq!(hits[0].document, "tasks/there.md");
 
     // Reads are bounded.
     let mut hits = Vec::new();
-    add_recall_hits(&mut hits, &stale, &recall, 0, &mut |_| panic!("no read"));
+    add_recall_hits(&mut hits, std::slice::from_ref(&stale), &recall, 0, &mut |_| panic!("no read"));
     assert!(hits.is_empty());
+}
+
+/// `#decisionsearchnofile`: a project search hands over every document it read;
+/// a hit lands on the document it names, with no read of another copy.
+#[test]
+fn recall_hits_land_on_any_of_the_documents_read() {
+    let (_, here_ledger) = local();
+    let here_rows = observe(LOCAL, &[]);
+    let there_rows = observe(OTHER, &[]);
+    let there_ledger = Ledger::build(&there_rows, &PriorIndex::default(), NOW, None);
+    let documents = [
+        SearchDocument {
+            ledger: &here_ledger,
+            rows: &here_rows,
+            path: HERE,
+            display: "tasks/here.md",
+            hits_current: true,
+        },
+        SearchDocument {
+            ledger: &there_ledger,
+            rows: &there_rows,
+            path: THERE,
+            display: "tasks/there.md",
+            hits_current: true,
+        },
+    ];
+    let recall = [RecallHit {
+        path: THERE.into(),
+        line: 5,
+        score: 4.0,
+        semantic: false,
+    }];
+    let mut hits = Vec::new();
+    add_recall_hits(&mut hits, &documents, &recall, 6, &mut |_| panic!("no read"));
+    assert_eq!(hits.len(), 1, "{hits:?}");
+    assert_eq!(hits[0].document, "tasks/there.md");
+    assert_eq!(hits[0].answer, "Use port 8443.");
+}
+
+fn registry() -> Vec<RegistryDecision> {
+    let record = |id: &str, state: &str, decision: &str, supersedes: &[&str]| RegistryDecision {
+        id: id.to_string(),
+        state: state.to_string(),
+        decision: decision.to_string(),
+        rationale: "Keeps the hit rate up.".to_string(),
+        evidence_response_ids: Vec::new(),
+        updated_at: "2026-11-05T00:00:00Z".to_string(),
+        supersedes: supersedes.iter().map(|id| id.to_string()).collect(),
+    };
+    vec![
+        record("DEC-cache-000", "superseded", "Use a FIFO cache store", &[]),
+        record("DEC-cache-001", "accepted", "Use an LRU cache store", &["DEC-cache-000"]),
+        record("DEC-lic-001", "reversed", "License the crates under MIT", &[]),
+    ]
+}
+
+/// `#decisionsearchnofile`: the registry answers by id, revision id, stamp,
+/// text and wording, and each hit names `decisions.md`.
+#[test]
+fn registry_records_match_every_band() {
+    let records = registry();
+    let top = |query: &str| {
+        search_registry(&records, query)
+            .into_iter()
+            .next()
+            .unwrap_or_else(|| panic!("no hit for {query}"))
+    };
+    let by_id = top("[#DEC-cache-001]");
+    assert_eq!(by_id.matched, SearchMatch::DecisionId);
+    assert_eq!(by_id.document, "decisions.md");
+    assert_eq!(by_id.answer, "Use an LRU cache store");
+    assert_eq!(by_id.rationale.as_deref(), Some("Keeps the hit rate up."));
+    assert_eq!(by_id.location, "decisions.md (accepted, updated 2026-11-05T00:00:00Z)");
+    assert!(by_id.is_current());
+    assert_eq!(
+        top(&crate::graph::registry_revision_id(&records[1])).matched,
+        SearchMatch::RevisionId
+    );
+    assert_eq!(top("⟦decision:DEC-cache-001⟧").matched, SearchMatch::Stamp);
+    assert_eq!(top("decision:dec-cache-001").matched, SearchMatch::Stamp);
+    assert_eq!(top("Use an LRU cache store").matched, SearchMatch::QuestionText);
+    let by_words = top("hit rate lru");
+    assert_eq!(by_words.matched, SearchMatch::Wording);
+    assert_eq!(by_words.decision_id, "DEC-cache-001");
+    assert!(search_registry(&records, "kubernetes namespace").is_empty());
+    assert!(search_registry(&records, "decision:DEC-nope").is_empty());
+}
+
+/// A record that no longer stands stays findable, but says so and never
+/// outranks the record that replaced it in its band, even on a better score.
+#[test]
+fn a_record_that_no_longer_stands_is_labelled_and_ranks_last() {
+    let records = registry();
+    let by_id = &search_registry(&records, "DEC-cache-000")[0];
+    assert!(!by_id.is_current());
+    assert_eq!(by_id.state.as_deref(), Some("superseded"));
+    assert_eq!(by_id.superseded_by, ["DEC-cache-001"]);
+    assert!(!search_registry(&records, "DEC-lic-001")[0].is_current());
+
+    let hits = search_registry(&records, "fifo lru cache store");
+    let ids: Vec<&str> = hits.iter().map(|hit| hit.decision_id.as_str()).collect();
+    assert_eq!(ids, ["DEC-cache-001", "DEC-cache-000"], "{hits:?}");
+    assert_eq!(hits[0].score, hits[1].score, "{hits:?}");
+
+    // The replaced record covers more of the query, and still ranks second.
+    let hits = search_registry(&records, "fifo cache store");
+    assert_eq!(hits[0].decision_id, "DEC-cache-001", "{hits:?}");
+    assert_eq!(hits[1].decision_id, "DEC-cache-000", "{hits:?}");
+    assert!(hits[0].score < hits[1].score, "{hits:?}");
 }
 
 #[test]

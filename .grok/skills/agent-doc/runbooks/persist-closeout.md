@@ -32,7 +32,12 @@ dispatching relevant editor, Python, and generated-document checks. It is an
 iteration aid, not release proof.
 
 After integration and any release-version projection, run exactly one
-authoritative `make check` before `finalize` / `write --commit`. A successful
+authoritative `make check` before `finalize` / `write --commit`. A coordinator
+closing a batch it integrated from subagent branches runs `make check-batch`
+instead: `make check` skips the ignored live-tmux sweep, so a batch gated on it
+alone can look green while CI's `make tmux-ci` step keeps main red. It runs
+`make check`, then `make tmux-ci`, and reuses either proof that still matches.
+Subagents keep running `make check` on their own branch. A successful
 run records a worktree-local fingerprint of repository bytes and toolchain
 identities. `make release` first runs cheap version/editor-parity checks, then
 may reuse the full-suite and tmux-CI proofs independently while their
@@ -105,6 +110,10 @@ Strict template closeout accepts only explicit exchange patch blocks. A response
 missing either `<!-- patch:exchange mode="append" -->` or
 `<!-- /patch:exchange -->` fails before capture or mutation; add the markers and
 retry the same closeout rather than converting it into a plain append implicitly.
+
+The same closeout carries the turn's recap in a `patch:recap` block, in the shared
+format in [recap.md](recap.md). Unlike `patch:exchange`, it is not required: a
+missing or malformed recap prints an advisory and never fails the closeout.
 
 `finalize` requires the cycle to reach `committed` and the post-commit
 `session-check` guard to pass before success, including prompt-only exchange-tail

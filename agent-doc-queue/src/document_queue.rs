@@ -4429,7 +4429,7 @@ fn response_metadata_row_indent(entry: &QueueEntry) -> Option<usize> {
     };
     let (indent, _, item_content) = split_list_item(raw)?;
     let content = item_content.trim();
-    if matches!(content, "**Choices:**" | "**Next actions:**") {
+    if matches!(content, "**Choices:**" | "**Next actions:**") || is_recommendation_row(content) {
         return Some(indent);
     }
     if let Some(body) = content.strip_prefix("**Response ")
@@ -4548,7 +4548,7 @@ fn structured_response_context(entry: &QueueEntry) -> Option<(usize, StructuredR
     };
     let (indent, _, item_content) = split_list_item(raw)?;
     let content = item_content.trim();
-    if matches!(content, "**Choices:**" | "**Next actions:**") {
+    if matches!(content, "**Choices:**" | "**Next actions:**") || is_recommendation_row(content) {
         return Some((indent, StructuredResponseContext::Container));
     }
     if let Some(body) = content.strip_prefix("**Response ")
@@ -4579,10 +4579,21 @@ fn structured_response_context(entry: &QueueEntry) -> Option<(usize, StructuredR
             indent,
             StructuredResponseContext::Choice {
                 label: label.trim().to_string(),
-                effect: effect.trim().to_string(),
+                effect: effect
+                    .replace(crate::operator_request_packet::RECOMMENDED_CHOICE_MARK, "")
+                    .trim()
+                    .to_string(),
             },
         )
     })
+}
+
+/// `#recommendationinrow`: the row is response context. A reason that happens
+/// to contain `**: ` must not read as an offered choice.
+fn is_recommendation_row(content: &str) -> bool {
+    content
+        .strip_prefix(crate::operator_request_packet::RECOMMENDATION_ROW_LABEL)
+        .is_some_and(|value| !value.trim().is_empty())
 }
 
 /// Bounded ancestry for the executable prompt at `index`.
@@ -12039,6 +12050,37 @@ mod tests {
             1
         );
         assert!(!serialized.contains("production"), "{serialized}");
+    }
+
+    #[test]
+    fn recommendation_row_is_context_and_its_mark_stays_out_of_the_selection() {
+        let body = concat!(
+            "- ~~do [#answered]~~ — auto-struck: response: [#r-0123456789ab]\n",
+            "  - **Response [#r-0123456789ab]:** Deployment is blocked. Which target?\n",
+            "    - **Timestamp:** 2026-11-05T19:58:00-05:00\n",
+            "    - **Summary:** Deployment is blocked. Which target?\n",
+            "    - **Recommendation:** **staging** — Production is frozen: **no**: exceptions.\n",
+            "      - Why not production?\n",
+            "    - **Choices:**\n",
+            "      - **staging**: Deploy to staging. — **Recommended**\n",
+            "        - Use staging and run the smoke test.\n",
+            "      - **production**: Deploy to production.\n",
+        );
+        let entries = parse(body).unwrap();
+        let executable = executable_prompt_indexes(&entries);
+        assert_eq!(executable.len(), 2, "{entries:#?}");
+
+        let reply = prompt_context_packet_at(&entries, executable[0]).unwrap();
+        assert_eq!(reply.decision_evidence, ["Why not production?"]);
+        assert!(
+            reply.selection.is_none(),
+            "a row under the reason picked nothing: {reply:#?}"
+        );
+
+        let pick = prompt_context_packet_at(&entries, executable[1]).unwrap();
+        let selection = pick.selection.unwrap();
+        assert_eq!(selection.label.as_deref(), Some("staging"));
+        assert_eq!(selection.text, "Deploy to staging.");
     }
 
     #[test]

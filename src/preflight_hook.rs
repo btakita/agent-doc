@@ -1889,6 +1889,20 @@ mod tests {
         }
         std::fs::create_dir_all(bare.join("nested/.git")).unwrap();
         assert!(!crate::skill::root_holds_session_document(bare));
+        // `#decisionsearchnofile`: the list is the same walk, every document.
+        let scan_docs = crate::skill::session_documents_under(bare);
+        assert!(scan_docs.documents.is_empty() && !scan_docs.exhausted);
+        for found in ["tasks/b.md", "a.md", "tasks/a.done.md"] {
+            let path = bare.join(found);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, session).unwrap();
+        }
+        assert_eq!(
+            crate::skill::session_documents_under(bare).documents,
+            [bare.join("a.md"), bare.join("tasks/b.md")]
+        );
+        std::fs::remove_file(bare.join("a.md")).unwrap();
+        std::fs::remove_dir_all(bare.join("tasks")).unwrap();
         assert_eq!(
             ensure(bare, scan).status,
             crate::skill::ClaudeHookStatus::NoSessionDocument

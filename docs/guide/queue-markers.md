@@ -131,6 +131,13 @@ last open blocker closes. A clause whose ids are all closed or absent leaves
 the row runnable, because agent-doc only derives blocked state from ids it can
 watch close.
 
+A claimed row also shows `⛔` when its worker stopped on a harness usage or
+credit limit (`#harnessquotaexhausted`). Nothing is running it and it is not
+lost: the attempt keeps its worker, worktree, and branch, and a plain re-claim is
+refused. `agent-doc queue claims` names the limit and the next step: resume the
+same worker after the reset, or `queue release --requeue` to dispatch the row on
+another harness with the partial branch in its brief.
+
 A blocked row is held out of the queue:
 
 - A row blocked by a stays-open clause is deferred: no drain selects it,

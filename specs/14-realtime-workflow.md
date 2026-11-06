@@ -1751,6 +1751,39 @@ reproduces any earlier hold from the same texts, so the hold itself need not be
 persisted. The plugin also refuses the unproven adoption whichever rules
 answer (an older native generation or the frozen floor).
 
+A canonical that differs from the buffer only by agent-doc's own writes is
+adopted (`#attachauthorattribution`). On 2026-11-05, after an IDE restart, a
+JetBrains attach held `ambiguous-retained-projection` although every
+canonical-vs-buffer difference was a queue marker projection (`📥` lifecycle
+icons and subagent claim markers) the document's bound session had written
+itself while no replica was attached. Attribution comes from the controller's
+op record, never from what the text looks like: every binary-authored canonical
+write (`apply_cp_write_for_file`, response and salient cells, the durable
+queue-attempt projection) goes through
+`RelayHub::apply_binary_authored_replace_scoped`, which records the write's
+pre-image hash and `source` in a bounded (64) hash chain
+(`BinaryWriteAttribution`). A write whose pre-image is not the previous write's
+post-image starts a new run, so any canonical change agent-doc did not author
+(an editor relay update, a durable document-op delta, a disk rebuild, a reseed,
+a committed-history roll-forward) ends attribution of everything older, and a
+read returns nothing unless the newest recorded write produced exactly the
+current canonical. The run survives a relay recycle with the retained canonical
+projection and a controller replacement through its durable copy
+(`.agent-doc/state/binary-write-attribution/<doc-hash>.json`, content hashes and
+`source` labels only, rewritten with each recorded write). The copy is
+content-addressed by its tip, so it answers only for a canonical whose hash
+equals that tip; a missing, malformed, or stale record is unattributed, and a
+failure to read or write one never fails the document write. Registration
+returns the run as `binary_attributed_ancestor_hashes` (logged as
+`crdt_replica_register_binary_attributed_ancestors`). The plugin reports
+`canonical_contains_operator_edits = true` when its buffer hashes to one of
+them and its canonical hashes to the `canonical_content_hash` they were proven
+against (`bufferIsBinaryAttributedAncestorUtil`): such a buffer holds no text
+the canonical lacks except what agent-doc's own writes replaced, so adoption is
+lossless under every rule set. Any other difference, including an operator edit
+beside the projections or one that reached the canonical through an earlier
+replica, is unattributed and keeps `ambiguous-retained-projection`.
+
 Exhaustion is resolved in place, not by a recycle (`#jetbrainsreplicaloops`).
 Measured on sdk.md 2026-10-16T05:57Z-06:05Z: the JetBrains replica looped every
 30 s on a stale-baseline local delta (`local delta found a stale native baseline
@@ -2875,10 +2908,24 @@ first reloads the durable ledger (which replaces the projection wholesale and so
 never folds a row it also applied live twice), then acknowledges. A failed
 reload keeps the row claimed and the overlay in place for the next drain.
 
-A predecessor can also land its row and acknowledge it after the successor's
-load, before the successor claims it, and the deleted row then leaves nothing to
-drain (`#predecessorlandandack`). Every acknowledgement therefore commits, in the
-transaction that deletes the row, a receipt naming the document, generation,
+Every drain then settles the overlay entries that have no row left to claim
+(`#orphanhandoffoverlay`): a retired predecessor can ACK a row after the
+successor copied it into the overlay, a newer epoch can supersede a row, and a
+drain can finish a row between its enqueue and its overlay note. The overlay is
+read before the rows, so an entry a concurrent enqueue noted is never mistaken
+for an orphan while its row is live: an entry is noted only after its row
+committed, and a row leaves only by an ACK that follows its ledger append. The
+entry settles against the ledger like a duplicate does. At or below the folded
+high-water it clears at once; above it, or absent from the ledger because a
+superseding row replaced it, the controller first reloads the durable ledger, so
+the reactive graphs, which see the projection and never the overlay, get the
+authority without waiting for an unrelated reload. A failed reload keeps the
+entry answering reads for the next drain.
+
+A predecessor that lands and ACKs a row after the successor's load and before
+its overlay copy leaves neither row nor entry, so nothing a drain walks can carry
+the event (`#predecessorlandandack`). Every acknowledgement therefore commits, in
+the transaction that deletes the row, a receipt naming the document, generation,
 authority epoch, and event id: at most one per document per generation, keeping
 the newest epoch. At the head of every drain a controller reconciles the receipts
 of older generations against the same high-water: one at or below it was folded

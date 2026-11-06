@@ -35,6 +35,9 @@ The body contains named components delimited by HTML comment markers:
 <!-- agent:status patch=replace -->
 <!-- /agent:status -->
 
+<!-- agent:recap patch=replace -->
+<!-- /agent:recap -->
+
 <!-- agent:run priority subagents clear -->
 <!-- /agent:run -->
 
@@ -61,7 +64,7 @@ The body contains named components delimited by HTML comment markers:
 ```
 
 New scaffolds use this queue-centric order:
-status, active, run, review, todo, backlog,
+status, recap, active, run, review, todo, backlog,
 icebox, notes, done, then exchange last. `active` is a binary-owned
 informational projection of started, unclosed work grouped by authoritative
 source; it is never an executable work source. Legacy `agent:open-items`
@@ -80,6 +83,7 @@ established components; valid documents in the previous order are not silently r
 - `<!-- agent:icebox -->` — project icebox for items parked outside the active backlog. Sits after `agent:backlog` in the default template.
 - `<!-- agent:signals -->` — realtime signal definitions/readings. Built-in tests, queue, supervisor, and IPC signals are expected first; custom signal plugins are deferred.
 - `<!-- agent:status -->`, `<!-- agent:log -->`, `<!-- agent:architecture -->`, ... — agent-managed via targeted patch blocks.
+- `<!-- agent:recap -->` — the last turn's recap and nothing else. Each closeout's `patch:recap` replaces the whole body; see [recap.md](recap.md).
 
 Built-in element semantics live in the `agent-doc-element-*` crate family and
 are composed by `agent-doc-element-registry`. An unregistered `agent:*`

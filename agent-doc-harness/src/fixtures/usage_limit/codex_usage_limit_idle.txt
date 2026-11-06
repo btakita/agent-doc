@@ -1,0 +1,8 @@
+• Ran cargo test -p agent-doc-harness
+  └ test result: ok. 12 passed; 0 failed
+
+■ You’ve hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/settings/usage to purchase more credits or try again at 3:14 PM.
+
+› 
+
+  gpt-6-sol · 41% context left · ~/work/project

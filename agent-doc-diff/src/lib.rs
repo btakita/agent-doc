@@ -4128,6 +4128,11 @@ diff --git a/tests/render_test.rs b/tests/render_test.rs
                 "- Keep the old sample rule.",
                 "- Keep the new sample rule.",
             ),
+            (
+                "recap",
+                "Committed, nothing to read.",
+                "Waiting on you.\n\nStill can't close:\n- do [#example]: blocked.\n❯ not a prompt",
+            ),
         ] {
             let previous =
                 format!("<!-- agent:{name} -->\n{previous_body}\n<!-- /agent:{name} -->\n");

@@ -407,6 +407,126 @@ fn decision_search_finds_answers_and_the_menu_stays_off_work_turns() {
     assert!(contract.get("decision_lookup_menu").is_none(), "{contract:#}");
 }
 
+/// `#decisionsearchnofile`: the first word is FILE only when it names a
+/// session document. Without FILE the project's session documents and its
+/// `decisions.md` are searched, and each hit names its document.
+#[test]
+fn decision_search_without_file_searches_the_project() {
+    let dir = tempfile::tempdir().unwrap();
+    let doc = session(
+        dir.path(),
+        "- ~~[#subagent-operator-request-tdport-pick]: Use port 3000.~~\n",
+        "- [ ] [#subagent-operator-request-tdport-pick] Choose the demo callback port for local sign-in runs: 3000 or 47616\n",
+    );
+    fs::create_dir_all(dir.path().join("tasks")).unwrap();
+    fs::write(
+        dir.path().join("tasks/other.md"),
+        concat!(
+            "---\nagent_doc_session: other\n---\n\n",
+            "## Todo <!-- agent:todo -->\n",
+            "- [x] [#licpick] Pick the license for the published crates\n",
+            "<!-- /agent:todo -->\n",
+            "## Run <!-- agent:run -->\n",
+            "- ~~[#licpick]: Apache-2.0 for every crate.~~\n",
+            "<!-- /agent:run -->\n",
+        ),
+    )
+    .unwrap();
+    // Not session documents: never searched, however they read.
+    fs::write(dir.path().join("README.md"), "- ~~[#licpick]: GPL.~~\n").unwrap();
+    fs::write(
+        dir.path().join("decisions.md"),
+        concat!(
+            "# Decisions\n\nThis file is the authoritative current decision registry.\n\n",
+            "<!-- agent:decision id=\"DEC-license-001\" -->\n## DEC-license-001\n",
+            "- State: accepted\n- Updated: 2026-11-05T00:00:00Z\n- Evidence: (none)\n- Supersedes: (none)\n",
+            "### Decision\nPublish crates under Apache-2.0.\n### Rationale\nPatent grant.\n<!-- /agent:decision -->\n",
+        ),
+    )
+    .unwrap();
+    let path = doc.to_str().unwrap();
+    let run = |args: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_agent-doc"))
+            .env("AGENT_DOC_ANSWER_RECALL", "off")
+            .env("AGENT_DOC_ROOT_CEILING_DIRECTORIES", dir.path().parent().unwrap())
+            .current_dir(dir.path())
+            .arg("decision")
+            .arg("search")
+            .args(args)
+            .output()
+            .unwrap()
+    };
+    let json = |args: &[&str]| -> serde_json::Value {
+        let mut args = args.to_vec();
+        args.push("--json");
+        let output = run(&args);
+        assert_ok(&output, "decision search");
+        serde_json::from_slice(&output.stdout).unwrap()
+    };
+    let documents = |report: &serde_json::Value| -> Vec<String> {
+        report["hits"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|hit| hit["document"].as_str().unwrap().to_string())
+            .collect()
+    };
+
+    // No FILE: one hit per source, each naming it; the words need no quotes.
+    let report = json(&["license", "for", "crates"]);
+    let found = documents(&report);
+    assert!(found.iter().any(|document| document == "tasks/other.md"), "{report:#}");
+    assert!(found.iter().any(|document| document == "decisions.md"), "{report:#}");
+    assert!(report.get("document").is_none(), "{report:#}");
+    assert_eq!(report["project"]["documents"], 2, "{report:#}");
+    assert_eq!(report["project"]["registry"]["status"], "read", "{report:#}");
+    assert_eq!(json(&["#licpick"])["hits"][0]["answer"], "Apache-2.0 for every crate.");
+    assert_eq!(json(&["DEC-license-001"])["hits"][0]["match"], "decision_id");
+
+    // The FILE form keeps its reach and its report shape.
+    let report = json(&[path, "license", "for", "crates"]);
+    assert!(report["hits"].as_array().unwrap().is_empty(), "{report:#}");
+    assert_eq!(report["document"], path, "{report:#}");
+    assert!(report.get("project").is_none(), "{report:#}");
+    let report = json(&["session.md", "#subagent-operator-request-tdport-pick"]);
+    assert_eq!(report["hits"][0]["answer"], "Use port 3000.", "{report:#}");
+
+    // A mistyped FILE, or a FILE alone, is refused rather than searched for.
+    for args in [&["sesion.md", "port"][..], &["README.md", "port"], &["session.md"]] {
+        let output = run(args);
+        assert!(!output.status.success(), "{args:?}: {output:?}");
+        assert!(String::from_utf8_lossy(&output.stderr).contains("--project"), "{output:?}");
+    }
+    // `--project` makes those words the query.
+    let report = json(&["--project", "session.md"]);
+    assert!(report["hits"].as_array().unwrap().is_empty(), "{report:#}");
+    assert_eq!(report["project"]["documents"], 2, "{report:#}");
+
+    // Human-readable output names every source and the scope.
+    let output = run(&["license", "for", "crates"]);
+    assert_ok(&output, "decision search (text)");
+    let text = String::from_utf8_lossy(&output.stdout);
+    assert!(text.contains(" in tasks/other.md ["), "{text}");
+    assert!(text.contains("`DEC-license-001` in decisions.md ["), "{text}");
+    assert!(text.contains("rationale: Patent grant."), "{text}");
+    assert!(text.contains("searched 2 session documents under "), "{text}");
+    assert!(text.contains("and decisions.md (1 records)"), "{text}");
+
+    // Outside a project there is nothing to search.
+    let outside = tempfile::tempdir().unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_agent-doc"))
+        .env("AGENT_DOC_ROOT_CEILING_DIRECTORIES", outside.path().parent().unwrap())
+        .current_dir(outside.path())
+        .args(["decision", "search", "port"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success(), "{output:?}");
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("searches the current project"),
+        "{output:?}"
+    );
+}
+
 /// `#decisionidstamp`: `preflight --probe` carries the same answered facts as
 /// a real preflight, from a read-only simulation. It writes no closure and no
 /// decision stamp into the document. A real preflight then stamps the open

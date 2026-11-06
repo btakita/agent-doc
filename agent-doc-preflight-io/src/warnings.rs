@@ -233,6 +233,43 @@ pub fn supervisor_drain_handoff_undrained_warning(
 
 /// Surface semantic memory matches for likely completed work and fail-open
 /// retrieval issues as ordinary preflight warnings.
+/// `#harnessquotaexhausted`: name a harness usage limit before this turn
+/// plans around it: the owning pane idle on one, and every worker attempt that
+/// stopped on one with its exact next step. Read-only.
+pub fn harness_usage_limit_warnings(file: &Path) -> Vec<PreflightWarning> {
+    let warning = |code: &str, message: String| PreflightWarning {
+        code: code.to_string(),
+        message,
+        document_agent: None,
+        active_harness: None,
+    };
+    let mut warnings = Vec::new();
+    if let Some(owner) = agent_doc_turn_status_io::owner_pane_usage_limit_for_file(file) {
+        warnings.push(warning(
+            "harness_usage_limit",
+            format!(
+                "{} on pane `{}`. {}",
+                owner.limit.cause(),
+                owner.pane,
+                owner.limit.operator_next_step(),
+            ),
+        ));
+    }
+    let Ok(ledger) = agent_doc_queue_io::queue_claim::load_ledger(file) else {
+        return warnings;
+    };
+    let document = file.display().to_string();
+    warnings.extend(
+        agent_doc_queue::worker_quota::quota_blocked_attempts(&ledger.claims).map(|(claim, _)| {
+            warning(
+                agent_doc_queue::worker_quota::WORKER_QUOTA_EXHAUSTED_REASON,
+                agent_doc_queue::worker_quota::quota_blocked_next_step(&document, claim),
+            )
+        }),
+    );
+    warnings
+}
+
 pub fn semantic_completion_warnings(file: &Path) -> Vec<PreflightWarning> {
     match agent_doc_memory_io::session::semantic_completion_matches(file, None, 5) {
         Ok(matches) => matches

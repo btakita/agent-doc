@@ -71,6 +71,8 @@ after the successor loaded the ledger:
 
 - the successor acknowledges the row and clears its pending-authority overlay
   only for an event its own projection holds;
+- no overlay entry outlives the drain, and an entry stops answering reads only
+  for an event the projection holds (`#orphanhandoffoverlay`);
 - the ledger never holds the event twice;
 - the row is eventually acknowledged under weak fairness; and
 - however the row left the table, the successor's projection eventually holds
@@ -78,11 +80,16 @@ after the successor loaded the ledger:
 
 `AuthorityHandoffFoldWedge` restores the shipped rule (every `inserted == false`
 duplicate is acknowledged as-is) and must violate; `AuthorityHandoffFoldReach`
-witnesses the late duplicate itself. A predecessor that lands *and*
-acknowledges its row after the successor's load leaves nothing to drain, so an
-ACK commits a receipt naming the event in the transaction that deletes the row,
-and a successor reconciles older generations' receipts at the head of every
-drain. `AuthorityHandoffFoldLateAckWedge` removes that reconcile and must violate
+witnesses the late duplicate itself. `AuthorityHandoffFoldOrphanWedge` restores
+the drain that walks only durable rows (the entry outlives it) and
+`AuthorityHandoffFoldClearWedge` clears an entry just because its row is gone
+(reads lose the authority); both must violate, and
+`AuthorityHandoffFoldOrphanReach` witnesses an orphan the settle must reload for.
+A predecessor that lands *and* acknowledges its row after the successor's load
+and before its row read leaves no row or entry, so an ACK commits a receipt
+naming the event in the transaction that deletes the row, and a successor
+reconciles older generations' receipts at the head of every drain.
+`AuthorityHandoffFoldLateAckWedge` removes that reconcile and must violate
 `EventuallyFolded`; `AuthorityHandoffFoldLateAckReach` witnesses the late ACK.
 The rest of the class of any predecessor write committed after a successor's
 load stays out of scope: a fact with no handoff row and no receipt reaches the

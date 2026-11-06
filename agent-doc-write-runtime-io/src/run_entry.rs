@@ -460,18 +460,39 @@ fn encode_no_pending_capture_intent(file: &Path, response: &mut String, enabled:
     );
 }
 
+/// The one semantic operation the response-cell path applies: the response,
+/// plus the turn's recap when it carries one (`#agentrecap`).
+#[derive(Debug, PartialEq, Eq)]
+struct ResponseCellPatchback {
+    response: String,
+    recap: Option<String>,
+}
+
+/// A recap is part of the response operation, so carrying one must not push
+/// every closeout off this path onto the composite write path.
 fn response_cell_from_patchback(
     patches: &[template::PatchBlock],
     unmatched: &str,
-) -> Option<String> {
-    if !unmatched.trim().is_empty() || patches.len() != 1 || patches[0].name != "exchange" {
+) -> Option<ResponseCellPatchback> {
+    if !unmatched.trim().is_empty() {
         return None;
     }
-    let response = patches[0].content.trim_matches(['\n', '\r']);
+    let is_recap = |name: &str| name == agent_doc_element::recap::RECAP_COMPONENT;
+    let mut response_patches = patches.iter().filter(|patch| !is_recap(&patch.name));
+    let exchange = response_patches
+        .next()
+        .filter(|patch| patch.name == "exchange")?;
+    if response_patches.next().is_some() {
+        return None;
+    }
+    let response = exchange.content.trim_matches(['\n', '\r']);
     (!response.is_empty()
         && agent_doc_template::response_materialization::response_text_has_heading(response)
         && agent_doc_merge::response_cell::is_assistant_only_response_cell(response))
-    .then(|| response.to_string())
+    .then(|| ResponseCellPatchback {
+        response: response.to_string(),
+        recap: template::recap_patch_body(patches).map(str::to_string),
+    })
 }
 
 fn enforce_strict_template_closeout_contract(
@@ -497,7 +518,15 @@ fn enforce_strict_template_closeout_contract(
         current_content,
         patches,
         unmatched,
-    )
+    )?;
+    if template_mode {
+        for advisory in
+            agent_doc_template::response_materialization::recap_closeout_advisories(patches)
+        {
+            eprintln!("[recap] advisory (#agentrecap): {advisory}");
+        }
+    }
+    Ok(())
 }
 
 /// Apply the response-only part of finalize as one idempotent semantic CRDT op.
@@ -674,7 +703,11 @@ fn try_add_response_cell_via_realtime_backbone(
     if force_disk {
         return Ok(false);
     }
-    let Some(response_cell) = response_cell_from_patchback(patches, unmatched) else {
+    let Some(ResponseCellPatchback {
+        response: response_cell,
+        recap,
+    }) = response_cell_from_patchback(patches, unmatched)
+    else {
         return Ok(false);
     };
     let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
@@ -692,6 +725,7 @@ fn try_add_response_cell_via_realtime_backbone(
             &operation_id,
             &response_sha256,
             &response_cell,
+            recap.as_deref(),
             committed_content.as_deref(),
             source,
         )?
@@ -4000,8 +4034,11 @@ mod tests {
         let response =
             template::PatchBlock::new("exchange", "\n### Re: response cell — gpt-5\n\nApplied.\n");
         assert_eq!(
-            response_cell_from_patchback(std::slice::from_ref(&response), "").as_deref(),
-            Some("### Re: response cell — gpt-5\n\nApplied.")
+            response_cell_from_patchback(std::slice::from_ref(&response), ""),
+            Some(ResponseCellPatchback {
+                response: "### Re: response cell — gpt-5\n\nApplied.".to_string(),
+                recap: None,
+            })
         );
         assert!(response_cell_from_patchback(std::slice::from_ref(&response), "extra").is_none());
         assert!(
@@ -4034,6 +4071,39 @@ mod tests {
             response_cell_from_patchback(std::slice::from_ref(&embedded_prompt), "").is_none(),
             "a mixed response/prompt patch must not be selected as an assistant-only response cell",
         );
+    }
+
+    /// `#agentrecap`: every closeout carries a recap, so a recap must keep the
+    /// response on the semantic path. Any other patch stays composite.
+    #[test]
+    fn response_cell_fast_path_carries_the_recap_with_the_response() {
+        let response =
+            template::PatchBlock::new("exchange", "\n### Re: response cell — gpt-5\n\nApplied.\n");
+        let recap = template::PatchBlock::new("recap", "Committed.\n");
+
+        let cell = response_cell_from_patchback(&[response.clone(), recap.clone()], "").unwrap();
+        assert_eq!(cell.response, "### Re: response cell — gpt-5\n\nApplied.");
+        assert_eq!(cell.recap.as_deref(), Some("Committed.\n"));
+
+        let cell = response_cell_from_patchback(&[recap.clone(), response.clone()], "").unwrap();
+        assert_eq!(cell.recap.as_deref(), Some("Committed.\n"));
+
+        let blank = template::PatchBlock::new("recap", "\n");
+        let cell = response_cell_from_patchback(&[response.clone(), blank], "").unwrap();
+        assert_eq!(cell.recap, None);
+
+        assert!(
+            response_cell_from_patchback(
+                &[
+                    response.clone(),
+                    recap.clone(),
+                    template::PatchBlock::new("status", "done"),
+                ],
+                "",
+            )
+            .is_none()
+        );
+        assert!(response_cell_from_patchback(&[recap, response.clone(), response], "").is_none());
     }
 
     #[test]

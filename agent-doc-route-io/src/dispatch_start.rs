@@ -363,9 +363,9 @@ mod tests {
     #[test]
     fn dispatch_start_capture_drops_grey_suggestion_but_keeps_typed_trigger() {
         let trigger = "agent-doc tasks/sample.md";
-        let ghost = DispatchStartPaneCapture::from_ansi(format!(
-            "\x1b[1m›\x1b[0m \x1b[2m{trigger}\x1b[0m\n\n  gpt-5.6 · ~/work/sample-app · 40% left\n"
-        ));
+        let ghost = DispatchStartPaneCapture::from_ansi(
+            crate::startup_ready::codex_composer_fixture::dim_suggestion(trigger),
+        );
         assert!(ghost.raw.contains("\x1b[2m"));
         assert!(
             !agent_doc_controller::dispatch::recent_lines_contain_trigger(
@@ -375,9 +375,9 @@ mod tests {
             "{}",
             ghost.composer_text
         );
-        let typed = DispatchStartPaneCapture::from_ansi(format!(
-            "\x1b[1m›\x1b[0m {trigger}\n\n  gpt-5.6 · ~/work/sample-app · 40% left\n"
-        ));
+        let typed = DispatchStartPaneCapture::from_ansi(
+            crate::startup_ready::codex_composer_fixture::typed(trigger),
+        );
         assert!(
             agent_doc_controller::dispatch::recent_lines_contain_trigger(
                 &typed.composer_text,

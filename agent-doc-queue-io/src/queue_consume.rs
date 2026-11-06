@@ -3023,6 +3023,14 @@ pub fn id_head_dispatch_guard_for_caller(
                  `agent-doc queue claims {path}` (`lost_recovery`) to recover the worker's \
                  result or reclaim the row."
             ),
+            QueueClaimState::QuotaBlocked => anyhow::bail!(
+                "{path}: [#{target_id}] is not reported; `queue consume {flag}` closes only a \
+                 reported row, and its {}",
+                agent_doc_queue::worker_quota::quota_blocked_next_step(
+                    &path.to_string(),
+                    claim,
+                ),
+            ),
             QueueClaimState::Reported => {
                 if reported_attempt_owned_by_other_live_session(
                     crate::queue_claim::claim_owner_liveness(file, claim),

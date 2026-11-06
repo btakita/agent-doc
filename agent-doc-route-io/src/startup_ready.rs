@@ -412,11 +412,69 @@ pub fn reverify_auto_start_dispatch_ready(
     }
 }
 
+/// `#codexghostreadyfixture`: a Codex composer frame drawn from Codex itself.
+///
+/// The rows are the verbatim bytes of `tmux capture-pane -p -e` over Codex
+/// v0.165.0 in a 100x30 pane, with only the working directory replaced. Live
+/// operator panes paint the same composer rows; only their footer differs (theme
+/// grey and an extra `← for agents` hint). What a hand-written fixture misses:
+/// - the footer status row carries `Context N% used`, which is what makes it
+///   ignorable chrome rather than the prompt candidate;
+/// - the composer sits on a background that is re-emitted after every reset, so
+///   a dim body is followed by `\x1b[0m\x1b[48;...m` rather than a bare reset;
+/// - the row below the status row loses `? for shortcuts` once text is typed.
+#[cfg(test)]
+pub(crate) mod codex_composer_fixture {
+    /// Zero-based terminal cursor row of the composer in every frame below.
+    pub(crate) const PROMPT_ROW: usize = 1;
+
+    const COMPOSER_BG: &str = "\x1b[48;2;30;30;30m";
+    pub(crate) const STATUS_ROW: &str = concat!(
+        "\x1b[49m  \x1b[38;2;246;226;183mGPT-5.6-Sol high\x1b[38;2;123;128;146m · ",
+        "\x1b[38;2;171;223;167m~/work/sample-app\x1b[38;2;123;128;146m · ",
+        "\x1b[38;2;242;181;144mContext 0% used\x1b[39m",
+    );
+    const WARNINGS: &str = concat!(
+        "\x1b[38;2;123;128;146m⚠ \x1b[38;2;196;167;103m3 warnings",
+        "\x1b[38;2;123;128;146m · \x1b[1m\x1b[38;2;205;214;244mf2\x1b[0m",
+        "\x1b[38;2;123;128;146m to view\x1b[39m",
+    );
+    const SHORTCUTS: &str =
+        "  \x1b[1m\x1b[38;2;205;214;244m?\x1b[0m\x1b[38;2;123;128;146m for shortcuts\x1b[39m";
+
+    fn frame(body: &str, hint_row: &str) -> String {
+        format!("{COMPOSER_BG}\n\x1b[1m›\x1b[0m{COMPOSER_BG} {body}\n\n{STATUS_ROW}\n{hint_row}\n")
+    }
+
+    fn idle_hint_row() -> String {
+        format!("{SHORTCUTS}{:57}{WARNINGS}", "")
+    }
+
+    /// Codex's own placeholder, exactly as an idle pane paints it.
+    pub(crate) fn idle_placeholder() -> String {
+        dim_suggestion("Ask Codex to do anything")
+    }
+
+    /// `text` in the captured styling of the idle placeholder.
+    pub(crate) fn dim_suggestion(text: &str) -> String {
+        frame(
+            &format!("\x1b[2m{text}\x1b[0m{COMPOSER_BG}"),
+            &idle_hint_row(),
+        )
+    }
+
+    /// `text` as Codex paints typed input (captured without pressing Enter).
+    pub(crate) fn typed(text: &str) -> String {
+        frame(text, &format!("{:74}{WARNINGS}", ""))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     const GROK_TRIGGER: &str = "agent-doc tasks/sample.md";
+    const CODEX_TRIGGER: &str = "agent-doc tasks/sample.md";
 
     fn grok_composer(body: &str) -> String {
         format!(
@@ -489,29 +547,113 @@ mod tests {
         );
     }
 
-    /// Codex renders its suggestion DIM: the ghost-free projection drops it,
-    /// so it is never a pending trigger, while the same text typed at normal
-    /// intensity is still pending and never reads as a ready composer.
+    /// `#codexghostreadyfixture`: the original Codex fixture's footer had no
+    /// `Context ` marker, so that footer became the prompt candidate and BOTH
+    /// its ghost and its typed composer projected `Absent`. `!ReadyEmpty` held
+    /// for the wrong reason. The captured frame pins all three real projections
+    /// exactly, so a frame that stops being read as a composer fails here.
+    ///
+    /// Cursor scoping cuts every row below the composer, so these projections
+    /// never read the footer. Its realism is asserted directly instead: without
+    /// this check a footer regressed to the original shape passed every test.
     #[test]
-    fn codex_dim_suggestion_is_not_pending_while_typed_text_is() {
+    fn codex_captured_idle_placeholder_reads_ready_empty() {
         let harness = HarnessConfig::codex();
-        let ghost = "\x1b[1m›\x1b[0m \x1b[2magent-doc tasks/sample.md\x1b[0m\n\n  gpt-5.6 · ~/work/sample-app · 40% left\n";
+        assert!(harness.is_ignorable_output_line(codex_composer_fixture::STATUS_ROW));
+        let idle = codex_composer_fixture::idle_placeholder();
+        assert_eq!(
+            agent_doc_harness::project_pane_composer_at_cursor(
+                &idle,
+                &harness,
+                Some(codex_composer_fixture::PROMPT_ROW)
+            ),
+            PaneComposerProjection::ReadyEmpty {
+                evidence: PaneComposerReadinessEvidence::Prompt {
+                    rendered: "› Ask Codex to do anything".to_string(),
+                },
+            }
+        );
+    }
+
+    /// A dim body in the real composer is `ReadyEmpty`, never a draft, and a
+    /// suggestion of the trigger is not a stranded trigger. Only Codex's own
+    /// placeholder was captured dim; the trigger text is substituted into that
+    /// exact styling, so the style, not the wording, is what is pinned.
+    #[test]
+    fn codex_dim_suggestion_reads_ready_empty_not_a_draft() {
+        let harness = HarnessConfig::codex();
+        let ghost = codex_composer_fixture::dim_suggestion(CODEX_TRIGGER);
+        let cursor = Some(codex_composer_fixture::PROMPT_ROW);
+        assert_eq!(
+            agent_doc_harness::project_pane_composer_at_cursor(&ghost, &harness, cursor),
+            PaneComposerProjection::ReadyEmpty {
+                evidence: PaneComposerReadinessEvidence::Prompt {
+                    rendered: format!("› {CODEX_TRIGGER}"),
+                },
+            }
+        );
         let composer_text =
-            agent_doc_turn_executor_tmux::prompt::composer_text_without_ghost_suggestions(ghost);
+            agent_doc_turn_executor_tmux::prompt::composer_text_without_ghost_suggestions(&ghost);
         assert!(!pane_composer_has_pending_trigger(
             &composer_text,
-            GROK_TRIGGER
+            CODEX_TRIGGER
         ));
-        let typed = "\x1b[1m›\x1b[0m agent-doc tasks/sample.md\n\n  gpt-5.6 · ~/work/sample-app · 40% left\n";
-        assert!(!matches!(
-            agent_doc_harness::project_pane_composer_at_cursor(typed, &harness, None),
-            PaneComposerProjection::ReadyEmpty { .. }
-        ));
+        assert_eq!(
+            fresh_start_missing_admission_outcome_from_capture(
+                &ghost,
+                &harness,
+                cursor,
+                CODEX_TRIGGER
+            ),
+            FreshStartAdmissionOutcome::IdleNoOpKeep
+        );
+
+        let plain = agent_doc_turn_executor_tmux::prompt::strip_ansi(&ghost);
+        assert_eq!(
+            agent_doc_harness::project_pane_composer_at_cursor(&plain, &harness, cursor),
+            PaneComposerProjection::OperatorDraft {
+                preview: format!("› {CODEX_TRIGGER}"),
+            },
+            "the plain capture is what made the suggestion read as a draft"
+        );
+        assert_eq!(
+            fresh_start_missing_admission_outcome_from_capture(
+                &plain,
+                &harness,
+                cursor,
+                CODEX_TRIGGER
+            ),
+            FreshStartAdmissionOutcome::GenuineMissReap
+        );
+    }
+
+    /// Text really typed into Codex renders at normal intensity on the composer
+    /// background: an operator draft, and the trigger still reads as pending.
+    #[test]
+    fn codex_typed_text_reads_as_an_operator_draft() {
+        let harness = HarnessConfig::codex();
+        let typed = codex_composer_fixture::typed(CODEX_TRIGGER);
+        let cursor = Some(codex_composer_fixture::PROMPT_ROW);
+        assert_eq!(
+            agent_doc_harness::project_pane_composer_at_cursor(&typed, &harness, cursor),
+            PaneComposerProjection::OperatorDraft {
+                preview: format!("› {CODEX_TRIGGER}"),
+            }
+        );
         let composer_text =
-            agent_doc_turn_executor_tmux::prompt::composer_text_without_ghost_suggestions(typed);
+            agent_doc_turn_executor_tmux::prompt::composer_text_without_ghost_suggestions(&typed);
         assert!(pane_composer_has_pending_trigger(
             &composer_text,
-            GROK_TRIGGER
+            CODEX_TRIGGER
         ));
+        assert_eq!(
+            fresh_start_missing_admission_outcome_from_capture(
+                &typed,
+                &harness,
+                cursor,
+                CODEX_TRIGGER
+            ),
+            FreshStartAdmissionOutcome::GenuineMissReap
+        );
     }
 }

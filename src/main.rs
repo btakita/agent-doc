@@ -4448,15 +4448,24 @@ enum DecisionAction {
     /// rank a session document's answered decisions against a question, an
     /// id or a decision stamp (exact id, then stamp, then normalized
     /// question text, then wording and optional tsift recall across session
-    /// documents), each with its verbatim answer, where and when it was
-    /// given, and the copies still open. Read-only.
+    /// documents), each with its verbatim answer, the document and place it
+    /// was given in, when, and the copies still open. Without FILE it
+    /// searches every session document of the project at or above the
+    /// current directory and its `decisions.md` registry
+    /// (`#decisionsearchnofile`). Read-only.
+    #[command(override_usage = "agent-doc decision search [FILE] <QUERY>... [OPTIONS]")]
     Search {
-        /// Session document
-        file: PathBuf,
-        /// Question text, `[#id]`, decision / revision id, or
-        /// `⟦decision:<id>⟧` stamp; several words need no quotes
-        #[arg(required = true, num_args = 1..)]
-        query: Vec<String>,
+        /// Optional FILE, then the query: question text, `[#id]`, decision /
+        /// revision id, or `⟦decision:<id>⟧` stamp; several words need no
+        /// quotes. A first word naming an existing session document is FILE,
+        /// and needs a query after it; any other first word ending in `.md`
+        /// is refused as a mistyped FILE; everything else is the query.
+        /// `--project` makes every word the query.
+        #[arg(value_name = "WORDS", required = true, num_args = 1..)]
+        words: Vec<String>,
+        /// Search the whole project; no word is read as FILE
+        #[arg(long)]
+        project: bool,
         /// Most hits to show
         #[arg(long, default_value_t = 10)]
         limit: usize,
@@ -4732,8 +4741,8 @@ fn run_decision_action(action: DecisionAction) -> anyhow::Result<()> {
             }
             Ok(())
         }
-        DecisionAction::Search { file, query, limit, json } => {
-            decision_search::run_search(&file, &query.join(" "), limit, json)
+        DecisionAction::Search { words, project, limit, json } => {
+            decision_search::run_search(&words, project, limit, json)
         }
         DecisionAction::Derive { file, premises, inference, decision, answer, id, json } => {
             decision_derive::run_derive(
@@ -5543,6 +5552,37 @@ enum QueueAction {
         /// confirmation that it belongs to an older attempt. Repeatable.
         #[arg(long = "key", value_name = "KEY")]
         keys: Vec<String>,
+    },
+    /// Record that a dispatched worker stopped on a harness usage or credit
+    /// limit (`#harnessquotaexhausted`). The attempt stops reading as running,
+    /// never expires into lost, and keeps its worker, worktree, and branch as
+    /// evidence; a plain re-claim is refused. `queue report-complete`
+    /// does this by itself when the worker's response is a limit notice.
+    #[command(name = "report-quota-blocked", after_help = agent_doc_frontmatter::frontmatter::queue_marker_legend_help())]
+    ReportQuotaBlocked {
+        /// Path to the session document
+        file: PathBuf,
+        /// The claimed queue item: `#id` / `do [#id]`, the queue line's text,
+        /// or the exact `PARENT: ...: LEAF` key printed by `queue claim`
+        #[arg(long, value_name = "ID_OR_TEXT")]
+        item: String,
+        /// Exact generation printed by `queue claim`.
+        #[arg(long)]
+        generation: Option<u64>,
+        /// Harness that ran out (`claude`, `codex`, `grok`, `opencode`), when
+        /// the notice does not identify it. Defaults to the coordinator's.
+        #[arg(long)]
+        harness: Option<String>,
+        /// Worktree holding the attempt's partial work
+        #[arg(long, value_name = "PATH")]
+        worktree: Option<PathBuf>,
+        /// Branch holding the attempt's partial commits
+        #[arg(long)]
+        branch: Option<String>,
+        /// What the harness returned, verbatim. An unrecognized line is still
+        /// recorded, because the caller has judged it a limit.
+        #[arg(long)]
+        evidence: String,
     },
     /// Reconcile durable queue-claim state into visible queue markers without
     /// releasing a claim or changing queue work. A retained editor write must
@@ -6523,6 +6563,31 @@ fn is_operator_usage_error(err: &anyhow::Error) -> bool {
             || cause.is::<agent_doc_queue::queue_claim::QueueClaimTransitionRefused>()
             || cause.is::<read::UnknownReadComponent>()
     })
+}
+
+/// Project a quota-blocked attempt onto its row and hand the coordinator its
+/// exact next step (`#harnessquotaexhausted`).
+fn print_worker_quota_blocked(
+    file: &std::path::Path,
+    claim: &agent_doc_queue::queue_claim::QueueClaim,
+) -> anyhow::Result<()> {
+    let queue_effects = CliQueueCommandEffects;
+    agent_doc_queue_io::queue_cmd::project_claim_item_runtime_state_with_effects(
+        &queue_effects,
+        file,
+        &claim.item_text,
+        false,
+    )?;
+    eprintln!(
+        "[queue] worker {} ({}) {}",
+        claim.owner,
+        agent_doc_queue::worker_quota::WORKER_QUOTA_EXHAUSTED_REASON,
+        agent_doc_queue::worker_quota::quota_blocked_next_step(
+            &file.display().to_string(),
+            claim,
+        ),
+    );
+    Ok(())
 }
 
 fn print_terminal_error_report(err: &anyhow::Error) {
@@ -9661,6 +9726,26 @@ fn try_main() -> anyhow::Result<()> {
                     !response.trim().is_empty(),
                     "subagent completion response must not be empty"
                 );
+                // `#harnessquotaexhausted`: a limit notice is not a report. A
+                // delivered result (a source commit in a sink) is, whatever its
+                // prose ends with.
+                let delivered = source_sha.is_some() && sink_ref.is_some();
+                if !delivered
+                    && let Some(limit) =
+                        agent_doc_harness::usage_limit::worker_handback_usage_limit(&response)
+                {
+                    let claim = queue_completion_feedback::block_worker_on_quota(
+                        &file,
+                        &item,
+                        generation,
+                        &limit,
+                        None,
+                        worktree.as_deref(),
+                        branch.as_deref(),
+                    )?;
+                    print_worker_quota_blocked(&file, &claim)?;
+                    return Ok(());
+                }
                 // `#goalpresetterminal`: a goal-loop row's hand-back without a
                 // declared final state is an interrupted loop. Keep the same
                 // row open, requeue the attempt, and carry the hand-back to the
@@ -9738,7 +9823,7 @@ fn try_main() -> anyhow::Result<()> {
                         ),
                         Err(err) => err.to_string(),
                     };
-                    let followups = queue_completion_feedback::describe_open_item_followups(
+                    let followups = queue_completion_feedback::describe_handback_followups(
                         &file,
                         &outcome.claim.item_text,
                         &outcome.followups,
@@ -9821,6 +9906,35 @@ fn try_main() -> anyhow::Result<()> {
                         })
                     );
                 }
+                Ok(())
+            }
+            QueueAction::ReportQuotaBlocked {
+                file,
+                item,
+                generation,
+                harness,
+                worktree,
+                branch,
+                evidence,
+            } => {
+                anyhow::ensure!(
+                    !evidence.trim().is_empty(),
+                    "report-quota-blocked needs the --evidence the harness returned"
+                );
+                let limit = agent_doc_harness::usage_limit::worker_handback_usage_limit(&evidence)
+                    .unwrap_or_else(|| {
+                        agent_doc_harness::usage_limit::HarnessUsageLimit::reported(&evidence)
+                    });
+                let claim = queue_completion_feedback::block_worker_on_quota(
+                    &file,
+                    &item,
+                    generation,
+                    &limit,
+                    harness.as_deref(),
+                    worktree.as_deref(),
+                    branch.as_deref(),
+                )?;
+                print_worker_quota_blocked(&file, &claim)?;
                 Ok(())
             }
             QueueAction::RepairCompletionFeedback { file } => {

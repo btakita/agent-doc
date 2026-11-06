@@ -777,7 +777,8 @@ mod tests {
     }
 
     fn wait_for_window_size(tmux: &IsolatedTmux, window_id: &str, expected: (u32, u32)) {
-        let deadline = Instant::now() + Duration::from_secs(2);
+        // `#wallclockassertsweep`: a hang ceiling, not a latency bound.
+        let deadline = Instant::now() + Duration::from_secs(30);
         loop {
             if window_size(tmux, window_id).ok() == Some(expected) {
                 return;

@@ -196,6 +196,7 @@ pub fn requeue_nonterminal_hand_back(
         final_states: final_states.clone(),
         response: response.trim().to_string(),
         recorded_at_secs: now_secs(),
+        quota_block: None,
     };
     mutate(file, |ledger| {
         if let Some(live) = live.as_ref() {
@@ -225,6 +226,26 @@ pub fn requeue_nonterminal_hand_back(
         claim: requeued,
         final_states,
     }))
+}
+
+/// Record an explicitly requeued quota-blocked attempt, so the next worker's
+/// brief names its partial branch and worktree (`#harnessquotaexhausted`).
+pub fn record_quota_requeue(file: &Path, claim: &QueueClaim) -> Result<()> {
+    let Some(block) = claim.quota_block.clone() else {
+        return Ok(());
+    };
+    let handoff = GoalLoopHandoff {
+        identity: claim.identity.clone(),
+        item_text: claim.item_text.clone(),
+        owner: claim.owner.clone(),
+        worker_id: claim.worker.as_ref().map(|worker| worker.worker_id.clone()),
+        generation: claim.generation,
+        final_states: Vec::new(),
+        response: block.evidence.clone(),
+        recorded_at_secs: now_secs(),
+        quota_block: Some(block),
+    };
+    mutate(file, |ledger| ledger.record(handoff))
 }
 
 /// Attach the row's recorded interrupted hand-back, if any, to a dispatch

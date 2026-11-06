@@ -48,6 +48,7 @@
 //!   and publishes its complete visible projection. The commit barrier refuses a
 //!   MultiReplica closeout while any live target has unprojected delivery.
 
+pub mod binary_write_attribution;
 pub mod editor_attach_hold;
 
 pub use agent_doc_turn::commit_barrier::{CommitBarrierRefusal, CommitBarrierVerdict};
@@ -1734,7 +1735,14 @@ fn reconcile_durable_queue_attempts_on_hub(
     if target == current {
         return Ok((false, 0));
     }
-    let packet = hub.apply_canonical_replace(&current, &target)?;
+    let packet = apply_binary_authored_on_hub(
+        hub,
+        file,
+        &current,
+        &target,
+        None,
+        "crdt_handoff_queue_attempt_projection",
+    )?;
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
@@ -2932,6 +2940,14 @@ pub struct ReplicaRegistration {
     /// read under the same hub lock as the bootstrap. The editor keeps it and
     /// refuses any later delivery stamped with a different history lineage.
     pub history_lineage: String,
+    /// `#attachauthorattribution`: content hashes of the canonical generations
+    /// from which only agent-doc's own recorded binary-authored writes lead to
+    /// `canonical_content_hash`, newest first
+    /// ([`RelayHub::binary_attributed_ancestors`]). A registering editor whose
+    /// buffer hashes to one of them holds no operator text the canonical lacks,
+    /// so adopting canonical is lossless. Empty when the newest canonical change
+    /// was not a recorded binary write.
+    pub binary_attributed_ancestor_hashes: Vec<String>,
 }
 
 /// Register an editor replica with the document's per-document hub on the live
@@ -3470,6 +3486,7 @@ fn register_replica_for_file_incremental_locked(
         canonical_covers_retained_frontier,
         canonical_content_hash,
         history_lineage,
+        binary_attributed_ancestors,
     ) = with_hub_seeded_from_file(file, |hub| {
         // Check the command's captured base in the same live-hub transition as
         // generation retirement. Checking after register in the plugin is too
@@ -3633,6 +3650,9 @@ fn register_replica_for_file_incremental_locked(
         }
         let canonical_content_hash = agent_doc_hash::content_hash(&hub.canonical_text());
         let history_lineage = hub.history_lineage().to_string();
+        // A replacement controller's writes and its predecessor's are one run.
+        binary_write_attribution::seed_hub(file, hub);
+        let binary_attributed_ancestors = hub.binary_attributed_ancestors();
         Ok::<_, anyhow::Error>((
             bootstrap,
             canonical_state_vector,
@@ -3641,8 +3661,30 @@ fn register_replica_for_file_incremental_locked(
             canonical_covers_retained_frontier,
             canonical_content_hash,
             history_lineage,
+            binary_attributed_ancestors,
         ))
     })??;
+    if !binary_attributed_ancestors.is_empty() {
+        let sources: Vec<&str> = binary_attributed_ancestors
+            .iter()
+            .map(|ancestor| ancestor.source.as_str())
+            .collect();
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "crdt_replica_register_binary_attributed_ancestors file={} client_id={} canonical_hash={} ancestors={} sources={} (#attachauthorattribution)",
+                file.display(),
+                client_id,
+                canonical_content_hash,
+                binary_attributed_ancestors.len(),
+                sources.join(","),
+            ),
+        );
+    }
+    let binary_attributed_ancestor_hashes = binary_attributed_ancestors
+        .into_iter()
+        .map(|ancestor| ancestor.content_hash)
+        .collect();
     // Editor attach is an explicit event → drive the reactive open-docs authority.
     mark_editor_open_docs_open(file);
     // Seed the legacy process-exit watcher from durable reliable-sync open pids.
@@ -3680,6 +3722,7 @@ fn register_replica_for_file_incremental_locked(
         canonical_covers_retained_frontier,
         canonical_content_hash,
         history_lineage,
+        binary_attributed_ancestor_hashes,
     }))
 }
 
@@ -4610,6 +4653,31 @@ pub fn relay_replica_update_for_file(
 /// barrier has flushed inbound editor ops. That baseline check is the guard that
 /// keeps unsaved editor-buffer changes from being overwritten by a stale binary
 /// recovery response.
+/// `#attachauthorattribution`: apply a write agent-doc itself authored, recorded
+/// in the hub's binary-authored run and its durable copy.
+fn apply_binary_authored_on_hub(
+    hub: &mut RelayHub,
+    file: &Path,
+    expected_current: &str,
+    content: &str,
+    scope: Option<&agent_doc_element::ComponentWriteScope>,
+    source: &str,
+) -> Result<agent_doc_document_realtime::crdt_relay::BroadcastPacket> {
+    binary_write_attribution::seed_hub(file, hub);
+    let packet = hub.apply_binary_authored_replace_scoped(expected_current, content, scope, source)?;
+    binary_write_attribution::persist_hub(file, hub);
+    Ok(packet)
+}
+
+/// One CP write's compare-and-swap target and its author label.
+#[derive(Clone, Copy)]
+struct CpHubWrite<'a> {
+    expected_current: &'a str,
+    content: &'a str,
+    scope: Option<&'a agent_doc_element::ComponentWriteScope>,
+    source: &'a str,
+}
+
 /// Apply a CP full-document replace against an already-resolved relay `hub`.
 ///
 /// Shared by the first-attempt and durable-projection-recovery paths of
@@ -4622,11 +4690,15 @@ fn apply_cp_write_on_hub(
     hub: &mut RelayHub,
     file: &Path,
     authority: CrdtAuthority,
-    expected_current: &str,
-    content: &str,
-    scope: Option<&agent_doc_element::ComponentWriteScope>,
+    write: CpHubWrite<'_>,
     require_zero_live_replicas: bool,
 ) -> Result<CpRelayWrite> {
+    let CpHubWrite {
+        expected_current,
+        content,
+        scope,
+        source,
+    } = write;
     if require_zero_live_replicas && hub.live_count() != 0 {
         anyhow::bail!(
             "CP relay write refused for {}: coordinated_detach_lost live_replicas={}",
@@ -4668,7 +4740,9 @@ fn apply_cp_write_on_hub(
             agent_doc_hash::content_hash(&canonical)
         );
     }
-    let packet = hub.apply_canonical_replace_scoped(expected_current, content, scope)?;
+    // `#attachauthorattribution`: every CP write is agent-doc's own op, so the
+    // hub records it in its binary-authored write run.
+    let packet = apply_binary_authored_on_hub(hub, file, expected_current, content, scope, source)?;
     // `#cpwritecomponentscoped`: the ops log is the only place a scoped write is
     // distinguishable from an unscoped one after the fact, and `unresolvable` is
     // the signal worth chasing — a steady-state CP write that names components it
@@ -4752,12 +4826,42 @@ fn guard_response_cell_target_against_tracked_weld(
     Ok(outcome)
 }
 
+/// Land the turn's recap in the same canonical cut as its response
+/// (`#agentrecap`). Returns whether the recap changed the document. A recap is
+/// never worth a closeout, so a failure is logged and the response still lands.
+fn apply_recap_to_outcome(
+    file: &Path,
+    outcome: &mut agent_doc_merge::response_cell::ResponseCellAddOutcome,
+    recap: &str,
+) -> bool {
+    match agent_doc_element::recap::replace_recap_in_document(&outcome.content, recap) {
+        Ok(content) if content != outcome.content => {
+            outcome.content = content;
+            true
+        }
+        Ok(_) => false,
+        Err(err) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "crdt_recap_skipped file={} cell_id={} error={} (#agentrecap)",
+                    file.display(),
+                    outcome.cell_id,
+                    format!("{err:#}").replace('\n', " | "),
+                ),
+            );
+            false
+        }
+    }
+}
+
 fn apply_response_cell_on_hub(
     hub: &mut RelayHub,
     file: &Path,
     authority: CrdtAuthority,
     committed_content: Option<&str>,
     response: &str,
+    recap: Option<&str>,
 ) -> Result<ResponseCellRelayWrite> {
     let ready = hub.commit_barrier_under_authority(authority)?;
     if !ready {
@@ -4780,10 +4884,19 @@ fn apply_response_cell_on_hub(
     } else {
         agent_doc_merge::response_cell::add_response_cell(&normalized, response)?
     };
-    let outcome = guard_response_cell_target_against_tracked_weld(file, &normalized, outcome)?;
-    let applied = repaired_scaffolding || outcome.applied;
+    let mut outcome = guard_response_cell_target_against_tracked_weld(file, &normalized, outcome)?;
+    let recap_applied =
+        recap.is_some_and(|recap| apply_recap_to_outcome(file, &mut outcome, recap));
+    let applied = repaired_scaffolding || outcome.applied || recap_applied;
     let (update_bytes, targets) = if applied {
-        let packet = hub.apply_canonical_replace(&canonical, &outcome.content)?;
+        let packet = apply_binary_authored_on_hub(
+            hub,
+            file,
+            &canonical,
+            &outcome.content,
+            None,
+            "response_cell",
+        )?;
         (packet.update.len(), packet.targets.len())
     } else {
         (0, 0)
@@ -4808,6 +4921,7 @@ pub fn add_response_cell_for_file(
     file: &Path,
     committed_content: Option<&str>,
     response: &str,
+    recap: Option<&str>,
     source: &str,
 ) -> Result<Option<ResponseCellRelayWrite>> {
     let authority = authority_for_file(&file.display().to_string());
@@ -4816,7 +4930,7 @@ pub fn add_response_cell_for_file(
     }
 
     let Some(result) = with_existing_hub(file, |hub| {
-        apply_response_cell_on_hub(hub, file, authority, committed_content, response)
+        apply_response_cell_on_hub(hub, file, authority, committed_content, response, recap)
     })?
     else {
         // A durable projection can lag an attached editor that has not yet
@@ -4890,7 +5004,14 @@ fn apply_salient_response_on_hub(
         &canonical, cycle_id, body,
     )?;
     let (update_bytes, targets) = if outcome.applied {
-        let packet = hub.apply_canonical_replace(&canonical, &outcome.content)?;
+        let packet = apply_binary_authored_on_hub(
+            hub,
+            file,
+            &canonical,
+            &outcome.content,
+            None,
+            "salient_response",
+        )?;
         (packet.update.len(), packet.targets.len())
     } else {
         (0, 0)
@@ -5043,16 +5164,14 @@ fn apply_cp_write_for_file_scoped_with_detach_fence(
     // is attached but this process has no registered replica (a transient gap after
     // a controller recycle / editor restart, or the FFI replica dropped), the hub
     // is absent and `with_existing_hub` returns `None`.
+    let write = CpHubWrite {
+        expected_current,
+        content,
+        scope,
+        source,
+    };
     let result = if let Some(result) = with_existing_hub(file, |hub| {
-        apply_cp_write_on_hub(
-            hub,
-            file,
-            authority,
-            expected_current,
-            content,
-            scope,
-            require_zero_live_replicas,
-        )
+        apply_cp_write_on_hub(hub, file, authority, write, require_zero_live_replicas)
     })? {
         result
     } else {
@@ -5070,15 +5189,7 @@ fn apply_cp_write_for_file_scoped_with_detach_fence(
         let recovered = recover_missing_hub_from_retained_projection(file, &hash)?;
         match if recovered {
             with_existing_hub(file, |hub| {
-                apply_cp_write_on_hub(
-                    hub,
-                    file,
-                    authority,
-                    expected_current,
-                    content,
-                    scope,
-                    require_zero_live_replicas,
-                )
+                apply_cp_write_on_hub(hub, file, authority, write, require_zero_live_replicas)
             })?
         } else {
             None
@@ -10043,7 +10154,7 @@ mod tests {
                 .unwrap()
         );
         let response = "### Re: operator prompt — gpt-5\n\nDelivered after re-register.";
-        add_response_cell_for_file(&doc, None, response, "test")
+        add_response_cell_for_file(&doc, None, response, None, "test")
             .unwrap()
             .expect("editor-attached response add should use the relay");
 
@@ -10109,7 +10220,7 @@ mod tests {
         );
 
         let response = "### Re: operator prompt — gpt-5\n\nWritten in the fresh epoch.";
-        let write = add_response_cell_for_file(&doc, None, response, "test")
+        let write = add_response_cell_for_file(&doc, None, response, None, "test")
             .unwrap()
             .expect("editor-attached response add should use the relay");
         assert!(write.applied);
@@ -10184,7 +10295,7 @@ mod tests {
         assert_eq!(registration.history_lineage, hub_history);
 
         let response = "### Re: operator prompt — gpt-5\n\nStamped.";
-        add_response_cell_for_file(&doc, None, response, "test")
+        add_response_cell_for_file(&doc, None, response, None, "test")
             .unwrap()
             .expect("editor-attached response add should use the relay");
         let pull = pull_replica_updates_for_file(&doc, identity)
@@ -10286,7 +10397,7 @@ mod tests {
             .expect("live editor should register with the relay");
 
         let response = "### Re: operator prompt — gpt-5\n\nDone.";
-        let first = add_response_cell_for_file(&doc, None, response, "test")
+        let first = add_response_cell_for_file(&doc, None, response, None, "test")
             .unwrap()
             .expect("editor-attached response add should use the relay");
         assert!(first.applied);
@@ -10330,7 +10441,7 @@ mod tests {
         assert!(hub_registry().lock().remove(&document_hash).is_some());
         with_hub(&doc, |hub| assert!(hub.canonical_text().contains(response))).unwrap();
 
-        let replay = add_response_cell_for_file(&doc, None, response, "test-replay")
+        let replay = add_response_cell_for_file(&doc, None, response, None, "test-replay")
             .unwrap()
             .expect("replay should still use the relay");
         assert!(!replay.applied);
@@ -10426,6 +10537,7 @@ mod tests {
             CrdtAuthority::GitAuthoritative,
             None,
             response,
+            None,
         )
         .expect("response transaction should repair binary scaffolding before parsing");
 
@@ -10442,10 +10554,60 @@ mod tests {
             CrdtAuthority::GitAuthoritative,
             None,
             response,
+            None,
         )
         .expect("exact replay should remain idempotent after repair");
         assert!(!replay.applied);
         assert_eq!(replay.content, first.content);
+    }
+
+    /// `#agentrecap`: the recap lands in the response's own canonical cut, in a
+    /// document that predates the component too. An exact replay changes nothing,
+    /// and a recap arriving for an already-landed response still lands.
+    #[test]
+    fn response_cell_relay_lands_the_recap_in_the_same_cut() {
+        let (_dir, doc) = temp_doc("response-cell-recap.md");
+        let live_cut = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "## Status <!-- agent:status patch=replace -->\n<!-- /agent:status -->\n\n",
+            "## Exchange <!-- agent:exchange patch=append -->\n",
+            "❯ operator prompt\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        std::fs::write(&doc, live_cut).unwrap();
+        let mut hub = RelayHub::from_text(CANONICAL_CLIENT_ID, live_cut);
+        let response = "### Re: operator prompt — gpt-5\n\nDone once.";
+        let land = |hub: &mut RelayHub, recap| {
+            apply_response_cell_on_hub(
+                hub,
+                &doc,
+                CrdtAuthority::GitAuthoritative,
+                None,
+                response,
+                recap,
+            )
+            .expect("recap-bearing response should land")
+        };
+
+        let first = land(&mut hub, Some("Committed, nothing to read.\n"));
+        assert!(first.applied);
+        assert_eq!(first.content.matches(response).count(), 1);
+        assert!(first.content.contains(concat!(
+            "## Recap <!-- agent:recap patch=replace -->\n",
+            "Committed, nothing to read.\n",
+            "<!-- /agent:recap -->\n",
+        )));
+        assert_eq!(hub.canonical_text(), first.content);
+
+        let replay = land(&mut hub, Some("Committed, nothing to read.\n"));
+        assert!(!replay.applied);
+        assert_eq!(replay.content, first.content);
+
+        let revised = land(&mut hub, Some("Revised recap.\n"));
+        assert!(revised.applied);
+        assert!(revised.content.contains("Revised recap.\n"));
+        assert!(!revised.content.contains("Committed, nothing to read."));
+        assert_eq!(hub.canonical_text(), revised.content);
     }
 
     #[test]
@@ -10476,9 +10638,10 @@ mod tests {
             .expect("live editor should register with the relay");
 
         let latest = "### Re: latest retry — gpt-5\n\nLatest.";
-        let write = add_response_cell_for_file(&doc, Some(committed), latest, "test-supersede")
-            .unwrap()
-            .expect("editor-attached response add should use the relay");
+        let write =
+            add_response_cell_for_file(&doc, Some(committed), latest, None, "test-supersede")
+                .unwrap()
+                .expect("editor-attached response add should use the relay");
 
         assert!(write.applied);
         assert!(write.content.contains("Committed."));
@@ -10493,10 +10656,15 @@ mod tests {
         assert_eq!(write.content.matches(latest).count(), 1);
         assert_eq!(write.content.matches("agent:boundary:").count(), 1);
 
-        let replay =
-            add_response_cell_for_file(&doc, Some(committed), latest, "test-supersede-replay")
-                .unwrap()
-                .expect("exact replay should still use the relay");
+        let replay = add_response_cell_for_file(
+            &doc,
+            Some(committed),
+            latest,
+            None,
+            "test-supersede-replay",
+        )
+        .unwrap()
+        .expect("exact replay should still use the relay");
         assert!(!replay.applied);
         assert_eq!(replay.cell_id, write.cell_id);
         assert_eq!(replay.content, write.content);
@@ -10550,9 +10718,10 @@ mod tests {
             .expect("live editor should register with the relay");
 
         let latest = "### Re: wave integrated — gpt-5\n\nIntegrated.";
-        let write = add_response_cell_for_file(&doc, Some(committed), latest, "test-closeout")
-            .unwrap()
-            .expect("editor-attached response add should use the relay");
+        let write =
+            add_response_cell_for_file(&doc, Some(committed), latest, None, "test-closeout")
+                .unwrap()
+                .expect("editor-attached response add should use the relay");
 
         assert!(write.applied);
         assert!(!write.content.contains("Stale."));
@@ -10571,7 +10740,7 @@ mod tests {
         );
 
         let replay =
-            add_response_cell_for_file(&doc, Some(committed), latest, "test-closeout-replay")
+            add_response_cell_for_file(&doc, Some(committed), latest, None, "test-closeout-replay")
                 .unwrap()
                 .expect("exact replay should still use the relay");
         assert!(!replay.applied);

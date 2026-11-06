@@ -1903,7 +1903,7 @@ fn report_complete_and_freeze_print_the_work_pool_refill() {
 /// the originating head in the same successor; a repeated report adds no
 /// duplicate rows, and the session still admits the next turn.
 #[test]
-fn report_complete_structures_the_handback_and_queues_its_open_items() {
+fn report_complete_structures_the_handback_and_queues_its_action_items() {
     let dir = tempfile::tempdir().unwrap();
     let doc = committed_run_session(dir.path(), &["- do [#alpha]", "- later work"]);
     let path = doc.to_str().unwrap();
@@ -1921,7 +1921,7 @@ fn report_complete_structures_the_handback_and_queues_its_open_items() {
     let handback = concat!(
         "**Summary:** fixed the alpha defect.\n",
         "**Verification:** make check exit=0; nextest 12 passed, 0 failed\n",
-        "**Open items:**\n",
+        "**Action items:**\n",
         "- >512-commit documents can miss answers\n",
         "- the gutter does not show the stamp yet\n",
         "**Next actions:** none",
@@ -1936,7 +1936,7 @@ fn report_complete_structures_the_handback_and_queues_its_open_items() {
     };
     let stderr = report("report-complete");
     assert!(
-        stderr.contains("Queued 2 open item(s) as follow-up row(s)") && stderr.contains("queue id `default`"),
+        stderr.contains("Queued 2 action item(s) as follow-up row(s)") && stderr.contains("queue id `default`"),
         "{stderr}"
     );
 
@@ -1946,7 +1946,7 @@ fn report_complete_structures_the_handback_and_queues_its_open_items() {
             "> **Subagent response:**\n>\n",
             "> **Summary**\n>\n> fixed the alpha defect.\n>\n",
             "> **Verification**\n>\n> make check exit=0; nextest 12 passed, 0 failed\n>\n",
-            "> **Open items**\n>\n",
+            "> **Action items**\n>\n",
             "> - >512-commit documents can miss answers\n",
             "> - the gutter does not show the stamp yet\n>\n",
             "> **Next actions**\n>\n> none\n",
@@ -1954,8 +1954,8 @@ fn report_complete_structures_the_handback_and_queues_its_open_items() {
         "the hand-back renders into the response structure: {written}"
     );
     // Rows may carry a lifecycle marker (`📥`) once a later pass projects them.
-    let first = "follow up on an open item from `alpha`: >512-commit documents can miss answers";
-    let second = "follow up on an open item from `alpha`: the gutter does not show the stamp yet";
+    let first = "follow up on an action item from `alpha`: >512-commit documents can miss answers";
+    let second = "follow up on an action item from `alpha`: the gutter does not show the stamp yet";
     let rows = run_rows(&doc);
     let position = |needle: &str| {
         rows.iter()
@@ -1971,11 +1971,125 @@ fn report_complete_structures_the_handback_and_queues_its_open_items() {
     assert!(position("later work") > alpha + 2, "{rows:#?}");
 
     let stderr = report("repeated report-complete");
-    assert!(stderr.contains("2 open item(s) already have a follow-up row"), "{stderr}");
+    assert!(stderr.contains("2 action item(s) already have a follow-up row"), "{stderr}");
     let rows = run_rows(&doc);
     assert_eq!(rows.iter().filter(|row| row.ends_with(first)).count(), 1, "{rows:#?}");
     assert_eq!(rows.iter().filter(|row| row.ends_with(second)).count(), 1, "{rows:#?}");
 
     assert_session_check_does_not_accuse_patchback(dir.path(), &doc);
     assert_preflight_admits(dir.path(), &doc, 1);
+}
+
+/// `#handbackopenitemstriage` (agent-doc-bugs.md, 2026-11-06): the
+/// #recommendationinrow hand-back listed six notes under Open items, and each
+/// became a row offered for dispatch in a `go` queue. This is that hand-back's
+/// shape: nothing is queued, every bullet stays in the cell, and the report
+/// line asks the coordinator to triage them.
+#[test]
+fn report_complete_holds_open_items_for_triage_instead_of_queueing_them() {
+    let dir = tempfile::tempdir().unwrap();
+    let doc = committed_run_session(dir.path(), &["- do [#alpha]", "- later work"]);
+    let path = doc.to_str().unwrap();
+    assert_ok(
+        &run_agent_doc(dir.path(), &["queue", "claim", path, "--item", "do [#alpha]", "--owner", "subagent:alpha"]),
+        "claim",
+    );
+    assert_ok(
+        &run_agent_doc(
+            dir.path(),
+            &["queue", "start", path, "--item", "do [#alpha]", "--owner", "subagent:alpha", "--generation", "1", "--worker-id", "worker:alpha"],
+        ),
+        "start",
+    );
+    let before = run_rows(&doc);
+    let handback = concat!(
+        "**Summary:** recommended choices show in the row.\n",
+        "**Verification:** make check exit=0\n",
+        "**Open items:**\n",
+        "- **Cleanup.** `cargo clean` is done.\n",
+        "- **Live document.** Nothing was applied to it.\n",
+        "**Next actions:** none",
+    );
+    let output = run_agent_doc(
+        dir.path(),
+        &["queue", "report-complete", "--prose-only", path, "--item", "do [#alpha]", "--generation", "1", "--response", handback],
+    );
+    assert_ok(&output, "report-complete");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("2 open item(s) were held for triage and NOT queued"), "{stderr}");
+    assert!(stderr.contains("queue follow-up"), "{stderr}");
+
+    let rows = run_rows(&doc);
+    assert_eq!(rows.len(), before.len(), "{rows:#?}");
+    assert!(!rows.iter().any(|row| row.contains("follow up on")), "{rows:#?}");
+    let written = fs::read_to_string(&doc).unwrap();
+    assert!(
+        written.contains(concat!(
+            "> **Open items**\n>\n",
+            "> - **Cleanup.** `cargo clean` is done.\n",
+            "> - **Live document.** Nothing was applied to it.\n",
+        )),
+        "{written}"
+    );
+}
+
+/// `#handbackopenitemstriage`: a hand-back from a nested row put its follow-ups
+/// at the top level between the parent's children. The next child then read as
+/// a child of the last follow-up, which made that row a parent rather than an
+/// executable leaf, so `queue consume --ack-text` could not reach it. Rows now
+/// follow the whole top-level row: every child keeps its parent, and each
+/// follow-up stays acknowledgeable.
+#[test]
+fn followups_of_a_nested_origin_leave_the_parent_children_alone_and_stay_acknowledgeable() {
+    let dir = tempfile::tempdir().unwrap();
+    let doc = committed_run_session(
+        dir.path(),
+        &["- parent work", "  - leaf work", "  - sibling work", "- later work"],
+    );
+    let path = doc.to_str().unwrap();
+    let item = "parent work: leaf work";
+    assert_ok(
+        &run_agent_doc(dir.path(), &["queue", "claim", path, "--item", item, "--owner", "subagent:leaf"]),
+        "claim",
+    );
+    assert_ok(
+        &run_agent_doc(
+            dir.path(),
+            &["queue", "start", path, "--item", item, "--owner", "subagent:leaf", "--generation", "1", "--worker-id", "worker:leaf"],
+        ),
+        "start",
+    );
+    let handback = concat!(
+        "**Summary:** done\n",
+        "**Action items:**\n",
+        "- wire the gutter stamp\n",
+        "**Next actions:** none",
+    );
+    assert_ok(
+        &run_agent_doc(
+            dir.path(),
+            &["queue", "report-complete", "--prose-only", path, "--item", item, "--generation", "1", "--response", handback],
+        ),
+        "report-complete",
+    );
+
+    let followup = "follow up on an action item from queue item “☑️ [#subagent:leaf#1] leaf work”: wire the gutter stamp";
+    let rows = run_rows(&doc);
+    let position = |needle: &str| {
+        rows.iter()
+            .position(|row| row.ends_with(needle))
+            .unwrap_or_else(|| panic!("{needle:?} missing: {rows:#?}"))
+    };
+    assert!(rows[position("sibling work")].starts_with("  - "), "{rows:#?}");
+    assert_eq!(position("sibling work") + 1, position(followup), "{rows:#?}");
+    assert!(rows[position(followup)].starts_with("- "), "{rows:#?}");
+    assert_eq!(position(followup) + 1, position("later work"), "{rows:#?}");
+
+    let output = run_agent_doc(dir.path(), &["queue", "consume", path, "--ack-text", followup]);
+    assert_ok(&output, "ack the follow-up row");
+    let rows = run_rows(&doc);
+    assert!(
+        rows.iter().any(|row| row.contains("sibling work") && !row.contains("~~")),
+        "the parent's other child is untouched: {rows:#?}"
+    );
 }

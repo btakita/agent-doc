@@ -594,6 +594,10 @@ mod tests {
     use super::*;
     use std::os::unix::io::RawFd;
 
+    /// `#wallclockassertsweep`: every wait below fails only when the awaited
+    /// event never happens; none bounds how fast a loaded host delivers it.
+    const HANG_CEILING: Duration = Duration::from_secs(30);
+
     /// A connected socketpair stands in for the PTY master/slave pair: both
     /// ends are bidirectional, pollable fds, so the bridge runs its real
     /// syscall path against a deterministic "child" the test drives.
@@ -617,9 +621,9 @@ mod tests {
         assert_eq!(n as usize, data.len());
     }
 
-    /// Read until `want` bytes arrive or a 2 s deadline passes.
+    /// Read until `want` bytes arrive or the hang ceiling passes.
     fn read_until(fd: RawFd, want: usize) -> Vec<u8> {
-        let deadline = Instant::now() + Duration::from_secs(2);
+        let deadline = Instant::now() + HANG_CEILING;
         let mut out = Vec::new();
         let mut buf = [0u8; 4096];
         while out.len() < want && Instant::now() < deadline {
@@ -641,7 +645,7 @@ mod tests {
     }
 
     fn wait_for(what: &str, mut ready: impl FnMut() -> bool) {
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let deadline = Instant::now() + HANG_CEILING;
         while !ready() {
             assert!(Instant::now() < deadline, "timed out waiting for {what}");
             std::thread::sleep(Duration::from_millis(2));
@@ -836,9 +840,21 @@ mod tests {
         wait_for("bridge to consume the child output", || {
             unread_bytes(world.master) == 0
         });
-        let started = Instant::now();
-        let report = bridge.finish();
-        assert!(started.elapsed() < Duration::from_secs(1));
+        // `#wallclockassertsweep`: "cannot wedge" is "finish returns while the
+        // pane still drains nothing" -- nothing ever reads `output_r`, so a
+        // wedged finish never returns and fails at the hang ceiling instead of
+        // hanging the suite. No elapsed-time bound.
+        let (report_tx, report_rx) = std::sync::mpsc::sync_channel(1);
+        std::thread::spawn(move || {
+            let _ = report_tx.send(bridge.finish());
+        });
+        let report = report_rx
+            .recv_timeout(HANG_CEILING)
+            .expect("a stalled pane wedged the handoff: finish never returned");
+        assert!(
+            unread_bytes(world.output_r) > 0,
+            "the pane must still be stalled (undrained) when finish returns"
+        );
         assert_eq!(report.pending_output, b"blocked");
         assert_eq!(report.replay, b"blocked");
     }

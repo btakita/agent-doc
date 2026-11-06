@@ -46,7 +46,8 @@ impl ClaimTimeSnapshot {
                 crate::queue_claim::QueueClaimState::Claimed
                 | crate::queue_claim::QueueClaimState::Running => 1,
                 crate::queue_claim::QueueClaimState::Reported
-                | crate::queue_claim::QueueClaimState::Lost => 0,
+                | crate::queue_claim::QueueClaimState::Lost
+                | crate::queue_claim::QueueClaimState::QuotaBlocked => 0,
             },
         }
     }

@@ -4040,11 +4040,21 @@ thread_local! {
     /// whether that load ran under `state_event_ingress` (`#refreshmemlockstall`).
     static FULL_DURABLE_LOAD_TEST_HOOK: std::cell::RefCell<Option<Box<dyn FnMut()>>> =
         const { std::cell::RefCell::new(None) };
+    /// Test seam: runs once on this thread after a starting controller copied
+    /// the durable handoff rows into its pending-authority overlay and before
+    /// its handoff worker exists (`#orphanhandoffoverlay`).
+    static AUTHORITY_OVERLAY_RECOVERED_TEST_HOOK: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
+        const { std::cell::RefCell::new(None) };
 }
 
 #[cfg(test)]
 fn set_full_durable_load_test_hook(hook: Option<Box<dyn FnMut()>>) {
     FULL_DURABLE_LOAD_TEST_HOOK.with(|slot| *slot.borrow_mut() = hook);
+}
+
+#[cfg(test)]
+fn set_authority_overlay_recovered_test_hook(hook: Option<Box<dyn FnOnce()>>) {
+    AUTHORITY_OVERLAY_RECOVERED_TEST_HOOK.with(|slot| *slot.borrow_mut() = hook);
 }
 
 impl ControllerMemoryState {
@@ -10483,6 +10493,12 @@ impl ControllerRuntime {
             );
             self.note_pending_document_authority_handoff(event);
         }
+        #[cfg(test)]
+        if let Some(hook) =
+            AUTHORITY_OVERLAY_RECOVERED_TEST_HOOK.with(|slot| slot.borrow_mut().take())
+        {
+            hook();
+        }
         let (wake, receiver) = std::sync::mpsc::sync_channel(1);
         let runtime = Arc::downgrade(self);
         std::thread::Builder::new()
@@ -10558,15 +10574,18 @@ impl ControllerRuntime {
         }
     }
 
-    fn clear_pending_document_authority_handoff(&self, event: &agent_doc_state_backbone::StateEvent) {
+    /// Clear the overlay entry for exactly this event. An entry a newer
+    /// handoff replaced meanwhile stays: its own row settles it.
+    fn clear_pending_document_authority_handoff(
+        &self,
+        event: &agent_doc_state_backbone::StateEvent,
+    ) {
         let document_hash = event.document_hash();
-        let authority_epoch = document_authority_epoch(event);
         let mut memory = self.memory.lock();
         let pending = &mut memory.pending_document_authority_handoffs;
         if pending
             .get(document_hash)
-            .and_then(document_authority_epoch)
-            == authority_epoch
+            .is_some_and(|current| current.event_id == event.event_id)
         {
             pending.remove(document_hash);
         }
@@ -11213,10 +11232,21 @@ impl ControllerRuntime {
             return Ok(AuthorityHandoffLedgerOutcome::Applied);
         }
         let sequence = state_store::state_event_sequence_in_db(&conn, &event.event_id)?;
-        // Read under the ingress lock: a durable reload swaps the snapshot (and
-        // its high-water) only while holding it.
+        // Under the ingress lock: a durable reload swaps the snapshot (and its
+        // high-water) only while holding it.
+        Ok(self.document_authority_handoff_ledger_position(sequence))
+    }
+
+    /// Compare one authority event's ledger sequence with the high-water of the
+    /// rows this projection folded. It only ever errs toward a reload: the
+    /// high-water does not move on a live apply, so a row this controller
+    /// applied live reads as `LedgeredAfterLoad`, and a reload is always safe.
+    fn document_authority_handoff_ledger_position(
+        &self,
+        sequence: Option<u64>,
+    ) -> AuthorityHandoffLedgerOutcome {
         let folded_through = self.memory.lock().durable_sequence;
-        Ok(match sequence {
+        match sequence {
             Some(sequence) if sequence <= folded_through => {
                 AuthorityHandoffLedgerOutcome::AlreadyFolded
             }
@@ -11224,7 +11254,7 @@ impl ControllerRuntime {
                 sequence,
                 folded_through,
             },
-        })
+        }
     }
 
     /// Fold what older generations acknowledged behind this controller's back.
@@ -11378,6 +11408,117 @@ impl ControllerRuntime {
                     retry = true;
                 }
             }
+        }
+        let settle_retry = self.settle_orphaned_document_authority_handoffs(project_root)?;
+        Ok(retry || settle_retry)
+    }
+
+    /// Settle pending-authority overlay entries that have no durable row left
+    /// for this drain to claim. `true` means at least one stays for a retry.
+    ///
+    /// `#orphanhandoffoverlay`: a retired predecessor can ACK a row after the
+    /// successor copied it into the overlay. No row remains, so nothing ever
+    /// cleared the entry: reads stayed correct through the overlay, while the
+    /// reactive graphs, which see the projection alone, went without the
+    /// authority until some later durable reload. The same orphan comes from a
+    /// row that a newer epoch superseded, and from a row this controller drained
+    /// in the gap between its enqueue and its overlay note.
+    ///
+    /// The overlay is read *before* the rows. An entry is noted only after its
+    /// row committed and a row leaves only by an ACK that follows its ledger
+    /// append, so a missing row means the ledger took it (or a row that
+    /// superseded it). Reading the other way round would mistake an entry noted
+    /// after the row read for an orphan while its row is still live.
+    ///
+    /// Whatever the ledger position, the entry clears only once the projection
+    /// is a fold of that ledger, so reads never lose the authority.
+    fn settle_orphaned_document_authority_handoffs(&self, project_root: &Path) -> Result<bool> {
+        let pending = self
+            .memory
+            .lock()
+            .pending_document_authority_handoffs
+            .values()
+            .cloned()
+            .collect::<Vec<_>>();
+        if pending.is_empty() {
+            return Ok(false);
+        }
+        let rows = state_store::load_document_authority_handoffs(project_root)?
+            .into_iter()
+            .map(|handoff| handoff.document_hash)
+            .collect::<std::collections::HashSet<_>>();
+        let generation = self.bootstrap.lock().controller_generation;
+        let mut retry = false;
+        let mut unfolded = Vec::new();
+        for event in pending {
+            if rows.contains(event.document_hash()) {
+                continue;
+            }
+            let opened = match telemetry_event_ingress_busy_timeout(&event) {
+                Some(busy_timeout) => {
+                    open_state_db_for_event_ingress_with_timeout(project_root, busy_timeout)
+                }
+                None => open_state_db_for_event_ingress(project_root),
+            };
+            let position = opened
+                .and_then(|conn| state_store::state_event_sequence_in_db(&conn, &event.event_id))
+                .map(|sequence| self.document_authority_handoff_ledger_position(sequence));
+            match position {
+                Ok(AuthorityHandoffLedgerOutcome::LedgeredAfterLoad {
+                    sequence,
+                    folded_through,
+                }) => unfolded.push((event, sequence, folded_through)),
+                Ok(_) => {
+                    agent_doc_ops_log_io::log_op(
+                        project_root,
+                        &format!(
+                            "document_authority_handoff_orphan_settled document_hash={} authority_epoch={} controller_generation={generation} (#orphanhandoffoverlay)",
+                            event.document_hash(),
+                            document_authority_epoch(&event).unwrap_or_default(),
+                        ),
+                    );
+                    self.clear_pending_document_authority_handoff(&event);
+                }
+                Err(error) => {
+                    agent_doc_ops_log_io::log_op(
+                        project_root,
+                        &format!(
+                            "document_authority_handoff_orphan_settle_deferred document_hash={} authority_epoch={} controller_generation={generation} error={error:#} (#orphanhandoffoverlay)",
+                            event.document_hash(),
+                            document_authority_epoch(&event).unwrap_or_default(),
+                        ),
+                    );
+                    retry = true;
+                }
+            }
+        }
+        if unfolded.is_empty() {
+            return Ok(retry);
+        }
+        // One reload folds every entry this pass found.
+        if let Err(error) = self.refresh_memory() {
+            agent_doc_ops_log_io::log_op(
+                project_root,
+                &format!(
+                    "document_authority_handoff_orphan_settle_deferred entries={} controller_generation={generation} error={error:#} (#orphanhandoffoverlay)",
+                    unfolded.len(),
+                ),
+            );
+            return Ok(true);
+        }
+        for (event, sequence, folded_through) in unfolded {
+            let sequence = sequence
+                .map(|sequence| sequence.to_string())
+                .unwrap_or_else(|| "none".to_string());
+            agent_doc_ops_log_io::log_op(
+                project_root,
+                &format!(
+                    "document_authority_handoff_orphan_refolded document_hash={} authority_epoch={} controller_generation={generation} ledger_sequence={sequence} folded_through={folded_through} (#orphanhandoffoverlay)",
+                    event.document_hash(),
+                    document_authority_epoch(&event).unwrap_or_default(),
+                ),
+            );
+            self.clear_pending_document_authority_handoff(&event);
         }
         Ok(retry)
     }
@@ -15056,7 +15197,7 @@ pub(crate) fn spawn_controller_sentinel(project_root: &Path) -> std::process::Ch
     // reaper's `is_same_project_controller_pid` gate sees it deterministically.
     let pid = child.id();
     let start = Instant::now();
-    while start.elapsed() < Duration::from_secs(2)
+    while start.elapsed() < blocking_effect_gate::HANG_CEILING
         && !is_same_project_controller_pid(project_root, pid)
     {
         std::thread::sleep(Duration::from_millis(10));
@@ -15098,7 +15239,7 @@ pub(crate) fn spawn_preparing_controller_sentinel_with_args(
         .expect("spawn preparing controller sentinel");
     let pid = child.id();
     let start = Instant::now();
-    while start.elapsed() < Duration::from_secs(2)
+    while start.elapsed() < blocking_effect_gate::HANG_CEILING
         && !(is_same_project_controller_pid(project_root, pid)
             && crate::process::cmdline_has_preparing_handoff(pid))
     {
@@ -15143,7 +15284,7 @@ pub(crate) fn spawn_controller_sentinel_with_fork_image(
         if fork_image.is_some() && is_same_project_controller_pid(project_root, child.id()) {
             break fork_image;
         }
-        if start.elapsed() >= Duration::from_secs(5) {
+        if start.elapsed() >= blocking_effect_gate::HANG_CEILING {
             break None;
         }
         std::thread::sleep(Duration::from_millis(10));
@@ -16374,7 +16515,7 @@ mod tests {
 
         authority_graph.acquire_subscription(document_hash, document_id);
         started_receiver
-            .recv_timeout(Duration::from_secs(1))
+            .recv_timeout(blocking_effect_gate::HANG_CEILING)
             .expect("authority publisher did not receive the initial projection");
 
         actor_graph.set(BTreeMap::from([(
@@ -19145,7 +19286,8 @@ mod tests {
         });
         // Times out far enough above the holder's release that contention resolves
         // into a successful acquire rather than an error.
-        let acquired = LaunchClaim::acquire_blocking(dir.path(), Duration::from_secs(2));
+        let acquired =
+            LaunchClaim::acquire_blocking(dir.path(), blocking_effect_gate::HANG_CEILING);
         assert!(
             acquired.is_ok(),
             "blocking acquire should wait out the holder"
@@ -23229,7 +23371,9 @@ agent:queue\n\
         });
         queue.shutdown();
         assert_eq!(
-            done_rx.recv_timeout(Duration::from_secs(2)).unwrap(),
+            done_rx
+                .recv_timeout(blocking_effect_gate::HANG_CEILING)
+                .unwrap(),
             None
         );
     }
@@ -23248,7 +23392,7 @@ agent:queue\n\
         let waiter = std::thread::spawn(move || {
             waiting.send(()).unwrap();
             waiter_graph
-                .await_terminal("cmd-reactive", Duration::from_secs(1))
+                .await_terminal("cmd-reactive", blocking_effect_gate::HANG_CEILING)
                 .unwrap()
         });
         waiting_observer.recv().unwrap();
@@ -23314,7 +23458,10 @@ agent:queue\n\
         let waiting_hash = first_hash.clone();
         let waiter = std::thread::spawn(move || {
             waiting_runtime
-                .wait_for_supervisor_recycle_settle_for(Some(&waiting_hash), Duration::from_secs(2))
+                .wait_for_supervisor_recycle_settle_for(
+                    Some(&waiting_hash),
+                    blocking_effect_gate::HANG_CEILING,
+                )
                 .unwrap()
         });
         rpc::handle_supervisor_recycle_settled(&bootstrap, &runtime, request(&first)).unwrap();
@@ -23354,7 +23501,9 @@ agent:queue\n\
                 .unwrap();
         });
         assert!(
-            project_done_rx.recv_timeout(Duration::from_secs(2)).unwrap(),
+            project_done_rx
+                .recv_timeout(blocking_effect_gate::HANG_CEILING)
+                .unwrap(),
             "the project-wide waiter must inspect the held memory guard without relocking it"
         );
     }
@@ -24333,7 +24482,7 @@ agent:queue\n\
         .unwrap();
         let status = wait_for_test_child_exit(
             predecessor,
-            Duration::from_secs(2),
+            blocking_effect_gate::HANG_CEILING,
             "an expired-lease predecessor must be reaped",
         );
         let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
@@ -24395,13 +24544,14 @@ agent:queue\n\
             false,
             "test",
         );
-        let fork_image_exited = wait_for_test_pid_exit(fork_image, Duration::from_secs(2));
+        let fork_image_exited =
+            wait_for_test_pid_exit(fork_image, blocking_effect_gate::HANG_CEILING);
         if !fork_image_exited {
             kill_test_pid(fork_image);
         }
         let status = wait_for_test_child_exit(
             sentinel,
-            Duration::from_secs(2),
+            blocking_effect_gate::HANG_CEILING,
             "removed-root controller must be reaped",
         );
         let (reaped, _) = result.unwrap();
@@ -24438,7 +24588,7 @@ agent:queue\n\
 
         let status = wait_for_test_child_exit(
             sentinel,
-            Duration::from_secs(2),
+            blocking_effect_gate::HANG_CEILING,
             "stable temp-root controller must be reaped after its project root disappears",
         );
         assert!(
@@ -24480,7 +24630,7 @@ agent:queue\n\
         // The aged orphan is our child; poll try_wait for its termination.
         let status = wait_for_test_child_exit(
             sentinel,
-            Duration::from_secs(2),
+            blocking_effect_gate::HANG_CEILING,
             "aged preparing orphan must be reaped by recycle",
         );
         assert!(
@@ -24519,7 +24669,7 @@ agent:queue\n\
 
         let status = wait_for_test_child_exit(
             sentinel,
-            Duration::from_secs(2),
+            blocking_effect_gate::HANG_CEILING,
             "stale bootstrap-owned preparing controller must be reaped by recycle",
         );
         assert!(
@@ -24871,7 +25021,7 @@ agent:queue\n\
         // a killed process lingers as a zombie until `wait()` — poll `try_wait`.
         let status = wait_for_test_child_exit(
             sentinel,
-            Duration::from_secs(2),
+            blocking_effect_gate::HANG_CEILING,
             "aged cross-project preparing orphan must be reaped",
         );
         assert!(
@@ -25373,7 +25523,7 @@ agent:queue\n\
             Some(observation("target")),
         );
 
-        let deadline = Instant::now() + Duration::from_secs(2);
+        let deadline = Instant::now() + blocking_effect_gate::HANG_CEILING;
         while pending_intent_id(&runtime, &document_hash).is_some() {
             assert!(
                 Instant::now() < deadline,
@@ -28043,7 +28193,7 @@ revised operator request
             .document_graphs
             .observe_retained_delivery_with_change(&document_hash, Some(materialized.clone()));
 
-        let deadline = Instant::now() + Duration::from_secs(2);
+        let deadline = Instant::now() + blocking_effect_gate::HANG_CEILING;
         while pending_intent_id(&runtime, &document_hash).is_some() {
             assert!(
                 Instant::now() < deadline,
@@ -28447,7 +28597,7 @@ revised operator request
             .unwrap();
 
         assert_eq!(projected, 1);
-        let deadline = Instant::now() + Duration::from_secs(2);
+        let deadline = Instant::now() + blocking_effect_gate::HANG_CEILING;
         let state = loop {
             let state = runtime.document_state_projection(&document_hash).unwrap();
             if state.as_ref().is_some_and(|state| {

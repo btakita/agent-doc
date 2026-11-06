@@ -1023,6 +1023,19 @@ pub struct PreflightResponseContract {
     pub opening_marker: String,
     pub closing_marker: String,
     pub plain_stdin_allowed: bool,
+    /// The turn's recap, written beside the exchange patch (`#agentrecap`). It
+    /// is optional for the write: a closeout without one still lands.
+    pub recap: PreflightRecapContract,
+}
+
+/// The recap half of the closeout: the same markers and one format for every
+/// harness (`#agentrecap`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PreflightRecapContract {
+    pub opening_marker: String,
+    pub closing_marker: String,
+    pub format_runbook: String,
+    pub required: bool,
 }
 
 impl PreflightResponseContract {
@@ -1033,6 +1046,12 @@ impl PreflightResponseContract {
             opening_marker: "<!-- patch:exchange -->".to_string(),
             closing_marker: "<!-- /patch:exchange -->".to_string(),
             plain_stdin_allowed: false,
+            recap: PreflightRecapContract {
+                opening_marker: "<!-- patch:recap -->".to_string(),
+                closing_marker: "<!-- /patch:recap -->".to_string(),
+                format_runbook: "runbooks/recap.md".to_string(),
+                required: false,
+            },
         }
     }
 }
@@ -1219,7 +1238,8 @@ never closes one: closeout keeps an echoed dispatch item queued and offers it fo
 leave it queued and say so for that item with a `**Deferred:** no subagent available` line. If \
 you judge an item blocked, still name it in the response with why. If a worker sends a \
 `[#subagent-operator-request-<unique-id>]` packet, copy the complete packet (request, context, and every choice) verbatim \
-into `agent:exchange`, present it from the main session, and return the operator's answer to the \
+into `agent:exchange`; a recommendation of your own goes in the packet's `recommendation:` row, \
+never only in prose. Present it from the main session, and return the operator's answer to the \
 same worker when the harness can continue it. The closeout that presents a blocking packet must \
 also record its concrete operator action in `agent:todo` with `--todo-add`; when the answer and \
 worker result complete that action, check it off with `--todo-done`. Never treat a chat answer as \

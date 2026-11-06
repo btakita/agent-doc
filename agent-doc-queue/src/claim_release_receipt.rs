@@ -185,6 +185,7 @@ impl ClaimReleaseReceipt {
             reported_at_secs: Some(self.released_at_secs),
             heartbeat_at_secs: None,
             frozen: None,
+            quota_block: None,
         }
     }
 }
@@ -632,6 +633,7 @@ mod tests {
             reported_at_secs: None,
             heartbeat_at_secs: None,
             frozen: None,
+            quota_block: None,
         }
     }
 

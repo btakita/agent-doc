@@ -3493,8 +3493,9 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
                 "Enter",
             ])?;
 
-            // Poll until pane_current_command changes from the shell
-            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+            // Poll until pane_current_command changes from the shell.
+            // `#wallclockassertsweep`: a hang ceiling, not a latency bound.
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
             loop {
                 std::thread::sleep(std::time::Duration::from_millis(100));
                 let cmd = agent_doc_tmux_io::target_current_command(&iso, &busy_pane)

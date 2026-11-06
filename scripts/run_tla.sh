@@ -507,6 +507,12 @@ must_violate=(
     # duplicate is a real interleaving of the fixed model.
     AuthorityHandoffFold:AuthorityHandoffFoldWedge
     AuthorityHandoffFold:AuthorityHandoffFoldReach
+    # `#orphanhandoffoverlay`: an overlay entry whose row a predecessor ACKed
+    # neither outlives the drain (OrphanWedge) nor clears unfolded (ClearWedge),
+    # and the reload that settles it is reachable (OrphanReach).
+    AuthorityHandoffFold:AuthorityHandoffFoldOrphanWedge
+    AuthorityHandoffFold:AuthorityHandoffFoldClearWedge
+    AuthorityHandoffFold:AuthorityHandoffFoldOrphanReach
     # `#predecessorlandandack`: with no ACK receipt the row a predecessor landed
     # and acknowledged after the successor's load leaves nothing to drain, so the
     # event never reaches the successor's projection; reach proves that late ACK

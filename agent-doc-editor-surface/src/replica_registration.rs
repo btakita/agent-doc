@@ -96,7 +96,11 @@ pub struct RegistrationProjectionEvidence {
     /// ancestor to the buffer (`#ambiguousholdforever`; `None`: not computed or
     /// unavailable). The ancestor is the settled shadow, or, when that proves
     /// nothing, the cached replica text whose frontier canonical covers
-    /// (`#ackedreplicabase`).
+    /// (`#ackedreplicabase`). The plugin also reports `true` when the controller's
+    /// record of its own binary-authored writes names the buffer as a canonical
+    /// generation those writes alone carried to this canonical
+    /// (`#attachauthorattribution`): the buffer then holds no operator edit the
+    /// canonical lacks.
     #[serde(default)]
     pub canonical_contains_operator_edits: Option<bool>,
     /// The three-way reconcile (ancestor, buffer, canonical) is clean
@@ -606,6 +610,37 @@ mod tests {
             derive_registration_projection(&facts(Some("s"), Some("b"), Some("s"))).action,
             PublishOperatorBuffer
         );
+    }
+
+    /// `#attachauthorattribution`, the 2026-11-05 restart shape: a retained
+    /// projection, no settled shadow, the buffer is the saved document, and the
+    /// editor already held once. Attribution reaches the derivation as the
+    /// containment fact, which adopts canonical on that path; without it the
+    /// same facts hold `ambiguous-retained-projection`.
+    #[test]
+    fn an_attributed_restart_buffer_adopts_canonical_and_an_unattributed_one_holds() {
+        let restarted = |contains: Option<bool>| RegistrationProjectionEvidence {
+            canonical_projection_retained: true,
+            buffer_equals_disk: Some(true),
+            attach_held_for_operator: Some(true),
+            canonical_contains_operator_edits: contains,
+            ..facts(
+                None,
+                Some("- ### 📥 do [#implement]\n"),
+                Some("- ### ☑️ [#subagent:impl#3] do [#implement]\n"),
+            )
+        };
+        let adopted = derive_registration_projection(&restarted(Some(true)));
+        assert_eq!(adopted.action, ApplyCanonical);
+        assert_eq!(adopted.hold_reason, None);
+        for unattributed in [None, Some(false)] {
+            let held = derive_registration_projection(&restarted(unattributed));
+            assert_eq!(held.action, HoldOperatorBuffer, "{unattributed:?}");
+            assert_eq!(
+                held.hold_reason.as_deref(),
+                Some(HOLD_AMBIGUOUS_RETAINED_PROJECTION)
+            );
+        }
     }
 
     #[test]

@@ -137,8 +137,9 @@ impl SubagentAuthorization {
         {
             self.subagent_prompt_preamble.push('\n');
         }
-        self.subagent_prompt_preamble
-            .push_str(&crate::goal_preset_terminal::prior_attempt_brief_section(&handoff));
+        self.subagent_prompt_preamble.push_str(
+            &crate::goal_preset_terminal::prior_attempt_brief_section(&handoff),
+        );
         self.prior_goal_attempt = Some(handoff);
     }
 }
@@ -580,12 +581,13 @@ pub const SUBAGENT_TMUX_ISOLATION_RULE: &str = subagent_tmux_isolation_rule!();
 
 /// `#workerresponsestructure`: the hand-back shape every brief asks for.
 /// `queue report-complete` renders a hand-back with these labels into the
-/// response structure and queues each **Open items** entry as a follow-up row
-/// after the originating head, so a limit the worker reports is never buried.
+/// response structure and queues each **Action items** entry as a follow-up
+/// row after the originating head, so work the worker reports is never buried.
+/// **Notes** are never queued (`#handbackopenitemstriage`).
 #[macro_export]
 macro_rules! subagent_handback_shape_rule {
     () => {
-        "Report back in this shape, one bold label per section, so `agent-doc queue report-complete` renders it into the response structure: **Summary** (one or two sentences); **What changed** (branch, every commit SHA, files changed); **Verification** (the exact commands run and their results); **Open items** (one `- ` bullet per limit, gap, or unfinished piece, or `none`; report-complete queues each bullet as a follow-up row after the originating head, so do not also list those as follow-ups); **Next actions** (remaining steps, and any follow-up queue heads in order)."
+        "Report back in this shape, one bold label per section, so `agent-doc queue report-complete` renders it into the response structure: **Summary** (one or two sentences); **What changed** (branch, every commit SHA, files changed); **Verification** (the exact commands run and their results); **Action items** (one `- ` bullet per piece of work someone still has to do, or `none`; report-complete queues each bullet as a follow-up row after the originating head, where it can dispatch with no review, so put nothing else here and do not also list those as follow-ups); **Notes** (one `- ` bullet per limit, state, or FYI that asks for no work, or `none`; never queued); **Next actions** (remaining steps, and any follow-up queue heads in order)."
     };
 }
 
@@ -655,6 +657,8 @@ pub const SUBAGENT_OPERATOR_REQUEST_PROTOCOL: &str = concat!(
     "  - <current state>\n",
     "  - <target/scope>\n",
     "  - <risk or effect>\n",
+    "- *recommendation:*\n",
+    "  - **<label>**: <reason, from the current evidence>\n",
     "- *choices:*\n",
     "  - **<label>**: <effect>\n\n",
     "Replace `<unique-id>` with a short request-specific lowercase suffix using letters, digits, ",
@@ -664,6 +668,9 @@ pub const SUBAGENT_OPERATOR_REQUEST_PROTOCOL: &str = concat!(
     "never on the key line itself; split the context into short bullets, one fact per bullet. ",
     "Keep the rendered `queue_item` value unchanged; it links this packet to the exact queue row. ",
     "Include every offered choice; write `- *choices:* []` only when the harness supplied none. ",
+    "When you recommend one choice, write `recommendation` above `choices`, as one row naming its ",
+    "exact label; otherwise omit the field. Prose outside the packet does not reach the operator's ",
+    "structured row. ",
     "Claude Code may surface a background worker's tool-permission prompt natively, and Codex ",
     "provides inter-agent messaging; Grok Build and OpenCode may require returning the packet ",
     "through the child result. In every harness, the coordinator records the packet verbatim in ",
@@ -1741,23 +1748,30 @@ agent_doc_format: template
         ] {
             let p = subagent_authorization("doc.md", content, item).subagent_prompt_preamble;
             let rule_at = p.find(&bullet).unwrap_or_else(|| panic!("{p}"));
-            assert!(p.find("- Commit and push only when").unwrap() < rule_at, "{p}");
-            assert!(rule_at < p.find("subagent operator request").unwrap(), "{p}");
+            assert!(
+                p.find("- Commit and push only when").unwrap() < rule_at,
+                "{p}"
+            );
+            assert!(
+                rule_at < p.find("subagent operator request").unwrap(),
+                "{p}"
+            );
             assert!(!p.contains("- Report back: branch, commit SHA"), "{p}");
         }
         for label in [
             "**Summary**",
             "**What changed**",
             "**Verification**",
-            "**Open items**",
+            "**Action items**",
+            "**Notes**",
             "**Next actions**",
         ] {
             assert!(SUBAGENT_HANDBACK_SHAPE_RULE.contains(label), "{label}");
         }
-        let handback = "**Summary** done\n**What changed** a1b2c3\n**Verification** ok\n**Open items**\n- a limit\n**Next actions** none";
+        let handback = "**Summary** done\n**What changed** a1b2c3\n**Verification** ok\n**Action items**\n- a gap\n**Notes**\n- a limit\n**Next actions** none";
         assert_eq!(
-            agent_doc_document::worker_handback::open_items(handback),
-            vec!["a limit".to_string()]
+            agent_doc_document::worker_handback::action_items(handback),
+            vec!["a gap".to_string()]
         );
     }
 

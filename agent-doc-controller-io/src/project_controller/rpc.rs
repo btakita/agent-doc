@@ -10178,6 +10178,9 @@ struct ControllerResponseCellAddPayload {
     operation_id: String,
     response_sha256: String,
     response: String,
+    /// The turn's recap, landed in the same canonical cut (`#agentrecap`).
+    #[serde(default)]
+    recap: Option<String>,
     #[serde(default)]
     committed_content: Option<String>,
     #[serde(default)]
@@ -10189,12 +10192,14 @@ struct ControllerResponseCellAddPayload {
 
 /// Add one assistant response cell through the controller-owned canonical CRDT
 /// model. The caller supplies no whole-document baseline or replacement.
+#[allow(clippy::too_many_arguments)]
 pub fn add_response_cell_via_controller_model_for_doc(
     doc: &Path,
     cycle_id: &str,
     operation_id: &str,
     response_sha256: &str,
     response: &str,
+    recap: Option<&str>,
     committed_content: Option<&str>,
     source: &str,
 ) -> Result<Option<agent_doc_crdt_relay_io::ResponseCellRelayWrite>> {
@@ -10204,6 +10209,7 @@ pub fn add_response_cell_via_controller_model_for_doc(
         operation_id,
         response_sha256,
         response,
+        recap,
         committed_content,
         false,
         false,
@@ -10229,6 +10235,7 @@ pub fn checkpoint_response_cell_via_controller_model_for_doc(
         operation_id,
         response_sha256,
         response,
+        None,
         committed_content,
         true,
         false,
@@ -10252,6 +10259,7 @@ pub fn salient_response_via_controller_model_for_doc(
         response_sha256,
         response,
         None,
+        None,
         true,
         true,
         source,
@@ -10265,6 +10273,7 @@ fn response_cell_via_controller_model_for_doc(
     operation_id: &str,
     response_sha256: &str,
     response: &str,
+    recap: Option<&str>,
     committed_content: Option<&str>,
     checkpoint_only: bool,
     salient_only: bool,
@@ -10284,6 +10293,7 @@ fn response_cell_via_controller_model_for_doc(
         operation_id: operation_id.to_string(),
         response_sha256: response_sha256.to_string(),
         response: response.to_string(),
+        recap: recap.map(str::to_string),
         committed_content: committed_content.map(str::to_string),
         checkpoint_only,
         salient_only,
@@ -12059,6 +12069,7 @@ fn handle_response_cell_add_rpc(
                 &canonical,
                 payload.committed_content.as_deref(),
                 &payload.response,
+                payload.recap.as_deref(),
                 source,
             )?
         }
@@ -16545,6 +16556,9 @@ fn controller_crdt_replica_data(
                         "retained_replica_reseed_pending": registration.retained_replica_reseed_pending,
                         "canonical_covers_retained_frontier": registration.canonical_covers_retained_frontier,
                         "canonical_content_hash": registration.canonical_content_hash,
+                        // `#attachauthorattribution`: canonical generations only
+                        // agent-doc's own recorded writes lead from.
+                        "binary_attributed_ancestor_hashes": registration.binary_attributed_ancestor_hashes,
                         "lineage": agent_doc_crdt_relay_io::current_lineage_for_file(canonical)?
                             .context("registered replica is missing its canonical lineage")?,
                         // `#deliverylineagestamp`: the CRDT history this bootstrap
@@ -20892,6 +20906,17 @@ prompt_presets:\n  \"#upgrade\": \"upgrade agent-doc to the latest release\"\n--
         .unwrap();
     }
 
+    /// `#tmuxciorphandrain`: one line per stretch of a live supervisor owning
+    /// the head, and a fresh line once that stretch ended.
+    #[test]
+    fn supervisor_alive_yield_logs_on_the_transition_not_every_tick() {
+        let file = Path::new("/nonexistent/supervisor-alive-yield.md");
+        assert!(orphan_drain_supervisor_alive_transition(file, true));
+        assert!(!orphan_drain_supervisor_alive_transition(file, true));
+        assert!(!orphan_drain_supervisor_alive_transition(file, false));
+        assert!(orphan_drain_supervisor_alive_transition(file, true));
+    }
+
     fn background_route(file: &Path) -> ControllerEditorRouteInvocation {
         ControllerEditorRouteInvocation {
             file: file.to_path_buf(),
@@ -21283,6 +21308,21 @@ fn orphan_drain_pause_suppression_transition(file: &Path, suppressed: bool) -> b
     }
 }
 
+/// `#tmuxciorphandrain`: true once per stretch of a live supervisor owning a
+/// drainable head, so the yield is observable without a line every sweep tick.
+fn orphan_drain_supervisor_alive_transition(file: &Path, yielded: bool) -> bool {
+    static YIELDED_DOCUMENTS: OnceLock<Mutex<std::collections::HashSet<PathBuf>>> = OnceLock::new();
+    let mut documents = YIELDED_DOCUMENTS
+        .get_or_init(|| Mutex::new(std::collections::HashSet::new()))
+        .lock();
+    if yielded {
+        documents.insert(file.to_path_buf())
+    } else {
+        documents.remove(file);
+        false
+    }
+}
+
 fn orphan_drain_claim_suppression_transition(file: &Path, suppressed: bool) -> bool {
     static SUPPRESSED_DOCUMENTS: OnceLock<Mutex<std::collections::HashSet<PathBuf>>> =
         OnceLock::new();
@@ -21459,10 +21499,24 @@ fn orphan_drain_closed_for_test() -> bool {
             .is_some_and(|gate| !Path::new(&gate).exists())
 }
 
+/// `#tmuxciorphandrain` debug-build seam. While
+/// `AGENT_DOC_TEST_ORPHAN_DRAIN_STALE_LIVENESS` names a file that EXISTS, the
+/// sweep decides as if its liveness probe had found no supervisor. That is the
+/// one input the live tmux suite cannot produce by ordering alone: a route
+/// running after a sweep whose observation predates the restart, the case the
+/// route's `supervisor_restarting` guard exists for. The `/proc` probe sees a
+/// supervisor held mid re-exec, so without this the guard is unreachable from a
+/// test. Unavailable in optimized production builds.
+fn orphan_drain_liveness_stale_for_test() -> bool {
+    cfg!(debug_assertions)
+        && std::env::var_os("AGENT_DOC_TEST_ORPHAN_DRAIN_STALE_LIVENESS")
+            .is_some_and(|gate| Path::new(&gate).exists())
+}
+
 fn controller_orphan_drain_tick(runtime: &Arc<ControllerRuntime>) {
     use agent_doc_controller::orphan_drain::{
         DEFAULT_MIN_DISPATCH_INTERVAL_SECS, OrphanDrainDecision, OrphanDrainEvent,
-        OrphanDrainObservation, OrphanDrainQueueControl, orphan_drain_decision,
+        OrphanDrainObservation, OrphanDrainQueueControl, OrphanDrainSkip, orphan_drain_decision,
     };
 
     // `#drainingpredecessor` (GH #261): a promoted predecessor never routes.
@@ -21815,17 +21869,17 @@ fn controller_orphan_drain_tick(runtime: &Arc<ControllerRuntime>) {
         );
         let recovered_actor_fallback =
             orphan_drain_same_attempt(last_dispatch.as_ref(), &attempt_holder);
+        // `#supervisorpidoperatorstarted`: an operator-started supervisor runs
+        // the same idle watch as a route-owned one.
+        let serving_supervisor =
+            agent_doc_supervisor_io::process::serving_supervisor_pid_for_doc(&file)
+                .filter(|_| !orphan_drain_liveness_stale_for_test());
         let observation = OrphanDrainObservation {
             // The supervisor-scope resolver owns activation (`queue: go`,
             // queue-tag `go`, and legacy active state) as well as drainability.
             queue_active,
             has_drainable_head: drainable.is_some(),
-            // `#supervisorpidoperatorstarted`: an operator-started supervisor
-            // runs the same idle watch as a route-owned one.
-            supervisor_alive: agent_doc_supervisor_io::process::serving_supervisor_pid_for_doc(
-                &file,
-            )
-            .is_some(),
+            supervisor_alive: serving_supervisor.is_some(),
             loop_owns_drain,
             pane_busy: record.state != agent_doc_controller::actor::ActorState::Ready,
             secs_since_last_dispatch: last_dispatch
@@ -21833,9 +21887,24 @@ fn controller_orphan_drain_tick(runtime: &Arc<ControllerRuntime>) {
                 .map(|lease| now.saturating_sub(lease.heartbeat_secs)),
         };
 
-        if orphan_drain_decision(observation, DEFAULT_MIN_DISPATCH_INTERVAL_SECS)
-            != OrphanDrainDecision::Dispatch
-        {
+        let decision = orphan_drain_decision(observation, DEFAULT_MIN_DISPATCH_INTERVAL_SECS);
+        if orphan_drain_supervisor_alive_transition(
+            &file,
+            decision == OrphanDrainDecision::Skip(OrphanDrainSkip::SupervisorAlive),
+        ) {
+            log_orphan_drain_event(
+                &file,
+                OrphanDrainEvent::SupervisorAliveYielded,
+                &format!(
+                    "file={} pane={} head={} supervisor_pid={} reason=supervisor_idle_watch_owns_drain focus_effect=preserved pane_effect=none",
+                    file.display(),
+                    record.pane_id,
+                    drainable.as_deref().unwrap_or("unknown"),
+                    serving_supervisor.map_or_else(|| "none".to_string(), |pid| pid.to_string()),
+                ),
+            );
+        }
+        if decision != OrphanDrainDecision::Dispatch {
             continue;
         }
 
@@ -45031,7 +45100,7 @@ mod tests {
         });
         assert!(
             receive
-                .recv_timeout(Duration::from_secs(1))
+                .recv_timeout(super::blocking_effect_gate::HANG_CEILING)
                 .unwrap()
                 .unwrap(),
             "a sibling document admission must not wait for maintenance"
@@ -45062,7 +45131,7 @@ mod tests {
         drop(guard);
         assert!(
             receive
-                .recv_timeout(Duration::from_secs(1))
+                .recv_timeout(super::blocking_effect_gate::HANG_CEILING)
                 .unwrap()
                 .unwrap()
         );
@@ -46135,7 +46204,7 @@ mod tests {
             let started = std::time::Instant::now();
             while !gh383_ops(dir.path()).contains("sync_tmux_layout_published_layout_awaiting") {
                 assert!(
-                    started.elapsed() < Duration::from_secs(5),
+                    started.elapsed() < super::blocking_effect_gate::HANG_CEILING,
                     "awaiting log did not appear: {}",
                     gh383_ops(dir.path())
                 );
@@ -47607,7 +47676,9 @@ mod tests {
         );
 
         assert_eq!(
-            receiver.recv_timeout(Duration::from_secs(1)).unwrap(),
+            receiver
+                .recv_timeout(super::blocking_effect_gate::HANG_CEILING)
+                .unwrap(),
             expected,
             "the retained Source/Effect edge must dispatch the durable pending fact",
         );
@@ -47627,7 +47698,9 @@ mod tests {
             &other_state,
         );
         assert_eq!(
-            receiver.recv_timeout(Duration::from_secs(1)).unwrap(),
+            receiver
+                .recv_timeout(super::blocking_effect_gate::HANG_CEILING)
+                .unwrap(),
             other,
         );
         assert_eq!(graph.ctx.get(&graph.lifecycle_commands).len(), 2);
@@ -47827,10 +47900,10 @@ mod tests {
 
         let mut commands = vec![
             lifecycle_receiver
-                .recv_timeout(Duration::from_secs(1))
+                .recv_timeout(super::blocking_effect_gate::HANG_CEILING)
                 .expect("first durable pending binding"),
             lifecycle_receiver
-                .recv_timeout(Duration::from_secs(1))
+                .recv_timeout(super::blocking_effect_gate::HANG_CEILING)
                 .expect("second durable pending binding"),
         ];
         assert!(lifecycle_receiver.try_recv().is_err());
@@ -47983,7 +48056,7 @@ mod tests {
         )
         .unwrap();
         let bind_command = lifecycle_receiver
-            .recv_timeout(Duration::from_secs(1))
+            .recv_timeout(super::blocking_effect_gate::HANG_CEILING)
             .expect("durable BindPending dispatches only after append/apply");
         assert_eq!(bind_command.state, pending_bind);
         let bind_receipt =
@@ -48029,7 +48102,7 @@ mod tests {
         )
         .unwrap();
         let release_command = lifecycle_receiver
-            .recv_timeout(Duration::from_secs(1))
+            .recv_timeout(super::blocking_effect_gate::HANG_CEILING)
             .expect("durable ReleasePending dispatches only after append/apply");
         assert_eq!(release_command.state, pending_release);
         let release_receipt =
@@ -48179,7 +48252,7 @@ mod tests {
             ),
         )
         .unwrap();
-        let deadline = Instant::now() + Duration::from_secs(2);
+        let deadline = Instant::now() + super::blocking_effect_gate::HANG_CEILING;
         while restarted.state_projection_activation_queue.counts() != (0, 0) {
             assert!(
                 Instant::now() < deadline,
@@ -53257,7 +53330,10 @@ mod tests {
                 "dispatch_only": true,
                 "plain_trigger": true,
                 "client_id": client,
-                "wait_for_ready_secs": 2,
+                // `#wallclockassertsweep`: twice the hang ceiling, so "no layout
+                // wait" below means "did not spend the budget" rather than a
+                // latency bound a loaded host can miss.
+                "wait_for_ready_secs": super::blocking_effect_gate::HANG_CEILING.as_secs() * 2,
             });
             let mut request = empty_controller_request("editor_route");
             request.file = Some(canonical.clone());
@@ -53277,8 +53353,8 @@ mod tests {
         let (result, elapsed) = route("jetbrains@RD.9f8e7d6c-pid:42");
         assert_eq!(result.exit_code, 0, "{}", result.output);
         assert!(
-            elapsed < Duration::from_secs(2),
-            "no layout wait: {elapsed:?}"
+            elapsed < super::blocking_effect_gate::HANG_CEILING,
+            "no layout wait: a route that waited spends the whole budget: {elapsed:?}"
         );
         let notice = result
             .output
@@ -56861,7 +56937,7 @@ mod tests {
 
         let error = await_editor_route_layout_gates(
             "/repo/a.md",
-            Instant::now() + Duration::from_secs(5),
+            Instant::now() + super::blocking_effect_gate::HANG_CEILING,
             superseded,
             |_, _| panic!("terminal foreground supersession must not re-observe"),
         )
@@ -56913,7 +56989,7 @@ mod tests {
         let mut reobserved = Vec::new();
         let (receipt, observations) = await_editor_route_layout_gates(
             "/repo/a.md",
-            Instant::now() + Duration::from_secs(5),
+            Instant::now() + super::blocking_effect_gate::HANG_CEILING,
             gh110_receipt(
                 false,
                 "superseded_by_newer_layout_state",
@@ -56934,7 +57010,8 @@ mod tests {
                 .contains("reason=superseded_by_newer_layout_state")
         );
         assert!(
-            reobserved[0].1 > Duration::ZERO && reobserved[0].1 <= Duration::from_secs(5),
+            reobserved[0].1 > Duration::ZERO
+                && reobserved[0].1 <= super::blocking_effect_gate::HANG_CEILING,
             "re-observation is bounded by the remaining budget: {:?}",
             reobserved[0].1
         );
@@ -56944,7 +57021,7 @@ mod tests {
     fn gh110_layout_gates_absorb_a_momentarily_missing_column() {
         let (receipt, observations) = await_editor_route_layout_gates(
             "/repo/a.md",
-            Instant::now() + Duration::from_secs(5),
+            Instant::now() + super::blocking_effect_gate::HANG_CEILING,
             gh110_receipt(true, "observed_convergence", &["/repo/other.md"]),
             |_, _| Ok(gh110_receipt(true, "observed_convergence", &["/repo/a.md"])),
         )
@@ -57020,7 +57097,7 @@ mod tests {
     fn gh110_operator_owned_layout_is_terminal_not_retried() {
         let error = await_editor_route_layout_gates(
             "/repo/a.md",
-            Instant::now() + Duration::from_secs(5),
+            Instant::now() + super::blocking_effect_gate::HANG_CEILING,
             gh110_receipt(false, "operator_owned_layout", &["/repo/a.md"]),
             |_, _| panic!("operator-owned layout must not be re-observed"),
         )
@@ -57034,7 +57111,7 @@ mod tests {
     fn gh110_layout_gates_propagate_a_reobservation_error() {
         let error = await_editor_route_layout_gates(
             "/repo/a.md",
-            Instant::now() + Duration::from_secs(5),
+            Instant::now() + super::blocking_effect_gate::HANG_CEILING,
             gh110_receipt(
                 false,
                 "superseded_by_newer_layout_state",
@@ -58819,7 +58896,11 @@ mod tests {
         };
         let adopted = runtime
             .async_editor_commands
-            .await_terminal_adopting("cmd-forwarded-later", Duration::from_secs(5), || Some(456))
+            .await_terminal_adopting(
+                "cmd-forwarded-later",
+                super::blocking_effect_gate::HANG_CEILING,
+                || Some(456),
+            )
             .unwrap();
         publisher.join().unwrap();
         assert_eq!(adopted["exit_code"], 0);
@@ -60895,13 +60976,14 @@ mod tests {
         let pid = sentinel.id();
 
         let outcome = force_restart_controller(dir.path(), true);
-        let fork_image_exited = wait_for_test_pid_exit(fork_image, Duration::from_secs(2));
+        let fork_image_exited =
+            wait_for_test_pid_exit(fork_image, super::blocking_effect_gate::HANG_CEILING);
         if !fork_image_exited {
             kill_test_pid(fork_image);
         }
         let status = wait_for_test_child_exit(
             sentinel,
-            Duration::from_secs(2),
+            super::blocking_effect_gate::HANG_CEILING,
             "forced restart must reap the controller",
         );
         // `reaped_pids` cannot name the sentinel here: it is this test's own
@@ -60943,7 +61025,7 @@ mod tests {
                     crate::process::process_parent_pid(*candidate) == Some(pid)
                         && crate::process::open_supervisor_document(*candidate).is_some()
                 });
-            if fork_image.is_some() || start.elapsed() > Duration::from_secs(5) {
+            if fork_image.is_some() || start.elapsed() > super::blocking_effect_gate::HANG_CEILING {
                 break fork_image;
             }
             std::thread::sleep(Duration::from_millis(10));
@@ -61121,7 +61203,7 @@ mod tests {
         // ACK under load. Assert the ordering itself: read the handoff table
         // first, and once it is empty the ledger read that follows must hold
         // the event.
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let deadline = Instant::now() + super::blocking_effect_gate::HANG_CEILING;
         loop {
             let acknowledged = state_store::load_document_authority_handoffs(dir.path())
                 .unwrap()
@@ -61629,6 +61711,295 @@ mod tests {
         );
     }
 
+    /// Prepare the `#orphanhandoffoverlay` race: a generation 1 predecessor
+    /// claimed a durable handoff. `land_before_load` commits its insert before
+    /// the successor loads the ledger; otherwise it commits, with the ACK,
+    /// inside successor construction. Either way the ACK lands after the
+    /// successor copied the row into its overlay and before its handoff worker
+    /// exists, so every successor drain finds the entry with no row.
+    /// `after_ack` runs at that same point, ahead of any drain.
+    fn successor_with_orphaned_authority_overlay(
+        dir: &tempfile::TempDir,
+        event: &agent_doc_state_backbone::StateEvent,
+        land_before_load: bool,
+        after_ack: impl FnOnce() + 'static,
+    ) -> Arc<ControllerRuntime> {
+        let bootstrap = test_bootstrap(dir);
+        let authority_epoch = super::super::document_authority_epoch(event).unwrap();
+        assert!(
+            state_store::enqueue_document_authority_handoff(
+                dir.path(),
+                &state_store::DocumentAuthorityHandoff {
+                    document_hash: event.document_hash().to_string(),
+                    authority_epoch,
+                    controller_generation: 1,
+                    payload_json: serde_json::to_string(event).unwrap(),
+                },
+            )
+            .unwrap()
+        );
+        assert!(
+            state_store::claim_document_authority_handoff(
+                dir.path(),
+                event.document_hash(),
+                authority_epoch,
+                1,
+            )
+            .unwrap()
+        );
+        if land_before_load {
+            drop(open_state_db(dir.path()).unwrap());
+            assert!(super::super::append_state_event_for_test(dir.path(), event).unwrap());
+        }
+        let acknowledged = std::sync::Arc::new(AtomicBool::new(false));
+        {
+            let (acknowledged, project_root, event) = (
+                acknowledged.clone(),
+                dir.path().to_path_buf(),
+                event.clone(),
+            );
+            super::super::set_authority_overlay_recovered_test_hook(Some(Box::new(move || {
+                if !land_before_load {
+                    assert!(
+                        super::super::append_state_event_for_test(&project_root, &event).unwrap(),
+                        "the predecessor's parked apply inserts the event"
+                    );
+                }
+                assert!(
+                    state_store::acknowledge_document_authority_handoff(
+                        &project_root,
+                        event.document_hash(),
+                        authority_epoch,
+                        1,
+                        &event.event_id,
+                    )
+                    .unwrap(),
+                    "the predecessor's generation-fenced ACK removes its own row"
+                );
+                after_ack();
+                acknowledged.store(true, Ordering::SeqCst);
+            })));
+        }
+        let successor = ControllerRuntime::new_arc(ControllerBootstrap {
+            controller_generation: 2,
+            previous_controller_pid: None,
+            ..bootstrap
+        });
+        super::super::set_authority_overlay_recovered_test_hook(None);
+        let successor = successor.unwrap();
+        assert!(
+            acknowledged.load(Ordering::SeqCst),
+            "the predecessor's ACK must land inside the successor's construction"
+        );
+        successor
+    }
+
+    fn drain_authority_handoffs_to_rest(runtime: &ControllerRuntime, project_root: &Path) {
+        // The attempt cap is a clock-free hang guard, never a latency bound.
+        let mut drains = 0;
+        while runtime
+            .drain_document_authority_handoffs(project_root)
+            .unwrap()
+        {
+            drains += 1;
+            assert!(drains < 100, "the drain never came to rest");
+        }
+    }
+
+    fn pending_authority_overlay_holds(runtime: &ControllerRuntime, document_hash: &str) -> bool {
+        runtime
+            .memory
+            .lock()
+            .pending_document_authority_handoffs
+            .contains_key(document_hash)
+    }
+
+    /// `#orphanhandoffoverlay`: the retired predecessor's row landed after the
+    /// successor's load, and its ACK after the successor's overlay copy. The
+    /// overlay kept reads correct, but the projection -- and so the reactive
+    /// graphs, which never see the overlay -- lacked the authority, and with no
+    /// row left nothing ever cleared the entry.
+    #[test]
+    fn drain_refolds_an_overlay_entry_a_retired_predecessor_acknowledged() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let event = authority_handoff_test_event("authority-orphan-late", "doc", 404);
+        let successor = successor_with_orphaned_authority_overlay(&dir, &event, false, || {});
+        assert!(
+            state_store::load_document_authority_handoffs(dir.path())
+                .unwrap()
+                .is_empty(),
+            "the predecessor's ACK left the successor no row to claim"
+        );
+
+        drain_authority_handoffs_to_rest(&successor, dir.path());
+
+        assert!(
+            !pending_authority_overlay_holds(&successor, "doc"),
+            "an entry with no row must not outlive the drain"
+        );
+        assert_eq!(
+            successor
+                .memory
+                .lock()
+                .state_projection
+                .document("doc")
+                .and_then(|projection| projection.document.latest_authority.clone())
+                .map(|authority| authority.authority_epoch),
+            Some(404),
+            "the projection must fold the event before the overlay stops answering for it"
+        );
+        assert_eq!(
+            successor
+                .document_graphs
+                .latest_projection("doc")
+                .and_then(|projection| projection.document.latest_authority)
+                .map(|authority| authority.authority_epoch),
+            Some(404),
+            "the reactive graphs must see the authority without a further reload"
+        );
+    }
+
+    /// `#orphanhandoffoverlay`: when the load already folded the row, the entry
+    /// is merely redundant, so settling it needs no durable reload.
+    #[test]
+    fn drain_settles_an_orphaned_overlay_entry_the_load_folded_without_a_reload() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let event = authority_handoff_test_event("authority-orphan-folded", "doc", 405);
+        let successor = successor_with_orphaned_authority_overlay(&dir, &event, true, || {});
+
+        drain_authority_handoffs_to_rest(&successor, dir.path());
+
+        assert!(!pending_authority_overlay_holds(&successor, "doc"));
+        let ops_log =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
+        assert!(
+            ops_log.contains("document_authority_handoff_orphan_settled document_hash=doc"),
+            "{ops_log}"
+        );
+        assert!(
+            !ops_log.contains("document_authority_handoff_orphan_refolded"),
+            "a row at or below the folded high-water must not cost a reload: {ops_log}"
+        );
+    }
+
+    /// `#orphanhandoffoverlay`: a row that outranks the entry supersedes it, and
+    /// the row's fold clears the entry only once the row itself is gone. An
+    /// event that never reached the ledger therefore settles too.
+    #[test]
+    fn drain_settles_an_overlay_entry_a_newer_row_superseded() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let runtime = ControllerRuntime::new_arc(test_bootstrap(&dir)).unwrap();
+        let superseded = authority_handoff_test_event("authority-superseded", "doc", 501);
+        let newer = authority_handoff_test_event("authority-superseding", "doc", 502);
+        assert!(
+            state_store::enqueue_document_authority_handoff(
+                dir.path(),
+                &state_store::DocumentAuthorityHandoff {
+                    document_hash: "doc".to_string(),
+                    authority_epoch: 502,
+                    controller_generation: 1,
+                    payload_json: serde_json::to_string(&newer).unwrap(),
+                },
+            )
+            .unwrap()
+        );
+        // The stale observation lost the row to the newer epoch; the note is
+        // what `handle_document_authority_handoff` does either way.
+        runtime.note_pending_document_authority_handoff(superseded);
+
+        drain_authority_handoffs_to_rest(&runtime, dir.path());
+
+        assert!(!pending_authority_overlay_holds(&runtime, "doc"));
+        assert_eq!(
+            runtime
+                .memory
+                .lock()
+                .state_projection
+                .document("doc")
+                .and_then(|projection| projection.document.latest_authority.clone())
+                .map(|authority| authority.authority_epoch),
+            Some(502),
+        );
+    }
+
+    /// `#orphanhandoffoverlay`: an entry whose row this drain could not claim
+    /// still has an owner, so it is not an orphan. Its event is not in the
+    /// ledger yet; settling here would lose the authority from reads.
+    #[test]
+    fn drain_leaves_an_overlay_entry_whose_row_is_still_durable() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let runtime = ControllerRuntime::new_arc(test_bootstrap(&dir)).unwrap();
+        let event = authority_handoff_test_event("authority-row-held", "doc", 601);
+        // A later generation holds the claim, which this drain cannot take.
+        assert!(
+            state_store::enqueue_document_authority_handoff(
+                dir.path(),
+                &state_store::DocumentAuthorityHandoff {
+                    document_hash: "doc".to_string(),
+                    authority_epoch: 601,
+                    controller_generation: u64::from(u32::MAX),
+                    payload_json: serde_json::to_string(&event).unwrap(),
+                },
+            )
+            .unwrap()
+        );
+        runtime.note_pending_document_authority_handoff(event);
+
+        assert!(
+            !runtime
+                .drain_document_authority_handoffs(dir.path())
+                .unwrap()
+        );
+
+        assert!(pending_authority_overlay_holds(&runtime, "doc"));
+        assert_eq!(
+            runtime
+                .document_state_projection("doc")
+                .unwrap()
+                .and_then(|projection| projection.document.latest_authority)
+                .map(|authority| authority.authority_epoch),
+            Some(601),
+        );
+    }
+
+    /// `#orphanhandoffoverlay`: a failed reload keeps the entry answering reads
+    /// and asks for a retry; the next drain settles it.
+    #[test]
+    fn drain_keeps_an_orphaned_overlay_entry_when_the_reload_fails() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let event = authority_handoff_test_event("authority-orphan-reload", "doc", 406);
+        // A ledger row the durable load refuses to parse fails the reload. The
+        // row is broken before any drain can run, so no drain settles it first.
+        let root = dir.path().to_path_buf();
+        let successor = successor_with_orphaned_authority_overlay(&dir, &event, false, move || {
+            open_state_db(&root)
+                .unwrap()
+                .execute_batch("UPDATE state_events SET payload_json = 'not json'")
+                .unwrap();
+        });
+
+        assert!(
+            successor
+                .drain_document_authority_handoffs(dir.path())
+                .unwrap(),
+            "a failed reload must leave the entry retryable"
+        );
+        assert!(
+            pending_authority_overlay_holds(&successor, "doc"),
+            "the overlay must keep answering until the projection holds the event"
+        );
+
+        open_state_db(dir.path())
+            .unwrap()
+            .execute(
+                "UPDATE state_events SET payload_json = ?1 WHERE event_id = ?2",
+                [&serde_json::to_string(&event).unwrap(), &event.event_id],
+            )
+            .unwrap();
+        drain_authority_handoffs_to_rest(&successor, dir.path());
+        assert!(!pending_authority_overlay_holds(&successor, "doc"));
+    }
+
     #[test]
     fn authority_overlay_read_is_atomic_with_fold_and_clear() {
         let dir = tempfile::TempDir::new().unwrap();
@@ -61855,7 +62226,7 @@ mod tests {
         };
 
         assert!(handle_state_event_append(&bootstrap, &runtime, request()).unwrap());
-        let deadline = Instant::now() + Duration::from_secs(2);
+        let deadline = Instant::now() + super::blocking_effect_gate::HANG_CEILING;
         while runtime.state_projection_activation_queue.counts() != (0, 0) {
             assert!(Instant::now() < deadline, "wake projection did not drain");
             std::thread::sleep(Duration::from_millis(10));
@@ -63248,7 +63619,7 @@ mod tests {
 
         durable_writer.execute_batch("ROLLBACK").unwrap();
         let outcome = result_rx
-            .recv_timeout(Duration::from_secs(5))
+            .recv_timeout(super::blocking_effect_gate::HANG_CEILING)
             .expect("claim completes after durable writer releases")
             .unwrap();
         claimant.join().unwrap();
@@ -66359,7 +66730,7 @@ mod tests {
         // `wait()` it — poll `try_wait` instead of `process_is_alive`.
         let status = wait_for_test_child_exit(
             sentinel,
-            Duration::from_secs(2),
+            super::blocking_effect_gate::HANG_CEILING,
             "wedged sentinel pid must be reaped",
         );
         assert!(
@@ -66392,7 +66763,7 @@ mod tests {
         // lingers as a zombie until `wait()` — poll `try_wait`.
         let status = wait_for_test_child_exit(
             sentinel,
-            Duration::from_secs(2),
+            super::blocking_effect_gate::HANG_CEILING,
             "aged preparing orphan must be reaped",
         );
         assert!(

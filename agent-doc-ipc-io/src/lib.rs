@@ -2225,6 +2225,10 @@ mod tests {
     use std::thread;
     use std::time::{Duration, Instant};
 
+    /// `#wallclockassertsweep`: a wait that fails only when the awaited event
+    /// never happens. It bounds no latency, so a loaded host cannot trip it.
+    const HANG_CEILING: Duration = Duration::from_secs(30);
+
     #[test]
     fn socket_directory_override_moves_editor_endpoint_off_project_storage() {
         let root = Path::new("/workspace/project");
@@ -2826,9 +2830,16 @@ mod tests {
     fn connect_watchdog_returns_before_a_wedged_connect_finishes() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("wedged-connect.sock");
-        let started = Instant::now();
-        let err = run_connect_with_timeout(&path, Duration::from_millis(100), || {
-            thread::sleep(Duration::from_secs(1));
+        // `#wallclockassertsweep`: ordering, not elapsed time. The wedged
+        // connect is released only after the watchdog has returned, so a
+        // watchdog that waited for it would hold until the release's hang
+        // ceiling, and `finished` records which of the two happened first.
+        let finished = Arc::new(AtomicBool::new(false));
+        let worker_finished = Arc::clone(&finished);
+        let (release, released) = std::sync::mpsc::channel::<()>();
+        let err = run_connect_with_timeout(&path, Duration::from_millis(100), move || {
+            let _ = released.recv_timeout(HANG_CEILING);
+            worker_finished.store(true, Ordering::SeqCst);
             Ok(())
         })
         .expect_err("a connect attempt beyond its deadline must fail closed");
@@ -2838,9 +2849,10 @@ mod tests {
             "unexpected timeout error: {err:#}"
         );
         assert!(
-            started.elapsed() < Duration::from_secs(1),
+            !finished.load(Ordering::SeqCst),
             "watchdog waited for the wedged connect worker to finish"
         );
+        drop(release);
     }
 
     /// Sets its flag from a Rust TLS destructor, after a deliberate delay, so a
@@ -2937,6 +2949,7 @@ mod tests {
         std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
 
         let root_clone = root.clone();
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel();
         let server = thread::spawn(move || {
             start_listener_with_logger_and_read_timeout(
                 &root_clone,
@@ -2945,32 +2958,31 @@ mod tests {
                 Duration::from_millis(100),
                 None,
                 local_ipc_identity(),
-                None,
+                Some(ready_tx),
             )
             .ok()
         });
-        thread::sleep(Duration::from_millis(100));
+        ready_rx
+            .recv_timeout(HANG_CEILING)
+            .expect("the test listener never announced readiness");
 
-        let stream = try_connect_with_timeout_for_pid(
-            &root,
-            u64::from(std::process::id()),
-            Duration::from_secs(1),
-        )
-        .expect("connect to test listener");
+        let stream =
+            try_connect_with_timeout_for_pid(&root, u64::from(std::process::id()), HANG_CEILING)
+                .expect("connect to test listener");
+        // `#wallclockassertsweep`: the client backstop is the hang ceiling.
+        // Only the listener's 100ms read timeout can end this read with a clean
+        // EOF; the backstop firing surfaces as a read error, not `Ok(0)`, so
+        // the clean close below proves the listener enforced its timeout
+        // without bounding how quickly a loaded host delivered it.
         stream
-            .set_recv_timeout(Some(Duration::from_secs(2)))
+            .set_recv_timeout(Some(HANG_CEILING))
             .expect("set client-side test backstop");
         let (mut reader, writer) = stream.split();
-        let started = Instant::now();
         let mut byte = [0u8; 1];
         let read = reader
             .read(&mut byte)
-            .expect("listener should close the half-open connection cleanly");
+            .expect("listener did not enforce its per-connection read timeout");
         assert_eq!(read, 0, "listener should close without a response body");
-        assert!(
-            started.elapsed() < Duration::from_secs(1),
-            "listener did not enforce its per-connection read timeout"
-        );
 
         drop(writer);
         let _ = std::fs::remove_file(socket_path(&root));
@@ -3237,7 +3249,7 @@ mod tests {
     }
 
     fn wait_for_test_listener(root: &Path) {
-        let deadline = Instant::now() + Duration::from_secs(2);
+        let deadline = Instant::now() + HANG_CEILING;
         while !socket_path(root).exists() && Instant::now() < deadline {
             thread::sleep(Duration::from_millis(10));
         }
@@ -3370,18 +3382,34 @@ mod tests {
         // Regression for #jbacceptwedge: the accept loop used to block on the
         // (potentially slow) apply handler, piling connections up in the socket
         // backlog ("22 unaccepted connections"). Now each connection is handled
-        // on its own thread, so N concurrent sends to a slow handler complete in
-        // ~one handler-duration rather than ~N. Sequential handling of three
-        // 600ms runs would take ~1.8s+; the parallel bound below is generous
-        // enough for CI variance while still failing under the old loop.
+        // on its own thread, so N concurrent sends to a slow handler are all in
+        // flight at once.
+        //
+        // `#wallclockassertsweep`: proven by ordering, not elapsed time. Each
+        // handler holds until all three sends are inside the handler at the
+        // same moment. The old single-threaded loop never admits a second
+        // handler while the first holds, so the first holds to the hang ceiling
+        // and the peaks below stay at 1; a per-connection-thread listener
+        // reaches 3 however slowly a loaded host schedules the clients.
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().to_path_buf();
         std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
 
+        let entered = Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let peak_inflight = Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let handler_entered = Arc::clone(&entered);
+        let handler_peak_inflight = Arc::clone(&peak_inflight);
         let root_clone = root.clone();
         let server = thread::spawn(move || {
             start_listener(&root_clone, move |msg| {
-                thread::sleep(Duration::from_millis(600));
+                handler_entered.fetch_add(1, Ordering::SeqCst);
+                let ceiling = Instant::now() + HANG_CEILING;
+                while handler_entered.load(Ordering::SeqCst) < 3 && Instant::now() < ceiling {
+                    thread::sleep(Duration::from_millis(5));
+                }
+                // Sampled while this handler is still in flight, so a listener
+                // that runs all three at once reports all three here.
+                handler_peak_inflight.fetch_max(inflight_connection_handlers(), Ordering::SeqCst);
                 let v: serde_json::Value = serde_json::from_str(msg).ok()?;
                 Some(
                     serde_json::json!({"type":"receipt","status":"applied","id":v["type"]})
@@ -3390,27 +3418,20 @@ mod tests {
             })
             .ok()
         });
-        thread::sleep(Duration::from_millis(120));
+        wait_for_test_listener(&root);
 
-        let start = Instant::now();
-        let inflight_sampler = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
-        let sampler_stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let sampler_inflight = inflight_sampler.clone();
-        let sampler_stop_clone = sampler_stop.clone();
-        let _sampler = thread::spawn(move || {
-            while !sampler_stop_clone.load(std::sync::atomic::Ordering::Relaxed) {
-                let seen = inflight_connection_handlers();
-                if seen > sampler_inflight.load(std::sync::atomic::Ordering::Relaxed) {
-                    sampler_inflight.store(seen, std::sync::atomic::Ordering::Relaxed);
-                }
-                thread::sleep(Duration::from_millis(25));
-            }
-        });
         let handles: Vec<_> = (0..3)
             .map(|i| {
                 let root = root.clone();
+                // Each handler holds until the slowest client arrives, so every
+                // client waits on the others' scheduling: its receipt deadline
+                // must be the hang ceiling, not the 6s production deadline.
                 thread::spawn(move || {
-                    send_message(&root, &serde_json::json!({"type": format!("m{}", i)}))
+                    send_message_with_timeout(
+                        &root,
+                        &serde_json::json!({"type": format!("m{}", i)}),
+                        HANG_CEILING,
+                    )
                 })
             })
             .collect();
@@ -3421,20 +3442,16 @@ mod tests {
                 "concurrent send should still receive a receipt"
             );
         }
-        sampler_stop.store(true, std::sync::atomic::Ordering::Relaxed);
-        let _ = _sampler.join();
-        let elapsed = start.elapsed();
-        assert!(
-            elapsed < Duration::from_millis(1500),
-            "3 concurrent sends to a 600ms handler took {:?} (expected parallel < 1.5s; \
-              sequential would be ~1.8s+)",
-            elapsed
+        assert_eq!(
+            entered.load(Ordering::SeqCst),
+            3,
+            "every send must reach the handler exactly once"
         );
-        let peak_inflight = inflight_sampler.load(std::sync::atomic::Ordering::Relaxed);
+        let peak_inflight = peak_inflight.load(Ordering::SeqCst);
         assert!(
-            peak_inflight >= 2,
-            "#jbacceptwedge regression: expected the listener to reach inflight>=2 while \
-             servicing 3 concurrent slow sends (proves per-connection-thread path exercised; \
+            peak_inflight >= 3,
+            "#jbacceptwedge regression: expected the listener to hold all 3 concurrent \
+             slow sends in flight at once (proves per-connection-thread path exercised; \
              old single-threaded loop could never exceed 1), observed peak={}",
             peak_inflight
         );
@@ -3526,7 +3543,7 @@ mod tests {
                 let (lock, condvar) = &*release_for_listener;
                 let mut released = lock.lock();
                 while !*released {
-                    let wait = condvar.wait_for(&mut released, Duration::from_secs(2));
+                    let wait = condvar.wait_for(&mut released, HANG_CEILING);
                     if wait.timed_out() {
                         return Some(
                             serde_json::json!({
@@ -3555,16 +3572,13 @@ mod tests {
             )
         });
         started_rx
-            .recv_timeout(Duration::from_secs(1))
+            .recv_timeout(HANG_CEILING)
             .expect("first publish should enter the handler and hold the projection");
 
-        let second = send_message_with_timeout(
-            &root,
-            &observe_lazily_current_message(&file),
-            Duration::from_secs(1),
-        )
-        .expect("duplicate publish should receive a synthetic applied receipt")
-        .expect("duplicate publish should return a receipt");
+        let second =
+            send_message_with_timeout(&root, &observe_lazily_current_message(&file), HANG_CEILING)
+                .expect("duplicate publish should receive a synthetic applied receipt")
+                .expect("duplicate publish should return a receipt");
         let second_receipt: serde_json::Value = serde_json::from_str(&second).unwrap();
         assert_eq!(second_receipt["status"], "applied");
         assert_eq!(second_receipt["duplicate"], true);
@@ -3700,7 +3714,7 @@ mod tests {
         );
 
         let msg = captured_rx
-            .recv_timeout(Duration::from_secs(1))
+            .recv_timeout(HANG_CEILING)
             .expect("listener saw a message");
         assert_eq!(msg["type"], "observe_lazily_current");
         assert_eq!(msg["file"], "/tmp/plan.md");

@@ -1,0 +1,10 @@
+⏺ Bash(cargo test -p agent-doc-harness)
+  ⎿  Running…
+
+  ⎿  You've hit your session limit · resets 9pm (America/New_York)
+     /upgrade to increase your usage limit.
+
+────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ bypass permissions on (shift+tab to cycle)

@@ -1895,20 +1895,23 @@ mod tests {
         let listener = ListenerOptions::new().name(name).create_sync().unwrap();
         // Accept the connection but hold it open without ever writing a response,
         // so the client's recv timeout fires.
+        //
+        // `#wallclockassertsweep`: ordering, not elapsed time. The connection is
+        // held until the client has already returned, so only the client's own
+        // recv timeout can end the read; a client that ignored it would read on
+        // until the hang-ceiling release closes the socket, and that EOF is a
+        // `Protocol` error, which the classification below rejects.
+        let (release, released) = std::sync::mpsc::channel::<()>();
         let handle = std::thread::spawn(move || {
             let _held = listener.accept();
-            std::thread::sleep(Duration::from_millis(600));
+            let _ = released.recv_timeout(Duration::from_secs(30));
         });
 
         let request = serde_json::json!({ "command": "document_state_projection" });
-        let started = std::time::Instant::now();
         let err = send_ndjson_request_to_actor(&socket_path, &request, Duration::from_millis(150))
             .expect_err("an unanswered actor read must error");
+        drop(release);
 
-        assert!(
-            started.elapsed() < Duration::from_secs(2),
-            "the read must fail within the bounded recv timeout"
-        );
         assert!(
             matches!(err, ActorRequestError::Timeout(_)),
             "recv-timeout read must be classified Timeout, got: {err:#}"

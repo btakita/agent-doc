@@ -122,16 +122,24 @@ preflight and every closeout (`#answerbyrequestid`):
 
 Before you raise any operator question (a waiting item, a request packet, a
 choices block, a question todo), search the recorded answers:
-`agent-doc decision search <FILE> <question, [#id], decision id or
-⟦decision:…⟧ stamp> [--json]`. It ranks answered decisions: exact id first,
+`agent-doc decision search [<FILE>] <question, [#id], decision id or
+⟦decision:…⟧ stamp> [--json]`. Name `<FILE>` to search that document;
+leave it out to search every session document of the current project and its
+`decisions.md` registry (`#decisionsearchnofile`). Only the first word can be
+`<FILE>`, and only when it names an existing session document. Any other
+first word ending in `.md` is refused as a mistyped path; `--project` reads
+every word as the query. It ranks answered decisions: exact id first,
 then a decision stamp, then the same normalized question, then the work
 item a request was raised for, then wording and tsift recall (which also finds answers in other session documents). Each hit
-shows the verbatim answer, where and when it was given, and the copies still
-open. The last line says whether tsift recall ran; when tsift is missing, its
-index is stale, or it passes its deadline (60s,
-`AGENT_DOC_DECISION_SEARCH_TIMEOUT_MS`), the ranking is the ledger's alone. If a hit answers your
-question, act on it and cite its decision id; ask only when nothing does,
-and say you searched.
+names its document and shows the verbatim answer, where and when it was
+given, and the copies still open. A `decisions.md` record also shows its state
+and rationale; one that is no longer `accepted` says so and what replaced it,
+so do not act on it. A project search lists what it did not search. The last
+line says whether tsift recall ran; when tsift is missing, its index is
+stale, or it passes its deadline (60s,
+`AGENT_DOC_DECISION_SEARCH_TIMEOUT_MS`), the ranking is the ledger's alone. If
+a hit answers your question, act on it and cite its decision id; ask only when
+nothing does, and say you searched.
 
 When a turn is about to ask the operator something (its prompt names an
 open question or asks for a decision, or the contract already pushes an

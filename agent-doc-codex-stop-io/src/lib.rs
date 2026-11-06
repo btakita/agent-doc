@@ -13584,6 +13584,7 @@ mod closeout_guidance_agreement_tests {
             tracked_item_aliases: Vec::new(),
             heartbeat_at_secs: None,
             frozen: None,
+            quota_block: None,
             claimed_at_secs: 1,
             expires_at_secs: 100,
             owner_session: None,

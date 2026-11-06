@@ -1,5 +1,5 @@
 //! `#workerresponsestructure` — render a background worker's hand-back into
-//! the response structure and extract its open items.
+//! the response structure and extract its action items.
 //!
 //! `agent-doc queue report-complete` used to quote a worker's hand-back
 //! verbatim. A hand-back the coordinator passed as one long line rendered as
@@ -7,20 +7,26 @@
 //! prose and never became queue work.
 //!
 //! A hand-back that labels its sections — `**Summary**`, `## Verification`,
-//! `Open items:` and the aliases in [`LABELS`] — is parsed into
+//! `Action items:` and the aliases in [`LABELS`] — is parsed into
 //! [`WorkerHandback`] and rendered in the canonical order
-//! Summary, What changed, Verification, Open items, Next actions. Rendering
+//! Summary, What changed, Verification, Action items, Open items, Notes,
+//! Next actions. Rendering
 //! never drops text: every body line is kept byte for byte (outer blank lines
 //! of a section are trimmed), an alias label survives as a sub-label inside
 //! its canonical section, and text before the first label leads the Summary.
 //! A hand-back that does not structure itself, meaning fewer than two labels
-//! and no Open items label, is returned unchanged, so an unstructured response
-//! is still recorded verbatim. A plain `Label:` line counts only for a
-//! canonical heading; `Tests:` is ordinary prose.
+//! and no Action items or Open items label, is returned unchanged, so an
+//! unstructured response is still recorded verbatim. A plain `Label:` line
+//! counts only for a canonical heading; `Tests:` is ordinary prose.
 //!
-//! [`WorkerHandback::open_items`] lists each open item (a top-level list
-//! entry, else a paragraph) as one line; the reporter turns each into a
-//! follow-up queue row.
+//! `#handbackopenitemstriage`: the section a bullet sits in is the only signal
+//! of what it asks for, because guessing from its prose is not reliable.
+//! [`WorkerHandback::action_items`] lists work someone still has to do, and
+//! the reporter turns each one into a follow-up queue row.
+//! **Notes** (limits, state, FYIs) are rendered and never queued.
+//! [`WorkerHandback::open_items`] lists the entries of the older **Open items**
+//! section, which mixed the two: they are rendered and held for the
+//! coordinator to triage, never queued unreviewed.
 
 /// One canonical section of the response structure, in render order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -28,16 +34,23 @@ pub enum SectionKind {
     Summary,
     WhatChanged,
     Verification,
+    /// Work someone still has to do: each entry becomes a queue row.
+    ActionItems,
+    /// Unclassified entries, held for coordinator triage.
     OpenItems,
+    /// Limits, state, and FYIs: rendered, never queued.
+    Notes,
     NextActions,
 }
 
 impl SectionKind {
-    pub const ALL: [SectionKind; 5] = [
+    pub const ALL: [SectionKind; 7] = [
         SectionKind::Summary,
         SectionKind::WhatChanged,
         SectionKind::Verification,
+        SectionKind::ActionItems,
         SectionKind::OpenItems,
+        SectionKind::Notes,
         SectionKind::NextActions,
     ];
 
@@ -47,7 +60,9 @@ impl SectionKind {
             SectionKind::Summary => "Summary",
             SectionKind::WhatChanged => "What changed",
             SectionKind::Verification => "Verification",
+            SectionKind::ActionItems => "Action items",
             SectionKind::OpenItems => "Open items",
+            SectionKind::Notes => "Notes",
             SectionKind::NextActions => "Next actions",
         }
     }
@@ -67,13 +82,16 @@ pub const LABELS: &[(&str, SectionKind)] = &[
     ("verification", SectionKind::Verification),
     ("tests", SectionKind::Verification),
     ("test results", SectionKind::Verification),
+    ("action items", SectionKind::ActionItems),
+    ("action item", SectionKind::ActionItems),
+    ("remaining work", SectionKind::ActionItems),
     ("open items", SectionKind::OpenItems),
     ("open item", SectionKind::OpenItems),
     ("open questions", SectionKind::OpenItems),
-    ("limits", SectionKind::OpenItems),
-    ("known limits", SectionKind::OpenItems),
-    ("limitations", SectionKind::OpenItems),
-    ("remaining work", SectionKind::OpenItems),
+    ("notes", SectionKind::Notes),
+    ("limits", SectionKind::Notes),
+    ("known limits", SectionKind::Notes),
+    ("limitations", SectionKind::Notes),
     ("next actions", SectionKind::NextActions),
     ("next action", SectionKind::NextActions),
     ("next steps", SectionKind::NextActions),
@@ -102,7 +120,7 @@ pub struct WorkerHandback {
     pub sections: Vec<HandbackSection>,
 }
 
-/// Values of an Open items section that mean "nothing is open".
+/// Values of an item section that mean "nothing is open".
 const NONE_MARKERS: &[&str] = &[
     "none",
     "n/a",
@@ -152,12 +170,15 @@ impl WorkerHandback {
             }
         }
         // One stray label in prose (`Tests: 12 passed.`) is not a structure.
-        // An Open items label alone still is: it is the section that must not
-        // be buried.
-        let has_open_items = sections
-            .iter()
-            .any(|section| section.kind == SectionKind::OpenItems);
-        if sections.len() < 2 && !has_open_items {
+        // An Action items or Open items label alone still is: those sections
+        // must not be buried.
+        let has_item_section = sections.iter().any(|section| {
+            matches!(
+                section.kind,
+                SectionKind::ActionItems | SectionKind::OpenItems
+            )
+        });
+        if sections.len() < 2 && !has_item_section {
             return None;
         }
         trim_blank_edges(&mut preamble);
@@ -209,12 +230,22 @@ impl WorkerHandback {
         blocks.join("\n\n")
     }
 
-    /// Every open item, one whitespace-collapsed line each, in order and
-    /// de-duplicated. A "none"-style value lists nothing.
+    /// Every action item, which is the only entry that becomes a queue row.
+    pub fn action_items(&self) -> Vec<String> {
+        self.items_of(SectionKind::ActionItems)
+    }
+
+    /// Every entry of an Open items section, held for coordinator triage.
     pub fn open_items(&self) -> Vec<String> {
+        self.items_of(SectionKind::OpenItems)
+    }
+
+    /// The entries of every `kind` section, one whitespace-collapsed line
+    /// each, in order and de-duplicated. A "none"-style value lists nothing.
+    fn items_of(&self, kind: SectionKind) -> Vec<String> {
         let mut items: Vec<String> = Vec::new();
         for section in &self.sections {
-            if section.kind != SectionKind::OpenItems {
+            if section.kind != kind {
                 continue;
             }
             for item in split_items(&section.lines) {
@@ -237,6 +268,14 @@ pub fn structure_response(response: &str) -> String {
         Some(handback) => handback.render(),
         None => response.to_string(),
     }
+}
+
+/// The action items of `response` (empty when it labels no Action items
+/// section).
+pub fn action_items(response: &str) -> Vec<String> {
+    WorkerHandback::parse(response)
+        .map(|handback| handback.action_items())
+        .unwrap_or_default()
 }
 
 /// The open items of `response` (empty when it labels no Open items section).
@@ -725,8 +764,7 @@ mod tests {
 
     #[test]
     fn duplicate_open_items_are_listed_once() {
-        let text =
-            "**Open items:**\n- same limit\n- same limit\n**Limits:**\n- same limit\n- other\n";
+        let text = "**Open items:**\n- same limit\n- same limit\n**Open questions:**\n- same limit\n- other\n";
         assert_eq!(
             open_items(text),
             vec!["same limit".to_string(), "other".to_string()]
@@ -735,9 +773,73 @@ mod tests {
 
     #[test]
     fn rendering_is_a_fixed_point() {
-        let text = "**Summary:** a\n**Verification:** b\n**Open items:**\n- c\n";
+        let text = concat!(
+            "**Summary:** a\n**Verification:** b\n**Action items:**\n- c\n",
+            "**Open items:**\n- d\n**Notes:**\n- e\n",
+        );
         let once = structure_response(text);
         assert_eq!(structure_response(&once), once);
+        assert_eq!(action_items(&once), action_items(text));
         assert_eq!(open_items(&once), open_items(text));
+    }
+
+    /// `#handbackopenitemstriage`: the section decides what a bullet asks for.
+    /// Only an Action items entry is work; notes are kept for the reader, and
+    /// an Open items entry stays unclassified.
+    #[test]
+    fn action_items_notes_and_open_items_stay_apart() {
+        let text = concat!(
+            "**Summary:** done\n",
+            "**Notes:**\n- `cargo clean` is done\n",
+            "**Remaining work:**\n- wire the gutter stamp\n",
+            "**Limits:**\n- >512-commit documents can miss answers\n",
+            "**Open items:**\n- Nothing was applied to it\n",
+            "**Action items:**\n- file the anchor as a backlog item\n",
+        );
+        let handback = WorkerHandback::parse(text).expect("labelled");
+        assert_eq!(
+            handback.action_items(),
+            vec![
+                "wire the gutter stamp".to_string(),
+                "file the anchor as a backlog item".to_string(),
+            ]
+        );
+        assert_eq!(
+            handback.open_items(),
+            vec!["Nothing was applied to it".to_string()]
+        );
+        let rendered = handback.render();
+        assert_no_text_lost(text, &rendered);
+        let position = |needle: &str| {
+            rendered
+                .find(needle)
+                .unwrap_or_else(|| panic!("{needle:?} missing: {rendered}"))
+        };
+        assert!(position("**Action items**") < position("**Open items**"));
+        assert!(position("**Open items**") < position("**Notes**"));
+        assert!(position("`cargo clean` is done") > position("**Notes**"));
+        assert!(position("_Limits:_") > position("**Notes**"));
+    }
+
+    #[test]
+    fn an_action_items_label_alone_is_a_structure_and_a_notes_label_alone_is_not() {
+        let text = "All done.\n\nAction items: fix the timer test";
+        assert_eq!(
+            structure_response(text),
+            "**Summary**\n\nAll done.\n\n**Action items**\n\nfix the timer test"
+        );
+        assert_eq!(action_items(text), vec!["fix the timer test".to_string()]);
+
+        let note = "All done.\n\nNotes: `cargo clean` is done";
+        assert_eq!(structure_response(note), note);
+        assert!(action_items(note).is_empty() && open_items(note).is_empty());
+    }
+
+    #[test]
+    fn none_action_items_queue_nothing() {
+        for none in ["None.", "none", "- none", "N/A"] {
+            let text = format!("**Summary:** done\n**Action items:**\n{none}\n");
+            assert!(action_items(&text).is_empty(), "{none:?} queued an item");
+        }
     }
 }

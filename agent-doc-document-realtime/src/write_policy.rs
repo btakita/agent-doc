@@ -424,18 +424,19 @@ fn rebase_agent_candidate_over_editor_cut_reconciled(
 ///   components keep the operator's edit, disjoint edits converge, and an
 ///   agent-owned `status`/`log` keeps the agent's op with a logged conflict).
 ///
-/// The response component is the shortcut's own and is never touched. When the
-/// texts do not share one component layout nothing is carried, and
-/// [`warn_dropped_agent_component_ops`] reports the loss instead.
+/// The response component is the shortcut's own and is never touched. A
+/// component the agent created over `merge_base` (a first `agent:recap`, a
+/// `patch:todo` that had to create `agent:todo`) is inserted at its canonical
+/// slot when the editor cut does not already hold it. Any other layout change
+/// is left uncarried, and [`warn_dropped_agent_component_ops`] reports a
+/// created component that still did not land (`#recapcreaterebasecarry`).
 pub fn carry_agent_component_ops_onto_response_rebase(
     merge_base: &str,
     agent_target: &str,
     editor_cut: &str,
     rebased: String,
 ) -> String {
-    use agent_doc_element::component_scope::{
-        ComponentWriteScope, replace_component_bodies, top_level_component_bodies,
-    };
+    use agent_doc_element::component_scope::{ComponentWriteScope, top_level_component_bodies};
     let (Some(base), Some(agent), Some(editor), Some(current)) = (
         top_level_component_bodies(merge_base),
         top_level_component_bodies(agent_target),
@@ -444,64 +445,82 @@ pub fn carry_agent_component_ops_onto_response_rebase(
     ) else {
         return rebased;
     };
-    let same_layout = |other: &[agent_doc_element::component_scope::TopLevelComponentBody]| {
-        other.len() == base.len()
-            && other
+    // The base's components, in order, as a subsequence of each side. An
+    // inserted component (the agent created one the base lacks) does not by
+    // itself refuse the shared components' body carry.
+    let align = |bodies: &[agent_doc_element::component_scope::TopLevelComponentBody]| -> Option<Vec<usize>> {
+        let mut cursor = 0usize;
+        let mut indexes = Vec::with_capacity(base.len());
+        for item in &base {
+            let found = bodies[cursor..]
                 .iter()
-                .zip(&base)
-                .all(|(left, right)| left.component == right.component)
+                .position(|candidate| candidate.component == item.component)?;
+            indexes.push(cursor + found);
+            cursor += found + 1;
+        }
+        Some(indexes)
     };
-    if !same_layout(&agent) || !same_layout(&editor) || !same_layout(&current) {
-        return rebased;
-    }
-    let mut take_agent = Vec::new();
-    let mut take_merged = Vec::new();
-    for (((base_body, agent_body), editor_body), current_body) in
-        base.iter().zip(&agent).zip(&editor).zip(&current)
-    {
-        if base_body.component.name == AGENT_RESPONSE_COMPONENT {
-            continue;
-        }
-        let base_text = &merge_base[base_body.body.clone()];
-        let agent_text = &agent_target[agent_body.body.clone()];
-        let editor_text = &editor_cut[editor_body.body.clone()];
-        let current_text = &rebased[current_body.body.clone()];
-        if agent_text == base_text || agent_text == editor_text || current_text != editor_text {
-            continue;
-        }
-        if editor_text == base_text {
-            take_agent.push(base_body.component.clone());
-        } else {
-            take_merged.push(base_body.component.clone());
-        }
-    }
     let mut rebased = rebased;
-    if !take_agent.is_empty()
-        && let Some(carried) = replace_component_bodies(
-            &rebased,
-            agent_target,
-            &ComponentWriteScope::new(take_agent),
-        )
+    if let (Some(agent_at), Some(editor_at), Some(current_at)) =
+        (align(&agent), align(&editor), align(&current))
     {
-        rebased = carried;
-    }
-    if !take_merged.is_empty() {
-        let plan = agent_doc_merge::merge(agent_doc_merge::MergeRequest::cell(
-            merge_base,
-            agent_target,
-            editor_cut,
-        ));
-        if !plan.fell_back
-            && let Some(carried) = replace_component_bodies(
+        let mut take_agent = Vec::new();
+        let mut take_merged = Vec::new();
+        for (index, base_body) in base.iter().enumerate() {
+            if base_body.component.name == AGENT_RESPONSE_COMPONENT {
+                continue;
+            }
+            let agent_body = &agent[agent_at[index]];
+            let editor_body = &editor[editor_at[index]];
+            let current_body = &current[current_at[index]];
+            let base_text = &merge_base[base_body.body.clone()];
+            let agent_text = &agent_target[agent_body.body.clone()];
+            let editor_text = &editor_cut[editor_body.body.clone()];
+            let current_text = &rebased[current_body.body.clone()];
+            if agent_text == base_text || agent_text == editor_text || current_text != editor_text {
+                continue;
+            }
+            if editor_text == base_text {
+                take_agent.push(base_body.component.clone());
+            } else {
+                take_merged.push(base_body.component.clone());
+            }
+        }
+        if !take_agent.is_empty()
+            && let Some(carried) = splice_component_bodies_by_identity(
                 &rebased,
-                &plan.merged_doc,
-                &ComponentWriteScope::new(take_merged),
+                agent_target,
+                &ComponentWriteScope::new(take_agent),
             )
         {
             rebased = carried;
         }
+        if !take_merged.is_empty() {
+            // A created component makes the whole-document cell merge fall
+            // back on structural divergence. Strip just those sections so the
+            // shared components still go through the authorship policy, then
+            // insert the created component afterwards.
+            let agent_for_merge = excise_sections(
+                agent_target,
+                &created_sections_absent_from(&agent, &base, &editor),
+            );
+            let plan = agent_doc_merge::merge(agent_doc_merge::MergeRequest::cell(
+                merge_base,
+                &agent_for_merge,
+                editor_cut,
+            ));
+            if !plan.fell_back
+                && let Some(carried) = splice_component_bodies_by_identity(
+                    &rebased,
+                    &plan.merged_doc,
+                    &ComponentWriteScope::new(take_merged),
+                )
+            {
+                rebased = carried;
+            }
+        }
     }
-    rebased
+    insert_agent_created_components(&agent, agent_target, &base, &editor, rebased)
 }
 
 /// One agent component op a rebase onto the editor cut did not carry.
@@ -520,8 +539,11 @@ pub struct DroppedAgentComponentOp {
 /// `merge_base` that `rebased` does not carry: the component holds the editor
 /// cut's body verbatim, not the agent's.
 ///
-/// Pure. Empty when nothing was dropped or the texts do not share one
-/// component layout (a layout change is not attributable per component).
+/// Pure. A component the agent created (present in `agent_target`, absent from
+/// `merge_base`) is reported even when the texts no longer share one component
+/// layout, so a first recap or `patch:todo` cannot vanish silently
+/// (`#recapcreaterebasecarry`). Empty when nothing was dropped, or when a
+/// layout change other than that creation is not attributable per component.
 pub fn dropped_agent_component_ops(
     merge_base: &str,
     agent_target: &str,
@@ -537,36 +559,74 @@ pub fn dropped_agent_component_ops(
     ) else {
         return Vec::new();
     };
-    let same_layout = |other: &[agent_doc_element::component_scope::TopLevelComponentBody]| {
-        other.len() == base.len()
-            && other
-                .iter()
-                .zip(&base)
-                .all(|(left, right)| left.component == right.component)
-    };
-    if !same_layout(&agent) || !same_layout(&editor) || !same_layout(&current) {
-        return Vec::new();
+    let mut dropped = Vec::new();
+    for base_body in &base {
+        if base_body.component.name == AGENT_RESPONSE_COMPONENT {
+            continue;
+        }
+        let Some(agent_body) = agent
+            .iter()
+            .find(|body| body.component == base_body.component)
+        else {
+            continue;
+        };
+        let Some(editor_body) = editor
+            .iter()
+            .find(|body| body.component == base_body.component)
+        else {
+            continue;
+        };
+        let Some(current_body) = current
+            .iter()
+            .find(|body| body.component == base_body.component)
+        else {
+            continue;
+        };
+        let base_text = &merge_base[base_body.body.clone()];
+        let agent_text = &agent_target[agent_body.body.clone()];
+        let editor_text = &editor_cut[editor_body.body.clone()];
+        let current_text = &rebased[current_body.body.clone()];
+        if agent_text != base_text && agent_text != editor_text && current_text == editor_text {
+            dropped.push(DroppedAgentComponentOp {
+                component: base_body.component.name.clone(),
+                occurrence: base_body.component.occurrence,
+                operator_changed: editor_text != base_text,
+            });
+        }
     }
-    base.iter()
-        .zip(&agent)
-        .zip(&editor)
-        .zip(&current)
-        .filter_map(|(((base_body, agent_body), editor_body), current_body)| {
-            if base_body.component.name == AGENT_RESPONSE_COMPONENT {
-                return None;
-            }
-            let base_text = &merge_base[base_body.body.clone()];
-            let agent_text = &agent_target[agent_body.body.clone()];
-            let editor_text = &editor_cut[editor_body.body.clone()];
-            let current_text = &rebased[current_body.body.clone()];
-            (agent_text != base_text && agent_text != editor_text && current_text == editor_text)
-                .then(|| DroppedAgentComponentOp {
-                    component: base_body.component.name.clone(),
-                    occurrence: base_body.component.occurrence,
-                    operator_changed: editor_text != base_text,
-                })
-        })
-        .collect()
+    for agent_body in &agent {
+        if agent_body.component.name == AGENT_RESPONSE_COMPONENT
+            || base
+                .iter()
+                .any(|body| body.component == agent_body.component)
+        {
+            continue;
+        }
+        let agent_text = &agent_target[agent_body.body.clone()];
+        let current_body = current
+            .iter()
+            .find(|body| body.component == agent_body.component);
+        let landed = current_body.is_some_and(|body| &rebased[body.body.clone()] == agent_text);
+        if landed {
+            continue;
+        }
+        let editor_body = editor
+            .iter()
+            .find(|body| body.component == agent_body.component);
+        // The editor's version was kept only when the rebased body is that
+        // version. A component nobody else has, left out entirely, is unjustified.
+        let operator_changed = editor_body.is_some_and(|body| {
+            let editor_text = &editor_cut[body.body.clone()];
+            current_body.is_some_and(|current| &rebased[current.body.clone()] == editor_text)
+                && editor_text != agent_text
+        });
+        dropped.push(DroppedAgentComponentOp {
+            component: agent_body.component.name.clone(),
+            occurrence: agent_body.component.occurrence,
+            operator_changed,
+        });
+    }
+    dropped
 }
 
 /// `#statuspatchdrop` (b): say so on stderr when a rebase discards an agent
@@ -590,6 +650,154 @@ fn warn_dropped_agent_component_ops(
             dropped.component, dropped.occurrence, dropped.operator_changed, dropped.component,
         );
     }
+}
+
+/// `dst` with each scoped top-level body replaced by the same identity's body
+/// in `src`. Unlike `replace_component_bodies`, the documents may differ by
+/// components outside `scope`: a created recap must not block carrying a
+/// status patch beside it.
+fn splice_component_bodies_by_identity(
+    dst: &str,
+    src: &str,
+    scope: &agent_doc_element::component_scope::ComponentWriteScope,
+) -> Option<String> {
+    use agent_doc_element::component_scope::top_level_component_bodies;
+    if scope.is_empty() {
+        return Some(dst.to_string());
+    }
+    let dst_bodies = top_level_component_bodies(dst)?;
+    let src_bodies = top_level_component_bodies(src)?;
+    if scope.components().iter().any(|scoped| {
+        !dst_bodies.iter().any(|body| &body.component == scoped)
+            || !src_bodies.iter().any(|body| &body.component == scoped)
+    }) {
+        return None;
+    }
+    let mut spliced = String::with_capacity(dst.len());
+    let mut cursor = 0usize;
+    for dst_body in &dst_bodies {
+        if !scope.contains(&dst_body.component.name, dst_body.component.occurrence) {
+            continue;
+        }
+        let src_body = src_bodies
+            .iter()
+            .find(|body| body.component == dst_body.component)?;
+        spliced.push_str(&dst[cursor..dst_body.body.start]);
+        spliced.push_str(&src[src_body.body.clone()]);
+        cursor = dst_body.body.end;
+    }
+    spliced.push_str(&dst[cursor..]);
+    Some(spliced)
+}
+
+/// Sections of components the agent created that the editor cut does not hold.
+fn created_sections_absent_from(
+    agent: &[agent_doc_element::component_scope::TopLevelComponentBody],
+    base: &[agent_doc_element::component_scope::TopLevelComponentBody],
+    editor: &[agent_doc_element::component_scope::TopLevelComponentBody],
+) -> Vec<std::ops::Range<usize>> {
+    agent
+        .iter()
+        .filter(|body| {
+            body.component.name != AGENT_RESPONSE_COMPONENT
+                && !base
+                    .iter()
+                    .any(|candidate| candidate.component == body.component)
+                && !editor
+                    .iter()
+                    .any(|candidate| candidate.component == body.component)
+        })
+        .map(|body| body.section.clone())
+        .collect()
+}
+
+fn excise_sections(doc: &str, ranges: &[std::ops::Range<usize>]) -> String {
+    if ranges.is_empty() {
+        return doc.to_string();
+    }
+    let mut ranges = ranges.to_vec();
+    ranges.sort_by_key(|range| range.start);
+    let mut out = String::with_capacity(doc.len());
+    let mut cursor = 0usize;
+    for range in ranges {
+        if range.start < cursor || range.end > doc.len() {
+            continue;
+        }
+        out.push_str(&doc[cursor..range.start]);
+        cursor = range.end;
+    }
+    out.push_str(&doc[cursor..]);
+    out
+}
+
+/// Insert each component the agent created and the editor cut lacks, at the
+/// canonical slot. A section that does not parse back out is left uncarried
+/// so [`dropped_agent_component_ops`] reports it.
+fn insert_agent_created_components(
+    agent: &[agent_doc_element::component_scope::TopLevelComponentBody],
+    agent_target: &str,
+    base: &[agent_doc_element::component_scope::TopLevelComponentBody],
+    editor: &[agent_doc_element::component_scope::TopLevelComponentBody],
+    mut rebased: String,
+) -> String {
+    use agent_doc_element::component_scope::top_level_component_bodies;
+    for body in agent {
+        if body.component.name == AGENT_RESPONSE_COMPONENT
+            || base
+                .iter()
+                .any(|candidate| candidate.component == body.component)
+            || editor
+                .iter()
+                .any(|candidate| candidate.component == body.component)
+        {
+            continue;
+        }
+        let Some(current) = top_level_component_bodies(&rebased) else {
+            return rebased;
+        };
+        if current
+            .iter()
+            .any(|candidate| candidate.component == body.component)
+        {
+            continue;
+        }
+        let section = &agent_target[body.section.clone()];
+        if let Some(updated) = insert_component_section(&rebased, &body.component.name, section) {
+            rebased = updated;
+        }
+    }
+    rebased
+}
+
+fn insert_component_section(dst: &str, name: &str, section: &str) -> Option<String> {
+    use agent_doc_element::component_scope::top_level_component_bodies;
+    let components = element::parse(dst).ok()?;
+    let offset = element::canonical_managed_component_insertion_offset(dst, &components, name);
+    if offset > dst.len() {
+        return None;
+    }
+    let section = section.trim_matches('\n');
+    let mut updated = String::with_capacity(dst.len() + section.len() + 2);
+    updated.push_str(&dst[..offset]);
+    if !updated.is_empty() && !updated.ends_with('\n') {
+        updated.push('\n');
+    }
+    // Scaffold sections start with a blank line (`RECAP_SECTION`, `TODO_SECTION`).
+    if !updated.is_empty() {
+        updated.push('\n');
+    }
+    updated.push_str(section);
+    updated.push('\n');
+    let after = &dst[offset..];
+    if !after.is_empty() && !after.starts_with('\n') {
+        updated.push('\n');
+    }
+    updated.push_str(after);
+    let bodies = top_level_component_bodies(&updated)?;
+    bodies
+        .iter()
+        .any(|body| body.component.name == name)
+        .then_some(updated)
 }
 
 /// Rebase a retained target only when the converged editor cut still carries a
@@ -6410,6 +6618,152 @@ mod status_patch_drop_tests {
                 component: "status".to_string(),
                 occurrence: 0,
                 operator_changed: false,
+            }]
+        );
+    }
+
+    fn with_section_before_exchange(doc: &str, section: &str) -> String {
+        doc.replacen(
+            "## Exchange <!-- agent:exchange patch=append -->\n",
+            &format!("{section}## Exchange <!-- agent:exchange patch=append -->\n"),
+            1,
+        )
+    }
+
+    /// `#recapcreaterebasecarry`: the response shortcut used to refuse any
+    /// layout change, so the first `agent:recap` (and a status patch beside it)
+    /// vanished with `dropped_agent_component_ops` empty.
+    #[test]
+    fn response_rebase_carries_a_recap_the_agent_created() {
+        let recap = "## Recap <!-- agent:recap patch=replace -->\nThe cycle committed.\n<!-- /agent:recap -->\n\n";
+        let base = doc(&status_body("Latest release: v0.35.558"), "", "- old row\n");
+        let target =
+            with_section_before_exchange(&doc(AGENT_STATUS, RESPONSE, "- old row\n"), recap);
+        let cut = doc(
+            &status_body("Latest release: v0.35.558"),
+            RESPONSE,
+            "- old row\n- typed\n",
+        );
+
+        let carried =
+            carry_agent_component_ops_onto_response_rebase(&base, &target, &cut, cut.clone());
+        assert!(carried.contains("The cycle committed."), "{carried}");
+        assert!(carried.contains("- typed\n"), "{carried}");
+        assert_eq!(status_of(&carried), AGENT_STATUS, "{carried}");
+        assert_eq!(
+            carried.matches("### Re: release status").count(),
+            1,
+            "{carried}"
+        );
+        assert!(
+            carried.find("<!-- /agent:status -->").unwrap() < carried.find("agent:recap").unwrap()
+        );
+        assert!(
+            carried.find("<!-- /agent:recap -->").unwrap() < carried.find("## Exchange").unwrap()
+        );
+        assert!(dropped_agent_component_ops(&base, &target, &cut, &carried).is_empty());
+
+        let rebased = rebase_agent_candidate_over_editor_cut(&base, &target, &cut).unwrap();
+        assert!(rebased.contains("The cycle committed."), "{rebased}");
+        assert_eq!(status_of(&rebased), AGENT_STATUS, "{rebased}");
+        assert!(rebased.contains("- typed\n"), "{rebased}");
+        assert!(dropped_agent_component_ops(&base, &target, &cut, &rebased).is_empty());
+    }
+
+    /// A `patch:todo` that creates `agent:todo` is the same hole: the component
+    /// is new, so the shared-layout carry used to return the editor cut unchanged.
+    #[test]
+    fn response_rebase_carries_a_todo_the_agent_created_beside_a_status_patch() {
+        let todo = "## Todo\n\n<!-- agent:todo priority -->\n- [ ] [#recapcreaterebasecarry] carry the created component\n<!-- /agent:todo -->\n\n";
+        let base = doc(&status_body("Latest release: v0.35.558"), "", "- old row\n");
+        let target =
+            with_section_before_exchange(&doc(AGENT_STATUS, RESPONSE, "- old row\n"), todo);
+        let cut = doc(
+            &status_body("Latest release: v0.35.558"),
+            "",
+            "- old row\n- typed while the response was in flight\n",
+        );
+
+        let rebased = rebase_agent_candidate_over_editor_cut(&base, &target, &cut).unwrap();
+
+        assert!(
+            rebased.contains("- [ ] [#recapcreaterebasecarry] carry the created component"),
+            "{rebased}"
+        );
+        assert_eq!(status_of(&rebased), AGENT_STATUS, "{rebased}");
+        assert!(
+            rebased.contains("- typed while the response was in flight"),
+            "{rebased}"
+        );
+        assert_eq!(
+            rebased.matches("### Re: release status").count(),
+            1,
+            "{rebased}"
+        );
+        assert!(dropped_agent_component_ops(&base, &target, &cut, &rebased).is_empty());
+        assert!(
+            rebased.find("<!-- /agent:queue -->").unwrap() < rebased.find("agent:todo").unwrap(),
+            "todo lands at its canonical slot, after queue: {rebased}"
+        );
+    }
+
+    /// Disjoint status edits still converge when the only layout change is the
+    /// component the agent created. The cell merge used to fall back and drop
+    /// both the status edit and the new component.
+    #[test]
+    fn created_recap_does_not_block_the_cell_policy_on_status() {
+        let recap = "## Recap <!-- agent:recap patch=replace -->\nThe cycle committed.\n<!-- /agent:recap -->\n\n";
+        let base_status = status_body("Latest release: v0.35.558");
+        let base = doc(&base_status, "", "- old row\n");
+        let agent_status =
+            base_status.replace("Latest release: v0.35.558", "Latest release: v0.35.559");
+        let target =
+            with_section_before_exchange(&doc(&agent_status, RESPONSE, "- old row\n"), recap);
+        let operator_status = base_status.replace("(older prose)", "(operator note)");
+        let cut = doc(&operator_status, RESPONSE, "- old row\n");
+
+        let rebased = rebase_agent_candidate_over_editor_cut(&base, &target, &cut).unwrap();
+        let status = status_of(&rebased);
+        assert!(status.contains("Latest release: v0.35.559"), "{status}");
+        assert!(status.contains("(operator note)"), "{status}");
+        assert!(rebased.contains("The cycle committed."), "{rebased}");
+        assert!(dropped_agent_component_ops(&base, &target, &cut, &rebased).is_empty());
+    }
+
+    /// When the carry cannot land the created component, the drop is visible.
+    /// An editor that already holds its own copy keeps that copy.
+    #[test]
+    fn a_created_component_left_behind_is_reported_dropped() {
+        let agent_recap =
+            "## Recap <!-- agent:recap patch=replace -->\nAgent recap.\n<!-- /agent:recap -->\n\n";
+        let operator_recap = "## Recap <!-- agent:recap patch=replace -->\nOperator recap.\n<!-- /agent:recap -->\n\n";
+        let base = doc(&status_body("p"), "", "- row\n");
+        let target =
+            with_section_before_exchange(&doc(&status_body("p"), RESPONSE, "- row\n"), agent_recap);
+        let untouched = base.clone();
+
+        assert_eq!(
+            dropped_agent_component_ops(&base, &target, &untouched, &untouched),
+            vec![DroppedAgentComponentOp {
+                component: "recap".to_string(),
+                occurrence: 0,
+                operator_changed: false,
+            }]
+        );
+
+        let cut = with_section_before_exchange(
+            &doc(&status_body("p"), RESPONSE, "- row\n"),
+            operator_recap,
+        );
+        let rebased = rebase_agent_candidate_over_editor_cut(&base, &target, &cut).unwrap();
+        assert!(rebased.contains("Operator recap."), "{rebased}");
+        assert!(!rebased.contains("Agent recap."), "{rebased}");
+        assert_eq!(
+            dropped_agent_component_ops(&base, &target, &cut, &rebased),
+            vec![DroppedAgentComponentOp {
+                component: "recap".to_string(),
+                occurrence: 0,
+                operator_changed: true,
             }]
         );
     }

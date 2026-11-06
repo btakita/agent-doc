@@ -56,6 +56,9 @@ pub enum OrphanDrainEvent {
     BackoffReadFailed,
     QueueControlReadFailed,
     QueuePausedSuppressed,
+    /// A live supervisor's idle watch owns a drainable head, so the sweep left
+    /// it alone (`#tmuxciorphandrain`). Logged on the transition, never per tick.
+    SupervisorAliveYielded,
     BackoffClaimFailed,
     Dispatch,
     DispatchSkipped,
@@ -74,6 +77,7 @@ impl OrphanDrainEvent {
             Self::BackoffReadFailed => "controller_orphan_drain_backoff_read_failed",
             Self::QueueControlReadFailed => "controller_orphan_drain_queue_control_read_failed",
             Self::QueuePausedSuppressed => "controller_orphan_drain_suppressed",
+            Self::SupervisorAliveYielded => "controller_orphan_drain_supervisor_alive",
             Self::BackoffClaimFailed => "controller_orphan_drain_backoff_claim_failed",
             Self::Dispatch => "controller_orphan_drain_dispatch",
             Self::DispatchSkipped => "controller_orphan_drain_dispatch_skipped",
@@ -320,6 +324,12 @@ mod tests {
                 .diagnostic_event(true)
                 .map(OrphanDrainEvent::as_str),
             Some("controller_orphan_drain_suppressed"),
+        );
+        // `tests/clear_queued_live_turn_tmux.rs` handshakes on this name
+        // (`#tmuxciorphandrain`).
+        assert_eq!(
+            OrphanDrainEvent::SupervisorAliveYielded.as_str(),
+            "controller_orphan_drain_supervisor_alive",
         );
     }
 

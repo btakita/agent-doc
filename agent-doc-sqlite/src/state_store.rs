@@ -492,8 +492,12 @@ fn open_document_authority_handoff_db(project_root: &Path) -> Result<Connection>
 ///
 /// This database is intentionally separate from `state.db`: accepting a
 /// telemetry handoff must not wait behind state-ledger maintenance. Generation
-/// never moves backwards, so an in-flight predecessor cannot reclaim a row a
-/// promoted successor already owns.
+/// never moves backwards here, and an ordinary claim refuses to move it
+/// backwards too, so an in-flight predecessor cannot reclaim a row a live
+/// successor already owns. The serving controller moves a generation backwards
+/// only through [`reclaim_abandoned_document_authority_handoff`], after the
+/// durable bootstrap proves that higher generation is not a live controller
+/// (`#abandonedreplacementhandoff`).
 pub fn enqueue_document_authority_handoff(
     project_root: &Path,
     handoff: &DocumentAuthorityHandoff,
@@ -599,6 +603,38 @@ pub fn claim_document_authority_handoff(
     )? > 0)
 }
 
+/// Move one abandoned higher generation's claim back to `controller_generation`.
+///
+/// `#abandonedreplacementhandoff`: [`claim_document_authority_handoff`] will not
+/// do this. A preparing replacement can claim a row and die before promotion;
+/// the older controller that keeps serving must be able to take that exact
+/// generation back. The caller proves the higher generation is not a live
+/// controller. This update names that generation, so a live successor's claim
+/// is not a match.
+pub fn reclaim_abandoned_document_authority_handoff(
+    project_root: &Path,
+    document_hash: &str,
+    authority_epoch: u64,
+    from_generation: u64,
+    controller_generation: u64,
+) -> Result<bool> {
+    let conn = open_document_authority_handoff_db(project_root)?;
+    Ok(conn.execute(
+        "UPDATE document_authority_handoffs SET controller_generation = ?4 \
+         WHERE document_hash = ?1 AND authority_epoch = ?2 AND controller_generation = ?3 \
+           AND ?3 > ?4",
+        params![
+            document_hash,
+            sqlite_i64(authority_epoch, "authority handoff epoch")?,
+            sqlite_i64(from_generation, "authority handoff controller generation")?,
+            sqlite_i64(
+                controller_generation,
+                "authority handoff controller generation"
+            )?,
+        ],
+    )? > 0)
+}
+
 /// Delete an acknowledged handoff row and record its receipt, atomically.
 ///
 /// `#predecessorlandandack`: the delete alone would leave nothing for a successor
@@ -666,9 +702,10 @@ pub fn acknowledge_document_authority_handoff(
 /// `controller_generation` to reconcile (`#predecessorlandandack`).
 ///
 /// Strictly older only: a controller's own acknowledgements are already folded
-/// into its projection, and a newer generation's belong to that generation's
-/// successor, so a receipt is never consumed out from under the controller it
-/// was written for.
+/// into its projection. A newer generation's receipt is not returned here. The
+/// serving controller loads those separately and keeps one only when that
+/// generation is abandoned (`#abandonedreplacementhandoff`); a live successor's
+/// receipt stays for the controller it was written for.
 pub fn load_document_authority_ack_receipts_before(
     project_root: &Path,
     controller_generation: u64,
@@ -678,6 +715,42 @@ pub fn load_document_authority_ack_receipts_before(
         "SELECT document_hash, controller_generation, authority_epoch, event_id \
          FROM document_authority_handoff_ack_receipts \
          WHERE controller_generation < ?1 \
+         ORDER BY document_hash, controller_generation",
+    )?;
+    let rows = statement
+        .query_map(
+            [sqlite_i64(
+                controller_generation,
+                "authority handoff controller generation",
+            )?],
+            |row| {
+                Ok(DocumentAuthorityAckReceipt {
+                    document_hash: row.get(0)?,
+                    controller_generation: row.get::<_, i64>(1)?.max(0) as u64,
+                    authority_epoch: row.get::<_, i64>(2)?.max(0) as u64,
+                    event_id: row.get(3)?,
+                })
+            },
+        )?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    Ok(rows)
+}
+
+/// Acknowledgement receipts a newer generation wrote
+/// (`#abandonedreplacementhandoff`).
+///
+/// This is the read. The serving controller discards one only after the durable
+/// bootstrap proves that generation is not a live controller. A live successor's
+/// receipt must stay for the controller it was written for.
+pub fn load_document_authority_ack_receipts_after(
+    project_root: &Path,
+    controller_generation: u64,
+) -> Result<Vec<DocumentAuthorityAckReceipt>> {
+    let conn = open_document_authority_handoff_db(project_root)?;
+    let mut statement = conn.prepare(
+        "SELECT document_hash, controller_generation, authority_epoch, event_id \
+         FROM document_authority_handoff_ack_receipts \
+         WHERE controller_generation > ?1 \
          ORDER BY document_hash, controller_generation",
     )?;
     let rows = statement
@@ -10956,6 +11029,83 @@ mod tests {
         Ok(())
     }
 
+    /// `#abandonedreplacementhandoff`: an ordinary claim cannot move a generation
+    /// backwards. Reclaim names the abandoned generation and moves only that claim.
+    #[test]
+    fn reclaim_abandoned_authority_handoff_moves_one_higher_generation_back() -> Result<()> {
+        let dir = tempfile::TempDir::new()?;
+        assert!(enqueue_document_authority_handoff(
+            dir.path(),
+            &DocumentAuthorityHandoff {
+                document_hash: "doc".to_string(),
+                authority_epoch: 10,
+                controller_generation: 1,
+                payload_json: "payload".to_string(),
+            },
+        )?);
+        assert!(claim_document_authority_handoff(dir.path(), "doc", 10, 3)?);
+        assert!(!claim_document_authority_handoff(dir.path(), "doc", 10, 1)?);
+        assert!(!reclaim_abandoned_document_authority_handoff(
+            dir.path(),
+            "doc",
+            10,
+            2,
+            1,
+        )?);
+        assert!(reclaim_abandoned_document_authority_handoff(
+            dir.path(),
+            "doc",
+            10,
+            3,
+            1,
+        )?);
+        let retained = load_document_authority_handoffs(dir.path())?;
+        assert_eq!(retained.len(), 1);
+        assert_eq!(retained[0].controller_generation, 1);
+        assert!(!reclaim_abandoned_document_authority_handoff(
+            dir.path(),
+            "doc",
+            10,
+            3,
+            1,
+        )?);
+        Ok(())
+    }
+
+    /// `#abandonedreplacementhandoff`: receipts newer than the reader are visible
+    /// to `load_after` and invisible to `load_before`.
+    #[test]
+    fn authority_ack_receipt_after_exposes_only_newer_generations() -> Result<()> {
+        let dir = tempfile::TempDir::new()?;
+        assert!(enqueue_document_authority_handoff(
+            dir.path(),
+            &DocumentAuthorityHandoff {
+                document_hash: "doc".to_string(),
+                authority_epoch: 10,
+                controller_generation: 2,
+                payload_json: "payload".to_string(),
+            },
+        )?);
+        assert!(acknowledge_document_authority_handoff(
+            dir.path(),
+            "doc",
+            10,
+            2,
+            "event-10",
+            "payload",
+        )?);
+        assert!(load_document_authority_ack_receipts_before(dir.path(), 1)?.is_empty());
+        assert_eq!(
+            load_document_authority_ack_receipts_after(dir.path(), 1)?
+                .iter()
+                .map(|receipt| receipt.controller_generation)
+                .collect::<Vec<_>>(),
+            vec![2],
+        );
+        assert!(load_document_authority_ack_receipts_after(dir.path(), 2)?.is_empty());
+        Ok(())
+    }
+
     /// `#retentionperiodic`: the interval stamp is keyed by database path. A
     /// single process opens several projects' `state.db` (the cross-project
     /// controller sweeps walk every root), so a process-global stamp would let
@@ -11621,8 +11771,11 @@ mod state_db_corruption_evidence_tests {
             Some("drain_target_pending_through_target")
         );
 
-        conn.execute("DELETE FROM documents WHERE document_id = ?1", [&document_id])
-            .unwrap();
+        conn.execute(
+            "DELETE FROM documents WHERE document_id = ?1",
+            [&document_id],
+        )
+        .unwrap();
         let actor_absent = load_queue_control_from_db(&conn, "document", &document_id)
             .unwrap()
             .unwrap();

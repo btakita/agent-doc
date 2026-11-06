@@ -61809,11 +61809,6 @@ mod tests {
         );
         assert_eq!(projected_cycle_id(&successor, "doc"), None);
         assert!(
-            state_store::load_document_authority_handoffs(dir.path())
-                .unwrap()
-                .is_empty()
-        );
-        assert!(
             state_store::load_document_authority_ack_receipts_before(dir.path(), 2)
                 .unwrap()
                 .is_empty(),
@@ -61939,6 +61934,325 @@ mod tests {
         assert_eq!(
             projected_cycle_id(&successor, "doc-pred").as_deref(),
             Some("cycle-pred")
+        );
+    }
+
+
+    fn write_controller_generation_record(
+        dir: &tempfile::TempDir,
+        generation: u64,
+        pid: u32,
+        epoch: u64,
+        handoff_state: ControllerHandoffState,
+    ) {
+        let mut recorded = test_bootstrap(dir);
+        recorded.controller_generation = generation;
+        recorded.pid = pid;
+        recorded.bootstrap_epoch = epoch;
+        recorded.handoff_state = handoff_state;
+        super::super::write_bootstrap_state(&recorded).unwrap();
+    }
+
+    fn enqueue_claimed_authority_handoff(
+        dir: &tempfile::TempDir,
+        event: &agent_doc_state_backbone::StateEvent,
+        authority_epoch: u64,
+        generation: u64,
+    ) {
+        assert!(
+            state_store::enqueue_document_authority_handoff(
+                dir.path(),
+                &state_store::DocumentAuthorityHandoff {
+                    document_hash: event.document_hash().to_string(),
+                    authority_epoch,
+                    controller_generation: 1,
+                    payload_json: serde_json::to_string(event).unwrap(),
+                },
+            )
+            .unwrap()
+        );
+        assert!(
+            state_store::claim_document_authority_handoff(
+                dir.path(),
+                event.document_hash(),
+                authority_epoch,
+                generation,
+            )
+            .unwrap()
+        );
+    }
+
+    /// `#abandonedreplacementhandoff`: the drain worker is installed in
+    /// `new_arc` before promotion. A preparing replacement on its private
+    /// socket must not claim or acknowledge; the public controller keeps that
+    /// work, including while `prepare_handoff` has marked it `Preparing`.
+    #[test]
+    fn abandoned_replacement_preparing_drain_does_not_claim_or_ack() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let event = authority_handoff_test_event("authority-preparing-replacement", "doc", 808);
+        enqueue_claimed_authority_handoff(&dir, &event, 808, 1);
+        let mut bootstrap = test_bootstrap(&dir);
+        bootstrap.controller_generation = 2;
+        bootstrap.handoff_state = ControllerHandoffState::Preparing;
+        bootstrap.socket_path = dir.path().join("controller-handoff-private.sock");
+        bootstrap.previous_controller_pid = Some(1);
+        let replacement = ControllerRuntime::new(bootstrap).unwrap();
+
+        assert!(
+            !replacement
+                .drain_document_authority_handoffs(dir.path())
+                .unwrap()
+        );
+
+        let retained = state_store::load_document_authority_handoffs(dir.path()).unwrap();
+        assert_eq!(retained.len(), 1);
+        assert_eq!(retained[0].controller_generation, 1);
+        assert!(
+            state_store::load_document_authority_ack_receipts_before(dir.path(), 3)
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(ledgered_authority_epoch(&replacement), None);
+    }
+
+    #[test]
+    fn abandoned_replacement_public_preparing_controller_still_drains() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let event = authority_handoff_test_event("authority-public-preparing", "doc", 809);
+        enqueue_claimed_authority_handoff(&dir, &event, 809, 1);
+        let mut bootstrap = test_bootstrap(&dir);
+        bootstrap.handoff_state = ControllerHandoffState::Preparing;
+        let serving = ControllerRuntime::new(bootstrap).unwrap();
+
+        assert!(
+            !serving
+                .drain_document_authority_handoffs(dir.path())
+                .unwrap()
+        );
+
+        assert!(
+            state_store::load_document_authority_handoffs(dir.path())
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(ledgered_authority_epoch(&serving), Some(809));
+    }
+
+    /// The replacement claimed the row and died. The durable record still names
+    /// that generation, and its pid is gone, so the older controller reclaims it.
+    #[test]
+    fn abandoned_replacement_serving_controller_reclaims_the_claimed_row() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let event = authority_handoff_test_event("authority-abandoned-claim", "doc", 810);
+        enqueue_claimed_authority_handoff(&dir, &event, 810, 2);
+        write_controller_generation_record(
+            &dir,
+            2,
+            u32::MAX,
+            state_store::timestamp_secs(),
+            ControllerHandoffState::Preparing,
+        );
+        let serving = ControllerRuntime::new(test_bootstrap(&dir)).unwrap();
+
+        assert!(
+            !serving
+                .drain_document_authority_handoffs(dir.path())
+                .unwrap()
+        );
+
+        assert!(
+            state_store::load_document_authority_handoffs(dir.path())
+                .unwrap()
+                .is_empty(),
+            "the serving controller must acknowledge the row the dead replacement claimed"
+        );
+        assert_eq!(ledgered_authority_epoch(&serving), Some(810));
+    }
+
+    /// Abort wrote the serving controller back as the durable record. The row
+    /// the replacement claimed is still abandoned, with no pid check required.
+    #[test]
+    fn abandoned_replacement_serving_controller_reclaims_when_the_record_is_itself() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let event = authority_handoff_test_event("authority-abandoned-rollback", "doc", 812);
+        enqueue_claimed_authority_handoff(&dir, &event, 812, 2);
+        let serving = ControllerRuntime::new(test_bootstrap(&dir)).unwrap();
+        let recorded = serving.bootstrap_snapshot().unwrap();
+        write_controller_generation_record(
+            &dir,
+            recorded.controller_generation,
+            recorded.pid,
+            recorded.bootstrap_epoch,
+            ControllerHandoffState::Stable,
+        );
+
+        assert!(
+            !serving
+                .drain_document_authority_handoffs(dir.path())
+                .unwrap()
+        );
+        assert_eq!(ledgered_authority_epoch(&serving), Some(812));
+    }
+
+    /// The replacement landed the event, acknowledged the row, and died. The
+    /// receipt is newer than the controller that kept serving, and that
+    /// controller's load missed the append.
+    #[test]
+    fn abandoned_replacement_serving_controller_folds_the_replacement_receipt() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let event = authority_handoff_test_event("authority-abandoned-receipt", "doc", 811);
+        let serving = ControllerRuntime::new(test_bootstrap(&dir)).unwrap();
+        assert_eq!(ledgered_authority_epoch(&serving), None);
+        assert!(super::super::append_state_event_for_test(dir.path(), &event).unwrap());
+        enqueue_claimed_authority_handoff(&dir, &event, 811, 2);
+        assert!(
+            state_store::acknowledge_document_authority_handoff(
+                dir.path(),
+                "doc",
+                811,
+                2,
+                &event.event_id,
+                &serde_json::to_string(&event).unwrap(),
+            )
+            .unwrap()
+        );
+        write_controller_generation_record(
+            &dir,
+            2,
+            u32::MAX,
+            state_store::timestamp_secs(),
+            ControllerHandoffState::Preparing,
+        );
+
+        assert!(
+            !serving
+                .drain_document_authority_handoffs(dir.path())
+                .unwrap()
+        );
+
+        assert_eq!(
+            ledgered_authority_epoch(&serving),
+            Some(811),
+            "a dead replacement's receipt must be folded by the controller that kept serving"
+        );
+        assert!(
+            state_store::load_document_authority_ack_receipts_after(dir.path(), 1)
+                .unwrap()
+                .is_empty(),
+            "the serving controller consumes the abandoned receipt"
+        );
+    }
+
+    /// A live newer controller still owns its claim and its receipt. The older
+    /// drain must not take either, including while that controller is preparing.
+    #[test]
+    fn abandoned_replacement_serving_controller_leaves_a_live_replacement() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let claimed = authority_handoff_test_event("authority-live-claim", "doc-claim", 813);
+        let acknowledged =
+            authority_handoff_test_event("authority-live-receipt", "doc-receipt", 814);
+        let serving = ControllerRuntime::new(test_bootstrap(&dir)).unwrap();
+        enqueue_claimed_authority_handoff(&dir, &claimed, 813, 2);
+        assert!(super::super::append_state_event_for_test(dir.path(), &acknowledged).unwrap());
+        enqueue_claimed_authority_handoff(&dir, &acknowledged, 814, 2);
+        assert!(
+            state_store::acknowledge_document_authority_handoff(
+                dir.path(),
+                "doc-receipt",
+                814,
+                2,
+                &acknowledged.event_id,
+                &serde_json::to_string(&acknowledged).unwrap(),
+            )
+            .unwrap()
+        );
+        let epoch = state_store::timestamp_secs();
+        assert!(
+            crate::process::recorded_process_is_alive(std::process::id(), epoch),
+            "the replacement record must still read as this live process"
+        );
+        write_controller_generation_record(
+            &dir,
+            2,
+            std::process::id(),
+            epoch,
+            ControllerHandoffState::Preparing,
+        );
+
+        assert!(
+            !serving
+                .drain_document_authority_handoffs(dir.path())
+                .unwrap()
+        );
+
+        let retained = state_store::load_document_authority_handoffs(dir.path()).unwrap();
+        assert_eq!(retained.len(), 1);
+        assert_eq!(retained[0].document_hash, "doc-claim");
+        assert_eq!(retained[0].controller_generation, 2);
+        assert_eq!(
+            state_store::load_document_authority_ack_receipts_after(dir.path(), 1)
+                .unwrap()
+                .iter()
+                .map(|receipt| receipt.event_id.as_str())
+                .collect::<Vec<_>>(),
+            vec![acknowledged.event_id.as_str()],
+            "a live replacement's receipt stays for that generation"
+        );
+        assert!(
+            serving
+                .memory
+                .lock()
+                .state_projection
+                .document("doc-receipt")
+                .and_then(|projection| projection.document.latest_authority.clone())
+                .is_none(),
+            "the serving controller must not fold a live replacement's receipt"
+        );
+    }
+
+    #[test]
+    fn abandoned_replacement_authority_generation_truth_table() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let mut recorded = test_bootstrap(&dir);
+        recorded.controller_generation = 1;
+        recorded.pid = 10;
+        assert!(
+            ControllerRuntime::abandoned_replacement_authority_generation(
+                1, 10, 2, &recorded, true,
+            ),
+            "a record that is this serving process abandons higher claims"
+        );
+        recorded.controller_generation = 2;
+        recorded.pid = 99;
+        assert!(
+            !ControllerRuntime::abandoned_replacement_authority_generation(
+                1, 10, 2, &recorded, true,
+            ),
+            "a live newer controller keeps its claim"
+        );
+        assert!(
+            !ControllerRuntime::abandoned_replacement_authority_generation(
+                1, 10, 4, &recorded, true,
+            ),
+            "a live newer controller also keeps claims above itself"
+        );
+        assert!(
+            ControllerRuntime::abandoned_replacement_authority_generation(
+                1, 10, 2, &recorded, false,
+            ),
+            "a recorded newer controller that is not alive is abandoned"
+        );
+        assert!(
+            ControllerRuntime::abandoned_replacement_authority_generation(
+                1, 10, 4, &recorded, false,
+            ),
+            "once the recorded newer controller is dead, higher claims are abandoned too"
+        );
+        assert!(
+            !ControllerRuntime::abandoned_replacement_authority_generation(
+                1, 10, 1, &recorded, false,
+            ),
+            "a generation at or below the serving controller is not an abandoned replacement"
         );
     }
 

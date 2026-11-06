@@ -5,7 +5,7 @@
 //! Tmux state remains a layout input. Actor ownership is a controller-lifetime
 //! Lazily projection; SQLite hydrates and durably records that model.
 
-use crate::process::{is_same_project_controller_pid, process_is_alive};
+use crate::process::{is_same_project_controller_pid, process_is_alive, recorded_process_is_alive};
 use agent_doc_controller::dispatch::{
     ControllerDispatchProofScope, ControllerDispatchReceipt, ControllerDispatchResultStatus,
 };
@@ -10545,6 +10545,9 @@ impl ControllerRuntime {
                     if runtime.successor_promoted() {
                         break;
                     }
+                    // A preparing replacement reaches this loop before promotion.
+                    // The drain refuses to claim until this process is the one
+                    // still serving (`#abandonedreplacementhandoff`).
                     match runtime.drain_document_authority_handoffs(&project_root) {
                         Ok(true) => {
                             std::thread::sleep(retry_delay);
@@ -11369,13 +11372,31 @@ impl ControllerRuntime {
     /// does for a duplicate: a row at or below the folded high-water was folded
     /// by the load and needs no reload, which keeps a restart's first drain over
     /// the predecessor's ordinary receipts cheap.
+    ///
+    /// `#abandonedreplacementhandoff`: a preparing replacement can ACK and die.
+    /// Its receipt is newer than the controller that keeps serving, so the
+    /// older-only load never sees it. Receipts of a generation the durable
+    /// bootstrap proves is not live are folded here too. A live successor's
+    /// receipts are left for that successor.
     fn reconcile_predecessor_authority_acks(
         &self,
         project_root: &Path,
         generation: u64,
     ) -> Result<bool> {
-        let receipts =
+        let mut receipts =
             state_store::load_document_authority_ack_receipts_before(project_root, generation)?;
+        let mut abandoned = 0usize;
+        for receipt in
+            state_store::load_document_authority_ack_receipts_after(project_root, generation)?
+        {
+            if self.abandoned_replacement_authority_generation_for(
+                project_root,
+                receipt.controller_generation,
+            )? {
+                abandoned += 1;
+                receipts.push(receipt);
+            }
+        }
         if receipts.is_empty() {
             return Ok(false);
         }
@@ -11396,7 +11417,7 @@ impl ControllerRuntime {
                 agent_doc_ops_log_io::log_op(
                     project_root,
                     &format!(
-                        "document_authority_ack_receipt_fold_deferred receipts={} unfolded={unfolded} controller_generation={generation} folded_through={folded_through} error={error:#} (#predecessorlandandack)",
+                        "document_authority_ack_receipt_fold_deferred receipts={} abandoned={abandoned} unfolded={unfolded} controller_generation={generation} folded_through={folded_through} error={error:#} (#predecessorlandandack)",
                         receipts.len(),
                     ),
                 );
@@ -11405,7 +11426,7 @@ impl ControllerRuntime {
             agent_doc_ops_log_io::log_op(
                 project_root,
                 &format!(
-                    "document_authority_ack_receipt_refolded receipts={} unfolded={unfolded} controller_generation={generation} folded_through={folded_through} (#predecessorlandandack)",
+                    "document_authority_ack_receipt_refolded receipts={} abandoned={abandoned} unfolded={unfolded} controller_generation={generation} folded_through={folded_through} (#predecessorlandandack)",
                     receipts.len(),
                 ),
             );
@@ -11416,6 +11437,77 @@ impl ControllerRuntime {
         Ok(false)
     }
 
+    /// `true` when `claimed_generation` is above the serving controller and no
+    /// live newer controller owns it (`#abandonedreplacementhandoff`).
+    ///
+    /// The durable record being this process means the replacement never became
+    /// the recorded authority, or an abort wrote this process back. A recorded
+    /// controller newer than us that is still alive owns higher claims. One
+    /// that is not alive does not.
+    pub(crate) fn abandoned_replacement_authority_generation(
+        serving_generation: u64,
+        serving_pid: u32,
+        claimed_generation: u64,
+        recorded: &ControllerBootstrap,
+        recorded_owner_alive: bool,
+    ) -> bool {
+        if claimed_generation <= serving_generation {
+            return false;
+        }
+        if recorded.controller_generation == serving_generation && recorded.pid == serving_pid {
+            return true;
+        }
+        if recorded_owner_alive && recorded.controller_generation > serving_generation {
+            return false;
+        }
+        true
+    }
+
+    /// A preparing replacement is not the controller that serves this root.
+    ///
+    /// `#abandonedreplacementhandoff`: `new_arc` starts the handoff drain before
+    /// promotion. Claiming or acknowledging from that private socket strands the
+    /// row on a newer generation the older public controller cannot ordinarily
+    /// claim, and writes a receipt that only a still-newer generation would
+    /// read. `prepare_handoff` also marks the public controller `Preparing`;
+    /// that process is still the serving one and must keep draining. Stable
+    /// always drains, including a promoted replacement whose recorded socket is
+    /// already the public path.
+    fn document_authority_handoff_drain_waits_for_authority(&self) -> bool {
+        let bootstrap = self.bootstrap.lock();
+        if bootstrap.handoff_state == ControllerHandoffState::Stable {
+            return false;
+        }
+        bootstrap.socket_path != socket_path(&bootstrap.project_root)
+    }
+
+    /// Whether `claimed_generation` is a replacement this serving controller may
+    /// adopt (`#abandonedreplacementhandoff`).
+    ///
+    /// Unknown bootstrap is not proof. A live recorded controller newer than
+    /// this process owns the higher rows and receipts. This process's own
+    /// record, or a recorded newer controller that is not alive, means the
+    /// higher generation died and this process kept serving.
+    fn abandoned_replacement_authority_generation_for(
+        &self,
+        project_root: &Path,
+        claimed_generation: u64,
+    ) -> Result<bool> {
+        let serving = self.bootstrap.lock().clone();
+        let Some(recorded) = read_bootstrap(project_root)? else {
+            return Ok(false);
+        };
+        let recorded_owner_alive =
+            recorded_process_is_alive(recorded.pid, recorded.bootstrap_epoch);
+        Ok(Self::abandoned_replacement_authority_generation(
+            serving.controller_generation,
+            serving.pid,
+            claimed_generation,
+            &recorded,
+            recorded_owner_alive,
+        ))
+    }
+
     /// Fold every durable latest-value authority handoff this controller can
     /// generation-fence. `true` means at least one row remains retryable.
     ///
@@ -11423,18 +11515,48 @@ impl ControllerRuntime {
     /// receipts (`#predecessorwriteafterload`), so a fact with nothing to claim
     /// still reaches this projection before the handoff pass.
     fn drain_document_authority_handoffs(&self, project_root: &Path) -> Result<bool> {
+        if self.document_authority_handoff_drain_waits_for_authority() {
+            return Ok(false);
+        }
         let generation = self.bootstrap.lock().controller_generation;
         let mut retry = self.reconcile_predecessor_ledger_writes(project_root)?;
         if self.reconcile_predecessor_authority_acks(project_root, generation)? {
             retry = true;
         }
         for handoff in state_store::load_document_authority_handoffs(project_root)? {
-            if !state_store::claim_document_authority_handoff(
+            let mut claimed = state_store::claim_document_authority_handoff(
                 project_root,
                 &handoff.document_hash,
                 handoff.authority_epoch,
                 generation,
-            )? {
+            )?;
+            if !claimed
+                && handoff.controller_generation > generation
+                && self.abandoned_replacement_authority_generation_for(
+                    project_root,
+                    handoff.controller_generation,
+                )?
+            {
+                claimed = state_store::reclaim_abandoned_document_authority_handoff(
+                    project_root,
+                    &handoff.document_hash,
+                    handoff.authority_epoch,
+                    handoff.controller_generation,
+                    generation,
+                )?;
+                if claimed {
+                    agent_doc_ops_log_io::log_op(
+                        project_root,
+                        &format!(
+                            "document_authority_handoff_reclaimed_abandoned_generation document_hash={} authority_epoch={} from_generation={} controller_generation={generation} (#abandonedreplacementhandoff)",
+                            handoff.document_hash,
+                            handoff.authority_epoch,
+                            handoff.controller_generation,
+                        ),
+                    );
+                }
+            }
+            if !claimed {
                 continue;
             }
             let event: agent_doc_state_backbone::StateEvent =

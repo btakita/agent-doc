@@ -427,6 +427,9 @@ pub enum PoolRefillTrigger {
     Release,
     Lost,
     Frozen,
+    /// A worker stopped on a harness usage limit (`#workerquotaautodetect`).
+    /// The attempt holds no pool slot.
+    QuotaBlocked,
     /// A planning boundary (preflight, `plan`, steering, `queue pool`).
     Plan,
 }
@@ -438,6 +441,7 @@ impl PoolRefillTrigger {
             Self::Release => "release",
             Self::Lost => "lost",
             Self::Frozen => "frozen",
+            Self::QuotaBlocked => "quota_blocked",
             Self::Plan => "plan",
         }
     }

@@ -32,7 +32,7 @@ const GAUGE_WINDOW: usize = 10;
 const NOTICE_TRAILING_LINES: usize = 6;
 /// A worker's hand-back this short is the limit notice itself, even when a
 /// short hint line follows it.
-const SHORT_HANDBACK_LINES: usize = 4;
+pub(crate) const SHORT_HANDBACK_LINES: usize = 4;
 
 /// Where the limit was read from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -185,7 +185,7 @@ fn classify_handback_line(line: &str) -> Option<HarnessUsageLimit> {
 
 /// Top-level prose lines of a hand-back: fenced blocks and blockquotes are
 /// quotation, never the harness's own voice.
-fn handback_lines(text: &str) -> Vec<String> {
+pub(crate) fn handback_lines(text: &str) -> Vec<String> {
     let mut in_fence = false;
     let mut lines = Vec::new();
     for line in text.lines() {

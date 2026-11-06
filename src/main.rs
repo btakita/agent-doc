@@ -5119,6 +5119,10 @@ enum HookAction {
     CodexStop,
     /// Keep a clean Claude queue closeout draining (stdin JSON hook payload)
     ClaudeStop,
+    /// Record a harness usage limit from a subagent-end payload (stdin JSON).
+    /// Claude Code does not fire `Stop` for a subagent; Grok also remaps the
+    /// project Stop hook onto this event, and the second call stays quiet.
+    SubagentStop,
     /// Block a tool call that would write an untracked `#id` into source or a
     /// commit message (`PreToolUse` stdin JSON hook payload)
     CoinedIdPreToolUse,
@@ -6365,6 +6369,26 @@ fn init_tracing() {
         .init();
 
     tracing::debug!("agent-doc tracing initialized (filter: {})", filter);
+}
+
+/// Project a subagent-end quota block and print the pool refill.
+///
+/// The ledger write already happened inside the hook. A projection failure
+/// still leaves the attempt `QuotaBlocked`; the hook has already allowed the
+/// stop.
+fn announce_subagent_quota(
+    applied: agent_doc_queue_io::worker_quota_autodetect::SubagentQuotaBlockApplied,
+) {
+    if let Err(err) = print_worker_quota_blocked(&applied.file, &applied.claim) {
+        eprintln!(
+            "[agent-doc] the quota block is recorded for {}; projecting the row failed: {err:#}",
+            applied.file.display()
+        );
+    }
+    emit_subagent_pool_refill(
+        &applied.file,
+        agent_doc_queue::subagent_pool::PoolRefillTrigger::QuotaBlocked,
+    );
 }
 
 /// `#subagentworkpool`: print the work-pool refill after a trigger command
@@ -9149,8 +9173,24 @@ fn try_main() -> anyhow::Result<()> {
                 Ok(())
             }
             HookAction::CodexUserPromptSubmit => preflight_hook::handle_codex_user_prompt_submit(),
-            HookAction::CodexStop => agent_doc_codex_stop_io::handle_stop(),
-            HookAction::ClaudeStop => agent_doc_codex_stop_io::handle_claude_stop(),
+            HookAction::CodexStop => {
+                if let Some(applied) = agent_doc_codex_stop_io::handle_stop()? {
+                    announce_subagent_quota(applied);
+                }
+                Ok(())
+            }
+            HookAction::ClaudeStop => {
+                if let Some(applied) = agent_doc_codex_stop_io::handle_claude_stop()? {
+                    announce_subagent_quota(applied);
+                }
+                Ok(())
+            }
+            HookAction::SubagentStop => {
+                if let Some(applied) = agent_doc_codex_stop_io::handle_subagent_stop()? {
+                    announce_subagent_quota(applied);
+                }
+                Ok(())
+            }
             HookAction::CoinedIdPreToolUse => {
                 agent_doc_hooks_io::coined_id_pretooluse::handle_pretooluse()
             }

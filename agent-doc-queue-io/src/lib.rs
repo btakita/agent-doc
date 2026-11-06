@@ -29,6 +29,7 @@ pub mod queue_tombstone;
 pub mod stale_completion_repair;
 pub mod subagent_dispatch;
 pub mod subagent_pool;
+pub mod worker_quota_autodetect;
 pub mod sync_payload;
 pub mod write_queue;
 

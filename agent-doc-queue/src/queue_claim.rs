@@ -2834,10 +2834,12 @@ impl QueueClaimLedger {
 /// goes through this one function.
 ///
 /// A nest vector (`root: …: item`, `#nestlistlineage`) is one free-text key.
-/// The same bare `#tag` under two parents is two claims. A leading intent tag
-/// whose remainder is the work (`#subagents: #gh-fix <url>`) stays on the
-/// authored semantic identity. A binary-admitted trailing `[#q-…]` becomes
-/// the identity for otherwise free-text work.
+/// The same bare `#tag` under two parents is two claims. The word `pick`
+/// under a leading `#parent:` is two claims as well
+/// (`#sharedleafclaimidentity`). A leading intent tag whose remainder is
+/// other work (`#subagents: #gh-fix <url>`) stays on the authored semantic
+/// identity. A binary-admitted trailing `[#q-…]` becomes the identity for
+/// otherwise free-text work.
 pub fn claim_identity(item: &str) -> QueueItemIdentity {
     // Publication state is binary-owned attempt metadata. Normalize both the
     // canonical `effect state` form and the historical `state effect state`
@@ -2856,8 +2858,10 @@ pub fn claim_identity(item: &str) -> QueueItemIdentity {
 ///
 /// `queue_head_identity` strips a leading `#id:` as an intent tag, so
 /// `#parent: #rebase` would collapse to `rebase` and every nested copy would
-/// share one claim. A URL or prose ancestor is kept whole. A routing tag in
-/// front of other work is left to [`queue_head_identity`].
+/// share one claim. The choice word `pick` collapses the same way
+/// (`#choicetermcheck: pick`, `#sharedleafclaimidentity`). A URL or prose
+/// ancestor is kept whole. A routing tag in front of other work is left to
+/// [`queue_head_identity`].
 fn nest_vector_claim_identity(text: &str) -> Option<QueueItemIdentity> {
     let head = agent_doc_element_queue::subprompts::head_without_subprompts(text);
     let head = agent_doc_element_queue::strip_priority_markers(head.trim());
@@ -2877,13 +2881,17 @@ fn nest_vector_claim_identity(text: &str) -> Option<QueueItemIdentity> {
         && !leaf[1..]
             .chars()
             .any(|ch| !(ch.is_ascii_alphanumeric() || ch == '-' || ch == '_'));
+    // `#parent: pick` is one claim per parent. Any other free-text remainder
+    // of a leading intent tag stays stripped.
+    let leaf_keeps_parent = leaf_is_bare_id || leaf.eq_ignore_ascii_case("pick");
     if stripped != head {
         let keeps_parent = if stripped.contains(": ") {
             // `#parent: child: #rebase` keeps every ancestor. `#gh-fix: see: the
-            // bug` is a tagged line whose work contains a colon.
-            head.matches(": ").count() >= 2 && leaf_is_bare_id
+            // bug` is a tagged line whose work contains a colon. A `pick` leaf
+            // keeps its parents the same way (`#sharedleafclaimidentity`).
+            head.matches(": ").count() >= 2 && leaf_keeps_parent
         } else {
-            stripped == leaf && leaf_is_bare_id
+            stripped == leaf && leaf_keeps_parent
         };
         if !keeps_parent {
             return None;
@@ -3713,6 +3721,113 @@ mod tests {
             contracts
         );
         assert_eq!(resolve_claim_target(contracts, &heads).unwrap(), contracts);
+    }
+
+    /// `#sharedleafclaimidentity`: `#choicetermcheck: pick`,
+    /// `#flatcontextbullets: pick`, and `#duplicateordinalshift: pick` are
+    /// three claims. `queue_head_identity` strips the leading `#parent:` and
+    /// this key used to keep the parent only for a bare `#id`, so all three
+    /// were `pick`. After one was consumed, `queue claim --item pick` painted
+    /// `🟡` on every remaining row of that identity and admission rolled back
+    /// when the visible markers were `["bare", "🟡", "🟡"]`
+    /// (`claim_projection_unrepresentable`).
+    #[test]
+    fn shared_pick_leaf_keeps_its_parent_in_the_claim_identity() {
+        use agent_doc_element_queue::QueueItemIdentity;
+
+        let rows = [
+            "#choicetermcheck: pick",
+            "#flatcontextbullets: pick",
+            "#duplicateordinalshift: pick",
+        ];
+        let identities: Vec<_> = rows.iter().map(|row| claim_identity(row)).collect();
+        assert_eq!(
+            identities[0],
+            QueueItemIdentity::FreeText("#choicetermcheck: pick".into())
+        );
+        assert_eq!(
+            identities[1],
+            QueueItemIdentity::FreeText("#flatcontextbullets: pick".into())
+        );
+        assert_eq!(
+            identities[2],
+            QueueItemIdentity::FreeText("#duplicateordinalshift: pick".into())
+        );
+        assert_ne!(identities[0], identities[1]);
+        assert_ne!(identities[1], identities[2]);
+        assert_ne!(identities[0], claim_identity("pick"));
+        assert_eq!(
+            claim_identity("🟡 [#subagent:worker#1] #flatcontextbullets: Pick"),
+            identities[1]
+        );
+        // A deeper `pick` leaf keeps every ancestor. Other free-text
+        // remainders of a leading intent tag still strip.
+        assert_eq!(
+            claim_identity("#choicetermcheck: child: pick"),
+            QueueItemIdentity::FreeText("#choicetermcheck: child: pick".into())
+        );
+        assert_ne!(
+            claim_identity("#choicetermcheck: child: pick"),
+            claim_identity("#flatcontextbullets: child: pick")
+        );
+        assert_eq!(
+            claim_identity("#bug: The tmux panes are swapped."),
+            claim_identity("the tmux panes are swapped.")
+        );
+        assert_eq!(
+            claim_identity("#subagents: first"),
+            claim_identity("#other: first")
+        );
+        assert_eq!(claim_identity("#parent: pick one"), claim_identity("pick one"));
+
+        let body = "\
+- #choicetermcheck
+  - pick
+- #flatcontextbullets
+  - pick
+- #duplicateordinalshift
+  - pick
+";
+        let entries = crate::document_queue::parse(body).unwrap();
+        let nested: Vec<_> = crate::document_queue::executable_prompt_indexes(&entries)
+            .into_iter()
+            .map(|index| {
+                (
+                    crate::document_queue::lineage_claim_text(&entries, index).unwrap(),
+                    claim_identity_at(&entries, index).unwrap(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            nested
+                .iter()
+                .map(|(text, _)| text.as_str())
+                .collect::<Vec<_>>(),
+            rows
+        );
+        assert_eq!(
+            nested
+                .iter()
+                .map(|(_, identity)| identity)
+                .collect::<Vec<_>>(),
+            identities.iter().collect::<Vec<_>>()
+        );
+
+        let heads: Vec<String> = rows.iter().map(|row| (*row).to_string()).collect();
+        assert_eq!(nest_leaf_matches("pick", &heads), heads);
+        assert_eq!(
+            resolve_claim_target("pick", &heads).unwrap(),
+            "#choicetermcheck: pick"
+        );
+        assert_eq!(
+            resolve_claim_target("#flatcontextbullets: pick", &heads).unwrap(),
+            "#flatcontextbullets: pick"
+        );
+        let claimed = ClaimedQueueItems::from_identities([identities[1].clone()]);
+        assert!(claimed.claims("#flatcontextbullets: pick"));
+        assert!(!claimed.claims("#choicetermcheck: pick"));
+        assert!(!claimed.claims("#duplicateordinalshift: pick"));
+        assert!(!claimed.claims("pick"));
     }
 
     /// `#queueeffectidentity`: duplicate nested commands retain their effect

@@ -8,10 +8,11 @@
 use agent_doc_element::element;
 use agent_doc_markdown_ast::exchange_tree::{
     ExchangeNode, ExchangeNodeKind, ResponseTurnCellPolicy, duplicate_response_cell_node_indices,
-    parse_exchange_nodes, remove_all_salient_responses, render_exchange_nodes,
+    parse_exchange_nodes, remove_all_salient_responses, render_exchange_nodes, response_cell_spans,
 };
 use similar::{Algorithm, DiffTag, capture_diff_slices};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+use std::ops::Range;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResponseCellAddOutcome {
@@ -805,16 +806,174 @@ fn is_completion_cell_node(node: &ExchangeNode) -> bool {
             .is_some_and(|range| range.start == 0)
 }
 
-/// Remove the uncommitted response tail after `anchor_id` and add `response`.
+/// A node's identity as a position in the exchange. A prompt's id covers the
+/// boundary line parsed into it, and the boundary moves on every response.
+fn position_id(node: &ExchangeNode) -> String {
+    let mut node = node.clone();
+    node.lines.retain(|line| !boundary_line(line));
+    node.node_id()
+}
+
+/// One position in an exchange: the `occurrence`-th node (from 1) with `id`
+/// (`#responseanchornodeidentity`).
 ///
-/// A response node after the anchor is stale unless `retained_response_ids`
-/// keeps it. A binary completion cell is stale only when
+/// A node id is not a position. Replies share sections and openings and prompts
+/// repeat, so the last node with an id can be an uncommitted copy, and when the
+/// real node was edited it can be an older copy of it. The first anchors too late
+/// and leaves stale text. The second anchors too early and deletes whatever lies
+/// between. Numbering the copies makes both resolve correctly or not at all: a
+/// document with fewer copies than the anchor's has no anchor, and every caller
+/// then falls back to its additive path.
+struct TailAnchor {
+    id: String,
+    occurrence: usize,
+}
+
+impl TailAnchor {
+    fn at(nodes: &[ExchangeNode], index: usize) -> Self {
+        let id = position_id(&nodes[index]);
+        let occurrence = nodes[..=index]
+            .iter()
+            .filter(|node| position_id(node) == id)
+            .count();
+        Self { id, occurrence }
+    }
+
+    fn locate(&self, nodes: &[ExchangeNode]) -> Option<usize> {
+        nodes
+            .iter()
+            .enumerate()
+            .filter(|(_, node)| position_id(node) == self.id)
+            .nth(self.occurrence - 1)
+            .map(|(index, _)| index)
+    }
+}
+
+/// How many copies of each response node `nodes` holds.
+fn response_counts<'a>(
+    nodes: impl IntoIterator<Item = &'a ExchangeNode>,
+) -> HashMap<String, usize> {
+    let mut counts = HashMap::new();
+    for node in nodes {
+        if matches!(node.kind, ExchangeNodeKind::Response { .. }) {
+            *counts.entry(node.node_id()).or_insert(0) += 1;
+        }
+    }
+    counts
+}
+
+/// Take one copy of `id` from `counts`, reporting whether one was left.
+fn take_copy(counts: &mut HashMap<String, usize>, id: &str) -> bool {
+    match counts.get_mut(id) {
+        Some(count) if *count > 0 => {
+            *count -= 1;
+            true
+        }
+        _ => false,
+    }
+}
+
+/// The steps of an exchange: each whole response cell, and each prompt or salient
+/// node on its own.
+fn exchange_units(nodes: &[ExchangeNode]) -> Vec<Range<usize>> {
+    let mut cells = response_cell_spans(nodes).into_iter().peekable();
+    let mut units = Vec::new();
+    let mut index = 0;
+    while index < nodes.len() {
+        let unit = cells
+            .next_if(|cell| cell.start == index)
+            .unwrap_or(index..index + 1);
+        index = unit.end;
+        units.push(unit);
+    }
+    units
+}
+
+/// The last node two targets hold at one position, as `(prior, latest)` indices
+/// (`#responseanchornodeidentity`).
+///
+/// Whole steps align first, because a section two replies happen to share says
+/// nothing about their position: comparing nodes anchored inside the stale reply.
+/// The match then runs on through any nodes the next differing cell shares from
+/// its start, so a reply extended by a section, or revised after its opening, is
+/// still reconciled as that change and not as a replacement of the whole cell.
+fn last_shared_position(prior: &[ExchangeNode], latest: &[ExchangeNode]) -> Option<(usize, usize)> {
+    let unit_ids = |nodes: &[ExchangeNode], unit: &Range<usize>| {
+        nodes[unit.clone()]
+            .iter()
+            .map(position_id)
+            .collect::<Vec<_>>()
+    };
+    let mut latest_copies = HashMap::<Vec<String>, Vec<usize>>::new();
+    for unit in exchange_units(latest) {
+        latest_copies
+            .entry(unit_ids(latest, &unit))
+            .or_default()
+            .push(unit.end);
+    }
+    let mut prior_copies = HashMap::<Vec<String>, usize>::new();
+    let mut next = (0, 0);
+    for unit in exchange_units(prior) {
+        let ids = unit_ids(prior, &unit);
+        let seen = prior_copies.entry(ids.clone()).or_insert(0);
+        if let Some(latest_end) = latest_copies.get(&ids).and_then(|ends| ends.get(*seen)) {
+            next = (unit.end, *latest_end);
+        }
+        *seen += 1;
+    }
+    let (mut prior_next, mut latest_next) = next;
+    while prior_next < prior.len()
+        && latest_next < latest.len()
+        && position_id(&prior[prior_next]) == position_id(&latest[latest_next])
+    {
+        prior_next += 1;
+        latest_next += 1;
+    }
+    (prior_next > 0 && latest_next > 0).then(|| (prior_next - 1, latest_next - 1))
+}
+
+/// The tail nodes that are a repeat of `response` and must stay.
+///
+/// [`add_response_cell`] treats a run found anywhere as a replay, so when a copy
+/// sits before the anchor it would not reinstall this one: removing it would
+/// leave the turn with no reply at all.
+fn replayed_tail_run(
+    nodes: &[ExchangeNode],
+    anchor_index: usize,
+    response: &str,
+) -> anyhow::Result<Range<usize>> {
+    let incoming = parse_response_cell(response)?
+        .0
+        .iter()
+        .map(ExchangeNode::node_id)
+        .collect::<Vec<_>>();
+    let ids = nodes.iter().map(ExchangeNode::node_id).collect::<Vec<_>>();
+    let (head, tail) = ids.split_at(anchor_index + 1);
+    if !head.windows(incoming.len()).any(|run| run == incoming) {
+        return Ok(0..0);
+    }
+    Ok(tail
+        .windows(incoming.len())
+        .rposition(|run| run == incoming)
+        .map_or(0..0, |start| {
+            head.len() + start..head.len() + start + incoming.len()
+        }))
+}
+
+/// Remove the uncommitted response tail after `anchor` and add `response`.
+///
+/// A response node after the anchor is stale unless a copy of it in `held_responses`
+/// is still unaccounted for. `held_responses` counts copies because the question
+/// is whether this node is the held one: one the document already carries at or
+/// before the anchor says nothing for a later node with the same id, and keeping
+/// that node left a superseded reply's shared opening or section behind on its own
+/// (`#responseanchornodeidentity`). A binary completion cell is stale only when
 /// `removable_completion_ids` names it: the queue closeout that strikes its
 /// row owns its retirement, so an ordinary response supersession keeps it.
 fn supersede_response_tail_after_anchor(
     doc: &str,
-    anchor_id: &str,
-    retained_response_ids: &HashSet<String>,
+    anchor: &TailAnchor,
+    mut held_responses: HashMap<String, usize>,
     removable_completion_ids: &HashSet<String>,
     response: &str,
 ) -> anyhow::Result<Option<ResponseCellAddOutcome>> {
@@ -824,12 +983,13 @@ fn supersede_response_tail_after_anchor(
         .find(|component| component.name == "exchange")
         .ok_or_else(|| anyhow::anyhow!("document has no agent:exchange component"))?;
     let current_nodes = parse_exchange_nodes(exchange.content(doc));
-    let Some(anchor_index) = current_nodes
-        .iter()
-        .rposition(|node| node.node_id() == anchor_id)
-    else {
+    let Some(anchor_index) = anchor.locate(&current_nodes) else {
         return Ok(None);
     };
+    for node in &current_nodes[..=anchor_index] {
+        take_copy(&mut held_responses, &node.node_id());
+    }
+    let replayed_tail = replayed_tail_run(&current_nodes, anchor_index, response)?;
 
     let mut removed = false;
     let mut boundary = None;
@@ -843,7 +1003,8 @@ fn supersede_response_tail_after_anchor(
         }
         let stale_response = index > anchor_index
             && matches!(node.kind, ExchangeNodeKind::Response { .. })
-            && !retained_response_ids.contains(&node.node_id())
+            && !replayed_tail.contains(&index)
+            && !take_copy(&mut held_responses, &node.node_id())
             && (!is_completion_cell_node(&node)
                 || removable_completion_ids.contains(&node.node_id()));
         if stale_response {
@@ -909,12 +1070,7 @@ pub fn supersede_uncommitted_response_tail(
         return add_response_cell(doc, response);
     };
     let committed_nodes = parse_exchange_nodes(committed_exchange.content(committed_doc));
-    let committed_response_ids = committed_nodes
-        .iter()
-        .filter(|node| matches!(node.kind, ExchangeNodeKind::Response { .. }))
-        .map(ExchangeNode::node_id)
-        .collect::<HashSet<_>>();
-    let Some(last_committed_node_id) = committed_nodes.last().map(ExchangeNode::node_id) else {
+    let Some(last_committed_index) = committed_nodes.len().checked_sub(1) else {
         return add_response_cell(doc, response);
     };
 
@@ -922,8 +1078,8 @@ pub fn supersede_uncommitted_response_tail(
     // supersede (`#completioncellslost`).
     if let Some(outcome) = supersede_response_tail_after_anchor(
         doc,
-        &last_committed_node_id,
-        &committed_response_ids,
+        &TailAnchor::at(&committed_nodes, last_committed_index),
+        response_counts(&committed_nodes),
         &HashSet::new(),
         response,
     )? {
@@ -936,11 +1092,12 @@ pub fn supersede_uncommitted_response_tail(
 /// Reconcile an editor still based on a superseded deferred target with the
 /// latest authoritative response tail.
 ///
-/// The last response common to both targets is the safe anchor. Responses that
-/// exist only in the prior target are removed from `doc`, responses that exist
-/// only in the latest target are installed as one cell, and operator prompts in
-/// `doc` remain untouched. `None` means the targets do not prove a response-tail
-/// supersession and the caller must use its ordinary merge policy.
+/// The last position both targets share is the safe anchor (see
+/// [`last_shared_position`]). Responses after it in the prior target are removed
+/// from `doc`, responses after it in the latest target are installed as one cell,
+/// and operator prompts in `doc` remain untouched. `None` means the targets do not
+/// prove a response-tail supersession and the caller must use its ordinary merge
+/// policy.
 pub fn reconcile_superseded_response_targets(
     doc: &str,
     prior_target: &str,
@@ -962,47 +1119,50 @@ pub fn reconcile_superseded_response_targets(
     };
     let prior_nodes = parse_exchange_nodes(prior_exchange.content(prior_target));
     let latest_nodes = parse_exchange_nodes(latest_exchange.content(latest_target));
-    let latest_node_ids = latest_nodes
-        .iter()
-        .map(ExchangeNode::node_id)
-        .collect::<HashSet<_>>();
     let latest_response_ids = latest_nodes
         .iter()
         .filter(|node| matches!(node.kind, ExchangeNodeKind::Response { .. }))
         .map(ExchangeNode::node_id)
         .collect::<HashSet<_>>();
-    let Some((prior_anchor_index, anchor_id)) = prior_nodes
-        .iter()
-        .enumerate()
-        .rev()
-        .find(|(_, node)| latest_node_ids.contains(&node.node_id()))
-        .map(|(index, node)| (index, node.node_id()))
+    let Some((prior_anchor_index, latest_anchor_index)) =
+        last_shared_position(&prior_nodes, &latest_nodes)
     else {
         return Ok(None);
     };
-    let prior_has_superseded_response =
-        prior_nodes.iter().skip(prior_anchor_index + 1).any(|node| {
-            matches!(node.kind, ExchangeNodeKind::Response { .. })
-                && !latest_response_ids.contains(&node.node_id())
-        });
+    let latest_tail_ids = latest_nodes[latest_anchor_index + 1..]
+        .iter()
+        .map(ExchangeNode::node_id)
+        .collect::<HashSet<_>>();
+    let prior_has_superseded_response = prior_nodes[prior_anchor_index + 1..].iter().any(|node| {
+        matches!(node.kind, ExchangeNodeKind::Response { .. })
+            && !latest_tail_ids.contains(&node.node_id())
+    });
     if !prior_has_superseded_response {
         return Ok(None);
     }
-    let Some(latest_anchor_index) = latest_nodes
+    let anchor = TailAnchor::at(&prior_nodes, prior_anchor_index);
+    let prior_head = response_counts(&prior_nodes[..=prior_anchor_index]);
+    let latest_head = response_counts(&latest_nodes[..=latest_anchor_index]);
+    let latest_counts = response_counts(&latest_nodes);
+    // Held: what both targets keep up to the anchor. A node of the prior tail is
+    // not held for matching one in the latest tail: it belongs to a reply that is
+    // leaving, and the latest copy is installed below.
+    let held_responses = prior_head
         .iter()
-        .rposition(|node| node.node_id() == anchor_id)
-    else {
-        return Ok(None);
-    };
-    let prior_response_ids = prior_nodes
-        .iter()
-        .filter(|node| matches!(node.kind, ExchangeNodeKind::Response { .. }))
-        .map(ExchangeNode::node_id)
-        .collect::<HashSet<_>>();
-    let common_response_ids = prior_response_ids
-        .intersection(&latest_response_ids)
-        .cloned()
-        .collect::<HashSet<_>>();
+        .filter_map(|(id, count)| {
+            latest_counts
+                .get(id)
+                .map(|latest| (id.clone(), (*count).min(*latest)))
+        })
+        .collect::<HashMap<_, _>>();
+    // Moved: nodes the latest target carries later than the prior target did.
+    // `doc` already holds them, so they are not new.
+    let mut moved_responses = prior_head;
+    for (id, count) in &latest_head {
+        if let Some(prior) = moved_responses.get_mut(id) {
+            *prior = prior.saturating_sub(*count);
+        }
+    }
     // `#completioncellslost`: only a completion cell the latest target itself
     // retired (present in the prior target, absent from the latest) may leave
     // the editor cut. A cell that reached the editor after the prior target
@@ -1029,7 +1189,7 @@ pub fn reconcile_superseded_response_targets(
         let (lines, _) = take_protocol_boundaries(node.lines, &mut fence);
         node.lines = lines;
         if matches!(node.kind, ExchangeNodeKind::Response { .. })
-            && !prior_response_ids.contains(&node.node_id())
+            && !take_copy(&mut moved_responses, &node.node_id())
             && !node.lines.is_empty()
             // The editor already carries this cell, which survives the
             // supersession in place; installing it again would duplicate it.
@@ -1045,8 +1205,8 @@ pub fn reconcile_superseded_response_targets(
     let response = render_exchange_nodes(&replacement_nodes);
     Ok(supersede_response_tail_after_anchor(
         doc,
-        &anchor_id,
-        &common_response_ids,
+        &anchor,
+        held_responses,
         &retired_completion_ids,
         &response,
     )?
@@ -2128,6 +2288,319 @@ mod tests {
             reconciled.matches("agent:boundary:").count(),
             1,
             "reconciled document:\n{reconciled}"
+        );
+    }
+
+    fn anchor_doc(exchange: &str) -> String {
+        format!(
+            "---\nagent_doc_format: template\n---\n\n<!-- agent:exchange patch=append -->\n{exchange}<!-- /agent:exchange -->\n"
+        )
+    }
+
+    const SHARED_OPENING: &str = "### Re: Response\n\n> **Queue prompt:** Many duplicate tags\n\n";
+    const SHARED_SECTION: &str = "### Verification\n\nmake check exit 0.\n\n";
+
+    /// `#responseanchornodeidentity`: the last committed section also closes an
+    /// earlier reply. When the operator edits the last copy, the anchor must not
+    /// fall back to the earlier copy: everything between the two reads as
+    /// uncommitted, and the operator's edit is deleted.
+    #[test]
+    fn supersession_never_falls_back_to_an_earlier_copy_of_the_edited_last_section() {
+        let committed = anchor_doc(&format!(
+            "### Re: first\n\nOne.\n\n{SHARED_SECTION}### Re: second\n\nTwo.\n\n{SHARED_SECTION}<!-- agent:boundary:committed -->\n"
+        ));
+        let current = anchor_doc(&format!(
+            "### Re: first\n\nOne.\n\n{SHARED_SECTION}### Re: second\n\nTwo.\n\n### Verification\n\nmake check exit 0, rerun by the operator.\n\n### Re: pending\n\nPending.\n<!-- agent:boundary:next -->\n"
+        ));
+
+        let outcome =
+            supersede_uncommitted_response_tail(&current, &committed, "### Re: latest\n\nLatest.")
+                .unwrap();
+
+        assert!(
+            outcome.content.contains("rerun by the operator"),
+            "an operator edit to committed history must survive:\n{}",
+            outcome.content
+        );
+        assert!(outcome.content.contains("Latest."));
+    }
+
+    /// `#responseanchornodeidentity`: an uncommitted reply that repeats the last
+    /// committed section must not become the anchor, or it survives its own
+    /// supersession.
+    #[test]
+    fn supersession_anchors_on_the_committed_copy_of_a_repeated_section() {
+        let committed = anchor_doc(&format!(
+            "### Re: first\n\nOne.\n\n{SHARED_SECTION}<!-- agent:boundary:committed -->\n"
+        ));
+        let current = anchor_doc(&format!(
+            "### Re: first\n\nOne.\n\n{SHARED_SECTION}### Re: pending\n\nPending.\n\n{SHARED_SECTION}<!-- agent:boundary:next -->\n"
+        ));
+
+        let outcome =
+            supersede_uncommitted_response_tail(&current, &committed, "### Re: latest\n\nLatest.")
+                .unwrap();
+
+        assert!(
+            !outcome.content.contains("Pending."),
+            "the stale reply must be superseded:\n{}",
+            outcome.content
+        );
+        assert_eq!(outcome.content.matches("### Verification").count(), 1);
+        assert!(outcome.content.contains("Latest."));
+    }
+
+    /// `#responseanchornodeidentity`: a stale reply to the same queue prompt as a
+    /// committed reply shares its opening node. Membership in the committed id
+    /// set kept that opening while its section left, so the stale heading and
+    /// quoted prompt stayed behind with nothing under them.
+    #[test]
+    fn superseded_reply_sharing_a_committed_opening_leaves_nothing_behind() {
+        let committed = anchor_doc(&format!(
+            "{SHARED_OPENING}### Batch j integrated\n\nPushed.\n\n\u{276f} follow-up\n<!-- agent:boundary:committed -->\n"
+        ));
+        let current = anchor_doc(&format!(
+            "{SHARED_OPENING}### Batch j integrated\n\nPushed.\n\n\u{276f} follow-up\n\n{SHARED_OPENING}### Stale section\n\nStale.\n<!-- agent:boundary:next -->\n"
+        ));
+
+        let outcome =
+            supersede_uncommitted_response_tail(&current, &committed, "### Re: latest\n\nLatest.")
+                .unwrap();
+
+        assert!(!outcome.content.contains("Stale."), "{}", outcome.content);
+        assert_eq!(
+            outcome.content.matches("**Queue prompt:**").count(),
+            1,
+            "the stale reply's opening must leave with it:\n{}",
+            outcome.content
+        );
+    }
+
+    /// `#responseanchornodeidentity`: the same fault for a shared section: it
+    /// stays behind and reads as part of whatever precedes it.
+    #[test]
+    fn superseded_reply_sharing_a_committed_section_leaves_nothing_behind() {
+        let committed = anchor_doc(&format!(
+            "### Re: first\n\nOne.\n\n{SHARED_SECTION}\u{276f} follow-up\n<!-- agent:boundary:committed -->\n"
+        ));
+        let current = anchor_doc(&format!(
+            "### Re: first\n\nOne.\n\n{SHARED_SECTION}\u{276f} follow-up\n\n### Re: pending\n\nPending.\n\n{SHARED_SECTION}<!-- agent:boundary:next -->\n"
+        ));
+
+        let outcome =
+            supersede_uncommitted_response_tail(&current, &committed, "### Re: latest\n\nLatest.")
+                .unwrap();
+
+        assert!(!outcome.content.contains("Pending."), "{}", outcome.content);
+        assert_eq!(
+            outcome.content.matches("### Verification").count(),
+            1,
+            "the stale reply's section must leave with it:\n{}",
+            outcome.content
+        );
+    }
+
+    /// `#responseanchornodeidentity`: the backlog's shape in the reconcile path.
+    /// The prior target's stale reply shares its opening with the reply before
+    /// it, so the opening read as common to both targets and became the anchor.
+    #[test]
+    fn reconcile_does_not_anchor_on_a_stale_reply_sharing_an_opening() {
+        let held = format!("{SHARED_OPENING}### Batch j integrated\n\nPushed.\n\n");
+        let prior = anchor_doc(&format!(
+            "\u{276f} prompt\n\n{held}{SHARED_OPENING}### Stale section\n\nStale.\n<!-- agent:boundary:stale -->\n"
+        ));
+        let latest = anchor_doc(&format!(
+            "\u{276f} prompt\n\n{held}### Re: latest\n\nLatest.\n<!-- agent:boundary:latest -->\n"
+        ));
+        let editor = prior.replace(
+            "<!-- agent:boundary:stale -->",
+            "\n\u{276f} operator follow-up\n<!-- agent:boundary:editor -->",
+        );
+
+        let reconciled = reconcile_superseded_response_targets(&editor, &prior, &latest)
+            .unwrap()
+            .expect("the stale reply is a provable supersession");
+
+        assert!(!reconciled.contains("Stale."), "{reconciled}");
+        assert!(reconciled.contains("\u{276f} operator follow-up"));
+        assert!(reconciled.contains("Latest."));
+        assert_eq!(
+            reconciled.matches("**Queue prompt:**").count(),
+            1,
+            "the stale reply's opening must leave with it:\n{reconciled}"
+        );
+    }
+
+    /// `#responseanchornodeidentity`: a stale and a latest reply close on one
+    /// section. That section is not the same position in the two targets, so it
+    /// must not anchor: only what follows it was then swapped, the stale heading
+    /// stayed, and the latest heading never arrived.
+    #[test]
+    fn reconcile_does_not_anchor_on_a_section_stale_and_latest_replies_share() {
+        let held = format!("### Re: held\n\nHeld.\n\n{SHARED_SECTION}");
+        let prior = anchor_doc(&format!(
+            "{held}### Re: stale\n\nStale.\n\n{SHARED_SECTION}### Extra\n\nStale extra.\n<!-- agent:boundary:stale -->\n"
+        ));
+        let latest = anchor_doc(&format!(
+            "{held}### Re: latest\n\nLatest.\n\n{SHARED_SECTION}### New\n\nNew section.\n<!-- agent:boundary:latest -->\n"
+        ));
+        let editor = prior.replace(
+            "<!-- agent:boundary:stale -->",
+            "\n\u{276f} operator follow-up\n<!-- agent:boundary:editor -->",
+        );
+
+        let reconciled = reconcile_superseded_response_targets(&editor, &prior, &latest)
+            .unwrap()
+            .expect("the stale reply is a provable supersession");
+
+        assert!(!reconciled.contains("### Re: stale"), "{reconciled}");
+        assert!(!reconciled.contains("Stale extra."), "{reconciled}");
+        assert!(reconciled.contains("### Re: latest"), "{reconciled}");
+        assert!(reconciled.contains("New section."), "{reconciled}");
+        assert_eq!(
+            reconciled.matches("### Verification").count(),
+            2,
+            "{reconciled}"
+        );
+        assert!(reconciled.contains("\u{276f} operator follow-up"));
+    }
+
+    /// `#responseanchornodeidentity`: the operator edited the anchor's copy in the
+    /// editor. An earlier copy must not stand in for it.
+    #[test]
+    fn reconcile_never_falls_back_to_an_earlier_copy_of_the_edited_anchor() {
+        let held = format!(
+            "### Re: first\n\nOne.\n\n{SHARED_SECTION}### Re: second\n\nTwo.\n\n{SHARED_SECTION}"
+        );
+        let prior = anchor_doc(&format!(
+            "{held}### Re: stale\n\nStale.\n<!-- agent:boundary:stale -->\n"
+        ));
+        let latest = anchor_doc(&format!(
+            "{held}### Re: latest\n\nLatest.\n<!-- agent:boundary:latest -->\n"
+        ));
+        let editor = anchor_doc(
+            "### Re: first\n\nOne.\n\n### Verification\n\nmake check exit 0.\n\n### Re: second\n\nTwo.\n\n### Verification\n\nmake check exit 0, rerun by the operator.\n\n### Re: stale\n\nStale.\n<!-- agent:boundary:stale -->\n",
+        );
+
+        let reconciled = reconcile_superseded_response_targets(&editor, &prior, &latest)
+            .unwrap()
+            .unwrap_or_else(|| editor.clone());
+
+        assert!(
+            reconciled.contains("rerun by the operator"),
+            "an operator edit must survive:\n{reconciled}"
+        );
+    }
+
+    /// `#responseanchornodeidentity`: a prompt's id covers the boundary parsed into
+    /// it, and the boundary moves on every response, so a committed prompt never
+    /// matched its own live copy and the stale reply after it survived.
+    #[test]
+    fn supersession_anchors_on_a_committed_prompt_whose_boundary_moved() {
+        let committed = anchor_doc(
+            "### Re: first\n\nOne.\n\n\u{276f} prompt\n<!-- agent:boundary:committed -->\n",
+        );
+        let current = anchor_doc(
+            "### Re: first\n\nOne.\n\n\u{276f} prompt\n\n### Re: pending\n\nPending.\n<!-- agent:boundary:next -->\n",
+        );
+
+        let outcome =
+            supersede_uncommitted_response_tail(&current, &committed, "### Re: latest\n\nLatest.")
+                .unwrap();
+
+        assert!(!outcome.content.contains("Pending."), "{}", outcome.content);
+    }
+
+    /// `#responseanchornodeidentity`: a repeat of an earlier reply answers a new
+    /// prompt. `add_response_cell` reads the earlier copy as a replay, so the tail
+    /// copy has to stay or the prompt loses its only answer.
+    #[test]
+    fn supersession_keeps_a_tail_reply_identical_to_a_committed_one() {
+        let reply = "### Re: status\n\nDone.\n\n";
+        let committed = anchor_doc(&format!(
+            "{reply}\u{276f} again\n<!-- agent:boundary:committed -->\n"
+        ));
+        let current = anchor_doc(&format!(
+            "{reply}\u{276f} again\n\n{reply}<!-- agent:boundary:next -->\n"
+        ));
+
+        let outcome =
+            supersede_uncommitted_response_tail(&current, &committed, "### Re: status\n\nDone.")
+                .unwrap();
+
+        assert_eq!(
+            outcome.content.matches("Done.").count(),
+            2,
+            "{}",
+            outcome.content
+        );
+    }
+
+    /// A committed node moved after the anchor is still committed.
+    #[test]
+    fn supersession_keeps_a_committed_response_moved_after_the_anchor() {
+        let committed = anchor_doc(
+            "### Re: first\n\nOne.\n\n\u{276f} prompt\n<!-- agent:boundary:committed -->\n",
+        );
+        let current = anchor_doc(
+            "\u{276f} prompt\n\n### Re: first\n\nOne.\n\n### Re: pending\n\nPending.\n<!-- agent:boundary:next -->\n",
+        );
+
+        let outcome =
+            supersede_uncommitted_response_tail(&current, &committed, "### Re: latest\n\nLatest.")
+                .unwrap();
+
+        assert!(outcome.content.contains("One."), "{}", outcome.content);
+        assert!(!outcome.content.contains("Pending."), "{}", outcome.content);
+    }
+
+    /// A committed cell the response extends section by section keeps working: the
+    /// anchor stays inside it and only the uncommitted section is replaced.
+    #[test]
+    fn supersession_replaces_an_uncommitted_section_of_a_committed_cell() {
+        let committed = anchor_doc(
+            "### Re: one\n\nFirst.\n\n### Details\n\nBody.\n<!-- agent:boundary:committed -->\n",
+        );
+        let current = anchor_doc(
+            "### Re: one\n\nFirst.\n\n### Details\n\nBody.\n\n### Draft\n\nDraft.\n<!-- agent:boundary:next -->\n",
+        );
+
+        let outcome = supersede_uncommitted_response_tail(
+            &current,
+            &committed,
+            "### Re: one\n\nFirst.\n\n### Details\n\nBody.\n\n### Final\n\nFinal.",
+        )
+        .unwrap();
+
+        assert!(!outcome.content.contains("Draft."), "{}", outcome.content);
+        assert!(outcome.content.contains("Final."));
+        assert_eq!(outcome.content.matches("### Re: one").count(), 1);
+    }
+
+    /// A reply revised after its opening is reconciled as that revision. An
+    /// operator edit to the opening then leaves no provable anchor, so the merge
+    /// policy decides rather than this path replacing the whole cell.
+    #[test]
+    fn reconcile_keeps_a_shared_opening_as_the_anchor_of_a_revised_reply() {
+        let opening = "### Re: one\n\nFirst.\n\n";
+        let prior = anchor_doc(&format!(
+            "\u{276f} prompt\n\n{opening}### Draft\n\nDraft.\n<!-- agent:boundary:stale -->\n"
+        ));
+        let latest = anchor_doc(&format!(
+            "\u{276f} prompt\n\n{opening}### Final\n\nFinal.\n<!-- agent:boundary:latest -->\n"
+        ));
+
+        let reconciled = reconcile_superseded_response_targets(&prior, &prior, &latest)
+            .unwrap()
+            .expect("the stale section is a provable supersession");
+        assert!(!reconciled.contains("Draft."), "{reconciled}");
+        assert!(reconciled.contains("Final."), "{reconciled}");
+        assert_eq!(reconciled.matches("### Re: one").count(), 1);
+
+        let edited = prior.replace("First.", "First, edited by the operator.");
+        assert_eq!(
+            reconcile_superseded_response_targets(&edited, &prior, &latest).unwrap(),
+            None,
         );
     }
 

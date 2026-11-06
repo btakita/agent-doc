@@ -28,6 +28,17 @@ all keep their text. A merge keys a response on its heading without the
 binary-owned ` (HEAD)` and `[#r-…]` annotations, so annotating a heading that is
 already in the document never yields a second copy.
 
+Superseding a response tail anchors on a position, never on a node id alone
+(`#responseanchornodeidentity`), because replies share openings and sections and
+prompts repeat. The anchor is the numbered copy of a node, ignoring the boundary
+line, so a document holding fewer copies has no anchor and the write stays additive
+rather than reaching back to an older copy. Two targets align on whole response
+cells before they compare nodes, so a section both happen to carry is not a shared
+position. A node after the anchor is kept only when it is an unaccounted-for copy of
+a held node, so a superseded reply leaves whole, opening and shared sections
+included. A tail reply identical to one before the anchor stays when it is the
+incoming response, since the add would read the older copy as a replay.
+
 This spec is the canonical workflow authority for live session documents. It is
 implementation-independent: editor plugins, CRDT transports, IPC payloads,
 snapshots, harness hooks, and direct CLI calls may change only if they preserve

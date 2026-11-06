@@ -1247,6 +1247,9 @@ describe('delivery history lineage (#deliverylineagestamp)', () => {
         const replacement = new CrdtReplicaForwarder('plan.md', 'vscode:lineage-2', node, second, resume);
         assert.equal(await replacement.register(), true);
         assert.deepEqual(second.registeredHistories, ['history-a']);
+    });
+});
+
 /** A replica node whose remote applies refuse as a divergent CRDT history. */
 class DivergentNode extends FakeNode {
     stateVector(): Uint8Array | null {

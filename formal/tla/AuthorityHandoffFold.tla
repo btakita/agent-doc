@@ -62,9 +62,9 @@ simply vanishes) MUST violate `EventuallyFolded`.
 `AuthorityHandoffFoldLateAckReach` asserts the late ACK never happens and MUST
 be violated, so the reconcile edge is exercised.
 
-Out of scope: the rest of the class of any predecessor write committed after a
-successor's load. A fact with no handoff row and no receipt reaches the
-successor only through its next general durable reload.
+A fact with no handoff row and no receipt is not this handoff. That wider
+class is `PredecessorWriteAfterLoad.tla` (`#predecessorwriteafterload`): the
+successor's drain reloads when the ledger is ahead of the load.
 ***************************************************************************)
 
 CONSTANTS FoldOnLateDuplicate, OrphanRule, ReconcileAckReceipts

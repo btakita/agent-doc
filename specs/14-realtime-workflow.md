@@ -3014,10 +3014,18 @@ of older generations against the same high-water: one at or below it was folded
 by the load, one above it (or whose row retention removed) needs one durable
 reload before any of the receipts read are discarded. A failed reload keeps the
 receipts for the next drain. Receipts only ever flow to a newer generation, so an
-abandoned replacement never impedes the controller that keeps serving. The class
-of any other predecessor write committed after a successor's load is not closed
-here: a fact with no handoff row and no receipt reaches the successor through its
-next general durable reload.
+abandoned replacement never impedes the controller that keeps serving.
+
+A predecessor write that is not an authority handoff still commits straight
+into the ledger, with no handoff row and no acknowledgement receipt
+(`#predecessorwriteafterload`). The same drain compares that ledger with the
+folded high-water before it reconciles receipts. A row this controller appended
+is already in its projection: the apply records the event id, and the drain
+advances the high-water over those rows without a reload. Any other row above
+the high-water was committed after the load, so the drain reloads the durable
+ledger once, which folds every such row, and only then discards receipts or
+acknowledges handoffs. A failed reload leaves the rows for the next drain. A
+row the load already folded is not a predecessor write and does not reload.
 
 A retained document-write owner therefore keeps the same delivery/native-save
 transition across the captured-response/write-applied boundary. Once the editor

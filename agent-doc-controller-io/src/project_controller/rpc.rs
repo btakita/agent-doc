@@ -61738,6 +61738,210 @@ mod tests {
         assert_eq!(ledgered_authority_epoch(&successor), Some(606));
     }
 
+    fn predecessor_write_event(
+        event_id: &str,
+        document_hash: &str,
+        cycle_id: &str,
+    ) -> agent_doc_state_backbone::StateEvent {
+        agent_doc_state_backbone::StateEvent::new(
+            event_id,
+            agent_doc_state_backbone::StateFact::PreflightStarted {
+                document_hash: document_hash.to_string(),
+                cycle_id: cycle_id.to_string(),
+                session_id: None,
+                tracked_work_maintenance_required: None,
+            },
+        )
+    }
+
+    fn projected_cycle_id(runtime: &ControllerRuntime, document_hash: &str) -> Option<String> {
+        runtime
+            .memory
+            .lock()
+            .state_projection
+            .document(document_hash)
+            .and_then(|projection| projection.closeout.cycle_id.clone())
+    }
+
+    /// How many full durable loads `body` causes. The construction load is not
+    /// included: the hook is installed around `body` only.
+    fn count_durable_reloads_during(body: impl FnOnce()) -> u64 {
+        let reloads = std::sync::Arc::new(AtomicU64::new(0));
+        let counter = std::sync::Arc::clone(&reloads);
+        super::super::set_full_durable_load_test_hook(Some(Box::new(move || {
+            counter.fetch_add(1, Ordering::SeqCst);
+        })));
+        body();
+        super::super::set_full_durable_load_test_hook(None);
+        reloads.load(Ordering::SeqCst)
+    }
+
+    /// `#predecessorwriteafterload`: a fact with no handoff row and no receipt
+    /// still has a ledger row. The drain that used to reconcile only receipts
+    /// reloads it, so the projection does not wait for an unrelated reload.
+    #[test]
+    fn successor_folds_a_predecessor_write_that_is_not_a_handoff() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let event = predecessor_write_event("predecessor-write-late", "doc", "cycle-late");
+        let landed = std::sync::Arc::new(AtomicBool::new(false));
+        {
+            let (landed, project_root, event) =
+                (landed.clone(), dir.path().to_path_buf(), event.clone());
+            super::super::set_full_durable_load_test_hook(Some(Box::new(move || {
+                if !landed.swap(true, Ordering::SeqCst) {
+                    assert!(
+                        super::super::append_state_event_for_test(&project_root, &event).unwrap()
+                    );
+                }
+            })));
+        }
+        let successor = ControllerRuntime::new(ControllerBootstrap {
+            controller_generation: 2,
+            previous_controller_pid: None,
+            ..bootstrap
+        })
+        .unwrap();
+        super::super::set_full_durable_load_test_hook(None);
+        assert!(
+            landed.load(Ordering::SeqCst),
+            "the predecessor must commit the fact inside the successor's load"
+        );
+        assert_eq!(projected_cycle_id(&successor, "doc"), None);
+        assert!(
+            state_store::load_document_authority_handoffs(dir.path())
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            state_store::load_document_authority_ack_receipts_before(dir.path(), 2)
+                .unwrap()
+                .is_empty(),
+            "this fact leaves no handoff receipt for the narrow reconcile"
+        );
+
+        let successor_ref = &successor;
+        let reloads = count_durable_reloads_during(|| {
+            assert!(
+                !successor_ref
+                    .drain_document_authority_handoffs(dir.path())
+                    .unwrap()
+            );
+        });
+        assert_eq!(
+            reloads, 1,
+            "the drain itself reloads; the fact must not wait for some other one"
+        );
+        assert_eq!(
+            projected_cycle_id(&successor, "doc").as_deref(),
+            Some("cycle-late")
+        );
+
+        let successor_ref = &successor;
+        let again = count_durable_reloads_during(|| {
+            assert!(
+                !successor_ref
+                    .drain_document_authority_handoffs(dir.path())
+                    .unwrap()
+            );
+        });
+        assert_eq!(
+            again, 0,
+            "a predecessor write the drain already folded must not reload again"
+        );
+    }
+
+    /// `#predecessorwriteafterload`: a row the load folded is not a predecessor
+    /// write, and a drain must not pay for a reload to look at it.
+    #[test]
+    fn predecessor_write_folded_by_the_load_needs_no_reload() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        super::super::set_full_durable_load_test_hook(None);
+        drop(open_state_db(dir.path()).unwrap());
+        let event = predecessor_write_event("predecessor-write-before-load", "doc", "cycle-early");
+        assert!(super::super::append_state_event_for_test(dir.path(), &event).unwrap());
+        let successor = ControllerRuntime::new(bootstrap).unwrap();
+        assert_eq!(
+            projected_cycle_id(&successor, "doc").as_deref(),
+            Some("cycle-early")
+        );
+
+        let successor_ref = &successor;
+        let reloads = count_durable_reloads_during(|| {
+            assert!(
+                !successor_ref
+                    .drain_document_authority_handoffs(dir.path())
+                    .unwrap()
+            );
+        });
+        assert_eq!(reloads, 0, "a row the load folded must not cost a reload");
+        assert_eq!(
+            projected_cycle_id(&successor, "doc").as_deref(),
+            Some("cycle-early")
+        );
+    }
+
+    /// `#predecessorwriteafterload`: this controller's own append is already in
+    /// the projection. The next drain advances the high-water over it and does
+    /// not reload. A predecessor row above that same high-water still does.
+    #[test]
+    fn own_append_does_not_reload_but_a_later_predecessor_write_does() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        super::super::set_full_durable_load_test_hook(None);
+        drop(open_state_db(dir.path()).unwrap());
+        let successor = ControllerRuntime::new(bootstrap).unwrap();
+        let own = predecessor_write_event("own-write", "doc-own", "cycle-own");
+        assert!(
+            successor
+                .append_apply_state_event_serialized(dir.path(), &own)
+                .unwrap()
+        );
+        assert_eq!(
+            projected_cycle_id(&successor, "doc-own").as_deref(),
+            Some("cycle-own")
+        );
+
+        let successor_ref = &successor;
+        let own_reloads = count_durable_reloads_during(|| {
+            assert!(
+                !successor_ref
+                    .drain_document_authority_handoffs(dir.path())
+                    .unwrap()
+            );
+        });
+        assert_eq!(
+            own_reloads, 0,
+            "this controller's own append is not a predecessor write"
+        );
+
+        let predecessor = predecessor_write_event("predecessor-write", "doc-pred", "cycle-pred");
+        assert!(super::super::append_state_event_for_test(dir.path(), &predecessor).unwrap());
+        assert_eq!(projected_cycle_id(&successor, "doc-pred"), None);
+        let successor_ref = &successor;
+        let predecessor_reloads = count_durable_reloads_during(|| {
+            assert!(
+                !successor_ref
+                    .drain_document_authority_handoffs(dir.path())
+                    .unwrap()
+            );
+        });
+        assert_eq!(
+            predecessor_reloads, 1,
+            "a predecessor row committed after the load still reloads from the drain"
+        );
+        assert_eq!(
+            projected_cycle_id(&successor, "doc-own").as_deref(),
+            Some("cycle-own"),
+            "the reload must keep the fact this controller already appended"
+        );
+        assert_eq!(
+            projected_cycle_id(&successor, "doc-pred").as_deref(),
+            Some("cycle-pred")
+        );
+    }
+
     /// `#sameepochhandoffackloss`: a same-epoch observation upserted after the
     /// drain loaded the row, and before its ACK, keeps its row. The loaded
     /// event is folded; the replacement reaches the ledger on the next drain.
@@ -61861,7 +62065,10 @@ mod tests {
         drop(open_state_db(dir.path()).unwrap());
         let folded = authority_handoff_test_event("authority-folded-at-load", "doc-a", 1);
         assert!(super::super::append_state_event_for_test(dir.path(), &folded).unwrap());
-        let runtime = ControllerRuntime::new_arc(bootstrap).unwrap();
+        // `new`, not `new_arc`: the handoff worker's drain now folds a
+        // predecessor ledger row on its own (`#predecessorwriteafterload`).
+        // This test pins the high-water check before that drain.
+        let runtime = ControllerRuntime::new(bootstrap).unwrap();
         assert_eq!(
             runtime
                 .append_apply_document_authority_handoff(dir.path(), &folded)

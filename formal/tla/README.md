@@ -91,9 +91,14 @@ naming the event in the transaction that deletes the row, and a successor
 reconciles older generations' receipts at the head of every drain.
 `AuthorityHandoffFoldLateAckWedge` removes that reconcile and must violate
 `EventuallyFolded`; `AuthorityHandoffFoldLateAckReach` witnesses the late ACK.
-The rest of the class of any predecessor write committed after a successor's
-load stays out of scope: a fact with no handoff row and no receipt reaches the
-successor through its next general durable reload.
+
+`PredecessorWriteAfterLoad.tla` (`#predecessorwriteafterload`) checks the rest
+of that class: a fact with no handoff row and no receipt, committed by a
+predecessor after the successor's load. The successor's drain reloads the
+ledger when the fact's sequence is above the folded high-water.
+`PredecessorWriteAfterLoadWedge` restores the drain that does not look at such
+a row and must violate `EventuallyOtherFolded`;
+`PredecessorWriteAfterLoadReach` witnesses the late write.
 
 `ReactiveTopology.tla` checks the shared lifetime-scoped graph contract used by
 agent-doc's Lazily state machines:

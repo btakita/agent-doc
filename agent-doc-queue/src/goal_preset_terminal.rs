@@ -278,6 +278,11 @@ pub struct GoalLoopHandoff {
     pub final_states: Vec<String>,
     pub response: String,
     pub recorded_at_secs: u64,
+    /// The attempt stopped on a harness usage limit and was requeued
+    /// explicitly (`#harnessquotaexhausted`), so the next worker continues
+    /// from its partial work.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quota_block: Option<crate::worker_quota::WorkerQuotaBlock>,
 }
 
 /// The latest interrupted hand-back per queue row identity.
@@ -330,6 +335,9 @@ impl GoalLoopHandoffLedger {
 /// the same row. It is framed as data: the quoted hand-back never widens the
 /// operator authorization above it.
 pub fn prior_attempt_brief_section(handoff: &GoalLoopHandoff) -> String {
+    if let Some(block) = &handoff.quota_block {
+        return crate::worker_quota::prior_attempt_brief_section(handoff, block);
+    }
     let mut quoted = String::new();
     for line in handoff.response.trim().lines() {
         quoted.push_str("> ");

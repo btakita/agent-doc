@@ -966,6 +966,9 @@ pub struct OpenCycleMessage<'a> {
     /// visible in the current document authority. Selects the command the
     /// generic report names; see [`open_cycle_resolution`].
     pub captured_response: CapturedResponseVisibility,
+    /// `#harnessquotaexhausted`: the owning pane sits idle on a harness usage
+    /// limit. Holds the cause and next step, already rendered.
+    pub usage_limit: Option<&'a str>,
 }
 
 /// `#interruptedhealgap`: whether an open cycle's durably captured response is
@@ -1030,6 +1033,20 @@ pub fn open_cycle_resolution(
 }
 
 pub fn open_cycle_message(input: OpenCycleMessage<'_>) -> String {
+    // `#harnessquotaexhausted`: the proven cause outranks every generic
+    // reading of the phase, including "still running" from a leftover lease.
+    if let Some(usage_limit) = input.usage_limit {
+        let resolution = open_cycle_resolution(input.file, input.phase, input.captured_response)
+            .map(|sentence| format!(" {sentence}"))
+            .unwrap_or_default();
+        return format!(
+            "[session-check] INTERRUPTED: cycle `{}` is still `{}` ({}) because the owning harness ran out of usage: {usage_limit}{resolution}{}",
+            input.cycle_id,
+            input.phase.as_str(),
+            input.last_event,
+            input.ipc_hint,
+        );
+    }
     if input.phase == CyclePhase::PreflightStarted
         && let Some(pane) = input.active_owner_pane
     {
@@ -1646,6 +1663,28 @@ mod tests {
     }
 
     #[test]
+    fn open_cycle_message_names_the_usage_limit_over_a_leftover_lease() {
+        let message = open_cycle_message(OpenCycleMessage {
+            file: "plan.md",
+            cycle_id: "cycle-1793918213881",
+            phase: CyclePhase::PreflightStarted,
+            last_event: "preflight_started",
+            ipc_hint: "",
+            active_owner_pane: Some("%10"),
+            captured_response: CapturedResponseVisibility::NoCapture,
+            usage_limit: Some("Grok Build is out of usage. Wait for the limit to reset."),
+        });
+        assert!(
+            message.starts_with("[session-check] INTERRUPTED: cycle `cycle-1793918213881`"),
+            "{message}"
+        );
+        assert!(message.contains("ran out of usage"), "{message}");
+        assert!(message.contains("Wait for the limit to reset"), "{message}");
+        assert!(!message.contains("still running"), "{message}");
+        assert!(message.contains("agent-doc cancel plan.md"), "{message}");
+    }
+
+    #[test]
     fn open_cycle_message_formats_direct_invocation_recovery() {
         let message = open_cycle_message(OpenCycleMessage {
             file: "doc.md",
@@ -1655,6 +1694,7 @@ mod tests {
             ipc_hint: " ipc proof pending",
             active_owner_pane: None,
             captured_response: CapturedResponseVisibility::NoCapture,
+            usage_limit: None,
         });
 
         assert!(message.contains("direct invocation did not reach response capture"));
@@ -1673,6 +1713,7 @@ mod tests {
             ipc_hint: "",
             active_owner_pane: None,
             captured_response: CapturedResponseVisibility::NoCapture,
+            usage_limit: None,
         });
 
         assert!(message.contains("response was captured but no write/commit followed"));
@@ -1694,6 +1735,7 @@ mod tests {
                 ipc_hint: "",
                 active_owner_pane: None,
                 captured_response,
+                usage_limit: None,
             });
             assert!(
                 message.contains("response write landed but no terminal commit followed"),
@@ -1718,6 +1760,7 @@ mod tests {
                 ipc_hint: "",
                 active_owner_pane: None,
                 captured_response: CapturedResponseVisibility::Missing,
+                usage_limit: None,
             });
             assert!(
                 message.contains("`agent-doc repair doc.md --resume-capture`"),
@@ -1771,6 +1814,7 @@ mod tests {
             ipc_hint: "",
             active_owner_pane: Some("%152"),
             captured_response: CapturedResponseVisibility::NoCapture,
+            usage_limit: None,
         });
 
         assert!(message.starts_with("[session-check] IN PROGRESS:"));

@@ -1,0 +1,5 @@
+**Summary** Detector added.
+
+```
+You've hit your session limit · resets 9pm
+```

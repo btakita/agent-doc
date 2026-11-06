@@ -24,6 +24,7 @@ agent-doc-turn-executor = { path = "../agent-doc-turn-executor", version = "0.35
 agent-doc-turn-executor-tmux = { path = "../agent-doc-turn-executor-tmux", version = "0.35.568" }
 anyhow = "1"
 libc = "0.2"
+serde_json = "1"
 
 [dev-dependencies]
 tempfile = "3"

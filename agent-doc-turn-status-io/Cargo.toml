@@ -11,6 +11,8 @@ publish = false
 name = "agent_doc_turn_status_io"
 
 [dependencies]
+agent-doc-harness = { path = "../agent-doc-harness", version = "0.35.568" }
+agent-doc-session-actor-io = { path = "../agent-doc-session-actor-io", version = "0.35.568" }
 agent-doc-tmux-io = { path = "../agent-doc-tmux-io", version = "0.35.568" }
 agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.35.568" }
 agent-doc-session-registry-io = { path = "../agent-doc-session-registry-io", version = "0.35.568" }

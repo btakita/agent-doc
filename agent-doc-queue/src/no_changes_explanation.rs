@@ -263,6 +263,10 @@ pub fn claimed_queue_guidance(claimed: &[ClaimedQueueItemFact]) -> String {
                         "`{}` has durable state `lost` for {} generation {}; recovery is required",
                         fact.item, fact.owner, fact.generation
                     ),
+                    (QueueClaimState::QuotaBlocked, _) => format!(
+                        "`{}` has durable state `quota_blocked` for {} generation {}: its worker stopped on a harness usage limit and nothing is running it; resume that worker after the reset or requeue it explicitly",
+                        fact.item, fact.owner, fact.generation
+                    ),
                 }
             })
             .collect::<Vec<_>>()

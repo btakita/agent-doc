@@ -147,6 +147,17 @@ The queue coordinator protocol is three-boundary and worker-fenced
    exact claimed row and generation it lists, never treat it as recorded
    (`#reportcompletenomatch`).
 
+A worker that runs out of tokens or credits returns a usage-limit notice, not a
+report (`#harnessquotaexhausted`). Pass that text to `queue report-complete`
+anyway, with `--branch`/`--worktree` when known: the binary reads the notice,
+records the attempt as blocked by quota (`⛔`), keeps its worker, branch, and
+worktree as evidence, and prints the next step. For an exit with no recognizable
+notice, run `queue report-quota-blocked --evidence <text> --harness <name>`. The
+attempt never expires into lost, its slot is free, and no new worker may start
+on that harness: after the reset, resume the same worker and rerun its
+`start_command`; or `queue release --generation <N> --requeue` and dispatch the
+row on another harness, whose brief names the partial work.
+
 Never infer running from a label, intended spawn, process poll, or heartbeat.
 `queue claim --refresh --generation <N>` only extends an already-started attempt.
 A generation binds to at most one worker and a worker to at most one live claim.

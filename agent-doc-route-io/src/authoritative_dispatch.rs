@@ -311,6 +311,52 @@ pub fn ambiguous_owner_turn_route_outcome(
     ))
 }
 
+/// `#harnessquotaexhausted`: pure outcome for a route whose owning pane is
+/// stopped on a harness usage or credit limit.
+///
+/// That pane reads as idle, so without this the route offers it a new turn, or
+/// calls a leftover lease ambiguous and advises a retry that cannot succeed
+/// before the limit resets. Names the limit as the cause, injects nothing, and
+/// never says to run it again.
+pub fn quota_blocked_owner_route_outcome(
+    file: &Path,
+    pane: &str,
+    limit: &agent_doc_harness::usage_limit::HarnessUsageLimit,
+    explicit_items: usize,
+    queued_prompt: Option<&str>,
+) -> CloseoutWaitRouteOutcome {
+    let fields = agent_doc_flow::outcome::blocked_with_exact_unblocker_fields(
+        "wait_for_usage_limit_reset_or_change_agent",
+    );
+    let pending = match (explicit_items, queued_prompt) {
+        (_, Some(prompt)) => format!(" Queued {prompt:?} in active agent:queue; it stays there."),
+        (0, None) => String::new(),
+        (1, None) => " 1 update stays saved in the document.".to_string(),
+        (n, None) => format!(" {n} updates stay saved in the document."),
+    };
+    CloseoutWaitRouteOutcome::Deferred(format!(
+        "[route] {} did not start: {}.{pending} No trigger was sent to pane {pane}, so nothing is working on this request. {} steering_delivered=0 owner_turn=quota_blocked reason=harness_usage_limit {fields}",
+        file.display(),
+        limit.cause(),
+        limit.operator_next_step(),
+    ))
+}
+
+/// `#harnessquotaexhausted`: the limit stopping the exact owning pane, when it
+/// sits idle on one. A running turn keeps its normal handling: a gauge at zero
+/// does not stop the turn already in flight. Capture failure is no evidence.
+fn owner_pane_usage_limit(
+    tmux: &Tmux,
+    pane: &str,
+    harness: &HarnessConfig,
+) -> Option<agent_doc_harness::usage_limit::HarnessUsageLimit> {
+    let capture = agent_doc_tmux_io::capture_pane_with_ansi(tmux, pane).ok()?;
+    if harness.has_busy_cue(&capture) {
+        return None;
+    }
+    agent_doc_harness::usage_limit::pane_usage_limit(&capture, harness)
+}
+
 /// `#ctrlcrerun`: the outcome for a route that met a lease-backed live-owner
 /// verdict, given whether the same route saw the owning pane stably
 /// dispatch-ready. Idle pane: [`ambiguous_owner_turn_route_outcome`];
@@ -737,6 +783,48 @@ pub fn route_via_authoritative_actor(
         return accept_pending_harness_switch(tmux, file, &actor, pending);
     }
     let closeout_harness = actor_transport_harness(&actor.record.harness);
+
+    // `#harnessquotaexhausted`: before any closeout, lease, or readiness
+    // reasoning. A pane out of usage reads as idle, so each of those would
+    // conclude something false about it. The harness-switch handoff above runs
+    // first because it is the remedy this refusal names.
+    if let Some(limit) =
+        owner_pane_usage_limit(tmux, &actor.record.pane_id, &closeout_harness)
+    {
+        let queued = match prompt_context {
+            Some(context) => Some(enqueue_route_dispatch_prompt(
+                file,
+                &context.prompt_text,
+                "harness_usage_limit",
+                true,
+                effects.queue_effects,
+            )?),
+            None => None,
+        };
+        let explicit = pending_explicit_send_count(file);
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "route_owner_harness_usage_limit file={} pane={} harness={} limit={:?} source={:?} explicit_items={explicit} queued={} (#harnessquotaexhausted)",
+                file.display(),
+                actor.record.pane_id,
+                actor.record.harness,
+                limit.limit,
+                limit.source,
+                queued.is_some(),
+            ),
+        );
+        let outcome = quota_blocked_owner_route_outcome(
+            file,
+            &actor.record.pane_id,
+            &limit,
+            explicit,
+            queued.as_ref().map(|queued| queued.prompt_text.as_str()),
+        );
+        eprintln!("{}", outcome.message());
+        outcome.record(file, explicit);
+        return Ok(actor.record.pane_id.clone());
+    }
 
     // `#persistingsubmitfast`: Run Agent Doc is an explicit send. When the
     // matching actor is busy in an already-open cycle, inspect the live pane
@@ -2415,6 +2503,54 @@ mod tests {
             panic!("{deferred:?}");
         };
         assert!(message.contains("nothing was dispatched"), "{message}");
+    }
+
+    #[test]
+    fn quota_blocked_owner_names_the_limit_and_never_advises_a_retry() {
+        let file = Path::new("/tmp/sample-session.md");
+        let limit = agent_doc_harness::usage_limit::pane_usage_limit(
+            "│ ❯   │\n╰── Weekly limit left: 0% · Grok 4.7 (high) · always-approve ─╯\n",
+            &HarnessConfig::grok(),
+        )
+        .expect("exhausted gauge");
+        let outcome = quota_blocked_owner_route_outcome(file, "%10", &limit, 2, None);
+        let CloseoutWaitRouteOutcome::Deferred(message) = &outcome else {
+            panic!("{outcome:?}");
+        };
+        for needle in [
+            "Grok Build is out of usage",
+            "Weekly limit left: 0%",
+            "2 updates stay saved in the document",
+            "No trigger was sent to pane %10",
+            "Wait for the limit to reset",
+            "`agent:` in its frontmatter",
+            "owner_turn=quota_blocked",
+            "steering_delivered=0",
+            "ui_outcome_class=blocked",
+        ] {
+            assert!(message.contains(needle), "missing {needle:?}: {message}");
+        }
+        for forbidden in [
+            "owner_turn=ambiguous",
+            "again in a few seconds",
+            "cancel-turn",
+            "could not tell",
+        ] {
+            assert!(!message.contains(forbidden), "{forbidden:?}: {message}");
+        }
+    }
+
+    #[test]
+    fn quota_blocked_owner_says_where_the_prompt_went() {
+        let file = Path::new("/tmp/sample-session.md");
+        let limit = agent_doc_harness::usage_limit::HarnessUsageLimit::reported("out of credits");
+        let outcome =
+            quota_blocked_owner_route_outcome(file, "%10", &limit, 0, Some("do [#sample]"));
+        assert!(
+            outcome.message().contains("Queued \"do [#sample]\" in active agent:queue"),
+            "{}",
+            outcome.message()
+        );
     }
 
     #[test]

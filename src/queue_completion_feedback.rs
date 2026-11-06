@@ -81,6 +81,49 @@ pub(crate) fn requeue_nonterminal_goal_hand_back(
     )
 }
 
+/// `#harnessquotaexhausted`: record a worker that ran out of usage. The
+/// harness is the explicit one, else the one the notice names, else the
+/// claiming coordinator's: workers run on their coordinator's harness unless
+/// told otherwise.
+pub(crate) fn block_worker_on_quota(
+    file: &Path,
+    item: &str,
+    generation: Option<u64>,
+    limit: &agent_doc_harness::usage_limit::HarnessUsageLimit,
+    harness: Option<&str>,
+    worktree: Option<&Path>,
+    branch: Option<&str>,
+) -> Result<agent_doc_queue::queue_claim::QueueClaim> {
+    let _lock = acquire_completion_lock(
+        file,
+        "record a quota-blocked worker",
+        COMPLETION_FEEDBACK_LOCK_WAIT,
+    )?;
+    let ledger = agent_doc_queue_io::queue_claim::load_ledger(file)?;
+    let owner_harness = ledger
+        .resolve_selector(item)?
+        .and_then(|claim| claim.owner_session.as_ref())
+        .and_then(|session| session.harness.clone());
+    let harness = harness
+        .map(str::to_string)
+        .or_else(|| limit.harness.clone())
+        .or(owner_harness)
+        .map(|name| agent_doc_harness::normalize_harness_name(&name));
+    let block = agent_doc_queue::worker_quota::WorkerQuotaBlock {
+        harness,
+        limit: limit.limit.clone(),
+        evidence: limit.evidence.clone(),
+        reset_hint: limit.reset_hint.clone(),
+        worktree: worktree.map(|path| path.display().to_string()),
+        branch: branch.map(str::to_string),
+        blocked_at_secs: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|elapsed| elapsed.as_secs())
+            .unwrap_or(0),
+    };
+    agent_doc_queue_io::queue_claim::block_attempt_on_quota(file, item, generation, block)
+}
+
 pub(crate) fn report_complete(
     file: &Path,
     item: &str,
@@ -1094,6 +1137,7 @@ mod tests {
             reported_at_secs: None,
             heartbeat_at_secs: None,
             frozen: None,
+            quota_block: None,
         }
     }
 

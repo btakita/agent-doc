@@ -447,6 +447,15 @@ pub fn open_cycle_message(
         agent_doc_ops_log_io::latest_ipc_proof_diagnostic_hint_for_cycle(file, &state.cycle_id)?
             .map(|hint| format!(" {hint}"))
             .unwrap_or_default();
+    let usage_limit = agent_doc_turn_status_io::owner_pane_usage_limit_for_file(file)
+        .map(|owner| {
+            format!(
+                "{} on pane `{}`. {}",
+                owner.limit.cause(),
+                owner.pane,
+                owner.limit.operator_next_step(),
+            )
+        });
     Ok(agent_doc_workflow::session_check::open_cycle_message(
         agent_doc_workflow::session_check::OpenCycleMessage {
             file: &state.file,
@@ -458,6 +467,7 @@ pub fn open_cycle_message(
                 .as_ref()
                 .map(|marker| marker.pane.as_str()),
             captured_response: crate::open_cycle_captured_response_visibility(file, state)?,
+            usage_limit: usage_limit.as_deref(),
         },
     ))
 }

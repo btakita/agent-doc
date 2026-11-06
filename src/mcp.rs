@@ -1434,6 +1434,7 @@ mod tests {
             reported_at_secs: None,
             heartbeat_at_secs: None,
             frozen: None,
+            quota_block: None,
         };
         let closeout =
             reported_claim_closeout("doc.md", &claim, &ReportedRepoEvidence::Undeclared).unwrap();

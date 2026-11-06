@@ -570,6 +570,7 @@ fn route_claimed_items(
                 reported_at_secs: None,
                 heartbeat_at_secs: None,
                 frozen: None,
+                quota_block: None,
             }
         });
     }

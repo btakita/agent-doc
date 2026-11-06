@@ -3013,11 +3013,30 @@ the newest epoch. At the head of every drain a controller reconciles the receipt
 of older generations against the same high-water: one at or below it was folded
 by the load, one above it (or whose row retention removed) needs one durable
 reload before any of the receipts read are discarded. A failed reload keeps the
-receipts for the next drain. Receipts only ever flow to a newer generation, so an
-abandoned replacement never impedes the controller that keeps serving. The class
-of any other predecessor write committed after a successor's load is not closed
-here: a fact with no handoff row and no receipt reaches the successor through its
-next general durable reload.
+receipts for the next drain. A controller does not reconcile its own receipts,
+and it does not reconcile a newer generation's while a live controller newer
+than itself is the durable record, so a predecessor cannot consume the receipt
+its successor needs.
+
+A preparing replacement's document-authority drain starts with the process,
+before promotion (`#abandonedreplacementhandoff`). It does not claim or
+acknowledge until it is the serving controller: `handoff_state` is `Stable`, or
+the socket path is already the public one. `prepare_handoff` marks the public
+controller `Preparing` while that process is still serving, and that process
+keeps draining. An ordinary claim still refuses to move a generation backwards,
+so a live successor cannot lose a row to its predecessor.
+
+A preparing replacement can still have claimed or acknowledged a row and then
+died, leaving the older controller that keeps serving unable to claim that
+generation and unable to see a receipt that only a newer generation would read.
+That controller adopts the generation only when the durable bootstrap proves it
+is not a live newer controller: the record is this serving process, or the
+recorded newer controller is not alive. It then reclaims that generation's row
+and reconciles that generation's receipts under the same high-water rule. A
+failed reload keeps both for the next drain. The class of any other predecessor
+write committed after a successor's load is not closed here: a fact with no
+handoff row and no receipt reaches the successor through its next general
+durable reload.
 
 A retained document-write owner therefore keeps the same delivery/native-save
 transition across the captured-response/write-applied boundary. Once the editor

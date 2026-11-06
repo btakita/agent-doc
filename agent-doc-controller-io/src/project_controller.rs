@@ -5,7 +5,7 @@
 //! Tmux state remains a layout input. Actor ownership is a controller-lifetime
 //! Lazily projection; SQLite hydrates and durably records that model.
 
-use crate::process::{is_same_project_controller_pid, process_is_alive};
+use crate::process::{is_same_project_controller_pid, process_is_alive, recorded_process_is_alive};
 use agent_doc_controller::dispatch::{
     ControllerDispatchProofScope, ControllerDispatchReceipt, ControllerDispatchResultStatus,
 };
@@ -4420,8 +4420,8 @@ fn run_state_projection_effect_test_hook(document_hash: &str) {
 fn run_state_projection_effect_test_hook(_document_hash: &str) {}
 
 #[cfg(test)]
-fn state_projection_derived_test_hook(
-) -> &'static Mutex<Option<(String, StateProjectionEffectTestHook)>> {
+fn state_projection_derived_test_hook()
+-> &'static Mutex<Option<(String, StateProjectionEffectTestHook)>> {
     static HOOK: OnceLock<Mutex<Option<(String, StateProjectionEffectTestHook)>>> = OnceLock::new();
     HOOK.get_or_init(|| Mutex::new(None))
 }
@@ -5017,9 +5017,8 @@ struct ControllerDocumentGraphs {
     ctx: ThreadSafeContext,
     /// Lock-only authoritative plane updated on state ingress. It provides
     /// immediate read-your-write without entering Lazily or flushing Effects.
-    latest_projection: Mutex<
-        HashMap<String, Option<agent_doc_state_backbone::DocumentStateProjection>>,
-    >,
+    latest_projection:
+        Mutex<HashMap<String, Option<agent_doc_state_backbone::DocumentStateProjection>>>,
     /// Worker-owned reactive projection. Everything retained-write-shaped is
     /// derived from this only after the activation worker copies the newest
     /// authoritative value across the boundary.
@@ -7973,13 +7972,12 @@ impl ControllerDocumentGraphs {
             .latest_projection(document_hash)
             .as_ref()
             .and_then(retained_intent_facts_from_projection);
-        let immediate =
-            agent_doc_state_backbone::retained_write::settlement_verdict_with_receipt(
-                pending.as_ref(),
-                authority.as_ref(),
-                disk.as_ref(),
-                settlement_receipt.as_ref(),
-            );
+        let immediate = agent_doc_state_backbone::retained_write::settlement_verdict_with_receipt(
+            pending.as_ref(),
+            authority.as_ref(),
+            disk.as_ref(),
+            settlement_receipt.as_ref(),
+        );
         // One batch: the two planes are one observation, and a settle effect that
         // ran between them would be judging a fresh authority against a stale disk.
         self.ctx.batch(|ctx| {
@@ -9579,16 +9577,14 @@ fn progressive_reconnect_operator_successor_hash(
     .filter(|capture| capture.base_hash.eq_ignore_ascii_case(&intent.target_hash))
     .filter(|capture| !capture.tip_hash.is_empty())
     .filter_map(|capture| {
-        let ops = serde_json::from_str::<Vec<agent_doc_merge::crdt::EditorOp>>(&capture.ops_json)
-            .ok()?;
+        let ops =
+            serde_json::from_str::<Vec<agent_doc_merge::crdt::EditorOp>>(&capture.ops_json).ok()?;
         Some((capture, ops))
     })
     .filter(|(_, ops)| !ops.is_empty())
     .find_map(|(capture, ops)| {
         agent_doc_merge::crdt::replay_editor_ops(&intent.target_content, &ops)
-            .filter(|tip| {
-                agent_doc_hash::content_hash(tip).eq_ignore_ascii_case(&capture.tip_hash)
-            })
+            .filter(|tip| agent_doc_hash::content_hash(tip).eq_ignore_ascii_case(&capture.tip_hash))
             .map(|_| capture.tip_hash.clone())
     })
 }
@@ -9680,9 +9676,9 @@ fn retained_transition_state(
     // older expected cut. Check that durable successor proof before the
     // `delivery == base_content` fast path below; otherwise that shortcut
     // replays the superseded snapshot and reverses the operator's correction.
-    if progressive_reconnect_operator_successor_hash(projection, intent).is_some_and(|hash| {
-        hash.eq_ignore_ascii_case(&delivery.content_hash)
-    }) {
+    if progressive_reconnect_operator_successor_hash(projection, intent)
+        .is_some_and(|hash| hash.eq_ignore_ascii_case(&delivery.content_hash))
+    {
         return RetainedTransitionState::TargetVisible {
             intent_id: intent.intent_id.clone(),
             target_hash: delivery.content_hash.clone(),
@@ -10190,8 +10186,9 @@ fn retained_intent_facts_from_projection(
             // (`#adwritesourceenum`). Settlement itself observes only content
             // planes, so it cannot tell a later stage from an older cycle's.
             superseding_stage: document.document.superseding_closeout_stage(pending),
-            operator_superseding_hash:
-                progressive_reconnect_operator_successor_hash(document, pending),
+            operator_superseding_hash: progressive_reconnect_operator_successor_hash(
+                document, pending,
+            ),
             carries_response_payload,
             carries_content_delta,
             closeout_committed: document.closeout.phase
@@ -10543,6 +10540,9 @@ impl ControllerRuntime {
                     if runtime.successor_promoted() {
                         break;
                     }
+                    // A preparing replacement reaches this loop before promotion.
+                    // The drain refuses to claim until this process is the one
+                    // still serving (`#abandonedreplacementhandoff`).
                     match runtime.drain_document_authority_handoffs(&project_root) {
                         Ok(true) => {
                             std::thread::sleep(retry_delay);
@@ -10570,7 +10570,12 @@ impl ControllerRuntime {
     }
 
     fn wake_document_authority_handoff_worker(&self) {
-        let Some(wake) = self.document_authority_handoff_wake.lock().as_ref().cloned() else {
+        let Some(wake) = self
+            .document_authority_handoff_wake
+            .lock()
+            .as_ref()
+            .cloned()
+        else {
             return;
         };
         match wake.try_send(()) {
@@ -10584,10 +10589,7 @@ impl ControllerRuntime {
         }
     }
 
-    fn note_pending_document_authority_handoff(
-        &self,
-        event: agent_doc_state_backbone::StateEvent,
-    ) {
+    fn note_pending_document_authority_handoff(&self, event: agent_doc_state_backbone::StateEvent) {
         let Some(incoming_epoch) = document_authority_epoch(&event) else {
             return;
         };
@@ -11297,13 +11299,31 @@ impl ControllerRuntime {
     /// does for a duplicate: a row at or below the folded high-water was folded
     /// by the load and needs no reload, which keeps a restart's first drain over
     /// the predecessor's ordinary receipts cheap.
+    ///
+    /// `#abandonedreplacementhandoff`: a preparing replacement can ACK and die.
+    /// Its receipt is newer than the controller that keeps serving, so the
+    /// older-only load never sees it. Receipts of a generation the durable
+    /// bootstrap proves is not live are folded here too. A live successor's
+    /// receipts are left for that successor.
     fn reconcile_predecessor_authority_acks(
         &self,
         project_root: &Path,
         generation: u64,
     ) -> Result<bool> {
-        let receipts =
+        let mut receipts =
             state_store::load_document_authority_ack_receipts_before(project_root, generation)?;
+        let mut abandoned = 0usize;
+        for receipt in
+            state_store::load_document_authority_ack_receipts_after(project_root, generation)?
+        {
+            if self.abandoned_replacement_authority_generation_for(
+                project_root,
+                receipt.controller_generation,
+            )? {
+                abandoned += 1;
+                receipts.push(receipt);
+            }
+        }
         if receipts.is_empty() {
             return Ok(false);
         }
@@ -11324,7 +11344,7 @@ impl ControllerRuntime {
                 agent_doc_ops_log_io::log_op(
                     project_root,
                     &format!(
-                        "document_authority_ack_receipt_fold_deferred receipts={} unfolded={unfolded} controller_generation={generation} folded_through={folded_through} error={error:#} (#predecessorlandandack)",
+                        "document_authority_ack_receipt_fold_deferred receipts={} abandoned={abandoned} unfolded={unfolded} controller_generation={generation} folded_through={folded_through} error={error:#} (#predecessorlandandack)",
                         receipts.len(),
                     ),
                 );
@@ -11333,7 +11353,7 @@ impl ControllerRuntime {
             agent_doc_ops_log_io::log_op(
                 project_root,
                 &format!(
-                    "document_authority_ack_receipt_refolded receipts={} unfolded={unfolded} controller_generation={generation} folded_through={folded_through} (#predecessorlandandack)",
+                    "document_authority_ack_receipt_refolded receipts={} abandoned={abandoned} unfolded={unfolded} controller_generation={generation} folded_through={folded_through} (#predecessorlandandack)",
                     receipts.len(),
                 ),
             );
@@ -11344,18 +11364,119 @@ impl ControllerRuntime {
         Ok(false)
     }
 
+    /// `true` when `claimed_generation` is above the serving controller and no
+    /// live newer controller owns it (`#abandonedreplacementhandoff`).
+    ///
+    /// The durable record being this process means the replacement never became
+    /// the recorded authority, or an abort wrote this process back. A recorded
+    /// controller newer than us that is still alive owns higher claims. One
+    /// that is not alive does not.
+    pub(crate) fn abandoned_replacement_authority_generation(
+        serving_generation: u64,
+        serving_pid: u32,
+        claimed_generation: u64,
+        recorded: &ControllerBootstrap,
+        recorded_owner_alive: bool,
+    ) -> bool {
+        if claimed_generation <= serving_generation {
+            return false;
+        }
+        if recorded.controller_generation == serving_generation && recorded.pid == serving_pid {
+            return true;
+        }
+        if recorded_owner_alive && recorded.controller_generation > serving_generation {
+            return false;
+        }
+        true
+    }
+
+    /// A preparing replacement is not the controller that serves this root.
+    ///
+    /// `#abandonedreplacementhandoff`: `new_arc` starts the handoff drain before
+    /// promotion. Claiming or acknowledging from that private socket strands the
+    /// row on a newer generation the older public controller cannot ordinarily
+    /// claim, and writes a receipt that only a still-newer generation would
+    /// read. `prepare_handoff` also marks the public controller `Preparing`;
+    /// that process is still the serving one and must keep draining. Stable
+    /// always drains, including a promoted replacement whose recorded socket is
+    /// already the public path.
+    fn document_authority_handoff_drain_waits_for_authority(&self) -> bool {
+        let bootstrap = self.bootstrap.lock();
+        if bootstrap.handoff_state == ControllerHandoffState::Stable {
+            return false;
+        }
+        bootstrap.socket_path != socket_path(&bootstrap.project_root)
+    }
+
+    /// Whether `claimed_generation` is a replacement this serving controller may
+    /// adopt (`#abandonedreplacementhandoff`).
+    ///
+    /// Unknown bootstrap is not proof. A live recorded controller newer than
+    /// this process owns the higher rows and receipts. This process's own
+    /// record, or a recorded newer controller that is not alive, means the
+    /// higher generation died and this process kept serving.
+    fn abandoned_replacement_authority_generation_for(
+        &self,
+        project_root: &Path,
+        claimed_generation: u64,
+    ) -> Result<bool> {
+        let serving = self.bootstrap.lock().clone();
+        let Some(recorded) = read_bootstrap(project_root)? else {
+            return Ok(false);
+        };
+        let recorded_owner_alive =
+            recorded_process_is_alive(recorded.pid, recorded.bootstrap_epoch);
+        Ok(Self::abandoned_replacement_authority_generation(
+            serving.controller_generation,
+            serving.pid,
+            claimed_generation,
+            &recorded,
+            recorded_owner_alive,
+        ))
+    }
+
     /// Fold every durable latest-value authority handoff this controller can
     /// generation-fence. `true` means at least one row remains retryable.
     fn drain_document_authority_handoffs(&self, project_root: &Path) -> Result<bool> {
+        if self.document_authority_handoff_drain_waits_for_authority() {
+            return Ok(false);
+        }
         let generation = self.bootstrap.lock().controller_generation;
         let mut retry = self.reconcile_predecessor_authority_acks(project_root, generation)?;
         for handoff in state_store::load_document_authority_handoffs(project_root)? {
-            if !state_store::claim_document_authority_handoff(
+            let mut claimed = state_store::claim_document_authority_handoff(
                 project_root,
                 &handoff.document_hash,
                 handoff.authority_epoch,
                 generation,
-            )? {
+            )?;
+            if !claimed
+                && handoff.controller_generation > generation
+                && self.abandoned_replacement_authority_generation_for(
+                    project_root,
+                    handoff.controller_generation,
+                )?
+            {
+                claimed = state_store::reclaim_abandoned_document_authority_handoff(
+                    project_root,
+                    &handoff.document_hash,
+                    handoff.authority_epoch,
+                    handoff.controller_generation,
+                    generation,
+                )?;
+                if claimed {
+                    agent_doc_ops_log_io::log_op(
+                        project_root,
+                        &format!(
+                            "document_authority_handoff_reclaimed_abandoned_generation document_hash={} authority_epoch={} from_generation={} controller_generation={generation} (#abandonedreplacementhandoff)",
+                            handoff.document_hash,
+                            handoff.authority_epoch,
+                            handoff.controller_generation,
+                        ),
+                    );
+                }
+            }
+            if !claimed {
                 continue;
             }
             let event: agent_doc_state_backbone::StateEvent =
@@ -11908,7 +12029,11 @@ impl ControllerRuntime {
     fn supervisor_recycle_projection(
         &self,
     ) -> Result<agent_doc_state_backbone::SupervisorRecycleProjection> {
-        Ok(self.memory.lock().state_projection.project_supervisor_recycle())
+        Ok(self
+            .memory
+            .lock()
+            .state_projection
+            .project_supervisor_recycle())
     }
 
     fn supervisor_recycle_projection_for(
@@ -11937,7 +12062,10 @@ impl ControllerRuntime {
                 hook();
             }
         });
-        if let Some(event) = memory.pending_document_authority_handoffs.get(document_hash) {
+        if let Some(event) = memory
+            .pending_document_authority_handoffs
+            .get(document_hash)
+        {
             projection
                 .get_or_insert_with(|| {
                     agent_doc_state_backbone::DocumentStateProjection::new(document_hash)
@@ -22802,7 +22930,11 @@ agent:queue\n\
                 event_id,
                 StateFact::EditorViewBindingObserved {
                     document_hash: document_hash.to_string(),
-                    canonical_path: dir.path().join("tasks/sdk.md").to_string_lossy().to_string(),
+                    canonical_path: dir
+                        .path()
+                        .join("tasks/sdk.md")
+                        .to_string_lossy()
+                        .to_string(),
                     binding_epoch: 1,
                     state: EditorViewBindingState::Released {
                         binding: EditorViewBindingIdentity {
@@ -23063,8 +23195,7 @@ agent:queue\n\
             let _ = entered_tx.send(());
             let _ = release_rx.lock().recv();
         });
-        *state_projection_derived_test_hook().lock() =
-            Some((document_hash.to_string(), hook));
+        *state_projection_derived_test_hook().lock() = Some((document_hash.to_string(), hook));
 
         // The first activation installed a persistent retained-transition
         // Effect. Updating its durable projection must ACK before the worker
@@ -23238,8 +23369,7 @@ agent:queue\n\
                 ACTIVATION.pass(document_hash);
             }
         });
-        *state_projection_effect_test_hook().lock() =
-            Some((document_hash.to_string(), hook));
+        *state_projection_effect_test_hook().lock() = Some((document_hash.to_string(), hook));
 
         // The refresh publishes Sources and returns while derived activation
         // remains blocked on another thread.
@@ -23312,8 +23442,7 @@ agent:queue\n\
                 let _ = release_rx.lock().recv();
             }
         });
-        *state_projection_effect_test_hook().lock() =
-            Some((document_hash.to_string(), hook));
+        *state_projection_effect_test_hook().lock() = Some((document_hash.to_string(), hook));
 
         let first = deferred_document_write_event(document_hash, "intent-0", "target-0");
         assert!(
@@ -23353,7 +23482,10 @@ agent:queue\n\
         release_tx.send(()).unwrap();
         let deadline = Instant::now() + blocking_effect_gate::HANG_CEILING;
         while runtime.state_projection_activation_queue.counts() != (0, 0) {
-            assert!(Instant::now() < deadline, "coalesced activation did not drain");
+            assert!(
+                Instant::now() < deadline,
+                "coalesced activation did not drain"
+            );
             std::thread::sleep(Duration::from_millis(10));
         }
         assert_eq!(calls.load(Ordering::SeqCst), 2);
@@ -23369,8 +23501,7 @@ agent:queue\n\
         let hook: StateProjectionEffectTestHook = Arc::new(|| {
             panic!("synthetic projection activation failure");
         });
-        *state_projection_effect_test_hook().lock() =
-            Some((document_hash.to_string(), hook));
+        *state_projection_effect_test_hook().lock() = Some((document_hash.to_string(), hook));
 
         let event = deferred_document_write_event(document_hash, "panic-intent", "panic-target");
         assert!(
@@ -23380,7 +23511,10 @@ agent:queue\n\
         );
         let deadline = Instant::now() + blocking_effect_gate::HANG_CEILING;
         while !runtime.controller_generation_poisoned() {
-            assert!(Instant::now() < deadline, "worker panic did not poison generation");
+            assert!(
+                Instant::now() < deadline,
+                "worker panic did not poison generation"
+            );
             std::thread::sleep(Duration::from_millis(10));
         }
         assert_eq!(
@@ -29206,11 +29340,7 @@ revised operator request
         // independently persisted snapshot, but that effect must explicitly
         // decline a live write.
         runtime
-            .document_queue_authority_observe(
-                &document_hash,
-                &canonical,
-                repaired.clone(),
-            )
+            .document_queue_authority_observe(&document_hash, &canonical, repaired.clone())
             .unwrap();
         let snapshot_only = runtime
             .document_graphs
@@ -29891,7 +30021,10 @@ mod retained_persistence_retry_tests {
                 false,
             )
             .expect("a refused current epoch keeps retrying");
-            assert!(decision.schedule_retry, "transport faults remain level-triggered");
+            assert!(
+                decision.schedule_retry,
+                "transport faults remain level-triggered"
+            );
             assert_eq!(decision.delay, Duration::from_secs(30));
             assert!(
                 !decision.request_replica_rebuild,
@@ -30005,7 +30138,11 @@ mod retained_persistence_retry_tests {
             'x',
             300_425usize.saturating_sub(large.len()),
         ));
-        assert_eq!(large.len(), 300_425, "fixture matches the measured document scale");
+        assert_eq!(
+            large.len(),
+            300_425,
+            "fixture matches the measured document scale"
+        );
         let content_hash = agent_doc_hash::content_hash(&large);
         let content = (content_hash.as_str(), large.len());
         let mut retries = std::collections::HashMap::new();

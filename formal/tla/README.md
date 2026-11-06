@@ -89,6 +89,11 @@ A predecessor that lands *and* acknowledges its row after the successor's load
 and before its row read leaves no row or entry, so an ACK commits a receipt
 naming the event in the transaction that deletes the row, and a successor
 reconciles older generations' receipts at the head of every drain.
+A preparing replacement is outside this model
+(`#abandonedreplacementhandoff`): its drain does not claim or acknowledge
+before it is the serving controller, and the controller that keeps serving
+reclaims a higher generation's row and receipt only once the durable bootstrap
+proves that generation is not a live newer controller.
 `AuthorityHandoffFoldLateAckWedge` removes that reconcile and must violate
 `EventuallyFolded`; `AuthorityHandoffFoldLateAckReach` witnesses the late ACK.
 The rest of the class of any predecessor write committed after a successor's

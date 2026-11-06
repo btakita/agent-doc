@@ -645,9 +645,14 @@ fn response_decision_metadata_child_end(
     item_indent: usize,
 ) -> Option<usize> {
     let content = strip_bullet(lines.get(opener_index)?)?.trim();
-    let value = ["**Context:** ", "**Question:** ", "**Selected:** "]
-        .into_iter()
-        .find_map(|prefix| content.strip_prefix(prefix))?;
+    let value = [
+        "**Context:** ",
+        "**Question:** ",
+        "**Selected:** ",
+        "**Recommendation:** ",
+    ]
+    .into_iter()
+    .find_map(|prefix| content.strip_prefix(prefix))?;
     if value.trim().is_empty() {
         return None;
     }
@@ -656,7 +661,15 @@ fn response_decision_metadata_child_end(
     if item_indent != response_indent + 2 {
         return None;
     }
-    let (_, has_summary) = canonical_response_row(strip_bullet(lines.get(response_index)?)?)?;
+    let parent = strip_bullet(lines.get(response_index)?)?;
+    // `#recommendationinrow`: a back-reference that owns a request renders the
+    // recommendation above that request's Choices subtree.
+    if content.starts_with("**Recommendation:** ")
+        && canonical_response_back_reference(parent).is_some()
+    {
+        return Some(opener_index + 1);
+    }
+    let (_, has_summary) = canonical_response_row(parent)?;
     has_summary.then_some(opener_index + 1)
 }
 
@@ -2285,6 +2298,43 @@ mod tests {
             ranges
                 .iter()
                 .all(|&(start, end)| !source[start..end].contains("Use staging"))
+        );
+    }
+
+    #[test]
+    fn recommendation_row_is_reserved_only_beneath_a_response_or_back_reference() {
+        let source = concat!(
+            "- ~~done~~\n",
+            "  - **Response [#r-0123456789ab]:** Summary.\n",
+            "    - **Timestamp:** 2026-11-05T19:58:00-05:00\n",
+            "    - **Recommendation:** **staging** — Production is frozen.\n",
+            "  - **Closed by:** [#r-0123456789ab]\n",
+            "    - **Recommendation:** **staging** — Production is frozen.\n",
+        );
+        let lines = source.lines().collect::<Vec<_>>();
+        for index in [3, 5] {
+            assert_eq!(
+                response_decision_metadata_child_end(&lines, index, 4),
+                Some(index + 1),
+                "{}",
+                lines[index]
+            );
+        }
+
+        // Beneath an ordinary row the same words are the operator's.
+        let operator = [
+            "- ordinary row",
+            "  - **Recommendation:** **staging** — mine.",
+        ];
+        assert_eq!(response_decision_metadata_child_end(&operator, 1, 2), None);
+        // The other decision rows stay reserved beneath a response only.
+        let back_reference = [
+            "- **Closed by:** [#r-0123456789ab]",
+            "  - **Context:** Why.",
+        ];
+        assert_eq!(
+            response_decision_metadata_child_end(&back_reference, 1, 2),
+            None
         );
     }
 

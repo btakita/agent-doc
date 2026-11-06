@@ -67,9 +67,34 @@ and the pending granular-flags-only rule. This runbook carries the rest.
   packets remain readable; the gate applies when a new response/checkpoint is
   written.
 
+  **A recommendation belongs in the structure, not only in prose
+  (`#recommendationinrow`).** The queue row is built from the packet, so
+  `My recommendation: X` beside a packet never reaches the operator's
+  `**Choices:**` block. When you recommend one offered choice, write it in the
+  packet, above `choices:`, as one row naming the choice's exact label:
+
+  ```md
+  - *recommendation:*
+    - **Leave them out**: The responses stay in the saved receipts, and the next repair removes restored cells again.
+  - *choices:*
+    - **Restore the 22**: after install, run `--apply` with those keys.
+    - **Leave them out**: apply nothing; the responses stay in the receipts.
+  ```
+
+  The row renders as `**Recommendation:** **<label>** — <reason>` directly above
+  `**Choices:**`, and the named choice row gains ` — **Recommended**`. A
+  coordinator recommending on a worker's packet adds this one field and leaves
+  the rest verbatim. A choice labelled `(Recommended)` with a
+  `Recommended because <reason>` description renders the same row; use one form
+  per packet. The write refuses a `recommendation:` that is not exactly
+  `**<offered label>**: <reason>`, names no offered choice, contradicts a
+  `(Recommended)` label, or gives no concrete reason. Omit the field when you
+  recommend nothing; the row then renders without either addition.
+
   Once the operator answers, retain a compact decision record in the cumulative
   final response: the context, question, choices presented, and selected/free-
-  form answer. Final response application removes the non-final checkpoint; the
+  form answer. A record with no request packet states its recommendation as
+  `- **Recommendation:** **<label>**: <reason>`. Final response application removes the non-final checkpoint; the
   decision record preserves what the operator saw and chose. Do not close or
   abandon the response cycle merely because the native UI paused the turn.
 - Reconcile the changed exchange tail oldest-first. Do not stop at the newest
@@ -1055,7 +1080,8 @@ packet's `request:` and choices unless `--todo-add` already supplies
 Preserve the canonical shape when copying the packet into exchange: the bare
 marker line, emphasized-key list fields, the `queue_item`, `request`, and
 `context` values as a nested list beneath their key bullet (the context as
-short one-fact bullets), and choices nested below `- *choices:*`. The parser
+short one-fact bullets), any `recommendation:` row, and choices nested below
+`- *choices:*`. The parser
 keeps historical inline-value and plain-key packets readable.
 Every operator ask in the response needs its own todo: an explicit request
 (`Say \`post\``, `needs your ok`), an unpublished draft path, and each item of

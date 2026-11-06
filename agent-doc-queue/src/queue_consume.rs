@@ -4124,9 +4124,16 @@ fn response_back_reference_child(
         .filter(|packet| !row_is_offered_option_of(packet, queue_item))
         .filter(|packet| rendered_choice_packet_ids.insert(packet.id.clone()))
     {
+        let recommendation = packet.choice_recommendation();
+        let mut choice_rows = packet.choice_rows;
+        if let Some(recommendation) = &recommendation {
+            recommendation.mark_choice_row(&mut choice_rows);
+            child.push_str("\n- ");
+            child.push_str(&recommendation.row());
+        }
         child.push_str("\n- **Choices:**");
         child.push_str(&format!("\n  - **Request**: [#{}]", packet.id));
-        for choice in packet.choice_rows {
+        for choice in choice_rows {
             child.push_str("\n  - ");
             child.push_str(&choice);
         }
@@ -4388,13 +4395,21 @@ fn response_summary_row_child(
             }
             summary.push_str(&packet.request);
         }
-        choice_projections.push((packet.id, packet.choice_rows));
+        let recommendation = packet.choice_recommendation();
+        let mut choice_rows = packet.choice_rows;
+        if let Some(recommendation) = &recommendation {
+            recommendation.mark_choice_row(&mut choice_rows);
+        }
+        choice_projections.push((packet.id, choice_rows, recommendation));
     }
     let decision_projection =
         structured_choice_projection(source_document, queue_item, response_body, shared_batch);
     let decision_choices = decision_projection
         .as_ref()
         .map(|projection| projection.choices.clone());
+    let decision_recommendation = decision_projection
+        .as_ref()
+        .and_then(|projection| projection.recommendation.clone());
     let decision_request_id = decision_projection
         .as_ref()
         .and_then(|projection| projection.request_id.clone());
@@ -4476,6 +4491,10 @@ fn response_summary_row_child(
         if let Some(choices) = decision_choices
             && !choices.is_empty()
         {
+            if let Some(recommendation) = &decision_recommendation {
+                child.push_str("\n- ");
+                child.push_str(&recommendation.row());
+            }
             child.push_str("\n- **Choices:**");
             for choice in choices {
                 child.push_str("\n  - ");
@@ -4483,9 +4502,9 @@ fn response_summary_row_child(
             }
         }
     } else {
-        for (index, (packet_id, packet_choices)) in choice_projections.into_iter().enumerate() {
-            child.push_str("\n- **Choices:**");
-            child.push_str(&format!("\n  - **Request**: [#{packet_id}]"));
+        for (index, (packet_id, packet_choices, packet_recommendation)) in
+            choice_projections.into_iter().enumerate()
+        {
             // `#waitingtriage`: a decision's options stand in for a packet's
             // only when that decision records this very request (or names no
             // request, which only a single-row response keeps); another
@@ -4493,10 +4512,18 @@ fn response_summary_row_child(
             let decision_is_this_request = decision_request_id
                 .as_deref()
                 .is_none_or(|id| id.eq_ignore_ascii_case(&packet_id));
-            let choices = match &decision_choices {
-                Some(choices) if index == 0 && decision_is_this_request => choices.clone(),
-                _ => packet_choices,
+            let (choices, recommendation) = match &decision_choices {
+                Some(choices) if index == 0 && decision_is_this_request => {
+                    (choices.clone(), decision_recommendation.clone())
+                }
+                _ => (packet_choices, packet_recommendation),
             };
+            if let Some(recommendation) = &recommendation {
+                child.push_str("\n- ");
+                child.push_str(&recommendation.row());
+            }
+            child.push_str("\n- **Choices:**");
+            child.push_str(&format!("\n  - **Request**: [#{packet_id}]"));
             for choice in choices {
                 child.push_str("\n  - ");
                 child.push_str(&choice);
@@ -4602,6 +4629,7 @@ struct StructuredChoiceProjection {
     question: Option<String>,
     selected: String,
     choices: Vec<String>,
+    recommendation: Option<crate::operator_request_packet::ChoiceRecommendation>,
 }
 
 fn structured_choice_projection(
@@ -4664,7 +4692,7 @@ fn structured_choice_projection(
     let selected_label = decision
         .selected_label
         .as_deref()
-        .map(normalized_choice_label);
+        .map(crate::operator_request_packet::normalized_choice_label);
     let mut choices = packet
         .as_ref()
         .map(|packet| packet.choice_rows.clone())
@@ -4676,12 +4704,19 @@ fn structured_choice_projection(
                 .map(|label| format!("**{label}**: Offered choice."))
                 .collect()
         });
+    let recommendation = packet
+        .as_ref()
+        .and_then(|packet| packet.choice_recommendation())
+        .or_else(|| decision.choice_recommendation());
+    if let Some(recommendation) = &recommendation {
+        recommendation.mark_choice_row(&mut choices);
+    }
     if let Some(selected_label) = selected_label {
         for choice in &mut choices {
             let label = choice
                 .strip_prefix("**")
                 .and_then(|choice| choice.split_once("**:"))
-                .map(|(label, _)| normalized_choice_label(label));
+                .map(|(label, _)| crate::operator_request_packet::normalized_choice_label(label));
             if label.as_deref() == Some(selected_label.as_str()) {
                 choice.push_str(" — **Selected**");
             }
@@ -4698,6 +4733,7 @@ fn structured_choice_projection(
             .or(decision.question),
         selected: decision.selected,
         choices,
+        recommendation,
     })
 }
 
@@ -4748,16 +4784,6 @@ fn queue_prompt_section_for_row<'a>(response_body: &'a str, queue_item: &str) ->
         }
     }
     ""
-}
-
-fn normalized_choice_label(label: &str) -> String {
-    label
-        .trim()
-        .trim_end_matches('.')
-        .trim_end_matches("(recommended)")
-        .trim_end_matches("(Recommended)")
-        .trim()
-        .to_ascii_lowercase()
 }
 
 fn response_has_unpublished_work_evidence(response_body: &str) -> bool {
@@ -6211,6 +6237,7 @@ struct WaitingOperatorPacket {
     request: String,
     context: String,
     choices: Vec<String>,
+    recommendation: Option<crate::operator_request_packet::ChoiceRecommendation>,
     response_timestamp: Option<String>,
 }
 
@@ -6237,6 +6264,13 @@ fn parse_waiting_operator_packets(source: &str) -> Vec<(String, WaitingOperatorP
     }
 
     let lines = source.lines().collect::<Vec<_>>();
+    let recommendations = crate::operator_request_packet::blocking_operator_request_packets(source)
+        .into_iter()
+        .filter_map(|packet| {
+            let recommendation = packet.choice_recommendation()?;
+            Some((packet.id.to_ascii_lowercase(), recommendation))
+        })
+        .collect::<HashMap<_, _>>();
     let mut packets = Vec::new();
     let mut current_response_timestamp = None;
     let mut index = 0;
@@ -6289,6 +6323,7 @@ fn parse_waiting_operator_packets(source: &str) -> Vec<(String, WaitingOperatorP
                         }
                     }
                     "choices" => field = Field::Choices,
+                    "recommendation" => field = Field::Other,
                     _ if matches!(field, Field::Choices) => {
                         packet.choices.push(one_line(de_bulleted));
                     }
@@ -6305,6 +6340,10 @@ fn parse_waiting_operator_packets(source: &str) -> Vec<(String, WaitingOperatorP
             index += 1;
         }
         if blocking && !packet.request.is_empty() {
+            packet.recommendation = recommendations.get(&id).cloned();
+            if let Some(recommendation) = &packet.recommendation {
+                recommendation.mark_choice_row(&mut packet.choices);
+            }
             packets.push((id, packet));
         }
     }
@@ -6436,6 +6475,10 @@ fn render_waiting_metadata(
         out.push(' ');
         out.push_str(&reply_suffix);
         if !packet.choices.is_empty() {
+            if let Some(recommendation) = &packet.recommendation {
+                out.push_str(&format!("\n{child}- {} ", recommendation.row()));
+                out.push_str(&reply_suffix);
+            }
             out.push_str(&format!("\n{child}- **Choices:** "));
             out.push_str(&reply_suffix);
             for choice in &packet.choices {
@@ -13284,5 +13327,284 @@ Old.
         );
         assert!(!choice.contains("**Choices:**"), "{queue}");
         assert!(!queue.contains("**Do not grant**"), "{queue}");
+    }
+
+    /// `#recommendationinrow`: the `#completioncellrestore` row, rendered from
+    /// `recommendation` (`None` drops the field and leaves the prose beside it).
+    fn recommendation_row_queue(recommendation: Option<&str>) -> String {
+        let queue_item = "🚧 [#subagent:restore#1] do [#restore]";
+        let request_id = "subagent-operator-request-closedcellkeys";
+        let recommendation = recommendation
+            .map(|row| format!("- *recommendation:*\n  - {row}\n"))
+            .unwrap_or_default();
+        let response = format!(
+            "### Re: one decision — test\n\n\
+**Current state:** The command is built.\n\n\
+**My recommendation: leave them out.** The receipts keep every response.\n\n\
+[#{request_id}] subagent operator request\n\
+- *queue_item:*\n  - {queue_item}\n\
+- *kind:* question\n\
+- *blocking:* true\n\
+- *request:*\n  - Should the closed attempts be restored?\n\
+{recommendation}\
+- *choices:*\n  - **Restore them**: Run `--apply`.\n  - **Leave them out**: Apply nothing.\n"
+        );
+        let before = queue_doc(&format!("- {queue_item}\n"));
+        let after =
+            doc_with_queue_and_exchange(&format!("- 🙋 [#{request_id}] {queue_item}\n"), &response);
+        let annotated = annotate_newly_struck_queue_items_with_response_id_at(
+            &before,
+            &after,
+            &response,
+            "2026-11-05T19:58:00-05:00",
+        )
+        .unwrap();
+        element::parse(&annotated)
+            .unwrap()
+            .into_iter()
+            .find(|component| component.name == "queue")
+            .unwrap()
+            .content(&annotated)
+            .to_string()
+    }
+
+    #[test]
+    fn recommended_choice_is_marked_and_its_reason_has_a_row() {
+        let queue = recommendation_row_queue(Some(
+            "**Leave them out**: The receipts keep every response, and the next repair removes restored cells.",
+        ));
+        assert!(
+            queue.contains(concat!(
+                "    - **Recommendation:** **Leave them out** — The receipts keep every response, and the next repair removes restored cells.\n",
+                "    - **Choices:**\n",
+                "      - **Request**: [#subagent-operator-request-closedcellkeys]\n",
+                "      - **Restore them**: Run `--apply`.\n",
+                "      - **Leave them out**: Apply nothing. — **Recommended**\n",
+            )),
+            "{queue}"
+        );
+    }
+
+    #[test]
+    fn a_response_without_a_recommendation_renders_no_new_row() {
+        let queue = recommendation_row_queue(None);
+        assert!(
+            queue.contains(concat!(
+                "    - **Choices:**\n",
+                "      - **Request**: [#subagent-operator-request-closedcellkeys]\n",
+                "      - **Restore them**: Run `--apply`.\n",
+                "      - **Leave them out**: Apply nothing.\n",
+            )),
+            "{queue}"
+        );
+        assert!(!queue.contains("**Recommendation:**"), "{queue}");
+        assert!(!queue.contains("**Recommended**"), "{queue}");
+
+        // Only the two rows differ: the field changes nothing else in the row.
+        let recommended = recommendation_row_queue(Some(
+            "**Leave them out**: The receipts keep every response already.",
+        ));
+        let unmarked = recommended
+            .replace(
+                "    - **Recommendation:** **Leave them out** — The receipts keep every response already.\n",
+                "",
+            )
+            .replace(" — **Recommended**", "");
+        let strip_ids = |queue: &str| {
+            queue
+                .lines()
+                .map(|line| line.split("[#r-").next().unwrap_or_default().to_string())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(strip_ids(&unmarked), strip_ids(&queue));
+    }
+
+    #[test]
+    fn answered_decision_keeps_the_recommendation_it_was_offered() {
+        let packet = concat!(
+            "[#subagent-operator-request-terminal-design] subagent operator request\n",
+            "- *queue_item:* do [#terminal]\n",
+            "- *kind:* question\n",
+            "- *blocking:* true\n",
+            "- *request:* What should happen to the unfinished row?\n",
+            "- *recommendation:*\n",
+            "  - **hold-only**: Nothing else preserves the worker's evidence.\n",
+            "- *choices:*\n",
+            "  - **redispatch**: Keep the row and redispatch its claim.\n",
+            "  - **hold-only**: Keep the row blocked for manual action.\n",
+        );
+        let before =
+            format!("<!-- agent:queue -->\n- do [#terminal]\n<!-- /agent:queue -->\n\n{packet}");
+        let after = before.replace("- do [#terminal]", "- ~~do [#terminal]~~");
+        let response = concat!(
+            "### Re: terminal choice — test\n\n",
+            "**Decision record** for `[#subagent-operator-request-terminal-design]`:\n",
+            "- **Choices presented:** redispatch, hold-only.\n",
+            "- **Selected:** **hold-only**. Keep it blocked.\n",
+        );
+        let annotated = annotate_newly_struck_queue_items_with_response_id_at(
+            &before,
+            &after,
+            response,
+            "2026-11-01T12:34:56-04:00",
+        )
+        .unwrap();
+        assert!(
+            annotated.contains(concat!(
+                "    - **Recommendation:** **hold-only** — Nothing else preserves the worker's evidence.\n",
+                "    - **Choices:**\n",
+                "      - **redispatch**: Keep the row and redispatch its claim.\n",
+                "      - **hold-only**: Keep the row blocked for manual action. — **Recommended** — **Selected**\n",
+            )),
+            "{annotated}"
+        );
+    }
+
+    #[test]
+    fn request_less_decision_record_states_its_recommendation() {
+        let before = queue_doc("- do [#plain]\n");
+        let after = before.replace("- do [#plain]", "- ~~do [#plain]~~");
+        let response = concat!(
+            "### Re: plain — test\n\n",
+            "> **Queue prompt:** do [#plain]\n\n",
+            "**Decision record**:\n",
+            "- **Question:** Which colour?\n",
+            "- **Choices presented:** green, blue.\n",
+            "- **Recommendation:** **blue**: The brand guide bans green banners.\n",
+            "- **Selected:** **green**. Green.\n",
+        );
+        let annotated = annotate_newly_struck_queue_items_with_response_id_at(
+            &before,
+            &after,
+            response,
+            "2026-11-01T12:34:56-04:00",
+        )
+        .unwrap();
+        assert!(
+            annotated.contains(concat!(
+                "**Recommendation:** **blue** — The brand guide bans green banners.\n",
+                "    - **Choices:**\n",
+                "      - **green**: Offered choice. — **Selected**\n",
+                "      - **blue**: Offered choice. — **Recommended**\n",
+            )),
+            "{annotated}"
+        );
+    }
+
+    #[test]
+    fn a_back_reference_row_carries_the_recommendation_of_its_request() {
+        let row = "do [#beta]";
+        let response = format!(
+            "### Re: batch — test\n\n\
+> **Queue prompt:** do [#alpha]\n\n\
+**Outcome:** `#alpha` and `#beta` shipped.\n\n\
+> **Queue prompt:** {row}\n\n\
+[#subagent-operator-request-betatarget] subagent operator request\n\
+- *queue_item:*\n  - {row}\n\
+- *kind:* question\n\
+- *blocking:* true\n\
+- *request:*\n  - Which target?\n\
+- *recommendation:*\n  - **staging**: Production is frozen until Monday.\n\
+- *choices:*\n  - **staging**: Staging.\n  - **production**: Production.\n"
+        );
+        let mut rendered = HashSet::new();
+        let child =
+            response_back_reference_child(row, &response, "[#r-0123456789ab]", &mut rendered);
+        assert_eq!(
+            child,
+            concat!(
+                "**Closed by:** [#r-0123456789ab]\n",
+                "- **Recommendation:** **staging** — Production is frozen until Monday.\n",
+                "- **Choices:**\n",
+                "  - **Request**: [#subagent-operator-request-betatarget]\n",
+                "  - **staging**: Staging. — **Recommended**\n",
+                "  - **production**: Production.",
+            )
+        );
+
+        // The row sits under a real back-reference without becoming queue work.
+        let body = format!(
+            "- ~~{row}~~\n{}",
+            render_response_lookup_child(&child, "  ")
+        );
+        let entries = document_queue::parse(&body).unwrap();
+        assert!(
+            document_queue::executable_prompt_indexes(&entries).is_empty(),
+            "{body}\n{entries:#?}"
+        );
+    }
+
+    #[test]
+    fn waiting_tree_marks_the_recommended_choice_and_states_why() {
+        let id = "subagent-operator-request-release-target";
+        let response = format!(
+            "### Re: release target — test · 2026-11-02T10:45-05:00\n\n\
+             [#{id}] subagent operator request\n\
+             - *kind:* question\n\
+             - *blocking:* true\n\
+             - *request:* Which release target should be used?\n\
+             - *recommendation:*\n\
+               - **staging**: Production is frozen until Monday.\n\
+             - *choices:*\n\
+               - **staging**: Publish to staging.\n\
+               - **production**: Publish to production.\n"
+        );
+        let document = waiting_tree_document(
+            "",
+            &format!("- [ ] [#{id}] Answer the release question.\n"),
+            &response,
+        );
+
+        let projected = project_waiting_on_you_tree(&document, &response)
+            .unwrap()
+            .expect("blocking todo should create the tree");
+        let reply = agent_doc_reply_suffix();
+        assert!(
+            projected.contains(&format!(
+                "- **Recommendation:** **staging** — Production is frozen until Monday. {reply}\n"
+            )),
+            "{projected}"
+        );
+        assert!(
+            projected.contains(&format!(
+                "- **staging**: Publish to staging. — **Recommended** {reply}\n"
+            )),
+            "{projected}"
+        );
+        assert!(
+            projected.contains(&format!(
+                "- **production**: Publish to production. {reply}\n"
+            )),
+            "{projected}"
+        );
+
+        let lines = projected.lines().collect::<Vec<_>>();
+        let row = lines
+            .iter()
+            .position(|line| line.contains("**Recommendation:**"))
+            .unwrap();
+        assert!(
+            agent_doc_markdown_ast::reply_row::is_agent_doc_reply_row_at(&lines, row),
+            "{projected}"
+        );
+    }
+
+    #[test]
+    fn prose_recommendation_line_after_the_packet_is_not_a_waiting_choice() {
+        let id = "subagent-operator-request-release-target";
+        let response = format!(
+            "### Re: release target — test · 2026-11-02T10:45-05:00\n\n\
+             [#{id}] subagent operator request\n\
+             - *kind:* question\n\
+             - *blocking:* true\n\
+             - *request:* Which release target should be used?\n\
+             - *choices:*\n\
+               - **staging**: Publish to staging.\n\n\
+             **Recommendation:** staging.\n"
+        );
+        let packets = parse_waiting_operator_packets(&response);
+        assert_eq!(packets.len(), 1);
+        assert_eq!(packets[0].1.choices, ["**staging**: Publish to staging."]);
+        assert_eq!(packets[0].1.recommendation, None);
     }
 }

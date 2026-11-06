@@ -9,10 +9,12 @@
 //! - `agent-doc queue consume <FILE> --id <id>` — escape hatch (#orphanqhead)
 //!   that strikes an orphaned id-backed head whose backing backlog item was
 //!   already reaped (or is gone), so it stops re-firing the auto-loop.
-//! - `agent-doc queue consume <FILE> --ack-id <id>` — explicit acknowledgement
-//!   (#freshqueueauth) for one top-level bare id-backed correction head, or
-//!   report-proven closeout of runnable work, while leaving the tracked item
-//!   unresolved. Supplying the flag is never acknowledgement provenance.
+//! - `agent-doc queue consume <FILE> --ack-id <id> [--ack-owner <OWNER#GENERATION>]`
+//!   — explicit acknowledgement (#freshqueueauth) for one top-level bare
+//!   id-backed correction head, or report-proven closeout of runnable work,
+//!   while leaving the tracked item unresolved. Supplying the flag is never
+//!   acknowledgement provenance. `--ack-owner` fences the strike to one visible
+//!   reported attempt when several reported rows share the id (#ackidattemptfence).
 //! - `agent-doc queue consume <FILE> --ack-text <text>` — exact acknowledgement
 //!   for a completed free-text head, including a unique active nested lineage.
 //! - `queue claim` is an admission transaction: the harness receives spawn
@@ -145,6 +147,17 @@ pub trait QueueCommandEffects {
     ) -> Result<Option<QueueCommandConsumeOutcome>>;
     fn strike_orphan_id_backed_queue_head(&self, file: &Path, id: &str) -> Result<bool>;
     fn acknowledge_open_id_backed_queue_head(&self, file: &Path, id: &str) -> Result<bool>;
+    fn acknowledge_open_id_backed_queue_head_for_attempt(
+        &self,
+        file: &Path,
+        id: &str,
+        attempt: Option<&agent_doc_document::queue_projection::QueueOwnerProjection>,
+    ) -> Result<bool> {
+        if attempt.is_some() {
+            anyhow::bail!("this queue command effect does not support --ack-id --ack-owner");
+        }
+        self.acknowledge_open_id_backed_queue_head(file, id)
+    }
     fn acknowledge_paused_free_text_queue_head(
         &self,
         file: &Path,
@@ -1750,9 +1763,15 @@ pub fn acknowledge_open_id(
     effects: &impl QueueCommandEffects,
     file: &Path,
     id: &str,
+    attempt: Option<&agent_doc_document::queue_projection::QueueOwnerProjection>,
 ) -> Result<()> {
     let normalized = backlog::normalize_pending_id(id);
-    if effects.acknowledge_open_id_backed_queue_head(file, id)? {
+    let acknowledged = if attempt.is_some() {
+        effects.acknowledge_open_id_backed_queue_head_for_attempt(file, id, attempt)?
+    } else {
+        effects.acknowledge_open_id_backed_queue_head(file, id)?
+    };
+    if acknowledged {
         println!(
             "{}: acknowledged id-backed correction head [#{}] while preserving the open backlog item (#freshqueueauth).",
             file.display(),

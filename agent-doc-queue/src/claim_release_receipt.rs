@@ -523,9 +523,10 @@ impl ClaimReleaseReceiptLedger {
 /// [`crate::reported_closeout::reported_row_strike`], the one derivation every
 /// closeout emitter shares. An id-backed row (or a waiting-tree parent whose
 /// reported `☑️` attempt is nested under it, `#reportedwritebackprescription`)
-/// closes with `queue consume --ack-id <id>` when the worker handoff is
-/// integrated but the tracked item stays open, or with `--done <id>` when its
-/// tracked work is complete. A free-text row bound to an attempt (prose,
+/// closes with `queue consume --ack-id <id> --ack-owner <owner#gen>` when the
+/// worker handoff is integrated but the tracked item stays open (unfenced
+/// `--ack-id <id>` when the attempt is unknown), or with `--done <id>` when
+/// its tracked work is complete. A free-text row bound to an attempt (prose,
 /// `[#id]: answer`, a `[#q-…]` row) closes with the attempt-fenced `--ack-text
 /// <row> --ack-owner <owner#gen>`; its `#` mentions never name a backlog id.
 /// Only a free-text row with no exact attempt falls back to the verbatim
@@ -541,7 +542,7 @@ pub fn queue_line_closeout(
     let strike = reported_row_strike(item, attempt);
     let command = strike.argv(document).map(|argv| shell_command(&argv));
     match (&strike, command) {
-        (ReportedRowStrike::AckId { id }, Some(command)) => format!(
+        (ReportedRowStrike::AckId { id, .. }, Some(command)) => format!(
             "strike the reported row with `{command}` (the tracked backlog/Todo item stays open and the struck row names its `(stays open: ...)` reason; this also closes a `☑️` row nested under a waiting parent); when the answer resolves the tracked item, pass `--done {id}` to `agent-doc finalize {document}` instead and close any parent item the same answer resolves (#ackstrikeopenbacklog)"
         ),
         (ReportedRowStrike::AckText { .. }, Some(command)) => format!(

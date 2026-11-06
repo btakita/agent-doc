@@ -1524,6 +1524,30 @@ fn queue_command_consume_outcome(
     }
 }
 
+fn parse_ack_owner(
+    raw: &str,
+) -> anyhow::Result<agent_doc_document::queue_projection::QueueOwnerProjection> {
+    let raw = raw.trim();
+    let (owner, generation) = raw.rsplit_once('#').with_context(|| {
+        format!(
+            "invalid --ack-owner {raw:?}; expected OWNER#GENERATION, for example subagent:worker#2"
+        )
+    })?;
+    if owner.is_empty() {
+        anyhow::bail!("invalid --ack-owner {raw:?}; OWNER must not be empty");
+    }
+    let generation = generation.parse::<u64>().with_context(|| {
+        format!("invalid --ack-owner {raw:?}; GENERATION must be a positive integer")
+    })?;
+    if generation == 0 {
+        anyhow::bail!("invalid --ack-owner {raw:?}; GENERATION must be greater than zero");
+    }
+    Ok(agent_doc_document::queue_projection::QueueOwnerProjection {
+        owner: owner.to_string(),
+        generation,
+    })
+}
+
 fn ack_text_selector(
     occurrence: Option<usize>,
     owner: Option<&str>,
@@ -1538,33 +1562,7 @@ fn ack_text_selector(
             "--ack-occurrence is one-based and must be greater than zero"
         ),
         (Some(occurrence), None) => Ok(Some(AckTextSelector::Occurrence(occurrence))),
-        (None, Some(raw)) => {
-            let raw = raw.trim();
-            let (owner, generation) = raw.rsplit_once('#').with_context(|| {
-                format!(
-                    "invalid --ack-owner {raw:?}; expected OWNER#GENERATION, for example subagent:worker#2"
-                )
-            })?;
-            if owner.is_empty() {
-                anyhow::bail!("invalid --ack-owner {raw:?}; OWNER must not be empty");
-            }
-            let generation = generation.parse::<u64>().with_context(|| {
-                format!(
-                    "invalid --ack-owner {raw:?}; GENERATION must be a positive integer"
-                )
-            })?;
-            if generation == 0 {
-                anyhow::bail!(
-                    "invalid --ack-owner {raw:?}; GENERATION must be greater than zero"
-                );
-            }
-            Ok(Some(AckTextSelector::Owner(
-                agent_doc_document::queue_projection::QueueOwnerProjection {
-                    owner: owner.to_string(),
-                    generation,
-                },
-            )))
-        }
+        (None, Some(raw)) => Ok(Some(AckTextSelector::Owner(parse_ack_owner(raw)?))),
         (None, None) => Ok(None),
     }
 }
@@ -1695,6 +1693,20 @@ impl agent_doc_queue_io::queue_cmd::QueueCommandEffects for CliQueueCommandEffec
         agent_doc_queue_io::queue_consume::acknowledge_open_id_backed_queue_head(
             file,
             id,
+            &CLI_QUEUE_CONSUME_WRITE_EFFECTS,
+        )
+    }
+
+    fn acknowledge_open_id_backed_queue_head_for_attempt(
+        &self,
+        file: &Path,
+        id: &str,
+        attempt: Option<&agent_doc_document::queue_projection::QueueOwnerProjection>,
+    ) -> anyhow::Result<bool> {
+        agent_doc_queue_io::queue_consume::acknowledge_open_id_backed_queue_head_for_attempt(
+            file,
+            id,
+            attempt,
             &CLI_QUEUE_CONSUME_WRITE_EFFECTS,
         )
     }
@@ -5876,7 +5888,9 @@ enum QueueAction {
         /// reported-release receipt proves its worker finished while the tracked
         /// item stays open (#nestedechostrike). The flag alone is never proof.
         /// Refuses claimed, running, lost, undispatched runnable, mirrored,
-        /// nested, and dispatch-owned rows.
+        /// nested, and dispatch-owned rows. When more than one reported row
+        /// for the id is visible, pass `--ack-owner OWNER#GENERATION` to
+        /// strike one attempt (`#ackidattemptfence`).
         #[arg(
             long,
             conflicts_with = "count",
@@ -5906,14 +5920,16 @@ enum QueueAction {
             conflicts_with = "ack_owner"
         )]
         ack_occurrence: Option<usize>,
-        /// Select the durable worker attempt among duplicate exact `--ack-text`
-        /// matches, spelled `OWNER#GENERATION` (for example
-        /// `subagent:pr172-address-current#2`).
+        /// Select one durable worker attempt, spelled `OWNER#GENERATION`
+        /// (for example `subagent:pr172-address-current#2`). With `--ack-text`,
+        /// chooses one duplicate exact lineage. With `--ack-id`, strikes only
+        /// that attempt's visible reported row when several reported rows share
+        /// the id (`#ackidattemptfence`).
         #[arg(
             long,
             value_name = "OWNER#GENERATION",
-            requires = "ack_text",
-            conflicts_with = "ack_occurrence"
+            conflicts_with = "ack_occurrence",
+            conflicts_with = "id"
         )]
         ack_owner: Option<String>,
     },
@@ -10273,7 +10289,13 @@ fn try_main() -> anyhow::Result<()> {
                 if let Some(id) = id {
                     agent_doc_queue_io::queue_cmd::consume_orphan_id(&queue_effects, &file, &id)
                 } else if let Some(id) = ack_id {
-                    agent_doc_queue_io::queue_cmd::acknowledge_open_id(&queue_effects, &file, &id)
+                    let attempt = ack_owner.as_deref().map(parse_ack_owner).transpose()?;
+                    agent_doc_queue_io::queue_cmd::acknowledge_open_id(
+                        &queue_effects,
+                        &file,
+                        &id,
+                        attempt.as_ref(),
+                    )
                 } else if let Some(text) = ack_text {
                     let selector = ack_text_selector(ack_occurrence, ack_owner.as_deref())?;
                     agent_doc_queue_io::queue_cmd::acknowledge_paused_free_text(
@@ -10281,6 +10303,10 @@ fn try_main() -> anyhow::Result<()> {
                         &file,
                         &text,
                         selector.as_ref(),
+                    )
+                } else if ack_owner.is_some() {
+                    anyhow::bail!(
+                        "--ack-owner requires --ack-id or --ack-text; it does not consume a queue head on its own"
                     )
                 } else {
                     agent_doc_queue_io::queue_cmd::consume_with_options(

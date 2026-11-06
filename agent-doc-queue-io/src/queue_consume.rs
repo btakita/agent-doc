@@ -3257,19 +3257,21 @@ fn converge_id_backed_head_strike(
     Ok(true)
 }
 
-/// `#dupreceiptconsume`: the refusal for `--ack-id <id>` when more than one
-/// reported row for `[#id]` is visible, each from a distinct worker attempt.
-/// It names every competing receipt and the exact command that settles each
-/// row on its own (fenced to that attempt), and says the refusal gates only
-/// this id, so a coordinator neither stalls later independent rows nor ends
-/// the turn without a next step.
+/// `#dupreceiptconsume`: the refusal for unfenced `--ack-id <id>` when more
+/// than one reported row for `[#id]` is visible, each from a distinct worker
+/// attempt. It names every competing receipt and the exact command that
+/// settles each row on its own (fenced to that attempt), and says the refusal
+/// gates only this id, so a coordinator neither stalls later independent rows
+/// nor ends the turn without a next step.
 ///
 /// `#ackrefusalusestrike`: each command is the attempt's
 /// [`reported_row_strike`](agent_doc_queue::reported_closeout::reported_row_strike),
 /// the derivation every closeout emitter shares, so this refusal never names a
-/// strike the Stop hook or session-check does not. `--ack-id` has no attempt
-/// fence, so two rows that both strike by id cannot be separated: naming each
-/// "after the other" would be circular, and the refusal says so instead.
+/// strike the Stop hook or session-check does not. `#ackidattemptfence`: an id
+/// strike carries `--ack-owner <owner#gen>` when the attempt is known, so two
+/// rows that both strike by id are settled one at a time. Only a legacy
+/// generation-0 id strike stays unfenced, and two of those still cannot be
+/// separated.
 fn competing_reported_receipts_refusal(
     file: &Path,
     target_id: &str,
@@ -3288,9 +3290,9 @@ fn competing_reported_receipts_refusal(
             )
         })
         .collect::<Vec<_>>();
-    let id_strikes = strikes
+    let unfenced_id_strikes = strikes
         .iter()
-        .filter(|strike| matches!(strike, ReportedRowStrike::AckId { .. }))
+        .filter(|strike| matches!(strike, ReportedRowStrike::AckId { owner: None, .. }))
         .count();
     let rows = attempts
         .iter()
@@ -3298,10 +3300,14 @@ fn competing_reported_receipts_refusal(
         .map(|(attempt, strike)| {
             let command = strike.argv(&document).map(|argv| shell_command(&argv));
             let settle = match (strike, command) {
-                (ReportedRowStrike::AckId { .. }, Some(_)) if id_strikes > 1 => {
+                (ReportedRowStrike::AckId { owner: None, .. }, Some(_))
+                    if unfenced_id_strikes > 1 =>
+                {
                     "no `queue consume` command strikes this row alone".to_string()
                 }
-                (ReportedRowStrike::AckId { .. }, Some(command)) => {
+                (ReportedRowStrike::AckId { owner: None, .. }, Some(command))
+                    if unfenced_id_strikes == 1 && strikes.len() > 1 =>
+                {
                     format!("after the other rows are struck, `{command}`")
                 }
                 (_, Some(command)) => format!("`{command}`"),
@@ -3320,18 +3326,43 @@ fn competing_reported_receipts_refusal(
             )
         })
         .collect::<String>();
-    let order = match id_strikes {
+    let order = match unfenced_id_strikes {
         0 => String::new(),
         1 => " Settle the free-text rows first; the id-backed row then resolves by `--ack-id`."
             .to_string(),
-        id_strikes => format!(
-            " {id_strikes} of these rows strike only by `--ack-id`, which cannot be fenced to one attempt, so no command settles them apart: surface them to the operator."
+        unfenced_id_strikes => format!(
+            " {unfenced_id_strikes} of these rows strike only by unfenced `--ack-id`, which cannot name one attempt, so no command settles them apart: surface them to the operator."
         ),
     };
     format!(
         "{document}: [#{target_id}] has {} visible reported rows from distinct worker attempts, so `--ack-id {target_id}` cannot tell which one to strike. Competing reported-release receipts:{rows}\nEach command strikes only its own attempt's row and keeps the tracked item open; pass `--done {target_id}` to `agent-doc finalize {document}` instead only when an answer resolves the tracked item.{order} This refusal gates only [#{target_id}]: drain every later independent queue row now, and quote these commands in the exchange response (#dupreceiptconsume).",
         attempts.len(),
     )
+}
+
+/// Open reported-release receipts for `[#target_id]` whose `☑️` row is still
+/// visible, oldest claim first (`#dupreceiptconsume`). An attempt with no
+/// visible row never competes and cannot be selected by `--ack-owner`.
+fn visible_reported_receipt_attempts(
+    file: &Path,
+    content: &str,
+    target_id: &str,
+) -> Result<Vec<(crate::claim_release_receipt::ParentIdReceiptAttempt, Vec<String>)>> {
+    let mut visible = Vec::new();
+    for attempt in
+        crate::claim_release_receipt::reported_receipt_attempts_for_parent_id(file, target_id)?
+    {
+        let attempt_keys = agent_doc_queue::queue_consume::reported_attempt_projection_node_keys_under_parent_id(
+            content,
+            target_id,
+            &attempt.owner,
+            attempt.generation,
+        )?;
+        if !attempt_keys.is_empty() {
+            visible.push((attempt, attempt_keys));
+        }
+    }
+    Ok(visible)
 }
 
 /// Acknowledge an exact id-backed queue head whose id still names open tracked
@@ -3357,9 +3388,24 @@ fn competing_reported_receipts_refusal(
 /// running or lost, or when another live coordinator session owns its report
 /// ([`id_head_dispatch_guard`]). The strike ends the reported attempt and
 /// retires its completion cell and release receipt (`#strikeretires`).
+///
+/// `#ackidattemptfence`: `attempt`, when set, is `--ack-owner OWNER#GENERATION`.
+/// It strikes only that attempt's visible reported row, including while another
+/// reported row for the same id is still visible. Omitting it keeps the
+/// unfenced rule: one visible reported row is struck, and two or more are refused.
 pub fn acknowledge_open_id_backed_queue_head(
     file: &Path,
     id: &str,
+    effects: &dyn QueueConsumeWriteEffects,
+) -> Result<bool> {
+    acknowledge_open_id_backed_queue_head_for_attempt(file, id, None, effects)
+}
+
+/// [`acknowledge_open_id_backed_queue_head`] fenced to one worker attempt.
+pub fn acknowledge_open_id_backed_queue_head_for_attempt(
+    file: &Path,
+    id: &str,
+    attempt: Option<&agent_doc_document::queue_projection::QueueOwnerProjection>,
     effects: &dyn QueueConsumeWriteEffects,
 ) -> Result<bool> {
     // `#crdtstructops` Phase D: the ack strike converges through CRDT structural
@@ -3394,8 +3440,53 @@ pub fn acknowledge_open_id_backed_queue_head(
     let mut evidence = None;
     let mut orphan_completion = None;
     let mut receipt_attempt = None;
-    let mut keys = id_backed_head_node_keys(&content, &target_id)?;
-    if keys.is_empty() {
+    let mut keys = Vec::new();
+    if let Some(selected) = attempt {
+        let mut visible = visible_reported_receipt_attempts(file, &content, &target_id)?;
+        let matched = visible.iter().position(|(candidate, _)| {
+            candidate.owner == selected.owner && candidate.generation == selected.generation
+        });
+        let Some(index) = matched else {
+            let visible_attempts = visible
+                .iter()
+                .map(|(candidate, _)| format!("{}#{}", candidate.owner, candidate.generation))
+                .collect::<Vec<_>>();
+            let visible_attempts = if visible_attempts.is_empty() {
+                "none".to_string()
+            } else {
+                visible_attempts.join(", ")
+            };
+            anyhow::bail!(
+                "{}: --ack-owner {}#{} did not match a visible reported row for [#{target_id}]; \
+                 no change was applied. Visible reported attempts: {visible_attempts}.",
+                file.display(),
+                selected.owner,
+                selected.generation,
+            );
+        };
+        let (_, attempt_keys) = visible.swap_remove(index);
+        keys = attempt_keys;
+        let mut candidate = id_head_dispatch_guard(file, &content, &target_id, &keys, "--ack-id")?;
+        if candidate
+            .reported
+            .as_ref()
+            .is_some_and(|(owner, generation)| {
+                owner != &selected.owner || *generation != selected.generation
+            })
+        {
+            // Another attempt's live claim is not the row this fence strikes.
+            candidate.reported = None;
+        }
+        if candidate.reported.is_none() {
+            candidate.reported_receipt = true;
+        }
+        receipt_attempt = Some((selected.owner.clone(), selected.generation));
+        evidence = Some(candidate);
+    }
+    if attempt.is_none() {
+        keys = id_backed_head_node_keys(&content, &target_id)?;
+    }
+    if attempt.is_none() && keys.is_empty() {
         let mut candidate = id_head_dispatch_guard(file, &content, &target_id, &keys, "--ack-id")?;
         if let Some((owner, generation)) = candidate.reported.as_ref() {
             keys = reported_attempt_projection_node_keys_for_parent_id(
@@ -3421,20 +3512,7 @@ pub fn acknowledge_open_id_backed_queue_head(
         // receipts against the document instead of refusing every id with
         // more than one.
         if keys.is_empty() && candidate.reported.is_none() {
-            let mut visible = Vec::new();
-            for attempt in crate::claim_release_receipt::reported_receipt_attempts_for_parent_id(
-                file, &target_id,
-            )? {
-                let attempt_keys = reported_attempt_projection_node_keys_under_parent_id(
-                    &content,
-                    &target_id,
-                    &attempt.owner,
-                    attempt.generation,
-                )?;
-                if !attempt_keys.is_empty() {
-                    visible.push((attempt, attempt_keys));
-                }
-            }
+            let mut visible = visible_reported_receipt_attempts(file, &content, &target_id)?;
             if visible.len() > 1 {
                 let attempts = visible
                     .into_iter()
@@ -11841,19 +11919,20 @@ Old.
                 assert_eq!(
                     reported_row_strike(parent, Some(("subagent:vscode_smoke", 1))),
                     ReportedRowStrike::AckId {
-                        id: "vscodecodersmoke".to_string()
+                        id: "vscodecodersmoke".to_string(),
+                        owner: Some("subagent:vscode_smoke#1".to_string()),
                     },
                     "the derivation every emitter shares"
                 );
                 assert!(
                     err.contains(&format!(
-                        "subagent:vscode_smoke#1 reported row {parent:?}: settle with after the other rows are struck, `agent-doc queue consume {} --ack-id vscodecodersmoke`",
+                        "subagent:vscode_smoke#1 reported row {parent:?}: settle with `agent-doc queue consume {} --ack-id vscodecodersmoke --ack-owner 'subagent:vscode_smoke#1'`",
                         doc.display()
                     )),
                     "{err}"
                 );
                 assert!(
-                    !err.contains("--ack-owner 'subagent:vscode_smoke#1'"),
+                    !err.contains(&format!("--ack-text '{parent}'")),
                     "`--ack-text <parent>` cannot address the nested attempt: {err}"
                 );
                 assert!(
@@ -11862,14 +11941,38 @@ Old.
                     )),
                     "{err}"
                 );
-                assert!(err.contains("Settle the free-text rows first"), "{err}");
+                assert!(!err.contains("after the other rows are struck"), "{err}");
+                assert!(!err.contains("Settle the free-text rows first"), "{err}");
                 assert_eq!(
                     std::fs::read_to_string(&doc).unwrap(),
                     before,
                     "a refused ack changes nothing"
                 );
 
-                // Both named commands land, in the order the refusal names.
+                // The fenced id command strikes only the waiting parent while
+                // the free-text answer row is still visible (#ackidattemptfence).
+                let parent_owner = agent_doc_document::queue_projection::QueueOwnerProjection {
+                    owner: "subagent:vscode_smoke".to_string(),
+                    generation: 1,
+                };
+                assert!(
+                    acknowledge_open_id_backed_queue_head_for_attempt(
+                        &doc,
+                        "vscodecodersmoke",
+                        Some(&parent_owner),
+                        &TEST_EFFECTS,
+                    )
+                    .unwrap()
+                );
+                let parent_struck = std::fs::read_to_string(&doc).unwrap();
+                assert!(
+                    !parent_struck.contains("[#subagent:vscode_smoke#1]"),
+                    "{parent_struck}"
+                );
+                assert!(
+                    parent_struck.contains("[#subagent:vscode_answer#1]"),
+                    "the free-text row stays live:\n{parent_struck}"
+                );
                 let selector = super::AckTextSelector::Owner(
                     agent_doc_document::queue_projection::QueueOwnerProjection {
                         owner: "subagent:vscode_answer".to_string(),
@@ -11884,7 +11987,6 @@ Old.
                 )
                 .unwrap()
                 .expect("the named --ack-text/--ack-owner command settles its row");
-                assert!(acknowledge_open_id_backed_queue_head(&doc, "vscodecodersmoke").unwrap());
                 let result = std::fs::read_to_string(&doc).unwrap();
                 assert!(!result.contains("[#subagent:vscode_smoke#1]"), "{result}");
                 assert!(!result.contains("[#subagent:vscode_answer#1]"), "{result}");
@@ -11896,9 +11998,9 @@ Old.
         }
     }
 
-    /// `#ackrefusalusestrike`: `--ack-id` has no attempt fence, so two rows that
-    /// both strike by id cannot be settled in any order. Naming each "after the
-    /// other rows" would send the coordinator round the same refusal forever.
+    /// `#ackidattemptfence`: two rows that both strike by id are settled one at
+    /// a time. Unfenced `--ack-id` still refuses, and each named command is
+    /// `--ack-id <id> --ack-owner <owner#gen>` for that attempt alone.
     #[test]
     fn ackrefusalusestrike_two_id_strikes_name_no_circular_order() {
         for deep in [false, true] {
@@ -11936,13 +12038,19 @@ Old.
                 .to_string();
             assert!(err.contains("subagent:vscode_smoke#1"), "{err}");
             assert!(err.contains("subagent:vscode_two#1"), "{err}");
-            assert_eq!(
-                err.matches("no `queue consume` command strikes this row alone")
-                    .count(),
-                2,
+            assert!(
+                err.contains("--ack-id vscodecodersmoke --ack-owner 'subagent:vscode_smoke#1'"),
                 "{err}"
             );
-            assert!(err.contains("surface them to the operator"), "{err}");
+            assert!(
+                err.contains("--ack-id vscodecodersmoke --ack-owner 'subagent:vscode_two#1'"),
+                "{err}"
+            );
+            assert!(
+                !err.contains("no `queue consume` command strikes this row alone"),
+                "{err}"
+            );
+            assert!(!err.contains("surface them to the operator"), "{err}");
             assert!(!err.contains("after the other rows are struck"), "{err}");
             assert!(!err.contains("Settle the free-text rows first"), "{err}");
             assert!(err.contains("independent"), "{err}");
@@ -11951,7 +12059,103 @@ Old.
                 competing,
                 "a refused ack changes nothing"
             );
+
+            let wrong = agent_doc_document::queue_projection::QueueOwnerProjection {
+                owner: "subagent:missing".to_string(),
+                generation: 1,
+            };
+            let mismatch = acknowledge_open_id_backed_queue_head_for_attempt(
+                &doc,
+                "vscodecodersmoke",
+                Some(&wrong),
+                &TEST_EFFECTS,
+            )
+            .unwrap_err()
+            .to_string();
+            assert!(
+                mismatch.contains("did not match a visible reported row"),
+                "{mismatch}"
+            );
+            assert_eq!(
+                std::fs::read_to_string(&doc).unwrap(),
+                competing,
+                "a mismatched --ack-owner changes nothing"
+            );
+
+            let second_owner = agent_doc_document::queue_projection::QueueOwnerProjection {
+                owner: "subagent:vscode_two".to_string(),
+                generation: 1,
+            };
+            assert!(
+                acknowledge_open_id_backed_queue_head_for_attempt(
+                    &doc,
+                    "vscodecodersmoke",
+                    Some(&second_owner),
+                    &TEST_EFFECTS,
+                )
+                .unwrap()
+            );
+            let settled = std::fs::read_to_string(&doc).unwrap();
+            assert!(!settled.contains("[#subagent:vscode_two#1]"), "{settled}");
+            assert!(
+                settled.contains("[#subagent:vscode_smoke#1]"),
+                "the other id-striking row stays live:\n{settled}"
+            );
+            let first_owner = agent_doc_document::queue_projection::QueueOwnerProjection {
+                owner: "subagent:vscode_smoke".to_string(),
+                generation: 1,
+            };
+            assert!(
+                acknowledge_open_id_backed_queue_head_for_attempt(
+                    &doc,
+                    "vscodecodersmoke",
+                    Some(&first_owner),
+                    &TEST_EFFECTS,
+                )
+                .unwrap()
+            );
+            let result = std::fs::read_to_string(&doc).unwrap();
+            assert!(!result.contains("[#subagent:vscode_smoke#1]"), "{result}");
+            assert!(!result.contains("[#subagent:vscode_two#1]"), "{result}");
+            assert!(
+                result.contains("[#later] keep later work live\n"),
+                "{result}"
+            );
         }
+    }
+
+    /// `#ackidattemptfence`: the closeout command carries `--ack-owner` even
+    /// when only one reported row is visible, and that command strikes it.
+    #[test]
+    fn ackidattemptfence_fenced_ack_id_strikes_the_only_visible_row() {
+        let dir = tempfile::tempdir().unwrap();
+        let (doc, _, _) = released_nested_attempt_doc(dir.path(), false);
+        let owner = agent_doc_document::queue_projection::QueueOwnerProjection {
+            owner: "subagent:vscode_smoke".to_string(),
+            generation: 1,
+        };
+        assert!(
+            acknowledge_open_id_backed_queue_head_for_attempt(
+                &doc,
+                "vscodecodersmoke",
+                Some(&owner),
+                &TEST_EFFECTS,
+            )
+            .unwrap()
+        );
+        let result = std::fs::read_to_string(&doc).unwrap();
+        assert!(!result.contains("[#subagent:vscode_smoke#1]"), "{result}");
+        assert!(
+            result.contains("- [ ] [#vscodecodersmoke]"),
+            "the Todo stays open:\n{result}"
+        );
+        assert!(
+            crate::claim_release_receipt::load(&doc)
+                .unwrap()
+                .receipts
+                .is_empty(),
+            "the fenced strike closes that attempt's receipt"
+        );
     }
 
     /// `#closeoutguidanceagree`: guidance is only right if the command lands.

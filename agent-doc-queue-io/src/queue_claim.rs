@@ -3386,7 +3386,16 @@ mod tests {
                     "review the pull request", "--ack-owner", "subagent:review#1",
                 ]
             } else {
-                vec!["agent-doc", "queue", "consume", &document, "--ack-id", "reportedid"]
+                vec![
+                    "agent-doc",
+                    "queue",
+                    "consume",
+                    &document,
+                    "--ack-id",
+                    "reportedid",
+                    "--ack-owner",
+                    "subagent:id#1",
+                ]
             };
             assert_eq!(report.next_action_argv.as_deref().unwrap(), expected.as_slice());
         }

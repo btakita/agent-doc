@@ -13670,12 +13670,16 @@ mod closeout_guidance_agreement_tests {
             (
                 "id-backed directive",
                 "do [#gh275]",
-                format!("agent-doc queue consume {DOC} --ack-id gh275"),
+                format!(
+                    "agent-doc queue consume {DOC} --ack-id gh275 --ack-owner '{OWNER}#{GENERATION}'"
+                ),
             ),
             (
                 "waiting-tree parent",
                 waiting,
-                format!("agent-doc queue consume {DOC} --ack-id vscodecodersmoke"),
+                format!(
+                    "agent-doc queue consume {DOC} --ack-id vscodecodersmoke --ack-owner '{OWNER}#{GENERATION}'"
+                ),
             ),
             (
                 "free-text answer row",

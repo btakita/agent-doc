@@ -3255,54 +3255,70 @@ fn converge_id_backed_head_strike(
 /// row on its own (fenced to that attempt), and says the refusal gates only
 /// this id, so a coordinator neither stalls later independent rows nor ends
 /// the turn without a next step.
+///
+/// `#ackrefusalusestrike`: each command is the attempt's
+/// [`reported_row_strike`](agent_doc_queue::reported_closeout::reported_row_strike),
+/// the derivation every closeout emitter shares, so this refusal never names a
+/// strike the Stop hook or session-check does not. `--ack-id` has no attempt
+/// fence, so two rows that both strike by id cannot be separated: naming each
+/// "after the other" would be circular, and the refusal says so instead.
 fn competing_reported_receipts_refusal(
     file: &Path,
     target_id: &str,
     attempts: &[crate::claim_release_receipt::ParentIdReceiptAttempt],
 ) -> String {
+    use agent_doc_queue::reported_closeout::{
+        ReportedRowStrike, reported_row_strike, shell_command,
+    };
     let document = file.display().to_string();
-    let settle_last_by_id = attempts.iter().any(|attempt| attempt.id_backed);
-    let rows = attempts
+    let strikes = attempts
         .iter()
         .map(|attempt| {
-            let owner = format!("{}#{}", attempt.owner, attempt.generation);
-            let settle = if attempt.id_backed {
-                format!(
-                    "after the other rows are struck, `{}`",
-                    agent_doc_queue::reported_closeout::shell_command(&[
-                        "agent-doc".to_string(),
-                        "queue".to_string(),
-                        "consume".to_string(),
-                        document.clone(),
-                        "--ack-id".to_string(),
-                        target_id.to_string(),
-                    ])
-                )
-            } else {
-                format!(
-                    "`{}`",
-                    agent_doc_queue::reported_closeout::shell_command(&[
-                        "agent-doc".to_string(),
-                        "queue".to_string(),
-                        "consume".to_string(),
-                        document.clone(),
-                        "--ack-text".to_string(),
-                        agent_doc_queue::queue_claim::claim_item_handle(&attempt.item_text),
-                        "--ack-owner".to_string(),
-                        owner.clone(),
-                    ])
-                )
+            reported_row_strike(
+                &attempt.item_text,
+                Some((&attempt.owner, attempt.generation)),
+            )
+        })
+        .collect::<Vec<_>>();
+    let id_strikes = strikes
+        .iter()
+        .filter(|strike| matches!(strike, ReportedRowStrike::AckId { .. }))
+        .count();
+    let rows = attempts
+        .iter()
+        .zip(&strikes)
+        .map(|(attempt, strike)| {
+            let command = strike.argv(&document).map(|argv| shell_command(&argv));
+            let settle = match (strike, command) {
+                (ReportedRowStrike::AckId { .. }, Some(_)) if id_strikes > 1 => {
+                    "no `queue consume` command strikes this row alone".to_string()
+                }
+                (ReportedRowStrike::AckId { .. }, Some(command)) => {
+                    format!("after the other rows are struck, `{command}`")
+                }
+                (_, Some(command)) => format!("`{command}`"),
+                // Unreachable for an attested attempt, whose generation is
+                // positive; the derivation stays total for one that is not.
+                _ => format!(
+                    "the verbatim echo `> **Queue prompt:** {}` persisted by `agent-doc finalize {document}`",
+                    attempt.item_text.trim()
+                ),
             };
             format!(
-                "\n  - {owner} reported row {:?}: settle with {settle}",
+                "\n  - {}#{} reported row {:?}: settle with {settle}",
+                attempt.owner,
+                attempt.generation,
                 attempt.item_text.trim()
             )
         })
         .collect::<String>();
-    let order = if settle_last_by_id {
-        " Settle the free-text rows first; the id-backed row then resolves by `--ack-id`."
-    } else {
-        ""
+    let order = match id_strikes {
+        0 => String::new(),
+        1 => " Settle the free-text rows first; the id-backed row then resolves by `--ack-id`."
+            .to_string(),
+        id_strikes => format!(
+            " {id_strikes} of these rows strike only by `--ack-id`, which cannot be fenced to one attempt, so no command settles them apart: surface them to the operator."
+        ),
     };
     format!(
         "{document}: [#{target_id}] has {} visible reported rows from distinct worker attempts, so `--ack-id {target_id}` cannot tell which one to strike. Competing reported-release receipts:{rows}\nEach command strikes only its own attempt's row and keeps the tracked item open; pass `--done {target_id}` to `agent-doc finalize {document}` instead only when an answer resolves the tracked item.{order} This refusal gates only [#{target_id}]: drain every later independent queue row now, and quote these commands in the exchange response (#dupreceiptconsume).",
@@ -11404,6 +11420,11 @@ Old.
         );
     }
 
+    const NESTED_ATTEMPT_PARENT: &str = concat!(
+        "[#vscodecodersmoke] Run the remote smoke on a real Coder workspace ",
+        "<!-- agent-doc:waiting-item -->"
+    );
+
     /// `#nestedreceiptack`: the 2026-11-03 agent-doc-bugs.md shape. The worker
     /// reported AND its claim was released, so only a reported-release receipt
     /// proves the attempt, and the queue head is the `### Waiting on you` group
@@ -11412,12 +11433,16 @@ Old.
     /// parent id; the deep one sits inside the parent's `**Response:**` tree
     /// and does not.
     fn released_nested_attempt_doc(root: &Path, deep: bool) -> (PathBuf, String, String) {
+        released_nested_attempt_doc_under(root, deep, NESTED_ATTEMPT_PARENT)
+    }
+
+    fn released_nested_attempt_doc_under(
+        root: &Path,
+        deep: bool,
+        parent: &str,
+    ) -> (PathBuf, String, String) {
         std::fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
         let doc = root.join("bugs.md");
-        let parent = concat!(
-            "[#vscodecodersmoke] Run the remote smoke on a real Coder workspace ",
-            "<!-- agent-doc:waiting-item -->"
-        );
         let owner = "subagent:vscode_smoke";
         let projection = if deep {
             concat!(
@@ -11444,11 +11469,12 @@ Old.
                 "  - [#later] keep later work live\n",
                 "<!-- /agent:run -->\n\n",
                 "## Todo <!-- agent:todo priority -->\n",
-                "- [ ] {parent}\n",
+                "- [ ] {todo}\n",
                 "<!-- /agent:todo -->\n",
             ),
             parent = parent,
             projection = projection,
+            todo = NESTED_ATTEMPT_PARENT,
         );
         std::fs::write(&doc, &content).unwrap();
         agent_doc_snapshot_io::checkpoint_document_baseline(
@@ -11726,6 +11752,199 @@ Old.
         );
     }
 
+    /// Adds a competing operator answer row beside the released nested attempt
+    /// of [`released_nested_attempt_doc_under`]: a waiting-tree parent's attempt
+    /// and a free-text `[#id]: answer` attempt, both reported, both visible.
+    fn waiting_parent_and_answer_doc(root: &Path, deep: bool, parent: &str) -> (PathBuf, String) {
+        let (doc, content, _) = released_nested_attempt_doc_under(root, deep, parent);
+        let answer = "[#vscodecodersmoke]: use the staging workspace";
+        let owner = "subagent:vscode_answer";
+        let with_row = |row: String| {
+            content.replace(
+                "<!-- /agent:run -->",
+                &format!("{row}\n<!-- /agent:run -->"),
+            )
+        };
+        let selectable = with_row(format!("- {answer}"));
+        std::fs::write(&doc, &selectable).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &selectable,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        let generation = running_claim(&doc, answer, owner);
+        let reported = crate::queue_claim::report_attempt(&doc, answer, Some(generation)).unwrap();
+        crate::queue_lineage::record_prose_only(&doc, &reported, "prose result").unwrap();
+        crate::claim_release_receipt::capture_response_for_attempt(
+            &doc,
+            answer,
+            generation,
+            "Answered on staging.",
+        )
+        .unwrap();
+        crate::claim_release_receipt::release(
+            &doc,
+            answer,
+            crate::claim_release_receipt::ReleaseKind::Reported,
+        )
+        .unwrap();
+        let competing = with_row(format!("- ☑️ [#{owner}#{generation}] {answer}"));
+        std::fs::write(&doc, &competing).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &competing,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        (doc, answer.to_string())
+    }
+
+    /// `#ackrefusalusestrike`: the refusal settles each competing row with the
+    /// strike every other closeout emitter names. A waiting-tree parent keyed
+    /// as free text (`[#id]: ...`) is the row the receipt's identity got wrong:
+    /// it told the coordinator `--ack-text <parent> --ack-owner <attempt>`,
+    /// which cannot address the attempt's nested `☑️` row, while the Stop hook
+    /// named `--ack-id <parent>` for that same attempt. The bare `[#id] ...`
+    /// parent is keyed by id on both paths and pins that they stay agreed.
+    #[test]
+    fn ackrefusalusestrike_waiting_parent_attempt_settles_by_ack_id_after_free_text_rows() {
+        use agent_doc_queue::reported_closeout::{ReportedRowStrike, reported_row_strike};
+        for (parent, free_text_identity) in [
+            (
+                "[#vscodecodersmoke]: confirm the Coder workspace <!-- agent-doc:waiting-item -->",
+                true,
+            ),
+            (NESTED_ATTEMPT_PARENT, false),
+        ] {
+            assert_eq!(
+                !agent_doc_queue::queue_claim::claim_identity(parent).is_id_backed(),
+                free_text_identity,
+                "{parent}"
+            );
+            for deep in [false, true] {
+                let dir = tempfile::tempdir().unwrap();
+                let (doc, answer) = waiting_parent_and_answer_doc(dir.path(), deep, parent);
+                let before = std::fs::read_to_string(&doc).unwrap();
+
+                let err = acknowledge_open_id_backed_queue_head(&doc, "vscodecodersmoke")
+                    .unwrap_err()
+                    .to_string();
+                assert_eq!(
+                    reported_row_strike(parent, Some(("subagent:vscode_smoke", 1))),
+                    ReportedRowStrike::AckId {
+                        id: "vscodecodersmoke".to_string()
+                    },
+                    "the derivation every emitter shares"
+                );
+                assert!(
+                    err.contains(&format!(
+                        "subagent:vscode_smoke#1 reported row {parent:?}: settle with after the other rows are struck, `agent-doc queue consume {} --ack-id vscodecodersmoke`",
+                        doc.display()
+                    )),
+                    "{err}"
+                );
+                assert!(
+                    !err.contains("--ack-owner 'subagent:vscode_smoke#1'"),
+                    "`--ack-text <parent>` cannot address the nested attempt: {err}"
+                );
+                assert!(
+                    err.contains(&format!(
+                        "--ack-text '{answer}' --ack-owner 'subagent:vscode_answer#1'"
+                    )),
+                    "{err}"
+                );
+                assert!(err.contains("Settle the free-text rows first"), "{err}");
+                assert_eq!(
+                    std::fs::read_to_string(&doc).unwrap(),
+                    before,
+                    "a refused ack changes nothing"
+                );
+
+                // Both named commands land, in the order the refusal names.
+                let selector = super::AckTextSelector::Owner(
+                    agent_doc_document::queue_projection::QueueOwnerProjection {
+                        owner: "subagent:vscode_answer".to_string(),
+                        generation: 1,
+                    },
+                );
+                super::acknowledge_paused_free_text_queue_head_with_selector_and_outcome(
+                    &doc,
+                    &answer,
+                    Some(&selector),
+                    &TEST_EFFECTS,
+                )
+                .unwrap()
+                .expect("the named --ack-text/--ack-owner command settles its row");
+                assert!(acknowledge_open_id_backed_queue_head(&doc, "vscodecodersmoke").unwrap());
+                let result = std::fs::read_to_string(&doc).unwrap();
+                assert!(!result.contains("[#subagent:vscode_smoke#1]"), "{result}");
+                assert!(!result.contains("[#subagent:vscode_answer#1]"), "{result}");
+                assert!(
+                    result.contains("[#later] keep later work live\n"),
+                    "{result}"
+                );
+            }
+        }
+    }
+
+    /// `#ackrefusalusestrike`: `--ack-id` has no attempt fence, so two rows that
+    /// both strike by id cannot be settled in any order. Naming each "after the
+    /// other rows" would send the coordinator round the same refusal forever.
+    #[test]
+    fn ackrefusalusestrike_two_id_strikes_name_no_circular_order() {
+        for deep in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let (doc, content, _) = released_nested_attempt_doc(dir.path(), deep);
+            let second =
+                "[#vscodecodersmoke]: confirm the workspace <!-- agent-doc:waiting-item -->";
+            let owner = "subagent:vscode_two";
+            let later = "  - [#later] keep later work live\n";
+            let competing = content.replace(
+                later,
+                &format!(
+                    "  - {second}\n    - ☑️ [#{owner}#1] Reconcile the reported work, then complete the parent item.\n{later}"
+                ),
+            );
+            running_waiting_parent_claim(&doc, &competing, second, owner, |generation| {
+                crate::queue_claim::report_attempt(&doc, second, Some(generation)).unwrap();
+                crate::claim_release_receipt::capture_response_for_attempt(
+                    &doc,
+                    second,
+                    generation,
+                    "Confirmed.",
+                )
+                .unwrap();
+                crate::claim_release_receipt::release(
+                    &doc,
+                    second,
+                    crate::claim_release_receipt::ReleaseKind::Reported,
+                )
+                .unwrap();
+            });
+
+            let err = acknowledge_open_id_backed_queue_head(&doc, "vscodecodersmoke")
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains("subagent:vscode_smoke#1"), "{err}");
+            assert!(err.contains("subagent:vscode_two#1"), "{err}");
+            assert_eq!(
+                err.matches("no `queue consume` command strikes this row alone")
+                    .count(),
+                2,
+                "{err}"
+            );
+            assert!(err.contains("surface them to the operator"), "{err}");
+            assert!(!err.contains("after the other rows are struck"), "{err}");
+            assert!(!err.contains("Settle the free-text rows first"), "{err}");
+            assert!(err.contains("independent"), "{err}");
+            assert_eq!(
+                std::fs::read_to_string(&doc).unwrap(),
+                competing,
+                "a refused ack changes nothing"
+            );
+        }
+    }
 
     /// `#closeoutguidanceagree`: guidance is only right if the command lands.
     /// Derive the strike from exactly what the Stop hook reads (the governed

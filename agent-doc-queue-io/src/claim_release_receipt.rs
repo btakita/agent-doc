@@ -77,9 +77,6 @@ pub struct ParentIdReceiptAttempt {
     pub generation: u64,
     /// The released claim's queue row text.
     pub item_text: String,
-    /// Whether that row was keyed by its directive id (`do [#id]`) rather than
-    /// as free text (`[#id]: answer`).
-    pub id_backed: bool,
 }
 
 /// `#dupreceiptconsume`: every distinct exact worker attempt whose open
@@ -115,10 +112,6 @@ pub fn reported_receipt_attempts_for_parent_id(
             continue;
         }
         attempts.push(ParentIdReceiptAttempt {
-            id_backed: matches!(
-                receipt.identity,
-                agent_doc_element_queue::QueueItemIdentity::Id(_)
-            ),
             owner: receipt.owner,
             generation: receipt.generation,
             item_text: receipt.item_text,

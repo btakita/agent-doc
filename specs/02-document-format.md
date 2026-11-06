@@ -963,7 +963,12 @@ attempt without a visible row never competes. When two or more reported rows
 are visible, it refuses and names each competing `owner#generation` with the
 command that settles that row alone (`queue consume --ack-text '<row>'
 --ack-owner '<owner>#<generation>'`), and says the refusal gates only that
-id, so later independent rows still drain.
+id, so later independent rows still drain. Each row's command is the one
+closeout derivation every emitter shares (`#ackrefusalusestrike`): a row that
+strikes by id (an id-backed row, or a waiting-tree parent whose attempt is
+nested under it) settles by `--ack-id <id>` once the other rows are struck.
+`--ack-id` has no attempt fence, so when two rows both strike by id the refusal
+names no order for them and says no command settles them apart.
 
 The preflight strike is queue maintenance's done-id strike: it runs in the same
 pass, ends a reported attempt the same way, and never edits the Todo. It fires

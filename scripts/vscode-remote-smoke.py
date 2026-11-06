@@ -143,7 +143,57 @@ def server_root_of(argv: List[str]) -> Optional[str]:
         match = re.search(r"^(.*/(?:code-server|\.?vscode-web)[^/]*)/(lib|out|bin)/", arg)
         if match:
             return match.group(1)
+        # A custom vscode-web `install_prefix` has no telling name; the desktop
+        # install keeps its `out/` under `resources/app`.
+        match = re.search(r"^(/.*)/out/(?:bootstrap-fork|server-main\.js)$", arg)
+        if match and "/resources/app/" not in arg:
+            return match.group(1)
     return None
+
+
+def vscode_web_serve_of(argv: List[str]) -> Optional[Tuple[str, Optional[str]]]:
+    """(install prefix, --extensions-dir) of a `serve-local` argv (src/plugin_vscode_web.rs)."""
+    def prefix_of(script: str) -> Optional[str]:
+        path = Path(script)
+        if not path.is_absolute():
+            return None
+        is_cli = path.parent.name == "bin" and path.name in SERVER_CLI_NAMES
+        return str(path.parent.parent) if is_cli or script.endswith("/out/server-main.js") else None
+
+    if not argv:
+        return None
+    index = 0 if prefix_of(argv[0]) else next((i for i, arg in enumerate(argv) if i and not arg.startswith("-")), None)
+    if index is None:
+        return None
+    prefix = prefix_of(argv[index])
+    args = argv[index + 1:]
+    if prefix is None or args[:1] != ["serve-local"]:
+        return None
+    extensions_dir = None
+    for position, arg in enumerate(args):
+        if arg == "--":
+            break
+        if arg == "--extensions-dir":
+            extensions_dir = args[position + 1] if position + 1 < len(args) else None
+        elif arg.startswith("--extensions-dir="):
+            extensions_dir = arg.split("=", 1)[1]
+    return prefix, extensions_dir or None
+
+
+def running_vscode_web_serves() -> List[Tuple[str, Optional[str]]]:
+    """This user's running `serve-local` servers, as `agent-doc plugin install vscode` finds them."""
+    serves = set()
+    for entry in Path("/proc").iterdir() if Path("/proc").is_dir() else []:
+        if not entry.name.isdigit():
+            continue
+        try:
+            owned = entry.stat().st_uid == os.geteuid()
+        except OSError:
+            continue
+        serve = vscode_web_serve_of(proc_argv(int(entry.name))) if owned else None
+        if serve:
+            serves.add(serve)
+    return sorted(serves, key=lambda serve: (serve[0], serve[1] or ""))
 
 
 def project_tmux_session(config_text: str) -> Optional[str]:
@@ -260,9 +310,12 @@ def installed_workspace_hosts() -> List[str]:
             if os.access(path, os.X_OK) and path.is_file():
                 hosts.append(f"code-server:{path}")
                 break
+    for prefix, extensions_dir in running_vscode_web_serves():
+        suffix = f" --extensions-dir {extensions_dir}" if extensions_dir else ""
+        hosts.append(f"vscode-web:{prefix}/bin/code-server{suffix}")
     for candidate in VSCODE_WEB_CLIS:
         path = Path(candidate) if candidate.startswith("/") else home / candidate
-        if os.access(path, os.X_OK) and path.is_file():
+        if os.access(path, os.X_OK) and path.is_file() and not any(host.startswith(f"vscode-web:{path}") for host in hosts):
             hosts.append(f"vscode-web:{path}")
             break
     roots = [os.environ.get("VSCODE_AGENT_FOLDER", "")] + [str(home / name) for name in SERVER_ROOT_NAMES]
@@ -376,6 +429,7 @@ class Smoke:
         data_home = os.environ.get("XDG_DATA_HOME") or str(home / ".local/share")
         dirs = [os.path.join(root, "extensions") for root in roots if root]
         dirs.append(os.path.join(data_home, "code-server/extensions"))
+        dirs.extend(extensions_dir for _, extensions_dir in running_vscode_web_serves() if extensions_dir)
         found: List[str] = []
         for directory in dirs:
             found.extend(sorted(glob.glob(os.path.join(directory, EXTENSION_ID + "-*", "package.json"))))
@@ -586,6 +640,18 @@ def self_test() -> int:
     assert is_server_extension_host(web) and server_root_of(web) == "/tmp/vscode-web"
     custom = ["/home/coder/.vscode-web/node", "/home/coder/.vscode-web/out/bootstrap-fork", "--type=extensionHost"]
     assert server_root_of(custom) == "/home/coder/.vscode-web"
+    opt = ["/opt/vw/node", "--dns-result-order=ipv4first", "/opt/vw/out/bootstrap-fork", "--type=extensionHost"]
+    assert is_server_extension_host(opt) and server_root_of(opt) == "/opt/vw"
+    electron = ["/usr/share/code/code", "/usr/share/code/resources/app/out/bootstrap-fork", "--type=extensionHost"]
+    assert not is_server_extension_host(electron)
+    # `#vscodewebextdir`: a custom vscode-web server, read from either process.
+    wrapper = ["sh", "/opt/vw/bin/code-server", "serve-local", "--extensions-dir=/srv/ext", "--port", "1"]
+    assert vscode_web_serve_of(wrapper) == ("/opt/vw", "/srv/ext")
+    node = ["/opt/vw/node", "/opt/vw/out/server-main.js", "serve-local", "--extensions-dir", "/srv/ext"]
+    assert vscode_web_serve_of(node) == ("/opt/vw", "/srv/ext")
+    assert vscode_web_serve_of(["/opt/vw/bin/code-server", "serve-local"]) == ("/opt/vw", None)
+    assert vscode_web_serve_of(["sh", "/home/u/.vscode-server/bin/a/bin/code-server", "--start-server"]) is None
+    assert vscode_web_serve_of(opt) is None and vscode_web_serve_of(["sh"]) is None and vscode_web_serve_of([]) is None
     desktop = ["/usr/share/code/code", "--type=utility", "--utility-sub-type=node.mojom.NodeService"]
     assert not is_server_extension_host(desktop) and server_root_of(desktop) is None
     pty = ["/home/u/.vscode-server/bin/abc/node", "/home/u/.vscode-server/bin/abc/out/bootstrap-fork", "--type=ptyHost"]

@@ -93,6 +93,7 @@ mod plan;
 mod plugin;
 mod plugin_activation;
 mod plugin_live_owner;
+mod plugin_vscode_web;
 mod preflight_hook;
 mod principles_cmd;
 mod queue_completion_feedback;

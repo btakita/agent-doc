@@ -10,7 +10,7 @@
 //! - `list()` — scans JetBrains plugin directories for the versioned agent-doc JAR and queries `code --list-extensions` for the VS Code extension; prints found entries to stdout.
 //! - JetBrains plugin directories are discovered from versioned IDE data roots (`~/.local/share/JetBrains/<Product><Version>/` on Linux, `~/Library/Application Support/JetBrains/<Product><Version>/` on macOS). Config roots and unrelated JetBrains service directories are excluded. Callers can select an exact target with `--plugins-dir`; ambiguous non-interactive discovery fails with rerun guidance instead of waiting on stdin.
 //! - VS Code CLI detection order: `cursor` → `codium` → `code` (first that succeeds `--version`). Absence is reported as a missing prerequisite before any download, never discarded and re-spawned as `code`.
-//! - VS Code installs also reach every workspace extension host on the machine (`#vscoderemoteparity`): `code-server` on `PATH` (otherwise `~/.local/bin/code-server` or Coder's default `/tmp/code-server/bin/code-server`, labelled `code-server:<path>`, `#vscodecodersmoke`), Coder's `vscode-web` module (the Microsoft VS Code Server web build, default `/tmp/vscode-web/bin/code-server`, otherwise `~/.vscode-web/bin/code-server`, labelled `vscode-web:<path>`, installing with no `--extensions-dir` so the server CLI picks the same `$VSCODE_AGENT_FOLDER`-or-`~/.vscode-server/extensions` default its `serve-local` loads, `#vscodewebprefix`), and the newest Remote-SSH server install under `~/.vscode-server` (or `$VSCODE_AGENT_FOLDER`), `~/.vscode-server-insiders`, `~/.vscodium-server` or `~/.cursor-server`, through that server's own CLI with `--extensions-dir <root>/extensions`. Both server layouts are probed (`bin/<commit>/bin/<cli>` and `cli/servers/<id>/server/bin/<cli>`). `install`, `update`, `update_all_installed` and `list` use the same targets; an install attempts every target before reporting failures, and fails before downloading only when no desktop CLI and no workspace host exists.
+//! - VS Code installs also reach every workspace extension host on the machine (`#vscoderemoteparity`): `code-server` on `PATH` (otherwise `~/.local/bin/code-server` or Coder's default `/tmp/code-server/bin/code-server`, labelled `code-server:<path>`, `#vscodecodersmoke`), Coder's `vscode-web` module (the Microsoft VS Code Server web build, default `/tmp/vscode-web/bin/code-server`, otherwise `~/.vscode-web/bin/code-server`, labelled `vscode-web:<path>`, installing with no `--extensions-dir` so the server CLI picks the same `$VSCODE_AGENT_FOLDER`-or-`~/.vscode-server/extensions` default its `serve-local` loads, `#vscodewebprefix`; each of this user's running `serve-local` servers is also a target, at the prefix and `--extensions-dir` its own argv names, labelled `vscode-web:<path> --extensions-dir <dir>` when one is set, `#vscodewebextdir`), and the newest Remote-SSH server install under `~/.vscode-server` (or `$VSCODE_AGENT_FOLDER`), `~/.vscode-server-insiders`, `~/.vscodium-server` or `~/.cursor-server`, through that server's own CLI with `--extensions-dir <root>/extensions`. Both server layouts are probed (`bin/<commit>/bin/<cli>` and `cli/servers/<id>/server/bin/<cli>`). `install`, `update`, `update_all_installed` and `list` use the same targets; an install attempts every target before reporting failures, and fails before downloading only when no desktop CLI and no workspace host exists.
 //! - Asset selection matches complete versioned package shapes and prefers a signed variant. JetBrains targets prove their platform build from the versioned IDE data root: 242-261 select `agent-doc-jetbrains-<version>.zip`, exact 262 selects `agent-doc-jetbrains-262-<version>.zip`, and an unprovable/unsupported target fails before replacement. Local installs read the selected package's own `gradle.properties`; VS Code installs require the VSIX version to match `package.json` exactly.
 //! - Downloaded editor packages are verified before installation against the release's `EDITOR-PACKAGES.sha256` manifest, falling back to GitHub's per-asset `digest`. A declared digest that disagrees with the bytes fails closed.
 //!
@@ -39,6 +39,7 @@
 //! - vscode_server_targets: a Remote-SSH root with servers in both layouts → one target for the newest, installing with `--extensions-dir <root>/extensions`; a non-executable CLI or empty root → no target
 //! - code_server_target: `code-server` off `PATH` but executable under `~/.local/bin` or `/tmp/code-server/bin` → a `code-server:<path>` target
 //! - vscode_web_target: an executable `/tmp/vscode-web/bin/code-server` or `~/.vscode-web/bin/code-server` → a `vscode-web:<path>` target with no leading args; a non-executable CLI → no target
+//! - vscode_web_targets: a running server at a custom prefix → its own CLI and `--extensions-dir`, ahead of the fixed probe; the fixed probe adds only a CLI no running server covers; a running server whose CLI is gone → no target
 //! - vscode_install_targets: no desktop CLI but a workspace host → the workspace host alone; neither → empty, and install fails with guidance naming `code-server` and `~/.vscode-server`
 //! - find_asset_prefers_signed: release with both signed and unsigned *versioned* zips → signed asset selected in either API order
 //! - editor package integrity: a manifest or API digest that disagrees with the downloaded bytes refuses the install
@@ -51,6 +52,7 @@
 use anyhow::{Context, Result, bail};
 use serde_json::Value;
 use std::cmp::Ordering as CmpOrdering;
+use crate::plugin_vscode_web::{VsCodeWebServe, running_vscode_web_serves};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::{self, IsTerminal as _, Read as _, Write as _};
@@ -1102,7 +1104,7 @@ const VSCODE_SERVER_ROOTS: &[&str] = &[
 ];
 
 /// Server CLI script names inside a server install's `bin/` directory.
-const VSCODE_SERVER_CLIS: &[&str] = &[
+pub(crate) const VSCODE_SERVER_CLIS: &[&str] = &[
     "code-server",
     "code-server-insiders",
     "codium-server",
@@ -1236,14 +1238,53 @@ const VSCODE_WEB_CLIS: &[&str] = &[
 /// `vscode-web:<path>`. It passes no `--extensions-dir`: the server CLI then
 /// resolves the same directory `serve-local` loads (`$VSCODE_AGENT_FOLDER`,
 /// otherwise `~/.vscode-server`, plus `/extensions`), exactly as the module's
-/// own extension install does. A template that sets the module's
-/// `extensions_dir` is not discoverable here.
+/// own extension install does. A template that changes the module's
+/// `install_prefix` or `extensions_dir` is found by `vscode_web_targets` from
+/// its running server.
 fn vscode_web_target(home: Option<&Path>) -> Option<VsCodeInstallTarget> {
     first_executable_cli(VSCODE_WEB_CLIS, home).map(|program| VsCodeInstallTarget {
         label: format!("vscode-web:{}", program.display()),
         program,
         leading_args: Vec::new(),
     })
+}
+
+/// The target for one running `serve-local` server (`#vscodewebextdir`). The
+/// `--extensions-dir` it was started with is the one it loads, so the install
+/// passes it on and the label names it: two servers can share one CLI.
+fn vscode_web_serve_target(serve: &VsCodeWebServe) -> Option<VsCodeInstallTarget> {
+    let program = VSCODE_SERVER_CLIS
+        .iter()
+        .map(|cli| serve.prefix.join("bin").join(cli))
+        .find(|candidate| is_executable_file(candidate))?;
+    let leading_args = serve
+        .extensions_dir
+        .iter()
+        .flat_map(|dir| ["--extensions-dir".to_string(), dir.display().to_string()])
+        .collect();
+    let mut target = VsCodeInstallTarget {
+        label: String::new(),
+        program,
+        leading_args,
+    };
+    target.label = format!("vscode-web:{}", target.display());
+    Some(target)
+}
+
+/// Every `vscode-web` install: each running server as it is configured, then
+/// the fixed probe, unless a running server already covers that CLI with the
+/// directory it really loads.
+fn vscode_web_targets(
+    home: Option<&Path>,
+    running: &BTreeSet<VsCodeWebServe>,
+) -> Vec<VsCodeInstallTarget> {
+    let mut targets: Vec<_> = running.iter().filter_map(vscode_web_serve_target).collect();
+    if let Some(probed) = vscode_web_target(home)
+        && !targets.iter().any(|target| target.program == probed.program)
+    {
+        targets.push(probed);
+    }
+    targets
 }
 
 /// Every workspace extension host this machine serves: `code-server` (Coder's
@@ -1259,7 +1300,10 @@ fn vscode_workspace_targets() -> Vec<VsCodeInstallTarget> {
         command_answers_version("code-server"),
         home.as_deref(),
     ));
-    targets.extend(vscode_web_target(home.as_deref()));
+    targets.extend(vscode_web_targets(
+        home.as_deref(),
+        &running_vscode_web_serves(Path::new("/proc")),
+    ));
     if let Some(home) = home {
         let agent_folder = std::env::var_os("VSCODE_AGENT_FOLDER")
             .filter(|value| !value.is_empty())
@@ -1283,7 +1327,7 @@ fn vscode_install_targets(
 
 fn missing_code_cli_message() -> &'static str {
     "No VS Code-family CLI or workspace extension host found: tried `cursor`, `codium`, and `code` on PATH, \
-`code-server` on PATH, ~/.local/bin or /tmp/code-server (Coder's default), Coder's vscode-web under /tmp/vscode-web or ~/.vscode-web, and a Remote-SSH server under ~/.vscode-server (or $VSCODE_AGENT_FOLDER), ~/.vscodium-server, or ~/.cursor-server. \
+`code-server` on PATH, ~/.local/bin or /tmp/code-server (Coder's default), Coder's vscode-web under /tmp/vscode-web, ~/.vscode-web or a running `serve-local`, and a Remote-SSH server under ~/.vscode-server (or $VSCODE_AGENT_FOLDER), ~/.vscodium-server, or ~/.cursor-server. \
 Install the editor's shell command (VS Code / VSCodium: run `Shell Command: Install 'code' command in PATH` from the command palette; Cursor: `Install 'cursor' command`), or put the CLI on PATH, then re-run. \
 On a Coder or Remote-SSH workspace, connect VS Code once so its server is installed, or run from a remote VS Code terminal."
 }
@@ -4329,8 +4373,8 @@ mod tests {
         vscode_extension_version_from_output,
     };
     use super::{
-        VsCodeInstallTarget, code_server_target, install_vsix_into_all, vscode_install_targets,
-        vscode_server_targets_in, vscode_web_target,
+        BTreeSet, VsCodeInstallTarget, code_server_target, install_vsix_into_all, vscode_install_targets,
+        vscode_server_targets_in, vscode_web_target, vscode_web_targets,
     };
     use super::{install_jetbrains_package_bytes, java_candidates_for_ide, resolve_java_for_ide};
     use serde_json::json;
@@ -5048,6 +5092,96 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
                 .iter()
                 .any(|path| path.contains("vscode-web"))
         );
+    }
+
+    /// `#vscodewebextdir`: a template's custom `install_prefix` and
+    /// `extensions_dir` come from the running server, so the install goes
+    /// where that server loads extensions, with no manual command.
+    #[cfg(unix)]
+    #[test]
+    fn vscode_web_targets_follow_the_running_server() {
+        use crate::plugin_vscode_web::VsCodeWebServe;
+
+        let root = TempDir::new().unwrap();
+        let prefix = root.path().join("custom");
+        let cli = prefix.join("bin/code-server");
+        executable(&cli, "#!/bin/sh\n");
+        let home = root.path().join("home");
+        let probed_cli = home.join(".vscode-web/bin/code-server");
+        let serve = |prefix: &Path, dir: Option<&str>| VsCodeWebServe {
+            prefix: prefix.to_path_buf(),
+            extensions_dir: dir.map(PathBuf::from),
+        };
+        let custom = VsCodeInstallTarget {
+            label: format!("vscode-web:{} --extensions-dir /srv/ext", cli.display()),
+            program: cli.clone(),
+            leading_args: vec!["--extensions-dir".into(), "/srv/ext".into()],
+        };
+        // The machine's /tmp/vscode-web, if any, joins as the fixed probe.
+        let without_machine_probe = |targets: Vec<VsCodeInstallTarget>| {
+            targets
+                .into_iter()
+                .filter(|target| target.program != Path::new(super::VSCODE_WEB_CLIS[0]))
+                .collect::<Vec<_>>()
+        };
+
+        let running = BTreeSet::from([serve(&prefix, Some("/srv/ext"))]);
+        assert_eq!(
+            without_machine_probe(vscode_web_targets(Some(&home), &running)),
+            vec![custom.clone()]
+        );
+
+        // A prefix with no `extensions_dir` keeps the server default.
+        let running = BTreeSet::from([serve(&prefix, None)]);
+        assert_eq!(
+            without_machine_probe(vscode_web_targets(Some(&home), &running)),
+            vec![VsCodeInstallTarget {
+                label: format!("vscode-web:{}", cli.display()),
+                program: cli.clone(),
+                leading_args: Vec::new(),
+            }]
+        );
+
+        // Two servers of one CLI are two targets, told apart by their labels.
+        let running = BTreeSet::from([
+            serve(&prefix, Some("/srv/ext")),
+            serve(&prefix, Some("/srv/other")),
+        ]);
+        let targets = without_machine_probe(vscode_web_targets(Some(&home), &running));
+        assert_eq!(targets.len(), 2);
+        assert_ne!(targets[0].label, targets[1].label);
+
+        // A server whose CLI is gone (its prefix was wiped under it) is no target.
+        let running = BTreeSet::from([serve(&root.path().join("gone"), Some("/srv/ext"))]);
+        assert_eq!(
+            without_machine_probe(vscode_web_targets(Some(&home), &running)),
+            Vec::new()
+        );
+
+        // Only a machine without Coder's default prefix can show what the
+        // fixed probe does; with one, `vscode_web_target` answers that path.
+        executable(&probed_cli, "#!/bin/sh\n");
+        if !super::is_executable_file(Path::new(super::VSCODE_WEB_CLIS[0])) {
+            let probed = VsCodeInstallTarget {
+                label: format!("vscode-web:{}", probed_cli.display()),
+                program: probed_cli.clone(),
+                leading_args: Vec::new(),
+            };
+            // A stopped install at the fixed path is still reached.
+            assert_eq!(
+                vscode_web_targets(Some(&home), &BTreeSet::from([serve(&prefix, Some("/srv/ext"))])),
+                vec![custom.clone(), probed.clone()]
+            );
+            assert_eq!(vscode_web_targets(Some(&home), &BTreeSet::new()), vec![probed]);
+            // A server running from the fixed path replaces the bare probe: its
+            // `--extensions-dir` is the directory it loads.
+            let at_probe = serve(&home.join(".vscode-web"), Some("/srv/ext"));
+            let targets = vscode_web_targets(Some(&home), &BTreeSet::from([at_probe]));
+            assert_eq!(
+                targets.iter().map(|target| target.leading_args.len()).collect::<Vec<_>>(),
+                vec![2]
+            );
+        }
     }
 
     #[test]

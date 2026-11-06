@@ -543,6 +543,11 @@ mod tests {
             PLUGIN_INSTALL_SOURCE.contains("\"/tmp/vscode-web/bin/code-server\""),
             "the VS Code remote upgrade cell must match whether install reaches Coder's vscode-web",
         );
+        assert_eq!(
+            row("VS Code on Coder")[2].contains("running `serve-local` servers"),
+            PLUGIN_INSTALL_SOURCE.contains("running_vscode_web_serves(Path::new(\"/proc\"))"),
+            "the VS Code remote upgrade cell must match whether install reads running vscode-web servers",
+        );
         let smoke_script = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("..")
             .join(VSCODE_REMOTE_SMOKE)

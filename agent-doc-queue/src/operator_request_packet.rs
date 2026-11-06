@@ -43,6 +43,9 @@ pub const RECOMMENDED_CHOICE_MARK: &str = " — **Recommended**";
 /// The reserved response row that states a recommendation and its reason.
 pub const RECOMMENDATION_ROW_LABEL: &str = "**Recommendation:** ";
 
+/// The reserved response row that says what a request's choices refer to.
+pub const CONTEXT_ROW_LABEL: &str = "**Context:** ";
+
 impl ChoiceRecommendation {
     /// The dedicated row rendered directly above its `**Choices:**` subtree.
     /// The separator is deliberately not `**: `: that spelling is an offered
@@ -77,6 +80,15 @@ impl BlockingOperatorRequestPacket {
             &self.choice_labels,
             &self.choice_rows,
         )
+    }
+
+    /// The row carrying this packet's context bullets (`#choicecontextinrow`).
+    /// It renders above the choices, so a label such as `Use #4` can be
+    /// answered from the row. `None` for a packet that states no context.
+    pub fn context_row(&self) -> Option<String> {
+        self.context
+            .as_deref()
+            .map(|context| format!("{CONTEXT_ROW_LABEL}{context}"))
     }
 }
 

@@ -666,6 +666,8 @@ pub const SUBAGENT_OPERATOR_REQUEST_PROTOCOL: &str = concat!(
     "never reuse the legacy fixed `[#subagent-operator-request]` id. ",
     "Put the `queue_item`, `request`, and `context` text in a nested list beneath its key line, ",
     "never on the key line itself; split the context into short bullets, one fact per bullet. ",
+    "The context renders beside the choices in the operator's queue row, so state there what each ",
+    "term in a choice refers to: a bare `#4` needs its repository and what it does. ",
     "Keep the rendered `queue_item` value unchanged; it links this packet to the exact queue row. ",
     "Include every offered choice; write `- *choices:* []` only when the harness supplied none. ",
     "When you recommend one choice, write `recommendation` above `choices`, as one row naming its ",

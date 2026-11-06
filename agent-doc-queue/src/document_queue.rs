@@ -4429,7 +4429,7 @@ fn response_metadata_row_indent(entry: &QueueEntry) -> Option<usize> {
     };
     let (indent, _, item_content) = split_list_item(raw)?;
     let content = item_content.trim();
-    if matches!(content, "**Choices:**" | "**Next actions:**") || is_recommendation_row(content) {
+    if matches!(content, "**Choices:**" | "**Next actions:**") || is_response_context_row(content) {
         return Some(indent);
     }
     if let Some(body) = content.strip_prefix("**Response ")
@@ -4548,7 +4548,7 @@ fn structured_response_context(entry: &QueueEntry) -> Option<(usize, StructuredR
     };
     let (indent, _, item_content) = split_list_item(raw)?;
     let content = item_content.trim();
-    if matches!(content, "**Choices:**" | "**Next actions:**") || is_recommendation_row(content) {
+    if matches!(content, "**Choices:**" | "**Next actions:**") || is_response_context_row(content) {
         return Some((indent, StructuredResponseContext::Container));
     }
     if let Some(body) = content.strip_prefix("**Response ")
@@ -4588,12 +4588,17 @@ fn structured_response_context(entry: &QueueEntry) -> Option<(usize, StructuredR
     })
 }
 
-/// `#recommendationinrow`: the row is response context. A reason that happens
-/// to contain `**: ` must not read as an offered choice.
-fn is_recommendation_row(content: &str) -> bool {
-    content
-        .strip_prefix(crate::operator_request_packet::RECOMMENDATION_ROW_LABEL)
-        .is_some_and(|value| !value.trim().is_empty())
+/// `#recommendationinrow`, `#choicecontextinrow`: the row is response context.
+/// A reason or context fact that happens to contain `**: ` must not read as an
+/// offered choice.
+fn is_response_context_row(content: &str) -> bool {
+    [
+        crate::operator_request_packet::RECOMMENDATION_ROW_LABEL,
+        crate::operator_request_packet::CONTEXT_ROW_LABEL,
+    ]
+    .into_iter()
+    .filter_map(|label| content.strip_prefix(label))
+    .any(|value| !value.trim().is_empty())
 }
 
 /// Bounded ancestry for the executable prompt at `index`.
@@ -12081,6 +12086,34 @@ mod tests {
         let selection = pick.selection.unwrap();
         assert_eq!(selection.label.as_deref(), Some("staging"));
         assert_eq!(selection.text, "Deploy to staging.");
+    }
+
+    #[test]
+    fn context_row_is_context_and_never_reads_as_a_choice() {
+        let body = concat!(
+            "- ~~do [#answered]~~ — auto-struck: response: [#r-0123456789ab]\n",
+            "  - **Response [#r-0123456789ab]:** Which pull request?\n",
+            "    - **Timestamp:** 2026-11-05T19:58:00-05:00\n",
+            "    - **Summary:** Which pull request?\n",
+            "    - **Context:** #1 converts the sources. Only one lands as **is**: they conflict.\n",
+            "      - What does #1 convert?\n",
+            "    - **Choices:**\n",
+            "      - **Use #4**: Keep the sync.\n",
+            "        - Use #4.\n",
+        );
+        let entries = parse(body).unwrap();
+        let executable = executable_prompt_indexes(&entries);
+        assert_eq!(executable.len(), 2, "{entries:#?}");
+
+        let reply = prompt_context_packet_at(&entries, executable[0]).unwrap();
+        assert_eq!(reply.decision_evidence, ["What does #1 convert?"]);
+        assert!(
+            reply.selection.is_none(),
+            "a row under the context picked nothing: {reply:#?}"
+        );
+
+        let pick = prompt_context_packet_at(&entries, executable[1]).unwrap();
+        assert_eq!(pick.selection.unwrap().label.as_deref(), Some("Use #4"));
     }
 
     #[test]

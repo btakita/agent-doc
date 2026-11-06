@@ -518,6 +518,10 @@ mod tests {
     use super::*;
     use std::sync::atomic::AtomicU64;
 
+    /// `#wallclockassertsweep2`: probe loops fail only when the observation
+    /// never arrives. Same 30s ceiling as `blocking_effect_gate::HANG_CEILING`.
+    const HANG_CEILING: Duration = Duration::from_secs(30);
+
     struct StashedCompletionState {
         started_at: Instant,
         stop_elapsed_millis: AtomicU64,
@@ -728,7 +732,7 @@ mod tests {
             None::<()>,
             |_, _| {},
         );
-        let probe_deadline = Instant::now() + Duration::from_secs(1);
+        let probe_deadline = Instant::now() + HANG_CEILING;
         while state.busy_probe_count.load(Ordering::Relaxed) == 0 && Instant::now() < probe_deadline
         {
             std::thread::sleep(Duration::from_millis(1));
@@ -783,14 +787,14 @@ mod tests {
             None::<()>,
             |_, _| {},
         );
-        let promotion_deadline = Instant::now() + Duration::from_secs(1);
+        let promotion_deadline = Instant::now() + HANG_CEILING;
         while state.interaction_probe_count.load(Ordering::Relaxed) == 0
             && Instant::now() < promotion_deadline
         {
             std::thread::sleep(Duration::from_millis(1));
         }
         assert!(state.interaction_probe_count.load(Ordering::Relaxed) > 0);
-        let record_deadline = Instant::now() + Duration::from_secs(1);
+        let record_deadline = Instant::now() + HANG_CEILING;
         while !state.promotion_recorded.load(Ordering::Relaxed) && Instant::now() < record_deadline
         {
             std::thread::sleep(Duration::from_millis(1));
@@ -803,6 +807,10 @@ mod tests {
 
         state.busy.store(false, Ordering::Relaxed);
         state.interaction_observed.store(false, Ordering::Relaxed);
+        // After promotion the interaction probe is no longer called, so the
+        // loop's continued running is not observable. 40ms is four times this
+        // test's 10ms orphan gate: long enough for that gate to open, not a
+        // latency budget. `#wallclockassertsweep2`
         std::thread::sleep(Duration::from_millis(40));
 
         assert!(
@@ -910,7 +918,7 @@ mod tests {
     }
 
     fn wait_for_binding_probes(state: &BindingCompletionState, probes: u64) {
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let deadline = Instant::now() + HANG_CEILING;
         while state.binding_probe_count.load(Ordering::Relaxed) < probes
             && Instant::now() < deadline
         {
@@ -923,7 +931,7 @@ mod tests {
     }
 
     fn wait_for_completed(completed: &AtomicBool) -> bool {
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let deadline = Instant::now() + HANG_CEILING;
         while !completed.load(Ordering::Relaxed) && Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(1));
         }

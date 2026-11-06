@@ -54,21 +54,89 @@ mod tests {
     use std::sync::Arc;
     use std::sync::mpsc;
     use std::time::Duration;
+    #[cfg(target_os = "linux")]
+    use std::time::Instant;
+
+    /// `#wallclockassertsweep2`: a wait that fails only when the awaited event
+    /// never happens. Not a latency bound.
+    const HANG_CEILING: Duration = Duration::from_secs(30);
+
+    #[cfg(target_os = "linux")]
+    fn parked_in_futex(tid: u64) -> bool {
+        let text = std::fs::read_to_string(format!("/proc/{tid}/syscall")).unwrap_or_default();
+        text.split_whitespace()
+            .next()
+            .and_then(|number| number.parse::<i64>().ok())
+            == Some(libc::SYS_futex)
+    }
+
+    #[cfg(target_os = "linux")]
+    fn assert_freeze_still_held(done: &mpsc::Receiver<()>) {
+        match done.try_recv() {
+            Ok(()) => panic!("freeze returned while the forwarding transaction was still held"),
+            Err(mpsc::TryRecvError::Disconnected) => {
+                panic!("contender ended before freeze returned");
+            }
+            Err(mpsc::TryRecvError::Empty) => {}
+        }
+    }
 
     #[test]
     fn freeze_waits_for_the_complete_forwarding_transaction() {
         let gate = Arc::new(IoHandoffGate::default());
         let forwarding = gate.forwarding();
-        let (tx, rx) = mpsc::channel();
-        let contender = gate.clone();
+        let (tid_tx, tid_rx) = mpsc::channel();
+        let (done_tx, done_rx) = mpsc::channel();
+        let contender = Arc::clone(&gate);
         let handle = std::thread::spawn(move || {
+            // Published before `freeze`, so the waiter below cannot mistake
+            // this send for the mutex park.
+            #[cfg(target_os = "linux")]
+            {
+                let tid = unsafe { libc::syscall(libc::SYS_gettid) };
+                assert!(tid > 0, "gettid failed");
+                tid_tx.send(tid as u64).unwrap();
+            }
+            #[cfg(not(target_os = "linux"))]
+            tid_tx.send(0u64).unwrap();
             let _freeze = contender.freeze();
-            tx.send(()).unwrap();
+            done_tx.send(()).unwrap();
         });
 
-        assert!(rx.recv_timeout(Duration::from_millis(50)).is_err());
+        let tid = tid_rx
+            .recv_timeout(HANG_CEILING)
+            .expect("contender never started");
+
+        // Linux observes the contender parked in `SYS_futex` (parking_lot's
+        // parker) while this thread still holds the forwarding guard. A
+        // `freeze` that did not wait would have sent already. Other targets
+        // have no `/proc/<tid>/syscall` equivalent; CI runs this on Linux.
+        #[cfg(target_os = "linux")]
+        {
+            let deadline = Instant::now() + HANG_CEILING;
+            loop {
+                assert_freeze_still_held(&done_rx);
+                if parked_in_futex(tid) {
+                    std::thread::yield_now();
+                    assert_freeze_still_held(&done_rx);
+                    if parked_in_futex(tid) {
+                        break;
+                    }
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "contender never parked in freeze while the forwarding transaction was held"
+                );
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        }
+        #[cfg(not(target_os = "linux"))]
+        let _ = tid;
+
         drop(forwarding);
-        rx.recv_timeout(Duration::from_secs(1)).unwrap();
+        done_rx
+            .recv_timeout(HANG_CEILING)
+            .expect("freeze did not resume after the forwarding transaction dropped");
         handle.join().unwrap();
     }
 

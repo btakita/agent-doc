@@ -9,7 +9,10 @@
 //! placement ([`crate::queue_inbound::plan_queue_followups_targeted`]).
 //! Rows the queue already holds, live or struck, are not added again, so a
 //! repeated report is idempotent and a follow-up the operator struck stays
-//! closed.
+//! closed. An id-less origin is quoted by its work text. A lifecycle marker
+//! or exact-attempt annotation on that row is not part of the quote, and a
+//! row that already includes one still matches after the marker changes
+//! (`#followuporiginlabelmarker`).
 //!
 //! `#handbackopenitemstriage`: a row can dispatch in a `go` queue with no
 //! review, so only an entry the worker labelled as work becomes one. **Notes**
@@ -37,12 +40,17 @@ const FOLLOWUP_ORIGIN_LABEL_CHARS: usize = 80;
 
 /// The follow-up row text for one action item. The origin id is written as a
 /// code span without `#`, so the row is free-text work that never aliases the
-/// originating item's identity.
+/// originating item's identity. An id-less origin is quoted by its work text
+/// ([`origin_work_text`]), bounded to [`FOLLOWUP_ORIGIN_LABEL_CHARS`], so a
+/// later report still produces the same row after the origin's lifecycle
+/// marker changes (`#followuporiginlabelmarker`).
 pub fn action_item_followup_text(origin_item: &str, action_item: &str) -> String {
     let origin = match agent_doc_element_queue::queue_head_identity(origin_item) {
         agent_doc_element_queue::QueueItemIdentity::Id(id) => format!("`{id}`"),
         agent_doc_element_queue::QueueItemIdentity::FreeText(_) => {
-            let text = agent_doc_document::subagent_completion::heading_item_text(origin_item);
+            let text = agent_doc_document::subagent_completion::heading_item_text(
+                &origin_work_text(origin_item),
+            );
             let mut label: String = text.chars().take(FOLLOWUP_ORIGIN_LABEL_CHARS).collect();
             if label.len() < text.len() {
                 label.push('…');
@@ -54,6 +62,18 @@ pub fn action_item_followup_text(origin_item: &str, action_item: &str) -> String
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+/// Work text of an origin row. A lifecycle marker, pin, or exact-attempt
+/// owner annotation is projection, not the quote. The raw row is kept when
+/// stripping would leave it empty.
+fn origin_work_text(origin_item: &str) -> String {
+    let stripped = agent_doc_element_queue::strip_attempt_projection_prefix(origin_item);
+    if stripped.trim().is_empty() {
+        origin_item.to_string()
+    } else {
+        stripped.to_string()
+    }
 }
 
 /// Insert one follow-up row per action item of `response` after the head
@@ -97,7 +117,9 @@ pub fn plan_handback_followups(
             continue;
         }
         let row = action_item_followup_text(&origin_row, &item);
-        if fresh.contains(&row) || existing.iter().any(|line| line.contains(&row)) {
+        if fresh.iter().any(|held| followup_rows_match(held, &row))
+            || existing.iter().any(|line| followup_rows_match(line, &row))
+        {
             outcome.already_present += 1;
             continue;
         }
@@ -127,6 +149,80 @@ pub fn plan_handback_followups(
             (content.to_string(), outcome)
         }
     }
+}
+
+/// True when `line` already holds the follow-up `row`, live or struck.
+///
+/// A quote written before `#followuporiginlabelmarker` embedded the origin's
+/// lifecycle marker (`☑️ [#subagent:leaf#1]`). That marker changes between
+/// reports, and it used to consume the 80-character bound, so the check
+/// compares the quote's work text. A struck row still matches.
+fn followup_rows_match(line: &str, row: &str) -> bool {
+    let line_key = followup_hold_key(line);
+    let row_key = followup_hold_key(row);
+    if line_key.contains(&row_key) {
+        return true;
+    }
+    let (Some((old_label, old_action)), Some((new_label, new_action))) = (
+        quoted_origin_parts(&line_key),
+        quoted_origin_parts(&row_key),
+    ) else {
+        return false;
+    };
+    if old_action != new_action {
+        return false;
+    }
+    // Only a truncated quote may match a longer one. Two short, different
+    // work texts that share a prefix stay distinct.
+    if !(old_label.ends_with('…') || new_label.ends_with('…')) {
+        return false;
+    }
+    let old_work = old_label.trim_end_matches('…');
+    let new_work = new_label.trim_end_matches('…');
+    !old_work.is_empty()
+        && !new_work.is_empty()
+        && (new_work.starts_with(old_work) || old_work.starts_with(new_work))
+}
+
+fn followup_hold_key(line: &str) -> String {
+    let collapsed = line.split_whitespace().collect::<Vec<_>>().join(" ");
+    normalize_quoted_origin(&collapsed.replace("~~", ""))
+}
+
+const ORIGIN_QUOTE_OPEN: &str = "queue item “";
+
+/// `queue item “<label>”` with a leading attempt projection removed from
+/// `<label>`. Other lines are unchanged.
+fn normalize_quoted_origin(line: &str) -> String {
+    let Some((label, end)) = quoted_label_span(line) else {
+        return line.to_string();
+    };
+    let stripped = agent_doc_element_queue::strip_attempt_projection_prefix(label).trim();
+    let work = if stripped.is_empty() { label } else { stripped };
+    if work == label {
+        return line.to_string();
+    }
+    let start = end - label.len();
+    let mut out = String::with_capacity(line.len());
+    out.push_str(&line[..start]);
+    out.push_str(work);
+    out.push_str(&line[end..]);
+    out
+}
+
+/// The quoted origin label and the byte index of its closing `”`.
+fn quoted_label_span(line: &str) -> Option<(&str, usize)> {
+    let start = line.find(ORIGIN_QUOTE_OPEN)? + ORIGIN_QUOTE_OPEN.len();
+    let rest = line.get(start..)?;
+    let rel = rest.find('”')?;
+    Some((&rest[..rel], start + rel))
+}
+
+/// `(label, action)` of `queue item “<label>”: <action>`.
+fn quoted_origin_parts(line: &str) -> Option<(&str, &str)> {
+    let (label, end) = quoted_label_span(line)?;
+    let action = line[end..].strip_prefix("”: ")?;
+    Some((label, action))
 }
 
 /// Whitespace-collapsed lines of queue `queue_id`'s body.
@@ -333,5 +429,122 @@ mod tests {
             action_item_followup_text("finish sdk", "a  limit\nwrapped"),
             "follow up on an action item from queue item “finish sdk”: a limit wrapped"
         );
+
+        // The 80-character bound is work text. A lifecycle marker must not
+        // spend it, or a later marker would cut the quote in a new place.
+        let marked = format!("☑️ [#subagent:leaf#1] {}", "x".repeat(90));
+        let quoted = action_item_followup_text(&marked, "wire it");
+        assert!(
+            !quoted.contains("[#subagent:leaf#1]") && !quoted.contains('☑'),
+            "{quoted}"
+        );
+        let label = quoted
+            .split_once("queue item “")
+            .and_then(|(_, rest)| rest.split_once('”'))
+            .map(|(label, _)| label)
+            .unwrap();
+        assert_eq!(
+            label.chars().count(),
+            FOLLOWUP_ORIGIN_LABEL_CHARS + 1,
+            "{label}"
+        );
+        assert!(
+            label.starts_with(&"x".repeat(FOLLOWUP_ORIGIN_LABEL_CHARS)),
+            "{label}"
+        );
+    }
+
+    /// `#followuporiginlabelmarker`: the nested-leaf hand-back quoted
+    /// `☑️ [#subagent:leaf#1]`. A repeat after that marker changes, and a row
+    /// already written with the marker, are the same follow-up.
+    #[test]
+    fn a_repeat_after_the_origin_marker_changes_does_not_add_a_second_row() {
+        let handback = concat!(
+            "**Summary:** done\n",
+            "**Action items:**\n",
+            "- wire the gutter stamp\n",
+        );
+        let content = doc("- ☑️ [#subagent:leaf#1] leaf work\n- later work\n");
+        let (once, first) = plan_handback_followups(&content, "leaf work", handback);
+        assert_eq!(
+            first.inserted,
+            vec![
+                "follow up on an action item from queue item “leaf work”: wire the gutter stamp"
+                    .to_string()
+            ]
+        );
+        assert_eq!(once.matches("[#subagent:leaf#1]").count(), 1, "{once}");
+
+        let changed = once.replacen(
+            "☑️ [#subagent:leaf#1] leaf work",
+            "🚧 [#subagent:leaf#2] leaf work",
+            1,
+        );
+        let (twice, second) = plan_handback_followups(&changed, "leaf work", handback);
+        assert_eq!(twice, changed);
+        assert_eq!(second.already_present, 1);
+        assert!(second.inserted.is_empty(), "{second:?}");
+
+        // A row the previous binary wrote, quoting the old marker, stays the
+        // one follow-up after the origin is re-projected. A struck copy stays
+        // closed. A different action item is still queued.
+        let legacy = doc(concat!(
+            "- 🚧 [#subagent:leaf#2] leaf work\n",
+            "- follow up on an action item from queue item “☑️ [#subagent:leaf#1] leaf work”: wire the gutter stamp\n",
+            "- later work\n",
+        ));
+        let (same, outcome) = plan_handback_followups(&legacy, "leaf work", handback);
+        assert_eq!(same, legacy);
+        assert_eq!(outcome.already_present, 1, "{outcome:?}");
+        assert!(outcome.inserted.is_empty(), "{outcome:?}");
+
+        let struck = legacy.replacen(
+            "- follow up on an action item from queue item “☑️ [#subagent:leaf#1] leaf work”: wire the gutter stamp",
+            "- ~~follow up on an action item from queue item “☑️ [#subagent:leaf#1] leaf work”: wire the gutter stamp~~",
+            1,
+        );
+        let (after, again) = plan_handback_followups(&struck, "leaf work", handback);
+        assert_eq!(after, struck);
+        assert_eq!(again.already_present, 1, "{again:?}");
+
+        let other = "**Summary:** done\n**Action items:**\n- a different limit\n";
+        let (added, extra) = plan_handback_followups(&legacy, "leaf work", other);
+        assert_eq!(
+            extra.inserted,
+            vec![
+                "follow up on an action item from queue item “leaf work”: a different limit"
+                    .to_string()
+            ]
+        );
+        assert_eq!(added.matches("follow up on").count(), 2, "{added}");
+    }
+
+    /// The old quote spent the 80-character bound on the marker, so its work
+    /// text is a shorter truncated prefix of the stable quote.
+    #[test]
+    fn a_marker_inside_the_old_quote_bound_still_matches() {
+        let work = "x".repeat(90);
+        let legacy_origin = format!("☑️ [#subagent:leaf#1] {work}");
+        let legacy_text =
+            agent_doc_document::subagent_completion::heading_item_text(&legacy_origin);
+        let mut legacy_label: String = legacy_text
+            .chars()
+            .take(FOLLOWUP_ORIGIN_LABEL_CHARS)
+            .collect();
+        assert!(legacy_label.len() < legacy_text.len());
+        legacy_label.push('…');
+        assert!(
+            legacy_label.contains("[#subagent:leaf#1]"),
+            "{legacy_label}"
+        );
+        let content = doc(&format!(
+            "- 🚧 [#subagent:leaf#2] {work}\n- follow up on an action item from queue item “{legacy_label}”: wire the gutter stamp\n"
+        ));
+        let handback = "**Summary:** done\n**Action items:**\n- wire the gutter stamp\n";
+        let origin = format!("🚧 [#subagent:leaf#2] {work}");
+        let (updated, outcome) = plan_handback_followups(&content, &origin, handback);
+        assert_eq!(updated, content);
+        assert_eq!(outcome.already_present, 1, "{outcome:?}");
+        assert!(outcome.inserted.is_empty(), "{outcome:?}");
     }
 }

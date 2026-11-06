@@ -60,6 +60,7 @@ pub mod route_dispatch;
 pub mod stale_completion_evidence;
 pub mod subagent_brief;
 pub mod subagent_intent;
+pub mod subagent_pool;
 pub mod waiting_archive;
 pub mod waiting_packet;
 pub mod waiting_status;

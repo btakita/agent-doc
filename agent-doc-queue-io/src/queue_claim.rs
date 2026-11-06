@@ -981,7 +981,7 @@ pub fn refresh_attempt(
     ttl_secs: u64,
     generation: Option<u64>,
 ) -> Result<QueueClaim> {
-    refresh_attempt_at(file, item, owner, ttl_secs, now_secs(), generation)
+    refresh_attempt_at(file, item, owner, ttl_secs, now_secs(), generation, true)
 }
 
 fn refresh_at(file: &Path, item: &str, owner: &str, ttl_secs: u64, now: u64) -> Result<QueueClaim> {
@@ -992,7 +992,7 @@ fn refresh_at(file: &Path, item: &str, owner: &str, ttl_secs: u64, now: u64) -> 
         .into_iter()
         .find(|claim| claim.identity == claim_identity(item))
         .map(|claim| claim.generation);
-    refresh_attempt_at(file, item, owner, ttl_secs, now, generation)
+    refresh_attempt_at(file, item, owner, ttl_secs, now, generation, false)
 }
 
 fn refresh_attempt_at(
@@ -1002,6 +1002,7 @@ fn refresh_attempt_at(
     ttl_secs: u64,
     now: u64,
     generation: Option<u64>,
+    revive_expired_bound: bool,
 ) -> Result<QueueClaim> {
     if item.trim().is_empty() {
         bail!("queue claim --refresh needs a non-empty --item (`#id` or the queue line's text)");
@@ -1018,14 +1019,25 @@ fn refresh_attempt_at(
     let owner_session = current_owner_session();
     let outcome = mutate_ledger(file, |ledger| {
         log_followed(file, &ledger.follow_edits_in_view(now, &heads));
-        Ok(ledger.refresh_attempt_in_session(
-            &target,
-            owner,
-            now,
-            ttl_secs,
-            owner_session,
-            generation,
-        ))
+        Ok(if revive_expired_bound {
+            ledger.refresh_or_revive_attempt_in_session(
+                &target,
+                owner,
+                now,
+                ttl_secs,
+                owner_session,
+                generation,
+            )
+        } else {
+            ledger.refresh_attempt_in_session(
+                &target,
+                owner,
+                now,
+                ttl_secs,
+                owner_session,
+                generation,
+            )
+        })
     })?;
     match &outcome {
         Ok(claim) => agent_doc_ops_log_io::log_op(
@@ -1051,6 +1063,35 @@ fn refresh_attempt_at(
         ),
     }
     outcome.map_err(|refused: QueueClaimRefreshRefused| refused.into())
+}
+
+/// Record that the harness reported this exact running worker stopped
+/// (`queue freeze`, `#subagentworkpool`): its pool slot frees for a refill
+/// while its claim, generation, and worker binding stay intact.
+pub fn freeze_attempt(
+    file: &Path,
+    item: &str,
+    generation: Option<u64>,
+    reason: &str,
+) -> Result<QueueClaim> {
+    let (target, heads) = resolve_live_claim_target(file, item, "queue_claim_freeze")?;
+    let now = now_secs();
+    let claim = mutate_ledger(file, |ledger| {
+        log_followed(file, &ledger.follow_edits_in_view(now, &heads));
+        ledger
+            .freeze_attempt(&target, generation, now, reason)
+            .map_err(anyhow::Error::from)
+    })?;
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "queue_claim_state state=frozen owner={} generation={} item_bytes={} (#subagentworkpool)",
+            claim.owner,
+            claim.generation,
+            claim.item_text.len()
+        ),
+    );
+    Ok(claim)
 }
 
 /// Mark one exact worker attempt as reported/awaiting integration.
@@ -1356,11 +1397,23 @@ pub fn abandon(file: &Path, item: &str) -> Result<Option<QueueClaim>> {
                 || claim.state != agent_doc_queue::queue_claim::QueueClaimState::Claimed
             {
                 claim.mark_lost();
+                record_abandoned_worker(&mut claim, now);
                 ledger.claims.push(claim.clone());
             }
             claim
         }))
     })
+}
+
+/// `release --requeue` is explicit evidence the worker no longer owns the
+/// attempt, so a bound attempt frees its pool slot (`#subagentworkpool`).
+fn record_abandoned_worker(claim: &mut QueueClaim, now: u64) {
+    if claim.worker.is_some() && claim.frozen.is_none() {
+        claim.frozen = Some(agent_doc_queue::queue_claim::QueueWorkerFreeze {
+            frozen_at_secs: now,
+            reason: "abandoned for requeue".to_string(),
+        });
+    }
 }
 
 /// Generation-fenced [`abandon`].
@@ -1389,6 +1442,7 @@ pub fn abandon_attempt(
                 || claim.state != agent_doc_queue::queue_claim::QueueClaimState::Claimed
             {
                 claim.mark_lost();
+                record_abandoned_worker(&mut claim, now);
                 ledger.claims.push(claim.clone());
             }
             claim
@@ -1630,15 +1684,26 @@ pub struct DispatchAcknowledgementObligation {
     pub generation: u64,
     pub start_command: String,
     pub release_command: String,
+    /// The preamble for the spawn this claim still owes (`#subagentworkpool`).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub brief_command: String,
 }
 
 impl DispatchAcknowledgementObligation {
     pub fn message(&self) -> String {
         format!(
-            "queue item {:?} is still claimed/dispatching by {} at generation {} but no worker \
-             acknowledgement was recorded. If the harness spawn succeeded, bind its worker now: \
-             `{}`. Otherwise abandon this attempt for redispatch: `{}`.",
-            self.item, self.owner, self.generation, self.start_command, self.release_command,
+            "URGENT, before any reported-result integration (#subagentworkpool): queue item {:?} \
+             is still claimed/dispatching by {} at generation {} but no worker acknowledgement \
+             was recorded. If the harness spawn succeeded, bind its worker now: `{}`. If no \
+             worker was spawned yet, spawn it NOW with the preamble from `{}`, then run that \
+             start command with the returned worker id. Only if it cannot be spawned, abandon \
+             this attempt for redispatch: `{}`.",
+            self.item,
+            self.owner,
+            self.generation,
+            self.start_command,
+            self.brief_command,
+            self.release_command,
         )
     }
 }
@@ -1666,6 +1731,10 @@ pub fn dispatch_acknowledgement_obligation(
         release_command: format!(
             "agent-doc queue release {document} --item {item} --generation {} --requeue",
             claim.generation,
+        ),
+        brief_command: crate::subagent_dispatch::brief_command(
+            &file.display().to_string(),
+            &claim.item_text,
         ),
     }
 }

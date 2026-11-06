@@ -242,7 +242,8 @@ pub struct QueueSubagentPlan {
 /// a capacity slot, and `after_deps` the `after=` / ordered-list predecessors
 /// keyed by id. Keeping exclusion separate from occupancy lets a Reported
 /// handback stay open for coordinator integration without blocking unrelated
-/// ready work.
+/// ready work. `default_pool` bounds a bare marker (`#subagentworkpool`);
+/// `None` keeps the unbounded every-eligible-head behavior.
 pub fn plan_queue_subagent_dispatch(
     mode: QueueSubagentsMode,
     eligible: &[String],
@@ -250,6 +251,7 @@ pub fn plan_queue_subagent_dispatch(
     excluded: &crate::queue_claim::ClaimedQueueItems,
     occupied: &crate::queue_claim::ClaimedQueueItems,
     after_deps: &std::collections::HashMap<String, Vec<String>>,
+    default_pool: Option<std::num::NonZeroUsize>,
 ) -> QueueSubagentPlan {
     let live_ids: std::collections::HashSet<String> = live_heads
         .iter()
@@ -259,7 +261,13 @@ pub fn plan_queue_subagent_dispatch(
         .iter()
         .filter(|head| occupied.claims(head))
         .count();
-    let mut remaining = mode.capacity.remaining_after(in_flight);
+    // `#subagentworkpool`: a bare marker is bounded by the default pool size
+    // when the caller supplies one; the held heads are the refill backlog.
+    let capacity = match (mode.capacity, default_pool) {
+        (QueueSubagentsCapacity::AllEligible, Some(pool)) => QueueSubagentsCapacity::Limited(pool),
+        (capacity, _) => capacity,
+    };
+    let mut remaining = capacity.remaining_after(in_flight);
     let mut plan = QueueSubagentPlan::default();
     for head in eligible {
         if excluded.claims(head) {
@@ -423,6 +431,7 @@ mod tests {
             &claimed,
             &claimed,
             &Default::default(),
+            None,
         );
         assert_eq!(plan.dispatch, strings(&["do [#b]"]));
         assert_eq!(plan.held, strings(&["do [#c]", "do [#d]"]));
@@ -444,6 +453,7 @@ mod tests {
             &excluded,
             &occupied,
             &Default::default(),
+            None,
         );
         assert_eq!(plan.dispatch, strings(&["do [#ready]"]));
         assert_eq!(plan.held, strings(&["do [#later]"]));
@@ -464,6 +474,7 @@ mod tests {
             &claimed,
             &claimed,
             &Default::default(),
+            None,
         );
         assert_eq!(plan.dispatch, strings(&["do [#b]", "do [#c]", "do [#d]"]));
         assert!(plan.held.is_empty());
@@ -483,6 +494,7 @@ mod tests {
             &none,
             &none,
             &deps,
+            None,
         );
         assert_eq!(plan.dispatch, strings(&["do [#a]"]));
         assert_eq!(plan.held, strings(&["do [#b]"]));
@@ -498,6 +510,7 @@ mod tests {
             &none,
             &none,
             &deps,
+            None,
         );
         assert_eq!(plan.dispatch, remaining);
         assert!(plan.held.is_empty());
@@ -526,6 +539,7 @@ mod tests {
             &none,
             &none,
             &deps,
+            None,
         );
         assert_eq!(
             first_pass.dispatch,
@@ -547,8 +561,39 @@ mod tests {
             &none,
             &none,
             &deps,
+            None,
         );
         assert_eq!(second_pass.dispatch, after_address);
         assert!(second_pass.held.is_empty());
+    }
+
+    /// `#subagentworkpool`: a bare marker is bounded by the default pool, and
+    /// a slot freed by an occupied worker finishing refills the next head.
+    #[test]
+    fn bare_marker_is_bounded_by_the_default_pool_and_refills() {
+        let heads = strings(&["do [#a]", "do [#b]", "do [#c]", "do [#d]"]);
+        let none = crate::queue_claim::ClaimedQueueItems::none();
+        let bare = QueueSubagentsMode {
+            capacity: QueueSubagentsCapacity::AllEligible,
+        };
+        let pool = std::num::NonZeroUsize::new(2);
+        let plan = plan_queue_subagent_dispatch(bare, &heads, &heads, &none, &none, &Default::default(), pool);
+        assert_eq!(plan.dispatch, strings(&["do [#a]", "do [#b]"]));
+        assert_eq!(plan.held, strings(&["do [#c]", "do [#d]"]));
+
+        // `#a` reported (excluded, no longer occupying); `#b` still running.
+        let excluded = crate::queue_claim::ClaimedQueueItems::from_identities([
+            crate::queue_claim::claim_identity("do [#a]"),
+            crate::queue_claim::claim_identity("do [#b]"),
+        ]);
+        let occupied = crate::queue_claim::ClaimedQueueItems::from_identities([
+            crate::queue_claim::claim_identity("do [#b]"),
+        ]);
+        let refill = plan_queue_subagent_dispatch(bare, &heads, &heads, &excluded, &occupied, &Default::default(), pool);
+        assert_eq!(refill.dispatch, strings(&["do [#c]"]));
+        assert_eq!(refill.held, strings(&["do [#d]"]));
+
+        let unbounded = plan_queue_subagent_dispatch(bare, &heads, &heads, &none, &none, &Default::default(), None);
+        assert_eq!(unbounded.dispatch, heads);
     }
 }

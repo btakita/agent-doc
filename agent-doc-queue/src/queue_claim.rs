@@ -206,6 +206,30 @@ pub struct QueueClaim {
     /// attempt reported before the field existed, or not reported yet.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reported_at_secs: Option<u64>,
+    /// Last generation-fenced coordinator heartbeat for a running worker
+    /// (`queue claim --refresh`). `None` falls back to the worker binding's
+    /// `started_at_secs`. The work pool (`#subagentworkpool`) treats a
+    /// running attempt whose heartbeat is older than the frozen bound as a
+    /// frozen worker: it frees its pool slot but keeps the claim.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub heartbeat_at_secs: Option<u64>,
+    /// Recorded evidence that this exact worker stopped (`#subagentworkpool`):
+    /// `queue freeze` after the harness reported the worker ended without a
+    /// result, or `queue release --requeue` abandoning the attempt. A harness
+    /// "waiting on its own background work" notice is proof of life, never
+    /// this record. A frozen worker frees its pool slot so the coordinator
+    /// refills it, while the claim, generation, and worker binding stay
+    /// intact: a later report from the same worker is still accepted, and a
+    /// heartbeat on a still-live attempt clears the freeze.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub frozen: Option<QueueWorkerFreeze>,
+}
+
+/// Recorded stop of one bound worker (`#subagentworkpool`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct QueueWorkerFreeze {
+    pub frozen_at_secs: u64,
+    pub reason: String,
 }
 
 fn is_zero(value: &u64) -> bool {
@@ -1249,6 +1273,8 @@ impl QueueClaimLedger {
             followed_generation: 0,
             claim_time_row: None,
             reported_at_secs: None,
+            heartbeat_at_secs: None,
+            frozen: None,
         };
         match self
             .claims
@@ -1500,7 +1526,7 @@ impl QueueClaimLedger {
         ttl_secs: u64,
         owner_session: Option<ClaimOwnerSession>,
     ) -> Result<QueueClaim, QueueClaimRefreshRefused> {
-        self.refresh_fenced_in_session(item, owner, now_secs, ttl_secs, owner_session, None)
+        self.refresh_fenced_in_session(item, owner, now_secs, ttl_secs, owner_session, None, false)
     }
 
     /// Attempt-fenced refresh used by command boundaries. Generated claims
@@ -1521,9 +1547,60 @@ impl QueueClaimLedger {
             ttl_secs,
             owner_session,
             Some(expected_generation),
+            false,
         )
     }
 
+    /// [`Self::refresh_attempt_in_session`] that also accepts the exact
+    /// generation of an attempt that expired with its worker still bound
+    /// (`#subagentworkpool`). Expiry only means nobody refreshed the claim, so
+    /// the coordinator's proof of life revives that same attempt: same owner,
+    /// generation, and worker. It cannot steal work: a reclaim moved the
+    /// generation (refused as stale), an unbound attempt has no worker to
+    /// vouch for, and a recorded stop or abandon stays lost.
+    pub fn refresh_or_revive_attempt_in_session(
+        &mut self,
+        item: &str,
+        owner: &str,
+        now_secs: u64,
+        ttl_secs: u64,
+        owner_session: Option<ClaimOwnerSession>,
+        expected_generation: Option<u64>,
+    ) -> Result<QueueClaim, QueueClaimRefreshRefused> {
+        self.refresh_fenced_in_session(
+            item,
+            owner,
+            now_secs,
+            ttl_secs,
+            owner_session,
+            Some(expected_generation),
+            true,
+        )
+    }
+
+    /// Whether `existing` may be revived by a generation-fenced heartbeat.
+    fn revivable(&self, index: usize, now_secs: u64) -> bool {
+        let existing = &self.claims[index];
+        let Some(binding) = existing.worker.as_ref() else {
+            return false;
+        };
+        existing.frozen.is_none()
+            && !existing.completion_recovered_after_loss
+            && matches!(
+                existing.state,
+                QueueClaimState::Running | QueueClaimState::Lost
+            )
+            && !self.claims.iter().enumerate().any(|(other_index, other)| {
+                other_index != index
+                    && other.blocks_dispatch(now_secs)
+                    && other
+                        .worker
+                        .as_ref()
+                        .is_some_and(|other| other.worker_id == binding.worker_id)
+            })
+    }
+
+    #[allow(clippy::too_many_arguments)]
     fn refresh_fenced_in_session(
         &mut self,
         item: &str,
@@ -1532,6 +1609,7 @@ impl QueueClaimLedger {
         ttl_secs: u64,
         owner_session: Option<ClaimOwnerSession>,
         generation_fence: Option<Option<u64>>,
+        revive_expired_bound: bool,
     ) -> Result<QueueClaim, QueueClaimRefreshRefused> {
         let identity = claim_identity(item);
         let owner = owner.trim();
@@ -1540,18 +1618,34 @@ impl QueueClaimLedger {
             owner: owner.to_string(),
             reason,
         };
-        let Some(existing) = self
+        let Some(index) = self
             .claims
-            .iter_mut()
-            .find(|claim| claim.identity == identity)
+            .iter()
+            .position(|claim| claim.identity == identity)
         else {
             return Err(refused(RefreshRefusal::Unclaimed));
         };
-        if existing.is_expired(now_secs) || existing.state == QueueClaimState::Lost {
+        let lapsed =
+            self.claims[index].is_expired(now_secs) || self.claims[index].state == QueueClaimState::Lost;
+        let revive = lapsed
+            && revive_expired_bound
+            && self.claims[index].owner == owner
+            && matches!(
+                generation_fence,
+                Some(Some(generation)) if generation == self.claims[index].generation
+            )
+            && self.revivable(index, now_secs);
+        let existing = &mut self.claims[index];
+        if lapsed && !revive {
             return Err(refused(RefreshRefusal::Expired {
                 holder: existing.owner.clone(),
                 expired_at_secs: existing.expires_at_secs,
+                worker_bound: existing.worker.is_some() && existing.frozen.is_none(),
             }));
+        }
+        if revive {
+            existing.state = QueueClaimState::Running;
+            existing.lost_from = None;
         }
         if existing.owner != owner {
             return Err(refused(RefreshRefusal::OtherOwner {
@@ -1569,10 +1663,57 @@ impl QueueClaimLedger {
             return Err(refused(RefreshRefusal::NotRunning));
         }
         existing.expires_at_secs = now_secs.saturating_add(ttl_secs.max(1));
+        // `#subagentworkpool`: a refresh is the coordinator's heartbeat for
+        // this worker; it is fresh again and occupies its pool slot.
+        existing.heartbeat_at_secs = Some(now_secs);
+        existing.frozen = None;
         if owner_session.is_some() {
             existing.owner_session = owner_session;
         }
         Ok(existing.clone())
+    }
+
+    /// Record that the harness reported this exact running worker stopped
+    /// (`queue freeze`, `#subagentworkpool`). The attempt keeps its claim,
+    /// generation, and worker binding; only its pool slot is freed, so the
+    /// coordinator can refill it. An attempt that expired with its worker
+    /// bound may be frozen too. Idempotent for an already-frozen attempt.
+    pub fn freeze_attempt(
+        &mut self,
+        item: &str,
+        expected_generation: Option<u64>,
+        now_secs: u64,
+        reason: &str,
+    ) -> Result<QueueClaim, QueueClaimTransitionRefused> {
+        let index = self
+            .claim_index(item)
+            .ok_or(QueueClaimTransitionRefused::Missing)?;
+        let claim = &mut self.claims[index];
+        validate_generation(claim, expected_generation)?;
+        match claim.state {
+            QueueClaimState::Running => {}
+            // An attempt that expired with its worker bound still needs its
+            // stop recorded before its slot frees (`#subagentworkpool`).
+            QueueClaimState::Lost if claim.worker.is_some() => {}
+            QueueClaimState::Claimed => {
+                return Err(QueueClaimTransitionRefused::NotRunning {
+                    generation: claim.generation,
+                });
+            }
+            state => {
+                return Err(QueueClaimTransitionRefused::Terminal {
+                    generation: claim.generation,
+                    state,
+                });
+            }
+        }
+        if claim.frozen.is_none() {
+            claim.frozen = Some(QueueWorkerFreeze {
+                frozen_at_secs: now_secs,
+                reason: reason.trim().to_string(),
+            });
+        }
+        Ok(claim.clone())
     }
 
     /// Mark the matching attempt reported. New generated claims require their
@@ -2861,10 +3002,12 @@ fn selector_referenced_queue_ids(text: &str) -> Vec<String> {
 pub enum RefreshRefusal {
     /// No claim on the item at all.
     Unclaimed,
-    /// The claim's TTL already lapsed; the head is back in the eligible set.
+    /// The claim's TTL already lapsed. With no bound worker the head is back in
+    /// the eligible set; with one, nothing proves the worker stopped.
     Expired {
         holder: String,
         expired_at_secs: u64,
+        worker_bound: bool,
     },
     /// A different owner holds the live claim.
     OtherOwner { holder: String },
@@ -2910,6 +3053,21 @@ impl std::fmt::Display for QueueClaimRefreshRefused {
             RefreshRefusal::Expired {
                 holder,
                 expired_at_secs,
+                worker_bound: true,
+            } => write!(
+                f,
+                "cannot refresh {:?}: the claim held by {holder} expired at {expired_at_secs} \
+                 with its worker still bound, and this refresh did not name that exact owner \
+                 and generation. Expiry alone is no evidence the worker stopped, so the head is \
+                 NOT eligible for dispatch again (#subagentworkpool): rerun `queue claim \
+                 --refresh` with the attempt's owner and --generation while the worker is alive, \
+                 or record its stop with `queue freeze` / `queue release --requeue`.",
+                self.item
+            ),
+            RefreshRefusal::Expired {
+                holder,
+                expired_at_secs,
+                worker_bound: false,
             } => write!(
                 f,
                 "cannot refresh {:?}: the claim held by {holder} expired at {expired_at_secs}. \
@@ -4061,6 +4219,8 @@ mod tests {
                     followed_generation: 0,
                     claim_time_row: None,
             reported_at_secs: None,
+            heartbeat_at_secs: None,
+            frozen: None,
                 },
                 QueueClaim {
                     identity: QueueItemIdentity::FreeText(format!("#gh-fix {url}")),
@@ -4082,6 +4242,8 @@ mod tests {
                     followed_generation: 0,
                     claim_time_row: None,
             reported_at_secs: None,
+            heartbeat_at_secs: None,
+            frozen: None,
                 },
             ],
             cancellations: Vec::new(),
@@ -4356,6 +4518,70 @@ mod tests {
             vec!["mirrored item", "unstruck item"],
             "a mirrored identity and an unstruck row keep their claims"
         );
+    }
+
+    /// `#subagentworkpool`: an attempt that expired with its worker bound is
+    /// revived only by its exact owner and generation, never when a stop is
+    /// recorded, the worker moved on, or a reclaim took the generation.
+    #[test]
+    fn only_the_exact_heartbeat_revives_an_expired_bound_attempt() {
+        let live = || {
+            let mut ledger = QueueClaimLedger::default();
+            ledger.claim("work", "subagent:a", 100, 10);
+            ledger
+                .start("work", "subagent:a", "worker:a", 100, 10, Some(1))
+                .unwrap();
+            ledger
+        };
+        let revive = |ledger: &mut QueueClaimLedger, owner: &str, generation: Option<u64>| {
+            ledger.refresh_or_revive_attempt_in_session("work", owner, 200, 50, None, generation)
+        };
+
+        let mut expired = live();
+        assert_eq!(revive(&mut expired, "subagent:b", Some(1)).unwrap_err().reason.kind(), "expired");
+        assert_eq!(revive(&mut expired, "subagent:a", Some(2)).unwrap_err().reason.kind(), "expired");
+        assert_eq!(revive(&mut expired, "subagent:a", None).unwrap_err().reason.kind(), "expired");
+        assert!(
+            expired.refresh_attempt_in_session("work", "subagent:a", 200, 50, None, Some(1)).is_err(),
+            "the plain fenced refresh keeps refusing"
+        );
+
+        let revived = revive(&mut expired, "subagent:a", Some(1)).unwrap();
+        assert_eq!(revived.state, QueueClaimState::Running);
+        assert_eq!(revived.lost_from, None);
+        assert_eq!(revived.generation, 1);
+        assert_eq!(revived.expires_at_secs, 250);
+        assert_eq!(revived.heartbeat_at_secs, Some(200));
+
+        // A projected loss is revived the same way.
+        let mut lost = live();
+        lost.prune(200, Some(&[claim_identity("work")].into_iter().collect()));
+        assert_eq!(lost.claims[0].state, QueueClaimState::Lost);
+        assert_eq!(
+            revive(&mut lost, "subagent:a", Some(1)).unwrap().state,
+            QueueClaimState::Running
+        );
+
+        // A recorded stop stays lost, and its refusal says why it is dispatchable.
+        let mut stopped = live();
+        stopped
+            .freeze_attempt("work", Some(1), 105, "ended without a result")
+            .unwrap();
+        let refusal = revive(&mut stopped, "subagent:a", Some(1)).unwrap_err();
+        assert!(refusal.to_string().contains("eligible for dispatch again"), "{refusal}");
+
+        // The worker now holds another live attempt.
+        let mut moved = live();
+        moved.claim("other", "subagent:a", 190, 100);
+        moved
+            .start("other", "subagent:a", "worker:a", 190, 100, Some(1))
+            .unwrap();
+        assert!(revive(&mut moved, "subagent:a", Some(1)).is_err());
+
+        // A bound refusal never claims the head is dispatchable.
+        let mut foreign = live();
+        let refusal = revive(&mut foreign, "subagent:b", Some(1)).unwrap_err();
+        assert!(refusal.to_string().contains("NOT eligible for dispatch again"), "{refusal}");
     }
 
     #[test]

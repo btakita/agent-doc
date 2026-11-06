@@ -58,10 +58,15 @@ accretion.
   the same turn until the binary emits a real stop condition or iteration cap.
 - **Grok Build:** a `subagents` / `fan-out` queue does not drain inline. Dispatch
   every `queue_subagent_dispatch` entry immediately with native
-  `spawn_subagent(background=true)`, one worker per item, then acknowledge each
-  returned `subagent_id` with the entry's generation-fenced `start_command`.
-  This dispatch is automatic on the first admitted cycle; it never waits for a
-  follow-up operator prompt asking Grok to run the workers.
+  `spawn_subagent(background=true)`, one worker per item and every entry in one
+  step (never one at a time), then acknowledge each returned `subagent_id`
+  with the entry's generation-fenced `start_command`. Do any
+  `queue_dispatch_acknowledgement_required` entries (claimed, no worker) first,
+  and finish every spawn + start before integrating a reported result. This
+  dispatch is automatic on the first admitted cycle; it never waits for a
+  follow-up operator prompt asking Grok to run the workers. After each worker
+  returns, run `queue report-complete` and then the refill it prints (see
+  [Work pool](#work-pool)) before integrating.
 
 Both `agent_doc_queue_max_iterations` and
 `AGENT_DOC_QUEUE_MAX_ITERATIONS_HARD_CAP` (default `50`) bound the loop.
@@ -81,6 +86,46 @@ The skip list is exhaustive after a proven editor delivery
 elect an attached-document disk write. The keyed worker retains the intent in
 `state.db` and resumes after the registered endpoint recovers. Follow
 `queue_continuation_guidance`; do not invent stop reasons.
+
+## Work pool
+
+A `subagents` queue's workers are a pool (`#subagentworkpool`). The pool size
+is the queue's `subagents=N` cap, or for a bare `subagents` marker the machine
+default: `AGENT_DOC_SUBAGENT_POOL_SIZE` when set, else twice the build gate's
+`AGENT_DOC_BUILD_SLOTS`, else cores / 4, clamped to 8..16.
+`queue_subagent_dispatch` already fills exactly the free slots, and
+`queue_subagent_pool` (preflight) / the plan's `queue_subagent_pool` show each
+pool's running, dispatching, frozen, and free counts.
+
+- A claimed head with no worker holds a slot and is the most urgent debt:
+  spawn it (preamble from `queue brief`) and run its `queue start` before new
+  claims and before integrating any reported (`☑️`) result. Plan lists these
+  first.
+- Refill triggers: `queue report-complete`, `queue release` (with or without
+  `--requeue`), a lost attempt, and a frozen worker. Each trigger command prints
+  `[queue] subagent work pool` with the next heads' exact claim / brief / start
+  commands; run them in that order in the same turn, before integrating. The
+  mid-turn PostToolUse steering surfaces the same refill once per change.
+- A running worker's heartbeat (start or `queue claim --refresh`) falls due
+  halfway through its claim window, well before expiry. The refill and plan
+  warnings list it with the exact `queue claim --refresh --generation <N>`
+  command; run it while the worker is alive. A harness notice that a worker is
+  waiting on its own background work is proof of life, so refresh it.
+- An attempt that expires with its worker still bound is unconfirmed, not
+  freed: it holds its slot and its row is not offered again. That same refresh
+  revives the attempt (same owner, generation, and worker), so never claim a
+  new generation for a worker that may still be running.
+- Frozen means evidence the worker stopped: the harness reported it ended
+  without a result (`agent-doc queue freeze <FILE> --item <item> --generation
+  <N> --reason '<what was reported>'`), or there was no heartbeat for
+  `AGENT_DOC_SUBAGENT_FROZEN_SECS` (default 1.5 times the claim TTL, so expiry
+  alone is never frozen). Freezing frees the slot but keeps the claim; a later
+  report from that worker is still accepted, and a refresh on a live attempt
+  clears the freeze.
+- `agent-doc queue pool <FILE> [--json]` prints the current refill at any time.
+
+Never wait for another operator prompt to dispatch heads that are waiting for a
+slot; the next trigger hands them out.
 
 ## Subagent heads
 

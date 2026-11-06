@@ -1229,7 +1229,21 @@ printed by the claim. When the subagent reports back, run `agent-doc queue repor
 non-repository work. For repository work replace `--prose-only` with explicit `--source-repo`, \
 `--source-sha`, `--sink-repo`, and designated `--sink-ref`; integrate and close \
 the item normally. Empty responses and placeholder-only reports are refused. Use `queue release \
---requeue --generation <generation>` only for explicitly abandoned work.";
+--requeue --generation <generation>` only for explicitly abandoned work. WORK POOL \
+(`#subagentworkpool`): the workers are a pool sized by the queue's `subagents=N` cap or the \
+machine default, and this list already fills exactly the free slots, so dispatch EVERY entry now, \
+never one at a time. Spawn and start every claimed head before integrating any reported result. \
+Each `queue report-complete`, `queue release`, and `queue freeze` frees a slot and prints the \
+pool refill (`[queue] subagent work pool`): run its steps in order in the same turn, before \
+integrating; never wait for another operator prompt to dispatch the waiting heads. A running \
+worker's heartbeat falls due halfway through its claim window: while it is alive, run the printed \
+`agent-doc queue claim <FILE> --item <item> --owner <owner> --refresh --generation <generation>`, \
+which also revives an attempt that expired with its worker still bound. A harness notice that a \
+worker is waiting on its own background work is proof of life, so refresh it. Only when the \
+harness reports a worker ended without a result, run `agent-doc queue freeze <FILE> --item <item> \
+--generation <generation> --reason '<what it reported>'`: the claim is kept and the slot refills. \
+Expiry alone frees no slot and offers no row again. `agent-doc queue pool <FILE>` prints the \
+current refill.";
 
 /// One exchange prompt delegated by `<!-- agent:exchange subagents -->`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1516,6 +1530,12 @@ pub struct PreflightOutput {
     /// How to handle `queue_subagent_dispatch`; present only when non-empty.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub queue_subagent_dispatch_guidance: Option<String>,
+    /// The subagent work pool (`#subagentworkpool`), present for a document
+    /// with `subagents` queue work: each pool's size and occupancy, claimed
+    /// heads still owed their spawn + `queue start` (do these FIRST), frozen
+    /// workers, and the next heads for the free slots.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub queue_subagent_pool: Option<agent_doc_queue::subagent_pool::PoolRefill>,
     /// `#qheadannotation`: operator text attached to a selected id-backed head
     /// (`do [#id]: <question>`), separated from the canonical directive. Each
     /// annotation is an operator directive to answer in this turn alongside the
@@ -12890,6 +12910,13 @@ mod tests {
             "{auth:?}"
         );
         assert!(QUEUE_SUBAGENT_DISPATCH_GUIDANCE.contains("request, context, and every choice"));
+        // `#subagentworkpool`
+        assert!(QUEUE_SUBAGENT_DISPATCH_GUIDANCE.contains("dispatch EVERY entry now"));
+        assert!(QUEUE_SUBAGENT_DISPATCH_GUIDANCE
+            .contains("Spawn and start every claimed head before integrating any reported result"));
+        assert!(QUEUE_SUBAGENT_DISPATCH_GUIDANCE.contains("agent-doc queue freeze"));
+        assert!(QUEUE_SUBAGENT_DISPATCH_GUIDANCE.contains("is proof of life, so refresh it"));
+        assert!(QUEUE_SUBAGENT_DISPATCH_GUIDANCE.contains("Expiry alone frees no slot"));
         assert!(
             QUEUE_SUBAGENT_DISPATCH_GUIDANCE.contains("also record its concrete operator action")
         );

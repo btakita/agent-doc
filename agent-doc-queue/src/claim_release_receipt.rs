@@ -183,6 +183,8 @@ impl ClaimReleaseReceipt {
             followed_generation: 0,
             claim_time_row: None,
             reported_at_secs: Some(self.released_at_secs),
+            heartbeat_at_secs: None,
+            frozen: None,
         }
     }
 }
@@ -582,6 +584,8 @@ mod tests {
             followed_generation: 0,
             claim_time_row: None,
             reported_at_secs: None,
+            heartbeat_at_secs: None,
+            frozen: None,
         }
     }
 

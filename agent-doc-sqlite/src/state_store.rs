@@ -441,6 +441,16 @@ pub struct DocumentAuthorityHandoff {
     pub payload_json: String,
 }
 
+/// What an acknowledgement leaves behind once its handoff row is gone
+/// (`#predecessorlandandack`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DocumentAuthorityAckReceipt {
+    pub document_hash: String,
+    pub controller_generation: u64,
+    pub authority_epoch: u64,
+    pub event_id: String,
+}
+
 pub fn document_authority_handoff_db_path(project_root: &Path) -> PathBuf {
     project_root
         .join(".agent-doc")
@@ -464,6 +474,14 @@ fn open_document_authority_handoff_db(project_root: &Path) -> Result<Connection>
             controller_generation INTEGER NOT NULL,
             payload_json TEXT NOT NULL,
             updated_at INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS document_authority_handoff_ack_receipts (
+            document_hash TEXT NOT NULL,
+            controller_generation INTEGER NOT NULL,
+            authority_epoch INTEGER NOT NULL,
+            event_id TEXT NOT NULL,
+            updated_at INTEGER NOT NULL,
+            PRIMARY KEY (document_hash, controller_generation)
         );
         "#,
     )?;
@@ -581,23 +599,117 @@ pub fn claim_document_authority_handoff(
     )? > 0)
 }
 
+/// Delete an acknowledged handoff row and record its receipt, atomically.
+///
+/// `#predecessorlandandack`: the delete alone would leave nothing for a successor
+/// that loaded the ledger before this row's event committed. The receipt survives
+/// the row, naming the event for that successor to reconcile. One document keeps
+/// one receipt per generation, holding the newest epoch: a latest-value older
+/// epoch cannot change what the newer one's reconcile folds.
 pub fn acknowledge_document_authority_handoff(
     project_root: &Path,
     document_hash: &str,
     authority_epoch: u64,
     controller_generation: u64,
+    event_id: &str,
+) -> Result<bool> {
+    let mut conn = open_document_authority_handoff_db(project_root)?;
+    let epoch = sqlite_i64(authority_epoch, "authority handoff epoch")?;
+    let generation = sqlite_i64(
+        controller_generation,
+        "authority handoff controller generation",
+    )?;
+    let transaction = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    let acknowledged = transaction.execute(
+        "DELETE FROM document_authority_handoffs \
+         WHERE document_hash = ?1 AND authority_epoch = ?2 AND controller_generation = ?3",
+        params![document_hash, epoch, generation],
+    )? > 0;
+    if acknowledged {
+        transaction.execute(
+            r#"
+            INSERT INTO document_authority_handoff_ack_receipts (
+                document_hash,
+                controller_generation,
+                authority_epoch,
+                event_id,
+                updated_at
+            ) VALUES (?1, ?2, ?3, ?4, ?5)
+            ON CONFLICT(document_hash, controller_generation) DO UPDATE SET
+                authority_epoch = excluded.authority_epoch,
+                event_id = excluded.event_id,
+                updated_at = excluded.updated_at
+            WHERE excluded.authority_epoch >= document_authority_handoff_ack_receipts.authority_epoch
+            "#,
+            params![
+                document_hash,
+                generation,
+                epoch,
+                event_id,
+                sqlite_i64(timestamp_secs(), "authority handoff timestamp")?,
+            ],
+        )?;
+    }
+    transaction.commit()?;
+    Ok(acknowledged)
+}
+
+/// The acknowledgement receipts older generations left for
+/// `controller_generation` to reconcile (`#predecessorlandandack`).
+///
+/// Strictly older only: a controller's own acknowledgements are already folded
+/// into its projection, and a newer generation's belong to that generation's
+/// successor, so a receipt is never consumed out from under the controller it
+/// was written for.
+pub fn load_document_authority_ack_receipts_before(
+    project_root: &Path,
+    controller_generation: u64,
+) -> Result<Vec<DocumentAuthorityAckReceipt>> {
+    let conn = open_document_authority_handoff_db(project_root)?;
+    let mut statement = conn.prepare(
+        "SELECT document_hash, controller_generation, authority_epoch, event_id \
+         FROM document_authority_handoff_ack_receipts \
+         WHERE controller_generation < ?1 \
+         ORDER BY document_hash, controller_generation",
+    )?;
+    let rows = statement
+        .query_map(
+            [sqlite_i64(
+                controller_generation,
+                "authority handoff controller generation",
+            )?],
+            |row| {
+                Ok(DocumentAuthorityAckReceipt {
+                    document_hash: row.get(0)?,
+                    controller_generation: row.get::<_, i64>(1)?.max(0) as u64,
+                    authority_epoch: row.get::<_, i64>(2)?.max(0) as u64,
+                    event_id: row.get(3)?,
+                })
+            },
+        )?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    Ok(rows)
+}
+
+/// Discard exactly this receipt. A newer one the same generation wrote since it
+/// was read stays for the next reconcile.
+pub fn discard_document_authority_ack_receipt(
+    project_root: &Path,
+    receipt: &DocumentAuthorityAckReceipt,
 ) -> Result<bool> {
     let conn = open_document_authority_handoff_db(project_root)?;
     Ok(conn.execute(
-        "DELETE FROM document_authority_handoffs \
-         WHERE document_hash = ?1 AND authority_epoch = ?2 AND controller_generation = ?3",
+        "DELETE FROM document_authority_handoff_ack_receipts \
+         WHERE document_hash = ?1 AND controller_generation = ?2 \
+           AND authority_epoch = ?3 AND event_id = ?4",
         params![
-            document_hash,
-            sqlite_i64(authority_epoch, "authority handoff epoch")?,
+            receipt.document_hash,
             sqlite_i64(
-                controller_generation,
+                receipt.controller_generation,
                 "authority handoff controller generation"
             )?,
+            sqlite_i64(receipt.authority_epoch, "authority handoff epoch")?,
+            receipt.event_id,
         ],
     )? > 0)
 }
@@ -10669,15 +10781,108 @@ mod tests {
             dir.path(),
             "doc",
             11,
-            1
+            1,
+            "event-11"
         )?);
         assert!(acknowledge_document_authority_handoff(
             dir.path(),
             "doc",
             11,
-            2
+            2,
+            "event-11"
         )?);
         assert!(load_document_authority_handoffs(dir.path())?.is_empty());
+        Ok(())
+    }
+
+    /// `#predecessorlandandack`: the receipt outlives the row it acknowledges,
+    /// exists only for an acknowledgement that took effect, and flows strictly
+    /// to newer generations.
+    #[test]
+    fn authority_ack_receipt_survives_the_row_and_flows_to_newer_generations() -> Result<()> {
+        let dir = tempfile::TempDir::new()?;
+        let enqueue = |authority_epoch, controller_generation| {
+            enqueue_document_authority_handoff(
+                dir.path(),
+                &DocumentAuthorityHandoff {
+                    document_hash: "doc".to_string(),
+                    authority_epoch,
+                    controller_generation,
+                    payload_json: "payload".to_string(),
+                },
+            )
+        };
+        let receipt = |authority_epoch, event_id: &str| DocumentAuthorityAckReceipt {
+            document_hash: "doc".to_string(),
+            controller_generation: 1,
+            authority_epoch,
+            event_id: event_id.to_string(),
+        };
+        assert!(enqueue(10, 1)?);
+
+        // A fenced acknowledgement deletes nothing, so it may record nothing.
+        assert!(!acknowledge_document_authority_handoff(
+            dir.path(),
+            "doc",
+            10,
+            2,
+            "event-10"
+        )?);
+        assert!(load_document_authority_ack_receipts_before(dir.path(), 9)?.is_empty());
+
+        assert!(acknowledge_document_authority_handoff(
+            dir.path(),
+            "doc",
+            10,
+            1,
+            "event-10"
+        )?);
+        assert!(load_document_authority_handoffs(dir.path())?.is_empty());
+        assert_eq!(
+            load_document_authority_ack_receipts_before(dir.path(), 2)?,
+            vec![receipt(10, "event-10")],
+        );
+        assert!(
+            load_document_authority_ack_receipts_before(dir.path(), 1)?.is_empty(),
+            "a controller never reconciles its own acknowledgements"
+        );
+
+        // One receipt per document per generation, keeping the newest epoch.
+        assert!(enqueue(12, 1)?);
+        assert!(acknowledge_document_authority_handoff(
+            dir.path(),
+            "doc",
+            12,
+            1,
+            "event-12"
+        )?);
+        assert!(enqueue(11, 1)?);
+        assert!(acknowledge_document_authority_handoff(
+            dir.path(),
+            "doc",
+            11,
+            1,
+            "event-11"
+        )?);
+        assert_eq!(
+            load_document_authority_ack_receipts_before(dir.path(), 2)?,
+            vec![receipt(12, "event-12")],
+        );
+
+        // Discarding what was read must not lose what replaced it.
+        assert!(!discard_document_authority_ack_receipt(
+            dir.path(),
+            &receipt(10, "event-10")
+        )?);
+        assert_eq!(
+            load_document_authority_ack_receipts_before(dir.path(), 2)?.len(),
+            1
+        );
+        assert!(discard_document_authority_ack_receipt(
+            dir.path(),
+            &receipt(12, "event-12")
+        )?);
+        assert!(load_document_authority_ack_receipts_before(dir.path(), 2)?.is_empty());
         Ok(())
     }
 

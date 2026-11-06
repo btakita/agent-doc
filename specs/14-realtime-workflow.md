@@ -2875,6 +2875,21 @@ first reloads the durable ledger (which replaces the projection wholesale and so
 never folds a row it also applied live twice), then acknowledges. A failed
 reload keeps the row claimed and the overlay in place for the next drain.
 
+A predecessor can also land its row and acknowledge it after the successor's
+load, before the successor claims it, and the deleted row then leaves nothing to
+drain (`#predecessorlandandack`). Every acknowledgement therefore commits, in the
+transaction that deletes the row, a receipt naming the document, generation,
+authority epoch, and event id: at most one per document per generation, keeping
+the newest epoch. At the head of every drain a controller reconciles the receipts
+of older generations against the same high-water: one at or below it was folded
+by the load, one above it (or whose row retention removed) needs one durable
+reload before any of the receipts read are discarded. A failed reload keeps the
+receipts for the next drain. Receipts only ever flow to a newer generation, so an
+abandoned replacement never impedes the controller that keeps serving. The class
+of any other predecessor write committed after a successor's load is not closed
+here: a fact with no handoff row and no receipt reaches the successor through its
+next general durable reload.
+
 A retained document-write owner therefore keeps the same delivery/native-save
 transition across the captured-response/write-applied boundary. Once the editor
 acknowledges the exact canonical cut, `session-check` may request the

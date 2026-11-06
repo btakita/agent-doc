@@ -4604,6 +4604,7 @@ mod tests {
                     &hook_document_hash,
                     11,
                     2,
+                    &folded_editor.event_id,
                 )
                 .unwrap()
             );

@@ -507,6 +507,12 @@ must_violate=(
     # duplicate is a real interleaving of the fixed model.
     AuthorityHandoffFold:AuthorityHandoffFoldWedge
     AuthorityHandoffFold:AuthorityHandoffFoldReach
+    # `#predecessorlandandack`: with no ACK receipt the row a predecessor landed
+    # and acknowledged after the successor's load leaves nothing to drain, so the
+    # event never reaches the successor's projection; reach proves that late ACK
+    # is a real interleaving of the fixed model.
+    AuthorityHandoffFold:AuthorityHandoffFoldLateAckWedge
+    AuthorityHandoffFold:AuthorityHandoffFoldLateAckReach
 )
 
 for module in "${modules[@]}"; do

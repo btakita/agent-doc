@@ -11227,11 +11227,69 @@ impl ControllerRuntime {
         })
     }
 
+    /// Fold what older generations acknowledged behind this controller's back.
+    /// `true` means the receipts remain for the next drain.
+    ///
+    /// `#predecessorlandandack`: a predecessor that lands its row and ACKs it
+    /// after this controller's ledger load leaves nothing to drain, so the row
+    /// cannot deliver the event. Its receipt does. The ledger commits before the
+    /// ACK, so every event named here is durable by the time it is read, and
+    /// one reload after the read folds all of them. The sequence decides as it
+    /// does for a duplicate: a row at or below the folded high-water was folded
+    /// by the load and needs no reload, which keeps a restart's first drain over
+    /// the predecessor's ordinary receipts cheap.
+    fn reconcile_predecessor_authority_acks(
+        &self,
+        project_root: &Path,
+        generation: u64,
+    ) -> Result<bool> {
+        let receipts =
+            state_store::load_document_authority_ack_receipts_before(project_root, generation)?;
+        if receipts.is_empty() {
+            return Ok(false);
+        }
+        let conn = open_state_db(project_root)?;
+        // A reload publishes the snapshot and its high-water in one swap under
+        // this lock, so a stale read only asks for a reload the row didn't need.
+        let folded_through = self.memory.lock().durable_sequence;
+        let mut unfolded = 0;
+        for receipt in &receipts {
+            match state_store::state_event_sequence_in_db(&conn, &receipt.event_id)? {
+                Some(sequence) if sequence <= folded_through => {}
+                _ => unfolded += 1,
+            }
+        }
+        drop(conn);
+        if unfolded > 0 {
+            if let Err(error) = self.refresh_memory() {
+                agent_doc_ops_log_io::log_op(
+                    project_root,
+                    &format!(
+                        "document_authority_ack_receipt_fold_deferred receipts={} unfolded={unfolded} controller_generation={generation} folded_through={folded_through} error={error:#} (#predecessorlandandack)",
+                        receipts.len(),
+                    ),
+                );
+                return Ok(true);
+            }
+            agent_doc_ops_log_io::log_op(
+                project_root,
+                &format!(
+                    "document_authority_ack_receipt_refolded receipts={} unfolded={unfolded} controller_generation={generation} folded_through={folded_through} (#predecessorlandandack)",
+                    receipts.len(),
+                ),
+            );
+        }
+        for receipt in &receipts {
+            state_store::discard_document_authority_ack_receipt(project_root, receipt)?;
+        }
+        Ok(false)
+    }
+
     /// Fold every durable latest-value authority handoff this controller can
     /// generation-fence. `true` means at least one row remains retryable.
     fn drain_document_authority_handoffs(&self, project_root: &Path) -> Result<bool> {
         let generation = self.bootstrap.lock().controller_generation;
-        let mut retry = false;
+        let mut retry = self.reconcile_predecessor_authority_acks(project_root, generation)?;
         for handoff in state_store::load_document_authority_handoffs(project_root)? {
             if !state_store::claim_document_authority_handoff(
                 project_root,
@@ -11295,6 +11353,7 @@ impl ControllerRuntime {
                         &handoff.document_hash,
                         handoff.authority_epoch,
                         generation,
+                        &event.event_id,
                     ) {
                         agent_doc_ops_log_io::log_op(
                             project_root,

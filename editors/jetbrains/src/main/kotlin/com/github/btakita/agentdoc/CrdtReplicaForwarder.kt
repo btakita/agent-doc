@@ -134,6 +134,13 @@ class CrdtReplicaForwarder(
         private set
 
     /**
+     * `#attachauthorattribution`: content hashes of the canonical generations from which only
+     * agent-doc's own recorded binary-authored writes lead to [canonicalContentHash].
+     */
+    var binaryAttributedAncestorHashes: List<String> = emptyList()
+        private set
+
+    /**
      * Register this editor as a replica with the CP-owned document model and open the
      * local FFI replica bootstrapped from the canonical state the CP
      * returns. Returns true when the document is editor-attached and the replica
@@ -186,6 +193,7 @@ class CrdtReplicaForwarder(
             retainedReplicaReseedPending = ack.retainedReplicaReseedPending
             canonicalCoversRetainedFrontier = ack.canonicalCoversRetainedFrontier
             canonicalContentHash = ack.canonicalContentHash
+            binaryAttributedAncestorHashes = ack.binaryAttributedAncestorHashes
             val incremental = ack.bootstrapKind == ReplicaBootstrapKind.Delta
             if (incremental && (resumeState == null || ack.canonicalStateVector == null)) {
                 log.warn(
@@ -607,6 +615,8 @@ data class ReplicaRegisterAck(
     val retainedReplicaReseedPending: Boolean = false,
     val canonicalCoversRetainedFrontier: Boolean? = null,
     val canonicalContentHash: String? = null,
+    /** `#attachauthorattribution`: see [CrdtReplicaForwarder.binaryAttributedAncestorHashes]. */
+    val binaryAttributedAncestorHashes: List<String> = emptyList(),
 )
 
 /** Build the typed controller payload for one process-scoped editor replica. */
@@ -865,6 +875,12 @@ class CpSocketReplicaTransport(
                 ?.takeUnless { it.isJsonNull }
                 ?.asBoolean
         val canonicalContentHash = data.get("canonical_content_hash")?.asString
+        val binaryAttributedAncestorHashes =
+            data.get("binary_attributed_ancestor_hashes")
+                ?.takeIf { it.isJsonArray }
+                ?.asJsonArray
+                ?.mapNotNull { element -> element.takeIf { it.isJsonPrimitive }?.asString }
+                ?: emptyList()
         val lineage = data.get("lineage")?.asString
         lastRegisterError = null
         return ReplicaRegisterAck(
@@ -877,6 +893,7 @@ class CpSocketReplicaTransport(
             retainedReplicaReseedPending = retainedReplicaReseedPending,
             canonicalCoversRetainedFrontier = canonicalCoversRetainedFrontier,
             canonicalContentHash = canonicalContentHash,
+            binaryAttributedAncestorHashes = binaryAttributedAncestorHashes,
         )
     }
 

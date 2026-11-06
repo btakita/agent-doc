@@ -16533,6 +16533,9 @@ fn controller_crdt_replica_data(
                         "retained_replica_reseed_pending": registration.retained_replica_reseed_pending,
                         "canonical_covers_retained_frontier": registration.canonical_covers_retained_frontier,
                         "canonical_content_hash": registration.canonical_content_hash,
+                        // `#attachauthorattribution`: canonical generations only
+                        // agent-doc's own recorded writes lead from.
+                        "binary_attributed_ancestor_hashes": registration.binary_attributed_ancestor_hashes,
                         "lineage": agent_doc_crdt_relay_io::current_lineage_for_file(canonical)?
                             .context("registered replica is missing its canonical lineage")?,
                     }))

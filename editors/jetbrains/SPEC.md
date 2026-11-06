@@ -941,6 +941,17 @@ change with no new JNA method and no plugin generation. Shipped derivations:
   unless canonical is proven to contain the operator edits;
   `RegistrationProjection.guardUnprovenCanonical` enforces that over any answer,
   including the frozen floor's restarted-IDE adoption.
+  `#attachauthorattribution`: the controller's `replica_register` ack carries
+  `binary_attributed_ancestor_hashes`, the canonical generations from which only
+  agent-doc's own recorded binary-authored writes lead to
+  `canonical_content_hash` (`CrdtReplicaForwarder.binaryAttributedAncestorHashes`).
+  When the buffer hashes to one of them and the bootstrapped canonical hashes to
+  `canonical_content_hash`, `forwarderFor` reports
+  `canonical_contains_operator_edits = true`
+  (`bufferIsBinaryAttributedAncestorUtil`), so a restarted IDE whose canonical
+  differs only by agent-doc's queue marker projections adopts canonical instead
+  of holding `ambiguous-retained-projection`. An absent or empty list, or a
+  canonical the list was not proven against, changes nothing.
 - `attach_failure_diagnosis` (phase 5b): what a CRDT replica attach failure
   means for the operator. Evidence is the recorded failure reason, for the
   operator notification the document's file name, and `live_replica_attached`

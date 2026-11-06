@@ -665,6 +665,94 @@ pub struct DocumentOpOriginFence {
     pub projections_queued: usize,
 }
 
+/// `#attachauthorattribution`: the most attributed binary-authored writes one
+/// hub remembers. Each entry is one hash, so the bound is a few KiB.
+pub const BINARY_WRITE_ATTRIBUTION_CAPACITY: usize = 64;
+
+/// One canonical generation that agent-doc's own binary-authored writes carried
+/// forward to the current canonical (`#attachauthorattribution`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BinaryAttributedAncestor {
+    /// `sha256` hex of the canonical text immediately before the write.
+    pub content_hash: String,
+    /// The binary write's `source` label (e.g. `queue_claim_runtime_projection`).
+    pub source: String,
+}
+
+/// `#attachauthorattribution`: the unbroken run of binary-authored canonical
+/// writes that produced the current canonical, recorded by the hub as each
+/// write lands.
+///
+/// After the 2026-11-05 IDE restart a JetBrains replica attach was refused as
+/// `ambiguous-retained-projection` although every canonical-vs-buffer
+/// difference was a queue marker projection agent-doc had written itself while
+/// no editor replica was attached (`📥` lifecycle icons and subagent claim
+/// markers). The restarted editor's buffer was the canonical generation before
+/// those writes; nothing in the attach evidence said so, because the IDE had
+/// discarded its settled shadow.
+///
+/// The record is an op record, never a reading of the text: an entry exists
+/// only because the hub applied that write through
+/// [`RelayHub::apply_binary_authored_replace_scoped`]. The run is a hash
+/// chain: each write's pre-image must be the previous write's post-image
+/// ([`Self::tip`]), so any canonical change that did not come through a
+/// recorded binary write (an editor relay update, a durable document-op
+/// delta, a disk rebuild, a reseed) breaks it and the next binary write
+/// starts a fresh run. A read checks the tip against the current canonical,
+/// so an unrecorded change after the last write empties the answer without
+/// hooking every mutation path. The record is content-addressed, so it can
+/// outlive the process that wrote it: the relay keeps a durable copy, and a hub
+/// whose canonical is not exactly the tip reads as "unattributed" (fail closed).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BinaryWriteAttribution {
+    /// Oldest first.
+    ancestors: VecDeque<BinaryAttributedAncestor>,
+    /// `sha256` hex of the canonical the newest recorded write produced.
+    tip: Option<String>,
+}
+
+impl BinaryWriteAttribution {
+    /// Record one binary-authored write `before -> after` (both hashes).
+    pub fn record(&mut self, before_hash: &str, after_hash: &str, source: &str) {
+        if before_hash == after_hash {
+            return;
+        }
+        if self.tip.as_deref() != Some(before_hash) {
+            // Something unrecorded moved the canonical since the last binary
+            // write: nothing older is attributable any more.
+            self.ancestors.clear();
+        }
+        self.ancestors.push_back(BinaryAttributedAncestor {
+            content_hash: before_hash.to_string(),
+            source: source.to_string(),
+        });
+        while self.ancestors.len() > BINARY_WRITE_ATTRIBUTION_CAPACITY {
+            self.ancestors.pop_front();
+        }
+        self.tip = Some(after_hash.to_string());
+    }
+
+    /// The newest recorded post-image, if any.
+    pub fn tip(&self) -> Option<&str> {
+        self.tip.as_deref()
+    }
+
+    /// The generations from which only recorded binary-authored writes lead to
+    /// `canonical_hash`, newest first. Empty unless the newest recorded write
+    /// produced exactly `canonical_hash`.
+    pub fn ancestors_of(&self, canonical_hash: &str) -> Vec<BinaryAttributedAncestor> {
+        if self.tip.as_deref() != Some(canonical_hash) {
+            return Vec::new();
+        }
+        self.ancestors
+            .iter()
+            .rev()
+            .filter(|ancestor| ancestor.content_hash != canonical_hash)
+            .cloned()
+            .collect()
+    }
+}
+
 /// Controller-owned in-memory projection retained independently of a relay
 /// member generation. It is deliberately not serialized to the CRDT recovery
 /// sidecar: a relay recycle reattaches to this live value, while a cold process
@@ -691,6 +779,9 @@ pub struct RetainedCanonicalProjection {
     /// reattaches to this projection keeps refusing adoption until the
     /// operator repairs the markers.
     pub component_structure_fenced: bool,
+    /// `#attachauthorattribution`: the binary-authored write run survives a
+    /// relay recycle with the canonical it describes.
+    pub binary_write_attribution: BinaryWriteAttribution,
 }
 
 /// Star-topology relay hub: one canonical replica + N registered editor replicas.
@@ -787,6 +878,9 @@ pub struct RelayHub {
     /// revision stays the committed/persisted one. Cleared by the first op
     /// that leaves the canonical parseable again.
     component_structure_fenced: bool,
+    /// `#attachauthorattribution`: the unbroken run of binary-authored writes
+    /// that produced the current canonical.
+    binary_write_attribution: BinaryWriteAttribution,
     /// Per-member liveness as a keyed reactive family (keyed by `client_id`). This is
     /// the **single** source of truth for whether a member is connected — the former
     /// `Member.live` field is gone. The present set only grows (deferral, not
@@ -1568,6 +1662,7 @@ impl RelayHub {
             controller_projection_established,
             retained_replica_reseed_pending,
             component_structure_fenced: false,
+            binary_write_attribution: BinaryWriteAttribution::default(),
             liveness,
             membership_epoch,
             live_editor_count,
@@ -1657,6 +1752,7 @@ impl RelayHub {
             projection.retained_replica_reseed_pending,
         );
         hub.component_structure_fenced = projection.component_structure_fenced;
+        hub.binary_write_attribution = projection.binary_write_attribution.clone();
         if hub.live_document_projection_enabled() {
             let recovered_text = hub.canonical.text();
             hub.reset_live_document_projection(&recovered_text);
@@ -1678,6 +1774,7 @@ impl RelayHub {
                 .automatic_history_compaction_requested,
             retained_replica_reseed_pending: self.retained_replica_reseed_pending(),
             component_structure_fenced: self.component_structure_fenced,
+            binary_write_attribution: self.binary_write_attribution.clone(),
         }
     }
 
@@ -2456,6 +2553,72 @@ impl RelayHub {
     ) -> Result<BroadcastPacket> {
         self.local_edit(client_id, offset, delete_len, insert)?;
         self.relay(client_id)
+    }
+
+    /// [`Self::apply_canonical_replace_scoped`] for a write agent-doc itself
+    /// authored (a CP write from a binary command or controller projection),
+    /// recorded as a binary-authored op (`#attachauthorattribution`).
+    ///
+    /// Only binary write paths may call this. Every other canonical change
+    /// (editor relay updates, document-op deltas, disk rebuilds, reseeds,
+    /// recovery roll-forwards) goes through its own path and is therefore
+    /// unattributed by construction.
+    pub fn apply_binary_authored_replace_scoped(
+        &mut self,
+        expected_current: &str,
+        content: &str,
+        scope: Option<&agent_doc_element::ComponentWriteScope>,
+        source: &str,
+    ) -> Result<BroadcastPacket> {
+        let packet = self.apply_canonical_replace_scoped(expected_current, content, scope)?;
+        let after = self.canonical.text();
+        self.binary_write_attribution.record(
+            &content_hash(expected_current),
+            &content_hash(&after),
+            source,
+        );
+        Ok(packet)
+    }
+
+    /// [`Self::apply_binary_authored_replace_scoped`] without a component scope.
+    pub fn apply_binary_authored_replace(
+        &mut self,
+        expected_current: &str,
+        content: &str,
+        source: &str,
+    ) -> Result<BroadcastPacket> {
+        self.apply_binary_authored_replace_scoped(expected_current, content, None, source)
+    }
+
+    /// The hub's binary-authored write run, for the durable copy.
+    pub fn binary_write_attribution(&self) -> &BinaryWriteAttribution {
+        &self.binary_write_attribution
+    }
+
+    /// Adopt a durable run into a hub with none of its own. A run this hub
+    /// already holds is newer, and [`BinaryWriteAttribution::record`] and
+    /// [`Self::binary_attributed_ancestors`] both refuse a tip that is not this
+    /// canonical, so a stale record can only read as unattributed.
+    pub fn seed_binary_write_attribution(&mut self, attribution: BinaryWriteAttribution) {
+        if self.binary_write_attribution.tip().is_none() {
+            self.binary_write_attribution = attribution;
+        }
+    }
+
+    /// `#attachauthorattribution`: the canonical generations from which only
+    /// recorded binary-authored writes lead to the current canonical, newest
+    /// first. A registering editor whose buffer is one of them holds no text
+    /// the canonical lacks except what agent-doc's own writes replaced, so
+    /// adopting canonical over it loses nothing the operator authored.
+    pub fn binary_attributed_ancestors(&self) -> Vec<BinaryAttributedAncestor> {
+        let Some(tip) = self.binary_write_attribution.tip() else {
+            return Vec::new();
+        };
+        let canonical_hash = content_hash(&self.canonical.text());
+        if tip != canonical_hash {
+            return Vec::new();
+        }
+        self.binary_write_attribution.ancestors_of(&canonical_hash)
     }
 
     /// Apply a CP-authored document target to the canonical replica using the
@@ -7212,6 +7375,111 @@ mod tests {
             saturated,
             "the derived count's edge set must saturate at the distinct-identity \
              count instead of growing with each connection cycle",
+        );
+    }
+
+    /// `#attachauthorattribution` (2026-11-05 IDE restart): with no editor
+    /// replica attached, agent-doc projected queue markers into the canonical
+    /// through several CP writes. The buffer the restarted editor shows (the
+    /// generation before them) and every intermediate generation are attributed
+    /// ancestors of the canonical; the canonical itself is not.
+    #[test]
+    fn binary_authored_writes_attribute_every_generation_they_carried_forward() {
+        let disk = "- ### 📥 do [#first]\n- ### 📥 do [#second]\n  - #review\n";
+        let claimed =
+            "- ### ☑️ [#subagent:first#3] do [#first]\n- ### 📥 do [#second]\n  - #review\n";
+        let pending =
+            "- ### ☑️ [#subagent:first#3] do [#first]\n- ### 📥 do [#second]\n  - 📥 #review\n";
+        let mut hub = RelayHub::from_text(1, disk);
+        assert!(
+            hub.binary_attributed_ancestors().is_empty(),
+            "nothing written yet"
+        );
+        hub.apply_binary_authored_replace(disk, claimed, "queue_claim_runtime_projection")
+            .unwrap();
+        hub.apply_binary_authored_replace(claimed, pending, "queue_claim_runtime_projection")
+            .unwrap();
+        let ancestors = hub.binary_attributed_ancestors();
+        assert_eq!(
+            ancestors
+                .iter()
+                .map(|a| a.content_hash.as_str())
+                .collect::<Vec<_>>(),
+            vec![content_hash(claimed).as_str(), content_hash(disk).as_str()],
+            "newest first"
+        );
+        assert!(
+            ancestors
+                .iter()
+                .all(|a| a.source == "queue_claim_runtime_projection")
+        );
+        // A relay recycle reattaches to the retained projection with its record.
+        let recycled =
+            RelayHub::from_retained_canonical_projection(1, &hub.retained_canonical_projection())
+                .unwrap();
+        assert_eq!(recycled.binary_attributed_ancestors(), ancestors);
+        // An unattributed hub (a cold controller) attributes nothing.
+        let cold = RelayHub::from_text(1, pending);
+        assert!(cold.binary_attributed_ancestors().is_empty());
+    }
+
+    /// `#attachauthorattribution`: an editor-relayed change is not agent-doc's
+    /// own op. After it, nothing is attributed until a binary write lands, and
+    /// then only the generation that write started from, never anything older.
+    #[test]
+    fn an_unattributed_canonical_change_breaks_the_binary_write_run() {
+        let base = "alpha\n";
+        let marked = "📥 alpha\n";
+        let mut hub = RelayHub::from_text(1, base);
+        hub.register(2).unwrap();
+        hub.apply_binary_authored_replace(base, marked, "queue_claim_runtime_projection")
+            .unwrap();
+        assert_eq!(hub.binary_attributed_ancestors().len(), 1);
+        // The operator types through a live editor replica.
+        hub.apply_local(2, 0, 0, "operator ").unwrap();
+        let typed = hub.canonical_text();
+        assert_ne!(typed, marked);
+        assert!(
+            hub.binary_attributed_ancestors().is_empty(),
+            "the newest canonical change was not a recorded binary write"
+        );
+        let projected = format!("{typed}☑️ done\n");
+        hub.apply_binary_authored_replace(&typed, &projected, "queue_claim_runtime_projection")
+            .unwrap();
+        let ancestors: Vec<String> = hub
+            .binary_attributed_ancestors()
+            .into_iter()
+            .map(|a| a.content_hash)
+            .collect();
+        assert_eq!(ancestors, vec![content_hash(&typed)]);
+        assert!(!ancestors.contains(&content_hash(base)));
+        assert!(!ancestors.contains(&content_hash(marked)));
+        // A plain CP replace (not recorded as binary-authored, e.g. a recovery
+        // roll-forward) also ends the run.
+        hub.apply_canonical_replace(&projected, "rolled forward\n")
+            .unwrap();
+        assert!(hub.binary_attributed_ancestors().is_empty());
+    }
+
+    #[test]
+    fn the_binary_write_run_is_bounded() {
+        let mut attribution = BinaryWriteAttribution::default();
+        for n in 0..(BINARY_WRITE_ATTRIBUTION_CAPACITY + 10) {
+            attribution.record(&format!("h{n}"), &format!("h{}", n + 1), "cp_write");
+        }
+        let tip = format!("h{}", BINARY_WRITE_ATTRIBUTION_CAPACITY + 10);
+        let ancestors = attribution.ancestors_of(&tip);
+        assert_eq!(ancestors.len(), BINARY_WRITE_ATTRIBUTION_CAPACITY);
+        assert_eq!(
+            ancestors.first().map(|a| a.content_hash.clone()),
+            Some(format!("h{}", BINARY_WRITE_ATTRIBUTION_CAPACITY + 9))
+        );
+        assert!(attribution.ancestors_of("h3").is_empty(), "not the tip");
+        // A no-op write records nothing and keeps the run.
+        attribution.record(&tip, &tip, "cp_write");
+        assert_eq!(
+            attribution.ancestors_of(&tip).len(),
+            BINARY_WRITE_ATTRIBUTION_CAPACITY
         );
     }
 }

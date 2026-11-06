@@ -93,6 +93,10 @@ struct SimPluginEditor {
     /// document and the operator has supplied no evidence since
     /// (`#emptycanonicaldeadlock`).
     attach_held: bool,
+    /// `#attachauthorattribution`: fold the controller's binary-authored write
+    /// record into the containment fact (`bufferIsBinaryAttributedAncestorUtil`).
+    /// `false` is the plugin before it.
+    attribution: bool,
     last: Option<AttemptFacts>,
 }
 
@@ -116,6 +120,7 @@ impl SimPluginEditor {
             controller_retains_visible_write: false,
             acknowledged_base: true,
             attach_held: false,
+            attribution: true,
             last: None,
         };
         let registration = editor
@@ -268,6 +273,11 @@ impl SimPluginEditor {
             .ok()
             .map(|disk| disk == self.buffer);
         evidence.attach_held_for_operator = self.attach_held.then_some(true);
+        if self.attribution
+            && buffer_is_binary_attributed_ancestor(&registration, &self.buffer, &canonical)
+        {
+            evidence.canonical_contains_operator_edits = Some(true);
+        }
         let decision = derive_registration_projection(&evidence);
         self.last = Some(AttemptFacts {
             sent_state_vector: retained_state_vector.is_some(),
@@ -417,6 +427,21 @@ fn registration_evidence(
     (evidence, merge_base)
 }
 
+/// `bufferIsBinaryAttributedAncestorUtil`: the buffer is a canonical generation
+/// the controller's binary-authored write record says leads to exactly this
+/// canonical.
+fn buffer_is_binary_attributed_ancestor(
+    registration: &ReplicaRegistration,
+    buffer: &str,
+    canonical: &str,
+) -> bool {
+    buffer != canonical
+        && agent_doc_hash::content_hash(canonical) == registration.canonical_content_hash
+        && registration
+            .binary_attributed_ancestor_hashes
+            .contains(&agent_doc_hash::content_hash(buffer))
+}
+
 /// `registrationMergeFromBaseUtil`: the buffer itself when canonical has not
 /// moved past `base`, else the native rebase from `base`.
 fn merge_from_base(base: &str, buffer: &str, canonical: &str) -> Option<String> {
@@ -540,6 +565,8 @@ fn library_reload_then_refused_swap_reregisters_with_the_retained_frontier() {
 #[test]
 fn a_frontier_released_before_the_swap_check_holds_every_recovery_probe() {
     let (_dir, doc, mut editor) = library_reload_then_refused_swap(ResumeRelease::BeforeSwap);
+    // That plugin also predates `#attachauthorattribution`.
+    editor.attribution = false;
     let operator_text = editor.buffer.clone();
     for probe in 0..3 {
         assert_eq!(
@@ -1112,4 +1139,255 @@ fn a_restored_settled_shadow_publishes_the_saved_operator_text_over_an_unmoved_h
     );
     assert_eq!(editor.buffer, operator_text);
     assert_eq!(hub_text(&doc), operator_text);
+}
+
+/// `#attachauthorattribution`: even with the retained frontier lost, the same
+/// sequence no longer holds. The only canonical difference is the durable claim
+/// the controller projected through its own queue-attempt write, so the buffer
+/// is attributed and the first recovery probe adopts canonical.
+#[test]
+fn a_lost_frontier_adopts_a_controller_claim_projection_it_can_attribute() {
+    let (_dir, doc, mut editor) = library_reload_then_refused_swap(ResumeRelease::BeforeSwap);
+    let attempt = editor.reregister(false);
+    let facts = editor.last().clone();
+    assert!(!facts.sent_state_vector, "{facts:#?}");
+    assert_eq!(facts.canonical_covers_retained_frontier, None);
+    assert_eq!(
+        attempt,
+        Attempt::Committed(RegistrationProjectionAction::ApplyCanonical),
+        "{facts:#?}"
+    );
+    assert_eq!(editor.buffer, hub_text(&doc));
+    assert!(editor.buffer.contains(&format!(
+        "🟡 [#subagent:attachhold#1] {CLAIMED_ITEM}"
+    )));
+}
+
+/// `#attachauthorattribution`: the restarted-IDE document shape. A run queue row
+/// and two queue heads the controller will project markers onto.
+const ATTRIBUTION_DOC: &str = "# sdk\n\n## prs <!-- agent:run id=\"prs\" subagents keep -->\n- https://example.test/pull/14\n  - #adversarial-pr\n<!-- /agent:run -->\n\n<!-- agent:queue -->\n- ### 📥 do [#implementfeature]\n- ### 📥 do [#docscleanup]\n<!-- /agent:queue -->\n";
+
+/// The controller's own marker projections while no replica is attached: the
+/// run row's lifecycle icon, then the two subagent claim markers. Returns the
+/// resulting canonical.
+fn project_binary_markers(doc: &std::path::Path) -> String {
+    let current = hub_text(doc);
+    let pending = current.replacen("  - #adversarial-pr", "  - 📥 #adversarial-pr", 1);
+    apply_cp_write_for_file(doc, &current, &pending, "queue_claim_runtime_projection")
+        .unwrap()
+        .expect("the controller write uses the live relay");
+    let claimed = pending
+        .replacen(
+            "- ### 📥 do [#implementfeature]",
+            "- ### ☑️ [#subagent:implfeature#3] do [#implementfeature]",
+            1,
+        )
+        .replacen(
+            "- ### 📥 do [#docscleanup]",
+            "- ### 🚧 [#subagent:docs#3] do [#docscleanup]",
+            1,
+        );
+    apply_cp_write_for_file(doc, &pending, &claimed, "queue_claim_runtime_projection")
+        .unwrap()
+        .expect("the controller write uses the live relay");
+    hub_text(doc)
+}
+
+/// `#attachauthorattribution` (2026-11-05 IDE restart): the IDE restarted
+/// (discarding its settled shadow), and with no replica attached the bound
+/// session's agent-doc projected queue markers into the surviving canonical
+/// through a retained write the editor never received. Every canonical-vs-buffer
+/// difference is one of those projections. The controller's record of its own
+/// writes proves it, so the attach adopts canonical instead of holding
+/// `ambiguous-retained-projection` for an operator close/repair/reopen.
+#[test]
+fn a_restart_whose_canonical_differs_only_by_binary_authored_projections_adopts_canonical() {
+    for attribution in [true, false] {
+        let (_dir, doc) = temp_doc("attach-author-attribution.md");
+        std::fs::write(&doc, ATTRIBUTION_DOC).unwrap();
+        let mut editor = SimPluginEditor::open(&doc, ResumeRelease::OnCommit);
+        editor.attribution = attribution;
+        let saved = editor.buffer.clone();
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), saved);
+        editor.restart_ide(None);
+        let canonical = project_binary_markers(&doc);
+        assert_ne!(canonical, saved);
+        editor.controller_retains_visible_write = true;
+
+        let attempt = editor.reregister(false);
+        let facts = editor.last().clone();
+        assert_eq!(facts.shadow, None, "{facts:#?}");
+        assert!(facts.canonical_projection_retained, "{facts:#?}");
+        assert_eq!(facts.canonical, canonical);
+        assert_eq!(facts.evidence.buffer_equals_disk, Some(true));
+        if !attribution {
+            // The plugin before the fix: the live hold.
+            assert_eq!(attempt, Attempt::Held(HOLD.to_string()), "{facts:#?}");
+            assert_eq!(editor.buffer, saved, "a hold never touches the buffer");
+            continue;
+        }
+        assert_eq!(
+            facts.evidence.canonical_contains_operator_edits,
+            Some(true),
+            "{facts:#?}"
+        );
+        assert_eq!(
+            attempt,
+            Attempt::Committed(RegistrationProjectionAction::ApplyCanonical),
+            "{facts:#?}"
+        );
+        assert_eq!(editor.buffer, canonical);
+        assert_eq!(hub_text(&doc), canonical);
+    }
+}
+
+/// `#attachauthorattribution`: the same restart, but the saved buffer also holds
+/// a row the operator typed. That difference is in no record of agent-doc's own
+/// writes, so the attach still holds.
+#[test]
+fn a_restart_with_an_operator_difference_beside_binary_projections_still_holds() {
+    let (_dir, doc) = temp_doc("attach-author-operator.md");
+    std::fs::write(&doc, ATTRIBUTION_DOC).unwrap();
+    let mut editor = SimPluginEditor::open(&doc, ResumeRelease::OnCommit);
+    let operator_text = editor.buffer.replacen(
+        "<!-- /agent:queue -->",
+        "- operator row saved before the restart\n<!-- /agent:queue -->",
+        1,
+    );
+    editor.type_unapplied(&operator_text);
+    save_buffer(&editor);
+    editor.restart_ide(None);
+    let canonical = project_binary_markers(&doc);
+    editor.controller_retains_visible_write = true;
+
+    let attempt = editor.reregister(false);
+    let facts = editor.last().clone();
+    assert_ne!(facts.evidence.canonical_contains_operator_edits, Some(true));
+    assert_eq!(attempt, Attempt::Held(HOLD.to_string()), "{facts:#?}");
+    assert_eq!(editor.buffer, operator_text);
+    assert_eq!(hub_text(&doc), canonical, "the hold never publishes either side");
+}
+
+/// `#attachauthorattribution`: an operator edit that reached the canonical
+/// through the old editor replica (never saved) is a canonical difference
+/// agent-doc did not author. The binary-authored run starts after it, so the
+/// saved buffer before it is not attributed and the attach holds.
+#[test]
+fn an_unattributed_canonical_difference_before_the_binary_projections_still_holds() {
+    let (_dir, doc) = temp_doc("attach-author-unattributed.md");
+    std::fs::write(&doc, ATTRIBUTION_DOC).unwrap();
+    let mut editor = SimPluginEditor::open(&doc, ResumeRelease::OnCommit);
+    let saved = editor.buffer.clone();
+    let typed = saved.replacen(
+        "<!-- /agent:queue -->",
+        "- operator row that reached the controller only\n<!-- /agent:queue -->",
+        1,
+    );
+    let delta = editor.type_text(&typed);
+    let identity = editor.forwarder().identity.clone();
+    relay_replica_update_for_file(&doc, &identity, &delta)
+        .unwrap()
+        .expect("the typing reaches the controller");
+    assert_eq!(hub_text(&doc), typed);
+    editor.restart_ide(None);
+    // The restarted IDE loads the saved document.
+    editor.buffer = saved.clone();
+    let canonical = project_binary_markers(&doc);
+    assert!(canonical.contains("operator row that reached the controller only"));
+    editor.controller_retains_visible_write = true;
+
+    let attempt = editor.reregister(false);
+    let facts = editor.last().clone();
+    assert_eq!(facts.evidence.buffer_equals_disk, Some(true));
+    assert_ne!(facts.evidence.canonical_contains_operator_edits, Some(true));
+    assert_eq!(attempt, Attempt::Held(HOLD.to_string()), "{facts:#?}");
+    assert_eq!(editor.buffer, saved);
+}
+
+/// Replace this process's hub with a cold controller's: the same canonical
+/// recovered from the durable projection, with no in-memory write record.
+fn replace_controller_keeping_canonical(doc: &std::path::Path) {
+    let projection = with_hub(doc, |hub| hub.projection_bytes()).unwrap();
+    forget_controller_relay_state_for_test(doc);
+    let recovered = RelayHub::recover_from_projection(CANONICAL_CLIENT_ID, &projection).unwrap();
+    assert!(recovered.binary_write_attribution().tip().is_none());
+    with_hub(doc, |hub| *hub = recovered).unwrap();
+}
+
+/// The restarted-IDE setup with the writes made by a controller that is then
+/// replaced. Returns the project, editor, saved text, and canonical.
+fn restart_across_controller_replacement(
+    name: &str,
+) -> (tempfile::TempDir, std::path::PathBuf, SimPluginEditor, String) {
+    let (dir, doc) = temp_doc(name);
+    std::fs::write(&doc, ATTRIBUTION_DOC).unwrap();
+    let mut editor = SimPluginEditor::open(&doc, ResumeRelease::OnCommit);
+    let saved = editor.buffer.clone();
+    editor.restart_ide(None);
+    let canonical = project_binary_markers(&doc);
+    replace_controller_keeping_canonical(&doc);
+    assert_eq!(hub_text(&doc), canonical);
+    editor.controller_retains_visible_write = true;
+    (dir, doc, editor, saved)
+}
+
+/// `#attachauthorattribution`: the 2026-11-05 canonical belonged to a
+/// replacement controller. The markers were written by its predecessor, so the
+/// proof has to outlive that process: the durable record names the generations
+/// and the replacement attaches without an operator step.
+#[test]
+fn a_replacement_controller_attributes_its_predecessors_binary_writes() {
+    let (_dir, doc, mut editor, _saved) =
+        restart_across_controller_replacement("attach-author-replacement.md");
+    let attempt = editor.reregister(false);
+    let facts = editor.last().clone();
+    assert_eq!(
+        attempt,
+        Attempt::Committed(RegistrationProjectionAction::ApplyCanonical),
+        "{facts:#?}"
+    );
+    assert_eq!(editor.buffer, hub_text(&doc));
+}
+
+/// `#attachauthorattribution`: the control. A replacement controller with no
+/// durable record, or a malformed one, has no proof and the attach still holds.
+#[test]
+fn a_replacement_controller_without_a_readable_record_still_holds() {
+    for corrupt in [false, true] {
+        let (dir, doc, mut editor, saved) =
+            restart_across_controller_replacement("attach-author-no-record.md");
+        let record = dir
+            .path()
+            .join(binary_write_attribution::BINARY_WRITE_ATTRIBUTION_DIR)
+            .join(format!(
+                "{}.json",
+                agent_doc_fs::document_state_hash(&doc).unwrap()
+            ));
+        if corrupt {
+            std::fs::write(&record, b"{not json").unwrap();
+        } else {
+            std::fs::remove_file(&record).unwrap();
+        }
+        let attempt = editor.reregister(false);
+        assert_eq!(attempt, Attempt::Held(HOLD.to_string()), "{:#?}", editor.last());
+        assert_eq!(editor.buffer, saved);
+    }
+}
+
+/// `#attachauthorattribution`: a durable record never answers for a canonical
+/// it does not end at. The replacement's canonical moved by a change agent-doc
+/// did not record, so the record's tip is stale and the attach holds.
+#[test]
+fn a_durable_record_proves_nothing_about_a_canonical_past_its_tip() {
+    let (_dir, doc, mut editor, saved) =
+        restart_across_controller_replacement("attach-author-stale-record.md");
+    with_hub(&doc, |hub| {
+        let canonical = hub.canonical_text();
+        hub.apply_canonical_replace(&canonical, &format!("{canonical}unrecorded change\n"))
+            .unwrap();
+    })
+    .unwrap();
+    let attempt = editor.reregister(false);
+    assert_eq!(attempt, Attempt::Held(HOLD.to_string()), "{:#?}", editor.last());
+    assert_eq!(editor.buffer, saved);
 }

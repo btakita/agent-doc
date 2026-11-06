@@ -889,8 +889,12 @@ pub fn normalize_generated_response_lifecycle_markers(source: &str) -> String {
                 .is_some()
             || response_decision_metadata_child_end(&normalized_lines, index, item_indent)
                 .is_some()
-            || response_next_action_decision_child_end(&normalized_lines, index, item_indent)
-                .is_some()
+            || response_next_action_decision_child_end(
+                &normalized_lines,
+                index,
+                item_indent,
+            )
+            .is_some()
             || response_action_child_end(&normalized_lines, index, item_indent).is_some()
             || related_row_child_end(&normalized_lines, index, item_indent).is_some();
         if generated {
@@ -2509,10 +2513,7 @@ mod tests {
             .iter()
             .map(|item| item.text.as_str())
             .collect::<Vec<_>>();
-        assert_eq!(
-            texts,
-            vec!["done", "I chose staging; verify the screenshot."]
-        );
+        assert_eq!(texts, vec!["done", "I chose staging; verify the screenshot."]);
         let ranges = response_row_child_ranges(source);
         assert_eq!(ranges.len(), 4, "{ranges:?}");
     }
@@ -2681,8 +2682,9 @@ mod tests {
             "{texts:#?}"
         );
         assert!(
-            texts.iter().any(|text| text
-                .contains("**Response:** Operator-authored text without the reserved marker.")),
+            texts.iter().any(|text| text.contains(
+                "**Response:** Operator-authored text without the reserved marker."
+            )),
             "{texts:#?}"
         );
         assert!(

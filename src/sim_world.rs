@@ -16705,6 +16705,217 @@ fn queue_add_lands_in_live_editor_buffer_without_disk_write_and_dedupes_by_key()
     drop(dir);
 }
 
+/// `#handbackeditorprojectiontest`: a labelled hand-back reported while a
+/// SimEditor holds the document. The successor is the editor's retained
+/// projection, not a disk write. Action items become follow-up rows there;
+/// open items and notes stay in the cell. A repeat reads that retained cut.
+#[test]
+fn report_complete_open_items_use_the_attached_editors_retained_projection() {
+    let disk = concat!(
+        "---\nagent_doc_session: handback-editor\nagent_doc_format: template\n---\n\n",
+        "<!-- agent:exchange patch=append subagents -->\n",
+        "### Re: prior - gpt-5\n\n",
+        "Dispatched the alpha worker.\n",
+        "<!-- agent:boundary:keep -->\n",
+        "<!-- /agent:exchange -->\n\n",
+        "<!-- agent:queue id=main subagents -->\n",
+        "- do [#alpha]\n",
+        "- later work\n",
+        "<!-- /agent:queue -->\n",
+    );
+    let (dir, doc) = editor_project(disk);
+    let mut editor = SimEditor::generic(&doc).unwrap();
+    assert!(
+        agent_doc_crdt_relay_io::crdt_authority_for_file(&doc).editor_attached(),
+        "the SimEditor must be the attached authority"
+    );
+    let item = "do [#alpha]";
+    agent_doc_queue_io::queue_claim::claim(&doc, item, "subagent:alpha", 600)
+        .expect("claim the origin while the editor is attached");
+    agent_doc_queue_io::queue_claim::start_attempt(
+        &doc,
+        item,
+        "subagent:alpha",
+        "worker:alpha",
+        600,
+        1,
+    )
+    .expect("start the claimed attempt");
+
+    let handback = concat!(
+        "**Summary:** fixed the alpha defect.\n",
+        "**Verification:** make check exit=0\n",
+        "**Action items:**\n",
+        "- wire the gutter stamp\n",
+        "- cover the retained path\n",
+        "**Open items:**\n",
+        "- **Cleanup.** cargo clean is done.\n",
+        "- **Live document.** Nothing was applied to it.\n",
+        "**Notes:**\n",
+        "- the fixture editor never saves\n",
+        "**Next actions:** none\n",
+    );
+    let report = crate::queue_completion_feedback::report_complete(
+        &doc,
+        item,
+        Some(1),
+        None,
+        None,
+        handback,
+    )
+    .expect("report-complete through the attached editor");
+    assert!(report.appended, "the completion cell is new");
+    assert!(
+        report.projection_pending,
+        "an attached editor retains the successor instead of blocking on projection: {report:?}"
+    );
+    assert_eq!(report.followups.queue_id.as_deref(), Some("main"));
+    assert_eq!(report.followups.inserted.len(), 2, "{:?}", report.followups);
+    assert_eq!(
+        report.followups.held_for_triage, 2,
+        "{:?}",
+        report.followups
+    );
+    assert!(report.followups.refused.is_none(), "{:?}", report.followups);
+    assert_eq!(
+        std::fs::read_to_string(&doc).unwrap(),
+        disk,
+        "report-complete must not write disk behind the attached editor"
+    );
+    assert_eq!(
+        editor.pull_peer_updates().unwrap(),
+        0,
+        "retention is not a relay delivery the editor can pull"
+    );
+    assert!(
+        !editor.buffer.contains("Subagent completed"),
+        "the live buffer stays the pre-report cut:\n{}",
+        editor.buffer
+    );
+
+    let pending = agent_doc_document_realtime_io::pending_document_write(&doc)
+        .expect("the retained projection is the durable successor");
+    assert_retained_handback(&pending.target_content);
+    agent_doc_lint_io::validate_structure_on_content(&doc, &pending.target_content)
+        .expect("the retained successor is a valid session document");
+    let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+    assert!(
+        ops_log.contains("delivery=retained_controller_projection")
+            && ops_log.contains("followups=2"),
+        "{ops_log}"
+    );
+
+    let repeat = crate::queue_completion_feedback::report_complete(
+        &doc,
+        item,
+        Some(1),
+        None,
+        None,
+        handback,
+    )
+    .expect("a repeat report reads the retained cut");
+    assert!(!repeat.appended, "the same cell is not appended twice");
+    assert_eq!(repeat.followups.inserted.len(), 0, "{:?}", repeat.followups);
+    assert_eq!(
+        repeat.followups.already_present, 2,
+        "{:?}",
+        repeat.followups
+    );
+    assert_eq!(
+        repeat.followups.held_for_triage, 2,
+        "{:?}",
+        repeat.followups
+    );
+    let pending = agent_doc_document_realtime_io::pending_document_write(&doc)
+        .expect("the repeat keeps one retained successor");
+    assert_retained_handback(&pending.target_content);
+    assert_eq!(std::fs::read_to_string(&doc).unwrap(), disk);
+
+    editor.close().unwrap();
+    drop(dir);
+}
+
+fn assert_retained_handback(content: &str) {
+    let followups = [
+        "follow up on an action item from `alpha`: wire the gutter stamp",
+        "follow up on an action item from `alpha`: cover the retained path",
+    ];
+    for row in followups {
+        assert_eq!(
+            content.matches(row).count(),
+            1,
+            "follow-up {row:?} must appear once in the retained projection:\n{content}"
+        );
+    }
+    assert!(
+        content.contains("- ☑️ [#subagent:alpha#1] do [#alpha]"),
+        "the reported marker is in the retained projection:\n{content}"
+    );
+    assert!(
+        content.contains("> **Open items**\n>\n> - **Cleanup.** cargo clean is done.\n"),
+        "open items stay in the quoted cell:\n{content}"
+    );
+    assert!(
+        content.contains("> - **Live document.** Nothing was applied to it.\n"),
+        "every open item stays in the quoted cell:\n{content}"
+    );
+    assert!(
+        content.contains("> - the fixture editor never saves\n"),
+        "notes stay in the quoted cell:\n{content}"
+    );
+    let lines = queue_body_lines(content);
+    for row in followups {
+        assert!(
+            lines.iter().any(|line| line.contains(row)),
+            "{row:?} missing from the retained queue: {lines:#?}"
+        );
+    }
+    assert!(
+        !lines.iter().any(|line| {
+            line.contains("cargo clean")
+                || line.contains("Nothing was applied")
+                || line.contains("never saves")
+        }),
+        "open items and notes must not become queue rows: {lines:#?}"
+    );
+    let origin = lines
+        .iter()
+        .position(|line| line.contains("do [#alpha]"))
+        .expect("origin row");
+    let later = lines
+        .iter()
+        .position(|line| line.contains("later work"))
+        .expect("later work");
+    let first = lines
+        .iter()
+        .position(|line| line.contains("wire the gutter stamp"))
+        .expect("first follow-up");
+    let second = lines
+        .iter()
+        .position(|line| line.contains("cover the retained path"))
+        .expect("second follow-up");
+    assert!(
+        origin < first && first < second && second < later,
+        "{lines:#?}"
+    );
+}
+
+fn queue_body_lines(content: &str) -> Vec<String> {
+    let open = content
+        .find("<!-- agent:queue")
+        .and_then(|at| content[at..].find('\n').map(|rel| at + rel + 1))
+        .unwrap_or_else(|| panic!("queue open marker missing:\n{content}"));
+    let close = content[open..]
+        .find("<!-- /agent:queue -->")
+        .map(|rel| open + rel)
+        .unwrap_or_else(|| panic!("queue close marker missing:\n{content}"));
+    content[open..close]
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
 #[test]
 fn queue_add_surfaces_to_running_steering_follow_as_drain_after_current() {
     // GH #237 acceptance 3+4: while a cycle is running, `steering --follow`

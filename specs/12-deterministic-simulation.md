@@ -271,6 +271,23 @@ instead of `None`. A concurrency property (one listener thread per connection)
 holds every handler until all of them are in flight at once and counts them,
 instead of comparing a run's duration with the serial one.
 
+`#routelivefallthroughwaits` leaves the route live-tmux fall-through loops on
+their short bounds. A fixture that publishes a fresh-restart pane after a 2s
+or 10s wait still publishes when `Restart { mode: fresh }` never arrives: the
+ack-timeout path can accept the reopen with no submission proof and return
+without `retry_routed_admission_after_fresh_restart`, and the busy-handoff
+path can focus the live session instead of restarting. Panicking at the 30s
+hang ceiling waits out that miss and hides the test's own `restart_called`
+assert. The one loop that already asserts the request
+(`resolve_or_create_pane_waits_for_busy_restart_handoff_before_retrying_route`)
+stays at 10s: the miss is the claim failing, and a 30s ceiling only delays
+it. The mock `"> "` waits stay at 5s inside `wait_for_busy_restart_handoff`'s
+20s test budget, which starts only after a restart request; a longer wait
+expires the route first, and the glyph is not the claim.
+`wait_for_agent_ready` calls that assert the pane is not ready stay at 2s or
+3s, because expiry is the pass. `wait_for_pane_contains` and `wait_for_shell`
+already return on a miss and the caller asserts.
+
 A transport deadline compiled short for tests (the 2s test-mode controller RPC
 deadline) exists so that an absent or silent peer fails fast. Against a peer
 the test has proven live, it is only a hang ceiling. Requests to a socket

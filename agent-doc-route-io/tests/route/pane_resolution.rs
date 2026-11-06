@@ -367,6 +367,9 @@ mod tests {
         let pane_for_thread = pane.clone();
         let restart_called_for_thread = restart_called.clone();
         std::thread::spawn(move || {
+            // `#routelivefallthroughwaits`: publish the respawn on expiry. This
+            // route can return without `Restart { mode: fresh }`. A 30s panic
+            // waits out that miss and hides the `restart_called` assert below.
             let wait_start = std::time::Instant::now();
             while !restart_called_for_thread.load(Ordering::Relaxed)
                 && wait_start.elapsed() < Duration::from_secs(2)
@@ -530,6 +533,9 @@ mod tests {
         let pane_for_thread = pane.clone();
         let restart_called_for_thread = restart_called.clone();
         std::thread::spawn(move || {
+            // `#routelivefallthroughwaits`: publish the respawn on expiry. This
+            // route can return without `Restart { mode: fresh }`. A 30s panic
+            // waits out that miss and hides the `restart_called` assert below.
             let wait_start = std::time::Instant::now();
             while !restart_called_for_thread.load(Ordering::Relaxed)
                 && wait_start.elapsed() < Duration::from_secs(2)

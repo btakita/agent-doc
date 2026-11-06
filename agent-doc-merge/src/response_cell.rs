@@ -392,8 +392,11 @@ fn collapse_checkpoint_proven_repeated_suffix(
 /// Response cells are idempotent: replaying the same heading and body is a
 /// no-op. Component-level three-way merges can nevertheless materialize both
 /// sides when an editor reconnects during a force-disk projection. Preserve
-/// the first semantic response occurrence, every prompt, and the newest
-/// boundary marker.
+/// one semantic response occurrence, every prompt, and the newest boundary
+/// marker. The kept occurrence is the copy whose headings carry a `[#r-…]`
+/// lookup id when one does (`#dedupekeepsannotatedcopy`); otherwise it is the
+/// first. A queue row links to that heading, so keeping the first plain copy
+/// would drop the id.
 ///
 /// `#responseblockmovedtail`: identity covers the whole cell, sections included.
 /// Two replies to one queue prompt can share an opening node exactly (heading
@@ -1421,6 +1424,68 @@ mod tests {
         assert_eq!(deduplicated.matches("### Details").count(), 1);
         assert!(deduplicated.contains("\u{276f} prompt retained from the live editor"));
         assert_eq!(deduplicated.matches("agent:boundary:").count(), 1);
+    }
+
+    /// `#dedupekeepsannotatedcopy`: the reconnect replay can hold the plain cell
+    /// ahead of the copy whose `### Re:` heading carries the `[#r-…]` id. That
+    /// id is what the queue row links to, and it is not part of cell identity.
+    #[test]
+    fn duplicate_cells_keep_the_annotated_heading_a_queue_row_links_to() {
+        let doc = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: topic — gpt-5\n\nDone.\n\n",
+            "### Details\n\nBody.\n\n",
+            "\u{276f} prompt retained from the live editor\n\n",
+            "### Re: topic — gpt-5 [#r-0123456789ab]\n\nDone.\n\n",
+            "### Details\n\nBody.\n",
+            "<!-- agent:boundary:next -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        let deduplicated = deduplicate_response_cells(doc)
+            .unwrap()
+            .expect("the plain copy should be removed");
+
+        assert!(deduplicated.contains("### Re: topic — gpt-5 [#r-0123456789ab]"));
+        assert!(!deduplicated.contains("### Re: topic — gpt-5\n"));
+        assert_eq!(deduplicated.matches("### Re: topic").count(), 1);
+        assert_eq!(deduplicated.matches("### Details").count(), 1);
+        assert_eq!(deduplicated.matches("[#r-0123456789ab]").count(), 1);
+        assert_eq!(deduplicated.matches("Done.").count(), 1);
+        assert!(deduplicated.contains("\u{276f} prompt retained from the live editor"));
+        assert_eq!(deduplicated.matches("agent:boundary:").count(), 1);
+        assert!(
+            deduplicated
+                .find("\u{276f} prompt retained from the live editor")
+                .unwrap()
+                < deduplicated
+                    .find("### Re: topic — gpt-5 [#r-0123456789ab]")
+                    .unwrap(),
+            "the annotated copy stays where it was, after the retained prompt"
+        );
+    }
+
+    #[test]
+    fn annotated_cell_already_first_still_drops_the_later_plain_copy() {
+        let doc = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: topic — gpt-5 [#r-0123456789ab] (HEAD)\n\nDone.\n\n",
+            "\u{276f} prompt retained from the live editor\n\n",
+            "### Re: topic — gpt-5\n\nDone.\n",
+            "<!-- agent:boundary:next -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        let deduplicated = deduplicate_response_cells(doc)
+            .unwrap()
+            .expect("the later plain copy should be removed");
+
+        assert!(deduplicated.contains("### Re: topic — gpt-5 [#r-0123456789ab] (HEAD)"));
+        assert!(!deduplicated.contains("### Re: topic — gpt-5\n"));
+        assert_eq!(deduplicated.matches("Done.").count(), 1);
+        assert!(deduplicated.contains("\u{276f} prompt retained from the live editor"));
     }
 
     #[test]

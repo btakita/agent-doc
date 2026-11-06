@@ -26,7 +26,10 @@ heading through its `###` sections (`#responseblockmovedtail`). Replies that sha
 an opening heading and quoted queue prompt, or share a section, are distinct and
 all keep their text. A merge keys a response on its heading without the
 binary-owned ` (HEAD)` and `[#r-…]` annotations, so annotating a heading that is
-already in the document never yields a second copy.
+already in the document never yields a second copy. When a plain copy and a
+copy whose heading already carries `[#r-…]` are both present, normalization
+keeps the annotated copy. A queue row links to that heading, so keeping the
+first plain occurrence would drop the id (`#dedupekeepsannotatedcopy`).
 
 Superseding a response tail anchors on a position, never on a node id alone
 (`#responseanchornodeidentity`), because replies share openings and sections and

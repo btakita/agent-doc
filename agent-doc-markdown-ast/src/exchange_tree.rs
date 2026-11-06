@@ -613,19 +613,57 @@ pub fn response_cell_spans(nodes: &[ExchangeNode]) -> Vec<Range<usize>> {
     spans
 }
 
-/// Indices of the response nodes in a repeated whole response cell: every node
-/// of each later cell whose ordered node ids equal an earlier cell's. A cell that
-/// only shares its opening node with another is distinct and is never reported.
+/// How many headings in this cell carry a compact `[#r-…]` lookup id.
+///
+/// The id is identity-neutral, so a plain cell and its annotated twin compare
+/// equal. A queue row links to the annotated heading, and dropping that copy
+/// leaves the link with nothing to find (`#dedupekeepsannotatedcopy`).
+fn response_lookup_heading_count(nodes: &[ExchangeNode]) -> usize {
+    nodes
+        .iter()
+        .flat_map(|node| node.lines.iter())
+        .filter(|line| response_id_from_heading(line.trim()).is_some())
+        .count()
+}
+
+/// Indices of the response nodes to drop from a repeated whole response cell.
+///
+/// Cells whose ordered node ids are equal are one response. A cell that only
+/// shares its opening node with another is distinct and is never reported.
+/// Among equal cells, the copy with the most `[#r-…]` headings is kept
+/// (`#dedupekeepsannotatedcopy`); an equal annotation count keeps the earliest
+/// copy, which is the first copy when none is annotated.
 pub fn duplicate_response_cell_node_indices(nodes: &[ExchangeNode]) -> HashSet<usize> {
-    let mut seen = HashSet::new();
-    let mut duplicates = HashSet::new();
+    let mut groups: Vec<(Vec<String>, Vec<Range<usize>>)> = Vec::new();
     for span in response_cell_spans(nodes) {
         let identity = nodes[span.clone()]
             .iter()
             .map(ExchangeNode::node_id)
             .collect::<Vec<_>>();
-        if !seen.insert(identity) {
-            duplicates.extend(span);
+        if let Some((_, spans)) = groups.iter_mut().find(|(seen, _)| *seen == identity) {
+            spans.push(span);
+        } else {
+            groups.push((identity, vec![span]));
+        }
+    }
+    let mut duplicates = HashSet::new();
+    for (_, spans) in groups {
+        if spans.len() < 2 {
+            continue;
+        }
+        let mut keep = 0usize;
+        let mut best = 0usize;
+        for (index, span) in spans.iter().enumerate() {
+            let annotated = response_lookup_heading_count(&nodes[span.clone()]);
+            if annotated > best {
+                best = annotated;
+                keep = index;
+            }
+        }
+        for (index, span) in spans.iter().enumerate() {
+            if index != keep {
+                duplicates.extend(span.clone());
+            }
         }
     }
     duplicates
@@ -952,6 +990,40 @@ mod tests {
         assert_eq!(
             duplicate_response_cell_node_indices(&repeated),
             HashSet::from([3, 4])
+        );
+    }
+
+    /// `#dedupekeepsannotatedcopy`: the lookup id is not part of the cell
+    /// identity, but the queue row links to the heading that carries it. Drop
+    /// the plain twin, including when it appears first. An equal annotation
+    /// count still keeps the earliest copy.
+    #[test]
+    fn duplicate_cell_keeps_the_copy_whose_heading_carries_the_lookup_id() {
+        let plain = "### Re: topic\n\nDone.\n\n### Details\n\nBody.\n\n";
+        let annotated = "### Re: topic [#r-0123456789ab]\n\nDone.\n\n### Details\n\nBody.\n";
+        let plain_then_annotated =
+            parse_exchange_nodes(&format!("{plain}\u{276f} Prompt.\n\n{annotated}"));
+        assert_eq!(
+            duplicate_response_cell_node_indices(&plain_then_annotated),
+            HashSet::from([0, 1]),
+            "the leading plain cell is the duplicate"
+        );
+
+        let annotated_then_plain = parse_exchange_nodes(&format!(
+            "### Re: topic [#r-0123456789ab]\n\nDone.\n\n\u{276f} Prompt.\n\n### Re: topic\n\nDone.\n"
+        ));
+        assert_eq!(
+            duplicate_response_cell_node_indices(&annotated_then_plain),
+            HashSet::from([2]),
+            "a later plain twin is still the duplicate"
+        );
+
+        let middle = parse_exchange_nodes(&format!(
+            "{plain}\u{276f} First.\n\n{annotated}\n\n\u{276f} Second.\n\n{plain}"
+        ));
+        assert_eq!(
+            duplicate_response_cell_node_indices(&middle),
+            HashSet::from([0, 1, 6, 7])
         );
     }
 

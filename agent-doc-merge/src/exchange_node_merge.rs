@@ -103,8 +103,10 @@ pub fn merge_exchange_nodes(_base: &str, ours: &str, theirs: &str) -> String {
     out
 }
 
-/// `#exchangeconverge` — collapse repeated identities, keeping the first
-/// occurrence in document order. Returns the deduped list and whether anything
+/// `#exchangeconverge` — collapse repeated identities. A repeated response cell
+/// keeps the copy whose headings carry a `[#r-…]` id when one does, and
+/// otherwise the first occurrence in document order
+/// (`#dedupekeepsannotatedcopy`). Returns the deduped list and whether anything
 /// was removed.
 ///
 /// Responses collide only as whole cells (`#responseblockmovedtail`): every
@@ -182,6 +184,22 @@ mod tests {
             "### Tags integrated\n\nFixed.\n",
         );
         assert_eq!(dedup_exchange_nodes_by_identity(exchange), exchange);
+    }
+
+    /// `#dedupekeepsannotatedcopy`: exchange convergence uses the same cell
+    /// dedupe, so a plain twin ahead of the lookup heading must not win.
+    #[test]
+    fn dedup_keeps_the_annotated_response_heading() {
+        let exchange = concat!(
+            "### Re: A\n\nAnswer A.\n\n",
+            "❯ Prompt.\n\n",
+            "### Re: A [#r-0123456789ab]\n\nAnswer A.\n",
+        );
+        let converged = dedup_exchange_nodes_by_identity(exchange);
+        assert_eq!(converged.matches("### Re: A").count(), 1);
+        assert!(converged.contains("### Re: A [#r-0123456789ab]"));
+        assert!(!converged.contains("### Re: A\n"));
+        assert!(converged.contains("❯ Prompt."));
     }
 
     #[test]

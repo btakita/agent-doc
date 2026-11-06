@@ -377,6 +377,12 @@ const NOTICES: &[Notice] = &[
         harnesses: OPENCODE,
         limit: "usage limit",
     },
+    // Captured OpenCode pane, 2026-08-07: `Usage limit reached for 5 hour.`
+    Notice {
+        prefix: "Usage limit reached for ",
+        harnesses: OPENCODE,
+        limit: "usage limit",
+    },
     Notice {
         prefix: "Free usage exceeded, subscribe to Go",
         harnesses: OPENCODE,
@@ -440,11 +446,24 @@ const NOTICES: &[Notice] = &[
 const OPENCODE_NAMED_LIMIT: &str = " usage limit reached. It will reset in";
 
 fn normalize_notice(line: &str) -> String {
+    // U+2B1D `⬝` prefixes OpenCode's limit row. It is not box art, so the
+    // chrome scan leaves it and the sentence would otherwise miss every prefix.
     line.trim_start_matches(|ch: char| {
         ch.is_whitespace()
             || matches!(
                 ch,
-                '⎿' | '■' | '●' | '⏺' | '•' | '✗' | '✘' | '⚠' | '│' | '┃' | '▌' | '!'
+                '⎿' | '■'
+                    | '●'
+                    | '⏺'
+                    | '•'
+                    | '✗'
+                    | '✘'
+                    | '⚠'
+                    | '│'
+                    | '┃'
+                    | '▌'
+                    | '!'
+                    | '⬝'
             )
     })
     .trim()
@@ -491,11 +510,12 @@ fn notice_belongs_to(line: &str, harness: &str) -> bool {
 /// prints its own format and a wrong parse would be worse than the verbatim
 /// phrase.
 fn reset_hint(line: &str) -> Option<String> {
-    const MARKERS: [&str; 4] = [
+    const MARKERS: [&str; 5] = [
         "resets ",
         "It will reset in ",
         "try again at ",
         "Try again at ",
+        "will reset at ",
     ];
     MARKERS.iter().find_map(|marker| {
         let start = line.find(marker)?;
@@ -503,6 +523,7 @@ fn reset_hint(line: &str) -> Option<String> {
         let end = tail
             .find(" · ")
             .or_else(|| tail.find(". To continue"))
+            .or_else(|| tail.find(" ["))
             .unwrap_or(tail.len());
         Some(tail[..end].trim_end_matches('.').trim().to_string())
     })
@@ -547,6 +568,22 @@ mod tests {
     const CODEX_PANE: &str = include_str!("fixtures/usage_limit/codex_usage_limit_idle.txt");
     const OPENCODE_PANE: &str = include_str!("fixtures/usage_limit/opencode_usage_limit_idle.txt");
 
+    // Verbatim captures, not retyped text. Pane files are contiguous slices.
+    // claude_session_limit_idle.txt: agent-loop
+    // `.agent-doc/logs/route-submit/1781897227286-direct_pane_acceptance-codex-_125-fc4bf71345e0.txt`
+    // lines 22-33 (the Claude limit screen; that scrollback later starts Codex).
+    // opencode_usage_limit_idle.txt:
+    // `.agent-doc/logs/route-submit/1786100983852-idle_queue_payload_observation-opencode-_25-7afb4a58cdd2.txt`
+    // lines 43-51.
+    // grok_weekly_four_idle.txt: haiven-dev
+    // `.agent-doc/logs/route-submit/1793908601659-idle_queue_payload_observation-grok-_10-0df9696d7cf8.txt`
+    // lines 41-53. The gauge reads 4%, so the file stays a negative fixture.
+    // worker_claude_handback.txt: assistant text, `53a5df7b-854a-4835-824e-c97a615b6494.jsonl` line 18.
+    // worker_claude_partial_then_limit.txt keeps its short progress lead-in; its last
+    // line is the assistant text of `e167fd58-83a5-4bf6-a38a-ff98cd3d83ed.jsonl` line 51.
+    // worker_opencode_handback.txt is the OpenCode sentence with ANSI and the leading
+    // U+2B1D run removed, because a hand-back is not passed through the pane strip.
+
     #[test]
     fn grok_weekly_gauge_at_zero_is_the_live_incident() {
         let grok = HarnessConfig::grok();
@@ -581,10 +618,12 @@ mod tests {
     #[test]
     fn grok_gauge_words_in_the_transcript_are_a_quotation() {
         let grok = HarnessConfig::grok();
+        assert!(GROK_FOUR.contains("limit left: 4%"));
         let quoted = GROK_FOUR.replace(
-            "Worked for 9m12s",
+            "Worked for 9m0s",
             "Weekly limit left: 0% · Grok 4.7 (high) · always-approve",
         );
+        assert_ne!(quoted, GROK_FOUR);
         assert_eq!(pane_usage_limit(&quoted, &grok), None);
     }
 
@@ -595,7 +634,7 @@ mod tests {
         assert_eq!(limit.limit, "session limit");
         assert_eq!(
             limit.reset_hint.as_deref(),
-            Some("resets 9pm (America/New_York)")
+            Some("resets 4:20pm (America/New_York)")
         );
         assert_eq!(limit.source, UsageLimitEvidence::LimitNotice);
     }
@@ -610,9 +649,27 @@ mod tests {
     }
 
     #[test]
-    fn opencode_notice_names_its_plan() {
+    fn opencode_captured_five_hour_notice() {
         let limit = pane_usage_limit(OPENCODE_PANE, &HarnessConfig::opencode()).expect("limit");
         assert_eq!(limit.harness.as_deref(), Some("opencode"));
+        assert_eq!(limit.limit, "usage limit");
+        assert!(
+            limit
+                .evidence
+                .starts_with("Usage limit reached for 5 hour.")
+        );
+        assert_eq!(
+            limit.reset_hint.as_deref(),
+            Some("will reset at 2026-08-07 18:07:35")
+        );
+    }
+
+    #[test]
+    fn opencode_named_plan_wording_still_names_the_plan() {
+        // 1.15.13 named-plan wording. OPENCODE_PANE is the captured pane; this
+        // string only keeps that branch covered.
+        let line = "Go usage limit reached. It will reset in 3 hours 12 minutes. To continue using this model now, enable usage from your available balance";
+        let limit = classify_notice(line).expect("named plan");
         assert_eq!(limit.limit, "Go usage limit");
         assert_eq!(
             limit.reset_hint.as_deref(),
@@ -643,10 +700,15 @@ mod tests {
     fn the_operator_draft_is_never_a_notice() {
         let claude = HarnessConfig::claude();
         let idle = CLAUDE_PANE.replace(
-            "⎿  You've hit your session limit · resets 9pm (America/New_York)\n     /upgrade to increase your usage limit.",
+            "You've hit your session limit \u{b7} resets 4:20pm (America/New_York)\n     /usage-credits to finish what you\u{2019}re working on.",
             "done",
         );
-        let draft = idle.replace("❯ \n", "❯ You've hit your session limit\n");
+        assert_ne!(idle, CLAUDE_PANE, "notice replace must hit the capture");
+        let draft = idle.replace(
+            "\u{276f}\u{a0}\n",
+            "\u{276f} You've hit your session limit\n",
+        );
+        assert_ne!(draft, idle, "prompt replace must hit the capture");
         assert_eq!(pane_usage_limit(&draft, &claude), None);
     }
 

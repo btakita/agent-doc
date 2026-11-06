@@ -140,7 +140,7 @@ fn a_limit_notice_hand_back_blocks_the_attempt_instead_of_reporting_it() {
     for needle in [
         "worker_quota_exhausted",
         "session limit",
-        "resets 9pm",
+        "resets 7:30pm",
         "branch `fix/sdk-partial` in worktree `/work/sdk`",
         "resume the same worker `worker-sdk`",
         "--requeue",

@@ -233,9 +233,10 @@ pub fn supervisor_drain_handoff_undrained_warning(
 
 /// Surface semantic memory matches for likely completed work and fail-open
 /// retrieval issues as ordinary preflight warnings.
-/// `#harnessquotaexhausted`: name a harness usage limit before this turn
+/// `#harnessquotaexhausted`: name a printed harness refusal before this turn
 /// plans around it: the owning pane idle on one, and every worker attempt that
-/// stopped on one with its exact next step. Read-only.
+/// stopped on one with its exact next step. A Grok `* limit left: 0%` border
+/// is not a refusal (`#routequotaoverride`). Read-only.
 pub fn harness_usage_limit_warnings(file: &Path) -> Vec<PreflightWarning> {
     let warning = |code: &str, message: String| PreflightWarning {
         code: code.to_string(),

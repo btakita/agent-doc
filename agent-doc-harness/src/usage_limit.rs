@@ -2,13 +2,16 @@
 //!
 //! A coding harness that runs out of plan usage or credits stops working but
 //! keeps its TUI up: the pane sits at an idle prompt, its turn lease can still
-//! look live, and retrying cannot help until the limit resets. Observed
-//! 2026-11-05 on a live Grok 4.7 pane whose composer border read
-//! `Weekly limit left: 0%`: route reported `owner_turn=ambiguous` and advised
-//! a retry, and session-check reported a plain INTERRUPTED cycle.
+//! look live, and retrying cannot help until the limit resets.
 //!
-//! This module is the single pure classifier for that state. Two surfaces
-//! read it:
+//! The block is a printed refusal, not a status gauge (`#routequotaoverride`).
+//! Claude, Codex, and Grok let the operator decide whether to spend credits.
+//! A Grok composer border of `* limit left: 0%` has no remaining pay-as-you-go
+//! field, so route, preflight, and session-check do not treat it as used up.
+//! Printed refusals stay blocks. A turn that is already running is not stopped.
+//! Worker claim and pool refill read a returned refusal, not that gauge.
+//!
+//! This module is the single pure classifier. Two surfaces read it:
 //!
 //! - [`pane_usage_limit`] / [`pane_is_quota_blocked`] read a pane capture;
 //! - [`worker_handback_usage_limit`] reads what a dispatched worker returned.
@@ -25,8 +28,6 @@ use crate::HarnessConfig;
 /// Longest evidence line kept. Long enough for every known notice; bounded so
 /// a pathological capture cannot flood route output or the ops log.
 const EVIDENCE_LIMIT: usize = 240;
-/// Non-empty bottom lines searched for a harness status gauge.
-const GAUGE_WINDOW: usize = 10;
 /// Transcript lines allowed below a limit notice before it counts as old
 /// history (an upgrade hint, a follow-on dialog line, a sidebar row).
 const NOTICE_TRAILING_LINES: usize = 6;
@@ -37,9 +38,12 @@ pub(crate) const SHORT_HANDBACK_LINES: usize = 4;
 /// Where the limit was read from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UsageLimitEvidence {
-    /// A live reading in the harness chrome. It stays true during a turn.
-    StatusGauge,
     /// A notice the harness printed when a request was refused.
+    ///
+    /// A composer-border gauge is not this. Claude, Codex, and Grok let the
+    /// operator decide whether to spend credits, and a Grok border of
+    /// `* limit left: 0%` has no remaining pay-as-you-go field
+    /// (`#routequotaoverride`).
     LimitNotice,
 }
 
@@ -113,10 +117,11 @@ pub fn pane_is_quota_blocked(capture: &str, harness: &HarnessConfig) -> bool {
 
 /// Read a usage or credit limit from a pane capture (plain or ANSI).
 ///
-/// A status gauge is a live reading, so it holds during a turn. A notice is
-/// history: it counts only when no turn is running and nothing but chrome and
-/// a few trailing lines sit below it, so a limit that has since reset, or an
-/// agent quoting the notice mid-transcript, does not read as exhausted.
+/// A notice counts only when no turn is running and nothing but chrome and a
+/// few trailing lines sit below it, so a limit that has since reset, a running
+/// turn, or an agent quoting the notice mid-transcript does not read as
+/// exhausted. A Grok composer border of `* limit left: 0%` is not a notice
+/// (`#routequotaoverride`).
 pub fn pane_usage_limit(capture: &str, harness: &HarnessConfig) -> Option<HarnessUsageLimit> {
     let lines = capture
         .lines()
@@ -124,15 +129,6 @@ pub fn pane_usage_limit(capture: &str, harness: &HarnessConfig) -> Option<Harnes
         .map(|line| line.trim().to_string())
         .filter(|line| !line.is_empty())
         .collect::<Vec<_>>();
-    if harness.binary == "grok"
-        && let Some(limit) = lines
-            .iter()
-            .rev()
-            .take(GAUGE_WINDOW)
-            .find_map(|line| grok_gauge_exhausted(line))
-    {
-        return Some(limit);
-    }
     if harness.has_busy_cue(capture) {
         return None;
     }
@@ -529,27 +525,6 @@ fn reset_hint(line: &str) -> Option<String> {
     })
 }
 
-/// `╰── Weekly limit left: 0% · Grok 4.7 (high) · always-approve ─╯`. Only
-/// the composer's bottom border counts: the same words in a transcript are a
-/// quotation. Exactly `0%`: a harness that rounds still printed its own
-/// reading, and any positive reading is not exhausted.
-fn grok_gauge_exhausted(line: &str) -> Option<HarnessUsageLimit> {
-    const GAUGE: &str = " limit left: 0%";
-    if !line.starts_with('╰') {
-        return None;
-    }
-    let body = line.trim_matches(|ch: char| matches!(ch, '╰' | '╯' | '─' | ' '));
-    let reading = body.split(" · ").find(|field| field.ends_with(GAUGE))?;
-    let name = reading.strip_suffix(GAUGE)?.trim();
-    Some(HarnessUsageLimit {
-        harness: Some("grok".to_string()),
-        limit: format!("{} limit", name.to_lowercase()),
-        evidence: bounded_evidence(reading),
-        reset_hint: None,
-        source: UsageLimitEvidence::StatusGauge,
-    })
-}
-
 fn bounded_evidence(line: &str) -> String {
     let redacted = agent_doc_secret_redact::redact(line);
     if redacted.chars().count() <= EVIDENCE_LIMIT {
@@ -585,15 +560,13 @@ mod tests {
     // U+2B1D run removed, because a hand-back is not passed through the pane strip.
 
     #[test]
-    fn grok_weekly_gauge_at_zero_is_the_live_incident() {
+    fn grok_zero_gauge_is_not_used_up() {
         let grok = HarnessConfig::grok();
-        let limit = pane_usage_limit(GROK_ZERO, &grok).expect("exhausted gauge");
-        assert_eq!(limit.harness.as_deref(), Some("grok"));
-        assert_eq!(limit.limit, "weekly limit");
-        assert_eq!(limit.evidence, "Weekly limit left: 0%");
-        assert_eq!(limit.source, UsageLimitEvidence::StatusGauge);
-        // The pane is exactly what the route read as idle: the gauge must
-        // explain that idle pane, not change its readiness.
+        assert!(GROK_ZERO.contains("limit left: 0%"));
+        assert_eq!(pane_usage_limit(GROK_ZERO, &grok), None);
+        assert!(!pane_is_quota_blocked(GROK_ZERO, &grok));
+        // The pane is exactly what the route read as idle. The gauge is the
+        // harness's credit decision, so it must not change readiness.
         assert!(crate::pane_idle_dispatch_ready(GROK_ZERO, &grok));
     }
 
@@ -608,11 +581,39 @@ mod tests {
     }
 
     #[test]
-    fn grok_gauge_stays_true_during_a_turn() {
+    fn grok_zero_gauge_does_not_stop_a_running_turn() {
         let grok = HarnessConfig::grok();
         let busy = GROK_ZERO.replace("Ctrl+x", "Ctrl+c:cancel  │  Ctrl+x");
-        assert!(grok.has_busy_cue(&busy) || grok.dispatch_blocker_reason(&busy).is_some());
-        assert!(pane_is_quota_blocked(&busy, &grok));
+        assert!(grok.has_busy_cue(&busy));
+        assert!(!pane_is_quota_blocked(&busy, &grok));
+        let refused = busy.replacen("Worked for 9m12s", "You hit your weekly limit", 1);
+        assert_ne!(refused, busy, "notice replace must hit the capture");
+        assert_eq!(pane_usage_limit(&refused, &grok), None);
+    }
+
+    #[test]
+    fn grok_printed_refusals_stay_blocks_on_an_idle_pane() {
+        let grok = HarnessConfig::grok();
+        let border = "│ ❯   │\n╰── Weekly limit left: 0% · Grok 4.7 (high) · always-approve ─╯\n";
+        for (notice, limit_name) in [
+            ("You hit your weekly limit", "weekly limit"),
+            (
+                "You've hit the credit limit for your plan",
+                "plan credit limit",
+            ),
+            ("You've hit your spending cap", "spending cap"),
+            ("Grok Build: usage limit reached", "usage limit"),
+            ("Grok Build: usage balance exhausted", "usage balance"),
+        ] {
+            let pane = format!("{notice}\n{border}");
+            let limit = pane_usage_limit(&pane, &grok)
+                .unwrap_or_else(|| panic!("printed refusal must block: {notice}"));
+            assert_eq!(limit.harness.as_deref(), Some("grok"), "{notice}");
+            assert_eq!(limit.limit, limit_name, "{notice}");
+            assert!(limit.evidence.starts_with(notice), "{notice}");
+            assert_eq!(limit.source, UsageLimitEvidence::LimitNotice, "{notice}");
+            assert!(pane_is_quota_blocked(&pane, &grok), "{notice}");
+        }
     }
 
     #[test]
@@ -733,10 +734,14 @@ mod tests {
 
     #[test]
     fn the_next_step_names_the_limit_and_never_advises_a_retry() {
-        let limit = pane_usage_limit(GROK_ZERO, &HarnessConfig::grok()).unwrap();
+        let limit = pane_usage_limit(
+            "You hit your weekly limit\n│ ❯   │\n",
+            &HarnessConfig::grok(),
+        )
+        .unwrap();
         let cause = limit.cause();
         assert!(cause.contains("Grok Build"), "{cause}");
-        assert!(cause.contains("Weekly limit left: 0%"), "{cause}");
+        assert!(cause.contains("You hit your weekly limit"), "{cause}");
         let next = limit.operator_next_step();
         assert!(next.contains("Wait for the limit to reset"), "{next}");
         assert!(next.contains("`agent:`"), "{next}");

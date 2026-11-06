@@ -713,7 +713,8 @@ pub struct OwnerPaneUsageLimit {
 }
 
 /// `#harnessquotaexhausted`: what stops `file`'s owning pane, read from a live
-/// capture. `None` for no owner, no capture, a running turn, or no limit.
+/// capture. `None` for no owner, no capture, a running turn, no printed
+/// refusal, or a Grok `* limit left: 0%` border (`#routequotaoverride`).
 /// A read-only diagnostic: it never changes turn, lease, or actor state.
 pub fn owner_pane_usage_limit_for_file(file: &Path) -> Option<OwnerPaneUsageLimit> {
     let root = agent_doc_project_root_io::project_root_containing(file)?;
@@ -1498,8 +1499,15 @@ mod tests {
         assert_eq!(owner.pane, "%10");
         assert_eq!(owner.limit.limit, "session limit");
         assert!(owner_pane_usage_limit_in_capture("%10", "claude", "❯ \n").is_none());
+        let idle_gauge = "│ ❯   │\n╰── Weekly limit left: 0% · Grok 4.7 (high) ─╯\n";
+        assert!(owner_pane_usage_limit_in_capture("%10", "grok", idle_gauge).is_none());
         let grok = "│ ❯   │\n╰── Weekly limit left: 0% · Grok 4.7 (high) ─╯\nCtrl+c:cancel\n";
         assert!(owner_pane_usage_limit_in_capture("%10", "grok", grok).is_none());
+        let refused = "You hit your weekly limit\n│ ❯   │\n";
+        let owner = owner_pane_usage_limit_in_capture("%10", "grok", refused).expect("notice");
+        assert_eq!(owner.limit.limit, "weekly limit");
+        let running_refusal = "You hit your weekly limit\nCtrl+c:cancel\n";
+        assert!(owner_pane_usage_limit_in_capture("%10", "grok", running_refusal).is_none());
     }
 
     #[test]

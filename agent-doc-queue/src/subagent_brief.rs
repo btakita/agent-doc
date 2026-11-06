@@ -880,8 +880,11 @@ fn render_preamble(
          queue items, backlog items, or documents.\n\nCoordinator rules (they override the \
          authorization above where the two conflict):\n\
          - Work only in your own git worktree outside the IDE-watched project, never in the \
-         coordinator's checkout or a checkout another subagent uses.\n\
-         - Write command output, logs, and scratch files inside your own worktree, never to a fixed \
+         coordinator's checkout or a checkout another subagent uses.\n",
+    );
+    out.push_str(concat!("- ", crate::subagent_worktree_layout_rule!(), "\n"));
+    out.push_str(
+        "- Write command output, logs, and scratch files inside your own worktree, never to a fixed \
          name (such as `check.log` or `msg.txt`) in a shared scratchpad or temp directory: sibling \
          subagents share it, and two runs truncating one file interleave each other's output, so \
          you would read another checkout's results as your own.\n\
@@ -911,6 +914,7 @@ fn render_preamble(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::worktree_layout::SUBAGENT_WORKTREE_LAYOUT_RULE;
 
     fn doc(frontmatter: &str, queue_attr: &str, queue: &[&str], backlog: &[&str]) -> String {
         let queue: String = queue.iter().map(|p| format!("- {p}\n")).collect();
@@ -1662,6 +1666,48 @@ agent_doc_format: template
             SUBAGENT_SCRATCH_ISOLATION_RULE.contains("never a file in a shared scratchpad or /tmp")
         );
         assert!(SUBAGENT_SCRATCH_ISOLATION_RULE.contains("unique `mktemp` path"));
+    }
+
+    /// `#worktreetmuxrouterskew`: every preamble forbids a flat worktree whose
+    /// `../tmux-router` is the shared `~/worktrees/tmux-router` checkout.
+    #[test]
+    fn every_status_restates_the_paired_worktree_layout_rule() {
+        let resolved = doc(
+            PRESETS,
+            "subagents preset=\"#spec-test-build-install-commit-push\"",
+            &["do [#abc]"],
+            &["[ ] [#abc] x"],
+        );
+        let unresolved = doc("", "subagents preset=\"#nosuch\"", &["do [#abc]"], &[]);
+        let item_only = doc("", "subagents", &["look at foo"], &[]);
+        let bullet = format!("- {SUBAGENT_WORKTREE_LAYOUT_RULE}\n");
+        for (content, item) in [
+            (&resolved, "do [#abc]"),
+            (&unresolved, "do [#abc]"),
+            (&item_only, "look at foo"),
+        ] {
+            let p = subagent_authorization("doc.md", content, item).subagent_prompt_preamble;
+            let rule_at = p.find(&bullet).unwrap_or_else(|| panic!("{p}"));
+            assert!(p.find("Coordinator rules").unwrap() < rule_at, "{p}");
+            assert!(
+                rule_at < p.find("- Commit and push only when").unwrap(),
+                "{p}"
+            );
+            let own_worktree = p
+                .find("Work only in your own git worktree")
+                .expect("own-worktree bullet");
+            assert!(own_worktree < rule_at, "{p}");
+        }
+        assert!(
+            !crate::worktree_layout::resolves_shared_worktrees_tmux_router(
+                &std::path::PathBuf::from("/home/brian/worktrees/label/agent-doc")
+            )
+        );
+        assert!(
+            crate::worktree_layout::resolves_shared_worktrees_tmux_router(
+                &std::path::PathBuf::from("/home/brian/worktrees/agent-doc-flat")
+            )
+        );
     }
 
     /// `#tmuxkittyterminal`: every preamble tells the worker that `$TMUX`

@@ -1213,7 +1213,8 @@ pub fn queue_subagent_dispatch_entries(
 }
 
 /// Guidance for a non-empty `queue_subagent_dispatch`.
-pub const QUEUE_SUBAGENT_DISPATCH_GUIDANCE: &str = "The operator added these queue items with \
+pub const QUEUE_SUBAGENT_DISPATCH_GUIDANCE: &str = concat!(
+    "The operator added these queue items with \
 subagent intent. For EACH: run its `claim_command` (fill in `<label>`) and wait for it to succeed \
 before calling the harness spawn tool. The successful claim must visibly move the row from 📥 \
 pending to 🟡 dispatching before any worker can begin; a failed or skipped claim forbids spawn. \
@@ -1268,7 +1269,9 @@ and the hand-back (`#workerquotaautodetect`); pass the text to `queue report-com
 or `queue report-quota-blocked` when you still have it, which records the same block \
 quietly if the hook already did. OpenCode has no subagent-end hook, so its limit still \
 has to be passed that way. `agent-doc queue pool <FILE>` prints the \
-current refill.";
+current refill. ",
+    agent_doc_queue::subagent_worktree_layout_rule!()
+);
 
 /// One exchange prompt delegated by `<!-- agent:exchange subagents -->`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1296,7 +1299,9 @@ Exchange prompts have no preamble, so put these rules in each subagent prompt yo
     " ",
     agent_doc_queue::subagent_build_slot_rule!(),
     " ",
-    agent_doc_queue::subagent_tmux_isolation_rule!()
+    agent_doc_queue::subagent_tmux_isolation_rule!(),
+    " ",
+    agent_doc_queue::subagent_worktree_layout_rule!()
 );
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -10007,7 +10012,10 @@ mod tests {
             guidance.contains(agent_doc_queue::subagent_brief::SUBAGENT_SCRATCH_ISOLATION_RULE)
         );
         assert!(guidance.contains(agent_doc_queue::build_slot::SUBAGENT_BUILD_SLOT_RULE));
-        assert!(guidance.ends_with(agent_doc_queue::subagent_brief::SUBAGENT_TMUX_ISOLATION_RULE));
+        assert!(guidance.contains(agent_doc_queue::subagent_brief::SUBAGENT_TMUX_ISOLATION_RULE));
+        assert!(guidance.ends_with(
+            agent_doc_queue::worktree_layout::SUBAGENT_WORKTREE_LAYOUT_RULE
+        ));
     }
 
     // `#qdonestrike-durable`: a not-ready Lazily head used to discard the whole
@@ -12984,6 +12992,10 @@ mod tests {
             "unset launch policy must be omitted"
         );
         assert!(QUEUE_SUBAGENT_DISPATCH_GUIDANCE.contains("`reasoning_effort`"));
+        assert!(QUEUE_SUBAGENT_DISPATCH_GUIDANCE
+            .contains(agent_doc_queue::worktree_layout::SUBAGENT_WORKTREE_LAYOUT_RULE));
+        assert!(QUEUE_SUBAGENT_DISPATCH_GUIDANCE
+            .ends_with(agent_doc_queue::worktree_layout::SUBAGENT_WORKTREE_LAYOUT_RULE));
         let state = run_queue_maintenance(&doc, None).unwrap();
         assert_eq!(
             queue_work_texts(&state.selected_queue_prompts),

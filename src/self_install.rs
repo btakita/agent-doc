@@ -1,4 +1,10 @@
 //! Install the current committed checkout from an isolated sibling worktree.
+//!
+//! The build worktree stays next to the source repo so `../tmux-router` keeps
+//! resolving to that repo's own sibling. A candidate placed directly under a
+//! directory named `worktrees` is refused: it would resolve to the shared
+//! `worktrees/tmux-router` checkout (`#worktreetmuxrouterskew`). The refusal
+//! names the paired layout and does not refresh or move that shared checkout.
 
 use anyhow::{Context, Result, bail};
 use std::path::{Path, PathBuf};
@@ -163,10 +169,41 @@ fn build_worktree_path(repo_root: &Path) -> Result<PathBuf> {
         .duration_since(UNIX_EPOCH)
         .context("system clock is before UNIX_EPOCH")?
         .as_millis();
-    Ok(parent.join(format!(
+    let path = parent.join(format!(
         ".agent-doc-build-{repo_name}-{}-{now}",
         std::process::id()
-    )))
+    ));
+    refuse_shared_worktrees_tmux_router(&path)?;
+    Ok(path)
+}
+
+/// Refuse a build worktree whose `../tmux-router` is the shared checkout.
+fn refuse_shared_worktrees_tmux_router(path: &Path) -> Result<()> {
+    if !agent_doc_queue::worktree_layout::resolves_shared_worktrees_tmux_router(path) {
+        return Ok(());
+    }
+    let shared = agent_doc_queue::worktree_layout::normalize_lexical(
+        &agent_doc_queue::worktree_layout::workspace_path_dep(
+            path,
+            agent_doc_queue::worktree_layout::TMUX_ROUTER_DIR_NAME,
+        ),
+    );
+    let worktrees_root = path
+        .parent()
+        .context("[self-install] worktree path has no parent")?;
+    let label = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .context("[self-install] worktree path is not valid UTF-8")?;
+    let layout = agent_doc_queue::worktree_layout::paired_layout(worktrees_root, label)
+        .map_err(|err| anyhow::anyhow!("[self-install] {err}"))?;
+    bail!(
+        "[self-install] {} resolves ../tmux-router to the shared {} checkout (#worktreetmuxrouterskew). Use the paired layout instead: agent-doc at {}, private tmux-router at {}. Do not refresh or move the shared checkout.",
+        path.display(),
+        shared.display(),
+        layout.agent_doc.display(),
+        layout.tmux_router.display()
+    );
 }
 
 fn sanitize_path_segment(input: &str) -> String {
@@ -245,6 +282,33 @@ mod tests {
                 .unwrap()
                 .to_string_lossy()
                 .starts_with(".agent-doc-build-agent-doc-")
+        );
+        assert!(!agent_doc_queue::worktree_layout::resolves_shared_worktrees_tmux_router(&path));
+    }
+
+    #[test]
+    fn build_worktree_directly_under_worktrees_is_refused() {
+        let root = PathBuf::from("/home/brian/worktrees/agent-doc-flat");
+        let err = build_worktree_path(&root).unwrap_err().to_string();
+        assert!(err.contains("#worktreetmuxrouterskew"), "{err}");
+        assert!(err.contains("/home/brian/worktrees/tmux-router"), "{err}");
+        assert!(
+            err.contains("Do not refresh or move the shared checkout"),
+            "{err}"
+        );
+        assert!(err.contains("/agent-doc"), "{err}");
+        assert!(err.contains("/tmux-router"), "{err}");
+        let flat = PathBuf::from("/home/brian/worktrees/agent-doc-flat");
+        assert!(agent_doc_queue::worktree_layout::resolves_shared_worktrees_tmux_router(&flat));
+        let layout = agent_doc_queue::worktree_layout::paired_layout(
+            &PathBuf::from("/home/brian/worktrees"),
+            "agent-doc-flat",
+        )
+        .unwrap();
+        assert!(
+            !agent_doc_queue::worktree_layout::resolves_shared_worktrees_tmux_router(
+                &layout.agent_doc
+            )
         );
     }
 

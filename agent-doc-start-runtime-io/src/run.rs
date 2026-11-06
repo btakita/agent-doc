@@ -2878,6 +2878,7 @@ pub fn run_with_reap_policy_resume_and_harness(
                     | AutoTriggerOutcome::Timeout
                     | AutoTriggerOutcome::SendFailed
                     | AutoTriggerOutcome::Cancelled
+                    | AutoTriggerOutcome::DraftRefused
             ),
         );
         let clean_exit_before_prompt =

@@ -76,7 +76,10 @@
 //!   injecting the harness-specific trigger command back through the claimed
 //!   tmux pane input path. If the child-owned renderer misses that prompt, a
 //!   fallback requires current-generation output plus independently reconciled,
-//!   stable dispatch-ready evidence from the owned pane.
+//!   stable dispatch-ready evidence from the owned pane. Before that inject,
+//!   and before every other `auto_trigger_inject_command` write, the composer
+//!   is read: a draft, residue, protected input, or an unreadable pane refuses
+//!   without typing (`#autotriggerdraftguard`).
 //!   This avoids the race where DSR (Device Status Report) escape sequences
 //!   interleave with the injected command, corrupting Claude Code's input
 //!   state, while also ensuring stale tmux scrollback cannot be mistaken for
@@ -153,9 +156,9 @@ use agent_doc_queue::queue::{
 use agent_doc_queue_io::queue_consume;
 use agent_doc_start_io::{SessionLog, log_event};
 use agent_doc_supervisor::auto_trigger::{
-    AutoTriggerCooldownAction, AutoTriggerMonitor, AutoTriggerNoPromptAction, AutoTriggerOutcome,
-    AutoTriggerStopOutcome, CapabilityProofGate, auto_trigger_clear_cooldown_action,
-    auto_trigger_no_prompt_action,
+    AutoTriggerCooldownAction, AutoTriggerDraftFacts, AutoTriggerDraftGuard, AutoTriggerMonitor,
+    AutoTriggerNoPromptAction, AutoTriggerOutcome, AutoTriggerStopOutcome, CapabilityProofGate,
+    auto_trigger_clear_cooldown_action, auto_trigger_draft_guard, auto_trigger_no_prompt_action,
 };
 #[cfg(test)]
 use agent_doc_supervisor::config::AgentLaunchArgsSources;
@@ -882,6 +885,109 @@ fn sleep_with_stop(stop: &AtomicBool, total: Duration) -> bool {
     }
 }
 
+struct AutoTriggerComposerRead {
+    content: Option<String>,
+    cursor_y: Option<usize>,
+}
+
+/// Read the destination `auto_trigger_inject_command` is about to type into.
+///
+/// A tmux inject pane that cannot be captured is `None`: that is unread, not
+/// empty. With no pane, the supervisor's own screen is the composer, and an
+/// empty screen is a completed read (`#autotriggerdraftguard`).
+fn observe_auto_trigger_composer(shared: &SupervisorShared) -> AutoTriggerComposerRead {
+    if let Some(pane_id) = shared.inject_pane.as_deref() {
+        let tmux = agent_doc_tmux_io::configured_tmux();
+        let content = agent_doc_tmux_io::capture_pane_with_ansi(&tmux, pane_id).ok();
+        let cursor_y = content
+            .as_ref()
+            .and_then(|_| agent_doc_tmux_io::pane_cursor_y(&tmux, pane_id));
+        return AutoTriggerComposerRead { content, cursor_y };
+    }
+    AutoTriggerComposerRead {
+        content: Some(shared.output.child_output_for_detection()),
+        cursor_y: None,
+    }
+}
+
+fn strip_composer_draft_edges(text: &str) -> &str {
+    text.trim_matches(|ch: char| {
+        ch.is_whitespace() || ch == '\u{a0}' || ch == '❯' || ch == '›' || ch == '>' || ch == '$'
+    })
+}
+
+fn composer_draft_is_exactly_command(draft: &str, command: &str) -> bool {
+    let command = strip_composer_draft_edges(command);
+    !command.is_empty() && strip_composer_draft_edges(draft) == command
+}
+
+/// Classify one composer read for [`auto_trigger_inject_command`].
+///
+/// `command_drafted` is an exact draft match, not a substring. The capacity
+/// retry's command is the word `continue`; a composer holding "please
+/// continue" is the operator's text and must refuse (`#autotriggerdraftguard`).
+fn read_auto_trigger_draft(
+    content: Option<&str>,
+    cursor_y: Option<usize>,
+    harness: &agent_doc_harness::HarnessConfig,
+    command: &str,
+) -> (AutoTriggerDraftFacts, Option<String>) {
+    let Some(content) = content else {
+        return (AutoTriggerDraftFacts::unreadable(), None);
+    };
+    let projection = agent_doc_harness::project_pane_composer_at_cursor(content, harness, cursor_y);
+    let residue = agent_doc_harness::claude_history_recall_at_cursor(harness, content, cursor_y)
+        .is_some()
+        || agent_doc_harness::agent_owned_composer_notice_at_cursor(harness, content, cursor_y)
+            .is_some();
+    let preview = agent_doc_harness::pane_composer_draft_at_cursor(harness, content, cursor_y);
+    let operator_draft = matches!(
+        projection,
+        agent_doc_harness::PaneComposerProjection::OperatorDraft { .. }
+    ) && !residue;
+    let command_drafted = operator_draft
+        && preview
+            .as_deref()
+            .is_some_and(|draft| composer_draft_is_exactly_command(draft, command));
+    let facts = AutoTriggerDraftFacts {
+        captured: true,
+        agent_addressed: matches!(
+            projection,
+            agent_doc_harness::PaneComposerProjection::AgentAddressed { .. }
+        ),
+        composer_residue: residue,
+        protected_input: harness
+            .protected_prompt_input_reason_at_cursor(content, cursor_y)
+            .is_some(),
+        foreign_draft: operator_draft && !command_drafted,
+        command_drafted,
+        pane_busy: harness.has_busy_cue(content),
+    };
+    (facts, preview)
+}
+
+fn log_auto_trigger_draft_refusal(
+    shared: &SupervisorShared,
+    harness: &agent_doc_harness::HarnessConfig,
+    reason: &str,
+    preview: Option<&str>,
+) {
+    let target = shared.inject_pane.as_deref().unwrap_or("child_pty");
+    let preview = preview.unwrap_or("<unavailable>");
+    let message = format!(
+        "auto_trigger_draft_refused target={target} harness={} reason={reason} draft_preview={preview:?} #autotriggerdraftguard note=nothing was typed",
+        harness.binary,
+    );
+    if let Some(runtime) = shared.actor_runtime.as_ref() {
+        agent_doc_ops_log_io::log_op(&runtime.file, &message);
+    }
+    if agent_doc_tmux_commands::input_diag::verbose_enabled() {
+        eprintln!(
+            "[agent-doc] auto-trigger refused ({reason}); composer on {target} was not modified"
+        );
+    }
+}
+
 fn auto_trigger_inject_command(
     shared: &SupervisorShared,
     stop: &AtomicBool,
@@ -895,6 +1001,24 @@ fn auto_trigger_inject_command(
         eprintln!("[agent-doc] auto-trigger gated: {reason}");
         return AutoTriggerOutcome::SendFailed;
     }
+    let submitted_text =
+        agent_doc_tmux_commands::submitted_text_without_trailing_line_endings(trigger_cmd)
+            .to_string();
+    let composer = observe_auto_trigger_composer(shared);
+    let (facts, preview) = read_auto_trigger_draft(
+        composer.content.as_deref(),
+        composer.cursor_y,
+        harness_cfg,
+        &submitted_text,
+    );
+    let submit_existing_draft = match auto_trigger_draft_guard(facts) {
+        AutoTriggerDraftGuard::Type => false,
+        AutoTriggerDraftGuard::SubmitStranded => true,
+        AutoTriggerDraftGuard::Refuse(reason) => {
+            log_auto_trigger_draft_refusal(shared, harness_cfg, reason, preview.as_deref());
+            return AutoTriggerOutcome::DraftRefused;
+        }
+    };
     let projection_key = match shared.begin_prompt_dispatch_projection("auto_trigger", trigger_cmd)
     {
         agent_doc_supervisor_io::ipc::PromptDispatchAdmission::Accepted { key } => Some(key),
@@ -936,23 +1060,32 @@ fn auto_trigger_inject_command(
         }
         None => None,
     };
-    let submitted_text =
-        agent_doc_tmux_commands::submitted_text_without_trailing_line_endings(trigger_cmd)
-            .to_string();
     let current_harness = shared.current_harness();
     if let Some(pane_id) = shared.inject_pane.as_deref() {
         let profile = agent_doc_tmux_commands::tmux_submit_profile_for_harness(&current_harness);
         agent_doc_tmux_io::input_diag::log_text_submit(
             agent_doc_tmux_io::input_diag::InputDiagSink::new(None, agent_doc_ops_log_io::log_op),
-            "supervisor.auto_trigger",
+            if submit_existing_draft {
+                "supervisor.auto_trigger_stranded_draft"
+            } else {
+                "supervisor.auto_trigger"
+            },
             &format!("pane:{pane_id}"),
-            &submitted_text,
+            if submit_existing_draft {
+                ""
+            } else {
+                &submitted_text
+            },
             Some(&current_harness),
             profile.transform(),
             profile.submit_key(),
         );
-        let outcome = match dispatch_submit_text_to_pane(pane_id, &submitted_text, &current_harness)
-        {
+        let sent = if submit_existing_draft {
+            dispatch_submit_existing_draft_to_pane(pane_id, &current_harness)
+        } else {
+            dispatch_submit_text_to_pane(pane_id, &submitted_text, &current_harness)
+        };
+        let outcome = match sent {
             Ok(()) => verify_auto_trigger_submitted(
                 shared,
                 pane_id,
@@ -983,12 +1116,24 @@ fn auto_trigger_inject_command(
         return AutoTriggerOutcome::Cancelled;
     }
 
-    let payload = submit_bytes(&submitted_text).into_bytes();
+    let payload = if submit_existing_draft {
+        b"\r".to_vec()
+    } else {
+        submit_bytes(&submitted_text).into_bytes()
+    };
     agent_doc_tmux_io::input_diag::log_text_submit(
         agent_doc_tmux_io::input_diag::InputDiagSink::new(None, agent_doc_ops_log_io::log_op),
-        "supervisor.auto_trigger",
+        if submit_existing_draft {
+            "supervisor.auto_trigger_stranded_draft"
+        } else {
+            "supervisor.auto_trigger"
+        },
         "child_pty",
-        &submitted_text,
+        if submit_existing_draft {
+            ""
+        } else {
+            &submitted_text
+        },
         Some(&current_harness),
         "raw_pty_submit_enter_byte",
         "Enter",
@@ -1121,6 +1266,21 @@ fn dispatch_submit_text_to_tmux(
 fn dispatch_submit_text_to_pane(pane: &str, text: &str, harness: &str) -> Result<()> {
     let tmux = agent_doc_tmux_io::configured_tmux();
     dispatch_submit_text_to_tmux(&tmux, pane, text, harness)
+}
+
+/// Press the harness submit key on a draft that is already this command.
+/// The text is not sent again (`#autotriggerdraftguard`).
+fn dispatch_submit_existing_draft_to_pane(pane: &str, harness: &str) -> Result<()> {
+    let tmux = agent_doc_tmux_io::configured_tmux();
+    agent_doc_tmux_io::send_submitted_text_for_harness_logged(
+        &tmux,
+        pane,
+        "",
+        harness,
+        agent_doc_tmux_io::input_diag::InputDiagSink::new(None, agent_doc_ops_log_io::log_op),
+        "supervisor.auto_trigger_stranded_draft",
+    )
+    .with_context(|| format!("failed to submit stranded draft in pane {pane}"))
 }
 
 /// How long a supervisor auto-trigger waits for the controller to project the
@@ -1571,6 +1731,18 @@ fn spawn_auto_trigger_thread(
                             if agent_doc_tmux_commands::input_diag::verbose_enabled() {
                                 eprintln!("[agent-doc] auto-trigger failed");
                             }
+                        }
+                        AutoTriggerOutcome::DraftRefused => {
+                            shared
+                                .auto_trigger_outcome
+                                .store(AutoTriggerOutcome::DraftRefused as u8, Ordering::Relaxed);
+                            log_event(
+                                &mut session_log,
+                                &format!(
+                                    "auto_trigger_refused harness={} reason=composer_draft #autotriggerdraftguard",
+                                    harness.binary
+                                ),
+                            );
                         }
                         outcome => {
                             shared
@@ -2589,8 +2761,7 @@ pub(crate) struct SupervisorShared {
     /// idle-tick effect records a successful durable sink receipt (GH #280).
     registry_publication_retry:
         agent_doc_supervisor::registry_publication::RegistryPublicationRetryState,
-    registry_publication_target:
-        Mutex<Option<agent_doc_start_io::StartSupervisorRegistryTarget>>,
+    registry_publication_target: Mutex<Option<agent_doc_start_io::StartSupervisorRegistryTarget>>,
     /// Lease for this process's authoritative actor generation. A controller CAS
     /// conflict retires it and suppresses every later lifecycle write.
     actor_generation_lease: agent_doc_supervisor::actor_generation::ActorGenerationLease,
@@ -5122,6 +5293,333 @@ mod tests {
             b"agent-doc tasks/software/tsift.md\r"
         );
     }
+
+    fn assert_auto_trigger_draft_guard(
+        content: Option<&str>,
+        cursor_y: Option<usize>,
+        harness: &agent_doc_harness::HarnessConfig,
+        command: &str,
+        expected: AutoTriggerDraftGuard,
+    ) {
+        let (facts, preview) = read_auto_trigger_draft(content, cursor_y, harness, command);
+        assert_eq!(
+            auto_trigger_draft_guard(facts),
+            expected,
+            "preview={preview:?} facts={facts:?}"
+        );
+    }
+
+    /// `#autotriggerdraftguard`: the word `continue` is an exact draft, not a
+    /// substring, and a busy composer with no draft is still safe to type into.
+    #[test]
+    fn auto_trigger_composer_read_classifies_drafts_before_typing() {
+        let claude = agent_doc_harness::HarnessConfig::claude();
+        let codex = agent_doc_harness::HarnessConfig::codex();
+        let command = "/agent-doc plan.md";
+
+        assert_auto_trigger_draft_guard(
+            None,
+            None,
+            &claude,
+            command,
+            AutoTriggerDraftGuard::Refuse("composer_unreadable"),
+        );
+        assert_auto_trigger_draft_guard(
+            Some(
+                "────────────────────────────────────────\n\
+                 ❯ keep going\n\
+                 ────────────────────────────────────────\n\
+                 ⏵⏵ bypass permissions on (shift+tab to cycle)\n",
+            ),
+            None,
+            &claude,
+            command,
+            AutoTriggerDraftGuard::Refuse("foreign_draft"),
+        );
+        assert_auto_trigger_draft_guard(
+            Some(
+                "────────────────────────────────────────\n\
+                 ❯\n\
+                 ────────────────────────────────────────\n\
+                 ⏵⏵ bypass permissions on (shift+tab to cycle)\n",
+            ),
+            None,
+            &claude,
+            command,
+            AutoTriggerDraftGuard::Type,
+        );
+        assert_auto_trigger_draft_guard(
+            Some(
+                "────────────────────────────────────────\n\
+                 ❯ /agent-doc plan.md\n\
+                 ────────────────────────────────────────\n\
+                 ⏵⏵ bypass permissions on (shift+tab to cycle)\n",
+            ),
+            None,
+            &claude,
+            command,
+            AutoTriggerDraftGuard::SubmitStranded,
+        );
+        assert_auto_trigger_draft_guard(
+            Some(
+                "✶ Generating… (3s · esc to interrupt)\n\
+                 ────────────────────────────────────────\n\
+                 ❯ /agent-doc plan.md\n\
+                 ────────────────────────────────────────\n\
+                 ⏵⏵ bypass permissions on · 1 shell\n",
+            ),
+            None,
+            &claude,
+            command,
+            AutoTriggerDraftGuard::Refuse("command_behind_running_turn"),
+        );
+        assert_auto_trigger_draft_guard(
+            Some("────────\n❯ Message @general-purpose…\n⏵⏵ bypass permissions on\n"),
+            None,
+            &claude,
+            command,
+            AutoTriggerDraftGuard::Refuse("agent_addressed"),
+        );
+
+        let working = "\
+• Working (1m 34s • esc to interrupt)\n\
+\n\
+›\n\
+gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used\n";
+        assert_auto_trigger_draft_guard(
+            Some(working),
+            None,
+            &codex,
+            "continue",
+            AutoTriggerDraftGuard::Type,
+        );
+        for foreign in ["› keep going", "› please continue"] {
+            assert_auto_trigger_draft_guard(
+                Some(&format!(
+                    "{foreign}\ngpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used\n"
+                )),
+                None,
+                &codex,
+                "continue",
+                AutoTriggerDraftGuard::Refuse("foreign_draft"),
+            );
+        }
+        assert_auto_trigger_draft_guard(
+            Some("› continue\ngpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used\n"),
+            None,
+            &codex,
+            "continue",
+            AutoTriggerDraftGuard::SubmitStranded,
+        );
+        assert_auto_trigger_draft_guard(
+            Some(
+                "\x1b[1m›\x1b[0m \x1b[2mcontinue\x1b[0m\n\
+                 gpt-5.5 high · ~/work/btakita/agent-loop · Context 40% used\n",
+            ),
+            None,
+            &codex,
+            "continue",
+            AutoTriggerDraftGuard::Type,
+        );
+    }
+
+    #[test]
+    fn auto_trigger_composer_read_refuses_residue_and_protected_input() {
+        let claude = agent_doc_harness::HarnessConfig::claude();
+        let recalled = concat!(
+            "completed response\n",
+            "\x1b[38;5;240m─── History 93/100 ───\x1b[0m\n",
+            "\x1b[38;5;153m❯\u{a0}/agent-doc /workspace/other.md\x1b[0m\n",
+            "────────\n",
+            "  ⏵⏵ auto mode on (shift+tab to cycle)\n",
+        );
+        assert_auto_trigger_draft_guard(
+            Some(recalled),
+            Some(2),
+            &claude,
+            "/agent-doc /workspace/other.md",
+            AutoTriggerDraftGuard::Refuse("composer_residue"),
+        );
+
+        let notice = concat!(
+            "completed response\n",
+            "❯\u{a0}[agent-doc] idle-queue watch: reconciled stale busy actor to ready\n",
+            "custom model and context status\n",
+        );
+        assert_auto_trigger_draft_guard(
+            Some(notice),
+            Some(1),
+            &claude,
+            "/agent-doc plan.md",
+            AutoTriggerDraftGuard::Refuse("composer_residue"),
+        );
+
+        let permission = "\
+  ⎿  Running…\n\
+\n\
+ Do you want to proceed?\n\
+   [1] Yes\n\
+ ❯ [2] Yes, and don't ask again for: tmux capture-pane:*\n\
+   [3] No\n\
+\n\
+ Esc to cancel · ctrl+e to explain\n";
+        let (facts, preview) =
+            read_auto_trigger_draft(Some(permission), None, &claude, "/agent-doc plan.md");
+        let guard = auto_trigger_draft_guard(facts);
+        assert!(
+            matches!(
+                guard,
+                AutoTriggerDraftGuard::Refuse("protected_input" | "foreign_draft")
+            ),
+            "a permission prompt must not be typed or submitted: {guard:?} preview={preview:?} facts={facts:?}"
+        );
+    }
+
+    fn assert_screen_inject(
+        screen: &str,
+        harness: &agent_doc_harness::HarnessConfig,
+        command: &str,
+        expected: AutoTriggerOutcome,
+        expected_bytes: &[u8],
+    ) {
+        let shared = SupervisorShared::new("test", "test-instance".to_string());
+        record_terminal_screen(&shared, screen.as_bytes());
+        let detected = child_output_for_detection(&shared);
+        let (facts, preview) = read_auto_trigger_draft(Some(&detected), None, harness, command);
+        let written = Arc::new(Mutex::new(Vec::new()));
+        *shared.inject_writer.lock() = Some(Arc::new(Mutex::new(SharedPtyWriter::new(Box::new(
+            RecordingWriter(written.clone()),
+        )))));
+        let stop = AtomicBool::new(false);
+        let outcome = auto_trigger_inject_command(&shared, &stop, command, harness);
+        assert_eq!(
+            outcome,
+            expected,
+            "detected={detected:?} preview={preview:?} facts={facts:?} guard={:?}",
+            auto_trigger_draft_guard(facts)
+        );
+        assert_eq!(
+            written.lock().as_slice(),
+            expected_bytes,
+            "detected={detected:?}"
+        );
+        if expected == AutoTriggerOutcome::DraftRefused {
+            assert_eq!(shared.prompt_dispatch_epoch.load(Ordering::Relaxed), 0);
+            assert!(shared.prompt_dispatch_projection.lock().is_none());
+            assert!(shared.actor_state.lock().is_none());
+        }
+    }
+
+    #[test]
+    fn auto_trigger_inject_refuses_a_foreign_screen_draft_without_typing() {
+        let claude = agent_doc_harness::HarnessConfig::claude();
+        let foreign = "\
+\x1b[2J\x1b[H────────────────────────────────────────\r\n\
+❯ keep going\r\n\
+────────────────────────────────────────\r\n\
+  Opus 4.8 ctx:18% ~/work/btakita/agent-loop main\r\n\
+  ⏵⏵ bypass permissions on (shift+tab to cycle)\r\n";
+        assert_screen_inject(
+            foreign,
+            &claude,
+            "/agent-doc plan.md",
+            AutoTriggerOutcome::DraftRefused,
+            b"",
+        );
+
+        let codex = agent_doc_harness::HarnessConfig::codex();
+        let longer = "\
+\x1b[2J\x1b[H› please continue\r\n\
+gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used\r\n";
+        assert_screen_inject(
+            longer,
+            &codex,
+            "continue",
+            AutoTriggerOutcome::DraftRefused,
+            b"",
+        );
+    }
+
+    #[test]
+    fn auto_trigger_inject_submits_a_stranded_exact_draft_with_enter_only() {
+        let screen = "\
+\x1b[2J\x1b[H────────────────────────────────────────\r\n\
+❯ /agent-doc plan.md\r\n\
+────────────────────────────────────────\r\n\
+  Opus 4.8 ctx:18% ~/work/btakita/agent-loop main\r\n\
+  ⏵⏵ bypass permissions on (shift+tab to cycle)\r\n";
+        assert_screen_inject(
+            screen,
+            &agent_doc_harness::HarnessConfig::claude(),
+            "/agent-doc plan.md",
+            AutoTriggerOutcome::Sent,
+            b"\r",
+        );
+    }
+
+    #[test]
+    fn auto_trigger_inject_types_continue_into_an_empty_busy_composer() {
+        let screen = "\
+\x1b[2J\x1b[H• Working (1m 34s • esc to interrupt)\r\n\
+\r\n\
+›\r\n\
+gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used\r\n";
+        assert_screen_inject(
+            screen,
+            &agent_doc_harness::HarnessConfig::codex(),
+            "continue",
+            AutoTriggerOutcome::Sent,
+            b"continue\r",
+        );
+    }
+
+    #[test]
+    fn auto_trigger_inject_types_over_a_ghost_of_the_command() {
+        let screen = "\
+\x1b[2J\x1b[H\x1b[1m›\x1b[0m \x1b[2mcontinue\x1b[0m\r\n\
+\r\n\
+  gpt-5.5 xhigh · ~/work · Context 40% used\r\n";
+        assert_screen_inject(
+            screen,
+            &agent_doc_harness::HarnessConfig::codex(),
+            "continue",
+            AutoTriggerOutcome::Sent,
+            b"continue\r",
+        );
+    }
+
+    #[test]
+    fn auto_trigger_inject_reads_the_composer_before_the_busy_transition() {
+        let source = include_str!("lib.rs");
+        let inject = source
+            .split_once("fn auto_trigger_inject_command(")
+            .and_then(|(_, tail)| tail.split_once("\nfn auto_trigger_clear_command("))
+            .map(|(body, _)| body)
+            .expect("auto_trigger_inject_command must remain discoverable");
+        let guard = inject
+            .find("auto_trigger_draft_guard(")
+            .expect("the inject must classify the composer");
+        let projection = inject
+            .find("begin_prompt_dispatch_projection(")
+            .expect("the inject still admits a prompt projection");
+        let busy = inject
+            .find("transition_actor_state(")
+            .expect("the inject still marks the actor busy");
+        assert!(
+            guard < projection && projection < busy,
+            "a refusal must return before the dispatch projection and the busy transition"
+        );
+        let clear = source
+            .split_once("fn auto_trigger_clear_command(")
+            .and_then(|(_, tail)| tail.split_once("\nfn auto_trigger_submit_queue_command("))
+            .map(|(body, _)| body)
+            .expect("auto_trigger_clear_command must remain discoverable");
+        assert!(
+            !clear.contains("auto_trigger_draft_guard("),
+            "a context clear stays on auto_trigger_clear_command"
+        );
+    }
+
     #[test]
     fn auto_trigger_inject_command_rejects_failed_capability_proof() {
         let shared = Arc::new(SupervisorShared::new("test", "test-instance".to_string()));

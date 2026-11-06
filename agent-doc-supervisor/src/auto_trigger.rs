@@ -45,6 +45,8 @@ pub enum AutoTriggerOutcome {
     SendFailed = 4,
     Cancelled = 5,
     SkippedClearCooldown = 6,
+    /// The composer was read and the inject typed nothing (`#autotriggerdraftguard`).
+    DraftRefused = 7,
 }
 
 impl AutoTriggerOutcome {
@@ -56,6 +58,7 @@ impl AutoTriggerOutcome {
             4 => Self::SendFailed,
             5 => Self::Cancelled,
             6 => Self::SkippedClearCooldown,
+            7 => Self::DraftRefused,
             _ => Self::NotNeeded,
         }
     }
@@ -69,8 +72,92 @@ impl AutoTriggerOutcome {
             Self::SendFailed => "send_failed",
             Self::Cancelled => "cancelled",
             Self::SkippedClearCooldown => "skipped_clear_cooldown",
+            Self::DraftRefused => "draft_refused",
         }
     }
+}
+
+/// What `auto_trigger_inject_command` may do after it has read the composer
+/// (`#autotriggerdraftguard`).
+///
+/// The restart trigger and the Codex capacity `continue` retry both write
+/// through that function, and neither caller runs the route composer guard.
+/// A busy composer with no draft is still safe to type into: the capacity
+/// retry exists to submit `continue` while Codex is showing its error.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AutoTriggerDraftGuard {
+    /// The read composer is empty enough to receive this command.
+    Type,
+    /// This exact command is already the idle composer's draft. Press Enter;
+    /// do not type it again.
+    SubmitStranded,
+    /// Type nothing. `reason` is a stable log token.
+    Refuse(&'static str),
+}
+
+/// Composer facts for [`auto_trigger_draft_guard`]. The caller has already
+/// classified one ANSI or supervisor-screen read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AutoTriggerDraftFacts {
+    /// False only when the destination could not be read. An empty screen is
+    /// a completed read.
+    pub captured: bool,
+    pub agent_addressed: bool,
+    /// History recall or an agent-doc notice sitting in the composer. Not ours
+    /// to submit, and not safe to type onto.
+    pub composer_residue: bool,
+    pub protected_input: bool,
+    /// An operator draft that is not this exact command.
+    pub foreign_draft: bool,
+    /// The current draft is exactly this command.
+    pub command_drafted: bool,
+    pub pane_busy: bool,
+}
+
+impl AutoTriggerDraftFacts {
+    pub const fn unreadable() -> Self {
+        Self {
+            captured: false,
+            agent_addressed: false,
+            composer_residue: false,
+            protected_input: false,
+            foreign_draft: false,
+            command_drafted: false,
+            pane_busy: false,
+        }
+    }
+}
+
+/// Decide the inject from one composer read (`#autotriggerdraftguard`).
+///
+/// Order matches the route guard: an unread composer refuses, a different
+/// draft refuses on an idle or a busy pane alike, and this command is
+/// submitted only when it is the entire idle draft. Protected input is
+/// checked after that so a stranded copy of this command is not reclassified
+/// as a Codex "drafted prompt input" refusal.
+pub const fn auto_trigger_draft_guard(facts: AutoTriggerDraftFacts) -> AutoTriggerDraftGuard {
+    if !facts.captured {
+        return AutoTriggerDraftGuard::Refuse("composer_unreadable");
+    }
+    if facts.agent_addressed {
+        return AutoTriggerDraftGuard::Refuse("agent_addressed");
+    }
+    if facts.composer_residue {
+        return AutoTriggerDraftGuard::Refuse("composer_residue");
+    }
+    if facts.foreign_draft {
+        return AutoTriggerDraftGuard::Refuse("foreign_draft");
+    }
+    if facts.command_drafted && facts.pane_busy {
+        return AutoTriggerDraftGuard::Refuse("command_behind_running_turn");
+    }
+    if facts.command_drafted {
+        return AutoTriggerDraftGuard::SubmitStranded;
+    }
+    if facts.protected_input {
+        return AutoTriggerDraftGuard::Refuse("protected_input");
+    }
+    AutoTriggerDraftGuard::Type
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -272,6 +359,7 @@ mod tests {
                 AutoTriggerOutcome::SkippedClearCooldown,
                 "skipped_clear_cooldown",
             ),
+            (7, AutoTriggerOutcome::DraftRefused, "draft_refused"),
         ];
 
         for (wire_value, outcome, label) in cases {
@@ -280,8 +368,77 @@ mod tests {
             assert_eq!(outcome.as_str(), label);
         }
         assert_eq!(
-            AutoTriggerOutcome::from_u8(7),
+            AutoTriggerOutcome::from_u8(8),
             AutoTriggerOutcome::NotNeeded
+        );
+    }
+
+    fn facts(mut apply: impl FnMut(&mut AutoTriggerDraftFacts)) -> AutoTriggerDraftFacts {
+        let mut facts = AutoTriggerDraftFacts {
+            captured: true,
+            ..AutoTriggerDraftFacts::unreadable()
+        };
+        apply(&mut facts);
+        facts
+    }
+
+    #[test]
+    fn auto_trigger_draft_guard_types_only_a_read_empty_composer() {
+        assert_eq!(
+            auto_trigger_draft_guard(AutoTriggerDraftFacts::unreadable()),
+            AutoTriggerDraftGuard::Refuse("composer_unreadable")
+        );
+        assert_eq!(
+            auto_trigger_draft_guard(facts(|_| {})),
+            AutoTriggerDraftGuard::Type,
+            "a busy-free empty read is safe to type into"
+        );
+        assert_eq!(
+            auto_trigger_draft_guard(facts(|facts| facts.pane_busy = true)),
+            AutoTriggerDraftGuard::Type,
+            "the capacity retry types continue into a busy composer that holds no draft"
+        );
+    }
+
+    #[test]
+    fn auto_trigger_draft_guard_refuses_a_foreign_draft_idle_or_busy() {
+        for pane_busy in [false, true] {
+            assert_eq!(
+                auto_trigger_draft_guard(facts(|facts| {
+                    facts.foreign_draft = true;
+                    facts.pane_busy = pane_busy;
+                })),
+                AutoTriggerDraftGuard::Refuse("foreign_draft")
+            );
+        }
+        assert_eq!(
+            auto_trigger_draft_guard(facts(|facts| facts.agent_addressed = true)),
+            AutoTriggerDraftGuard::Refuse("agent_addressed")
+        );
+        assert_eq!(
+            auto_trigger_draft_guard(facts(|facts| facts.composer_residue = true)),
+            AutoTriggerDraftGuard::Refuse("composer_residue")
+        );
+        assert_eq!(
+            auto_trigger_draft_guard(facts(|facts| facts.protected_input = true)),
+            AutoTriggerDraftGuard::Refuse("protected_input")
+        );
+    }
+
+    #[test]
+    fn auto_trigger_draft_guard_submits_an_exact_idle_draft_and_refuses_it_while_busy() {
+        assert_eq!(
+            auto_trigger_draft_guard(facts(|facts| facts.command_drafted = true)),
+            AutoTriggerDraftGuard::SubmitStranded
+        );
+        assert_eq!(
+            auto_trigger_draft_guard(facts(|facts| {
+                facts.command_drafted = true;
+                facts.pane_busy = true;
+                facts.protected_input = true;
+            })),
+            AutoTriggerDraftGuard::Refuse("command_behind_running_turn"),
+            "a stranded command behind a running turn is not reclassified as protected input, and it is not submitted"
         );
     }
 

@@ -2669,6 +2669,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
             let mut codex_model_capacity_recovery_attempts: u8 = 0;
             let mut codex_model_capacity_recovery_exhausted_logged = false;
             let mut codex_model_capacity_error_armed = true;
+            let mut codex_model_capacity_draft_refused_logged = false;
             let auto_install_enabled =
                 agent_doc_supervisor_io::config::supervisor_auto_install_enabled(&path);
             let install_crate_root = if auto_install_enabled {
@@ -3588,6 +3589,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     && !capacity_error_visible
                 {
                     codex_model_capacity_error_armed = true;
+                    codex_model_capacity_draft_refused_logged = false;
                 }
                 match agent_doc_supervisor::detection::codex_model_capacity_recovery_decision(
                     &harness.binary,
@@ -3616,6 +3618,25 @@ pub(super) fn spawn_idle_queue_watch_thread(
                             );
                         let outcome =
                             auto_trigger_inject_command(&shared, &stop, "continue", &harness);
+                        if outcome == AutoTriggerOutcome::DraftRefused {
+                            // The composer held a draft. Do not spend one of the
+                            // two recovery attempts, and keep the error armed so
+                            // the same continue is sent once the draft is gone.
+                            codex_model_capacity_recovery_attempts =
+                                codex_model_capacity_recovery_attempts.saturating_sub(1);
+                            codex_model_capacity_error_armed = true;
+                            if !codex_model_capacity_draft_refused_logged {
+                                codex_model_capacity_draft_refused_logged = true;
+                                let event = format!(
+                                    "codex_model_capacity_recovery_draft_refused file={} pane={} action=wait_for_clear_composer (#autotriggerdraftguard)",
+                                    path.display(),
+                                    shared.inject_pane.as_deref().unwrap_or("<pty>"),
+                                );
+                                log_event(&mut session_log, &event);
+                                agent_doc_ops_log_io::log_op(&path, &event);
+                            }
+                            continue;
+                        }
                         let event = format!(
                             "codex_model_capacity_recovery file={} pane={} attempt={} max_attempts={} recovered_projection={} action=submit_continue result={:?} (#codexcapacityretry)",
                             path.display(),
@@ -7849,6 +7870,16 @@ mod tests {
         assert!(recovery < injection);
         assert!(projection_recovery < injection);
         assert!(injection < fast_path);
+        let refusal = source[injection..fast_path]
+            .find("if outcome == AutoTriggerOutcome::DraftRefused {")
+            .map(|offset| injection + offset)
+            .expect("a refused continue must be handled before the quiescent fast path");
+        let between = &source[refusal..fast_path];
+        assert!(
+            between.contains("saturating_sub(1)")
+                && between.contains("codex_model_capacity_error_armed = true"),
+            "a draft refusal must not spend the capacity attempt and must stay armed"
+        );
     }
 
     #[test]

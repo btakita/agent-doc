@@ -220,6 +220,8 @@ fn principles_lists_facts_and_lint_reports_fact_warnings() {
         "- fact [#jws]: Session tokens are JWS.\n",
         "- fact #os: Linux and macOS.\n",
         "- fact [#jws]: declared twice\n",
+        "- fact [#bad id]: never a premise\n",
+        "- Fact checking comes first.\n",
         "<!-- /agent:rules -->\n\n",
         "<!-- agent:exchange -->\n",
         "prompt\n",
@@ -263,7 +265,7 @@ fn principles_lists_facts_and_lint_reports_fact_warnings() {
         .collect();
     assert_eq!(
         codes,
-        vec!["fact_in_global_file", "fact_duplicate_id"],
+        vec!["fact_in_global_file", "fact_duplicate_id", "fact_malformed"],
         "{json:#}"
     );
 
@@ -279,7 +281,9 @@ fn principles_lists_facts_and_lint_reports_fact_warnings() {
                 .and(predicate::str::contains(
                     "[#jws] document: Session tokens are JWS.",
                 ))
-                .and(predicate::str::contains("  fact_duplicate_id: ")),
+                .and(predicate::str::contains("  fact_duplicate_id: "))
+                .and(predicate::str::contains("  fact_malformed: "))
+                .and(predicate::str::contains("Fact checking").not()),
         );
 
     cargo_bin_cmd!("agent-doc")
@@ -289,12 +293,13 @@ fn principles_lists_facts_and_lint_reports_fact_warnings() {
         .assert()
         .success()
         .stderr(
-            predicate::str::contains("2 principle/fact warning(s)")
+            predicate::str::contains("3 principle/fact warning(s)")
                 .and(predicate::str::contains(
                     "facts.md: warning: fact [#jws] is declared twice",
                 ))
                 .and(predicate::str::contains("[fact_in_global_file]"))
-                .and(predicate::str::contains("[fact_duplicate_id]")),
+                .and(predicate::str::contains("[fact_duplicate_id]"))
+                .and(predicate::str::contains("[fact_malformed]")),
         );
     assert_eq!(std::fs::read_to_string(&document).unwrap(), document_text);
 }

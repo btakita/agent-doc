@@ -17,7 +17,9 @@
 //!   a farther one and lists the replaced source in `overrides`; a second fact
 //!   with one id in the same file is a `fact_duplicate_id` issue and the first
 //!   applies ([`compose_facts`]). A fact item stays in `agent_rules` as
-//!   written.
+//!   written. An item that starts like a fact but has no valid id or no
+//!   statement is a `fact_malformed` issue ([`classify_fact`]): it stays an
+//!   ordinary rule and is not a premise.
 //! - [`PremiseRecord`] is one premise's statement plus the digest a caller
 //!   stores (the caller supplies the hash function, so this crate stays free
 //!   of hashing and storage). [`statement_digest_input`] is the canonical text
@@ -36,7 +38,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::derivation::{Contradiction, Graph, Impact, NodeKind, NodeRef};
 use crate::{
-    ISSUE_FACT_DUPLICATE_ID, Layer, Principle, PrincipleIssue, PrincipleScope, is_valid_id,
+    ISSUE_FACT_DUPLICATE_ID, ISSUE_FACT_MALFORMED, Layer, Principle, PrincipleIssue,
+    PrincipleScope, first_line, is_valid_id,
 };
 
 /// One premise statement in scope for a document: a principle or a fact.
@@ -88,30 +91,64 @@ pub struct ParsedFact {
     pub statement: String,
 }
 
-/// Parse one rule text as a fact; `None` when it is not a well-formed
-/// `fact [#id]: <statement>` item.
-pub fn parse_fact(rule: &str) -> Option<ParsedFact> {
-    let mut lines = rule.lines();
-    let first = lines.next()?.trim_start();
-    let head = first.get(..4)?;
-    if !head.eq_ignore_ascii_case("fact") {
-        return None;
-    }
-    let rest = &first[4..];
-    let next = rest.chars().next()?;
-    if !(next.is_whitespace() || matches!(next, '[' | '#')) {
-        return None;
-    }
-    let rest = rest.trim_start();
-    let (id, statement_head) = if let Some(bracketed) = rest.strip_prefix("[#") {
-        let (id, tail) = bracketed.split_once(']')?;
-        (id.trim(), tail.trim_start().strip_prefix(':')?)
-    } else {
-        let (id, statement) = rest.strip_prefix('#')?.split_once(':')?;
-        (id.trim(), statement)
+/// How one rule text reads as a fact.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FactForm {
+    /// Not a fact: an ordinary rule.
+    Plain,
+    /// A well-formed fact.
+    Fact(ParsedFact),
+    /// Starts like a fact but is not one (`#factmalformedwarning`): the rule
+    /// stays plain and is not a premise.
+    Malformed { reason: String },
+}
+
+/// Classify one rule text as a fact.
+///
+/// The shape is `fact` (any case) followed by whitespace, `[`, `#`, or `:`,
+/// then a `[#id]`, `#id`, `[id]`, or `:`. Anything else stays
+/// [`FactForm::Plain`], so prose that opens with the word ("Fact checking
+/// comes first.", "Facts matter.") is never reported.
+pub fn classify_fact(rule: &str) -> FactForm {
+    const NEEDS_ID: &str = "a fact needs an id: `fact [#id]: <statement>`";
+    let malformed = |reason: &str| FactForm::Malformed {
+        reason: reason.to_string(),
     };
+    let mut lines = rule.lines();
+    let Some(first) = lines.next() else {
+        return FactForm::Plain;
+    };
+    let Some(after_keyword) = strip_fact_keyword(first.trim_start()) else {
+        return FactForm::Plain;
+    };
+    let rest = after_keyword.trim_start();
+    let (id, statement_head) = if let Some(bracketed) = rest.strip_prefix("[#") {
+        let Some((id, tail)) = bracketed.split_once(']') else {
+            return malformed("the `[#id]` has no closing `]`");
+        };
+        let Some(statement) = tail.trim_start().strip_prefix(':') else {
+            return malformed("expected `:` after `[#id]`");
+        };
+        (id.trim(), statement)
+    } else if let Some(hashed) = rest.strip_prefix('#') {
+        let Some((id, statement)) = hashed.split_once(':') else {
+            return malformed("expected `:` after `#id`");
+        };
+        (id.trim(), statement)
+    } else if rest.starts_with(':') {
+        return malformed(NEEDS_ID);
+    } else if rest.starts_with('[') {
+        return malformed("a fact id starts with `#`: `fact [#id]: <statement>`");
+    } else {
+        return FactForm::Plain;
+    };
+    if id.is_empty() {
+        return malformed(NEEDS_ID);
+    }
     if !is_valid_id(id) {
-        return None;
+        return malformed(&format!(
+            "fact id {id:?} must start with a letter or digit and may use only ASCII letters, digits, `-`, `_` and `.`"
+        ));
     }
     let statement = std::iter::once(statement_head)
         .chain(lines)
@@ -119,10 +156,34 @@ pub fn parse_fact(rule: &str) -> Option<ParsedFact> {
         .filter(|line| !line.is_empty())
         .collect::<Vec<_>>()
         .join("\n");
-    (!statement.is_empty()).then(|| ParsedFact {
+    if statement.is_empty() {
+        return malformed(&format!("fact [#{id}] has no statement"));
+    }
+    FactForm::Fact(ParsedFact {
         id: id.to_string(),
         statement,
     })
+}
+
+/// `fact` (any case) followed by whitespace, `[`, `#`, or `:`.
+fn strip_fact_keyword(line: &str) -> Option<&str> {
+    const KEYWORD: &str = "fact";
+    let head = line.get(..KEYWORD.len())?;
+    if !head.eq_ignore_ascii_case(KEYWORD) {
+        return None;
+    }
+    let rest = &line[KEYWORD.len()..];
+    let next = rest.chars().next()?;
+    (next.is_whitespace() || matches!(next, '[' | '#' | ':')).then_some(rest)
+}
+
+/// Parse one rule text as a fact; `None` when it is not a well-formed
+/// `fact [#id]: <statement>` item ([`classify_fact`] says why).
+pub fn parse_fact(rule: &str) -> Option<ParsedFact> {
+    match classify_fact(rule) {
+        FactForm::Fact(parsed) => Some(parsed),
+        FactForm::Plain | FactForm::Malformed { .. } => None,
+    }
 }
 
 /// A fact in scope, after nearest-wins composition.
@@ -151,7 +212,8 @@ pub struct FactComposition {
 /// (the caller reports a fact written there). A nearer fact with the same id
 /// replaces the farther one in place and records the replaced source in
 /// [`Fact::overrides`]; within one layer the first declaration wins and each
-/// later one is a [`ISSUE_FACT_DUPLICATE_ID`] issue.
+/// later one is a [`ISSUE_FACT_DUPLICATE_ID`] issue. A fact-shaped rule that
+/// is not a fact is a [`ISSUE_FACT_MALFORMED`] issue and composes nothing.
 pub fn compose_facts(layers: &[Layer]) -> FactComposition {
     let mut composition = FactComposition::default();
     for layer in layers {
@@ -159,7 +221,22 @@ pub fn compose_facts(layers: &[Layer]) -> FactComposition {
             continue;
         }
         let mut seen_in_layer: Vec<String> = Vec::new();
-        for parsed in layer.rules.iter().filter_map(|rule| parse_fact(rule)) {
+        for rule in &layer.rules {
+            let parsed = match classify_fact(rule) {
+                FactForm::Plain => continue,
+                FactForm::Fact(parsed) => parsed,
+                FactForm::Malformed { reason } => {
+                    composition.issues.push(PrincipleIssue {
+                        code: ISSUE_FACT_MALFORMED,
+                        message: format!(
+                            "{reason}; kept as an ordinary rule, not a premise: {:?}",
+                            first_line(rule)
+                        ),
+                        source: layer.source.clone(),
+                    });
+                    continue;
+                }
+            };
             if seen_in_layer.contains(&parsed.id) {
                 composition.issues.push(PrincipleIssue {
                     code: ISSUE_FACT_DUPLICATE_ID,
@@ -414,6 +491,101 @@ mod tests {
         ] {
             assert_eq!(parse_fact(rule), None, "{rule:?}");
         }
+    }
+
+    /// `#factmalformedwarning`: every shape `parse_fact` refuses for a bad id
+    /// or an empty statement says why, so nothing the operator meant as a
+    /// premise disappears silently.
+    #[test]
+    fn a_fact_shaped_rule_that_is_not_a_fact_says_why() {
+        for (rule, needle) in [
+            ("fact: no id here", "needs an id"),
+            ("FACT: no id here", "needs an id"),
+            ("fact [#]: empty id", "needs an id"),
+            ("fact #: empty id", "needs an id"),
+            ("fact [jws]: no hash", "starts with `#`"),
+            ("fact [#open: unclosed", "closing `]`"),
+            ("fact [#ok] missing colon", "expected `:`"),
+            ("fact #nocolon", "expected `:`"),
+            ("fact [#has space]: x", "may use only"),
+            ("fact #has space: x", "may use only"),
+            ("fact [#-lead]: x", "start with a letter or digit"),
+            ("fact [#empty]:", "has no statement"),
+            ("fact [#empty]:   \n   \n", "has no statement"),
+            ("fact #empty:", "has no statement"),
+        ] {
+            match classify_fact(rule) {
+                FactForm::Malformed { reason } => {
+                    assert!(reason.contains(needle), "{rule:?}: {reason}");
+                }
+                other => panic!("{rule:?} should be malformed, got {other:?}"),
+            }
+            assert_eq!(parse_fact(rule), None, "{rule:?}");
+        }
+    }
+
+    /// A warning on prose would teach the operator to ignore the warning.
+    #[test]
+    fn prose_that_opens_with_the_word_fact_is_plain_and_never_reported() {
+        for rule in [
+            "",
+            "fact",
+            "Facts matter more than opinions.",
+            "Fact checking comes before the merge.",
+            "fact-check the release notes",
+            "factor [#x]: a different word",
+            "In fact [#x]: not at the start",
+        ] {
+            assert_eq!(classify_fact(rule), FactForm::Plain, "{rule:?}");
+        }
+    }
+
+    #[test]
+    fn every_well_formed_fact_still_classifies_as_a_fact() {
+        for rule in [
+            "fact [#jws]: Credentials are JWS.",
+            "fact[#jws]: no space",
+            "fact#jws: no space",
+            "  fact [# jws ] : spaced",
+            "fact [#jws]:\n  statement on the next line",
+        ] {
+            assert!(
+                matches!(classify_fact(rule), FactForm::Fact(_)),
+                "{rule:?}: {:?}",
+                classify_fact(rule)
+            );
+        }
+    }
+
+    #[test]
+    fn a_malformed_fact_is_reported_at_its_file_and_is_not_a_premise() {
+        let layers = [layer(
+            PrincipleScope::Document,
+            "doc.md",
+            &["fact [#bad id]: not a premise", "fact [#ok]: a premise"],
+        )];
+        let composition = compose_facts(&layers);
+        assert_eq!(
+            composition
+                .facts
+                .iter()
+                .map(|fact| fact.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["ok"]
+        );
+        assert_eq!(composition.issues.len(), 1, "{:?}", composition.issues);
+        let issue = &composition.issues[0];
+        assert_eq!(
+            (issue.code, issue.source.as_str()),
+            (ISSUE_FACT_MALFORMED, "doc.md")
+        );
+        assert!(
+            issue
+                .message
+                .ends_with("not a premise: \"fact [#bad id]: not a premise\""),
+            "{}",
+            issue.message
+        );
     }
 
     #[test]

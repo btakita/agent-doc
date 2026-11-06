@@ -40,3 +40,6 @@ formal/**/lake-manifest.json
 # cargo-fuzz scratch (corpus/ and regressions/ are committed)
 fuzz/artifacts/
 fuzz/coverage/
+# A verification log inside the tree. The dev-check fingerprint hashes every
+# untracked, unignored file, so this would void the proof it is recording.
+/check.log

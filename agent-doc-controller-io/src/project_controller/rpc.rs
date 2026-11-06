@@ -20903,6 +20903,17 @@ prompt_presets:\n  \"#upgrade\": \"upgrade agent-doc to the latest release\"\n--
         .unwrap();
     }
 
+    /// `#tmuxciorphandrain`: one line per stretch of a live supervisor owning
+    /// the head, and a fresh line once that stretch ended.
+    #[test]
+    fn supervisor_alive_yield_logs_on_the_transition_not_every_tick() {
+        let file = Path::new("/nonexistent/supervisor-alive-yield.md");
+        assert!(orphan_drain_supervisor_alive_transition(file, true));
+        assert!(!orphan_drain_supervisor_alive_transition(file, true));
+        assert!(!orphan_drain_supervisor_alive_transition(file, false));
+        assert!(orphan_drain_supervisor_alive_transition(file, true));
+    }
+
     fn background_route(file: &Path) -> ControllerEditorRouteInvocation {
         ControllerEditorRouteInvocation {
             file: file.to_path_buf(),
@@ -21294,6 +21305,21 @@ fn orphan_drain_pause_suppression_transition(file: &Path, suppressed: bool) -> b
     }
 }
 
+/// `#tmuxciorphandrain`: true once per stretch of a live supervisor owning a
+/// drainable head, so the yield is observable without a line every sweep tick.
+fn orphan_drain_supervisor_alive_transition(file: &Path, yielded: bool) -> bool {
+    static YIELDED_DOCUMENTS: OnceLock<Mutex<std::collections::HashSet<PathBuf>>> = OnceLock::new();
+    let mut documents = YIELDED_DOCUMENTS
+        .get_or_init(|| Mutex::new(std::collections::HashSet::new()))
+        .lock();
+    if yielded {
+        documents.insert(file.to_path_buf())
+    } else {
+        documents.remove(file);
+        false
+    }
+}
+
 fn orphan_drain_claim_suppression_transition(file: &Path, suppressed: bool) -> bool {
     static SUPPRESSED_DOCUMENTS: OnceLock<Mutex<std::collections::HashSet<PathBuf>>> =
         OnceLock::new();
@@ -21470,10 +21496,24 @@ fn orphan_drain_closed_for_test() -> bool {
             .is_some_and(|gate| !Path::new(&gate).exists())
 }
 
+/// `#tmuxciorphandrain` debug-build seam. While
+/// `AGENT_DOC_TEST_ORPHAN_DRAIN_STALE_LIVENESS` names a file that EXISTS, the
+/// sweep decides as if its liveness probe had found no supervisor. That is the
+/// one input the live tmux suite cannot produce by ordering alone: a route
+/// running after a sweep whose observation predates the restart, the case the
+/// route's `supervisor_restarting` guard exists for. The `/proc` probe sees a
+/// supervisor held mid re-exec, so without this the guard is unreachable from a
+/// test. Unavailable in optimized production builds.
+fn orphan_drain_liveness_stale_for_test() -> bool {
+    cfg!(debug_assertions)
+        && std::env::var_os("AGENT_DOC_TEST_ORPHAN_DRAIN_STALE_LIVENESS")
+            .is_some_and(|gate| Path::new(&gate).exists())
+}
+
 fn controller_orphan_drain_tick(runtime: &Arc<ControllerRuntime>) {
     use agent_doc_controller::orphan_drain::{
         DEFAULT_MIN_DISPATCH_INTERVAL_SECS, OrphanDrainDecision, OrphanDrainEvent,
-        OrphanDrainObservation, OrphanDrainQueueControl, orphan_drain_decision,
+        OrphanDrainObservation, OrphanDrainQueueControl, OrphanDrainSkip, orphan_drain_decision,
     };
 
     // `#drainingpredecessor` (GH #261): a promoted predecessor never routes.
@@ -21826,17 +21866,17 @@ fn controller_orphan_drain_tick(runtime: &Arc<ControllerRuntime>) {
         );
         let recovered_actor_fallback =
             orphan_drain_same_attempt(last_dispatch.as_ref(), &attempt_holder);
+        // `#supervisorpidoperatorstarted`: an operator-started supervisor runs
+        // the same idle watch as a route-owned one.
+        let serving_supervisor =
+            agent_doc_supervisor_io::process::serving_supervisor_pid_for_doc(&file)
+                .filter(|_| !orphan_drain_liveness_stale_for_test());
         let observation = OrphanDrainObservation {
             // The supervisor-scope resolver owns activation (`queue: go`,
             // queue-tag `go`, and legacy active state) as well as drainability.
             queue_active,
             has_drainable_head: drainable.is_some(),
-            // `#supervisorpidoperatorstarted`: an operator-started supervisor
-            // runs the same idle watch as a route-owned one.
-            supervisor_alive: agent_doc_supervisor_io::process::serving_supervisor_pid_for_doc(
-                &file,
-            )
-            .is_some(),
+            supervisor_alive: serving_supervisor.is_some(),
             loop_owns_drain,
             pane_busy: record.state != agent_doc_controller::actor::ActorState::Ready,
             secs_since_last_dispatch: last_dispatch
@@ -21844,9 +21884,24 @@ fn controller_orphan_drain_tick(runtime: &Arc<ControllerRuntime>) {
                 .map(|lease| now.saturating_sub(lease.heartbeat_secs)),
         };
 
-        if orphan_drain_decision(observation, DEFAULT_MIN_DISPATCH_INTERVAL_SECS)
-            != OrphanDrainDecision::Dispatch
-        {
+        let decision = orphan_drain_decision(observation, DEFAULT_MIN_DISPATCH_INTERVAL_SECS);
+        if orphan_drain_supervisor_alive_transition(
+            &file,
+            decision == OrphanDrainDecision::Skip(OrphanDrainSkip::SupervisorAlive),
+        ) {
+            log_orphan_drain_event(
+                &file,
+                OrphanDrainEvent::SupervisorAliveYielded,
+                &format!(
+                    "file={} pane={} head={} supervisor_pid={} reason=supervisor_idle_watch_owns_drain focus_effect=preserved pane_effect=none",
+                    file.display(),
+                    record.pane_id,
+                    drainable.as_deref().unwrap_or("unknown"),
+                    serving_supervisor.map_or_else(|| "none".to_string(), |pid| pid.to_string()),
+                ),
+            );
+        }
+        if decision != OrphanDrainDecision::Dispatch {
             continue;
         }
 

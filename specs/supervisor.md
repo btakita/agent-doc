@@ -545,6 +545,18 @@ a closed actor record is replaceable through the stale-authority path.
   action=continue_orphan_route` and continues, with the pre-input recycle gate
   deciding as before. No `InFlight` recycle (or an unreadable projection)
   keeps the genuine-orphan path unchanged.
+- That route guard is the second fence; the sweep itself is the first
+  (`#tmuxciorphandrain`). A re-`execve` keeps the pid and the command line, so
+  the sweep's `/proc` liveness probe names a restarting supervisor and it
+  dispatches nothing, logging `controller_orphan_drain_supervisor_alive
+  ... supervisor_pid=<pid> reason=supervisor_idle_watch_owns_drain` once per
+  stretch. Before `#supervisorpidoperatorstarted` this held only for a
+  route-owned supervisor: an operator-started one read as absent, which is how
+  the drain reached the route at all. The route guard stays for a route that
+  runs after a sweep whose observation predates the restart. The live test
+  proves both fences in one re-exec window: the sweep's yield for the held pid,
+  then, through the debug-only `AGENT_DOC_TEST_ORPHAN_DRAIN_STALE_LIVENESS`
+  seam, the route's deferral.
 - The orphan drain's claim check is a snapshot, so it is re-read at every
   irreversible step (GH #319 claim visibility). The sweep reads the document's claim
   ledger before its selector's claim reads, then re-reads it at the commit

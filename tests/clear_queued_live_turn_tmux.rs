@@ -26,7 +26,8 @@
 //! live harness between the items keeps that pending clear
 //! (`#autoclearbaseline`), and a controller orphan drain that lands inside that
 //! re-exec yields to the restarting supervisor instead of typing the next item
-//! past the clear (`#autoclearorphandrain`).
+//! past the clear (`#autoclearorphandrain`): the sweep sees the held supervisor
+//! and dispatches nothing, and a route queued by an older sweep defers.
 //!
 //! A fake Codex harness (`FAKE_CODEX`) covers the Codex delivery: the queued
 //! clear fires after the turn even though Codex's post-turn placeholder is on
@@ -268,6 +269,10 @@ const RECEIPT_PROBE_HOLD: &str = "hold_receipt_probe";
 /// (`AGENT_DOC_TEST_ORPHAN_DRAIN_GATE`).
 const ORPHAN_DRAIN_GATE: &str = "open_orphan_drain";
 
+/// The file whose existence makes the sweep decide as if its liveness probe
+/// found no supervisor (`AGENT_DOC_TEST_ORPHAN_DRAIN_STALE_LIVENESS`).
+const ORPHAN_DRAIN_STALE_LIVENESS: &str = "orphan_drain_stale_liveness";
+
 /// The file whose existence holds a preserved-child re-exec reentry before it
 /// registers (`AGENT_DOC_TEST_HOLD_PRESERVED_CHILD_REENTRY`); removing it
 /// releases the replacement image.
@@ -450,8 +455,9 @@ impl LiveClearScenario {
         // The controller is spawned by this supervisor and inherits these.
         let hold = if reexec_orphan_handshake {
             format!(
-                "{hold}export AGENT_DOC_TEST_ORPHAN_DRAIN_GATE={}\nexport AGENT_DOC_TEST_HOLD_PRESERVED_CHILD_REENTRY={}\n",
+                "{hold}export AGENT_DOC_TEST_ORPHAN_DRAIN_GATE={}\nexport AGENT_DOC_TEST_ORPHAN_DRAIN_STALE_LIVENESS={}\nexport AGENT_DOC_TEST_HOLD_PRESERVED_CHILD_REENTRY={}\n",
                 shell_quote(&fake.join(ORPHAN_DRAIN_GATE).to_string_lossy()),
+                shell_quote(&fake.join(ORPHAN_DRAIN_STALE_LIVENESS).to_string_lossy()),
                 shell_quote(&fake.join(REENTRY_HOLD).to_string_lossy()),
             )
         } else {
@@ -735,17 +741,35 @@ impl LiveClearScenario {
         std::fs::write(self.fake.join(ORPHAN_DRAIN_GATE), "").unwrap();
     }
 
+    /// Make the sweep decide as a sweep from before the restart would have.
+    fn assume_stale_orphan_liveness(&self) {
+        std::fs::write(self.fake.join(ORPHAN_DRAIN_STALE_LIVENESS), "").unwrap();
+    }
+
+    fn restore_orphan_liveness(&self) {
+        std::fs::remove_file(self.fake.join(ORPHAN_DRAIN_STALE_LIVENESS)).unwrap();
+    }
+
     /// Arm the reentry hold: the next preserved-child re-exec image stops
     /// before registering until [`Self::release_reentry_hold`].
     fn arm_reentry_hold(&self) {
         std::fs::write(self.fake.join(REENTRY_HOLD), "").unwrap();
     }
 
-    fn wait_reentry_held(&self) {
+    /// Wait for the replacement image to hold, and return the pid it reported.
+    fn wait_reentry_held(&self) -> u32 {
         let held = self.fake.join(format!("{REENTRY_HOLD}.held"));
         self.wait_until("the replacement image is held before registering", || {
-            held.exists()
+            std::fs::read_to_string(&held)
+                .is_ok_and(|text| text.trim_end().ends_with(char::is_numeric))
         });
+        std::fs::read_to_string(held)
+            .unwrap()
+            .trim()
+            .strip_prefix("pid=")
+            .unwrap()
+            .parse()
+            .unwrap()
     }
 
     fn release_reentry_hold(&self) {
@@ -1723,16 +1747,26 @@ fn queue_auto_clear_carries_its_baseline_across_a_preserved_child_reexec() {
 /// runs): item one commits and the supervisor re-`execve`s itself, adopting
 /// the live harness. While the replacement image is still in its re-exec window
 /// (recycle `InFlight`, no IPC listener, not registered) the controller's
-/// orphan drain dispatches item two (`reason=no_supervisor_idle_watch`). Its
+/// orphan drain dispatched item two (`reason=no_supervisor_idle_watch`). Its
 /// route read the restarting supervisor as degraded (`supervisor_health_is_
 /// unreachable`), waited out the recycle, and typed item two straight into the
 /// pane, skipping the queue auto-clear the replacement image carried
-/// (`#autoclearbaseline`). A restarting supervisor is not an orphan: the
-/// route yields to its idle watch, which clears and then dispatches item two.
+/// (`#autoclearbaseline`). A restarting supervisor is not an orphan, and two
+/// independent fences now say so, each proved here:
+///
+/// 1. The sweep yields. Its `/proc` liveness probe names the held image
+///    (`#supervisorpidoperatorstarted`), so it dispatches nothing. The drain
+///    only reached the route here because this fixture's `agent-doc start
+///    <FILE>` supervisor was invisible to the route-owned scan
+///    (`#tmuxciorphandrain`).
+/// 2. The route yields. A route queued by a sweep that decided before the
+///    restart still lands in the window, and it defers to the idle watch, which
+///    clears and then dispatches item two.
 ///
 /// Ordered by handshake: the orphan drain is closed until the replacement
-/// image is held before registering, and the image is released only once the
-/// drain's route for item two has decided.
+/// image is held before registering, the sweep's yield is observed for that
+/// exact pid, and the image is released only once the drain's route for item
+/// two has decided.
 #[test]
 #[ignore = "live tmux integration test; run `make tmux-ci`"]
 fn an_orphan_drain_during_a_preserved_child_reexec_defers_to_the_restarting_supervisor() {
@@ -1757,7 +1791,7 @@ fn an_orphan_drain_during_a_preserved_child_reexec_defers_to_the_restarting_supe
         "test_reexec_orphan_drain",
     )
     .unwrap();
-    scenario.wait_reentry_held();
+    let held_pid = scenario.wait_reentry_held();
 
     // The supervisor is restarting. Let the orphan drain take its first look.
     scenario.open_orphan_drain();
@@ -1766,6 +1800,27 @@ fn an_orphan_drain_during_a_preserved_child_reexec_defers_to_the_restarting_supe
             line.contains("] controller_orphan_drain_dispatch ") && line.contains("head=q-")
         })
     };
+    // Positive evidence the sweep reached this document inside the window and
+    // named the held image: a bare "no dispatch yet" passes with the sweep off.
+    let yielded_to_held_image = format!("supervisor_pid={held_pid} ");
+    scenario.wait_until(
+        "the orphan drain's sweep saw the held supervisor and yielded to it",
+        || {
+            scenario.ops_log().lines().any(|line| {
+                line.contains("] controller_orphan_drain_supervisor_alive ")
+                    && line.contains("head=q-")
+                    && line.contains(&yielded_to_held_image)
+            })
+        },
+    );
+    assert!(
+        !orphan_dispatched(&scenario.ops_log()),
+        "the sweep dispatched beside a restarting supervisor it could see: {}",
+        scenario.ops_log_tail()
+    );
+
+    // A sweep that decided before the restart still queues its route.
+    scenario.assume_stale_orphan_liveness();
     scenario.wait_until(
         "the orphan drain's route for item two decided against the restarting supervisor",
         || {
@@ -1779,6 +1834,7 @@ fn an_orphan_drain_during_a_preserved_child_reexec_defers_to_the_restarting_supe
                 })
         },
     );
+    scenario.restore_orphan_liveness();
     scenario.release_reentry_hold();
     scenario.wait_until(
         "the replacement image continued the outgoing auto-clear baseline",

@@ -79,7 +79,9 @@ The default development suite must stay pure/fast. Tests that create an
 plain `cargo test`, `make test`, and `make check` do not pay tmux startup,
 window reconciliation, shell readiness, or process-tree sampling costs. The
 explicit `make tmux-ci` target owns the ignored live-tmux sweep and GitHub
-Actions must run that target on Linux with `tmux` installed.
+Actions must run that target on Linux with `tmux` installed. A coordinator
+closing an integrated batch runs both through `make check-batch`, so a live-tmux
+regression stops the batch instead of reddening main (`#tmuxciorphandrain`).
 
 Every live tmux test gets a server no other test run can reach. Tests build
 their server with `agent_doc_tmux_io::isolated_test_tmux(label)`, never

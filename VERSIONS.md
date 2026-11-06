@@ -4,6 +4,7 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 ## 0.35.568
 
+- **`queue consume --ack-id` can name one reported attempt** (`#ackidattemptfence`). `--ack-owner OWNER#GENERATION` strikes only that attempt's visible row when several reported rows share an id. Unfenced `--ack-id` still strikes the single visible row and, when more than one is visible, refuses with each attempt's fenced command instead of saying no command separates them.
 - **A coordinator on an exhausted harness can claim a worker on another one** (`#claimworkerharness`). `queue claim --harness <claude|codex|grok|opencode|cursor>` names the worker's harness. The quota gate checks that harness instead of the coordinator session, and `claude` / `claude-code` compare as one harness. Omitting the flag still refuses a new worker on the coordinator's exhausted harness.
 - **Managed lists no longer drift.** `agent:active`, `agent:todo`, backlog, review, icebox, and done are each one projection of durable item state, re-rendered at preflight under a shared no-drift contract that `session-check` enforces. Active renders from claims, receipts, and lineage, separating running work from work that needs integration, and a visible ☑️ is treated as output, never as authority.
 - **Large waiting trees are legible.** Every waiting queue head carries its state and a `⟦you · agent · done⟧` roll-up, a **Next** row names each waiting item's one remaining action, and a waiting item's packet is decision evidence that is never regenerated over operator text or read as queue work.

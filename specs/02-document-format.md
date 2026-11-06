@@ -987,15 +987,19 @@ id, for example a Todo first dispatched as a waiting row and later answered
 by an operator queue row `[#id]: answer` (`#dupreceiptconsume`). It strikes
 the one attempt whose reported `☑️` row is still visible in the document; an
 attempt without a visible row never competes. When two or more reported rows
-are visible, it refuses and names each competing `owner#generation` with the
-command that settles that row alone (`queue consume --ack-text '<row>'
---ack-owner '<owner>#<generation>'`), and says the refusal gates only that
-id, so later independent rows still drain. Each row's command is the one
-closeout derivation every emitter shares (`#ackrefusalusestrike`): a row that
-strikes by id (an id-backed row, or a waiting-tree parent whose attempt is
-nested under it) settles by `--ack-id <id>` once the other rows are struck.
-`--ack-id` has no attempt fence, so when two rows both strike by id the refusal
-names no order for them and says no command settles them apart.
+are visible, unfenced `--ack-id <id>` refuses and names each competing
+`owner#generation` with the command that settles that row alone, and says the
+refusal gates only that id, so later independent rows still drain. Each row's
+command is the one closeout derivation every emitter shares
+(`#ackrefusalusestrike`, `#ackidattemptfence`): a free-text row settles by
+`queue consume --ack-text '<row>' --ack-owner '<owner>#<generation>'`, and a
+row that strikes by id (an id-backed row, or a waiting-tree parent whose
+attempt is nested under it) settles by
+`queue consume --ack-id <id> --ack-owner '<owner>#<generation>'`. That
+`--ack-owner` fence strikes only the named attempt's visible row and leaves
+every other reported row for the same id untouched, so two id-striking rows
+are settled one at a time. Omitting `--ack-owner` still strikes the single
+visible reported row. A legacy generation-0 id strike stays unfenced.
 
 The preflight strike is queue maintenance's done-id strike: it runs in the same
 pass, ends a reported attempt the same way, and never edits the Todo. It fires

@@ -371,13 +371,20 @@ pub fn operator_request_id(claim: &QueueClaim) -> String {
 /// reported for `<id>`) and a `[#q-…]` row got `--ack-id q-…` (not a backlog
 /// id, always refused), while session-check named the attempt-fenced
 /// `--ack-text <row> --ack-owner owner#gen` for the same attempt.
+///
+/// `#ackidattemptfence`: an id strike names that same `--ack-owner` fence when
+/// the attempt is known, so two visible rows that both strike by id are two
+/// different commands.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReportedRowStrike {
-    /// `queue consume <doc> --ack-id <id>`: an id-backed row (`do [#id]`,
-    /// `[#id]`), or a waiting-tree parent whose reported `☑️` attempt is
-    /// nested under it, which only `--ack-id <parent id>` strikes
-    /// (`#nestedreceiptack`, `#reportedwritebackprescription`).
-    AckId { id: String },
+    /// `queue consume <doc> --ack-id <id> [--ack-owner <owner#gen>]`: an
+    /// id-backed row (`do [#id]`, `[#id]`), or a waiting-tree parent whose
+    /// reported `☑️` attempt is nested under it, which only `--ack-id <parent
+    /// id>` strikes (`#nestedreceiptack`, `#reportedwritebackprescription`).
+    /// `owner` is `Some(owner#gen)` when the attempt is known
+    /// (`#ackidattemptfence`); a correction head or a legacy generation-0
+    /// receipt stays unfenced.
+    AckId { id: String, owner: Option<String> },
     /// `queue consume <doc> --ack-text <row> --ack-owner <owner#gen>`: a
     /// free-text row (prose, `[#id]: answer`, a `[#q-…]` row) bound to one
     /// exact worker attempt.
@@ -391,7 +398,20 @@ impl ReportedRowStrike {
     /// The `queue consume` argv, or `None` for [`ReportedRowStrike::Echo`].
     pub fn argv(&self, document: &str) -> Option<Vec<String>> {
         match self {
-            Self::AckId { id } => Some(argv(&[
+            Self::AckId {
+                id,
+                owner: Some(owner),
+            } => Some(argv(&[
+                "agent-doc",
+                "queue",
+                "consume",
+                document,
+                "--ack-id",
+                id,
+                "--ack-owner",
+                owner,
+            ])),
+            Self::AckId { id, owner: None } => Some(argv(&[
                 "agent-doc",
                 "queue",
                 "consume",
@@ -422,11 +442,14 @@ impl ReportedRowStrike {
 /// a waiting-tree parent (`[#id] ... <!-- agent-doc:waiting-item -->`) whose
 /// reported attempt is a nested child row, which `--ack-text <parent>` cannot
 /// address. Every other free-text row is fenced to its attempt; a legacy
-/// generation-0 receipt or an unknown attempt falls back to the echo.
+/// generation-0 receipt or an unknown attempt falls back to the echo. An id
+/// strike carries the same fence when the attempt is known
+/// (`#ackidattemptfence`).
 pub fn reported_row_strike(item_text: &str, attempt: Option<(&str, u64)>) -> ReportedRowStrike {
     let item = item_text.trim();
+    let owner = known_attempt_owner(attempt);
     if let QueueItemIdentity::Id(id) = crate::queue_claim::claim_identity(item) {
-        return ReportedRowStrike::AckId { id };
+        return ReportedRowStrike::AckId { id, owner };
     }
     // A binary-generated trailing `[#q-…]` is an occurrence id, never a
     // tracked item, so it is stripped before the parent's id is read.
@@ -435,16 +458,24 @@ pub fn reported_row_strike(item_text: &str, attempt: Option<(&str, u64)>) -> Rep
             &agent_doc_element_queue::strip_generated_queue_prompt_id_annotation(item),
         )
     {
-        return ReportedRowStrike::AckId { id };
+        return ReportedRowStrike::AckId { id, owner };
     }
+    match owner {
+        Some(owner) => ReportedRowStrike::AckText {
+            handle: claim_item_handle(item),
+            owner,
+        },
+        None => ReportedRowStrike::Echo,
+    }
+}
+
+/// `OWNER#GENERATION` for a positive exact attempt, else `None`.
+fn known_attempt_owner(attempt: Option<(&str, u64)>) -> Option<String> {
     match attempt {
         Some((owner, generation)) if !owner.trim().is_empty() && generation > 0 => {
-            ReportedRowStrike::AckText {
-                handle: claim_item_handle(item),
-                owner: format!("{}#{generation}", owner.trim()),
-            }
+            Some(format!("{}#{}", owner.trim(), generation))
         }
-        _ => ReportedRowStrike::Echo,
+        _ => None,
     }
 }
 
@@ -456,7 +487,7 @@ pub fn claim_row_strike(claim: &QueueClaim) -> ReportedRowStrike {
 fn consume_step(document: &str, claim: &QueueClaim) -> ReportedCloseoutStep {
     let strike = claim_row_strike(claim);
     let detail = match &strike {
-        ReportedRowStrike::AckId { id } => format!(
+        ReportedRowStrike::AckId { id, .. } => format!(
             "strike the reported row; the tracked item stays open and the struck row names its `(stays open: ...)` reason (#ackstrikeopenbacklog). When the worker's or operator's answer resolves the tracked item, pass `--done {id}` to `agent-doc finalize {document}` instead and close any parent item the same answer resolves; never acknowledge a head whose item the answer finished"
         ),
         _ => "strike the reported free-text row, fenced to this exact worker attempt".to_string(),
@@ -1674,7 +1705,9 @@ mod tests {
                 "consume",
                 DOC,
                 "--ack-id",
-                "clidocsreleasecleanup"
+                "clidocsreleasecleanup",
+                "--ack-owner",
+                "subagent:c948clidocs#3",
             ])
         );
     }
@@ -2489,7 +2522,7 @@ mod tests {
         );
         assert!(
             commands[2].contains(
-                "step 3/3 (consume): run `agent-doc queue consume tasks/session.md --ack-id fix`"
+                "step 3/3 (consume): run `agent-doc queue consume tasks/session.md --ack-id fix --ack-owner 'subagent:fix#3'`"
             ),
             "{}",
             commands[2]

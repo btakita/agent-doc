@@ -34,8 +34,9 @@
 //!   alias `session` means `document`). A field line may carry a leading `- `.
 //! - A principle item is not also an `agent_rules` entry.
 //! - A rule that starts like a principle but is malformed (no id, an invalid
-//!   id, or an empty statement) stays an ordinary rule and yields a
-//!   [`PrincipleIssue`], so nothing the operator wrote is dropped.
+//!   id, an id missing its `#`, or an empty statement) stays an ordinary rule
+//!   and yields a [`PrincipleIssue`], so nothing the operator wrote is dropped
+//!   (`#principlemissinghashwarning`).
 //!
 //! ## Scope
 //!
@@ -213,6 +214,11 @@ pub fn is_valid_id(id: &str) -> bool {
 }
 
 /// Classify one rule text.
+///
+/// The shape is `principle` (any case) followed by whitespace, `[`, `#`, or
+/// `:`, then a `[#id]`, `#id`, `[id]`, or `:`. Anything else stays
+/// [`RuleForm::Plain`], so prose that opens with the word ("Principle of least
+/// surprise applies.") is never reported.
 pub fn parse_rule(rule: &str) -> RuleForm {
     let mut lines = rule.lines();
     let Some(first) = lines.next() else {
@@ -237,6 +243,8 @@ pub fn parse_rule(rule: &str) -> RuleForm {
         (id.trim(), statement)
     } else if rest.starts_with(':') {
         return malformed("a principle needs an id: `principle [#id]: <statement>`");
+    } else if rest.starts_with('[') {
+        return malformed("a principle id starts with `#`: `principle [#id]: <statement>`");
     } else {
         return RuleForm::Plain;
     };

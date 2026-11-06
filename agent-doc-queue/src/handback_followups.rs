@@ -18,6 +18,13 @@
 //! review, so only an entry the worker labelled as work becomes one. **Notes**
 //! never do. An **Open items** entry says nothing about which it is, so it
 //! stays in the cell and the report line asks the coordinator to triage it.
+//!
+//! `#handbackrefusedcommandexact`: when that placement cannot be proven, the
+//! report line prints one `queue follow-up` command on its own line. `--after`
+//! is the originating head and each `--item` is a follow-up row that was not
+//! placed, shell-quoted, so the line can be run as printed. An action item
+//! withheld because it carries an HTML comment or component marker is not one
+//! of those items: a live queue row must not hold it.
 
 /// What became of a hand-back's item sections.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -31,8 +38,41 @@ pub struct HandbackFollowups {
     /// Open items held for coordinator triage, not queued.
     pub held_for_triage: usize,
     /// Why the action items could not be queued. The worker result is still
-    /// recorded; the coordinator queues them with `queue follow-up`.
+    /// recorded; the coordinator queues the placeable rows with `queue follow-up`.
     pub refused: Option<String>,
+    /// Origin row text (`--after`) for a placement the command must retry.
+    pub refused_origin: Option<String>,
+    /// Follow-up row texts (`--item`) that placement refused, in order.
+    /// Marker-bearing action items are omitted (`#handbackrefusedcommandexact`).
+    pub refused_items: Vec<String>,
+}
+
+/// One copy-pasteable `queue follow-up` for a refused placement.
+///
+/// The row texts are the same ones [`plan_handback_followups`] would have
+/// inserted. Shell words follow [`crate::reported_closeout::shell_command`],
+/// so a coordinator can run the line as printed.
+pub fn refused_placement_command(
+    file: &str,
+    queue_id: &str,
+    origin: &str,
+    items: &[String],
+) -> String {
+    let mut argv = vec![
+        "agent-doc".to_string(),
+        "queue".to_string(),
+        "follow-up".to_string(),
+        file.to_string(),
+        "--id".to_string(),
+        queue_id.to_string(),
+        "--after".to_string(),
+        origin.to_string(),
+    ];
+    for item in items {
+        argv.push("--item".to_string());
+        argv.push(item.clone());
+    }
+    crate::reported_closeout::shell_command(&argv)
 }
 
 /// Longest origin label a follow-up row quotes for an id-less queue item.
@@ -100,14 +140,7 @@ pub fn plan_handback_followups(
     // placement matches the row's own text.
     let origin_row = crate::queue_response::queue_row_text_for_head(content, origin_item)
         .unwrap_or_else(|| origin_item.to_string());
-    let Some(queue_id) = crate::subagent_brief::origin_queue_id_for_item(content, origin_item)
-    else {
-        outcome.refused = Some("the document has no queue holding the originating head".into());
-        return (content.to_string(), outcome);
-    };
-    outcome.queue_id = Some(queue_id.clone());
-    let existing = queue_row_lines(content, &queue_id);
-    let mut fresh: Vec<String> = Vec::new();
+    let mut queueable: Vec<String> = Vec::new();
     let mut withheld = 0;
     for item in items {
         // The cell quotes a worker's component markers inert
@@ -116,7 +149,31 @@ pub fn plan_handback_followups(
             withheld += 1;
             continue;
         }
-        let row = action_item_followup_text(&origin_row, &item);
+        queueable.push(action_item_followup_text(&origin_row, &item));
+    }
+    let withheld_reason = (withheld > 0).then(|| {
+        format!(
+            "{withheld} action item(s) carry an HTML comment or component marker, which a live queue row must not hold"
+        )
+    });
+    let Some(queue_id) = crate::subagent_brief::origin_queue_id_for_item(content, origin_item)
+    else {
+        outcome.refused = Some(match &withheld_reason {
+            Some(withheld) => {
+                format!("the document has no queue holding the originating head; {withheld}")
+            }
+            None => "the document has no queue holding the originating head".to_string(),
+        });
+        if !queueable.is_empty() {
+            outcome.refused_origin = Some(origin_row);
+            outcome.refused_items = queueable;
+        }
+        return (content.to_string(), outcome);
+    };
+    outcome.queue_id = Some(queue_id.clone());
+    let existing = queue_row_lines(content, &queue_id);
+    let mut fresh: Vec<String> = Vec::new();
+    for row in queueable {
         if fresh.iter().any(|held| followup_rows_match(held, &row))
             || existing.iter().any(|line| followup_rows_match(line, &row))
         {
@@ -125,10 +182,8 @@ pub fn plan_handback_followups(
         }
         fresh.push(row);
     }
-    if withheld > 0 {
-        outcome.refused = Some(format!(
-            "{withheld} action item(s) carry an HTML comment or component marker, which a live queue row must not hold"
-        ));
+    if let Some(withheld) = withheld_reason {
+        outcome.refused = Some(withheld);
     }
     if fresh.is_empty() {
         return (content.to_string(), outcome);
@@ -145,7 +200,13 @@ pub fn plan_handback_followups(
             (plan.content, outcome)
         }
         Err(err) => {
-            outcome.refused = Some(format!("{err:#}"));
+            let placement = format!("{err:#}");
+            outcome.refused = Some(match outcome.refused.take() {
+                Some(prior) => format!("{placement}; {prior}"),
+                None => placement,
+            });
+            outcome.refused_origin = Some(origin_row);
+            outcome.refused_items = fresh;
             (content.to_string(), outcome)
         }
     }
@@ -546,5 +607,77 @@ mod tests {
         assert_eq!(updated, content);
         assert_eq!(outcome.already_present, 1, "{outcome:?}");
         assert!(outcome.inserted.is_empty(), "{outcome:?}");
+    }
+
+    /// `#handbackrefusedcommandexact`: a refused placement keeps the origin
+    /// and the row texts the report command must print. A marker-bearing
+    /// action item is not among them.
+    #[test]
+    fn a_refused_placement_records_the_origin_and_the_unplaced_rows() {
+        let ambiguous = doc("- do [#decisionidstamp]\n- do [#decisionidstamp]\n");
+        let handback = concat!(
+            "**Summary:** done\n",
+            "**Action items:**\n",
+            "- a stray <!-- /agent:queue --> closes the queue early\n",
+            "- an ordinary limit\n",
+        );
+        let (same, outcome) =
+            plan_handback_followups(&ambiguous, "do [#decisionidstamp]", handback);
+        assert_eq!(same, ambiguous);
+        assert!(outcome.inserted.is_empty());
+        assert_eq!(
+            outcome.refused_origin.as_deref(),
+            Some("do [#decisionidstamp]")
+        );
+        assert_eq!(
+            outcome.refused_items,
+            vec![
+                "follow up on an action item from `decisionidstamp`: an ordinary limit".to_string()
+            ]
+        );
+        assert!(
+            outcome
+                .refused
+                .as_deref()
+                .is_some_and(|why| why.contains("ambiguous") && why.contains("1 action item")),
+            "{outcome:?}"
+        );
+        let command = refused_placement_command(
+            "tasks/session.md",
+            "main",
+            outcome.refused_origin.as_deref().unwrap(),
+            &outcome.refused_items,
+        );
+        assert_eq!(
+            command,
+            "agent-doc queue follow-up tasks/session.md --id main --after 'do [#decisionidstamp]' --item 'follow up on an action item from `decisionidstamp`: an ordinary limit'"
+        );
+        assert!(!command.contains("<origin>") && !command.contains("<text>"));
+
+        let bare = "---\nagent_doc_session: s\n---\n\nno queue here\n";
+        let (_, missing) = plan_handback_followups(bare, "do [#decisionidstamp]", HANDBACK);
+        assert!(
+            missing
+                .refused
+                .as_deref()
+                .is_some_and(|why| why.contains("no queue")),
+            "{missing:?}"
+        );
+        assert_eq!(
+            missing.refused_origin.as_deref(),
+            Some("do [#decisionidstamp]")
+        );
+        assert_eq!(missing.refused_items.len(), 2, "{missing:?}");
+
+        let quoted = refused_placement_command(
+            "tasks/my session.md",
+            "main",
+            "do [#alpha]",
+            &["follow up on an action item from `alpha`: it's `done`".to_string()],
+        );
+        assert_eq!(
+            quoted,
+            "agent-doc queue follow-up 'tasks/my session.md' --id main --after 'do [#alpha]' --item 'follow up on an action item from `alpha`: it'\\''s `done`'"
+        );
     }
 }

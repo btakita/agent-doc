@@ -464,7 +464,11 @@ and the pending granular-flags-only rule. This runbook carries the rest.
      **Notes**, and **Next actions** into the response structure and queues each
      Action items bullet as a follow-up row right after the originating head, or
      after the top-level row that holds a nested head, so do not add those rows
-     again with `queue follow-up` (`#workerresponsestructure`). Notes never
+     again with `queue follow-up` (`#workerresponsestructure`). When that
+     placement is refused, the report line prints one exact `queue follow-up`
+     command on its own line, with the real origin and each unplaced item
+     already filled in; run that line as printed
+     (`#handbackrefusedcommandexact`). Notes never
      become rows. Bullets under the older **Open items** label are not queued
      either, because that label does not say which are work: when the report
      line says they were held for triage, read them and queue only the work with

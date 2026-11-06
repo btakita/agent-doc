@@ -51,10 +51,18 @@ creates one with the receipt's attach command.
   Run `agent-doc plugin install vscode` on the workspace: it installs into
   `code-server` when that is on `PATH` (otherwise `~/.local/bin/code-server`
   or `/tmp/code-server/bin/code-server`, where Coder's code-server module
-  installs it), and into the newest Remote-SSH server
+  installs it), into Coder's VS Code Web (the `vscode-web` module, which
+  extracts the VS Code Server web build into `/tmp/vscode-web` by default;
+  `~/.vscode-web` is also probed) through its own
+  `bin/code-server`, and into the newest Remote-SSH server
   under `~/.vscode-server` (or `$VSCODE_AGENT_FOLDER`), `~/.vscodium-server` or
   `~/.cursor-server` through the server's own CLI. That server exists only
   after VS Code has connected once. Reload the remote window after an install.
+  VS Code Web loads extensions from `~/.vscode-server/extensions` (or
+  `$VSCODE_AGENT_FOLDER/extensions`) unless the template sets the module's
+  `extensions_dir`; with another `install_prefix` or an `extensions_dir`,
+  install the VSIX by hand:
+  `<install_prefix>/bin/code-server --extensions-dir <extensions_dir> --install-extension <vsix>`.
   `vscode.env.remoteName` is passed to the binary, and to the `agent-doc`
   terminal the extension creates, as an opaque IDE observation.
 - External terminal: configure `host = "external"` only where a display/session
@@ -98,7 +106,7 @@ product failure.
 2. Make sure `.agent-doc/config.toml` names the project's `tmux_session`
    (`agent-doc session set <NAME>`); tmux-attach fails without it.
 3. Connect VS Code to the workspace (Coder Remote / Remote-SSH, or the
-   code-server browser tab) and open the document.
+   code-server or VS Code Web browser tab) and open the document.
 4. Run, with the default 300 s waits:
 
 ```sh

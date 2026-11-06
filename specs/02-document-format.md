@@ -340,7 +340,10 @@ guesses a span:
 - A controller applies the same fence to disk text it adopts without an editor
   update (gap 3). A cold controller start with no editor handover (no hub, no
   retained projection, and no retained editor frontier) seeds the relay from
-  disk. It judges that text against the last valid revision: the durable
+  disk, unless the predecessor recorded an unsaved canonical against disk that
+  is still that baseline (`#unsavedcanonicalcarry`). That carried cut is not
+  judged as a new disk adoption and is not written back to disk. A disk seed
+  judges its text against the last valid revision: the durable
   snapshot, else `HEAD:<doc>`. The first one whose markers pair is used.
   An out-of-band disk rebuild at the commit barrier (`#staleinmem`) judges the
   disk text against the pre-rebuild canonical instead. When the disk text fails

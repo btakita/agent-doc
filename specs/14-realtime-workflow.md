@@ -250,8 +250,15 @@ that gate.
 This is not whole-buffer adoption: the encoded replica and frontier are the
 native-generation handoff, and any existing controller model outranks them.
 Without a retained frontier (including an IDE restart), registration uses the
-normal canonical bootstrap. Re-registration thereby publishes the exact current
-editor state as the new replica baseline without consulting disk as authority.
+normal canonical bootstrap. When the predecessor recorded an unsaved canonical
+against disk that is still that baseline, the bootstrap is that carried cut
+(`#unsavedcanonicalcarry`), not a fresh single-peer rebuild of the disk text
+plus a queue-attempt re-projection. Disk that has moved, and a missing record,
+still bootstrap from disk. The carried record is not a retained editor frontier
+and never replaces one: a frontier still starts from an empty canonical so the
+replica can publish its missing operations. Re-registration thereby publishes
+the exact current editor state as the new replica baseline without consulting
+disk as authority.
 It never installs or saves a Lazily-retained whole-document target first.
 Retained agent intents replay afterward through the ordered document-cell/CRDT
 delivery path over that published operator cut.
@@ -1706,8 +1713,10 @@ when it matches no revision it may carry operator typing, stays authoritative
 byte-for-byte, and logs `crdt_reseed_committed_history_unproven`. A committed
 text with a component parse failure is never adopted
 (`crdt_reseed_committed_history_roll_forward_refused`). The cold disk seed (no
-retained frontier, e.g. an IDE restart) is unchanged: the editor bootstraps the
-disk bytes it shows.
+retained frontier, e.g. an IDE restart) bootstraps the carried unsaved canonical
+when one was recorded against disk that is still that baseline
+(`#unsavedcanonicalcarry`); otherwise the editor bootstraps the disk bytes it
+shows. A retained frontier is still the empty reseed, not that record.
 
 An empty or editor-only canonical is never authority over an attached buffer
 (`#emptycanonicaldeadlock`). On 2026-11-04 (`src/haiven-dev/tasks/fpe.md`,

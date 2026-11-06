@@ -50,6 +50,7 @@
 
 pub mod binary_write_attribution;
 pub mod editor_attach_hold;
+mod unsaved_canonical;
 
 pub use agent_doc_turn::commit_barrier::{CommitBarrierRefusal, CommitBarrierVerdict};
 use agent_doc_turn::op_log::OpsLogEvent;
@@ -1789,13 +1790,18 @@ fn with_existing_hub<T>(file: &Path, f: impl FnOnce(&mut RelayHub) -> T) -> Resu
 /// Retain the hub's canonical projection and publish its queue-region change
 /// key (`queue_regions`) from the SAME materialized text, so watching the
 /// queue costs no second materialization of the document.
+fn retain_canonical_projection(hash: &str, file: &Path, projection: RetainedCanonicalProjection) {
+    unsaved_canonical::sync(file, &projection);
+    retained_canonical_projections().retain(hash, projection);
+}
+
 fn retain_and_publish_queue_region(
     hash: &str,
     file: &Path,
     projection: RetainedCanonicalProjection,
 ) {
     publish_queue_region(hash, file, &projection.current_text);
-    retained_canonical_projections().retain(hash, projection);
+    retain_canonical_projection(hash, file, projection);
 }
 
 /// Change key of one document's `agent:queue` region, published from every
@@ -2002,7 +2008,7 @@ fn with_hub_seeded_from_file<T>(file: &Path, f: impl FnOnce(&mut RelayHub) -> T)
     if let Some(handle) = hub_handle(&hash) {
         let mut hub = handle.lock();
         let result = f(&mut hub);
-        retained_canonical_projections().retain(&hash, hub.retained_canonical_projection());
+        retain_canonical_projection(&hash, file, hub.retained_canonical_projection());
         return Ok(result);
     }
     if let Some(projection) = retained_canonical_projections().observe(&hash) {
@@ -2028,32 +2034,51 @@ fn with_hub_seeded_from_file<T>(file: &Path, f: impl FnOnce(&mut RelayHub) -> T)
         let handle = hub_handle_or_insert_with(&hash, || recovered);
         let mut hub = handle.lock();
         let result = f(&mut hub);
-        retained_canonical_projections().retain(&hash, hub.retained_canonical_projection());
+        retain_canonical_projection(&hash, file, hub.retained_canonical_projection());
         return Ok(result);
     }
     // Seeding reads the whole document, so it happens with no registry lock
     // held; `hub_handle_or_insert_with` only installs the finished hub, and a
     // racing allocator's hub wins (`or_insert_with` keeps the first).
-    let seed_text = std::fs::read_to_string(file)
+    let disk_text = std::fs::read_to_string(file)
         .map_err(|e| anyhow::anyhow!("failed to seed relay hub from {}: {e}", file.display()))?;
-    let mut seeded = RelayHub::from_text(CANONICAL_CLIENT_ID, &seed_text);
-    // `#componentownclose` gap 3: a cold controller with no editor handover
-    // has no pre-update canonical, so judge the disk text against the last
-    // valid revision (snapshot, then HEAD). Disk text whose markers no longer
-    // pair is kept byte-for-byte (the editor bootstraps exactly what it
-    // shows, and nothing is written to disk), but the hub is fenced: it is
-    // not current text and does not pass the commit barrier, so the last
-    // valid revision stays the committed one until the operator repairs it.
-    let cold_fence = DiskStructureFence::judge_cold_seed(file, &seed_text);
-    if let Some(fence) = &cold_fence {
-        seeded.fence_component_structure();
-        fence.surface(file, "cold_disk_seed");
-    }
+    // `#unsavedcanonicalcarry`: a predecessor that moved the canonical past this
+    // disk baseline recorded the cut. Carry it. Disk that has moved, and a
+    // missing record, still seed from disk. A registration that already inserted
+    // an empty retained-replica hub never reaches here.
+    let mut seeded = match unsaved_canonical::cold_seed(file, &disk_text) {
+        unsaved_canonical::ColdSeed::Carried {
+            content,
+            component_structure_fenced,
+        } => {
+            let mut hub = RelayHub::from_unsaved_text(CANONICAL_CLIENT_ID, &content, &disk_text);
+            if component_structure_fenced {
+                hub.fence_component_structure();
+            }
+            hub
+        }
+        unsaved_canonical::ColdSeed::Disk => {
+            let mut hub = RelayHub::from_text(CANONICAL_CLIENT_ID, &disk_text);
+            // `#componentownclose` gap 3: a cold controller with no editor handover
+            // has no pre-update canonical, so judge the disk text against the last
+            // valid revision (snapshot, then HEAD). Disk text whose markers no longer
+            // pair is kept byte-for-byte (the editor bootstraps exactly what it
+            // shows, and nothing is written to disk), but the hub is fenced: it is
+            // not current text and does not pass the commit barrier, so the last
+            // valid revision stays the committed one until the operator repairs it.
+            let cold_fence = DiskStructureFence::judge_cold_seed(file, &disk_text);
+            if let Some(fence) = &cold_fence {
+                hub.fence_component_structure();
+                fence.surface(file, "cold_disk_seed");
+            }
+            hub
+        }
+    };
     reconcile_durable_queue_attempts_on_hub(file, &mut seeded)?;
     let handle = hub_handle_or_insert_with(&hash, || seeded);
     let mut hub = handle.lock();
     let result = f(&mut hub);
-    retained_canonical_projections().retain(&hash, hub.retained_canonical_projection());
+    retain_canonical_projection(&hash, file, hub.retained_canonical_projection());
     Ok(result)
 }
 
@@ -3426,7 +3451,9 @@ fn register_replica_for_file_incremental_locked(
     // available only when the controller has neither a hub nor a retained
     // canonical projection and the editor proves it owns retained CRDT state.
     // Existing controller state therefore always wins, and an IDE restart (no
-    // retained frontier) continues to bootstrap from disk.
+    // retained frontier) bootstraps from a carried unsaved canonical when disk
+    // is still the baseline that cut diverged from, otherwise from disk
+    // (`#unsavedcanonicalcarry`).
     let restore_fresh_controller_from_retained_replica = retained_state_vector.is_some()
         && expected_canonical_hash.is_none()
         && hub_handle(&document_hash).is_none()
@@ -6229,7 +6256,7 @@ pub fn record_committed_baseline_for_file(file: &Path) {
     if let Some(handle) = hub_handle(&hash) {
         let mut hub = handle.lock();
         hub.record_committed_baseline(&on_disk);
-        retained_canonical_projections().retain(&hash, hub.retained_canonical_projection());
+        retain_canonical_projection(&hash, file, hub.retained_canonical_projection());
     }
     evict_hub_if_safe(file, &hash, "committed_baseline");
 }
@@ -11135,6 +11162,148 @@ mod tests {
             assert!(hub.commit_barrier_ready().unwrap());
         })
         .unwrap();
+    }
+
+    /// `#unsavedcanonicalcarry`: a replacement that registers with no retained
+    /// frontier must not rebuild the hub from disk plus a queue re-projection
+    /// while the predecessor's canonical is still ahead of that disk.
+    #[test]
+    fn fresh_controller_without_a_frontier_keeps_an_unsaved_canonical() {
+        let (dir, doc) = temp_doc("unsaved-canonical.md");
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let file_str = doc.display().to_string();
+        seed_live_reliable_sync_open(&file_str);
+        register_replica_for_file(&doc, "intellij:unsaved-canonical")
+            .unwrap()
+            .expect("the predecessor editor attaches");
+        let disk = std::fs::read_to_string(&doc).unwrap();
+        let unsaved = format!("{disk}\nunsaved canonical line\n");
+        with_hub(&doc, |hub| {
+            hub.apply_canonical_replace(&disk, &unsaved).unwrap();
+        })
+        .unwrap();
+        assert!(
+            super::unsaved_canonical::record_exists_for_test(&doc),
+            "the unsaved cut is recorded before the process is replaced"
+        );
+        drop_controller_state_for_test(&doc);
+
+        let (_client_id, bootstrap) =
+            register_replica_for_file(&doc, "intellij:unsaved-canonical-restart")
+                .unwrap()
+                .expect("the frontier-less editor attaches to the replacement");
+        assert!(
+            !bootstrap.is_empty(),
+            "the editor bootstraps the carried canonical, not an empty reseed"
+        );
+        with_hub(&doc, |hub| {
+            assert_eq!(hub.canonical_text(), unsaved);
+        })
+        .unwrap();
+        assert!(
+            deregister_replica_for_file(&doc, "intellij:unsaved-canonical-restart").unwrap(),
+            "the replacement member leaves"
+        );
+        let document_hash = agent_doc_fs::document_state_hash(&doc).unwrap();
+        assert!(
+            hub_is_allocated_for_test(&document_hash),
+            "an unsaved carried canonical must not be evicted with its last member"
+        );
+        with_hub(&doc, |hub| {
+            assert_eq!(hub.canonical_text(), unsaved);
+            assert!(!hub.is_safe_to_evict());
+        })
+        .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&doc).unwrap(),
+            disk,
+            "carrying the canonical does not write disk"
+        );
+        let ops = ops_log(dir.path());
+        assert!(
+            ops.contains("crdt_unsaved_canonical_carried")
+                && ops.contains("action=seed_carried_canonical"),
+            "{ops}"
+        );
+        drop_controller_state_for_test(&doc);
+    }
+
+    /// A retained editor frontier still reseeds from that replica. The carried
+    /// cut is not a substitute for it.
+    #[test]
+    fn retained_frontier_reseed_is_not_replaced_by_the_carried_canonical() {
+        let (dir, doc) = temp_doc("unsaved-canonical-frontier.md");
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        seed_live_reliable_sync_open(&doc.display().to_string());
+        register_replica_for_file(&doc, "intellij:unsaved-frontier")
+            .unwrap()
+            .expect("the predecessor editor attaches");
+        let disk = std::fs::read_to_string(&doc).unwrap();
+        let unsaved = format!("{disk}\nunsaved canonical line\n");
+        with_hub(&doc, |hub| {
+            hub.apply_canonical_replace(&disk, &unsaved).unwrap();
+        })
+        .unwrap();
+        assert!(super::unsaved_canonical::record_exists_for_test(&doc));
+        drop_controller_state_for_test(&doc);
+
+        let retained = agent_doc_merge::crdt_sync::ReplicaState::from_text(77, &disk);
+        let registration = register_replica_for_file_incremental(
+            &doc,
+            "intellij:unsaved-frontier-restart",
+            Some(&retained.state_vector()),
+        )
+        .unwrap()
+        .expect("the retained editor attaches");
+        assert!(registration.retained_replica_reseed_pending);
+        assert!(registration.bootstrap.is_empty());
+        with_hub(&doc, |hub| {
+            assert!(hub.retained_replica_reseed_pending());
+            assert_ne!(hub.canonical_text(), unsaved);
+        })
+        .unwrap();
+        assert!(
+            !ops_log(dir.path()).contains("crdt_unsaved_canonical_carried"),
+            "a retained frontier must not seed the carried cut"
+        );
+        assert!(super::unsaved_canonical::record_exists_for_test(&doc));
+        drop_controller_state_for_test(&doc);
+    }
+
+    /// Disk that is no longer the recorded baseline is not overwritten by the
+    /// carried cut. The record stays so the bytes are not thrown away.
+    #[test]
+    fn moved_disk_is_not_replaced_by_the_carried_canonical() {
+        let (dir, doc) = temp_doc("unsaved-canonical-moved.md");
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        seed_live_reliable_sync_open(&doc.display().to_string());
+        register_replica_for_file(&doc, "intellij:unsaved-moved")
+            .unwrap()
+            .expect("the predecessor editor attaches");
+        let disk = std::fs::read_to_string(&doc).unwrap();
+        let unsaved = format!("{disk}\nunsaved canonical line\n");
+        with_hub(&doc, |hub| {
+            hub.apply_canonical_replace(&disk, &unsaved).unwrap();
+        })
+        .unwrap();
+        let moved = format!("{disk}\nmoved on disk\n");
+        std::fs::write(&doc, &moved).unwrap();
+        drop_controller_state_for_test(&doc);
+
+        register_replica_for_file(&doc, "intellij:unsaved-moved-restart")
+            .unwrap()
+            .expect("the frontier-less editor attaches");
+        with_hub(&doc, |hub| {
+            assert_eq!(hub.canonical_text(), moved);
+        })
+        .unwrap();
+        assert!(super::unsaved_canonical::record_exists_for_test(&doc));
+        let ops = ops_log(dir.path());
+        assert!(
+            ops.contains("crdt_unsaved_canonical_disk_moved") && ops.contains("action=seed_disk"),
+            "{ops}"
+        );
+        drop_controller_state_for_test(&doc);
     }
 
     /// Commit `text` as `doc` on top of the repository [`git_commit_document`]

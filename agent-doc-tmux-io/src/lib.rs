@@ -1132,8 +1132,25 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn bounded_command_kills_and_reaps_a_stalled_child() {
-        let mut command = Command::new("sh");
-        command.args(["-c", "sleep 5"]);
+        use std::io::{Seek as _, Write as _};
+        use std::os::unix::process::CommandExt as _;
+
+        // `#wallclockassertsweep`: the child's natural exit is a minute away, and
+        // the elapsed bound below is half of that: the ceiling that separates
+        // "killed" from "waited for it to finish" without measuring how fast a
+        // loaded host runs the kill. Its pid is recorded before exec, and
+        // `spawn` returns only after exec, so the reap check below always runs.
+        let mut pid_file = tempfile::tempfile().unwrap();
+        let child_pid_file = pid_file.try_clone().unwrap();
+        let mut command = Command::new("sleep");
+        command.arg("60");
+        // SAFETY: `getpid` and `write` on an open fd are async-signal-safe, and
+        // nothing here allocates.
+        unsafe {
+            command.pre_exec(move || {
+                (&child_pid_file).write_all(&std::process::id().to_ne_bytes())
+            });
+        }
         let started = Instant::now();
         let err = command_output_bounded(command, "test-tmux", Duration::from_millis(30))
             .expect_err("stalled child should time out");
@@ -1147,7 +1164,20 @@ mod tests {
             ),
             "{err:?}"
         );
-        assert!(started.elapsed() < Duration::from_secs(1));
+        assert!(
+            started.elapsed() < Duration::from_secs(30),
+            "the runner must kill the child, not wait for its natural exit"
+        );
+        let mut pid = [0u8; 4];
+        pid_file.rewind().unwrap();
+        pid_file.read_exact(&mut pid).unwrap();
+        let pid = u32::from_ne_bytes(pid);
+        // Absent, not merely dead: a killed child nobody waited on stays in
+        // `/proc` as a zombie.
+        assert!(
+            !std::path::Path::new(&format!("/proc/{pid}")).exists(),
+            "the timed-out child {pid} must be killed and reaped"
+        );
     }
 
     /// `#tmuxnotinmode` (GH #70): N copies of the benign `not in a mode` line

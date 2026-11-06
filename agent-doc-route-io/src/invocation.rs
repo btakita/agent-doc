@@ -681,7 +681,8 @@ mod tests {
         let pane = tmux.new_session("0", dir.path()).unwrap();
         let _watched = tmux.new_session("1", dir.path()).unwrap();
         let _client = tmux.attach_control_mode(Some("1")).unwrap();
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        // `#wallclockassertsweep`: a hang ceiling, not a latency bound.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
         while agent_doc_tmux_io::session_attached_client_count(&tmux, "1") == 0 {
             assert!(
                 std::time::Instant::now() < deadline,

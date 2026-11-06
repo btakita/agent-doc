@@ -228,7 +228,9 @@ mod tests {
     }
 
     fn wait_for(count: &AtomicUsize, at_least: usize) -> usize {
-        let deadline = Instant::now() + Duration::from_secs(5);
+        // `#wallclockassertsweep`: a hang ceiling, not a latency bound; the
+        // loop returns as soon as the count is reached.
+        let deadline = Instant::now() + Duration::from_secs(30);
         while Instant::now() < deadline {
             let seen = count.load(Ordering::SeqCst);
             if seen >= at_least {

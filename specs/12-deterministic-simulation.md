@@ -245,6 +245,17 @@ of the long deadline the test distinguishes from ("woken by the event, not by
 its 30s deadline" asserts under 15s), with the test's input deadline raised
 until that margin holds.
 
+`#wallclockassertsweep` applied that rule to the remaining short bounds. A 1-5s
+polling deadline, `recv_timeout`, or child-exit wait in test code is a 30s hang
+ceiling (`blocking_effect_gate::HANG_CEILING` in the controller crate). An "X
+returns without waiting for Y" property holds Y until X has returned (a wedged
+connect worker, an unanswered actor socket, a bounded writeback job), so a
+regressed X can only return after Y's hang-ceiling release and fails on the
+outcome: a finished flag, a `Protocol` instead of a `Timeout` error, `Some`
+instead of `None`. A concurrency property (one listener thread per connection)
+holds every handler until all of them are in flight at once and counts them,
+instead of comparing a run's duration with the serial one.
+
 A transport deadline compiled short for tests (the 2s test-mode controller RPC
 deadline) exists so that an absent or silent peer fails fast. Against a peer
 the test has proven live, it is only a hang ceiling. Requests to a socket

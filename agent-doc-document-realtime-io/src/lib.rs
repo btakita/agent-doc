@@ -11509,7 +11509,8 @@ mod tests {
     fn cold_state_db_editor_authority_blocks_disk_until_detach_event() {
         let (_dir, file, _canonical) = temp_git_doc(&["operator queue edit\n"]);
         let await_authority = |expected| {
-            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            // `#wallclockassertsweep`: a hang ceiling, not a latency bound.
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
             loop {
                 let observed =
                     observe_editor_authority_for_disk_write(&file, "handoff_writeback").unwrap();
@@ -12129,8 +12130,11 @@ mod tests {
             "the wait must actually give a late registration its full budget, \
              spent {elapsed:?} of {budget:?}"
         );
+        // `#wallclockassertsweep`: "bounded" is a hang ceiling, not a latency
+        // multiple of the budget a loaded host can exceed; an unbounded wait
+        // still never returns inside it.
         assert!(
-            elapsed < budget * 8,
+            elapsed < std::time::Duration::from_secs(30),
             "the wait must stay bounded so a refused route errors instead of \
              hanging, spent {elapsed:?} of {budget:?}"
         );
@@ -18309,7 +18313,9 @@ mod tests {
             &file,
             receipt,
             "catchup_receipt",
-            std::time::Duration::from_secs(5),
+            // `#wallclockassertsweep`: a hang ceiling for the late delta, not a
+            // latency bound.
+            std::time::Duration::from_secs(30),
         );
         writer.join().unwrap();
         assert_eq!(
@@ -18331,7 +18337,10 @@ mod tests {
                 .contains("refusing editor receipt that diverges from controller canonical"),
             "{err:#}"
         );
-        assert!(started.elapsed() < std::time::Duration::from_secs(3));
+        // `#wallclockassertsweep`: "promptly" is "inside a hang ceiling far above
+        // the 200ms budget": a refusal that ignored its budget never returns
+        // inside it, while a loaded host cannot trip it.
+        assert!(started.elapsed() < std::time::Duration::from_secs(30));
     }
 
     fn cell_doc(exchange: &str, queue: &str) -> String {
@@ -19327,7 +19336,8 @@ mod tests {
         );
 
         let document_hash = agent_doc_hash::document_id_for_path(&file);
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        // `#wallclockassertsweep`: a hang ceiling, not a latency bound.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
         loop {
             let conn = agent_doc_sqlite::state_store::open_state_db(dir.path()).unwrap();
             let authority_events = agent_doc_sqlite::state_store::load_state_events_from_db(

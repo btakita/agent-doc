@@ -1097,6 +1097,8 @@ blockquoted, at most three leading spaces) followed without a blank line by
 canonical list fields `- *kind:* question|permission`, `- *blocking:* true`,
 and a concrete `- *request:*` whose value is nested beneath it. The
 `queue_item`, `request`, and `context` values nest beneath their key bullet,
+an optional `- *recommendation:*` row names one offered choice
+(`#recommendationinrow`, [§7](07-orchestration-commands.md)),
 and a line nested beneath a field belongs to that field, never to the packet's
 fields ([§7](07-orchestration-commands.md)). Historical values on the key
 line, plain fields, and emphasized or bold key variants remain readable; the

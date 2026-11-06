@@ -137,8 +137,9 @@ impl SubagentAuthorization {
         {
             self.subagent_prompt_preamble.push('\n');
         }
-        self.subagent_prompt_preamble
-            .push_str(&crate::goal_preset_terminal::prior_attempt_brief_section(&handoff));
+        self.subagent_prompt_preamble.push_str(
+            &crate::goal_preset_terminal::prior_attempt_brief_section(&handoff),
+        );
         self.prior_goal_attempt = Some(handoff);
     }
 }
@@ -633,6 +634,8 @@ pub const SUBAGENT_OPERATOR_REQUEST_PROTOCOL: &str = concat!(
     "  - <current state>\n",
     "  - <target/scope>\n",
     "  - <risk or effect>\n",
+    "- *recommendation:*\n",
+    "  - **<label>**: <reason, from the current evidence>\n",
     "- *choices:*\n",
     "  - **<label>**: <effect>\n\n",
     "Replace `<unique-id>` with a short request-specific lowercase suffix using letters, digits, ",
@@ -642,6 +645,9 @@ pub const SUBAGENT_OPERATOR_REQUEST_PROTOCOL: &str = concat!(
     "never on the key line itself; split the context into short bullets, one fact per bullet. ",
     "Keep the rendered `queue_item` value unchanged; it links this packet to the exact queue row. ",
     "Include every offered choice; write `- *choices:* []` only when the harness supplied none. ",
+    "When you recommend one choice, write `recommendation` above `choices`, as one row naming its ",
+    "exact label; otherwise omit the field. Prose outside the packet does not reach the operator's ",
+    "structured row. ",
     "Claude Code may surface a background worker's tool-permission prompt natively, and Codex ",
     "provides inter-agent messaging; Grok Build and OpenCode may require returning the packet ",
     "through the child result. In every harness, the coordinator records the packet verbatim in ",

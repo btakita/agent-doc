@@ -2006,6 +2006,7 @@ mod tests {
             queue_item: None,
             choice_labels: Vec::new(),
             choice_rows: Vec::new(),
+            recommendation: None,
         };
         assert_eq!(
             blocking_operator_request_todo_text(&permission, None),
@@ -2075,6 +2076,7 @@ mod tests {
                     .to_string(),
             ],
             choice_rows: Vec::new(),
+            recommendation: None,
         };
         let text = blocking_operator_request_todo_text(&packet, None);
         assert!(text.contains("word…"), "{text}");

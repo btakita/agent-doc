@@ -1268,6 +1268,7 @@ fn structured_inline_response_summaries(content: &str, response_id: &str) -> BTr
                             "**Context:**",
                             "**Question:**",
                             "**Selected:**",
+                            "**Recommendation:**",
                         ]
                         .into_iter()
                         .any(|prefix| {

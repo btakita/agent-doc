@@ -45,7 +45,7 @@ pub const LEGACY_WAITING_METADATA_MARKER: &str = "<!-- agent-doc:waiting-metadat
 pub const WAITING_ITEM_MARKER: &str = "<!-- agent-doc:waiting-item -->";
 
 /// Labels that open a generated (non-choice) packet row.
-pub const REPLY_ROW_LABELS: [&str; 10] = [
+pub const REPLY_ROW_LABELS: [&str; 11] = [
     "**Next:**",
     "**Roll-up:**",
     "**Subtree:**",
@@ -53,6 +53,7 @@ pub const REPLY_ROW_LABELS: [&str; 10] = [
     "**Timestamp:**",
     "**Context:**",
     "**Question:**",
+    "**Recommendation:**",
     "**Choices:**",
     "**Next actions:**",
     "**Action:**",

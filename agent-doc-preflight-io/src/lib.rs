@@ -1219,7 +1219,8 @@ never closes one: closeout keeps an echoed dispatch item queued and offers it fo
 leave it queued and say so for that item with a `**Deferred:** no subagent available` line. If \
 you judge an item blocked, still name it in the response with why. If a worker sends a \
 `[#subagent-operator-request-<unique-id>]` packet, copy the complete packet (request, context, and every choice) verbatim \
-into `agent:exchange`, present it from the main session, and return the operator's answer to the \
+into `agent:exchange`; a recommendation of your own goes in the packet's `recommendation:` row, \
+never only in prose. Present it from the main session, and return the operator's answer to the \
 same worker when the harness can continue it. The closeout that presents a blocking packet must \
 also record its concrete operator action in `agent:todo` with `--todo-add`; when the answer and \
 worker result complete that action, check it off with `--todo-done`. Never treat a chat answer as \

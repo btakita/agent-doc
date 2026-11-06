@@ -16,6 +16,68 @@ pub struct BlockingOperatorRequestPacket {
     /// Canonical choice content without its source list marker, preserving the
     /// exact emphasized label and explanatory text for response projection.
     pub choice_rows: Vec<String>,
+    /// The packet's raw `recommendation:` row, as written. Read it through
+    /// [`BlockingOperatorRequestPacket::choice_recommendation`].
+    pub recommendation: Option<String>,
+}
+
+/// One offered choice a response recommends, and why (`#recommendationinrow`).
+///
+/// This is read from a specified form and never from prose, so a sentence such
+/// as "my recommendation: leave them out" recommends nothing here:
+/// - a packet's `recommendation:` row, `**<offered label>**: <reason>`;
+/// - a decision record's `**Recommendation:**` field, in the same shape;
+/// - the one choice labelled `(Recommended)`, whose description starts
+///   `Recommended because <reason>`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChoiceRecommendation {
+    /// The offered label, without any `(Recommended)` suffix.
+    pub label: String,
+    pub rationale: String,
+}
+
+/// Appended to the recommended row of a `**Choices:**` subtree. A label that
+/// already ends `(Recommended)` is marked by its label and gets no second mark.
+pub const RECOMMENDED_CHOICE_MARK: &str = " — **Recommended**";
+
+/// The reserved response row that states a recommendation and its reason.
+pub const RECOMMENDATION_ROW_LABEL: &str = "**Recommendation:** ";
+
+impl ChoiceRecommendation {
+    /// The dedicated row rendered directly above its `**Choices:**` subtree.
+    /// The separator is deliberately not `**: `: that spelling is an offered
+    /// choice, and this row must never read as one.
+    pub fn row(&self) -> String {
+        format!(
+            "{RECOMMENDATION_ROW_LABEL}**{}** — {}",
+            self.label, self.rationale
+        )
+    }
+
+    /// Mark the row that offers this recommendation.
+    pub fn mark_choice_row(&self, rows: &mut [String]) {
+        for row in rows {
+            let Some(label) = choice_row_label(row) else {
+                continue;
+            };
+            if same_choice_label(label, &self.label) && !is_recommended_choice_label(label) {
+                row.push_str(RECOMMENDED_CHOICE_MARK);
+            }
+        }
+    }
+}
+
+impl BlockingOperatorRequestPacket {
+    /// The choice this packet recommends. `None` for a packet that recommends
+    /// nothing, and for one whose recommendation names no offered choice or
+    /// states no reason; those render exactly as they did before.
+    pub fn choice_recommendation(&self) -> Option<ChoiceRecommendation> {
+        resolve_choice_recommendation(
+            self.recommendation.as_deref(),
+            &self.choice_labels,
+            &self.choice_rows,
+        )
+    }
 }
 
 /// A final, operator-visible answer to a structured choice prompt.
@@ -27,6 +89,93 @@ pub struct StructuredChoiceDecision {
     pub choice_labels: Vec<String>,
     pub selected: String,
     pub selected_label: Option<String>,
+    /// The record's raw `**Recommendation:**` field, as written.
+    pub recommendation: Option<String>,
+}
+
+impl StructuredChoiceDecision {
+    /// The recommendation this record states about the choices it presented.
+    pub fn choice_recommendation(&self) -> Option<ChoiceRecommendation> {
+        resolve_choice_recommendation(self.recommendation.as_deref(), &self.choice_labels, &[])
+    }
+}
+
+/// A choice label with any `(Recommended)` suffix removed, comparable across
+/// the spellings a label takes between a packet and its decision record.
+pub(crate) fn normalized_choice_label(label: &str) -> String {
+    bare_choice_label(label.trim().trim_end_matches('.')).to_ascii_lowercase()
+}
+
+fn bare_choice_label(label: &str) -> &str {
+    label
+        .trim_end_matches("(recommended)")
+        .trim_end_matches("(Recommended)")
+        .trim()
+}
+
+fn same_choice_label(left: &str, right: &str) -> bool {
+    normalized_choice_label(left) == normalized_choice_label(right)
+}
+
+fn is_recommended_choice_label(label: &str) -> bool {
+    label.trim().to_ascii_lowercase().ends_with("(recommended)")
+}
+
+/// The label of a rendered choice row: `**label**: effect` or `label: effect`.
+fn choice_row_label(row: &str) -> Option<&str> {
+    let row = row.trim();
+    let label = match row.strip_prefix("**") {
+        Some(bold) => bold.split_once("**:")?.0,
+        None => row.split_once(':').map_or(row, |(label, _)| label),
+    };
+    Some(label.trim()).filter(|label| !label.is_empty())
+}
+
+/// `**<label>**: <reason>`, the one spelling a declared recommendation takes.
+fn parse_declared_recommendation(row: &str) -> Option<(&str, &str)> {
+    let row = row.trim();
+    let row = row.strip_prefix("- ").unwrap_or(row).trim_start();
+    let (label, rationale) = row.strip_prefix("**")?.split_once("**:")?;
+    let (label, rationale) = (label.trim(), rationale.trim());
+    (!label.is_empty() && !rationale.is_empty()).then_some((label, rationale))
+}
+
+fn resolve_choice_recommendation(
+    declared: Option<&str>,
+    labels: &[String],
+    rows: &[String],
+) -> Option<ChoiceRecommendation> {
+    if let Some(declared) = declared {
+        let (label, rationale) = parse_declared_recommendation(declared)?;
+        let offered = labels
+            .iter()
+            .find(|offered| same_choice_label(offered, label))?;
+        return Some(ChoiceRecommendation {
+            label: bare_choice_label(offered.trim()).to_string(),
+            rationale: rationale.to_string(),
+        });
+    }
+    let mut suffixed = labels
+        .iter()
+        .filter(|label| is_recommended_choice_label(label));
+    let label = suffixed.next()?;
+    if suffixed.next().is_some() {
+        return None;
+    }
+    let description = rows
+        .iter()
+        .find_map(|row| row.strip_prefix(&format!("**{label}**:")))?
+        .trim();
+    const PREFIX: &str = "recommended because ";
+    let rationale = description
+        .get(..PREFIX.len())
+        .filter(|prefix| prefix.eq_ignore_ascii_case(PREFIX))
+        .map(|prefix| description[prefix.len()..].trim())
+        .filter(|rationale| !rationale.is_empty())?;
+    Some(ChoiceRecommendation {
+        label: bare_choice_label(label.trim()).to_string(),
+        rationale: rationale.to_string(),
+    })
 }
 
 /// A `(Recommended)` marker is an operator-facing judgment, not decoration.
@@ -39,12 +188,6 @@ pub fn recommended_choice_rationale_error(label: &str, description: &str) -> Opt
         return None;
     }
 
-    let choice_words = lowercase_label
-        .trim_end_matches("(recommended)")
-        .split(|character: char| !character.is_ascii_alphanumeric())
-        .filter(|word| !word.is_empty())
-        .collect::<std::collections::HashSet<_>>();
-
     let description = description.trim();
     const PREFIX: &str = "recommended because ";
     let lowercase = description.to_ascii_lowercase();
@@ -53,6 +196,24 @@ pub fn recommended_choice_rationale_error(label: &str, description: &str) -> Opt
             "recommended choice `{label}` must start its description with `Recommended because <contextual reason>`"
         ));
     };
+    if !rationale_states_a_reason(&lowercase_label, rationale) {
+        return Some(format!(
+            "recommended choice `{label}` needs a concrete contextual reason, not a tautological recommendation"
+        ));
+    }
+    None
+}
+
+/// Whether a lowercased rationale says something beyond its own lowercased
+/// label: at least two words that are neither the label nor recommendation
+/// filler.
+fn rationale_states_a_reason(lowercase_label: &str, rationale: &str) -> bool {
+    let choice_words = lowercase_label
+        .trim_end_matches("(recommended)")
+        .split(|character: char| !character.is_ascii_alphanumeric())
+        .filter(|word| !word.is_empty())
+        .collect::<std::collections::HashSet<_>>();
+
     let substantive_words = rationale
         .split(|character: char| !character.is_ascii_alphanumeric())
         .filter(|word| !word.is_empty())
@@ -90,12 +251,7 @@ pub fn recommended_choice_rationale_error(label: &str, description: &str) -> Opt
         })
         .take(2)
         .count();
-    if substantive_words < 2 {
-        return Some(format!(
-            "recommended choice `{label}` needs a concrete contextual reason, not a tautological recommendation"
-        ));
-    }
-    None
+    substantive_words >= 2
 }
 
 /// Validate recommendation rationale in a newly emitted blocking packet.
@@ -104,6 +260,9 @@ pub fn recommended_choice_rationale_error(label: &str, description: &str) -> Opt
 pub fn blocking_operator_request_recommendation_error(
     packet: &BlockingOperatorRequestPacket,
 ) -> Option<String> {
+    if let Some(error) = declared_recommendation_error(packet) {
+        return Some(error);
+    }
     packet.choice_labels.iter().find_map(|label| {
         if !label.trim().to_ascii_lowercase().ends_with("(recommended)") {
             return None;
@@ -116,6 +275,41 @@ pub fn blocking_operator_request_recommendation_error(
             .map(str::trim)
             .unwrap_or_default();
         recommended_choice_rationale_error(label, description)
+    })
+}
+
+/// A declared recommendation renders only when it is exact, so a malformed one
+/// is refused while it is being written instead of vanishing from the row.
+fn declared_recommendation_error(packet: &BlockingOperatorRequestPacket) -> Option<String> {
+    let declared = packet.recommendation.as_deref()?;
+    let Some((label, rationale)) = parse_declared_recommendation(declared) else {
+        return Some(format!(
+            "`recommendation:` must be one row `**<offered label>**: <contextual reason>`, not `{declared}`"
+        ));
+    };
+    if !packet
+        .choice_labels
+        .iter()
+        .any(|offered| same_choice_label(offered, label))
+    {
+        return Some(format!(
+            "recommendation `{label}` must name an offered choice, spelled as its label"
+        ));
+    }
+    if let Some(other) = packet
+        .choice_labels
+        .iter()
+        .find(|offered| is_recommended_choice_label(offered) && !same_choice_label(offered, label))
+    {
+        return Some(format!(
+            "recommendation `{label}` contradicts the choice labelled `{other}`"
+        ));
+    }
+    let lowercase_label = label.to_ascii_lowercase();
+    (!rationale_states_a_reason(&lowercase_label, &rationale.to_ascii_lowercase())).then(|| {
+        format!(
+            "recommendation `{label}` needs a concrete contextual reason, not a tautological recommendation"
+        )
     })
 }
 
@@ -151,6 +345,7 @@ pub fn structured_choice_decisions(response: &str) -> Vec<StructuredChoiceDecisi
         let mut question = None;
         let mut choice_labels = Vec::new();
         let mut selected = None;
+        let mut recommendation = None;
         index += 1;
         while index < lines.len() {
             let field = lines[index].trim();
@@ -181,6 +376,9 @@ pub fn structured_choice_decisions(response: &str) -> Vec<StructuredChoiceDecisi
                         .collect();
                 }
                 "selected" => selected = (!value.is_empty()).then(|| value.to_string()),
+                "recommendation" => {
+                    recommendation = (!value.is_empty()).then(|| value.to_string());
+                }
                 _ => {}
             }
             index += 1;
@@ -200,6 +398,7 @@ pub fn structured_choice_decisions(response: &str) -> Vec<StructuredChoiceDecisi
             choice_labels,
             selected,
             selected_label,
+            recommendation,
         });
     }
     decisions
@@ -296,6 +495,7 @@ fn parsed_blocking_operator_request_packets(
         let mut queue_item = None;
         let mut choice_labels = Vec::new();
         let mut choice_rows = Vec::new();
+        let mut recommendation = None;
         let mut field_indent: Option<usize> = None;
         let mut current_key = String::new();
         let mut choice_indent: Option<usize> = None;
@@ -313,7 +513,10 @@ fn parsed_blocking_operator_request_packets(
                 break;
             }
             index += 1;
-            if line_indent > level || (current_key == "choices" && is_legacy_choice_line(field)) {
+            if line_indent > level
+                || (matches!(current_key.as_str(), "choices" | "recommendation")
+                    && is_legacy_choice_line(field))
+            {
                 match current_key.as_str() {
                     "choices" => {
                         let shallowest = *choice_indent.get_or_insert(line_indent);
@@ -331,6 +534,10 @@ fn parsed_blocking_operator_request_packets(
                     "queue_item" => {
                         append_nested_value(Some(queue_item.get_or_insert_with(String::new)), field)
                     }
+                    "recommendation" => append_nested_value(
+                        Some(recommendation.get_or_insert_with(String::new)),
+                        field,
+                    ),
                     _ => {}
                 }
                 continue;
@@ -347,6 +554,9 @@ fn parsed_blocking_operator_request_packets(
                 "request" => request = Some(value.to_string()),
                 "context" => context = Some(value.to_string()),
                 "queue_item" => queue_item = (!value.is_empty()).then(|| value.to_string()),
+                "recommendation" => {
+                    recommendation = (!value.is_empty()).then(|| value.to_string());
+                }
                 _ => {}
             }
             if value.is_empty() {
@@ -371,6 +581,7 @@ fn parsed_blocking_operator_request_packets(
                 queue_item: queue_item.filter(|item| !item.is_empty()),
                 choice_labels,
                 choice_rows,
+                recommendation,
             },
             start_line: marker_index,
             end_line: index,
@@ -398,7 +609,13 @@ fn is_legacy_choice_line(field: &str) -> bool {
         && !operator_request_field(field).is_some_and(|(key, _)| {
             matches!(
                 key.to_ascii_lowercase().as_str(),
-                "queue_item" | "kind" | "blocking" | "request" | "context" | "choices"
+                "queue_item"
+                    | "kind"
+                    | "blocking"
+                    | "request"
+                    | "context"
+                    | "choices"
+                    | "recommendation"
             )
         })
 }
@@ -569,5 +786,192 @@ mod tests {
                 .unwrap()
                 .contains("must start")
         );
+    }
+
+    /// The `#completioncellrestore` packet, with its recommendation in the
+    /// specified form instead of in prose beside the packet.
+    const RECOMMENDED_PACKET: &str = concat!(
+        "[#subagent-operator-request-closedcellkeys] subagent operator request\n",
+        "- *queue_item:*\n  - do [#completioncellrestore]\n",
+        "- *kind:* question\n",
+        "- *blocking:* true\n",
+        "- *request:*\n  - Should the 22 closed attempts be restored?\n",
+        "- *recommendation:*\n",
+        "  - **Leave them out**: The worker responses stay in the saved receipts, and the next repair removes restored cells again.\n",
+        "- *choices:*\n",
+        "  - **Restore the 22**: after install, run `--apply` with those keys.\n",
+        "  - **Leave them out**: apply nothing; the responses stay in the receipts.\n",
+    );
+
+    fn only_packet(response: &str) -> BlockingOperatorRequestPacket {
+        let mut packets = blocking_operator_request_packets(response);
+        assert_eq!(packets.len(), 1, "{response}");
+        packets.remove(0)
+    }
+
+    #[test]
+    fn recommendation_row_names_its_offered_label_and_reason() {
+        let packet = only_packet(RECOMMENDED_PACKET);
+        assert_eq!(packet.choice_labels, ["Restore the 22", "Leave them out"]);
+        let recommendation = packet.choice_recommendation().unwrap();
+        assert_eq!(recommendation.label, "Leave them out");
+        assert_eq!(
+            recommendation.row(),
+            "**Recommendation:** **Leave them out** — The worker responses stay in the saved receipts, and the next repair removes restored cells again."
+        );
+        assert_eq!(
+            blocking_operator_request_recommendation_error(&packet),
+            None
+        );
+
+        let mut rows = packet.choice_rows.clone();
+        recommendation.mark_choice_row(&mut rows);
+        assert_eq!(
+            rows,
+            [
+                "**Restore the 22**: after install, run `--apply` with those keys.",
+                "**Leave them out**: apply nothing; the responses stay in the receipts. — **Recommended**",
+            ]
+        );
+    }
+
+    #[test]
+    fn a_recommendation_written_after_choices_is_never_an_offered_choice() {
+        let row = "- *recommendation:*\n  - **Leave them out**: The saved receipts keep every response.\n";
+        let response = RECOMMENDED_PACKET.replace(
+            "- *recommendation:*\n  - **Leave them out**: The worker responses stay in the saved receipts, and the next repair removes restored cells again.\n",
+            "",
+        ) + row;
+        let packet = only_packet(&response);
+        assert_eq!(packet.choice_labels, ["Restore the 22", "Leave them out"]);
+        assert_eq!(
+            packet.choice_recommendation().unwrap().rationale,
+            "The saved receipts keep every response."
+        );
+
+        // The flush legacy choice layout reaches the same answer.
+        let flush = response.replace("\n  - **", "\n- **");
+        let packet = only_packet(&flush);
+        assert_eq!(
+            packet.choice_recommendation().map(|found| found.label),
+            Some("Leave them out".to_string()),
+            "{flush}"
+        );
+    }
+
+    #[test]
+    fn prose_never_recommends_a_choice() {
+        // The defect's own shape: a judgment beside the packet is not a form.
+        let response = format!(
+            "**My recommendation: leave them out.** The receipts keep them.\n\n{}\n**Recommendation:** Leave them out.\n",
+            RECOMMENDED_PACKET.replace(
+                "- *recommendation:*\n  - **Leave them out**: The worker responses stay in the saved receipts, and the next repair removes restored cells again.\n",
+                "",
+            )
+        );
+        let packet = only_packet(&response);
+        assert_eq!(packet.recommendation, None);
+        assert_eq!(packet.choice_recommendation(), None);
+        assert_eq!(
+            blocking_operator_request_recommendation_error(&packet),
+            None
+        );
+    }
+
+    #[test]
+    fn recommended_label_yields_the_same_recommendation() {
+        let packet = only_packet(concat!(
+            "[#subagent-operator-request-a] subagent operator request\n",
+            "- *kind:* question\n- *blocking:* true\n- *request:*\n  - Which?\n",
+            "- *choices:*\n",
+            "  - **Keep compatibility (Recommended)**: Recommended because existing clients still send the old format.\n",
+            "  - **Switch now**: Require the new format.\n",
+        ));
+        let recommendation = packet.choice_recommendation().unwrap();
+        assert_eq!(recommendation.label, "Keep compatibility");
+        assert_eq!(
+            recommendation.rationale,
+            "existing clients still send the old format."
+        );
+
+        // The label already marks the row; a second mark would only repeat it.
+        let mut rows = packet.choice_rows.clone();
+        recommendation.mark_choice_row(&mut rows);
+        assert_eq!(rows, packet.choice_rows);
+    }
+
+    #[test]
+    fn a_recommended_label_without_a_stated_reason_has_nothing_to_render() {
+        for choices in [
+            // A legacy packet: the label stays as its own mark, with no row.
+            "  - **staging (Recommended)**: Publish to staging.\n  - **production**: Publish.\n",
+            // Two recommended labels name no single recommendation.
+            "  - **a (Recommended)**: Recommended because the first evidence holds.\n  - **b (Recommended)**: Recommended because the second evidence holds.\n",
+        ] {
+            let packet = only_packet(&format!(
+                "[#subagent-operator-request-a] subagent operator request\n\
+                 - *kind:* question\n- *blocking:* true\n- *request:*\n  - Which?\n\
+                 - *choices:*\n{choices}"
+            ));
+            assert_eq!(packet.choice_recommendation(), None, "{choices}");
+        }
+    }
+
+    #[test]
+    fn invalid_recommendation_is_refused_while_written_and_silent_when_replayed() {
+        let declared = "  - **Leave them out**: The worker responses stay in the saved receipts, and the next repair removes restored cells again.\n";
+        for (row, expected) in [
+            (
+                "  - **Restore everything**: The saved receipts would be complete.\n",
+                "must name an offered choice",
+            ),
+            (
+                "  - Leave them out, the receipts keep them.\n",
+                "must be one row",
+            ),
+            (
+                "  - **Leave them out**: it is the recommended choice.\n",
+                "concrete contextual reason",
+            ),
+            (
+                "  - **Leave them out**: leave them out.\n",
+                "concrete contextual reason",
+            ),
+        ] {
+            let packet = only_packet(&RECOMMENDED_PACKET.replace(declared, row));
+            let error = blocking_operator_request_recommendation_error(&packet)
+                .unwrap_or_else(|| panic!("{row} must be refused"));
+            assert!(error.contains(expected), "{error}");
+            assert_eq!(
+                packet.choice_recommendation().is_some(),
+                row.contains("it is the") || row.contains("leave them out."),
+                "{row}"
+            );
+        }
+
+        let contradiction = RECOMMENDED_PACKET.replace(
+            "**Restore the 22**: after install",
+            "**Restore the 22 (Recommended)**: Recommended because the operator asked for every cell; after install",
+        );
+        let error =
+            blocking_operator_request_recommendation_error(&only_packet(&contradiction)).unwrap();
+        assert!(error.contains("contradicts"), "{error}");
+    }
+
+    #[test]
+    fn decision_record_carries_a_recommendation_of_its_own() {
+        let decisions = structured_choice_decisions(concat!(
+            "**Decision record**:\n",
+            "- **Question:** where should it be published?\n",
+            "- **Choices presented:** staging, production.\n",
+            "- **Recommendation:** **staging**: The production window is closed until Monday.\n",
+            "- **Selected:** **production**. Ship it.\n",
+        ));
+        assert_eq!(decisions.len(), 1);
+        assert_eq!(
+            decisions[0].choice_recommendation().unwrap().row(),
+            "**Recommendation:** **staging** — The production window is closed until Monday."
+        );
+        assert_eq!(decisions[0].selected_label.as_deref(), Some("production"));
     }
 }

@@ -2073,7 +2073,9 @@ fn followups_of_a_nested_origin_leave_the_parent_children_alone_and_stay_acknowl
         "report-complete",
     );
 
-    let followup = "follow up on an action item from queue item “☑️ [#subagent:leaf#1] leaf work”: wire the gutter stamp";
+    // The quote is the leaf's work text. A lifecycle marker on the origin
+    // (`☑️ [#subagent:leaf#1]`) is not part of it (`#followuporiginlabelmarker`).
+    let followup = "follow up on an action item from queue item “leaf work”: wire the gutter stamp";
     let rows = run_rows(&doc);
     let position = |needle: &str| {
         rows.iter()

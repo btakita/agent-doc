@@ -1623,3 +1623,88 @@ fn report_complete_without_a_matching_subagent_claim_fails_and_names_candidates(
         "a refused report writes nothing"
     );
 }
+
+/// `#workerresponsestructure` (agent-doc-bugs.md, 2026-11-05): the
+/// decisionidstamp hand-back reached `agent:exchange` as one quoted paragraph,
+/// so its open item (">512-commit documents can miss answers") was buried and
+/// never became queue work. A labelled hand-back now renders into the
+/// response structure, and each open item lands as a follow-up row right after
+/// the originating head in the same successor; a repeated report adds no
+/// duplicate rows, and the session still admits the next turn.
+#[test]
+fn report_complete_structures_the_handback_and_queues_its_open_items() {
+    let dir = tempfile::tempdir().unwrap();
+    let doc = committed_run_session(dir.path(), &["- do [#alpha]", "- later work"]);
+    let path = doc.to_str().unwrap();
+    assert_ok(
+        &run_agent_doc(dir.path(), &["queue", "claim", path, "--item", "do [#alpha]", "--owner", "subagent:alpha"]),
+        "claim",
+    );
+    assert_ok(
+        &run_agent_doc(
+            dir.path(),
+            &["queue", "start", path, "--item", "do [#alpha]", "--owner", "subagent:alpha", "--generation", "1", "--worker-id", "worker:alpha"],
+        ),
+        "start",
+    );
+    let handback = concat!(
+        "**Summary:** fixed the alpha defect.\n",
+        "**Verification:** make check exit=0; nextest 12 passed, 0 failed\n",
+        "**Open items:**\n",
+        "- >512-commit documents can miss answers\n",
+        "- the gutter does not show the stamp yet\n",
+        "**Next actions:** none",
+    );
+    let report = |what: &str| {
+        let output = run_agent_doc(
+            dir.path(),
+            &["queue", "report-complete", "--prose-only", path, "--item", "do [#alpha]", "--generation", "1", "--response", handback],
+        );
+        assert_ok(&output, what);
+        String::from_utf8_lossy(&output.stderr).into_owned()
+    };
+    let stderr = report("report-complete");
+    assert!(
+        stderr.contains("Queued 2 open item(s) as follow-up row(s)") && stderr.contains("queue id `default`"),
+        "{stderr}"
+    );
+
+    let written = fs::read_to_string(&doc).unwrap();
+    assert!(
+        written.contains(concat!(
+            "> **Subagent response:**\n>\n",
+            "> **Summary**\n>\n> fixed the alpha defect.\n>\n",
+            "> **Verification**\n>\n> make check exit=0; nextest 12 passed, 0 failed\n>\n",
+            "> **Open items**\n>\n",
+            "> - >512-commit documents can miss answers\n",
+            "> - the gutter does not show the stamp yet\n>\n",
+            "> **Next actions**\n>\n> none\n",
+        )),
+        "the hand-back renders into the response structure: {written}"
+    );
+    // Rows may carry a lifecycle marker (`📥`) once a later pass projects them.
+    let first = "follow up on an open item from `alpha`: >512-commit documents can miss answers";
+    let second = "follow up on an open item from `alpha`: the gutter does not show the stamp yet";
+    let rows = run_rows(&doc);
+    let position = |needle: &str| {
+        rows.iter()
+            .position(|row| row.ends_with(needle))
+            .unwrap_or_else(|| panic!("{needle:?} missing: {rows:#?}"))
+    };
+    let alpha = rows
+        .iter()
+        .position(|row| row.ends_with("do [#alpha]"))
+        .unwrap_or_else(|| panic!("origin row missing: {rows:#?}"));
+    assert_eq!(position(first), alpha + 1, "{rows:#?}");
+    assert_eq!(position(second), alpha + 2, "{rows:#?}");
+    assert!(position("later work") > alpha + 2, "{rows:#?}");
+
+    let stderr = report("repeated report-complete");
+    assert!(stderr.contains("2 open item(s) already have a follow-up row"), "{stderr}");
+    let rows = run_rows(&doc);
+    assert_eq!(rows.iter().filter(|row| row.ends_with(first)).count(), 1, "{rows:#?}");
+    assert_eq!(rows.iter().filter(|row| row.ends_with(second)).count(), 1, "{rows:#?}");
+
+    assert_session_check_does_not_accuse_patchback(dir.path(), &doc);
+    assert_preflight_admits(dir.path(), &doc, 1);
+}

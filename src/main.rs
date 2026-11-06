@@ -9560,8 +9560,13 @@ fn try_main() -> anyhow::Result<()> {
                         ),
                         Err(err) => err.to_string(),
                     };
+                    let followups = queue_completion_feedback::describe_open_item_followups(
+                        &file,
+                        &outcome.claim.item_text,
+                        &outcome.followups,
+                    );
                     eprintln!(
-                        "[queue] subagent completion feedback {} for {:?} (owner {}, generation {}); awaiting integration. A worker report, side-worktree commit, or published side branch is not terminal completion; verify the authorized delivery boundary and commit reachability. Next: {}{}",
+                        "[queue] subagent completion feedback {} for {:?} (owner {}, generation {}); awaiting integration. A worker report, side-worktree commit, or published side branch is not terminal completion; verify the authorized delivery boundary and commit reachability.{followups} Next: {}{}",
                         if outcome.appended {
                             "accepted"
                         } else if outcome.replaced {

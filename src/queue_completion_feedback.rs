@@ -32,6 +32,9 @@ pub(crate) struct CompletionFeedbackOutcome {
     /// Durable editor-authority target still awaiting visible projection.
     pub projection_pending: bool,
     pub intent_id: Option<String>,
+    /// The hand-back's open items queued as follow-up rows in this same
+    /// successor (`#workerresponsestructure`).
+    pub followups: agent_doc_queue::handback_followups::OpenItemFollowups,
 }
 
 #[derive(Debug, Clone)]
@@ -224,16 +227,59 @@ fn report_complete_with_lock_wait(
     // the first is still awaiting projection.
     let projection =
         agent_doc_queue_io::queue_cmd::derive_claim_runtime_projection(file, &current, None)?;
-    let (appended, replaced, intent_id) =
+    let (appended, replaced, intent_id, followups) =
         upsert_completion_feedback(file, &current, &projection.target_content, &claim, response)?;
     agent_doc_queue_io::queue_cmd::record_claim_runtime_projection(file, &projection, None)?;
+    if !followups.inserted.is_empty() {
+        // `#capturegatedispatched`: queued follow-ups are tracked work. The
+        // rows already landed; a failed mark only leaves the gate armed.
+        if let Err(err) = agent_doc_cycle_state_io::mark_queue_followups_added(file) {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!("queue_followup_capture_mark_failed source=report_complete error={err:#}"),
+            );
+        }
+    }
     Ok(CompletionFeedbackOutcome {
         claim,
         appended,
         replaced,
         projection_pending: intent_id.is_some(),
         intent_id,
+        followups,
     })
+}
+
+/// `#workerresponsestructure`: the report line's account of the hand-back's
+/// open items — queued as follow-up rows, already queued, or refused with the
+/// exact `queue follow-up` command the coordinator runs instead. Empty when
+/// the hand-back lists no open items.
+pub(crate) fn describe_open_item_followups(
+    file: &Path,
+    origin: &str,
+    followups: &agent_doc_queue::handback_followups::OpenItemFollowups,
+) -> String {
+    let queue = followups.queue_id.as_deref().unwrap_or("<queue-id>");
+    let mut text = String::new();
+    if !followups.inserted.is_empty() {
+        text.push_str(&format!(
+            " Queued {} open item(s) as follow-up row(s) after {origin:?} in queue id `{queue}`; do not add them again.",
+            followups.inserted.len(),
+        ));
+    }
+    if followups.already_present > 0 {
+        text.push_str(&format!(
+            " {} open item(s) already have a follow-up row in queue id `{queue}`.",
+            followups.already_present,
+        ));
+    }
+    if let Some(reason) = &followups.refused {
+        text.push_str(&format!(
+            " The hand-back's open items were NOT queued ({reason}); queue them with `agent-doc queue follow-up {} --id {queue} --after <origin> --item <text>...`.",
+            file.display(),
+        ));
+    }
+    text
 }
 
 /// Most rows/claims named in a no-match refusal; the rest are counted.
@@ -348,7 +394,12 @@ fn upsert_completion_feedback(
     projected: &str,
     claim: &QueueClaim,
     response: &str,
-) -> Result<(bool, bool, Option<String>)> {
+) -> Result<(
+    bool,
+    bool,
+    Option<String>,
+    agent_doc_queue::handback_followups::OpenItemFollowups,
+)> {
     let key = agent_doc_queue_io::queue_claim::completion_feedback_key(claim)?;
     // Keep the heading, attested worker response, and marker contiguous. The existing N-1 diff
     // classifier treats a block beginning with `### Re:` as a recovery
@@ -371,16 +422,24 @@ fn upsert_completion_feedback(
         projected, &key, &note,
     )?;
     let appended = replacement.is_none();
-    let updated = match replacement {
+    let with_cell = match replacement {
         Some(updated) => updated,
         None => agent_doc_element_exchange::insert_prompt_line_before_boundary(projected, &note)?,
     };
-    let replaced = !appended && updated != projected;
+    // `#workerresponsestructure`: each open item the hand-back reports becomes
+    // a follow-up row after the originating head, in the same successor as
+    // the cell, so the limit is queued work rather than buried prose.
+    let (updated, followups) = agent_doc_queue::handback_followups::plan_open_item_followups(
+        &with_cell,
+        &claim.item_text,
+        response,
+    );
+    let replaced = !appended && with_cell != projected;
     if updated == current {
         let intent_id = agent_doc_document_realtime_io::pending_document_write(file)
             .filter(|pending| pending.target_content == current)
             .map(|pending| pending.intent_id);
-        return Ok((false, false, intent_id));
+        return Ok((false, false, intent_id, followups));
     }
     let scope = changed_component_scope(current, &updated)
         .context("subagent completion feedback must change only agent:exchange/queue")?;
@@ -401,11 +460,13 @@ fn upsert_completion_feedback(
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "subagent_completion_feedback_accepted owner={} claimed_at={} key={} item_bytes={} delivery={}{}",
+            "subagent_completion_feedback_accepted owner={} claimed_at={} key={} item_bytes={} followups={} followups_present={} delivery={}{}",
             claim.owner,
             claim.claimed_at_secs,
             key,
             claim.item_text.len(),
+            followups.inserted.len(),
+            followups.already_present,
             if retained_intent.is_some() {
                 "retained_controller_projection"
             } else {
@@ -417,8 +478,9 @@ fn upsert_completion_feedback(
                 .unwrap_or_default(),
         ),
     );
-    Ok((appended, replaced, retained_intent))
+    Ok((appended, replaced, retained_intent, followups))
 }
+
 
 /// Settle any retained completion successor, then rederive the queue marker
 /// from the durable claim ledger. This never releases a claim or writes behind

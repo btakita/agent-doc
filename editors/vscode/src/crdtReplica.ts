@@ -6,6 +6,7 @@ import {
     peerReplicasMissing,
     reliableSyncDocumentOpFlush,
     reliableSyncDocumentOpPush,
+    type ReplicaApplyOutcome,
 } from './native.js';
 import {
     MergeOwnershipStateChart,
@@ -19,6 +20,25 @@ import { peerReplicaRebuildPaths } from './peerReplicaPull.js';
  * and one pull already answers for all of them. Mirrors the JetBrains constant.
  */
 const PEER_REPLICA_PULL_MIN_INTERVAL_MS = 5_000;
+
+/**
+ * `#divergentapplyreregister`: minimum gap between immediate re-registers of one
+ * document after its replica refused a delivery as a divergent CRDT history
+ * (FFI -4). One re-register installs a full bootstrap in the controller's
+ * current history, so a second refusal inside the window means the controller
+ * keeps encoding against another one; inside the window the refusal falls back
+ * to the controller's own redelivery budget and lineage retirement. Mirrors the
+ * JetBrains constant.
+ */
+export const DIVERGENT_HISTORY_REREGISTER_MIN_INTERVAL_MS = 30_000;
+
+/** Whether a divergent-history re-register is allowed now (the loop guard). */
+export function divergentHistoryReregisterDue(nowMs: number, lastAttemptMs: number | undefined): boolean {
+    return lastAttemptMs === undefined
+        // A clock rollback permits the re-register instead of suppressing it.
+        || nowMs < lastAttemptMs
+        || nowMs - lastAttemptMs >= DIVERGENT_HISTORY_REREGISTER_MIN_INTERVAL_MS;
+}
 
 export interface ReplicaRegisterAck {
     clientId: number;
@@ -68,6 +88,11 @@ export interface ReplicaNode {
     open(clientId: number, initState?: Uint8Array | null): boolean;
     applyLocal(clientId: number, offset: number, deleteLen: number, insert: string): boolean;
     applyUpdate(clientId: number, update: Uint8Array): boolean;
+    /**
+     * `#divergentapplyreregister`: `applyUpdate` keeping the native refusal kind.
+     * A node without it reports every refusal as a plain failure.
+     */
+    applyUpdateOutcome?(clientId: number, update: Uint8Array): ReplicaApplyOutcome;
     encodeState(): Uint8Array | null;
     stateVector?(): Uint8Array | null;
     diff?(theirStateVector: Uint8Array): Uint8Array | null;
@@ -533,6 +558,7 @@ export class CrdtReplicaForwarder {
     private clientId = 0;
     private pushedVersion: Uint8Array | null = null;
     private lineage: string | null = null;
+    private divergent = false;
     private readonly ownership = new MergeOwnershipStateChart();
 
     constructor(
@@ -624,9 +650,29 @@ export class CrdtReplicaForwarder {
 
     applyRemoteUpdate(update: Uint8Array): string | null {
         if (!this.attached) return null;
-        if (!this.node.applyUpdate(this.clientId, update)) return null;
+        const outcome = this.node.applyUpdateOutcome
+            ? this.node.applyUpdateOutcome(this.clientId, update)
+            : this.node.applyUpdate(this.clientId, update) ? 'applied' : 'failed';
+        if (outcome === 'divergent') {
+            // `#divergentapplyreregister`: refused whole (FFI -4) because the
+            // update was encoded against another CRDT history. Every later
+            // delivery to this replica is from that history too; the manager
+            // re-registers from the buffer.
+            this.divergent = true;
+            return null;
+        }
+        if (outcome !== 'applied') return null;
         this.pushedVersion = this.node.stateVector?.() ?? this.pushedVersion;
         return this.node.text();
+    }
+
+    /**
+     * `#divergentapplyreregister`: true once a remote update was refused as a
+     * divergent CRDT history. The replica's state then belongs to a retired
+     * history and is never offered as a resume state.
+     */
+    get historyDivergent(): boolean {
+        return this.divergent;
     }
 
     replicaText(): string | null {
@@ -636,6 +682,8 @@ export class CrdtReplicaForwarder {
 
     captureResumeState(): ReplicaResumeState | null {
         if (!this.attached) return null;
+        // A divergent replica's frontier names op ids of a retired history.
+        if (this.divergent) return null;
         const encodedState = this.node.encodeState();
         const stateVector = this.node.stateVector?.();
         if (!encodedState || !stateVector) return null;
@@ -705,6 +753,8 @@ export interface CrdtReplicaManagerOptions {
     peerReplicasMissing?: (pid: number, heldDocumentHashes: readonly string[]) => string | null;
     /** This editor process's pid; defaults to `process.pid`. */
     pid?: number;
+    /** Wall clock in epoch millis; defaults to `Date.now`. Injectable for guard tests. */
+    now?: () => number;
     logger?: ReplicaLogger;
 }
 
@@ -736,6 +786,9 @@ export class CrdtReplicaManager {
     // dead controller strands every document at once. One pull answers for all of
     // them, so the second and third file to notice must not each start their own.
     private lastPeerReplicaPullAtMs = 0;
+    // `#divergentapplyreregister`: the last divergent-history re-register attempt
+    // per document, the loop guard's stamp.
+    private readonly divergentHistoryReregisterAtMs = new Map<string, number>();
     private disposed = false;
 
     constructor(private readonly options: CrdtReplicaManagerOptions) {
@@ -1322,6 +1375,14 @@ export class CrdtReplicaManager {
                 if (converged == null) break;
                 peerUpdates.push(update);
             }
+            if (forwarder.historyDivergent) {
+                // `#divergentapplyreregister`: never project a replica holding
+                // another CRDT history, even updates applied before the refusal;
+                // re-register from the buffer now instead of waiting out the
+                // controller's redelivery budget.
+                await this.reregisterAfterDivergentHistory(filePath, forwarder);
+                continue;
+            }
             if (converged == null || peerUpdates.length === 0 || this.hasPendingLocal(filePath)) continue;
 
             await this.projectConvergedRemoteUpdates(
@@ -1451,6 +1512,63 @@ export class CrdtReplicaManager {
         } else {
             this.scheduleReplicaRetry(filePath, 'controller-transport-reregister-failed');
         }
+    }
+
+    /**
+     * `#divergentapplyreregister`: the replica refused a delivery encoded against
+     * another CRDT history (FFI -4, `#replicapositiondrift`). Re-register from the
+     * buffer immediately, mirroring the Zed sidecar, instead of leaving the
+     * refused delivery until the controller's redelivery budget retires the
+     * member. The divergent forwarder offers no resume state, so the replacement
+     * installs a full bootstrap in the controller's current history.
+     *
+     * Loop guard: at most one such re-register per document per
+     * `DIVERGENT_HISTORY_REREGISTER_MIN_INTERVAL_MS`, stamped only when a
+     * registration is actually attempted.
+     */
+    private async reregisterAfterDivergentHistory(
+        filePath: string,
+        staleForwarder: CrdtReplicaForwarder,
+    ): Promise<boolean> {
+        if (this.forwarders.get(filePath) !== staleForwarder) return false;
+        const editorText = this.currentEditorText(filePath);
+        const expectedText = this.shadows.get(filePath);
+        if (
+            editorText == null ||
+            expectedText === undefined ||
+            editorText !== expectedText ||
+            this.hasPendingLocal(filePath)
+        ) {
+            this.scheduleReplicaRetry(filePath, 'divergent-history-editor-not-stable');
+            return false;
+        }
+        const nowMs = (this.options.now ?? Date.now)();
+        const lastAttemptMs = this.divergentHistoryReregisterAtMs.get(filePath);
+        if (!divergentHistoryReregisterDue(nowMs, lastAttemptMs)) {
+            this.logger.warn(
+                `[crdt-replica] divergent-history re-register suppressed for ${filePath}; ` +
+                `since_last_ms=${nowMs - (lastAttemptMs ?? nowMs)} ` +
+                `min_interval_ms=${DIVERGENT_HISTORY_REREGISTER_MIN_INTERVAL_MS} ` +
+                'fallback=controller_lineage_retirement (#divergentapplyreregister)',
+            );
+            return false;
+        }
+        this.divergentHistoryReregisterAtMs.set(filePath, nowMs);
+        const replacement = await this.replaceForwarder(filePath, staleForwarder, editorText);
+        if (replacement) {
+            this.clearReplicaRetryBackoff(filePath);
+            this.logger.warn(
+                `[crdt-replica] re-registered ${filePath} from the buffer after a divergent-history delivery ` +
+                '(#divergentapplyreregister)',
+            );
+            this.requestRemoteDrain(filePath);
+            return true;
+        }
+        this.logger.warn(
+            `[crdt-replica] divergent-history re-register did not commit for ${filePath} (#divergentapplyreregister)`,
+        );
+        this.scheduleReplicaRetry(filePath, 'divergent-history-reregister-failed');
+        return false;
     }
 
     private async replaceForwarder(

@@ -342,9 +342,10 @@ pub fn quota_blocked_owner_route_outcome(
     ))
 }
 
-/// `#harnessquotaexhausted`: the limit stopping the exact owning pane, when it
-/// sits idle on one. A running turn keeps its normal handling: a gauge at zero
-/// does not stop the turn already in flight. Capture failure is no evidence.
+/// `#harnessquotaexhausted`: the printed refusal stopping the exact owning
+/// pane, when it sits idle on one. A running turn keeps its normal handling.
+/// A Grok composer border of `* limit left: 0%` is not a refusal
+/// (`#routequotaoverride`). Capture failure is no evidence.
 fn owner_pane_usage_limit(
     tmux: &Tmux,
     pane: &str,
@@ -2512,18 +2513,24 @@ mod tests {
     #[test]
     fn quota_blocked_owner_names_the_limit_and_never_advises_a_retry() {
         let file = Path::new("/tmp/sample-session.md");
+        let gauge = "│ ❯   │\n╰── Weekly limit left: 0% · Grok 4.7 (high) · always-approve ─╯\n";
+        assert!(
+            agent_doc_harness::usage_limit::pane_usage_limit(gauge, &HarnessConfig::grok())
+                .is_none(),
+            "a 0% gauge is the harness's credit decision, not a block"
+        );
         let limit = agent_doc_harness::usage_limit::pane_usage_limit(
-            "│ ❯   │\n╰── Weekly limit left: 0% · Grok 4.7 (high) · always-approve ─╯\n",
+            "You hit your weekly limit\n│ ❯   │\n╰── Weekly limit left: 0% · Grok 4.7 (high) · always-approve ─╯\n",
             &HarnessConfig::grok(),
         )
-        .expect("exhausted gauge");
+        .expect("printed refusal");
         let outcome = quota_blocked_owner_route_outcome(file, "%10", &limit, 2, None);
         let CloseoutWaitRouteOutcome::Deferred(message) = &outcome else {
             panic!("{outcome:?}");
         };
         for needle in [
             "Grok Build is out of usage",
-            "Weekly limit left: 0%",
+            "You hit your weekly limit",
             "2 updates stay saved in the document",
             "No trigger was sent to pane %10",
             "Wait for the limit to reset",

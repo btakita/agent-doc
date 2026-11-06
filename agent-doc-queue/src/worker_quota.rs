@@ -10,7 +10,9 @@
 //!
 //! This module is pure policy. Two consumers share it: the claim ledger's
 //! projections, and the subagent work pool (`#subagentworkpool`), which reads
-//! [`pool_refill_quota_block`] before it refills a freed slot.
+//! [`pool_refill_quota_block`] before it refills a freed slot. Both stay tied
+//! to a returned refusal. A Grok composer border of `* limit left: 0%` is not
+//! one (`#routequotaoverride`).
 
 use serde::{Deserialize, Serialize};
 

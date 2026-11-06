@@ -26,6 +26,7 @@ agent-doc-flow-io = { path = "../agent-doc-flow-io", version = "0.35.568" }
 agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.568" }
 agent-doc-frontmatter-io = { path = "../agent-doc-frontmatter-io", version = "0.35.568" }
 agent-doc-git-io = { path = "../agent-doc-git-io", version = "0.35.568" }
+agent-doc-harness = { path = "../agent-doc-harness", version = "0.35.568" }
 agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.568" }
 agent-doc-ipc-io = { path = "../agent-doc-ipc-io", version = "0.35.568" }
 agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.35.568" }
@@ -49,7 +50,6 @@ serde_json = "1"
 
 [dev-dependencies]
 agent-doc-fs = { path = "../agent-doc-fs", version = "0.35.568" }
-agent-doc-harness = { path = "../agent-doc-harness", version = "0.35.568" }
 agent-doc-session-accretion-io = { path = "../agent-doc-session-accretion-io", version = "0.35.568" }
 agent-doc-write-command-io = { path = "../agent-doc-write-command-io", version = "0.35.568" }
 tempfile = "3"

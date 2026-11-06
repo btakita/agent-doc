@@ -2,8 +2,9 @@
 //! (`#harnessquotaexhausted`), driven through the real `agent-doc` CLI.
 
 use std::fs;
+use std::io::Write;
 use std::path::Path;
-use std::process::{Command, Output};
+use std::process::{Command, Output, Stdio};
 
 /// `#integrationtesttargets`: this target drives the real `agent-doc` CLI.
 const CONTROLLER_LAUNCH_REASON: &str = "queue claim/report CLI commands reach the project controller, which they launch as production does";
@@ -317,4 +318,134 @@ fn the_explicit_command_records_an_exit_with_unknown_wording() {
     assert_eq!(claim["state"], "quota_blocked");
     assert_eq!(claim["quota_block"]["harness"], "opencode");
     assert_eq!(claim["quota_block"]["evidence"], "provider returned 402");
+}
+
+fn subagent_stop(dir: &Path, payload: &str) -> Output {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_agent-doc"))
+        .env(
+            agent_doc_controller_io::project_controller::TEST_CONTROLLER_LAUNCH_REASON_ENV,
+            CONTROLLER_LAUNCH_REASON,
+        )
+        .env_remove("TMUX")
+        .current_dir(dir)
+        .args(["hook", "subagent-stop"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(payload.as_bytes())
+        .unwrap();
+    child.wait_with_output().unwrap()
+}
+
+fn subagent_payload(dir: &Path, worker: &str, message: &str, error: Option<&str>) -> String {
+    let mut payload = serde_json::json!({
+        "hookEventName": "subagent_stop",
+        "hook_event_name": "SubagentStop",
+        "cwd": dir,
+        "sessionId": "parent-session",
+        "session_id": "parent-session",
+        "subagentId": worker,
+        "subagent_id": worker,
+        "subagentType": "general",
+        "agent_id": worker,
+        "lastAssistantMessage": message,
+        "last_assistant_message": message,
+    });
+    if let Some(error) = error {
+        payload["error"] = serde_json::json!(error);
+    }
+    payload.to_string()
+}
+
+fn claim_state(dir: &Path, doc: &str) -> String {
+    let claims = claims(dir, doc);
+    let report = claim_for(&claims, ITEM);
+    let claim = report.get("claim").unwrap_or(report);
+    claim["state"].as_str().unwrap().to_string()
+}
+
+#[test]
+fn a_subagent_end_limit_blocks_without_report_complete() {
+    let dir = tempfile::tempdir().unwrap();
+    let doc = started_session(dir.path());
+    let output = subagent_stop(
+        dir.path(),
+        &subagent_payload(dir.path(), "worker-sdk", LIMIT_NOTICE, None),
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "{stderr}");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let hook: serde_json::Value = serde_json::from_str(stdout.trim()).expect(&stdout);
+    assert!(hook.get("decision").is_none(), "{stdout}");
+    assert!(stderr.contains("worker_quota_exhausted"), "{stderr}");
+    assert_eq!(claim_state(dir.path(), &doc), "quota_blocked");
+    let rendered = fs::read_to_string(&doc).unwrap();
+    assert!(rendered.contains("⛔"), "row must read blocked: {rendered}");
+    assert!(
+        !rendered.contains("🚧"),
+        "row must not read running: {rendered}"
+    );
+
+    let again = subagent_stop(
+        dir.path(),
+        &subagent_payload(dir.path(), "worker-sdk", LIMIT_NOTICE, None),
+    );
+    let again_stderr = String::from_utf8_lossy(&again.stderr);
+    assert!(again.status.success(), "{again_stderr}");
+    assert!(
+        !again_stderr.contains("worker_quota_exhausted"),
+        "a second identical signal stays quiet: {again_stderr}"
+    );
+    assert_eq!(claim_state(dir.path(), &doc), "quota_blocked");
+}
+
+#[test]
+fn a_subagent_end_real_report_leaves_the_attempt_running() {
+    let dir = tempfile::tempdir().unwrap();
+    let doc = started_session(dir.path());
+    let output = subagent_stop(
+        dir.path(),
+        &subagent_payload(dir.path(), "worker-sdk", REAL_REPORT, None),
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "{stderr}");
+    assert_eq!(claim_state(dir.path(), &doc), "running");
+    let rendered = fs::read_to_string(&doc).unwrap();
+    assert!(!rendered.contains("⛔"), "{rendered}");
+}
+
+#[test]
+fn a_subagent_end_for_an_unknown_worker_does_not_block() {
+    let dir = tempfile::tempdir().unwrap();
+    let doc = started_session(dir.path());
+    let output = subagent_stop(
+        dir.path(),
+        &subagent_payload(dir.path(), "other-worker", LIMIT_NOTICE, None),
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "{stderr}");
+    assert_eq!(claim_state(dir.path(), &doc), "running");
+}
+
+#[test]
+fn a_structured_rate_limit_blocks_without_a_known_notice() {
+    let dir = tempfile::tempdir().unwrap();
+    let doc = started_session(dir.path());
+    let output = subagent_stop(
+        dir.path(),
+        &subagent_payload(dir.path(), "worker-sdk", "Done.", Some("rate_limit")),
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "{stderr}");
+    assert_eq!(claim_state(dir.path(), &doc), "quota_blocked");
+    let claims = claims(dir.path(), &doc);
+    let report = claim_for(&claims, ITEM);
+    let claim = report.get("claim").unwrap_or(report);
+    assert_eq!(claim["quota_block"]["evidence"], "rate_limit");
 }

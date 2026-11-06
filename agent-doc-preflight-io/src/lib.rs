@@ -1262,7 +1262,12 @@ which also revives an attempt that expired with its worker still bound. A harnes
 worker is waiting on its own background work is proof of life, so refresh it. Only when the \
 harness reports a worker ended without a result, run `agent-doc queue freeze <FILE> --item <item> \
 --generation <generation> --reason '<what it reported>'`: the claim is kept and the slot refills. \
-Expiry alone frees no slot and offers no row again. `agent-doc queue pool <FILE>` prints the \
+Expiry alone frees no slot and offers no row again. When the harness ends the \
+subagent on a usage limit, the subagent-end hook records ⛔ itself from the worker id \
+and the hand-back (`#workerquotaautodetect`); pass the text to `queue report-complete` \
+or `queue report-quota-blocked` when you still have it, which records the same block \
+quietly if the hook already did. OpenCode has no subagent-end hook, so its limit still \
+has to be passed that way. `agent-doc queue pool <FILE>` prints the \
 current refill.";
 
 /// One exchange prompt delegated by `<!-- agent:exchange subagents -->`.

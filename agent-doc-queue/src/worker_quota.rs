@@ -178,6 +178,52 @@ pub fn quota_blocked_next_step(document: &str, claim: &QueueClaim) -> String {
     )
 }
 
+/// Which attempt a subagent-end signal names (`#workerquotaautodetect`).
+///
+/// `rows` are the attempts already filtered to one worker id, as
+/// `(state, started_at_secs)` in caller order. `Reported` and `Claimed` are
+/// not quota stops. Running beats Lost beats an existing QuotaBlocked row. The
+/// same rank breaks toward the newest start. Two rows that still tie are
+/// [`QuotaAutodetectChoice::Ambiguous`]: the caller mutates nothing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QuotaAutodetectChoice {
+    Selected(usize),
+    Ambiguous,
+    None,
+}
+
+pub fn choose_quota_autodetect_claim(rows: &[(QueueClaimState, u64)]) -> QuotaAutodetectChoice {
+    fn rank(state: QueueClaimState) -> Option<u8> {
+        match state {
+            QueueClaimState::Running => Some(0),
+            QueueClaimState::Lost => Some(1),
+            QueueClaimState::QuotaBlocked => Some(2),
+            QueueClaimState::Claimed | QueueClaimState::Reported => None,
+        }
+    }
+    let mut best: Option<(u8, u64, usize, bool)> = None;
+    for (index, (state, started_at_secs)) in rows.iter().enumerate() {
+        let Some(rank) = rank(*state) else {
+            continue;
+        };
+        match best {
+            None => best = Some((rank, *started_at_secs, index, false)),
+            Some((best_rank, best_started, best_index, _)) => {
+                if rank < best_rank || (rank == best_rank && *started_at_secs > best_started) {
+                    best = Some((rank, *started_at_secs, index, false));
+                } else if rank == best_rank && *started_at_secs == best_started {
+                    best = Some((best_rank, best_started, best_index, true));
+                }
+            }
+        }
+    }
+    match best {
+        Some((_, _, index, false)) => QuotaAutodetectChoice::Selected(index),
+        Some((_, _, _, true)) => QuotaAutodetectChoice::Ambiguous,
+        None => QuotaAutodetectChoice::None,
+    }
+}
+
 /// The prior-attempt section of the next worker's brief, after an explicit
 /// requeue of a quota-blocked attempt.
 pub fn prior_attempt_brief_section(
@@ -351,6 +397,38 @@ mod tests {
         assert_eq!(claim.state, QueueClaimState::Running);
         assert_eq!(claim.quota_block, None);
         assert!(!claim.is_expired(resumed_at));
+    }
+
+    #[test]
+    fn autodetect_prefers_running_over_lost_and_breaks_ties_by_start() {
+        let rows = [
+            (QueueClaimState::Lost, 10),
+            (QueueClaimState::QuotaBlocked, 50),
+            (QueueClaimState::Running, 20),
+            (QueueClaimState::Reported, 90),
+        ];
+        assert_eq!(
+            choose_quota_autodetect_claim(&rows),
+            QuotaAutodetectChoice::Selected(2)
+        );
+        let lost = [(QueueClaimState::Lost, 10), (QueueClaimState::Lost, 30)];
+        assert_eq!(
+            choose_quota_autodetect_claim(&lost),
+            QuotaAutodetectChoice::Selected(1)
+        );
+    }
+
+    #[test]
+    fn autodetect_is_ambiguous_when_the_same_rank_starts_together() {
+        let rows = [(QueueClaimState::Running, 10), (QueueClaimState::Running, 10)];
+        assert_eq!(
+            choose_quota_autodetect_claim(&rows),
+            QuotaAutodetectChoice::Ambiguous
+        );
+        assert_eq!(
+            choose_quota_autodetect_claim(&[(QueueClaimState::Reported, 10)]),
+            QuotaAutodetectChoice::None
+        );
     }
 
     #[test]

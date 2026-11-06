@@ -60,6 +60,9 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
+mod subagent_quota;
+pub use subagent_quota::{SubagentQuotaBlockApplied, handle_subagent_stop};
+
 #[cfg(test)]
 use agent_doc_codex_hook_io::project_root_for;
 
@@ -508,8 +511,18 @@ fn resolve_stop_hook_budget(raw: Option<&str>) -> std::time::Duration {
     std::time::Duration::from_secs(secs)
 }
 
-pub fn handle_stop() -> Result<()> {
-    let run = match read_stdin_payload()
+pub fn handle_stop() -> Result<Option<SubagentQuotaBlockApplied>> {
+    let read = read_stdin_payload();
+    let quota = match &read {
+        Ok(payload) => subagent_quota::observe_payload(payload).unwrap_or_else(|err| {
+            eprintln!(
+                "[agent-doc] subagent-end quota autodetect failed: {err:#}. The stop is still allowed."
+            );
+            None
+        }),
+        Err(_) => None,
+    };
+    let run = match read
         .and_then(|payload| serde_json::from_str::<StopInput>(&payload).context("parse stop JSON"))
         .and_then(|input| apply_stop_within_budget(input, stop_hook_deadline()))
     {
@@ -534,7 +547,7 @@ pub fn handle_stop() -> Result<()> {
             .context("flush timed-out Codex Stop response")?;
         std::process::exit(0);
     }
-    Ok(())
+    Ok(quota)
 }
 
 /// Claude Code Stop boundary for a completed queue item.
@@ -543,12 +556,12 @@ pub fn handle_stop() -> Result<()> {
 /// leaving the model free to emit a final answer after `session-check` had
 /// durably proven another drainable queue head. Bindings are exact-session
 /// scoped so an unrelated Claude conversation can never inherit this work.
-pub fn handle_claude_stop() -> Result<()> {
+pub fn handle_claude_stop() -> Result<Option<SubagentQuotaBlockApplied>> {
     // Read stdin exactly once; `claude_stop_response` owns every decision made
     // from it, so the tests exercise the same function the hook does.
-    let response = claude_stop_response(read_stdin_payload().as_deref().ok())?;
+    let (response, quota) = claude_stop_response_with_quota(read_stdin_payload().as_deref().ok())?;
     println!("{}", serde_json::to_string(&response)?);
-    Ok(())
+    Ok(quota)
 }
 
 /// The JSON the Claude Stop hook prints for `payload`.
@@ -570,7 +583,20 @@ pub fn handle_claude_stop() -> Result<()> {
 ///   is just an unbounded loop.
 ///
 /// Modelled in `formal/tla/StopHookContinuation.tla`.
+#[cfg(test)]
 fn claude_stop_response(payload: Option<&str>) -> Result<serde_json::Value> {
+    claude_stop_response_with_quota(payload).map(|(response, _)| response)
+}
+
+/// The JSON the Claude Stop hook prints, plus a worker quota block recorded
+/// from this same payload when it is a subagent end (`#workerquotaautodetect`).
+///
+/// Grok remaps a Stop hook to `SubagentStop` inside a subagent, so this path
+/// records the block before the observe-only return. It does not change a
+/// parent turn's continuation decision, and it never answers `decision: "block"`.
+fn claude_stop_response_with_quota(
+    payload: Option<&str>,
+) -> Result<(serde_json::Value, Option<SubagentQuotaBlockApplied>)> {
     let envelope =
         payload.and_then(|payload| serde_json::from_str::<serde_json::Value>(payload).ok());
     let Some(envelope) = envelope else {
@@ -579,20 +605,29 @@ fn claude_stop_response(payload: Option<&str>) -> Result<serde_json::Value> {
              session or document, so there is no queue continuation to check. Allowing the \
              final answer."
         );
-        return Ok(serde_json::json!({}));
+        return Ok((serde_json::json!({}), None));
     };
+    let quota = subagent_quota::observe_value(&envelope).unwrap_or_else(|err| {
+        eprintln!(
+            "[agent-doc] subagent-end quota autodetect failed: {err:#}. The stop is still allowed."
+        );
+        None
+    });
     let stop_hook_active = envelope
         .get("stop_hook_active")
         .and_then(serde_json::Value::as_bool)
         .unwrap_or(false);
 
-    match serde_json::from_value::<ClaudeStopInput>(envelope)
+    let (response, quota) = match serde_json::from_value::<ClaudeStopInput>(envelope)
         .context("parse Claude Stop JSON")
         .and_then(|input| apply_claude_stop(&input))
     {
-        Ok(response) => Ok(response
-            .map(|response| response.to_hook_output())
-            .unwrap_or_else(|| serde_json::json!({}))),
+        Ok(response) => (
+            response
+                .map(|response| response.to_hook_output())
+                .unwrap_or_else(|| serde_json::json!({})),
+            quota,
+        ),
         // Failing closed is right the FIRST time: the operator needs to hear
         // that the continuation check could not run. Repeating it is not.
         Err(err) if stop_hook_active => {
@@ -601,15 +636,24 @@ fn claude_stop_response(payload: Option<&str>) -> Result<serde_json::Value> {
                  {err:#}. Already blocked once for this stop; allowing the final answer so the \
                  failure is reported instead of looped."
             );
-            Ok(serde_json::json!({}))
+            (serde_json::json!({}), quota)
         }
-        Err(err) => Ok(serde_json::to_value(ClaudeStopBlock {
-            decision: "block",
-            reason: format!(
-                "agent-doc Claude Stop hook failed closed while checking queue continuation: {err:#}. Do not send the final answer; report this hook failure to the operator."
-            ),
-        })?),
+        Err(err) => (
+            serde_json::to_value(ClaudeStopBlock {
+                decision: "block",
+                reason: format!(
+                    "agent-doc Claude Stop hook failed closed while checking queue continuation: {err:#}. Do not send the final answer; report this hook failure to the operator."
+                ),
+            })?,
+            quota,
+        ),
+    };
+    if response.as_object().is_some_and(|map| map.is_empty())
+        && let Some(applied) = quota.as_ref()
+    {
+        return Ok((subagent_quota::announced_hook_output(applied), quota));
     }
+    Ok((response, quota))
 }
 
 fn apply_claude_stop(input: &ClaudeStopInput) -> Result<Option<ClaudeStopContinuation>> {

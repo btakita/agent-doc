@@ -136,7 +136,10 @@ credit limit (`#harnessquotaexhausted`). Nothing is running it and it is not
 lost: the attempt keeps its worker, worktree, and branch, and a plain re-claim is
 refused. `agent-doc queue claims` names the limit and the next step: resume the
 same worker after the reset, or `queue release --requeue` to dispatch the row on
-another harness with the partial branch in its brief.
+another harness with the partial branch in its brief. The block is recorded from
+the harness subagent-end hook when that hook sees the worker id and a known limit
+or a structured `rate_limit`, as well as from `queue report-complete` or
+`queue report-quota-blocked`.
 
 A blocked row is held out of the queue:
 

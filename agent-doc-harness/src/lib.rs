@@ -52,6 +52,7 @@ pub mod prompt_source;
 pub mod spawn_program;
 pub mod steering_delivery;
 pub mod timeout;
+pub mod subagent_end;
 pub mod usage_limit;
 
 /// How the supervisor builds args on restart after a crash.

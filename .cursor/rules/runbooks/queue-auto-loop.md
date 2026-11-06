@@ -156,17 +156,24 @@ The queue coordinator protocol is three-boundary and worker-fenced
    (`#reportcompletenomatch`).
 
 A worker that runs out of tokens or credits returns a usage-limit notice, not a
-report (`#harnessquotaexhausted`). Pass that text to `queue report-complete`
-anyway, with `--branch`/`--worktree` when known: the binary reads the notice,
-records the attempt as blocked by quota (`⛔`), keeps its worker, branch, and
-worktree as evidence, and prints the next step. For an exit with no recognizable
-notice, run `queue report-quota-blocked --evidence <text> --harness <name>`. The
-attempt never expires into lost, its slot is free, and no new worker may start
-on that harness: after the reset, resume the same worker and rerun its
-`start_command`; or `queue release --generation <N> --requeue` and dispatch the
-row on another harness with `queue claim --harness <name>`, whose brief names
-the partial work. A claim with no `--harness` is for this coordinator's
-harness and is refused while that harness is exhausted.
+report (`#harnessquotaexhausted`). Claude and Grok record that from the
+subagent-end hook (`agent-doc hook subagent-stop`, and a remapped Stop that
+carries the worker id) without the coordinator forwarding the text: the attempt
+becomes blocked by quota (`⛔`) instead of staying running until its TTL marks
+it lost (`#workerquotaautodetect`). A Codex Stop records it only when the
+payload names the worker id. Pass the text to `queue report-complete` anyway
+when you have it, with `--branch`/`--worktree` when known: the binary reads the
+notice, records the same block, and keeps the worker, branch, and worktree as
+evidence. A second identical signal is quiet. For an exit with no recognizable
+notice and no structured `rate_limit`, run
+`queue report-quota-blocked --evidence <text> --harness <name>`. The attempt
+never expires into lost, its slot is free, and no new worker may start on that
+harness: after the reset, resume the same worker and rerun its `start_command`;
+or `queue release --generation <N> --requeue` and dispatch the row on another
+harness with `queue claim --harness <name>`, whose brief names the partial
+work. A claim with no `--harness` is for this coordinator's harness and is
+refused while that harness is exhausted. OpenCode has no subagent-end hook, so
+its coordinator still passes the text.
 
 Never infer running from a label, intended spawn, process poll, or heartbeat.
 `queue claim --refresh --generation <N>` extends an already-started attempt and

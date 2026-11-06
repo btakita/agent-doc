@@ -1694,6 +1694,10 @@ mod tests {
             vec![crate::skill::STEERING_POSTTOOLUSE_COMMAND.to_string()]
         );
         assert_eq!(
+            hook_commands_for(&after, "SubagentStop"),
+            vec!["agent-doc hook subagent-stop".to_string()]
+        );
+        assert_eq!(
             hook_commands_for(&after, "Stop"),
             vec![
                 OPERATOR_STOP.to_string(),
@@ -1727,10 +1731,14 @@ mod tests {
             .cloned()
             .collect();
         expected_keys.push("PostToolUse".to_string());
+        expected_keys.push("SubagentStop".to_string());
         expected_keys.sort();
         let mut sorted_after = after_keys.clone();
         sorted_after.sort();
-        assert_eq!(sorted_after, expected_keys, "exactly one event was added");
+        assert_eq!(
+            sorted_after, expected_keys,
+            "PostToolUse and SubagentStop were added"
+        );
         assert_eq!(
             std::fs::read_to_string(&super_settings).unwrap(),
             super_before,
@@ -1781,6 +1789,7 @@ mod tests {
             missing,
             vec![
                 "added Stop `agent-doc hook claude-stop` (timeout 15s)".to_string(),
+                "added SubagentStop `agent-doc hook subagent-stop` (timeout 15s)".to_string(),
                 "added PostToolUse `agent-doc hook steering-post-tool-use` (timeout 10s)"
                     .to_string(),
             ]

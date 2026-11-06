@@ -1376,6 +1376,7 @@ pub(crate) fn user_layer_project_hooks(path: &Path) -> Vec<&'static str> {
     [
         PREFLIGHT_USER_PROMPT_COMMAND,
         CLAUDE_STOP_COMMAND,
+        SUBAGENT_STOP_COMMAND,
         STEERING_POSTTOOLUSE_COMMAND,
     ]
     .into_iter()
@@ -1744,6 +1745,10 @@ pub(crate) const STEERING_HOOK_TIMEOUT_SECS: u64 = 10;
 /// Consequential Claude Stop boundary: a clean closeout with a durable next
 /// queue head is not allowed to become a final answer.
 const CLAUDE_STOP_COMMAND: &str = "agent-doc hook claude-stop";
+/// Claude Code does not fire `Stop` for a subagent. This distinct command is
+/// the project `SubagentStop` hook (`#workerquotaautodetect`). Grok remaps the
+/// Stop hook as well; the handler is quiet when both fire.
+const SUBAGENT_STOP_COMMAND: &str = "agent-doc hook subagent-stop";
 
 /// `timeout` written onto installed Claude/Codex `UserPromptSubmit` preflight hooks.
 ///
@@ -1842,7 +1847,7 @@ pub(crate) struct RequiredClaudeHook {
 /// `preflight_timeout_secs` is raised to at least [`PREFLIGHT_HOOK_TIMEOUT_SECS`].
 pub(crate) fn required_claude_project_hooks(
     preflight_timeout_secs: u64,
-) -> [RequiredClaudeHook; 7] {
+) -> [RequiredClaudeHook; 8] {
     let hook = |event, command, status_message, timeout_secs| RequiredClaudeHook {
         event,
         command,
@@ -1859,6 +1864,15 @@ pub(crate) fn required_claude_project_hooks(
             "Stop",
             CLAUDE_STOP_COMMAND,
             Some("Checking agent-doc queue continuation"),
+            Some(CLAUDE_STOP_HOOK_TIMEOUT_SECS),
+        ),
+        // `#workerquotaautodetect`: Claude Code does not deliver `Stop` to a
+        // subagent. Grok may also remap the Stop command above onto this
+        // event; the handler records a usage limit once and stays quiet after.
+        hook(
+            "SubagentStop",
+            SUBAGENT_STOP_COMMAND,
+            Some("Recording a subagent usage limit"),
             Some(CLAUDE_STOP_HOOK_TIMEOUT_SECS),
         ),
         hook("SessionStart", TURN_STATUS_IDLE_COMMAND, None, None),

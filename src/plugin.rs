@@ -10,7 +10,7 @@
 //! - `list()` — scans JetBrains plugin directories for the versioned agent-doc JAR and queries `code --list-extensions` for the VS Code extension; prints found entries to stdout.
 //! - JetBrains plugin directories are discovered from versioned IDE data roots (`~/.local/share/JetBrains/<Product><Version>/` on Linux, `~/Library/Application Support/JetBrains/<Product><Version>/` on macOS). Config roots and unrelated JetBrains service directories are excluded. Callers can select an exact target with `--plugins-dir`; ambiguous non-interactive discovery fails with rerun guidance instead of waiting on stdin.
 //! - VS Code CLI detection order: `cursor` → `codium` → `code` (first that succeeds `--version`). Absence is reported as a missing prerequisite before any download, never discarded and re-spawned as `code`.
-//! - VS Code installs also reach every workspace extension host on the machine (`#vscoderemoteparity`): `code-server` on `PATH` (otherwise `~/.local/bin/code-server` or Coder's default `/tmp/code-server/bin/code-server`, labelled `code-server:<path>`, `#vscodecodersmoke`), and the newest Remote-SSH server install under `~/.vscode-server` (or `$VSCODE_AGENT_FOLDER`), `~/.vscode-server-insiders`, `~/.vscodium-server` or `~/.cursor-server`, through that server's own CLI with `--extensions-dir <root>/extensions`. Both server layouts are probed (`bin/<commit>/bin/<cli>` and `cli/servers/<id>/server/bin/<cli>`). `install`, `update`, `update_all_installed` and `list` use the same targets; an install attempts every target before reporting failures, and fails before downloading only when no desktop CLI and no workspace host exists.
+//! - VS Code installs also reach every workspace extension host on the machine (`#vscoderemoteparity`): `code-server` on `PATH` (otherwise `~/.local/bin/code-server` or Coder's default `/tmp/code-server/bin/code-server`, labelled `code-server:<path>`, `#vscodecodersmoke`), Coder's `vscode-web` module (the Microsoft VS Code Server web build, default `/tmp/vscode-web/bin/code-server`, otherwise `~/.vscode-web/bin/code-server`, labelled `vscode-web:<path>`, installing with no `--extensions-dir` so the server CLI picks the same `$VSCODE_AGENT_FOLDER`-or-`~/.vscode-server/extensions` default its `serve-local` loads, `#vscodewebprefix`), and the newest Remote-SSH server install under `~/.vscode-server` (or `$VSCODE_AGENT_FOLDER`), `~/.vscode-server-insiders`, `~/.vscodium-server` or `~/.cursor-server`, through that server's own CLI with `--extensions-dir <root>/extensions`. Both server layouts are probed (`bin/<commit>/bin/<cli>` and `cli/servers/<id>/server/bin/<cli>`). `install`, `update`, `update_all_installed` and `list` use the same targets; an install attempts every target before reporting failures, and fails before downloading only when no desktop CLI and no workspace host exists.
 //! - Asset selection matches complete versioned package shapes and prefers a signed variant. JetBrains targets prove their platform build from the versioned IDE data root: 242-261 select `agent-doc-jetbrains-<version>.zip`, exact 262 selects `agent-doc-jetbrains-262-<version>.zip`, and an unprovable/unsupported target fails before replacement. Local installs read the selected package's own `gradle.properties`; VS Code installs require the VSIX version to match `package.json` exactly.
 //! - Downloaded editor packages are verified before installation against the release's `EDITOR-PACKAGES.sha256` manifest, falling back to GitHub's per-asset `digest`. A declared digest that disagrees with the bytes fails closed.
 //!
@@ -38,6 +38,7 @@
 //! - detect_code_cmd: cursor available → returns "cursor"; only code available → returns "code"; none available → `None`, and the caller fails with install guidance before downloading
 //! - vscode_server_targets: a Remote-SSH root with servers in both layouts → one target for the newest, installing with `--extensions-dir <root>/extensions`; a non-executable CLI or empty root → no target
 //! - code_server_target: `code-server` off `PATH` but executable under `~/.local/bin` or `/tmp/code-server/bin` → a `code-server:<path>` target
+//! - vscode_web_target: an executable `/tmp/vscode-web/bin/code-server` or `~/.vscode-web/bin/code-server` → a `vscode-web:<path>` target with no leading args; a non-executable CLI → no target
 //! - vscode_install_targets: no desktop CLI but a workspace host → the workspace host alone; neither → empty, and install fails with guidance naming `code-server` and `~/.vscode-server`
 //! - find_asset_prefers_signed: release with both signed and unsigned *versioned* zips → signed asset selected in either API order
 //! - editor package integrity: a manifest or API digest that disagrees with the downloaded bytes refuses the install
@@ -1189,13 +1190,10 @@ fn vscode_server_targets_in(home: &Path, agent_folder: Option<&Path>) -> Vec<VsC
 const CODE_SERVER_OFF_PATH_CLIS: &[&str] =
     &[".local/bin/code-server", "/tmp/code-server/bin/code-server"];
 
-/// The `code-server` target: the CLI on `PATH` when it answers, otherwise the
-/// first executable off-`PATH` install, labelled `code-server:<path>`.
-fn code_server_target(on_path: bool, home: Option<&Path>) -> Option<VsCodeInstallTarget> {
-    if on_path {
-        return Some(VsCodeInstallTarget::cli("code-server"));
-    }
-    CODE_SERVER_OFF_PATH_CLIS
+/// The first candidate that is an executable file; relative candidates are
+/// under `home` and skipped without one.
+fn first_executable_cli(candidates: &[&str], home: Option<&Path>) -> Option<PathBuf> {
+    candidates
         .iter()
         .filter_map(|candidate| {
             let candidate = Path::new(candidate);
@@ -1206,16 +1204,52 @@ fn code_server_target(on_path: bool, home: Option<&Path>) -> Option<VsCodeInstal
             }
         })
         .find(|candidate| is_executable_file(candidate))
-        .map(|program| VsCodeInstallTarget {
-            label: format!("code-server:{}", program.display()),
-            program,
-            leading_args: Vec::new(),
-        })
+}
+
+/// The `code-server` target: the CLI on `PATH` when it answers, otherwise the
+/// first executable off-`PATH` install, labelled `code-server:<path>`.
+fn code_server_target(on_path: bool, home: Option<&Path>) -> Option<VsCodeInstallTarget> {
+    if on_path {
+        return Some(VsCodeInstallTarget::cli("code-server"));
+    }
+    first_executable_cli(CODE_SERVER_OFF_PATH_CLIS, home).map(|program| VsCodeInstallTarget {
+        label: format!("code-server:{}", program.display()),
+        program,
+        leading_args: Vec::new(),
+    })
+}
+
+/// Where Coder's `vscode-web` module installs the Microsoft VS Code Server web
+/// build (`#vscodewebprefix`). The module extracts the
+/// `vscode-server-<platform>-<arch>-web` tarball into its `install_prefix`
+/// (default `/tmp/vscode-web`; its README's custom example is
+/// `/home/coder/.vscode-web`) and runs `<prefix>/bin/code-server serve-local`,
+/// never putting it on `PATH`. That CLI is the VS Code Server's, not
+/// code-server's, and it is not under a Remote-SSH server root, so neither
+/// other probe finds it. Relative entries are under `$HOME`.
+const VSCODE_WEB_CLIS: &[&str] = &[
+    "/tmp/vscode-web/bin/code-server",
+    ".vscode-web/bin/code-server",
+];
+
+/// The `vscode-web` target: the first executable install, labelled
+/// `vscode-web:<path>`. It passes no `--extensions-dir`: the server CLI then
+/// resolves the same directory `serve-local` loads (`$VSCODE_AGENT_FOLDER`,
+/// otherwise `~/.vscode-server`, plus `/extensions`), exactly as the module's
+/// own extension install does. A template that sets the module's
+/// `extensions_dir` is not discoverable here.
+fn vscode_web_target(home: Option<&Path>) -> Option<VsCodeInstallTarget> {
+    first_executable_cli(VSCODE_WEB_CLIS, home).map(|program| VsCodeInstallTarget {
+        label: format!("vscode-web:{}", program.display()),
+        program,
+        leading_args: Vec::new(),
+    })
 }
 
 /// Every workspace extension host this machine serves: `code-server` (Coder's
-/// browser IDE) and each Remote-SSH server install (VS Code Desktop through
-/// Coder Remote or Remote-SSH).
+/// browser IDE), Coder's `vscode-web` (VS Code Server in the browser) and each
+/// Remote-SSH server install (VS Code Desktop through Coder Remote or
+/// Remote-SSH).
 fn vscode_workspace_targets() -> Vec<VsCodeInstallTarget> {
     let mut targets = Vec::new();
     let home = std::env::var_os("HOME")
@@ -1225,6 +1259,7 @@ fn vscode_workspace_targets() -> Vec<VsCodeInstallTarget> {
         command_answers_version("code-server"),
         home.as_deref(),
     ));
+    targets.extend(vscode_web_target(home.as_deref()));
     if let Some(home) = home {
         let agent_folder = std::env::var_os("VSCODE_AGENT_FOLDER")
             .filter(|value| !value.is_empty())
@@ -1248,7 +1283,7 @@ fn vscode_install_targets(
 
 fn missing_code_cli_message() -> &'static str {
     "No VS Code-family CLI or workspace extension host found: tried `cursor`, `codium`, and `code` on PATH, \
-`code-server` on PATH, ~/.local/bin or /tmp/code-server (Coder's default), and a Remote-SSH server under ~/.vscode-server (or $VSCODE_AGENT_FOLDER), ~/.vscodium-server, or ~/.cursor-server. \
+`code-server` on PATH, ~/.local/bin or /tmp/code-server (Coder's default), Coder's vscode-web under /tmp/vscode-web or ~/.vscode-web, and a Remote-SSH server under ~/.vscode-server (or $VSCODE_AGENT_FOLDER), ~/.vscodium-server, or ~/.cursor-server. \
 Install the editor's shell command (VS Code / VSCodium: run `Shell Command: Install 'code' command in PATH` from the command palette; Cursor: `Install 'cursor' command`), or put the CLI on PATH, then re-run. \
 On a Coder or Remote-SSH workspace, connect VS Code once so its server is installed, or run from a remote VS Code terminal."
 }
@@ -4295,7 +4330,7 @@ mod tests {
     };
     use super::{
         VsCodeInstallTarget, code_server_target, install_vsix_into_all, vscode_install_targets,
-        vscode_server_targets_in,
+        vscode_server_targets_in, vscode_web_target,
     };
     use super::{install_jetbrains_package_bytes, java_candidates_for_ide, resolve_java_for_ide};
     use serde_json::json;
@@ -4975,6 +5010,46 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
         assert!(super::CODE_SERVER_OFF_PATH_CLIS.contains(&"/tmp/code-server/bin/code-server"));
     }
 
+    /// `#vscodewebprefix`: Coder's `vscode-web` module extracts the VS Code
+    /// Server web build into `/tmp/vscode-web` (or a custom prefix such as
+    /// `~/.vscode-web`) without putting it on `PATH`. That install is reached
+    /// through its own CLI with no `--extensions-dir`, so the server picks the
+    /// directory its `serve-local` loads.
+    #[cfg(unix)]
+    #[test]
+    fn vscode_web_target_reaches_coders_vscode_web_install() {
+        let home = TempDir::new().unwrap();
+        let cli = home.path().join(".vscode-web/bin/code-server");
+        fs::create_dir_all(cli.parent().unwrap()).unwrap();
+        fs::write(&cli, "#!/bin/sh\n").unwrap();
+        // Not executable: not a target (the machine's /tmp/vscode-web, if any,
+        // may answer instead, so only assert the home candidate is skipped).
+        assert_ne!(
+            vscode_web_target(Some(home.path())).map(|target| target.program),
+            Some(cli.clone())
+        );
+        executable(&cli, "#!/bin/sh\n");
+        let expected = VsCodeInstallTarget {
+            label: format!("vscode-web:{}", cli.display()),
+            program: cli.clone(),
+            leading_args: Vec::new(),
+        };
+        // Coder's default prefix is probed first, and needs no `$HOME`; only a
+        // machine without one can prove the fallback and the empty result.
+        assert_eq!(super::VSCODE_WEB_CLIS[0], "/tmp/vscode-web/bin/code-server");
+        if !super::is_executable_file(Path::new(super::VSCODE_WEB_CLIS[0])) {
+            assert_eq!(vscode_web_target(Some(home.path())), Some(expected));
+            assert_eq!(vscode_web_target(None), None);
+        }
+        // The VS Code Server CLI names `code-server` too, but it is not
+        // code-server: the code-server probe never labels it.
+        assert!(
+            !super::CODE_SERVER_OFF_PATH_CLIS
+                .iter()
+                .any(|path| path.contains("vscode-web"))
+        );
+    }
+
     #[test]
     fn vscode_install_reaches_the_desktop_cli_and_every_workspace_host() {
         let server = VsCodeInstallTarget {
@@ -5030,6 +5105,7 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
     fn the_missing_code_cli_message_names_the_prerequisite_not_the_vsix() {
         let message = missing_code_cli_message();
         assert!(message.contains("code-server"), "{message}");
+        assert!(message.contains("/tmp/vscode-web"), "{message}");
         assert!(message.contains(".vscode-server"), "{message}");
         assert!(message.contains("cursor"), "{message}");
         assert!(message.contains("codium"), "{message}");

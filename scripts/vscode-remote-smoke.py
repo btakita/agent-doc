@@ -6,12 +6,14 @@ machine serving a code-server or VS Code Server workspace extension host. It
 checks, in order:
 
 1. install      `agent-doc plugin install vscode` reaches a workspace extension
-                host (a `remote-ssh:<root>` or `code-server` target), and the
+                host (a `remote-ssh:<root>`, `code-server` or `vscode-web:<cli>`
+                target), and the
                 installed manifest declares `"extensionKind": ["workspace"]`.
 2. register     the controller holds a VS Code registration for the document
                 whose activation receipt has `role=workspace`.
 3. remote-host  the registered pid is a server-side extension host process
-                (`--type=extensionHost` under a VS Code Server or code-server).
+                (`--type=extensionHost` under a VS Code Server, Coder's
+                vscode-web, or code-server).
 4. tmux-attach  a tmux client attached to the project session descends from
                 the same server (the extension's `agent-doc` terminal).
 5. remote-name  that client carries `AGENT_DOC_VSCODE_REMOTE_NAME`, the
@@ -71,6 +73,10 @@ PREREQUISITE = {
 # (src/plugin.rs CODE_SERVER_OFF_PATH_CLIS): relative entries are under $HOME.
 # Coder's code-server module installs into /tmp/code-server by default.
 CODE_SERVER_OFF_PATH_CLIS = (".local/bin/code-server", "/tmp/code-server/bin/code-server")
+# Coder's vscode-web module extracts the VS Code Server web build into
+# /tmp/vscode-web by default (src/plugin.rs VSCODE_WEB_CLIS, `#vscodewebprefix`);
+# its README's custom prefix example is ~/.vscode-web.
+VSCODE_WEB_CLIS = ("/tmp/vscode-web/bin/code-server", ".vscode-web/bin/code-server")
 SERVER_CLI_NAMES = ("code-server", "code-server-insiders", "codium-server", "cursor-server")
 SESSION_DOC_PROBE = (
     "import ctypes, sys\n"
@@ -117,7 +123,8 @@ def workspace_target_lines(plugin_list: str) -> List[str]:
         line.strip()
         for line in plugin_list.splitlines()
         if line.startswith("vscode")
-        and ("remote-ssh:" in line or "code-server:" in line or line.rstrip().endswith("code-server"))
+        and ("remote-ssh:" in line or "code-server:" in line or "vscode-web:" in line
+             or line.rstrip().endswith("code-server"))
     ]
 
 
@@ -133,7 +140,7 @@ def server_root_of(argv: List[str]) -> Optional[str]:
             marker = "/" + name + "/"
             if marker in arg:
                 return arg[: arg.index(marker) + len(marker) - 1]
-        match = re.search(r"^(.*/code-server[^/]*)/(lib|out|bin)/", arg)
+        match = re.search(r"^(.*/(?:code-server|\.?vscode-web)[^/]*)/(lib|out|bin)/", arg)
         if match:
             return match.group(1)
     return None
@@ -253,6 +260,11 @@ def installed_workspace_hosts() -> List[str]:
             if os.access(path, os.X_OK) and path.is_file():
                 hosts.append(f"code-server:{path}")
                 break
+    for candidate in VSCODE_WEB_CLIS:
+        path = Path(candidate) if candidate.startswith("/") else home / candidate
+        if os.access(path, os.X_OK) and path.is_file():
+            hosts.append(f"vscode-web:{path}")
+            break
     roots = [os.environ.get("VSCODE_AGENT_FOLDER", "")] + [str(home / name) for name in SERVER_ROOT_NAMES]
     seen = set()
     for root in roots:
@@ -532,6 +544,8 @@ def self_test() -> int:
     ]
     coder = "vscode     btakita.agent-doc@0.2.84  code-server:/tmp/code-server/bin/code-server\n"
     assert workspace_target_lines(coder) == [coder.strip()]
+    vscode_web = "vscode     btakita.agent-doc@0.2.84  vscode-web:/tmp/vscode-web/bin/code-server\n"
+    assert workspace_target_lines(vscode_web) == [vscode_web.strip()]
 
     # The 2026-11-04 Coder run: install failed, so register must not wait and
     # remote-host onward must not run; layout-sync follows register.
@@ -567,6 +581,11 @@ def self_test() -> int:
     assert is_server_extension_host(remote) and server_root_of(remote) == "/home/u/.vscode-server"
     code_server = ["/usr/lib/code-server/lib/node", "/usr/lib/code-server/out/bootstrap-fork", "--type=extensionHost"]
     assert is_server_extension_host(code_server) and server_root_of(code_server) == "/usr/lib/code-server"
+    # Coder's vscode-web: the VS Code Server web build extracted flat into its prefix.
+    web = ["/tmp/vscode-web/node", "/tmp/vscode-web/out/bootstrap-fork", "--type=extensionHost"]
+    assert is_server_extension_host(web) and server_root_of(web) == "/tmp/vscode-web"
+    custom = ["/home/coder/.vscode-web/node", "/home/coder/.vscode-web/out/bootstrap-fork", "--type=extensionHost"]
+    assert server_root_of(custom) == "/home/coder/.vscode-web"
     desktop = ["/usr/share/code/code", "--type=utility", "--utility-sub-type=node.mojom.NodeService"]
     assert not is_server_extension_host(desktop) and server_root_of(desktop) is None
     pty = ["/home/u/.vscode-server/bin/abc/node", "/home/u/.vscode-server/bin/abc/out/bootstrap-fork", "--type=ptyHost"]

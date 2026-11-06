@@ -326,7 +326,10 @@ pub fn prune_stale_editor_sockets(project_root: &Path) -> Result<usize> {
 /// socket file is unlinked **only** on positive evidence that its owner is gone
 /// (`#netadv5` R3): see [`probe_listener_for_pid`].
 pub fn is_listener_active_for_pid(project_root: &Path, pid: u64) -> bool {
-    matches!(probe_listener_for_pid(project_root, pid), ListenerProbe::Live)
+    matches!(
+        probe_listener_for_pid(project_root, pid),
+        ListenerProbe::Live
+    )
 }
 
 /// What one connect attempt learned about the editor listener for a pid.
@@ -377,7 +380,10 @@ fn classify_connect_failure(error: &anyhow::Error) -> ConnectFailure {
     }
     let refused = error.chain().any(|cause| {
         cause.downcast_ref::<std::io::Error>().is_some_and(|io| {
-            matches!(io.kind(), ErrorKind::ConnectionRefused | ErrorKind::NotFound)
+            matches!(
+                io.kind(),
+                ErrorKind::ConnectionRefused | ErrorKind::NotFound
+            )
         })
     });
     if refused {
@@ -1617,13 +1623,9 @@ fn build_mismatch_reload_decision(
     reload_already_requested: Option<bool>,
 ) -> BuildMismatchReloadDecision {
     if sender_executable_replaced {
-        BuildMismatchReloadDecision::Refuse(
-            BuildMismatchRecoveryRefusal::SenderExecutableReplaced,
-        )
+        BuildMismatchReloadDecision::Refuse(BuildMismatchRecoveryRefusal::SenderExecutableReplaced)
     } else if reload_already_requested == Some(true) {
-        BuildMismatchReloadDecision::Refuse(
-            BuildMismatchRecoveryRefusal::ReloadAlreadyRequested,
-        )
+        BuildMismatchReloadDecision::Refuse(BuildMismatchRecoveryRefusal::ReloadAlreadyRequested)
     } else {
         BuildMismatchReloadDecision::Reload
     }
@@ -2318,7 +2320,9 @@ mod tests {
             ],
         );
         let msg = serde_json::json!({"type": "deliver_crdt_remote", "file": "/tmp/plan.md"});
-        send_message(&root, &msg).unwrap().expect("terminal receipt");
+        send_message(&root, &msg)
+            .unwrap()
+            .expect("terminal receipt");
         assert_eq!(connections.load(SeqCst), 1, "one connection per intent");
         assert_eq!(
             round_trips.load(SeqCst),
@@ -2357,12 +2361,17 @@ mod tests {
             probe_listener_for_pid_with(root, live_pid, slow, |_| false),
             ListenerProbe::Unknown
         );
-        assert!(sock.exists(), "a timeout is not evidence even for a dead pid");
+        assert!(
+            sock.exists(),
+            "a timeout is not evidence even for a dead pid"
+        );
 
         // Refused while the owner is alive (listener restarting): retained.
         let refused = |_: &Path, _: u64| -> Result<()> {
-            Err(anyhow::Error::new(std::io::Error::from(ErrorKind::ConnectionRefused))
-                .context("failed to connect to IPC socket"))
+            Err(
+                anyhow::Error::new(std::io::Error::from(ErrorKind::ConnectionRefused))
+                    .context("failed to connect to IPC socket"),
+            )
         };
         assert_eq!(
             probe_listener_for_pid_with(root, live_pid, refused, |_| true),
@@ -2387,14 +2396,20 @@ mod tests {
     #[test]
     fn connect_failure_classification_separates_slow_from_refused() {
         let timed_out = anyhow::Error::new(ConnectTimedOut("t".into()));
-        assert_eq!(classify_connect_failure(&timed_out), ConnectFailure::Inconclusive);
-        let refused = anyhow::Error::new(std::io::Error::from(ErrorKind::ConnectionRefused))
-            .context("ctx");
+        assert_eq!(
+            classify_connect_failure(&timed_out),
+            ConnectFailure::Inconclusive
+        );
+        let refused =
+            anyhow::Error::new(std::io::Error::from(ErrorKind::ConnectionRefused)).context("ctx");
         assert_eq!(classify_connect_failure(&refused), ConnectFailure::Refused);
         let missing = anyhow::Error::new(std::io::Error::from(ErrorKind::NotFound));
         assert_eq!(classify_connect_failure(&missing), ConnectFailure::Refused);
         let other = anyhow::Error::new(std::io::Error::from(ErrorKind::PermissionDenied));
-        assert_eq!(classify_connect_failure(&other), ConnectFailure::Inconclusive);
+        assert_eq!(
+            classify_connect_failure(&other),
+            ConnectFailure::Inconclusive
+        );
     }
 
     /// The real watchdog error is typed, so it classifies as inconclusive.
@@ -2998,6 +3013,7 @@ mod tests {
         let callback_reached = Arc::new(AtomicBool::new(false));
         let listener_identity = IpcPeerIdentity::new(IPC_PROTOCOL_VERSION, "listener-build");
 
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel();
         let root_clone = root.clone();
         let shutdown_clone = Arc::clone(&shutdown);
         let callback_reached_clone = Arc::clone(&callback_reached);
@@ -3012,10 +3028,10 @@ mod tests {
                 Duration::from_secs(1),
                 Some(shutdown_clone),
                 listener_identity,
-                None,
+                Some(ready_tx),
             )
         });
-        wait_for_test_listener(&root);
+        wait_for_test_listener(&root, &ready_rx);
 
         let stream = try_connect_with_timeout_for_pid(
             &root,
@@ -3059,6 +3075,7 @@ mod tests {
         let reloads_reached = Arc::new(AtomicUsize::new(0));
         let listener_identity = IpcPeerIdentity::new(IPC_PROTOCOL_VERSION, "stale-listener-build");
 
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel();
         let root_clone = root.clone();
         let shutdown_clone = Arc::clone(&shutdown);
         let mutation_reached_clone = Arc::clone(&mutation_reached);
@@ -3078,10 +3095,10 @@ mod tests {
                 Duration::from_secs(2),
                 Some(shutdown_clone),
                 listener_identity,
-                None,
+                Some(ready_tx),
             )
         });
-        wait_for_test_listener(&root);
+        wait_for_test_listener(&root, &ready_rx);
 
         let error = send_message_with_timeout_inner_with_identity(
             &root,
@@ -3248,15 +3265,37 @@ mod tests {
         );
     }
 
-    fn wait_for_test_listener(root: &Path) {
-        let deadline = Instant::now() + HANG_CEILING;
-        while !socket_path(root).exists() && Instant::now() < deadline {
-            thread::sleep(Duration::from_millis(10));
-        }
-        assert!(
-            socket_path(root).exists(),
-            "listener socket was not published"
-        );
+    /// [`start_listener`] plus the readiness sender. Timeouts and identity stay
+    /// the production defaults; only the announcement is added so a test can
+    /// wait on the event instead of sleeping (`#ipclistenerreadysleeps`).
+    fn start_announcing_test_listener<F>(
+        root: &Path,
+        handler: F,
+        ready: std::sync::mpsc::Sender<PathBuf>,
+    ) -> Result<()>
+    where
+        F: Fn(&str) -> Option<String> + Send + Sync + 'static,
+    {
+        start_listener_with_logger_and_read_timeout(
+            root,
+            handler,
+            noop_ops_logger,
+            Duration::from_secs(IPC_LISTENER_READ_TIMEOUT_SECS),
+            None,
+            local_ipc_identity(),
+            Some(ready),
+        )
+    }
+
+    /// `#ipclistenerreadysleeps`: the listener's readiness event, then one hello.
+    /// A fixed sleep or a socket-file poll races the accept loop.
+    fn wait_for_test_listener(root: &Path, ready: &std::sync::mpsc::Receiver<PathBuf>) {
+        await_listener_ready(ready, &socket_path(root)).unwrap_or_else(|why| {
+            panic!(
+                "the test listener never came up at {}: {why}",
+                socket_path(root).display()
+            )
+        });
     }
 
     fn stop_test_listener(
@@ -3286,25 +3325,17 @@ mod tests {
 
         let root_clone = root.clone();
         let shutdown_clone = Arc::clone(&shutdown);
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel();
         let server = thread::spawn(move || {
-            start_listener_with_logger_until(
+            start_listener_with_logger_until_ready(
                 &root_clone,
                 |_| Some(r#"{"ok":true}"#.to_string()),
                 noop_ops_logger,
                 shutdown_clone,
+                ready_tx,
             )
         });
-
-        // `#remainingwallclock`: publication liveness, not speed; the bounds
-        // here are hang ceilings.
-        let deadline = Instant::now() + Duration::from_secs(60);
-        while !socket_path(&root).exists() && Instant::now() < deadline {
-            thread::sleep(Duration::from_millis(10));
-        }
-        assert!(
-            socket_path(&root).exists(),
-            "listener socket was not published"
-        );
+        wait_for_test_listener(&root, &ready_rx);
 
         let mut stream = try_connect_with_timeout_for_pid(
             &root,
@@ -3400,25 +3431,31 @@ mod tests {
         let handler_entered = Arc::clone(&entered);
         let handler_peak_inflight = Arc::clone(&peak_inflight);
         let root_clone = root.clone();
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel();
         let server = thread::spawn(move || {
-            start_listener(&root_clone, move |msg| {
-                handler_entered.fetch_add(1, Ordering::SeqCst);
-                let ceiling = Instant::now() + HANG_CEILING;
-                while handler_entered.load(Ordering::SeqCst) < 3 && Instant::now() < ceiling {
-                    thread::sleep(Duration::from_millis(5));
-                }
-                // Sampled while this handler is still in flight, so a listener
-                // that runs all three at once reports all three here.
-                handler_peak_inflight.fetch_max(inflight_connection_handlers(), Ordering::SeqCst);
-                let v: serde_json::Value = serde_json::from_str(msg).ok()?;
-                Some(
-                    serde_json::json!({"type":"receipt","status":"applied","id":v["type"]})
-                        .to_string(),
-                )
-            })
+            start_announcing_test_listener(
+                &root_clone,
+                move |msg| {
+                    handler_entered.fetch_add(1, Ordering::SeqCst);
+                    let ceiling = Instant::now() + HANG_CEILING;
+                    while handler_entered.load(Ordering::SeqCst) < 3 && Instant::now() < ceiling {
+                        thread::sleep(Duration::from_millis(5));
+                    }
+                    // Sampled while this handler is still in flight, so a listener
+                    // that runs all three at once reports all three here.
+                    handler_peak_inflight
+                        .fetch_max(inflight_connection_handlers(), Ordering::SeqCst);
+                    let v: serde_json::Value = serde_json::from_str(msg).ok()?;
+                    Some(
+                        serde_json::json!({"type":"receipt","status":"applied","id":v["type"]})
+                            .to_string(),
+                    )
+                },
+                ready_tx,
+            )
             .ok()
         });
-        wait_for_test_listener(&root);
+        wait_for_test_listener(&root, &ready_rx);
 
         let handles: Vec<_> = (0..3)
             .map(|i| {
@@ -3480,19 +3517,24 @@ mod tests {
         std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
 
         let root_clone = root.clone();
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel();
         let server = thread::spawn(move || {
-            start_listener(&root_clone, move |msg| {
-                // Simulate a generation handoff that would exceed a tight timeout.
-                thread::sleep(Duration::from_millis(800));
-                let v: serde_json::Value = serde_json::from_str(msg).ok()?;
-                Some(
-                    serde_json::json!({"type":"receipt","status":"applied","id":v["type"]})
-                        .to_string(),
-                )
-            })
+            start_announcing_test_listener(
+                &root_clone,
+                move |msg| {
+                    // Simulate a generation handoff that would exceed a tight timeout.
+                    thread::sleep(Duration::from_millis(800));
+                    let v: serde_json::Value = serde_json::from_str(msg).ok()?;
+                    Some(
+                        serde_json::json!({"type":"receipt","status":"applied","id":v["type"]})
+                            .to_string(),
+                    )
+                },
+                ready_tx,
+            )
             .ok()
         });
-        thread::sleep(Duration::from_millis(150));
+        wait_for_test_listener(&root, &ready_rx);
 
         let pid = u64::from(std::process::id());
         let message = reload_lib_message("0.0.0-test");
@@ -3527,39 +3569,45 @@ mod tests {
         let file_for_listener = file.clone();
         let handler_calls_for_listener = handler_calls.clone();
         let release_for_listener = release.clone();
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel();
         let server = thread::spawn(move || {
-            start_listener(&root_clone, move |msg| {
-                let v: serde_json::Value = serde_json::from_str(msg).ok()?;
-                if v.get("type").and_then(|value| value.as_str()) != Some("observe_lazily_current")
-                {
-                    return Some(
-                        serde_json::json!({"type":"receipt","status":"rejected"}).to_string(),
-                    );
-                }
-                assert_eq!(v["file"], file_for_listener);
-                handler_calls_for_listener.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                let _ = started_tx.send(());
-
-                let (lock, condvar) = &*release_for_listener;
-                let mut released = lock.lock();
-                while !*released {
-                    let wait = condvar.wait_for(&mut released, HANG_CEILING);
-                    if wait.timed_out() {
+            start_announcing_test_listener(
+                &root_clone,
+                move |msg| {
+                    let v: serde_json::Value = serde_json::from_str(msg).ok()?;
+                    if v.get("type").and_then(|value| value.as_str())
+                        != Some("observe_lazily_current")
+                    {
                         return Some(
-                            serde_json::json!({
-                                "type":"receipt",
-                                "status":"rejected",
-                                "reason":"test_timeout"
-                            })
-                            .to_string(),
+                            serde_json::json!({"type":"receipt","status":"rejected"}).to_string(),
                         );
                     }
-                }
-                Some(serde_json::json!({"type":"receipt","status":"applied"}).to_string())
-            })
+                    assert_eq!(v["file"], file_for_listener);
+                    handler_calls_for_listener.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    let _ = started_tx.send(());
+
+                    let (lock, condvar) = &*release_for_listener;
+                    let mut released = lock.lock();
+                    while !*released {
+                        let wait = condvar.wait_for(&mut released, HANG_CEILING);
+                        if wait.timed_out() {
+                            return Some(
+                                serde_json::json!({
+                                    "type":"receipt",
+                                    "status":"rejected",
+                                    "reason":"test_timeout"
+                                })
+                                .to_string(),
+                            );
+                        }
+                    }
+                    Some(serde_json::json!({"type":"receipt","status":"applied"}).to_string())
+                },
+                ready_tx,
+            )
             .ok()
         });
-        thread::sleep(Duration::from_millis(100));
+        wait_for_test_listener(&root, &ready_rx);
 
         let root_for_first = root.clone();
         let file_for_first = file.clone();
@@ -3604,19 +3652,22 @@ mod tests {
         std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
 
         let root_clone = root.clone();
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel();
         let server = thread::spawn(move || {
-            start_listener(&root_clone, |msg| {
-                let v: serde_json::Value = serde_json::from_str(msg).ok()?;
-                Some(
-                    serde_json::json!({"type": "receipt", "status": "applied", "id": v["type"]})
-                        .to_string(),
-                )
-            })
+            start_announcing_test_listener(
+                &root_clone,
+                |msg| {
+                    let v: serde_json::Value = serde_json::from_str(msg).ok()?;
+                    Some(
+                        serde_json::json!({"type": "receipt", "status": "applied", "id": v["type"]})
+                            .to_string(),
+                    )
+                },
+                ready_tx,
+            )
             .ok();
         });
-
-        // Give the server time to start
-        thread::sleep(Duration::from_millis(100));
+        wait_for_test_listener(&root, &ready_rx);
 
         // Send a message
         let msg = serde_json::json!({"type": "refresh_vcs"});
@@ -3643,6 +3694,7 @@ mod tests {
         let shutdown = std::sync::Arc::new(AtomicBool::new(false));
         let server_shutdown = shutdown.clone();
         let root_clone = root.clone();
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel();
         let server = thread::spawn(move || {
             start_listener_with_logger_and_read_timeout(
                 &root_clone,
@@ -3655,12 +3707,11 @@ mod tests {
                 Duration::from_secs(1),
                 Some(server_shutdown),
                 IpcPeerIdentity::new(IPC_PROTOCOL_VERSION, "older-compatible-build"),
-                None,
+                Some(ready_tx),
             )
             .unwrap();
         });
-
-        thread::sleep(Duration::from_millis(100));
+        wait_for_test_listener(&root, &ready_rx);
 
         let ok = send_observe_lazily_current_after_editor_save_to_editor(
             &root,
@@ -3690,16 +3741,20 @@ mod tests {
 
         let (captured_tx, captured_rx) = std::sync::mpsc::channel();
         let root_clone = root.clone();
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel();
         let server = thread::spawn(move || {
-            start_listener(&root_clone, move |msg| {
-                let v: serde_json::Value = serde_json::from_str(msg).ok()?;
-                let _ = captured_tx.send(v);
-                Some(serde_json::json!({"type": "receipt", "status": "applied"}).to_string())
-            })
+            start_announcing_test_listener(
+                &root_clone,
+                move |msg| {
+                    let v: serde_json::Value = serde_json::from_str(msg).ok()?;
+                    let _ = captured_tx.send(v);
+                    Some(serde_json::json!({"type": "receipt", "status": "applied"}).to_string())
+                },
+                ready_tx,
+            )
             .ok();
         });
-
-        thread::sleep(Duration::from_millis(100));
+        wait_for_test_listener(&root, &ready_rx);
 
         let ok = send_observe_lazily_current_to_editor(
             &root,
@@ -3741,19 +3796,27 @@ mod tests {
         let attempts = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
         let attempts_for_listener = attempts.clone();
         let root_clone = root.clone();
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel();
         let server = thread::spawn(move || {
-            start_listener(&root_clone, move |_msg| {
-                // First attempt: the replica attach is still running past the
-                // plugin's 750ms wait. Second attempt: it has landed.
-                if attempts_for_listener.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 {
-                    Some(agent_doc_ipc_protocol::DEFERRED_RECEIPT_LINE.to_string())
-                } else {
-                    Some(serde_json::json!({"type": "receipt", "status": "applied"}).to_string())
-                }
-            })
+            start_announcing_test_listener(
+                &root_clone,
+                move |_msg| {
+                    // First attempt: the replica attach is still running past the
+                    // plugin's 750ms wait. Second attempt: it has landed.
+                    if attempts_for_listener.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0
+                    {
+                        Some(agent_doc_ipc_protocol::DEFERRED_RECEIPT_LINE.to_string())
+                    } else {
+                        Some(
+                            serde_json::json!({"type": "receipt", "status": "applied"}).to_string(),
+                        )
+                    }
+                },
+                ready_tx,
+            )
             .ok();
         });
-        thread::sleep(Duration::from_millis(100));
+        wait_for_test_listener(&root, &ready_rx);
 
         let msg = serde_json::json!({"type": "deliver_crdt_remote", "file": "/tmp/plan.md"});
         let first = send_message(&root, &msg).unwrap_err();
@@ -3764,7 +3827,10 @@ mod tests {
         );
 
         let second = send_message(&root, &msg).unwrap();
-        assert!(second.is_some(), "the retry after a deferral must make progress");
+        assert!(
+            second.is_some(),
+            "the retry after a deferral must make progress"
+        );
 
         let _ = std::fs::remove_file(socket_path(&root));
         drop(server);
@@ -3777,14 +3843,16 @@ mod tests {
         std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
 
         let root_clone = root.clone();
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel();
         let server = thread::spawn(move || {
-            start_listener(&root_clone, |_msg| {
-                Some(agent_doc_ipc_protocol::PROJECTION_CHANGED_RECEIPT_LINE.to_string())
-            })
+            start_announcing_test_listener(
+                &root_clone,
+                |_msg| Some(agent_doc_ipc_protocol::PROJECTION_CHANGED_RECEIPT_LINE.to_string()),
+                ready_tx,
+            )
             .ok();
         });
-
-        thread::sleep(Duration::from_millis(100));
+        wait_for_test_listener(&root, &ready_rx);
 
         let msg = serde_json::json!({"type": "persist_current"});
         let error = send_message(&root, &msg).unwrap_err();
@@ -3811,17 +3879,21 @@ mod tests {
         let handler_started = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let handler_started_for_listener = handler_started.clone();
         let root_clone = root.clone();
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel();
         let server = thread::spawn(move || {
-            start_listener(&root_clone, move |msg| {
-                assert!(message_requests_early_receipt(msg));
-                handler_started_for_listener.store(true, std::sync::atomic::Ordering::SeqCst);
-                thread::sleep(Duration::from_millis(1500));
-                Some(serde_json::json!({"type": "receipt", "status": "applied"}).to_string())
-            })
+            start_announcing_test_listener(
+                &root_clone,
+                move |msg| {
+                    assert!(message_requests_early_receipt(msg));
+                    handler_started_for_listener.store(true, std::sync::atomic::Ordering::SeqCst);
+                    thread::sleep(Duration::from_millis(1500));
+                    Some(serde_json::json!({"type": "receipt", "status": "applied"}).to_string())
+                },
+                ready_tx,
+            )
             .ok();
         });
-
-        thread::sleep(Duration::from_millis(100));
+        wait_for_test_listener(&root, &ready_rx);
 
         let start = Instant::now();
         let ok = send_observe_lazily_current_to_editor(
@@ -3863,14 +3935,18 @@ mod tests {
         std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
 
         let root_clone = root.clone();
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel();
         let server = thread::spawn(move || {
-            start_listener(&root_clone, |_msg| {
-                Some(serde_json::json!({"type": "receipt", "status": "rejected"}).to_string())
-            })
+            start_announcing_test_listener(
+                &root_clone,
+                |_msg| {
+                    Some(serde_json::json!({"type": "receipt", "status": "rejected"}).to_string())
+                },
+                ready_tx,
+            )
             .ok();
         });
-
-        thread::sleep(Duration::from_millis(100));
+        wait_for_test_listener(&root, &ready_rx);
 
         let msg = serde_json::json!({"type": "apply_canonical"});
         let error = send_message(&root, &msg).unwrap_err();
@@ -3921,17 +3997,21 @@ mod tests {
         std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
 
         let root_clone = root.clone();
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel();
         let server = thread::spawn(move || {
-            start_listener(&root_clone, |msg| {
-                // Prove the early receipt already went out before this apply runs.
-                assert!(message_requests_early_receipt(msg));
-                thread::sleep(Duration::from_millis(50));
-                Some(serde_json::json!({"type": "receipt", "status": "applied"}).to_string())
-            })
+            start_announcing_test_listener(
+                &root_clone,
+                |msg| {
+                    // Prove the early receipt already went out before this apply runs.
+                    assert!(message_requests_early_receipt(msg));
+                    thread::sleep(Duration::from_millis(50));
+                    Some(serde_json::json!({"type": "receipt", "status": "applied"}).to_string())
+                },
+                ready_tx,
+            )
             .ok();
         });
-
-        thread::sleep(Duration::from_millis(100));
+        wait_for_test_listener(&root, &ready_rx);
 
         // Manually flagged so the listener early-receipts independent of sender
         // auto-injection.

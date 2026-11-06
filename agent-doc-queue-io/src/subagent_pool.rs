@@ -82,6 +82,24 @@ pub fn pool_refill_for_content_at(
     trigger: PoolRefillTrigger,
     now_secs: u64,
 ) -> Result<PoolRefill> {
+    let harness = pool_refill_session_harness();
+    pool_refill_for_content_at_for_harness(file, content, trigger, now_secs, harness.as_deref())
+}
+
+/// Harness a new worker would run on: this process's coordinator session.
+/// `None` outside a known harness, which the refill gate refuses.
+fn pool_refill_session_harness() -> Option<String> {
+    crate::queue_claim::current_owner_session().and_then(|session| session.harness)
+}
+
+/// [`pool_refill_for_content_at`] for an explicit target harness.
+fn pool_refill_for_content_at_for_harness(
+    file: &Path,
+    content: &str,
+    trigger: PoolRefillTrigger,
+    now_secs: u64,
+    harness: Option<&str>,
+) -> Result<PoolRefill> {
     let document = file.display().to_string();
     let (plan, pools) =
         crate::subagent_dispatch::queue_attr_subagent_plan_and_pools(file, content)?;
@@ -154,6 +172,15 @@ pub fn pool_refill_for_content_at(
             })
         })
         .collect::<Vec<_>>();
+    // `#poolquotarefillgate`: `queue claim` refuses a new worker on this
+    // harness. Withhold the heads that refusal would reject and keep the reason.
+    let quota_refill_block =
+        agent_doc_queue::worker_quota::pool_refill_quota_block(&claim_states, harness).map(
+            |claim| agent_doc_queue::subagent_pool::QuotaRefillBlock {
+                harness: harness.map(agent_doc_queue::worker_quota::canonical_harness_name),
+                reason: agent_doc_queue::worker_quota::quota_blocked_next_step(&document, claim),
+            },
+        );
     let frozen = claim_states
         .into_iter()
         .filter_map(|claim| {
@@ -172,7 +199,9 @@ pub fn pool_refill_for_content_at(
             })
         })
         .collect::<Vec<_>>();
-    let next_heads =
+    let next_heads = if quota_refill_block.is_some() {
+        Vec::new()
+    } else {
         crate::subagent_dispatch::pending_subagent_dispatch_for_content(file, content)?
             .into_iter()
             .map(|item| RefillHead {
@@ -181,7 +210,8 @@ pub fn pool_refill_for_content_at(
                 start_command: crate::subagent_dispatch::start_command(&document, &item),
                 item,
             })
-            .collect::<Vec<_>>();
+            .collect::<Vec<_>>()
+    };
     let waiting_for_slot = plan.map(|plan| plan.held.len()).unwrap_or_default();
     Ok(PoolRefill {
         trigger,
@@ -190,6 +220,7 @@ pub fn pool_refill_for_content_at(
         refresh_due,
         frozen,
         next_heads,
+        quota_refill_block,
         waiting_for_slot,
     })
 }
@@ -224,13 +255,14 @@ pub fn render_pool_refill_or_warn(
                 agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
-                        "subagent_pool_refill trigger={} unstarted={} refresh_due={} next_heads={} frozen={} waiting={} (#subagentworkpool)",
+                        "subagent_pool_refill trigger={} unstarted={} refresh_due={} next_heads={} frozen={} waiting={} quota_withheld={} (#subagentworkpool)",
                         trigger.as_str(),
                         refill.unstarted.len(),
                         refill.refresh_due.len(),
                         refill.next_heads.len(),
                         refill.frozen.len(),
                         refill.waiting_for_slot,
+                        u8::from(refill.quota_refill_block.is_some()),
                     ),
                 );
             }
@@ -521,6 +553,137 @@ mod tests {
             crate::queue_claim::refresh_attempt(&file, "do [#a]", "subagent:a", 7200, Some(1))
                 .is_err(),
             "an abandoned attempt is never revived"
+        );
+    }
+
+    fn block_on_quota(file: &Path, harness: &str) {
+        crate::queue_claim::block_attempt_on_quota(
+            file,
+            "do [#a]",
+            Some(1),
+            agent_doc_queue::worker_quota::WorkerQuotaBlock {
+                harness: Some(harness.to_string()),
+                limit: "session limit".to_string(),
+                evidence: "You've hit your session limit · resets 9pm".to_string(),
+                reset_hint: Some("resets 9pm".to_string()),
+                worktree: Some("/work/tree".to_string()),
+                branch: Some("fix/partial".to_string()),
+                blocked_at_secs: 10,
+            },
+        )
+        .unwrap();
+    }
+
+    fn refill_for(file: &Path, content: &str, harness: Option<&str>) -> PoolRefill {
+        pool_refill_for_content_at_for_harness(
+            file,
+            content,
+            PoolRefillTrigger::ReportComplete,
+            crate::queue_claim::claim_clock_now_secs(),
+            harness,
+        )
+        .unwrap()
+    }
+
+    /// `#poolquotarefillgate`: a freed slot is not refilled onto the harness
+    /// that just ran out. Claim refuses that harness; the pool must not list
+    /// the head, and it must say why.
+    #[test]
+    fn a_quota_block_withholds_next_heads_and_reports_the_reason() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("task.md");
+        let content = pool_doc("subagents=2", &["do [#a]", "do [#b]", "do [#c]"]);
+        std::fs::write(&file, &content).unwrap();
+        start(&file, "do [#a]", "subagent:a");
+        block_on_quota(&file, "claude-code");
+
+        let refused = refill_for(&file, &content, Some("claude"));
+        assert!(refused.next_heads.is_empty(), "{refused:#?}");
+        let block = refused.quota_refill_block.as_ref().expect("reason");
+        assert_eq!(block.harness.as_deref(), Some("claude-code"));
+        assert!(
+            block.reason.contains("session limit of claude-code"),
+            "{block:?}"
+        );
+        assert!(
+            block
+                .reason
+                .contains("do not start another worker on claude-code"),
+            "{block:?}"
+        );
+        let text = refused.render().unwrap();
+        assert!(
+            text.contains("next heads withheld (worker_quota_exhausted on claude-code)"),
+            "{text}"
+        );
+        assert!(text.contains("no refill head is offered"), "{text}");
+        assert!(!text.contains("do [#b]"), "{text}");
+        assert!(refused.is_actionable(), "the reason has to reach steering");
+
+        let other = refill_for(&file, &content, Some("codex"));
+        assert_eq!(
+            other
+                .next_heads
+                .iter()
+                .map(|head| head.item.as_str())
+                .collect::<Vec<_>>(),
+            ["do [#b]", "do [#c]"],
+            "{other:#?}"
+        );
+        assert!(other.quota_refill_block.is_none(), "{other:#?}");
+
+        let unknown = refill_for(&file, &content, None);
+        assert!(
+            unknown.next_heads.is_empty(),
+            "unknown harness fails closed: {unknown:#?}"
+        );
+        assert_eq!(
+            unknown
+                .quota_refill_block
+                .as_ref()
+                .map(|block| block.harness.as_deref()),
+            Some(None),
+        );
+
+        let claude_claim = crate::queue_claim::claim_with_session(
+            &file,
+            "do [#b]",
+            "subagent:b",
+            7200,
+            Some(agent_doc_queue::queue_claim::ClaimOwnerSession {
+                harness: Some("claude".to_string()),
+                session_id: Some("coordinator".to_string()),
+                pane: None,
+                pid: None,
+            }),
+        );
+        let err = claude_claim.unwrap_err().to_string();
+        assert!(err.contains("worker_quota_exhausted"), "{err}");
+        assert!(
+            err.contains("refusing to start a new worker on claude"),
+            "{err}"
+        );
+
+        crate::queue_claim::start_attempt(
+            &file,
+            "do [#a]",
+            "subagent:a",
+            "worker:subagent:a",
+            7200,
+            1,
+        )
+        .unwrap();
+        let resumed = refill_for(&file, &content, Some("claude"));
+        assert!(resumed.quota_refill_block.is_none(), "{resumed:#?}");
+        assert_eq!(
+            resumed
+                .next_heads
+                .iter()
+                .map(|head| head.item.as_str())
+                .collect::<Vec<_>>(),
+            ["do [#b]"],
+            "the resumed worker holds one slot: {resumed:#?}"
         );
     }
 }

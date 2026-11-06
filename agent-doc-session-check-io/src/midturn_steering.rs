@@ -2417,6 +2417,13 @@ fn subagent_pool_refill_fingerprint(refill: &agent_doc_queue::subagent_pool::Poo
     for head in &refill.next_heads {
         parts.push(format!("n:{}", head.item));
     }
+    if let Some(block) = &refill.quota_refill_block {
+        parts.push(format!(
+            "q:{}:{}",
+            block.harness.as_deref().unwrap_or("-"),
+            block.reason
+        ));
+    }
     agent_doc_hash::content_hash(&parts.join("\n"))
 }
 

@@ -5028,6 +5028,8 @@ fn validate_blocking_operator_request_recommendations(
     // Captured-finalize and repair replay re-apply binary-owned response input
     // that may predate this validation contract.  Reject only a response being
     // authored now; never wedge recovery of an already retained capture.
+    // A choice line's bare numeric `#N` is not a rejection, including when that
+    // number is absent from `request:` and `context:` (`#choicecontextinrow`).
     if options.response_input_provenance.is_binary_owned_replay() {
         return Ok(());
     }
@@ -6954,6 +6956,151 @@ mod tests {
         );
         validate_blocking_operator_request_recommendations(&repair_replay, &legacy_packets)
             .expect("pre-upgrade repair replays must remain recoverable");
+    }
+
+    /// `#choicecontextinrow`: a newly authored closeout still accepts a blocking
+    /// packet whose choice line contains a bare numeric `#N` absent from
+    /// `request:` and `context:`. Summary stays the request, a Context row
+    /// appears only when `context:` is non-empty, and the choice lines render
+    /// even when neither field defines the number.
+    #[test]
+    fn a_newly_authored_packet_with_an_unexplained_numeric_choice_term_is_accepted() {
+        let row = "moving the tag: go [#q-7ef51b5d460a]";
+        let request = "Which pull request should the tag sit on?";
+        let packet = |context: &str| {
+            format!(
+                "[#subagent-operator-request-tagterm] subagent operator request\n\
+- *queue_item:*\n  - {row}\n\
+- *kind:* question\n\
+- *blocking:* true\n\
+- *request:*\n  - {request}\n\
+{context}\
+- *choices:*\n\
+  - **Use #4**: keep the sync and leave the other pull request for later.\n\
+  - **Use #1**: land the conversion first.\n"
+            )
+        };
+        let responses = [
+            packet(""),
+            packet(
+                "- *context:*\n  - The two pull requests conflict, so only one can land as is.\n",
+            ),
+        ];
+        assert!(
+            !responses[0].contains("*context:*"),
+            "the empty case must omit context:"
+        );
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = tmp.path().join("session.md");
+        let mut current = agent_doc_write_command_io::CommandOptions::recovery_from_captured_closeout_mutation_plan(
+            &doc,
+            agent_doc_write_command_io::CapturedCloseoutMutationPlan::default(),
+        );
+        current.origin = Some("skill".to_string());
+        current.response_input_provenance =
+            agent_doc_write_command_io::ResponseInputProvenance::default();
+        current.force_disk = true;
+
+        for response in &responses {
+            let packets =
+                agent_doc_turn::response_text::blocking_operator_request_packets(response);
+            assert_eq!(packets.len(), 1, "{response}");
+            let parsed = &packets[0];
+            assert_eq!(parsed.request, request);
+            let context = parsed.context.as_deref().unwrap_or("");
+            for number in ["#1", "#4"] {
+                assert!(!parsed.request.contains(number), "{parsed:?}");
+                assert!(!context.contains(number), "{parsed:?}");
+                assert!(
+                    parsed.choice_rows.iter().any(|row| row.contains(number)),
+                    "{parsed:?}"
+                );
+            }
+            assert!(
+                agent_doc_queue::operator_request_packet::blocking_operator_request_recommendation_error(
+                    parsed
+                )
+                .is_none(),
+                "{parsed:?}"
+            );
+            validate_blocking_operator_request_recommendations(&current, &packets)
+                .expect("a newly authored closeout accepts a bare numeric choice term");
+
+            RESPONSE_STDIN_OVERRIDE.with(|slot| {
+                slot.replace(Some(response.clone()));
+            });
+            let derived = derive_blocking_operator_requests(&doc, &current)
+                .expect("deriving the packet must not refuse the choice term");
+            assert_eq!(
+                derived.queue_actions.len(),
+                1,
+                "actions: {:?}",
+                derived
+                    .queue_actions
+                    .iter()
+                    .map(|action| action.queue_item.as_str())
+                    .collect::<Vec<_>>()
+            );
+            assert_eq!(derived.queue_actions[0].queue_item, row);
+            assert!(
+                derived.todo_inputs.iter().any(|text| {
+                    text.contains(request) && text.contains("#4") && text.contains("#1")
+                }),
+                "todos: {:?}",
+                derived.todo_inputs
+            );
+
+            let turn = format!(
+                "### Re: held rows — test\n\n\
+> **Queue prompt:** {row}\n\n\
+**Deferred:** this request replaces an older one. It has a new id so it attaches to the row.\n\n\
+{response}"
+            );
+            let before = format!("<!-- agent:queue -->\n- {row}\n<!-- /agent:queue -->\n");
+            let after = format!(
+                "---\nqueue_active: true\n---\n\n## Exchange\n\n<!-- agent:exchange -->\n{turn}\n<!-- /agent:exchange -->\n\n## Queue\n\n<!-- agent:queue -->\n- ~~{row}~~\n<!-- /agent:queue -->\n"
+            );
+            let annotated = agent_doc_queue::queue_consume::annotate_newly_struck_queue_items_with_response_id_at(
+                &before,
+                &after,
+                &turn,
+                "2026-11-05T19:58:00-05:00",
+            )
+            .unwrap();
+            let queue = element::parse(&annotated)
+                .unwrap()
+                .into_iter()
+                .find(|component| component.name == "queue")
+                .unwrap()
+                .content(&annotated)
+                .to_string();
+            assert!(
+                queue.contains(&format!("    - **Summary:** {request}\n")),
+                "{queue}"
+            );
+            assert!(!queue.contains("Deferred"), "{queue}");
+            assert!(queue.contains("- **Use #4**: keep the sync"), "{queue}");
+            assert!(
+                queue.contains("- **Use #1**: land the conversion"),
+                "{queue}"
+            );
+            if context.is_empty() {
+                assert!(!queue.contains("**Context:**"), "{queue}");
+            } else {
+                assert!(
+                    queue.contains(&format!("    - **Context:** {context}\n")),
+                    "{queue}"
+                );
+                let context_line = queue
+                    .lines()
+                    .find(|line| line.contains("**Context:**"))
+                    .unwrap();
+                assert!(
+                    !context_line.contains("#4") && !context_line.contains("#1"),
+                    "{queue}"
+                );
+            }
+        }
     }
 
     #[test]

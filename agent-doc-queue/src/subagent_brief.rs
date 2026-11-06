@@ -137,9 +137,8 @@ impl SubagentAuthorization {
         {
             self.subagent_prompt_preamble.push('\n');
         }
-        self.subagent_prompt_preamble.push_str(
-            &crate::goal_preset_terminal::prior_attempt_brief_section(&handoff),
-        );
+        self.subagent_prompt_preamble
+            .push_str(&crate::goal_preset_terminal::prior_attempt_brief_section(&handoff));
         self.prior_goal_attempt = Some(handoff);
     }
 }

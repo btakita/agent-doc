@@ -58,6 +58,12 @@ const CONTROLLER_DISPATCH_PANE_CAPTURE_TIMEOUT: Duration = Duration::from_millis
 /// gives a slow-but-alive server a read it can win, while a wedged one still
 /// fails closed within 250 + 500 + 1000 = 1.75s, well inside the 5s RPC deadline.
 const CONTROLLER_DISPATCH_PANE_CAPTURE_TIMEOUT_CAP: Duration = Duration::from_secs(1);
+/// `#ctlprobeloadbudget`: hard ceiling on the SUM of every pane read's budget
+/// in one dispatch admission, however loaded the host reports itself. The
+/// unloaded reads (250 + 500 + 1000 = 1.75s) fit inside it unchanged; a host
+/// at per-core load above 1.0 earns proportionally longer reads up to this
+/// bound, which leaves the rest of the 5s dispatch RPC deadline for admission.
+const CONTROLLER_DISPATCH_PANE_CAPTURE_TOTAL_CEILING: Duration = Duration::from_secs(3);
 /// Captures attempted before a timed-out pane observation fails dispatch
 /// closed. One slow tmux reply under load (the operator's server routinely
 /// serves dozens of panes) is not evidence of a wedged server: on 2026-11-04 a
@@ -11490,6 +11496,11 @@ struct ControllerCrdtReplicaPayload {
     identity: Option<String>,
     #[serde(default)]
     state_vector_b64: Option<String>,
+    /// `#deliverylineagestamp`: the `history_lineage` the editor's previous
+    /// registration returned, sent beside `state_vector_b64` so a retained
+    /// replica from another CRDT history is bootstrapped in full.
+    #[serde(default)]
+    history_lineage: Option<String>,
     expected_canonical_hash: Option<String>,
     #[serde(default)]
     provisional_replacement: bool,
@@ -16489,10 +16500,11 @@ fn controller_crdt_replica_data(
                 .editor_pid
                 .or_else(|| agent_doc_crdt_relay_io::editor_process_id_from_identity(identity));
             let registration =
-                agent_doc_crdt_relay_io::register_replica_for_file_with_precondition_and_replacement_mode(
+                agent_doc_crdt_relay_io::register_replica_for_file_with_retained_history(
                     canonical,
                     identity,
                     retained_state_vector.as_deref(),
+                    payload.history_lineage.as_deref(),
                     resolved_editor_pid,
                     durable_projection_retained,
                     payload.expected_canonical_hash.as_deref(),
@@ -16535,6 +16547,10 @@ fn controller_crdt_replica_data(
                         "canonical_content_hash": registration.canonical_content_hash,
                         "lineage": agent_doc_crdt_relay_io::current_lineage_for_file(canonical)?
                             .context("registered replica is missing its canonical lineage")?,
+                        // `#deliverylineagestamp`: the CRDT history this bootstrap
+                        // belongs to. The editor refuses any later delivery stamped
+                        // with a different one.
+                        "history_lineage": registration.history_lineage,
                     }))
                 }
                 None => Ok(crdt_replica_refused_data("detached_authority")),
@@ -16622,9 +16638,14 @@ fn controller_crdt_replica_data(
             if let Some(canonical_text) =
                 agent_doc_crdt_relay_io::pull_rebootstrap_for_file(canonical, identity)?
             {
+                // A replace delivery is installed as text and followed by a fresh
+                // registration, so its stamp is informational only.
                 return Ok(serde_json::json!({
                     "kind": "replace",
                     "replace": canonical_text,
+                    "history_lineage": agent_doc_crdt_relay_io::current_history_lineage_for_file(
+                        canonical,
+                    )?,
                 }));
             }
             match agent_doc_crdt_relay_io::pull_replica_updates_for_file(canonical, identity)? {
@@ -16640,6 +16661,9 @@ fn controller_crdt_replica_data(
                                 "generation": update.generation,
                                 "expected_content_hash": update.expected_content_hash,
                                 "update_b64": base64_standard_encode(&update.update),
+                                // `#deliverylineagestamp`: the history these op ids
+                                // belong to, stamped when the update was queued.
+                                "history_lineage": update.history_lineage,
                             })
                         })
                         .collect();
@@ -16650,6 +16674,7 @@ fn controller_crdt_replica_data(
                         "current_generation": pull.delivery.current_generation,
                         "last_ack_generation": pull.delivery.last_ack_generation,
                         "pending_updates": pull.delivery.pending_updates,
+                        "history_lineage": pull.history_lineage,
                     }))
                 }
                 // The authority gate above already proved this document is
@@ -29022,28 +29047,70 @@ fn classify_controller_dispatch_pane(
 /// exactly one observation, and a timeout on every attempt still fails closed.
 /// `capture` receives the budget for its attempt, which doubles after every
 /// observed timeout (`#recoverableautoretry`, see
-/// [`agent_doc_controller::dispatch::dispatch_pane_capture_attempt_timeout`]).
+/// [`agent_doc_controller::dispatch::dispatch_pane_capture_attempt_timeout`]),
+/// scaled by measured host load and bounded by the budget's total ceiling
+/// (`#ctlprobeloadbudget`). The ceiling is charged with the budgets granted to
+/// earlier timed-out reads, not a wall clock, so the bound is deterministic.
 fn capture_dispatch_pane_retrying_timeouts(
     attempts: usize,
-    base_timeout: Duration,
-    timeout_cap: Duration,
+    budget: agent_doc_controller::dispatch::DispatchPaneCaptureBudget,
     mut capture: impl FnMut(Duration) -> Result<String, agent_doc_tmux_io::TmuxIoError>,
 ) -> Result<String, agent_doc_tmux_io::TmuxIoError> {
+    let mut spent = Duration::ZERO;
     let attempts = attempts.max(1);
     let mut attempt = 1;
     loop {
-        let timeout = agent_doc_controller::dispatch::dispatch_pane_capture_attempt_timeout(
-            base_timeout,
-            timeout_cap,
-            attempt,
-        );
+        // The first read always has budget (`total >= base`), so this only
+        // stops a re-read once the ceiling is exhausted.
+        let timeout = budget
+            .attempt_timeout(attempt, spent)
+            .unwrap_or(budget.base);
         match capture(timeout) {
-            Err(agent_doc_tmux_io::TmuxIoError::Timeout { .. }) if attempt < attempts => {
+            Err(agent_doc_tmux_io::TmuxIoError::Timeout { .. })
+                if attempt < attempts
+                    && budget
+                        .attempt_timeout(attempt + 1, spent.saturating_add(timeout))
+                        .is_some() =>
+            {
+                spent = spent.saturating_add(timeout);
                 attempt += 1;
             }
             result => return result,
         }
     }
+}
+
+/// `#ctlprobeloadbudget`: the host's 1-minute load average and the CPUs this
+/// process may run on. `None` (unsupported platform, failed syscall) keeps the
+/// unloaded budget.
+fn sample_host_load() -> Option<agent_doc_controller::dispatch::HostLoadSample> {
+    let online_cpus = std::thread::available_parallelism().ok()?.get();
+    #[cfg(unix)]
+    {
+        let mut loads = [0f64; 3];
+        // SAFETY: `loads` is a valid, writable buffer of the requested length.
+        let filled = unsafe { libc::getloadavg(loads.as_mut_ptr(), 1) };
+        (filled >= 1).then_some(agent_doc_controller::dispatch::HostLoadSample {
+            load_avg_1m: loads[0],
+            online_cpus,
+        })
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = online_cpus;
+        None
+    }
+}
+
+fn controller_dispatch_pane_capture_budget(
+    load: Option<agent_doc_controller::dispatch::HostLoadSample>,
+) -> agent_doc_controller::dispatch::DispatchPaneCaptureBudget {
+    agent_doc_controller::dispatch::dispatch_pane_capture_budget(
+        CONTROLLER_DISPATCH_PANE_CAPTURE_TIMEOUT,
+        CONTROLLER_DISPATCH_PANE_CAPTURE_TIMEOUT_CAP,
+        CONTROLLER_DISPATCH_PANE_CAPTURE_TOTAL_CEILING,
+        load,
+    )
 }
 
 /// One controller pane capture, classified twice from the same bytes: the
@@ -29074,6 +29141,7 @@ fn classify_controller_dispatch_pane_evidence(
 }
 
 fn controller_dispatch_pane_evidence(
+    file: &Path,
     record: &agent_doc_controller::actor::ActorRecord,
 ) -> ControllerDispatchPaneEvidence {
     if record.pane_id.is_empty() {
@@ -29084,13 +29152,14 @@ fn controller_dispatch_pane_evidence(
             ready_prompt: false,
         };
     }
+    let load = sample_host_load();
+    let budget = controller_dispatch_pane_capture_budget(load);
     let tmux = agent_doc_tmux_io::configured_tmux();
     let evidence = classify_controller_dispatch_pane_evidence(
         &record.harness,
         capture_dispatch_pane_retrying_timeouts(
             CONTROLLER_DISPATCH_PANE_CAPTURE_ATTEMPTS,
-            CONTROLLER_DISPATCH_PANE_CAPTURE_TIMEOUT,
-            CONTROLLER_DISPATCH_PANE_CAPTURE_TIMEOUT_CAP,
+            budget,
             |timeout| {
                 agent_doc_tmux_io::capture_pane_with_ansi_bounded(&tmux, &record.pane_id, timeout)
             },
@@ -29109,6 +29178,25 @@ fn controller_dispatch_pane_evidence(
             observation: ControllerDispatchPaneObservation::Clear,
             ready_prompt: false,
         };
+    }
+    if let ControllerDispatchPaneObservation::Unavailable(reason) = &evidence.observation {
+        // Make a refusal self-explaining: which budget lost, at what load.
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "controller_dispatch_pane_capture_unavailable pane={} load_avg_1m={} online_cpus={} load_scale_permille={} base_ms={} cap_ms={} total_ms={} reason={:?} (#ctlprobeloadbudget)",
+                record.pane_id,
+                load.map(|l| format!("{:.2}", l.load_avg_1m))
+                    .unwrap_or_else(|| "unknown".to_string()),
+                load.map(|l| l.online_cpus.to_string())
+                    .unwrap_or_else(|| "unknown".to_string()),
+                budget.load_scale_permille,
+                budget.base.as_millis(),
+                budget.cap.as_millis(),
+                budget.total.as_millis(),
+                reason,
+            ),
+        );
     }
     evidence
 }
@@ -29367,7 +29455,7 @@ pub(crate) fn handle_dispatch(
     // Ready projection can race a still-running turn between that probe and
     // this RPC. Re-observe the authoritative pane here before issuing a
     // dispatch receipt so no caller can inject into a live turn.
-    let pane_evidence = controller_dispatch_pane_evidence(&record);
+    let pane_evidence = controller_dispatch_pane_evidence(&file, &record);
     let record = repair_restart_busy_before_dispatch(
         bootstrap,
         runtime,
@@ -67224,10 +67312,13 @@ mod tests {
 
         let base = Duration::from_millis(250);
         let cap = Duration::from_secs(1);
+        // The unloaded budget: no host-load sample.
+        let budget = controller_dispatch_pane_capture_budget(None);
+        assert_eq!((budget.base, budget.cap), (base, cap));
 
         // One slow reply, then an answer: the answer wins.
         let mut calls = 0;
-        let result = capture_dispatch_pane_retrying_timeouts(3, base, cap, |_| {
+        let result = capture_dispatch_pane_retrying_timeouts(3, budget, |_| {
             calls += 1;
             if calls == 1 {
                 Err(timeout())
@@ -67241,7 +67332,7 @@ mod tests {
         // Timeouts on every attempt still fail closed, after exactly `attempts`
         // reads, and each re-read gets a doubled (capped) budget.
         let mut budgets = Vec::new();
-        let result = capture_dispatch_pane_retrying_timeouts(3, base, cap, |timeout| {
+        let result = capture_dispatch_pane_retrying_timeouts(3, budget, |timeout| {
             budgets.push(timeout);
             Err(timeout_err(timeout))
         });
@@ -67253,7 +67344,7 @@ mod tests {
 
         // A non-timeout error is a real answer: no re-read.
         let mut calls = 0;
-        let result = capture_dispatch_pane_retrying_timeouts(3, base, cap, |_| {
+        let result = capture_dispatch_pane_retrying_timeouts(3, budget, |_| {
             calls += 1;
             Err(TmuxIoError::Failed {
                 binary: "tmux".to_string(),
@@ -67263,6 +67354,106 @@ mod tests {
         });
         assert!(matches!(result, Err(TmuxIoError::Failed { .. })));
         assert_eq!(calls, 1);
+    }
+
+    /// `#ctlprobeloadbudget`: at load ~100 on 32 cores, a tmux slower than the
+    /// unloaded 250/500/1000ms reads would refuse `Run Agent Doc` on an idle
+    /// pane. The 1.2s latency here is a modelled value, not a measurement. The
+    /// load-scaled budget lets that pane be proven idle, still refuses a pane
+    /// whose capture shows a live turn, and a wedged server still fails closed
+    /// inside the hard total ceiling.
+    #[test]
+    fn dispatch_pane_capture_budget_scales_with_measured_load_and_stays_fail_closed() {
+        use agent_doc_tmux_io::TmuxIoError;
+        let loaded = Some(agent_doc_controller::dispatch::HostLoadSample {
+            load_avg_1m: 100.0,
+            online_cpus: 32,
+        });
+        const IDLE_WITH_WATCHER_PANEL: &str = include_str!(
+            "../../../agent-doc-harness/src/fixtures/grok_idle_with_watcher_panel.txt"
+        );
+        let busy_panel = IDLE_WITH_WATCHER_PANEL.replace("Ctrl+x", "Ctrl+c:cancel  │  Ctrl+x");
+        // A tmux server assumed to need 1.2s to answer under this load: modelled
+        // by the budget each read is granted, never a wall clock.
+        let slow_tmux = |answer: &str| {
+            let answer = answer.to_string();
+            move |timeout: Duration| {
+                if timeout >= Duration::from_millis(1_200) {
+                    Ok(answer.clone())
+                } else {
+                    Err(TmuxIoError::Timeout {
+                        binary: "tmux".to_string(),
+                        timeout_ms: timeout.as_millis(),
+                    })
+                }
+            }
+        };
+
+        // Unloaded budget: every read loses, the idle pane cannot be proven.
+        let unloaded = classify_controller_dispatch_pane_evidence(
+            "grok",
+            capture_dispatch_pane_retrying_timeouts(
+                CONTROLLER_DISPATCH_PANE_CAPTURE_ATTEMPTS,
+                controller_dispatch_pane_capture_budget(None),
+                slow_tmux(IDLE_WITH_WATCHER_PANEL),
+            ),
+        );
+        assert!(matches!(
+            unloaded.observation,
+            ControllerDispatchPaneObservation::Unavailable(_)
+        ));
+        assert!(!unloaded.ready_prompt);
+
+        // Load-scaled budget: the second read wins and the idle pane is proven.
+        let budget = controller_dispatch_pane_capture_budget(loaded);
+        assert_eq!(budget.load_scale_permille, 3_125);
+        let proven = classify_controller_dispatch_pane_evidence(
+            "grok",
+            capture_dispatch_pane_retrying_timeouts(
+                CONTROLLER_DISPATCH_PANE_CAPTURE_ATTEMPTS,
+                budget,
+                slow_tmux(IDLE_WITH_WATCHER_PANEL),
+            ),
+        );
+        assert_eq!(proven.observation, ControllerDispatchPaneObservation::Clear);
+        assert!(proven.ready_prompt);
+
+        // A genuinely busy pane is still refused: more time never turns a
+        // captured live-turn cue into a dispatch.
+        let busy = classify_controller_dispatch_pane_evidence(
+            "grok",
+            capture_dispatch_pane_retrying_timeouts(
+                CONTROLLER_DISPATCH_PANE_CAPTURE_ATTEMPTS,
+                budget,
+                slow_tmux(&busy_panel),
+            ),
+        );
+        assert!(matches!(
+            busy.observation,
+            ControllerDispatchPaneObservation::Blocked(_)
+        ));
+        assert!(!busy.ready_prompt);
+
+        // A wedged server still fails closed, and the reads it was granted
+        // never exceed the hard total ceiling.
+        let mut granted = Vec::new();
+        let wedged = capture_dispatch_pane_retrying_timeouts(
+            CONTROLLER_DISPATCH_PANE_CAPTURE_ATTEMPTS,
+            budget,
+            |timeout| {
+                granted.push(timeout);
+                Err(TmuxIoError::Timeout {
+                    binary: "tmux".to_string(),
+                    timeout_ms: timeout.as_millis(),
+                })
+            },
+        );
+        assert!(matches!(wedged, Err(TmuxIoError::Timeout { .. })));
+        assert_eq!(granted.len(), CONTROLLER_DISPATCH_PANE_CAPTURE_ATTEMPTS);
+        assert_eq!(
+            granted.iter().sum::<Duration>(),
+            CONTROLLER_DISPATCH_PANE_CAPTURE_TOTAL_CEILING
+        );
     }
     #[test]
     fn resolve_supervisor_auto_recycle_precedence() {
@@ -71711,6 +71902,79 @@ body
         ));
     }
 
+    /// `#deliverylineagestamp`: the wire contract the editors parse. The
+    /// foreign-history case is told apart by `canonical_covers_retained_frontier`,
+    /// not `bootstrap_kind`: the receipt queued below already forces a full
+    /// bootstrap, so `full` alone would pass with the request field ignored.
+    #[test]
+    fn replica_rpc_stamps_deliveries_and_honours_the_retained_history_lineage() {
+        let _env = reliable_sync_env_lock();
+        let dir = tempfile::TempDir::new().unwrap();
+        let file = dir.path().join("sample-session.md");
+        std::fs::write(&file, "---\nagent_doc_session: sample\n---\nbody\n").unwrap();
+        let canonical = file.canonicalize().unwrap();
+        let identity = format!(
+            "jetbrains-{}-stamped:{}",
+            std::process::id(),
+            canonical.display()
+        );
+        let call = |method, fields: serde_json::Value| {
+            let mut value = serde_json::json!({
+                "method": match method {
+                    ControllerCrdtReplicaMethod::Register => "replica_register",
+                    _ => "replica_pull",
+                },
+                "editor_pid": std::process::id(),
+            });
+            value
+                .as_object_mut()
+                .unwrap()
+                .extend(fields.as_object().unwrap().clone());
+            let payload: ControllerCrdtReplicaPayload = serde_json::from_value(value).unwrap();
+            controller_crdt_replica_data(None, &canonical, method, &identity, &payload).unwrap()
+        };
+
+        let registered = call(ControllerCrdtReplicaMethod::Register, serde_json::json!({}));
+        let history = registered["history_lineage"]
+            .as_str()
+            .expect("the register ack names the history")
+            .to_string();
+        agent_doc_crdt_relay_io::ensure_canonical_projection_receipt_for_file(
+            &canonical, &identity,
+        )
+        .unwrap()
+        .expect("the registered member queues a receipt");
+
+        let pulled = call(ControllerCrdtReplicaMethod::Pull, serde_json::json!({}));
+        assert_eq!(pulled["kind"], "delta");
+        assert_eq!(pulled["history_lineage"], history.as_str());
+        let updates = pulled["updates"].as_array().unwrap();
+        assert!(!updates.is_empty(), "{pulled}");
+        assert!(
+            updates
+                .iter()
+                .all(|update| update["history_lineage"] == history.as_str()),
+            "{pulled}"
+        );
+
+        let frontier = registered["canonical_state_vector_b64"].clone();
+        let same = call(
+            ControllerCrdtReplicaMethod::Register,
+            serde_json::json!({ "state_vector_b64": frontier, "history_lineage": history }),
+        );
+        assert_eq!(same["canonical_covers_retained_frontier"], true, "{same}");
+        let foreign = call(
+            ControllerCrdtReplicaMethod::Register,
+            serde_json::json!({ "state_vector_b64": frontier, "history_lineage": "another-history" }),
+        );
+        assert!(
+            foreign["canonical_covers_retained_frontier"].is_null(),
+            "{foreign}"
+        );
+        assert_eq!(foreign["bootstrap_kind"], "full", "{foreign}");
+        assert_eq!(foreign["history_lineage"], history.as_str());
+    }
+
     #[test]
     fn retained_capture_is_rearmed_when_a_live_editor_replica_registers() {
         let _env = reliable_sync_env_lock();
@@ -71729,6 +71993,7 @@ body
             method: ControllerCrdtReplicaMethod::Register,
             identity: None,
             state_vector_b64,
+            history_lineage: None,
             expected_canonical_hash: None,
             provisional_replacement: false,
             expected_canonical_state_vector_b64: None,
@@ -71924,6 +72189,7 @@ body
                 method: ControllerCrdtReplicaMethod::Pull,
                 identity: Some("jetbrains:prior-controller".into()),
                 state_vector_b64: None,
+                history_lineage: None,
                 expected_canonical_hash: None,
                 provisional_replacement: false,
                 expected_canonical_state_vector_b64: None,

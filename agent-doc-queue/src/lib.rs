@@ -40,6 +40,7 @@ pub mod queue_head_alignment;
 pub mod queue_head_annotation;
 pub mod queue_head_entry;
 pub mod queue_heads;
+pub mod handback_followups;
 pub mod queue_inbound;
 pub mod queue_mirror_projection;
 pub mod queue_preemption;

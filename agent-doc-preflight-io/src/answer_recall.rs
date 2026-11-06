@@ -13,8 +13,12 @@
 //! Environment:
 //! - `AGENT_DOC_ANSWER_RECALL=off` (or `0`, `false`, `no`) disables recall.
 //! - `AGENT_DOC_TSIFT_BIN` names the tsift executable (default `tsift`).
-//! - `AGENT_DOC_ANSWER_RECALL_TIMEOUT_MS` is the deadline for one pass
-//!   (default 2500, minimum 100).
+//! - `AGENT_DOC_ANSWER_RECALL_TIMEOUT_MS` is the deadline for one preflight
+//!   pass (default 2500, minimum 100).
+//! - `AGENT_DOC_DECISION_SEARCH_TIMEOUT_MS` is the deadline for the one query
+//!   of `agent-doc decision search` (default 60000, minimum 100). An agent
+//!   asked for that search and waits for it; preflight runs on every turn and
+//!   must not hold the turn up (`#decisionsearchtsiftdeadline`).
 
 use std::ffi::OsString;
 use std::io::Read;
@@ -27,7 +31,15 @@ use serde_json::Value;
 use wait_timeout::ChildExt;
 
 const DEFAULT_TIMEOUT_MS: u64 = 2500;
+const DEFAULT_SEARCH_TIMEOUT_MS: u64 = 60_000;
+const MIN_TIMEOUT_MS: u64 = 100;
 const MAX_REPORT_BYTES: u64 = 1024 * 1024;
+
+fn env_millis(name: &str) -> Option<u64> {
+    std::env::var(name)
+        .ok()
+        .and_then(|value| value.trim().parse().ok())
+}
 
 /// The process environment recall reads, injectable for tests.
 #[derive(Debug, Clone, Default)]
@@ -36,6 +48,7 @@ pub struct RecallEnv {
     pub tsift_bin: Option<String>,
     pub path: Option<OsString>,
     pub timeout_ms: Option<u64>,
+    pub search_timeout_ms: Option<u64>,
 }
 
 impl RecallEnv {
@@ -51,9 +64,8 @@ impl RecallEnv {
                 .ok()
                 .filter(|value| !value.trim().is_empty()),
             path: std::env::var_os("PATH"),
-            timeout_ms: std::env::var("AGENT_DOC_ANSWER_RECALL_TIMEOUT_MS")
-                .ok()
-                .and_then(|value| value.trim().parse().ok()),
+            timeout_ms: env_millis("AGENT_DOC_ANSWER_RECALL_TIMEOUT_MS"),
+            search_timeout_ms: env_millis("AGENT_DOC_DECISION_SEARCH_TIMEOUT_MS"),
         }
     }
 }
@@ -118,8 +130,24 @@ impl TsiftRecall {
         Ok(Self {
             bin,
             root: std::fs::canonicalize(&root).unwrap_or(root),
-            deadline: Duration::from_millis(env.timeout_ms.unwrap_or(DEFAULT_TIMEOUT_MS).max(100)),
+            deadline: Duration::from_millis(
+                env.timeout_ms
+                    .unwrap_or(DEFAULT_TIMEOUT_MS)
+                    .max(MIN_TIMEOUT_MS),
+            ),
         })
+    }
+
+    /// [`Self::discover_or_reason`] with the on-demand deadline of
+    /// `agent-doc decision search`.
+    pub fn discover_for_search(file: &Path, env: &RecallEnv) -> Result<Self, &'static str> {
+        let mut source = Self::discover_or_reason(file, env)?;
+        source.deadline = Duration::from_millis(
+            env.search_timeout_ms
+                .unwrap_or(DEFAULT_SEARCH_TIMEOUT_MS)
+                .max(MIN_TIMEOUT_MS),
+        );
+        Ok(source)
     }
 
     /// Modification time of the tsift index, when readable.
@@ -144,6 +172,10 @@ impl TsiftRecall {
                 .args(["--envelope", "search"])
                 .arg(query)
                 .args(["--strategy", "hybrid", "--absolute", "--budget", "normal"])
+                // Only Markdown hits are eligible. Without this the budgeted
+                // `ranked` rows of a code-heavy workspace are all code symbols,
+                // and every one of them is dropped.
+                .args(["--lang", "markdown"])
                 .arg("--limit")
                 .arg(limit.to_string())
                 .current_dir(&self.root)

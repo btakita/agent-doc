@@ -1985,16 +1985,18 @@ pub fn append_claimed_queue_removals(
 
 /// Re-route queue items whose worker already reported (`#reportedrelease`).
 ///
-/// `reported_owner` answers the released owner for a queue line that carries
-/// a live release receipt (the caller's receipt ledger; a live claim already
-/// supersedes a receipt there). Such an item becomes
+/// `reported_owner` answers the released owner and its exact attempt
+/// generation for a queue line that carries a live release receipt (the
+/// caller's receipt ledger; a live claim already supersedes a receipt there).
+/// The generation fences the strike the item's action names
+/// (`#closeoutguidanceagree`). Such an item becomes
 /// [`SteeringDispatch::PersistReported`]: its answer exists in the
 /// coordinator's context, so the action is to persist it now, never to offer
 /// it to a NEW subagent. Runs after [`apply_claim_owners`]; a claimed item
 /// keeps its forward routing.
 pub fn apply_release_receipts(
     items: &mut [SteeringItem],
-    reported_owner: impl Fn(&str) -> Option<String>,
+    reported_owner: impl Fn(&str) -> Option<(String, u64)>,
 ) {
     for item in items.iter_mut() {
         if item.source != SteeringSource::Queue
@@ -2004,10 +2006,11 @@ pub fn apply_release_receipts(
         {
             continue;
         }
-        if let Some(owner) = reported_owner(&item.verbatim) {
+        if let Some((owner, generation)) = reported_owner(&item.verbatim) {
             item.dispatch = SteeringDispatch::PersistReported;
             item.presets.clear();
             item.owner = Some(owner);
+            item.generation = (generation > 0).then_some(generation);
         }
     }
 }
@@ -2036,6 +2039,7 @@ fn action_for(document: &str, item: &SteeringItem) -> String {
                 document,
                 &item.verbatim,
                 item.owner.as_deref().unwrap_or("its worker"),
+                item.generation,
             )
         }
         SteeringDispatch::ForwardToOwner if item.change != SteeringChange::Deleted => {
@@ -4223,7 +4227,7 @@ mod tests {
             item(SteeringChange::Deleted, SteeringDispatch::Subagent),
         ];
         apply_release_receipts(&mut items, |_| {
-            Some("subagent:page-status-enum".to_string())
+            Some(("subagent:page-status-enum".to_string(), 0))
         });
         assert_eq!(items[0].dispatch, SteeringDispatch::PersistReported);
         assert_eq!(items[0].owner.as_deref(), Some("subagent:page-status-enum"));

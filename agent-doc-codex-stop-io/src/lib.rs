@@ -715,6 +715,10 @@ struct ReportedWritebackDebt {
     /// `Some(N)` while the `Reported` claim is still held; `None` once
     /// `queue release` turned it into a release receipt (`#reportedrelease`).
     held_generation: Option<u64>,
+    /// The reported attempt's generation: the held claim's, else the release
+    /// receipt's. It fences the free-text strike to this exact attempt
+    /// (`#closeoutguidanceagree`); `None` only when no receipt names the row.
+    attempt_generation: Option<u64>,
     /// Completion was recovered only after this exact attempt became Lost.
     /// This is urgent reconciliation debt, never a one-shot reminder.
     recovered_after_loss: bool,
@@ -728,6 +732,29 @@ struct ReportedWritebackDebt {
     /// with no verified integration, so `queue consume` refuses the strike
     /// until the closeout's integration steps run.
     awaiting_integration: Option<AwaitingIntegration>,
+}
+
+impl ReportedWritebackDebt {
+    /// The row's closeout, from the one strike derivation every closeout
+    /// emitter shares (`#closeoutguidanceagree`).
+    fn closeout(&self, file_display: &str) -> String {
+        agent_doc_queue::claim_release_receipt::queue_line_closeout(
+            file_display,
+            &self.item_text,
+            self.attempt_generation
+                .map(|generation| (self.owner.as_str(), generation)),
+        )
+    }
+
+    /// [`Self::closeout`] for a row whose result the document does not record.
+    fn persist_closeout(&self, file_display: &str) -> String {
+        agent_doc_queue::claim_release_receipt::queue_line_persist_closeout(
+            file_display,
+            &self.item_text,
+            self.attempt_generation
+                .map(|generation| (self.owner.as_str(), generation)),
+        )
+    }
 }
 
 /// A reported row whose strike waits on integrating the worker's repository
@@ -815,6 +842,7 @@ fn reported_writeback_debts(file: &Path, content: &str) -> Result<Vec<ReportedWr
                 item_text: claim.item_text,
                 owner: claim.owner,
                 held_generation: Some(claim.generation),
+                attempt_generation: Some(claim.generation),
                 recovered_after_loss: claim.completion_recovered_after_loss,
                 result_record,
                 awaiting_integration,
@@ -856,13 +884,17 @@ fn reported_writeback_debts(file: &Path, content: &str) -> Result<Vec<ReportedWr
                 &receipts,
             )
         });
+        // `#closeoutguidanceagree`: the receipt names the exact attempt, so the
+        // reminder fences the free-text strike to it as session-check does.
+        let (owner, attempt_generation) = match owners.get(&identity) {
+            Some((owner, generation)) => (owner.clone(), Some(*generation)),
+            None => ("the worker".to_string(), None),
+        };
         debts.push(ReportedWritebackDebt {
-            owner: owners
-                .get(&identity)
-                .cloned()
-                .unwrap_or_else(|| "the worker".to_string()),
+            owner,
             item_text: head,
             held_generation: None,
+            attempt_generation,
             recovered_after_loss: receipt
                 .is_some_and(|receipt| receipt.completion_recovered_after_loss),
             result_record,
@@ -909,8 +941,7 @@ fn claude_reported_writeback_reason(file_display: &str, debts: &[ReportedWriteba
         .iter()
         .filter_map(|debt| Some((debt, debt.awaiting_integration.as_ref()?)))
         .map(|(debt, awaiting)| {
-            let closeout =
-                agent_doc_queue::claim_release_receipt::queue_line_closeout(file_display, &debt.item_text);
+            let closeout = debt.closeout(file_display);
             let claim = match debt.held_generation {
                 Some(generation) => format!("claim generation {generation} still held"),
                 None => "claim released".to_string(),
@@ -977,8 +1008,7 @@ fn claude_unpersisted_writeback_reason(
     let rows = debts
         .iter()
         .map(|debt| {
-            let closeout =
-                agent_doc_queue::claim_release_receipt::queue_line_closeout(file_display, &debt.item_text);
+            let closeout = debt.closeout(file_display);
             // `#reportedhookintegrationwait`: the strike is refused until the
             // repository work integrates; say so instead of implying the
             // closeout alone lands.
@@ -1002,10 +1032,11 @@ fn claude_unpersisted_writeback_reason(
                     agent_doc_queue::queue_claim::claim_item_handle(&debt.item_text),
                 ),
                 (Some(generation), None) => format!(
-                    "- `{}` reported for `{}` (claim generation {generation}; recovered_after_loss={}). The document does not record its result: no `### Re: Subagent completed` cell for this attempt is in `agent:exchange` (its `queue report-complete` cell never reached the document, or a later write removed it), so persist the worker's result yourself: {closeout}. If integration or verification must finish first, run `agent-doc queue release {file_display} --item {:?} --generation {generation}` and still persist the result with that closeout.",
+                    "- `{}` reported for `{}` (claim generation {generation}; recovered_after_loss={}). The document does not record its result: no `### Re: Subagent completed` cell for this attempt is in `agent:exchange` (its `queue report-complete` cell never reached the document, or a later write removed it), so persist the worker's result yourself: {}. If integration or verification must finish first, run `agent-doc queue release {file_display} --item {:?} --generation {generation}` and still persist the result with that closeout.",
                     debt.owner,
                     debt.item_text.trim(),
                     debt.recovered_after_loss,
+                    debt.persist_closeout(file_display),
                     agent_doc_queue::queue_claim::claim_item_handle(&debt.item_text),
                 ),
                 (None, Some(recorded)) => format!(
@@ -1018,6 +1049,7 @@ fn claude_unpersisted_writeback_reason(
                         file_display,
                         &debt.item_text,
                         &debt.owner,
+                        debt.attempt_generation,
                     )
                 ),
             };
@@ -2826,6 +2858,7 @@ fn committed_prompt_diff_stop_response_with(
                     &disp,
                     &item.verbatim,
                     item.owner.as_deref().unwrap_or("its worker"),
+                    item.generation,
                 ),
             ),
         }));
@@ -2835,7 +2868,13 @@ fn committed_prompt_diff_stop_response_with(
         .map(|item| {
             format!(
                 " It is a queue line: {}; that closeout strikes it.",
-                agent_doc_queue::claim_release_receipt::queue_line_closeout(&disp, &item.verbatim)
+                agent_doc_queue::claim_release_receipt::queue_line_closeout(
+                    &disp,
+                    &item.verbatim,
+                    item.owner
+                        .as_deref()
+                        .zip(item.generation),
+                )
             )
         })
         .unwrap_or_default();
@@ -13136,10 +13175,11 @@ Reviewed the gated items.\n\
     /// line as fresh work, without the strike contract: the agent persisted a
     /// `### Re:` answer, the line stayed queued, and steering re-offered it to
     /// a NEW subagent. A reported release now carries a receipt: Stop names
-    /// the worker's unpersisted result and the exact echo that strikes the
-    /// line, and steering routes it `persist_reported`, never `subagent`.
+    /// the worker's unpersisted result and the exact attempt-fenced strike
+    /// (`#closeoutguidanceagree`), and steering routes it `persist_reported`,
+    /// never `subagent`.
     #[test]
-    fn committed_reported_release_names_the_unpersisted_worker_result_and_echo() {
+    fn committed_reported_release_names_the_unpersisted_worker_result_and_strike() {
         let dir = setup_project();
         let doc = write_auto_queue_doc(&dir, &[]);
         init_git_repo(dir.path(), &doc);
@@ -13203,10 +13243,16 @@ Reviewed the gated items.\n\
             reason.contains("subagent:page-status-enum already reported"),
             "{reason}"
         );
+        // `#closeoutguidanceagree`: the receipt names the exact attempt, so the
+        // bounce names the same attempt-fenced strike session-check does.
         assert!(
-            reason.contains(&format!("`> **Queue prompt:** {prompt}`")),
-            "the bounce must carry the echo that strikes the line: {reason}"
+            reason.contains(&format!(
+                "write the result to `agent:exchange` with `agent-doc finalize {disp}`, then strike the reported row with `agent-doc queue consume {disp} --ack-text '{prompt}' --ack-owner 'subagent:page-status-enum#1'`",
+                disp = doc.display()
+            )),
+            "the bounce must carry the command that strikes the line: {reason}"
         );
+        assert!(!reason.contains("--ack-id"), "{reason}");
         assert!(
             reason.contains("Do NOT dispatch a new subagent"),
             "{reason}"
@@ -13501,5 +13547,175 @@ mod stop_input_tests {
             serde_json::from_str(r#"{"session_id":"s","turn_id":"t","cwd":"/w"}"#).unwrap();
         assert_eq!(input.last_assistant_message, "");
         assert!(!input.stop_hook_active);
+    }
+}
+
+/// `#closeoutguidanceagree`: every closeout emitter names the same exact strike
+/// for one reported attempt. On 2026-11-05 completion feedback and the Stop
+/// hook read the first `#` of a free-text row (`--ack-id <id>` for an
+/// `[#id]: answer` row, `--ack-id q-…` for a `[#q-…]` row) while session-check
+/// named `--ack-text <row> --ack-owner owner#gen` for the same attempt.
+#[cfg(test)]
+mod closeout_guidance_agreement_tests {
+    use super::*;
+    use agent_doc_queue::queue_claim::{
+        QueueClaim, QueueClaimState, QueueWorkerBinding, claim_identity,
+    };
+
+    const DOC: &str = "tasks/bugs.md";
+    const OWNER: &str = "subagent:agree";
+    const GENERATION: u64 = 3;
+
+    fn reported(item: &str) -> QueueClaim {
+        QueueClaim {
+            identity: claim_identity(item),
+            item_text: item.to_string(),
+            owner: OWNER.to_string(),
+            generation: GENERATION,
+            state: QueueClaimState::Reported,
+            lost_from: None,
+            completion_recovered_after_loss: false,
+            publication_state: None,
+            worker: Some(QueueWorkerBinding {
+                worker_id: format!("worker:{OWNER}"),
+                started_at_secs: 1,
+            }),
+            dispatch_policy: None,
+            tracked_item_aliases: Vec::new(),
+            heartbeat_at_secs: None,
+            frozen: None,
+            claimed_at_secs: 1,
+            expires_at_secs: 100,
+            owner_session: None,
+            anchor: None,
+            followed_from: Vec::new(),
+            followed_generation: 0,
+            claim_time_row: None,
+            reported_at_secs: None,
+        }
+    }
+
+    /// The one `agent-doc queue consume …` command quoted in `text`.
+    fn consume_command(emitter: &str, text: &str) -> String {
+        let commands = text
+            .split('`')
+            .filter(|span| span.starts_with("agent-doc queue consume "))
+            .collect::<Vec<_>>();
+        assert_eq!(commands.len(), 1, "{emitter} names one strike: {text}");
+        commands[0].to_string()
+    }
+
+    fn debt(item: &str, held: bool, recorded: bool) -> ReportedWritebackDebt {
+        ReportedWritebackDebt {
+            item_text: item.to_string(),
+            owner: OWNER.to_string(),
+            held_generation: held.then_some(GENERATION),
+            attempt_generation: Some(GENERATION),
+            recovered_after_loss: false,
+            result_record: recorded
+                .then_some(agent_doc_queue_io::sync_payload::ReportedResultRecord::CompletionCell),
+            awaiting_integration: None,
+        }
+    }
+
+    #[test]
+    fn every_emitter_names_one_strike_per_row_kind() {
+        let waiting = "[#vscodecodersmoke] Run the remote smoke on a real Coder workspace <!-- agent-doc:waiting-item -->";
+        let cases = [
+            (
+                "id-backed directive",
+                "do [#gh275]",
+                format!("agent-doc queue consume {DOC} --ack-id gh275"),
+            ),
+            (
+                "waiting-tree parent",
+                waiting,
+                format!("agent-doc queue consume {DOC} --ack-id vscodecodersmoke"),
+            ),
+            (
+                "free-text answer row",
+                "[#tdclireleasedownloads]: haiven-cli will be public",
+                format!(
+                    "agent-doc queue consume {DOC} --ack-text '[#tdclireleasedownloads]: haiven-cli will be public' --ack-owner '{OWNER}#{GENERATION}'"
+                ),
+            ),
+            (
+                "q- row",
+                "Rebuild the SDK docs [#q-7f3a]",
+                format!(
+                    "agent-doc queue consume {DOC} --ack-text 'Rebuild the SDK docs [#q-7f3a]' --ack-owner '{OWNER}#{GENERATION}'"
+                ),
+            ),
+            (
+                "prose row",
+                "What are the values?",
+                format!(
+                    "agent-doc queue consume {DOC} --ack-text 'What are the values?' --ack-owner '{OWNER}#{GENERATION}'"
+                ),
+            ),
+        ];
+        for (kind, item, expected) in cases {
+            let claim = reported(item);
+            let session_check = agent_doc_queue::reported_closeout::overdue_reported_closeout_warning(
+                &claim,
+                &agent_doc_queue::reported_closeout::reported_claim_closeout(
+                    DOC,
+                    &claim,
+                    &agent_doc_queue::reported_closeout::ReportedRepoEvidence::ProseOnly,
+                )
+                .unwrap(),
+                2,
+            );
+            let rendered = [
+                (
+                    "completion feedback",
+                    agent_doc_queue::claim_release_receipt::queue_line_closeout_for_claim(
+                        DOC, &claim,
+                    ),
+                ),
+                ("session-check", session_check),
+                (
+                    "Stop hook (held, recorded)",
+                    claude_unpersisted_writeback_reason(DOC, &[&debt(item, true, true)]),
+                ),
+                (
+                    "Stop hook (released, recorded)",
+                    claude_unpersisted_writeback_reason(DOC, &[&debt(item, false, true)]),
+                ),
+                (
+                    "Stop hook (held, unrecorded)",
+                    claude_unpersisted_writeback_reason(DOC, &[&debt(item, true, false)]),
+                ),
+                (
+                    "Stop hook (released, unrecorded)",
+                    claude_unpersisted_writeback_reason(DOC, &[&debt(item, false, false)]),
+                ),
+                (
+                    "persist-reported steering",
+                    agent_doc_queue::claim_release_receipt::persist_reported_instruction(
+                        DOC,
+                        item,
+                        OWNER,
+                        Some(GENERATION),
+                    ),
+                ),
+            ];
+            for (emitter, text) in rendered {
+                assert_eq!(
+                    consume_command(emitter, &text),
+                    expected,
+                    "{kind}: {emitter} disagrees: {text}"
+                );
+            }
+            // Agreement must not cost the recorded-result promise: a row the
+            // document already records is never told to write it again.
+            for held in [true, false] {
+                let recorded = claude_unpersisted_writeback_reason(DOC, &[&debt(item, held, true)]);
+                assert!(
+                    !recorded.contains("write the result to `agent:exchange`"),
+                    "{kind}: {recorded}"
+                );
+            }
+        }
     }
 }

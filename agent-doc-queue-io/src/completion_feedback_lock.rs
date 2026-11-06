@@ -266,12 +266,23 @@ mod tests {
     use super::*;
     use std::sync::{Arc, Mutex};
 
+    /// Own the lock, waiting in the kernel with no clock deciding.
+    ///
+    /// A zero window made any transient contention an instant refusal, and an
+    /// "uncontended" lock file still has transient contention: another test
+    /// in this process spawning a child duplicates every open descriptor
+    /// between fork and exec, O_CLOEXEC included, and `flock` belongs to the
+    /// open file description, so the duplicate keeps the lock alive after
+    /// `drop`. A standalone repro with four spawning threads refused 111514
+    /// of 200000 non-blocking acquires and 0 of 200000 blocking ones, which
+    /// is why `every_acquire_is_a_visible_handoff` failed with
+    /// `Stalled { stall_window: 0ns }`.
     fn hold(lock_path: &Path) -> File {
         acquire_progress_lock(
             lock_path,
             ProgressLockWait {
-                stall_window: Duration::ZERO,
-                max_wait: Duration::ZERO,
+                stall_window: Duration::MAX,
+                max_wait: Duration::MAX,
             },
             || 0,
             |_| {},

@@ -5836,10 +5836,11 @@ fn respond_does_not_supersede_a_session_check_refusal_that_survives_its_commit()
 /// operator added a free-text queue question after the coordinator's cycle had
 /// committed; the coordinator claimed it for a subagent and released the claim
 /// when the worker reported. `queue release` must hand back the exact
-/// persist-now closeout (the `> **Queue prompt:**` echo), and a late finalize
-/// (auto-reopened from a HEAD that predates the line) carrying that echo must
-/// strike the line and end its release receipt, so nothing re-serves or
-/// re-dispatches the answered question.
+/// persist-now closeout (the attempt-fenced strike, `#closeoutguidanceagree`),
+/// and a late finalize (auto-reopened from a HEAD that predates the line)
+/// carrying the `> **Queue prompt:**` echo must still strike the line and end
+/// its release receipt, so nothing re-serves or re-dispatches the answered
+/// question.
 #[test]
 fn finalize_strikes_a_mid_turn_head_whose_reported_worker_was_released() {
     let (tmp, doc) = setup_session_stream_doc();
@@ -5998,7 +5999,10 @@ fn finalize_strikes_a_mid_turn_head_whose_reported_worker_was_released() {
     let released = String::from_utf8_lossy(&released.get_output().stderr).into_owned();
     assert!(
         released.contains("subagent:page-status-enum already reported")
-            && released.contains(&format!("`> **Queue prompt:** {question}`"))
+            && released.contains("write the result to `agent:exchange`")
+            && released.contains(&format!(
+                "--ack-text '{question}' --ack-owner 'subagent:page-status-enum#1'"
+            ))
             && released.contains("Do NOT dispatch a new subagent"),
         "release must hand back the persist-now closeout:\n{released}"
     );

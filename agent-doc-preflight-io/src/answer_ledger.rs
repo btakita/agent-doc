@@ -1134,7 +1134,7 @@ pub fn search_decisions(
         .map_err(|err| anyhow::anyhow!("failed to read {}: {err}", file.display()))?;
     let (_, ledger) = build_ledger(file, &content);
     let mut hits = search::search_ledger(&ledger, query, display);
-    let recall = match TsiftRecall::discover_or_reason(file, env) {
+    let recall = match TsiftRecall::discover_for_search(file, env) {
         Err(detail) => SearchRecallStatus::Unavailable {
             detail: detail.to_string(),
         },
@@ -1586,6 +1586,7 @@ mod tests {
             tsift_bin: None,
             path: Some(path.as_os_str().to_owned()),
             timeout_ms: Some(timeout_ms),
+            search_timeout_ms: Some(timeout_ms),
         }
     }
 
@@ -1764,6 +1765,80 @@ mod tests {
             }
             other => panic!("{other:?}"),
         }
+    }
+
+    /// `#decisionsearchtsiftdeadline`: the search waits on its own deadline,
+    /// so a tsift that takes longer than the preflight pass may spend still
+    /// answers it, and the preflight pass stays bounded by its own.
+    #[test]
+    fn decision_search_has_its_own_deadline() {
+        let (dir, doc, other) = recall_project();
+        let bin_dir = fake_tsift(dir.path(), &other, "1");
+        let env = RecallEnv {
+            timeout_ms: Some(100),
+            search_timeout_ms: Some(30_000),
+            ..recall_env(&bin_dir, 0)
+        };
+
+        let source = TsiftRecall::discover_for_search(&doc, &env).unwrap();
+        assert_eq!(source.deadline(), std::time::Duration::from_secs(30));
+        assert_eq!(
+            TsiftRecall::discover(&doc, &env).unwrap().deadline(),
+            std::time::Duration::from_millis(100)
+        );
+
+        let report =
+            search_decisions(&doc, "tasks/session.md", "which port does the demo use", &env, 10)
+                .unwrap();
+        assert!(
+            matches!(&report.recall, SearchRecallStatus::Used { hits, .. } if *hits > 0),
+            "{:?}",
+            report.recall
+        );
+    }
+
+    /// Without an override the search gets the long deadline, not the
+    /// preflight pass's.
+    #[test]
+    fn decision_search_defaults_past_the_preflight_deadline() {
+        let (dir, doc, other) = recall_project();
+        let bin_dir = fake_tsift(dir.path(), &other, "0");
+        let env = RecallEnv {
+            timeout_ms: None,
+            search_timeout_ms: None,
+            ..recall_env(&bin_dir, 0)
+        };
+        let preflight = TsiftRecall::discover(&doc, &env).unwrap().deadline();
+        let search = TsiftRecall::discover_for_search(&doc, &env).unwrap().deadline();
+        assert_eq!(preflight, std::time::Duration::from_millis(2500));
+        assert_eq!(search, std::time::Duration::from_secs(60));
+    }
+
+    /// Only Markdown hits are eligible, so a code-heavy workspace's symbols
+    /// must not fill the budgeted result rows.
+    #[test]
+    fn recall_asks_tsift_for_markdown_only() {
+        use std::os::unix::fs::PermissionsExt;
+        let (dir, doc, _) = recall_project();
+        let bin_dir = dir.path().join("argsbin");
+        std::fs::create_dir_all(&bin_dir).unwrap();
+        let args_file = dir.path().join("tsift.args");
+        let script = bin_dir.join("tsift");
+        std::fs::write(
+            &script,
+            format!(
+                "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{}'\necho '{{}}'\n",
+                args_file.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let env = recall_env(&bin_dir, 5_000);
+        search_decisions(&doc, "tasks/session.md", "which port", &env, 10).unwrap();
+
+        let args = std::fs::read_to_string(&args_file).unwrap();
+        assert!(args.contains("--lang\nmarkdown\n"), "{args}");
     }
 
     /// A tsift past its deadline is reported as failed; the ledger ranking

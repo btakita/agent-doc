@@ -48,6 +48,10 @@ pub(crate) struct HandoffDocument {
     pub project_root: PathBuf,
     pub identity: String,
     pub client_id: u64,
+    /// `#deliverylineagestamp`: the registration's CRDT history. Absent in a
+    /// handoff file written by an older image, which resumes as unknown.
+    #[serde(default)]
+    pub history_lineage: Option<String>,
     pub replica_state_b64: String,
     /// `agent_doc_hash::content_hash` of the replica text the state encodes.
     pub replica_text_hash: String,
@@ -77,6 +81,7 @@ impl HandoffDocument {
             project_root: document.project_root.clone(),
             identity: document.identity.clone(),
             client_id: document.client_id,
+            history_lineage: document.history_lineage.clone(),
             replica_state_b64: BASE64_STANDARD.encode(document.replica.encode_state()),
             replica_text_hash: agent_doc_hash::content_hash(&document.replica.text()),
             shadow: document.shadow.clone(),
@@ -106,6 +111,7 @@ impl HandoffDocument {
             project_root: self.project_root.clone(),
             identity: self.identity.clone(),
             client_id: self.client_id,
+            history_lineage: self.history_lineage.clone(),
             replica,
             shadow: self.shadow.clone(),
             pending_apply_target: self.pending_apply_target.clone(),
@@ -416,6 +422,7 @@ mod tests {
             project_root: PathBuf::from("/tmp"),
             identity: format!("zed-lsp:{}:abc", std::process::id()),
             client_id,
+            history_lineage: Some("history-a".into()),
             replica: ReplicaState::from_text(client_id, text),
             shadow: text.to_string(),
             pending_apply_target: Some(format!("{text}remote\n")),

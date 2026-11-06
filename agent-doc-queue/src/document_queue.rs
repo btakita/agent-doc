@@ -4195,18 +4195,15 @@ pub fn entry_is_group_parent(entries: &[QueueEntry], idx: usize) -> bool {
         return false;
     };
     for later in entries.iter().skip(idx + 1) {
-        // A complete list comment is annotation, not an executable
-        // descendant. Keep scanning through it so a real child below the
-        // comment still makes this prompt row a group parent, while a
-        // comment-only child leaves its prompt parent runnable.
-        if list_comment_context_row(later).is_some() {
-            continue;
-        }
-        // A deeper reference row is an annotation like a comment; only rows
-        // nested beneath it make this row a group. A reference row at this
-        // depth or shallower is a sibling and ends the subtree
-        // (`#queuelineageparent`).
-        if let Some((indent, _)) = reference_context_row(later) {
+        // A deeper list comment or reference row is annotation, not an
+        // executable descendant. Keep scanning through it so a real child
+        // below it still makes this prompt row a group parent, while an
+        // annotation-only child leaves its prompt parent runnable. At this
+        // depth or shallower it is a sibling that heads its own rows, so it
+        // ends the subtree (`#queuelineageparent`, `#commentsiblingclose`).
+        if let Some((indent, _)) =
+            list_comment_context_row(later).or_else(|| reference_context_row(later))
+        {
             if indent > own_indent {
                 continue;
             }
@@ -4484,8 +4481,9 @@ fn reference_context_row(entry: &QueueEntry) -> Option<(usize, String)> {
 /// Retaining their structural indent and a compact label here lets a child
 /// below a comment execute independently without discarding the operator's
 /// note. Comment-only children remain annotations on their runnable prompt
-/// parent; [`entry_is_group_parent`] skips them when looking for executable
-/// descendants.
+/// parent; [`entry_is_group_parent`] skips deeper comments when looking for
+/// executable descendants, and a comment at the row's depth or shallower ends
+/// its subtree.
 fn list_comment_context_row(entry: &QueueEntry) -> Option<(usize, String)> {
     let QueueEntry::Freeform(raw) = entry else {
         return None;
@@ -4934,6 +4932,10 @@ pub fn lineage_claim_text(entries: &[QueueEntry], index: usize) -> Option<String
 #[cfg(test)]
 #[path = "reference_lineage_tests.rs"]
 mod reference_lineage_tests;
+
+#[cfg(test)]
+#[path = "comment_sibling_tests.rs"]
+mod comment_sibling_tests;
 
 #[cfg(test)]
 mod unique_child_vector_regression_tests {

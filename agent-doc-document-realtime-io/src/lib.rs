@@ -6299,10 +6299,26 @@ pub fn deferred_document_write_reconnect_content(
                 file.display()
             )
         })?;
-        merged = agent_doc_merge::response_cell::deduplicate_response_cells(&merged)
-            .ok()
-            .flatten()
-            .unwrap_or(merged);
+        if let Some(deduplicated) =
+            agent_doc_merge::response_cell::deduplicate_response_cells(&merged)
+                .ok()
+                .flatten()
+        {
+            // `#responseblockmovedtail`: this pass removes response text from a
+            // whole document, so it leaves the byte count behind for the next
+            // investigation. The 2026-11-05 removal had no log line of its own.
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "editor_reconnect_response_cells_deduplicated file={} intent_id={} removed_bytes={} result_hash={}",
+                    file.display(),
+                    intent.intent_id,
+                    merged.len().saturating_sub(deduplicated.len()),
+                    agent_doc_hash::content_hash(&deduplicated),
+                ),
+            );
+            merged = deduplicated;
+        }
         merged = canonicalize_and_validate_agent_rebase(
             &merged,
             &intent.target_content,
@@ -16653,6 +16669,64 @@ mod tests {
         assert!(reconnected.contains("[#fund-vesting-fk]"));
         assert!(reconnected.contains("- [x] [#fundlink2]"));
         assert_eq!(reconnected.matches("agent:boundary:").count(), 1);
+    }
+
+    /// `#responseblockmovedtail` (agent-doc-bugs.md, 2026-11-05 17:52 EST): after
+    /// a controller restart the reconnect replay projected a whole-document target
+    /// that had lost a committed reply's heading and quoted prompt. That reply
+    /// shares both with an earlier reply to the same queue prompt.
+    #[test]
+    fn reconnect_replay_keeps_replies_that_share_an_opening_node() {
+        let exchange = concat!(
+            "### Re: Response\n\n> **Queue prompt:** Many duplicate tags\n\n",
+            "### Batch j integrated\n\nPushed and installed.\n\n",
+            "### Re: Status\n\nRunning.\n\n",
+            "### Re: Response\n\n> **Queue prompt:** Many duplicate tags\n\n",
+            "### Duplicate request tags: integrated\n\nFixed.\n\n",
+        );
+        let doc = |extra: &str, queue: &str| {
+            format!(
+                "---\nagent_doc_format: template\n---\n\n<!-- agent:exchange patch=append -->\n{exchange}{extra}<!-- agent:boundary:base -->\n<!-- /agent:exchange -->\n\n<!-- agent:queue -->\n{queue}<!-- /agent:queue -->\n"
+            )
+        };
+        let base = doc("", "- do [#one]\n");
+        let target = doc("### Re: Completed\n\nDone.\n\n", "- do [#one]\n");
+        let editor_cut = doc("", "- do [#one]\n- do [#two]\n");
+        let (_dir, file, _) = temp_doc(&base);
+        let document_hash = agent_doc_hash::document_id_for_path(&file);
+        let event = agent_doc_state_backbone::StateEvent::new(
+            "deferred-response",
+            agent_doc_state_backbone::StateFact::DocumentWriteDeferred {
+                document_hash,
+                intent_id: "intent-response".to_string(),
+                expected_hash: agent_doc_hash::content_hash(&base),
+                expected_content: Some(base.clone()),
+                target_hash: agent_doc_hash::content_hash(&target),
+                target_content: target.clone(),
+                source: agent_doc_state_backbone::DocumentWriteSource::from("test"),
+                reason: DocumentWriteDeferredReason::EditorProjectionPending,
+            },
+        );
+        agent_doc_controller_io::project_controller::append_state_event_for_test(
+            file.parent().unwrap(),
+            &event,
+        )
+        .unwrap();
+
+        let reconnected = deferred_document_write_reconnect_content(&file, &editor_cut)
+            .unwrap()
+            .expect("the deferred response replays over the editor cut");
+
+        assert_eq!(reconnected.matches("### Re: Response\n").count(), 2);
+        assert_eq!(
+            reconnected
+                .matches("> **Queue prompt:** Many duplicate tags")
+                .count(),
+            2
+        );
+        assert_eq!(reconnected.matches("### Duplicate request tags").count(), 1);
+        assert!(reconnected.contains("### Re: Completed"));
+        assert!(reconnected.contains("- do [#two]"));
     }
 
     #[test]

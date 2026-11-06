@@ -175,6 +175,8 @@ legacy ownership evidence falls back to whole-document equality.
 | `AGENT_DOC_RUN_HEARTBEAT_SECS` | `30` | Run heartbeat interval |
 | `AGENT_DOC_QUEUE_MAX_ITERATIONS_HARD_CAP` | `50` | Hard cap on auto-loop queue iterations |
 | `AGENT_DOC_TSIFT_BIN` | — | Override tsift binary path |
+| `AGENT_DOC_ANSWER_RECALL_TIMEOUT_MS` | `2500` | Deadline for the tsift recall pass of one preflight |
+| `AGENT_DOC_DECISION_SEARCH_TIMEOUT_MS` | `60000` | Deadline for the tsift recall of `agent-doc decision search` |
 | `AGENT_DOC_TSIFT_GRAPH_TIMEOUT_SECS` | — | Tsift graph query timeout |
 
 ### Harness Detection

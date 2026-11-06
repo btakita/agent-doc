@@ -602,12 +602,15 @@ pub fn reported_head_texts_for_content(file: &Path, content: &str) -> Vec<String
         .collect()
 }
 
-/// Released owner of every governing receipt on a live line of `content`, by
-/// line identity (mid-turn steering's `persist_reported` routing).
+/// Released owner and exact attempt generation of every governing receipt on
+/// a live line of `content`, by line identity (mid-turn steering's
+/// `persist_reported` routing and the Stop hook's writeback reminder). The
+/// generation fences the free-text strike those emitters prescribe
+/// (`#closeoutguidanceagree`); zero marks a legacy unfenced receipt.
 pub fn reported_owners_for_content(
     file: &Path,
     content: &str,
-) -> std::collections::HashMap<agent_doc_element_queue::QueueItemIdentity, String> {
+) -> std::collections::HashMap<agent_doc_element_queue::QueueItemIdentity, (String, u64)> {
     let ledger = ledger_or_warn(file);
     if ledger.receipts.is_empty() {
         return Default::default();
@@ -623,7 +626,12 @@ pub fn reported_owners_for_content(
                 .governing(now, live.as_ref(), &claimed, &receipt.item_text)
                 .is_some_and(|governing| governing == *receipt)
         })
-        .map(|receipt| (receipt.identity.clone(), receipt.owner.clone()))
+        .map(|receipt| {
+            (
+                receipt.identity.clone(),
+                (receipt.owner.clone(), receipt.generation),
+            )
+        })
         .collect()
 }
 

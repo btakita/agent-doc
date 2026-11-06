@@ -4040,11 +4040,21 @@ thread_local! {
     /// whether that load ran under `state_event_ingress` (`#refreshmemlockstall`).
     static FULL_DURABLE_LOAD_TEST_HOOK: std::cell::RefCell<Option<Box<dyn FnMut()>>> =
         const { std::cell::RefCell::new(None) };
+    /// Test seam: runs once on this thread after a starting controller copied
+    /// the durable handoff rows into its pending-authority overlay and before
+    /// its handoff worker exists (`#orphanhandoffoverlay`).
+    static AUTHORITY_OVERLAY_RECOVERED_TEST_HOOK: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
+        const { std::cell::RefCell::new(None) };
 }
 
 #[cfg(test)]
 fn set_full_durable_load_test_hook(hook: Option<Box<dyn FnMut()>>) {
     FULL_DURABLE_LOAD_TEST_HOOK.with(|slot| *slot.borrow_mut() = hook);
+}
+
+#[cfg(test)]
+fn set_authority_overlay_recovered_test_hook(hook: Option<Box<dyn FnOnce()>>) {
+    AUTHORITY_OVERLAY_RECOVERED_TEST_HOOK.with(|slot| *slot.borrow_mut() = hook);
 }
 
 impl ControllerMemoryState {
@@ -10483,6 +10493,12 @@ impl ControllerRuntime {
             );
             self.note_pending_document_authority_handoff(event);
         }
+        #[cfg(test)]
+        if let Some(hook) =
+            AUTHORITY_OVERLAY_RECOVERED_TEST_HOOK.with(|slot| slot.borrow_mut().take())
+        {
+            hook();
+        }
         let (wake, receiver) = std::sync::mpsc::sync_channel(1);
         let runtime = Arc::downgrade(self);
         std::thread::Builder::new()
@@ -10558,15 +10574,18 @@ impl ControllerRuntime {
         }
     }
 
-    fn clear_pending_document_authority_handoff(&self, event: &agent_doc_state_backbone::StateEvent) {
+    /// Clear the overlay entry for exactly this event. An entry a newer
+    /// handoff replaced meanwhile stays: its own row settles it.
+    fn clear_pending_document_authority_handoff(
+        &self,
+        event: &agent_doc_state_backbone::StateEvent,
+    ) {
         let document_hash = event.document_hash();
-        let authority_epoch = document_authority_epoch(event);
         let mut memory = self.memory.lock();
         let pending = &mut memory.pending_document_authority_handoffs;
         if pending
             .get(document_hash)
-            .and_then(document_authority_epoch)
-            == authority_epoch
+            .is_some_and(|current| current.event_id == event.event_id)
         {
             pending.remove(document_hash);
         }
@@ -11213,10 +11232,21 @@ impl ControllerRuntime {
             return Ok(AuthorityHandoffLedgerOutcome::Applied);
         }
         let sequence = state_store::state_event_sequence_in_db(&conn, &event.event_id)?;
-        // Read under the ingress lock: a durable reload swaps the snapshot (and
-        // its high-water) only while holding it.
+        // Under the ingress lock: a durable reload swaps the snapshot (and its
+        // high-water) only while holding it.
+        Ok(self.document_authority_handoff_ledger_position(sequence))
+    }
+
+    /// Compare one authority event's ledger sequence with the high-water of the
+    /// rows this projection folded. It only ever errs toward a reload: the
+    /// high-water does not move on a live apply, so a row this controller
+    /// applied live reads as `LedgeredAfterLoad`, and a reload is always safe.
+    fn document_authority_handoff_ledger_position(
+        &self,
+        sequence: Option<u64>,
+    ) -> AuthorityHandoffLedgerOutcome {
         let folded_through = self.memory.lock().durable_sequence;
-        Ok(match sequence {
+        match sequence {
             Some(sequence) if sequence <= folded_through => {
                 AuthorityHandoffLedgerOutcome::AlreadyFolded
             }
@@ -11224,7 +11254,7 @@ impl ControllerRuntime {
                 sequence,
                 folded_through,
             },
-        })
+        }
     }
 
     /// Fold every durable latest-value authority handoff this controller can
@@ -11319,6 +11349,117 @@ impl ControllerRuntime {
                     retry = true;
                 }
             }
+        }
+        let settle_retry = self.settle_orphaned_document_authority_handoffs(project_root)?;
+        Ok(retry || settle_retry)
+    }
+
+    /// Settle pending-authority overlay entries that have no durable row left
+    /// for this drain to claim. `true` means at least one stays for a retry.
+    ///
+    /// `#orphanhandoffoverlay`: a retired predecessor can ACK a row after the
+    /// successor copied it into the overlay. No row remains, so nothing ever
+    /// cleared the entry: reads stayed correct through the overlay, while the
+    /// reactive graphs, which see the projection alone, went without the
+    /// authority until some later durable reload. The same orphan comes from a
+    /// row that a newer epoch superseded, and from a row this controller drained
+    /// in the gap between its enqueue and its overlay note.
+    ///
+    /// The overlay is read *before* the rows. An entry is noted only after its
+    /// row committed and a row leaves only by an ACK that follows its ledger
+    /// append, so a missing row means the ledger took it (or a row that
+    /// superseded it). Reading the other way round would mistake an entry noted
+    /// after the row read for an orphan while its row is still live.
+    ///
+    /// Whatever the ledger position, the entry clears only once the projection
+    /// is a fold of that ledger, so reads never lose the authority.
+    fn settle_orphaned_document_authority_handoffs(&self, project_root: &Path) -> Result<bool> {
+        let pending = self
+            .memory
+            .lock()
+            .pending_document_authority_handoffs
+            .values()
+            .cloned()
+            .collect::<Vec<_>>();
+        if pending.is_empty() {
+            return Ok(false);
+        }
+        let rows = state_store::load_document_authority_handoffs(project_root)?
+            .into_iter()
+            .map(|handoff| handoff.document_hash)
+            .collect::<std::collections::HashSet<_>>();
+        let generation = self.bootstrap.lock().controller_generation;
+        let mut retry = false;
+        let mut unfolded = Vec::new();
+        for event in pending {
+            if rows.contains(event.document_hash()) {
+                continue;
+            }
+            let opened = match telemetry_event_ingress_busy_timeout(&event) {
+                Some(busy_timeout) => {
+                    open_state_db_for_event_ingress_with_timeout(project_root, busy_timeout)
+                }
+                None => open_state_db_for_event_ingress(project_root),
+            };
+            let position = opened
+                .and_then(|conn| state_store::state_event_sequence_in_db(&conn, &event.event_id))
+                .map(|sequence| self.document_authority_handoff_ledger_position(sequence));
+            match position {
+                Ok(AuthorityHandoffLedgerOutcome::LedgeredAfterLoad {
+                    sequence,
+                    folded_through,
+                }) => unfolded.push((event, sequence, folded_through)),
+                Ok(_) => {
+                    agent_doc_ops_log_io::log_op(
+                        project_root,
+                        &format!(
+                            "document_authority_handoff_orphan_settled document_hash={} authority_epoch={} controller_generation={generation} (#orphanhandoffoverlay)",
+                            event.document_hash(),
+                            document_authority_epoch(&event).unwrap_or_default(),
+                        ),
+                    );
+                    self.clear_pending_document_authority_handoff(&event);
+                }
+                Err(error) => {
+                    agent_doc_ops_log_io::log_op(
+                        project_root,
+                        &format!(
+                            "document_authority_handoff_orphan_settle_deferred document_hash={} authority_epoch={} controller_generation={generation} error={error:#} (#orphanhandoffoverlay)",
+                            event.document_hash(),
+                            document_authority_epoch(&event).unwrap_or_default(),
+                        ),
+                    );
+                    retry = true;
+                }
+            }
+        }
+        if unfolded.is_empty() {
+            return Ok(retry);
+        }
+        // One reload folds every entry this pass found.
+        if let Err(error) = self.refresh_memory() {
+            agent_doc_ops_log_io::log_op(
+                project_root,
+                &format!(
+                    "document_authority_handoff_orphan_settle_deferred entries={} controller_generation={generation} error={error:#} (#orphanhandoffoverlay)",
+                    unfolded.len(),
+                ),
+            );
+            return Ok(true);
+        }
+        for (event, sequence, folded_through) in unfolded {
+            let sequence = sequence
+                .map(|sequence| sequence.to_string())
+                .unwrap_or_else(|| "none".to_string());
+            agent_doc_ops_log_io::log_op(
+                project_root,
+                &format!(
+                    "document_authority_handoff_orphan_refolded document_hash={} authority_epoch={} controller_generation={generation} ledger_sequence={sequence} folded_through={folded_through} (#orphanhandoffoverlay)",
+                    event.document_hash(),
+                    document_authority_epoch(&event).unwrap_or_default(),
+                ),
+            );
+            self.clear_pending_document_authority_handoff(&event);
         }
         Ok(retry)
     }

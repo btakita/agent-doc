@@ -29,17 +29,37 @@ every duplicate is ACKed as-is) MUST violate `SuccessorAckImpliesFolded`.
 violated: the race interleaving is reachable, so the positive run is not
 vacuous.
 
+THE ORPHAN (`#orphanhandoffoverlay`, `OrphanRule`)
+--------------------------------------------------
+A predecessor that ACKs its row after the successor read it into the overlay
+leaves an entry with no row to claim. `OrphanRule` is what the drain then does:
+
+- "refold": the shipped rule. A row the projection folded clears the entry at
+  once; otherwise the successor reloads the durable ledger first.
+- "ignore": the previous rule. The entry outlives the drain, so the projection,
+  and the reactive graphs that never see the overlay, lack the authority.
+  `AuthorityHandoffFoldOrphanWedge` MUST violate `NoOrphanAtRest`.
+- "clear": the tempting fix, clearing the entry because its row is gone. It
+  loses the authority from reads. `AuthorityHandoffFoldClearWedge` MUST violate
+  `OverlayClearImpliesFolded`.
+
+`AuthorityHandoffFoldOrphanReach` asserts an unfolded orphan never happens and
+MUST be violated, so the reload branch of "refold" is reachable.
+
 Out of scope: a predecessor that both lands and ACKs its row after the
-successor's load but before the successor claims it. Nothing then remains for
-the successor's drain, and its projection learns the event only from the next
-general durable reload -- the class of any predecessor write committed after a
-successor's load, which this model does not claim to close.
+successor's load but before the successor reads the rows. Neither row nor
+overlay entry then exists, nothing remains for the successor's drain, and its
+projection learns the event only from the next general durable reload -- the
+class of any predecessor write committed after a successor's load, which this
+model does not claim to close.
 ***************************************************************************)
 
-CONSTANTS FoldOnLateDuplicate
+CONSTANTS FoldOnLateDuplicate, OrphanRule
+
+ASSUME OrphanRule \in {"ignore", "clear", "refold"}
 
 Rows == {"gen1", "gen2", "acked"}
-SPcs == {"init", "loaded", "read", "claimed", "appended", "done"}
+SPcs == {"init", "loaded", "read", "orphan", "claimed", "appended", "done"}
 Outcomes == {"none", "inserted", "folded", "late"}
 
 VARIABLES
@@ -52,11 +72,12 @@ VARIABLES
     foldedThrough,  \* successor: high-water of the rows its projection folded
     folded,         \* successor: its projection holds the event
     overlay,        \* successor: pending-authority overlay holds the event
+    noted,          \* successor: the overlay held the event at some point
     outcome,        \* successor: what its append observed
     sAcked          \* successor: it ACKed the row and cleared the overlay
 
 vars == <<seq, eventSeq, row, pLanded, pDone, sPc, foldedThrough, folded,
-          overlay, outcome, sAcked>>
+          overlay, noted, outcome, sAcked>>
 
 TypeOK ==
     /\ seq \in 0..2
@@ -68,6 +89,7 @@ TypeOK ==
     /\ foldedThrough \in 0..2
     /\ folded \in BOOLEAN
     /\ overlay \in BOOLEAN
+    /\ noted \in BOOLEAN
     /\ outcome \in Outcomes
     /\ sAcked \in BOOLEAN
 
@@ -81,6 +103,7 @@ Init ==
     /\ foldedThrough = 0
     /\ folded = FALSE
     /\ overlay = FALSE
+    /\ noted = FALSE
     /\ outcome = "none"
     /\ sAcked = FALSE
 
@@ -92,36 +115,49 @@ PLand ==
        THEN /\ seq' = seq + 1
             /\ eventSeq' = seq + 1
        ELSE UNCHANGED <<seq, eventSeq>>
-    /\ UNCHANGED <<row, pDone, sPc, foldedThrough, folded, overlay, outcome, sAcked>>
+    /\ UNCHANGED <<row, pDone, sPc, foldedThrough, folded, overlay, noted, outcome, sAcked>>
 
 \* Its ACK is generation-fenced: it removes only a row still claimed by 1.
 PAck ==
     /\ pLanded /\ ~pDone
     /\ pDone' = TRUE
     /\ row' = IF row = "gen1" THEN "acked" ELSE row
-    /\ UNCHANGED <<seq, eventSeq, pLanded, sPc, foldedThrough, folded, overlay, outcome, sAcked>>
+    /\ UNCHANGED <<seq, eventSeq, pLanded, sPc, foldedThrough, folded, overlay, noted, outcome, sAcked>>
 
 SLoad ==
     /\ sPc = "init"
     /\ sPc' = "loaded"
     /\ foldedThrough' = seq
     /\ folded' = (eventSeq # 0)
-    /\ UNCHANGED <<seq, eventSeq, row, pLanded, pDone, overlay, outcome, sAcked>>
+    /\ UNCHANGED <<seq, eventSeq, row, pLanded, pDone, overlay, noted, outcome, sAcked>>
 
 SReadRows ==
     /\ sPc = "loaded"
     /\ sPc' = "read"
     /\ overlay' = (row # "acked")
+    /\ noted' = overlay'
     /\ UNCHANGED <<seq, eventSeq, row, pLanded, pDone, foldedThrough, folded, outcome, sAcked>>
 
 SClaim ==
     /\ sPc = "read"
     /\ IF row = "acked"
-       THEN /\ sPc' = "done"
+       THEN /\ sPc' = IF overlay /\ OrphanRule # "ignore" THEN "orphan" ELSE "done"
             /\ UNCHANGED row
        ELSE /\ sPc' = "claimed"
             /\ row' = "gen2"
-    /\ UNCHANGED <<seq, eventSeq, pLanded, pDone, foldedThrough, folded, overlay, outcome, sAcked>>
+    /\ UNCHANGED <<seq, eventSeq, pLanded, pDone, foldedThrough, folded, overlay, noted, outcome, sAcked>>
+
+\* No row is left for an overlay entry: settle it. The reload makes the
+\* projection the fold of the whole ledger before the entry stops answering.
+SSettle ==
+    /\ sPc = "orphan"
+    /\ sPc' = "done"
+    /\ IF OrphanRule = "refold" /\ ~folded
+       THEN /\ folded' = TRUE
+            /\ foldedThrough' = seq
+       ELSE UNCHANGED <<folded, foldedThrough>>
+    /\ overlay' = FALSE
+    /\ UNCHANGED <<seq, eventSeq, row, pLanded, pDone, noted, outcome, sAcked>>
 
 SAppend ==
     /\ sPc = "claimed"
@@ -133,7 +169,7 @@ SAppend ==
             /\ outcome' = "inserted"
        ELSE /\ UNCHANGED <<seq, eventSeq, folded>>
             /\ outcome' = IF eventSeq <= foldedThrough THEN "folded" ELSE "late"
-    /\ UNCHANGED <<row, pLanded, pDone, foldedThrough, overlay, sAcked>>
+    /\ UNCHANGED <<row, pLanded, pDone, foldedThrough, overlay, noted, sAcked>>
 
 \* The durable reload: the projection becomes the fold of the whole ledger.
 SAck ==
@@ -146,24 +182,31 @@ SAck ==
     /\ row' = IF row = "gen2" THEN "acked" ELSE row
     /\ overlay' = FALSE
     /\ sAcked' = TRUE
-    /\ UNCHANGED <<seq, eventSeq, pLanded, pDone, outcome>>
+    /\ UNCHANGED <<seq, eventSeq, pLanded, pDone, noted, outcome>>
 
 Done ==
     /\ pDone /\ sPc = "done"
     /\ UNCHANGED vars
 
-Next == PLand \/ PAck \/ SLoad \/ SReadRows \/ SClaim \/ SAppend \/ SAck \/ Done
+Next == PLand \/ PAck \/ SLoad \/ SReadRows \/ SClaim \/ SSettle \/ SAppend \/ SAck \/ Done
 
 Spec ==
     /\ Init
     /\ [][Next]_vars
     /\ WF_vars(PLand) /\ WF_vars(PAck)
     /\ WF_vars(SLoad) /\ WF_vars(SReadRows) /\ WF_vars(SClaim)
-    /\ WF_vars(SAppend) /\ WF_vars(SAck)
+    /\ WF_vars(SSettle) /\ WF_vars(SAppend) /\ WF_vars(SAck)
 
 \* The successor ACKs a row and clears its overlay only for an event its own
 \* projection holds.
 SuccessorAckImpliesFolded == sAcked => folded
+
+\* `#orphanhandoffoverlay`: no overlay entry outlives the drain.
+NoOrphanAtRest == sPc = "done" => ~overlay
+
+\* `#orphanhandoffoverlay`: an entry stops answering reads only for an event the
+\* projection holds, however it was cleared.
+OverlayClearImpliesFolded == (noted /\ ~overlay) => folded
 
 \* The ledger never holds the event twice.
 SingleLedgerRow == seq <= 1
@@ -173,4 +216,8 @@ EventuallyAcked == <>(row = "acked")
 
 \* Reach (asserted negated; MUST be violated): the late duplicate happens.
 NeverLateDuplicate == outcome # "late"
+
+\* Reach (asserted negated; MUST be violated): an entry with no row holds an
+\* event the projection has not folded, so "refold" must reload.
+NeverUnfoldedOrphan == ~(sPc = "orphan" /\ ~folded)
 ====================================================================================

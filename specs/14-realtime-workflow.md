@@ -2875,6 +2875,25 @@ first reloads the durable ledger (which replaces the projection wholesale and so
 never folds a row it also applied live twice), then acknowledges. A failed
 reload keeps the row claimed and the overlay in place for the next drain.
 
+Every drain then settles the overlay entries that have no row left to claim
+(`#orphanhandoffoverlay`): a retired predecessor can ACK a row after the
+successor copied it into the overlay, a newer epoch can supersede a row, and a
+drain can finish a row between its enqueue and its overlay note. The overlay is
+read before the rows, so an entry a concurrent enqueue noted is never mistaken
+for an orphan while its row is live: an entry is noted only after its row
+committed, and a row leaves only by an ACK that follows its ledger append. The
+entry settles against the ledger like a duplicate does. At or below the folded
+high-water it clears at once; above it, or absent from the ledger because a
+superseding row replaced it, the controller first reloads the durable ledger, so
+the reactive graphs, which see the projection and never the overlay, get the
+authority without waiting for an unrelated reload. A failed reload keeps the
+entry answering reads for the next drain.
+
+A predecessor that lands and ACKs a row after the successor's load and before
+its overlay copy leaves neither row nor entry, so no drain can see it. Like any
+predecessor write committed after a successor's load, the projection learns it
+from the next durable reload.
+
 A retained document-write owner therefore keeps the same delivery/native-save
 transition across the captured-response/write-applied boundary. Once the editor
 acknowledges the exact canonical cut, `session-check` may request the

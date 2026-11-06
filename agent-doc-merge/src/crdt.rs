@@ -1211,7 +1211,67 @@ pub(crate) fn split_list_children(body: &str) -> Option<Vec<KeyedChild>> {
     if starts.is_empty() {
         return None;
     }
-    Some(segment_by_starts(body, &starts, list_item_key))
+    let mut children = segment_by_starts(body, &starts, list_item_key);
+    rekey_generated_response_children(body, &mut children);
+    Some(children)
+}
+
+/// `#responsewrapperlossrootcause`: give each binary-generated response row an
+/// identity scoped to the row it hangs under.
+///
+/// Every list line, at any depth, is its own merge child, and
+/// [`list_item_key`] reads a row's first `[#id]` or else its text. That is
+/// the right identity for a queue item and the wrong one for a generated row.
+/// One response closing several rows renders the same `**Response [#r-…]**`,
+/// `**Timestamp:**` and `**Closed by:**` under each of them, every completed
+/// tree says `**State:** Complete.`, and a `**Guidance:**` row that names an
+/// open parent takes that parent's `[#id]` as its key. These are occurrences
+/// of one key, so a merge read an agent-added tree as a replayed duplicate the
+/// operator had omitted and dropped it row by row. Only a row with unique text
+/// survived: on 2026-11-05 the live document kept `**Summary:**` and lost the
+/// five rows around it.
+///
+/// The enclosing row's key plus the row's own label is stable across both
+/// sides and across a re-rendered value. Operator text beneath a generated
+/// choice or action is outside the generated ranges and keeps its own key.
+fn rekey_generated_response_children(body: &str, children: &mut [KeyedChild]) {
+    let mut generated = agent_doc_markdown_ast::overlay::response_row_child_ranges(body);
+    generated.extend(agent_doc_markdown_ast::overlay::response_details_child_ranges(body));
+    if generated.is_empty() {
+        return;
+    }
+    let mut enclosing: Vec<(usize, String)> = Vec::new();
+    let mut offset = 0usize;
+    for child in children.iter_mut() {
+        let start = offset;
+        offset += child.text.len();
+        if child.key == PREAMBLE_KEY {
+            continue;
+        }
+        let indent = child.text.len() - child.text.trim_start_matches([' ', '\t']).len();
+        while enclosing.last().is_some_and(|(open, _)| *open >= indent) {
+            enclosing.pop();
+        }
+        if generated
+            .iter()
+            .any(|(range_start, range_end)| (*range_start..*range_end).contains(&start))
+        {
+            let scope = enclosing.last().map_or("", |(_, key)| key.as_str());
+            child.key = format!("gen:{scope}:{}", generated_row_label(&child.text));
+        }
+        enclosing.push((indent, child.key.clone()));
+    }
+}
+
+/// A generated row's stable label: the bold lead of `**State:** Complete.`, or
+/// the whole row when it has none. The value after the label is excluded so a
+/// re-rendered timestamp, state or guidance updates the row in place.
+fn generated_row_label(row: &str) -> &str {
+    let line = row.lines().next().unwrap_or("").trim();
+    let item = line.strip_prefix("- ").unwrap_or(line);
+    item.strip_prefix("**")
+        .and_then(|rest| rest.split_once("**"))
+        .map_or(item, |(label, _)| label)
 }
 
 /// Split an `exchange` component body into keyed children, one per `### Re:`
@@ -5755,6 +5815,81 @@ Second answer line three.
                 "c".into(),
                 "y".into()
             ]
+        );
+    }
+
+    #[test]
+    fn generated_response_rows_key_by_the_row_they_hang_under() {
+        // `#responsewrapperlossrootcause`: one response closes three rows, so its
+        // generated rows repeat. A Guidance row naming the open parent must not
+        // take that parent's identity.
+        let body = concat!(
+            "- ### ~~do [#alpha]~~\n",
+            "  - **Response [#r-0123456789ab]**\n",
+            "    - **Timestamp:** 2026-11-05T19:10:10.000Z\n",
+            "    - **Summary:** First.\n",
+            "    - **State:** Complete.\n",
+            "    - **Guidance:** Safe to delete this completed row.\n",
+            "- ### re [#parent] response\n",
+            "  - ~~first reply [#q-aaaaaaaaaaaa]~~\n",
+            "    - **Response [#r-0123456789ab]**\n",
+            "      - **Timestamp:** 2026-11-05T19:10:10.000Z\n",
+            "      - **Summary:** Second.\n",
+            "      - **State:** Complete.\n",
+            "      - **Guidance:** Keep the tree under [#parent]: [#parent] is still open.\n",
+            "  - ~~second reply [#q-bbbbbbbbbbbb]~~\n",
+            "    - **Closed by:** [#r-0123456789ab]\n",
+        );
+        let children = split_list_children(body).unwrap();
+        assert!(
+            keys_unique(&children),
+            "{:?}",
+            children.iter().map(|c| &c.key).collect::<Vec<_>>()
+        );
+        assert_eq!(
+            children.iter().filter(|c| c.key == "id:parent").count(),
+            1,
+            "only the row that owns the id carries it"
+        );
+        let joined: String = children.iter().map(|c| c.text.as_str()).collect();
+        assert_eq!(joined, body, "rekeying must stay lossless");
+        let row = |needle: &str| {
+            children
+                .iter()
+                .find(|c| c.text.contains(needle))
+                .unwrap()
+                .key
+                .clone()
+        };
+        let rerendered = body.replace(
+            "      - **State:** Complete.\n",
+            "      - **State:** Follow-up work remains.\n",
+        );
+        let rerendered = split_list_children(&rerendered).unwrap();
+        assert!(
+            rerendered
+                .iter()
+                .any(|c| c.key == row("Second.").replace("Summary:", "State:")
+                    && c.text.contains("Follow-up work remains")),
+            "a re-rendered value keeps the row's identity"
+        );
+    }
+
+    #[test]
+    fn operator_text_beneath_a_generated_choice_keeps_its_own_key() {
+        let body = concat!(
+            "- ### ~~do [#alpha]~~\n",
+            "  - **Response [#r-0123456789ab]**\n",
+            "    - **Summary:** Pick one.\n",
+            "    - **Choices:**\n",
+            "      - **Widen**: keep the strategy\n",
+            "        - use the wider one [#q-aaaaaaaaaaaa]\n",
+        );
+        let children = split_list_children(body).unwrap();
+        assert_eq!(
+            children.last().unwrap().key,
+            "id:q-aaaaaaaaaaaa",
+            "an operator reply is queue work, not a generated row"
         );
     }
 

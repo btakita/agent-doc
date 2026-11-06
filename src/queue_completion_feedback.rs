@@ -32,9 +32,9 @@ pub(crate) struct CompletionFeedbackOutcome {
     /// Durable editor-authority target still awaiting visible projection.
     pub projection_pending: bool,
     pub intent_id: Option<String>,
-    /// The hand-back's open items queued as follow-up rows in this same
+    /// The hand-back's action items queued as follow-up rows in this same
     /// successor (`#workerresponsestructure`).
-    pub followups: agent_doc_queue::handback_followups::OpenItemFollowups,
+    pub followups: agent_doc_queue::handback_followups::HandbackFollowups,
 }
 
 #[derive(Debug, Clone)]
@@ -199,7 +199,9 @@ fn report_complete_with_lock_wait(
     // failure, never a silent success. The worker result it carried would
     // otherwise be lost while the coordinator reads exit 0 as "recorded".
     let Some(claim) = observed_claim(file, item, &current)? else {
-        return Err(no_matching_claim_error(file, item, generation, &current, None));
+        return Err(no_matching_claim_error(
+            file, item, generation, &current, None,
+        ));
     };
     if !claim.owner.starts_with("subagent:") {
         return Err(no_matching_claim_error(
@@ -237,7 +239,9 @@ fn report_complete_with_lock_wait(
     }
     if let Some(repository) = repository {
         agent_doc_queue_io::queue_lineage::record(
-            file, &claim.item_text, claim.generation,
+            file,
+            &claim.item_text,
+            claim.generation,
             agent_doc_queue_io::queue_lineage::RecordRequest {
                 kind: if repository.pushed_ref.is_some() {
                     agent_doc_queue_io::queue_lineage::QueueLineageEventKind::Pushed
@@ -258,13 +262,14 @@ fn report_complete_with_lock_wait(
             },
         )?;
     }
-    let claim = agent_doc_queue_io::queue_claim::report_exact_worker_attempt_with_publication_state(
-        file,
-        &claim.item_text,
-        generation.unwrap_or(claim.generation),
-        &worker_id,
-        publication_state,
-    )?;
+    let claim =
+        agent_doc_queue_io::queue_claim::report_exact_worker_attempt_with_publication_state(
+            file,
+            &claim.item_text,
+            generation.unwrap_or(claim.generation),
+            &worker_id,
+            publication_state,
+        )?;
     // Derive the reported marker and completion cell from one cut and publish
     // one successor. Two separate retained editor writes can conflict while
     // the first is still awaiting projection.
@@ -294,31 +299,39 @@ fn report_complete_with_lock_wait(
 }
 
 /// `#workerresponsestructure`: the report line's account of the hand-back's
-/// open items — queued as follow-up rows, already queued, or refused with the
-/// exact `queue follow-up` command the coordinator runs instead. Empty when
-/// the hand-back lists no open items.
-pub(crate) fn describe_open_item_followups(
+/// items — action items queued as follow-up rows, already queued, or refused
+/// with the exact `queue follow-up` command the coordinator runs instead, and
+/// open items held for triage (`#handbackopenitemstriage`). Empty when the
+/// hand-back lists neither.
+pub(crate) fn describe_handback_followups(
     file: &Path,
     origin: &str,
-    followups: &agent_doc_queue::handback_followups::OpenItemFollowups,
+    followups: &agent_doc_queue::handback_followups::HandbackFollowups,
 ) -> String {
     let queue = followups.queue_id.as_deref().unwrap_or("<queue-id>");
     let mut text = String::new();
     if !followups.inserted.is_empty() {
         text.push_str(&format!(
-            " Queued {} open item(s) as follow-up row(s) after {origin:?} in queue id `{queue}`; do not add them again.",
+            " Queued {} action item(s) as follow-up row(s) after {origin:?} in queue id `{queue}`; do not add them again.",
             followups.inserted.len(),
         ));
     }
     if followups.already_present > 0 {
         text.push_str(&format!(
-            " {} open item(s) already have a follow-up row in queue id `{queue}`.",
+            " {} action item(s) already have a follow-up row in queue id `{queue}`.",
             followups.already_present,
         ));
     }
     if let Some(reason) = &followups.refused {
         text.push_str(&format!(
-            " The hand-back's open items were NOT queued ({reason}); queue them with `agent-doc queue follow-up {} --id {queue} --after <origin> --item <text>...`.",
+            " The hand-back's action items were NOT queued ({reason}); queue them with `agent-doc queue follow-up {} --id {queue} --after <origin> --item <text>...`.",
+            file.display(),
+        ));
+    }
+    if followups.held_for_triage > 0 {
+        text.push_str(&format!(
+            " {} open item(s) were held for triage and NOT queued, because Open items does not say which entries are work: read them in the response, and queue only the work with `agent-doc queue follow-up {} --id {queue} --after <origin> --item <text>...`.",
+            followups.held_for_triage,
             file.display(),
         ));
     }
@@ -350,8 +363,8 @@ fn no_matching_claim_error(
         ),
         None => "no claim in the ledger matches it".to_string(),
     };
-    let rows = agent_doc_queue::queue_continuation::all_queue_head_texts(current)
-        .unwrap_or_default();
+    let rows =
+        agent_doc_queue::queue_continuation::all_queue_head_texts(current).unwrap_or_default();
     let ledger = agent_doc_queue_io::queue_claim::load_ledger_following(file, current);
     let mut message = format!(
         "queue report-complete matched no subagent claim for {item:?}{requested_generation} in {}: {reason}. No completion feedback was written; the worker result is NOT recorded (#reportcompletenomatch).",
@@ -441,7 +454,7 @@ fn upsert_completion_feedback(
     bool,
     bool,
     Option<String>,
-    agent_doc_queue::handback_followups::OpenItemFollowups,
+    agent_doc_queue::handback_followups::HandbackFollowups,
 )> {
     let key = agent_doc_queue_io::queue_claim::completion_feedback_key(claim)?;
     // Keep the heading, attested worker response, and marker contiguous. The existing N-1 diff
@@ -469,10 +482,10 @@ fn upsert_completion_feedback(
         Some(updated) => updated,
         None => agent_doc_element_exchange::insert_prompt_line_before_boundary(projected, &note)?,
     };
-    // `#workerresponsestructure`: each open item the hand-back reports becomes
-    // a follow-up row after the originating head, in the same successor as
-    // the cell, so the limit is queued work rather than buried prose.
-    let (updated, followups) = agent_doc_queue::handback_followups::plan_open_item_followups(
+    // `#workerresponsestructure`: each action item the hand-back reports
+    // becomes a follow-up row after the originating head, in the same
+    // successor as the cell, so the work is queued rather than buried prose.
+    let (updated, followups) = agent_doc_queue::handback_followups::plan_handback_followups(
         &with_cell,
         &claim.item_text,
         response,
@@ -524,7 +537,6 @@ fn upsert_completion_feedback(
     Ok((appended, replaced, retained_intent, followups))
 }
 
-
 /// Settle any retained completion successor, then rederive the queue marker
 /// from the durable claim ledger. This never releases a claim or writes behind
 /// an editor-owned buffer.
@@ -569,7 +581,11 @@ pub(crate) fn repair_claim_projection(
 pub(crate) fn repair_legacy_completion_feedback(
     file: &Path,
 ) -> Result<CompletionFeedbackRepairOutcome> {
-    let _lock = acquire_completion_lock(file, "repair subagent completion feedback", COMPLETION_FEEDBACK_LOCK_WAIT)?;
+    let _lock = acquire_completion_lock(
+        file,
+        "repair subagent completion feedback",
+        COMPLETION_FEEDBACK_LOCK_WAIT,
+    )?;
     let current =
         agent_doc_document_realtime_io::try_resolve_current_document_content(file, SOURCE)?;
     let (updated, repaired) = repair_legacy_completion_feedback_content(&current);
@@ -623,7 +639,11 @@ pub(crate) fn repair_stale_completion(
             &crate::CLI_QUEUE_CONSUME_WRITE_EFFECTS,
         );
     }
-    let _lock = acquire_completion_lock(file, "repair stale completion evidence", COMPLETION_FEEDBACK_LOCK_WAIT)?;
+    let _lock = acquire_completion_lock(
+        file,
+        "repair stale completion evidence",
+        COMPLETION_FEEDBACK_LOCK_WAIT,
+    )?;
     if let Some(pending) = agent_doc_document_realtime_io::pending_document_write(file) {
         bail!(
             "{} has a retained editor write (intent {}) that has not landed; open it in the active editor/project and run `agent-doc queue repair-projection {:?}`, then rerun; nothing was changed",
@@ -829,11 +849,13 @@ pub(crate) fn repair_managed_state(
     apply: bool,
     keys: &std::collections::HashSet<String>,
 ) -> Result<ManagedStateRepairReport> {
-    let _lock = acquire_completion_lock(file, "audit managed queue state", COMPLETION_FEEDBACK_LOCK_WAIT)?;
+    let _lock = acquire_completion_lock(
+        file,
+        "audit managed queue state",
+        COMPLETION_FEEDBACK_LOCK_WAIT,
+    )?;
 
-    if apply
-        && let Some(pending) = agent_doc_document_realtime_io::pending_document_write(file)
-    {
+    if apply && let Some(pending) = agent_doc_document_realtime_io::pending_document_write(file) {
         bail!(
             "{} has a retained editor write (intent {}) that has not landed; open it in the active editor/project and run `agent-doc queue repair-projection {:?}`, then rerun; nothing was changed",
             file.display(),
@@ -1387,7 +1409,11 @@ mod tests {
         // The same row is open, undisturbed, and not duplicated; no completion
         // cell claims the loop finished.
         let content = fs::read_to_string(&doc).unwrap();
-        assert_eq!(content.matches("pull/12: #adversarial-pr").count(), 1, "{content}");
+        assert_eq!(
+            content.matches("pull/12: #adversarial-pr").count(),
+            1,
+            "{content}"
+        );
         assert!(!content.contains("~~"), "{content}");
         assert!(!content.contains("### Re: Subagent completed"), "{content}");
 
@@ -1395,7 +1421,10 @@ mod tests {
         // again, and its next brief carries the interrupted hand-back.
         let ledger = agent_doc_queue_io::queue_claim::load_ledger(&doc).unwrap();
         assert!(
-            ledger.claims.iter().all(|claim| !claim.state.blocks_dispatch()),
+            ledger
+                .claims
+                .iter()
+                .all(|claim| !claim.state.blocks_dispatch()),
             "{ledger:?}"
         );
         let (outcome, _) =
@@ -1414,7 +1443,11 @@ mod tests {
             .as_ref()
             .expect("the brief carries the interrupted attempt");
         assert_eq!(prior.owner, "subagent:pr12-review1");
-        assert!(brief.subagent_prompt_preamble.contains("Prior goal-loop attempt"));
+        assert!(
+            brief
+                .subagent_prompt_preamble
+                .contains("Prior goal-loop attempt")
+        );
         assert!(
             brief
                 .subagent_prompt_preamble
@@ -1516,14 +1549,15 @@ mod tests {
             Some(QueueReportState::PublishedLocal)
         );
         assert_eq!(
-            agent_doc_queue_io::queue_claim::load_ledger(&doc).unwrap().claims[0]
+            agent_doc_queue_io::queue_claim::load_ledger(&doc)
+                .unwrap()
+                .claims[0]
                 .publication_state,
             Some(QueueReportState::PublishedLocal)
         );
         let reported_content = fs::read_to_string(&doc).unwrap();
         assert!(
-            reported_content
-                .contains("finish sdk.md with deterministic tests ⟦published+local⟧"),
+            reported_content.contains("finish sdk.md with deterministic tests ⟦published+local⟧"),
             "{reported_content}"
         );
         assert_eq!(
@@ -1682,13 +1716,8 @@ mod tests {
             stale = stale,
         );
         fs::write(&doc, &original).unwrap();
-        agent_doc_queue_io::queue_claim::claim(
-            &doc,
-            "still running",
-            "subagent:live",
-            600,
-        )
-        .unwrap();
+        agent_doc_queue_io::queue_claim::claim(&doc, "still running", "subagent:live", 600)
+            .unwrap();
         agent_doc_queue_io::queue_claim::start_attempt(
             &doc,
             "still running",
@@ -1874,8 +1903,15 @@ mod tests {
             .map(|item| {
                 let doc = doc.clone();
                 std::thread::spawn(move || {
-                    report_complete(&doc, item, Some(1), None, None, "concurrent worker completed")
-                        .unwrap()
+                    report_complete(
+                        &doc,
+                        item,
+                        Some(1),
+                        None,
+                        None,
+                        "concurrent worker completed",
+                    )
+                    .unwrap()
                 })
             })
             .collect::<Vec<_>>();
@@ -1970,8 +2006,8 @@ mod tests {
         .unwrap()
         .expect("editor replica attaches");
 
-        let first = report_complete(&doc, "first worker", Some(1), None, None, "first result")
-            .unwrap();
+        let first =
+            report_complete(&doc, "first worker", Some(1), None, None, "first result").unwrap();
         assert!(first.projection_pending);
 
         agent_doc_crdt_relay_io::with_hub(&doc, |hub| {
@@ -1999,8 +2035,8 @@ mod tests {
             "fixture must expose the concurrent editor cut:\n{authoritative}",
         );
 
-        let second = report_complete(&doc, "second worker", Some(1), None, None, "second result")
-            .unwrap();
+        let second =
+            report_complete(&doc, "second worker", Some(1), None, None, "second result").unwrap();
         assert!(second.projection_pending);
         let pending = agent_doc_document_realtime_io::pending_document_write(&doc)
             .expect("both reports remain in one retained successor");

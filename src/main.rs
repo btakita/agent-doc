@@ -9823,7 +9823,7 @@ fn try_main() -> anyhow::Result<()> {
                         ),
                         Err(err) => err.to_string(),
                     };
-                    let followups = queue_completion_feedback::describe_open_item_followups(
+                    let followups = queue_completion_feedback::describe_handback_followups(
                         &file,
                         &outcome.claim.item_text,
                         &outcome.followups,

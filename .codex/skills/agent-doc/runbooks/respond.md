@@ -446,10 +446,15 @@ and the pending granular-flags-only rule. This runbook carries the rest.
      Pass the worker's complete handback verbatim; an empty response is refused,
      and there is no placeholder-only completion mode. Keep its labelled
      sections and line breaks, never flatten it onto one line: report-complete
-     renders **Summary**, **What changed**, **Verification**, **Open items**,
-     and **Next actions** into the response structure and queues each Open
-     items bullet as a follow-up row right after the originating head, so do not
-     add those rows again with `queue follow-up` (`#workerresponsestructure`).
+     renders **Summary**, **What changed**, **Verification**, **Action items**,
+     **Notes**, and **Next actions** into the response structure and queues each
+     Action items bullet as a follow-up row right after the originating head, or
+     after the top-level row that holds a nested head, so do not add those rows
+     again with `queue follow-up` (`#workerresponsestructure`). Notes never
+     become rows. Bullets under the older **Open items** label are not queued
+     either, because that label does not say which are work: when the report
+     line says they were held for triage, read them and queue only the work with
+     `queue follow-up` (`#handbackopenitemstriage`).
      A handback without those labels is recorded verbatim.
      Before treating the handback as complete, compare it with the queue item,
      resolved presets, nested authorization, and any effect named by the worker.

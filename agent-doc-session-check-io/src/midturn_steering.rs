@@ -568,6 +568,8 @@ fn route_claimed_items(
                 followed_generation: 0,
                 claim_time_row: None,
                 reported_at_secs: None,
+                heartbeat_at_secs: None,
+                frozen: None,
             }
         });
     }
@@ -2394,6 +2396,90 @@ fn status_sync_checkpoint(file: &Path, observed_at_ms: u64) -> Result<Option<Str
     )
 }
 
+/// `project_runtime_state` key prefix of the last surfaced pool refill.
+const SUBAGENT_POOL_REFILL_KEY_PREFIX: &str = "subagent_pool_refill";
+
+/// Stable fingerprint of what a refill asks the coordinator to do, so the
+/// PostToolUse hook surfaces each distinct refill once instead of after every
+/// tool call.
+fn subagent_pool_refill_fingerprint(refill: &agent_doc_queue::subagent_pool::PoolRefill) -> String {
+    let mut parts = Vec::new();
+    for entry in &refill.unstarted {
+        parts.push(format!("u:{}:{}", entry.generation, entry.item));
+    }
+    for entry in &refill.refresh_due {
+        parts.push(format!(
+            "r:{}:{}:{}:{}",
+            entry.generation, entry.last_heartbeat_secs, entry.expired, entry.item
+        ));
+    }
+    for head in &refill.next_heads {
+        parts.push(format!("n:{}", head.item));
+    }
+    agent_doc_hash::content_hash(&parts.join("\n"))
+}
+
+/// Mid-turn work-pool refill (`#subagentworkpool`): while the owner turn is
+/// open, a slot freed by a worker report, release, loss, or freeze (or a
+/// claimed head still owed its spawn, or a worker heartbeat coming due before
+/// its claim expires) is surfaced in the PostToolUse context with the exact
+/// commands, once per distinct refill.
+fn subagent_pool_checkpoint(file: &Path, observed_at_ms: u64) -> Result<Option<String>> {
+    let Some(cycle) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
+        return Ok(None);
+    };
+    if !cycle_accepts_steering(&cycle, &cycle.cycle_id) {
+        return Ok(None);
+    }
+    let content = crate::resolve_current_document_content(file, "subagent_pool_checkpoint")?;
+    if !agent_doc_queue_io::subagent_dispatch::queue_subagent_dispatch_enabled_for_content(
+        file, &content,
+    )? {
+        return Ok(None);
+    }
+    let Some(root) = project_root(file) else {
+        return Ok(None);
+    };
+    let refill = agent_doc_queue_io::subagent_pool::pool_refill_for_content(
+        file,
+        &content,
+        agent_doc_queue::subagent_pool::PoolRefillTrigger::Plan,
+    )?;
+    let key = format!(
+        "{SUBAGENT_POOL_REFILL_KEY_PREFIX}:{}",
+        agent_doc_hash::content_hash(&canonical_document(file)?)
+    );
+    let conn = agent_doc_sqlite::state_store::open_state_db(&root)?;
+    if !refill.is_actionable() {
+        agent_doc_sqlite::state_store::clear_project_runtime_state_in_db(&conn, &key)?;
+        return Ok(None);
+    }
+    let fingerprint = subagent_pool_refill_fingerprint(&refill);
+    if agent_doc_sqlite::state_store::load_project_runtime_state_from_db(&conn, &key)?.as_deref()
+        == Some(fingerprint.as_str())
+    {
+        return Ok(None);
+    }
+    agent_doc_sqlite::state_store::upsert_project_runtime_state_in_db(
+        &conn,
+        &key,
+        &fingerprint,
+        observed_at_ms,
+    )?;
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "subagent_pool_refill_surfaced file={} cycle={} unstarted={} refresh_due={} next_heads={} (#subagentworkpool)",
+            file.display(),
+            cycle.cycle_id,
+            refill.unstarted.len(),
+            refill.refresh_due.len(),
+            refill.next_heads.len(),
+        ),
+    );
+    Ok(refill.render())
+}
+
 fn post_tool_use_response_at_with_checkpoint(
     payload: &str,
     observed_at_ms: u64,
@@ -2462,6 +2548,20 @@ fn post_tool_use_response_at_with_checkpoint(
             eprintln!(
                 "[agent-doc] status-sync checkpoint skipped for {}: {err:#}",
                 file.display()
+            );
+        }
+    }
+    match subagent_pool_checkpoint(&file, observed_at_ms) {
+        Ok(Some(context)) => contexts.push(context),
+        Ok(None) => {}
+        Err(err) => {
+            // A pool reminder must never steal steering or fail the tool call.
+            agent_doc_ops_log_io::log_op(
+                &file,
+                &format!(
+                    "subagent_pool_checkpoint_error file={} error={err:#}",
+                    file.display()
+                ),
             );
         }
     }
@@ -2564,6 +2664,48 @@ mod tests {
             )
             .expect("test editor should deregister from the CRDT relay");
         }
+    }
+
+    /// `#subagentworkpool`: an open owner turn sees the refill once per
+    /// distinct change, with the unstarted claim's spawn first, so a refill
+    /// never needs another operator prompt and never repeats per tool call.
+    #[test]
+    fn pool_checkpoint_surfaces_each_distinct_refill_once() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        let content = "---\nsession: sid\nagent_doc_format: template\n---\n\n<!-- agent:queue subagents=2 go -->\n- do [#a]\n- do [#b]\n- do [#c]\n- do [#d]\n<!-- /agent:queue -->\n";
+        std::fs::write(&file, content).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&file, Some(content), Some(content)).unwrap();
+        let clock = agent_doc_queue_io::queue_claim::claim_clock_now_secs();
+        let _pin = agent_doc_queue_io::queue_claim::pin_claim_clock_for_current_thread(clock);
+        agent_doc_queue_io::queue_claim::claim(&file, "do [#a]", "subagent:a", 7200).unwrap();
+        let _later =
+            agent_doc_queue_io::queue_claim::pin_claim_clock_for_current_thread(clock + 60);
+
+        let first = subagent_pool_checkpoint(&file, 1_000).unwrap().expect("refill");
+        assert!(first.contains("URGENT"), "{first}");
+        assert!(first.contains("do [#a]"), "{first}");
+        assert!(first.contains("Refill a free pool slot"), "{first}");
+        assert!(first.contains("do [#b]"), "{first}");
+        assert_eq!(
+            subagent_pool_checkpoint(&file, 2_000).unwrap(),
+            None,
+            "the same refill is surfaced once"
+        );
+
+        agent_doc_queue_io::queue_claim::start_attempt(
+            &file,
+            "do [#a]",
+            "subagent:a",
+            "worker:a",
+            7200,
+            1,
+        )
+        .unwrap();
+        let second = subagent_pool_checkpoint(&file, 3_000).unwrap().expect("changed refill");
+        assert!(!second.contains("URGENT"), "{second}");
+        assert!(second.contains("do [#b]"), "{second}");
     }
 
     #[test]

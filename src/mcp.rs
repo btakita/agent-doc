@@ -1432,6 +1432,8 @@ mod tests {
             followed_generation: 0,
             claim_time_row: None,
             reported_at_secs: None,
+            heartbeat_at_secs: None,
+            frozen: None,
         };
         let closeout =
             reported_claim_closeout("doc.md", &claim, &ReportedRepoEvidence::Undeclared).unwrap();
@@ -1740,6 +1742,104 @@ mod tests {
 
         let state = agent_doc_cycle_state_io::load(&file).unwrap().unwrap();
         assert_eq!(state.phase, agent_doc_turn::CyclePhase::PreflightStarted);
+    }
+
+    /// `#subagentworkpool` on the Grok connected path: `agent_doc_plan`
+    /// hands out every free pool slot at once (never one head per turn), lists
+    /// the claimed-without-worker head's spawn + start first, reports the pool,
+    /// and a worker report frees a slot that the next plan refills.
+    #[test]
+    fn connected_plan_dispatches_every_free_pool_slot_and_refills_after_a_report() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+        let file = root.join("session.md");
+        let rows = (1..=7).map(|n| format!("- Grok task {n}.\n")).collect::<String>();
+        let content = format!(
+            "---\nagent_doc_session: sid-1\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n### Re: prior\n\nDone.\n<!-- /agent:exchange -->\n\n## Queue\n\n<!-- agent:queue subagents=4 go -->\n{rows}<!-- /agent:queue -->\n"
+        );
+        std::fs::write(&file, &content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &file,
+            &content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        let clock = agent_doc_queue_io::queue_claim::claim_clock_now_secs();
+        let _pin = agent_doc_queue_io::queue_claim::pin_claim_clock_for_current_thread(clock);
+        // The Grok miss: a head claimed, never spawned.
+        agent_doc_queue_io::queue_claim::claim(&file, "Grok task 1.", "subagent:g1", 7200).unwrap();
+        let admit = response_for(json!({
+            "jsonrpc": "2.0",
+            "id": 50,
+            "method": "tools/call",
+            "params": {
+                "name": "agent_doc_admit",
+                "arguments": { "file": file.display().to_string() }
+            }
+        }));
+        assert_eq!(admit["result"]["isError"], false);
+        let _later = agent_doc_queue_io::queue_claim::pin_claim_clock_for_current_thread(clock + 60);
+        let plan_call = |id: u64| {
+            let plan = response_for(json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "method": "tools/call",
+                "params": {
+                    "name": "agent_doc_plan",
+                    "arguments": { "file": file.display().to_string() }
+                }
+            }));
+            assert_eq!(plan["result"]["isError"], false, "{plan}");
+            plan["result"]["structuredContent"]["plan"].clone()
+        };
+        let items = |contract: &serde_json::Value| {
+            // An empty list is omitted from the serialized plan.
+            contract["queue_subagent_dispatch"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default()
+                .iter()
+                .map(|entry| entry["item"].as_str().unwrap().to_string())
+                .collect::<Vec<_>>()
+        };
+
+        let contract = plan_call(51);
+        assert_eq!(
+            items(&contract),
+            ["Grok task 2.", "Grok task 3.", "Grok task 4."],
+            "every free slot (4 - 1 dispatching) is handed out at once"
+        );
+        assert_eq!(contract["queue_subagent_pool"][0]["occupancy"]["free"], 3);
+        assert_eq!(contract["queue_subagent_pool"][0]["occupancy"]["dispatching"], 1);
+        let first = contract["required_commands"][0].as_str().unwrap();
+        assert!(first.starts_with("URGENT"), "{first}");
+        assert!(first.contains("Grok task 1."), "{first}");
+
+        // Spawn + start the unstarted claim and the three new heads, then
+        // one worker reports: its slot refills with the next head.
+        for (n, item) in ["Grok task 1.", "Grok task 2.", "Grok task 3.", "Grok task 4."].iter().enumerate() {
+            let owner = format!("subagent:g{}", n + 1);
+            let generation = if n == 0 {
+                1
+            } else {
+                agent_doc_queue_io::queue_claim::claim(&file, item, &owner, 7200).unwrap().1.generation
+            };
+            agent_doc_queue_io::queue_claim::start_attempt(
+                &file,
+                item,
+                &owner,
+                &format!("grok-subagent-{}", n + 1),
+                7200,
+                generation,
+            )
+            .unwrap();
+        }
+        assert!(items(&plan_call(52)).is_empty(), "the pool is full");
+        agent_doc_queue_io::queue_claim::report_attempt(&file, "Grok task 2.", Some(1)).unwrap();
+        let refill = plan_call(53);
+        assert_eq!(items(&refill), ["Grok task 5."], "the report freed one slot");
+        assert_eq!(refill["queue_subagent_pool"][0]["occupancy"]["running"], 3);
     }
 
     #[test]

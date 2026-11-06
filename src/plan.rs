@@ -76,6 +76,12 @@ pub struct DispatchPlan {
     pub queue_subagent_dispatch_guidance: Option<String>,
     /// Claims that still need the successful spawn's worker id, or must be
     /// released for redispatch when no worker was spawned.
+    /// Work-pool occupancy of each `subagents` queue (`#subagentworkpool`):
+    /// pool size and source, running / dispatching / frozen workers, and free
+    /// slots. `queue_subagent_dispatch` already fills exactly the free slots;
+    /// every `report-complete` / `release` / `freeze` prints the next refill.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub queue_subagent_pool: Vec<agent_doc_queue::subagent_pool::PoolStatus>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub queue_dispatch_acknowledgement_required:
         Vec<agent_doc_queue_io::queue_claim::DispatchAcknowledgementObligation>,
@@ -260,6 +266,18 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
             agent_doc_queue_io::queue_claim::claim_clock_now_secs(),
             0,
         )?;
+    let (_, queue_subagent_pool) =
+        agent_doc_queue_io::subagent_dispatch::queue_attr_subagent_plan_and_pools(
+            file, &content,
+        )?;
+    // `#subagentworkpool`: a due heartbeat is a warning on every plan, so a
+    // long-running worker is refreshed before its claim expires.
+    let queue_refresh_warnings = agent_doc_queue_io::subagent_pool::pool_refill_for_content(
+        file,
+        &content,
+        agent_doc_queue::subagent_pool::PoolRefillTrigger::Plan,
+    )?
+    .refresh_due_steps();
     let queue_subagent_dispatch_guidance = (!queue_subagent_dispatch.is_empty())
         .then(|| agent_doc_preflight_io::QUEUE_SUBAGENT_DISPATCH_GUIDANCE.to_string());
     // `#subagentsalwaysparallel`: the same subagent-intent resolution the
@@ -410,6 +428,8 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
                 ),
             }
         };
+        let mut warnings = warnings;
+        warnings.extend(queue_refresh_warnings);
         let mut required_commands = queue_lifecycle_required_commands;
         required_commands.extend(finalize_placeholder_commands(file, &fm, &[]));
         let blockers_for_tree = blockers.clone();
@@ -430,6 +450,7 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
         return Ok(DispatchPlan {
             queue_subagent_dispatch,
             queue_subagent_dispatch_guidance,
+            queue_subagent_pool,
             queue_dispatch_acknowledgement_required,
             queue_reported_closeout,
             prompt_targets: Vec::new(),
@@ -565,7 +586,7 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
         );
     }
     let mut blockers = shared_doc_security_blockers(file, &fm, &pending_mutations);
-    let mut warnings = Vec::new();
+    let mut warnings = queue_refresh_warnings;
     if let Some(deferral) = plan_backlog_only_deferral_warning(execution_scope, &prompt_diff_text) {
         warnings.push(deferral);
     }
@@ -706,6 +727,7 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
     Ok(DispatchPlan {
         queue_subagent_dispatch,
         queue_subagent_dispatch_guidance,
+        queue_subagent_pool,
         queue_dispatch_acknowledgement_required,
         queue_reported_closeout,
         prompt_targets,
@@ -911,6 +933,15 @@ fn queue_lifecycle_required_commands(
 ) -> (Vec<String>, QueueLifecyclePhases) {
     use agent_doc_queue::reported_closeout::ReportedCloseoutReadiness;
     let mut commands = Vec::new();
+    // `#subagentworkpool`: a claimed head with no worker is the most urgent
+    // pool debt. Its spawn + start comes before new claims and long before
+    // reported-result integration (Grok sdk-dev 2026-11-05: four claimed
+    // heads sat unspawned behind serial integration, so the pool ran one).
+    commands.extend(
+        acknowledgements
+            .iter()
+            .map(|obligation| obligation.message()),
+    );
     commands.extend(dispatch
         .iter()
         .flat_map(|entry| {
@@ -940,11 +971,6 @@ fn queue_lifecycle_required_commands(
             }
             steps
         }));
-    commands.extend(
-        acknowledgements
-            .iter()
-            .map(|obligation| obligation.message()),
-    );
     let dispatch_len = commands.len();
     let commands_for = |readiness: ReportedCloseoutReadiness| {
         reported
@@ -2365,6 +2391,104 @@ Done.
         assert!(!dispatched.contains(&"do [#portsdk]"), "{dispatched:?}");
         assert_eq!(reserve_index(&plan, "do [#docs]"), Some(0), "{:#?}", plan.required_commands);
         assert!(reserve_index(&plan, "do [#usesdk]").is_none());
+    }
+
+    /// `#subagentworkpool`, the Grok sdk-dev shape (2026-11-05): N claimed
+    /// heads with no worker, M reported rows awaiting integration, and one
+    /// running worker. The pool (`subagents=6`) has 6 - (3 dispatching + 1
+    /// running) = 2 free slots. The plan must list every unstarted spawn +
+    /// start FIRST, then exactly two new claims, and only then the reported
+    /// closeouts; the refill projection carries the same order and the
+    /// waiting backlog.
+    #[test]
+    fn plan_spawns_unstarted_claims_before_refill_and_integration() {
+        let _prompt = EnvGuard::unset("AGENT_DOC_HARNESS_PROMPT");
+        let dir = setup_project();
+        let doc = dir.path().join("plan.md");
+        let rows = [
+            "Claimed one.", "Claimed two.", "Claimed three.",
+            "Reported one.", "Reported two.",
+            "Running one.",
+            "Fresh one.", "Fresh two.", "Fresh three.", "Fresh four.",
+        ];
+        let queue = rows.iter().map(|row| format!("- {row}\n")).collect::<String>();
+        let content = subagents_queue_doc()
+            .replace("<!-- agent:queue priority subagents go -->", "<!-- agent:queue priority subagents=6 go -->")
+            .replace("- Fix the claim button.\n- Align the Close button.\n", &queue);
+        std::fs::write(&doc, &content).unwrap();
+        let clock = agent_doc_queue_io::queue_claim::claim_clock_now_secs();
+        let _pin = agent_doc_queue_io::queue_claim::pin_claim_clock_for_current_thread(clock);
+        for (index, item) in ["Claimed one.", "Claimed two.", "Claimed three."].iter().enumerate() {
+            agent_doc_queue_io::queue_claim::claim(&doc, item, &format!("subagent:c{index}"), 7200)
+                .unwrap();
+        }
+        for (index, item) in ["Reported one.", "Reported two."].iter().enumerate() {
+            let reported = report_item(&doc, item, &format!("subagent:r{index}"));
+            agent_doc_queue_io::queue_lineage::record_prose_only(&doc, &reported, "prose result")
+                .unwrap();
+        }
+        let (_, running) =
+            agent_doc_queue_io::queue_claim::claim(&doc, "Running one.", "subagent:run", 7200)
+                .unwrap();
+        agent_doc_queue_io::queue_claim::start_attempt(
+            &doc,
+            "Running one.",
+            "subagent:run",
+            "worker:run",
+            7200,
+            running.generation,
+        )
+        .unwrap();
+        checkpoint_for_plan(&doc);
+        // Past the dispatch grace, well inside the frozen bound.
+        let _later = agent_doc_queue_io::queue_claim::pin_claim_clock_for_current_thread(clock + 60);
+
+        let plan = build(&doc).unwrap();
+
+        assert_eq!(plan.queue_dispatch_acknowledgement_required.len(), 3, "{plan:#?}");
+        assert_eq!(
+            plan.queue_subagent_dispatch
+                .iter()
+                .map(|entry| entry.item.as_str())
+                .collect::<Vec<_>>(),
+            ["Fresh one.", "Fresh two."],
+            "exactly the free slots are refilled"
+        );
+        let pool = &plan.queue_subagent_pool[0].occupancy;
+        assert_eq!((pool.size, pool.running, pool.dispatching, pool.free), (6, 1, 3, 2), "{pool:?}");
+        for (index, command) in plan.required_commands.iter().take(3).enumerate() {
+            assert!(
+                command.starts_with("URGENT, before any reported-result integration")
+                    && command.contains("queue brief")
+                    && command.contains("queue start"),
+                "step {index} must be an unstarted spawn: {:#?}",
+                plan.required_commands
+            );
+        }
+        assert_eq!(reserve_index(&plan, "Fresh one."), Some(3), "{:#?}", plan.required_commands);
+        assert_eq!(reserve_index(&plan, "Fresh two."), Some(6), "{:#?}", plan.required_commands);
+        let first_closeout = plan
+            .required_commands
+            .iter()
+            .position(|command| command.contains("queue consume"))
+            .unwrap_or_else(|| panic!("{:#?}", plan.required_commands));
+        assert!(first_closeout > 6, "{:#?}", plan.required_commands);
+
+        let content = std::fs::read_to_string(&doc).unwrap();
+        let refill = agent_doc_queue_io::subagent_pool::pool_refill_for_content(
+            &doc,
+            &content,
+            agent_doc_queue::subagent_pool::PoolRefillTrigger::ReportComplete,
+        )
+        .unwrap();
+        assert_eq!(refill.unstarted.len(), 3, "{refill:#?}");
+        assert_eq!(refill.next_heads.len(), 2, "{refill:#?}");
+        assert_eq!(refill.waiting_for_slot, 2, "{refill:#?}");
+        let text = refill.render().unwrap();
+        let urgent = text.find("URGENT").unwrap();
+        let refill_step = text.find("Refill a free pool slot").unwrap();
+        assert!(urgent < refill_step, "{text}");
+        assert!(text.contains("2 more head(s) wait"), "{text}");
     }
 
     /// `#reportedcloseout` + `#questionsneverblock`: a reported attempt with a

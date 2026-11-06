@@ -1623,3 +1623,145 @@ fn report_complete_without_a_matching_subagent_claim_fails_and_names_candidates(
         "a refused report writes nothing"
     );
 }
+
+/// `#subagentworkpool`, end to end through the CLI: `report-complete` prints
+/// the pool refill with the unstarted claim's spawn first and the next head's
+/// exact claim / brief / start commands; `queue freeze` frees a slot while
+/// keeping the claim; `queue pool --json` reports the same projection.
+#[test]
+fn report_complete_and_freeze_print_the_work_pool_refill() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::create_dir_all(dir.path().join(".agent-doc/locks")).unwrap();
+    let doc = dir.path().join("session.md");
+    fs::write(
+        &doc,
+        concat!(
+            "---\nagent_doc_session: pool-refill\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n### Re: prior — gpt-5\n\nDone.\n<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue subagents=2 -->\n",
+            "- task one\n- task two\n- task three\n- task four\n",
+            "<!-- /agent:queue -->\n",
+        ),
+    )
+    .unwrap();
+    let path = doc.to_str().unwrap().to_string();
+    let base = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let run = |at: u64, args: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_agent-doc"))
+            .env(
+                agent_doc_controller_io::project_controller::TEST_CONTROLLER_LAUNCH_REASON_ENV,
+                CONTROLLER_LAUNCH_REASON,
+            )
+            .env("AGENT_DOC_TEST_QUEUE_CLAIM_NOW_SECS", at.to_string())
+            .current_dir(dir.path())
+            .args(args)
+            .output()
+            .unwrap()
+    };
+    let ok = |output: std::process::Output, what: &str| {
+        assert!(
+            output.status.success(),
+            "{what}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8_lossy(&output.stderr).into_owned()
+    };
+    ok(
+        run(base, &["queue", "claim", &path, "--item", "task one", "--owner", "subagent:one"]),
+        "claim one",
+    );
+    ok(
+        run(
+            base,
+            &[
+                "queue", "start", &path, "--item", "task one", "--owner", "subagent:one",
+                "--generation", "1", "--worker-id", "worker:one",
+            ],
+        ),
+        "start one",
+    );
+    // Claimed, never spawned: the Grok miss.
+    ok(
+        run(base, &["queue", "claim", &path, "--item", "task two", "--owner", "subagent:two"]),
+        "claim two",
+    );
+
+    let later = base + 60;
+    let report = ok(
+        run(
+            later,
+            &[
+                "queue", "report-complete", "--prose-only", &path, "--item", "task one",
+                "--generation", "1", "--response", "Completed task one.",
+            ],
+        ),
+        "report one",
+    );
+    assert!(
+        report.contains("[queue] subagent work pool (#subagentworkpool, trigger=report_complete)"),
+        "{report}"
+    );
+    let urgent = report.find("URGENT").unwrap_or_else(|| panic!("{report}"));
+    let refill = report
+        .find("Refill a free pool slot")
+        .unwrap_or_else(|| panic!("{report}"));
+    assert!(urgent < refill, "{report}");
+    assert!(report.contains("\"task two\""), "{report}");
+    assert!(report.contains("agent-doc queue start"), "{report}");
+    assert!(report.contains("--generation 1 --worker-id <worker-id>"), "{report}");
+    assert!(report.contains("\"task three\""), "{report}");
+    assert!(report.contains("agent-doc queue claim"), "{report}");
+    assert!(report.contains("agent-doc queue brief"), "{report}");
+    assert!(report.contains("1 more head(s) wait"), "{report}");
+
+    // Bind the unstarted claim, fill the pool, then freeze one worker.
+    ok(
+        run(
+            later,
+            &[
+                "queue", "start", &path, "--item", "task two", "--owner", "subagent:two",
+                "--generation", "1", "--worker-id", "worker:two",
+            ],
+        ),
+        "start two",
+    );
+    ok(
+        run(later, &["queue", "claim", &path, "--item", "task three", "--owner", "subagent:three"]),
+        "claim three",
+    );
+    ok(
+        run(
+            later,
+            &[
+                "queue", "start", &path, "--item", "task three", "--owner", "subagent:three",
+                "--generation", "1", "--worker-id", "worker:three",
+            ],
+        ),
+        "start three",
+    );
+    let freeze = ok(
+        run(
+            later,
+            &[
+                "queue", "freeze", &path, "--item", "task two", "--generation", "1", "--reason",
+                "ended without a result",
+            ],
+        ),
+        "freeze two",
+    );
+    assert!(freeze.contains("trigger=frozen"), "{freeze}");
+    assert!(freeze.contains("\"task four\""), "{freeze}");
+
+    let pool = run(later, &["queue", "pool", &path, "--json"]);
+    assert!(pool.status.success());
+    let pool: serde_json::Value = serde_json::from_slice(&pool.stdout).unwrap();
+    assert_eq!(pool["pools"][0]["occupancy"]["size"], 2, "{pool}");
+    assert_eq!(pool["pools"][0]["occupancy"]["source"], "queue_cap", "{pool}");
+    assert_eq!(pool["pools"][0]["occupancy"]["frozen"], 1, "{pool}");
+    assert_eq!(pool["pools"][0]["occupancy"]["free"], 1, "{pool}");
+    assert_eq!(pool["frozen"][0]["item"], "task two", "{pool}");
+    assert_eq!(pool["next_heads"][0]["item"], "task four", "{pool}");
+}

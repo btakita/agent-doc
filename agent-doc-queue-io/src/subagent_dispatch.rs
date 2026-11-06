@@ -151,6 +151,13 @@ fn subagent_dispatch_candidates_for_content(file: &Path, content: &str) -> Resul
         .into_iter()
         .filter(|claim| claim.state == agent_doc_queue::queue_claim::QueueClaimState::Lost)
         .collect::<Vec<_>>();
+    // `#subagentworkpool`: an attempt that expired with its worker still bound
+    // and no recorded stop may still be working, so its row is never offered.
+    let unconfirmed = lost
+        .iter()
+        .filter(|claim| claim.worker.is_some() && claim.frozen.is_none())
+        .map(|claim| claim.identity.clone())
+        .collect::<Vec<_>>();
     let lineage = crate::queue_lineage::load(file)?;
     let lost_identities = lost
         .into_iter()
@@ -171,8 +178,9 @@ fn subagent_dispatch_candidates_for_content(file: &Path, content: &str) -> Resul
         .into_iter()
         .filter(|head| {
             let identity = agent_doc_queue::queue_claim::claim_identity(head);
-            fresh_identities.iter().any(|fresh| fresh == &identity)
-                || lost_identities.iter().any(|lost| lost == &identity)
+            !unconfirmed.contains(&identity)
+                && (fresh_identities.iter().any(|fresh| fresh == &identity)
+                    || lost_identities.iter().any(|lost| lost == &identity))
         });
     let claimed = crate::queue_claim::claimed_items_for_content(file, content);
     Ok(heads
@@ -357,6 +365,31 @@ fn queue_attr_subagent_plan_with_presets(
     content: &str,
     prompt_presets: &agent_doc_frontmatter::frontmatter::PromptPresets,
 ) -> Result<Option<agent_doc_queue::subagent_intent::QueueSubagentPlan>> {
+    queue_attr_subagent_plan_with_pools(file, content, prompt_presets, None)
+}
+
+/// [`queue_attr_subagent_plan`] that also reports each dispatching queue's
+/// work-pool occupancy (`#subagentworkpool`).
+pub fn queue_attr_subagent_plan_and_pools(
+    file: &Path,
+    content: &str,
+) -> Result<(
+    Option<agent_doc_queue::subagent_intent::QueueSubagentPlan>,
+    Vec<agent_doc_queue::subagent_pool::PoolStatus>,
+)> {
+    let prompt_presets =
+        agent_doc_frontmatter_io::session::effective_prompt_presets_for_file(content, file)?;
+    let mut pools = Vec::new();
+    let plan = queue_attr_subagent_plan_with_pools(file, content, &prompt_presets, Some(&mut pools))?;
+    Ok((plan, pools))
+}
+
+fn queue_attr_subagent_plan_with_pools(
+    file: &Path,
+    content: &str,
+    prompt_presets: &agent_doc_frontmatter::frontmatter::PromptPresets,
+    mut pools: Option<&mut Vec<agent_doc_queue::subagent_pool::PoolStatus>>,
+) -> Result<Option<agent_doc_queue::subagent_intent::QueueSubagentPlan>> {
     let components = agent_doc_element::element::parse(content)?;
     let graph = agent_doc_queue::queue_set::QueueSet::parse(content, &components)?;
     // `#queueschedule`: a closed schedule window dispatches nothing.
@@ -370,21 +403,24 @@ fn queue_attr_subagent_plan_with_presets(
             file, content,
         ));
     let claim_states = crate::queue_claim::claim_states_for_content(file, content)?;
+    // `#subagentworkpool`: a dispatching claim and a live running worker hold
+    // a pool slot; a frozen worker frees its slot but keeps its claim (it
+    // stays in `excluded` through the ledger claims).
+    let now = crate::queue_claim::claim_clock_now_secs();
+    let frozen_secs = crate::subagent_pool::frozen_secs();
+    let default_pool = crate::subagent_pool::default_pool_size();
     let occupied = agent_doc_queue::queue_claim::ClaimedQueueItems::from_identities(
         claim_states
             .iter()
             .filter(|claim| {
-                matches!(
-                    claim.state,
-                    agent_doc_queue::queue_claim::QueueClaimState::Claimed
-                        | agent_doc_queue::queue_claim::QueueClaimState::Running
-                )
+                agent_doc_queue::subagent_pool::occupies_pool_slot(claim, now, frozen_secs)
             })
             .map(|claim| claim.identity.clone()),
     );
     let lost = claim_states
-        .into_iter()
+        .iter()
         .filter(|claim| claim.state == agent_doc_queue::queue_claim::QueueClaimState::Lost)
+        .cloned()
         .collect::<Vec<_>>();
     let lineage = (!lost.is_empty())
         .then(|| crate::queue_lineage::load(file))
@@ -505,6 +541,24 @@ fn queue_attr_subagent_plan_with_presets(
             continue;
         }
         saw_attr = true;
+        let pool = agent_doc_queue::subagent_pool::resolve_pool_size(mode.capacity, default_pool);
+        if let Some(pools) = pools.as_deref_mut() {
+            let live_identities = live
+                .iter()
+                .map(|head| agent_doc_queue::queue_claim::claim_identity(head))
+                .collect::<Vec<_>>();
+            pools.push(agent_doc_queue::subagent_pool::PoolStatus {
+                queue_id: block.id.to_string(),
+                occupancy: agent_doc_queue::subagent_pool::pool_occupancy(
+                    pool,
+                    claim_states
+                        .iter()
+                        .filter(|claim| live_identities.contains(&claim.identity)),
+                    now,
+                    frozen_secs,
+                ),
+            });
+        }
         let plan = agent_doc_queue::subagent_intent::plan_queue_subagent_dispatch(
             mode,
             &eligible,
@@ -512,6 +566,7 @@ fn queue_attr_subagent_plan_with_presets(
             &excluded,
             &occupied,
             &after_deps,
+            Some(default_pool.size),
         );
         combined.dispatch.extend(plan.dispatch);
         combined.held.extend(plan.held);

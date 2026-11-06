@@ -5289,9 +5289,11 @@ enum QueueAction {
         #[arg(long, default_value_t = agent_doc_queue::queue_claim::DEFAULT_QUEUE_CLAIM_TTL_SECS)]
         ttl_secs: u64,
         /// Extend the TTL of an already-started claim `--owner` holds on
-        /// `--item` (a heartbeat for a long-running worker). Refuses, without
-        /// creating or promoting a claim, when the item is unclaimed,
-        /// unstarted, expired, or another owner holds it. Also adopts the claim
+        /// `--item` (a heartbeat for a long-running worker). With the exact
+        /// `--generation` it also revives that attempt if it expired with its
+        /// worker still bound and no recorded stop. Refuses, without creating
+        /// or promoting a claim, when the item is unclaimed, unstarted,
+        /// otherwise expired, or another owner holds it. Also adopts the claim
         /// into the calling harness session after the coordinator `/clear`ed.
         #[arg(long)]
         refresh: bool,
@@ -5365,6 +5367,42 @@ enum QueueAction {
         /// inside the binary-owned completion cell and retained until closeout.
         #[arg(long, value_name = "TEXT", allow_hyphen_values = true)]
         response: String,
+    },
+    /// Record evidence that one exact bound worker stopped
+    /// (`#subagentworkpool`), e.g. a harness reporting that the worker ended
+    /// without a result. A notice that a worker is waiting on its own
+    /// background work is proof of life: run `queue claim --refresh` for that,
+    /// never this. The worker's work-pool slot is freed so the coordinator
+    /// refills it now; its claim, generation, and worker binding are kept, so
+    /// a later report from the same worker is still accepted and a `queue
+    /// claim --refresh` heartbeat on a live attempt clears the freeze. An
+    /// attempt that expired with its worker bound may be frozen too. Prints
+    /// the pool refill (next heads' claim / brief / start commands).
+    #[command(after_help = agent_doc_frontmatter::frontmatter::queue_marker_legend_help())]
+    Freeze {
+        /// Path to the session document
+        file: PathBuf,
+        /// The running queue item: `#id` / `do [#id]`, the queue line's text,
+        /// or the exact `PARENT: ...: LEAF` key printed by `queue claim`
+        #[arg(long, value_name = "ID_OR_TEXT")]
+        item: String,
+        /// Exact generation printed by `queue claim`
+        #[arg(long)]
+        generation: Option<u64>,
+        /// What the harness reported, e.g. `ended without a result`
+        #[arg(long, default_value = "")]
+        reason: String,
+    },
+    /// Show the subagent work pool (`#subagentworkpool`): each `subagents`
+    /// queue's pool size, running / dispatching / frozen workers, free slots,
+    /// claimed heads still owed a spawn, and the next heads to dispatch with
+    /// their exact claim / brief / start commands.
+    Pool {
+        /// Path to the session document
+        file: PathBuf,
+        /// Print the pool refill as one JSON object
+        #[arg(long)]
+        json: bool,
     },
     /// Repair the v0.34 rolling-upgrade completion notices whose binary marker
     /// was written directly beneath a bodyless `### Re:` heading. Rewrites
@@ -6199,6 +6237,32 @@ fn init_tracing() {
         .init();
 
     tracing::debug!("agent-doc tracing initialized (filter: {})", filter);
+}
+
+/// `#subagentworkpool`: print the work-pool refill after a trigger command
+/// (`report-complete`, `release`, `freeze`). Never fails the trigger.
+fn emit_subagent_pool_refill(
+    file: &std::path::Path,
+    trigger: agent_doc_queue::subagent_pool::PoolRefillTrigger,
+) {
+    let content = match agent_doc_document_realtime_io::try_resolve_current_document_content(
+        file,
+        "queue_subagent_pool_refill",
+    ) {
+        Ok(content) => content,
+        Err(err) => {
+            eprintln!(
+                "[queue] WARNING: could not read {} for the subagent work-pool refill: {err:#}. Run `agent-doc queue pool` before dispatching more work.",
+                file.display()
+            );
+            return;
+        }
+    };
+    if let Some(text) =
+        agent_doc_queue_io::subagent_pool::render_pool_refill_or_warn(file, &content, trigger)
+    {
+        eprintln!("{text}");
+    }
 }
 
 fn main() -> ExitCode {
@@ -9405,6 +9469,10 @@ fn try_main() -> anyhow::Result<()> {
                     }
                     None => eprintln!("[queue] no claim on {item:?}; nothing to release"),
                 }
+                emit_subagent_pool_refill(
+                    &file,
+                    agent_doc_queue::subagent_pool::PoolRefillTrigger::Release,
+                );
                 Ok(())
             }
             QueueAction::Legend { line, markdown } => {
@@ -9516,6 +9584,10 @@ fn try_main() -> anyhow::Result<()> {
                             &requeue.claim.item_text,
                         ),
                     );
+                    emit_subagent_pool_refill(
+                        &file,
+                        agent_doc_queue::subagent_pool::PoolRefillTrigger::Release,
+                    );
                     Ok(())
                 } else {
                     let has_repository_result = publication_state.is_some()
@@ -9587,8 +9659,58 @@ fn try_main() -> anyhow::Result<()> {
                             String::new()
                         },
                     );
+                    // `#subagentworkpool`: the report freed a pool slot; hand
+                    // the coordinator the refill before it starts integrating.
+                    emit_subagent_pool_refill(
+                        &file,
+                        agent_doc_queue::subagent_pool::PoolRefillTrigger::ReportComplete,
+                    );
                     Ok(())
                 }
+            }
+            QueueAction::Freeze {
+                file,
+                item,
+                generation,
+                reason,
+            } => {
+                let claim = agent_doc_queue_io::queue_claim::freeze_attempt(
+                    &file,
+                    &item,
+                    generation,
+                    &reason,
+                )?;
+                eprintln!(
+                    "[queue] froze {:?} (owner {}, generation {}); its work-pool slot is free, its claim and worker binding are kept. A report from the same worker is still accepted; `queue claim --refresh` clears the freeze.",
+                    claim.item_text, claim.owner, claim.generation,
+                );
+                emit_subagent_pool_refill(
+                    &file,
+                    agent_doc_queue::subagent_pool::PoolRefillTrigger::Frozen,
+                );
+                Ok(())
+            }
+            QueueAction::Pool { file, json } => {
+                let content = agent_doc_document_realtime_io::try_resolve_current_document_content(
+                    &file,
+                    "queue_subagent_pool",
+                )?;
+                let refill = agent_doc_queue_io::subagent_pool::pool_refill_for_content(
+                    &file,
+                    &content,
+                    agent_doc_queue::subagent_pool::PoolRefillTrigger::Plan,
+                )?;
+                if json {
+                    println!("{}", serde_json::to_string(&refill)?);
+                } else {
+                    println!(
+                        "{}",
+                        refill.render().unwrap_or_else(|| {
+                            "[queue] no subagent work pool: no `subagents` queue and no dispatchable subagent head".to_string()
+                        })
+                    );
+                }
+                Ok(())
             }
             QueueAction::RepairCompletionFeedback { file } => {
                 let outcome = queue_completion_feedback::repair_legacy_completion_feedback(&file)?;
@@ -9700,6 +9822,16 @@ fn try_main() -> anyhow::Result<()> {
                     &file,
                 )?;
                 println!("{}", serde_json::to_string_pretty(&claims)?);
+                // `#subagentworkpool`: a lost attempt freed its pool slot.
+                // Claims JSON stays on stdout; the refill goes to stderr.
+                if claims.iter().any(|report| {
+                    report.claim.state == agent_doc_queue::queue_claim::QueueClaimState::Lost
+                }) {
+                    emit_subagent_pool_refill(
+                        &file,
+                        agent_doc_queue::subagent_pool::PoolRefillTrigger::Lost,
+                    );
+                }
                 Ok(())
             }
             QueueAction::Lineage {

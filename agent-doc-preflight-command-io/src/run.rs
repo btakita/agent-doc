@@ -2625,6 +2625,29 @@ fn run_with_options_to_writer_in_pass(
         queue_authoritative_content,
         &pending_queue_subagent_dispatch,
     )?;
+    // `#subagentworkpool`: the pool status and, ahead of everything else,
+    // claimed heads still owed their spawn + start. Diagnostic projection: a
+    // failure is logged and never fails preflight.
+    let queue_subagent_pool = agent_doc_queue_io::subagent_dispatch::queue_subagent_dispatch_enabled_for_content(
+        file,
+        queue_authoritative_content,
+    )
+    .unwrap_or(false)
+    .then(|| {
+        agent_doc_queue_io::subagent_pool::pool_refill_for_content(
+            file,
+            queue_authoritative_content,
+            agent_doc_queue::subagent_pool::PoolRefillTrigger::Plan,
+        )
+        .map_err(|err| {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!("subagent_pool_projection_error file={} error={err:#}", file.display()),
+            );
+        })
+        .ok()
+    })
+    .flatten();
     let exchange_subagent_dispatch = if exchange_prompt_attrs.subagents {
         agent_doc_preflight_io::exchange_subagent_dispatch_entries(&active_exchange_prompt_targets)
     } else {
@@ -3074,6 +3097,7 @@ fn run_with_options_to_writer_in_pass(
         queue_subagent_dispatch_guidance: (!queue_subagent_dispatch.is_empty())
             .then(|| agent_doc_preflight_io::QUEUE_SUBAGENT_DISPATCH_GUIDANCE.to_string()),
         queue_subagent_dispatch,
+        queue_subagent_pool,
         queue_head_annotation_guidance:
             agent_doc_queue::queue_head_annotation::queue_head_annotation_guidance(
                 &queue_head_annotations,

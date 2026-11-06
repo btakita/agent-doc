@@ -17,7 +17,9 @@ mod tests {
     use super::*;
     use agent_doc_controller::dispatch::is_codex_shell_search_blocker;
     use agent_doc_controller::dispatch::{PromptReadyBarrierFacts, classify_prompt_ready_barrier};
-    use agent_doc_route_io::direct_pane_dispatch::CommandDispatchStatus;
+    use agent_doc_route_io::direct_pane_dispatch::{
+        CommandDispatchStatus, direct_pane_acceptance_poll_count,
+    };
     use agent_doc_route_io::startup_sync::{
         newly_provisioned_route_needs_reconcile, reconcile_newly_provisioned_route,
         sync_after_claim,
@@ -732,10 +734,14 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         );
         let _ = wait_for_pane_contains(&iso, &pane, "READY", std::time::Duration::from_secs(3));
 
-        let started = std::time::Instant::now();
+        // `#sendoncepollcounter`: the poll's stable-empty accept is 900ms, so
+        // an under-1s bound both passes a real poll and fails a correct return
+        // under load. The counter moves only when the poll window is entered.
+        let polls_before = direct_pane_acceptance_poll_count();
         send_command_once_checked(&iso, &pane, "test.md", &HarnessConfig::codex()).unwrap();
-        assert!(
-            started.elapsed() < std::time::Duration::from_secs(1),
+        assert_eq!(
+            direct_pane_acceptance_poll_count(),
+            polls_before,
             "single-submit pass-through must not enter the acceptance polling window"
         );
     }

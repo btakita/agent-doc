@@ -209,7 +209,12 @@ property that host load can stretch. Pin the clock instead: inject `now` (the
 rename-debounce lease window), count observations and injected sleeps (a
 zero-budget wait never sleeps), or answer from state (a replayed editor-op
 epoch is consumed when it reads back absent, not when one bounded clear round
-trip beat the clock).
+trip beat the clock). A pass that must not enter another wait counts that
+wait's entries on the calling thread (`direct_pane_acceptance_poll_count` for
+the single-submit path, `#sendoncepollcounter`) instead of asserting the call
+returned under a second: the acceptance poll's own stable-empty accept is
+900ms, so an under-1s bound both passes a real poll and fails a correct
+return under load.
 
 A "not blocked by a blocked effect" property is proven by ordering, not by a
 latency bound (`#remainingwallclock`): the effect's test fixture blocks on a

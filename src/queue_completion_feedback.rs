@@ -304,6 +304,11 @@ fn report_complete_with_lock_wait(
 /// with the exact `queue follow-up` command the coordinator runs instead, and
 /// open items held for triage (`#handbackopenitemstriage`). Empty when the
 /// hand-back lists neither.
+///
+/// `#handbackrefusedcommandexact`: the refused-placement command is its own
+/// line. `--after` and each `--item` are the real origin and unplaced row
+/// texts, shell-quoted, because those rows quote an id in backticks and a
+/// surrounding code span would cut the command. The line can be run as printed.
 pub(crate) fn describe_handback_followups(
     file: &Path,
     origin: &str,
@@ -324,10 +329,21 @@ pub(crate) fn describe_handback_followups(
         ));
     }
     if let Some(reason) = &followups.refused {
-        text.push_str(&format!(
-            " The hand-back's action items were NOT queued ({reason}); queue them with `agent-doc queue follow-up {} --id {queue} --after <origin> --item <text>...`.",
-            file.display(),
-        ));
+        if followups.refused_items.is_empty() {
+            text.push_str(&format!(
+                " The hand-back's action items were NOT queued ({reason})."
+            ));
+        } else {
+            let command = agent_doc_queue::handback_followups::refused_placement_command(
+                &file.display().to_string(),
+                queue,
+                followups.refused_origin.as_deref().unwrap_or(origin),
+                &followups.refused_items,
+            );
+            text.push_str(&format!(
+                " The hand-back's action items were NOT queued ({reason}); run this exact command as printed:\n{command}\n"
+            ));
+        }
     }
     if followups.held_for_triage > 0 {
         text.push_str(&format!(
@@ -1496,6 +1512,63 @@ mod tests {
         let reported = report_complete(&doc, ROW, Some(generation), None, None, clean)
             .expect("the final-state hand-back is reported normally");
         assert!(reported.appended);
+    }
+
+    /// `#handbackrefusedcommandexact`: the report line's refused-placement
+    /// command names the real origin and each unplaced row, and a marker-only
+    /// refusal does not offer a command that would insert the marker.
+    #[test]
+    fn refused_placement_report_prints_a_command_that_can_be_run_as_printed() {
+        let items = vec![
+            "follow up on an action item from `alpha`: >512-commit documents can miss answers"
+                .to_string(),
+            "follow up on an action item from `alpha`: the gutter does not show the stamp"
+                .to_string(),
+        ];
+        let followups = agent_doc_queue::handback_followups::HandbackFollowups {
+            queue_id: Some("main".to_string()),
+            refused: Some(
+                "queue follow-up origin \"do [#alpha]\" is ambiguous in queue id `main`"
+                    .to_string(),
+            ),
+            refused_origin: Some("do [#alpha]".to_string()),
+            refused_items: items.clone(),
+            ..agent_doc_queue::handback_followups::HandbackFollowups::default()
+        };
+        let text =
+            describe_handback_followups(Path::new("tasks/bugs.md"), "do [#alpha]", &followups);
+        let command = text
+            .lines()
+            .find(|line| line.starts_with("agent-doc queue follow-up"))
+            .unwrap_or_else(|| panic!("no runnable command:\n{text}"));
+        assert_eq!(
+            command,
+            agent_doc_queue::handback_followups::refused_placement_command(
+                "tasks/bugs.md",
+                "main",
+                "do [#alpha]",
+                &items,
+            )
+        );
+        assert!(
+            !command.contains("<origin>") && !command.contains("<text>"),
+            "{command}"
+        );
+        assert!(command.contains("--after 'do [#alpha]'"), "{command}");
+        assert!(command.contains("--item "), "{command}");
+
+        let withheld = agent_doc_queue::handback_followups::HandbackFollowups {
+            queue_id: Some("main".to_string()),
+            refused: Some(
+                "1 action item(s) carry an HTML comment or component marker, which a live queue row must not hold"
+                    .to_string(),
+            ),
+            ..agent_doc_queue::handback_followups::HandbackFollowups::default()
+        };
+        let text =
+            describe_handback_followups(Path::new("tasks/bugs.md"), "do [#alpha]", &withheld);
+        assert!(text.contains("NOT queued"), "{text}");
+        assert!(!text.contains("queue follow-up"), "{text}");
     }
 
     #[test]

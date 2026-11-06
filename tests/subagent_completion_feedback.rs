@@ -2033,6 +2033,116 @@ fn report_complete_holds_open_items_for_triage_instead_of_queueing_them() {
     );
 }
 
+/// `#handbackrefusedcommandexact`: two identical heads refuse placement, and
+/// the report line's command is the real origin plus each unplaced row. After
+/// the duplicate is removed, that printed line is what queues them.
+#[test]
+fn report_complete_prints_a_runnable_command_when_placement_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let doc = committed_run_session(dir.path(), &["- do [#alpha]", "- do [#alpha]", "- later work"]);
+    let path = doc.to_str().unwrap();
+    assert_ok(
+        &run_agent_doc(dir.path(), &["queue", "claim", path, "--item", "do [#alpha]", "--owner", "subagent:alpha"]),
+        "claim",
+    );
+    assert_ok(
+        &run_agent_doc(
+            dir.path(),
+            &["queue", "start", path, "--item", "do [#alpha]", "--owner", "subagent:alpha", "--generation", "1", "--worker-id", "worker:alpha"],
+        ),
+        "start",
+    );
+    let handback = concat!(
+        "**Summary:** fixed the alpha defect.\n",
+        "**Action items:**\n",
+        "- >512-commit documents can miss answers\n",
+        "- the gutter does not show the stamp yet\n",
+        "**Next actions:** none",
+    );
+    let output = run_agent_doc(
+        dir.path(),
+        &["queue", "report-complete", "--prose-only", path, "--item", "do [#alpha]", "--generation", "1", "--response", handback],
+    );
+    assert_ok(&output, "report-complete");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let command = stderr
+        .lines()
+        .find(|line| line.starts_with("agent-doc queue follow-up"))
+        .unwrap_or_else(|| panic!("no runnable command:\n{stderr}"))
+        .to_string();
+    assert!(!command.contains("<origin>") && !command.contains("<text>"), "{command}");
+    assert!(command.contains("--id default"), "{command}");
+    assert!(command.contains("--after "), "{command}");
+    assert!(command.contains("do [#alpha]"), "{command}");
+    assert!(command.contains("--item 'follow up on an action item from `alpha`: >512-commit documents can miss answers'"), "{command}");
+    assert!(command.contains("--item 'follow up on an action item from `alpha`: the gutter does not show the stamp yet'"), "{command}");
+    assert!(command.contains(path), "{command}");
+
+    let written = fs::read_to_string(&doc).unwrap();
+    let disambiguated = drop_second_run_row(&written, "do [#alpha]");
+    fs::write(&doc, &disambiguated).unwrap();
+    let rerun = run_printed_command(dir.path(), &command);
+    assert_ok(&rerun, "printed queue follow-up");
+    let rows = run_rows(&doc);
+    let first = "follow up on an action item from `alpha`: >512-commit documents can miss answers";
+    let second = "follow up on an action item from `alpha`: the gutter does not show the stamp yet";
+    let position = |needle: &str| {
+        rows.iter()
+            .position(|row| row.contains(needle))
+            .unwrap_or_else(|| panic!("{needle:?} missing: {rows:#?}"))
+    };
+    let alpha = rows
+        .iter()
+        .position(|row| row.contains("do [#alpha]") && !row.contains("follow up"))
+        .unwrap_or_else(|| panic!("origin row missing: {rows:#?}"));
+    assert_eq!(rows.iter().filter(|row| row.contains("do [#alpha]") && !row.contains("follow up")).count(), 1, "{rows:#?}");
+    assert!(position(first) > alpha && position(second) > position(first), "{rows:#?}");
+}
+
+fn drop_second_run_row(content: &str, origin: &str) -> String {
+    let start = content.find("<!-- agent:run ").expect("run");
+    let body_start = start + content[start..].find('\n').unwrap() + 1;
+    let end = content.find("<!-- /agent:run -->").expect("run close");
+    let mut seen = 0;
+    let mut body = String::new();
+    for line in content[body_start..end].split_inclusive('\n') {
+        let work = line.trim_end_matches(['\n', '\r']).trim_start();
+        let is_origin = work.strip_prefix("- ").is_some_and(|rest| {
+            !rest.contains("follow up") && rest.contains(origin)
+        });
+        if is_origin {
+            seen += 1;
+            if seen == 2 {
+                continue;
+            }
+        }
+        body.push_str(line);
+    }
+    assert_eq!(seen, 2, "expected two origin rows:\n{}", &content[body_start..end]);
+    let mut out = String::new();
+    out.push_str(&content[..body_start]);
+    out.push_str(&body);
+    out.push_str(&content[end..]);
+    out
+}
+
+fn run_printed_command(dir: &std::path::Path, command: &str) -> std::process::Output {
+    let binary = std::path::Path::new(env!("CARGO_BIN_EXE_agent-doc"));
+    let bin_dir = binary.parent().expect("binary dir");
+    let path = std::env::var("PATH").unwrap_or_default();
+    Command::new("sh")
+        .arg("-c")
+        .arg(command)
+        .current_dir(dir)
+        .env("PATH", format!("{}:{path}", bin_dir.display()))
+        .env(
+            agent_doc_controller_io::project_controller::TEST_CONTROLLER_LAUNCH_REASON_ENV,
+            CONTROLLER_LAUNCH_REASON,
+        )
+        .output()
+        .unwrap()
+}
+
 /// `#handbackopenitemstriage`: a hand-back from a nested row put its follow-ups
 /// at the top level between the parent's children. The next child then read as
 /// a child of the last follow-up, which made that row a parent rather than an

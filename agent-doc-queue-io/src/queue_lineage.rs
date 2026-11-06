@@ -1495,36 +1495,101 @@ fn resolve_reported_attempt<'a>(
     let identity = claim_identity(item);
     // Admission can add a binary-owned `[#q-...]` after claim/start recorded
     // an authored nested lineage (`parent: leaf`). That projection is the
-    // same attempt, not fresh work. Resolve only that one-way generated-id
-    // alias; authored ids are never stripped. More than one candidate remains
-    // corrupt/ambiguous state and must not pick an attempt silently.
+    // same attempt, not fresh work. It is a fallback only: two siblings that
+    // both followed `<parent>: #address` share that authored identity, and
+    // OR-ing it with the post-admission identity made every one of them
+    // ambiguous. Exact nest-vector text, then exact identity, wins first.
     let authored_item =
         agent_doc_queue::queue_response::normalized_authored_queue_prompt_text(item);
     let authored_identity = claim_identity(&authored_item);
-    let followed = aliases
-        .map(|aliases| {
-            aliases
-                .texts
+    let owner = aliases.map(|aliases| aliases.owner);
+    let item_key = item.trim();
+    let generation_matches = ledger
+        .attempts
+        .iter()
+        .filter(|attempt| attempt.generation == generation)
+        .collect::<Vec<_>>();
+
+    if let Some(resolved) = fence_attempt_matches(
+        generation_matches
+            .iter()
+            .copied()
+            .filter(|attempt| attempt.item_text.trim() == item_key),
+        owner,
+    ) {
+        return resolved;
+    }
+    if let Some(resolved) = fence_attempt_matches(
+        generation_matches
+            .iter()
+            .copied()
+            .filter(|attempt| attempt.matches_identity(&identity)),
+        owner,
+    ) {
+        return resolved;
+    }
+    // One-way authored alias. Used only when the exact text and the exact
+    // identity name nothing, so a pre-admission claim still resolves after
+    // its `[#q-…]` is admitted.
+    if authored_identity != identity
+        && let Some(resolved) = fence_attempt_matches(
+            generation_matches
                 .iter()
-                .map(|text| claim_identity(text))
-                .filter(|alias| alias != &identity && alias != &authored_identity)
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-    let mut attempts = ledger.attempts.iter().filter(|attempt| {
-        attempt.generation == generation
-            && (attempt.matches_identity(&identity)
-                || (authored_identity != identity && attempt.matches_identity(&authored_identity))
-                || aliases.is_some_and(|aliases| {
+                .copied()
+                .filter(|attempt| attempt.matches_identity(&authored_identity)),
+            owner,
+        )
+    {
+        return resolved;
+    }
+    if let Some(aliases) = aliases {
+        let followed = aliases
+            .texts
+            .iter()
+            .map(|text| claim_identity(text))
+            .filter(|alias| alias != &identity && alias != &authored_identity)
+            .collect::<Vec<_>>();
+        if !followed.is_empty()
+            && let Some(resolved) = fence_attempt_matches(
+                generation_matches.iter().copied().filter(|attempt| {
                     attempt.owner == aliases.owner
                         && followed.iter().any(|alias| attempt.matches_identity(alias))
-                }))
-    });
-    match (attempts.next(), attempts.next()) {
-        (None, _) => ResolvedReportedAttempt::Missing,
-        (Some(_), Some(_)) => ResolvedReportedAttempt::Ambiguous,
-        (Some(attempt), None) => ResolvedReportedAttempt::One(attempt),
+                }),
+                None,
+            )
+        {
+            return resolved;
+        }
     }
+    ResolvedReportedAttempt::Missing
+}
+
+/// `None` when nothing matched, so the caller can try a weaker alias.
+/// A known owner that excludes every match is `Missing` and must not fall
+/// through onto a sibling.
+fn fence_attempt_matches<'a>(
+    matches: impl Iterator<Item = &'a QueueLineageAttempt>,
+    owner: Option<&str>,
+) -> Option<ResolvedReportedAttempt<'a>> {
+    let matches = matches.collect::<Vec<_>>();
+    if matches.is_empty() {
+        return None;
+    }
+    let scoped = match owner {
+        Some(owner) => matches
+            .iter()
+            .copied()
+            .filter(|attempt| attempt.owner == owner)
+            .collect::<Vec<_>>(),
+        None => matches,
+    };
+    if scoped.is_empty() {
+        return Some(ResolvedReportedAttempt::Missing);
+    }
+    if scoped.len() == 1 {
+        return Some(ResolvedReportedAttempt::One(scoped[0]));
+    }
+    Some(ResolvedReportedAttempt::Ambiguous)
 }
 
 /// Whether one receipt records repository work.
@@ -2284,6 +2349,227 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(refusal.contains("is not integrated"), "{refusal}");
+    }
+
+    /// Two `#address [#q-…]` leaves under one parent, plus generation 1 of the
+    /// same `[#q-…]` under a different parent. Authored history collides;
+    /// the nest vector and the owner each name one attempt.
+    #[test]
+    fn shared_address_q_id_resolves_by_nest_vector_then_owner() {
+        use agent_doc_queue::queue_claim::claim_identity;
+
+        let fixture = RepoFixture::new();
+        let b1 = "https://example.test/merge_requests/2: #address [#q-3f7fdc3da31f]";
+        let b2 = "https://example.test/merge_requests/2: #address [#q-096acdc5caca]";
+        let a1 = "https://example.test/merge_requests/1: #address [#q-3f7fdc3da31f]";
+        let leaf = "#address [#q-3f7fdc3da31f]";
+        let authored = agent_doc_queue::queue_response::normalized_authored_queue_prompt_text(b1);
+        let authored_identity = claim_identity(&authored);
+        assert_eq!(
+            authored_identity,
+            claim_identity(&agent_doc_queue::queue_response::normalized_authored_queue_prompt_text(
+                b2
+            ))
+        );
+        let shared = claim_identity(leaf);
+
+        fn push(
+            file: &std::path::Path,
+            item_text: &str,
+            identity: agent_doc_element_queue::QueueItemIdentity,
+            history: Vec<agent_doc_element_queue::QueueItemIdentity>,
+            owner: &str,
+            prose: bool,
+        ) {
+            super::mutate(file, |ledger| {
+                let mut events = vec![QueueLineageEvent {
+                    kind: QueueLineageEventKind::Created,
+                    at_secs: 10,
+                    detail: Some(format!("owner={owner}")),
+                    ..QueueLineageEvent::default()
+                }];
+                if prose {
+                    events.push(QueueLineageEvent {
+                        kind: QueueLineageEventKind::ProseOnly,
+                        at_secs: 20,
+                        detail: Some("addressed".into()),
+                        ..QueueLineageEvent::default()
+                    });
+                }
+                ledger.attempts.push(QueueLineageAttempt {
+                    identity,
+                    identity_history: history,
+                    item_text: item_text.to_string(),
+                    item_text_history: Vec::new(),
+                    generation: 1,
+                    owner: owner.to_string(),
+                    events,
+                });
+                Ok(())
+            })
+            .unwrap();
+        }
+        push(
+            &fixture.doc,
+            b1,
+            claim_identity(b1),
+            vec![authored_identity.clone(), shared.clone()],
+            "subagent:addr-b1",
+            true,
+        );
+        push(
+            &fixture.doc,
+            b2,
+            claim_identity(b2),
+            vec![authored_identity],
+            "subagent:addr-b2",
+            false,
+        );
+        push(
+            &fixture.doc,
+            a1,
+            shared,
+            Vec::new(),
+            "subagent:addr-a1",
+            false,
+        );
+
+        require_integrated_repo_work(&fixture.doc, b1, 1).unwrap();
+        let b2_err = require_integrated_repo_work(&fixture.doc, b2, 1)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            !b2_err.contains("ambiguous"),
+            "unique nest vector was ambiguous: {b2_err}"
+        );
+        assert!(
+            b2_err.contains("neither repository work nor a prose-only"),
+            "{b2_err}"
+        );
+        let a_err = require_integrated_repo_work(&fixture.doc, a1, 1)
+            .unwrap_err()
+            .to_string();
+        assert!(!a_err.contains("ambiguous"), "{a_err}");
+        assert!(
+            a_err.contains("neither repository work nor a prose-only"),
+            "{a_err}"
+        );
+
+        let mut b1_claim = make_claim(&fixture.doc, leaf, "subagent:addr-b1", None);
+        b1_claim.generation = 1;
+        require_integrated_claim_repo_work(&fixture.doc, &b1_claim).unwrap();
+
+        let mut a1_claim = make_claim(&fixture.doc, leaf, "subagent:addr-a1", None);
+        a1_claim.generation = 1;
+        let fenced = require_integrated_claim_repo_work(&fixture.doc, &a1_claim)
+            .unwrap_err()
+            .to_string();
+        assert!(!fenced.contains("ambiguous"), "{fenced}");
+        assert!(
+            fenced.contains("neither repository work nor a prose-only"),
+            "{fenced}"
+        );
+
+        let unfenced = require_integrated_repo_work(&fixture.doc, leaf, 1)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            unfenced.contains("ambiguous"),
+            "shared q-id without an owner fence should stay ambiguous: {unfenced}"
+        );
+    }
+
+    /// A still-visible unresolvable `#address [#q-…]` row does not reject an
+    /// unrelated document change. Striking that row still demands integration
+    /// proof for that attempt alone.
+    #[test]
+    fn unresolvable_nested_row_does_not_block_an_unrelated_successor() {
+        use agent_doc_queue::queue_claim::claim_identity;
+
+        let fixture = RepoFixture::new();
+        let before = concat!(
+            "<!-- agent:queue -->\n",
+            "- https://example.test/merge_requests/2\n",
+            "  - #address [#q-3f7fdc3da31f]\n",
+            "  - #address [#q-096acdc5caca]\n",
+            "- do [#other]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        std::fs::write(&fixture.doc, before).unwrap();
+        let heads = agent_doc_queue::queue_continuation::all_queue_head_texts(before)
+            .expect("queue graph");
+        let b1 = heads
+            .iter()
+            .find(|head| head.contains("[#q-3f7fdc3da31f]"))
+            .expect("b1 head")
+            .clone();
+        let b2 = heads
+            .iter()
+            .find(|head| head.contains("[#q-096acdc5caca]"))
+            .expect("b2 head")
+            .clone();
+        assert!(
+            b1.contains("merge_requests/2") && b2.contains("merge_requests/2"),
+            "lineage heads lost their parent: {heads:?}"
+        );
+        assert_ne!(b1, b2);
+
+        let mut claims = QueueClaimLedger::default();
+        for (head, owner) in [(&b1, "subagent:addr-b1"), (&b2, "subagent:addr-b2")] {
+            let mut claim = make_claim(&fixture.doc, head, owner, None);
+            claim.state = QueueClaimState::Reported;
+            claim.generation = 1;
+            claims.claims.push(claim);
+            super::mutate(&fixture.doc, |ledger| {
+                ledger.attempts.push(QueueLineageAttempt {
+                    identity: claim_identity(head),
+                    identity_history: vec![claim_identity(
+                        &agent_doc_queue::queue_response::normalized_authored_queue_prompt_text(
+                            head,
+                        ),
+                    )],
+                    item_text: head.clone(),
+                    item_text_history: Vec::new(),
+                    generation: 1,
+                    owner: owner.to_string(),
+                    events: vec![QueueLineageEvent {
+                        kind: QueueLineageEventKind::Created,
+                        at_secs: 10,
+                        detail: Some(format!("owner={owner}")),
+                        ..QueueLineageEvent::default()
+                    }],
+                });
+                Ok(())
+            })
+            .unwrap();
+        }
+        crate::queue_claim::store_ledger_for_test(&fixture.doc, &claims).unwrap();
+
+        let unrelated = before.replacen("- do [#other]\n", "", 1);
+        crate::queue_consume::require_integrated_reported_repo_work_for_successor(
+            &fixture.doc,
+            before,
+            &unrelated,
+        )
+        .expect("a live unresolvable sibling must not block an unrelated change");
+
+        let struck = before.replacen("  - #address [#q-3f7fdc3da31f]\n", "", 1);
+        let err = crate::queue_consume::require_integrated_reported_repo_work_for_successor(
+            &fixture.doc,
+            before,
+            &struck,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            !err.contains("ambiguous"),
+            "striking one row was ambiguous: {err}"
+        );
+        assert!(
+            err.contains("neither repository work nor a prose-only"),
+            "{err}"
+        );
+        assert!(err.contains(&b1), "{err}");
     }
 
     #[test]

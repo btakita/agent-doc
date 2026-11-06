@@ -2595,7 +2595,16 @@ pub fn require_integrated_reported_repo_work_for_successor(
     // that a tracked-work successor closes in a later component.
     let before_heads = agent_doc_queue::queue_continuation::all_queue_head_texts(before)
         .context("integration closeout guard: failed to parse queue graph")?;
-    let after_live = agent_doc_queue::queue_consume::live_work_identities(after);
+    // Both sides are nest-vector lineage keys. Leaf work identity of
+    // `#address [#q-…]` is `queue-id:q-…`, which never matches the parent
+    // vector, so a still-visible nested row looked closed and one unresolvable
+    // attempt blocked every unrelated `--done` in the same closeout.
+    let after_heads = agent_doc_queue::queue_continuation::all_queue_head_texts(after)
+        .context("integration closeout guard: failed to parse queue graph")?;
+    let after_live = after_heads
+        .iter()
+        .map(|head| agent_doc_queue::queue_claim::claim_identity(head))
+        .collect::<HashSet<_>>();
     let mut seen = HashSet::new();
     let closed = before_heads
         .into_iter()

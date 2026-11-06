@@ -952,12 +952,34 @@ pub fn queue_head_identity(text: &str) -> QueueItemIdentity {
 /// correlation identity. Legacy no-id rows retain the historical text key.
 pub fn queue_prompt_stable_identity(text: &str) -> QueueItemIdentity {
     let semantic = queue_head_identity(text);
-    if semantic.is_id_backed() {
+    if let QueueItemIdentity::Id(id) = &semantic {
+        // `#address [#q-…]` strips to `[#q-…]`, which is not tracked work.
+        // The q-id correlates the row; the preset token is not a backlog id.
+        if id.starts_with("q-") && preset_token_collapsed_to_generated_id(text) {
+            return QueueItemIdentity::FreeText(format!("queue-id:{id}"));
+        }
         return semantic;
     }
     queue_prompt_stable_id(text)
         .map(|id| QueueItemIdentity::FreeText(format!("queue-id:{id}")))
         .unwrap_or(semantic)
+}
+
+/// A leading `#preset` whose remainder is only a generated `[#q-…]`.
+fn preset_token_collapsed_to_generated_id(text: &str) -> bool {
+    let head = subprompts::head_without_subprompts(text);
+    let visible = strip_priority_markers(head.trim());
+    let stripped = strip_intent_tags(visible.trim());
+    if stripped == visible.trim() {
+        return false;
+    }
+    let Some(rest) = stripped.trim().strip_prefix("[#") else {
+        return false;
+    };
+    let Some((id, tail)) = rest.split_once(']') else {
+        return false;
+    };
+    id.starts_with("q-") && tail.trim().is_empty()
 }
 
 /// Authored semantic id or binary-admitted q-id for correlation/navigation.
@@ -1189,6 +1211,41 @@ mod tests {
         assert_eq!(
             QueueItemIdentity::from_prompt("[#abc123] described"),
             QueueItemIdentity::Id("abc123".to_string())
+        );
+    }
+
+    /// `#address [#q-…]` is free text. The q-id correlates the row; the preset
+    /// token is not a backlog id, and `q-…` is not a `--done` id either.
+    #[test]
+    fn preset_collapsed_to_generated_id_is_free_text() {
+        assert_eq!(
+            queue_prompt_stable_identity("#address [#q-3f7fdc3da31f]"),
+            QueueItemIdentity::FreeText("queue-id:q-3f7fdc3da31f".into())
+        );
+        assert_eq!(
+            queue_prompt_stable_identity("#upgrade [#q-d20365e4090d]"),
+            QueueItemIdentity::FreeText("queue-id:q-d20365e4090d".into())
+        );
+        assert_ne!(
+            queue_prompt_stable_identity("#address [#q-3f7fdc3da31f]"),
+            queue_prompt_stable_identity("#address [#q-096acdc5caca]")
+        );
+        assert_eq!(
+            queue_head_identity("#address [#q-3f7fdc3da31f]"),
+            QueueItemIdentity::Id("q-3f7fdc3da31f".into()),
+            "the tracked-work reader still sees the bracket; stable identity does not"
+        );
+        assert_eq!(
+            queue_prompt_stable_identity("#review [#adr0043-publish]"),
+            QueueItemIdentity::Id("adr0043-publish".into())
+        );
+        assert_eq!(
+            queue_prompt_stable_identity("#address"),
+            QueueItemIdentity::Id("address".into())
+        );
+        assert_eq!(
+            queue_prompt_stable_identity("do [#q-authored]"),
+            QueueItemIdentity::Id("q-authored".into())
         );
     }
 

@@ -68,6 +68,7 @@ pub struct QueuePromptIdentityProjection {
 /// then derive document-local `Related` navigation from the resulting cut.
 pub fn project(content: &str, document_id: &str) -> QueuePromptIdentityProjection {
     let nodes = executable_queue_nodes(content);
+    let ancestor_paths = queue_ancestor_paths(content);
     let mut owned_ids: HashMap<String, String> = identified_queue_nodes(content)
         .into_iter()
         .filter_map(|node| node_id(&node).map(|id| (id, node.node_key)))
@@ -80,8 +81,15 @@ pub fn project(content: &str, document_id: &str) -> QueuePromptIdentityProjectio
             continue;
         }
         let work = node.item.work_text().trim();
+        let ancestors = ancestor_paths
+            .get(&node.node_key)
+            .map(String::as_str)
+            .unwrap_or("");
+        // The ancestor path is part of the mint. A removed row must not hand
+        // its q-id to the same leaf under a different parent. An explicit
+        // `[#q-…]` still follows the row and is not reminted.
         let seed = format!(
-            "{document_id}\n{}\n{}\n{}",
+            "{document_id}\n{}\n{}\n{ancestors}\n{}",
             node.component,
             node.node_key,
             agent_doc_element_queue::normalize_multiline_dedup_text(work)
@@ -322,6 +330,48 @@ fn source_indent(content: &str, byte: usize) -> usize {
         .take_while(|ch| *ch == ' ' || *ch == '\t')
         .map(|ch| if ch == '\t' { 4 } else { 1 })
         .sum()
+}
+
+/// Authored ancestor path for every live queue item, keyed by node key.
+///
+/// The path is part of the mint seed. A removed row must not hand its q-id to
+/// the same leaf under a different parent. Labels are authored work, so
+/// admitting a parent's own `[#q-…]` does not change a child's seed.
+fn queue_ancestor_paths(content: &str) -> HashMap<String, String> {
+    let nodes = all_item_nodes(content)
+        .into_iter()
+        .filter(|node| node.component == "queue" && !node.item.struck)
+        .collect::<Vec<_>>();
+    let mut paths = HashMap::new();
+    let mut stack: Vec<(usize, String)> = Vec::new();
+    let mut component_index = String::new();
+    for node in &nodes {
+        let index = node.node_key.split(':').nth(1).unwrap_or("");
+        if component_index != index {
+            stack.clear();
+            component_index = index.to_string();
+        }
+        let indent = source_indent(content, node.item.start_byte);
+        while stack.last().is_some_and(|(depth, _)| *depth >= indent) {
+            stack.pop();
+        }
+        let path = stack
+            .iter()
+            .map(|(_, label)| label.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        paths.insert(node.node_key.clone(), path);
+        stack.push((indent, ancestor_seed_label(&node.item)));
+    }
+    paths
+}
+
+fn ancestor_seed_label(item: &agent_doc_markdown_ast::overlay::Item) -> String {
+    let authored =
+        agent_doc_element_queue::strip_generated_queue_prompt_id_annotation(item.work_text());
+    agent_doc_element_queue::normalize_multiline_dedup_text(
+        agent_doc_element_queue::strip_priority_markers(authored.trim()).trim(),
+    )
 }
 
 fn related_declarations(
@@ -721,5 +771,45 @@ mod tests {
             Some("q-stable"),
             "claim-generation metadata must not eclipse the work identity"
         );
+    }
+
+    /// A q-id follows the row that shows it. After that row is gone, the same
+    /// leaf under a different parent is a new row and mints a new id.
+    #[test]
+    fn removed_row_does_not_carry_its_q_id_to_the_same_leaf_under_a_different_parent() {
+        let under_a = concat!(
+            "<!-- agent:run -->\n",
+            "- https://example.test/merge_requests/1\n",
+            "  - #address\n",
+            "<!-- /agent:run -->\n",
+        );
+        let admitted = project(under_a, "doc-a");
+        assert_eq!(admitted.assignments.len(), 1);
+        let carried = admitted.assignments[0].id.clone();
+
+        let under_b = concat!(
+            "<!-- agent:run -->\n",
+            "- https://example.test/merge_requests/2\n",
+            "  - #address\n",
+            "<!-- /agent:run -->\n",
+        );
+        let moved = project(under_b, "doc-a");
+        assert_eq!(moved.assignments.len(), 1);
+        assert_ne!(
+            moved.assignments[0].id, carried,
+            "parent B reused the q-id minted under parent A"
+        );
+        assert!(project(&moved.content, "doc-a").assignments.is_empty());
+
+        let explicit = admitted.content.replace(
+            "https://example.test/merge_requests/1",
+            "https://example.test/merge_requests/9",
+        );
+        let kept = project(&explicit, "doc-a");
+        assert!(
+            kept.assignments.is_empty(),
+            "an explicit [#q-…] moved under a new parent was reminted: {kept:?}"
+        );
+        assert_eq!(kept.content.matches(&format!("[#{carried}]")).count(), 1);
     }
 }

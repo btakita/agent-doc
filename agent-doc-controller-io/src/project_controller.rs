@@ -1542,6 +1542,20 @@ fn set_authority_overlay_read_test_hook(hook: Option<Box<dyn FnOnce()>>) {
     AUTHORITY_OVERLAY_READ_TEST_HOOK.with(|slot| *slot.borrow_mut() = hook);
 }
 
+#[cfg(test)]
+thread_local! {
+    /// Runs after a handoff row is folded and before its ACK, so a test can
+    /// upsert a same-epoch replacement into the open race
+    /// (`#sameepochhandoffackloss`).
+    static AUTHORITY_HANDOFF_BEFORE_ACK_TEST_HOOK: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(test)]
+fn set_authority_handoff_before_ack_test_hook(hook: Option<Box<dyn FnOnce()>>) {
+    AUTHORITY_HANDOFF_BEFORE_ACK_TEST_HOOK.with(|slot| *slot.borrow_mut() = hook);
+}
+
 /// Run `publish` with `order` as the publishing editor frame (see
 /// [`PANE_LAYOUT_EDITOR_PUBLICATION`]). The previous value is restored even if
 /// `publish` panics.
@@ -11393,23 +11407,42 @@ impl ControllerRuntime {
                             ),
                         );
                     }
-                    if let Err(error) = state_store::acknowledge_document_authority_handoff(
+                    #[cfg(test)]
+                    AUTHORITY_HANDOFF_BEFORE_ACK_TEST_HOOK.with(|slot| {
+                        if let Some(hook) = slot.borrow_mut().take() {
+                            hook();
+                        }
+                    });
+                    // `#sameepochhandoffackloss`: fence on the payload this drain
+                    // loaded. A same-epoch upsert since the load replaced the
+                    // row; deleting by epoch and generation would drop that
+                    // observation before it reached the ledger. `Ok(false)`
+                    // still clears this event's overlay entry (by event id) and
+                    // leaves the replacement to the next drain.
+                    match state_store::acknowledge_document_authority_handoff(
                         project_root,
                         &handoff.document_hash,
                         handoff.authority_epoch,
                         generation,
                         &event.event_id,
+                        &handoff.payload_json,
                     ) {
-                        agent_doc_ops_log_io::log_op(
-                            project_root,
-                            &format!(
-                                "document_authority_handoff_ack_deferred document_hash={} authority_epoch={} controller_generation={} error={error:#}",
-                                handoff.document_hash, handoff.authority_epoch, generation,
-                            ),
-                        );
-                        retry = true;
-                    } else {
-                        self.clear_pending_document_authority_handoff(&event);
+                        Err(error) => {
+                            agent_doc_ops_log_io::log_op(
+                                project_root,
+                                &format!(
+                                    "document_authority_handoff_ack_deferred document_hash={} authority_epoch={} controller_generation={} error={error:#}",
+                                    handoff.document_hash, handoff.authority_epoch, generation,
+                                ),
+                            );
+                            retry = true;
+                        }
+                        Ok(deleted) => {
+                            self.clear_pending_document_authority_handoff(&event);
+                            if !deleted {
+                                retry = true;
+                            }
+                        }
                     }
                 }
                 Err(error) => {

@@ -606,12 +606,19 @@ pub fn claim_document_authority_handoff(
 /// the row, naming the event for that successor to reconcile. One document keeps
 /// one receipt per generation, holding the newest epoch: a latest-value older
 /// epoch cannot change what the newer one's reconcile folds.
+///
+/// `#sameepochhandoffackloss`: the delete also fences on the payload the drain
+/// loaded. One document has one row, and a same-epoch observation replaces that
+/// payload without moving the epoch or the claimed generation. Acknowledging the
+/// loaded event must not delete the replacement, and a receipt is written only
+/// when that exact row was the one removed.
 pub fn acknowledge_document_authority_handoff(
     project_root: &Path,
     document_hash: &str,
     authority_epoch: u64,
     controller_generation: u64,
     event_id: &str,
+    payload_json: &str,
 ) -> Result<bool> {
     let mut conn = open_document_authority_handoff_db(project_root)?;
     let epoch = sqlite_i64(authority_epoch, "authority handoff epoch")?;
@@ -622,8 +629,9 @@ pub fn acknowledge_document_authority_handoff(
     let transaction = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
     let acknowledged = transaction.execute(
         "DELETE FROM document_authority_handoffs \
-         WHERE document_hash = ?1 AND authority_epoch = ?2 AND controller_generation = ?3",
-        params![document_hash, epoch, generation],
+         WHERE document_hash = ?1 AND authority_epoch = ?2 AND controller_generation = ?3 \
+           AND payload_json = ?4",
+        params![document_hash, epoch, generation, payload_json],
     )? > 0;
     if acknowledged {
         transaction.execute(
@@ -10741,14 +10749,13 @@ mod tests {
     #[test]
     fn authority_handoff_keeps_latest_and_successor_generation_owns_ack() -> Result<()> {
         let dir = tempfile::TempDir::new()?;
-        let handoff = |authority_epoch, controller_generation, payload_json: &str| {
-            DocumentAuthorityHandoff {
+        let handoff =
+            |authority_epoch, controller_generation, payload_json: &str| DocumentAuthorityHandoff {
                 document_hash: "doc".to_string(),
                 authority_epoch,
                 controller_generation,
                 payload_json: payload_json.to_string(),
-            }
-        };
+            };
         assert!(enqueue_document_authority_handoff(
             dir.path(),
             &handoff(10, 1, "old")
@@ -10757,12 +10764,7 @@ mod tests {
             dir.path(),
             &handoff(9, 1, "stale")
         )?);
-        assert!(claim_document_authority_handoff(
-            dir.path(),
-            "doc",
-            10,
-            2
-        )?);
+        assert!(claim_document_authority_handoff(dir.path(), "doc", 10, 2)?);
         assert!(enqueue_document_authority_handoff(
             dir.path(),
             &handoff(11, 1, "new-from-predecessor")
@@ -10771,25 +10773,22 @@ mod tests {
         let retained = load_document_authority_handoffs(dir.path())?;
         assert_eq!(retained.len(), 1);
         assert_eq!(retained[0], handoff(11, 2, "new-from-predecessor"));
-        assert!(!claim_document_authority_handoff(
-            dir.path(),
-            "doc",
-            11,
-            1
-        )?);
+        assert!(!claim_document_authority_handoff(dir.path(), "doc", 11, 1)?);
         assert!(!acknowledge_document_authority_handoff(
             dir.path(),
             "doc",
             11,
             1,
-            "event-11"
+            "event-11",
+            "new-from-predecessor"
         )?);
         assert!(acknowledge_document_authority_handoff(
             dir.path(),
             "doc",
             11,
             2,
-            "event-11"
+            "event-11",
+            "new-from-predecessor"
         )?);
         assert!(load_document_authority_handoffs(dir.path())?.is_empty());
         Ok(())
@@ -10826,7 +10825,8 @@ mod tests {
             "doc",
             10,
             2,
-            "event-10"
+            "event-10",
+            "payload"
         )?);
         assert!(load_document_authority_ack_receipts_before(dir.path(), 9)?.is_empty());
 
@@ -10835,7 +10835,8 @@ mod tests {
             "doc",
             10,
             1,
-            "event-10"
+            "event-10",
+            "payload"
         )?);
         assert!(load_document_authority_handoffs(dir.path())?.is_empty());
         assert_eq!(
@@ -10854,7 +10855,8 @@ mod tests {
             "doc",
             12,
             1,
-            "event-12"
+            "event-12",
+            "payload"
         )?);
         assert!(enqueue(11, 1)?);
         assert!(acknowledge_document_authority_handoff(
@@ -10862,7 +10864,8 @@ mod tests {
             "doc",
             11,
             1,
-            "event-11"
+            "event-11",
+            "payload"
         )?);
         assert_eq!(
             load_document_authority_ack_receipts_before(dir.path(), 2)?,
@@ -10883,6 +10886,73 @@ mod tests {
             &receipt(12, "event-12")
         )?);
         assert!(load_document_authority_ack_receipts_before(dir.path(), 2)?.is_empty());
+        Ok(())
+    }
+
+    /// `#sameepochhandoffackloss`: a same-epoch observation upserted after the
+    /// drain loaded the row keeps that row. The ACK of the loaded payload must
+    /// not delete it and must not record a receipt for an event the row no
+    /// longer holds.
+    #[test]
+    fn authority_ack_keeps_same_epoch_payload_replaced_before_ack() -> Result<()> {
+        let dir = tempfile::TempDir::new()?;
+        let handoff = |payload_json: &str| DocumentAuthorityHandoff {
+            document_hash: "doc".to_string(),
+            authority_epoch: 10,
+            controller_generation: 1,
+            payload_json: payload_json.to_string(),
+        };
+        assert!(enqueue_document_authority_handoff(
+            dir.path(),
+            &handoff("source-a")
+        )?);
+        assert!(claim_document_authority_handoff(dir.path(), "doc", 10, 2)?);
+        assert!(enqueue_document_authority_handoff(
+            dir.path(),
+            &handoff("source-b")
+        )?);
+
+        let retained = load_document_authority_handoffs(dir.path())?;
+        assert_eq!(retained.len(), 1);
+        assert_eq!(retained[0].payload_json, "source-b");
+        assert_eq!(retained[0].authority_epoch, 10);
+        // Claim raised the generation; the same-epoch upsert kept it.
+        assert_eq!(retained[0].controller_generation, 2);
+        assert!(!acknowledge_document_authority_handoff(
+            dir.path(),
+            "doc",
+            10,
+            2,
+            "event-a",
+            "source-a"
+        )?);
+        let kept = load_document_authority_handoffs(dir.path())?;
+        assert_eq!(kept.len(), 1);
+        assert_eq!(kept[0].payload_json, "source-b");
+        assert_eq!(kept[0].controller_generation, 2);
+        assert!(
+            load_document_authority_ack_receipts_before(dir.path(), 3)?.is_empty(),
+            "a payload the row no longer holds is not an acknowledgement"
+        );
+
+        assert!(acknowledge_document_authority_handoff(
+            dir.path(),
+            "doc",
+            10,
+            2,
+            "event-b",
+            "source-b"
+        )?);
+        assert!(load_document_authority_handoffs(dir.path())?.is_empty());
+        assert_eq!(
+            load_document_authority_ack_receipts_before(dir.path(), 3)?,
+            vec![DocumentAuthorityAckReceipt {
+                document_hash: "doc".to_string(),
+                controller_generation: 2,
+                authority_epoch: 10,
+                event_id: "event-b".to_string(),
+            }]
+        );
         Ok(())
     }
 

@@ -2949,6 +2949,16 @@ first reloads the durable ledger (which replaces the projection wholesale and so
 never folds a row it also applied live twice), then acknowledges. A failed
 reload keeps the row claimed and the overlay in place for the next drain.
 
+The acknowledgement deletes only the payload the drain loaded
+(`#sameepochhandoffackloss`). One document has one handoff row, and a later
+observation at the same epoch replaces that payload: a different source is a
+different event, and the epoch and the claimed generation do not move. An
+acknowledgement keyed only by epoch and generation would delete the replacement,
+so that observation would never reach the ledger. The replacement keeps its row
+and is drained on the next pass. A receipt is written only when the loaded
+payload was the row actually deleted. The overlay clear stays keyed by event id,
+so an entry the replacement already noted is left in place.
+
 Every drain then settles the overlay entries that have no row left to claim
 (`#orphanhandoffoverlay`): a retired predecessor can ACK a row after the
 successor copied it into the overlay, a newer epoch can supersede a row, and a

@@ -1387,6 +1387,59 @@ mod core_tests {
         assert_eq!(after.matches(heading.as_str()).count(), 1);
     }
 
+    /// `#responseblockmovedtail` (agent-doc-bugs.md, 2026-11-05 17:52 EST): a
+    /// response HEAD already holds is committed history, not this cycle's missing
+    /// response. Recovery appended it at the tail. The document stays as it is.
+    #[test]
+    fn try_auto_recover_live_prompt_drift_never_moves_a_committed_response_to_the_tail() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        let doc = root.join("test.md");
+        let git = |args: &[&str]| {
+            let status = std::process::Command::new("git")
+                .current_dir(root)
+                .args(["-c", "user.name=t", "-c", "user.email=t@example.test"])
+                .args(args)
+                .status()
+                .unwrap();
+            assert!(status.success(), "git {args:?}");
+        };
+
+        let snapshot = agent_doc_test_support::drift_content_ours();
+        let heading = snapshot
+            .lines()
+            .find(|line| line.starts_with("### Re:"))
+            .expect("fixture response heading")
+            .to_string();
+        let live = agent_doc_test_support::drift_baseline();
+        assert!(!live.contains(&heading), "fixture must lack the response");
+
+        fs::write(&doc, &snapshot).unwrap();
+        git(&["init", "-q"]);
+        git(&["add", "test.md"]);
+        git(&["commit", "-qm", "committed response"]);
+        fs::write(&doc, &live).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(&snapshot), Some(&live)).unwrap();
+        agent_doc_cycle_state_io::record_ipc_snapshot_adoption_blocked(&doc).unwrap();
+
+        let recovered = try_auto_recover_live_prompt_drift(&doc, &snapshot, &live).unwrap();
+
+        assert_eq!(recovered, None);
+        assert_eq!(fs::read_to_string(&doc).unwrap(), live);
+        let ops_log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops_log.contains("live_prompt_drift_recovery_refused_committed_response"),
+            "the refusal must name itself in the ops log:\n{ops_log}"
+        );
+    }
+
     #[test]
     fn try_auto_recover_live_prompt_drift_prefers_editor_ipc_when_listener_active() {
         let dir = TempDir::new().unwrap();

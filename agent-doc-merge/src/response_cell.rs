@@ -7,8 +7,8 @@
 
 use agent_doc_element::element;
 use agent_doc_markdown_ast::exchange_tree::{
-    ExchangeNode, ExchangeNodeKind, ResponseTurnCellPolicy, parse_exchange_nodes,
-    remove_all_salient_responses, render_exchange_nodes,
+    ExchangeNode, ExchangeNodeKind, ResponseTurnCellPolicy, duplicate_response_cell_node_indices,
+    parse_exchange_nodes, remove_all_salient_responses, render_exchange_nodes,
 };
 use similar::{Algorithm, DiffTag, capture_diff_slices};
 use std::collections::HashSet;
@@ -386,13 +386,19 @@ fn collapse_checkpoint_proven_repeated_suffix(
     (collapsed_results.len() == 1).then(|| collapsed_results.pop().unwrap())
 }
 
-/// Remove repeated response nodes with the same body-aware identity.
+/// Remove repeated whole response cells with the same body-aware identity.
 ///
 /// Response cells are idempotent: replaying the same heading and body is a
 /// no-op. Component-level three-way merges can nevertheless materialize both
 /// sides when an editor reconnects during a force-disk projection. Preserve
 /// the first semantic response occurrence, every prompt, and the newest
 /// boundary marker.
+///
+/// `#responseblockmovedtail`: identity covers the whole cell, sections included.
+/// Two replies to one queue prompt can share an opening node exactly (heading
+/// plus quoted prompt) and differ only in their `###` sections; comparing nodes
+/// deleted the second reply's heading and left its sections under the previous
+/// response, and commit recovery then re-appended that reply at the tail.
 pub fn deduplicate_response_cells(doc: &str) -> anyhow::Result<Option<String>> {
     let components = element::parse(doc)?;
     let Some(exchange) = components
@@ -401,14 +407,13 @@ pub fn deduplicate_response_cells(doc: &str) -> anyhow::Result<Option<String>> {
     else {
         return Ok(None);
     };
-    let nodes = parse_exchange_nodes(exchange.content(doc));
-    let mut response_ids = HashSet::new();
+    let mut nodes = parse_exchange_nodes(exchange.content(doc));
     let mut boundary = None;
     let mut removed = false;
-    let mut retained = Vec::with_capacity(nodes.len());
     let mut fence = MarkdownFence::default();
-    for mut node in nodes {
-        let (lines, boundaries) = take_protocol_boundaries(node.lines, &mut fence);
+    for node in &mut nodes {
+        let (lines, boundaries) =
+            take_protocol_boundaries(std::mem::take(&mut node.lines), &mut fence);
         node.lines = lines;
         for candidate in boundaries {
             if boundary.is_some() {
@@ -416,16 +421,15 @@ pub fn deduplicate_response_cells(doc: &str) -> anyhow::Result<Option<String>> {
             }
             boundary = Some(candidate);
         }
-        if matches!(node.kind, ExchangeNodeKind::Response { .. })
-            && !response_ids.insert(node.node_id())
-        {
-            removed = true;
-            continue;
-        }
-        if !node.lines.is_empty() {
-            retained.push(node);
-        }
     }
+    let duplicate_cell_nodes = duplicate_response_cell_node_indices(&nodes);
+    removed |= !duplicate_cell_nodes.is_empty();
+    let retained = nodes
+        .into_iter()
+        .enumerate()
+        .filter(|(index, node)| !duplicate_cell_nodes.contains(index) && !node.lines.is_empty())
+        .map(|(_, node)| node)
+        .collect::<Vec<_>>();
     if !removed {
         return Ok(None);
     }
@@ -1195,6 +1199,67 @@ mod tests {
         assert_eq!(deduplicated.matches("Done.").count(), 1);
         assert!(deduplicated.contains("❯ original prompt"));
         assert!(deduplicated.contains("❯ prompt retained from the live editor"));
+        assert_eq!(deduplicated.matches("agent:boundary:").count(), 1);
+    }
+
+    /// `#responseblockmovedtail` (agent-doc-bugs.md, 2026-11-05 17:52 EST). Two
+    /// replies to one queue prompt share their opening node exactly and differ
+    /// only in their `###` sections. The node-level dedupe deleted the second
+    /// reply's heading and quoted prompt during the post-restart reconnect replay
+    /// and left its section under the previous response.
+    #[test]
+    fn replies_to_one_prompt_with_different_sections_are_distinct_cells() {
+        let doc = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: Response\n\n> **Queue prompt:** Many duplicate tags\n\n",
+            "### Batch j integrated\n\nPushed and installed.\n\n",
+            "### Re: Status\n\nRunning.\n\n",
+            "### Re: Response\n\n> **Queue prompt:** Many duplicate tags\n\n",
+            "### Duplicate request tags: integrated\n\nFixed.\n",
+            "<!-- agent:boundary:next -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        assert_eq!(deduplicate_response_cells(doc).unwrap(), None);
+    }
+
+    /// The same shape proves a shared section does not make two responses one
+    /// response: a repeated `### Verification` stays under each reply.
+    #[test]
+    fn responses_sharing_one_section_keep_it_under_each_response() {
+        let doc = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: first\n\nOne.\n\n### Verification\n\nmake check exit 0.\n\n",
+            "### Re: second\n\nTwo.\n\n### Verification\n\nmake check exit 0.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        assert_eq!(deduplicate_response_cells(doc).unwrap(), None);
+    }
+
+    /// A whole multi-section cell materialized twice still collapses, so the
+    /// reconnect repair keeps working after identity moved up to the cell.
+    #[test]
+    fn repeated_multi_section_cell_collapses_with_all_its_sections() {
+        let doc = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: topic\n\nSummary.\n\n### Details\n\nBody.\n\n",
+            "\u{276f} prompt retained from the live editor\n\n",
+            "### Re: topic\n\nSummary.\n\n### Details\n\nBody.\n",
+            "<!-- agent:boundary:next -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        let deduplicated = deduplicate_response_cells(doc)
+            .unwrap()
+            .expect("the repeated cell should be removed");
+
+        assert_eq!(deduplicated.matches("### Re: topic").count(), 1);
+        assert_eq!(deduplicated.matches("### Details").count(), 1);
+        assert!(deduplicated.contains("\u{276f} prompt retained from the live editor"));
         assert_eq!(deduplicated.matches("agent:boundary:").count(), 1);
     }
 

@@ -579,6 +579,58 @@ pub fn parse_exchange_nodes(inner: &str) -> Vec<ExchangeNode> {
     nodes
 }
 
+/// The node index ranges of each whole response cell, in document order
+/// (`#responseblockmovedtail`).
+///
+/// [`parse_exchange_nodes`] opens a node at every `### ` heading, so a response
+/// with subsection headings is several nodes. Its opening node can hold nothing
+/// but the `### Re:` heading and a `> **Queue prompt:**` quote, and two replies
+/// to one prompt then share that opening node exactly while their sections
+/// differ. A cell therefore runs from its `### Re:` heading through the following
+/// section nodes, and only a cell, never one of its nodes, can be a duplicate.
+/// A prompt or salient node ends the cell; a section with no open cell starts one.
+pub fn response_cell_spans(nodes: &[ExchangeNode]) -> Vec<Range<usize>> {
+    let is_response = |node: &ExchangeNode| matches!(node.kind, ExchangeNodeKind::Response { .. });
+    let opens_cell = |node: &ExchangeNode| {
+        node.lines
+            .first()
+            .is_some_and(|line| line.trim_start().starts_with("### Re:"))
+    };
+    let mut spans = Vec::new();
+    let mut index = 0usize;
+    while index < nodes.len() {
+        if !is_response(&nodes[index]) {
+            index += 1;
+            continue;
+        }
+        let start = index;
+        index += 1;
+        while index < nodes.len() && is_response(&nodes[index]) && !opens_cell(&nodes[index]) {
+            index += 1;
+        }
+        spans.push(start..index);
+    }
+    spans
+}
+
+/// Indices of the response nodes in a repeated whole response cell: every node
+/// of each later cell whose ordered node ids equal an earlier cell's. A cell that
+/// only shares its opening node with another is distinct and is never reported.
+pub fn duplicate_response_cell_node_indices(nodes: &[ExchangeNode]) -> HashSet<usize> {
+    let mut seen = HashSet::new();
+    let mut duplicates = HashSet::new();
+    for span in response_cell_spans(nodes) {
+        let identity = nodes[span.clone()]
+            .iter()
+            .map(ExchangeNode::node_id)
+            .collect::<Vec<_>>();
+        if !seen.insert(identity) {
+            duplicates.extend(span);
+        }
+    }
+    duplicates
+}
+
 /// Render an exchange node list back to a byte-stable source string.
 pub fn render_exchange_nodes(nodes: &[ExchangeNode]) -> String {
     nodes.iter().map(ExchangeNode::render).collect()
@@ -871,6 +923,36 @@ mod tests {
         assert!(responses[0].render().contains("Here is the answer."));
         assert!(!responses[0].render().contains("Second answer."));
         assert!(responses[1].render().contains("Second answer."));
+    }
+
+    #[test]
+    fn response_cell_spans_group_sections_under_their_re_heading() {
+        let nodes = parse_exchange_nodes(concat!(
+            "### Re: A\n\nOne.\n\n### Details\n\nTwo.\n\n",
+            "\u{276f} Prompt.\n\n",
+            "### Stray section\n\nThree.\n\n",
+            "### Re: B\n\nFour.\n",
+        ));
+        assert_eq!(response_cell_spans(&nodes), vec![0..2, 3..4, 4..5]);
+    }
+
+    /// `#responseblockmovedtail`: a shared opening node or a shared section is
+    /// not a duplicate; only a whole repeated cell is, and all of its nodes are.
+    #[test]
+    fn only_whole_cells_are_duplicates() {
+        let opening = "### Re: Response\n\n> **Queue prompt:** tags\n\n";
+        let distinct = parse_exchange_nodes(&format!(
+            "{opening}### One\n\nA.\n\n{opening}### Two\n\nB.\n"
+        ));
+        assert!(duplicate_response_cell_node_indices(&distinct).is_empty());
+
+        let repeated = parse_exchange_nodes(&format!(
+            "{opening}### One\n\nA.\n\n\u{276f} Prompt.\n\n{opening}### One\n\nA.\n"
+        ));
+        assert_eq!(
+            duplicate_response_cell_node_indices(&repeated),
+            HashSet::from([3, 4])
+        );
     }
 
     #[test]

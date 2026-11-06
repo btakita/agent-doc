@@ -2975,43 +2975,126 @@ fn latest_missing_snapshot_response_block(
         return None;
     };
     let snapshot_body = snapshot_exchange.content(snapshot);
-    let file_body = file_exchange.content(file_content);
-    let file_norm = normalize_visible_recovery_compare(file_body);
-    // `#closeoutduplicatedcommit` / `#dupemoduloecho`: a response the document
-    // already holds is not missing just because the binary decorated one copy.
-    // The live copy carried a done-id `> **Queue prompt:**` echo under its
-    // heading that the snapshot copy lacked, so the contiguous containment
-    // check below failed and the whole response was re-appended (agent-doc-bugs.md,
-    // 2026-10-15 19:51, cycle-1792108257994).
-    let file_signatures: std::collections::HashSet<String> =
-        exchange_response_block_ranges(file_body)
-            .into_iter()
-            .map(|range| {
-                agent_doc_turn::response_replay::response_block_signature(
-                    &normalize_visible_recovery_compare(&file_body[range]),
-                )
-            })
-            .collect();
+    let held = HeldResponseBlocks::new(
+        file_exchange.content(file_content),
+        normalize_visible_recovery_compare,
+    );
     for range in exchange_response_block_ranges(snapshot_body)
         .into_iter()
         .rev()
     {
         let block = &snapshot_body[range];
         let block_norm = normalize_visible_recovery_compare(block);
-        let block_trimmed = block_norm.trim();
-        if block_trimmed.is_empty() {
-            continue;
-        }
-        if file_norm.contains(block_trimmed)
-            || file_signatures.contains(&agent_doc_turn::response_replay::response_block_signature(
-                &block_norm,
-            ))
+        if block_norm.trim().is_empty()
+            || held.holds(&block_norm)
+            || held.holds_every_section_after_the_opening_node(&block_norm)
         {
             continue;
         }
         return Some(block.to_string());
     }
     None
+}
+
+/// The response blocks one `agent:exchange` body already holds, for the
+/// missing-response decision.
+struct HeldResponseBlocks {
+    body_norm: String,
+    signatures: std::collections::HashSet<String>,
+}
+
+impl HeldResponseBlocks {
+    fn new(body: &str, normalize_visible_recovery_compare: impl Fn(&str) -> String + Copy) -> Self {
+        Self {
+            body_norm: normalize_visible_recovery_compare(body),
+            signatures: exchange_response_block_ranges(body)
+                .into_iter()
+                .map(|range| {
+                    agent_doc_turn::response_replay::response_block_signature(
+                        &normalize_visible_recovery_compare(&body[range]),
+                    )
+                })
+                .collect(),
+        }
+    }
+
+    /// `#closeoutduplicatedcommit` / `#dupemoduloecho`: a response the document
+    /// already holds is not missing just because the binary decorated one copy.
+    /// The live copy carried a done-id `> **Queue prompt:**` echo under its
+    /// heading that the snapshot copy lacked, so the contiguous containment
+    /// check failed and the whole response was re-appended (agent-doc-bugs.md,
+    /// 2026-10-15 19:51, cycle-1792108257994).
+    fn holds(&self, block_norm: &str) -> bool {
+        self.body_norm.contains(block_norm.trim())
+            || self
+                .signatures
+                .contains(&agent_doc_turn::response_replay::response_block_signature(
+                    block_norm,
+                ))
+    }
+
+    /// `#responseblockmovedtail`: a multi-section response that lost only its
+    /// opening heading is not missing. Its sections still sit in the document, so
+    /// appending the block moves the heading to the tail and duplicates every
+    /// section (agent-doc-bugs.md, 2026-11-05 17:52 EST, cycle-1793918843964).
+    fn holds_every_section_after_the_opening_node(&self, block_norm: &str) -> bool {
+        let sections = response_block_sections_after_opening_node(block_norm);
+        !sections.is_empty()
+            && sections
+                .iter()
+                .all(|section| self.body_norm.contains(section.trim()))
+    }
+}
+
+/// The `### ` sections of a response block after the node its `### Re:` heading
+/// opens. A heading-looking line in a code fence only splits the comparison
+/// text, and every piece must still be held contiguously.
+fn response_block_sections_after_opening_node(block: &str) -> Vec<&str> {
+    let mut starts = Vec::new();
+    let mut offset = 0usize;
+    for line in block.split_inclusive('\n') {
+        if offset > 0 && line.trim_start().starts_with("### ") {
+            starts.push(offset);
+        }
+        offset += line.len();
+    }
+    starts
+        .iter()
+        .enumerate()
+        .map(|(index, start)| {
+            let end = starts.get(index + 1).copied().unwrap_or(block.len());
+            &block[*start..end]
+        })
+        .filter(|section| !section.trim().is_empty())
+        .collect()
+}
+
+/// `#responseblockmovedtail`: the heading of the block commit recovery would
+/// append when HEAD already holds that block. Recovery rebases this cycle's
+/// uncommitted response onto the live document. A block HEAD holds is committed
+/// history, so appending it moves an old response to the tail; an operator
+/// deletion would come back the same way. The caller leaves the document alone.
+pub fn live_prompt_drift_missing_block_committed_heading(
+    snapshot: &str,
+    file_content: &str,
+    head_content: &str,
+    normalize_visible_recovery_compare: impl Fn(&str) -> String + Copy,
+) -> Option<String> {
+    let block = latest_missing_snapshot_response_block(
+        snapshot,
+        file_content,
+        normalize_visible_recovery_compare,
+    )?;
+    let components = agent_doc_element::element::parse(head_content).ok()?;
+    let head_exchange = components
+        .iter()
+        .find(|component| component.name == AGENT_RESPONSE_COMPONENT)?;
+    let held = HeldResponseBlocks::new(
+        head_exchange.content(head_content),
+        normalize_visible_recovery_compare,
+    );
+    held.holds(&normalize_visible_recovery_compare(&block))
+        .then(|| block.lines().next().unwrap_or_default().trim().to_string())
 }
 
 /// `#exch-intermix-falsedrop`: true when a recorded dropped prompt is still
@@ -5027,6 +5110,78 @@ Working.
             live_prompt_drift_recovery_target(&snapshot, &drift_baseline(), identity_normalize)
                 .expect("the missing response is rebased onto the live document");
         assert_eq!(target.matches("### Re: do #fix").count(), 1);
+    }
+
+    fn exchange_doc(exchange: &str) -> String {
+        format!(
+            "---\nagent_doc_format: template\n---\n\n<!-- agent:exchange patch=append -->\n{exchange}<!-- agent:boundary:next -->\n<!-- /agent:exchange -->\n"
+        )
+    }
+
+    const SECOND_REPLY_OPENING: &str =
+        "### Re: Response\n\n> **Queue prompt:** Many duplicate tags\n\n";
+
+    fn second_reply_exchange() -> String {
+        format!(
+            "### Re: Earlier\n\nRunning.\n\n{SECOND_REPLY_OPENING}### Duplicate request tags: integrated\n\nFixed.\n"
+        )
+    }
+
+    /// `#responseblockmovedtail` (agent-doc-bugs.md, 2026-11-05 17:52 EST): the
+    /// reply lost only its heading and quoted prompt, so the block looked missing
+    /// and commit recovery re-appended it, which moved the heading to the tail and
+    /// gave the document a second copy of the section.
+    #[test]
+    fn live_prompt_drift_recovery_target_never_appends_a_block_whose_sections_are_held() {
+        let snapshot = exchange_doc(&second_reply_exchange());
+        let live = snapshot.replace(SECOND_REPLY_OPENING, "");
+        assert_ne!(live, snapshot, "fixture must lose the opening node");
+
+        assert_eq!(
+            live_prompt_drift_recovery_target(&snapshot, &live, identity_normalize),
+            None
+        );
+    }
+
+    /// A multi-section response is still recovered when its sections are gone.
+    #[test]
+    fn live_prompt_drift_recovery_target_appends_a_multi_section_response_that_is_missing() {
+        let snapshot = exchange_doc(&second_reply_exchange());
+        let live = exchange_doc("### Re: Earlier\n\nRunning.\n\n");
+
+        let target = live_prompt_drift_recovery_target(&snapshot, &live, identity_normalize)
+            .expect("the whole response is missing");
+
+        assert_eq!(target.matches("### Duplicate request tags").count(), 1);
+        assert_eq!(target.matches("### Re: Response").count(), 1);
+    }
+
+    #[test]
+    fn missing_block_committed_heading_names_only_a_block_head_holds() {
+        let snapshot = exchange_doc(&second_reply_exchange());
+        let live = exchange_doc("### Re: Earlier\n\nRunning.\n\n");
+
+        assert_eq!(
+            live_prompt_drift_missing_block_committed_heading(
+                &snapshot,
+                &live,
+                &snapshot,
+                identity_normalize,
+            )
+            .as_deref(),
+            Some("### Re: Response"),
+            "a response HEAD holds is committed history"
+        );
+        assert_eq!(
+            live_prompt_drift_missing_block_committed_heading(
+                &snapshot,
+                &live,
+                &live,
+                identity_normalize,
+            ),
+            None,
+            "an uncommitted response is this cycle's, and recovery may rebase it"
+        );
     }
 
     #[test]

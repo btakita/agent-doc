@@ -464,15 +464,26 @@ def self_test() -> None:
     preflight_start = makefile.index("release-preflight: version-sync")
     release_start = makefile.index("release-check: release-preflight", preflight_start)
     preflight = makefile[preflight_start:release_start]
-    release_check = makefile[release_start:makefile.index("\nrelease-macos-cadence-check:", release_start)]
+    batch_start = makefile.index("\ncheck-batch:", release_start)
+    release_check = makefile[release_start:makefile.index("\n", makefile.index("$(MAKE)", release_start))]
+    batch_check = makefile[batch_start:makefile.index("\nrelease-macos-cadence-check:", batch_start)]
     assert "scripts/check_editor_parity.py" in preflight
-    assert release_check.index("verify-full-check") < release_check.index("$(MAKE) check")
-    assert release_check.index("$(MAKE) check") < release_check.index("verify-tmux-ci")
-    assert release_check.index("verify-tmux-ci") < release_check.index("$(MAKE) tmux-ci")
-    tmux_start = makefile.index("tmux-ci:")
+    # `#tmuxciorphandrain`: the batch gate is the release gate, and it runs the
+    # live-tmux sweep. Sub-makes keep TEST_ISOLATION_GOALS, which keys on
+    # MAKECMDGOALS, in force for both suites.
+    assert "$(MAKE) check-batch" in release_check
+    assert batch_check.index("verify-full-check") < batch_check.index("$(MAKE) check;")
+    assert batch_check.index("$(MAKE) check;") < batch_check.index("verify-tmux-ci")
+    assert batch_check.index("verify-tmux-ci") < batch_check.index("$(MAKE) tmux-ci")
+    assert batch_check.rindex("verify-full-check") < batch_check.rindex("verify-tmux-ci")
+    assert "\ncheck-batch:\n" in batch_check, "check-batch must run its suites as sub-makes"
+    tmux_start = makefile.index("\ntmux-ci:")
     tmux_recipe = makefile[tmux_start:makefile.index("\n# Lint", tmux_start)]
     assert "AGENT_DOC_TMUX_CI_SUCCEEDED=1" in tmux_recipe
     assert "record-tmux-ci" in tmux_recipe
+    assert "unset TMUX TMUX_PANE;" in tmux_recipe
+    # A growing in-tree log must not change the fingerprint under its own run.
+    assert "\n/check.log\n" in (ROOT / ".gitignore").read_text()
     install_start = makefile.index("install-full: editor-generation-bump")
     install_recipe = makefile[install_start:makefile.index("\n# Keep every existing", install_start)]
     assert "CARGO_INSTALL_BIN_DIR_ABS :=" in makefile

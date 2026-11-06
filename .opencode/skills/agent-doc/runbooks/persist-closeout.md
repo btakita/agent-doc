@@ -32,7 +32,12 @@ dispatching relevant editor, Python, and generated-document checks. It is an
 iteration aid, not release proof.
 
 After integration and any release-version projection, run exactly one
-authoritative `make check` before `finalize` / `write --commit`. A successful
+authoritative `make check` before `finalize` / `write --commit`. A coordinator
+closing a batch it integrated from subagent branches runs `make check-batch`
+instead: `make check` skips the ignored live-tmux sweep, so a batch gated on it
+alone can look green while CI's `make tmux-ci` step keeps main red. It runs
+`make check`, then `make tmux-ci`, and reuses either proof that still matches.
+Subagents keep running `make check` on their own branch. A successful
 run records a worktree-local fingerprint of repository bytes and toolchain
 identities. `make release` first runs cheap version/editor-parity checks, then
 may reuse the full-suite and tmux-CI proofs independently while their

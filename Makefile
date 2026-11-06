@@ -1,4 +1,4 @@
-.PHONY: build build-release release release-check release-preflight release-macos-assets release-macos-cadence-check release-version release-macos-coverage-check audit-docs test sim-medium sim-net sim-fuzz cross-editor-simworld editor-parity jetbrains-classic-check jetbrains-262-check jetbrains-263-check jetbrains-keystroke-bench tmux-ci clippy check check-fast dev-check-self-test release-driver-self-test release-publication-self-test target-stable-channel-self-test installer-self-test jetbrains-repository-self-test build-priority-self-test git-env-isolation-self-test build-priority-probe python-compat-check artifact-purge-check preview-artifact-check verify-jetbrains-262-preview precommit pypi-quota-check pypi-quota-self-test homebrew-formula-self-test vscode-remote-smoke-self-test timings install install-full install-editor-plugins editor-generation-bump cleanup-build-artifacts install-hooks clean init-python python-bootstrap-test wheel publish publish-pypi bump-plugin bump-plugin-262 version-sync dev-harness-test lean tla tla-runner-self-test fuzz
+.PHONY: build build-release release release-check release-preflight release-macos-assets release-macos-cadence-check release-version release-macos-coverage-check audit-docs test sim-medium sim-net sim-fuzz cross-editor-simworld editor-parity jetbrains-classic-check jetbrains-262-check jetbrains-263-check jetbrains-keystroke-bench tmux-ci clippy check check-fast check-batch dev-check-self-test release-driver-self-test release-publication-self-test target-stable-channel-self-test installer-self-test jetbrains-repository-self-test build-priority-self-test git-env-isolation-self-test build-priority-probe python-compat-check artifact-purge-check preview-artifact-check verify-jetbrains-262-preview precommit pypi-quota-check pypi-quota-self-test homebrew-formula-self-test vscode-remote-smoke-self-test timings install install-full install-editor-plugins editor-generation-bump cleanup-build-artifacts install-hooks clean init-python python-bootstrap-test wheel publish publish-pypi bump-plugin bump-plugin-262 version-sync dev-harness-test lean tla tla-runner-self-test fuzz
 
 # `#tmuxscopesteward`: tmux built with systemd support (e.g. Arch/CachyOS tmux
 # 3.8) asks the systemd user manager for one transient `tmux-spawn-<uuid>.scope`
@@ -124,6 +124,15 @@ release-preflight: version-sync
 	@python3 scripts/check_editor_parity.py
 
 release-check: release-preflight
+	@$(MAKE) check-batch
+
+# The gate for an integrated batch, and the release's own gate
+# (`#tmuxciorphandrain`). `make check` deliberately skips the ignored live-tmux
+# sweep, so a batch that ran only `check` read green while main stayed red in CI's
+# `make tmux-ci` step. Each suite reuses its content-identical proof, and both run
+# as sub-makes, one after the other: TEST_ISOLATION_GOALS keys on MAKECMDGOALS, so
+# they would lose their test isolation as prerequisites of this target.
+check-batch:
 	@if ! python3 scripts/dev-check.py verify-full-check; then \
 		$(MAKE) check; \
 	fi
@@ -248,9 +257,12 @@ cross-editor-simworld: $(VSCODE_NODE_LOCK)
 	AGENT_DOC_BIN="$$test_agent_doc_bin" $(CARGO_CLEAN_ENV) $(CARGO_CMD) test --workspace --test cross_editor_simworld native_plugin_harnesses_peer_through_real_agent_doc_controller -- --ignored --nocapture --test-threads=1
 
 # Live tmux integration sweep. These tests are intentionally ignored in the
-# default development suite and run on CI where tmux is installed.
+# default development suite and run on CI where tmux is installed. `$$TMUX` beats
+# `TMUX_TMPDIR`, so the sweep drops it: run from a live pane, as `check-batch` is,
+# it must behave as on CI, where nothing can reach the operator's server.
 tmux-ci:
 	@set -e; \
+	unset TMUX TMUX_PANE; \
 	test_agent_doc_bin="$(CARGO_TARGET_DIR_ABS)/debug/agent-doc"; \
 	$(CARGO_CLEAN_ENV) $(CARGO_CMD) build --bin agent-doc --quiet; \
 	AGENT_DOC_BIN="$$test_agent_doc_bin" $(CARGO_CLEAN_ENV) $(CARGO_CMD) test --all-targets -- --ignored --skip native_plugin_harnesses_peer_through_real_agent_doc_controller --test-threads="$(TMUX_TEST_THREADS)"; \

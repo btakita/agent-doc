@@ -1610,7 +1610,8 @@ fn record_abandoned_worker(claim: &mut QueueClaim, now: u64) {
     if claim.worker.is_some() && claim.frozen.is_none() {
         claim.frozen = Some(agent_doc_queue::queue_claim::QueueWorkerFreeze {
             frozen_at_secs: now,
-            reason: "abandoned for requeue".to_string(),
+            reason: agent_doc_queue::queue_claim::ABANDONED_REQUEUE_REASON.to_string(),
+            abandoned: true,
         });
     }
 }
@@ -2025,11 +2026,7 @@ pub fn claim_states_for_content(file: &Path, content: &str) -> Result<Vec<QueueC
                 .is_some_and(|live| live.contains(&claim.identity))
         })
         .map(|mut claim| {
-            if claim.state != agent_doc_queue::queue_claim::QueueClaimState::Reported
-                && claim.is_expired(now)
-            {
-                claim.mark_lost();
-            }
+            claim.project_expiry(now);
             claim
         })
         .collect())

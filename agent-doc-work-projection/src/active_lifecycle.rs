@@ -110,7 +110,8 @@ pub struct ActiveLifecycle {
 
 impl ActiveLifecycle {
     /// Join the ledgers the same way the queue lifecycle projection does:
-    /// cancelled attempts are gone; an expired, unreported claim is lost; a
+    /// cancelled attempts are gone; an expired, unreported claim is lost unless
+    /// a harness freeze still holds its worker; a
     /// receipt stands for its identity only when no claim does; lineage that
     /// ended an attempt removes it.
     pub fn from_ledgers(
@@ -134,11 +135,7 @@ impl ActiveLifecycle {
                 continue;
             }
             let mut claim = claim.clone();
-            if claim.state != agent_doc_queue::queue_claim::QueueClaimState::Reported
-                && claim.is_expired(now_secs)
-            {
-                claim.mark_lost();
-            }
+            claim.project_expiry(now_secs);
             let fact = facts(&claim.owner, claim.generation)
                 .cloned()
                 .unwrap_or_default();

@@ -8158,11 +8158,7 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
         .claims
         .into_iter()
         .map(|mut claim| {
-            if claim.state != agent_doc_queue::queue_claim::QueueClaimState::Reported
-                && claim.is_expired(now)
-            {
-                claim.mark_lost();
-            }
+            claim.project_expiry(now);
             claim
         })
         .collect::<Vec<_>>();

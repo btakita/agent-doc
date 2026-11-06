@@ -125,8 +125,11 @@ pool's running, dispatching, frozen, and free counts.
   <N> --reason '<what was reported>'`), or there was no heartbeat for
   `AGENT_DOC_SUBAGENT_FROZEN_SECS` (default 1.5 times the claim TTL, so expiry
   alone is never frozen). Freezing frees the slot but keeps the claim; a later
-  report from that worker is still accepted, and a refresh on a live attempt
-  clears the freeze.
+  report from that worker is still accepted. `queue claim --refresh` with that
+  attempt's owner and generation clears the freeze, including after the claim
+  TTL, so a worker resumed through its transcript keeps the same attempt.
+  Expiry does not turn a harness freeze into lost and does not make its head
+  eligible for dispatch. Only `queue release --requeue` abandons it.
 - `agent-doc queue pool <FILE> [--json]` prints the current refill at any time.
 
 Never wait for another operator prompt to dispatch heads that are waiting for a
@@ -166,11 +169,15 @@ the partial work. A claim with no `--harness` is for this coordinator's
 harness and is refused while that harness is exhausted.
 
 Never infer running from a label, intended spawn, process poll, or heartbeat.
-`queue claim --refresh --generation <N>` only extends an already-started attempt.
-A generation binds to at most one worker and a worker to at most one live claim.
-Use generation-matched `queue release` only for that attempt; add `--requeue` to
-abandon it for a new worker. Expired attempts become visible `⚠️` lost state;
-orphaned completion evidence is `🔄` and must be reconciled, not redispatched.
+`queue claim --refresh --generation <N>` extends an already-started attempt and
+revives one that expired with its worker still bound, including a harness freeze
+whose worker resumed through its transcript. It does not revive an explicit
+requeue. A generation binds to at most one worker and a worker to at most one
+live claim. Use generation-matched `queue release` only for that attempt; add
+`--requeue` to abandon it for a new worker. Expired attempts become visible `⚠️`
+lost state, except a harness freeze, which stays the same attempt until that
+refresh or an explicit requeue. Orphaned completion evidence is `🔄` and must be
+reconciled, not redispatched.
 
 Claimed heads do not count toward continuation and must not be redispatched. If
 all remaining heads are claimed or operator-gated, end quietly and wait for the

@@ -467,6 +467,67 @@ mod tests {
         assert!(!live.is_actionable(), "{live:#?}");
     }
 
+    /// `#frozenclaimrefreshrevive`: a harness freeze that expires with its
+    /// worker still bound stays that attempt. Refresh revives it; the refusal
+    /// for any other heartbeat does not call the head dispatchable, and the
+    /// row is not offered again.
+    #[test]
+    fn an_expired_frozen_attempt_is_revived_not_redispatched() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("task.md");
+        let content = pool_doc("subagents=1", &["do [#a]", "do [#b]"]);
+        std::fs::write(&file, &content).unwrap();
+        let clock = crate::queue_claim::claim_clock_now_secs();
+        {
+            let _pin = crate::queue_claim::pin_claim_clock_for_current_thread(clock);
+            start(&file, "do [#a]", "subagent:a");
+            crate::queue_claim::freeze_attempt(&file, "do [#a]", Some(1), "session restarted")
+                .unwrap();
+        }
+        let expired = clock + 7_300;
+        let _pin = crate::queue_claim::pin_claim_clock_for_current_thread(expired);
+        let states = crate::queue_claim::claim_states_for_content(&file, &content).unwrap();
+        let frozen_claim = states
+            .iter()
+            .find(|claim| claim.item_text == "do [#a]")
+            .expect("frozen attempt");
+        assert_eq!(
+            frozen_claim.state,
+            agent_doc_queue::queue_claim::QueueClaimState::Running,
+            "expiry must not turn a harness freeze into lost"
+        );
+        assert!(frozen_claim.frozen.is_some());
+        assert!(frozen_claim.blocks_dispatch(expired));
+        let refill = pool_refill_for_content(&file, &content, PoolRefillTrigger::Frozen).unwrap();
+        assert!(
+            refill.next_heads.iter().all(|head| head.item != "do [#a]"),
+            "the frozen row is not redispatched: {refill:#?}"
+        );
+        assert_eq!(refill.frozen.len(), 1, "{refill:#?}");
+        let text = refill.render().unwrap();
+        assert!(text.contains("not eligible for dispatch"), "{text}");
+        let wrong =
+            crate::queue_claim::refresh_attempt(&file, "do [#a]", "subagent:a", 7200, Some(2))
+                .unwrap_err();
+        assert!(
+            wrong
+                .to_string()
+                .contains("NOT eligible for dispatch again"),
+            "{wrong}"
+        );
+        let revived =
+            crate::queue_claim::refresh_attempt(&file, "do [#a]", "subagent:a", 7200, Some(1))
+                .unwrap();
+        assert_eq!(
+            revived.state,
+            agent_doc_queue::queue_claim::QueueClaimState::Running
+        );
+        assert!(revived.frozen.is_none(), "the heartbeat clears the freeze");
+        assert_eq!(revived.generation, 1);
+        assert_eq!(revived.heartbeat_at_secs, Some(expired));
+    }
+
     /// `#poolidleheartbeat`, through the real ledger: nothing before the batch
     /// has had its coalesce window, one wake identity while the due set stands,
     /// nothing once the coordinator refreshed, and a new identity at expiry.

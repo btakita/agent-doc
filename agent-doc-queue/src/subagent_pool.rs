@@ -26,7 +26,11 @@
 //!   the worker stopped: a recorded stop (`queue freeze`), or no heartbeat past
 //!   [`DEFAULT_WORKER_FROZEN_SECS`]. A harness notification that a worker is
 //!   waiting on its own background work is proof of life, so the coordinator
-//!   records it as a heartbeat (`queue claim --refresh`), never as a freeze;
+//!   records it as a heartbeat (`queue claim --refresh`), never as a freeze.
+//!   A harness freeze that then passes its claim TTL still keeps the claim:
+//!   it is not `Lost`, its row is not offered, and the exact refresh revives
+//!   it when that worker resumes through its transcript
+//!   (`#frozenclaimrefreshrevive`). Only `queue release --requeue` abandons it;
 //! * `Reported` attempts, unbound lapsed attempts, and attempts abandoned with
 //!   `queue release --requeue` hold no slot.
 //!
@@ -245,15 +249,17 @@ pub fn classify_attempt(claim: &QueueClaim, now_secs: u64, frozen_secs: u64) -> 
         };
     }
     if let Some(freeze) = &claim.frozen {
-        // A recorded stop on a lapsed attempt is already recovery debt.
-        return if lapsed {
-            AttemptSlot::Free
-        } else {
-            AttemptSlot::Frozen(WorkerFrozen::HarnessReported {
-                frozen_at_secs: freeze.frozen_at_secs,
-                reason: freeze.reason.clone(),
-            })
-        };
+        // An explicit requeue is recovery debt once the attempt has lapsed.
+        // A harness freeze is not: the worker may resume through its
+        // transcript, so expiry must not drop the claim
+        // (`#frozenclaimrefreshrevive`).
+        if freeze.is_abandon() && lapsed {
+            return AttemptSlot::Free;
+        }
+        return AttemptSlot::Frozen(WorkerFrozen::HarnessReported {
+            frozen_at_secs: freeze.frozen_at_secs,
+            reason: freeze.reason.clone(),
+        });
     }
     if let Some(last) = last_heartbeat_secs(claim) {
         let stale_for_secs = now_secs.saturating_sub(last);
@@ -633,7 +639,7 @@ impl PoolRefill {
         }
         for worker in &self.frozen {
             out.push_str(&format!(
-                "\n  frozen: {:?} (worker {}, generation {}): {}; its slot is free and its claim is kept",
+                "\n  frozen: {:?} (worker {}, generation {}): {}; its slot is free and its claim is kept. `queue claim --refresh` with this owner and generation revives a transcript resume, including after the claim TTL; the head is not eligible for dispatch",
                 worker.item,
                 worker.worker_id,
                 worker.generation,
@@ -811,6 +817,7 @@ mod tests {
         stopped.frozen = Some(QueueWorkerFreeze {
             frozen_at_secs: now,
             reason: "ended without a result".to_string(),
+            abandoned: false,
         });
         let dispatching = claim("dispatching", QueueClaimState::Claimed, None);
         let reported = claim("reported", QueueClaimState::Reported, Some(1));
@@ -969,12 +976,27 @@ mod tests {
         ));
         claim.frozen = Some(QueueWorkerFreeze {
             frozen_at_secs: 600,
-            reason: "abandoned for requeue".to_string(),
+            reason: crate::queue_claim::ABANDONED_REQUEUE_REASON.to_string(),
+            abandoned: true,
         });
         assert_eq!(
             classify_attempt(&claim, expired_at, frozen_secs),
             AttemptSlot::Free
         );
+        claim.frozen = Some(QueueWorkerFreeze {
+            frozen_at_secs: 600,
+            reason: "ended without a result".to_string(),
+            abandoned: false,
+        });
+        assert!(
+            matches!(
+                classify_attempt(&claim, expired_at, frozen_secs),
+                AttemptSlot::Frozen(WorkerFrozen::HarnessReported { .. })
+            ),
+            "a harness freeze stays frozen after the TTL"
+        );
+        assert!(!occupies_pool_slot(&claim, expired_at, frozen_secs));
+        assert!(claim.blocks_dispatch(expired_at));
     }
 
     /// A heartbeat falls due halfway through the claim window, not at expiry.

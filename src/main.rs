@@ -5354,10 +5354,12 @@ enum QueueAction {
         /// Extend the TTL of an already-started claim `--owner` holds on
         /// `--item` (a heartbeat for a long-running worker). With the exact
         /// `--generation` it also revives that attempt if it expired with its
-        /// worker still bound and no recorded stop. Refuses, without creating
-        /// or promoting a claim, when the item is unclaimed, unstarted,
-        /// otherwise expired, or another owner holds it. Also adopts the claim
-        /// into the calling harness session after the coordinator `/clear`ed.
+        /// worker still bound, including a harness `queue freeze` whose worker
+        /// resumed through its transcript. It does not revive an explicit
+        /// `queue release --requeue`. Refuses, without creating or promoting a
+        /// claim, when the item is unclaimed, unstarted, otherwise expired, or
+        /// another owner holds it. Also adopts the claim into the calling
+        /// harness session after the coordinator `/clear`ed.
         #[arg(long)]
         refresh: bool,
         /// Exact generation printed by the original claim. Required with
@@ -5444,10 +5446,12 @@ enum QueueAction {
     /// background work is proof of life: run `queue claim --refresh` for that,
     /// never this. The worker's work-pool slot is freed so the coordinator
     /// refills it now; its claim, generation, and worker binding are kept, so
-    /// a later report from the same worker is still accepted and a `queue
-    /// claim --refresh` heartbeat on a live attempt clears the freeze. An
-    /// attempt that expired with its worker bound may be frozen too. Prints
-    /// the pool refill (next heads' claim / brief / start commands).
+    /// a later report from the same worker is still accepted and `queue claim
+    /// --refresh` with the exact owner and generation clears the freeze,
+    /// including after the claim TTL. Expiry does not turn that frozen attempt
+    /// into lost or make its head eligible for dispatch. An attempt that
+    /// expired with its worker bound may be frozen too. Prints the pool refill
+    /// (next heads' claim / brief / start commands).
     #[command(after_help = agent_doc_frontmatter::frontmatter::queue_marker_legend_help())]
     Freeze {
         /// Path to the session document

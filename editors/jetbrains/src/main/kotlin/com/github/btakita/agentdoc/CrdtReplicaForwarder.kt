@@ -510,7 +510,23 @@ class CrdtReplicaForwarder(
         if (!attached) return null
         val started = System.nanoTime()
         val applyStarted = System.nanoTime()
-        if (!node.applyUpdate(clientId, update)) return null
+        when (node.applyUpdateOutcome(clientId, update)) {
+            ReplicaApplyOutcome.Applied -> Unit
+            ReplicaApplyOutcome.DivergentHistory -> {
+                // `#divergentapplyreregister`: the native replica refused the
+                // update whole (FFI -4, `#replicapositiondrift`) because it was
+                // encoded against another CRDT history. Nothing was applied.
+                // Every later delivery to this replica is from that history
+                // too, so mark it; the manager re-registers from the buffer.
+                historyDivergent = true
+                log.warn(
+                    "[crdt-replica] remote update refused as divergent CRDT history for " +
+                        "${File(filePath).name}; update_bytes=${update.size} lineage=${lineage ?: "none"}",
+                )
+                return null
+            }
+            ReplicaApplyOutcome.Failed -> return null
+        }
         pushedVersion = node.stateVector()
         logSlow("native.applyUpdate", applyStarted, details = "update_bytes=${update.size}")
         val textStarted = System.nanoTime()
@@ -534,9 +550,22 @@ class CrdtReplicaForwarder(
         return knownReplicaText
     }
 
+    /**
+     * `#divergentapplyreregister`: true once a remote update was refused because
+     * it was encoded against a different CRDT history than this replica holds.
+     * The replica's own state belongs to a retired history from then on, so it
+     * is never offered as a resume state ([captureResumeState]).
+     */
+    @Volatile
+    var historyDivergent: Boolean = false
+        private set
+
     /** Capture a local replica handoff before replacement/native unload. */
     fun captureResumeState(): ReplicaResumeState? {
         if (!attached) return null
+        // A divergent replica's frontier names op ids of a retired history; a
+        // resume against it would ask the controller for a cross-history delta.
+        if (historyDivergent) return null
         val encodedState = node.encodeState() ?: return null
         val stateVector = node.stateVector() ?: return null
         return ReplicaResumeState(encodedState.copyOf(), stateVector.copyOf(), historyLineage)
@@ -1235,6 +1264,30 @@ class CpSocketReplicaTransport(
     }
 }
 
+/** Outcome of applying one remote CRDT update to the local replica. */
+enum class ReplicaApplyOutcome {
+    Applied,
+
+    /**
+     * `#replicapositiondrift`: the update restates an op id this replica stores
+     * with a different character or origin, so it was encoded against another
+     * CRDT history. Nothing was applied; the editor must re-register.
+     */
+    DivergentHistory,
+    Failed,
+}
+
+/** `agent_doc_replica_apply_update` return code for a divergent history (`#replicapositiondrift`). */
+internal const val REPLICA_APPLY_DIVERGENT_HISTORY = -4
+
+/** Map an `agent_doc_replica_apply_update` return code to its outcome. */
+internal fun replicaApplyOutcomeUtil(code: Int): ReplicaApplyOutcome =
+    when (code) {
+        0 -> ReplicaApplyOutcome.Applied
+        REPLICA_APPLY_DIVERGENT_HISTORY -> ReplicaApplyOutcome.DivergentHistory
+        else -> ReplicaApplyOutcome.Failed
+    }
+
 /**
  * The local CRDT replica node. The production implementation ([NativeReplicaNode])
  * delegates every call to the shared Rust cdylib so there is NO CRDT logic in
@@ -1244,6 +1297,13 @@ interface ReplicaNode {
     fun open(clientId: Long, initState: ByteArray?): Boolean
     fun applyLocal(clientId: Long, offset: Int, deleteLen: Int, insert: String): Boolean
     fun applyUpdate(clientId: Long, update: ByteArray): Boolean
+
+    /**
+     * [applyUpdate], keeping the native refusal kind. A node that cannot tell a
+     * divergent history apart reports every refusal as [ReplicaApplyOutcome.Failed].
+     */
+    fun applyUpdateOutcome(clientId: Long, update: ByteArray): ReplicaApplyOutcome =
+        if (applyUpdate(clientId, update)) ReplicaApplyOutcome.Applied else ReplicaApplyOutcome.Failed
     fun encodeState(): ByteArray?
     fun stateVector(): ByteArray? = byteArrayOf()
     fun diff(theirStateVector: ByteArray): ByteArray? = encodeState()
@@ -1286,13 +1346,16 @@ class NativeReplicaNode : ReplicaNode {
         }
     }
 
-    override fun applyUpdate(clientId: Long, update: ByteArray): Boolean {
-        val lib = AgentDocLib.get() ?: return false
+    override fun applyUpdate(clientId: Long, update: ByteArray): Boolean =
+        applyUpdateOutcome(clientId, update) == ReplicaApplyOutcome.Applied
+
+    override fun applyUpdateOutcome(clientId: Long, update: ByteArray): ReplicaApplyOutcome {
+        val lib = AgentDocLib.get() ?: return ReplicaApplyOutcome.Failed
         return try {
-            lib.agent_doc_replica_apply_update(clientId, update, update.size.toLong()) == 0
+            replicaApplyOutcomeUtil(lib.agent_doc_replica_apply_update(clientId, update, update.size.toLong()))
         } catch (e: Throwable) {
             log.debug("[native] replica_apply_update failed: ${e.message}")
-            false
+            ReplicaApplyOutcome.Failed
         }
     }
 

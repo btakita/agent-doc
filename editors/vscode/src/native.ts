@@ -1024,6 +1024,24 @@ function copyStateBuffer(ptr: any, len: number): Uint8Array | null {
     }
 }
 
+/**
+ * Outcome of applying one remote CRDT update to the local replica. `divergent`
+ * is the FFI's -4 (`#replicapositiondrift`): the update restates an op id the
+ * replica stores with a different character or origin, so it was encoded
+ * against another CRDT history and nothing was applied.
+ */
+export type ReplicaApplyOutcome = 'applied' | 'divergent' | 'failed';
+
+/** `agent_doc_replica_apply_update` return code for a divergent CRDT history. */
+export const REPLICA_APPLY_DIVERGENT_HISTORY = -4;
+
+/** Map an `agent_doc_replica_apply_update` return code to its outcome. */
+export function replicaApplyOutcome(code: number): ReplicaApplyOutcome {
+    if (code === 0) return 'applied';
+    if (code === REPLICA_APPLY_DIVERGENT_HISTORY) return 'divergent';
+    return 'failed';
+}
+
 export class NativeReplicaNode {
     private clientId: number | null = null;
 
@@ -1057,16 +1075,21 @@ export class NativeReplicaNode {
     }
 
     applyUpdate(clientId: number, update: Uint8Array): boolean {
-        if (update.length === 0) return true;
-        if (!ensureLoaded(this.projectRoot)) return false;
+        return this.applyUpdateOutcome(clientId, update) === 'applied';
+    }
+
+    /** `#divergentapplyreregister`: [applyUpdate] keeping the FFI's -4 refusal kind. */
+    applyUpdateOutcome(clientId: number, update: Uint8Array): ReplicaApplyOutcome {
+        if (update.length === 0) return 'applied';
+        if (!ensureLoaded(this.projectRoot)) return 'failed';
         bindFunctions();
-        if (!_replica_apply_update) return false;
+        if (!_replica_apply_update) return 'failed';
         try {
             const bytes = Buffer.from(update);
-            return _replica_apply_update(clientId, bytes, bytes.length) === 0;
+            return replicaApplyOutcome(_replica_apply_update(clientId, bytes, bytes.length));
         } catch (e: any) {
             console.warn(`[agent-doc/native] replica_apply_update error: ${e.message}`);
-            return false;
+            return 'failed';
         }
     }
 

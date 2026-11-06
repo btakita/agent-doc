@@ -8,6 +8,8 @@ coalescedReplicaTextChange,
 controllerReplicaPayload,
     DELIVERY_HISTORY_LINEAGE_MISMATCH,
     deliveryHistoryLineageMismatch,
+    DIVERGENT_HISTORY_REREGISTER_MIN_INTERVAL_MS,
+    divergentHistoryReregisterDue,
   localReplicaBaselineDecision,
     parsePullDelivery,
     parsePullResponse,
@@ -24,6 +26,7 @@ controllerReplicaPayload,
     type ReplicaTransport,
     utf16RangeToCodePoints,
 } from './crdtReplica.js';
+import { replicaApplyOutcome, type ReplicaApplyOutcome } from './native.js';
 
 describe('ControllerSocketReplicaTransport', () => {
     it('carries the process-scoped editor PID in every replica payload', () => {
@@ -1244,5 +1247,179 @@ describe('delivery history lineage (#deliverylineagestamp)', () => {
         const replacement = new CrdtReplicaForwarder('plan.md', 'vscode:lineage-2', node, second, resume);
         assert.equal(await replacement.register(), true);
         assert.deepEqual(second.registeredHistories, ['history-a']);
+/** A replica node whose remote applies refuse as a divergent CRDT history. */
+class DivergentNode extends FakeNode {
+    stateVector(): Uint8Array | null {
+        return Buffer.from([7]);
+    }
+
+    applyUpdateOutcome(clientId: number, update: Uint8Array): ReplicaApplyOutcome {
+        this.updates.push(Buffer.from(update));
+        return 'divergent';
+    }
+}
+
+describe('#divergentapplyreregister a divergent-history delivery re-registers from the buffer', () => {
+    const filePath = '/work/plan.md';
+    const peerUpdate: ReplicaRemoteUpdate = {
+        patchId: 'crdt:1:42:1',
+        origin: 1,
+        target: 42,
+        generation: 1,
+        update: Buffer.from([5]),
+    };
+
+    it('maps the FFI -4 return code to a divergent outcome', () => {
+        assert.strictEqual(replicaApplyOutcome(0), 'applied');
+        assert.strictEqual(replicaApplyOutcome(-4), 'divergent');
+        assert.strictEqual(replicaApplyOutcome(-2), 'failed');
+        assert.strictEqual(replicaApplyOutcome(-3), 'failed');
+        assert.strictEqual(replicaApplyOutcome(-99), 'failed');
+    });
+
+    it('allows one re-register per guard window and permits a clock rollback', () => {
+        assert.strictEqual(divergentHistoryReregisterDue(100_000, undefined), true);
+        assert.strictEqual(divergentHistoryReregisterDue(100_000, 100_000), false);
+        assert.strictEqual(
+            divergentHistoryReregisterDue(100_000 + DIVERGENT_HISTORY_REREGISTER_MIN_INTERVAL_MS - 1, 100_000),
+            false,
+        );
+        assert.strictEqual(
+            divergentHistoryReregisterDue(100_000 + DIVERGENT_HISTORY_REREGISTER_MIN_INTERVAL_MS, 100_000),
+            true,
+        );
+        assert.strictEqual(divergentHistoryReregisterDue(90_000, 100_000), true);
+    });
+
+    it('marks the forwarder divergent and withholds its resume state', async () => {
+        const node = new DivergentNode('base');
+        const forwarder = new CrdtReplicaForwarder(filePath, 'vscode-test', node, new FakeTransport());
+        assert.strictEqual(await forwarder.register(), true);
+        assert.strictEqual(forwarder.historyDivergent, false);
+        assert.notStrictEqual(forwarder.captureResumeState(), null, 'a healthy replica offers its resume state');
+
+        assert.strictEqual(forwarder.applyRemoteUpdate(Buffer.from([5])), null);
+        assert.strictEqual(forwarder.historyDivergent, true);
+        assert.strictEqual(forwarder.captureResumeState(), null);
+    });
+
+    it('an ordinary apply failure is not a divergent history', async () => {
+        const node = new FakeNode('base');
+        node.applyUpdate = () => false;
+        const forwarder = new CrdtReplicaForwarder(filePath, 'vscode-test', node, new FakeTransport());
+        assert.strictEqual(await forwarder.register(), true);
+
+        assert.strictEqual(forwarder.applyRemoteUpdate(Buffer.from([5])), null);
+        assert.strictEqual(forwarder.historyDivergent, false);
+    });
+
+    it('re-registers immediately with a full bootstrap and never projects the refused delivery', async (t) => {
+        const transport = new FakeTransport();
+        transport.pending = [peerUpdate];
+        const nodes: FakeNode[] = [new DivergentNode('base'), new FakeNode('base')];
+        const manager = new CrdtReplicaManager({
+            projectRoot: '/work',
+            identity: 'vscode-test',
+            transport,
+            nodeFactory: () => nodes.shift() ?? new FakeNode('base'),
+            listDocuments: () => [],
+            currentText: () => 'base',
+            applyText: async () => {
+                assert.fail('a divergent-history delivery must never reach the editor');
+            },
+        });
+
+        t.after(() => manager.dispose());
+
+        assert.strictEqual(await manager.attachDocument(filePath, 'base'), true);
+        await manager.drainRemoteUpdates(filePath);
+
+        assert.strictEqual(transport.registerCount, 2, 'the refusal re-registers in the same drain');
+        assert.deepStrictEqual(transport.deregistered, [filePath], 'the divergent member is retired');
+        assert.strictEqual(
+            transport.registerStateVectors[1],
+            null,
+            'the replacement never resumes the divergent history',
+        );
+    });
+
+    it('guards against a re-register loop when the controller keeps diverging', async (t) => {
+        const transport = new FakeTransport();
+        transport.pending = [peerUpdate];
+        let nowMs = 1_000_000;
+        const warnings: string[] = [];
+        const manager = new CrdtReplicaManager({
+            projectRoot: '/work',
+            identity: 'vscode-test',
+            transport,
+            nodeFactory: () => new DivergentNode('base'),
+            listDocuments: () => [],
+            currentText: () => 'base',
+            applyText: async () => {
+                assert.fail('a divergent-history delivery must never reach the editor');
+            },
+            now: () => nowMs,
+            logger: { debug: () => {}, warn: (message) => warnings.push(message) },
+        });
+
+        t.after(() => manager.dispose());
+
+        assert.strictEqual(await manager.attachDocument(filePath, 'base'), true);
+        await manager.drainRemoteUpdates(filePath);
+        assert.strictEqual(transport.registerCount, 2);
+
+        nowMs += DIVERGENT_HISTORY_REREGISTER_MIN_INTERVAL_MS - 1;
+        await manager.drainRemoteUpdates(filePath);
+        await manager.drainRemoteUpdates(filePath);
+        assert.strictEqual(transport.registerCount, 2, 'inside the window the refusal must not re-register again');
+        assert.ok(warnings.some((message) => message.includes('divergent-history re-register suppressed')));
+
+        nowMs += 1;
+        await manager.drainRemoteUpdates(filePath);
+        assert.strictEqual(transport.registerCount, 3, 'the next window allows one more re-register');
+    });
+
+    it('retries a suppressed re-register even after the refused delivery is gone', async (t) => {
+        const transport = new FakeTransport();
+        transport.pending = [peerUpdate];
+        let nowMs = 1_000_000;
+        const divergentReplacement = new DivergentNode('base');
+        const nodes: FakeNode[] = [new DivergentNode('base'), divergentReplacement];
+        const manager = new CrdtReplicaManager({
+            projectRoot: '/work',
+            identity: 'vscode-test',
+            transport,
+            nodeFactory: () => nodes.shift() ?? new FakeNode('base'),
+            listDocuments: () => [],
+            currentText: () => 'base',
+            applyText: async () => {
+                assert.fail('a divergent-history delivery must never reach the editor');
+            },
+            now: () => nowMs,
+        });
+
+        t.after(() => manager.dispose());
+
+        assert.strictEqual(await manager.attachDocument(filePath, 'base'), true);
+        await manager.drainRemoteUpdates(filePath);
+        await manager.drainRemoteUpdates(filePath);
+        assert.strictEqual(transport.registerCount, 2, 'the second refusal is inside the window');
+        assert.strictEqual(divergentReplacement.updates.length, 1, 'the replacement refused the delivery once');
+
+        await manager.drainRemoteUpdates(filePath);
+        assert.strictEqual(
+            divergentReplacement.updates.length,
+            1,
+            'nothing is applied to a replica already known to hold another history',
+        );
+
+        transport.pending = [];
+        nowMs += DIVERGENT_HISTORY_REREGISTER_MIN_INTERVAL_MS;
+        await manager.drainRemoteUpdates(filePath);
+        assert.strictEqual(
+            transport.registerCount,
+            3,
+            'a replica known to hold another history must not stay attached once its delivery is gone',
+        );
     });
 });

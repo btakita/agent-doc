@@ -1204,6 +1204,32 @@ internal fun pullDeliveryRequestsReplicaRefreshUtil(delivery: ReplicaPullDeliver
     delivery is ReplicaPullDelivery.Unavailable
 
 /**
+ * `#divergentapplyreregister`: minimum gap between immediate re-registers of one
+ * document after its replica refused a delivery as a divergent CRDT history
+ * (FFI -4). One re-register installs a full bootstrap in the controller's
+ * current history, so a second refusal inside the window means the controller
+ * keeps encoding against another history; re-registering again would only
+ * repeat a full-bootstrap round trip. Inside the window the refusal falls back
+ * to the controller's own path (redelivery budget, then lineage retirement and
+ * a `missing_replica` pull refusal).
+ */
+internal const val DIVERGENT_HISTORY_REREGISTER_MIN_INTERVAL_MS = 30_000L
+
+/**
+ * Whether a divergent-history re-register is allowed now. Pure on purpose: the
+ * loop guard is asserted by calling it, not by scanning source.
+ *
+ * @param lastAttemptMs epoch millis of the previous divergent-history re-register
+ *   attempt for this document, or `null` when there has been none.
+ */
+internal fun divergentHistoryReregisterDueUtil(nowMs: Long, lastAttemptMs: Long?): Boolean =
+    lastAttemptMs == null ||
+        // A clock rollback permits the re-register instead of suppressing it until
+        // the wall clock catches up with the stamp.
+        nowMs < lastAttemptMs ||
+        nowMs - lastAttemptMs >= DIVERGENT_HISTORY_REREGISTER_MIN_INTERVAL_MS
+
+/**
  * Count only work that advanced a pulled remote frontier toward a visible receipt.
  *
  * A pull can return the same retained update indefinitely while the editor baseline
@@ -1327,6 +1353,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         ConcurrentHashMap<String, ReplicaRegistrationRetryProjection>()
     private val registerRetryTasks = ConcurrentHashMap<String, ScheduledFuture<*>>()
     private val projectionRecoveryReregisterStartedAtMs = ConcurrentHashMap<String, Long>()
+    private val divergentHistoryReregisterAtMs = ConcurrentHashMap<String, Long>()
     private val consecutiveNoOpReschedules = AtomicInteger(0)
     private val remoteDrainBackoffScheduled = AtomicBoolean(false)
     private val remoteEditorApplies =
@@ -2736,6 +2763,15 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             }
             val updates = (delivery as ReplicaPullDelivery.Deltas).updates
             updateCount = updates.size
+            if (forwarder.historyDivergent) {
+                // `#divergentapplyreregister`: an earlier drain deferred or
+                // suppressed this replica's re-register. The mark outlives the
+                // refused delivery, so retry even when nothing is pending now;
+                // applying anything to this replica would still be wrong.
+                deliveryKind = "divergent"
+                if (reregisterAfterDivergentHistory(filePath, forwarder, expectedText)) usefulWork = 1
+                return usefulWork
+            }
             if (updates.isEmpty()) {
                 if (retainedCanonicalProjectionPaths.contains(filePath)) {
                     val canonical = forwarder.replicaText()
@@ -2770,6 +2806,15 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 peerUpdateCount++
                 converged = forwarder.applyRemoteUpdate(update.update) ?: break
                 appliedRemoteUpdates.add(update)
+            }
+            if (forwarder.historyDivergent) {
+                // `#divergentapplyreregister`: never project a replica that holds
+                // another CRDT history, even the updates it applied before the
+                // refusal; re-register from the buffer now instead of waiting
+                // out the controller's redelivery budget.
+                deliveryKind = "divergent"
+                if (reregisterAfterDivergentHistory(filePath, forwarder, expectedText)) usefulWork = 1
+                return usefulWork
             }
 
             val targetText = converged
@@ -4789,6 +4834,74 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                     "reason=$reason",
             )
         }
+    }
+
+    /**
+     * `#divergentapplyreregister`: the replica refused a delivery encoded against
+     * another CRDT history (FFI -4, `#replicapositiondrift`). Re-register from the
+     * buffer immediately, mirroring the Zed sidecar, instead of letting the
+     * refused delivery sit until the controller's redelivery budget retires the
+     * member (~25 s of a stale editor).
+     *
+     * The registration installs a full bootstrap from the controller canonical:
+     * the divergent replica's state names op ids of a retired history and is
+     * never offered as a resume. The buffer stays authoritative through the
+     * ordinary registration decision (adopt, merge forward, or hold), and the
+     * swap is fenced on the buffer still matching [editorText].
+     *
+     * Loop guard: at most one such re-register per document per
+     * [DIVERGENT_HISTORY_REREGISTER_MIN_INTERVAL_MS]. The window is stamped only
+     * when a registration is actually attempted, so a cheap refusal (the operator
+     * typed since the pull) never spends it.
+     */
+    private fun reregisterAfterDivergentHistory(
+        filePath: String,
+        staleForwarder: CrdtReplicaForwarder,
+        editorText: String,
+    ): Boolean {
+        if (forwarders[filePath] !== staleForwarder) return false
+        val fileName = File(filePath).name
+        if (hasPendingLocal(filePath) || editorBufferText(filePath) != editorText) {
+            log.info(
+                "[crdt-replica] divergent-history re-register deferred for $fileName; " +
+                    "reason=editor_not_stable (#divergentapplyreregister)",
+            )
+            requestRemoteDrain(filePath, "divergent-history-editor-not-stable")
+            return false
+        }
+        val now = System.currentTimeMillis()
+        val lastAttemptMs = divergentHistoryReregisterAtMs[filePath]
+        if (!divergentHistoryReregisterDueUtil(now, lastAttemptMs)) {
+            log.warn(
+                "[crdt-replica] divergent-history re-register suppressed for $fileName; " +
+                    "since_last_ms=${now - (lastAttemptMs ?: now)} " +
+                    "min_interval_ms=$DIVERGENT_HISTORY_REREGISTER_MIN_INTERVAL_MS " +
+                    "fallback=controller_lineage_retirement (#divergentapplyreregister)",
+            )
+            return false
+        }
+        divergentHistoryReregisterAtMs[filePath] = now
+        val replacement = forwarderFor(
+            filePath = filePath,
+            initialEditorText = editorText,
+            bypassRegisterBackoff = false,
+            replaceCached = true,
+            expectedEditorTextAtSwap = editorText,
+            bootstrapFromControllerCanonical = true,
+        )
+        if (replacement != null && replacement !== staleForwarder) {
+            log.info(
+                "[crdt-replica] re-registered $fileName from the buffer after a divergent-history " +
+                    "delivery (#divergentapplyreregister)",
+            )
+            requestRemoteDrain(filePath, "divergent-history-reregistered")
+            return true
+        }
+        log.warn(
+            "[crdt-replica] divergent-history re-register did not commit for $fileName; " +
+                "reason=${attachFailureReasons[filePath] ?: "swap_refused"} (#divergentapplyreregister)",
+        )
+        return false
     }
 
     private fun shouldAttemptRegister(filePath: String): Boolean {

@@ -2249,6 +2249,32 @@ history. A missing value on either side is unknown, never a mismatch, so an
 older controller (no stamp) or an older editor (no registration value, no
 request field) keeps its previous behaviour.
 
+**A divergent-history refusal re-registers at once (`#divergentapplyreregister`).**
+JetBrains (the classic package and the modular 262/263 backends, which compile
+the same sources) and VS Code read `-4` as its own outcome instead of a plain
+apply failure. The forwarder marks itself divergent; the remote drain then
+re-registers from the buffer in the same pass rather than leaving the refused
+delivery pending until the controller's redelivery budget (about 25 s) retires
+the member. Rules:
+
+- The drain never projects a divergent replica's text, including updates it
+  applied earlier in the same batch.
+- The mark outlives the refused delivery. A later drain retries a deferred or
+  suppressed re-register before applying anything, even with nothing pending.
+- A divergent forwarder never offers its state as a resume state: its frontier
+  names op ids of the retired history. The replacement is a full bootstrap from
+  the controller canonical, and the ordinary registration decision keeps the
+  buffer authoritative (adopt, merge forward, or hold).
+- The swap is fenced on the buffer still equal to the drain's shadow with no
+  pending local edit. A buffer that moved defers the re-register without
+  spending the loop guard.
+- Loop guard: at most one divergent-history re-register per document per
+  30 s, stamped when a registration is attempted. A second refusal inside the
+  window means the controller keeps encoding against another history, so the
+  editor stops paying full-bootstrap round trips and falls back to the
+  controller's lineage retirement (`missing_replica`). A wall-clock rollback
+  permits the re-register.
+
 The answer is the canonical-relative splices that produce the merge, so the
 plugin forwards them exactly like a translated batch: on the attached endpoint
 when it already holds that canonical, otherwise on a replacement registered at

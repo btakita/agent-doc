@@ -254,7 +254,12 @@ until that margin holds.
 
 `#wallclockassertsweep` applied that rule to the remaining short bounds. A 1-5s
 polling deadline, `recv_timeout`, or child-exit wait in test code is a 30s hang
-ceiling (`blocking_effect_gate::HANG_CEILING` in the controller crate). An "X
+ceiling (`blocking_effect_gate::HANG_CEILING` in the controller crate).
+`#wallclockassertsweep2` uses that ceiling for the supervisor-process waits
+outside `reexec_bridge`: the detached-child exit callback, the stdin-writer
+stop join, and the route-owned completion probe loops. The forwarding gate's
+"still held" check is ordering, not a sample: on Linux the contender must be
+parked in `SYS_futex` before the forwarding guard is dropped. An "X
 returns without waiting for Y" property holds Y until X has returned (a wedged
 connect worker, an unanswered actor socket, a bounded writeback job), so a
 regressed X can only return after Y's hang-ceiling release and fails on the

@@ -164,8 +164,10 @@ mod tests {
         reap_detached_observed(child, move |observed_pid, result| {
             tx.send((observed_pid, result)).unwrap();
         });
+        // `#wallclockassertsweep2`: `false` has already exited. This bound fails
+        // only when the reaper never reports that exit; it is not a latency budget.
         let (observed_pid, status) = rx
-            .recv_timeout(std::time::Duration::from_secs(2))
+            .recv_timeout(std::time::Duration::from_secs(30))
             .expect("observed exit callback");
         assert_eq!(observed_pid, pid);
         assert!(!status.expect("wait succeeds").success());

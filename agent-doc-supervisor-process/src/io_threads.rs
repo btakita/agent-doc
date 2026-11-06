@@ -474,8 +474,10 @@ mod tests {
         std::thread::spawn(move || {
             let _ = joined_tx.send(handle.join());
         });
+        // `#wallclockassertsweep2`: a hang ceiling. The stop pipe must wake the
+        // blocking poll; a loaded host may deliver that wake long after 1s.
         let result = joined_rx
-            .recv_timeout(std::time::Duration::from_secs(1))
+            .recv_timeout(std::time::Duration::from_secs(30))
             .expect("stop pipe must interrupt the raw-fd stdin poll before a restart prompt");
         assert!(
             result.is_ok(),

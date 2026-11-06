@@ -1190,6 +1190,20 @@ the dispatch actor and produce receipts.
   it safe. This controller-owned fence is the final check before route input,
   so a stale `Ready` projection cannot inject into a long-running turn even if a
   route-side probe raced it.
+- That pane observation is bounded and load-aware (`#recoverableautoretry`,
+  `#ctlprobeloadbudget`). Only a tmux *timeout* is re-read (any other capture
+  error is an answer and fails closed at once), at most three reads, each read
+  doubling the previous budget: 250ms -> 500ms -> 1s on an unloaded host. The
+  budget scales linearly with the measured per-core 1-minute load average
+  (`getloadavg` / available CPUs) when that exceeds 1.0, up to 4x, and the sum
+  of every read's budget never exceeds a hard 3s ceiling, charged from granted
+  budgets rather than a wall clock, so a wedged tmux server still fails closed
+  inside the 5s dispatch RPC deadline. Load changes only how long the
+  controller waits for tmux; it never changes what a capture means: a live-turn
+  cue still refuses with `actor_turn_busy`, and a pane that every read failed
+  to capture still refuses with `actor_turn_observation_unavailable` (the
+  ops log records `controller_dispatch_pane_capture_unavailable` with the load
+  sample and budget). An unavailable sample keeps the unloaded budget.
 - A redundant in-flight re-dispatch (an identical dispatch for the same cycle is
   already accepted and unconsumed) is coalesced: the controller records the
   `coalesced_in_flight` receipt and suppresses the re-send so the routed trigger is

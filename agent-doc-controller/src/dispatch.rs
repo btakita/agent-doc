@@ -4388,6 +4388,104 @@ pub fn dispatch_pane_capture_attempt_timeout(
     base.saturating_mul(1u32 << doublings).min(cap.max(base))
 }
 
+/// `#ctlprobeloadbudget`: the largest multiple of the unloaded pane-capture
+/// budget a loaded host can earn. Per-core load above this does not buy more
+/// time; the total ceiling still bounds the whole observation.
+pub const DISPATCH_PANE_CAPTURE_MAX_LOAD_SCALE_PERMILLE: u32 = 4_000;
+
+/// `#ctlprobeloadbudget`: a measured host-load sample (the 1-minute load
+/// average and the CPUs this process may run on). It is the only input that
+/// scales the controller's dispatch pane-capture budget, so tests inject it
+/// instead of reading the machine they run on.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct HostLoadSample {
+    pub load_avg_1m: f64,
+    pub online_cpus: usize,
+}
+
+impl HostLoadSample {
+    /// Runnable load per CPU in thousandths, or `None` when the sample cannot
+    /// say anything (no CPUs, or a non-finite / negative load).
+    pub fn load_per_core_permille(&self) -> Option<u32> {
+        if self.online_cpus == 0 || !self.load_avg_1m.is_finite() || self.load_avg_1m < 0.0 {
+            return None;
+        }
+        let permille = (self.load_avg_1m * 1000.0 / self.online_cpus as f64).round();
+        Some(permille.min(u32::MAX as f64) as u32)
+    }
+}
+
+/// `#ctlprobeloadbudget`: the controller's per-dispatch tmux capture budget
+/// after scaling by measured host load.
+///
+/// `base` / `cap` are the first-read and per-read budgets (they keep the
+/// `#recoverableautoretry` doubling shape); `total` is the hard ceiling on the
+/// sum of every read's budget, so a heavily loaded host earns longer reads but
+/// a wedged tmux server still fails closed well inside the dispatch RPC
+/// deadline.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DispatchPaneCaptureBudget {
+    pub base: Duration,
+    pub cap: Duration,
+    pub total: Duration,
+    /// Applied scale in thousandths (1000 = unloaded budget).
+    pub load_scale_permille: u32,
+}
+
+impl DispatchPaneCaptureBudget {
+    /// The budget for the `attempt`-th (1-based) read after `spent` has already
+    /// been granted to earlier reads that timed out. `None` once the total
+    /// ceiling is exhausted: the observation then fails closed.
+    pub fn attempt_timeout(&self, attempt: usize, spent: Duration) -> Option<Duration> {
+        let remaining = self.total.saturating_sub(spent);
+        if remaining.is_zero() {
+            return None;
+        }
+        Some(dispatch_pane_capture_attempt_timeout(self.base, self.cap, attempt).min(remaining))
+    }
+}
+
+/// `#ctlprobeloadbudget`: scale the dispatch pane-capture budget by measured
+/// per-core host load.
+///
+/// On 2026-11-05 a 20-worker build run drove this 32-core host to load ~100. A
+/// budget fixed for an idle host can then time out on a pane that is merely
+/// slow to read, and a timeout refuses `Run Agent Doc` with
+/// `actor_turn_observation_unavailable` even when the pane is idle. A longer
+/// fixed timeout would make every wedged-server refusal slower on an idle host,
+/// so the budget scales instead with what the host is measurably doing:
+///
+/// - per-core load at or below 1.0 (or no sample) keeps the unloaded budget
+///   exactly;
+/// - above that, `base` and `cap` scale linearly with per-core load, up to
+///   [`DISPATCH_PANE_CAPTURE_MAX_LOAD_SCALE_PERMILLE`];
+/// - every read stays inside `total_ceiling` (never below the unscaled first
+///   read), so the worst case is bounded no matter what load reports.
+///
+/// The scale changes only how long the controller waits for tmux to answer.
+/// It never changes what an answer means: a captured busy cue still refuses
+/// with `actor_turn_busy`, and an unreadable pane still fails closed.
+pub fn dispatch_pane_capture_budget(
+    base: Duration,
+    cap: Duration,
+    total_ceiling: Duration,
+    load: Option<HostLoadSample>,
+) -> DispatchPaneCaptureBudget {
+    let load_scale_permille = load
+        .and_then(|sample| sample.load_per_core_permille())
+        .unwrap_or(1_000)
+        .clamp(1_000, DISPATCH_PANE_CAPTURE_MAX_LOAD_SCALE_PERMILLE);
+    let scale = |budget: Duration| budget.saturating_mul(load_scale_permille) / 1_000;
+    let total = total_ceiling.max(base);
+    let scaled_base = scale(base).min(total);
+    DispatchPaneCaptureBudget {
+        base: scaled_base,
+        cap: scale(cap.max(base)).clamp(scaled_base, total),
+        total,
+        load_scale_permille,
+    }
+}
+
 pub fn pause_reason_is_stale_supervisor_churn_stop(reason: &str) -> bool {
     let r = reason.to_ascii_lowercase();
     if OpsLogEvent::SupervisorBinaryStale.is_line_or_field_value(&r)
@@ -9041,6 +9139,80 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
             dispatch_pane_capture_attempt_timeout(base, Duration::from_millis(10), 3),
             base
         );
+    }
+
+    fn load(load_avg_1m: f64, online_cpus: usize) -> Option<HostLoadSample> {
+        Some(HostLoadSample {
+            load_avg_1m,
+            online_cpus,
+        })
+    }
+
+    #[test]
+    fn dispatch_pane_capture_budget_keeps_the_unloaded_shape_on_an_idle_host() {
+        let base = Duration::from_millis(250);
+        let cap = Duration::from_secs(1);
+        let total = Duration::from_secs(3);
+        // No sample, an idle host, and exactly one runnable task per core all
+        // keep the `#recoverableautoretry` budget unchanged.
+        for sample in [
+            None,
+            load(0.4, 32),
+            load(32.0, 32),
+            load(f64::NAN, 32),
+            load(5.0, 0),
+        ] {
+            let budget = dispatch_pane_capture_budget(base, cap, total, sample);
+            assert_eq!(budget.load_scale_permille, 1_000, "{sample:?}");
+            assert_eq!(budget.base, base);
+            assert_eq!(budget.cap, cap);
+            let reads: Vec<_> = (1..=3)
+                .scan(Duration::ZERO, |spent, attempt| {
+                    let timeout = budget.attempt_timeout(attempt, *spent)?;
+                    *spent += timeout;
+                    Some(timeout)
+                })
+                .collect();
+            assert_eq!(reads, vec![base, Duration::from_millis(500), cap]);
+        }
+    }
+
+    #[test]
+    fn dispatch_pane_capture_budget_scales_with_per_core_load_under_a_hard_ceiling() {
+        let base = Duration::from_millis(250);
+        let cap = Duration::from_secs(1);
+        let total = Duration::from_secs(3);
+
+        // Load ~100 on a 32-core host, as reported on 2026-11-05 (3.125 per core).
+        let budget = dispatch_pane_capture_budget(base, cap, total, load(100.0, 32));
+        assert_eq!(budget.load_scale_permille, 3_125);
+        assert_eq!(budget.base, Duration::from_micros(781_250));
+        assert_eq!(budget.cap, Duration::from_micros(3_000_000));
+        let first = budget.attempt_timeout(1, Duration::ZERO).unwrap();
+        let second = budget.attempt_timeout(2, first).unwrap();
+        let third = budget.attempt_timeout(3, first + second).unwrap();
+        assert_eq!(first, Duration::from_micros(781_250));
+        assert_eq!(second, Duration::from_micros(1_562_500));
+        // The last read gets what is left of the ceiling, never more.
+        assert_eq!(third, Duration::from_micros(656_250));
+        assert_eq!(first + second + third, total);
+        assert_eq!(budget.attempt_timeout(4, total), None);
+
+        // Load beyond the maximum scale buys nothing more.
+        let saturated = dispatch_pane_capture_budget(base, cap, total, load(10_000.0, 32));
+        assert_eq!(
+            saturated.load_scale_permille,
+            DISPATCH_PANE_CAPTURE_MAX_LOAD_SCALE_PERMILLE
+        );
+        assert_eq!(saturated.base, Duration::from_secs(1));
+        assert_eq!(saturated.cap, total);
+
+        // A ceiling below the first unscaled read never shrinks that read.
+        let tight =
+            dispatch_pane_capture_budget(base, cap, Duration::from_millis(10), load(100.0, 32));
+        assert_eq!(tight.total, base);
+        assert_eq!(tight.attempt_timeout(1, Duration::ZERO), Some(base));
+        assert_eq!(tight.attempt_timeout(2, base), None);
     }
 
     #[test]

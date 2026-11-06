@@ -4486,6 +4486,54 @@ pub fn dispatch_pane_capture_budget(
     }
 }
 
+/// `#ctlprobelatencytelemetry`: what one dispatch pane observation measurably
+/// cost. Wall time around each read, so unlike the budget it includes the
+/// spawn of the tmux client and the 5ms poll of the bounded capture: reads
+/// report a floor near 5ms, and `elapsed` can exceed the granted budgets, which
+/// is what the dispatch RPC deadline actually pays.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct DispatchPaneCaptureTiming {
+    /// Reads issued, the timed-out ones included.
+    pub reads: u32,
+    /// Wall time of the read that ended the observation.
+    pub last_read: Duration,
+    /// Wall time of every read together.
+    pub elapsed: Duration,
+}
+
+impl DispatchPaneCaptureTiming {
+    pub fn record_read(&mut self, read: Duration) {
+        self.reads = self.reads.saturating_add(1);
+        self.last_read = read;
+        self.elapsed = self.elapsed.saturating_add(read);
+    }
+}
+
+/// `#ctlprobelatencytelemetry`: the ops-log fields that let the
+/// `#ctlprobeloadbudget` limits be tuned from data: the load sample, the budget
+/// it earned, and what the reads cost. `total_ms` is the budget's ceiling and
+/// `elapsed_ms` the measured wall time.
+pub fn dispatch_pane_capture_telemetry_fields(
+    load: Option<HostLoadSample>,
+    budget: &DispatchPaneCaptureBudget,
+    timing: DispatchPaneCaptureTiming,
+) -> String {
+    format!(
+        "load_avg_1m={} online_cpus={} load_scale_permille={} base_ms={} cap_ms={} total_ms={} reads={} last_read_ms={} elapsed_ms={}",
+        load.map(|l| format!("{:.2}", l.load_avg_1m))
+            .unwrap_or_else(|| "unknown".to_string()),
+        load.map(|l| l.online_cpus.to_string())
+            .unwrap_or_else(|| "unknown".to_string()),
+        budget.load_scale_permille,
+        budget.base.as_millis(),
+        budget.cap.as_millis(),
+        budget.total.as_millis(),
+        timing.reads,
+        timing.last_read.as_millis(),
+        timing.elapsed.as_millis(),
+    )
+}
+
 pub fn pause_reason_is_stale_supervisor_churn_stop(reason: &str) -> bool {
     let r = reason.to_ascii_lowercase();
     if OpsLogEvent::SupervisorBinaryStale.is_line_or_field_value(&r)
@@ -9146,6 +9194,51 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
             load_avg_1m,
             online_cpus,
         })
+    }
+
+    #[test]
+    fn dispatch_pane_capture_timing_accumulates_reads_and_keeps_the_last() {
+        let mut timing = DispatchPaneCaptureTiming::default();
+        timing.record_read(Duration::from_millis(250));
+        timing.record_read(Duration::from_millis(40));
+        assert_eq!(
+            timing,
+            DispatchPaneCaptureTiming {
+                reads: 2,
+                last_read: Duration::from_millis(40),
+                elapsed: Duration::from_millis(290),
+            }
+        );
+    }
+
+    #[test]
+    fn dispatch_pane_capture_telemetry_fields_name_load_budget_and_measured_cost() {
+        let budget = dispatch_pane_capture_budget(
+            Duration::from_millis(250),
+            Duration::from_secs(1),
+            Duration::from_secs(3),
+            load(100.0, 32),
+        );
+        let timing = DispatchPaneCaptureTiming {
+            reads: 2,
+            last_read: Duration::from_millis(1_200),
+            elapsed: Duration::from_millis(1_981),
+        };
+        assert_eq!(
+            dispatch_pane_capture_telemetry_fields(load(100.0, 32), &budget, timing),
+            "load_avg_1m=100.00 online_cpus=32 load_scale_permille=3125 base_ms=781 cap_ms=3000 total_ms=3000 reads=2 last_read_ms=1200 elapsed_ms=1981"
+        );
+        // No sample: the budget is unscaled and the line says the load is unknown.
+        let unloaded = dispatch_pane_capture_budget(
+            Duration::from_millis(250),
+            Duration::from_secs(1),
+            Duration::from_secs(3),
+            None,
+        );
+        assert!(
+            dispatch_pane_capture_telemetry_fields(None, &unloaded, timing)
+                .starts_with("load_avg_1m=unknown online_cpus=unknown load_scale_permille=1000 ")
+        );
     }
 
     #[test]

@@ -1204,6 +1204,17 @@ the dispatch actor and produce receipts.
   to capture still refuses with `actor_turn_observation_unavailable` (the
   ops log records `controller_dispatch_pane_capture_unavailable` with the load
   sample and budget). An unavailable sample keeps the unloaded budget.
+- Every pane observation that reached tmux leaves one ops-log line, so the 4x
+  scale and the 3s ceiling are tuned from measured latency, not a model
+  (`#ctlprobelatencytelemetry`). A read that came back, whether the pane proved
+  idle or busy, logs `controller_dispatch_pane_capture_read`; the refusal above
+  carries the same fields: `load_avg_1m`, `online_cpus`, `load_scale_permille`,
+  the granted `base_ms` / `cap_ms` / `total_ms`, `reads` (timed-out reads
+  included), `last_read_ms`, and `elapsed_ms`. The timings are wall time around
+  each read: they include spawning the tmux client and the bounded capture's
+  5ms poll, so a read reports a floor near 5ms, and `elapsed_ms` may exceed
+  `total_ms` because the ceiling is charged from granted budgets. `elapsed_ms`
+  is what the 5s dispatch RPC deadline actually pays.
 - A redundant in-flight re-dispatch (an identical dispatch for the same cycle is
   already accepted and unconsumed) is coalesced: the controller records the
   `coalesced_in_flight` receipt and suppresses the re-send so the routed trigger is

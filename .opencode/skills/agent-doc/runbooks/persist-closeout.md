@@ -37,6 +37,10 @@ closing a batch it integrated from subagent branches runs `make check-batch`
 instead: `make check` skips the ignored live-tmux sweep, so a batch gated on it
 alone can look green while CI's `make tmux-ci` step keeps main red. It runs
 `make check`, then `make tmux-ci`, and reuses either proof that still matches.
+`make tmux-ci` reports every failing test binary (`#tmuxcinofailfast`): each
+`cargo test` passes `--no-fail-fast`, a red invocation does not stop the later
+ones, and the target exits non-zero only after the list finishes. A green
+receipt is recorded only when every invocation passed.
 Subagents keep running `make check` on their own branch. A successful
 run records a worktree-local fingerprint of repository bytes and toolchain
 identities. `make release` first runs cheap version/editor-parity checks, then

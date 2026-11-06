@@ -813,6 +813,7 @@ pub fn acknowledge_paused_free_text_queue_head_with_selector_and_outcome(
             .context("queue consume --ack-text: failed to converge document")?;
         save_snapshot_recovery_only(file, &target, "queue consume --ack-text writeback");
         record_queue_consumption_proofs(file, &plan, QueueConsumptionProofStage::AfterMutation)?;
+        retire_exact_text_ack_strike(file, &row.lineage, selector, &target, &content);
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
@@ -983,6 +984,7 @@ pub fn acknowledge_paused_free_text_queue_head_with_selector_and_outcome(
         .context("queue consume --ack-text: failed to converge document")?;
     save_snapshot_recovery_only(file, &target, "queue consume --ack-text writeback");
     record_queue_consumption_proofs(file, &plan, QueueConsumptionProofStage::AfterMutation)?;
+    retire_exact_text_ack_strike(file, &observed_head, None, &target, &content);
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
@@ -1002,6 +1004,69 @@ pub fn acknowledge_paused_free_text_queue_head_with_selector_and_outcome(
         drained: remaining == 0,
         auto: plan.auto,
     }))
+}
+
+/// `#acktextreceiptclose`: end the finished-work evidence of the row an
+/// `--ack-text` strike closed, at the strike's own mutation boundary rather
+/// than at a later closeout sweep. Call only after the successor `after`
+/// (derived from `before`) was accepted.
+///
+/// Like every other binary strike, the struck row's `Reported` claim and
+/// reported-release receipt end when no row with its identity is live in the
+/// successor ([`crate::claim_release_receipt::retire_struck_with_projection_or_warn`]).
+/// An `--ack-owner <owner#gen>` selector also names the exact attempt the
+/// strike consumed, so that attempt's receipt closes (its response capture is
+/// kept) and its `Reported` claim retires even while a duplicate row with the
+/// same identity stays live. Without this the receipt stayed open until the
+/// next closeout prune (sdk-dev 2026-11-05: struck 03:32Z, closed 17:04Z).
+/// Failures are reported, never fatal: the successor is already accepted and
+/// the next closeout prune still closes a receipt whose row has no live head.
+fn retire_exact_text_ack_strike(
+    file: &Path,
+    struck_head: &str,
+    selector: Option<&AckTextSelector>,
+    after: &str,
+    before: &str,
+) {
+    const SOURCE: &str = "queue_consume_ack_text";
+    crate::claim_release_receipt::retire_struck_with_projection_or_warn(
+        file,
+        &[struck_head.to_string()],
+        after,
+        before,
+        SOURCE,
+    );
+    let Some(AckTextSelector::Owner(owner)) = selector else {
+        return;
+    };
+    let identity = agent_doc_queue::queue_claim::claim_identity(struck_head);
+    if let Err(err) = crate::queue_claim::retire_exact_reported_attempt_for_identity(
+        file,
+        &identity,
+        &owner.owner,
+        owner.generation,
+        SOURCE,
+    ) {
+        eprintln!(
+            "[queue] WARNING: could not end the claim of {} generation {} in {} ({SOURCE}): {err:#}",
+            owner.owner,
+            owner.generation,
+            file.display()
+        );
+    }
+    if let Err(err) = crate::claim_release_receipt::close_exact_reported_receipt(
+        file,
+        &owner.owner,
+        owner.generation,
+        SOURCE,
+    ) {
+        eprintln!(
+            "[queue] WARNING: could not close the release receipt of {} generation {} in {} ({SOURCE}): {err:#}",
+            owner.owner,
+            owner.generation,
+            file.display()
+        );
+    }
 }
 
 fn consume_queue_prompts_with_options(
@@ -5554,6 +5619,313 @@ mod core_tests {
         assert!(
             updated.contains(&format!("- ☑️ [#subagent:typing_effect2#1] {sibling}")),
             "{updated}"
+        );
+    }
+
+    /// `#acktextreceiptclose`: the exact-attempt `--ack-text --ack-owner`
+    /// strike ends its own attempt's evidence: the reported-release receipt
+    /// closes (response capture kept) and the `Reported` claim retires at the
+    /// strike, not at a later closeout sweep (sdk-dev 2026-11-05: struck at
+    /// 03:32Z, receipt closed only by a 17:04Z sweep).
+    #[test]
+    fn exact_text_ack_owner_closes_its_reported_receipt_at_the_strike() {
+        let tmp = TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        let doc = tmp.path().join("session.md");
+        let target = "Integrate the reported SDK fix. [#q-5a17c0ffee01]";
+        let sibling = "Integrate the second SDK fix. [#q-5a17c0ffee02]";
+        let content = format!(
+            concat!(
+                "---\nqueue_active: true\n---\n\n",
+                "<!-- agent:exchange -->\n",
+                "### Re: integrated worker result\n\n",
+                "> **Queue prompt:** {target}\n\n",
+                "The fix is integrated.\n",
+                "<!-- /agent:exchange -->\n\n",
+                "<!-- agent:run id=main subagents -->\n",
+                "- ☑️ [#subagent:sdkfix#1] {target}\n",
+                "- {sibling}\n",
+                "<!-- /agent:run -->\n",
+            ),
+            target = target,
+            sibling = sibling,
+        );
+        fs::write(&doc, &content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        let (_, claim) = crate::queue_claim::claim(&doc, target, "subagent:sdkfix", 3600).unwrap();
+        crate::queue_claim::start_attempt(
+            &doc,
+            target,
+            "subagent:sdkfix",
+            "worker:sdkfix",
+            3600,
+            claim.generation,
+        )
+        .unwrap();
+        let reported =
+            crate::queue_claim::report_attempt(&doc, target, Some(claim.generation)).unwrap();
+        crate::queue_lineage::record_prose_only(&doc, &reported, "test prose result").unwrap();
+        crate::claim_release_receipt::capture_response_for_attempt(
+            &doc,
+            target,
+            claim.generation,
+            "The fix is integrated.",
+        )
+        .unwrap();
+        let open_receipt = |doc: &Path| {
+            crate::claim_release_receipt::load(doc)
+                .unwrap()
+                .receipts
+                .into_iter()
+                .find(|receipt| {
+                    receipt.owner == "subagent:sdkfix" && receipt.generation == claim.generation
+                })
+                .expect("the exact attempt's receipt is kept as response evidence")
+        };
+        assert!(!open_receipt(&doc).attempt_closed());
+
+        let selector = super::AckTextSelector::Owner(
+            agent_doc_document::queue_projection::QueueOwnerProjection {
+                owner: "subagent:sdkfix".to_string(),
+                generation: claim.generation,
+            },
+        );
+        super::acknowledge_paused_free_text_queue_head_with_selector_and_outcome(
+            &doc,
+            target,
+            Some(&selector),
+            &TEST_EFFECTS,
+        )
+        .unwrap()
+        .expect("the exact reported attempt should be acknowledged");
+
+        let updated = fs::read_to_string(&doc).unwrap();
+        assert!(
+            updated.contains(&format!("- ### ~~{target}~~")),
+            "{updated}"
+        );
+        let receipt = open_receipt(&doc);
+        assert!(
+            receipt.attempt_closed(),
+            "the strike must close its own receipt immediately: {receipt:?}"
+        );
+        assert!(
+            receipt.response.is_some(),
+            "closing keeps the response capture"
+        );
+        let identity = agent_doc_queue::queue_claim::claim_identity(target);
+        assert!(
+            !crate::queue_claim::load_ledger(&doc)
+                .unwrap()
+                .claims
+                .iter()
+                .any(|claim| claim.identity == identity),
+            "the consumed Reported claim retires at the strike"
+        );
+    }
+
+    /// `#acktextreceiptclose`: with a duplicate row of the same identity still
+    /// live, only the attempt named by `--ack-owner` ends. Row liveness cannot
+    /// decide it, so the generic struck-row retirement leaves the evidence
+    /// open; the exact owner selector is the proof, for an attempt still held
+    /// as a `Reported` claim and for one already released to its receipt.
+    #[test]
+    fn exact_text_ack_owner_ends_its_attempt_beside_live_duplicate() {
+        for released in [false, true] {
+            let tmp = TempDir::new().unwrap();
+            fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+            let doc = tmp.path().join("session.md");
+            let target = "Address the SDK review. [#q-5a17c0ffee03]";
+            let owner = "subagent:sdkreview";
+            let initial = format!(
+                concat!(
+                    "---\nqueue_active: true\n---\n\n",
+                    "<!-- agent:exchange -->\n<!-- /agent:exchange -->\n\n",
+                    "<!-- agent:run id=main subagents -->\n",
+                    "- {target}\n",
+                    "<!-- /agent:run -->\n",
+                ),
+                target = target,
+            );
+            fs::write(&doc, &initial).unwrap();
+            let (_, claim) = crate::queue_claim::claim(&doc, target, owner, 3600).unwrap();
+            let generation = claim.generation;
+            crate::queue_claim::start_attempt(
+                &doc,
+                target,
+                owner,
+                "worker:sdkreview",
+                3600,
+                generation,
+            )
+            .unwrap();
+            let reported =
+                crate::queue_claim::report_attempt(&doc, target, Some(generation)).unwrap();
+            crate::queue_lineage::record_prose_only(&doc, &reported, "test prose result").unwrap();
+            crate::claim_release_receipt::capture_response_for_attempt(
+                &doc,
+                target,
+                generation,
+                "Review addressed.",
+            )
+            .unwrap();
+            if released {
+                crate::claim_release_receipt::release(
+                    &doc,
+                    target,
+                    crate::claim_release_receipt::ReleaseKind::Reported,
+                )
+                .unwrap();
+            }
+            let content = format!(
+                concat!(
+                    "---\nqueue_active: true\n---\n\n",
+                    "<!-- agent:exchange -->\n",
+                    "### Re: integrated worker result\n\n",
+                    "> **Queue prompt:** {target}\n\n",
+                    "Review addressed.\n",
+                    "<!-- /agent:exchange -->\n\n",
+                    "<!-- agent:run id=main subagents -->\n",
+                    "- ☑️ [#{owner}#{generation}] {target}\n",
+                    "- {target}\n",
+                    "<!-- /agent:run -->\n",
+                ),
+                target = target,
+                owner = owner,
+                generation = generation,
+            );
+            fs::write(&doc, &content).unwrap();
+            agent_doc_snapshot_io::checkpoint_document_baseline(
+                &doc,
+                &content,
+                agent_doc_ops_log_io::log_op,
+            )
+            .unwrap();
+            let receipt_for = |doc: &Path| {
+                crate::claim_release_receipt::load(doc)
+                    .unwrap()
+                    .receipts
+                    .into_iter()
+                    .find(|receipt| receipt.owner == owner && receipt.generation == generation)
+                    .expect("the attempt keeps its receipt")
+            };
+            assert!(!receipt_for(&doc).attempt_closed(), "released={released}");
+
+            let selector = super::AckTextSelector::Owner(
+                agent_doc_document::queue_projection::QueueOwnerProjection {
+                    owner: owner.to_string(),
+                    generation,
+                },
+            );
+            let outcome = super::acknowledge_paused_free_text_queue_head_with_selector_and_outcome(
+                &doc,
+                target,
+                Some(&selector),
+                &TEST_EFFECTS,
+            )
+            .unwrap()
+            .expect("the exact attempt should be acknowledged");
+
+            let updated = fs::read_to_string(&doc).unwrap();
+            assert_eq!(outcome.remaining, 1, "released={released}: {updated}");
+            assert!(
+                updated.contains(&format!("- ### ~~{target}~~")),
+                "released={released}: {updated}"
+            );
+            assert!(
+                updated.contains(&format!("\n- {target}\n")),
+                "released={released}: the duplicate row stays live: {updated}"
+            );
+            let receipt = receipt_for(&doc);
+            assert!(
+                receipt.attempt_closed(),
+                "released={released}: the strike must close the exact attempt's receipt: {receipt:?}"
+            );
+            assert!(receipt.response.is_some(), "released={released}");
+            assert!(
+                !crate::queue_claim::load_ledger(&doc)
+                    .unwrap()
+                    .claims
+                    .iter()
+                    .any(|claim| claim.owner == owner && claim.generation == generation),
+                "released={released}: the consumed Reported claim retires at the strike"
+            );
+        }
+    }
+
+    /// `#acktextreceiptclose`: a projection-damaged bare head has no owner
+    /// selector and leaves through the paused-head branch; that strike ends
+    /// the row's receipt too.
+    #[test]
+    fn exact_text_ack_bare_head_strike_closes_its_receipt() {
+        let tmp = TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        let doc = tmp.path().join("session.md");
+        let head = "Promote the SDK release once CI settles.";
+        let owner = "subagent:sdkpromote";
+        let queue = |row: &str| {
+            format!(
+                concat!(
+                    "---\nagent_doc_format: template\n---\n\n",
+                    "<!-- agent:exchange -->\n",
+                    "### Re: Response\n\nPromoted.\n",
+                    "<!-- /agent:exchange -->\n\n",
+                    "<!-- agent:queue subagents -->\n",
+                    "{row}\n",
+                    "<!-- /agent:queue -->\n",
+                ),
+                row = row,
+            )
+        };
+        fs::write(&doc, queue(&format!("- {head}"))).unwrap();
+        let (_, claim) = crate::queue_claim::claim(&doc, head, owner, 3600).unwrap();
+        let generation = claim.generation;
+        crate::queue_claim::start_attempt(&doc, head, owner, "worker:sdkpromote", 3600, generation)
+            .unwrap();
+        let reported = crate::queue_claim::report_attempt(&doc, head, Some(generation)).unwrap();
+        crate::queue_lineage::record_prose_only(&doc, &reported, "test prose result").unwrap();
+        crate::claim_release_receipt::capture_response_for_attempt(
+            &doc,
+            head,
+            generation,
+            "Promoted.",
+        )
+        .unwrap();
+        crate::claim_release_receipt::release(
+            &doc,
+            head,
+            crate::claim_release_receipt::ReleaseKind::Reported,
+        )
+        .unwrap();
+        let content = queue(head);
+        fs::write(&doc, &content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        super::acknowledge_paused_free_text_queue_head_with_outcome(&doc, head, &TEST_EFFECTS)
+            .unwrap()
+            .expect("the exact bare head should be acknowledged");
+
+        let updated = fs::read_to_string(&doc).unwrap();
+        assert!(updated.contains(&format!("- ### ~~{head}~~")), "{updated}");
+        let receipt = crate::claim_release_receipt::load(&doc)
+            .unwrap()
+            .receipts
+            .into_iter()
+            .find(|receipt| receipt.owner == owner && receipt.generation == generation)
+            .expect("the full response capture is kept");
+        assert!(
+            receipt.attempt_closed(),
+            "the strike must close the row's receipt: {receipt:?}"
         );
     }
 

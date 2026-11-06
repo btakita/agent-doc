@@ -71,14 +71,21 @@ after the successor loaded the ledger:
 
 - the successor acknowledges the row and clears its pending-authority overlay
   only for an event its own projection holds;
+- no overlay entry outlives the drain, and an entry stops answering reads only
+  for an event the projection holds (`#orphanhandoffoverlay`);
 - the ledger never holds the event twice; and
 - the row is eventually acknowledged under weak fairness.
 
 `AuthorityHandoffFoldWedge` restores the shipped rule (every `inserted == false`
 duplicate is acknowledged as-is) and must violate; `AuthorityHandoffFoldReach`
-witnesses the late duplicate itself. A predecessor that lands *and*
-acknowledges its row after the successor's load is out of scope: the successor
-then learns the event only from its next general durable reload.
+witnesses the late duplicate itself. `AuthorityHandoffFoldOrphanWedge` restores
+the drain that walks only durable rows (the entry outlives it) and
+`AuthorityHandoffFoldClearWedge` clears an entry just because its row is gone
+(reads lose the authority); both must violate, and
+`AuthorityHandoffFoldOrphanReach` witnesses an orphan the settle must reload for.
+A predecessor that lands *and* acknowledges its row after the successor's load
+and before its row read is out of scope: no row or entry remains, so the
+successor learns the event only from its next general durable reload.
 
 `ReactiveTopology.tla` checks the shared lifetime-scoped graph contract used by
 agent-doc's Lazily state machines:

@@ -507,6 +507,12 @@ must_violate=(
     # duplicate is a real interleaving of the fixed model.
     AuthorityHandoffFold:AuthorityHandoffFoldWedge
     AuthorityHandoffFold:AuthorityHandoffFoldReach
+    # `#orphanhandoffoverlay`: an overlay entry whose row a predecessor ACKed
+    # neither outlives the drain (OrphanWedge) nor clears unfolded (ClearWedge),
+    # and the reload that settles it is reachable (OrphanReach).
+    AuthorityHandoffFold:AuthorityHandoffFoldOrphanWedge
+    AuthorityHandoffFold:AuthorityHandoffFoldClearWedge
+    AuthorityHandoffFold:AuthorityHandoffFoldOrphanReach
 )
 
 for module in "${modules[@]}"; do

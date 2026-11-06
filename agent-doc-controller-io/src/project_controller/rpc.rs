@@ -61426,6 +61426,294 @@ mod tests {
         );
     }
 
+    /// Prepare the `#orphanhandoffoverlay` race: a generation 1 predecessor
+    /// claimed a durable handoff. `land_before_load` commits its insert before
+    /// the successor loads the ledger; otherwise it commits, with the ACK,
+    /// inside successor construction. Either way the ACK lands after the
+    /// successor copied the row into its overlay and before its handoff worker
+    /// exists, so every successor drain finds the entry with no row.
+    /// `after_ack` runs at that same point, ahead of any drain.
+    fn successor_with_orphaned_authority_overlay(
+        dir: &tempfile::TempDir,
+        event: &agent_doc_state_backbone::StateEvent,
+        land_before_load: bool,
+        after_ack: impl FnOnce() + 'static,
+    ) -> Arc<ControllerRuntime> {
+        let bootstrap = test_bootstrap(dir);
+        let authority_epoch = super::super::document_authority_epoch(event).unwrap();
+        assert!(
+            state_store::enqueue_document_authority_handoff(
+                dir.path(),
+                &state_store::DocumentAuthorityHandoff {
+                    document_hash: event.document_hash().to_string(),
+                    authority_epoch,
+                    controller_generation: 1,
+                    payload_json: serde_json::to_string(event).unwrap(),
+                },
+            )
+            .unwrap()
+        );
+        assert!(
+            state_store::claim_document_authority_handoff(
+                dir.path(),
+                event.document_hash(),
+                authority_epoch,
+                1,
+            )
+            .unwrap()
+        );
+        if land_before_load {
+            drop(open_state_db(dir.path()).unwrap());
+            assert!(super::super::append_state_event_for_test(dir.path(), event).unwrap());
+        }
+        let acknowledged = std::sync::Arc::new(AtomicBool::new(false));
+        {
+            let (acknowledged, project_root, event) = (
+                acknowledged.clone(),
+                dir.path().to_path_buf(),
+                event.clone(),
+            );
+            super::super::set_authority_overlay_recovered_test_hook(Some(Box::new(move || {
+                if !land_before_load {
+                    assert!(
+                        super::super::append_state_event_for_test(&project_root, &event).unwrap(),
+                        "the predecessor's parked apply inserts the event"
+                    );
+                }
+                assert!(
+                    state_store::acknowledge_document_authority_handoff(
+                        &project_root,
+                        event.document_hash(),
+                        authority_epoch,
+                        1,
+                    )
+                    .unwrap(),
+                    "the predecessor's generation-fenced ACK removes its own row"
+                );
+                after_ack();
+                acknowledged.store(true, Ordering::SeqCst);
+            })));
+        }
+        let successor = ControllerRuntime::new_arc(ControllerBootstrap {
+            controller_generation: 2,
+            previous_controller_pid: None,
+            ..bootstrap
+        });
+        super::super::set_authority_overlay_recovered_test_hook(None);
+        let successor = successor.unwrap();
+        assert!(
+            acknowledged.load(Ordering::SeqCst),
+            "the predecessor's ACK must land inside the successor's construction"
+        );
+        successor
+    }
+
+    fn drain_authority_handoffs_to_rest(runtime: &ControllerRuntime, project_root: &Path) {
+        // The attempt cap is a clock-free hang guard, never a latency bound.
+        let mut drains = 0;
+        while runtime
+            .drain_document_authority_handoffs(project_root)
+            .unwrap()
+        {
+            drains += 1;
+            assert!(drains < 100, "the drain never came to rest");
+        }
+    }
+
+    fn pending_authority_overlay_holds(runtime: &ControllerRuntime, document_hash: &str) -> bool {
+        runtime
+            .memory
+            .lock()
+            .pending_document_authority_handoffs
+            .contains_key(document_hash)
+    }
+
+    /// `#orphanhandoffoverlay`: the retired predecessor's row landed after the
+    /// successor's load, and its ACK after the successor's overlay copy. The
+    /// overlay kept reads correct, but the projection -- and so the reactive
+    /// graphs, which never see the overlay -- lacked the authority, and with no
+    /// row left nothing ever cleared the entry.
+    #[test]
+    fn drain_refolds_an_overlay_entry_a_retired_predecessor_acknowledged() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let event = authority_handoff_test_event("authority-orphan-late", "doc", 404);
+        let successor = successor_with_orphaned_authority_overlay(&dir, &event, false, || {});
+        assert!(
+            state_store::load_document_authority_handoffs(dir.path())
+                .unwrap()
+                .is_empty(),
+            "the predecessor's ACK left the successor no row to claim"
+        );
+
+        drain_authority_handoffs_to_rest(&successor, dir.path());
+
+        assert!(
+            !pending_authority_overlay_holds(&successor, "doc"),
+            "an entry with no row must not outlive the drain"
+        );
+        assert_eq!(
+            successor
+                .memory
+                .lock()
+                .state_projection
+                .document("doc")
+                .and_then(|projection| projection.document.latest_authority.clone())
+                .map(|authority| authority.authority_epoch),
+            Some(404),
+            "the projection must fold the event before the overlay stops answering for it"
+        );
+        assert_eq!(
+            successor
+                .document_graphs
+                .latest_projection("doc")
+                .and_then(|projection| projection.document.latest_authority)
+                .map(|authority| authority.authority_epoch),
+            Some(404),
+            "the reactive graphs must see the authority without a further reload"
+        );
+    }
+
+    /// `#orphanhandoffoverlay`: when the load already folded the row, the entry
+    /// is merely redundant, so settling it needs no durable reload.
+    #[test]
+    fn drain_settles_an_orphaned_overlay_entry_the_load_folded_without_a_reload() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let event = authority_handoff_test_event("authority-orphan-folded", "doc", 405);
+        let successor = successor_with_orphaned_authority_overlay(&dir, &event, true, || {});
+
+        drain_authority_handoffs_to_rest(&successor, dir.path());
+
+        assert!(!pending_authority_overlay_holds(&successor, "doc"));
+        let ops_log =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
+        assert!(
+            ops_log.contains("document_authority_handoff_orphan_settled document_hash=doc"),
+            "{ops_log}"
+        );
+        assert!(
+            !ops_log.contains("document_authority_handoff_orphan_refolded"),
+            "a row at or below the folded high-water must not cost a reload: {ops_log}"
+        );
+    }
+
+    /// `#orphanhandoffoverlay`: a row that outranks the entry supersedes it, and
+    /// the row's fold clears the entry only once the row itself is gone. An
+    /// event that never reached the ledger therefore settles too.
+    #[test]
+    fn drain_settles_an_overlay_entry_a_newer_row_superseded() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let runtime = ControllerRuntime::new_arc(test_bootstrap(&dir)).unwrap();
+        let superseded = authority_handoff_test_event("authority-superseded", "doc", 501);
+        let newer = authority_handoff_test_event("authority-superseding", "doc", 502);
+        assert!(
+            state_store::enqueue_document_authority_handoff(
+                dir.path(),
+                &state_store::DocumentAuthorityHandoff {
+                    document_hash: "doc".to_string(),
+                    authority_epoch: 502,
+                    controller_generation: 1,
+                    payload_json: serde_json::to_string(&newer).unwrap(),
+                },
+            )
+            .unwrap()
+        );
+        // The stale observation lost the row to the newer epoch; the note is
+        // what `handle_document_authority_handoff` does either way.
+        runtime.note_pending_document_authority_handoff(superseded);
+
+        drain_authority_handoffs_to_rest(&runtime, dir.path());
+
+        assert!(!pending_authority_overlay_holds(&runtime, "doc"));
+        assert_eq!(
+            runtime
+                .memory
+                .lock()
+                .state_projection
+                .document("doc")
+                .and_then(|projection| projection.document.latest_authority.clone())
+                .map(|authority| authority.authority_epoch),
+            Some(502),
+        );
+    }
+
+    /// `#orphanhandoffoverlay`: an entry whose row this drain could not claim
+    /// still has an owner, so it is not an orphan. Its event is not in the
+    /// ledger yet; settling here would lose the authority from reads.
+    #[test]
+    fn drain_leaves_an_overlay_entry_whose_row_is_still_durable() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let runtime = ControllerRuntime::new_arc(test_bootstrap(&dir)).unwrap();
+        let event = authority_handoff_test_event("authority-row-held", "doc", 601);
+        // A later generation holds the claim, which this drain cannot take.
+        assert!(
+            state_store::enqueue_document_authority_handoff(
+                dir.path(),
+                &state_store::DocumentAuthorityHandoff {
+                    document_hash: "doc".to_string(),
+                    authority_epoch: 601,
+                    controller_generation: u64::from(u32::MAX),
+                    payload_json: serde_json::to_string(&event).unwrap(),
+                },
+            )
+            .unwrap()
+        );
+        runtime.note_pending_document_authority_handoff(event);
+
+        assert!(
+            !runtime
+                .drain_document_authority_handoffs(dir.path())
+                .unwrap()
+        );
+
+        assert!(pending_authority_overlay_holds(&runtime, "doc"));
+        assert_eq!(
+            runtime
+                .document_state_projection("doc")
+                .unwrap()
+                .and_then(|projection| projection.document.latest_authority)
+                .map(|authority| authority.authority_epoch),
+            Some(601),
+        );
+    }
+
+    /// `#orphanhandoffoverlay`: a failed reload keeps the entry answering reads
+    /// and asks for a retry; the next drain settles it.
+    #[test]
+    fn drain_keeps_an_orphaned_overlay_entry_when_the_reload_fails() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let event = authority_handoff_test_event("authority-orphan-reload", "doc", 406);
+        // A ledger row the durable load refuses to parse fails the reload. The
+        // row is broken before any drain can run, so no drain settles it first.
+        let root = dir.path().to_path_buf();
+        let successor = successor_with_orphaned_authority_overlay(&dir, &event, false, move || {
+            open_state_db(&root)
+                .unwrap()
+                .execute_batch("UPDATE state_events SET payload_json = 'not json'")
+                .unwrap();
+        });
+
+        assert!(
+            successor
+                .drain_document_authority_handoffs(dir.path())
+                .unwrap(),
+            "a failed reload must leave the entry retryable"
+        );
+        assert!(
+            pending_authority_overlay_holds(&successor, "doc"),
+            "the overlay must keep answering until the projection holds the event"
+        );
+
+        open_state_db(dir.path())
+            .unwrap()
+            .execute(
+                "UPDATE state_events SET payload_json = ?1 WHERE event_id = ?2",
+                [&serde_json::to_string(&event).unwrap(), &event.event_id],
+            )
+            .unwrap();
+        drain_authority_handoffs_to_rest(&successor, dir.path());
+        assert!(!pending_authority_overlay_holds(&successor, "doc"));
+    }
+
     #[test]
     fn authority_overlay_read_is_atomic_with_fold_and_clear() {
         let dir = tempfile::TempDir::new().unwrap();

@@ -10,7 +10,7 @@
 //! - `list()` — scans JetBrains plugin directories for the versioned agent-doc JAR and queries `code --list-extensions` for the VS Code extension; prints found entries to stdout.
 //! - JetBrains plugin directories are discovered from versioned IDE data roots (`~/.local/share/JetBrains/<Product><Version>/` on Linux, `~/Library/Application Support/JetBrains/<Product><Version>/` on macOS). Config roots and unrelated JetBrains service directories are excluded. Callers can select an exact target with `--plugins-dir`; ambiguous non-interactive discovery fails with rerun guidance instead of waiting on stdin.
 //! - VS Code CLI detection order: `cursor` → `codium` → `code` (first that succeeds `--version`). Absence is reported as a missing prerequisite before any download, never discarded and re-spawned as `code`.
-//! - VS Code installs also reach every workspace extension host on the machine (`#vscoderemoteparity`): `code-server` on `PATH` (otherwise `~/.local/bin/code-server` or Coder's default `/tmp/code-server/bin/code-server`, labelled `code-server:<path>`, `#vscodecodersmoke`), Coder's `vscode-web` module (the Microsoft VS Code Server web build, default `/tmp/vscode-web/bin/code-server`, otherwise `~/.vscode-web/bin/code-server`, labelled `vscode-web:<path>`, installing with no `--extensions-dir` so the server CLI picks the same `$VSCODE_AGENT_FOLDER`-or-`~/.vscode-server/extensions` default its `serve-local` loads, `#vscodewebprefix`; each of this user's running `serve-local` servers is also a target, at the prefix and `--extensions-dir` its own argv names, labelled `vscode-web:<path> --extensions-dir <dir>` when one is set, `#vscodewebextdir`), and the newest Remote-SSH server install under `~/.vscode-server` (or `$VSCODE_AGENT_FOLDER`), `~/.vscode-server-insiders`, `~/.vscodium-server` or `~/.cursor-server`, through that server's own CLI with `--extensions-dir <root>/extensions`. Both server layouts are probed (`bin/<commit>/bin/<cli>` and `cli/servers/<id>/server/bin/<cli>`). `install`, `update`, `update_all_installed` and `list` use the same targets; an install attempts every target before reporting failures, and fails before downloading only when no desktop CLI and no workspace host exists.
+//! - VS Code installs also reach every workspace extension host on the machine (`#vscoderemoteparity`): `code-server` on `PATH` (otherwise `~/.local/bin/code-server` or Coder's default `/tmp/code-server/bin/code-server`, labelled `code-server:<path>`, `#vscodecodersmoke`), Coder's `vscode-web` module (the Microsoft VS Code Server web build, default `/tmp/vscode-web/bin/code-server`, otherwise `~/.vscode-web/bin/code-server`, labelled `vscode-web:<path>`, installing with no `--extensions-dir` so the server CLI picks the same `$VSCODE_AGENT_FOLDER`-or-`~/.vscode-server/extensions` default its `serve-local` loads, `#vscodewebprefix`; each of this user's running `serve-local` servers is also a target, at the prefix and the extensions directory that server loads (`--extensions-dir`, else `<--server-data-dir>/extensions`, else that process's own `$VSCODE_AGENT_FOLDER/extensions`, else the CLI default), labelled `vscode-web:<path> --extensions-dir <dir>` when one is set, `#vscodewebextdir` `#vscodewebdatadir`), and the newest Remote-SSH server install under `~/.vscode-server` (or `$VSCODE_AGENT_FOLDER`), `~/.vscode-server-insiders`, `~/.vscodium-server` or `~/.cursor-server`, through that server's own CLI with `--extensions-dir <root>/extensions`. Both server layouts are probed (`bin/<commit>/bin/<cli>` and `cli/servers/<id>/server/bin/<cli>`). `install`, `update`, `update_all_installed` and `list` use the same targets; an install attempts every target before reporting failures, and fails before downloading only when no desktop CLI and no workspace host exists.
 //! - Asset selection matches complete versioned package shapes and prefers a signed variant. JetBrains targets prove their platform build from the versioned IDE data root: 242-261 select `agent-doc-jetbrains-<version>.zip`, exact 262 selects `agent-doc-jetbrains-262-<version>.zip`, and an unprovable/unsupported target fails before replacement. Local installs read the selected package's own `gradle.properties`; VS Code installs require the VSIX version to match `package.json` exactly.
 //! - Downloaded editor packages are verified before installation against the release's `EDITOR-PACKAGES.sha256` manifest, falling back to GitHub's per-asset `digest`. A declared digest that disagrees with the bytes fails closed.
 //!
@@ -1240,7 +1240,9 @@ const VSCODE_WEB_CLIS: &[&str] = &[
 /// otherwise `~/.vscode-server`, plus `/extensions`), exactly as the module's
 /// own extension install does. A template that changes the module's
 /// `install_prefix` or `extensions_dir` is found by `vscode_web_targets` from
-/// its running server.
+/// its running server, which also applies that server's `--server-data-dir`
+/// and its own `VSCODE_AGENT_FOLDER` (`#vscodewebdatadir`). This probe has no
+/// process to read, so it still leaves the CLI default.
 fn vscode_web_target(home: Option<&Path>) -> Option<VsCodeInstallTarget> {
     first_executable_cli(VSCODE_WEB_CLIS, home).map(|program| VsCodeInstallTarget {
         label: format!("vscode-web:{}", program.display()),
@@ -1250,8 +1252,11 @@ fn vscode_web_target(home: Option<&Path>) -> Option<VsCodeInstallTarget> {
 }
 
 /// The target for one running `serve-local` server (`#vscodewebextdir`). The
-/// `--extensions-dir` it was started with is the one it loads, so the install
-/// passes it on and the label names it: two servers can share one CLI.
+/// extensions directory it loads is passed on and the label names it: two
+/// servers can share one CLI. That directory is `--extensions-dir`, else
+/// `<--server-data-dir>/extensions`, else the server's own
+/// `VSCODE_AGENT_FOLDER/extensions` (`#vscodewebdatadir`). `None` leaves the
+/// CLI default, which matches a server that set none of those.
 fn vscode_web_serve_target(serve: &VsCodeWebServe) -> Option<VsCodeInstallTarget> {
     let program = VSCODE_SERVER_CLIS
         .iter()
@@ -5096,7 +5101,10 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
 
     /// `#vscodewebextdir`: a template's custom `install_prefix` and
     /// `extensions_dir` come from the running server, so the install goes
-    /// where that server loads extensions, with no manual command.
+    /// where that server loads extensions, with no manual command. A directory
+    /// derived from `--server-data-dir` or the server's own
+    /// `VSCODE_AGENT_FOLDER` (`#vscodewebdatadir`) arrives as `extensions_dir`
+    /// and is passed on the same way.
     #[cfg(unix)]
     #[test]
     fn vscode_web_targets_follow_the_running_server() {

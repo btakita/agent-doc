@@ -10,6 +10,16 @@
 //! Remote-SSH server (`--start-server`) and an extension host
 //! (`out/bootstrap-fork`) never match.
 //!
+//! The extensions directory is the one `server.main.ts` loads
+//! (`#vscodewebdatadir`): `--extensions-dir` when it is set, otherwise
+//! `<--server-data-dir>/extensions`, otherwise this process's own
+//! `$VSCODE_AGENT_FOLDER/extensions`. Anything else is the CLI default
+//! (`~/<serverDataFolderName>/extensions`), which the installing shell
+//! resolves the same way, so it is left unset. The module never passes
+//! `--server-data-dir`; that flag and a server-only `VSCODE_AGENT_FOLDER`
+//! are a hand-started server or an environment the installing shell does
+//! not share. The shell's own `VSCODE_AGENT_FOLDER` is not consulted here.
+//!
 //! agent-doc goes on to execute the CLI it finds here, so only processes owned
 //! by this user count: another user's argv must not choose a program to run.
 
@@ -23,13 +33,19 @@ use crate::plugin::VSCODE_SERVER_CLIS;
 /// other VS Code Server process.
 const SERVE_SUBCOMMAND: &str = "serve-local";
 const EXTENSIONS_DIR_FLAG: &str = "--extensions-dir";
+const SERVER_DATA_DIR_FLAG: &str = "--server-data-dir";
+/// What `server.main.ts` reads. The installing shell's copy is not the server's.
+#[cfg(unix)]
+const AGENT_FOLDER_ENV: &str = "VSCODE_AGENT_FOLDER";
 
 /// One running `serve-local` server.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct VsCodeWebServe {
     /// The module's `install_prefix`.
     pub prefix: PathBuf,
-    /// The module's `extensions_dir`; `None` when the server uses its default.
+    /// The directory this server loads extensions from. `None` when that is
+    /// the CLI default, because the server set neither `--extensions-dir`,
+    /// `--server-data-dir`, nor its own `VSCODE_AGENT_FOLDER`.
     pub extensions_dir: Option<PathBuf>,
 }
 
@@ -48,25 +64,71 @@ fn server_prefix(script: &Path) -> Option<PathBuf> {
         .flatten()
 }
 
-/// The last `--extensions-dir` value, in either the `=` form the module passes
-/// or the two-argument form. VS Code keeps the last of a repeated flag.
-fn extensions_dir_arg(args: &[String]) -> Option<PathBuf> {
-    let mut dir = None;
+/// The last value of `flag`, in either the `=` form or the two-argument form.
+/// VS Code keeps the last of a repeated string flag and then ignores an empty
+/// value (`args[flag] || …`). Arguments after `--` are not flags.
+fn last_flag_value<'a>(args: &'a [String], flag: &str) -> Option<&'a str> {
+    let mut value = None;
     let mut args = args.iter();
     while let Some(arg) = args.next() {
         if arg == "--" {
             break;
         }
-        if arg == EXTENSIONS_DIR_FLAG {
-            dir = args.next().map(String::as_str);
-        } else if let Some(value) = arg
-            .strip_prefix(EXTENSIONS_DIR_FLAG)
+        if arg == flag {
+            value = args.next().map(String::as_str);
+        } else if let Some(parsed) = arg
+            .strip_prefix(flag)
             .and_then(|rest| rest.strip_prefix('='))
         {
-            dir = Some(value);
+            value = Some(parsed);
         }
     }
-    dir.filter(|dir| !dir.is_empty()).map(PathBuf::from)
+    value.filter(|value| !value.is_empty())
+}
+
+/// The extensions directory named on `args`, before the process environment.
+/// `--extensions-dir` wins. Otherwise `--server-data-dir` is the parent of
+/// `extensions`, which is how `server.main.ts` joins it. `None` means neither
+/// flag named a directory.
+fn extensions_dir_arg(args: &[String]) -> Option<PathBuf> {
+    if let Some(dir) = last_flag_value(args, EXTENSIONS_DIR_FLAG) {
+        return Some(PathBuf::from(dir));
+    }
+    last_flag_value(args, SERVER_DATA_DIR_FLAG).map(|dir| PathBuf::from(dir).join("extensions"))
+}
+
+/// `VSCODE_AGENT_FOLDER` from one `environ` blob.
+#[cfg(unix)]
+enum AgentFolder {
+    /// Absent or empty. JavaScript treats an empty value as unset.
+    Unset,
+    /// The first entry, which is the one `getenv` returns.
+    Set(PathBuf),
+    /// The value is not UTF-8, so the server must be skipped rather than
+    /// rewritten into a different directory.
+    NotUtf8,
+}
+
+/// The first `VSCODE_AGENT_FOLDER` in `environ`.
+#[cfg(unix)]
+fn agent_folder(environ: &[u8]) -> AgentFolder {
+    for entry in environ.split(|byte| *byte == 0) {
+        let Some(split) = entry.iter().position(|byte| *byte == b'=') else {
+            continue;
+        };
+        let (key, value) = (&entry[..split], &entry[split + 1..]);
+        if key != AGENT_FOLDER_ENV.as_bytes() {
+            continue;
+        }
+        if value.is_empty() {
+            return AgentFolder::Unset;
+        }
+        return match std::str::from_utf8(value) {
+            Ok(value) => AgentFolder::Set(PathBuf::from(value)),
+            Err(_) => AgentFolder::NotUtf8,
+        };
+    }
+    AgentFolder::Unset
 }
 
 /// The server one process's argv runs, or `None` when it is not `serve-local`.
@@ -87,9 +149,12 @@ pub fn vscode_web_serve_from_argv(argv: &[String]) -> Option<VsCodeWebServe> {
     })
 }
 
-/// The server under one `/proc/<pid>`. A relative `--extensions-dir` is
-/// relative to that process, so it resolves against its `cwd`. A path that is
-/// not UTF-8 is skipped rather than rewritten into a different directory.
+/// The server under one `/proc/<pid>`. A relative extensions directory,
+/// named with `--extensions-dir` or derived from `--server-data-dir` or
+/// `VSCODE_AGENT_FOLDER`, is relative to that process, so it resolves against
+/// its `cwd`. A path that is not UTF-8 is skipped rather than rewritten into
+/// a different directory. An unreadable `environ` leaves a server that named
+/// no directory on its argv at the CLI default.
 #[cfg(unix)]
 fn serve_of_process(process: &Path) -> Option<VsCodeWebServe> {
     let cmdline = String::from_utf8(fs::read(process.join("cmdline")).ok()?).ok()?;
@@ -99,6 +164,14 @@ fn serve_of_process(process: &Path) -> Option<VsCodeWebServe> {
         .map(str::to_string)
         .collect();
     let mut serve = vscode_web_serve_from_argv(&argv)?;
+    if serve.extensions_dir.is_none() {
+        let environ = fs::read(process.join("environ")).unwrap_or_default();
+        match agent_folder(&environ) {
+            AgentFolder::Set(folder) => serve.extensions_dir = Some(folder.join("extensions")),
+            AgentFolder::Unset => {}
+            AgentFolder::NotUtf8 => return None,
+        }
+    }
     if let Some(dir) = serve.extensions_dir.take() {
         serve.extensions_dir = Some(if dir.is_relative() {
             fs::read_link(process.join("cwd")).ok()?.join(dir)
@@ -243,6 +316,78 @@ mod tests {
             vscode_web_serve_from_argv(&no_value),
             Some(serve("/opt/vw", None))
         );
+    }
+
+    /// `#vscodewebdatadir`: `server.main.ts` uses `--extensions-dir` or else
+    /// `<--server-data-dir>/extensions`. The module never passes the data-dir
+    /// flag; a hand-started server does. An empty value is ignored, and the
+    /// last of a repeat wins, matching `parseArgs`.
+    #[test]
+    fn server_data_dir_is_the_extensions_parent_unless_extensions_dir_is_set() {
+        let data_dir = argv(&[
+            "/opt/vw/bin/code-server",
+            "serve-local",
+            "--server-data-dir=/srv/data",
+        ]);
+        assert_eq!(
+            vscode_web_serve_from_argv(&data_dir),
+            Some(serve("/opt/vw", Some("/srv/data/extensions")))
+        );
+        let extensions_wins = argv(&[
+            "/opt/vw/bin/code-server",
+            "serve-local",
+            "--server-data-dir=/srv/data",
+            "--extensions-dir=/srv/ext",
+        ]);
+        assert_eq!(
+            vscode_web_serve_from_argv(&extensions_wins),
+            Some(serve("/opt/vw", Some("/srv/ext")))
+        );
+        let data_dir_wins_when_extensions_is_empty = argv(&[
+            "/opt/vw/bin/code-server",
+            "serve-local",
+            "--extensions-dir=",
+            "--server-data-dir=/srv/data",
+        ]);
+        assert_eq!(
+            vscode_web_serve_from_argv(&data_dir_wins_when_extensions_is_empty),
+            Some(serve("/opt/vw", Some("/srv/data/extensions")))
+        );
+        let last = argv(&[
+            "/opt/vw/bin/code-server",
+            "serve-local",
+            "--server-data-dir",
+            "/srv/a",
+            "--server-data-dir=/srv/b",
+        ]);
+        assert_eq!(
+            vscode_web_serve_from_argv(&last),
+            Some(serve("/opt/vw", Some("/srv/b/extensions")))
+        );
+        for args in [
+            &[
+                "/opt/vw/bin/code-server",
+                "serve-local",
+                "--server-data-dir",
+            ][..],
+            &[
+                "/opt/vw/bin/code-server",
+                "serve-local",
+                "--server-data-dir=",
+            ],
+            &[
+                "/opt/vw/bin/code-server",
+                "serve-local",
+                "--",
+                "--server-data-dir=/srv/a",
+            ],
+        ] {
+            assert_eq!(
+                vscode_web_serve_from_argv(&argv(args)),
+                Some(serve("/opt/vw", None)),
+                "{args:?}"
+            );
+        }
     }
 
     #[test]
@@ -392,6 +537,155 @@ mod tests {
         );
     }
 
+    fn write_environ(dir: &Path, entries: &[(&[u8], &[u8])]) {
+        let mut bytes = Vec::new();
+        for (key, value) in entries {
+            bytes.extend_from_slice(key);
+            bytes.push(b'=');
+            bytes.extend_from_slice(value);
+            bytes.push(0);
+        }
+        fs::write(dir.join("environ"), bytes).unwrap();
+    }
+
+    /// `#vscodewebdatadir`: the server's own `VSCODE_AGENT_FOLDER`, not the
+    /// installing shell's. `--server-data-dir` and `--extensions-dir` still
+    /// win, an empty value is unset, and the first entry is the one `getenv`
+    /// returns.
+    #[test]
+    fn the_servers_own_agent_folder_sets_the_extensions_directory() {
+        let root = tempfile::tempdir().unwrap();
+        let proc_root = root.path();
+        let plain = process(
+            proc_root,
+            "10",
+            &["sh", "/opt/vw/bin/code-server", "serve-local"],
+        );
+        // No environ file: the CLI default stays unset.
+        assert_eq!(serve_of_process(&plain), Some(serve("/opt/vw", None)));
+        write_environ(
+            &plain,
+            &[
+                (b"OTHER", b"/not/this"),
+                (b"VSCODE_AGENT_FOLDER", b"/srv/agent"),
+                (b"VSCODE_AGENT_FOLDER", b"/srv/ignored"),
+            ],
+        );
+        assert_eq!(
+            serve_of_process(&plain),
+            Some(serve("/opt/vw", Some("/srv/agent/extensions")))
+        );
+        // Same environment as the wrapper above: the scan must collapse them.
+        let node = process(
+            proc_root,
+            "13",
+            &["/opt/vw/node", "/opt/vw/out/server-main.js", "serve-local"],
+        );
+        write_environ(&node, &[(b"VSCODE_AGENT_FOLDER", b"/srv/agent")]);
+
+        write_environ(&plain, &[(b"VSCODE_AGENT_FOLDER", b"")]);
+        assert_eq!(serve_of_process(&plain), Some(serve("/opt/vw", None)));
+
+        let data_dir = process(
+            proc_root,
+            "11",
+            &[
+                "sh",
+                "/opt/vw/bin/code-server",
+                "serve-local",
+                "--server-data-dir=/srv/data",
+            ],
+        );
+        write_environ(&data_dir, &[(b"VSCODE_AGENT_FOLDER", b"/srv/agent")]);
+        assert_eq!(
+            serve_of_process(&data_dir),
+            Some(serve("/opt/vw", Some("/srv/data/extensions")))
+        );
+
+        let extensions = process(
+            proc_root,
+            "12",
+            &[
+                "sh",
+                "/opt/vw/bin/code-server",
+                "serve-local",
+                "--extensions-dir=/srv/ext",
+            ],
+        );
+        write_environ(&extensions, &[(b"VSCODE_AGENT_FOLDER", b"/srv/agent")]);
+        assert_eq!(
+            serve_of_process(&extensions),
+            Some(serve("/opt/vw", Some("/srv/ext")))
+        );
+
+        // A non-UTF-8 value must not be rewritten into another directory.
+        // A non-UTF-8 *other* variable is irrelevant.
+        write_environ(&plain, &[(b"VSCODE_AGENT_FOLDER", b"/srv/\xff")]);
+        assert_eq!(serve_of_process(&plain), None);
+        write_environ(
+            &plain,
+            &[(b"OTHER", b"\xff"), (b"VSCODE_AGENT_FOLDER", b"/srv/agent")],
+        );
+        assert_eq!(
+            serve_of_process(&plain),
+            Some(serve("/opt/vw", Some("/srv/agent/extensions")))
+        );
+        fs::create_dir(proc_root.join("self")).unwrap();
+        // One entry for the shared agent folder: wrapper and node child collapsed.
+        assert_eq!(
+            running_vscode_web_serves(proc_root)
+                .into_iter()
+                .collect::<Vec<_>>(),
+            vec![
+                serve("/opt/vw", Some("/srv/agent/extensions")),
+                serve("/opt/vw", Some("/srv/data/extensions")),
+                serve("/opt/vw", Some("/srv/ext")),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_relative_data_dir_or_agent_folder_resolves_against_the_servers_cwd() {
+        let root = tempfile::tempdir().unwrap();
+        let proc_root = root.path();
+        let data_dir = process(
+            proc_root,
+            "10",
+            &[
+                "sh",
+                "/opt/vw/bin/code-server",
+                "serve-local",
+                "--server-data-dir=data",
+            ],
+        );
+        // No `cwd`: a relative directory would land in agent-doc's own cwd.
+        assert_eq!(serve_of_process(&data_dir), None);
+        std::os::unix::fs::symlink("/home/coder/project", data_dir.join("cwd")).unwrap();
+        assert_eq!(
+            serve_of_process(&data_dir),
+            Some(serve(
+                "/opt/vw",
+                Some("/home/coder/project/data/extensions")
+            ))
+        );
+
+        let agent = process(
+            proc_root,
+            "11",
+            &["sh", "/opt/vw/bin/code-server", "serve-local"],
+        );
+        write_environ(&agent, &[(b"VSCODE_AGENT_FOLDER", b"agent")]);
+        assert_eq!(serve_of_process(&agent), None);
+        std::os::unix::fs::symlink("/home/coder/project", agent.join("cwd")).unwrap();
+        assert_eq!(
+            serve_of_process(&agent),
+            Some(serve(
+                "/opt/vw",
+                Some("/home/coder/project/agent/extensions")
+            ))
+        );
+    }
+
     #[test]
     fn a_non_utf8_argv_is_skipped_rather_than_rewritten() {
         let root = tempfile::tempdir().unwrap();
@@ -438,6 +732,54 @@ mod tests {
             serves.contains(&VsCodeWebServe {
                 prefix,
                 extensions_dir: Some(PathBuf::from("/srv/ext")),
+            }),
+            "{serves:?}"
+        );
+    }
+
+    /// The same real `/proc` shape, for the two inputs that are not on the
+    /// module's argv: `--server-data-dir` wins over the process environment,
+    /// and `VSCODE_AGENT_FOLDER` is that process's value.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn the_real_proc_reports_server_data_dir_and_the_servers_agent_folder() {
+        let root = tempfile::tempdir().unwrap();
+        let prefix = root.path().join("custom prefix");
+        let cli = prefix.join("bin/code-server");
+        fs::create_dir_all(cli.parent().unwrap()).unwrap();
+        fs::write(&cli, "read line\n").unwrap();
+        let spawn = |data_dir: Option<&str>, agent: &str| {
+            let mut command = std::process::Command::new("/bin/sh");
+            command
+                .arg(&cli)
+                .arg("serve-local")
+                .env("VSCODE_AGENT_FOLDER", agent)
+                .stdin(std::process::Stdio::piped());
+            if let Some(data_dir) = data_dir {
+                command.arg(format!("--server-data-dir={data_dir}"));
+            }
+            command.spawn().unwrap()
+        };
+        let mut with_data_dir = spawn(Some("/srv/data"), "/srv/ignored");
+        let mut with_agent = spawn(None, "/srv/agent");
+
+        let serves = running_vscode_web_serves(Path::new("/proc"));
+
+        with_data_dir.kill().unwrap();
+        with_agent.kill().unwrap();
+        with_data_dir.wait().unwrap();
+        with_agent.wait().unwrap();
+        assert!(
+            serves.contains(&VsCodeWebServe {
+                prefix: prefix.clone(),
+                extensions_dir: Some(PathBuf::from("/srv/data/extensions")),
+            }),
+            "{serves:?}"
+        );
+        assert!(
+            serves.contains(&VsCodeWebServe {
+                prefix,
+                extensions_dir: Some(PathBuf::from("/srv/agent/extensions")),
             }),
             "{serves:?}"
         );

@@ -1469,7 +1469,7 @@ impl HarnessConfig {
         {
             return Some(placeholder);
         }
-        if self.binary == "codex" {
+        if matches!(self.binary.as_str(), "claude" | "codex") {
             let lines: Vec<String> = output
                 .lines()
                 .map(agent_doc_turn_executor_tmux::prompt::strip_ansi)
@@ -1477,7 +1477,12 @@ impl HarnessConfig {
             let last = lines
                 .iter()
                 .rposition(|line| !self.is_ignorable_output_line(line))?;
-            return Some(lines[codex_composer_first_row(&lines, last)].trim().to_string());
+            let first_row = if self.binary == "codex" {
+                codex_composer_first_row(&lines, last)
+            } else {
+                claude_composer_first_row(&lines, last)
+            };
+            return Some(lines[first_row].trim().to_string());
         }
         output
             .lines()
@@ -1555,6 +1560,29 @@ fn codex_composer_first_row(lines: &[String], last: usize) -> usize {
         }
         if line.is_empty() {
             break;
+        }
+    }
+    last
+}
+
+/// The `❯` row of a Claude composer whose body ends at `last`.
+///
+/// A draft that wraps, or holds a newline, continues on indented rows with no
+/// prompt glyph (`#managedipcdraftguard`), so its last row reads as neither a
+/// prompt nor a draft, and a route typed onto it. Claude frames its composer
+/// between two rules, and paragraph breaks render as blank rows, so the walk
+/// crosses those. The rule directly above the `❯` is what tells the composer
+/// from an option menu, whose rows have the same shape. An empty `❯` row claims
+/// nothing: text under it is a prompt suggestion as often as input, and resolving
+/// to that row would read the composer as ready.
+fn claude_composer_first_row(lines: &[String], last: usize) -> usize {
+    let mut row = last;
+    while row > 0 && (lines[row].starts_with("  ") || lines[row].trim().is_empty()) {
+        row -= 1;
+        if lines[row].starts_with('❯') {
+            let framed = row > 0 && lines[row - 1].trim_start().starts_with(['─', '━']);
+            let has_text = lines[row].trim() != "❯";
+            return if framed && has_text { row } else { last };
         }
     }
     last
@@ -1738,10 +1766,18 @@ pub fn project_pane_composer(content: &str, harness: &HarnessConfig) -> PaneComp
     };
     let content = content.as_ref();
     if harness.binary == "grok" {
-        return if harness.has_busy_cue(content) {
-            PaneComposerProjection::Busy
-        } else {
-            grok::project(content)
+        if !harness.has_busy_cue(content) {
+            return grok::project(content);
+        }
+        // Claude, Codex and OpenCode report a draft over a busy cue. Without
+        // this, Grok's reads as an empty running composer.
+        return match grok::follow_up_composer(content) {
+            grok::FollowUpComposer::Draft { preview } => {
+                PaneComposerProjection::OperatorDraft { preview }
+            }
+            grok::FollowUpComposer::Empty | grok::FollowUpComposer::Unreadable => {
+                PaneComposerProjection::Busy
+            }
         };
     }
     // OpenCode renders its composer as a box instead of a standalone prompt
@@ -4846,6 +4882,68 @@ Working (21s - esc to interrupt)
             project_pane_composer(busy, &h),
             PaneComposerProjection::Busy,
             "the composer projection must be Busy, not ReadyEmpty"
+        );
+    }
+
+    /// `#managedipcdraftguard`: rows taken from real captures. A Claude draft
+    /// that wraps ends on an indented row with no `❯`, and read as no composer.
+    #[test]
+    fn a_claude_draft_of_several_rows_resolves_to_its_prompt_row() {
+        const RULE: &str = "────────────────────────────────────────\n";
+        const FOOTER: &str =
+            "  Opus 5 ctx:20% ~/w main alex@host\n  ⏵⏵ bypass permissions on (shift+tab to cycle)\n";
+        let h = HarnessConfig::claude();
+        let is_first_row = |projection: PaneComposerProjection| {
+            matches!(projection, PaneComposerProjection::OperatorDraft { preview }
+                if preview.ends_with("first row"))
+        };
+
+        for body in [
+            "❯ first row\n  second row\n",
+            "❯\u{a0}first row\n  second row\n  third row\n\n",
+            "❯ first row\n\n  a second paragraph\n",
+        ] {
+            let frame = format!("⏺ done\n{RULE}{body}{RULE}{FOOTER}");
+            let cursor = 1 + body.trim_end().lines().count();
+            assert!(
+                is_first_row(project_pane_composer_at_cursor(&frame, &h, Some(cursor))),
+                "{body:?}"
+            );
+            assert!(is_first_row(project_pane_composer(&frame, &h)), "{body:?}");
+            let busy = format!("✶ Generating… (3s · esc to interrupt)\n{RULE}{body}{RULE}{FOOTER}");
+            assert!(
+                is_first_row(project_pane_composer_at_cursor(&busy, &h, Some(cursor))),
+                "{body:?}"
+            );
+        }
+    }
+
+    /// The walk above must not turn an option menu, whose rows have the same
+    /// shape, or the transcript into a draft.
+    #[test]
+    fn the_claude_draft_walk_needs_the_composer_rule_above_its_prompt() {
+        const RULE: &str = "────────────────────────────────────────\n";
+        let h = HarnessConfig::claude();
+
+        let menu = " Pick one\n❯ 1. First option\n  2. Second option\n  3. Third option\n";
+        assert_eq!(
+            h.last_prompt_candidate(menu).as_deref(),
+            Some("3. Third option")
+        );
+
+        let echoed_prompt = format!("{RULE}❯ an old prompt\n⏺ an answer\n  that wraps\n");
+        assert_eq!(
+            h.last_prompt_candidate(&echoed_prompt).as_deref(),
+            Some("that wraps")
+        );
+
+        let empty = format!("❯ an old prompt\n  that wrapped\n{RULE}❯ \n{RULE}");
+        assert_eq!(h.last_prompt_candidate(&empty).as_deref(), Some("❯"));
+
+        let suggestion = format!("{RULE}❯\u{a0}\n  Persist and finalize this cycle.\n");
+        assert_eq!(
+            h.last_prompt_candidate(&suggestion).as_deref(),
+            Some("Persist and finalize this cycle.")
         );
     }
 

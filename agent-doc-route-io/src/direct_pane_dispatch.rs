@@ -478,6 +478,119 @@ pub fn dead_harness_shell_dispatch_block(
     })
 }
 
+/// What the composer held when a path read it immediately before typing.
+pub(crate) struct ComposerBeforeTyping {
+    /// This trigger is already the current draft.
+    pub trigger_visible: bool,
+    pub diagnostic_path: Option<PathBuf>,
+}
+
+/// The last composer read before text is typed. Refuses a composer that text
+/// must not land in, and returns `None` when the pane could not be read.
+pub(crate) fn read_composer_before_typing(
+    tmux: &Tmux,
+    pane: &str,
+    file: &Path,
+    file_path: &str,
+    harness: &HarnessConfig,
+) -> Result<Option<ComposerBeforeTyping>> {
+    let trigger = harness.trigger_command(file_path);
+    // `#plaincaptureghost`: no plain-capture fallback — a plain capture cannot
+    // tell a ghost suggestion from a typed draft, and a failed ANSI capture is
+    // the same unreachable tmux a plain retry would hit.
+    let captured = match agent_doc_tmux_io::capture_pane_with_ansi(tmux, pane) {
+        Ok(captured) => captured,
+        Err(e) => {
+            eprintln!(
+                "[route] warning: failed to capture pane {} before direct submit: {}",
+                pane, e
+            );
+            return Ok(None);
+        }
+    };
+    let cursor_y = agent_doc_tmux_io::pane_cursor_y(tmux, pane);
+    if let PaneComposerProjection::AgentAddressed { target } =
+        agent_doc_harness::project_pane_composer_at_cursor(&captured, harness, cursor_y)
+    {
+        let outcome_fields = agent_doc_flow::outcome::blocked_with_exact_unblocker_fields(
+            StartingPaneBlocker::AgentAddressed.unblocker(),
+        );
+        anyhow::bail!(agent_addressed_composer_refusal_message(
+            AgentAddressedComposerRefusalFacts {
+                harness_binary: &harness.binary,
+                pane,
+                file_display: &file.display().to_string(),
+                target: &target,
+                outcome_fields: &outcome_fields,
+            },
+        ));
+    }
+    // Keep SGR attributes for protected-input classification: Codex uses
+    // DIM to distinguish generated composer suggestions from operator
+    // drafts. Diagnostics and trigger matching use the ghost-free plain
+    // projection (`#plaincaptureghost`).
+    let content = composer_text_without_ghost_suggestions(&captured);
+    let trigger_visible = route_trigger_visible_in_current_draft(&content, &trigger, |line| {
+        harness.is_prompt_line(line)
+    });
+    if trigger_visible {
+        let diagnostic_path = preserve_route_pane_snapshot(
+            file,
+            pane,
+            harness,
+            "direct_pane_existing_draft_visible",
+            &content,
+        )
+        .path;
+        return Ok(Some(ComposerBeforeTyping {
+            trigger_visible,
+            diagnostic_path,
+        }));
+    }
+    let Some(reason) = harness.protected_prompt_input_reason_at_cursor(&captured, cursor_y) else {
+        return Ok(Some(ComposerBeforeTyping {
+            trigger_visible,
+            diagnostic_path: None,
+        }));
+    };
+    let diagnostic_path = preserve_route_pane_snapshot(
+        file,
+        pane,
+        harness,
+        "direct_pane_protected_prompt_input",
+        &content,
+    )
+    .path;
+    let draft_preview_field =
+        protected_prompt_draft_preview_at_cursor(harness, &captured, cursor_y)
+            .map(|preview| format!(" draft_preview={preview:?}"))
+            .unwrap_or_default();
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "route_dispatch_direct_pane_blocked file={} pane={} harness={} protected_input={}{}",
+            file.display(),
+            pane,
+            harness.binary,
+            reason,
+            draft_preview_field,
+        ),
+    );
+    let diagnostic = diagnostic_path
+        .as_ref()
+        .map(|path| format!(" snapshot_path={}", path.display()))
+        .unwrap_or_default();
+    anyhow::bail!(
+        "route refusing to dispatch {} into pane {} for {} because the composer contains protected prompt input ({}){}; clear or submit that draft, then rerun agent-doc route{}",
+        trigger,
+        pane,
+        file.display(),
+        reason,
+        draft_preview_field,
+        diagnostic,
+    );
+}
+
 pub fn send_command_unchecked(
     tmux: &Tmux,
     pane: &str,
@@ -513,102 +626,9 @@ pub fn send_command_unchecked(
     }) {
         anyhow::bail!("{rejection}");
     }
-    let mut existing_draft_diagnostic_path = None;
-    let mut protected_prompt_input = None;
-    // `#plaincaptureghost`: no plain-capture fallback — a plain capture cannot
-    // tell a ghost suggestion from a typed draft, and a failed ANSI capture is
-    // the same unreachable tmux a plain retry would hit.
-    let existing_draft_visible = match agent_doc_tmux_io::capture_pane_with_ansi(tmux, pane) {
-        Ok(captured) => {
-            let cursor_y = agent_doc_tmux_io::pane_cursor_y(tmux, pane);
-            if let PaneComposerProjection::AgentAddressed { target } =
-                agent_doc_harness::project_pane_composer_at_cursor(&captured, harness, cursor_y)
-            {
-                let outcome_fields = agent_doc_flow::outcome::blocked_with_exact_unblocker_fields(
-                    StartingPaneBlocker::AgentAddressed.unblocker(),
-                );
-                anyhow::bail!(agent_addressed_composer_refusal_message(
-                    AgentAddressedComposerRefusalFacts {
-                        harness_binary: &harness.binary,
-                        pane,
-                        file_display: &file.display().to_string(),
-                        target: &target,
-                        outcome_fields: &outcome_fields,
-                    },
-                ));
-            }
-            // Keep SGR attributes for protected-input classification: Codex uses
-            // DIM to distinguish generated composer suggestions from operator
-            // drafts. Diagnostics and trigger matching use the ghost-free plain
-            // projection (`#plaincaptureghost`).
-            let content = composer_text_without_ghost_suggestions(&captured);
-            let visible = route_trigger_visible_in_current_draft(&content, &trigger, |line| {
-                harness.is_prompt_line(line)
-            });
-            if visible {
-                existing_draft_diagnostic_path = preserve_route_pane_snapshot(
-                    file,
-                    pane,
-                    harness,
-                    "direct_pane_existing_draft_visible",
-                    &content,
-                )
-                .path;
-            } else if let Some(reason) =
-                harness.protected_prompt_input_reason_at_cursor(&captured, cursor_y)
-            {
-                let diagnostic_path = preserve_route_pane_snapshot(
-                    file,
-                    pane,
-                    harness,
-                    "direct_pane_protected_prompt_input",
-                    &content,
-                )
-                .path;
-                let draft_preview =
-                    protected_prompt_draft_preview_at_cursor(harness, &captured, cursor_y);
-                protected_prompt_input = Some((reason, diagnostic_path, draft_preview));
-            }
-            visible
-        }
-        Err(e) => {
-            eprintln!(
-                "[route] warning: failed to capture pane {} before direct submit: {}",
-                pane, e
-            );
-            false
-        }
-    };
-    if let Some((reason, diagnostic_path, draft_preview)) = protected_prompt_input {
-        let draft_preview_field = draft_preview
-            .as_deref()
-            .map(|preview| format!(" draft_preview={preview:?}"))
-            .unwrap_or_default();
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "route_dispatch_direct_pane_blocked file={} pane={} harness={} protected_input={}{}",
-                file.display(),
-                pane,
-                harness.binary,
-                reason,
-                draft_preview_field,
-            ),
-        );
-        let diagnostic = diagnostic_path
-            .as_ref()
-            .map(|path| format!(" snapshot_path={}", path.display()))
-            .unwrap_or_default();
-        anyhow::bail!(
-            "route refusing to dispatch {} into pane {} for {} because the composer contains protected prompt input ({}){}; clear or submit that draft, then rerun agent-doc route{}",
-            harness.trigger_command(file_path),
-            pane,
-            file.display(),
-            reason,
-            draft_preview_field,
-            diagnostic,
-        );
-    }
+    let composer = read_composer_before_typing(tmux, pane, file, file_path, harness)?;
+    let existing_draft_visible = composer.as_ref().is_some_and(|read| read.trigger_visible);
+    let existing_draft_diagnostic_path = composer.and_then(|read| read.diagnostic_path);
     if direct_pane_can_enter_existing_draft(DirectPaneExistingDraftSubmitFacts {
         profile_allows_pending_draft_enter_resubmit:
             agent_doc_tmux_commands::tmux_submit_profile_for_harness(&harness.binary)

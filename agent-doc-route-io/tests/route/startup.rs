@@ -739,6 +739,125 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
             "single-submit pass-through must not enter the acceptance polling window"
         );
     }
+    /// Run Agent Doc's single submit, with no controller check in front of it.
+    fn guarded_pass_through(
+        iso: &tmux_router::Tmux,
+        root: &std::path::Path,
+        pane: &str,
+        harness: &HarnessConfig,
+    ) -> anyhow::Result<agent_doc_controller::dispatch::RoutedDispatchStartProof> {
+        agent_doc_route_io::dispatch::dispatch_routed_reopen_with_mode(
+            iso,
+            &root.join("test.md"),
+            pane,
+            "test.md",
+            harness,
+            agent_doc_route_io::dispatch::DirectPaneDispatchOptions {
+                effects: agent_doc_route_io::runtime_effects::route_dispatch_effects(),
+                await_start_proof: false,
+                print_unproven_progress: false,
+                submit_policy:
+                    agent_doc_controller::dispatch::DirectPaneSubmitPolicy::PassThroughSingleSubmit,
+            },
+        )
+    }
+
+    /// `#managedipcdraftguard`: the controller refuses a visibly running turn, so
+    /// this drives what is left, a turn that started after that check. The pane
+    /// paints a running Claude turn at its bottom, where the busy cue is read, and
+    /// records every key it receives.
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn dispatch_guard_refuses_a_composer_under_a_running_turn() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::write(dir.path().join("test.md"), "# test\n").unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        let harness = HarnessConfig::claude();
+
+        for (label, draft, refusal) in [
+            ("draft", "fix the tests".to_string(), "not this trigger"),
+            (
+                "trigger",
+                harness.trigger_command("test.md"),
+                "already holds the unsubmitted",
+            ),
+        ] {
+            let keys = dir.path().join(format!("{label}.keys"));
+            let script = dir.path().join(format!("{label}.sh"));
+            let rule = "─".repeat(40);
+            std::fs::write(
+                &script,
+                format!(
+                    ": > '{keys}'\n\
+                     stty -echo -icanon min 1 time 0\n\
+                     rows=$(stty size | cut -d' ' -f1)\n\
+                     printf '\\033[2J\\033[%d;1H' $((rows - 4))\n\
+                     printf '✶ Generating… (3s · esc to interrupt)\\n{rule}\\n❯ {draft}\\n{rule}\\n'\n\
+                     printf '  Opus 5 ctx:20%% ~/w main alex@host'\n\
+                     printf '\\033[%d;%dH' $((rows - 2)) {column}\n\
+                     exec cat > '{keys}'\n",
+                    keys = keys.display(),
+                    column = draft.chars().count() + 3,
+                ),
+            )
+            .unwrap();
+            let name = format!("route-test-guard-busy-{label}");
+            let iso = agent_doc_tmux_io::isolated_test_tmux(&name);
+            let pane = iso.auto_start("test", &test_cwd()).unwrap();
+            let window = iso.pane_window(&pane).unwrap();
+            sessions::register_full_with_cwd_in(
+                dir.path(),
+                &name,
+                &pane,
+                "test.md",
+                1234,
+                &window,
+                &dir.path().to_string_lossy(),
+            )
+            .unwrap();
+            send_keys_with_retry(&iso, &pane, &format!("sh '{}'", script.display()));
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+            while agent_doc_tmux_io::target_current_command(&iso, &pane).as_deref() != Some("cat") {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "the frame never rendered"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+
+            let error = guarded_pass_through(&iso, dir.path(), &pane, &harness)
+                .expect_err("the composer refuses the route");
+
+            assert!(error.to_string().contains(refusal), "{label}: {error}");
+            assert_eq!(
+                std::fs::read(&keys).unwrap(),
+                b"",
+                "{label}: nothing may reach the composer"
+            );
+        }
+    }
+
+    /// Unknown pane state does not authorize typing.
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn dispatch_guard_refuses_a_composer_it_could_not_read() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::write(dir.path().join("test.md"), "# test\n").unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-guard-unread");
+        iso.auto_start("test", &test_cwd()).unwrap();
+
+        let error = guarded_pass_through(&iso, dir.path(), "%9999", &HarnessConfig::claude())
+            .expect_err("an unread composer refuses the route");
+
+        assert!(
+            error.to_string().contains("could not read the composer"),
+            "{error}"
+        );
+    }
+
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn send_command_checked_codex_does_not_append_follow_up_lines() {

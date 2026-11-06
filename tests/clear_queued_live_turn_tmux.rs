@@ -39,6 +39,10 @@
 //! no static list (only its faint style marks it), and it arrives as one
 //! supervised fresh restart, never a typed `/clear` (Codex exits on it).
 //!
+//! The same scenarios drive `agent-doc route` onto text in the composer: nothing
+//! is typed onto a draft, on supervisor IPC or the plain-trigger pass-through
+//! (`#managedipcdraftguard`).
+//!
 //! Live tmux: `#[ignore]`, run through `make tmux-ci`.
 
 use std::path::PathBuf;
@@ -82,6 +86,11 @@ with open(os.path.join(d, "bg.pids"), "a") as f:
     f.write("%d\n" % bg.pid)
 RULE = "─" * 40 + "\n"
 draft = ""
+# Claude wraps a long draft onto indented rows with no `❯`.
+WRAP = 150
+def composer():
+    rows = [draft[i:i + WRAP] for i in range(0, len(draft), WRAP)] or [""]
+    return "❯ " + "\n  ".join(rows) + "\n", len(rows), 3 + len(rows[-1])
 def footer():
     # `background` mirrors haiven-dev api.md pane %165 (2026-10-11): an idle
     # prompt while Claude Code background subagents and a shell keep running.
@@ -91,13 +100,18 @@ def footer():
                 "  ◯ general-purpose  Checking DecisionFeed.jsx for chat-safety status                         6m 10s · ↓ 95.4k tokens\n")
     return "  Opus 4.8 ctx:40% ~/fake main\n  ⏵⏵ bypass permissions on (shift+tab to cycle)\n"
 def idle():
-    sys.stdout.write("\x1b[2J\x1b[H" + RULE + "❯ " + draft + "\n" + RULE + footer()
-                     + "\x1b[2;%dH" % (3 + len(draft)))
+    body, rows, column = composer()
+    sys.stdout.write("\x1b[2J\x1b[H" + RULE + body + RULE + footer()
+                     + "\x1b[%d;%dH" % (1 + rows, column))
     sys.stdout.flush()
 def busy():
-    sys.stdout.write("\x1b[2J\x1b[H✶ Generating… (3s · esc to interrupt)\n"
-                     + RULE + "❯ " + draft + "\n" + RULE + footer()
-                     + "\x1b[3;%dH" % (3 + len(draft)))
+    body, rows, column = composer()
+    # A real pane paints the turn at its bottom, where the busy cue is read;
+    # `paint_low` puts this frame there.
+    top = 30 if os.path.exists(os.path.join(d, "paint_low")) else 0
+    sys.stdout.write("\x1b[2J\x1b[H" + "\n" * top + "✶ Generating… (3s · esc to interrupt)\n"
+                     + RULE + body + RULE + footer()
+                     + "\x1b[%d;%dH" % (top + 2 + rows, column))
     sys.stdout.flush()
 state = "idle"
 idle()
@@ -1734,6 +1748,270 @@ fn a_coordinator_parked_on_background_workers_is_woken_for_a_due_heartbeat() {
     for pid in background {
         assert!(process_alive(pid), "background worker {pid} survived");
     }
+}
+
+/// Harness turns the fake recorded, without its start markers.
+fn submitted_lines(scenario: &LiveClearScenario) -> Vec<String> {
+    scenario
+        .inputs()
+        .into_iter()
+        .filter(|line| line != "<started>")
+        .collect()
+}
+
+/// The part of `text` on the `❯` row of the fake composer.
+fn first_composer_row(text: &str) -> &str {
+    &text[..text.len().min(150)]
+}
+
+impl LiveClearScenario {
+    /// Type `text` into the fake composer, as an operator would, and leave it
+    /// unsubmitted.
+    fn type_into_composer(&self, text: &str) {
+        let typed = self
+            .tmux
+            .cmd()
+            .args(["send-keys", "-t", &self.pane, "-l", text])
+            .output()
+            .unwrap();
+        assert!(typed.status.success(), "{}", stderr(&typed));
+        self.wait_until("the draft is in the composer", || {
+            self.tmux
+                .capture_pane(&self.pane, None)
+                .unwrap_or_default()
+                .contains(&format!("❯ {}", first_composer_row(text)))
+        });
+    }
+
+    fn composer_holds(&self, text: &str) -> bool {
+        self.tmux
+            .capture_pane(&self.pane, None)
+            .unwrap_or_default()
+            .lines()
+            .any(|line| line.trim_end() == format!("❯ {}", first_composer_row(text)))
+    }
+
+    fn diagnostics(&self, routed: &Output) -> String {
+        format!(
+            "--- exit ---\n{:?}\n--- stderr ---\n{}\n--- pane ---\n{}\n--- inputs ---\n{:?}\n--- ops.log tail ---\n{}",
+            routed.status.code(),
+            stderr(routed),
+            self.tmux.capture_pane(&self.pane, None).unwrap_or_default(),
+            self.inputs(),
+            self.ops_log_tail(),
+        )
+    }
+}
+
+/// `#managedipcdraftguard`: `agent-doc route` reaches an idle actor through
+/// supervisor IPC. The trigger must not be typed onto text the operator has not
+/// sent, and once the draft is gone the same route must get through: a refusal
+/// that left a dispatch receipt behind would swallow the rerun.
+#[test]
+#[ignore = "live tmux integration test; run `make tmux-ci`"]
+fn a_managed_route_types_nothing_onto_a_draft_and_the_rerun_delivers() {
+    let scenario = LiveClearScenario::start_with_composer("route-managed-draft");
+    scenario.type_into_composer("fix the widget tests");
+
+    let routed = scenario.agent_doc(&["route", DOC], &[], None);
+    // Long enough for a delivered prompt to reach the fake's log.
+    std::thread::sleep(Duration::from_secs(2));
+
+    let diagnostics = scenario.diagnostics(&routed);
+    assert!(
+        scenario.ops_log().contains("supervisor_ipc") || !routed.status.success(),
+        "{diagnostics}"
+    );
+    assert_eq!(
+        submitted_lines(&scenario),
+        Vec::<String>::new(),
+        "{diagnostics}"
+    );
+    assert!(
+        scenario.composer_holds("fix the widget tests"),
+        "{diagnostics}"
+    );
+    assert!(!routed.status.success(), "{diagnostics}");
+    assert!(
+        stderr(&routed).contains("fix the widget tests"),
+        "{diagnostics}"
+    );
+
+    let cleared = scenario
+        .tmux
+        .cmd()
+        .args(["send-keys", "-t", &scenario.pane, "C-u"])
+        .output()
+        .unwrap();
+    assert!(cleared.status.success(), "{}", stderr(&cleared));
+    scenario.wait_until("the operator cleared the draft", || {
+        !scenario
+            .tmux
+            .capture_pane(&scenario.pane, None)
+            .unwrap_or_default()
+            .contains("fix the widget tests")
+    });
+    let rerun = scenario.agent_doc(&["route", DOC], &[], None);
+    scenario.wait_until("the rerun reached the harness", || {
+        submitted_lines(&scenario)
+            .iter()
+            .any(|line| line.contains("/agent-doc"))
+    });
+    let diagnostics = scenario.diagnostics(&rerun);
+    assert_eq!(submitted_lines(&scenario).len(), 1, "{diagnostics}");
+}
+
+/// `#managedipcdraftguard`: a draft that wraps ends on a row with no `❯`, which
+/// read as no composer at all.
+#[test]
+#[ignore = "live tmux integration test; run `make tmux-ci`"]
+fn a_managed_route_types_nothing_onto_a_wrapped_draft() {
+    let scenario = LiveClearScenario::start_with_composer("route-managed-wrapped-draft");
+    let draft = "fix the widget tests ".repeat(10);
+    let draft = draft.trim_end();
+    scenario.type_into_composer(draft);
+
+    let routed = scenario.agent_doc(&["route", DOC], &[], None);
+    std::thread::sleep(Duration::from_secs(2));
+
+    let diagnostics = scenario.diagnostics(&routed);
+    assert_eq!(
+        submitted_lines(&scenario),
+        Vec::<String>::new(),
+        "{diagnostics}"
+    );
+    assert!(scenario.composer_holds(draft), "{diagnostics}");
+    assert!(!routed.status.success(), "{diagnostics}");
+}
+
+/// `#managedipcdraftguard`: the same route on Codex, under a status line no row
+/// list recognizes, where only the cursor says the draft is the composer.
+#[test]
+#[ignore = "live tmux integration test; run `make tmux-ci`"]
+fn a_managed_codex_route_types_nothing_onto_a_draft_above_a_custom_status_line() {
+    let scenario = LiveClearScenario::start_codex("route-managed-codex-draft");
+    std::fs::write(scenario.fake.join("status_line"), "  my own status line\n").unwrap();
+    std::fs::write(scenario.fake.join("draft"), "fix the widget tests").unwrap();
+    scenario.wait_until("the draft is on screen", || {
+        scenario
+            .tmux
+            .capture_pane(&scenario.pane, None)
+            .unwrap_or_default()
+            .contains("my own status line")
+    });
+
+    let routed = scenario.agent_doc(&["route", DOC], &[], None);
+    std::thread::sleep(Duration::from_secs(2));
+
+    let diagnostics = scenario.diagnostics(&routed);
+    assert_eq!(
+        submitted_lines(&scenario),
+        Vec::<String>::new(),
+        "{diagnostics}"
+    );
+    assert!(!routed.status.success(), "{diagnostics}");
+}
+
+impl LiveClearScenario {
+    /// A turn is running and the operator has started typing the next message.
+    fn draft_under_a_running_turn(&self, draft: &str) -> Vec<String> {
+        std::fs::write(self.fake.join("paint_low"), "").unwrap();
+        self.route_dispatch_turn();
+        self.hook(true, "UserPromptSubmit");
+        self.wait_until("the turn is running low in the pane", || {
+            self.tmux
+                .capture_pane(&self.pane, None)
+                .unwrap_or_default()
+                .lines()
+                .position(|line| line.contains("esc to interrupt"))
+                .is_some_and(|row| row >= 30)
+        });
+        let before = submitted_lines(self);
+        self.type_into_composer(draft);
+        before
+    }
+}
+
+/// `#managedipcdraftguard`: the controller refuses a visibly running turn before
+/// either transport is reached, so these pin the outcome for the operator, not a
+/// route guard. `dispatch_guard` in `agent-doc-route-io` drives the window after
+/// that check.
+#[test]
+#[ignore = "live tmux integration test; run `make tmux-ci`"]
+fn no_route_into_a_running_turn_types_onto_a_draft() {
+    let scenario = LiveClearScenario::start_with_composer("route-busy-draft");
+    let before = scenario.draft_under_a_running_turn("fix the widget tests");
+
+    for args in [
+        vec!["route", "--dispatch-only", "--plain-trigger", DOC],
+        vec!["route", DOC],
+    ] {
+        let routed = scenario.agent_doc(&args, &[], None);
+        std::thread::sleep(Duration::from_secs(2));
+
+        let diagnostics = scenario.diagnostics(&routed);
+        assert_eq!(
+            submitted_lines(&scenario),
+            before,
+            "{args:?}\n{diagnostics}"
+        );
+        assert!(
+            scenario.composer_holds("fix the widget tests"),
+            "{args:?}\n{diagnostics}"
+        );
+        assert!(!routed.status.success(), "{args:?}\n{diagnostics}");
+    }
+}
+
+/// `#managedipcdraftguard`: Run Agent Doc's plain trigger on an idle pane, the
+/// `send_command_once_checked` path. A draft of one row was already refused there;
+/// a wrapped one read as no composer.
+#[test]
+#[ignore = "live tmux integration test; run `make tmux-ci`"]
+fn an_idle_plain_trigger_types_nothing_onto_a_wrapped_draft() {
+    let scenario = LiveClearScenario::start_with_composer("route-plain-wrapped-draft");
+    let draft = "fix the widget tests ".repeat(10);
+    let draft = draft.trim_end();
+    scenario.type_into_composer(draft);
+
+    let routed = scenario.agent_doc(
+        &["route", "--dispatch-only", "--plain-trigger", DOC],
+        &[],
+        None,
+    );
+    std::thread::sleep(Duration::from_secs(2));
+
+    let diagnostics = scenario.diagnostics(&routed);
+    assert_eq!(
+        submitted_lines(&scenario),
+        Vec::<String>::new(),
+        "{diagnostics}"
+    );
+    assert!(scenario.composer_holds(draft), "{diagnostics}");
+    assert!(!routed.status.success(), "{diagnostics}");
+}
+
+/// `#managedipcdraftguard`: supervisor IPC inherits the stranded-trigger repair
+/// with the guard. The held trigger is submitted, not typed a second time.
+#[test]
+#[ignore = "live tmux integration test; run `make tmux-ci`"]
+fn a_managed_route_submits_a_stranded_trigger_instead_of_typing_a_second() {
+    let scenario = LiveClearScenario::start_with_composer("route-managed-stranded");
+    let trigger = format!("/agent-doc {}", scenario.doc.display());
+    scenario.type_into_composer(&trigger);
+
+    let routed = scenario.agent_doc(&["route", DOC], &[], None);
+    scenario.wait_until("the held trigger was submitted", || {
+        !submitted_lines(&scenario).is_empty()
+    });
+    std::thread::sleep(Duration::from_secs(2));
+
+    assert_eq!(
+        submitted_lines(&scenario),
+        vec![trigger],
+        "{}",
+        scenario.diagnostics(&routed)
+    );
 }
 
 /// A two-item `go` queue for the `#bgclearpolicy` auto-clear scenarios.

@@ -110,8 +110,11 @@
   A closeout's `patch:recap` replaces the whole body in the response's own
   operation, creating the component below `agent:status` when the document
   predates it. The text is informational: it never starts a turn and is never
-  read as a prompt or a queue row. A missing recap or a format finding is an
-  advisory, never a refusal. All harnesses write one format, from
+  read as a prompt or a queue row. A numbered decision that recommends a
+  choice nests the `#recommendationinrow` row
+  `- **Recommendation:** **<label>** — <reason>`; that line is not projected
+  into `**Choices:**` (`#recaprecommendationrow`). A missing recap or a format
+  finding is an advisory, never a refusal. All harnesses write one format, from
   `runbooks/recap.md`. See [Document Format](specs/02-document-format.md).
 
 - A template patch whose target no patch path applies is refused with a

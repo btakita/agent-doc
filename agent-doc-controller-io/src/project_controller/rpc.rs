@@ -61119,8 +61119,12 @@ mod tests {
         // saw `inserted == false`, acknowledged the row, and cleared its
         // pending-authority overlay without ever folding the event, so its
         // projection lacked the authority forever -- a 5 s deadline reported
-        // that as "slow". The ceiling only turns a leaked reference into a
-        // failure; it bounds no latency.
+        // that as "slow". `#retiredhandoffapplyrace` now folds such a late
+        // duplicate before the ACK (pinned deterministically by
+        // `successor_folds_handoff_a_retired_predecessor_ledgered_after_its_load`);
+        // this test keeps the wait so it covers contention recovery alone. The
+        // ceiling only turns a leaked reference into a failure; it bounds no
+        // latency.
         let predecessor = Arc::downgrade(&runtime);
         drop(runtime);
         let ceiling = Instant::now() + super::blocking_effect_gate::HANG_CEILING;
@@ -61181,6 +61185,156 @@ mod tests {
                 .map(|authority| authority.authority_epoch),
             Some(202),
             "the successor's projection must carry the recovered authority"
+        );
+    }
+
+    /// `#retiredhandoffapplyrace`: a retired predecessor (generation 1)
+    /// claimed a durable handoff and parked its apply in SQLite's busy handler.
+    /// The parked insert commits *after* the successor (generation 2) loaded
+    /// the ledger, so the successor's own append reports `inserted == false`.
+    /// The successor used to acknowledge the row and clear its pending overlay
+    /// without folding the event, leaving its projection without the authority.
+    ///
+    /// The interleaving is pinned by the durable-load seam, not by timing: the
+    /// predecessor's row lands inside the successor's construction, after its
+    /// ledger load and before its handoff worker exists, so every successor
+    /// drain -- the background worker's or this test's -- meets the duplicate.
+    #[test]
+    fn successor_folds_handoff_a_retired_predecessor_ledgered_after_its_load() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let event = authority_handoff_test_event("authority-retired-late-apply", "doc", 303);
+        // The predecessor accepted the handoff and claimed it for its apply.
+        assert!(
+            state_store::enqueue_document_authority_handoff(
+                dir.path(),
+                &state_store::DocumentAuthorityHandoff {
+                    document_hash: "doc".to_string(),
+                    authority_epoch: 303,
+                    controller_generation: 1,
+                    payload_json: serde_json::to_string(&event).unwrap(),
+                },
+            )
+            .unwrap()
+        );
+        assert!(state_store::claim_document_authority_handoff(dir.path(), "doc", 303, 1).unwrap());
+
+        let landed = std::sync::Arc::new(AtomicBool::new(false));
+        {
+            let (landed, project_root, event) =
+                (landed.clone(), dir.path().to_path_buf(), event.clone());
+            super::super::set_full_durable_load_test_hook(Some(Box::new(move || {
+                // The parked predecessor apply commits exactly once, after the
+                // successor's ledger load: the durable effect of its
+                // `append_state_event`.
+                if !landed.swap(true, Ordering::SeqCst) {
+                    assert!(
+                        super::super::append_state_event_for_test(&project_root, &event).unwrap(),
+                        "the predecessor's parked apply inserts the event"
+                    );
+                }
+            })));
+        }
+        let successor = ControllerRuntime::new_arc(ControllerBootstrap {
+            controller_generation: 2,
+            previous_controller_pid: None,
+            ..bootstrap
+        });
+        super::super::set_full_durable_load_test_hook(None);
+        let successor = successor.unwrap();
+        assert!(
+            landed.load(Ordering::SeqCst),
+            "the predecessor's row must land inside the successor's construction"
+        );
+
+        // A drain returning `false` handled every row it could fence; it may
+        // race the successor's own worker, and both run under generation 2. The
+        // attempt cap is a clock-free hang guard, never a latency bound.
+        let mut drains = 0;
+        while successor
+            .drain_document_authority_handoffs(dir.path())
+            .unwrap()
+        {
+            drains += 1;
+            assert!(
+                drains < 100,
+                "the successor could never settle its predecessor's durable handoff"
+            );
+        }
+        assert!(
+            state_store::load_document_authority_handoffs(dir.path())
+                .unwrap()
+                .is_empty(),
+            "the successor must acknowledge the claimed handoff"
+        );
+        // The ACK follows the fold in whichever drain made it, so once the row
+        // is gone the projection itself -- not the pending overlay, which this
+        // read deliberately bypasses -- must carry the authority.
+        assert_eq!(
+            successor
+                .memory
+                .lock()
+                .state_projection
+                .document("doc")
+                .and_then(|projection| projection.document.latest_authority.clone())
+                .map(|authority| authority.authority_epoch),
+            Some(303),
+            "an acknowledged handoff whose event a predecessor ledgered after the load must be folded"
+        );
+    }
+
+    /// `#retiredhandoffapplyrace`: the duplicate's ledger sequence, compared
+    /// with the projection's folded high-water, is what tells "already folded"
+    /// from "ledgered by another writer after the load".
+    #[test]
+    fn authority_handoff_append_distinguishes_folded_from_late_ledgered_duplicates() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        // Prime state.db, then ledger one event before the controller loads.
+        drop(open_state_db(dir.path()).unwrap());
+        let folded = authority_handoff_test_event("authority-folded-at-load", "doc-a", 1);
+        assert!(super::super::append_state_event_for_test(dir.path(), &folded).unwrap());
+        let runtime = ControllerRuntime::new_arc(bootstrap).unwrap();
+        assert_eq!(
+            runtime
+                .append_apply_document_authority_handoff(dir.path(), &folded)
+                .unwrap(),
+            super::super::AuthorityHandoffLedgerOutcome::AlreadyFolded,
+            "a duplicate the load folded needs no reload"
+        );
+
+        let late = authority_handoff_test_event("authority-ledgered-after-load", "doc-b", 2);
+        assert!(super::super::append_state_event_for_test(dir.path(), &late).unwrap());
+        match runtime
+            .append_apply_document_authority_handoff(dir.path(), &late)
+            .unwrap()
+        {
+            super::super::AuthorityHandoffLedgerOutcome::LedgeredAfterLoad {
+                sequence: Some(sequence),
+                folded_through,
+            } => assert!(
+                sequence > folded_through,
+                "a row committed after the load sits above the folded high-water"
+            ),
+            other => {
+                panic!("a row another writer ledgered after the load is not folded: {other:?}")
+            }
+        }
+
+        let fresh = authority_handoff_test_event("authority-fresh", "doc-c", 3);
+        assert_eq!(
+            runtime
+                .append_apply_document_authority_handoff(dir.path(), &fresh)
+                .unwrap(),
+            super::super::AuthorityHandoffLedgerOutcome::Applied
+        );
+        runtime.refresh_memory().unwrap();
+        assert_eq!(
+            runtime
+                .append_apply_document_authority_handoff(dir.path(), &late)
+                .unwrap(),
+            super::super::AuthorityHandoffLedgerOutcome::AlreadyFolded,
+            "a durable reload folds the late row and raises the high-water over it"
         );
     }
 

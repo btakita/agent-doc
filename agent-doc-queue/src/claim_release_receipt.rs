@@ -890,6 +890,16 @@ mod tests {
             ),
             ("Rebuild the SDK docs [#q-7f3a]", "'Rebuild the SDK docs [#q-7f3a]'"),
             ("What are the values?", "'What are the values?'"),
+            // A preset token plus only a generated q-id is still free text.
+            // `--ack-id address` and `--ack-id q-…` both refuse.
+            (
+                "#address [#q-3f7fdc3da31f]",
+                "'#address [#q-3f7fdc3da31f]'",
+            ),
+            (
+                "https://example.test/merge_requests/2: #address [#q-3f7fdc3da31f]",
+                "'https://example.test/merge_requests/2: #address [#q-3f7fdc3da31f]'",
+            ),
         ] {
             let closeout = queue_line_closeout("tasks/sdk.md", row, Some(("subagent:c690cli", 1)));
             assert!(

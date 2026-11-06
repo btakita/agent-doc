@@ -359,37 +359,127 @@ pub fn operator_request_id(claim: &QueueClaim) -> String {
     format!("subagent-operator-request-reportedcloseout-{digest}")
 }
 
-fn consume_step(document: &str, claim: &QueueClaim) -> ReportedCloseoutStep {
-    match &claim.identity {
-        QueueItemIdentity::Id(id) => ReportedCloseoutStep {
-            action: ReportedCloseoutAction::Consume,
-            argv: argv(&["agent-doc", "queue", "consume", document, "--ack-id", id]),
-            concrete: true,
-            alternative: None,
-            detail: format!(
-                "strike the reported row; the tracked item stays open and the struck row names its `(stays open: ...)` reason (#ackstrikeopenbacklog). When the worker's or operator's answer resolves the tracked item, pass `--done {id}` to `agent-doc finalize {document}` instead and close any parent item the same answer resolves; never acknowledge a head whose item the answer finished"
-            ),
-        },
-        QueueItemIdentity::FreeText(_) => {
-            let owner = format!("{}#{}", claim.owner, claim.generation);
-            ReportedCloseoutStep {
-                action: ReportedCloseoutAction::Consume,
-                argv: argv(&[
-                    "agent-doc",
-                    "queue",
-                    "consume",
-                    document,
-                    "--ack-text",
-                    &claim_item_handle(&claim.item_text),
-                    "--ack-owner",
-                    &owner,
-                ]),
-                concrete: true,
-                alternative: None,
-                detail: "strike the reported free-text row, fenced to this exact worker attempt"
-                    .to_string(),
+/// The one exact command that strikes a reported queue row
+/// (`#closeoutguidanceagree`).
+///
+/// Completion feedback (`queue report-complete`), session-check's overdue
+/// closeout, the Stop hook's writeback reminder, mid-turn steering and the
+/// `queue claims` consume step all render this, so a coordinator is never told
+/// two different commands for one attempt. They disagreed on 2026-11-05: the
+/// completion feedback and the Stop hook read the first `#` of a free-text row,
+/// so `[#id]: answer` got `--ack-id <id>` (refused when another attempt also
+/// reported for `<id>`) and a `[#q-…]` row got `--ack-id q-…` (not a backlog
+/// id, always refused), while session-check named the attempt-fenced
+/// `--ack-text <row> --ack-owner owner#gen` for the same attempt.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReportedRowStrike {
+    /// `queue consume <doc> --ack-id <id>`: an id-backed row (`do [#id]`,
+    /// `[#id]`), or a waiting-tree parent whose reported `☑️` attempt is
+    /// nested under it, which only `--ack-id <parent id>` strikes
+    /// (`#nestedreceiptack`, `#reportedwritebackprescription`).
+    AckId { id: String },
+    /// `queue consume <doc> --ack-text <row> --ack-owner <owner#gen>`: a
+    /// free-text row (prose, `[#id]: answer`, a `[#q-…]` row) bound to one
+    /// exact worker attempt.
+    AckText { handle: String, owner: String },
+    /// A free-text row with no exact attempt to fence the strike to: the
+    /// verbatim `> **Queue prompt:**` echo persisted by `agent-doc finalize`.
+    Echo,
+}
+
+impl ReportedRowStrike {
+    /// The `queue consume` argv, or `None` for [`ReportedRowStrike::Echo`].
+    pub fn argv(&self, document: &str) -> Option<Vec<String>> {
+        match self {
+            Self::AckId { id } => Some(argv(&[
+                "agent-doc",
+                "queue",
+                "consume",
+                document,
+                "--ack-id",
+                id,
+            ])),
+            Self::AckText { handle, owner } => Some(argv(&[
+                "agent-doc",
+                "queue",
+                "consume",
+                document,
+                "--ack-text",
+                handle,
+                "--ack-owner",
+                owner,
+            ])),
+            Self::Echo => None,
+        }
+    }
+}
+
+/// How reported queue row `item_text` strikes, given the exact attempt
+/// (`owner`, `generation`) when the caller knows it (`#closeoutguidanceagree`).
+///
+/// The row's claim identity decides: an id-backed row acknowledges by id. A
+/// free-text row's `#` mentions never name a tracked item, with one exception:
+/// a waiting-tree parent (`[#id] ... <!-- agent-doc:waiting-item -->`) whose
+/// reported attempt is a nested child row, which `--ack-text <parent>` cannot
+/// address. Every other free-text row is fenced to its attempt; a legacy
+/// generation-0 receipt or an unknown attempt falls back to the echo.
+pub fn reported_row_strike(item_text: &str, attempt: Option<(&str, u64)>) -> ReportedRowStrike {
+    let item = item_text.trim();
+    if let QueueItemIdentity::Id(id) = crate::queue_claim::claim_identity(item) {
+        return ReportedRowStrike::AckId { id };
+    }
+    // A binary-generated trailing `[#q-…]` is an occurrence id, never a
+    // tracked item, so it is stripped before the parent's id is read.
+    if item.contains(crate::queue_consume::WAITING_ON_YOU_ITEM_MARKER)
+        && let Some(id) = crate::queue_response::queue_prompt_done_id(
+            &agent_doc_element_queue::strip_generated_queue_prompt_id_annotation(item),
+        )
+    {
+        return ReportedRowStrike::AckId { id };
+    }
+    match attempt {
+        Some((owner, generation)) if !owner.trim().is_empty() && generation > 0 => {
+            ReportedRowStrike::AckText {
+                handle: claim_item_handle(item),
+                owner: format!("{}#{generation}", owner.trim()),
             }
         }
+        _ => ReportedRowStrike::Echo,
+    }
+}
+
+/// [`reported_row_strike`] for a claim's exact attempt.
+pub fn claim_row_strike(claim: &QueueClaim) -> ReportedRowStrike {
+    reported_row_strike(&claim.item_text, Some((&claim.owner, claim.generation)))
+}
+
+fn consume_step(document: &str, claim: &QueueClaim) -> ReportedCloseoutStep {
+    let strike = claim_row_strike(claim);
+    let detail = match &strike {
+        ReportedRowStrike::AckId { id } => format!(
+            "strike the reported row; the tracked item stays open and the struck row names its `(stays open: ...)` reason (#ackstrikeopenbacklog). When the worker's or operator's answer resolves the tracked item, pass `--done {id}` to `agent-doc finalize {document}` instead and close any parent item the same answer resolves; never acknowledge a head whose item the answer finished"
+        ),
+        _ => "strike the reported free-text row, fenced to this exact worker attempt".to_string(),
+    };
+    // A Reported claim always carries a positive generation; a generation-0
+    // legacy claim still names the unfenced `--ack-text` selector rather than
+    // an echo, which is not a `queue consume` step.
+    let argv = strike.argv(document).unwrap_or_else(|| {
+        argv(&[
+            "agent-doc",
+            "queue",
+            "consume",
+            document,
+            "--ack-text",
+            &claim_item_handle(&claim.item_text),
+        ])
+    });
+    ReportedCloseoutStep {
+        action: ReportedCloseoutAction::Consume,
+        argv,
+        concrete: true,
+        alternative: None,
+        detail,
     }
 }
 

@@ -515,44 +515,90 @@ impl ClaimReleaseReceiptLedger {
     }
 }
 
-/// How a persisted answer closes queue line `item_text` (`#reportedrelease`):
-/// a free-text line strikes only on the verbatim `> **Queue prompt:**` echo.
-/// A row that leads with a directive `[#id]` closes with `queue consume
-/// --ack-id <id>` when the worker handoff is integrated but the tracked item
-/// stays open, or with `--done <id>` when its tracked work is complete. A
-/// heading-only answer leaves the line queued, so it is served (and
-/// dispatched) again.
+/// How a persisted answer closes queue line `item_text` (`#reportedrelease`),
+/// given the exact reported attempt (`owner`, `generation`) when known.
 ///
-/// `#reportedwritebackprescription`: a waiting-tree parent (`[#id] ... <!--
-/// agent-doc:waiting-item -->`) has a free-text claim identity, but its
-/// reported `☑️` attempt is a nested child: echoing the parent line never
-/// strikes that child, while `--ack-id <id>` does (`#nestedreceiptack`). The
-/// prescription therefore keys on the row's directive id, not its identity
-/// class, and no longer offers `--pending-gate` (a backlog-only legacy alias
-/// that cannot strike a Todo-backed reported row).
-pub fn queue_line_closeout(document: &str, item_text: &str) -> String {
+/// `#closeoutguidanceagree`: the command comes from
+/// [`crate::reported_closeout::reported_row_strike`], the one derivation every
+/// closeout emitter shares. An id-backed row (or a waiting-tree parent whose
+/// reported `☑️` attempt is nested under it, `#reportedwritebackprescription`)
+/// closes with `queue consume --ack-id <id>` when the worker handoff is
+/// integrated but the tracked item stays open, or with `--done <id>` when its
+/// tracked work is complete. A free-text row bound to an attempt (prose,
+/// `[#id]: answer`, a `[#q-…]` row) closes with the attempt-fenced `--ack-text
+/// <row> --ack-owner <owner#gen>`; its `#` mentions never name a backlog id.
+/// Only a free-text row with no exact attempt falls back to the verbatim
+/// `> **Queue prompt:**` echo. A heading-only answer leaves the line queued,
+/// so it is served (and dispatched) again.
+pub fn queue_line_closeout(
+    document: &str,
+    item_text: &str,
+    attempt: Option<(&str, u64)>,
+) -> String {
+    use crate::reported_closeout::{ReportedRowStrike, reported_row_strike, shell_command};
     let item = item_text.trim();
-    let id = match claim_identity(item) {
-        QueueItemIdentity::Id(id) => Some(id),
-        QueueItemIdentity::FreeText(_) => crate::queue_response::queue_prompt_done_id(item),
-    };
-    match id {
-        Some(id) => format!(
-            "strike the reported row with `agent-doc queue consume {document} --ack-id {id}` (the tracked backlog/Todo item stays open and the struck row names its `(stays open: ...)` reason; this also closes a `☑️` row nested under a waiting parent); when the answer resolves the tracked item, pass `--done {id}` to `agent-doc finalize {document}` instead and close any parent item the same answer resolves (#ackstrikeopenbacklog)"
+    let strike = reported_row_strike(item, attempt);
+    let command = strike.argv(document).map(|argv| shell_command(&argv));
+    match (&strike, command) {
+        (ReportedRowStrike::AckId { id }, Some(command)) => format!(
+            "strike the reported row with `{command}` (the tracked backlog/Todo item stays open and the struck row names its `(stays open: ...)` reason; this also closes a `☑️` row nested under a waiting parent); when the answer resolves the tracked item, pass `--done {id}` to `agent-doc finalize {document}` instead and close any parent item the same answer resolves (#ackstrikeopenbacklog)"
         ),
-        None => format!(
+        (ReportedRowStrike::AckText { .. }, Some(command)) => format!(
+            "strike the reported row with `{command}` (fenced to this exact worker attempt; any tracked item the row answers stays open, so close it with `--done <id>` to `agent-doc finalize {document}` only when the answer resolves it)"
+        ),
+        _ => format!(
             "open the response with the verbatim echo `> **Queue prompt:** {item}` and persist it with `agent-doc finalize {document}`; a `### Re:` heading alone leaves the line queued"
         ),
     }
 }
 
+/// [`queue_line_closeout`] for a row whose result the document does not record
+/// yet. The strike is the same command; a fenced `--ack-text` strike records
+/// nothing, so it is preceded by the write that does. The echo persists and
+/// strikes in one step, and `--ack-id` keeps its existing guidance, so only the
+/// fenced strike gains the step (`#closeoutguidanceagree`). A row whose result
+/// is already recorded takes plain [`queue_line_closeout`]: repeating this step
+/// there would tell the coordinator to re-answer it.
+pub fn queue_line_persist_closeout(
+    document: &str,
+    item_text: &str,
+    attempt: Option<(&str, u64)>,
+) -> String {
+    use crate::reported_closeout::{ReportedRowStrike, reported_row_strike};
+    let closeout = queue_line_closeout(document, item_text, attempt);
+    match reported_row_strike(item_text, attempt) {
+        ReportedRowStrike::AckText { .. } => format!(
+            "write the result to `agent:exchange` with `agent-doc finalize {document}`, then {closeout}; a `### Re:` heading alone leaves the line queued"
+        ),
+        _ => closeout,
+    }
+}
+
+/// [`queue_line_closeout`] for one claim's exact attempt.
+pub fn queue_line_closeout_for_claim(document: &str, claim: &QueueClaim) -> String {
+    queue_line_closeout(
+        document,
+        &claim.item_text,
+        Some((&claim.owner, claim.generation)),
+    )
+}
+
 /// The persist-now instruction for a line whose worker reported
 /// (`#reportedrelease`): the closeout that strikes the line is the only
-/// completion.
-pub fn persist_reported_instruction(document: &str, item_text: &str, owner: &str) -> String {
+/// completion. `generation` is the reported attempt's, when known.
+pub fn persist_reported_instruction(
+    document: &str,
+    item_text: &str,
+    owner: &str,
+    generation: Option<u64>,
+) -> String {
     format!(
         "{owner} already reported and its claim was released. Its result is durable in agent-doc's completion evidence (preflight surfaces it as `queue_sync.reported_checkmark` `recovered_response`), so a harness switch or `/clear` does not lose it, but the document has not recorded it and the queue line is still open. Persist that worker's result in THIS turn: {}. That closeout strikes the line. Do NOT dispatch a new subagent for it, do NOT re-claim it, and do NOT end the turn with the answer only in chat.",
-        queue_line_closeout(document, item_text)
+        queue_line_persist_closeout(
+            document,
+            item_text,
+            generation.map(|generation| (owner, generation)),
+        )
     )
 }
 
@@ -781,14 +827,14 @@ mod tests {
     #[test]
     fn persist_instruction_names_the_echo_for_free_text_and_done_for_ids() {
         let free =
-            persist_reported_instruction("tasks/docs.md", "What are the values?", "subagent:x");
+            persist_reported_instruction("tasks/docs.md", "What are the values?", "subagent:x", None);
         assert!(
             free.contains("> **Queue prompt:** What are the values?"),
             "{free}"
         );
         assert!(free.contains("agent-doc finalize tasks/docs.md"), "{free}");
         assert!(free.contains("Do NOT dispatch a new subagent"), "{free}");
-        let id = persist_reported_instruction("tasks/docs.md", "do [#gh275]", "subagent:y");
+        let id = persist_reported_instruction("tasks/docs.md", "do [#gh275]", "subagent:y", Some(2));
         assert!(id.contains("--done gh275"), "{id}");
         assert!(
             id.contains("agent-doc queue consume tasks/docs.md --ack-id gh275"),
@@ -812,13 +858,65 @@ mod tests {
             claim_identity(parent),
             QueueItemIdentity::FreeText(_)
         ));
-        let closeout = queue_line_closeout("tasks/bugs.md", parent);
-        assert!(
-            closeout.contains("agent-doc queue consume tasks/bugs.md --ack-id vscodecodersmoke"),
-            "{closeout}"
+        for attempt in [None, Some(("subagent:vscode_smoke", 1))] {
+            let closeout = queue_line_closeout("tasks/bugs.md", parent, attempt);
+            assert!(
+                closeout
+                    .contains("agent-doc queue consume tasks/bugs.md --ack-id vscodecodersmoke"),
+                "{closeout}"
+            );
+            assert!(!closeout.contains("Queue prompt"), "{closeout}");
+            assert!(!closeout.contains("--pending-gate"), "{closeout}");
+            assert!(!closeout.contains("--ack-text"), "{closeout}");
+        }
+    }
+
+    /// `#closeoutguidanceagree`: a free-text row bound to an attempt never
+    /// gets `--ack-id` from a `#` it merely mentions. The 2026-11-05 shapes:
+    /// an operator answer row `[#id]: answer` (whose `--ack-id <id>` refused
+    /// once a second attempt also reported for `<id>`) and a binary-admitted
+    /// `[#q-…]` row (`q-…` is never a backlog id, so `--ack-id` always
+    /// refused). Both name the attempt-fenced `--ack-text`/`--ack-owner`
+    /// command; with no exact attempt the line falls back to the echo.
+    #[test]
+    fn free_text_rows_bound_to_an_attempt_prescribe_the_fenced_ack_text() {
+        for (row, quoted) in [
+            (
+                "[#tdclireleasedownloads]: haiven-cli will be public",
+                "'[#tdclireleasedownloads]: haiven-cli will be public'",
+            ),
+            ("Rebuild the SDK docs [#q-7f3a]", "'Rebuild the SDK docs [#q-7f3a]'"),
+            ("What are the values?", "'What are the values?'"),
+        ] {
+            let closeout = queue_line_closeout("tasks/sdk.md", row, Some(("subagent:c690cli", 1)));
+            assert!(
+                closeout.contains(&format!(
+                    "`agent-doc queue consume tasks/sdk.md --ack-text {quoted} --ack-owner 'subagent:c690cli#1'`"
+                )),
+                "{closeout}"
+            );
+            assert!(!closeout.contains("--ack-id"), "{closeout}");
+            assert!(!closeout.contains("Queue prompt"), "{closeout}");
+            for legacy in [None, Some(("subagent:c690cli", 0))] {
+                let echo = queue_line_closeout("tasks/sdk.md", row, legacy);
+                assert!(echo.contains(&format!("> **Queue prompt:** {row}")), "{echo}");
+                assert!(!echo.contains("--ack-"), "{echo}");
+            }
+        }
+        let persisted =
+            persist_reported_instruction("tasks/sdk.md", "Rebuild the SDK docs [#q-7f3a]", "subagent:q", Some(3));
+        assert!(persisted.contains("--ack-owner 'subagent:q#3'"), "{persisted}");
+        assert!(!persisted.contains("--ack-id"), "{persisted}");
+        assert!(persisted.contains("write the result to `agent:exchange`"), "{persisted}");
+        // A row whose result is already recorded is only struck: it must never
+        // be told to record it again.
+        let strike = queue_line_closeout(
+            "tasks/sdk.md",
+            "Rebuild the SDK docs [#q-7f3a]",
+            Some(("subagent:q", 3)),
         );
-        assert!(!closeout.contains("Queue prompt"), "{closeout}");
-        assert!(!closeout.contains("--pending-gate"), "{closeout}");
+        assert!(strike.starts_with("strike the reported row"), "{strike}");
+        assert!(!strike.contains("agent:exchange"), "{strike}");
     }
 
     /// Formal receipt-admission truth table. Only a Reported claim with one

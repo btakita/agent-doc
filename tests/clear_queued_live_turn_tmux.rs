@@ -168,8 +168,30 @@ log.write("<started>\n")
 with open(os.path.join(d, "pids"), "a") as f:
     f.write("%d\n" % os.getpid())
 FOOTER = "\x1b[2m  gpt-5.5 xhigh · ~/fake · Context 40% used\x1b[0m\n"
+# The row Codex paints under the status row while text is typed.
+TYPED_HINT = " " * 74 + "\x1b[38;2;123;128;146m⚠ 3 warnings · f2 to view\x1b[39m\n"
 turns = 0
+def typed_draft():
+    # Text an operator typed and has not submitted: the test writes it to
+    # `draft`, one composer row per line, in normal intensity.
+    try:
+        with open(os.path.join(d, "draft")) as f:
+            return f.read().split("\n")
+    except FileNotFoundError:
+        return None
 def idle():
+    rows = typed_draft()
+    if rows:
+        # `status_line` stands in for a status line the operator configured.
+        status_line = os.path.join(d, "status_line")
+        footer = FOOTER + TYPED_HINT
+        if os.path.exists(status_line):
+            footer = open(status_line).read()
+        sys.stdout.write("\x1b[2J\x1b[H\x1b[1m›\x1b[0m " + "\n  ".join(rows) + "\n\n"
+                         + footer
+                         + "\x1b[%d;%dH" % (len(rows), 3 + len(rows[-1])))
+        sys.stdout.flush()
+        return
     placeholder = "Ask a follow-up question" if turns else "Ask Codex to do anything"
     sys.stdout.write("\x1b[2J\x1b[H\x1b[1m›\x1b[0m \x1b[2m" + placeholder + "\x1b[0m\n\n"
                      + FOOTER + "\x1b[1;3H")
@@ -919,6 +941,61 @@ fn an_idle_clear_types_clear_into_the_same_harness_and_background_jobs_survive()
         "an idle clear is never a restart:\n{}",
         scenario.ops_log_tail()
     );
+}
+
+/// `#codexfooterrowcomposer`: Clear Session Context reaches a Codex pane as a
+/// supervised restart, so reading a typed draft as an empty composer destroys
+/// it. The hint row under the status row hid a one-row draft, a draft of several
+/// rows lost its `›` glyph to its last row, and a configured status line matches
+/// no row list. All three must refuse.
+#[test]
+#[ignore = "live tmux integration test; run `make tmux-ci`"]
+fn a_codex_clear_refuses_every_draft_shape_instead_of_destroying_it() {
+    let scenario = LiveClearScenario::start_codex("clear-codex-draft");
+    let harness = scenario.harness_pids();
+    assert_eq!(harness.len(), 1);
+
+    for (draft, status_line, row) in [
+        ("fix the widget tests", None, "fix the widget tests"),
+        (
+            "first row of a draft\nlast row of a draft",
+            None,
+            "last row of a draft",
+        ),
+        (
+            "a draft over a custom status line",
+            Some("  my own status line\n"),
+            "my own status line",
+        ),
+    ] {
+        if let Some(status_line) = status_line {
+            std::fs::write(scenario.fake.join("status_line"), status_line).unwrap();
+        }
+        std::fs::write(scenario.fake.join("draft"), draft).unwrap();
+        scenario.wait_until("the draft is on screen", || {
+            scenario
+                .tmux
+                .capture_pane(&scenario.pane, None)
+                .unwrap_or_default()
+                .contains(row)
+        });
+        let pressed = scenario.agent_doc(&["session", "clear", DOC], &[], None);
+        // Long enough for a restart to show.
+        std::thread::sleep(Duration::from_secs(3));
+        assert_eq!(
+            scenario.harness_pids(),
+            harness,
+            "the clear restarted Codex over the draft {draft:?}\n--- stderr ---\n{}\n--- ops.log tail ---\n{}",
+            stderr(&pressed),
+            scenario.ops_log_tail(),
+        );
+        assert!(
+            !pressed.status.success() && stderr(&pressed).contains("drafted prompt input"),
+            "the clear must refuse with the reason: {}",
+            stderr(&pressed)
+        );
+        assert_eq!(scenario.clears(), 0, "{:?}", scenario.inputs());
+    }
 }
 
 /// The pane `%149` case: a clear pressed while a route-dispatched turn is

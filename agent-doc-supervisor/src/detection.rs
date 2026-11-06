@@ -892,4 +892,30 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 45% used
             &harness
         ));
     }
+
+    /// `#codexfooterrowcomposer`: an idle queue drain reads the child's output,
+    /// which has no cursor. Rows from a real Codex capture: an empty composer
+    /// stays dispatchable and a typed one does not, whichever row is at the
+    /// bottom.
+    #[test]
+    fn idle_queue_reads_a_codex_composer_above_its_footer_rows() {
+        let harness = HarnessConfig::codex();
+        for footer in [
+            "  GPT-5.6-Sol high · ~/work/sample-app · Context 0% used\n  ? for shortcuts      ⚠ 3 warnings · f2 to view\n",
+            "  GPT-5.6-Sol high · ~/work/sample-app · ← for agents\n",
+        ] {
+            let idle = format!("› Ask Codex to do anything\n\n{footer}");
+            assert_eq!(
+                idle_queue_prompt_visibility(&idle, &harness, true),
+                IdleQueuePromptVisibility::Visible,
+                "{footer}"
+            );
+            let typed = format!("› fix the tests\n\n{footer}");
+            assert_eq!(
+                idle_queue_prompt_visibility(&typed, &harness, true),
+                IdleQueuePromptVisibility::Hidden,
+                "{footer}"
+            );
+        }
+    }
 }

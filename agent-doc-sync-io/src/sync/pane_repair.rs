@@ -97,17 +97,21 @@ pub(crate) fn protected_registered_pane_state(
         return None;
     }
 
-    let capture = agent_doc_tmux_io::capture_pane(tmux, pane_id).ok()?;
-    protected_registered_pane_state_from_capture(file, &capture)
+    // Escapes preserved: the dim styling is what tells a ghost suggestion from
+    // a typed draft, and a ghost must not protect the pane.
+    let capture = agent_doc_tmux_io::capture_pane_with_ansi(tmux, pane_id).ok()?;
+    let cursor_y = agent_doc_tmux_io::pane_cursor_y(tmux, pane_id);
+    protected_registered_pane_state_from_capture(file, &capture, cursor_y)
 }
 
 pub(crate) fn protected_registered_pane_state_from_capture(
     file: &Path,
     capture: &str,
+    cursor_y: Option<usize>,
 ) -> Option<ProtectedRegisteredPaneState> {
     let harness = resolve_harness_for_sync(file);
     let protected =
-        agent_doc_sync::protected_registered_pane_state_from_capture(&harness, capture)?;
+        agent_doc_sync::protected_registered_pane_state_from_capture(&harness, capture, cursor_y)?;
     if protected.reason == "active permission prompt" {
         agent_doc_tmux_io::input_diag::log_prompt_detection(
             agent_doc_tmux_io::input_diag::InputDiagSink::new(
@@ -1318,7 +1322,7 @@ Starting codex...
 tab to queue message
 gpt-5.4 high · ~/work/btakita/agent-loop · Context 31% used
 ";
-        let protected = protected_registered_pane_state_from_capture(&doc, capture)
+        let protected = protected_registered_pane_state_from_capture(&doc, capture, None)
             .expect("protected queue-state prompt detected");
         assert_eq!(protected.reason, "queued draft in composer");
         assert!(
@@ -1349,7 +1353,7 @@ Starting codex...
 gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% used
 ";
         assert_eq!(
-            protected_registered_pane_state_from_capture(&doc, capture),
+            protected_registered_pane_state_from_capture(&doc, capture, None),
             None
         );
     }

@@ -2047,7 +2047,8 @@ fn protected_clear_input_reason(
         .or_else(|_| agent_doc_tmux_io::capture_pane(tmux, pane))
         .ok()?;
     let harness = harness_for_evidence(ctx, evidence);
-    if let Some(reason) = harness.protected_prompt_input_reason(&captured) {
+    let cursor_y = agent_doc_tmux_io::pane_cursor_y(tmux, pane);
+    if let Some(reason) = harness.protected_prompt_input_reason_at_cursor(&captured, cursor_y) {
         return Some(reason);
     }
     // `#cancelturnprompt`: Claude's composer projection reports operator text
@@ -2055,13 +2056,11 @@ fn protected_clear_input_reason(
     // `/clear` onto it would submit one concatenated line, the same hazard the
     // route refuses as `#concatdraftinject`. agent-doc's own restored trigger
     // was already withdrawn above, so anything left is the operator's.
-    if harness.binary == "claude" {
-        let cursor_y = agent_doc_tmux_io::pane_cursor_y(tmux, pane);
-        if let agent_doc_harness::PaneComposerProjection::OperatorDraft { .. } =
+    if harness.binary == "claude"
+        && let agent_doc_harness::PaneComposerProjection::OperatorDraft { .. } =
             agent_doc_harness::project_pane_composer_at_cursor(&captured, &harness, cursor_y)
-        {
-            return Some("drafted prompt input".to_string());
-        }
+    {
+        return Some("drafted prompt input".to_string());
     }
     None
 }

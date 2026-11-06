@@ -1552,8 +1552,9 @@ fn reconcile_component_body(
                             index,
                             &shared_anchors,
                         ));
-                    (is_live_revision && !seen_live_revision_keys.insert(child.key.clone()))
-                        .then_some(index)
+                    (is_live_revision
+                        && !seen_live_revision_keys.insert(child.key.clone()))
+                    .then_some(index)
                 })
                 .collect::<std::collections::HashSet<_>>();
             ours_children.retain(|child| !stale_revision_keys.contains(&child.key));
@@ -5489,8 +5490,7 @@ Second answer line three.
         };
         let base = doc("- [#tdprovauth]");
         let base_state = CrdtDoc::from_text(&base).encode_state();
-        let prefix =
-            "  - 📥 We will support anonymous interactions. The P2P ADRs define the auth rules. ";
+        let prefix = "  - 📥 We will support anonymous interactions. The P2P ADRs define the auth rules. ";
         let draft = format!(
             "{prefix}Create an ADR to promote the P2P auth rules to general Haiven Rules to codify #chat-ploic"
         );
@@ -5522,8 +5522,11 @@ Second answer line three.
 
     #[test]
     fn reconcile_queue_keeps_operator_authored_identical_rows_without_revision_evidence() {
-        let doc =
-            |rows: &str| format!("<!-- agent:run id=\"main\" -->\n{rows}\n<!-- /agent:run -->\n");
+        let doc = |rows: &str| {
+            format!(
+                "<!-- agent:run id=\"main\" -->\n{rows}\n<!-- /agent:run -->\n"
+            )
+        };
         let base = doc("- [#tdprovauth]");
         let base_state = CrdtDoc::from_text(&base).encode_state();
         let repeated = "  - 📥 intentionally repeat this effect";
@@ -5531,10 +5534,7 @@ Second answer line three.
         let theirs = doc(&format!("- [#tdprovauth]\n{repeated}\n{repeated}"));
 
         let merged = merge_by_component(Some(&base_state), &ours, &theirs).unwrap();
-        assert_eq!(
-            merged.matches("intentionally repeat this effect").count(),
-            2
-        );
+        assert_eq!(merged.matches("intentionally repeat this effect").count(), 2);
     }
 
     #[test]

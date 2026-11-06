@@ -3638,6 +3638,30 @@ pub fn annotate_newly_struck_queue_items_with_response_id_at(
             })
         })
         .collect::<Vec<_>>();
+    // `#choicerowcellselection`: a turn holding several `> **Queue prompt:**`
+    // echoes usually files its requests together after the last one, so the
+    // cell that holds a row's packet is not the cell echoing that row. Only the
+    // holding cell can render the row's Context and Choices. A citation of the
+    // request's `[#id]` elsewhere in the turn is prose, not the request.
+    let cell_packets = response_candidates
+        .iter()
+        .map(|candidate| {
+            crate::operator_request_packet::blocking_operator_request_packets(&candidate.body)
+        })
+        .collect::<Vec<_>>();
+    let cells_holding_packet_of = |queue_item: &str| {
+        cell_packets
+            .iter()
+            .enumerate()
+            .filter(|(_, packets)| {
+                packets.iter().any(|packet| {
+                    operator_request_packet_belongs_to_row(packet, queue_item)
+                        && !row_is_offered_option_of(packet, queue_item)
+                })
+            })
+            .map(|(index, _)| index)
+            .collect::<Vec<_>>()
+    };
     // `#answerack`: operator answers inside waiting packets that this response
     // consumed. An answer whose stable id the response cites is consumed by the
     // one section citing it (or by the whole response when several do); an
@@ -3734,19 +3758,25 @@ pub fn annotate_newly_struck_queue_items_with_response_id_at(
             .map(|(index, _)| index)
             .collect::<Vec<_>>();
 
-        let candidate = match matching.as_slice() {
-            [index] => response_candidates[*index].clone(),
-            [] if stable_identity.1.is_none()
-                && (response_candidates.len() <= 1 || explicitly_addressed_sections <= 1) =>
+        let packet_cell = match cells_holding_packet_of(&node.item.text).as_slice() {
+            [index] => Some(*index),
+            _ => None,
+        };
+        let candidate = match (matching.as_slice(), packet_cell) {
+            ([index], _) => response_candidates[*index].clone(),
+            (_, Some(index)) => response_candidates[index].clone(),
+            ([], None)
+                if stable_identity.1.is_none()
+                    && (response_candidates.len() <= 1 || explicitly_addressed_sections <= 1) =>
             {
                 composite_candidate.clone()
             }
-            [] if explicitly_addressed_sections == 0 => composite_candidate.clone(),
-            [] => anyhow::bail!(
+            ([], None) if explicitly_addressed_sections == 0 => composite_candidate.clone(),
+            ([], None) => anyhow::bail!(
                 "newly completed queue prompt has no unique response section: {}",
                 node.item.text.trim()
             ),
-            _ => anyhow::bail!(
+            (_, None) => anyhow::bail!(
                 "newly completed queue prompt matches multiple response sections: {}",
                 node.item.text.trim()
             ),
@@ -3766,38 +3796,33 @@ pub fn annotate_newly_struck_queue_items_with_response_id_at(
                 node.item.text.trim()
             );
         }
+        // The unpublished-work refusal above reads the row's own section. Its
+        // projection then comes from the cell that holds its request.
+        let candidate = packet_cell.map_or(candidate, |index| response_candidates[index].clone());
         candidates_by_node_key.push((node.node_key.clone(), candidate, true, stable_identity));
     }
 
     for node in operator_request_nodes {
-        let action_ids = agent_doc_document::queue_projection::operator_action_ids(&node.item.text);
         let matching_packet_ids = operator_request_packets
             .iter()
-            .filter(|packet| {
-                action_ids
-                    .iter()
-                    .any(|id| id.eq_ignore_ascii_case(&packet.id))
-                    || packet.queue_item.as_deref().is_some_and(|queue_item| {
-                        agent_doc_document::queue_projection::operator_request_item_matches_row(
-                            &node.item.text,
-                            queue_item,
-                        )
-                    })
-            })
+            .filter(|packet| operator_request_packet_belongs_to_row(packet, &node.item.text))
             .map(|packet| packet.id.as_str())
             .collect::<Vec<_>>();
-        let mut matching = response_candidates
-            .iter()
-            .enumerate()
-            .filter(|(_, candidate)| {
-                matching_packet_ids
-                    .iter()
-                    .any(|id| candidate.body.contains(&format!("[#{id}]")))
-            })
-            .map(|(index, _)| index)
-            .collect::<Vec<_>>();
-        matching.sort_unstable();
-        matching.dedup();
+        let mut matching = cells_holding_packet_of(&node.item.text);
+        if matching.is_empty() {
+            // Every packet of this row is an option row's, or it sits outside
+            // the scoped cells: the turn's citation is all that places it.
+            matching = response_candidates
+                .iter()
+                .enumerate()
+                .filter(|(_, candidate)| {
+                    matching_packet_ids
+                        .iter()
+                        .any(|id| candidate.body.contains(&format!("[#{id}]")))
+                })
+                .map(|(index, _)| index)
+                .collect::<Vec<_>>();
+        }
         let candidate = match matching.as_slice() {
             [index] => response_candidates[*index].clone(),
             [] if response_candidates.len() <= 1 => composite_candidate.clone(),
@@ -3986,6 +4011,7 @@ pub fn annotate_newly_struck_queue_items_with_response_id_at(
                     } else {
                         projected_response_body
                     },
+                    turn_body: response_body,
                     response_id,
                     addressed_at,
                     shared_batch: if repeated_response {
@@ -4163,6 +4189,9 @@ struct ResponseLookupContext<'a> {
     source_document: &'a str,
     queue_item: &'a str,
     response_body: &'a str,
+    /// The whole turn `response_body` was scoped from. A row's section is not
+    /// always in the cell that holds its request.
+    turn_body: &'a str,
     response_id: &'a str,
     addressed_at: &'a str,
     shared_batch: bool,
@@ -4297,6 +4326,7 @@ fn response_summary_row_child(
     let ResponseLookupContext {
         source_document,
         queue_item,
+        turn_body,
         response_id,
         addressed_at,
         shared_batch,
@@ -4311,10 +4341,29 @@ fn response_summary_row_child(
     // bullet that names this row, never the response's first paragraph when
     // that paragraph is about something else.
     let item_scoped_summary = response_summary_for_queue_item(response_body, queue_item);
+    // Even when this response closed a batch, operator requests remain scoped
+    // to their own live origin rows. Batch prose is intentionally replaced by
+    // the generic per-row summary below, but suppressing the matching request
+    // would hide the only active operator decision.
+    let packets = crate::operator_request_packet::blocking_operator_request_packets(response_body)
+        .into_iter()
+        .filter(|packet| operator_request_packet_belongs_to_row(packet, queue_item))
+        .filter(|packet| !row_is_offered_option_of(packet, queue_item))
+        .collect::<Vec<_>>();
     let mut summary = match item_scoped_summary {
         Some(summary) => summary,
         None if shared_batch => "This item was completed as part of a shared batch; no unrelated batch prose was copied into this row."
             .to_string(),
+        // `#choicerowcellselection`: the cell holding a row's request, or the
+        // whole turn when several rows share one heading, leads with what it
+        // says about another row. A row waiting on a request reads its own
+        // section; with none, its request alone is the Summary.
+        None if !packets.is_empty() => {
+            match queue_prompt_section_for_row(turn_body, queue_item) {
+                "" => String::new(),
+                section => response_summary_lead(section),
+            }
+        }
         None => response_summary_lead(response_body),
     };
     let next_actions = if shared_batch {
@@ -4322,15 +4371,6 @@ fn response_summary_row_child(
     } else {
         response_next_actions(response_body)
     };
-    // Even when this response closed a batch, operator requests remain scoped
-    // to their own live origin rows. Batch prose is intentionally replaced by
-    // the generic per-row summary above, but suppressing the matching request
-    // would hide the only active operator decision.
-    let packets = crate::operator_request_packet::blocking_operator_request_packets(response_body)
-        .into_iter()
-        .filter(|packet| operator_request_packet_belongs_to_row(packet, queue_item))
-        .filter(|packet| !row_is_offered_option_of(packet, queue_item))
-        .collect::<Vec<_>>();
     let has_blocking_request = !packets.is_empty()
         || response_body
             .lines()
@@ -13687,5 +13727,266 @@ Old.
             "Review https://example.test/pull/93#review upholds both findings. The only approval names no license."
         );
         assert_eq!(packets[0].1.choices, ["**Merge**: Merge it."]);
+    }
+    const TAG_ROW: &str = "moving the tag: go [#q-7ef51b5d460a]";
+    const FLAG_ROW: &str = "set the flag [#q-b0b0b0b0b0b0]";
+    const OLD_ROW: &str = "close the old row [#q-a0a0a0a0a0a0]";
+    const TAG_REQUEST: &str = "subagent-operator-request-tagmove";
+    const FLAG_REQUEST: &str = "subagent-operator-request-flagset";
+
+    /// `#choicerowcellselection`: the closeout shape that lost a row's Context.
+    /// One heading echoes three rows, then files both requests together after
+    /// the last echo, so neither request sits in the cell echoing the tag row.
+    fn held_rows_response() -> String {
+        format!(
+            "### Re: held rows — test\n\n\
+> **Queue prompt:** {OLD_ROW}\n\n\
+**Outcome:** done, and safe to delete.\n\n\
+> **Queue prompt:** {TAG_ROW}\n\n\
+**Deferred:** your go stands. Request below.\n\n\
+> **Queue prompt:** {FLAG_ROW}\n\n\
+**Deferred:** this replaces an older request for the flag.\n\n\
+[#{TAG_REQUEST}] subagent operator request\n\
+- *queue_item:*\n  - {TAG_ROW}\n\
+- *kind:* question\n\
+- *blocking:* true\n\
+- *request:*\n  - Which `sample-sdk` pull request should the tag sit on?\n\
+- *context:*\n\
+\x20 - `sample-sdk` #1 converts the sources, and #4 syncs them.\n\
+- *choices:*\n\
+\x20 - **Use #4**: keep the sync.\n\
+\x20 - **Use #1**: land the conversion.\n\n\
+[#{FLAG_REQUEST}] subagent operator request\n\
+- *queue_item:*\n  - {FLAG_ROW}\n\
+- *kind:* question\n\
+- *blocking:* true\n\
+- *request:*\n  - Should I set the flag?\n\
+- *context:*\n\
+\x20 - It gates only the production deploy.\n\
+- *choices:*\n\
+\x20 - **Leave it unset**: nothing changes.\n\
+\x20 - **Set it**: the next release deploys.\n\n\
+**Reported rows still open:** the release rows finish with the tag move.\n"
+        )
+    }
+
+    fn annotated_rows(before_body: &str, after_body: &str, response: &str) -> String {
+        let before = queue_doc(before_body);
+        let after = doc_with_queue_and_exchange(after_body, response);
+        let annotated = annotate_newly_struck_queue_items_with_response_id_at(
+            &before,
+            &after,
+            response,
+            "2026-11-05T19:58:00-05:00",
+        )
+        .unwrap();
+        element::parse(&annotated)
+            .unwrap()
+            .into_iter()
+            .find(|component| component.name == "queue")
+            .unwrap()
+            .content(&annotated)
+            .to_string()
+    }
+
+    /// The projected lines beneath the row holding `needle`.
+    fn row_subtree<'a>(queue: &'a str, needle: &str) -> Vec<&'a str> {
+        let mut lines = queue.lines().skip_while(|line| !line.contains(needle));
+        let Some(row) = lines.next() else {
+            return Vec::new();
+        };
+        let indent = row.len() - row.trim_start().len();
+        lines
+            .take_while(|line| line.len() - line.trim_start().len() > indent)
+            .collect()
+    }
+
+    fn assert_tag_row_is_answerable(subtree: &[&str], queue: &str) {
+        for expected in [
+            "**Context:** `sample-sdk` #1 converts the sources, and #4 syncs them.",
+            &format!("**Request**: [#{TAG_REQUEST}]"),
+            "**Use #4**: keep the sync.",
+            "**Use #1**: land the conversion.",
+        ] {
+            assert!(
+                subtree.iter().any(|line| line.contains(expected)),
+                "missing {expected}: {queue}"
+            );
+        }
+        let flag_context = "gates only the production deploy";
+        assert!(
+            !subtree.iter().any(|line| line.contains(flag_context)),
+            "{queue}"
+        );
+    }
+
+    #[test]
+    fn a_struck_row_projects_the_cell_holding_its_request() {
+        let queue = annotated_rows(
+            &format!("- {TAG_ROW}\n"),
+            &format!("- ~~{TAG_ROW}~~\n"),
+            &held_rows_response(),
+        );
+        let subtree = row_subtree(&queue, TAG_ROW);
+        assert_tag_row_is_answerable(&subtree, &queue);
+        assert!(queue.contains("Waiting on operator input."), "{queue}");
+    }
+
+    #[test]
+    fn a_struck_row_no_echo_names_is_placed_by_its_request() {
+        // No echo names this row, so only the packet can place it. Without the
+        // packet this refuses as a row with no unique section.
+        let response = held_rows_response().replace(
+            &format!("> **Queue prompt:** {TAG_ROW}\n\n"),
+            "> **Queue prompt:** an unrelated row [#q-c0c0c0c0c0c0]\n\n",
+        );
+        let queue = annotated_rows(
+            &format!("- {TAG_ROW}\n"),
+            &format!("- ~~{TAG_ROW}~~\n"),
+            &response,
+        );
+        assert_tag_row_is_answerable(&row_subtree(&queue, TAG_ROW), &queue);
+    }
+
+    #[test]
+    fn citing_a_request_elsewhere_does_not_compete_with_the_cell_holding_it() {
+        // The tag row's own cell cites the request by id. That is prose, and a
+        // closeout must not refuse the row as matching two sections.
+        let response = held_rows_response().replace(
+            "**Deferred:** your go stands. Request below.",
+            &format!("**Deferred:** your go stands. See [#{TAG_REQUEST}]."),
+        );
+        let row = format!("🙋 {TAG_ROW} [#{TAG_REQUEST}]");
+        let queue = annotated_rows(&format!("- {TAG_ROW}\n"), &format!("- {row}\n"), &response);
+        assert_tag_row_is_answerable(&row_subtree(&queue, TAG_ROW), &queue);
+    }
+
+    #[test]
+    fn a_waiting_row_never_takes_another_rows_outcome_as_its_summary() {
+        // Striking the old row shares this turn's one response id, so the tag
+        // row is handed the whole turn, which leads with the old row's outcome.
+        let response = held_rows_response();
+        let before = format!("- {OLD_ROW}\n- {TAG_ROW}\n");
+        let after = format!("- ~~{OLD_ROW}~~\n- 🙋 {TAG_ROW} [#{TAG_REQUEST}]\n");
+        let queue = annotated_rows(&before, &after, &response);
+        let subtree = row_subtree(&queue, TAG_ROW);
+        assert_tag_row_is_answerable(&subtree, &queue);
+        assert!(
+            subtree.iter().any(|line| line.trim()
+                == "- **Summary:** Which `sample-sdk` pull request should the tag sit on?"),
+            "{queue}"
+        );
+        assert!(
+            !subtree.iter().any(|line| line.contains("safe to delete")),
+            "{queue}"
+        );
+    }
+
+    #[test]
+    fn a_waiting_row_keeps_the_lead_of_its_own_section() {
+        let response = held_rows_response().replace(
+            "**Deferred:** your go stands. Request below.",
+            "**Current state:** the tag waits on approvals.",
+        );
+        let row = format!("🙋 {TAG_ROW} [#{TAG_REQUEST}]");
+        let queue = annotated_rows(&format!("- {TAG_ROW}\n"), &format!("- {row}\n"), &response);
+        let subtree = row_subtree(&queue, TAG_ROW);
+        assert!(
+            subtree.iter().any(|line| line.trim()
+                == "- **Summary:** **Current state:** the tag waits on approvals. Which `sample-sdk` pull request should the tag sit on?"),
+            "{queue}"
+        );
+    }
+
+    #[test]
+    fn a_row_with_no_section_of_its_own_states_only_its_request() {
+        let response = held_rows_response().replace(
+            &format!(
+                "> **Queue prompt:** {TAG_ROW}\n\n**Deferred:** your go stands. Request below.\n\n"
+            ),
+            "",
+        );
+        let response = response.replace(
+            "**Deferred:** this replaces an older request for the flag.",
+            "**Outcome:** the flag row is ready.",
+        );
+        let row = format!("🙋 {TAG_ROW} [#{TAG_REQUEST}]");
+        let queue = annotated_rows(&format!("- {TAG_ROW}\n"), &format!("- {row}\n"), &response);
+        let subtree = row_subtree(&queue, TAG_ROW);
+        assert!(
+            subtree.iter().any(|line| line.trim()
+                == "- **Summary:** Which `sample-sdk` pull request should the tag sit on?"),
+            "{queue}"
+        );
+    }
+
+    #[test]
+    fn two_rows_of_one_turn_each_show_their_own_request() {
+        let response = held_rows_response();
+        let before = format!("- {TAG_ROW}\n- {FLAG_ROW}\n");
+        let after = format!("- 🙋 {TAG_ROW} [#{TAG_REQUEST}]\n- 🙋 {FLAG_ROW} [#{FLAG_REQUEST}]\n");
+        let queue = annotated_rows(&before, &after, &response);
+        assert_tag_row_is_answerable(&row_subtree(&queue, TAG_ROW), &queue);
+        let flag = row_subtree(&queue, FLAG_ROW);
+        for expected in [
+            "**Context:** It gates only the production deploy.",
+            "**Set it**: the next release deploys.",
+        ] {
+            assert!(
+                flag.iter().any(|line| line.contains(expected)),
+                "missing {expected}: {queue}"
+            );
+        }
+        assert!(
+            !flag.iter().any(|line| line.contains("sample-sdk")),
+            "{queue}"
+        );
+    }
+
+    #[test]
+    fn a_nested_row_takes_the_request_its_brief_named_by_nest_vector() {
+        // The brief collapses a nested row into `parent: child`, and the packet
+        // copies that. The row itself reads `child`, so nothing bound them and
+        // the row showed no Response, Context, or Choices at all.
+        let response = held_rows_response().replace(
+            &format!("- *queue_item:*\n  - {FLAG_ROW}\n"),
+            &format!("- *queue_item:*\n  - https://example.test/pull/216: {FLAG_ROW}\n"),
+        );
+        let before = format!("- https://example.test/pull/216\n  - {FLAG_ROW}\n");
+        let queue = annotated_rows(&before, &before, &response);
+        let flag = row_subtree(&queue, FLAG_ROW);
+        assert!(
+            flag.iter()
+                .any(|line| line.contains("**Context:** It gates only the production deploy.")),
+            "{queue}"
+        );
+        assert!(
+            flag.iter()
+                .any(|line| line.trim() == "- **Summary:** Should I set the flag?"),
+            "{queue}"
+        );
+    }
+
+    #[test]
+    fn the_unpublished_work_refusal_reads_the_rows_own_section() {
+        // Moving the projection to the request's cell must not move the
+        // evidence: the row's own section says its work is not committed.
+        let response = held_rows_response().replace(
+            "**Deferred:** your go stands. Request below.",
+            "**Blocked:** the tag move is not committed.",
+        );
+        let error = annotate_newly_struck_queue_items_with_response_id_at(
+            &queue_doc(&format!("- {TAG_ROW}\n")),
+            &doc_with_queue_and_exchange(&format!("- ~~{TAG_ROW}~~\n"), &response),
+            &response,
+            "2026-11-05T19:58:00-05:00",
+        )
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("refusing to terminalize unpublished queue work"),
+            "{error:#}"
+        );
     }
 }

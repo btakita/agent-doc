@@ -1544,7 +1544,16 @@ pub fn operator_request_item_matches_row(row_text: &str, queue_item: &str) -> bo
         return true;
     }
     let origin = operator_request_row_origin(row_text);
-    !origin.is_empty() && origin == operator_request_origin_item(queue_item)
+    if origin.is_empty() {
+        return false;
+    }
+    // `#choicerowcellselection`: the brief names a nested row by its nest
+    // vector (`parent: child [#q-…]`), which is not the row's own text. A
+    // q-id belongs to one occurrence, so it alone identifies the row.
+    let item = operator_request_origin_item(queue_item);
+    let row_id = agent_doc_element_queue::queue_prompt_stable_id(&origin);
+    origin == item
+        || (row_id.is_some() && row_id == agent_doc_element_queue::queue_prompt_stable_id(&item))
 }
 
 /// Collapsed origin of a row after its parent-line request annotation is
@@ -1972,6 +1981,25 @@ mod tests {
         ));
         assert!(!operator_request_item_matches_row(row, " "));
         assert!(!operator_request_item_matches_row(" ", &origin));
+    }
+
+    /// `#choicerowcellselection`: a brief names a nested row by its nest vector.
+    #[test]
+    fn a_nested_row_matches_its_nest_vector_by_occurrence_id() {
+        let vector = "https://example.test/pull/216: set the flag [#q-b0b0b0b0b0b0]";
+        assert!(operator_request_item_matches_row(
+            "set the flag [#q-b0b0b0b0b0b0]",
+            vector
+        ));
+        assert!(operator_request_item_matches_row(
+            "🙋📥 set the flag [#q-b0b0b0b0b0b0] [#subagent-operator-request-flagset]",
+            vector
+        ));
+        assert!(!operator_request_item_matches_row(
+            "set the flag [#q-c0c0c0c0c0c0]",
+            vector
+        ));
+        assert!(!operator_request_item_matches_row("set the flag", vector));
     }
 
     /// `#answeredrequeststrike`: an answered request whose todo closed no

@@ -9,6 +9,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import shlex
 import shutil
 import subprocess
 import sys
@@ -347,6 +348,108 @@ def verify_tmux_ci() -> bool:
     return verify_proof("tmux-ci")
 
 
+def tmux_ci_shell(recipe: str) -> str:
+    """First tmux-ci recipe line, as the shell sees it after Make joins continuations."""
+    physical: list[str] = []
+    for line in recipe.splitlines():
+        if not line.startswith("\t"):
+            continue
+        physical.append(line[1:])
+        if not line.endswith("\\"):
+            break
+    if not physical or not physical[0].startswith("@set -u;"):
+        raise AssertionError("tmux-ci must start with set -u so one red cannot abort the sweep")
+    parts = [line[:-1] if line.endswith("\\") else line for line in physical]
+    shell = "".join(parts)
+    if shell.startswith("@"):
+        shell = shell[1:]
+    return shell.replace("$$", "$")
+
+
+def assert_tmux_ci_reports_every_failing_binary(recipe: str) -> None:
+    """`#tmuxcinofailfast`: one failing test binary must not hide later binaries."""
+    assert "\t@set -e;" not in recipe
+    assert recipe.index("exit $$fail") < recipe.index("record-tmux-ci")
+    shell_src = tmux_ci_shell(recipe)
+    assert "set -e" not in shell_src
+    test_invocations = shell_src.count("$(CARGO_CMD) test")
+    assert test_invocations >= 2, test_invocations
+    assert shell_src.count("--no-fail-fast") == test_invocations
+    assert shell_src.count("run_tmux_ci ") == test_invocations
+    assert "--fail-fast" not in shell_src.replace("--no-fail-fast", "")
+    assert shell_src.index("build --bin agent-doc") < shell_src.index("run_tmux_ci ")
+    build_span = shell_src[shell_src.index("build --bin agent-doc"):shell_src.index("run_tmux_ci ")]
+    assert "exit 1" in build_span
+    assert shell_src.index("exit $fail") > shell_src.rindex("--no-fail-fast")
+
+    with tempfile.TemporaryDirectory(prefix="ad-tmux-ci-failfast-") as tmp:
+        tmp_path = Path(tmp)
+        log = tmp_path / "log"
+        tests = tmp_path / "tests"
+        fake = tmp_path / "cargo"
+        fake.write_text(
+            "#!/bin/sh\n"
+            "printf '%s\\n' \"$*\" >> \"$TMUX_CI_LOG\"\n"
+            "case \"$1\" in\n"
+            "  test)\n"
+            "    echo x >> \"$TMUX_CI_TESTS\"\n"
+            "    n=$(wc -l < \"$TMUX_CI_TESTS\" | tr -d ' ')\n"
+            "    if [ -n \"${TMUX_CI_FAIL_N:-}\" ] && [ \"$n\" = \"$TMUX_CI_FAIL_N\" ]; then\n"
+            "      echo \"fake cargo failing test invocation $n\" >&2\n"
+            "      exit 1\n"
+            "    fi\n"
+            "    ;;\n"
+            "esac\n"
+            "if [ -n \"${TMUX_TMPDIR:-}\" ]; then\n"
+            "  mkdir -p \"$TMUX_TMPDIR/tmux-$(id -u)\"\n"
+            "fi\n"
+            "exit 0\n"
+        )
+        fake.chmod(0o755)
+        quoted_fake = shlex.quote(str(fake))
+        quoted_target = shlex.quote(str(tmp_path))
+
+        def run(fail_n: str) -> subprocess.CompletedProcess[str]:
+            log.write_text("")
+            tests.write_text("")
+            shell = shell_src.replace("$(CARGO_CLEAN_ENV) $(CARGO_CMD)", quoted_fake)
+            shell = shell.replace("$(CARGO_TARGET_DIR_ABS)", quoted_target)
+            shell = shell.replace("$(TMUX_TEST_THREADS)", "1")
+            env = os.environ.copy()
+            env["TMUX_CI_LOG"] = str(log)
+            env["TMUX_CI_TESTS"] = str(tests)
+            env["TMUX_CI_FAIL_N"] = fail_n
+            env.pop("TMUX", None)
+            env.pop("TMUX_PANE", None)
+            before = set(Path("/tmp").glob("adtx.*"))
+            result = subprocess.run(["sh", "-c", shell], env=env, text=True, capture_output=True)
+            leftover = set(Path("/tmp").glob("adtx.*")) - before
+            for path in leftover:
+                shutil.rmtree(path, ignore_errors=True)
+            assert not leftover, f"tmux-ci left {leftover}"
+            return result
+
+        red = run("1")
+        red_log = log.read_text()
+        assert red.returncode != 0, red.stdout + red.stderr
+        assert "failing invocations:" in red.stderr
+        assert "all-targets" in red.stderr
+        test_lines = [line for line in red_log.splitlines() if line.startswith("test ")]
+        assert any("layout_owned_provisioning_does_not_focus_intermediate_pane" in line for line in test_lines), red_log
+        assert all("--no-fail-fast" in line for line in test_lines), red_log
+        # The two for-loops expand past the source line count. A sweep that
+        # stopped at the first red would not reach the last route filter.
+        assert len(test_lines) > test_invocations, (len(test_lines), test_invocations, red_log)
+        starts = [line for line in red.stdout.splitlines() if line.startswith("tmux-ci: ")]
+        assert len(starts) == len(test_lines), (starts, test_lines)
+
+        green = run("")
+        assert green.returncode == 0, green.stdout + green.stderr
+        assert "failing invocations:" not in green.stderr
+        green_tests = [line for line in log.read_text().splitlines() if line.startswith("test ")]
+        assert len(green_tests) == len(test_lines)
+
+
 def self_test() -> None:
     assert tool_version_command("tmux", "/usr/bin/tmux") == ["/usr/bin/tmux", "-V"]
     assert tool_version_command("cargo", "/usr/bin/cargo") == [
@@ -482,6 +585,7 @@ def self_test() -> None:
     assert "AGENT_DOC_TMUX_CI_SUCCEEDED=1" in tmux_recipe
     assert "record-tmux-ci" in tmux_recipe
     assert "unset TMUX TMUX_PANE;" in tmux_recipe
+    assert_tmux_ci_reports_every_failing_binary(tmux_recipe)
     # A growing in-tree log must not change the fingerprint under its own run.
     assert "\n/check.log\n" in (ROOT / ".gitignore").read_text()
     install_start = makefile.index("install-full: editor-generation-bump")

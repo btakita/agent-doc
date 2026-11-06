@@ -260,33 +260,71 @@ cross-editor-simworld: $(VSCODE_NODE_LOCK)
 # default development suite and run on CI where tmux is installed. `$$TMUX` beats
 # `TMUX_TMPDIR`, so the sweep drops it: run from a live pane, as `check-batch` is,
 # it must behave as on CI, where nothing can reach the operator's server.
+# `#tmuxcinofailfast`: report every failing test binary. Cargo stops at the first
+# failing binary unless `--no-fail-fast` is set, and this recipe used to stop at
+# the first non-zero status, so one red hid every later binary. Each `cargo test`
+# passes `--no-fail-fast` (cargo's flag, before `--`; libtest already runs every
+# test inside one binary). A red invocation is recorded and the list continues.
+# The shell exits non-zero only after that, so the receipt below is recorded
+# only when every invocation passed. A build failure still stops the sweep:
+# later binaries cannot run without the binary under test.
 tmux-ci:
-	@set -e; \
+	@set -u; \
 	unset TMUX TMUX_PANE; \
+	fail=0; \
+	failed_labels=""; \
 	test_agent_doc_bin="$(CARGO_TARGET_DIR_ABS)/debug/agent-doc"; \
-	$(CARGO_CLEAN_ENV) $(CARGO_CMD) build --bin agent-doc --quiet; \
-	AGENT_DOC_BIN="$$test_agent_doc_bin" $(CARGO_CLEAN_ENV) $(CARGO_CMD) test --all-targets -- --ignored --skip native_plugin_harnesses_peer_through_real_agent_doc_controller --test-threads="$(TMUX_TEST_THREADS)"; \
-	AGENT_DOC_BIN="$$test_agent_doc_bin" $(CARGO_CLEAN_ENV) $(CARGO_CMD) test -p agent-doc-sync-io --lib -- --ignored --test-threads="$(TMUX_TEST_THREADS)"; \
-	AGENT_DOC_BIN="$$test_agent_doc_bin" $(CARGO_CLEAN_ENV) $(CARGO_CMD) test -p agent-doc-tmux-io --lib isolated_test_server -- --ignored --test-threads="$(TMUX_TEST_THREADS)"; \
-	AGENT_DOC_BIN="$$test_agent_doc_bin" $(CARGO_CLEAN_ENV) $(CARGO_CMD) test -p agent-doc-tmux-io --lib pane_order -- --ignored --test-threads="$(TMUX_TEST_THREADS)"; \
-	AGENT_DOC_BIN="$$test_agent_doc_bin" $(CARGO_CLEAN_ENV) $(CARGO_CMD) test -p agent-doc-tmux-io --lib pane_launch_live -- --ignored --test-threads="$(TMUX_TEST_THREADS)"; \
-	isolated_tmux_tmpdir=$$(mktemp -d "/tmp/adtx.XXXXXX"); \
-	for test_filter in isolated_test_server pane_launch_live; do \
-		TMUX_TMPDIR="$$isolated_tmux_tmpdir" AGENT_DOC_BIN="$$test_agent_doc_bin" $(CARGO_CLEAN_ENV) $(CARGO_CMD) test -p agent-doc-tmux-io --lib "$$test_filter" -- --ignored --test-threads="$(TMUX_TEST_THREADS)"; \
-	done; \
-	rmdir "$$isolated_tmux_tmpdir/tmux-$$(id -u)" "$$isolated_tmux_tmpdir"; \
-	AGENT_DOC_BIN="$$test_agent_doc_bin" $(CARGO_CLEAN_ENV) $(CARGO_CMD) test -p agent-doc-sync-io repair_layout_ -- --ignored --test-threads="$(TMUX_TEST_THREADS)"; \
-	AGENT_DOC_BIN="$$test_agent_doc_bin" $(CARGO_CLEAN_ENV) $(CARGO_CMD) test -p agent-doc-sync-io --lib navigation_lane_guard_ -- --ignored --test-threads="$(TMUX_TEST_THREADS)"; \
-	AGENT_DOC_BIN="$$test_agent_doc_bin" $(CARGO_CLEAN_ENV) $(CARGO_CMD) test -p agent-doc-controller-io --lib navigation_lane_session_ -- --ignored --test-threads="$(TMUX_TEST_THREADS)"; \
-	AGENT_DOC_BIN="$$test_agent_doc_bin" $(CARGO_CLEAN_ENV) $(CARGO_CMD) test -p agent-doc-claim-io --lib navigation_lane_requester_ -- --ignored --test-threads="$(TMUX_TEST_THREADS)"; \
-	AGENT_DOC_BIN="$$test_agent_doc_bin" $(CARGO_CLEAN_ENV) $(CARGO_CMD) test -p agent-doc-route-io --lib layout_startup_completion_cannot_append_a_third_visible_pane -- --ignored --test-threads="$(TMUX_TEST_THREADS)"; \
-	AGENT_DOC_BIN="$$test_agent_doc_bin" $(CARGO_CLEAN_ENV) $(CARGO_CMD) test -p agent-doc-tmux-io --lib client_visibility:: -- --ignored --test-threads="$(TMUX_TEST_THREADS)"; \
-	AGENT_DOC_BIN="$$test_agent_doc_bin" $(CARGO_CLEAN_ENV) $(CARGO_CMD) test -p agent-doc-sync-io --lib superseded_owner:: -- --ignored --test-threads="$(TMUX_TEST_THREADS)"; \
-	AGENT_DOC_BIN="$$test_agent_doc_bin" $(CARGO_CLEAN_ENV) $(CARGO_CMD) test -p agent-doc-route-io --lib dispatch_into_a_client_less_session_reports_the_pane_not_visible -- --ignored --test-threads="$(TMUX_TEST_THREADS)"; \
-	AGENT_DOC_BIN="$$test_agent_doc_bin" $(CARGO_CLEAN_ENV) $(CARGO_CMD) test -p agent-doc-route-io --lib active_turn_provenance_reads_the_supervisor_trigger_inject_from_the_actor_store -- --ignored --test-threads="$(TMUX_TEST_THREADS)"; \
+	if ! $(CARGO_CLEAN_ENV) $(CARGO_CMD) build --bin agent-doc --quiet; then \
+		echo "tmux-ci: build failed; remaining binaries were not run" >&2; \
+		exit 1; \
+	fi; \
+	export AGENT_DOC_BIN="$$test_agent_doc_bin"; \
+	run_tmux_ci() { \
+		label="$$1"; \
+		shift; \
+		echo "tmux-ci: $$label"; \
+		if ! "$$@"; then \
+			echo "tmux-ci: failed $$label" >&2; \
+			fail=1; \
+			failed_labels="$$failed_labels $$label"; \
+		fi; \
+	}; \
+	run_tmux_ci all-targets $(CARGO_CLEAN_ENV) $(CARGO_CMD) test --all-targets --no-fail-fast -- --ignored --skip native_plugin_harnesses_peer_through_real_agent_doc_controller --test-threads="$(TMUX_TEST_THREADS)"; \
+	run_tmux_ci agent-doc-sync-io-lib $(CARGO_CLEAN_ENV) $(CARGO_CMD) test -p agent-doc-sync-io --lib --no-fail-fast -- --ignored --test-threads="$(TMUX_TEST_THREADS)"; \
+	run_tmux_ci agent-doc-tmux-io-isolated_test_server $(CARGO_CLEAN_ENV) $(CARGO_CMD) test -p agent-doc-tmux-io --lib isolated_test_server --no-fail-fast -- --ignored --test-threads="$(TMUX_TEST_THREADS)"; \
+	run_tmux_ci agent-doc-tmux-io-pane_order $(CARGO_CLEAN_ENV) $(CARGO_CMD) test -p agent-doc-tmux-io --lib pane_order --no-fail-fast -- --ignored --test-threads="$(TMUX_TEST_THREADS)"; \
+	run_tmux_ci agent-doc-tmux-io-pane_launch_live $(CARGO_CLEAN_ENV) $(CARGO_CMD) test -p agent-doc-tmux-io --lib pane_launch_live --no-fail-fast -- --ignored --test-threads="$(TMUX_TEST_THREADS)"; \
+	isolated_tmux_tmpdir=$$(mktemp -d "/tmp/adtx.XXXXXX") || isolated_tmux_tmpdir=""; \
+	if [ -z "$$isolated_tmux_tmpdir" ]; then \
+		echo "tmux-ci: failed mktemp" >&2; \
+		fail=1; \
+		failed_labels="$$failed_labels mktemp"; \
+	else \
+		for test_filter in isolated_test_server pane_launch_live; do \
+			TMUX_TMPDIR="$$isolated_tmux_tmpdir" run_tmux_ci "agent-doc-tmux-io-$$test_filter-TMUX_TMPDIR" $(CARGO_CLEAN_ENV) $(CARGO_CMD) test -p agent-doc-tmux-io --lib "$$test_filter" --no-fail-fast -- --ignored --test-threads="$(TMUX_TEST_THREADS)"; \
+		done; \
+		if ! rmdir "$$isolated_tmux_tmpdir/tmux-$$(id -u)" "$$isolated_tmux_tmpdir"; then \
+			echo "tmux-ci: failed rmdir $$isolated_tmux_tmpdir" >&2; \
+			fail=1; \
+			failed_labels="$$failed_labels rmdir"; \
+		fi; \
+	fi; \
+	run_tmux_ci agent-doc-sync-io-repair_layout $(CARGO_CLEAN_ENV) $(CARGO_CMD) test -p agent-doc-sync-io repair_layout_ --no-fail-fast -- --ignored --test-threads="$(TMUX_TEST_THREADS)"; \
+	run_tmux_ci agent-doc-sync-io-navigation_lane_guard $(CARGO_CLEAN_ENV) $(CARGO_CMD) test -p agent-doc-sync-io --lib navigation_lane_guard_ --no-fail-fast -- --ignored --test-threads="$(TMUX_TEST_THREADS)"; \
+	run_tmux_ci agent-doc-controller-io-navigation_lane_session $(CARGO_CLEAN_ENV) $(CARGO_CMD) test -p agent-doc-controller-io --lib navigation_lane_session_ --no-fail-fast -- --ignored --test-threads="$(TMUX_TEST_THREADS)"; \
+	run_tmux_ci agent-doc-claim-io-navigation_lane_requester $(CARGO_CLEAN_ENV) $(CARGO_CMD) test -p agent-doc-claim-io --lib navigation_lane_requester_ --no-fail-fast -- --ignored --test-threads="$(TMUX_TEST_THREADS)"; \
+	run_tmux_ci agent-doc-route-io-layout_startup $(CARGO_CLEAN_ENV) $(CARGO_CMD) test -p agent-doc-route-io --lib layout_startup_completion_cannot_append_a_third_visible_pane --no-fail-fast -- --ignored --test-threads="$(TMUX_TEST_THREADS)"; \
+	run_tmux_ci agent-doc-tmux-io-client_visibility $(CARGO_CLEAN_ENV) $(CARGO_CMD) test -p agent-doc-tmux-io --lib client_visibility:: --no-fail-fast -- --ignored --test-threads="$(TMUX_TEST_THREADS)"; \
+	run_tmux_ci agent-doc-sync-io-superseded_owner $(CARGO_CLEAN_ENV) $(CARGO_CMD) test -p agent-doc-sync-io --lib superseded_owner:: --no-fail-fast -- --ignored --test-threads="$(TMUX_TEST_THREADS)"; \
+	run_tmux_ci agent-doc-route-io-dispatch-client-less $(CARGO_CLEAN_ENV) $(CARGO_CMD) test -p agent-doc-route-io --lib dispatch_into_a_client_less_session_reports_the_pane_not_visible --no-fail-fast -- --ignored --test-threads="$(TMUX_TEST_THREADS)"; \
+	run_tmux_ci agent-doc-route-io-active-turn-provenance $(CARGO_CLEAN_ENV) $(CARGO_CMD) test -p agent-doc-route-io --lib active_turn_provenance_reads_the_supervisor_trigger_inject_from_the_actor_store --no-fail-fast -- --ignored --test-threads="$(TMUX_TEST_THREADS)"; \
 	for test_filter in provision_pane_ manual_layout_provisions_paused_queue_without_dispatch_or_resume layout_owned_provisioning_does_not_focus_intermediate_pane; do \
-		AGENT_DOC_BIN="$$test_agent_doc_bin" $(CARGO_CLEAN_ENV) $(CARGO_CMD) test -p agent-doc-route-io --test route "$$test_filter" -- --ignored --test-threads="$(TMUX_TEST_THREADS)"; \
-	done
+		run_tmux_ci "agent-doc-route-io-route-$$test_filter" $(CARGO_CLEAN_ENV) $(CARGO_CMD) test -p agent-doc-route-io --test route "$$test_filter" --no-fail-fast -- --ignored --test-threads="$(TMUX_TEST_THREADS)"; \
+	done; \
+	if [ "$$fail" -ne 0 ]; then \
+		echo "tmux-ci: failing invocations:$$failed_labels" >&2; \
+	fi; \
+	exit $$fail
 	@AGENT_DOC_TMUX_CI_SUCCEEDED=1 python3 scripts/dev-check.py record-tmux-ci
 
 # Lint every workspace member (`#clippyworkspacegap`). The workspace has no

@@ -82,6 +82,9 @@ explicit `make tmux-ci` target owns the ignored live-tmux sweep and GitHub
 Actions must run that target on Linux with `tmux` installed. A coordinator
 closing an integrated batch runs both through `make check-batch`, so a live-tmux
 regression stops the batch instead of reddening main (`#tmuxciorphandrain`).
+The sweep reports every failing test binary (`#tmuxcinofailfast`): each
+`cargo test` passes `--no-fail-fast`, and a red invocation does not hide the
+later ones. A green receipt is recorded only when every invocation passed.
 
 Every live tmux test gets a server no other test run can reach. Tests build
 their server with `agent_doc_tmux_io::isolated_test_tmux(label)`, never

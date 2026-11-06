@@ -29191,18 +29191,15 @@ fn controller_dispatch_pane_evidence(
             ready_prompt: false,
         };
     }
-    let load = sample_host_load();
-    let budget = controller_dispatch_pane_capture_budget(load);
     let tmux = agent_doc_tmux_io::configured_tmux();
-    let evidence = classify_controller_dispatch_pane_evidence(
-        &record.harness,
-        capture_dispatch_pane_retrying_timeouts(
-            CONTROLLER_DISPATCH_PANE_CAPTURE_ATTEMPTS,
-            budget,
-            |timeout| {
-                agent_doc_tmux_io::capture_pane_with_ansi_bounded(&tmux, &record.pane_id, timeout)
-            },
-        ),
+    let evidence = observe_controller_dispatch_pane(
+        file,
+        record,
+        sample_host_load(),
+        Instant::now,
+        |timeout| {
+            agent_doc_tmux_io::capture_pane_with_ansi_bounded(&tmux, &record.pane_id, timeout)
+        },
     );
     // Unit controller fixtures use synthetic pane ids without owning a tmux
     // server. Preserve those actor-state tests; the classifier regression
@@ -29218,26 +29215,81 @@ fn controller_dispatch_pane_evidence(
             ready_prompt: false,
         };
     }
-    if let ControllerDispatchPaneObservation::Unavailable(reason) = &evidence.observation {
-        // Make a refusal self-explaining: which budget lost, at what load.
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "controller_dispatch_pane_capture_unavailable pane={} load_avg_1m={} online_cpus={} load_scale_permille={} base_ms={} cap_ms={} total_ms={} reason={:?} (#ctlprobeloadbudget)",
-                record.pane_id,
-                load.map(|l| format!("{:.2}", l.load_avg_1m))
-                    .unwrap_or_else(|| "unknown".to_string()),
-                load.map(|l| l.online_cpus.to_string())
-                    .unwrap_or_else(|| "unknown".to_string()),
-                budget.load_scale_permille,
-                budget.base.as_millis(),
-                budget.cap.as_millis(),
-                budget.total.as_millis(),
-                reason,
-            ),
-        );
-    }
     evidence
+}
+
+/// Observe the pane and leave one ops-log line saying what the observation cost
+/// (`#ctlprobelatencytelemetry`). The clock and the capture are injected so the
+/// logged latency is deterministic in tests.
+fn observe_controller_dispatch_pane(
+    file: &Path,
+    record: &agent_doc_controller::actor::ActorRecord,
+    load: Option<agent_doc_controller::dispatch::HostLoadSample>,
+    now: impl FnMut() -> Instant,
+    capture: impl FnMut(Duration) -> Result<String, agent_doc_tmux_io::TmuxIoError>,
+) -> ControllerDispatchPaneEvidence {
+    let budget = controller_dispatch_pane_capture_budget(load);
+    let (captured, timing) = capture_dispatch_pane_timed(
+        CONTROLLER_DISPATCH_PANE_CAPTURE_ATTEMPTS,
+        budget,
+        now,
+        capture,
+    );
+    let evidence = classify_controller_dispatch_pane_evidence(&record.harness, captured);
+    agent_doc_ops_log_io::log_op(
+        file,
+        &controller_dispatch_pane_capture_log_line(
+            &record.pane_id,
+            load,
+            &budget,
+            timing,
+            &evidence.observation,
+        ),
+    );
+    evidence
+}
+
+/// `#ctlprobelatencytelemetry`: time every read of the bounded re-read loop.
+fn capture_dispatch_pane_timed(
+    attempts: usize,
+    budget: agent_doc_controller::dispatch::DispatchPaneCaptureBudget,
+    mut now: impl FnMut() -> Instant,
+    mut capture: impl FnMut(Duration) -> Result<String, agent_doc_tmux_io::TmuxIoError>,
+) -> (
+    Result<String, agent_doc_tmux_io::TmuxIoError>,
+    agent_doc_controller::dispatch::DispatchPaneCaptureTiming,
+) {
+    let mut timing = agent_doc_controller::dispatch::DispatchPaneCaptureTiming::default();
+    let captured = capture_dispatch_pane_retrying_timeouts(attempts, budget, |timeout| {
+        let started = now();
+        let read = capture(timeout);
+        timing.record_read(now().saturating_duration_since(started));
+        read
+    });
+    (captured, timing)
+}
+
+/// A read that came back (idle or busy pane alike) is a latency sample
+/// (`#ctlprobelatencytelemetry`); a pane no read could capture is the refusal,
+/// which also says which budget lost, at what load (`#ctlprobeloadbudget`).
+fn controller_dispatch_pane_capture_log_line(
+    pane: &str,
+    load: Option<agent_doc_controller::dispatch::HostLoadSample>,
+    budget: &agent_doc_controller::dispatch::DispatchPaneCaptureBudget,
+    timing: agent_doc_controller::dispatch::DispatchPaneCaptureTiming,
+    observation: &ControllerDispatchPaneObservation,
+) -> String {
+    let fields = agent_doc_controller::dispatch::dispatch_pane_capture_telemetry_fields(
+        load, budget, timing,
+    );
+    match observation {
+        ControllerDispatchPaneObservation::Unavailable(reason) => format!(
+            "controller_dispatch_pane_capture_unavailable pane={pane} {fields} reason={reason:?} (#ctlprobeloadbudget)"
+        ),
+        _ => format!(
+            "controller_dispatch_pane_capture_read pane={pane} {fields} (#ctlprobelatencytelemetry)"
+        ),
+    }
 }
 
 /// True when a fresh harness-hook turn lease names `pane` (pane-scoped, or the
@@ -67795,6 +67847,113 @@ mod tests {
             CONTROLLER_DISPATCH_PANE_CAPTURE_TOTAL_CEILING
         );
     }
+
+    /// `#ctlprobelatencytelemetry`: every observation leaves its latency and
+    /// load in the real ops log, so the `#ctlprobeloadbudget` limits can be
+    /// tuned from a live host. Both a proven idle pane and a busy one are
+    /// successful reads; only a pane no read captured is the refusal line.
+    #[test]
+    fn dispatch_pane_observation_logs_latency_and_load_for_every_outcome() {
+        use agent_doc_tmux_io::TmuxIoError;
+        const IDLE_WITH_WATCHER_PANEL: &str = include_str!(
+            "../../../agent-doc-harness/src/fixtures/grok_idle_with_watcher_panel.txt"
+        );
+        let busy_panel = IDLE_WITH_WATCHER_PANEL.replace("Ctrl+x", "Ctrl+c:cancel  │  Ctrl+x");
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("doc.md");
+        std::fs::write(&file, "doc\n").unwrap();
+        let record = agent_doc_controller::actor::ActorRecord {
+            document_id: "doc".to_string(),
+            session_id: "session".to_string(),
+            generation: 1,
+            pane_id: "%7".to_string(),
+            window_id: "@1".to_string(),
+            harness: "grok".to_string(),
+            state: agent_doc_controller::actor::ActorState::Ready,
+            last_transition: agent_doc_controller::actor::ActorLastTransition {
+                caller: "test".to_string(),
+                reason: "test".to_string(),
+                timestamp: 0,
+                prior_generation: 0,
+                new_generation: 1,
+            },
+        };
+        let loaded = Some(agent_doc_controller::dispatch::HostLoadSample {
+            load_avg_1m: 100.0,
+            online_cpus: 32,
+        });
+        let timed_out = |timeout: Duration| TmuxIoError::Timeout {
+            binary: "tmux".to_string(),
+            timeout_ms: timeout.as_millis(),
+        };
+        // Each clock read advances 40ms, so every read measures exactly 40ms.
+        let clock = || {
+            let mut at = Instant::now();
+            move || {
+                at += Duration::from_millis(40);
+                at
+            }
+        };
+
+        // Idle: the first read times out, the second answers.
+        let mut idle_reads = 0;
+        let idle = observe_controller_dispatch_pane(&file, &record, loaded, clock(), |timeout| {
+            idle_reads += 1;
+            if idle_reads == 1 {
+                Err(timed_out(timeout))
+            } else {
+                Ok(IDLE_WITH_WATCHER_PANEL.to_string())
+            }
+        });
+        assert_eq!(idle.observation, ControllerDispatchPaneObservation::Clear);
+
+        let busy = observe_controller_dispatch_pane(&file, &record, loaded, clock(), |_| {
+            Ok(busy_panel.clone())
+        });
+        assert!(matches!(
+            busy.observation,
+            ControllerDispatchPaneObservation::Blocked(_)
+        ));
+
+        let wedged = observe_controller_dispatch_pane(&file, &record, None, clock(), |timeout| {
+            Err(timed_out(timeout))
+        });
+        assert!(matches!(
+            wedged.observation,
+            ControllerDispatchPaneObservation::Unavailable(_)
+        ));
+
+        let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        let lines: Vec<&str> = ops_log
+            .lines()
+            .filter(|line| line.contains("controller_dispatch_pane_capture_"))
+            .collect();
+        assert_eq!(lines.len(), 3, "one line per observation: {ops_log}");
+        let budget_fields = "pane=%7 load_avg_1m=100.00 online_cpus=32 load_scale_permille=3125 base_ms=781 cap_ms=3000 total_ms=3000";
+        assert!(
+            lines[0].contains(&format!(
+                "controller_dispatch_pane_capture_read {budget_fields} reads=2 last_read_ms=40 elapsed_ms=80 (#ctlprobelatencytelemetry)"
+            )),
+            "{}",
+            lines[0]
+        );
+        assert!(
+            lines[1].contains(&format!(
+                "controller_dispatch_pane_capture_read {budget_fields} reads=1 last_read_ms=40 elapsed_ms=40 (#ctlprobelatencytelemetry)"
+            )),
+            "{}",
+            lines[1]
+        );
+        assert!(
+            lines[2].contains(
+                "controller_dispatch_pane_capture_unavailable pane=%7 load_avg_1m=unknown online_cpus=unknown load_scale_permille=1000 base_ms=250 cap_ms=1000 total_ms=3000 reads=3 last_read_ms=40 elapsed_ms=120 reason="
+            ),
+            "{}",
+            lines[2]
+        );
+    }
+
     #[test]
     fn resolve_supervisor_auto_recycle_precedence() {
         use agent_doc_supervisor::config::resolve_supervisor_auto_recycle as r;

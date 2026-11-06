@@ -1411,6 +1411,34 @@ mod tests {
                  use capture_pane_with_ansi and composer_text_without_ghost_suggestions"
             );
         }
+        // `#plaincapturepassthrough`: dispatch.rs keeps plain captures for busy
+        // cues and diagnostic snapshots, so this pins the one composer check it
+        // has that reads pane text as a draft: the pass-through stranded-draft
+        // repair, and the projection every one of its looks goes through.
+        let dispatch = include_str!("dispatch.rs");
+        let repair = dispatch
+            .split_once("fn repair_pass_through_stranded_draft(")
+            .and_then(|(_, rest)| rest.split_once("\nfn pass_through_draft_and_busy("))
+            .map(|(repair, _)| repair)
+            .expect("pass-through repair moved; update this guard");
+        assert!(
+            repair.contains("agent_doc_tmux_io::capture_pane_with_ansi(tmux, pane)")
+                && repair.contains("pass_through_draft_and_busy(&captured, trigger, harness)"),
+            "the pass-through repair must read a styled capture through its projection"
+        );
+        assert!(
+            !repair.contains("agent_doc_tmux_io::capture_pane("),
+            "the pass-through repair is reading a plain capture again"
+        );
+        let projection = dispatch
+            .split_once("\nfn pass_through_draft_and_busy(")
+            .and_then(|(_, rest)| rest.split_once("\nfn send_pass_through_stranded_draft_enter("))
+            .map(|(projection, _)| projection)
+            .expect("pass-through projection moved; update this guard");
+        assert!(
+            projection.contains("composer_text_without_ghost_suggestions(captured)"),
+            "the pass-through repair must match the trigger against the ghost-free projection"
+        );
         let harness = agent_doc_harness::HarnessConfig::grok();
         let idle_with_ghost = concat!(
             "╭────────────────────────╮\n",

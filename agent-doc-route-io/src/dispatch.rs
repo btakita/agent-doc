@@ -35,6 +35,7 @@ use agent_doc_harness::HarnessConfig;
 use agent_doc_session_registry_io::dispatch_registry;
 use agent_doc_supervisor::ipc_protocol::IpcMethod;
 use agent_doc_turn::op_log::OpsLogEvent;
+use agent_doc_turn_executor_tmux::prompt::composer_text_without_ghost_suggestions;
 use tmux_router::Tmux;
 
 #[derive(Debug, Clone, Copy)]
@@ -526,6 +527,12 @@ pub fn dispatch_routed_reopen(
 /// (`#lazily-reactive-first`), matching the sibling
 /// `send_direct_pane_enter_resubmit_until_stable` on the observed-acceptance
 /// path.
+///
+/// `#plaincapturepassthrough`: every look reads the styled capture through
+/// [`pass_through_draft_and_busy`]. After a submit that did cross, Grok and
+/// Claude render their next-prompt prediction, often the trigger itself, as a
+/// ghost in the now-empty composer; a plain capture reads that as the trigger
+/// still sitting there and presses Enter at a suggestion.
 fn repair_pass_through_stranded_draft(
     tmux: &Tmux,
     file: &Path,
@@ -543,13 +550,9 @@ fn repair_pass_through_stranded_draft(
     let required_clear_observations =
         pass_through_stranded_draft_required_clear_observations(settle);
     loop {
-        let (draft_visible, pane_busy) = match agent_doc_tmux_io::capture_pane(tmux, pane) {
-            Ok(content) => (
-                route_trigger_visible_in_current_draft(&content, trigger, |line| {
-                    harness.is_prompt_line(line)
-                }),
-                harness.has_busy_cue(&content),
-            ),
+        let (draft_visible, pane_busy) = match agent_doc_tmux_io::capture_pane_with_ansi(tmux, pane)
+        {
+            Ok(captured) => pass_through_draft_and_busy(&captured, trigger, harness),
             Err(e) => {
                 capture_failed = true;
                 eprintln!(
@@ -612,6 +615,24 @@ fn repair_pass_through_stranded_draft(
         }
         return;
     }
+}
+
+/// `(draft_visible, pane_busy)` for one pass-through look at an ANSI capture.
+/// Both read the ghost-free projection, so a ghost suggestion is neither a
+/// stranded draft nor a busy cue, while the same text typed at normal intensity
+/// is still the draft (`#plaincapturepassthrough`).
+fn pass_through_draft_and_busy(
+    captured: &str,
+    trigger: &str,
+    harness: &HarnessConfig,
+) -> (bool, bool) {
+    let content = composer_text_without_ghost_suggestions(captured);
+    (
+        route_trigger_visible_in_current_draft(&content, trigger, |line| {
+            harness.is_prompt_line(line)
+        }),
+        harness.has_busy_cue(&content),
+    )
 }
 
 fn send_pass_through_stranded_draft_enter(
@@ -1309,6 +1330,140 @@ mod tests {
                Sample 5.1 ctx:16% ~/src/sample-app main user@host\n\
                ⏵⏵ bypass permissions on (shift+tab to cycle)\n"
         )
+    }
+
+    /// `#plaincapturepassthrough`: after a pass-through submit crossed, the
+    /// harness predicts the next prompt in the empty composer. Read through the
+    /// ghost-free projection that is no stranded draft to press Enter at; the
+    /// same text at normal intensity still is one.
+    #[test]
+    fn pass_through_reads_a_ghost_trigger_as_clear_and_a_typed_trigger_as_stranded() {
+        let grok_composer = |body: &str| {
+            format!(
+                concat!(
+                    "● Done.\n",
+                    "╭────────────────────────────────╮\n",
+                    "\x1b[38;2;88;88;88m│\x1b[0m \x1b[38;2;122;162;247m❯\x1b[0m {} \x1b[38;2;88;88;88m│\x1b[0m\n",
+                    "╰──── Grok 4.7 (high) ───────────╯\n",
+                    "Tab/→:accept suggestion  │  Shift+Tab:mode  │  Ctrl+x:shortcuts\n",
+                ),
+                body
+            )
+        };
+        let codex_composer = |body: &str| format!("• Done.\n\n› {body}\n\n  gpt-5.5 high\n");
+        for (name, harness, ghost, typed) in [
+            (
+                "claude",
+                HarnessConfig::claude(),
+                claude_pane(&format!("\x1b[39m❯\u{a0}\x1b[2m{TRIGGER}\x1b[0m")),
+                claude_pane(&format!("\x1b[39m❯\u{a0}\x1b[39m{TRIGGER}\x1b[0m")),
+            ),
+            (
+                "grok",
+                HarnessConfig::grok(),
+                grok_composer(&format!("\x1b[3;38;2;88;88;88m{TRIGGER}\x1b[0m")),
+                grok_composer(&format!("\x1b[38;2;192;202;245m{TRIGGER}\x1b[0m")),
+            ),
+            (
+                "codex",
+                HarnessConfig::codex(),
+                codex_composer(&format!("\x1b[2m{TRIGGER}\x1b[0m")),
+                codex_composer(TRIGGER),
+            ),
+        ] {
+            let plain = agent_doc_turn_executor_tmux::prompt::strip_ansi(&ghost);
+            assert!(
+                route_trigger_visible_in_current_draft(&plain, TRIGGER, |line| {
+                    harness.is_prompt_line(line)
+                }),
+                "{name}: the plain capture is what read the ghost as a stranded draft"
+            );
+            assert_eq!(
+                pass_through_draft_and_busy(&ghost, TRIGGER, &harness),
+                (false, false),
+                "{name}: a ghost of the trigger is an empty composer"
+            );
+            assert_eq!(
+                pass_through_draft_and_busy(&typed, TRIGGER, &harness),
+                (true, false),
+                "{name}: the typed trigger is still the stranded draft"
+            );
+        }
+    }
+
+    /// `#plaincapturepassthrough`: a busy cue survives the projection, so a
+    /// working pane still ends the repair without a keypress.
+    #[test]
+    fn pass_through_keeps_reading_busy_cues_from_the_projection() {
+        let harness = HarnessConfig::claude();
+        let captured = format!(
+            "\x1b[38;5;174m✻ Thinking…\x1b[0m (esc to interrupt)\n{}",
+            claude_pane("\x1b[39m❯\u{a0}\x1b[0m")
+        );
+        assert_eq!(
+            pass_through_draft_and_busy(&captured, TRIGGER, &harness),
+            (false, true)
+        );
+    }
+
+    /// `#plaincapturepassthrough`: drives the real repair over a real pane. The
+    /// pane's program records every key it receives, so a bare Enter pressed at
+    /// the ghost cannot go unseen.
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn pass_through_repair_presses_no_key_at_a_real_ghost_but_resubmits_a_typed_trigger() {
+        fn run(style: &str, socket: &str) -> usize {
+            let dir = tempfile::tempdir().unwrap();
+            let keys = dir.path().join("keys");
+            let script = dir.path().join("composer.sh");
+            std::fs::write(
+                &script,
+                format!(
+                    ": > '{keys}'\n\
+                     stty -echo -icanon min 1 time 0\n\
+                     printf '\\033[2J\\033[Hcompleted response\\n'\n\
+                     printf '\\342\\235\\257 \\033[{style}m{TRIGGER}\\033[0m\\n'\n\
+                     printf 'composer-rendered\\n'\n\
+                     exec cat > '{keys}'\n",
+                    keys = keys.display()
+                ),
+            )
+            .unwrap();
+            let iso = agent_doc_tmux_io::isolated_test_tmux(socket);
+            let pane = iso.auto_start("claude", dir.path()).unwrap();
+            iso.send_keys(&pane, &format!("sh '{}'", script.display()))
+                .unwrap();
+            let deadline = Instant::now() + Duration::from_secs(20);
+            while !iso
+                .capture_pane(&pane, None)
+                .unwrap_or_default()
+                .contains("composer-rendered")
+            {
+                assert!(Instant::now() < deadline, "composer never rendered");
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            let doc = dir.path().join("session.md");
+            std::fs::write(&doc, "# session\n").unwrap();
+            repair_pass_through_stranded_draft(
+                &iso,
+                &doc,
+                &pane,
+                &HarnessConfig::claude(),
+                TRIGGER,
+            );
+            std::fs::read(&keys).unwrap().len()
+        }
+
+        assert_eq!(
+            run("2", "route-test-pass-through-ghost"),
+            0,
+            "a faint ghost of the trigger must not draw a submit key"
+        );
+        assert_eq!(
+            run("0", "route-test-pass-through-typed"),
+            pass_through_stranded_draft_max_enter_resubmits(),
+            "a typed trigger is the strand this repair exists to resubmit"
+        );
     }
 
     #[test]

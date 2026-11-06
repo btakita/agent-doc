@@ -21,7 +21,9 @@ use agent_doc_controller::dispatch::{
     route_trigger_visible_in_current_draft, routed_trigger_payload_rejection,
 };
 use agent_doc_controller_io::route_snapshot::RoutePaneSnapshot;
-use agent_doc_harness::{HarnessConfig, PaneComposerProjection, protected_prompt_draft_preview};
+use agent_doc_harness::{
+    HarnessConfig, PaneComposerProjection, protected_prompt_draft_preview_at_cursor,
+};
 use agent_doc_hash::short_content_hash;
 use agent_doc_supervisor::lifecycle::recycle_interrupted_resubmit_should_wait;
 use agent_doc_tmux::pane_current_command_is_bare_shell;
@@ -518,8 +520,9 @@ pub fn send_command_unchecked(
     // the same unreachable tmux a plain retry would hit.
     let existing_draft_visible = match agent_doc_tmux_io::capture_pane_with_ansi(tmux, pane) {
         Ok(captured) => {
+            let cursor_y = agent_doc_tmux_io::pane_cursor_y(tmux, pane);
             if let PaneComposerProjection::AgentAddressed { target } =
-                crate::startup_ready::pane_composer_projection(tmux, pane, &captured, harness)
+                agent_doc_harness::project_pane_composer_at_cursor(&captured, harness, cursor_y)
             {
                 let outcome_fields = agent_doc_flow::outcome::blocked_with_exact_unblocker_fields(
                     StartingPaneBlocker::AgentAddressed.unblocker(),
@@ -551,7 +554,9 @@ pub fn send_command_unchecked(
                     &content,
                 )
                 .path;
-            } else if let Some(reason) = harness.protected_prompt_input_reason(&captured) {
+            } else if let Some(reason) =
+                harness.protected_prompt_input_reason_at_cursor(&captured, cursor_y)
+            {
                 let diagnostic_path = preserve_route_pane_snapshot(
                     file,
                     pane,
@@ -560,7 +565,8 @@ pub fn send_command_unchecked(
                     &content,
                 )
                 .path;
-                let draft_preview = protected_prompt_draft_preview(harness, &captured);
+                let draft_preview =
+                    protected_prompt_draft_preview_at_cursor(harness, &captured, cursor_y);
                 protected_prompt_input = Some((reason, diagnostic_path, draft_preview));
             }
             visible
@@ -1090,6 +1096,59 @@ brian@host repo%
         assert_eq!(
             harness.protected_prompt_input_reason(draft).as_deref(),
             Some("drafted prompt input"),
+        );
+    }
+
+    /// `#codexfooterrowcomposer`: the last guard before route types drives a real
+    /// pane under a status line no row list recognizes. The pane's program
+    /// records every key it receives, so a trigger typed onto the draft cannot go
+    /// unseen.
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn route_types_nothing_onto_a_codex_draft_above_an_unrecognized_status_line() {
+        let dir = tempfile::tempdir().unwrap();
+        let keys = dir.path().join("keys");
+        let script = dir.path().join("composer.sh");
+        std::fs::write(
+            &script,
+            format!(
+                ": > '{keys}'\n\
+                 stty -echo -icanon min 1 time 0\n\
+                 printf '\\033[2J\\033[H\\342\\200\\272 fix the tests\\n\\n  my own status line\\n'\n\
+                 printf '\\033[1;16H'\n\
+                 exec cat > '{keys}'\n",
+                keys = keys.display()
+            ),
+        )
+        .unwrap();
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-codex-draft-status-line");
+        let pane = iso.auto_start("codex", dir.path()).unwrap();
+        iso.send_keys(&pane, &format!("sh '{}'", script.display()))
+            .unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        while agent_doc_tmux_io::target_current_command(&iso, &pane).as_deref() != Some("cat") {
+            assert!(std::time::Instant::now() < deadline, "composer never rendered");
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        let doc = dir.path().join("session.md");
+        std::fs::write(&doc, "# session\n").unwrap();
+
+        let error = send_command_unchecked(
+            &iso,
+            &pane,
+            &doc.display().to_string(),
+            &HarnessConfig::codex(),
+        )
+        .expect_err("a draft refuses the route");
+
+        assert!(
+            error.to_string().contains("drafted prompt input"),
+            "{error}"
+        );
+        assert_eq!(
+            std::fs::read(&keys).unwrap(),
+            b"",
+            "nothing may reach the composer"
         );
     }
 }

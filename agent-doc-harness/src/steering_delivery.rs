@@ -85,6 +85,16 @@ pub enum RunningTurnFollowUpComposer {
 }
 
 pub fn running_turn_follow_up_composer(harness: &str, output: &str) -> RunningTurnFollowUpComposer {
+    running_turn_follow_up_composer_at_cursor(harness, output, None)
+}
+
+/// Cursor-aware counterpart to [`running_turn_follow_up_composer`], for the gate
+/// that decides whether route may paste into the composer.
+pub fn running_turn_follow_up_composer_at_cursor(
+    harness: &str,
+    output: &str,
+    cursor_y: Option<usize>,
+) -> RunningTurnFollowUpComposer {
     let adapter = steering_delivery_adapter(harness);
     if adapter.harness == "grok" {
         return match crate::grok::follow_up_composer(output) {
@@ -95,7 +105,7 @@ pub fn running_turn_follow_up_composer(harness: &str, output: &str) -> RunningTu
     }
 
     let config = crate::HarnessConfig::from_agent_name(adapter.harness);
-    if let Some(reason) = config.protected_prompt_input_reason(output) {
+    if let Some(reason) = config.protected_prompt_input_reason_at_cursor(output, cursor_y) {
         if matches!(
             reason.as_str(),
             "queued draft in composer" | "drafted prompt input"
@@ -104,7 +114,7 @@ pub fn running_turn_follow_up_composer(harness: &str, output: &str) -> RunningTu
         }
         return RunningTurnFollowUpComposer::Blocked { reason };
     }
-    match crate::project_pane_composer(output, &config) {
+    match crate::project_pane_composer_at_cursor(output, &config, cursor_y) {
         crate::PaneComposerProjection::ReadyEmpty { .. } | crate::PaneComposerProjection::Busy => {
             RunningTurnFollowUpComposer::Empty
         }

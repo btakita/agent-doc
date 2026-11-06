@@ -831,11 +831,12 @@ pub struct OpenCycleProtectedPaneState {
 pub fn protected_registered_pane_state_from_capture(
     harness: &agent_doc_harness::HarnessConfig,
     capture: &str,
+    cursor_y: Option<usize>,
 ) -> Option<ProtectedRegisteredPaneState> {
-    let reason = harness.protected_prompt_input_reason(capture)?;
+    let reason = harness.protected_prompt_input_reason_at_cursor(capture, cursor_y)?;
     Some(ProtectedRegisteredPaneState {
         reason,
-        last_visible_excerpt: last_visible_excerpt(capture),
+        last_visible_excerpt: last_visible_excerpt(&agent_doc_harness::strip_ansi(capture)),
     })
 }
 
@@ -1749,6 +1750,41 @@ mod tests {
         );
     }
 
+    /// `#codexfooterrowcomposer`: rows from a real Codex capture. The hint row
+    /// must neither hide a typed draft nor turn a ghost suggestion into one.
+    #[test]
+    fn protected_registered_pane_state_reads_a_styled_codex_composer() {
+        let harness = agent_doc_harness::HarnessConfig::codex();
+        let footer = "\n  GPT-5.6-Sol high · ~/work/sample-app · Context 0% used\n  \
+                      ? for shortcuts      ⚠ 3 warnings · f2 to view\n";
+        let ghost = format!("\x1b[1m›\x1b[0m \x1b[2mSummarize recent commits\x1b[0m\n{footer}");
+        assert_eq!(
+            protected_registered_pane_state_from_capture(&harness, &ghost, None),
+            None
+        );
+
+        let typed = format!("\x1b[1m›\x1b[0m \x1b[1mfix\x1b[0m the tests\n{footer}");
+        let state = protected_registered_pane_state_from_capture(&harness, &typed, None)
+            .expect("a typed draft protects the pane");
+        assert_eq!(state.reason, "drafted prompt input");
+        assert_eq!(
+            state.last_visible_excerpt.as_deref(),
+            Some("? for shortcuts ⚠ 3 warnings · f2 to view")
+        );
+
+        let custom_status = "\x1b[1m›\x1b[0m fix the tests\n\n  my own status line\n";
+        assert_eq!(
+            protected_registered_pane_state_from_capture(&harness, custom_status, None),
+            None
+        );
+        assert_eq!(
+            protected_registered_pane_state_from_capture(&harness, custom_status, Some(0))
+                .map(|state| state.reason)
+                .as_deref(),
+            Some("drafted prompt input")
+        );
+    }
+
     #[test]
     fn protected_registered_pane_state_detects_codex_queue_state() {
         let capture = "\
@@ -1760,6 +1796,7 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 31% used
         let state = protected_registered_pane_state_from_capture(
             &agent_doc_harness::HarnessConfig::codex(),
             capture,
+            None,
         )
         .expect("queue-state draft should protect the pane");
 

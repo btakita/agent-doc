@@ -2391,10 +2391,11 @@ fn duplicate_retirement_protection(
     turn_boundary: bool,
 ) -> agent_doc_supervisor::session_owner::SupersededOwnerProtection {
     let tmux = agent_doc_tmux_io::configured_tmux();
-    let capture = agent_doc_tmux_io::capture_pane(&tmux, pane).ok();
+    let capture = agent_doc_tmux_io::capture_pane_with_ansi(&tmux, pane).ok();
+    let cursor_y = agent_doc_tmux_io::pane_cursor_y(&tmux, pane);
     let protected_input_reason = capture
         .as_deref()
-        .and_then(|text| harness.protected_prompt_input_reason(text));
+        .and_then(|text| harness.protected_prompt_input_reason_at_cursor(text, cursor_y));
     agent_doc_supervisor::session_owner::SupersededOwnerProtection {
         active_turn: !turn_boundary,
         protected_input_reason,

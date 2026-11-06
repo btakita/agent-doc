@@ -24,8 +24,9 @@ use agent_doc_frontmatter::frontmatter::Frontmatter;
 use agent_doc_turn_executor::codex_launch::codex_resume_restart_args;
 use agent_doc_turn_executor_tmux::prompt::{
     codex_idle_placeholder_candidate, codex_prompt_candidate_is_dim_placeholder,
-    is_codex_idle_placeholder_prompt,
+    is_codex_footer_row, is_codex_idle_placeholder_prompt,
 };
+pub use agent_doc_turn_executor_tmux::prompt::strip_ansi;
 use anyhow::Result;
 use std::path::{Path, PathBuf};
 
@@ -846,7 +847,7 @@ impl HarnessConfig {
             return true;
         }
         match self.binary.as_str() {
-            "codex" => trimmed.contains("·") && trimmed.contains("Context "),
+            "codex" => is_codex_footer_row(trimmed),
             "opencode" => is_opencode_idle_chrome_line(trimmed),
             // #jb-stale-busy-idle-footer: skip Claude's static model/context status
             // line (`Opus … ctx:N% … <cwd> <branch> <user>@<host>`) so a genuinely
@@ -1371,6 +1372,20 @@ impl HarnessConfig {
     /// Return a reason when the latest pane output shows live user input or
     /// another interactive composer state that must block replacement.
     pub fn protected_prompt_input_reason(&self, output: &str) -> Option<String> {
+        self.protected_prompt_input_reason_at_cursor(output, None)
+    }
+
+    /// Cursor-aware counterpart to [`Self::protected_prompt_input_reason`].
+    /// A dialog or queue hint can render below the cursor, so those still read
+    /// the whole pane; only the composer is scoped, because a status line is
+    /// user-configured and no row list can name every one of them
+    /// (`#codexfooterrowcomposer`). Prefer this wherever a pane is at hand and
+    /// a missed draft would be lost.
+    pub fn protected_prompt_input_reason_at_cursor(
+        &self,
+        output: &str,
+        cursor_y: Option<usize>,
+    ) -> Option<String> {
         if let Some(reason) = self.dispatch_blocker_reason(output) {
             match reason.as_str() {
                 "active permission prompt" => return Some(reason),
@@ -1388,7 +1403,8 @@ impl HarnessConfig {
             return None;
         }
 
-        let candidate = self.last_prompt_candidate(output)?;
+        let scoped = cursor_scoped_prompt_content(output, self, cursor_y);
+        let candidate = self.last_prompt_candidate(&scoped)?;
         let trimmed = agent_doc_turn_executor_tmux::prompt::strip_ansi(&candidate);
         let trimmed = trimmed.trim();
         if !matches!(trimmed.chars().next(), Some('>' | '›' | '❯')) {
@@ -1397,7 +1413,7 @@ impl HarnessConfig {
         if self.is_dispatch_ready_prompt_line(trimmed) {
             return None;
         }
-        if codex_prompt_candidate_is_dim_placeholder(output, trimmed) {
+        if codex_prompt_candidate_is_dim_placeholder(&scoped, trimmed) {
             return None;
         }
         if Self::agent_doc_session_control_prompt(trimmed) {
@@ -1452,6 +1468,16 @@ impl HarnessConfig {
             && let Some(placeholder) = codex_idle_placeholder_candidate(output)
         {
             return Some(placeholder);
+        }
+        if self.binary == "codex" {
+            let lines: Vec<String> = output
+                .lines()
+                .map(agent_doc_turn_executor_tmux::prompt::strip_ansi)
+                .collect();
+            let last = lines
+                .iter()
+                .rposition(|line| !self.is_ignorable_output_line(line))?;
+            return Some(lines[codex_composer_first_row(&lines, last)].trim().to_string());
         }
         output
             .lines()
@@ -1512,6 +1538,28 @@ impl BottomIdleChromeScan {
     }
 }
 
+/// The row holding the `›` of a Codex composer whose body ends at `last`.
+///
+/// A draft that wraps, or holds a newline, continues on rows indented to the
+/// composer's text column and carrying no prompt glyph, so its last row says
+/// nothing about being a composer (`#codexfooterrowcomposer`). The walk stops at
+/// a blank row or an unindented row, which is where transcript text ends. `last`
+/// comes back unchanged when no `›` joins it.
+fn codex_composer_first_row(lines: &[String], last: usize) -> usize {
+    let mut row = last;
+    while row > 0 && lines[row].starts_with("  ") {
+        row -= 1;
+        let line = lines[row].trim_end();
+        if line.starts_with('›') {
+            return row;
+        }
+        if line.is_empty() {
+            break;
+        }
+    }
+    last
+}
+
 fn protected_prompt_draft_preview_from_candidate(
     candidate: &str,
     harness: &HarnessConfig,
@@ -1557,7 +1605,17 @@ fn agent_owned_notice_from_prompt_candidate(
 }
 
 pub fn protected_prompt_draft_preview(harness: &HarnessConfig, content: &str) -> Option<String> {
-    let candidate = harness.last_prompt_candidate(content)?;
+    protected_prompt_draft_preview_at_cursor(harness, content, None)
+}
+
+/// Cursor-aware counterpart to [`protected_prompt_draft_preview`].
+pub fn protected_prompt_draft_preview_at_cursor(
+    harness: &HarnessConfig,
+    content: &str,
+    cursor_y: Option<usize>,
+) -> Option<String> {
+    let scoped = cursor_scoped_prompt_content(content, harness, cursor_y);
+    let candidate = harness.last_prompt_candidate(&scoped)?;
     protected_prompt_draft_preview_from_candidate(&candidate, harness)
 }
 
@@ -1639,11 +1697,7 @@ fn codex_without_new_chat_trailer(content: &str) -> std::borrow::Cow<'_, str> {
     else {
         return std::borrow::Cow::Borrowed(content);
     };
-    let is_footer = |line: &str| {
-        line.is_empty()
-            || (line.contains('·') && line.contains("Context "))
-            || line.starts_with("? for shortcuts")
-    };
+    let is_footer = |line: &str| line.is_empty() || is_codex_footer_row(line);
     let mut in_exit_summary = false;
     for (offset, line) in normalized[banner + 1..].iter().enumerate() {
         if line.is_empty() {

@@ -596,7 +596,11 @@ fn running_turn_steering_claim(
     if !harness_cfg.has_busy_cue(&capture) {
         return RunningTurnSteeringClaim::Count(pending_explicit_send_count(file));
     }
-    match agent_doc_harness::steering_delivery::running_turn_follow_up_composer(harness, &capture) {
+    match agent_doc_harness::steering_delivery::running_turn_follow_up_composer_at_cursor(
+        harness,
+        &capture,
+        agent_doc_tmux_io::pane_cursor_y(tmux, pane),
+    ) {
         agent_doc_harness::steering_delivery::RunningTurnFollowUpComposer::Draft => {
             return RunningTurnSteeringClaim::NotDelivered(route_sync_steering_not_delivered(
                 file,

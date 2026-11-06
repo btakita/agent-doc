@@ -467,6 +467,56 @@ pub(crate) mod codex_composer_fixture {
     pub(crate) fn typed(text: &str) -> String {
         frame(text, &format!("{:74}{WARNINGS}", ""))
     }
+
+    /// The hint rows of the frames above, which sit below the status row.
+    pub(crate) fn hint_rows() -> [String; 2] {
+        [idle_hint_row(), format!("{:74}{WARNINGS}", "")]
+    }
+
+    /// `#codexfooterrowcomposer`: frames from Codex v0.165.0 with no configured
+    /// status line, in a 120x30 pane. Its status row has no `Context` item
+    /// before a turn reports usage and gains a `← for agents` hint when idle.
+    const DEFAULT_STATUS: &str = concat!(
+        "  \x1b[38;2;246;226;183mGPT-5.6-Sol high\x1b[39m · ",
+        "\x1b[38;2;171;223;167m~/work/sample-app\x1b[39m",
+    );
+
+    /// Codex's placeholder over the default status row. `(frame, cursor row)`.
+    pub(crate) fn default_status_idle() -> (String, usize) {
+        (
+            format!(
+                "\x1b[1m›\x1b[0m \x1b[2mAsk Codex to do anything\x1b[0m\n\n\
+                 {DEFAULT_STATUS} · \x1b[1m←\x1b[0m for agents\n"
+            ),
+            0,
+        )
+    }
+
+    /// Typed text over the default status row. Each of `rows` is one composer
+    /// row: Codex indents every row after the first to the text column, whether
+    /// the row came from wrapping or from a newline. `(frame, cursor row)`.
+    pub(crate) fn default_status_typed(rows: &[&str]) -> (String, usize) {
+        (
+            format!(
+                "\x1b[1m›\x1b[0m {}\n\n{DEFAULT_STATUS}\n",
+                rows.join("\n  ")
+            ),
+            rows.len() - 1,
+        )
+    }
+
+    /// Text typed while a turn runs, which replaces the status row with Codex's
+    /// queue hint. `(frame, cursor row)`.
+    pub(crate) fn busy_typed(text: &str) -> (String, usize) {
+        (
+            format!(
+                "• Working (3s • esc to interrupt)\n\n\x1b[1m›\x1b[0m {text}\n\n  \
+                 \x1b[1mtab\x1b[0m to queue message{:79}100% context left\n",
+                ""
+            ),
+            2,
+        )
+    }
 }
 
 #[cfg(test)]
@@ -654,6 +704,185 @@ mod tests {
                 CODEX_TRIGGER
             ),
             FreshStartAdmissionOutcome::GenuineMissReap
+        );
+    }
+
+    /// `#codexfooterrowcomposer`: readers without a cursor saw the hint row as
+    /// the composer: idle and typed frames both projected `Absent`, a typed
+    /// draft had no protected reason, and its preview was the hint text.
+    #[test]
+    fn codex_captured_frames_read_the_same_without_a_cursor() {
+        let harness = HarnessConfig::codex();
+        for row in codex_composer_fixture::hint_rows() {
+            assert!(harness.is_ignorable_output_line(&row), "{row:?}");
+        }
+
+        let idle = codex_composer_fixture::idle_placeholder();
+        let ready = PaneComposerProjection::ReadyEmpty {
+            evidence: PaneComposerReadinessEvidence::Prompt {
+                rendered: "› Ask Codex to do anything".to_string(),
+            },
+        };
+        assert_eq!(agent_doc_harness::project_pane_composer(&idle, &harness), ready);
+        assert_eq!(harness.protected_prompt_input_reason(&idle), None);
+        assert!(agent_doc_harness::ready_prompt_candidate(&idle, &harness).is_some());
+
+        let ghost = codex_composer_fixture::dim_suggestion(CODEX_TRIGGER);
+        assert_eq!(
+            agent_doc_harness::project_pane_composer(&ghost, &harness),
+            PaneComposerProjection::ReadyEmpty {
+                evidence: PaneComposerReadinessEvidence::Prompt {
+                    rendered: format!("› {CODEX_TRIGGER}"),
+                },
+            }
+        );
+        assert_eq!(harness.protected_prompt_input_reason(&ghost), None);
+
+        let typed = codex_composer_fixture::typed(CODEX_TRIGGER);
+        assert_eq!(
+            agent_doc_harness::project_pane_composer(&typed, &harness),
+            PaneComposerProjection::OperatorDraft {
+                preview: format!("› {CODEX_TRIGGER}"),
+            }
+        );
+        assert_eq!(
+            harness.protected_prompt_input_reason(&typed).as_deref(),
+            Some("drafted prompt input")
+        );
+        assert_eq!(
+            agent_doc_harness::protected_prompt_draft_preview(&harness, &typed),
+            Some(format!("› {CODEX_TRIGGER}"))
+        );
+        assert_eq!(agent_doc_harness::ready_prompt_candidate(&typed, &harness), None);
+    }
+
+    /// The default status row has no `Context` item, so it posed as the composer
+    /// on the same readers. A cursor must agree with no cursor on each frame.
+    #[test]
+    fn codex_default_status_frames_read_the_same_with_and_without_a_cursor() {
+        let harness = HarnessConfig::codex();
+        let (idle, cursor) = codex_composer_fixture::default_status_idle();
+        for cursor_y in [None, Some(cursor)] {
+            assert!(
+                matches!(
+                    agent_doc_harness::project_pane_composer_at_cursor(&idle, &harness, cursor_y),
+                    PaneComposerProjection::ReadyEmpty { .. }
+                ),
+                "{cursor_y:?}"
+            );
+        }
+        assert_eq!(
+            agent_doc_harness::protected_prompt_draft_preview(&harness, &idle).as_deref(),
+            Some("› Ask Codex to do anything")
+        );
+
+        let (typed, cursor) = codex_composer_fixture::default_status_typed(&["fix the tests"]);
+        for cursor_y in [None, Some(cursor)] {
+            assert_eq!(
+                agent_doc_harness::project_pane_composer_at_cursor(&typed, &harness, cursor_y),
+                PaneComposerProjection::OperatorDraft {
+                    preview: "› fix the tests".to_string(),
+                },
+                "{cursor_y:?}"
+            );
+        }
+    }
+
+    /// A draft of several rows ends on a row with no `›`. It read `Absent` even
+    /// with a cursor, so every draft guard let it through.
+    #[test]
+    fn codex_draft_of_several_rows_is_a_draft_with_and_without_a_cursor() {
+        let harness = HarnessConfig::codex();
+        let (draft, cursor) = codex_composer_fixture::default_status_typed(&[
+            "a long operator draft that wrapped at the edge of the",
+            "pane onto a second row",
+            "and a third after a newline",
+        ]);
+        for cursor_y in [None, Some(cursor)] {
+            assert_eq!(
+                agent_doc_harness::project_pane_composer_at_cursor(&draft, &harness, cursor_y),
+                PaneComposerProjection::OperatorDraft {
+                    preview: "› a long operator draft that wrapped at the edge of the".to_string(),
+                },
+                "{cursor_y:?}"
+            );
+            assert_eq!(
+                harness
+                    .protected_prompt_input_reason_at_cursor(&draft, cursor_y)
+                    .as_deref(),
+                Some("drafted prompt input"),
+                "{cursor_y:?}"
+            );
+        }
+    }
+
+    /// Transcript below an indented row is not a composer: the walk to the `›`
+    /// stops at the blank row between a submitted prompt and what follows it.
+    #[test]
+    fn codex_transcript_rows_do_not_join_an_earlier_prompt() {
+        let harness = HarnessConfig::codex();
+        let pane = "› an earlier prompt\n\n  an indented result row\n";
+        assert_eq!(
+            harness.last_prompt_candidate(pane).as_deref(),
+            Some("an indented result row")
+        );
+    }
+
+    /// Text typed during a turn is a draft to every reader, and its preview is
+    /// the text rather than the queue hint.
+    #[test]
+    fn codex_busy_typed_frame_projects_the_draft_not_the_turn() {
+        let harness = HarnessConfig::codex();
+        let (typed, cursor) = codex_composer_fixture::busy_typed("do not lose this");
+        assert_eq!(
+            harness.protected_prompt_input_reason(&typed).as_deref(),
+            Some("queued draft in composer")
+        );
+        for cursor_y in [None, Some(cursor)] {
+            assert_eq!(
+                agent_doc_harness::project_pane_composer_at_cursor(&typed, &harness, cursor_y),
+                PaneComposerProjection::OperatorDraft {
+                    preview: "› do not lose this".to_string(),
+                },
+                "{cursor_y:?}"
+            );
+            assert_eq!(
+                agent_doc_harness::protected_prompt_draft_preview_at_cursor(
+                    &harness, &typed, cursor_y
+                )
+                .as_deref(),
+                Some("› do not lose this"),
+                "{cursor_y:?}"
+            );
+        }
+    }
+
+    /// A status line is user-configured, so no row list is complete. This is why
+    /// every guard with a pane reads at the cursor, and what would break if one
+    /// went back to reading the whole frame.
+    #[test]
+    fn codex_custom_status_line_hides_a_draft_from_everything_but_the_cursor() {
+        let harness = HarnessConfig::codex();
+        let frame = "\x1b[1m›\x1b[0m fix the tests\n\n  my own status line\n";
+        assert_eq!(harness.protected_prompt_input_reason(frame), None);
+        assert_eq!(
+            harness
+                .protected_prompt_input_reason_at_cursor(frame, Some(0))
+                .as_deref(),
+            Some("drafted prompt input")
+        );
+        assert_eq!(
+            agent_doc_harness::protected_prompt_draft_preview_at_cursor(&harness, frame, Some(0))
+                .as_deref(),
+            Some("› fix the tests")
+        );
+        assert_eq!(
+            agent_doc_harness::steering_delivery::running_turn_follow_up_composer_at_cursor(
+                "codex",
+                &format!("• Working (3s • esc to interrupt)\n\n{frame}"),
+                Some(2),
+            ),
+            agent_doc_harness::steering_delivery::RunningTurnFollowUpComposer::Draft
         );
     }
 }

@@ -408,6 +408,63 @@ pub fn is_codex_idle_placeholder_prompt(trimmed: &str) -> bool {
     codex_idle_placeholder_prompt(trimmed).is_some()
 }
 
+/// True for a row Codex paints below its composer: the status row or the hint
+/// row under it (`#codexfooterrowcomposer`). `trimmed` is ANSI-free.
+///
+/// Rows below the composer come first in every bottom-up scan, so a footer row
+/// that is not recognized here hides the composer from every reader without a
+/// cursor. Each shape is matched across the whole row: a footer word inside
+/// transcript text must not hide that row from the scan.
+pub fn is_codex_footer_row(trimmed: &str) -> bool {
+    (trimmed.contains('·') && trimmed.contains("Context "))
+        || is_codex_status_row(trimmed)
+        || is_codex_hint_row(trimmed)
+}
+
+/// The default status row, which has no `Context` item until a turn has
+/// reported usage: `GPT-5.6-Sol high · ~/work/app · ← for agents`, or just the
+/// model and working directory once text is typed or the pane is narrow.
+fn is_codex_status_row(trimmed: &str) -> bool {
+    let mut items = trimmed.split(" · ");
+    let (Some(model), Some(working_directory)) = (items.next(), items.next()) else {
+        return false;
+    };
+    let mut model = model.split_whitespace();
+    let (Some(_), Some(effort), None) = (model.next(), model.next(), model.next()) else {
+        return false;
+    };
+    matches!(
+        effort,
+        "minimal" | "low" | "medium" | "high" | "xhigh" | "default"
+    ) && (working_directory.starts_with("~/") || working_directory.starts_with('/'))
+}
+
+/// The hint row: right- and left-aligned hints separated by a run of spaces.
+fn is_codex_hint_row(trimmed: &str) -> bool {
+    let mut hints = trimmed
+        .split("  ")
+        .map(str::trim)
+        .filter(|hint| !hint.is_empty())
+        .peekable();
+    hints.peek().is_some() && hints.all(is_codex_hint)
+}
+
+fn is_codex_hint(hint: &str) -> bool {
+    matches!(
+        hint,
+        "? for shortcuts" | "← for agents" | "tab to queue message"
+    ) || after_count(hint) == Some("% context left")
+        || hint
+            .strip_prefix("⚠ ")
+            .and_then(after_count)
+            .is_some_and(|rest| matches!(rest, " warning · f2 to view" | " warnings · f2 to view"))
+}
+
+fn after_count(text: &str) -> Option<&str> {
+    let rest = text.trim_start_matches(|c: char| c.is_ascii_digit());
+    (rest.len() < text.len()).then_some(rest)
+}
+
 pub fn codex_idle_placeholder_prompt(trimmed: &str) -> Option<String> {
     let body = trimmed.strip_prefix('›')?.trim();
     if body.is_empty()
@@ -472,7 +529,7 @@ pub fn codex_idle_placeholder_candidate(output: &str) -> Option<String> {
         .iter()
         .rev()
         .map(|line| line.trim())
-        .filter(|line| !line.is_empty() && !line.contains("· Context "))
+        .filter(|line| !line.is_empty() && !is_codex_footer_row(line))
         .collect::<Vec<_>>()
         .join(" ");
     let normalized = normalized.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -1186,5 +1243,64 @@ in @filename
         let content = "ctrl+f fullscreen  ⇆ select  enter confirm\n";
         let info = parse_prompt(content);
         assert!(!info.active);
+    }
+
+    /// `#codexfooterrowcomposer`: every row is from a real Codex capture.
+    #[test]
+    fn codex_footer_row_covers_the_rows_codex_paints_below_its_composer() {
+        for row in [
+            "GPT-5.6-Sol high · ~/work/sample-app · Context 0% used",
+            "GPT-5.6-Sol high · ~/work/sample-app · Context 0% used  ⚠ 3 warnings · f2 to view",
+            "gpt-5.6-sol xhigh · ~/work/sample-app · Context 2% used · Main [default]",
+            "GPT-5.6-Sol high · ~/work/sample-app · ← for agents",
+            "GPT-5.6-Sol high · ~/work/sample-app",
+            "GPT-5.6-Sol high · ~/worktrees/sample-…",
+            "? for shortcuts",
+            "? for shortcuts                                       ⚠ 3 warnings · f2 to view",
+            "⚠ 1 warning · f2 to view",
+            "⚠ 3 warnings · f2 to view",
+            "tab to queue message",
+            "tab to queue message                                  100% context left",
+        ] {
+            assert!(is_codex_footer_row(row), "{row}");
+        }
+    }
+
+    /// A bottom-up scan skips a footer row, so a row of transcript that merely
+    /// mentions a hint must stay visible to it.
+    #[test]
+    fn codex_footer_row_is_matched_across_the_whole_row() {
+        for row in [
+            "› ? for shortcuts",
+            "? for shortcuts is what the footer says",
+            "see the ? for shortcuts hint",
+            "tab to queue message explained",
+            "? for shortcuts  then a column of transcript",
+            "the footer read  ⚠ 3 warnings · f2 to view",
+            "⚠ warnings · f2 to view",
+            "⚠ 3 warnings",
+            "% context left",
+            "the footer · f2 to view",
+            "turn high · the door · is open",
+            "GPT-5.6-Sol high",
+            "• Working (5s • esc to interrupt) · 1 background terminal running · /ps to view",
+        ] {
+            assert!(!is_codex_footer_row(row), "{row}");
+        }
+    }
+
+    #[test]
+    fn codex_idle_placeholder_candidate_recovers_a_wrapped_placeholder_above_the_hint_row() {
+        let output = concat!(
+            "› Find and fix a bug in\n",
+            "  @filename\n",
+            "\n",
+            "  GPT-5.6-Sol high · ~/work/sample-app · Context 0% used\n",
+            "  ? for shortcuts                       ⚠ 3 warnings · f2 to view\n",
+        );
+        assert_eq!(
+            codex_idle_placeholder_candidate(output).as_deref(),
+            Some("› Find and fix a bug in @filename"),
+        );
     }
 }

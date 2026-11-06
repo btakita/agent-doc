@@ -1575,4 +1575,29 @@ mod tests {
         );
         assert_eq!(observation.draft_preview.as_deref(), Some("❯ operator text"));
     }
+
+    /// `#codexfooterrowcomposer`: a draft ending on a row with no `›` projected
+    /// `Absent`, which this guard reads as an empty composer.
+    #[test]
+    fn pre_dispatch_refuses_to_append_to_a_codex_draft_of_several_rows() {
+        let (draft, cursor) =
+            crate::startup_ready::codex_composer_fixture::default_status_typed(&[
+                "a long operator draft that wrapped",
+                "onto a second row",
+            ]);
+        let observation = classify_pre_dispatch_stranded_draft_observation(
+            Some(&draft),
+            Some(cursor),
+            &HarnessConfig::codex(),
+            TRIGGER,
+        );
+        assert_eq!(
+            observation.action,
+            PreDispatchStrandedDraftAction::DeferForeignDraft
+        );
+        assert_eq!(
+            observation.draft_preview.as_deref(),
+            Some("› a long operator draft that wrapped")
+        );
+    }
 }

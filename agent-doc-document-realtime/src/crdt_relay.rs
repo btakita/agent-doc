@@ -1732,6 +1732,20 @@ impl RelayHub {
         hub
     }
 
+    /// Seed `canonical_text` while leaving `disk_text` as the uncommitted baseline.
+    ///
+    /// [`Self::from_text`] records its seed as already committed. Using it for a
+    /// cut that is not on disk lets the next cold start treat that cut as the
+    /// baseline and replace it with disk (`#unsavedcanonicalcarry`). The committed
+    /// frontier stays empty, so the hub is not evictable until a real save records
+    /// one. Callers pass this only when the two texts differ.
+    pub fn from_unsaved_text(canonical_id: u64, canonical_text: &str, disk_text: &str) -> Self {
+        let mut hub = Self::from_text(canonical_id, canonical_text);
+        hub.last_committed_text = Some(disk_text.to_string());
+        hub.last_committed_state_vector = None;
+        hub
+    }
+
     /// Recover a hub from a durable disk **recovery projection** (plan phase 6):
     /// rebuild the in-memory canonical replica from the last durable snapshot on
     /// restart. At most one flush is lost; live editors re-sync their newer ops on
@@ -6309,6 +6323,21 @@ mod tests {
         assert_eq!(
             hub.last_committed_text_for_test(),
             Some("# plan\n\nexisting queue\n")
+        );
+        assert!(
+            hub.is_safe_to_evict(),
+            "a disk seed is the committed baseline"
+        );
+    }
+
+    #[test]
+    fn from_unsaved_text_keeps_disk_as_the_baseline_and_pins_the_hub() {
+        let hub = RelayHub::from_unsaved_text(1, "disk\nunsaved\n", "disk\n");
+        assert_eq!(hub.canonical_text(), "disk\nunsaved\n");
+        assert_eq!(hub.last_committed_text_for_test(), Some("disk\n"));
+        assert!(
+            !hub.is_safe_to_evict(),
+            "an unsaved cut must survive an empty-member eviction"
         );
     }
 

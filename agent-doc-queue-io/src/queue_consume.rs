@@ -2195,8 +2195,21 @@ fn strike_free_text_queue_heads_with_proof(
     // `#qstrikenote` annotation in the replaced raw). When the diff yields ops,
     // converge via structural ops instead of the full-text write; otherwise
     // (force-disk repair, or a shape the node model can't express) keep full-text.
+    // `#responserowqueuehead`: node ops carry only item spans. A strike target
+    // that also nests its response tree (`#atomicstrikeresponse`) or edits the
+    // exchange cannot be expressed by them; landing it node-only loses the
+    // tree. Use node ops only when they reproduce the full target exactly.
     let replace_ops =
         node_replace_ops_from_diff(&content, &new_document, "queue").unwrap_or_default();
+    let replace_ops = if agent_doc_queue::queue_consume::structural_ops_reproduce_target(
+        &content,
+        &replace_ops,
+        &new_document,
+    ) {
+        replace_ops
+    } else {
+        Vec::new()
+    };
     let activation_changed = frontmatter::parse(&content)?.0.queue_active
         != frontmatter::parse(&new_document)?.0.queue_active;
     if skip_visible_guard {
@@ -3100,7 +3113,17 @@ fn converge_id_backed_head_strike(
             .context("orphan strike: failed to inspect retained completion feedback")?,
     );
     target = reconcile_terminal_active_projection(file, target)?.0;
-    if target == new_document && retired_completion_keys.is_empty() {
+    // `#responserowqueuehead`: node ops are the write only when they reproduce
+    // the whole target; a strike that also nests response children outside
+    // the item spans converges as the full-text successor.
+    if target == new_document
+        && retired_completion_keys.is_empty()
+        && agent_doc_queue::queue_consume::structural_ops_reproduce_target(
+            &content,
+            &strike_ops,
+            &new_document,
+        )
+    {
         effects
             .converge_structural_ops(file, &strike_ops, &content, source)
             .context("orphan strike: failed to write document")?;
@@ -3980,7 +4003,10 @@ fn plan_queue_prompt_consumption_inner(
                     .iter()
                     .map(|echo| echo.identity.as_str())
                     .collect::<Vec<_>>(),
-                consumed_texts.iter().map(String::as_str).collect::<Vec<_>>(),
+                consumed_texts
+                    .iter()
+                    .map(String::as_str)
+                    .collect::<Vec<_>>(),
                 "done-id response echoes must select the same concrete rows as queue completion"
             );
             let consumed_text = consumed_texts.first().cloned().ok_or_else(|| {
@@ -4423,7 +4449,10 @@ fn plan_queue_prompt_consumption_inner(
             .iter()
             .map(|echo| echo.identity.as_str())
             .collect::<Vec<_>>(),
-        consumed_texts.iter().map(String::as_str).collect::<Vec<_>>(),
+        consumed_texts
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>(),
         "free-text response echoes must select the same concrete rows as queue consumption"
     );
     let consumed_node_keys = queue_prompt_node_keys_for_count(content, consume_count)?;
@@ -5488,7 +5517,8 @@ mod core_tests {
             claim.generation,
         )
         .unwrap();
-        let reported_prose = crate::queue_claim::report_attempt(&doc, target, Some(claim.generation)).unwrap();
+        let reported_prose =
+            crate::queue_claim::report_attempt(&doc, target, Some(claim.generation)).unwrap();
         // `#reportedcloseoutfacts`: the worker declared a prose-only result.
         crate::queue_lineage::record_prose_only(&doc, &reported_prose, "test prose result")
             .unwrap();
@@ -8576,7 +8606,8 @@ mod core_tests {
             "Done; the backlog item was reaped.",
         )
         .unwrap();
-        let reported_prose = crate::queue_claim::report_attempt(&doc, item, Some(running.generation)).unwrap();
+        let reported_prose =
+            crate::queue_claim::report_attempt(&doc, item, Some(running.generation)).unwrap();
         // `#reportedcloseoutfacts`: the worker declared a prose-only result.
         crate::queue_lineage::record_prose_only(&doc, &reported_prose, "test prose result")
             .unwrap();
@@ -8765,10 +8796,10 @@ mod core_tests {
         let running =
             crate::queue_claim::start_attempt(doc, item, owner, "/root/w", 600, claimed.generation)
                 .unwrap();
-        let reported_prose = crate::queue_claim::report_attempt(doc, item, Some(running.generation)).unwrap();
+        let reported_prose =
+            crate::queue_claim::report_attempt(doc, item, Some(running.generation)).unwrap();
         // `#reportedcloseoutfacts`: the worker declared a prose-only result.
-        crate::queue_lineage::record_prose_only(doc, &reported_prose, "test prose result")
-            .unwrap();
+        crate::queue_lineage::record_prose_only(doc, &reported_prose, "test prose result").unwrap();
         let ledger = crate::queue_claim::load_ledger(doc).unwrap();
         assert_eq!(ledger.claims.len(), 1);
         assert_eq!(
@@ -9110,8 +9141,7 @@ mod core_tests {
         ));
 
         assert!(
-            plan.new_document
-                .contains("> Parent A: same leaf"),
+            plan.new_document.contains("> Parent A: same leaf"),
             "the response must retain the consumed occurrence's full vector:\n{}",
             plan.new_document
         );
@@ -9133,14 +9163,12 @@ mod core_tests {
         ));
 
         assert!(
-            plan.new_document
-                .contains("> Parent B: same leaf"),
+            plan.new_document.contains("> Parent B: same leaf"),
             "the response must retain the second occurrence's full vector:\n{}",
             plan.new_document
         );
         assert!(
-            plan.new_document
-                .contains("- Parent A\n  - same leaf\n"),
+            plan.new_document.contains("- Parent A\n  - same leaf\n"),
             "consuming B must leave the identical A occurrence live:\n{}",
             plan.new_document
         );
@@ -9148,15 +9176,11 @@ mod core_tests {
 
     #[test]
     fn drained_nested_leaf_echo_uses_preconsume_three_level_vector() {
-        let plan = nested_duplicate_plan(concat!(
-            "- Grandparent\n",
-            "  - Parent\n",
-            "    - leaf\n",
-        ));
+        let plan =
+            nested_duplicate_plan(concat!("- Grandparent\n", "  - Parent\n", "    - leaf\n",));
 
         assert!(
-            plan.new_document
-                .contains("> Grandparent: Parent: leaf"),
+            plan.new_document.contains("> Grandparent: Parent: leaf"),
             "removing the drained queue tree must not erase response ancestry:\n{}",
             plan.new_document
         );
@@ -10666,34 +10690,31 @@ Old.
             agent_doc_ops_log_io::log_op,
         )
         .unwrap();
-        let (generation, source, sink_ref) = reported_committed_repo_work(
-            dir.path(),
-            &doc,
-            "#repo-done",
-            "subagent:repo-done",
-        );
+        let (generation, source, sink_ref) =
+            reported_committed_repo_work(dir.path(), &doc, "#repo-done", "subagent:repo-done");
 
-        let refusal = mark_completed_queue_prompts_for_done_ids(
-            &doc,
-            &["repo-done".to_string()],
-            false,
-        )
-        .unwrap_err()
-        .to_string();
+        let refusal =
+            mark_completed_queue_prompts_for_done_ids(&doc, &["repo-done".to_string()], false)
+                .unwrap_err()
+                .to_string();
         assert!(refusal.contains("is not integrated"), "{refusal}");
-        assert!(std::fs::read_to_string(&doc).unwrap().contains("- do [#repo-done]"));
+        assert!(
+            std::fs::read_to_string(&doc)
+                .unwrap()
+                .contains("- do [#repo-done]")
+        );
 
         record_integrated_repo_work(&doc, "#repo-done", generation, &source, &sink_ref);
         assert_eq!(
-            mark_completed_queue_prompts_for_done_ids(
-                &doc,
-                &["repo-done".to_string()],
-                false,
-            )
-            .unwrap(),
+            mark_completed_queue_prompts_for_done_ids(&doc, &["repo-done".to_string()], false,)
+                .unwrap(),
             1
         );
-        assert!(std::fs::read_to_string(&doc).unwrap().contains("~~do [#repo-done]~~"));
+        assert!(
+            std::fs::read_to_string(&doc)
+                .unwrap()
+                .contains("~~do [#repo-done]~~")
+        );
     }
 
     #[test]
@@ -10722,18 +10743,18 @@ Old.
             agent_doc_ops_log_io::log_op,
         )
         .unwrap();
-        let (generation, source, sink_ref) = reported_committed_repo_work(
-            dir.path(),
-            &doc,
-            item,
-            "subagent:auto-repo",
-        );
+        let (generation, source, sink_ref) =
+            reported_committed_repo_work(dir.path(), &doc, item, "subagent:auto-repo");
 
         let refusal = strike_answered_free_text_queue_heads(&doc, &response, true)
             .unwrap_err()
             .to_string();
         assert!(refusal.contains("is not integrated"), "{refusal}");
-        assert!(std::fs::read_to_string(&doc).unwrap().contains(&format!("- {item}\n")));
+        assert!(
+            std::fs::read_to_string(&doc)
+                .unwrap()
+                .contains(&format!("- {item}\n"))
+        );
 
         record_integrated_repo_work(&doc, item, generation, &source, &sink_ref);
         assert_eq!(
@@ -10750,7 +10771,8 @@ Old.
         let dir = tempfile::tempdir().unwrap();
         let doc = reported_todo_row_doc(dir.path());
         let generation = running_claim(&doc, "#ahfe", "subagent:ahfe");
-        let reported_prose = crate::queue_claim::report_attempt(&doc, "#ahfe", Some(generation)).unwrap();
+        let reported_prose =
+            crate::queue_claim::report_attempt(&doc, "#ahfe", Some(generation)).unwrap();
         // `#reportedcloseoutfacts`: the worker declared a prose-only result.
         crate::queue_lineage::record_prose_only(&doc, &reported_prose, "test prose result")
             .unwrap();
@@ -10828,7 +10850,8 @@ Old.
             parent,
             "subagent:vscode_smoke",
             |generation| {
-                let reported_prose = crate::queue_claim::report_attempt(&doc, parent, Some(generation)).unwrap();
+                let reported_prose =
+                    crate::queue_claim::report_attempt(&doc, parent, Some(generation)).unwrap();
                 // `#reportedcloseoutfacts`: the worker declared a prose-only result.
                 crate::queue_lineage::record_prose_only(&doc, &reported_prose, "test prose result")
                     .unwrap();
@@ -10934,18 +10957,20 @@ Old.
             agent_doc_ops_log_io::log_op,
         )
         .unwrap();
-        let generation = running_waiting_parent_claim(&doc, &content, parent, owner, |generation| {
-            crate::claim_release_receipt::capture_response_for_attempt(
-                &doc,
-                parent,
-                generation,
-                "Keep 4 files, remove 14.",
-            )
-            .unwrap();
-            let reported =
-                crate::queue_claim::report_attempt(&doc, parent, Some(generation)).unwrap();
-            crate::queue_lineage::record_prose_only(&doc, &reported, "test prose result").unwrap();
-        });
+        let generation =
+            running_waiting_parent_claim(&doc, &content, parent, owner, |generation| {
+                crate::claim_release_receipt::capture_response_for_attempt(
+                    &doc,
+                    parent,
+                    generation,
+                    "Keep 4 files, remove 14.",
+                )
+                .unwrap();
+                let reported =
+                    crate::queue_claim::report_attempt(&doc, parent, Some(generation)).unwrap();
+                crate::queue_lineage::record_prose_only(&doc, &reported, "test prose result")
+                    .unwrap();
+            });
 
         assert!(acknowledge_open_id_backed_queue_head(&doc, "hookcreatedsubmodules").unwrap());
 
@@ -10968,8 +10993,10 @@ Old.
         // parent is re-projected under it, with no attempt row.
         let edited_content = document(edited, "");
         std::fs::write(&doc, &edited_content).unwrap();
-        for (label, current) in [("struck", struck.as_str()), ("edited", edited_content.as_str())]
-        {
+        for (label, current) in [
+            ("struck", struck.as_str()),
+            ("edited", edited_content.as_str()),
+        ] {
             let projected =
                 crate::queue_cmd::derive_claim_runtime_projection(&doc, current, None).unwrap();
             assert!(
@@ -11331,7 +11358,6 @@ Old.
         );
     }
 
-
     #[test]
     fn nestedreceiptack_ack_id_strikes_released_reported_row_inside_response_tree() {
         assert_released_nested_attempt_acknowledged(true);
@@ -11456,7 +11482,9 @@ Old.
         .unwrap();
 
         let reported_generation = running_claim(&doc, "#reported", "subagent:reported");
-        let reported_prose = crate::queue_claim::report_attempt(&doc, "#reported", Some(reported_generation)).unwrap();
+        let reported_prose =
+            crate::queue_claim::report_attempt(&doc, "#reported", Some(reported_generation))
+                .unwrap();
         // `#reportedcloseoutfacts`: the worker declared a prose-only result.
         crate::queue_lineage::record_prose_only(&doc, &reported_prose, "test prose result")
             .unwrap();
@@ -11609,8 +11637,12 @@ Old.
             "#review [#adr0043-publish]",
             "subagent:adr0043-review",
         );
-        let reported_prose = crate::queue_claim::report_attempt(&doc, "#review [#adr0043-publish]", Some(generation))
-            .unwrap();
+        let reported_prose = crate::queue_claim::report_attempt(
+            &doc,
+            "#review [#adr0043-publish]",
+            Some(generation),
+        )
+        .unwrap();
         // `#reportedcloseoutfacts`: the worker declared a prose-only result.
         crate::queue_lineage::record_prose_only(&doc, &reported_prose, "test prose result")
             .unwrap();
@@ -11798,8 +11830,12 @@ Old.
             "#publish-session-contracts",
             "subagent:publish-session-contracts",
         );
-        let reported_prose = crate::queue_claim::report_attempt(&doc, "#publish-session-contracts", Some(generation))
-            .unwrap();
+        let reported_prose = crate::queue_claim::report_attempt(
+            &doc,
+            "#publish-session-contracts",
+            Some(generation),
+        )
+        .unwrap();
         // `#reportedcloseoutfacts`: the worker declared a prose-only result.
         crate::queue_lineage::record_prose_only(&doc, &reported_prose, "test prose result")
             .unwrap();

@@ -495,7 +495,12 @@ replayed copy the operator omitted, and a rebase dropped every row but a unique
 `response_row_child_ranges` and `response_details_child_ranges` report, so
 operator text beneath a generated choice or action keeps its own key and stays
 queue work. These keys are derived on all three sides by one binary, so
-replicas need no migration.
+replicas need no migration. A strike still publishes that rebased live
+target and a separate snapshot projection. When those two disagree on the
+queue lines the strike itself added or removed, closeout logs
+`strike_snapshot_target_diverged` (`#stricksnapshotdivergence`) and still
+publishes both cuts. An operator row the snapshot never held, and a snapshot
+whose queue body already matches the published live queue, stay quiet.
 
 `agent:run` is the canonical runnable-work component. The former
 `agent:queue` spelling remains a backward-compatible alias with identical queue

@@ -474,6 +474,10 @@ impl agent_doc_controller_io::project_controller::ProjectControllerRuntimeEffect
         actor.submit(
             agent_doc_document_realtime::session_ops::SessionOpKind::QueueHead,
             move |_ctx| {
+                // The published body, when a rebase changes it, is noted on
+                // this thread by the convergence write. Clear before the write
+                // so an older note cannot be read as this strike's target.
+                agent_doc_crdt_relay_io::clear_strike_published_target();
                 let result = if invocation.live_write_required {
                     agent_doc_queue_io::queue_consume::require_integrated_reported_repo_work_for_successor(
                         &file,
@@ -493,6 +497,15 @@ impl agent_doc_controller_io::project_controller::ProjectControllerRuntimeEffect
                     })
                 } else {
                     Ok(())
+                };
+                let published_live = if invocation.live_write_required {
+                    agent_doc_crdt_relay_io::take_strike_published_target(
+                        &file,
+                        "answered_free_text_projection",
+                    )
+                    .unwrap_or_else(|| invocation.target_content.clone())
+                } else {
+                    invocation.expected_content.clone()
                 };
                 match &result {
                     Ok(()) => {
@@ -529,6 +542,15 @@ impl agent_doc_controller_io::project_controller::ProjectControllerRuntimeEffect
                                     &snapshot_target_content,
                                 )?
                                 .unwrap_or(snapshot_target_content);
+                            agent_doc_queue_io::queue_consume::log_strike_snapshot_target_divergence(
+                                &file,
+                                "answered_free_text_projection",
+                                &invocation.expected_content,
+                                &invocation.target_content,
+                                &published_live,
+                                &snapshot,
+                                &snapshot_target_content,
+                            );
                             if snapshot_target_content != snapshot {
                                 agent_doc_snapshot_io::checkpoint_document_baseline(
                                     &file,

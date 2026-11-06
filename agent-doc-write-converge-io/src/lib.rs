@@ -4120,6 +4120,9 @@ pub fn try_editor_converge(
     current_content: &str,
     source: &str,
 ) -> Result<bool> {
+    // A previous strike on this thread must not leak its published body into
+    // this write. The note, if any, is taken by the strike after we return.
+    agent_doc_crdt_relay_io::clear_strike_published_target();
     let canonical_file = file
         .canonicalize()
         .with_context(|| format!("{source}: failed to resolve {}", file.display()))?;
@@ -4318,6 +4321,12 @@ pub fn try_editor_converge(
                     &patch_id,
                     &recovered,
                     "editor_convergence",
+                );
+                agent_doc_crdt_relay_io::note_strike_published_target(
+                    file,
+                    source,
+                    target,
+                    &recovered,
                 );
                 Ok(true)
             } else {

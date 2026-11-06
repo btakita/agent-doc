@@ -342,6 +342,84 @@ pub(crate) fn save_snapshot_recovery_only(file: &Path, content: &str, context: &
     }
 }
 
+/// Say when the strike text just published and the snapshot projection
+/// disagree on the queue lines that strike added or removed.
+///
+/// A missing snapshot stays an expected skip (`#snapmissingquiet`): the
+/// checkpoint returns before this runs. The comparison never changes the bytes
+/// either side publishes (`#stricksnapshotdivergence`).
+pub fn log_strike_snapshot_target_divergence(
+    file: &Path,
+    source: &str,
+    live_before: &str,
+    live_requested: &str,
+    live_published: &str,
+    snapshot_before: &str,
+    snapshot_target: &str,
+) {
+    let Some(divergence) =
+        agent_doc_document_realtime::write_policy::strike_snapshot_queue_divergence(
+            live_before,
+            live_requested,
+            live_published,
+            snapshot_before,
+            snapshot_target,
+        )
+    else {
+        return;
+    };
+    eprintln!(
+        "[queue] strike snapshot target diverged during {source} for {}: live effect line delta {} snapshot effect line delta {} (#stricksnapshotdivergence)",
+        file.display(),
+        divergence.live_effect_line_delta,
+        divergence.snapshot_effect_line_delta,
+    );
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "strike_snapshot_target_diverged file={} source={source} live_before_len={} live_published_len={} snapshot_before_len={} snapshot_target_len={} live_before_hash={} live_published_hash={} snapshot_before_hash={} snapshot_target_hash={} live_effect_line_delta={} snapshot_effect_line_delta={} live_effect_delta_hash={} snapshot_effect_delta_hash={} #stricksnapshotdivergence",
+            file.display(),
+            divergence.live_before_len,
+            divergence.live_published_len,
+            divergence.snapshot_before_len,
+            divergence.snapshot_target_len,
+            divergence.live_before_hash,
+            divergence.live_published_hash,
+            divergence.snapshot_before_hash,
+            divergence.snapshot_target_hash,
+            divergence.live_effect_line_delta,
+            divergence.snapshot_effect_line_delta,
+            divergence.live_effect_delta_hash,
+            divergence.snapshot_effect_delta_hash,
+        ),
+    );
+}
+
+fn checkpoint_strike_snapshot(
+    file: &Path,
+    source: &str,
+    live_before: &str,
+    live_requested: &str,
+    live_published: &str,
+    snapshot_targets: Option<&(String, String)>,
+) {
+    let Some((before, target)) = snapshot_targets else {
+        return;
+    };
+    log_strike_snapshot_target_divergence(
+        file,
+        source,
+        live_before,
+        live_requested,
+        live_published,
+        before,
+        target,
+    );
+    if target != before {
+        save_snapshot_recovery_only(file, target, "free-text strike snapshot sync");
+    }
+}
+
 #[cfg(test)]
 use agent_doc_queue::{
     queue_consume::{
@@ -2222,8 +2300,10 @@ fn strike_free_text_queue_heads_with_proof(
     // Snapshot sync: match the same answered free-text heads in the snapshot and
     // strike them by the snapshot's own node keys (keys are position/hash derived
     // and need not equal the document's). Required closeouts must prove both sides
-    // converge on the struck state.
-    let new_snapshot = match load_snapshot_recovery_only(file, "free-text strike snapshot sync") {
+    // converge on the struck state. Keep the snapshot target even when it already
+    // matches, so a rebased live publish can be compared against it.
+    let snapshot_targets = match load_snapshot_recovery_only(file, "free-text strike snapshot sync")
+    {
         Some(snap) => match project(&snap) {
             Ok((snapshot, _)) => {
                 let target = snapshot
@@ -2232,8 +2312,8 @@ fn strike_free_text_queue_heads_with_proof(
                     })
                     .transpose()?
                     .unwrap_or_else(|| snap.clone());
-                let (target, changed) = reconcile_terminal_active_projection(file, target)?;
-                (changed || target != snap).then_some(target)
+                let (target, _) = reconcile_terminal_active_projection(file, target)?;
+                Some((snap, target))
             }
             Err(err) => {
                 log_snapshot_recovery_warning(file, "free-text strike snapshot sync", err);
@@ -2249,9 +2329,14 @@ fn strike_free_text_queue_heads_with_proof(
     // because the live document is already a fixpoint, and do not manufacture
     // a live write just to make the snapshot repair observable.
     if !live_changed {
-        if let Some(snap) = new_snapshot {
-            save_snapshot_recovery_only(file, &snap, "free-text strike snapshot sync");
-        }
+        checkpoint_strike_snapshot(
+            file,
+            "free_text_strike",
+            &content,
+            &new_document,
+            &new_document,
+            snapshot_targets.as_ref(),
+        );
         return Ok(0);
     }
 
@@ -2277,10 +2362,12 @@ fn strike_free_text_queue_heads_with_proof(
     };
     let activation_changed = frontmatter::parse(&content)?.0.queue_active
         != frontmatter::parse(&new_document)?.0.queue_active;
-    if skip_visible_guard {
-        effects
-            .atomic_write(file, &new_document)
-            .context("free-text strike: failed to write document")?;
+    // The convergence write may rebase `new_document` onto a newer editor cut.
+    // That published body is not on `CpRelayWrite`. Clear first so a note from
+    // another write on this thread cannot be read as this strike's target.
+    agent_doc_crdt_relay_io::clear_strike_published_target();
+    let write_result = if skip_visible_guard {
+        effects.atomic_write(file, &new_document)
     } else if !active_projection_changed && !activation_changed && !replace_ops.is_empty() {
         converge_awaiting_retained_delivery(
             effects,
@@ -2290,7 +2377,6 @@ fn strike_free_text_queue_heads_with_proof(
             "free_text_strike",
             || effects.converge_structural_ops(file, &replace_ops, &content, "free_text_strike"),
         )
-        .context("free-text strike: failed to write document")?;
     } else {
         converge_awaiting_retained_delivery(
             effects,
@@ -2300,11 +2386,19 @@ fn strike_free_text_queue_heads_with_proof(
             "free_text_strike",
             || effects.converge_document_or_disk(file, &new_document, &content, "free_text_strike"),
         )
-        .context("free-text strike: failed to write document")?;
-    }
-    if let Some(snap) = new_snapshot {
-        save_snapshot_recovery_only(file, &snap, "free-text strike snapshot sync");
-    }
+    };
+    let published_live =
+        agent_doc_crdt_relay_io::take_strike_published_target(file, "free_text_strike")
+            .unwrap_or_else(|| new_document.clone());
+    write_result.context("free-text strike: failed to write document")?;
+    checkpoint_strike_snapshot(
+        file,
+        "free_text_strike",
+        &content,
+        &new_document,
+        &published_live,
+        snapshot_targets.as_ref(),
+    );
 
     match proof {
         AnswerPresenceProof::Materialized => eprintln!(
@@ -6577,6 +6671,138 @@ mod core_tests {
                     .unwrap()
                     .is_none(),
             "the independently stale snapshot Active index must self-heal: {snapshot}"
+        );
+        let ops =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
+        assert!(
+            !ops.contains("strike_snapshot_target_diverged"),
+            "an Active-index repair is not a queue-target disagreement:\n{ops}"
+        );
+    }
+
+    /// `#stricksnapshotdivergence`: an operator row the snapshot never held is
+    /// not the strike's effect. Striking the same heads on both sides stays quiet.
+    #[test]
+    fn an_untouched_operator_row_does_not_diverge_the_strike_snapshot() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("s.md");
+        let response = FTSTRIKE_RESPONSE;
+        let snapshot = format!(
+            concat!(
+                "---\nqueue_active: true\n---\n\n",
+                "<!-- agent:exchange -->\n{}\n<!-- /agent:exchange -->\n\n",
+                "<!-- agent:queue go -->\n",
+                "- do [#fullboundary]\n",
+                "- :pushpin: JB `Run Agent Doc` is stalled on this document when I tried to start the queue run. No notification.\n",
+                "- :pushpin: My free-text queue items are not immediately struck as if they are addressed.\n",
+                "<!-- /agent:queue -->\n",
+            ),
+            response,
+        );
+        let live = snapshot.replace(
+            "- do [#fullboundary]\n",
+            "- do [#fullboundary]\n- operator typed this while the strike was in flight\n",
+        );
+        std::fs::write(&doc, &live).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        let struck = strike_answered_free_text_queue_heads(&doc, response, true).unwrap();
+        assert_eq!(struck, 2, "both answered heads strike");
+        let ops =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
+        assert!(
+            !ops.contains("strike_snapshot_target_diverged"),
+            "the operator row is outside the strike effect:\n{ops}"
+        );
+    }
+
+    /// The convergence write can accept different bytes than the projection the
+    /// snapshot checkpoints. Detection logs that and leaves both publishes alone.
+    #[test]
+    fn a_rebased_strike_publish_that_drops_the_snapshot_effect_is_logged() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("s.md");
+        let response = FTSTRIKE_RESPONSE;
+        let content = format!(
+            concat!(
+                "---\nqueue_active: true\n---\n\n",
+                "<!-- agent:exchange -->\n{}\n<!-- /agent:exchange -->\n\n",
+                "<!-- agent:queue go -->\n",
+                "- do [#fullboundary]\n",
+                "- :pushpin: JB `Run Agent Doc` is stalled on this document when I tried to start the queue run. No notification.\n",
+                "- :pushpin: My free-text queue items are not immediately struck as if they are addressed.\n",
+                "<!-- /agent:queue -->\n",
+            ),
+            response,
+        );
+        std::fs::write(&doc, &content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        struct LossyPublishEffects;
+        impl QueueConsumeWriteEffects for LossyPublishEffects {
+            fn current_document_content(&self, file: &Path, _source: &str) -> Result<String> {
+                Ok(std::fs::read_to_string(file)?)
+            }
+
+            fn atomic_write(&self, file: &Path, content: &str) -> Result<()> {
+                agent_doc_fs::write_atomic(file, content.as_bytes())
+            }
+
+            fn converge_document_or_disk(
+                &self,
+                file: &Path,
+                target_content: &str,
+                source_content: &str,
+                reason: &str,
+            ) -> Result<()> {
+                agent_doc_crdt_relay_io::note_strike_published_target(
+                    file,
+                    reason,
+                    target_content,
+                    source_content,
+                );
+                agent_doc_fs::write_atomic(file, source_content.as_bytes())
+            }
+        }
+
+        let struck = super::strike_answered_free_text_queue_heads(
+            &doc,
+            response,
+            false,
+            &LossyPublishEffects,
+        )
+        .unwrap();
+        assert_eq!(struck, 2, "the projection still strikes both heads");
+        assert_eq!(
+            std::fs::read_to_string(&doc).unwrap(),
+            content,
+            "detection must not replace the bytes the strike write published"
+        );
+        let snapshot = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
+        assert!(
+            snapshot.contains("— auto-struck: answered this cycle (#ftstrike)"),
+            "the snapshot keeps the strike the live publish dropped:\n{snapshot}"
+        );
+        let ops = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops.contains("strike_snapshot_target_diverged")
+                && ops.contains("source=free_text_strike")
+                && ops.contains("#stricksnapshotdivergence"),
+            "the disagreement is logged:\n{ops}"
         );
     }
 

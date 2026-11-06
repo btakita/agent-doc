@@ -25,7 +25,7 @@ use agent_doc_turn::response_replay::response_materialized_in_content;
 use anyhow::Result;
 use lazily::{ThreadSafeContext, ThreadSafeStateMachine};
 use sha2::{Digest, Sha256};
-use std::collections::HashSet;
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 fn content_hash(content: &str) -> String {
     let mut hasher = Sha256::new();
@@ -902,6 +902,159 @@ fn warn_dropped_agent_component_ops(
             dropped.row,
         );
     }
+}
+
+/// A strike's published live target and its snapshot target disagree on the
+/// queue lines that strike itself added or removed (`#stricksnapshotdivergence`).
+///
+/// Whole-document inequality is the common case: the snapshot is a recovery
+/// baseline and is often stale by operator rows the strike did not touch.
+/// Those rows are not part of either strike effect, so they stay quiet. So
+/// does a snapshot whose queue body already matches the published live queue
+/// (an Active-index repair, or a snapshot catching up to a strike the live
+/// document already holds).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StrikeSnapshotTargetDivergence {
+    pub live_before_len: usize,
+    pub live_published_len: usize,
+    pub snapshot_before_len: usize,
+    pub snapshot_target_len: usize,
+    pub live_before_hash: String,
+    pub live_published_hash: String,
+    pub snapshot_before_hash: String,
+    pub snapshot_target_hash: String,
+    pub live_effect_line_delta: i64,
+    pub snapshot_effect_line_delta: i64,
+    pub live_effect_delta_hash: String,
+    pub snapshot_effect_delta_hash: String,
+}
+
+/// `live_published` is the text the strike write accepted, after any rebase
+/// onto a newer editor cut. `live_requested` is the projection before that
+/// rebase. The effect is the queue-line delta of that projection plus the
+/// snapshot projection; a line the rebase merely carried in from the editor
+/// cut is outside the effect. Quiet when the two targets hold the same
+/// multiset of those lines, even if one side already held them.
+pub fn strike_snapshot_queue_divergence(
+    live_before: &str,
+    live_requested: &str,
+    live_published: &str,
+    snapshot_before: &str,
+    snapshot_target: &str,
+) -> Option<StrikeSnapshotTargetDivergence> {
+    let live_published_lines = queue_line_counts(live_published);
+    let snapshot_target_lines = queue_line_counts(snapshot_target);
+    if live_published_lines == snapshot_target_lines {
+        return None;
+    }
+    let requested_delta = signed_line_delta(
+        &queue_line_counts(live_before),
+        &queue_line_counts(live_requested),
+    );
+    let snapshot_delta =
+        signed_line_delta(&queue_line_counts(snapshot_before), &snapshot_target_lines);
+    let mut effect_lines = BTreeSet::new();
+    effect_lines.extend(requested_delta.keys().cloned());
+    effect_lines.extend(snapshot_delta.keys().cloned());
+    let live_effect_counts = project_line_counts(&live_published_lines, &effect_lines);
+    let snapshot_effect_counts = project_line_counts(&snapshot_target_lines, &effect_lines);
+    if live_effect_counts == snapshot_effect_counts {
+        return None;
+    }
+    let live_before_lines = queue_line_counts(live_before);
+    let live_delta = signed_line_delta(&live_before_lines, &live_published_lines);
+    let live_effect = project_line_delta(&live_delta, &effect_lines);
+    let snapshot_effect = project_line_delta(&snapshot_delta, &effect_lines);
+    Some(StrikeSnapshotTargetDivergence {
+        live_before_len: live_before.len(),
+        live_published_len: live_published.len(),
+        snapshot_before_len: snapshot_before.len(),
+        snapshot_target_len: snapshot_target.len(),
+        live_before_hash: content_hash(live_before),
+        live_published_hash: content_hash(live_published),
+        snapshot_before_hash: content_hash(snapshot_before),
+        snapshot_target_hash: content_hash(snapshot_target),
+        live_effect_line_delta: line_delta_total(&live_effect),
+        snapshot_effect_line_delta: line_delta_total(&snapshot_effect),
+        live_effect_delta_hash: line_delta_hash(&live_effect),
+        snapshot_effect_delta_hash: line_delta_hash(&snapshot_effect),
+    })
+}
+
+fn queue_line_counts(doc: &str) -> BTreeMap<String, i64> {
+    let mut counts = BTreeMap::new();
+    let Ok(components) = agent_doc_element::element::parse(doc) else {
+        return counts;
+    };
+    for component in components
+        .iter()
+        .filter(|component| component.name == "queue")
+    {
+        for line in component.content(doc).lines() {
+            *counts.entry(line.to_string()).or_default() += 1;
+        }
+    }
+    counts
+}
+
+fn signed_line_delta(
+    before: &BTreeMap<String, i64>,
+    after: &BTreeMap<String, i64>,
+) -> BTreeMap<String, i64> {
+    let mut delta = BTreeMap::new();
+    for (line, before_count) in before {
+        let change = after.get(line).copied().unwrap_or(0) - *before_count;
+        if change != 0 {
+            delta.insert(line.clone(), change);
+        }
+    }
+    for (line, after_count) in after {
+        if !before.contains_key(line) {
+            delta.insert(line.clone(), *after_count);
+        }
+    }
+    delta
+}
+
+fn project_line_delta(
+    delta: &BTreeMap<String, i64>,
+    lines: &BTreeSet<String>,
+) -> BTreeMap<String, i64> {
+    lines
+        .iter()
+        .filter_map(|line| {
+            let change = delta.get(line).copied().unwrap_or(0);
+            (change != 0).then(|| (line.clone(), change))
+        })
+        .collect()
+}
+
+fn project_line_counts(
+    counts: &BTreeMap<String, i64>,
+    lines: &BTreeSet<String>,
+) -> BTreeMap<String, i64> {
+    lines
+        .iter()
+        .filter_map(|line| {
+            let count = counts.get(line).copied().unwrap_or(0);
+            (count != 0).then(|| (line.clone(), count))
+        })
+        .collect()
+}
+
+fn line_delta_total(delta: &BTreeMap<String, i64>) -> i64 {
+    delta.values().sum()
+}
+
+fn line_delta_hash(delta: &BTreeMap<String, i64>) -> String {
+    let mut rendered = String::new();
+    for (line, change) in delta {
+        rendered.push_str(&change.to_string());
+        rendered.push('\n');
+        rendered.push_str(line);
+        rendered.push('\n');
+    }
+    content_hash(&rendered)
 }
 
 /// `dst` with each scoped top-level body replaced by the same identity's body
@@ -6853,6 +7006,61 @@ mod status_patch_drop_tests {
         );
 
         assert!(dropped_agent_rows(&base, &target, &cut, &rebased).is_empty());
+    }
+
+    /// `#stricksnapshotdivergence`: the same rebase publishes the routed operator
+    /// row on the live side only. That row is not the strike's effect, so the
+    /// snapshot projection of the strike stays quiet. Dropping the strike's
+    /// `**Closed by:**` row — the incident's wrapper loss, built by hand because
+    /// generated rows no longer share a merge identity — is the disagreement.
+    /// A snapshot that only catches up to a strike the live queue already holds
+    /// stays quiet too, including when the live queue has an operator row the
+    /// snapshot never stored.
+    #[test]
+    fn a_rebased_strike_logs_only_when_its_queue_effect_misses_the_snapshot() {
+        let routed = "- ### do [#routed]\n";
+        let base = queue_doc(&format!("{CLOSED_TREE}{OPEN_REPLIES}"));
+        let target = queue_doc(&format!("{CLOSED_TREE}{STRUCK_REPLIES}"));
+        let cut = queue_doc(&format!("{routed}{CLOSED_TREE}{OPEN_REPLIES}"));
+        let rebased = rebase_agent_candidate_over_editor_cut(&base, &target, &cut).unwrap();
+
+        assert!(
+            strike_snapshot_queue_divergence(&base, &target, &rebased, &base, &target).is_none(),
+            "an operator row the rebase carried in is not a snapshot disagreement"
+        );
+
+        let lossy = rebased.replacen("    - **Closed by:** [#r-0123456789ab]\n", "", 1);
+        let divergence = strike_snapshot_queue_divergence(&base, &target, &lossy, &base, &target)
+            .expect("a wrapper the live rebase dropped and the snapshot kept");
+        assert_ne!(
+            divergence.live_effect_delta_hash,
+            divergence.snapshot_effect_delta_hash
+        );
+        assert!(divergence.live_effect_line_delta < divergence.snapshot_effect_line_delta);
+
+        let untouched = queue_doc(&format!("{routed}{CLOSED_TREE}{STRUCK_REPLIES}"));
+        assert!(
+            strike_snapshot_queue_divergence(&untouched, &untouched, &untouched, &target, &target)
+                .is_none(),
+            "the same strike on a snapshot that lacks an untouched operator row stays quiet"
+        );
+        assert!(
+            strike_snapshot_queue_divergence(&untouched, &untouched, &untouched, &base, &target)
+                .is_none(),
+            "a snapshot catching up to a strike the live queue already holds stays quiet"
+        );
+
+        let frontmatter_only = target.replace("agent: claude", "agent: codex");
+        assert!(
+            strike_snapshot_queue_divergence(&target, &target, &target, &target, &frontmatter_only)
+                .is_none(),
+            "bytes outside the queue are not a strike-target disagreement"
+        );
+
+        assert!(
+            strike_snapshot_queue_divergence(&base, &target, &target, &base, &base).is_some(),
+            "a head struck only on the live side disagrees with an unstruck snapshot"
+        );
     }
 
     /// A tree inserted ahead of an older one must not renumber it: ordinal

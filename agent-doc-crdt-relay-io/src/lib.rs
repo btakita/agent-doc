@@ -2905,6 +2905,66 @@ pub struct CpRelayWrite {
     pub delivery_converged: bool,
 }
 
+struct StrikePublishedTarget {
+    file: std::path::PathBuf,
+    source: String,
+    content: String,
+}
+
+thread_local! {
+    static STRIKE_PUBLISHED_TARGET: std::cell::RefCell<Option<StrikePublishedTarget>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Drop any published-strike body left on this thread.
+///
+/// A strike clears this before it writes, then takes the body after the write
+/// returns. `CpRelayWrite` stays hash-only because it is an RPC result
+/// (`#stricksnapshotdivergence`).
+pub fn clear_strike_published_target() {
+    STRIKE_PUBLISHED_TARGET.with(|slot| *slot.borrow_mut() = None);
+}
+
+/// Remember the canonical text a strike write actually accepted.
+///
+/// Equal to the requested target, or any source other than a free-text strike,
+/// stores nothing: the caller already has the requested bytes, and this slot
+/// must not retain an unrelated document.
+pub fn note_strike_published_target(
+    file: &std::path::Path,
+    source: &str,
+    requested: &str,
+    published: &str,
+) {
+    if published == requested
+        || !matches!(source, "answered_free_text_projection" | "free_text_strike")
+    {
+        return;
+    }
+    STRIKE_PUBLISHED_TARGET.with(|slot| {
+        *slot.borrow_mut() = Some(StrikePublishedTarget {
+            file: file.to_path_buf(),
+            source: source.to_string(),
+            content: published.to_string(),
+        });
+    });
+}
+
+/// Take the published body noted for this file and strike source, if one was.
+pub fn take_strike_published_target(file: &std::path::Path, source: &str) -> Option<String> {
+    STRIKE_PUBLISHED_TARGET.with(|slot| {
+        let matches = slot
+            .borrow()
+            .as_ref()
+            .is_some_and(|noted| noted.file == file && noted.source == source);
+        if matches {
+            slot.borrow_mut().take().map(|noted| noted.content)
+        } else {
+            None
+        }
+    })
+}
+
 /// Result of one body-aware assistant response cell added to the canonical
 /// realtime document. `content` is the exact post-operation canonical projection
 /// used by snapshot/commit materialization; it is not a second write request.

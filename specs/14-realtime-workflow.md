@@ -134,7 +134,11 @@ projections, from receipts rather than elapsed time. The controller's
 saved the exact converged canonical (`disk_projection_ready`), and, after it
 publishes the pre-commit queue authority, the answered free-text strike that
 observation projects carries its exact application receipt
-(`answered_free_text_strike_applied` equals the projection id). Each refusal is
+(`answered_free_text_strike_applied` equals the projection id). When the
+published live target and the snapshot projection disagree on the queue lines
+that strike added or removed, the same closeout also logs
+`strike_snapshot_target_diverged` (`#stricksnapshotdivergence`) without
+changing either cut. Each refusal is
 stamped `recovery=await_live_projection_then_retry_controller_commit`
 (`controller_commit_strike_receipt_pending` logs the strike case). While a cycle
 is open, the closing command does not fall back to a local commit on such a

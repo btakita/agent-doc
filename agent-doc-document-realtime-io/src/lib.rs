@@ -4027,7 +4027,13 @@ pub fn apply_canonical_replace_if_attached(
                                     profile.render(wait_state),
                                 ),
                             );
-                            return Ok(Some(relay_write));
+                            return noted_relay_write(
+                                file,
+                                source,
+                                content,
+                                applied_target,
+                                relay_write,
+                            );
                         }
                         if write_policy::decide_crdt_write_admission(delivery_converged)
                             == write_policy::CrdtWriteAdmission::WaitForDeliveryProjection
@@ -4043,7 +4049,13 @@ pub fn apply_canonical_replace_if_attached(
                                     relay_write.content_hash,
                                 ),
                             );
-                            return Ok(Some(relay_write));
+                            return noted_relay_write(
+                                file,
+                                source,
+                                content,
+                                applied_target,
+                                relay_write,
+                            );
                         } else {
                             // A controller handoff can overlap the editor's application of
                             // the valid CP target. A replacement replica may then publish
@@ -4087,7 +4099,13 @@ pub fn apply_canonical_replace_if_attached(
                                         reason,
                                     ),
                                 );
-                                return Ok(Some(relay_write));
+                                return noted_relay_write(
+                                    file,
+                                    source,
+                                    content,
+                                    applied_target,
+                                    relay_write,
+                                );
                             }
                             // The editor may publish queue consumption, a new prompt,
                             // or other operator-owned bytes while ACKing our retained
@@ -4149,7 +4167,13 @@ pub fn apply_canonical_replace_if_attached(
                                         started.elapsed().as_millis(),
                                     ),
                                 );
-                                return Ok(Some(relay_write));
+                                return noted_relay_write(
+                                    file,
+                                    source,
+                                    content,
+                                    &relay_text,
+                                    relay_write,
+                                );
                             }
 
                             // Genuine operator text still leaves part of the target
@@ -4269,7 +4293,13 @@ file,
                                     started.elapsed().as_millis(),
                                 ),
                             );
-                            return Ok(Some(relay_write));
+                            return noted_relay_write(
+                                file,
+                                source,
+                                content,
+                                &effective_target,
+                                relay_write,
+                            );
                         }
 
                         // Buffer authority and delivery health are separate:
@@ -4384,7 +4414,13 @@ file,
                                     live_editors,
                                 ),
                             );
-                            return Ok(Some(relay_write));
+                            return noted_relay_write(
+                                file,
+                                source,
+                                content,
+                                &effective_target,
+                                relay_write,
+                            );
                         }
 
                         // Retain every accepted candidate before it crosses the
@@ -4442,7 +4478,13 @@ file,
                                         profile.render(wait_state),
                                     ),
                                 );
-                                return Ok(Some(relay_write));
+                                return noted_relay_write(
+                                    file,
+                                    source,
+                                    content,
+                                    &effective_target,
+                                    relay_write,
+                                );
                             }
                             Ok(Some(relay_write)) => {
                                 agent_doc_ops_log_io::log_op(
@@ -4453,7 +4495,13 @@ file,
                                         relay_write.content_hash,
                                     ),
                                 );
-                                return Ok(Some(relay_write));
+                                return noted_relay_write(
+                                    file,
+                                    source,
+                                    content,
+                                    &effective_target,
+                                    relay_write,
+                                );
                             }
                             Err(err) => {
                                 let detail = format!("{err:#}");
@@ -4528,6 +4576,17 @@ file,
         }
         frontier_backoff_ms = CRDT_WRITE_BACKOFF_POLICY.next_ms(frontier_backoff_ms, false);
     }
+}
+
+fn noted_relay_write(
+    file: &Path,
+    source: &str,
+    requested: &str,
+    published: &str,
+    write: agent_doc_crdt_relay_io::CpRelayWrite,
+) -> Result<Option<agent_doc_crdt_relay_io::CpRelayWrite>> {
+    agent_doc_crdt_relay_io::note_strike_published_target(file, source, requested, published);
+    Ok(Some(write))
 }
 
 fn projected_noop_relay_write(

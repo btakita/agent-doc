@@ -2184,6 +2184,8 @@ the member. Rules:
 
 - The drain never projects a divergent replica's text, including updates it
   applied earlier in the same batch.
+- The mark outlives the refused delivery. A later drain retries a deferred or
+  suppressed re-register before applying anything, even with nothing pending.
 - A divergent forwarder never offers its state as a resume state: its frontier
   names op ids of the retired history. The replacement is a full bootstrap from
   the controller canonical, and the ordinary registration decision keeps the

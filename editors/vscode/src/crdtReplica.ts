@@ -1356,6 +1356,14 @@ export class CrdtReplicaManager {
                 continue;
             }
             const updates = delivery.updates;
+            if (forwarder.historyDivergent) {
+                // `#divergentapplyreregister`: an earlier drain deferred or
+                // suppressed this replica's re-register. The mark outlives the
+                // refused delivery, so retry even when nothing is pending now;
+                // applying anything to this replica would still be wrong.
+                await this.reregisterAfterDivergentHistory(filePath, forwarder);
+                continue;
+            }
             if (this.hasPendingLocal(filePath)) continue;
             const expectedText = this.shadows.get(filePath);
             if (expectedText === undefined) continue;

@@ -1193,7 +1193,7 @@ describe('#divergentapplyreregister a divergent-history delivery re-registers fr
         assert.strictEqual(forwarder.historyDivergent, false);
     });
 
-    it('re-registers immediately with a full bootstrap and never projects the refused delivery', async () => {
+    it('re-registers immediately with a full bootstrap and never projects the refused delivery', async (t) => {
         const transport = new FakeTransport();
         transport.pending = [peerUpdate];
         const nodes: FakeNode[] = [new DivergentNode('base'), new FakeNode('base')];
@@ -1209,6 +1209,8 @@ describe('#divergentapplyreregister a divergent-history delivery re-registers fr
             },
         });
 
+        t.after(() => manager.dispose());
+
         assert.strictEqual(await manager.attachDocument(filePath, 'base'), true);
         await manager.drainRemoteUpdates(filePath);
 
@@ -1219,10 +1221,9 @@ describe('#divergentapplyreregister a divergent-history delivery re-registers fr
             null,
             'the replacement never resumes the divergent history',
         );
-        manager.dispose();
     });
 
-    it('guards against a re-register loop when the controller keeps diverging', async () => {
+    it('guards against a re-register loop when the controller keeps diverging', async (t) => {
         const transport = new FakeTransport();
         transport.pending = [peerUpdate];
         let nowMs = 1_000_000;
@@ -1241,6 +1242,8 @@ describe('#divergentapplyreregister a divergent-history delivery re-registers fr
             logger: { debug: () => {}, warn: (message) => warnings.push(message) },
         });
 
+        t.after(() => manager.dispose());
+
         assert.strictEqual(await manager.attachDocument(filePath, 'base'), true);
         await manager.drainRemoteUpdates(filePath);
         assert.strictEqual(transport.registerCount, 2);
@@ -1254,6 +1257,49 @@ describe('#divergentapplyreregister a divergent-history delivery re-registers fr
         nowMs += 1;
         await manager.drainRemoteUpdates(filePath);
         assert.strictEqual(transport.registerCount, 3, 'the next window allows one more re-register');
-        manager.dispose();
+    });
+
+    it('retries a suppressed re-register even after the refused delivery is gone', async (t) => {
+        const transport = new FakeTransport();
+        transport.pending = [peerUpdate];
+        let nowMs = 1_000_000;
+        const divergentReplacement = new DivergentNode('base');
+        const nodes: FakeNode[] = [new DivergentNode('base'), divergentReplacement];
+        const manager = new CrdtReplicaManager({
+            projectRoot: '/work',
+            identity: 'vscode-test',
+            transport,
+            nodeFactory: () => nodes.shift() ?? new FakeNode('base'),
+            listDocuments: () => [],
+            currentText: () => 'base',
+            applyText: async () => {
+                assert.fail('a divergent-history delivery must never reach the editor');
+            },
+            now: () => nowMs,
+        });
+
+        t.after(() => manager.dispose());
+
+        assert.strictEqual(await manager.attachDocument(filePath, 'base'), true);
+        await manager.drainRemoteUpdates(filePath);
+        await manager.drainRemoteUpdates(filePath);
+        assert.strictEqual(transport.registerCount, 2, 'the second refusal is inside the window');
+        assert.strictEqual(divergentReplacement.updates.length, 1, 'the replacement refused the delivery once');
+
+        await manager.drainRemoteUpdates(filePath);
+        assert.strictEqual(
+            divergentReplacement.updates.length,
+            1,
+            'nothing is applied to a replica already known to hold another history',
+        );
+
+        transport.pending = [];
+        nowMs += DIVERGENT_HISTORY_REREGISTER_MIN_INTERVAL_MS;
+        await manager.drainRemoteUpdates(filePath);
+        assert.strictEqual(
+            transport.registerCount,
+            3,
+            'a replica known to hold another history must not stay attached once its delivery is gone',
+        );
     });
 });

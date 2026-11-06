@@ -112,7 +112,15 @@ class DivergentHistoryReregisterTest {
             "the divergence check must precede the editor projection",
             divergentCheck < drain.indexOf("queueRemoteTextApply(\n"),
         )
-        assertTrue(drain.contains("reregisterAfterDivergentHistory(filePath, forwarder, expectedText)"))
+        assertEquals(
+            "the mark is honoured after the pull and again after the apply loop",
+            2,
+            drain.split("reregisterAfterDivergentHistory(filePath, forwarder, expectedText)").size - 1,
+        )
+        assertTrue(
+            "a mark left by an earlier drain must be honoured even with nothing pending",
+            divergentCheck < drain.indexOf("if (updates.isEmpty())"),
+        )
 
         val reregister =
             source

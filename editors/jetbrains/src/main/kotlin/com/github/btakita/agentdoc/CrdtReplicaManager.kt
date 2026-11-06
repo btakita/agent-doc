@@ -2763,6 +2763,15 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             }
             val updates = (delivery as ReplicaPullDelivery.Deltas).updates
             updateCount = updates.size
+            if (forwarder.historyDivergent) {
+                // `#divergentapplyreregister`: an earlier drain deferred or
+                // suppressed this replica's re-register. The mark outlives the
+                // refused delivery, so retry even when nothing is pending now;
+                // applying anything to this replica would still be wrong.
+                deliveryKind = "divergent"
+                if (reregisterAfterDivergentHistory(filePath, forwarder, expectedText)) usefulWork = 1
+                return usefulWork
+            }
             if (updates.isEmpty()) {
                 if (retainedCanonicalProjectionPaths.contains(filePath)) {
                     val canonical = forwarder.replicaText()

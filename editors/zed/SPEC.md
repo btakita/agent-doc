@@ -21,6 +21,21 @@
   never published upstream as a whole-document baseline. Because Zed reports
   full-sync changes, the LSP reduces each operator observation to the smallest
   contiguous code-point delta before publishing it.
+- A replica that refuses a delivery as a divergent CRDT history
+  (`apply_update_verified`, FFI `-4`, `#divergentapplyreregister`) is not
+  applied and not projected. The sidecar re-registers from the visible buffer
+  in that same poll, at most once per document per 30 s. The window is stamped
+  only when a registration is attempted. An in-flight `workspace/applyEdit`
+  defers the attempt without spending the window. A further refusal inside the
+  window stays attached so the controller's redelivery budget and lineage
+  retirement can proceed, and a later poll retries the re-register before
+  applying anything, even when that pull has nothing pending. A wall-clock
+  rollback permits another re-register. The mark and the stamp survive an
+  in-place binary handoff. A local edit while the replica is marked updates
+  the visible buffer only; it is published by the replacement registration,
+  never as a delta of the retired history. A history-lineage mismatch still
+  re-registers immediately: that refusal is `#deliverylineagestamp`, not this
+  window.
 - Remote edit echoes are generation-fenced by comparing the visible buffer to
   the already-advanced local replica; they project visible state and are never
   rebroadcast.

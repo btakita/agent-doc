@@ -484,6 +484,17 @@ fn canonical_response_back_reference(item_content: &str) -> Option<&str> {
     canonical_bracketed_response_id(response_id)
 }
 
+/// `#livebackrefrequest`: the label a later live row uses for a request it
+/// still owns. It is not a second `**Response [#r-…]**` tree and not a
+/// closure link. A non-empty value is required so a bare `**Summary:**`
+/// stays ordinary text.
+fn canonical_live_request_summary(item_content: &str) -> bool {
+    item_content
+        .trim()
+        .strip_prefix("**Summary:** ")
+        .is_some_and(|value| !value.trim().is_empty())
+}
+
 fn canonical_response_choice(item_content: &str) -> bool {
     let Some(choice) = item_content.trim().strip_prefix("**") else {
         return false;
@@ -611,6 +622,7 @@ fn response_choices_label_child_end(
         let parent = strip_bullet(lines.get(index)?)?;
         if canonical_response_row(parent).is_some()
             || canonical_response_back_reference(parent).is_some()
+            || canonical_live_request_summary(parent)
         {
             return Some(opener_index + 1);
         }
@@ -662,11 +674,17 @@ fn response_decision_metadata_child_end(
         return None;
     }
     let parent = strip_bullet(lines.get(response_index)?)?;
-    // `#recommendationinrow`, `#choicecontextinrow`: a back-reference that owns
-    // a request renders its context and recommendation above its Choices
-    // subtree.
+    // `#recommendationinrow`, `#choicecontextinrow`, `#livebackrefrequest`:
+    // context and recommendation sit above Choices on a response row, a
+    // back-reference, or a later live row's own summary. All three stay
+    // inert. A response row is either `**Response [#r-…]:**` with the
+    // summary inline or `**Response [#r-…]**` with the summary as its own
+    // child (`#responserowqueuehead`). Question and Selected stay reserved
+    // only beneath a response row that carries its summary inline.
     if (content.starts_with("**Recommendation:** ") || content.starts_with("**Context:** "))
-        && canonical_response_back_reference(parent).is_some()
+        && (canonical_response_back_reference(parent).is_some()
+            || canonical_live_request_summary(parent)
+            || canonical_response_row(parent).is_some())
     {
         return Some(opener_index + 1);
     }
@@ -2340,6 +2358,81 @@ mod tests {
             response_decision_metadata_child_end(&back_reference, 1, 2),
             None
         );
+
+        // `#responserowqueuehead`: the summary is a child of the lookup
+        // response row, and context beside that summary stays reserved.
+        let lookup = [
+            "- row",
+            "  - **Response [#r-0123456789ab]**",
+            "    - **Summary:** Which target?",
+            "    - **Context:** Production is frozen.",
+            "    - **Recommendation:** **staging** — Production is frozen.",
+            "    - **Question:** Why.",
+        ];
+        assert_eq!(response_decision_metadata_child_end(&lookup, 3, 4), Some(4));
+        assert_eq!(response_decision_metadata_child_end(&lookup, 4, 4), Some(5));
+        assert_eq!(response_decision_metadata_child_end(&lookup, 5, 4), None);
+    }
+
+    /// `#livebackrefrequest`: a later live row's summary is not a second
+    /// response tree. Context, recommendation, and choices under it stay
+    /// inert; an operator note under a choice stays work. Question is not
+    /// reserved there.
+    #[test]
+    fn a_live_request_summary_reserves_context_and_choices() {
+        let source = concat!(
+            "<!-- agent:queue -->\n",
+            "- do [#flag]\n",
+            "  - **Summary:** Should I set the flag?\n",
+            "    - **Context:** It gates only the production deploy.\n",
+            "    - **Recommendation:** **Set it** — The next release needs it.\n",
+            "    - **Choices:**\n",
+            "      - **Request**: [#subagent-operator-request-flagset]\n",
+            "      - **Set it**: the next release deploys.\n",
+            "        - operator note stays work\n",
+            "    - **Question:** Why.\n",
+            "- next task\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let parsed = components(source);
+        let texts = parsed[0]
+            .items
+            .iter()
+            .map(|item| item.text.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            texts,
+            vec![
+                "do [#flag]",
+                "operator note stays work",
+                "**Question:** Why.",
+                "next task"
+            ],
+            "{texts:?}"
+        );
+        let ranges = inert_list_child_ranges(source);
+        let inert = |needle: &str| {
+            let at = source.find(needle).expect(needle);
+            ranges.iter().any(|&(start, end)| at >= start && at < end)
+        };
+        // The summary line itself is reserved by the orphaned response-structure
+        // row check (it is not a queue item, asserted above), not by the
+        // parent-relative response-row ranges.
+        let lines = source.lines().collect::<Vec<_>>();
+        let summary_index = lines
+            .iter()
+            .position(|line| line.contains("**Summary:** Should I set the flag?"))
+            .unwrap();
+        assert_eq!(
+            generated_response_structure_row_end(&lines, summary_index, 2),
+            Some(summary_index + 1)
+        );
+        assert!(inert("**Context:** It gates only the production deploy."));
+        assert!(inert("**Recommendation:** **Set it**"));
+        assert!(inert("**Choices:**"));
+        assert!(inert("**Set it**: the next release deploys."));
+        assert!(!inert("**Question:** Why."));
+        assert!(!inert("operator note stays work"));
     }
 
     #[test]

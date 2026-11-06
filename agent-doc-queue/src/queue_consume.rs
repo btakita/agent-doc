@@ -3941,6 +3941,10 @@ pub fn annotate_newly_struck_queue_items_with_response_id_at(
         .collect::<Vec<_>>();
 
     let mut edits = Vec::new();
+    // `#livebackrefrequest`: in-place replacement of a stale `**Closed by:**`
+    // line on a later live request row. Applied with the row edits, later
+    // ranges first, so the two never shift each other.
+    let mut closed_by_rewrites = Vec::<(usize, usize, String)>::new();
     // A blocking request is one decision even when an aggregate response is
     // projected below several queue rows. Render its choices only on the first
     // row that owns the request; unrelated or duplicate rows receive nothing.
@@ -3950,6 +3954,9 @@ pub fn annotate_newly_struck_queue_items_with_response_id_at(
     // later rows retain only a searchable, inert backlink. Repeating the full
     // tree gave one public response id several apparent definitions and let a
     // later response become nested inside an arbitrary duplicate.
+    // `#livebackrefrequest`: a later row that is still live and owns a request
+    // does not use that closure link. It gets its own summary label, the
+    // request sentence, and the context and choices it has now.
     let mut response_projection_counts = HashMap::<String, usize>::new();
     for (_, response_id, _, _) in projection_by_node_key.values() {
         *response_projection_counts
@@ -4017,8 +4024,10 @@ pub fn annotate_newly_struck_queue_items_with_response_id_at(
     }
     // When one of the rows owns an operator request, put the canonical response
     // there so the full response tree and its decision stay together. If more
-    // than one row owns a distinct request, later owners keep only their scoped
-    // choices beneath the response backlink.
+    // than one row owns a distinct request, a later row the response actually
+    // struck keeps its scoped choices beneath `**Closed by:**`. A later row
+    // that is still live states the request on its own summary instead
+    // (`#livebackrefrequest`).
     canonical_response_owners.extend(request_response_owners);
     for node in &nodes {
         let Some((projected_response_body, response_id, _annotate_inline_id, shared_batch)) =
@@ -4037,7 +4046,6 @@ pub fn annotate_newly_struck_queue_items_with_response_id_at(
         // Compare the complete rendered subtree with only generated timestamp
         // and tree-scoped guidance lines normalized so choices, summaries,
         // details, and response ids must still match exactly.
-        let normalized_owned_scope = normalize_response_projection_volatile_metadata(owned_scope);
         let child_indent = " ".repeat(indent + 2);
         let response_mode = queue_response_ranges
             .iter()
@@ -4084,18 +4092,38 @@ pub fn annotate_newly_struck_queue_items_with_response_id_at(
                 &node.item.text,
                 projected_response_body,
                 response_id,
+                node.item.struck,
                 &mut rendered_choice_packet_ids,
             )]
         };
-        let missing_children = lookup_children
-            .iter()
-            .filter(|child| {
-                let rendered = render_response_lookup_child(child, &child_indent);
-                !normalized_owned_scope
-                    .contains(&normalize_response_projection_volatile_metadata(&rendered))
-            })
-            .cloned()
-            .collect::<Vec<_>>();
+        let closed_by_rewrite = lookup_children.first().and_then(|child| {
+            adopt_closed_by_as_live_request_summary(
+                owned_scope,
+                node.item.start_byte,
+                &child_indent,
+                response_id,
+                child,
+            )
+        });
+        let normalized_owned_scope = normalize_response_projection_volatile_metadata(owned_scope);
+        let missing_children = if closed_by_rewrite.is_some() {
+            // The stale closure line is rewritten in place. Appending the new
+            // child as well would repeat the context and choices it already has.
+            Vec::new()
+        } else {
+            lookup_children
+                .iter()
+                .filter(|child| {
+                    let rendered = render_response_lookup_child(child, &child_indent);
+                    !normalized_owned_scope
+                        .contains(&normalize_response_projection_volatile_metadata(&rendered))
+                })
+                .cloned()
+                .collect::<Vec<_>>()
+        };
+        if let Some(rewrite) = closed_by_rewrite {
+            closed_by_rewrites.push(rewrite);
+        }
         let has_inline_id = raw.contains(&format!("{RESPONSE_ID_NOTE_PREFIX}{response_id}"));
         if has_inline_id || !missing_children.is_empty() {
             edits.push((
@@ -4109,12 +4137,12 @@ pub fn annotate_newly_struck_queue_items_with_response_id_at(
         }
     }
 
-    let mut out = after;
-    for (start, end, indent, has_inline_id, response_id, children) in edits.into_iter().rev() {
+    let mut replacements = Vec::new();
+    for (start, end, indent, has_inline_id, response_id, children) in edits {
         let mut replacement = if has_inline_id {
-            remove_inline_response_id(&out[start..end], &response_id)
+            remove_inline_response_id(&after[start..end], &response_id)
         } else {
-            out[start..end].to_string()
+            after[start..end].to_string()
         };
         if !children.is_empty() {
             if !replacement.ends_with('\n') {
@@ -4125,15 +4153,59 @@ pub fn annotate_newly_struck_queue_items_with_response_id_at(
                 replacement.push_str(&render_response_lookup_child(&child, &child_indent));
             }
         }
+        replacements.push((start, end, replacement));
+    }
+    replacements.extend(closed_by_rewrites);
+    replacements.sort_by(|left, right| right.0.cmp(&left.0));
+    let mut out = after;
+    for (start, end, replacement) in replacements {
         out.replace_range(start..end, &replacement);
     }
     Ok(out)
+}
+
+/// `#livebackrefrequest`: when a later live row already says `**Closed by:**`
+/// for this response, replace that line instead of appending a second child.
+///
+/// The decision rows it already has stay. A bare closure line with none is
+/// replaced by the whole summary child. Returns the absolute rewrite.
+fn adopt_closed_by_as_live_request_summary(
+    owned_scope: &str,
+    scope_start: usize,
+    child_indent: &str,
+    response_id: &str,
+    child: &str,
+) -> Option<(usize, usize, String)> {
+    let summary = child.lines().next().unwrap_or_default();
+    if !summary.starts_with("**Summary:** ") {
+        return None;
+    }
+    let closed_by = format!("{child_indent}- **Closed by:** {response_id}\n");
+    let rel = owned_scope.find(&closed_by)?;
+    let summary_line = format!("{child_indent}- {summary}\n");
+    let mut rewritten = owned_scope.to_string();
+    rewritten.replace_range(rel..rel + closed_by.len(), &summary_line);
+    let rendered = render_response_lookup_child(child, child_indent);
+    let decision_indent = format!("{child_indent}  - **");
+    let keeps_existing_decision = normalize_response_projection_volatile_metadata(&rewritten)
+        .contains(&normalize_response_projection_volatile_metadata(&rendered))
+        || rewritten.contains(&format!("{decision_indent}Context:**"))
+        || rewritten.contains(&format!("{decision_indent}Recommendation:**"))
+        || rewritten.contains(&format!("{decision_indent}Choices:**"));
+    let replacement = if keeps_existing_decision {
+        summary_line
+    } else {
+        rendered
+    };
+    let abs = scope_start + rel;
+    Some((abs, abs + closed_by.len(), replacement))
 }
 
 fn response_back_reference_child(
     queue_item: &str,
     response_body: &str,
     response_id: &str,
+    row_struck: bool,
     rendered_choice_packet_ids: &mut HashSet<String>,
 ) -> String {
     debug_assert!(agent_doc_markdown_ast::exchange_tree::is_compact_response_id(response_id));
@@ -4143,11 +4215,36 @@ fn response_back_reference_child(
     // own options. It never substitutes another decision's choices (which
     // grafted one item's options onto its siblings) and never re-copies the
     // offered options beneath a row that is itself one of those options.
-    let mut child = format!("**Closed by:** {response_id}");
-    for packet in crate::operator_request_packet::blocking_operator_request_packets(response_body)
+    // `#livebackrefrequest`: that link is closure evidence. A row the response
+    // did not strike, which still owns a request, states the request sentence
+    // on its own summary instead of saying Closed by.
+    let owned = crate::operator_request_packet::blocking_operator_request_packets(response_body)
         .into_iter()
         .filter(|packet| operator_request_packet_belongs_to_row(packet, queue_item))
         .filter(|packet| !row_is_offered_option_of(packet, queue_item))
+        .collect::<Vec<_>>();
+    let mut sentence = String::new();
+    for packet in &owned {
+        let request = packet
+            .request
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        if request.is_empty() || sentence.contains(&request) {
+            continue;
+        }
+        if !sentence.is_empty() {
+            sentence.push(' ');
+        }
+        sentence.push_str(&request);
+    }
+    let mut child = if !row_struck && !sentence.is_empty() {
+        format!("**Summary:** {sentence}")
+    } else {
+        format!("**Closed by:** {response_id}")
+    };
+    for packet in owned
+        .into_iter()
         .filter(|packet| rendered_choice_packet_ids.insert(packet.id.clone()))
     {
         if let Some(context) = packet.context_row() {
@@ -13607,7 +13704,7 @@ Old.
         );
         let mut rendered = HashSet::new();
         let child =
-            response_back_reference_child(row, &response, "[#r-0123456789ab]", &mut rendered);
+            response_back_reference_child(row, &response, "[#r-0123456789ab]", true, &mut rendered);
         assert_eq!(
             child,
             concat!(
@@ -13884,7 +13981,7 @@ Old.
 
         let mut rendered = HashSet::new();
         let child =
-            response_back_reference_child(row, &response, "[#r-0123456789ab]", &mut rendered);
+            response_back_reference_child(row, &response, "[#r-0123456789ab]", true, &mut rendered);
         assert!(
             child.contains(
                 "- **Context:** Production is frozen. Review https://example.test/pull/93: merge is blocked.\n"
@@ -13983,7 +14080,7 @@ Old.
         );
         let mut rendered = HashSet::new();
         let child =
-            response_back_reference_child(row, &response, "[#r-0123456789ab]", &mut rendered);
+            response_back_reference_child(row, &response, "[#r-0123456789ab]", true, &mut rendered);
         assert_eq!(
             child,
             concat!(
@@ -14006,6 +14103,35 @@ Old.
         assert!(
             document_queue::executable_prompt_indexes(&entries).is_empty(),
             "{body}\n{entries:#?}"
+        );
+
+        // The same row, still live, states the request instead of Closed by.
+        let mut rendered = HashSet::new();
+        let live = response_back_reference_child(
+            row,
+            &response,
+            "[#r-0123456789ab]",
+            false,
+            &mut rendered,
+        );
+        assert_eq!(
+            live,
+            concat!(
+                "**Summary:** Which target?\n",
+                "- **Context:** Production is frozen: **no**: exceptions.\n",
+                "- **Recommendation:** **staging** — Production is frozen until Monday.\n",
+                "- **Choices:**\n",
+                "  - **Request**: [#subagent-operator-request-betatarget]\n",
+                "  - **staging**: Staging. — **Recommended**\n",
+                "  - **production**: Production.",
+            )
+        );
+        let live_body = format!("- {row}\n{}", render_response_lookup_child(&live, "  "));
+        let live_entries = document_queue::parse(&live_body).unwrap();
+        let prompts = document_queue::prompts(&live_entries);
+        assert!(
+            prompts.iter().all(|prompt| prompt.text == row),
+            "{live_body}\n{prompts:?}"
         );
     }
 
@@ -14247,6 +14373,120 @@ Old.
         assert!(
             !flag.iter().any(|line| line.contains("sample-sdk")),
             "{queue}"
+        );
+        // `#livebackrefrequest`: the later live row owns a request, so it
+        // states that sentence itself. It is not Closed by and not a second
+        // response tree. The first request row keeps the one response tree.
+        assert!(
+            flag.iter()
+                .any(|line| line.trim() == "- **Summary:** Should I set the flag?"),
+            "{queue}"
+        );
+        assert!(
+            !flag.iter().any(|line| line.contains("**Closed by:**")),
+            "{queue}"
+        );
+        assert!(
+            !flag.iter().any(|line| line.contains("**Response [#r-")),
+            "{queue}"
+        );
+        let tag = row_subtree(&queue, TAG_ROW);
+        assert!(
+            tag.iter().any(|line| line.contains("**Response [#r-")),
+            "{queue}"
+        );
+        // Both rows stay live queue items. Generated summary, context, and
+        // choice rows are not prompts, including the context beside the one
+        // response tree (`#responserowqueuehead`).
+        let entries = document_queue::parse(&queue).unwrap();
+        assert!(
+            entries.iter().any(|entry| {
+                matches!(
+                    entry,
+                    document_queue::QueueEntry::Prompt(prompt) if prompt.text.contains(FLAG_ROW)
+                )
+            }),
+            "{entries:?}"
+        );
+        let prompts = document_queue::prompts(&entries);
+        assert!(
+            prompts.iter().all(|prompt| {
+                !prompt.text.contains("**Summary:**")
+                    && !prompt.text.contains("**Context:**")
+                    && !prompt.text.contains("**Choices:**")
+                    && !prompt.text.contains("**Set it**:")
+                    && !prompt.text.contains("**Use #4**:")
+                    && !prompt.text.contains("**Use #1**:")
+                    && !prompt.text.contains("Should I set the flag?")
+            }),
+            "{prompts:?}\n{queue}"
+        );
+    }
+
+    /// `#livebackrefrequest`: a row the response struck keeps `**Closed by:**`.
+    /// A later live row that owns a request does not, including when an older
+    /// projection already wrote that closure line under it.
+    #[test]
+    fn a_later_live_request_row_keeps_a_struck_sibling_on_closed_by() {
+        let response = held_rows_response();
+        let before = format!("- {OLD_ROW}\n- {TAG_ROW}\n- {FLAG_ROW}\n");
+        let after = format!(
+            "- ~~{OLD_ROW}~~\n- 🙋 {TAG_ROW} [#{TAG_REQUEST}]\n- 🙋 {FLAG_ROW} [#{FLAG_REQUEST}]\n"
+        );
+        let queue = annotated_rows(&before, &after, &response);
+        let old = row_subtree(&queue, OLD_ROW);
+        assert!(
+            old.iter().any(|line| line.contains("**Closed by:** [#r-")),
+            "{queue}"
+        );
+        assert!(
+            !old.iter().any(|line| line.contains("**Summary:**") || line.contains("**Response [#r-")),
+            "{queue}"
+        );
+        let flag = row_subtree(&queue, FLAG_ROW);
+        assert!(
+            flag.iter()
+                .any(|line| line.trim() == "- **Summary:** Should I set the flag?"),
+            "{queue}"
+        );
+        assert!(
+            !flag.iter().any(|line| line.contains("**Closed by:**") || line.contains("**Response [#r-")),
+            "{queue}"
+        );
+        assert_eq!(queue.matches("**Closed by:** [#r-").count(), 1, "{queue}");
+        assert_eq!(queue.matches("**Response [#r-").count(), 1, "{queue}");
+
+        let response_id = old
+            .iter()
+            .find_map(|line| line.trim().strip_prefix("- **Closed by:** "))
+            .expect("struck row links the response");
+        let stale = format!(
+            "- ~~{OLD_ROW}~~\n  - **Closed by:** {response_id}\n- 🙋 {TAG_ROW} [#{TAG_REQUEST}]\n- 🙋 {FLAG_ROW} [#{FLAG_REQUEST}]\n  - **Closed by:** {response_id}\n    - **Context:** It gates only the production deploy.\n    - **Choices:**\n      - **Request**: [#{FLAG_REQUEST}]\n      - **Leave it unset**: nothing changes.\n      - **Set it**: the next release deploys.\n"
+        );
+        let repaired = annotated_rows(&before, &stale, &response);
+        let flag = row_subtree(&repaired, FLAG_ROW);
+        assert!(
+            flag.iter()
+                .any(|line| line.trim() == "- **Summary:** Should I set the flag?"),
+            "{repaired}"
+        );
+        assert!(
+            !flag.iter().any(|line| line.contains("**Closed by:**")),
+            "{repaired}"
+        );
+        assert_eq!(
+            repaired
+                .matches("**Set it**: the next release deploys.")
+                .count(),
+            1,
+            "{repaired}"
+        );
+        assert_eq!(
+            repaired
+                .matches(&format!("**Closed by:** {response_id}"))
+                .count(),
+            1,
+            "{repaired}"
         );
     }
 

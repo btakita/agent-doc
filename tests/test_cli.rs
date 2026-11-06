@@ -18949,6 +18949,7 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "pub fn log_route_latency(",
         "pub fn log_dispatch_inject(",
         "pub fn poll_direct_pane_acceptance(",
+        "pub fn direct_pane_acceptance_poll_count(",
         "pub fn send_direct_pane_enter_resubmit(",
         "pub fn send_direct_pane_enter_resubmit_until_stable(",
         "pub fn dead_harness_shell_dispatch_block(",

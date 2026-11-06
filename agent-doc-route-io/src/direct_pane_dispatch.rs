@@ -1,4 +1,5 @@
 use anyhow::Result;
+use std::cell::Cell;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 use tmux_router::Tmux;
@@ -82,6 +83,26 @@ pub struct RouteSubmitObservationLogFacts<'a> {
 /// into a harness composer for this `agent-doc route` invocation.
 static DISPATCH_INJECT_ATTEMPTS: std::sync::atomic::AtomicUsize =
     std::sync::atomic::AtomicUsize::new(0);
+
+thread_local! {
+    /// `#sendoncepollcounter`: entries into [`poll_direct_pane_acceptance`] on
+    /// this thread. A process-global counter races when parallel tests poll.
+    static DIRECT_PANE_ACCEPTANCE_POLL_ENTRIES: Cell<u64> = const { Cell::new(0) };
+}
+
+/// How many times this thread has entered the direct-pane acceptance poll.
+///
+/// `#sendoncepollcounter`: a test snapshots this instead of bounding wall
+/// time. The single-submit path must not enter the poll window at all.
+pub fn direct_pane_acceptance_poll_count() -> u64 {
+    DIRECT_PANE_ACCEPTANCE_POLL_ENTRIES.with(Cell::get)
+}
+
+fn record_direct_pane_acceptance_poll_entry() {
+    DIRECT_PANE_ACCEPTANCE_POLL_ENTRIES.with(|entries| {
+        entries.set(entries.get().saturating_add(1));
+    });
+}
 
 pub fn editor_route_attempt_id() -> Option<String> {
     agent_doc_controller_io::route_snapshot::editor_route_attempt_id()
@@ -217,6 +238,7 @@ pub fn poll_direct_pane_acceptance(
     trigger: &str,
     phase: &str,
 ) -> DirectPaneAcceptance {
+    record_direct_pane_acceptance_poll_entry();
     let start = std::time::Instant::now();
     let timeout = direct_pane_submit_acceptance_timeout();
     let poll_interval = DIRECT_PANE_SUBMIT_ACCEPTANCE_POLL_INTERVAL;
@@ -1097,6 +1119,54 @@ brian@host repo%
             harness.protected_prompt_input_reason(draft).as_deref(),
             Some("drafted prompt input"),
         );
+    }
+
+    #[test]
+    fn acceptance_poll_counter_is_per_thread() {
+        let before = direct_pane_acceptance_poll_count();
+        record_direct_pane_acceptance_poll_entry();
+        assert_eq!(direct_pane_acceptance_poll_count(), before + 1);
+        let other = std::thread::spawn(direct_pane_acceptance_poll_count)
+            .join()
+            .expect("counter thread");
+        assert_eq!(other, 0, "another thread must not see this thread's polls");
+    }
+
+    /// `#sendoncepollcounter`: the ignored live test snapshots the counter.
+    /// This pins the same fact in the default suite: the poll window records
+    /// an entry, and neither once-submit function enters that window.
+    #[test]
+    fn single_submit_does_not_enter_the_acceptance_poll() {
+        let dispatch = include_str!("direct_pane_dispatch.rs");
+        let poll = source_fn_body(dispatch, "pub fn poll_direct_pane_acceptance(");
+        assert!(
+            poll.contains("record_direct_pane_acceptance_poll_entry()"),
+            "the acceptance poll window must move the test-visible counter"
+        );
+        let once = source_fn_body(dispatch, "pub fn send_command_once_unchecked(");
+        assert!(
+            !once.contains("poll_direct_pane_acceptance("),
+            "single-submit must not enter the acceptance poll"
+        );
+        let checked = source_fn_body(
+            include_str!("dispatch.rs"),
+            "pub fn send_command_once_checked(",
+        );
+        assert!(checked.contains("send_command_once_unchecked("));
+        assert!(
+            !checked.contains("poll_direct_pane_acceptance("),
+            "checked single-submit must stay on the once path"
+        );
+    }
+
+    fn source_fn_body<'a>(source: &'a str, signature: &str) -> &'a str {
+        let start = source
+            .find(signature)
+            .unwrap_or_else(|| panic!("missing {signature}"));
+        let after = start + signature.len();
+        let rest = &source[after..];
+        let end = rest.find("\npub fn ").unwrap_or(rest.len());
+        &source[start..after + end]
     }
 
     /// `#codexfooterrowcomposer`: the last guard before route types drives a real

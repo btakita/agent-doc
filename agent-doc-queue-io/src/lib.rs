@@ -3,6 +3,7 @@
 pub mod active_lifecycle;
 pub mod build_slot;
 pub mod claim_release_receipt;
+pub mod completion_cell_restore;
 pub mod completion_feedback_lock;
 pub mod queue_marker_audit;
 pub mod continuation_detect;

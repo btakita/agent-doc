@@ -1884,6 +1884,7 @@ dependencies = [
  "agent-doc-document-realtime",
  "agent-doc-element",
  "agent-doc-element-backlog",
+ "agent-doc-element-exchange",
  "agent-doc-element-queue",
  "agent-doc-frontmatter",
  "agent-doc-frontmatter-io",

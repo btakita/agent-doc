@@ -927,8 +927,25 @@ pub fn claim_with_runtime_projection(
     agent_doc_queue::queue_claim::ClaimOutcome,
     agent_doc_queue::queue_claim::QueueClaim,
 )> {
+    claim_with_runtime_projection_for_harness(effects, file, item, owner, ttl_secs, None)
+}
+
+/// [`claim_with_runtime_projection`] for a worker on `worker_harness`
+/// (`queue claim --harness`, `#claimworkerharness`).
+pub fn claim_with_runtime_projection_for_harness(
+    effects: &(impl QueueRuntimeProjectionEffects + ?Sized),
+    file: &Path,
+    item: &str,
+    owner: &str,
+    ttl_secs: u64,
+    worker_harness: Option<&str>,
+) -> Result<(
+    agent_doc_queue::queue_claim::ClaimOutcome,
+    agent_doc_queue::queue_claim::QueueClaim,
+)> {
     let before = crate::queue_claim::load_ledger(file)?;
-    let (outcome, claim) = crate::queue_claim::claim(file, item, owner, ttl_secs)?;
+    let (outcome, claim) =
+        crate::queue_claim::claim_for_worker_harness(file, item, owner, ttl_secs, worker_harness)?;
     let previous = before
         .claims
         .iter()

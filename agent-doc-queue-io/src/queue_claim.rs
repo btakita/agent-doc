@@ -673,6 +673,7 @@ fn claim_next_shared_leaf(
     owner: &str,
     ttl_secs: u64,
     owner_session: Option<ClaimOwnerSession>,
+    worker_harness: Option<&str>,
 ) -> Result<(ClaimOutcome, QueueClaim)> {
     let mut prepared = Vec::with_capacity(candidates.len());
     for target in &candidates {
@@ -693,6 +694,7 @@ fn claim_next_shared_leaf(
             .then_some(agent_doc_queue::queue_claim::SubagentDispatchPolicy {
                 model: authorization.model,
                 effort: authorization.effort,
+                harness: None,
             });
         prepared.push(PreparedSharedLeaf {
             target: target.clone(),
@@ -706,6 +708,7 @@ fn claim_next_shared_leaf(
     let claim_keys = queues.claim_keys();
     let now = now_secs();
     let owner_session_for_claim = owner_session.clone();
+    let worker_harness = worker_harness.map(str::to_string);
     let result = mutate_ledger(file, |ledger| {
         let chosen = prepared
             .iter()
@@ -722,6 +725,7 @@ fn claim_next_shared_leaf(
             &chosen.identity,
             owner,
             owner_session_for_claim.as_ref(),
+            worker_harness.as_deref(),
         )?;
         let outcome = ledger.claim_in_session_with_generation_floor(
             &chosen.target,
@@ -742,7 +746,12 @@ fn claim_next_shared_leaf(
         {
             stored.claim_time_row = chosen.claim_time_row.clone();
         }
-        stored.dispatch_policy = chosen.dispatch_policy.clone();
+        assign_dispatch_policy(
+            stored,
+            &outcome,
+            chosen.dispatch_policy.clone(),
+            worker_harness.as_deref(),
+        );
         stored.tracked_item_aliases = chosen.tracked_item_aliases.clone();
         Ok((outcome, stored.clone()))
     })?;
@@ -755,22 +764,28 @@ fn claim_next_shared_leaf(
 
 /// `#harnessquotaexhausted`: every subagent dispatch passes through a claim,
 /// so this is the gate that keeps a new worker off a harness a sibling worker
-/// just ran out of, however the dispatch was decided. Only proven-equal
-/// harnesses refuse here (`canonical_harness_name`, so `claude` matches a
-/// block stored as `claude-code`); a coordinator session of unknown harness
-/// may be dispatching anything. The row's own blocked attempt is refused by
-/// [`ClaimOutcome::QuotaBlocked`] instead, with its own next step.
+/// just ran out of, however the dispatch was decided. `worker_harness` is the
+/// harness named by `queue claim --harness` (`#claimworkerharness`); without
+/// it the worker is assumed to run on the coordinator's session harness. Only
+/// proven-equal harnesses refuse here (`quota_harness_key`, so `claude`
+/// matches a block stored as `claude-code`); a coordinator session of unknown
+/// harness, and no `--harness`, may be dispatching anything. The row's own
+/// blocked attempt is refused by [`ClaimOutcome::QuotaBlocked`] instead, with
+/// its own next step.
 fn refuse_claim_on_exhausted_harness(
     file: &Path,
     ledger: &QueueClaimLedger,
     identity: &agent_doc_element_queue::QueueItemIdentity,
     owner: &str,
     owner_session: Option<&ClaimOwnerSession>,
+    worker_harness: Option<&str>,
 ) -> Result<()> {
     if !owner.trim().starts_with("subagent:") {
         return Ok(());
     }
-    let Some(harness) = owner_session.and_then(|session| session.harness.as_deref()) else {
+    let Some(harness) =
+        worker_harness.or_else(|| owner_session.and_then(|session| session.harness.as_deref()))
+    else {
         return Ok(());
     };
     let blocked = ledger
@@ -783,17 +798,75 @@ fn refuse_claim_on_exhausted_harness(
                 .as_ref()
                 .is_some_and(|block| block.harness.is_some())
         });
-    if let Some(claim) = agent_doc_queue::worker_quota::pool_refill_quota_block(blocked, Some(harness)) {
+    if let Some(claim) =
+        agent_doc_queue::worker_quota::pool_refill_quota_block(blocked, Some(harness))
+    {
+        let shown = agent_doc_queue::worker_quota::quota_harness_key(harness);
         bail!(
-            "refusing to start a new worker on {harness} ({}): {}",
+            "refusing to start a new worker on {shown} ({}): {} To claim this row for a worker on a different harness, pass `--harness <{}>`.",
             agent_doc_queue::worker_quota::WORKER_QUOTA_EXHAUSTED_REASON,
             agent_doc_queue::worker_quota::quota_blocked_next_step(
                 &file.display().to_string(),
                 claim,
             ),
+            agent_doc_queue::worker_quota::WORKER_HARNESS_NAMES.join("|"),
         );
     }
     Ok(())
+}
+
+/// Record `--harness` on a claim that was actually admitted. A refused
+/// outcome must not stamp the holder or the blocked attempt, and must not
+/// drop a harness an earlier admission already recorded. The policy
+/// assignment itself stays unconditional: model and effort were already
+/// rewritten on every outcome.
+fn assign_dispatch_policy(
+    claim: &mut agent_doc_queue::queue_claim::QueueClaim,
+    outcome: &ClaimOutcome,
+    policy: Option<agent_doc_queue::queue_claim::SubagentDispatchPolicy>,
+    worker_harness: Option<&str>,
+) {
+    let previous_harness = claim
+        .dispatch_policy
+        .as_ref()
+        .and_then(|policy| policy.harness.clone());
+    claim.dispatch_policy = policy;
+    let admitted = matches!(
+        outcome,
+        ClaimOutcome::Created | ClaimOutcome::Reassigned | ClaimOutcome::Refreshed
+    );
+    if admitted {
+        if let Some(harness) = worker_harness {
+            let stored = claim.dispatch_policy.get_or_insert_with(|| {
+                agent_doc_queue::queue_claim::SubagentDispatchPolicy {
+                    model: None,
+                    effort: None,
+                    harness: None,
+                }
+            });
+            stored.harness = Some(harness.to_string());
+            return;
+        }
+        // A new attempt with no `--harness` inherits the coordinator harness.
+        // An idempotent same-owner claim (`Refreshed`) keeps the harness the
+        // original admission recorded.
+        if !matches!(outcome, ClaimOutcome::Refreshed) {
+            return;
+        }
+    }
+    let Some(harness) = previous_harness else {
+        return;
+    };
+    let stored = claim.dispatch_policy.get_or_insert_with(|| {
+        agent_doc_queue::queue_claim::SubagentDispatchPolicy {
+            model: None,
+            effort: None,
+            harness: None,
+        }
+    });
+    if stored.harness.is_none() {
+        stored.harness = Some(harness);
+    }
 }
 
 fn persist_claim_result(
@@ -825,7 +898,7 @@ fn persist_claim_result(
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "queue_claim outcome={:?} owner={} generation={} state={:?} expires_at={} item_bytes={} occurrences={occurrences} owner_session={} model={} effort={}",
+            "queue_claim outcome={:?} owner={} generation={} state={:?} expires_at={} item_bytes={} occurrences={occurrences} owner_session={} model={} effort={} worker_harness={}",
             result.0,
             result.1.owner,
             result.1.generation,
@@ -845,6 +918,12 @@ fn persist_claim_result(
                 .as_ref()
                 .and_then(|policy| policy.effort.as_deref())
                 .unwrap_or("-"),
+            result
+                .1
+                .dispatch_policy
+                .as_ref()
+                .and_then(|policy| policy.harness.as_deref())
+                .unwrap_or("-"),
         ),
     );
     Ok(result)
@@ -861,7 +940,26 @@ pub fn claim(
     owner: &str,
     ttl_secs: u64,
 ) -> Result<(ClaimOutcome, QueueClaim)> {
-    claim_with_session(file, item, owner, ttl_secs, current_owner_session())
+    claim_for_worker_harness(file, item, owner, ttl_secs, None)
+}
+
+/// [`claim`] for a worker on `worker_harness` (`queue claim --harness`,
+/// `#claimworkerharness`). `None` keeps the coordinator's own harness.
+pub fn claim_for_worker_harness(
+    file: &Path,
+    item: &str,
+    owner: &str,
+    ttl_secs: u64,
+    worker_harness: Option<&str>,
+) -> Result<(ClaimOutcome, QueueClaim)> {
+    claim_with_session_for_worker_harness(
+        file,
+        item,
+        owner,
+        ttl_secs,
+        current_owner_session(),
+        worker_harness,
+    )
 }
 
 /// [`claim`] bound to an explicit owner session (`#claimownerliveness`);
@@ -873,6 +971,24 @@ pub fn claim_with_session(
     ttl_secs: u64,
     owner_session: Option<ClaimOwnerSession>,
 ) -> Result<(ClaimOutcome, QueueClaim)> {
+    claim_with_session_for_worker_harness(file, item, owner, ttl_secs, owner_session, None)
+}
+
+/// [`claim_with_session`] that names the worker harness (`#claimworkerharness`).
+pub fn claim_with_session_for_worker_harness(
+    file: &Path,
+    item: &str,
+    owner: &str,
+    ttl_secs: u64,
+    owner_session: Option<ClaimOwnerSession>,
+    worker_harness: Option<&str>,
+) -> Result<(ClaimOutcome, QueueClaim)> {
+    let worker_harness = match worker_harness {
+        Some(raw) => Some(
+            agent_doc_queue::worker_quota::parse_worker_harness(raw).map_err(anyhow::Error::msg)?,
+        ),
+        None => None,
+    };
     if item.trim().is_empty() {
         bail!("queue claim needs a non-empty --item (`#id` or the queue line's text)");
     }
@@ -883,7 +999,15 @@ pub fn claim_with_session(
     // Bind the first of those rows that no live claim holds. The others stay
     // live and are claimed by their own nest vector.
     if let Some((candidates, queues)) = shared_leaf_claim_candidates(file, item)? {
-        return claim_next_shared_leaf(file, candidates, queues, owner, ttl_secs, owner_session);
+        return claim_next_shared_leaf(
+            file,
+            candidates,
+            queues,
+            owner,
+            ttl_secs,
+            owner_session,
+            worker_harness.as_deref(),
+        );
     }
     // A miss is a typed usage error (`QueueClaimMiss`) naming the live heads,
     // never a bare string: the CLI reports it as-is instead of wrapping it in
@@ -909,6 +1033,7 @@ pub fn claim_with_session(
         .then_some(agent_doc_queue::queue_claim::SubagentDispatchPolicy {
             model: authorization.model,
             effort: authorization.effort,
+            harness: None,
         });
     // `#queueeffectidentity`: preflight annotates intentional repeated effects,
     // so an exact identity normally names one occurrence. Keep the count in the
@@ -925,7 +1050,14 @@ pub fn claim_with_session(
     let lineage_generation_floor = crate::queue_lineage::max_generation(file, &target)?;
     let now = now_secs();
     let result = mutate_ledger(file, |ledger| {
-        refuse_claim_on_exhausted_harness(file, ledger, &identity, owner, owner_session.as_ref())?;
+        refuse_claim_on_exhausted_harness(
+            file,
+            ledger,
+            &identity,
+            owner,
+            owner_session.as_ref(),
+            worker_harness.as_deref(),
+        )?;
         let outcome = ledger.claim_in_session_with_generation_floor(
             &target,
             owner,
@@ -947,7 +1079,12 @@ pub fn claim_with_session(
         {
             stored.claim_time_row = Some(row);
         }
-        stored.dispatch_policy = dispatch_policy.clone();
+        assign_dispatch_policy(
+            stored,
+            &outcome,
+            dispatch_policy.clone(),
+            worker_harness.as_deref(),
+        );
         stored.tracked_item_aliases = tracked_item_aliases.clone();
         Ok((outcome, stored.clone()))
     })?;
@@ -2739,6 +2876,194 @@ mod tests {
         )
         .unwrap();
         doc
+    }
+
+    /// `#claimworkerharness`: a coordinator session on an exhausted harness can
+    /// still claim a different row for a worker on another harness. The stored
+    /// block may say `claude-code`; that is the same harness as `claude`.
+    #[test]
+    fn a_claim_for_another_harness_is_admitted_when_the_coordinator_is_exhausted() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = write_doc(
+            dir.path(),
+            &["do [#blocked]", "do [#next]", "do [#also]", "do [#free]"],
+        );
+        let session = ClaimOwnerSession {
+            harness: Some("claude".to_string()),
+            session_id: Some("coord".to_string()),
+            pane: None,
+            pid: None,
+        };
+        let (_, blocked) = claim_with_session(
+            &doc,
+            "#blocked",
+            "subagent:blocked",
+            600,
+            Some(session.clone()),
+        )
+        .unwrap();
+        start_attempt(
+            &doc,
+            "#blocked",
+            "subagent:blocked",
+            "worker-1",
+            600,
+            blocked.generation,
+        )
+        .unwrap();
+        block_attempt_on_quota(
+            &doc,
+            "#blocked",
+            Some(blocked.generation),
+            agent_doc_queue::worker_quota::WorkerQuotaBlock {
+                harness: Some("claude-code".to_string()),
+                limit: "session limit".to_string(),
+                evidence: "You've hit your session limit".to_string(),
+                reset_hint: None,
+                worktree: None,
+                branch: None,
+                blocked_at_secs: 1,
+            },
+        )
+        .unwrap();
+
+        let refused =
+            claim_with_session(&doc, "#next", "subagent:next", 600, Some(session.clone()))
+                .unwrap_err()
+                .to_string();
+        assert!(refused.contains("worker_quota_exhausted"), "{refused}");
+        assert!(refused.contains("--harness"), "{refused}");
+
+        let alias = claim_with_session_for_worker_harness(
+            &doc,
+            "#next",
+            "subagent:next",
+            600,
+            Some(session.clone()),
+            Some("claude-code"),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(alias.contains("worker_quota_exhausted"), "{alias}");
+
+        let unknown = claim_with_session_for_worker_harness(
+            &doc,
+            "#next",
+            "subagent:next",
+            600,
+            Some(session.clone()),
+            Some("not-a-harness"),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(unknown.contains("not a worker harness"), "{unknown}");
+        assert!(
+            load_ledger(&doc)
+                .unwrap()
+                .claims
+                .iter()
+                .all(|claim| claim.owner != "subagent:next")
+        );
+
+        claim_with_session(&doc, "#also", "coordinator", 600, Some(session.clone())).unwrap();
+
+        let explicit = claim_with_session_for_worker_harness(
+            &doc,
+            "#free",
+            "subagent:free",
+            600,
+            None,
+            Some("claude"),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            explicit.contains("on claude (worker_quota_exhausted)"),
+            "{explicit}"
+        );
+
+        let (_, claimed) = claim_with_session_for_worker_harness(
+            &doc,
+            "#next",
+            "subagent:next",
+            600,
+            Some(session),
+            Some("codex"),
+        )
+        .unwrap();
+        assert_eq!(
+            claimed
+                .dispatch_policy
+                .as_ref()
+                .and_then(|policy| policy.harness.as_deref()),
+            Some("codex")
+        );
+        let (_, idempotent) = claim_with_session_for_worker_harness(
+            &doc,
+            "#next",
+            "subagent:next",
+            600,
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(idempotent.generation, claimed.generation);
+        assert_eq!(
+            idempotent
+                .dispatch_policy
+                .as_ref()
+                .and_then(|policy| policy.harness.as_deref()),
+            Some("codex"),
+            "an idempotent claim keeps the harness already recorded"
+        );
+        start_attempt(
+            &doc,
+            "#next",
+            "subagent:next",
+            "worker-2",
+            600,
+            claimed.generation,
+        )
+        .unwrap();
+        block_attempt_on_quota(
+            &doc,
+            "#next",
+            Some(claimed.generation),
+            agent_doc_queue::worker_quota::WorkerQuotaBlock {
+                harness: Some("codex".to_string()),
+                limit: "session limit".to_string(),
+                evidence: "codex limit".to_string(),
+                reset_hint: None,
+                worktree: None,
+                branch: None,
+                blocked_at_secs: 2,
+            },
+        )
+        .unwrap();
+        let again = claim_with_session_for_worker_harness(
+            &doc,
+            "#next",
+            "subagent:next",
+            600,
+            None,
+            Some("grok"),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(again.contains("worker_quota_exhausted"), "{again}");
+        let kept = load_ledger(&doc)
+            .unwrap()
+            .claims
+            .into_iter()
+            .find(|claim| claim.owner == "subagent:next")
+            .unwrap();
+        assert_eq!(
+            kept.dispatch_policy
+                .as_ref()
+                .and_then(|policy| policy.harness.as_deref()),
+            Some("codex"),
+            "a refused reclaim keeps the harness the admitted attempt recorded"
+        );
     }
 
     /// `#finalgrace`: a pinned claim clock stamps the claim and measures its

@@ -295,6 +295,10 @@ pub struct SubagentDispatchPolicy {
     pub model: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effort: Option<String>,
+    /// Worker harness named by `queue claim --harness` (`#claimworkerharness`).
+    /// `None` means the worker runs on the claiming coordinator's harness.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub harness: Option<String>,
 }
 
 /// Positive acknowledgement that one concrete harness worker accepted one

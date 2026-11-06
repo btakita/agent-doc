@@ -145,8 +145,8 @@ pub fn project(output: &str) -> PaneComposerProjection {
 }
 
 /// Whether a running Grok composer can take one mid-turn follow-up
-/// (`#routesyncsteer`). A busy footer still parses: the readiness projection
-/// collapses that screen to `Busy` and would otherwise hide an operator draft.
+/// (`#routesyncsteer`). A busy footer still parses, so a draft under a running
+/// turn stays visible.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FollowUpComposer {
     /// Empty box, or ghost suggestion text only.
@@ -260,6 +260,24 @@ mod tests {
         );
         assert_eq!(
             project_pane_composer(&format!("Waiting for response… 1.0s [stop]\n{IDLE}"), &h),
+            PaneComposerProjection::Busy
+        );
+    }
+
+    /// `#managedipcdraftguard`: a running turn does not hide a draft, as it does
+    /// not on any other harness.
+    #[test]
+    fn a_draft_under_a_running_turn_is_a_draft() {
+        let h = HarnessConfig::grok();
+        let busy = IDLE.replace("Ctrl+x", "Ctrl+c:cancel │ Ctrl+x");
+        assert_eq!(
+            project_pane_composer(&busy.replace("│ ❯ ", "│ ❯ unfinished note "), &h),
+            PaneComposerProjection::OperatorDraft {
+                preview: "unfinished note".to_string(),
+            }
+        );
+        assert_eq!(
+            project_pane_composer(&busy, &h),
             PaneComposerProjection::Busy
         );
     }

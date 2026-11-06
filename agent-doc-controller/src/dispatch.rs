@@ -3932,10 +3932,10 @@ pub enum PreDispatchStrandedDraftAction {
     /// The composer holds no draft of this trigger, so the normal
     /// text-plus-submit dispatch is correct.
     DispatchFresh,
-    /// A draft is visible but the harness is mid-turn, so the text is queued
-    /// behind that turn rather than stranded. Pressing a submit key into an
-    /// active turn is never the repair; the caller's own busy short-circuit owns
-    /// this case.
+    /// This trigger is visible but the harness is mid-turn. Pressing a submit
+    /// key into an active turn is never the repair, and a path that types with
+    /// no composer check of its own must refuse rather than append a second
+    /// trigger (`#managedipcdraftguard`).
     DeferPaneBusy,
     /// An idle, dispatch-ready composer is still holding this trigger
     /// unsubmitted. Submit that draft instead of appending a second trigger to
@@ -3943,8 +3943,9 @@ pub enum PreDispatchStrandedDraftAction {
     ResubmitStrandedDraft,
     /// The composer holds a draft that is NOT this trigger. Injecting appends to
     /// it with no separator, so the harness receives one concatenated line
-    /// (`#concatdraftinject`). Nothing here is agent-doc's text to clear, so the
-    /// dispatch fails closed and leaves the draft exactly as it is.
+    /// (`#concatdraftinject`), and a running turn takes that line as one queued
+    /// message (`#managedipcdraftguard`). Nothing here is agent-doc's text to
+    /// clear, so the dispatch fails closed and leaves the draft exactly as it is.
     DeferForeignDraft,
 }
 
@@ -3995,17 +3996,16 @@ pub struct PreDispatchStrandedDraftFacts {
 /// own. `#jbtsiftnosub2` implements exactly this pre-check for FRESH route panes;
 /// an existing dispatch-only pane needs the same guarantee.
 ///
-/// The classification stays a strict tightening: only a successful capture that
-/// proves an idle, dispatch-ready composer still holding this exact trigger
-/// diverts from the normal dispatch. Everything else — capture failure, no
-/// draft, busy pane — proceeds as before.
+/// A press of `Enter` needs a successful capture that proves an idle,
+/// dispatch-ready composer still holding this exact trigger. A draft that is not
+/// this trigger refuses on an idle or a busy pane alike.
 pub const fn classify_pre_dispatch_stranded_draft_action(
     facts: PreDispatchStrandedDraftFacts,
 ) -> PreDispatchStrandedDraftAction {
     if !facts.pane_captured {
         PreDispatchStrandedDraftAction::ObserveUnavailable
     } else if !facts.trigger_drafted {
-        if facts.foreign_draft && !facts.pane_busy {
+        if facts.foreign_draft {
             PreDispatchStrandedDraftAction::DeferForeignDraft
         } else {
             PreDispatchStrandedDraftAction::DispatchFresh
@@ -8527,8 +8527,7 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
             PreDispatchStrandedDraftAction::DeferForeignDraft.as_str(),
             "defer_foreign_draft"
         );
-        // An empty composer is still the ordinary dispatch, and a busy pane is
-        // still the busy case — the new state is a strict tightening of neither.
+        // An empty composer is still the ordinary dispatch.
         assert_eq!(
             classify_pre_dispatch_stranded_draft_action(PreDispatchStrandedDraftFacts {
                 trigger_drafted: false,
@@ -8544,8 +8543,8 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
                 pane_busy: true,
                 ..idle_ready_composer_facts()
             }),
-            PreDispatchStrandedDraftAction::DispatchFresh,
-            "a busy pane keeps its existing short-circuit rather than acquiring a new refusal"
+            PreDispatchStrandedDraftAction::DeferForeignDraft,
+            "a running turn takes the draft and the trigger as one message (#managedipcdraftguard)"
         );
         // The draft that DOES hold this trigger still submits: the foreign-draft
         // state must not swallow the case #strandeddraftresubmit owns.

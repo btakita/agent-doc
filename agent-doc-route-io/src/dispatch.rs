@@ -8,7 +8,7 @@ use crate::direct_pane_dispatch::{
     CommandDispatchResult, CommandDispatchStatus, RouteSubmitObservationLogFacts,
     log_dispatch_inject, log_route_latency, log_route_submit_observation,
     poll_direct_pane_acceptance, preserve_route_pane_snapshot, print_route_pane_snapshot_hint,
-    send_command_once_unchecked, send_command_unchecked,
+    read_composer_before_typing, send_command_once_unchecked, send_command_unchecked,
     send_direct_pane_enter_resubmit_until_stable,
     try_late_direct_pane_enter_resubmit_after_unproven_dispatch,
 };
@@ -160,11 +160,6 @@ pub fn dispatch_via_supervisor_ipc_with_mode(
     }) {
         anyhow::bail!("{rejection}");
     }
-    let flash_msg = format!("⏳ {}", harness.trigger_command(&short_name));
-    if let Err(e) = agent_doc_tmux_io::show_message(tmux, pane, "2000", &flash_msg) {
-        eprintln!("[route] warning: display-message failed: {}", e);
-    }
-
     let tracker =
         build_routed_dispatch_start_tracker(file, file_path, harness, Some(tmux), Some(pane))?;
     let _route_submit_guard = agent_doc_controller_io::project_controller::begin_route_submit(
@@ -172,6 +167,14 @@ pub fn dispatch_via_supervisor_ipc_with_mode(
         pane,
         &harness.binary,
     )?;
+    if let Some(proof) = guard_composer_before_typing(tmux, file, pane, file_path, harness)? {
+        return Ok(proof);
+    }
+    let flash_msg = format!("⏳ {}", harness.trigger_command(&short_name));
+    if let Err(e) = agent_doc_tmux_io::show_message(tmux, pane, "2000", &flash_msg) {
+        eprintln!("[route] warning: display-message failed: {}", e);
+    }
+
     let method = IpcMethod::Inject {
         bytes: agent_doc_tmux_commands::submitted_text_without_trailing_line_endings(&payload)
             .to_string(),
@@ -806,6 +809,37 @@ fn clear_non_operator_composer_residue(
     }
 }
 
+/// `#managedipcdraftguard`: the guard for a path that types with no composer
+/// check of its own, supervisor IPC inject and the pass-through single submit.
+/// `Ok(Some(proof))` means a stranded trigger was submitted instead; `Ok(None)`
+/// means the composer was read and is safe to type into. A composer that could
+/// not be read refuses, because a miss here loses text that exists nowhere else.
+fn guard_composer_before_typing(
+    tmux: &Tmux,
+    file: &Path,
+    pane: &str,
+    file_path: &str,
+    harness: &HarnessConfig,
+) -> Result<Option<RoutedDispatchStartProof>> {
+    if let Some(proof) =
+        try_pre_dispatch_stranded_draft_submit(tmux, file, pane, file_path, harness)?
+    {
+        return Ok(Some(proof));
+    }
+    match read_composer_before_typing(tmux, pane, file, file_path, harness)? {
+        Some(read) if read.trigger_visible => anyhow::bail!(
+            "pane {pane} composer already holds the unsubmitted {} trigger behind a running turn; \
+             route never appends a second trigger to it. Retry once that turn has ended.",
+            file.display(),
+        ),
+        Some(_) => Ok(None),
+        None => anyhow::bail!(
+            "route could not read the composer of pane {pane} for {}; nothing was typed. Retry.",
+            file.display(),
+        ),
+    }
+}
+
 /// (`#strandeddraftresubmit`) Submit a trigger already stranded in the composer
 /// instead of appending a second one to it.
 ///
@@ -966,14 +1000,10 @@ pub fn dispatch_routed_reopen_with_mode(
         pane,
         &harness.binary,
     )?;
-    // `#strandeddraftresubmit`: a trigger already stranded in the composer must
-    // be submitted, never have a second trigger appended to it.
-    if let Some(proof) =
-        try_pre_dispatch_stranded_draft_submit(tmux, file, pane, file_path, harness)?
-    {
-        return Ok(proof);
-    }
     if options.submit_policy == DirectPaneSubmitPolicy::PassThroughSingleSubmit {
+        if let Some(proof) = guard_composer_before_typing(tmux, file, pane, file_path, harness)? {
+            return Ok(proof);
+        }
         let submit_start = Instant::now();
         let trigger = send_command_once_checked(tmux, pane, file_path, harness)?;
         repair_pass_through_stranded_draft(tmux, file, pane, harness, &trigger);
@@ -998,6 +1028,14 @@ pub fn dispatch_routed_reopen_with_mode(
             ),
         );
         return Ok(RoutedDispatchStartProof::TransportSubmittedOnly);
+    }
+    // `#strandeddraftresubmit`: a trigger already stranded in the composer must
+    // be submitted, never have a second trigger appended to it. Anything else
+    // falls through to `send_command_checked`, whose own composer read owns it.
+    if let Some(proof) =
+        try_pre_dispatch_stranded_draft_submit(tmux, file, pane, file_path, harness)?
+    {
+        return Ok(proof);
     }
     let tracker =
         build_routed_dispatch_start_tracker(file, file_path, harness, Some(tmux), Some(pane))?;
@@ -1419,6 +1457,81 @@ mod tests {
             PreDispatchStrandedDraftAction::DeferForeignDraft
         );
         assert_eq!(observation.draft_preview.as_deref(), Some("❯ operator text"));
+    }
+
+    /// `#managedipcdraftguard`: a draft refuses under a running turn too, on
+    /// every harness that has a composer to read. The trigger that is already
+    /// the draft gets its own action, because typing it again would glue the two.
+    #[test]
+    fn pre_dispatch_refuses_a_draft_under_a_running_turn() {
+        const RULE: &str = "────────────────────────────────────────\n";
+        for (harness, frame, cursor) in [
+            (
+                HarnessConfig::claude(),
+                format!("✶ Generating… (3s · esc to interrupt)\n{RULE}❯ fix the tests\n{RULE}"),
+                Some(2),
+            ),
+            (
+                HarnessConfig::claude(),
+                format!(
+                    "✶ Generating… (3s · esc to interrupt)\n{RULE}❯ fix the tests\n  and more\n{RULE}"
+                ),
+                Some(3),
+            ),
+            (
+                HarnessConfig::codex(),
+                "• Working (3s • esc to interrupt)\n\n› fix the tests\n\n  my own status line\n"
+                    .to_string(),
+                Some(2),
+            ),
+            (
+                HarnessConfig::grok(),
+                "╭────────────╮\n│ ❯ fix the tests │\n╰──── Grok ───╯\nCtrl+c:cancel\n".to_string(),
+                None,
+            ),
+        ] {
+            let action = classify_pre_dispatch_stranded_draft_capture(
+                Some(&frame),
+                cursor,
+                &harness,
+                TRIGGER,
+            );
+            assert_eq!(
+                action,
+                PreDispatchStrandedDraftAction::DeferForeignDraft,
+                "{}: {frame}",
+                harness.binary
+            );
+        }
+
+        let harness = HarnessConfig::codex();
+        let frame = format!(
+            "• Working (3s • esc to interrupt)\n\n› {TRIGGER}\n\n  my own status line\n"
+        );
+        assert_eq!(
+            classify_pre_dispatch_stranded_draft_capture(
+                Some(&frame),
+                Some(2),
+                &harness,
+                TRIGGER
+            ),
+            PreDispatchStrandedDraftAction::DeferPaneBusy
+        );
+    }
+
+    #[test]
+    fn pre_dispatch_lets_a_running_turn_with_an_empty_composer_through() {
+        const RULE: &str = "────────────────────────────────────────\n";
+        let frame = format!("✶ Generating… (3s · esc to interrupt)\n{RULE}❯ \n{RULE}");
+        assert_eq!(
+            classify_pre_dispatch_stranded_draft_capture(
+                Some(&frame),
+                Some(2),
+                &HarnessConfig::claude(),
+                TRIGGER
+            ),
+            PreDispatchStrandedDraftAction::DispatchFresh
+        );
     }
 
     /// `#codexfooterrowcomposer`: a draft ending on a row with no `›` projected

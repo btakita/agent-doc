@@ -1914,35 +1914,44 @@ const TURN_INTENT_CHECKPOINTS_KEPT_PER_DOCUMENT: i64 = 2;
 /// largest remaining unbounded fact once `#responsecaptureretention` and
 /// `#turnintentretention` were in force — each row embeds a full
 /// `commit_candidate_content` image.
+///
+/// `#decisionlookupstartupcost`: the superseded-row predicate used to
+/// `json_extract` both payloads inside a correlated `EXISTS`. There is no
+/// `fact_type`-leading index, so that planned a full scan of `state_events`
+/// and then parsed every sibling payload again per candidate. On the live
+/// agent-loop ledger (533 candidates, ~45MB of payloads inside a 275MB
+/// `state.db`, nothing left to delete) that read alone took about 9s, and
+/// every process's first `open_state_db` runs it — including read-only
+/// `decision answered` / `decision search`, before any ledger work. Extract
+/// the hash and revision once into a materialized set, then apply the same
+/// `>` / `IS` predicate there. The comparison stays SQLite's, so a missing
+/// revision does not lose to a numeric one.
+const VISIBLE_CANDIDATE_PRUNE_SQL: &str = r#"
+    WITH keyed AS MATERIALIZED (
+        SELECT rowid, id, document_hash,
+               json_extract(payload_json, '$.fact.commit_candidate_hash') AS hash,
+               json_extract(payload_json, '$.fact.model_revision') AS rev
+        FROM state_events
+        WHERE fact_type = 'visible_write_commit_candidate_observed'
+    )
+    SELECT e.rowid FROM keyed e
+    WHERE EXISTS (
+        SELECT 1 FROM keyed n
+        WHERE n.document_hash = e.document_hash
+          AND n.hash IS e.hash
+          AND (
+            n.rev > e.rev
+            OR (n.rev IS e.rev AND n.id > e.id)
+          )
+    )
+    LIMIT 2000
+"#;
+
 fn prune_superseded_visible_write_commit_candidates(conn: &Connection) -> Result<()> {
     // Bounded batches planned by a read (`#sdkingressstall`), so neither a
     // legacy backlog nor the scan itself holds the write lock.
-    delete_state_events_planned_by_read(
-        conn,
-        r#"
-                    SELECT e.rowid FROM state_events e
-                    WHERE e.fact_type = 'visible_write_commit_candidate_observed'
-                      AND EXISTS (
-                        SELECT 1 FROM state_events n
-                        WHERE n.fact_type = 'visible_write_commit_candidate_observed'
-                          AND n.document_hash = e.document_hash
-                          AND json_extract(n.payload_json, '$.fact.commit_candidate_hash')
-                              IS json_extract(e.payload_json, '$.fact.commit_candidate_hash')
-                          AND (
-                            json_extract(n.payload_json, '$.fact.model_revision')
-                              > json_extract(e.payload_json, '$.fact.model_revision')
-                            OR (
-                              json_extract(n.payload_json, '$.fact.model_revision')
-                                IS json_extract(e.payload_json, '$.fact.model_revision')
-                              AND n.id > e.id
-                            )
-                          )
-                      )
-                    LIMIT 2000
-        "#,
-        [],
-    )
-    .context("failed to prune superseded visible write commit candidates")?;
+    delete_state_events_planned_by_read(conn, VISIBLE_CANDIDATE_PRUNE_SQL, [])
+        .context("failed to prune superseded visible write commit candidates")?;
     Ok(())
 }
 
@@ -10013,6 +10022,75 @@ mod tests {
                 "b-c1-r1".to_string(),
             ],
             "one row survives per (document, commit_candidate_hash): highest revision, last on a tie"
+        );
+        Ok(())
+    }
+
+    /// `#decisionlookupstartupcost`: planning must extract each candidate
+    /// payload once. A correlated `json_extract` over sibling payloads made
+    /// every process's first `open_state_db` scan the whole ledger, which is
+    /// what `decision answered` paid before it read the document.
+    #[test]
+    fn visible_candidate_prune_extracts_each_payload_once() -> Result<()> {
+        let dir = tempfile::TempDir::new()?;
+        let conn = open_state_db(dir.path())?;
+        let plan = conn
+            .prepare(&format!("EXPLAIN QUERY PLAN {VISIBLE_CANDIDATE_PRUNE_SQL}"))?
+            .query_map([], |row| row.get::<_, String>(3))?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        let scans = plan
+            .iter()
+            .filter(|line| line.contains("SCAN state_events"))
+            .count();
+        assert!(
+            plan.iter().any(|line| line.contains("MATERIALIZE keyed")),
+            "plan must materialize the extracted keys once: {plan:?}"
+        );
+        assert_eq!(
+            scans, 1,
+            "state_events is scanned only to build that set, not again per row: {plan:?}"
+        );
+
+        // A missing revision does not lose to a numeric one (`>` is not true
+        // for NULL), and two missing revisions still keep the later row.
+        let insert = |event_id: &str, payload: &str| {
+            conn.execute(
+                "INSERT INTO state_events (event_id, document_hash, domain, fact_type, payload_json, timestamp) \
+                 VALUES (?1, 'docA', 'document', 'visible_write_commit_candidate_observed', ?2, 0)",
+                rusqlite::params![event_id, payload],
+            )
+        };
+        insert(
+            "numeric",
+            r#"{"fact":{"commit_candidate_hash":"h","model_revision":1,"commit_candidate_content":"x"}}"#,
+        )?;
+        insert(
+            "missing-revision",
+            r#"{"fact":{"commit_candidate_hash":"h","commit_candidate_content":"y"}}"#,
+        )?;
+        insert(
+            "null-hash-old",
+            r#"{"fact":{"commit_candidate_hash":null,"model_revision":null}}"#,
+        )?;
+        insert(
+            "null-hash-new",
+            r#"{"fact":{"commit_candidate_hash":null,"model_revision":null}}"#,
+        )?;
+        prune_superseded_visible_write_commit_candidates(&conn)?;
+        let remaining: Vec<String> = conn
+            .prepare(
+                "SELECT event_id FROM state_events \
+                 WHERE fact_type = 'visible_write_commit_candidate_observed' ORDER BY id",
+            )?
+            .query_map([], |row| row.get(0))?
+            .collect::<std::result::Result<_, _>>()?;
+        assert_eq!(
+            remaining,
+            vec![
+                "numeric".to_string(),
+                "missing-revision".to_string(),
+                "null-hash-new".to_string(),
+            ]
         );
         Ok(())
     }

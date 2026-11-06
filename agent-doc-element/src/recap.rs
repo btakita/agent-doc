@@ -12,6 +12,10 @@
 //!   in place, and a blank recap counts as no recap.
 //! - [`recap_format_findings`] checks only what is cheap and deterministic, and
 //!   its findings are advisory. The format itself lives in `runbooks/recap.md`.
+//! - A recommended decision nests the `#recommendationinrow` row
+//!   `- **Recommendation:** **<label>** — <reason>` under that numbered item.
+//!   The row is display only: findings never turn the recap into choices
+//!   (`#recaprecommendationrow`).
 //!
 //! # Agentic Contracts
 //! - [`replace_recap_in_document`] changes nothing outside the recap section.
@@ -21,6 +25,7 @@
 //! - replace_is_total_and_keeps_no_history
 //! - replace_creates_the_section_below_status_and_nothing_else
 //! - format_findings_accept_the_full_shape_and_any_omitted_section
+//! - decision_recommendation_uses_the_rendered_marker
 
 use std::fmt;
 
@@ -104,6 +109,14 @@ pub enum RecapFormatFinding {
     SectionWithoutList { label: &'static str },
     /// Operator decisions must be a numbered list.
     DecisionsNotNumbered,
+    /// A decision recommends in prose instead of the rendered marker.
+    DecisionRecommendsInProse,
+    /// A `**Recommendation:**` line is not the rendered marker.
+    DecisionRecommendationMalformed { line: String },
+    /// A numbered decision names more than one recommendation.
+    DecisionRecommendationRepeated,
+    /// A recommendation's reason restates itself instead of a tradeoff.
+    DecisionRecommendationTautology { label: String },
 }
 
 impl fmt::Display for RecapFormatFinding {
@@ -130,6 +143,22 @@ impl fmt::Display for RecapFormatFinding {
             Self::DecisionsNotNumbered => {
                 write!(f, "number the items under `{DECISIONS_LABEL}`")
             }
+            Self::DecisionRecommendsInProse => write!(
+                f,
+                "nest `- **Recommendation:** **<label>** — <reason>` under the numbered decision instead of `I recommend` or `My recommendation`"
+            ),
+            Self::DecisionRecommendationMalformed { line } => write!(
+                f,
+                "write `{line}` as `- **Recommendation:** **<label>** — <reason>` nested under its numbered decision"
+            ),
+            Self::DecisionRecommendationRepeated => write!(
+                f,
+                "a numbered decision has more than one `**Recommendation:**`; keep one"
+            ),
+            Self::DecisionRecommendationTautology { label } => write!(
+                f,
+                "recommendation `{label}` needs a concrete contextual reason, not a tautological recommendation"
+            ),
         }
     }
 }
@@ -164,7 +193,175 @@ pub fn recap_format_findings(body: &str) -> Vec<RecapFormatFinding> {
             findings.push(RecapFormatFinding::DecisionsNotNumbered);
         }
     }
+    findings.extend(decision_recommendation_findings(&lines));
     findings
+}
+
+/// Recommendations under `Your decisions`, and only there (`#recaprecommendationrow`).
+///
+/// The marker is the row `#recommendationinrow` renders above `**Choices:**`.
+/// Prose such as `I recommend hold` is a finding, not a guess of which choice
+/// it meant, and a well-formed row is never turned into a choice.
+fn decision_recommendation_findings(lines: &[&str]) -> Vec<RecapFormatFinding> {
+    let Some(start) = lines
+        .iter()
+        .position(|line| label_rank(line) == Some(RECAP_SECTION_LABELS.len() - 1))
+    else {
+        return Vec::new();
+    };
+    let mut findings = Vec::new();
+    let mut index = start + 1;
+    while index < lines.len() {
+        let line = lines[index];
+        if !line.starts_with(char::is_whitespace) && !is_list_item(line) {
+            break;
+        }
+        if is_numbered_item(line) {
+            let item_start = index;
+            index += 1;
+            while index < lines.len() && lines[index].starts_with(char::is_whitespace) {
+                index += 1;
+            }
+            findings.extend(findings_for_decision(&lines[item_start..index]));
+            continue;
+        }
+        findings.extend(findings_for_loose_recommendation(line));
+        index += 1;
+    }
+    findings
+}
+
+fn findings_for_decision(lines: &[&str]) -> Vec<RecapFormatFinding> {
+    let mut findings = Vec::new();
+    if lines.iter().copied().any(contains_prose_recommendation) {
+        findings.push(RecapFormatFinding::DecisionRecommendsInProse);
+    }
+    if lines[0].contains(RECOMMENDATION_ROW_PREFIX) {
+        findings.push(RecapFormatFinding::DecisionRecommendationMalformed {
+            line: lines[0].trim().to_string(),
+        });
+    }
+    let mut markers = 0usize;
+    for line in &lines[1..] {
+        if !line.contains(RECOMMENDATION_ROW_PREFIX) {
+            continue;
+        }
+        markers += 1;
+        match parse_recommendation_marker(line) {
+            Some((label, reason)) if rationale_states_a_reason(label, reason) => {}
+            Some((label, _)) => {
+                findings.push(RecapFormatFinding::DecisionRecommendationTautology {
+                    label: label.to_string(),
+                });
+            }
+            None => findings.push(RecapFormatFinding::DecisionRecommendationMalformed {
+                line: line.trim().to_string(),
+            }),
+        }
+    }
+    if markers > 1 {
+        findings.push(RecapFormatFinding::DecisionRecommendationRepeated);
+    }
+    findings
+}
+
+fn findings_for_loose_recommendation(line: &str) -> Vec<RecapFormatFinding> {
+    let mut findings = Vec::new();
+    if contains_prose_recommendation(line) {
+        findings.push(RecapFormatFinding::DecisionRecommendsInProse);
+    }
+    if line.contains(RECOMMENDATION_ROW_PREFIX) {
+        findings.push(RecapFormatFinding::DecisionRecommendationMalformed {
+            line: line.trim().to_string(),
+        });
+    }
+    findings
+}
+
+const RECOMMENDATION_ROW_PREFIX: &str = "**Recommendation:**";
+
+/// The rendered `#recommendationinrow` row: `- **Recommendation:** **<label>** — <reason>`.
+fn parse_recommendation_marker(line: &str) -> Option<(&str, &str)> {
+    let rest = line.trim();
+    let rest = rest
+        .strip_prefix("- ")
+        .or_else(|| rest.strip_prefix("* "))
+        .or_else(|| rest.strip_prefix("+ "))?
+        .trim_start();
+    let rest = rest
+        .strip_prefix(RECOMMENDATION_ROW_PREFIX)?
+        .trim_start()
+        .strip_prefix("**")?;
+    let (label, after) = rest.split_once("**")?;
+    let label = label.trim();
+    let reason = after.trim_start().strip_prefix('—')?.trim();
+    if label.is_empty() || reason.is_empty() || label.contains('*') {
+        return None;
+    }
+    Some((label, reason))
+}
+
+fn contains_prose_recommendation(line: &str) -> bool {
+    let lower = line.to_ascii_lowercase();
+    contains_phrase(&lower, "i recommend") || contains_phrase(&lower, "my recommendation")
+}
+
+fn contains_phrase(haystack: &str, phrase: &str) -> bool {
+    haystack.match_indices(phrase).any(|(index, _)| {
+        let before = index == 0 || !haystack.as_bytes()[index - 1].is_ascii_alphanumeric();
+        let after = index + phrase.len();
+        let after = after >= haystack.len() || !haystack.as_bytes()[after].is_ascii_alphanumeric();
+        before && after
+    })
+}
+
+/// Same bar as a queue recommendation: at least two words that are neither the
+/// choice label nor recommendation filler. `agent-doc-element` does not depend
+/// on `agent-doc-queue`, so this stays beside `rationale_states_a_reason` there.
+fn rationale_states_a_reason(label: &str, reason: &str) -> bool {
+    let label = label.to_ascii_lowercase();
+    let reason = reason.to_ascii_lowercase();
+    let choice_words = label
+        .trim_end_matches("(recommended)")
+        .split(|character: char| !character.is_ascii_alphanumeric())
+        .filter(|word| !word.is_empty())
+        .collect::<std::collections::HashSet<_>>();
+    let substantive_words = reason
+        .split(|character: char| !character.is_ascii_alphanumeric())
+        .filter(|word| !word.is_empty())
+        .filter(|word| !choice_words.contains(word))
+        .filter(|word| {
+            !matches!(
+                *word,
+                "a" | "an"
+                    | "and"
+                    | "be"
+                    | "best"
+                    | "better"
+                    | "because"
+                    | "choice"
+                    | "choose"
+                    | "chosen"
+                    | "it"
+                    | "is"
+                    | "option"
+                    | "prefer"
+                    | "preferred"
+                    | "recommend"
+                    | "recommendation"
+                    | "recommended"
+                    | "select"
+                    | "selected"
+                    | "should"
+                    | "that"
+                    | "the"
+                    | "this"
+                    | "to"
+            )
+        })
+        .take(2)
+        .count();
+    substantive_words >= 2
 }
 
 /// Non-blank lines outside fenced code, so a quoted example is never checked.
@@ -236,7 +433,8 @@ mod tests {
         "Still can't close:\n",
         "- do [#example]: the merge is still blocked.\n\n",
         "Your decisions, most urgent first:\n",
-        "1. Release: ship or hold. I recommend hold.\n",
+        "1. Release: ship or hold.\n",
+        "   - **Recommendation:** **hold** — the mirror is unchecked.\n",
         "2. Docs: publish or hold.\n",
     );
 
@@ -414,9 +612,102 @@ mod tests {
             RecapFormatFinding::SectionOutOfOrder { label: "a" },
             RecapFormatFinding::SectionWithoutList { label: "a" },
             RecapFormatFinding::DecisionsNotNumbered,
+            RecapFormatFinding::DecisionRecommendsInProse,
+            RecapFormatFinding::DecisionRecommendationMalformed {
+                line: "- **Recommendation:** hold".to_string(),
+            },
+            RecapFormatFinding::DecisionRecommendationRepeated,
+            RecapFormatFinding::DecisionRecommendationTautology {
+                label: "hold".to_string(),
+            },
         ];
         for finding in findings {
             assert!(!finding.to_string().is_empty());
         }
+    }
+
+    #[test]
+    fn decision_recommendation_uses_the_rendered_marker() {
+        let marked = concat!(
+            "Outcome.\n\n",
+            "Your decisions, most urgent first:\n",
+            "1. Release: ship it or hold it.\n",
+            "   - **Recommendation:** **hold** — the mirror is unchecked.\n",
+            "2. Docs: publish them now or with the release.\n",
+        );
+        assert_eq!(recap_format_findings(marked), []);
+
+        let prose_outside = concat!(
+            "I recommend reading the notes.\n\n",
+            "Your decisions, most urgent first:\n",
+            "1. Ship.\n",
+        );
+        assert_eq!(recap_format_findings(prose_outside), []);
+
+        let fenced = concat!(
+            "Outcome.\n\n",
+            "```\n",
+            "Your decisions, most urgent first:\n",
+            "1. I recommend hold.\n",
+            "```\n",
+        );
+        assert_eq!(recap_format_findings(fenced), []);
+
+        assert_eq!(
+            recap_format_findings(
+                "Outcome.\n\nYour decisions, most urgent first:\n1. Release: ship or hold. I recommend hold.\n"
+            ),
+            [RecapFormatFinding::DecisionRecommendsInProse]
+        );
+        assert_eq!(
+            recap_format_findings(
+                "Outcome.\n\nYour decisions, most urgent first:\n1. Release: ship or hold. My recommendation: hold.\n"
+            ),
+            [RecapFormatFinding::DecisionRecommendsInProse]
+        );
+        assert_eq!(
+            recap_format_findings(
+                "Outcome.\n\nYour decisions, most urgent first:\n1. Release: ship or hold.\n   - **Recommendation:** **hold** - the mirror is unchecked.\n"
+            ),
+            [RecapFormatFinding::DecisionRecommendationMalformed {
+                line: "- **Recommendation:** **hold** - the mirror is unchecked.".to_string()
+            }]
+        );
+        assert_eq!(
+            recap_format_findings(
+                "Outcome.\n\nYour decisions, most urgent first:\n1. **Recommendation:** **hold** — the mirror is unchecked.\n"
+            ),
+            [RecapFormatFinding::DecisionRecommendationMalformed {
+                line: "1. **Recommendation:** **hold** — the mirror is unchecked.".to_string()
+            }]
+        );
+        assert_eq!(
+            recap_format_findings(
+                "Outcome.\n\nYour decisions, most urgent first:\n1. Release: ship or hold.\n   - **Recommendation:** **hold** — it is recommended.\n"
+            ),
+            [RecapFormatFinding::DecisionRecommendationTautology {
+                label: "hold".to_string()
+            }]
+        );
+        assert_eq!(
+            recap_format_findings(concat!(
+                "Outcome.\n\nYour decisions, most urgent first:\n",
+                "1. Release: ship or hold.\n",
+                "   - **Recommendation:** **hold** — the mirror is unchecked.\n",
+                "   - **Recommendation:** **ship** — the review is requested.\n",
+            )),
+            [RecapFormatFinding::DecisionRecommendationRepeated]
+        );
+        assert_eq!(
+            recap_format_findings(
+                "Outcome.\n\nYour decisions, most urgent first:\n- **Recommendation:** **hold** — the mirror is unchecked.\n"
+            ),
+            [
+                RecapFormatFinding::DecisionsNotNumbered,
+                RecapFormatFinding::DecisionRecommendationMalformed {
+                    line: "- **Recommendation:** **hold** — the mirror is unchecked.".to_string()
+                }
+            ]
+        );
     }
 }

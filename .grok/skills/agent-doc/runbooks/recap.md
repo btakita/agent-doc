@@ -44,7 +44,18 @@ below. Omit any section that has nothing to say, except the first.
    `Blocked (⛔)`.
 4. **`Still can't close:`** A list of what stays open, each with the reason.
 5. **`Your decisions, most urgent first:`** A numbered list of what only the
-   operator can decide, with your recommendation where you have one.
+   operator can decide. When you recommend one choice that item names, nest the
+   `#recommendationinrow` marker under that item:
+
+   `- **Recommendation:** **<label>** — <reason>`
+
+   The label is that choice, with no `(Recommended)` suffix. The reason states
+   current evidence or a tradeoff, not a tautology such as "it is recommended".
+   Omit the line when you recommend nothing. Do not write `I recommend …` or
+   `My recommendation: …`; that prose is not the marker. The line is the same
+   row a queue renders above `**Choices:**`, and it is display only: the recap
+   is still not a packet, a choice, or a queue row, and nothing here is
+   projected into `**Choices:**` (`#recaprecommendationrow`).
 
 Use the three labels exactly as written, each on its own line and directly above
 its list. Use no Markdown headings.
@@ -67,7 +78,8 @@ Still can't close:
 - do [#example-a]: the merge is blocked until the release lands.
 
 Your decisions, most urgent first:
-1. Release: ship it or hold it. I recommend hold, because the mirror is unchecked.
+1. Release: ship it or hold it.
+   - **Recommendation:** **hold** — the mirror is unchecked.
 2. Docs: publish them now or with the release.
 ```
 
@@ -80,6 +92,11 @@ finding is an advisory on stderr. A recap never fails a closeout:
 - It contains no Markdown heading outside a code fence.
 - The three labels keep their order, and each one introduces a list.
 - The items under `Your decisions, most urgent first:` are numbered.
+- A recommendation under one of those items is one nested
+  `- **Recommendation:** **<label>** — <reason>` line, and the reason is not a
+  tautology. `I recommend` and `My recommendation` there are findings. The check
+  does not guess which choice the prose meant, and it does not read the line as
+  a `**Choices:**` row.
 
 Everything else in this runbook is your responsibility. A closeout with no recap
 or a blank one still lands, leaves the previous recap in place, and prints an

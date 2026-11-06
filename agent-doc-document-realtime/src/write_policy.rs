@@ -5127,6 +5127,56 @@ Working.
         )
     }
 
+    /// `#responseanchornodeidentity`: a retained target superseded while the
+    /// editor held a follow-up prompt. The stale reply shares its opening with the
+    /// reply before it, and the rebased document must not keep that opening.
+    #[test]
+    fn rebase_drops_a_stale_reply_sharing_an_opening_with_a_held_reply() {
+        let held = format!("{SECOND_REPLY_OPENING}### Batch j integrated\n\nPushed.\n\n");
+        let base = exchange_doc(&format!(
+            "\u{276f} prompt\n\n{held}{SECOND_REPLY_OPENING}### Stale section\n\nStale.\n"
+        ));
+        let target = exchange_doc(&format!(
+            "\u{276f} prompt\n\n{held}### Re: latest\n\nLatest.\n"
+        ));
+        let cut = base.replace(
+            "<!-- agent:boundary:next -->",
+            "\n\u{276f} operator follow-up\n<!-- agent:boundary:next -->",
+        );
+
+        let rebased = rebase_agent_candidate_over_editor_cut(&base, &target, &cut).unwrap();
+
+        assert!(!rebased.contains("Stale."), "{rebased}");
+        assert!(rebased.contains("Latest."), "{rebased}");
+        assert!(rebased.contains("\u{276f} operator follow-up"), "{rebased}");
+        assert_eq!(rebased.matches("**Queue prompt:**").count(), 1, "{rebased}");
+    }
+
+    /// `#responseanchornodeidentity`: the operator's edit to a section an earlier
+    /// reply also carries survives a rebase. The edit leaves the targets with no
+    /// provable anchor, so the rebase is additive: the stale reply stays. Stepping
+    /// back to an earlier anchor would remove it, and the edited section with it.
+    #[test]
+    fn rebase_keeps_an_operator_edit_to_a_repeated_section() {
+        const SECTION: &str = "### Verification\n\nmake check exit 0.\n\n";
+        let held = format!("### Re: first\n\nOne.\n\n{SECTION}### Re: second\n\nTwo.\n\n{SECTION}");
+        let base = exchange_doc(&format!("{held}### Re: stale\n\nStale.\n"));
+        let target = exchange_doc(&format!("{held}### Re: latest\n\nLatest.\n"));
+        let last_copy = base.rfind("make check exit 0.").unwrap();
+        let mut cut = base.clone();
+        cut.replace_range(
+            last_copy..last_copy + "make check exit 0.".len(),
+            "make check exit 0, rerun by the operator.",
+        );
+
+        let rebased = rebase_agent_candidate_over_editor_cut(&base, &target, &cut).unwrap();
+
+        assert!(rebased.contains("rerun by the operator"), "{rebased}");
+        assert_eq!(rebased.matches("### Verification").count(), 2, "{rebased}");
+        assert!(rebased.contains("Latest."), "{rebased}");
+        assert!(rebased.contains("Stale."), "{rebased}");
+    }
+
     /// `#responseblockmovedtail` (agent-doc-bugs.md, 2026-11-05 17:52 EST): the
     /// reply lost only its heading and quoted prompt, so the block looked missing
     /// and commit recovery re-appended it, which moved the heading to the tail and

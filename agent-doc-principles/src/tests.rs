@@ -69,6 +69,8 @@ fn ordinary_rules_including_prose_about_principles_stay_plain() {
         "Principles matter.",
         "principled design",
         "[#principle] is just an id",
+        "principled [id]: a different word",
+        "In principle [id]: not at the start",
         "",
     ] {
         assert_eq!(parse_rule(rule), RuleForm::Plain, "{rule:?}");
@@ -80,6 +82,9 @@ fn principle_shaped_rules_without_a_valid_id_or_statement_are_malformed() {
     for (rule, needle) in [
         ("principle: no id here", "needs an id"),
         ("principle [#]: empty id", "needs an id"),
+        ("principle [velocity]: no hash", "starts with `#`"),
+        ("PRINCIPLE [velocity]: no hash", "starts with `#`"),
+        ("principle[velocity]: no space", "starts with `#`"),
         ("principle [#open: unclosed", "closing `]`"),
         ("principle [#ok] missing colon", "expected `:`"),
         ("principle #nocolon", "expected `:`"),
@@ -287,6 +292,50 @@ fn a_malformed_principle_stays_an_ordinary_rule_with_an_issue() {
             .message
             .contains("kept as an ordinary rule")
     );
+}
+
+/// `#principlemissinghashwarning`: `principle [id]: x` reads as a principle to
+/// the operator, so it is reported rather than left a plain rule. It is kept
+/// where rules are kept, and in the global file it is not also told to become
+/// a principle, which is what it already tried to be.
+#[test]
+fn a_principle_id_missing_its_hash_is_reported_not_silently_plain() {
+    let composition = compose(&[
+        layer(
+            PrincipleScope::Global,
+            "principles.md",
+            &["principle [velocity]: Velocity over polish."],
+        ),
+        layer(
+            PrincipleScope::Document,
+            "doc.md",
+            &["principle [velocity]: Velocity over polish."],
+        ),
+    ]);
+    assert!(composition.principles.is_empty());
+    assert_eq!(
+        composition.rules,
+        vec!["principle [velocity]: Velocity over polish."]
+    );
+    let codes: Vec<(&str, &str)> = composition
+        .issues
+        .iter()
+        .map(|issue| (issue.code, issue.source.as_str()))
+        .collect();
+    assert_eq!(
+        codes,
+        vec![
+            (ISSUE_MALFORMED, "principles.md"),
+            (ISSUE_MALFORMED, "doc.md"),
+        ]
+    );
+    let global = &composition.issues[0].message;
+    assert!(global.contains("starts with `#`"), "{global}");
+    assert!(global.contains("ignored"), "{global}");
+    assert!(!global.contains("Write it as `principle"), "{global}");
+    let kept = &composition.issues[1].message;
+    assert!(kept.contains("starts with `#`"), "{kept}");
+    assert!(kept.contains("kept as an ordinary rule"), "{kept}");
 }
 
 #[test]

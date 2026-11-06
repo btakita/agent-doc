@@ -303,3 +303,55 @@ fn principles_lists_facts_and_lint_reports_fact_warnings() {
         );
     assert_eq!(std::fs::read_to_string(&document).unwrap(), document_text);
 }
+
+/// `#principlemissinghashwarning`: `principle [id]: x` is not a principle, and
+/// both surfaces that report authoring problems say so. Before this it was an
+/// ordinary rule with no warning at all.
+#[test]
+fn principles_and_lint_warn_on_a_principle_id_missing_its_hash() {
+    let temp = tempfile::tempdir().unwrap();
+    let config_home = temp.path().join("config");
+    std::fs::create_dir_all(&config_home).unwrap();
+    let document = temp.path().join("nohash.md");
+    std::fs::write(
+        &document,
+        concat!(
+            "---\nagent_doc_session: nohash\n---\n\n",
+            "<!-- agent:rules -->\n",
+            "- principle [velocity]: Velocity over polish.\n",
+            "- Principle of least surprise applies.\n",
+            "<!-- /agent:rules -->\n\n",
+            "<!-- agent:exchange -->\n",
+            "prompt\n",
+            "<!-- /agent:exchange -->\n",
+        ),
+    )
+    .unwrap();
+
+    let output = cargo_bin_cmd!("agent-doc")
+        .env("XDG_CONFIG_HOME", &config_home)
+        .args(["principles", "--json"])
+        .arg(&document)
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(json["principles"], serde_json::json!([]), "{json:#}");
+    let warnings = json["warnings"].as_array().unwrap();
+    assert_eq!(warnings.len(), 1, "{json:#}");
+    assert_eq!(warnings[0]["code"], "principle_malformed", "{json:#}");
+    let message = warnings[0]["message"].as_str().unwrap();
+    assert!(message.contains("starts with `#`"), "{message}");
+    assert!(message.contains("kept as an ordinary rule"), "{message}");
+
+    cargo_bin_cmd!("agent-doc")
+        .env("XDG_CONFIG_HOME", &config_home)
+        .arg("lint")
+        .arg(&document)
+        .assert()
+        .success()
+        .stderr(
+            predicate::str::contains("1 principle/fact warning(s)")
+                .and(predicate::str::contains("[principle_malformed]")),
+        );
+}

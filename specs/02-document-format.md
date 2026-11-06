@@ -132,9 +132,13 @@ names where to move it, and the binary never copies a principle between
 files. A nearer principle with the same id replaces the farther one in place
 and lists the replaced sources in `overrides`; a second principle with one id
 in the same file is a `principle_duplicate_id` warning and the first applies.
-A principle-shaped rule with no valid id or no statement stays an ordinary
+A rule that starts like a principle (`principle` followed by `[#id]`, `#id`,
+`[id]`, or `:`) but has no valid id or no statement stays an ordinary
 `agent_rules` entry with a `principle_malformed` warning, so nothing the
-operator wrote is dropped. Principle items are not also `agent_rules` entries.
+operator wrote is dropped (`#principlemissinghashwarning` covers `[id]`, the
+missing `#`). Prose that merely opens with the word ("Principle of least
+surprise applies.") is not reported. Principle items are not also
+`agent_rules` entries.
 
 The composed list is `principles` on the cycle contract (`id`, `statement`,
 optional `rationale`, `scope`, `source`, optional `overrides`), with

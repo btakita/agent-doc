@@ -1207,8 +1207,18 @@ fn merge_exchange_inner(
     let uses_heading_turns = !theirs_blocks.is_empty() || !ours_blocks.is_empty();
 
     if !uses_heading_turns {
-        // No heading-prose turns on either side — delegate to the list-item merge
-        // so the existing bullet-based exchange behavior is preserved exactly.
+        // No heading-prose turns on either side. Bullet items still use the
+        // list-item merge. A body with no bullets is operator prompt text:
+        // emitting only items used to drop it, including a second `yes`
+        // (`#identicalpromptdedupe`).
+        let inner = theirs_inner.concat();
+        let prompt_only = !inner.trim().is_empty()
+            && theirs_comp.is_none_or(|comp| comp.items.is_empty())
+            && ours_comp.is_none_or(|comp| comp.items.is_empty())
+            && base_comp.is_none_or(|comp| comp.items.is_empty());
+        if prompt_only {
+            return inner;
+        }
         let mut out = String::new();
         if let Some(tc) = theirs_comp {
             let merged = merge_component_items(
@@ -3056,6 +3066,32 @@ Answer to A.
             merged.merged_doc.matches("❯ yes").count(),
             2,
             "a second yes prompt is not a duplicate:\n{}",
+            merged.merged_doc
+        );
+    }
+
+    #[test]
+    fn exchange_merge_keeps_a_second_yes_without_a_response_heading() {
+        // Before any `### Re:` turn, the exchange is only operator prompt nodes.
+        // The no-heading branch used to emit list items and drop that text, so a
+        // second `yes` disappeared along with the first (`#identicalpromptdedupe`).
+        let _guard = crate::document_cell::CELL_MERGE_ENV_LOCK.lock();
+        unsafe {
+            std::env::remove_var(crate::document_cell::CELL_MERGE_ENV);
+        }
+        let base = "<!-- agent:exchange -->\n❯ yes\n<!-- /agent:exchange -->\n";
+        let ours = base;
+        let theirs = "<!-- agent:exchange -->\n❯ yes\n\n❯ yes\n<!-- /agent:exchange -->\n";
+        let merged = document_cell_merge(base, ours, theirs);
+        assert_eq!(
+            merged.merged_doc.matches("❯ yes").count(),
+            2,
+            "a second yes before any response is not a duplicate:\n{}",
+            merged.merged_doc
+        );
+        assert!(
+            merged.merged_doc.contains("❯ yes\n\n❯ yes\n"),
+            "both prompt nodes stay verbatim:\n{}",
             merged.merged_doc
         );
     }

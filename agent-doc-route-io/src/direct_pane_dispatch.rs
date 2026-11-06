@@ -25,6 +25,7 @@ use agent_doc_harness::{HarnessConfig, PaneComposerProjection, protected_prompt_
 use agent_doc_hash::short_content_hash;
 use agent_doc_supervisor::lifecycle::recycle_interrupted_resubmit_should_wait;
 use agent_doc_tmux::pane_current_command_is_bare_shell;
+use agent_doc_turn_executor_tmux::prompt::composer_text_without_ghost_suggestions;
 
 /// Poll cadence for the direct-pane submit-acceptance check.
 pub const DIRECT_PANE_SUBMIT_ACCEPTANCE_POLL_INTERVAL: Duration = Duration::from_millis(150);
@@ -221,8 +222,11 @@ pub fn poll_direct_pane_acceptance(
     let mut poll_state = DirectPaneAcceptancePollState::default();
     let mut capture_failed = false;
     while start.elapsed() < timeout {
-        match agent_doc_tmux_io::capture_pane(tmux, pane) {
-            Ok(content) => {
+        match agent_doc_tmux_io::capture_pane_with_ansi(tmux, pane) {
+            Ok(captured) => {
+                // `#plaincaptureghost`: a ghost suggestion repeating the trigger
+                // after Enter is not the trigger still sitting in the input.
+                let content = composer_text_without_ghost_suggestions(&captured);
                 let elapsed = start.elapsed();
                 let cmd_still_in_input = recent_lines_contain_trigger(&content, trigger);
                 let capture_hash = short_content_hash(&content);
@@ -462,8 +466,9 @@ pub fn dead_harness_shell_dispatch_block(
     // `#runfrontendcrashed`: with a bare shell in the foreground, a lone `❯`
     // is the shell's own (Powerlevel10k/starship) prompt as often as it is an
     // empty composer — demand harness-specific evidence.
-    let pane_shows_harness_prompt = agent_doc_tmux_io::capture_pane(tmux, pane)
+    let pane_shows_harness_prompt = agent_doc_tmux_io::capture_pane_with_ansi(tmux, pane)
         .ok()
+        .map(|captured| composer_text_without_ghost_suggestions(&captured))
         .is_some_and(|content| harness.prompt_proves_harness_over_shell(&content));
     classify_dead_harness_shell_dispatch_block(DeadHarnessShellDispatchFacts {
         pane_shows_harness_prompt,
@@ -508,9 +513,10 @@ pub fn send_command_unchecked(
     }
     let mut existing_draft_diagnostic_path = None;
     let mut protected_prompt_input = None;
-    let existing_draft_visible = match agent_doc_tmux_io::capture_pane_with_ansi(tmux, pane)
-        .or_else(|_| agent_doc_tmux_io::capture_pane(tmux, pane))
-    {
+    // `#plaincaptureghost`: no plain-capture fallback — a plain capture cannot
+    // tell a ghost suggestion from a typed draft, and a failed ANSI capture is
+    // the same unreachable tmux a plain retry would hit.
+    let existing_draft_visible = match agent_doc_tmux_io::capture_pane_with_ansi(tmux, pane) {
         Ok(captured) => {
             if let PaneComposerProjection::AgentAddressed { target } =
                 crate::startup_ready::pane_composer_projection(tmux, pane, &captured, harness)
@@ -530,8 +536,9 @@ pub fn send_command_unchecked(
             }
             // Keep SGR attributes for protected-input classification: Codex uses
             // DIM to distinguish generated composer suggestions from operator
-            // drafts. Diagnostics and trigger matching use the plain projection.
-            let content = agent_doc_turn_executor_tmux::prompt::strip_ansi(&captured);
+            // drafts. Diagnostics and trigger matching use the ghost-free plain
+            // projection (`#plaincaptureghost`).
+            let content = composer_text_without_ghost_suggestions(&captured);
             let visible = route_trigger_visible_in_current_draft(&content, &trigger, |line| {
                 harness.is_prompt_line(line)
             });
@@ -762,13 +769,13 @@ pub fn try_late_direct_pane_enter_resubmit_after_unproven_dispatch(
         .map(|command| command.trim().to_string())
         .filter(|command| pane_current_command_is_bare_shell(command))
     {
-        if let Ok(content) = agent_doc_tmux_io::capture_pane(tmux, pane) {
+        if let Ok(captured) = agent_doc_tmux_io::capture_pane_with_ansi(tmux, pane) {
             preserve_route_pane_snapshot(
                 file,
                 pane,
                 harness,
                 "dispatch_start_unproven_late_resubmit_refused_bare_shell",
-                &content,
+                &agent_doc_turn_executor_tmux::prompt::strip_ansi(&captured),
             );
         }
         agent_doc_ops_log_io::log_op(
@@ -783,8 +790,11 @@ pub fn try_late_direct_pane_enter_resubmit_after_unproven_dispatch(
         );
         return Ok(None);
     }
-    let visible = match agent_doc_tmux_io::capture_pane(tmux, pane) {
-        Ok(content) => {
+    let visible = match agent_doc_tmux_io::capture_pane_with_ansi(tmux, pane) {
+        Ok(captured) => {
+            // `#plaincaptureghost`: a ghost suggestion of the trigger is not a
+            // late draft; Enter on it would submit the suggestion.
+            let content = composer_text_without_ghost_suggestions(&captured);
             let visible = route_trigger_visible_in_current_draft(&content, &trigger, |line| {
                 harness.is_prompt_line(line)
             });
@@ -935,6 +945,56 @@ fn late_resubmit_harness_surface_visible(content: &str, harness: &HarnessConfig)
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `#plaincaptureghost`: after Enter, Grok predicts the next prompt as an
+    /// italic grey ghost, often the trigger itself. Read from the ANSI capture
+    /// through the ghost-free projection, it is neither the trigger still in
+    /// the input (acceptance poll) nor a late draft to Enter-resubmit; the same
+    /// text typed at normal intensity still is both.
+    #[test]
+    fn grok_grey_suggestion_is_not_a_late_draft_but_typed_trigger_is() {
+        let harness = HarnessConfig::grok();
+        let trigger = "agent-doc tasks/sample.md";
+        let composer = |body: &str| {
+            format!(
+                concat!(
+                    "● Done.\n",
+                    "╭────────────────────────────────╮\n",
+                    "\x1b[38;2;88;88;88m│\x1b[0m \x1b[38;2;122;162;247m❯\x1b[0m {} \x1b[38;2;88;88;88m│\x1b[0m\n",
+                    "╰──── Grok 4.7 (high) ───────────╯\n",
+                    "Tab/→:accept suggestion  │  Shift+Tab:mode  │  Ctrl+x:shortcuts\n",
+                ),
+                body
+            )
+        };
+        let ghost = composer(&format!("\x1b[3;38;2;88;88;88m{trigger}\x1b[0m"));
+        let typed = composer(&format!("\x1b[38;2;192;202;245m{trigger}\x1b[0m"));
+
+        let ghost_text = composer_text_without_ghost_suggestions(&ghost);
+        assert!(!recent_lines_contain_trigger(&ghost_text, trigger));
+        assert!(!route_trigger_visible_in_current_draft(
+            &ghost_text,
+            trigger,
+            |line| harness.is_prompt_line(line)
+        ));
+        assert!(
+            late_resubmit_harness_surface_visible(&ghost_text, &harness),
+            "masking the ghost keeps the Grok composer frame visible"
+        );
+        let plain = agent_doc_turn_executor_tmux::prompt::strip_ansi(&ghost);
+        assert!(
+            recent_lines_contain_trigger(&plain, trigger),
+            "the plain capture is what made the ghost read as the trigger"
+        );
+
+        let typed_text = composer_text_without_ghost_suggestions(&typed);
+        assert!(recent_lines_contain_trigger(&typed_text, trigger));
+        assert!(route_trigger_visible_in_current_draft(
+            &typed_text,
+            trigger,
+            |line| harness.is_prompt_line(line)
+        ));
+    }
 
     #[test]
     fn supervisor_acceptance_requires_composer_or_active_turn_observation() {

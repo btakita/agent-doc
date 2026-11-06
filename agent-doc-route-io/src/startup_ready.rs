@@ -281,15 +281,38 @@ pub fn fresh_start_missing_admission_outcome(
     harness: &HarnessConfig,
     trigger: &str,
 ) -> FreshStartAdmissionOutcome {
-    match agent_doc_tmux_io::capture_pane(tmux, pane) {
-        Ok(content) => {
-            let pane_dispatch_ready =
-                pane_ready_prompt_candidate(tmux, pane, &content, harness).is_some();
-            let trigger_pending = pane_composer_has_pending_trigger(&content, trigger);
-            fresh_start_admission_outcome(false, pane_dispatch_ready, trigger_pending)
-        }
+    match agent_doc_tmux_io::capture_pane_with_ansi(tmux, pane) {
+        Ok(content) => fresh_start_missing_admission_outcome_from_capture(
+            &content,
+            harness,
+            agent_doc_tmux_io::pane_cursor_y(tmux, pane),
+            trigger,
+        ),
         Err(_) => fresh_start_admission_outcome(false, false, false),
     }
+}
+
+/// Pure core of [`fresh_start_missing_admission_outcome`] over one ANSI capture.
+///
+/// `#plaincaptureghost`: the composer is classified from the ANSI capture and
+/// the trigger is matched against the ghost-free projection, so a Grok/Codex
+/// grey suggestion of the trigger is neither an operator draft (which made a
+/// healthy idle pane read not-ready and get reaped as a genuine miss) nor a
+/// stranded trigger.
+pub fn fresh_start_missing_admission_outcome_from_capture(
+    content: &str,
+    harness: &HarnessConfig,
+    cursor_y: Option<usize>,
+    trigger: &str,
+) -> FreshStartAdmissionOutcome {
+    let pane_dispatch_ready = matches!(
+        agent_doc_harness::project_pane_composer_at_cursor(content, harness, cursor_y),
+        PaneComposerProjection::ReadyEmpty { .. }
+    );
+    let composer_text =
+        agent_doc_turn_executor_tmux::prompt::composer_text_without_ghost_suggestions(content);
+    let trigger_pending = pane_composer_has_pending_trigger(&composer_text, trigger);
+    fresh_start_admission_outcome(false, pane_dispatch_ready, trigger_pending)
 }
 
 /// `#jbtsiftnosub`: re-verify, immediately before an auto-start send, that the
@@ -299,7 +322,7 @@ pub fn auto_start_dispatch_ready_block(
     pane: &str,
     harness: &HarnessConfig,
 ) -> Option<AutoStartDispatchBlock> {
-    let pane_shows_dispatch_ready_prompt = agent_doc_tmux_io::capture_pane(tmux, pane)
+    let pane_shows_dispatch_ready_prompt = agent_doc_tmux_io::capture_pane_with_ansi(tmux, pane)
         .ok()
         .and_then(|content| pane_ready_prompt_candidate(tmux, pane, &content, harness))
         .is_some();
@@ -386,5 +409,109 @@ pub fn reverify_auto_start_dispatch_ready(
                 shell,
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const GROK_TRIGGER: &str = "agent-doc tasks/sample.md";
+
+    fn grok_composer(body: &str) -> String {
+        format!(
+            concat!(
+                "╭────────────────────────────────╮\n",
+                "\x1b[38;2;88;88;88m│\x1b[0m \x1b[38;2;122;162;247m❯\x1b[0m {} \x1b[38;2;88;88;88m│\x1b[0m\n",
+                "╰──── Grok 4.7 (high) ───────────╯\n",
+                "Tab/→:accept suggestion  │  Shift+Tab:mode  │  Ctrl+x:shortcuts\n",
+            ),
+            body
+        )
+    }
+
+    /// `#plaincaptureghost`: a fresh-start no-cycle check over an idle Grok
+    /// pane whose box shows a grey (italic RGB) suggestion of the very trigger
+    /// keeps the pane as a healthy idle no-op. The plain capture read the ghost
+    /// as a draft: not ready, so the pane was reaped as a genuine miss.
+    #[test]
+    fn fresh_start_grey_suggestion_reads_idle_ready_not_a_draft() {
+        let harness = HarnessConfig::grok();
+        let ghost = grok_composer(&format!("\x1b[3;38;2;88;88;88m{GROK_TRIGGER}\x1b[0m"));
+        assert_eq!(
+            fresh_start_missing_admission_outcome_from_capture(
+                &ghost,
+                &harness,
+                None,
+                GROK_TRIGGER
+            ),
+            FreshStartAdmissionOutcome::IdleNoOpKeep
+        );
+        let plain = agent_doc_turn_executor_tmux::prompt::strip_ansi(&ghost);
+        assert_eq!(
+            fresh_start_missing_admission_outcome_from_capture(
+                &plain,
+                &harness,
+                None,
+                GROK_TRIGGER
+            ),
+            FreshStartAdmissionOutcome::GenuineMissReap,
+            "the plain capture is what made the ghost read as a draft"
+        );
+    }
+
+    /// The same visible text typed at normal intensity is still an operator
+    /// draft: not dispatch-ready, and the trigger still reads as pending.
+    #[test]
+    fn fresh_start_typed_draft_still_reads_as_a_draft() {
+        let harness = HarnessConfig::grok();
+        let typed = grok_composer(&format!("\x1b[38;2;192;202;245m{GROK_TRIGGER}\x1b[0m"));
+        assert_eq!(
+            agent_doc_harness::project_pane_composer_at_cursor(&typed, &harness, None),
+            PaneComposerProjection::OperatorDraft {
+                preview: GROK_TRIGGER.to_string(),
+            }
+        );
+        let composer_text =
+            agent_doc_turn_executor_tmux::prompt::composer_text_without_ghost_suggestions(&typed);
+        assert!(pane_composer_has_pending_trigger(
+            &composer_text,
+            GROK_TRIGGER
+        ));
+        assert_eq!(
+            fresh_start_missing_admission_outcome_from_capture(
+                &typed,
+                &harness,
+                None,
+                GROK_TRIGGER
+            ),
+            FreshStartAdmissionOutcome::GenuineMissReap
+        );
+    }
+
+    /// Codex renders its suggestion DIM: the ghost-free projection drops it,
+    /// so it is never a pending trigger, while the same text typed at normal
+    /// intensity is still pending and never reads as a ready composer.
+    #[test]
+    fn codex_dim_suggestion_is_not_pending_while_typed_text_is() {
+        let harness = HarnessConfig::codex();
+        let ghost = "\x1b[1m›\x1b[0m \x1b[2magent-doc tasks/sample.md\x1b[0m\n\n  gpt-5.6 · ~/work/sample-app · 40% left\n";
+        let composer_text =
+            agent_doc_turn_executor_tmux::prompt::composer_text_without_ghost_suggestions(ghost);
+        assert!(!pane_composer_has_pending_trigger(
+            &composer_text,
+            GROK_TRIGGER
+        ));
+        let typed = "\x1b[1m›\x1b[0m agent-doc tasks/sample.md\n\n  gpt-5.6 · ~/work/sample-app · 40% left\n";
+        assert!(!matches!(
+            agent_doc_harness::project_pane_composer_at_cursor(typed, &harness, None),
+            PaneComposerProjection::ReadyEmpty { .. }
+        ));
+        let composer_text =
+            agent_doc_turn_executor_tmux::prompt::composer_text_without_ghost_suggestions(typed);
+        assert!(pane_composer_has_pending_trigger(
+            &composer_text,
+            GROK_TRIGGER
+        ));
     }
 }

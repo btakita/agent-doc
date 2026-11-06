@@ -136,8 +136,8 @@ pub fn build_routed_dispatch_start_tracker(
         "codex" if codex_dispatch_start_tracking_enabled(file) => {
             let latest = agent_doc_codex_hook_io::load_latest_prompt_state_for_file(file)?;
             let (pane, pre_dispatch_content) = match (tmux, pane) {
-                (Some(tmux), Some(pane)) => match agent_doc_tmux_io::capture_pane(tmux, pane) {
-                    Ok(content) => (Some(pane.to_string()), Some(content)),
+                (Some(tmux), Some(pane)) => match capture_dispatch_start_pane(tmux, pane) {
+                    Ok(content) => (Some(pane.to_string()), Some(content.composer_text)),
                     Err(err) => {
                         eprintln!(
                             "[route] warning: failed to capture Codex pane {} before routed dispatch: {}",
@@ -161,13 +161,14 @@ pub fn build_routed_dispatch_start_tracker(
             let (Some(tmux), Some(pane)) = (tmux, pane) else {
                 return Ok(None);
             };
-            let pre_dispatch_content =
-                agent_doc_tmux_io::capture_pane(tmux, pane).with_context(|| {
+            let pre_dispatch_content = capture_dispatch_start_pane(tmux, pane)
+                .with_context(|| {
                     format!(
                         "failed to capture OpenCode pane {} before routed dispatch",
                         pane
                     )
-                })?;
+                })?
+                .composer_text;
             Ok(Some(RoutedDispatchStartTracker::OpenCodePane {
                 pane: pane.to_string(),
                 trigger: harness.trigger_command(file_path),
@@ -176,6 +177,34 @@ pub fn build_routed_dispatch_start_tracker(
         }
         _ => Ok(None),
     }
+}
+
+/// One dispatch-start pane observation.
+///
+/// `#plaincaptureghost`: the pane is captured with ANSI so the composer can be
+/// classified on its SGR styling; `composer_text` is the ANSI-free projection
+/// with harness ghost suggestions removed, which every trigger/draft/content
+/// comparison reads. A plain `capture-pane -p` made a grey suggestion of the
+/// trigger read as the trigger still sitting unsubmitted in the composer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DispatchStartPaneCapture {
+    raw: String,
+    composer_text: String,
+}
+
+impl DispatchStartPaneCapture {
+    fn from_ansi(raw: String) -> Self {
+        let composer_text =
+            agent_doc_turn_executor_tmux::prompt::composer_text_without_ghost_suggestions(&raw);
+        Self { raw, composer_text }
+    }
+}
+
+fn capture_dispatch_start_pane(
+    tmux: &Tmux,
+    pane: &str,
+) -> std::result::Result<DispatchStartPaneCapture, agent_doc_tmux_io::TmuxIoError> {
+    agent_doc_tmux_io::capture_pane_with_ansi(tmux, pane).map(DispatchStartPaneCapture::from_ansi)
 }
 
 fn codex_routed_dispatch_start_proof_facts<'a>(
@@ -221,14 +250,16 @@ fn opencode_pane_dispatch_start_proof_facts<'a>(
     harness: &HarnessConfig,
     trigger: &'a str,
     pre_dispatch_content: &'a str,
-    current_content: &'a str,
+    current: &'a DispatchStartPaneCapture,
 ) -> OpenCodePaneDispatchStartProofFacts<'a> {
+    let current_content = current.composer_text.as_str();
     OpenCodePaneDispatchStartProofFacts {
         trigger,
         pre_dispatch_content,
         current_content,
+        // The composer projection needs the SGR styling (`#plaincaptureghost`).
         current_has_ready_prompt_candidate: agent_doc_harness::ready_prompt_candidate(
-            current_content,
+            &current.raw,
             harness,
         )
         .is_some(),
@@ -277,7 +308,7 @@ pub fn wait_for_routed_dispatch_start(
                 if let (Some(pane), Some(pre_dispatch_content)) =
                     (pane.as_deref(), pre_dispatch_content.as_deref())
                 {
-                    let content = agent_doc_tmux_io::capture_pane(tmux, pane).with_context(|| {
+                    let current = capture_dispatch_start_pane(tmux, pane).with_context(|| {
                         format!(
                             "failed to capture Codex pane {} while awaiting routed dispatch proof",
                             pane
@@ -286,7 +317,7 @@ pub fn wait_for_routed_dispatch_start(
                     let facts = codex_pane_dispatch_start_proof_facts(
                         harness,
                         pre_dispatch_content,
-                        &content,
+                        &current.composer_text,
                     );
                     if codex_pane_busy_transition_after_acceptance(facts) {
                         return Ok(Some(RoutedDispatchStartProof::PaneStateChanged));
@@ -298,7 +329,7 @@ pub fn wait_for_routed_dispatch_start(
                 trigger,
                 pre_dispatch_content,
             } => {
-                let content = agent_doc_tmux_io::capture_pane(tmux, pane).with_context(|| {
+                let current = capture_dispatch_start_pane(tmux, pane).with_context(|| {
                     format!(
                         "failed to capture OpenCode pane {} while awaiting routed dispatch proof",
                         pane
@@ -308,7 +339,7 @@ pub fn wait_for_routed_dispatch_start(
                     harness,
                     trigger,
                     pre_dispatch_content,
-                    &content,
+                    &current,
                 );
                 if opencode_pane_state_changed_from_idle(facts) {
                     return Ok(Some(RoutedDispatchStartProof::PaneStateChanged));
@@ -324,6 +355,36 @@ pub fn wait_for_routed_dispatch_start(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `#plaincaptureghost`: a Codex dim suggestion of the trigger in the idle
+    /// composer is dropped from the text every dispatch-start comparison reads,
+    /// while the raw ANSI capture is kept for composer classification. A typed
+    /// trigger at normal intensity survives the projection.
+    #[test]
+    fn dispatch_start_capture_drops_grey_suggestion_but_keeps_typed_trigger() {
+        let trigger = "agent-doc tasks/sample.md";
+        let ghost = DispatchStartPaneCapture::from_ansi(format!(
+            "\x1b[1m›\x1b[0m \x1b[2m{trigger}\x1b[0m\n\n  gpt-5.6 · ~/work/sample-app · 40% left\n"
+        ));
+        assert!(ghost.raw.contains("\x1b[2m"));
+        assert!(
+            !agent_doc_controller::dispatch::recent_lines_contain_trigger(
+                &ghost.composer_text,
+                trigger
+            ),
+            "{}",
+            ghost.composer_text
+        );
+        let typed = DispatchStartPaneCapture::from_ansi(format!(
+            "\x1b[1m›\x1b[0m {trigger}\n\n  gpt-5.6 · ~/work/sample-app · 40% left\n"
+        ));
+        assert!(
+            agent_doc_controller::dispatch::recent_lines_contain_trigger(
+                &typed.composer_text,
+                trigger
+            )
+        );
+    }
 
     #[test]
     fn codex_pane_facts_recognize_working_snapshot_after_idle_baseline() {

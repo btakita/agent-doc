@@ -495,6 +495,17 @@ pub struct RefillHead {
     pub start_command: String,
 }
 
+/// Why a refill withheld `next_heads` (`#poolquotarefillgate`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct QuotaRefillBlock {
+    /// Canonical harness the refill refused. `None` when the caller named
+    /// none: the gate then refuses rather than guessing a different harness.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub harness: Option<String>,
+    /// [`crate::worker_quota::quota_blocked_next_step`] for the blocking attempt.
+    pub reason: String,
+}
+
 /// One pool's status line.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PoolStatus {
@@ -517,16 +528,25 @@ pub struct PoolRefill {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub frozen: Vec<FrozenWorker>,
     /// The next heads to dispatch now, already bounded by free slots.
+    /// Empty when [`Self::quota_refill_block`] withheld them.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub next_heads: Vec<RefillHead>,
+    /// Set when a harness usage limit withholds `next_heads`
+    /// (`#poolquotarefillgate`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quota_refill_block: Option<QuotaRefillBlock>,
     /// Heads still waiting for a slot after this refill.
     pub waiting_for_slot: usize,
 }
 
 impl PoolRefill {
-    /// Whether the coordinator has pool work to do now.
+    /// Whether the coordinator has pool work to do now. A quota refusal is
+    /// actionable so the reason is surfaced, not only the heads it removed.
     pub fn is_actionable(&self) -> bool {
-        !self.unstarted.is_empty() || !self.refresh_due.is_empty() || !self.next_heads.is_empty()
+        !self.unstarted.is_empty()
+            || !self.refresh_due.is_empty()
+            || !self.next_heads.is_empty()
+            || self.quota_refill_block.is_some()
     }
 
     /// One line per due heartbeat.
@@ -620,9 +640,29 @@ impl PoolRefill {
                 worker.frozen.describe(),
             ));
         }
+        if let Some(block) = &self.quota_refill_block {
+            let on = block
+                .harness
+                .as_deref()
+                .map(|harness| format!(" on {harness}"))
+                .unwrap_or_default();
+            out.push_str(&format!(
+                "\n  quota: next heads withheld ({}{on}): {}",
+                crate::worker_quota::WORKER_QUOTA_EXHAUSTED_REASON,
+                block.reason,
+            ));
+        }
         let steps = self.ordered_steps();
         if steps.is_empty() {
-            if self.waiting_for_slot > 0 {
+            if self.quota_refill_block.is_some() {
+                out.push_str("\n  no refill head is offered while that harness is out of usage.");
+                if self.waiting_for_slot > 0 {
+                    out.push_str(&format!(
+                        "\n  {} more head(s) stay held.",
+                        self.waiting_for_slot
+                    ));
+                }
+            } else if self.waiting_for_slot > 0 {
                 out.push_str(&format!(
                     "\n  no free slot; {} head(s) wait. Refill on the next report-complete, release, lost, or frozen worker.",
                     self.waiting_for_slot
@@ -847,6 +887,7 @@ mod tests {
                 freeze_command: "agent-doc queue freeze f --item r".to_string(),
             }],
             frozen: Vec::new(),
+            quota_refill_block: None,
             next_heads: vec![RefillHead {
                 item: "do [#b]".to_string(),
                 claim_command: "agent-doc queue claim f --item b".to_string(),
@@ -869,6 +910,38 @@ mod tests {
             "{text}"
         );
         assert!(text.contains("3 more head(s) wait"), "{text}");
+    }
+
+    /// `#poolquotarefillgate`: a refusal is the report, not an empty pool.
+    #[test]
+    fn a_quota_refusal_names_the_reason_and_offers_no_head() {
+        let refill = PoolRefill {
+            trigger: PoolRefillTrigger::ReportComplete,
+            pools: Vec::new(),
+            unstarted: Vec::new(),
+            refresh_due: Vec::new(),
+            frozen: Vec::new(),
+            next_heads: Vec::new(),
+            quota_refill_block: Some(QuotaRefillBlock {
+                harness: Some("claude-code".to_string()),
+                reason: "do not start another worker on claude-code".to_string(),
+            }),
+            waiting_for_slot: 2,
+        };
+        assert!(refill.is_actionable());
+        let text = refill.render().unwrap();
+        assert!(
+            text.contains("next heads withheld (worker_quota_exhausted on claude-code)"),
+            "{text}"
+        );
+        assert!(
+            text.contains("do not start another worker on claude-code"),
+            "{text}"
+        );
+        assert!(text.contains("no refill head is offered"), "{text}");
+        assert!(text.contains("2 more head(s) stay held"), "{text}");
+        assert!(!text.contains("no head waits for a slot"), "{text}");
+        assert!(!text.contains("queue claim"), "{text}");
     }
 
     /// Expiry alone is not evidence the worker stopped: an expired bound

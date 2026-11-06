@@ -756,8 +756,9 @@ fn claim_next_shared_leaf(
 /// `#harnessquotaexhausted`: every subagent dispatch passes through a claim,
 /// so this is the gate that keeps a new worker off a harness a sibling worker
 /// just ran out of, however the dispatch was decided. Only proven-equal
-/// harnesses refuse here; a coordinator session of unknown harness may be
-/// dispatching anything. The row's own blocked attempt is refused by
+/// harnesses refuse here (`canonical_harness_name`, so `claude` matches a
+/// block stored as `claude-code`); a coordinator session of unknown harness
+/// may be dispatching anything. The row's own blocked attempt is refused by
 /// [`ClaimOutcome::QuotaBlocked`] instead, with its own next step.
 fn refuse_claim_on_exhausted_harness(
     file: &Path,

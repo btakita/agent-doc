@@ -72,19 +72,33 @@ pub fn quota_blocked_attempts<'a>(
     })
 }
 
+/// Harness spelling this gate compares, the same three folds as
+/// `agent_doc_harness::normalize_harness_name`. Callers may pass either the
+/// session spelling (`claude`) or the stored spelling (`claude-code`).
+pub fn canonical_harness_name(raw: &str) -> String {
+    match raw.trim() {
+        "" => "default".to_string(),
+        "claude" => "claude-code".to_string(),
+        "grok-build" => "grok".to_string(),
+        other => other.to_string(),
+    }
+}
+
 /// Refill gate for a freed pool slot (`#subagentworkpool`): the blocked
 /// attempt that forbids dispatching a new worker on `harness`, if any.
 ///
 /// `None` from the caller, or a block recorded without a harness, means the
-/// target cannot be proven different, so the refill is refused. A harness
-/// comparison is on canonical names: pass `normalize_harness_name` output.
+/// target cannot be proven different, so the refill is refused. Both named
+/// sides are compared with [`canonical_harness_name`].
 pub fn pool_refill_quota_block<'a>(
     claims: impl IntoIterator<Item = &'a QueueClaim>,
     harness: Option<&str>,
 ) -> Option<&'a QueueClaim> {
     quota_blocked_attempts(claims)
         .find(|(_, block)| match (harness, block.harness.as_deref()) {
-            (Some(harness), Some(blocked)) => harness == blocked,
+            (Some(harness), Some(blocked)) => {
+                canonical_harness_name(harness) == canonical_harness_name(blocked)
+            }
             _ => true,
         })
         .map(|(claim, _)| claim)
@@ -353,6 +367,17 @@ mod tests {
         let refused = pool_refill_quota_block(&ledger.claims, Some("claude"));
         assert_eq!(refused.map(|claim| claim.generation), Some(1));
         assert!(pool_refill_quota_block(&ledger.claims, Some("codex")).is_none());
+    }
+
+    /// A coordinator session says `claude`; the block stores `claude-code`.
+    #[test]
+    fn the_pool_gate_folds_harness_aliases() {
+        let claude = blocked_ledger(Some("claude-code"));
+        assert!(pool_refill_quota_block(&claude.claims, Some("claude")).is_some());
+        assert!(pool_refill_quota_block(&claude.claims, Some("claude-code")).is_some());
+        let grok = blocked_ledger(Some("grok"));
+        assert!(pool_refill_quota_block(&grok.claims, Some("grok-build")).is_some());
+        assert!(pool_refill_quota_block(&grok.claims, Some("codex")).is_none());
     }
 
     #[test]

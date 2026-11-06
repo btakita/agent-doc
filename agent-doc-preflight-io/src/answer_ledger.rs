@@ -2017,15 +2017,12 @@ mod tests {
         assert_eq!(search, std::time::Duration::from_secs(60));
     }
 
-    /// Only Markdown hits are eligible, so a code-heavy workspace's symbols
-    /// must not fill the budgeted result rows.
-    #[test]
-    fn recall_asks_tsift_for_markdown_only() {
+    /// A `tsift` that writes its arguments to the returned file, one per line.
+    fn args_recording_tsift(dir: &Path) -> (std::path::PathBuf, std::path::PathBuf) {
         use std::os::unix::fs::PermissionsExt;
-        let (dir, doc, _) = recall_project();
-        let bin_dir = dir.path().join("argsbin");
+        let bin_dir = dir.join("argsbin");
         std::fs::create_dir_all(&bin_dir).unwrap();
-        let args_file = dir.path().join("tsift.args");
+        let args_file = dir.join("tsift.args");
         let script = bin_dir.join("tsift");
         std::fs::write(
             &script,
@@ -2036,12 +2033,41 @@ mod tests {
         )
         .unwrap();
         std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        (bin_dir, args_file)
+    }
+
+    /// Only Markdown hits are eligible, so a code-heavy workspace's symbols
+    /// must not fill the budgeted result rows.
+    #[test]
+    fn recall_asks_tsift_for_markdown_only() {
+        let (dir, doc, _) = recall_project();
+        let (bin_dir, args_file) = args_recording_tsift(dir.path());
 
         let env = recall_env(&bin_dir, 5_000);
         search_decisions(&doc, "tasks/session.md", "which port", &env, 10).unwrap();
 
         let args = std::fs::read_to_string(&args_file).unwrap();
         assert!(args.contains("--lang\nmarkdown\n"), "{args}");
+    }
+
+    /// Preflight stays on the project's own index, where an unscoped search at
+    /// a workspace root visits every nested scope. `decision search` has a
+    /// caller waiting and keeps that reach.
+    #[test]
+    fn only_preflight_recall_is_held_to_the_project_scope() {
+        let (dir, doc, _) = recall_project();
+        let (bin_dir, args_file) = args_recording_tsift(dir.path());
+        let env = recall_env(&bin_dir, 5_000);
+
+        let source = TsiftRecall::discover(&doc, &env).unwrap();
+        source.recall_with_outcome(&["which port".to_string()], 5);
+        let args = std::fs::read_to_string(&args_file).unwrap();
+        assert!(args.contains("--scope\n<root>\n"), "{args}");
+
+        std::fs::remove_file(&args_file).unwrap();
+        search_decisions(&doc, "tasks/session.md", "which port", &env, 10).unwrap();
+        let args = std::fs::read_to_string(&args_file).unwrap();
+        assert!(!args.contains("--scope"), "{args}");
     }
 
     /// A tsift past its deadline is reported as failed; the ledger ranking

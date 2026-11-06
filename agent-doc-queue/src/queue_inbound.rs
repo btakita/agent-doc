@@ -57,8 +57,9 @@ pub struct QueueFollowupPlan {
 }
 
 /// Insert queue-local follow-up heads immediately after the head that produced
-/// them. Queue id and origin are both mandatory: a mirrored copy in another
-/// queue must never redirect the insertion to the document's selected queue.
+/// them, or for a nested head after the top-level row that contains it. Queue
+/// id and origin are both mandatory: a mirrored copy in another queue must
+/// never redirect the insertion to the document's selected queue.
 pub fn plan_queue_followups(
     content: &str,
     queue_id: &str,
@@ -155,12 +156,15 @@ fn splice_followups(
 }
 
 /// Body-relative end offsets of every live (unstruck) row whose head text is
-/// `origin`, including that row's nested subtree.
+/// `origin`, including the nested subtree of its top-level row.
 ///
-/// Follow-ups are siblings of the originating work. Inserting immediately
-/// after only the parent line makes its pre-existing children appear beneath
-/// the new follow-up in Markdown, silently changing both rows' lineage
-/// (`#queueprojectiondrift`).
+/// Follow-ups are top-level rows. Inserting immediately after only the parent
+/// line makes its pre-existing children appear beneath the new follow-up in
+/// Markdown, silently changing both rows' lineage (`#queueprojectiondrift`).
+/// `#handbackopenitemstriage`: the same holds for the later children of a
+/// nested origin's ancestors, so the insertion point is the end of the whole
+/// top-level row. That row may also be a Response packet or a Waiting-on-you
+/// tree, where a nested row would read as the operator's answer, not as work.
 fn live_origin_subtree_ends(body: &str, origin: &str) -> Vec<usize> {
     let wanted = crate::queue_head_alignment::normalize_queue_head_text(origin);
     let lines = body
@@ -171,7 +175,7 @@ fn live_origin_subtree_ends(body: &str, origin: &str) -> Vec<usize> {
         })
         .collect::<Vec<_>>();
     let mut matches = Vec::new();
-    for (index, (line_end, line)) in lines.iter().enumerate() {
+    for (index, (_, line)) in lines.iter().enumerate() {
         let line_text = line.trim_end_matches(['\r', '\n']);
         let indent = line_text.len() - line_text.trim_start().len();
         let Some(prompt) = line_text
@@ -182,8 +186,15 @@ fn live_origin_subtree_ends(body: &str, origin: &str) -> Vec<usize> {
             continue;
         };
         if crate::queue_head_alignment::normalize_queue_head_text(prompt) == wanted {
-            let mut subtree_end = *line_end;
-            for (descendant_end, descendant) in lines.iter().skip(index + 1) {
+            let (mut root, mut indent) = (index, indent);
+            for (candidate, (_, line)) in lines[..index].iter().enumerate().rev() {
+                let candidate_indent = line.len() - line.trim_start().len();
+                if line.trim_start().starts_with("- ") && candidate_indent < indent {
+                    (root, indent) = (candidate, candidate_indent);
+                }
+            }
+            let mut subtree_end = lines[root].0;
+            for (descendant_end, descendant) in lines.iter().skip(root + 1) {
                 let descendant = descendant.trim_end_matches(['\r', '\n']);
                 if descendant.trim().is_empty() {
                     continue;
@@ -461,6 +472,41 @@ mod tests {
                 "- existing tail\n",
                 "<!-- /agent:queue -->\n",
             )
+        );
+    }
+
+    /// `#handbackopenitemstriage`: follow-ups of a nested origin once landed
+    /// at the top level between its parent's children, so a later child became
+    /// a child of the last follow-up. That row was then a parent, not a leaf,
+    /// and `queue consume --ack-text` could not reach it.
+    #[test]
+    fn followups_of_a_nested_origin_land_after_its_top_level_row() {
+        let doc = concat!(
+            "<!-- agent:queue id=main -->\n",
+            "- do [#parent]\n",
+            "  - **Response [#r-0123456789ab]**\n",
+            "    - **Choices:**\n",
+            "      - **Leave them out**: apply nothing\n",
+            "        - ☑️ [#subagent:worker#1] pick: leave them out\n",
+            "  - 🙋☑️ [#subagent:parent#1] Resolve the open operator action.\n",
+            "- later work\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let updated = plan_queue_followups(
+            doc,
+            "main",
+            "☑️ [#subagent:worker#1] pick: leave them out",
+            &["first".to_string(), "second".to_string()],
+        )
+        .unwrap();
+        assert!(
+            updated.contains(concat!(
+                "  - 🙋☑️ [#subagent:parent#1] Resolve the open operator action.\n",
+                "- first\n",
+                "- second\n",
+                "- later work\n",
+            )),
+            "{updated}"
         );
     }
 

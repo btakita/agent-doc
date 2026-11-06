@@ -72,21 +72,51 @@ pub fn quota_blocked_attempts<'a>(
     })
 }
 
+/// Worker harnesses `queue claim --harness` accepts (`#claimworkerharness`).
+pub const WORKER_HARNESS_NAMES: &[&str] = &["claude", "codex", "grok", "opencode", "cursor"];
+
+/// Comparison key for a worker harness. `claude` and `claude-code` are one
+/// harness, as are `grok` and `grok-build`. Other names compare trimmed and
+/// lowercased.
+pub fn quota_harness_key(name: &str) -> String {
+    match name.trim().to_ascii_lowercase().as_str() {
+        "claude" | "claude-code" => "claude".to_string(),
+        "grok" | "grok-build" => "grok".to_string(),
+        other => other.to_string(),
+    }
+}
+
+/// Parse `queue claim --harness`. The stored value is [`quota_harness_key`].
+pub fn parse_worker_harness(raw: &str) -> Result<String, String> {
+    let key = quota_harness_key(raw);
+    if WORKER_HARNESS_NAMES.contains(&key.as_str()) {
+        Ok(key)
+    } else {
+        Err(format!(
+            "queue claim --harness {raw:?} is not a worker harness; expected one of {}",
+            WORKER_HARNESS_NAMES.join(", ")
+        ))
+    }
+}
+
 /// Refill gate for a freed pool slot (`#subagentworkpool`): the blocked
 /// attempt that forbids dispatching a new worker on `harness`, if any.
 ///
 /// `None` from the caller, or a block recorded without a harness, means the
-/// target cannot be proven different, so the refill is refused. A harness
-/// comparison is on canonical names: pass `normalize_harness_name` output.
+/// target cannot be proven different, so the refill is refused. Names compare
+/// through [`quota_harness_key`].
 pub fn pool_refill_quota_block<'a>(
     claims: impl IntoIterator<Item = &'a QueueClaim>,
     harness: Option<&str>,
 ) -> Option<&'a QueueClaim> {
+    let harness = harness.map(quota_harness_key).filter(|key| !key.is_empty());
     quota_blocked_attempts(claims)
-        .find(|(_, block)| match (harness, block.harness.as_deref()) {
-            (Some(harness), Some(blocked)) => harness == blocked,
-            _ => true,
-        })
+        .find(
+            |(_, block)| match (harness.as_deref(), block.harness.as_deref()) {
+                (Some(harness), Some(blocked)) => harness == quota_harness_key(blocked),
+                _ => true,
+            },
+        )
         .map(|(claim, _)| claim)
 }
 
@@ -131,7 +161,7 @@ pub fn quota_blocked_next_step(document: &str, claim: &QueueClaim) -> String {
         ),
     };
     format!(
-        "attempt generation {generation} of {item:?} stopped on {cause}, so it was recorded as blocked by quota, not lost.{keep} Its worker slot is free, but do not start another worker on {harness} until the limit resets. Next: {resume}; or, to move on now, run `agent-doc queue release {document} --item {item:?} --generation {generation} --requeue` and dispatch the row on another harness, whose brief names this attempt's partial work."
+        "attempt generation {generation} of {item:?} stopped on {cause}, so it was recorded as blocked by quota, not lost.{keep} Its worker slot is free, but do not start another worker on {harness} until the limit resets. Next: {resume}; or, to move on now, run `agent-doc queue release {document} --item {item:?} --generation {generation} --requeue` and dispatch the row on another harness (`agent-doc queue claim {document} --item {item:?} --owner subagent:<label> --harness <name>`), whose brief names this attempt's partial work."
     )
 }
 
@@ -364,6 +394,17 @@ mod tests {
     }
 
     #[test]
+    fn claude_code_is_the_same_exhausted_harness_as_claude() {
+        let ledger = blocked_ledger(Some("claude-code"));
+        assert!(pool_refill_quota_block(&ledger.claims, Some("claude")).is_some());
+        assert!(pool_refill_quota_block(&ledger.claims, Some("CLAUDE")).is_some());
+        assert!(pool_refill_quota_block(&ledger.claims, Some("codex")).is_none());
+        assert_eq!(quota_harness_key(" grok-build "), "grok");
+        assert_eq!(parse_worker_harness("claude-code").unwrap(), "claude");
+        assert!(parse_worker_harness("not-a-harness").is_err());
+    }
+
+    #[test]
     fn the_pool_gate_ignores_a_resumed_attempt() {
         let mut ledger = blocked_ledger(Some("claude"));
         ledger
@@ -384,6 +425,7 @@ mod tests {
             "queue start tasks/a.md",
             "--generation 1 --worker worker-1",
             "--requeue",
+            "--harness",
             "do not start another worker on claude",
         ] {
             assert!(next.contains(needle), "missing {needle:?} in {next}");

@@ -5364,6 +5364,13 @@ enum QueueAction {
         /// `--refresh` for generated claims.
         #[arg(long, requires = "refresh")]
         generation: Option<u64>,
+        /// Harness the worker will run on (`claude`, `codex`, `grok`,
+        /// `opencode`, `cursor`). Omit it to use this coordinator's harness.
+        /// A coordinator whose own harness is out of usage passes this to
+        /// claim the row for a worker on a different harness
+        /// (`#claimworkerharness`). `claude-code` is `claude`.
+        #[arg(long, value_name = "NAME", conflicts_with = "refresh")]
+        harness: Option<String>,
     },
     /// Acknowledge that a successful harness dispatch bound one concrete
     /// worker to one exact claim generation. This is the only transition from
@@ -9525,6 +9532,7 @@ fn try_main() -> anyhow::Result<()> {
                 ttl_secs,
                 refresh,
                 generation,
+                harness,
             } => {
                 if refresh {
                     let claim = agent_doc_queue_io::queue_claim::refresh_attempt(
@@ -9549,15 +9557,22 @@ fn try_main() -> anyhow::Result<()> {
                 }
                 let queue_effects = CliQueueCommandEffects;
                 let (outcome, claim) =
-                    agent_doc_queue_io::queue_cmd::claim_with_runtime_projection(
+                    agent_doc_queue_io::queue_cmd::claim_with_runtime_projection_for_harness(
                     &queue_effects,
                     &file,
                     &item,
                     &owner,
                     ttl_secs,
+                    harness.as_deref(),
                 )?;
+                let on_harness = claim
+                    .dispatch_policy
+                    .as_ref()
+                    .and_then(|policy| policy.harness.as_deref())
+                    .map(|harness| format!(" on {harness}"))
+                    .unwrap_or_default();
                 eprintln!(
-                    "[queue] claimed {:?} for {} generation {} until {} ({:?}, dispatching)",
+                    "[queue] claimed {:?} for {} generation {} until {} ({:?}, dispatching{on_harness})",
                     claim.item_text,
                     claim.owner,
                     claim.generation,

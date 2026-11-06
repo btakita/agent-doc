@@ -108,7 +108,8 @@ pub(crate) fn block_worker_on_quota(
         .map(str::to_string)
         .or_else(|| limit.harness.clone())
         .or(owner_harness)
-        .map(|name| agent_doc_harness::normalize_harness_name(&name));
+        .map(|name| agent_doc_queue::worker_quota::quota_harness_key(&name))
+        .filter(|name| !name.is_empty());
     let block = agent_doc_queue::worker_quota::WorkerQuotaBlock {
         harness,
         limit: limit.limit.clone(),

@@ -161,7 +161,9 @@ notice, run `queue report-quota-blocked --evidence <text> --harness <name>`. The
 attempt never expires into lost, its slot is free, and no new worker may start
 on that harness: after the reset, resume the same worker and rerun its
 `start_command`; or `queue release --generation <N> --requeue` and dispatch the
-row on another harness, whose brief names the partial work.
+row on another harness with `queue claim --harness <name>`, whose brief names
+the partial work. A claim with no `--harness` is for this coordinator's
+harness and is refused while that harness is exhausted.
 
 Never infer running from a label, intended spawn, process poll, or heartbeat.
 `queue claim --refresh --generation <N>` only extends an already-started attempt.

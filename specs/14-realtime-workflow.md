@@ -39,6 +39,18 @@ a held node, so a superseded reply leaves whole, opening and shared sections
 included. A tail reply identical to one before the anchor stays when it is the
 incoming response, since the add would read the older copy as a replay.
 
+When no anchor is provable the rebase stays additive: the stale reply and the
+operator's edit both remain. The missing latest reply is appended to the
+exchange body, which already ends in the boundary marker, so the reply lands
+after the marker. The same order appears when that append does not apply and
+`merge_contents_crdt` weaves the latest reply after the stale cell that carries
+the marker. A reply after the marker is outside the insertion cursor. The
+rebase keeps that additive text and, when the exchange does not already end in
+exactly one standalone protocol boundary, canonicalizes the newest target's
+singleton `agent:boundary` to exchange end. A fenced example of the marker is
+prose. A result that already ends on that singleton keeps its bytes, including
+its id.
+
 This spec is the canonical workflow authority for live session documents. It is
 implementation-independent: editor plugins, CRDT transports, IPC payloads,
 snapshots, harness hooks, and direct CLI calls may change only if they preserve

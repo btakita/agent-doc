@@ -12,7 +12,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use agent_doc_element_queue::QueueItemIdentity;
 use agent_doc_queue::queue_claim::{QueueClaim, claim_identity};
-use agent_doc_queue::reported_closeout::{ReportedRepoEvidence, ReportedRepoFacts, SinkContainment};
+use agent_doc_queue::reported_closeout::{
+    ReportedRepoEvidence, ReportedRepoFacts, SinkContainment,
+};
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 
@@ -517,18 +519,19 @@ pub fn attempt_never_started(ledger: &QueueLineageLedger, claim: &QueueClaim) ->
 pub fn latest_unstarted_identities(
     ledger: &QueueLineageLedger,
 ) -> Vec<agent_doc_element_queue::QueueItemIdentity> {
-    let newest = ledger.attempts.iter().fold(
-        std::collections::HashMap::new(),
-        |mut newest, attempt| {
-            newest
-                .entry(attempt.identity.clone())
-                .and_modify(|generation: &mut u64| {
-                    *generation = (*generation).max(attempt.generation)
-                })
-                .or_insert(attempt.generation);
-            newest
-        },
-    );
+    let newest =
+        ledger
+            .attempts
+            .iter()
+            .fold(std::collections::HashMap::new(), |mut newest, attempt| {
+                newest
+                    .entry(attempt.identity.clone())
+                    .and_modify(|generation: &mut u64| {
+                        *generation = (*generation).max(attempt.generation)
+                    })
+                    .or_insert(attempt.generation);
+                newest
+            });
     ledger
         .attempts
         .iter()
@@ -780,7 +783,11 @@ pub fn record(
 /// (`queue report-complete --prose-only`, `#reportedcloseoutfacts`). The
 /// attempt is established or re-keyed from the claim first, so a claim that
 /// followed an admission edit still lands on its own attempt.
-pub fn record_prose_only(file: &Path, claim: &QueueClaim, detail: &str) -> Result<QueueLineageAttempt> {
+pub fn record_prose_only(
+    file: &Path,
+    claim: &QueueClaim,
+    detail: &str,
+) -> Result<QueueLineageAttempt> {
     record_claim(file, claim)?;
     record(
         file,
@@ -867,7 +874,9 @@ fn durable_path(path: PathBuf) -> Result<String> {
 fn validate_transition(attempt: &QueueLineageAttempt, event: &QueueLineageEvent) -> Result<()> {
     let has = |kind| attempt.events.iter().any(|existing| existing.kind == kind);
     if event.resolves_sha.is_some() && event.kind != QueueLineageEventKind::Integrated {
-        bail!("--resolves applies only to an `integrated` lineage event with `--method conflict-resolved`");
+        bail!(
+            "--resolves applies only to an `integrated` lineage event with `--method conflict-resolved`"
+        );
     }
     match event.kind {
         QueueLineageEventKind::Created => bail!("created is binary-owned by `queue claim`"),
@@ -1027,10 +1036,18 @@ fn verify_event(attempt: &QueueLineageAttempt, event: &QueueLineageEvent) -> Res
         .as_deref()
         .or(prior.repo_path.as_deref())
         .map(Path::new);
-    let source_repo = event.source_repo_path.as_deref()
-        .or(prior.source_repo_path.as_deref()).map(Path::new).or(legacy_repo);
-    let sink_repo = event.sink_repo_path.as_deref()
-        .or(prior.sink_repo_path.as_deref()).map(Path::new).or(legacy_repo);
+    let source_repo = event
+        .source_repo_path
+        .as_deref()
+        .or(prior.source_repo_path.as_deref())
+        .map(Path::new)
+        .or(legacy_repo);
+    let sink_repo = event
+        .sink_repo_path
+        .as_deref()
+        .or(prior.sink_repo_path.as_deref())
+        .map(Path::new)
+        .or(legacy_repo);
     let worktree = event
         .worktree_path
         .as_deref()
@@ -1063,7 +1080,9 @@ fn verify_event(attempt: &QueueLineageAttempt, event: &QueueLineageEvent) -> Res
             }
         }
         QueueLineageEventKind::Committed | QueueLineageEventKind::Pushed => {
-            let repo = source_repo.context("commit/push lineage event needs a recorded --source-repo (or legacy --repo)")?;
+            let repo = source_repo.context(
+                "commit/push lineage event needs a recorded --source-repo (or legacy --repo)",
+            )?;
             let source = event
                 .source_sha
                 .as_deref()
@@ -1084,8 +1103,12 @@ fn verify_event(attempt: &QueueLineageAttempt, event: &QueueLineageEvent) -> Res
             }
         }
         QueueLineageEventKind::Integrated => {
-            let source_repo = source_repo.context("integrated lineage event needs a recorded --source-repo (or legacy --repo)")?;
-            let sink_repo = sink_repo.context("integrated lineage event needs a recorded --sink-repo (or legacy --repo)")?;
+            let source_repo = source_repo.context(
+                "integrated lineage event needs a recorded --source-repo (or legacy --repo)",
+            )?;
+            let sink_repo = sink_repo.context(
+                "integrated lineage event needs a recorded --sink-repo (or legacy --repo)",
+            )?;
             verify_integration(
                 source_repo,
                 sink_repo,
@@ -1098,7 +1121,10 @@ fn verify_event(attempt: &QueueLineageAttempt, event: &QueueLineageEvent) -> Res
                     .integration_method
                     .context("missing integration method")?,
                 event.resolves_sha.as_deref(),
-                event.sink_ref.as_deref().context("missing designated sink ref")?,
+                event
+                    .sink_ref
+                    .as_deref()
+                    .context("missing designated sink ref")?,
             )?;
         }
         QueueLineageEventKind::Released => {
@@ -1106,7 +1132,9 @@ fn verify_event(attempt: &QueueLineageAttempt, event: &QueueLineageEvent) -> Res
                 event.release_state,
                 Some(ReleaseState::Tagged | ReleaseState::Published)
             ) {
-                let repo = sink_repo.context("tagged/published release needs a recorded --sink-repo (or legacy --repo)")?;
+                let repo = sink_repo.context(
+                    "tagged/published release needs a recorded --sink-repo (or legacy --repo)",
+                )?;
                 let tag = event
                     .release_tag
                     .as_deref()
@@ -1174,10 +1202,7 @@ fn require_ancestor(repo: &Path, ancestor: &str, descendant: &str, message: &str
 /// can cease to prove integration after a force-move or deleted sink ref, so
 /// queue synchronization must not project it as recovered integration evidence
 /// without this live check.
-pub fn stored_integration_is_verified(
-    attempt: &QueueLineageAttempt,
-    event_index: usize,
-) -> bool {
+pub fn stored_integration_is_verified(attempt: &QueueLineageAttempt, event_index: usize) -> bool {
     let Some(event) = attempt.events.get(event_index) else {
         return false;
     };
@@ -1252,8 +1277,10 @@ fn verify_conflict_resolution(
     resolves: Option<&str>,
 ) -> Result<()> {
     let source_full = git_output(source_repo, &["rev-parse", &format!("{source}^{{commit}}")])?;
-    let integration_full =
-        git_output(sink_repo, &["rev-parse", &format!("{integration}^{{commit}}")])?;
+    let integration_full = git_output(
+        sink_repo,
+        &["rev-parse", &format!("{integration}^{{commit}}")],
+    )?;
     if source_full == integration_full {
         bail!(
             "conflict-resolved integration {integration} is the source commit itself; record it with `--method fast-forward`"
@@ -1263,8 +1290,11 @@ fn verify_conflict_resolution(
     require_single_parent(sink_repo, &integration_full, "integration")?;
     match resolves {
         Some(resolves) => {
-            let named = git_output(source_repo, &["rev-parse", &format!("{resolves}^{{commit}}")])
-                .with_context(|| format!("--resolves commit {resolves:?} is unavailable"))?;
+            let named = git_output(
+                source_repo,
+                &["rev-parse", &format!("{resolves}^{{commit}}")],
+            )
+            .with_context(|| format!("--resolves commit {resolves:?} is unavailable"))?;
             if named != source_full {
                 bail!(
                     "--resolves {resolves} names {named}, not source commit {source_full}; a conflict-resolved receipt must name its own source"
@@ -1289,13 +1319,21 @@ fn verify_conflict_resolution(
     let integration_files = touched_files(sink_repo, &integration_full)?;
     let uncovered: Vec<&String> = source_files.difference(&integration_files).collect();
     if !uncovered.is_empty() {
-        let shown: Vec<&str> = uncovered.iter().take(10).map(|path| path.as_str()).collect();
+        let shown: Vec<&str> = uncovered
+            .iter()
+            .take(10)
+            .map(|path| path.as_str())
+            .collect();
         bail!(
             "conflict-resolved integration {integration_full} does not touch {} of the {} file(s) source commit {source_full} touched ({}{}); it cannot carry that change. Integrate the missing paths, or record the commit that does",
             uncovered.len(),
             source_files.len(),
             shown.join(", "),
-            if uncovered.len() > shown.len() { ", …" } else { "" },
+            if uncovered.len() > shown.len() {
+                ", …"
+            } else {
+                ""
+            },
         );
     }
     Ok(())
@@ -1329,7 +1367,15 @@ fn require_single_parent(repo: &Path, sha: &str, label: &str) -> Result<()> {
 fn touched_files(repo: &Path, sha: &str) -> Result<BTreeSet<String>> {
     let listing = git_output(
         repo,
-        &["diff-tree", "--no-commit-id", "--name-only", "-r", "--no-renames", "-z", sha],
+        &[
+            "diff-tree",
+            "--no-commit-id",
+            "--name-only",
+            "-r",
+            "--no-renames",
+            "-z",
+            sha,
+        ],
     )?;
     Ok(listing
         .split('\0')
@@ -1667,7 +1713,12 @@ fn sink_containment(facts: &ReportedRepoFacts) -> Option<SinkContainment> {
     if require_commit(repo, source, "source").is_err() {
         return Some(SinkContainment::SourceAbsentFromSink);
     }
-    if git_output(repo, &["rev-parse", "--verify", &format!("{sink_ref}^{{commit}}")]).is_err() {
+    if git_output(
+        repo,
+        &["rev-parse", "--verify", &format!("{sink_ref}^{{commit}}")],
+    )
+    .is_err()
+    {
         return Some(SinkContainment::Unverifiable {
             reason: format!("designated sink ref {sink_ref} is unavailable in {sink_repo}"),
         });
@@ -1759,7 +1810,12 @@ pub fn reported_repo_evidence(
     item: &str,
     generation: u64,
 ) -> Result<ReportedRepoEvidence> {
-    Ok(reported_repo_evidence_resolved(&load(file)?, item, generation, None))
+    Ok(reported_repo_evidence_resolved(
+        &load(file)?,
+        item,
+        generation,
+        None,
+    ))
 }
 
 /// [`reported_repo_evidence`] for a live claim over an already-loaded lineage
@@ -1927,7 +1983,11 @@ fn diagnose(attempt: &QueueLineageAttempt, facts: &Facts) -> Vec<Diagnostic> {
         .events
         .iter()
         .any(|event| event.kind == QueueLineageEventKind::Removed);
-    let Some(source_repo_raw) = facts.source_repo_path.as_deref().or(facts.repo_path.as_deref()) else {
+    let Some(source_repo_raw) = facts
+        .source_repo_path
+        .as_deref()
+        .or(facts.repo_path.as_deref())
+    else {
         // A declared prose-only result has no repository by construction.
         if attempt_declares_prose_only(attempt) && !attempt_carries_repo_work(attempt) {
             return diagnostics;
@@ -1946,7 +2006,10 @@ fn diagnose(attempt: &QueueLineageAttempt, facts: &Facts) -> Vec<Diagnostic> {
         });
         return diagnostics;
     }
-    let sink_repo_raw = facts.sink_repo_path.as_deref().or(facts.repo_path.as_deref())
+    let sink_repo_raw = facts
+        .sink_repo_path
+        .as_deref()
+        .or(facts.repo_path.as_deref())
         .unwrap_or(source_repo_raw);
     let sink_repo = Path::new(sink_repo_raw);
     if let Some(worktree) = facts.worktree_path.as_deref() {
@@ -1973,7 +2036,16 @@ fn diagnose(attempt: &QueueLineageAttempt, facts: &Facts) -> Vec<Diagnostic> {
         ("integration", facts.integration_sha.as_deref()),
     ] {
         if let Some(sha) = sha
-            && require_commit(if label == "integration" { sink_repo } else { source_repo }, sha, label).is_err()
+            && require_commit(
+                if label == "integration" {
+                    sink_repo
+                } else {
+                    source_repo
+                },
+                sha,
+                label,
+            )
+            .is_err()
         {
             diagnostics.push(Diagnostic {
                 level: DiagnosticLevel::Mismatch,
@@ -1992,10 +2064,15 @@ fn diagnose(attempt: &QueueLineageAttempt, facts: &Facts) -> Vec<Diagnostic> {
     if let (Some(reference), Some(source)) =
         (facts.pushed_ref.as_deref(), facts.source_sha.as_deref())
     {
-        match git_output(source_repo, &["rev-parse", &format!("{reference}^{{commit}}")]) {
+        match git_output(
+            source_repo,
+            &["rev-parse", &format!("{reference}^{{commit}}")],
+        ) {
             Ok(actual)
                 if actual == source
-                    || git_output(source_repo, &["rev-parse", source]).ok().as_deref()
+                    || git_output(source_repo, &["rev-parse", source])
+                        .ok()
+                        .as_deref()
                         == Some(actual.as_str()) => {}
             Ok(actual) => diagnostics.push(Diagnostic {
                 level: DiagnosticLevel::Mismatch,
@@ -2039,8 +2116,9 @@ fn diagnose(attempt: &QueueLineageAttempt, facts: &Facts) -> Vec<Diagnostic> {
     } else if facts.integration_sha.is_some() || facts.integration_method.is_some() {
         diagnostics.push(Diagnostic {
             level: DiagnosticLevel::Mismatch,
-            text: "integration_sink_missing: legacy integrated receipt is not designated-sink proof"
-                .to_string(),
+            text:
+                "integration_sink_missing: legacy integrated receipt is not designated-sink proof"
+                    .to_string(),
         });
     }
     if let (Some(tag), Some(integration), Some(ReleaseState::Tagged | ReleaseState::Published)) = (
@@ -2304,12 +2382,7 @@ mod tests {
         let projected = "parent work: nested prose [#q-a1b2c3d4e5f6]";
 
         let prose = RepoFixture::new();
-        let claim = make_claim(
-            &prose.doc,
-            authored,
-            "subagent:prose",
-            Some("worker:prose"),
-        );
+        let claim = make_claim(&prose.doc, authored, "subagent:prose", Some("worker:prose"));
         record_started(&prose.doc, &claim).unwrap();
         // `#reportedcloseoutfacts`: no repository facts is not prose until declared.
         assert!(require_integrated_repo_work(&prose.doc, projected, claim.generation).is_err());
@@ -2318,12 +2391,7 @@ mod tests {
 
         let repo = RepoFixture::new();
         let base = repo.head();
-        let claim = make_claim(
-            &repo.doc,
-            authored,
-            "subagent:repo",
-            Some("worker:repo"),
-        );
+        let claim = make_claim(&repo.doc, authored, "subagent:repo", Some("worker:repo"));
         record_started(&repo.doc, &claim).unwrap();
         record(
             &repo.doc,
@@ -2367,9 +2435,9 @@ mod tests {
         let authored_identity = claim_identity(&authored);
         assert_eq!(
             authored_identity,
-            claim_identity(&agent_doc_queue::queue_response::normalized_authored_queue_prompt_text(
-                b2
-            ))
+            claim_identity(
+                &agent_doc_queue::queue_response::normalized_authored_queue_prompt_text(b2)
+            )
         );
         let shared = claim_identity(leaf);
 
@@ -2496,8 +2564,8 @@ mod tests {
             "<!-- /agent:queue -->\n",
         );
         std::fs::write(&fixture.doc, before).unwrap();
-        let heads = agent_doc_queue::queue_continuation::all_queue_head_texts(before)
-            .expect("queue graph");
+        let heads =
+            agent_doc_queue::queue_continuation::all_queue_head_texts(before).expect("queue graph");
         let b1 = heads
             .iter()
             .find(|head| head.contains("[#q-3f7fdc3da31f]"))
@@ -2577,8 +2645,19 @@ mod tests {
         let fixture = RepoFixture::new();
         let base = fixture.head();
         let worker_repo = fixture._dir.path().join("worker-clone");
-        git(fixture._dir.path(), &["clone", "-q", fixture.root.to_str().unwrap(), worker_repo.to_str().unwrap()]);
-        git(&worker_repo, &["config", "user.email", "worker@example.com"]);
+        git(
+            fixture._dir.path(),
+            &[
+                "clone",
+                "-q",
+                fixture.root.to_str().unwrap(),
+                worker_repo.to_str().unwrap(),
+            ],
+        );
+        git(
+            &worker_repo,
+            &["config", "user.email", "worker@example.com"],
+        );
         git(&worker_repo, &["config", "user.name", "Worker"]);
         std::fs::write(worker_repo.join("result.txt"), "integrated result\n").unwrap();
         git(&worker_repo, &["add", "result.txt"]);
@@ -2593,47 +2672,98 @@ mod tests {
         let sink_ref = git_output(&fixture.root, &["branch", "--show-current"]).unwrap();
         assert!(require_commit(&fixture.root, &source, "source").is_err());
 
-        let claim = make_claim(&fixture.doc, "cross clone work", "subagent:cross-clone", Some("worker:cross-clone"));
+        let claim = make_claim(
+            &fixture.doc,
+            "cross clone work",
+            "subagent:cross-clone",
+            Some("worker:cross-clone"),
+        );
         record_started(&fixture.doc, &claim).unwrap();
-        record(&fixture.doc, &claim.item_text, claim.generation, RecordRequest {
-            kind: QueueLineageEventKind::Committed,
-            source_repo_path: Some(worker_repo.clone()),
-            sink_repo_path: Some(fixture.root.clone()),
-            base_sha: Some(base), source_sha: Some(source.clone()),
-            sink_ref: Some(sink_ref.clone()), ..RecordRequest::default()
-        }).unwrap();
-        record(&fixture.doc, &claim.item_text, claim.generation, RecordRequest {
-            kind: QueueLineageEventKind::Integrated,
-            source_sha: Some(source), integration_sha: Some(integration),
-            integration_method: Some(IntegrationMethod::CherryPick),
-            sink_ref: Some(sink_ref), ..RecordRequest::default()
-        }).unwrap();
+        record(
+            &fixture.doc,
+            &claim.item_text,
+            claim.generation,
+            RecordRequest {
+                kind: QueueLineageEventKind::Committed,
+                source_repo_path: Some(worker_repo.clone()),
+                sink_repo_path: Some(fixture.root.clone()),
+                base_sha: Some(base),
+                source_sha: Some(source.clone()),
+                sink_ref: Some(sink_ref.clone()),
+                ..RecordRequest::default()
+            },
+        )
+        .unwrap();
+        record(
+            &fixture.doc,
+            &claim.item_text,
+            claim.generation,
+            RecordRequest {
+                kind: QueueLineageEventKind::Integrated,
+                source_sha: Some(source),
+                integration_sha: Some(integration),
+                integration_method: Some(IntegrationMethod::CherryPick),
+                sink_ref: Some(sink_ref),
+                ..RecordRequest::default()
+            },
+        )
+        .unwrap();
 
         require_integrated_repo_work(&fixture.doc, &claim.item_text, claim.generation).unwrap();
         let report = query(&fixture.doc, Some(&claim.item_text), Some(claim.generation)).unwrap();
-        assert_eq!(report.attempts[0].source_repo_path.as_deref(), Some(worker_repo.to_string_lossy().as_ref()));
-        assert_eq!(report.attempts[0].sink_repo_path.as_deref(), Some(fixture.root.to_string_lossy().as_ref()));
+        assert_eq!(
+            report.attempts[0].source_repo_path.as_deref(),
+            Some(worker_repo.to_string_lossy().as_ref())
+        );
+        assert_eq!(
+            report.attempts[0].sink_repo_path.as_deref(),
+            Some(fixture.root.to_string_lossy().as_ref())
+        );
     }
 
     #[test]
     fn integration_guard_is_scoped_to_one_attempt_not_historical_project_debt() {
         let fixture = RepoFixture::new();
-        let repo_claim = make_claim(&fixture.doc, "old repository work", "subagent:old", Some("worker:old"));
+        let repo_claim = make_claim(
+            &fixture.doc,
+            "old repository work",
+            "subagent:old",
+            Some("worker:old"),
+        );
         record_started(&fixture.doc, &repo_claim).unwrap();
-        record(&fixture.doc, &repo_claim.item_text, repo_claim.generation, RecordRequest {
-            kind: QueueLineageEventKind::Committed,
-            source_repo_path: Some(fixture.root.clone()),
-            sink_repo_path: Some(fixture.root.clone()),
-            source_sha: Some(fixture.head()),
-            sink_ref: Some("master".to_string()),
-            ..RecordRequest::default()
-        }).unwrap();
-        assert!(require_integrated_repo_work(&fixture.doc, &repo_claim.item_text, repo_claim.generation).is_err());
+        record(
+            &fixture.doc,
+            &repo_claim.item_text,
+            repo_claim.generation,
+            RecordRequest {
+                kind: QueueLineageEventKind::Committed,
+                source_repo_path: Some(fixture.root.clone()),
+                sink_repo_path: Some(fixture.root.clone()),
+                source_sha: Some(fixture.head()),
+                sink_ref: Some("master".to_string()),
+                ..RecordRequest::default()
+            },
+        )
+        .unwrap();
+        assert!(
+            require_integrated_repo_work(
+                &fixture.doc,
+                &repo_claim.item_text,
+                repo_claim.generation
+            )
+            .is_err()
+        );
 
-        let prose_claim = make_claim(&fixture.doc, "current prose work", "subagent:current", Some("worker:current"));
+        let prose_claim = make_claim(
+            &fixture.doc,
+            "current prose work",
+            "subagent:current",
+            Some("worker:current"),
+        );
         record_started(&fixture.doc, &prose_claim).unwrap();
         record_prose_only(&fixture.doc, &prose_claim, "current prose result").unwrap();
-        require_integrated_repo_work(&fixture.doc, &prose_claim.item_text, prose_claim.generation).unwrap();
+        require_integrated_repo_work(&fixture.doc, &prose_claim.item_text, prose_claim.generation)
+            .unwrap();
     }
 
     #[test]
@@ -2805,7 +2935,10 @@ mod tests {
             report.attempts[0].integration_sha.as_deref(),
             Some(integration.as_str())
         );
-        assert_eq!(report.attempts[0].sink_ref.as_deref(), Some(sink_ref.as_str()));
+        assert_eq!(
+            report.attempts[0].sink_ref.as_deref(),
+            Some(sink_ref.as_str())
+        );
 
         // Worktree disappearance degrades the live check without erasing or
         // invalidating the durable receipt. An explicit removed receipt clears
@@ -2981,8 +3114,13 @@ mod tests {
             let doc = &self.fixture.doc;
             let claim = make_claim(doc, "work", "subagent:port", Some("worker:port"));
             record_started(doc, &claim).unwrap();
-            record(doc, "work", 1, attach_request(&self.fixture, "worker:port", &self.base))
-                .unwrap();
+            record(
+                doc,
+                "work",
+                1,
+                attach_request(&self.fixture, "worker:port", &self.base),
+            )
+            .unwrap();
             record(
                 doc,
                 "work",
@@ -3076,7 +3214,11 @@ mod tests {
         );
         assert!(!is_patch_id_mismatch(&unnamed));
         let wrong_name = conflict
-            .integrate(&landed, IntegrationMethod::ConflictResolved, Some(&conflict.base))
+            .integrate(
+                &landed,
+                IntegrationMethod::ConflictResolved,
+                Some(&conflict.base),
+            )
             .unwrap_err();
         assert!(
             format!("{wrong_name:#}").contains("must name its own source"),
@@ -3097,7 +3239,11 @@ mod tests {
             "{uncovered:#}"
         );
         let merge_commit = conflict
-            .integrate(&sink_head, IntegrationMethod::ConflictResolved, Some(&source))
+            .integrate(
+                &sink_head,
+                IntegrationMethod::ConflictResolved,
+                Some(&source),
+            )
             .unwrap_err();
         assert!(
             format!("{merge_commit:#}").contains("has 2 parents"),
@@ -3168,7 +3314,10 @@ mod tests {
         ));
         assert!(message_names_commit(&full.to_ascii_uppercase(), &full));
         assert!(
-            !message_names_commit(&format!("see {}", &full[..MIN_NAMED_SOURCE_ABBREV - 1]), &full),
+            !message_names_commit(
+                &format!("see {}", &full[..MIN_NAMED_SOURCE_ABBREV - 1]),
+                &full
+            ),
             "a short abbreviation is not a name"
         );
         assert!(!message_names_commit(&format!("{full}0"), &full));
@@ -3224,7 +3373,10 @@ mod tests {
         )
         .unwrap_err()
         .to_string();
-        assert!(missing_sink.contains("designated --sink-ref"), "{missing_sink}");
+        assert!(
+            missing_sink.contains("designated --sink-ref"),
+            "{missing_sink}"
+        );
 
         let unreachable_sink = record(
             &fixture.doc,
@@ -3242,9 +3394,8 @@ mod tests {
         .unwrap_err()
         .to_string();
         assert!(
-            unreachable_sink.contains(
-                "integration commit is not reachable from the designated sink ref"
-            ),
+            unreachable_sink
+                .contains("integration commit is not reachable from the designated sink ref"),
             "{unreachable_sink}"
         );
 
@@ -3322,7 +3473,9 @@ mod tests {
         fn shape(fixture: &RepoFixture, claim: &QueueClaim) -> ReportedCloseoutShape {
             let evidence =
                 reported_repo_evidence(&fixture.doc, &claim.item_text, claim.generation).unwrap();
-            reported_claim_closeout("doc.md", claim, &evidence).unwrap().shape
+            reported_claim_closeout("doc.md", claim, &evidence)
+                .unwrap()
+                .shape
         }
 
         fn record_commit(fixture: &RepoFixture, claim: &QueueClaim, source: &str, sink_ref: &str) {
@@ -3345,7 +3498,12 @@ mod tests {
         #[test]
         fn missing_lineage_attempt_is_named_not_guessed_prose() {
             let fixture = RepoFixture::new();
-            let claim = reported(make_claim(&fixture.doc, "never recorded", "subagent:x", Some("worker:x")));
+            let claim = reported(make_claim(
+                &fixture.doc,
+                "never recorded",
+                "subagent:x",
+                Some("worker:x"),
+            ));
             assert_eq!(
                 reported_repo_evidence(&fixture.doc, &claim.item_text, claim.generation).unwrap(),
                 ReportedRepoEvidence::LineageMissing
@@ -3353,7 +3511,10 @@ mod tests {
             assert_eq!(shape(&fixture, &claim), ReportedCloseoutShape::MissingFacts);
         }
 
-        fn declare_prose_only(fixture: &RepoFixture, claim: &QueueClaim) -> Result<QueueLineageAttempt> {
+        fn declare_prose_only(
+            fixture: &RepoFixture,
+            claim: &QueueClaim,
+        ) -> Result<QueueLineageAttempt> {
             record(
                 &fixture.doc,
                 &claim.item_text,
@@ -3372,17 +3533,26 @@ mod tests {
         #[test]
         fn started_attempt_without_repo_facts_is_missing_facts_until_declared_prose_only() {
             let fixture = RepoFixture::new();
-            let claim = reported(make_claim(&fixture.doc, "review the PR", "subagent:review", Some("worker:review")));
+            let claim = reported(make_claim(
+                &fixture.doc,
+                "review the PR",
+                "subagent:review",
+                Some("worker:review"),
+            ));
             record_started(&fixture.doc, &claim).unwrap();
             assert_eq!(
                 reported_repo_evidence(&fixture.doc, &claim.item_text, claim.generation).unwrap(),
                 ReportedRepoEvidence::Undeclared
             );
             assert_eq!(shape(&fixture, &claim), ReportedCloseoutShape::MissingFacts);
-            let refusal = require_integrated_repo_work(&fixture.doc, &claim.item_text, claim.generation)
-                .unwrap_err()
-                .to_string();
-            assert!(refusal.contains("neither repository work nor a prose-only declaration"), "{refusal}");
+            let refusal =
+                require_integrated_repo_work(&fixture.doc, &claim.item_text, claim.generation)
+                    .unwrap_err()
+                    .to_string();
+            assert!(
+                refusal.contains("neither repository work nor a prose-only declaration"),
+                "{refusal}"
+            );
             assert!(refusal.contains("--event prose-only"), "{refusal}");
 
             // Replay the emitted declaration step's exact event.
@@ -3403,22 +3573,40 @@ mod tests {
             );
             assert_eq!(shape(&fixture, &claim), ReportedCloseoutShape::ProseConsume);
             require_integrated_repo_work(&fixture.doc, &claim.item_text, claim.generation).unwrap();
-            let report = query(&fixture.doc, Some(&claim.item_text), Some(claim.generation)).unwrap();
+            let report =
+                query(&fixture.doc, Some(&claim.item_text), Some(claim.generation)).unwrap();
             assert_eq!(report.attempts[0].state, "prose_only");
-            assert_eq!(report.attempts[0].verification, "verified", "{:?}", report.attempts[0].diagnostics);
+            assert_eq!(
+                report.attempts[0].verification, "verified",
+                "{:?}",
+                report.attempts[0].diagnostics
+            );
         }
 
         #[test]
         fn prose_only_declaration_cannot_erase_recorded_repository_work() {
             let fixture = RepoFixture::new();
-            let claim = reported(make_claim(&fixture.doc, "fix it", "subagent:fix", Some("worker:fix")));
+            let claim = reported(make_claim(
+                &fixture.doc,
+                "fix it",
+                "subagent:fix",
+                Some("worker:fix"),
+            ));
             record_started(&fixture.doc, &claim).unwrap();
             let branch = git_output(&fixture.root, &["branch", "--show-current"]).unwrap();
             let source = fixture.commit_file("fix.txt", "fix\n", "worker fix");
             record_commit(&fixture, &claim, &source, &branch);
-            let refusal = declare_prose_only(&fixture, &claim).unwrap_err().to_string();
-            assert!(refusal.contains("already records repository work"), "{refusal}");
-            assert!(require_integrated_repo_work(&fixture.doc, &claim.item_text, claim.generation).is_err());
+            let refusal = declare_prose_only(&fixture, &claim)
+                .unwrap_err()
+                .to_string();
+            assert!(
+                refusal.contains("already records repository work"),
+                "{refusal}"
+            );
+            assert!(
+                require_integrated_repo_work(&fixture.doc, &claim.item_text, claim.generation)
+                    .is_err()
+            );
 
             let carrying = record(
                 &fixture.doc,
@@ -3443,7 +3631,12 @@ mod tests {
         fn unrecorded_side_branch_commit_is_never_consumed_as_prose() {
             let fixture = RepoFixture::new();
             let main = git_output(&fixture.root, &["branch", "--show-current"]).unwrap();
-            let claim = reported(make_claim(&fixture.doc, "convert ts to js", "subagent:c631tsjs", Some("worker:tsjs")));
+            let claim = reported(make_claim(
+                &fixture.doc,
+                "convert ts to js",
+                "subagent:c631tsjs",
+                Some("worker:tsjs"),
+            ));
             record_started(&fixture.doc, &claim).unwrap();
             git(&fixture.root, &["checkout", "-qb", "feat/ts-to-js-dts"]);
             let source = fixture.commit_file("sdk.js", "js\n", "convert ts to js");
@@ -3457,8 +3650,14 @@ mod tests {
             .unwrap();
             assert_eq!(closeout.shape, ReportedCloseoutShape::MissingFacts);
             assert_eq!(closeout.missing_facts, ["repo_work_or_prose_declaration"]);
-            assert!(closeout.next_action_argv().is_none(), "nothing may strike the row first");
-            assert!(require_integrated_repo_work(&fixture.doc, &claim.item_text, claim.generation).is_err());
+            assert!(
+                closeout.next_action_argv().is_none(),
+                "nothing may strike the row first"
+            );
+            assert!(
+                require_integrated_repo_work(&fixture.doc, &claim.item_text, claim.generation)
+                    .is_err()
+            );
 
             // The repository_work branch, with its placeholders filled.
             let step = closeout
@@ -3467,7 +3666,11 @@ mod tests {
                 .find(|step| step.action == ReportedCloseoutAction::RecordRepositoryWork)
                 .unwrap();
             assert_eq!(step.alternative.as_deref(), Some("repository_work"));
-            assert!(step.argv.windows(2).any(|pair| pair == ["--event", "committed"]));
+            assert!(
+                step.argv
+                    .windows(2)
+                    .any(|pair| pair == ["--event", "committed"])
+            );
             record_commit(&fixture, &claim, &source, &main);
             let evidence =
                 reported_repo_evidence(&fixture.doc, &claim.item_text, claim.generation).unwrap();
@@ -3475,13 +3678,19 @@ mod tests {
                 matches!(
                     &evidence,
                     ReportedRepoEvidence::Unintegrated {
-                        sink: Some(SinkContainment::DoesNotContain { fast_forward: true, .. }),
+                        sink: Some(SinkContainment::DoesNotContain {
+                            fast_forward: true,
+                            ..
+                        }),
                         ..
                     }
                 ),
                 "{evidence:?}"
             );
-            assert!(require_integrated_repo_work(&fixture.doc, &claim.item_text, claim.generation).is_err());
+            assert!(
+                require_integrated_repo_work(&fixture.doc, &claim.item_text, claim.generation)
+                    .is_err()
+            );
         }
 
         /// The openquestions shape: the claim followed an admission edit
@@ -3492,7 +3701,12 @@ mod tests {
         fn claim_that_followed_an_admission_edit_resolves_its_original_lineage() {
             let fixture = RepoFixture::new();
             let original = "Draft the open questions in a md file.";
-            let mut claim = reported(make_claim(&fixture.doc, original, "subagent:openquestions", Some("worker:oq")));
+            let mut claim = reported(make_claim(
+                &fixture.doc,
+                original,
+                "subagent:openquestions",
+                Some("worker:oq"),
+            ));
             record_started(&fixture.doc, &claim).unwrap();
             let current = "Draft the open questions in a md file.  [#q-21230b62be31]⟦local⟧";
             claim.identity = claim_identity(current);
@@ -3546,7 +3760,12 @@ mod tests {
         #[test]
         fn missing_lineage_is_established_from_the_live_claim() {
             let fixture = RepoFixture::new();
-            let claim = reported(make_claim(&fixture.doc, "never recorded", "subagent:x", Some("worker:x")));
+            let claim = reported(make_claim(
+                &fixture.doc,
+                "never recorded",
+                "subagent:x",
+                Some("worker:x"),
+            ));
             let mut claims = agent_doc_queue::queue_claim::QueueClaimLedger::default();
             claims.claims.push(claim.clone());
             crate::queue_claim::store_ledger_for_test(&fixture.doc, &claims).unwrap();
@@ -3574,7 +3793,12 @@ mod tests {
             let source = fixture.commit_file("side.txt", "side\n", "side work");
             git(&fixture.root, &["checkout", "-q", &main]);
             fixture.commit_file("main.txt", "main moved\n", "main moves on");
-            let claim = reported(make_claim(&fixture.doc, "side work", "subagent:side", Some("worker:side")));
+            let claim = reported(make_claim(
+                &fixture.doc,
+                "side work",
+                "subagent:side",
+                Some("worker:side"),
+            ));
             record_started(&fixture.doc, &claim).unwrap();
             record_commit(&fixture, &claim, &source, &main);
 
@@ -3594,14 +3818,22 @@ mod tests {
             }
             let closeout = reported_claim_closeout("doc.md", &claim, &evidence).unwrap();
             assert_eq!(closeout.shape, ReportedCloseoutShape::IntegrationRequired);
-            assert!(closeout.steps.iter().all(|step| step.action != ReportedCloseoutAction::Integrate));
+            assert!(
+                closeout
+                    .steps
+                    .iter()
+                    .all(|step| step.action != ReportedCloseoutAction::Integrate)
+            );
             let cherry = closeout
                 .steps
                 .iter()
                 .find(|step| step.action == ReportedCloseoutAction::CherryPickOntoSink)
                 .unwrap();
             assert!(cherry.concrete, "{cherry:?}");
-            let status = Command::new(&cherry.argv[0]).args(&cherry.argv[1..]).status().unwrap();
+            let status = Command::new(&cherry.argv[0])
+                .args(&cherry.argv[1..])
+                .status()
+                .unwrap();
             assert!(status.success(), "{:?}", cherry.argv);
 
             let record_step = closeout
@@ -3634,7 +3866,10 @@ mod tests {
             )
             .unwrap();
             require_integrated_repo_work(&fixture.doc, &claim.item_text, claim.generation).unwrap();
-            assert_eq!(shape(&fixture, &claim), ReportedCloseoutShape::IntegratedConsume);
+            assert_eq!(
+                shape(&fixture, &claim),
+                ReportedCloseoutShape::IntegratedConsume
+            );
         }
 
         #[test]
@@ -3645,14 +3880,21 @@ mod tests {
             git(&fixture.root, &["rm", "-rq", "--cached", "."]);
             let source = fixture.commit_file("contracts.txt", "pin\n", "contracts artifact");
             git(&fixture.root, &["checkout", "-qf", &main]);
-            let claim = reported(make_claim(&fixture.doc, "publish telemetry", "subagent:c106telem", Some("worker:t")));
+            let claim = reported(make_claim(
+                &fixture.doc,
+                "publish telemetry",
+                "subagent:c106telem",
+                Some("worker:t"),
+            ));
             record_started(&fixture.doc, &claim).unwrap();
             record_commit(&fixture, &claim, &source, &main);
             assert_eq!(
                 reported_repo_evidence(&fixture.doc, &claim.item_text, claim.generation).unwrap(),
                 ReportedRepoEvidence::Unintegrated {
                     facts: ReportedRepoFacts {
-                        source_repo: Some(fixture.root.canonicalize().unwrap().display().to_string()),
+                        source_repo: Some(
+                            fixture.root.canonicalize().unwrap().display().to_string()
+                        ),
                         sink_repo: Some(fixture.root.canonicalize().unwrap().display().to_string()),
                         source_sha: Some(source.clone()),
                         sink_ref: Some(main.clone()),
@@ -3668,7 +3910,12 @@ mod tests {
         fn repo_work_contained_in_the_sink_emits_a_record_step_the_binary_accepts() {
             let fixture = RepoFixture::new();
             let branch = git_output(&fixture.root, &["branch", "--show-current"]).unwrap();
-            let claim = reported(make_claim(&fixture.doc, "fix the bug", "subagent:fix", Some("worker:fix")));
+            let claim = reported(make_claim(
+                &fixture.doc,
+                "fix the bug",
+                "subagent:fix",
+                Some("worker:fix"),
+            ));
             record_started(&fixture.doc, &claim).unwrap();
             let source = fixture.commit_file("fix.txt", "fix\n", "worker fix");
             record_commit(&fixture, &claim, &source, &branch);
@@ -3678,20 +3925,29 @@ mod tests {
             assert!(
                 matches!(
                     &evidence,
-                    ReportedRepoEvidence::Unintegrated { sink: Some(SinkContainment::Contains), .. }
+                    ReportedRepoEvidence::Unintegrated {
+                        sink: Some(SinkContainment::Contains),
+                        ..
+                    }
                 ),
                 "{evidence:?}"
             );
             let closeout = reported_claim_closeout("doc.md", &claim, &evidence).unwrap();
             assert_eq!(closeout.shape, ReportedCloseoutShape::IntegrationProof);
-            assert!(require_integrated_repo_work(&fixture.doc, &claim.item_text, claim.generation).is_err());
+            assert!(
+                require_integrated_repo_work(&fixture.doc, &claim.item_text, claim.generation)
+                    .is_err()
+            );
 
             // Run the verify step's exact argv, then apply the record step's
             // exact facts through the binary's own verified record path.
             let verify = &closeout.steps[0];
             assert_eq!(verify.action, ReportedCloseoutAction::VerifyIntegration);
             assert_eq!(verify.argv[0], "git");
-            let status = Command::new("git").args(&verify.argv[1..]).status().unwrap();
+            let status = Command::new("git")
+                .args(&verify.argv[1..])
+                .status()
+                .unwrap();
             assert!(status.success(), "{:?}", verify.argv);
             let step = &closeout.steps[1];
             assert_eq!(step.action, ReportedCloseoutAction::RecordIntegration);
@@ -3718,7 +3974,10 @@ mod tests {
             .unwrap();
 
             require_integrated_repo_work(&fixture.doc, &claim.item_text, claim.generation).unwrap();
-            assert_eq!(shape(&fixture, &claim), ReportedCloseoutShape::IntegratedConsume);
+            assert_eq!(
+                shape(&fixture, &claim),
+                ReportedCloseoutShape::IntegratedConsume
+            );
         }
 
         #[test]
@@ -3728,7 +3987,12 @@ mod tests {
             git(&fixture.root, &["checkout", "-qb", "side"]);
             let source = fixture.commit_file("side.txt", "side\n", "side work");
             git(&fixture.root, &["checkout", "-q", &main]);
-            let claim = reported(make_claim(&fixture.doc, "side work", "subagent:side", Some("worker:side")));
+            let claim = reported(make_claim(
+                &fixture.doc,
+                "side work",
+                "subagent:side",
+                Some("worker:side"),
+            ));
             record_started(&fixture.doc, &claim).unwrap();
             record_commit(&fixture, &claim, &source, &main);
 
@@ -3738,7 +4002,10 @@ mod tests {
                 matches!(
                     &evidence,
                     ReportedRepoEvidence::Unintegrated {
-                        sink: Some(SinkContainment::DoesNotContain { fast_forward: true, .. }),
+                        sink: Some(SinkContainment::DoesNotContain {
+                            fast_forward: true,
+                            ..
+                        }),
                         ..
                     }
                 ),
@@ -3752,7 +4019,12 @@ mod tests {
         #[test]
         fn repo_work_without_a_sink_ref_names_the_missing_fact() {
             let fixture = RepoFixture::new();
-            let claim = reported(make_claim(&fixture.doc, "unsunk work", "subagent:u", Some("worker:u")));
+            let claim = reported(make_claim(
+                &fixture.doc,
+                "unsunk work",
+                "subagent:u",
+                Some("worker:u"),
+            ));
             record_started(&fixture.doc, &claim).unwrap();
             record(
                 &fixture.doc,

@@ -71,9 +71,11 @@ jobs:
       - name: Install VS Code plugin dependencies
         run: npm ci --prefix editors/vscode
 
+      # `make check` runs `cargo fmt --all --check` (`#fmtcigate`). The stable
+      # toolchain does not install rustfmt unless the component is named.
       - uses: dtolnay/rust-toolchain@stable
         with:
-          components: clippy
+          components: clippy, rustfmt
 
       # #ci-per-test-timeout-guard: install nextest so `make check` uses the
       # nextest path, activating the per-test slow-timeout deadlock guard in

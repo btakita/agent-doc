@@ -1031,7 +1031,12 @@ Duplicate replay should stay live.
             id = RESPONSE_ID,
             summary = SUMMARY,
         );
-        th::commit_file(root, "session.md", &historical, "structured response evidence");
+        th::commit_file(
+            root,
+            "session.md",
+            &historical,
+            "structured response evidence",
+        );
         let doc = root.join("session.md");
         let authority = historical.replace(
             "<!-- /agent:queue -->\n",
@@ -1086,7 +1091,12 @@ Duplicate replay should stay live.
             ),
             id = RESPONSE_ID,
         );
-        th::commit_file(root, "session.md", &historical, "structured response evidence");
+        th::commit_file(
+            root,
+            "session.md",
+            &historical,
+            "structured response evidence",
+        );
         let doc = root.join("session.md");
         let authority = historical.replace(
             "Original authoritative summary.",
@@ -1391,7 +1401,12 @@ Duplicate replay should stay live.
             ),
             pinned = PINNED,
         );
-        th::commit_file(root, "session.md", &document, "committed pinned queue projection");
+        th::commit_file(
+            root,
+            "session.md",
+            &document,
+            "committed pinned queue projection",
+        );
         let decision = agent_doc_decision_io::DecisionRecord {
             id: "DEC-pinned-response".to_string(),
             state: agent_doc_decision_io::DecisionState::Accepted,

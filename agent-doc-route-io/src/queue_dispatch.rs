@@ -354,7 +354,11 @@ fn resolve_route_queue_document_content_awaiting(
                         attempt,
                         ROUTE_QUEUE_MAX_RESOLVE_ATTEMPTS,
                         witness_changed,
-                        if witness_changed { "retry" } else { "fail_closed" },
+                        if witness_changed {
+                            "retry"
+                        } else {
+                            "fail_closed"
+                        },
                         agent_doc_secret_redact::redact(&format!("{err:#}")).replace('\n', " "),
                     ),
                 );

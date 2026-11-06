@@ -747,9 +747,7 @@ fn classify_lifecycle(item: &str, claim: Option<&QueueClaim>) -> QueueSyncLifecy
             | QueueLifecycleMarker::LostClaimed
             | QueueLifecycleMarker::LostRunning
             | QueueLifecycleMarker::LostReported,
-        ) => {
-            QueueSyncLifecycle::ReconcileUnknown
-        }
+        ) => QueueSyncLifecycle::ReconcileUnknown,
         Some(QueueLifecycleMarker::AwaitingOperator) => QueueSyncLifecycle::OperatorGated,
         Some(
             QueueLifecycleMarker::Claimed
@@ -925,9 +923,7 @@ mod tests {
             "    - Is there anything left in this tree? [#q-111111111111]\n",
             "    - Is there anything left in this tree? [#q-222222222222]\n",
         );
-        let content = format!(
-            "<!-- agent:run id=main subagents -->\n{body}<!-- /agent:run -->\n"
-        );
+        let content = format!("<!-- agent:run id=main subagents -->\n{body}<!-- /agent:run -->\n");
         let entries = crate::document_queue::parse(body).unwrap();
         let first_alias = entries
             .iter()
@@ -985,8 +981,18 @@ mod tests {
         .unwrap();
 
         assert_eq!(payload.pending.len(), 2);
-        assert!(payload.pending.iter().any(|item| item.item.contains("effect:1")));
-        assert!(payload.pending.iter().any(|item| item.item.contains("effect:2")));
+        assert!(
+            payload
+                .pending
+                .iter()
+                .any(|item| item.item.contains("effect:1"))
+        );
+        assert!(
+            payload
+                .pending
+                .iter()
+                .any(|item| item.item.contains("effect:2"))
+        );
     }
 
     #[test]

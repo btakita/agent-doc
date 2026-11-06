@@ -28,16 +28,28 @@ pub enum UpstreamObservation {
 pub enum PostCloseoutPushDecision {
     Disabled,
     Push(UpstreamTarget),
-    Skip { reason: &'static str, detail: String },
+    Skip {
+        reason: &'static str,
+        detail: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PostCloseoutPushOutcome {
     Disabled,
     Pushed(UpstreamTarget),
-    Skipped { reason: &'static str, detail: String },
-    Rejected { target: UpstreamTarget, detail: String },
-    Failed { phase: &'static str, detail: String },
+    Skipped {
+        reason: &'static str,
+        detail: String,
+    },
+    Rejected {
+        target: UpstreamTarget,
+        detail: String,
+    },
+    Failed {
+        phase: &'static str,
+        detail: String,
+    },
 }
 
 /// Own the publication decision independently of Git process execution.
@@ -279,7 +291,12 @@ mod tests {
         init_repo(local_dir.path());
         git(
             local_dir.path(),
-            &["remote", "add", "origin", remote_dir.path().to_str().unwrap()],
+            &[
+                "remote",
+                "add",
+                "origin",
+                remote_dir.path().to_str().unwrap(),
+            ],
         );
         git(local_dir.path(), &["push", "-u", "origin", "main"]);
         commit(local_dir.path(), "published\n", "closeout");
@@ -302,7 +319,12 @@ mod tests {
         init_repo(local_dir.path());
         git(
             local_dir.path(),
-            &["remote", "add", "origin", remote_dir.path().to_str().unwrap()],
+            &[
+                "remote",
+                "add",
+                "origin",
+                remote_dir.path().to_str().unwrap(),
+            ],
         );
         git(local_dir.path(), &["push", "-u", "origin", "main"]);
 
@@ -311,7 +333,10 @@ mod tests {
             peer_dir.path(),
             &["clone", remote_dir.path().to_str().unwrap(), "."],
         );
-        git(peer_dir.path(), &["config", "user.email", "peer@example.com"]);
+        git(
+            peer_dir.path(),
+            &["config", "user.email", "peer@example.com"],
+        );
         git(peer_dir.path(), &["config", "user.name", "Peer"]);
         commit(peer_dir.path(), "remote-ahead\n", "peer");
         git(peer_dir.path(), &["push", "origin", "main"]);
@@ -326,7 +351,10 @@ mod tests {
             git_value(remote_dir.path(), &["rev-parse", "refs/heads/main"]),
             remote_before
         );
-        assert_eq!(git_value(local_dir.path(), &["rev-parse", "HEAD"]), local_head);
+        assert_eq!(
+            git_value(local_dir.path(), &["rev-parse", "HEAD"]),
+            local_head
+        );
     }
 
     #[test]

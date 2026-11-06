@@ -770,8 +770,9 @@ fn record_claim_runtime_projection_scoped(
             // accepted boundary; otherwise a reintroduced stable id can show a
             // fresh Running queue row beside its predecessor's stale Reported
             // status until an unrelated full-document repair happens.
-            let synced = agent_doc_work_projection::reconcile_managed_active_items_for(file, &queue_synced)?
-                .unwrap_or(queue_synced);
+            let synced =
+                agent_doc_work_projection::reconcile_managed_active_items_for(file, &queue_synced)?
+                    .unwrap_or(queue_synced);
             if synced != snapshot
                 && let Err(err) = agent_doc_snapshot_io::checkpoint_document_baseline(
                     file,
@@ -871,7 +872,11 @@ pub struct ClaimAdmissionRefused {
 
 impl std::fmt::Display for ClaimAdmissionRefused {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "claim admission refused (blocker: {}): {}", self.blocker, self.detail)
+        write!(
+            f,
+            "claim admission refused (blocker: {}): {}",
+            self.blocker, self.detail
+        )
     }
 }
 
@@ -1500,9 +1505,11 @@ fn project_runtime_state_with_effects(
                 derive_blocker_runtime_projection(file, &current)?
             }
         };
-        let target_content =
-            agent_doc_work_projection::reconcile_managed_active_items_for(file, &projection.target_content)?
-                .unwrap_or(projection.target_content);
+        let target_content = agent_doc_work_projection::reconcile_managed_active_items_for(
+            file,
+            &projection.target_content,
+        )?
+        .unwrap_or(projection.target_content);
         // `#sdkdocumentselfheal`: exact operator-request rows and their Todo
         // receipts are one lifecycle. Older/interrupted closeouts could strike
         // the queue row but leave its same-id Todo open until another foreground
@@ -1585,7 +1592,8 @@ fn project_runtime_state_with_effects(
             }
         };
         let active_settled =
-            agent_doc_work_projection::reconcile_managed_active_items_for(file, &authoritative)?.is_none();
+            agent_doc_work_projection::reconcile_managed_active_items_for(file, &authoritative)?
+                .is_none();
         let terminal_todos_settled = rows != RuntimeProjectionRows::All
             || only_identity.is_some()
             || agent_doc_queue::queue_consume::reconcile_terminal_operator_request_todos(
@@ -2617,8 +2625,7 @@ mod tests {
             "{repaired}"
         );
         assert!(
-            repaired
-                .contains("- **Response:** Approve and merge PR #42. ▫️")
+            repaired.contains("- **Response:** Approve and merge PR #42. ▫️")
                 && !repaired.contains("~~**Response:** Approve and merge PR #42."),
             "agent-doc reply rows remain inert without being struck: {repaired}"
         );
@@ -3559,16 +3566,21 @@ mod tests {
                     .unwrap()
                     .unwrap_or_else(|| content.to_string());
             assert!(
-                agent_doc_work_projection::reconcile_managed_active_items_with(&rendered, &lifecycle)
-                    .unwrap()
-                    .is_none(),
+                agent_doc_work_projection::reconcile_managed_active_items_with(
+                    &rendered, &lifecycle
+                )
+                .unwrap()
+                .is_none(),
                 "a second render is a no-op"
             );
             rendered
         };
         // A stale `☑️` with no durable record is not active work.
         let unbacked = render(content);
-        assert!(!unbacked.contains("dispatched worker work\n    - **Status"), "{unbacked}");
+        assert!(
+            !unbacked.contains("dispatched worker work\n    - **Status"),
+            "{unbacked}"
+        );
 
         crate::queue_claim::claim(&doc, "dispatched worker work", "subagent:worker", 600).unwrap();
         let claimed = render(content);
@@ -3589,8 +3601,14 @@ mod tests {
         crate::queue_claim::report_attempt(&doc, &running.item_text, Some(running.generation))
             .unwrap();
         let reported = render(content);
-        assert!(reported.contains("- **Needs integration** (1)\n"), "{reported}");
-        assert!(reported.contains("- **Status:** reported\n    - **Age:** since attached "), "{reported}");
+        assert!(
+            reported.contains("- **Needs integration** (1)\n"),
+            "{reported}"
+        );
+        assert!(
+            reported.contains("- **Status:** reported\n    - **Age:** since attached "),
+            "{reported}"
+        );
         assert!(!reported.contains("- **Running**"), "{reported}");
     }
 
@@ -5394,7 +5412,11 @@ mod waiting_item_claim_projection_tests {
         let (_, claim) =
             claim_with_runtime_projection(&effects, &doc, "#answered", "subagent:worker", 600)
                 .expect("an answered waiting item is admitted with a visible 🟡");
-        assert_eq!(effects.verify_reads.get(), 1, "admission reads the queue-claims observer");
+        assert_eq!(
+            effects.verify_reads.get(),
+            1,
+            "admission reads the queue-claims observer"
+        );
 
         let claimed = std::fs::read_to_string(&doc).unwrap();
         assert!(
@@ -5407,7 +5429,10 @@ mod waiting_item_claim_projection_tests {
             .iter()
             .find(|report| report.claim.generation == claim.generation)
             .unwrap();
-        assert_eq!(report.visible_projection_state, "synchronized", "{report:#?}");
+        assert_eq!(
+            report.visible_projection_state, "synchronized",
+            "{report:#?}"
+        );
         assert_eq!(report.observed_visible_markers, ["🟡"]);
         // The reported outer item keeps its own receipt projection.
         assert!(
@@ -5417,10 +5442,9 @@ mod waiting_item_claim_projection_tests {
 
         // Closeout's waiting-status pass and the runtime projector agree on
         // one fixed point: neither strips the other's projection.
-        let rerendered =
-            agent_doc_queue::queue_consume::project_waiting_on_you_tree(&claimed, "")
-                .unwrap()
-                .unwrap_or_else(|| claimed.clone());
+        let rerendered = agent_doc_queue::queue_consume::project_waiting_on_you_tree(&claimed, "")
+            .unwrap()
+            .unwrap_or_else(|| claimed.clone());
         assert!(
             answered_row(&rerendered).starts_with("  - 🟡 [#subagent:worker#1] ⟦🟡 "),
             "{}",
@@ -5465,7 +5489,13 @@ mod waiting_item_claim_projection_tests {
         let (_, claim) =
             claim_with_runtime_projection(&effects, &doc, "#answered", "subagent:worker", 600)
                 .unwrap();
-        release_attempt(&doc, "#answered", ReleaseKind::Requeue, Some(claim.generation)).unwrap();
+        release_attempt(
+            &doc,
+            "#answered",
+            ReleaseKind::Requeue,
+            Some(claim.generation),
+        )
+        .unwrap();
         project_claim_item_runtime_state_with_effects(&effects, &doc, &claim.item_text, true)
             .unwrap();
         let released = std::fs::read_to_string(&doc).unwrap();
@@ -5496,12 +5526,24 @@ mod waiting_item_claim_projection_tests {
             .downcast_ref::<ClaimAdmissionRefused>()
             .expect("the refusal is typed");
         assert_eq!(refused.blocker, CLAIM_PROJECTION_UNREPRESENTABLE);
-        assert!(format!("{error:#}").contains("no worker may be spawned"), "{error:#}");
+        assert!(
+            format!("{error:#}").contains("no worker may be spawned"),
+            "{error:#}"
+        );
 
         // Compensated: no live claim, no visible marker, a terminal receipt.
-        assert!(crate::queue_claim::load_ledger(&doc).unwrap().claims.is_empty());
+        assert!(
+            crate::queue_claim::load_ledger(&doc)
+                .unwrap()
+                .claims
+                .is_empty()
+        );
         let after = std::fs::read_to_string(&doc).unwrap();
-        assert!(answered_row(&after).starts_with("  - ⟦"), "{}", answered_row(&after));
+        assert!(
+            answered_row(&after).starts_with("  - ⟦"),
+            "{}",
+            answered_row(&after)
+        );
         let lineage = crate::queue_lineage::load(&doc).unwrap();
         assert_eq!(
             crate::queue_lineage::admission_refused_identities(&lineage),
@@ -5568,7 +5610,10 @@ mod waiting_item_claim_projection_tests {
         let error =
             claim_with_runtime_projection(&RefusingEffects, &doc, "#answered", "subagent:w", 600)
                 .unwrap_err();
-        assert!(error.downcast_ref::<ClaimAdmissionRefused>().is_none(), "{error:#}");
+        assert!(
+            error.downcast_ref::<ClaimAdmissionRefused>().is_none(),
+            "{error:#}"
+        );
         let lineage = crate::queue_lineage::load(&doc).unwrap();
         assert!(crate::queue_lineage::admission_refused_identities(&lineage).is_empty());
     }
@@ -5749,8 +5794,16 @@ mod waiting_item_claim_projection_tests {
         assert!(rendered.contains("refused on all 8 attempts"), "{rendered}");
         assert!(rendered.contains("no worker may be spawned"), "{rendered}");
         // Still transient: rolled back, not terminalized as a held blocker.
-        assert!(error.downcast_ref::<ClaimAdmissionRefused>().is_none(), "{rendered}");
-        assert!(crate::queue_claim::load_ledger(&doc).unwrap().claims.is_empty());
+        assert!(
+            error.downcast_ref::<ClaimAdmissionRefused>().is_none(),
+            "{rendered}"
+        );
+        assert!(
+            crate::queue_claim::load_ledger(&doc)
+                .unwrap()
+                .claims
+                .is_empty()
+        );
         let lineage = crate::queue_lineage::load(&doc).unwrap();
         assert!(crate::queue_lineage::admission_refused_identities(&lineage).is_empty());
     }
@@ -5782,6 +5835,10 @@ mod waiting_item_claim_projection_tests {
         let doc = write_doc(dir.path(), &waiting_doc());
         let effects = CountingRefusal(std::cell::Cell::new(0));
         claim_with_runtime_projection(&effects, &doc, "#answered", "subagent:w", 600).unwrap_err();
-        assert_eq!(effects.0.get(), 1, "only `retry_crdt_merge` refusals earn a retry");
+        assert_eq!(
+            effects.0.get(),
+            1,
+            "only `retry_crdt_merge` refusals earn a retry"
+        );
     }
 }

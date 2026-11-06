@@ -61,13 +61,13 @@
 //!    layout gate never kills or reaps a process directly, and no wall-clock age
 //!    is an input to the replacement decision.
 
-use crate::sync::{pane_occupant_for_document, PaneOccupant};
+use crate::sync::{PaneOccupant, pane_occupant_for_document};
 use agent_doc_controller::dispatch::is_stash_window_name;
 use agent_doc_controller::supervisor_replacement::{
-    decide_stale_idle_supervisor_recovery, StaleIdleSupervisorFacts, StaleIdleSupervisorRecovery,
+    StaleIdleSupervisorFacts, StaleIdleSupervisorRecovery, decide_stale_idle_supervisor_recovery,
 };
 pub use agent_doc_supervisor::recycle_request::{
-    StaleRecycleRequestState, STALE_RECYCLE_CONSUME_BOUND_SECS,
+    STALE_RECYCLE_CONSUME_BOUND_SECS, StaleRecycleRequestState,
 };
 use agent_doc_turn::turn_status::STALE_SUPERVISOR_PANE_MARKER;
 use std::collections::{HashMap, HashSet};
@@ -692,9 +692,7 @@ pub fn plan_column_admissions(
     let realised: Vec<String> = facts
         .iter()
         .zip(&base)
-        .filter(|(_, admission)| {
-            !admission.excludes()
-        })
+        .filter(|(_, admission)| !admission.excludes())
         .map(|(fact, _)| fact.pane.clone())
         .collect();
     facts
@@ -976,7 +974,11 @@ pub fn gate_stale_column_panes(
                     "layout_column_pane_stale_stash_promoted_flagged",
                     format!(
                         "promoted_flagged_recycle_overdue:{}",
-                        if fact.is_focus { "focused" } else { "unfocused" }
+                        if fact.is_focus {
+                            "focused"
+                        } else {
+                            "unfocused"
+                        }
                     ),
                 )
             }
@@ -986,7 +988,11 @@ pub fn gate_stale_column_panes(
                     "layout_column_pane_stale_stash_promoted_editor_requested",
                     format!(
                         "promoted_editor_requested_recycle_pending:{}:editor_columns={}",
-                        if fact.is_focus { "focused" } else { "unfocused" },
+                        if fact.is_focus {
+                            "focused"
+                        } else {
+                            "unfocused"
+                        },
                         fact.editor_requested_columns.unwrap_or_default(),
                     ),
                 )
@@ -1938,10 +1944,7 @@ mod tests {
             "{facts:?}"
         );
         // I1: a live turn is never displaced, by any admission.
-        assert!(
-            !(displaces_live_turn && !admission.excludes()),
-            "{facts:?}"
-        );
+        assert!(!(displaces_live_turn && !admission.excludes()), "{facts:?}");
         // I2: never promoted UNFLAGGED out of the stash while overdue (the
         // flagged promotion is its own record).
         assert!(
@@ -2099,9 +2102,10 @@ mod tests {
                 .map(|doc| {
                     let pane = self.pane_for(doc);
                     let stale = self.stale && pane == self.stale_pane;
-                    let editor_documents: Option<Vec<&str>> = self.editor_columns.as_ref().map(
-                        |columns| columns.iter().flat_map(|arg| arg.split(',')).collect(),
-                    );
+                    let editor_documents: Option<Vec<&str>> = self
+                        .editor_columns
+                        .as_ref()
+                        .map(|columns| columns.iter().flat_map(|arg| arg.split(',')).collect());
                     ColumnGateFacts {
                         file: PathBuf::from(doc),
                         pane: pane.to_string(),

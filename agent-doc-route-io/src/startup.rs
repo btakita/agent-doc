@@ -357,9 +357,7 @@ pub fn provision_and_route_pane(
     // Codex boot can still complete without multiplying phase-local waits. The
     // controller command wait is deliberately longer than this nested effect.
     let _wait_for_ready_guard =
-        crate::invocation::WaitForReadyOverrideGuard::set(Some(
-            MANUAL_PANE_LAYOUT_EFFECT_TIMEOUT,
-        ));
+        crate::invocation::WaitForReadyOverrideGuard::set(Some(MANUAL_PANE_LAYOUT_EFFECT_TIMEOUT));
     let split_before = is_first_column(file, col_args);
     let harness = resolve_harness_for_file(file);
     let session_name = resolve_target_session(tmux, context_session, &[], Some(file), &harness)?;

@@ -550,9 +550,8 @@ mod tests {
     /// left a durable capture with no replay path at all.
     #[test]
     fn classify_allows_several_distinct_response_headings() {
-        match classify_replay_payload(
-            "### Re: first — gpt-5\none\n### Re: second — gpt-5\ntwo\n",
-        ) {
+        match classify_replay_payload("### Re: first — gpt-5\none\n### Re: second — gpt-5\ntwo\n")
+        {
             ReplayPayloadClassification::Replayable(_) => {}
             other => panic!("expected replayable, got {other:?}"),
         }
@@ -602,7 +601,9 @@ mod tests {
     #[test]
     fn topic_normalization_splits_on_the_last_em_dash() {
         assert_eq!(
-            re_heading_topics("### Re: lazily.md — one crash behind it — opus-5 · 2026-09-27T17:44-04:00\n"),
+            re_heading_topics(
+                "### Re: lazily.md — one crash behind it — opus-5 · 2026-09-27T17:44-04:00\n"
+            ),
             vec!["lazily.md — one crash behind it".to_string()]
         );
         // Without the last-em-dash rule both of these would normalize to

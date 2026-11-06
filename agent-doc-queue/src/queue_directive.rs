@@ -350,7 +350,10 @@ mod tests {
         );
         // No note, a detached colon, or no colon at all is not this shape.
         assert_eq!(explicit_do_directive_with_note_ids("do [#foo]:"), None);
-        assert_eq!(explicit_do_directive_with_note_ids("do [#foo] : note"), None);
+        assert_eq!(
+            explicit_do_directive_with_note_ids("do [#foo] : note"),
+            None
+        );
         assert_eq!(explicit_do_directive_with_note_ids("do [#foo]"), None);
         assert_eq!(explicit_do_directive_with_note_ids("do: something"), None);
     }

@@ -910,7 +910,10 @@ fn a_fresh_controller_reseed_yields_to_the_saved_operator_buffer_without_operato
     let attempt = editor.reregister(false);
     let facts = editor.last().clone();
     assert!(facts.retained_replica_reseed_pending, "{facts:#?}");
-    assert_eq!(facts.canonical, replica_text, "the reseed is the older replica");
+    assert_eq!(
+        facts.canonical, replica_text,
+        "the reseed is the older replica"
+    );
     assert_eq!(facts.evidence.buffer_equals_disk, Some(true));
     assert_eq!(
         attempt,
@@ -933,7 +936,10 @@ fn a_fresh_controller_reseed_yields_to_the_saved_operator_buffer_without_operato
         "the reseeded replica text is recoverable: {sidecars:?}"
     );
     let ops = ops_log(dir.path());
-    assert!(ops.contains("crdt_reseed_committed_history_unproven"), "{ops}");
+    assert!(
+        ops.contains("crdt_reseed_committed_history_unproven"),
+        "{ops}"
+    );
     assert!(ops.contains("recovery_sidecar="), "{ops}");
 }
 
@@ -965,7 +971,10 @@ fn an_empty_fresh_canonical_takes_the_attached_buffer_and_loses_nothing() {
     );
     assert_eq!(editor.buffer, EMPTY_RESEED_OPERATOR_TEXT);
     assert_eq!(hub_text(&doc), EMPTY_RESEED_OPERATOR_TEXT);
-    assert_eq!(std::fs::read_to_string(&doc).unwrap(), EMPTY_RESEED_OPERATOR_TEXT);
+    assert_eq!(
+        std::fs::read_to_string(&doc).unwrap(),
+        EMPTY_RESEED_OPERATOR_TEXT
+    );
     with_hub(&doc, |hub| assert!(!hub.retained_replica_reseed_pending())).unwrap();
 }
 
@@ -995,7 +1004,10 @@ fn a_genuine_two_sided_reseed_conflict_still_holds_for_the_operator() {
         "{:#?}",
         editor.last()
     );
-    assert_eq!(editor.buffer, operator_text, "the hold never touches the buffer");
+    assert_eq!(
+        editor.buffer, operator_text,
+        "the hold never touches the buffer"
+    );
 
     // The controller now holds the reseed; a later projection-recovery
     // re-register is an ordinary register with no settled shadow.
@@ -1158,9 +1170,11 @@ fn a_lost_frontier_adopts_a_controller_claim_projection_it_can_attribute() {
         "{facts:#?}"
     );
     assert_eq!(editor.buffer, hub_text(&doc));
-    assert!(editor.buffer.contains(&format!(
-        "🟡 [#subagent:attachhold#1] {CLAIMED_ITEM}"
-    )));
+    assert!(
+        editor
+            .buffer
+            .contains(&format!("🟡 [#subagent:attachhold#1] {CLAIMED_ITEM}"))
+    );
 }
 
 /// `#attachauthorattribution`: the restarted-IDE document shape. A run queue row
@@ -1265,7 +1279,11 @@ fn a_restart_with_an_operator_difference_beside_binary_projections_still_holds()
     assert_ne!(facts.evidence.canonical_contains_operator_edits, Some(true));
     assert_eq!(attempt, Attempt::Held(HOLD.to_string()), "{facts:#?}");
     assert_eq!(editor.buffer, operator_text);
-    assert_eq!(hub_text(&doc), canonical, "the hold never publishes either side");
+    assert_eq!(
+        hub_text(&doc),
+        canonical,
+        "the hold never publishes either side"
+    );
 }
 
 /// `#attachauthorattribution`: an operator edit that reached the canonical
@@ -1318,7 +1336,12 @@ fn replace_controller_keeping_canonical(doc: &std::path::Path) {
 /// replaced. Returns the project, editor, saved text, and canonical.
 fn restart_across_controller_replacement(
     name: &str,
-) -> (tempfile::TempDir, std::path::PathBuf, SimPluginEditor, String) {
+) -> (
+    tempfile::TempDir,
+    std::path::PathBuf,
+    SimPluginEditor,
+    String,
+) {
     let (dir, doc) = temp_doc(name);
     std::fs::write(&doc, ATTRIBUTION_DOC).unwrap();
     let mut editor = SimPluginEditor::open(&doc, ResumeRelease::OnCommit);
@@ -1369,7 +1392,12 @@ fn a_replacement_controller_without_a_readable_record_still_holds() {
             std::fs::remove_file(&record).unwrap();
         }
         let attempt = editor.reregister(false);
-        assert_eq!(attempt, Attempt::Held(HOLD.to_string()), "{:#?}", editor.last());
+        assert_eq!(
+            attempt,
+            Attempt::Held(HOLD.to_string()),
+            "{:#?}",
+            editor.last()
+        );
         assert_eq!(editor.buffer, saved);
     }
 }
@@ -1388,6 +1416,11 @@ fn a_durable_record_proves_nothing_about_a_canonical_past_its_tip() {
     })
     .unwrap();
     let attempt = editor.reregister(false);
-    assert_eq!(attempt, Attempt::Held(HOLD.to_string()), "{:#?}", editor.last());
+    assert_eq!(
+        attempt,
+        Attempt::Held(HOLD.to_string()),
+        "{:#?}",
+        editor.last()
+    );
     assert_eq!(editor.buffer, saved);
 }

@@ -390,7 +390,10 @@ mod tests {
         assert!(!message.contains("diverged from their last settled ancestor"));
         assert!(message.contains("paste back anything missing"));
         assert!(message.ends_with(" The editor buffer and disk were left unchanged."));
-        assert_eq!(answer.hold_notification, AttachFailureHoldNotification::Error);
+        assert_eq!(
+            answer.hold_notification,
+            AttachFailureHoldNotification::Error
+        );
     }
 
     /// Seen on agent-doc-bugs.md, 2026-10-28 12:57:53. A
@@ -428,7 +431,10 @@ mod tests {
             assert!(message.contains("kept the attached editor replica for agent-doc-bugs.md"));
             assert!(message.contains(&format!("Cause: {reason}.")));
             assert!(!message.contains("agent-doc repair"), "{reason}: {message}");
-            assert!(!message.contains("close this editor tab"), "{reason}: {message}");
+            assert!(
+                !message.contains("close this editor tab"),
+                "{reason}: {message}"
+            );
         }
     }
 
@@ -440,9 +446,17 @@ mod tests {
                 file_name: Some("agent-doc-bugs.md".to_string()),
                 live_replica_attached: live,
             });
-            assert_eq!(answer.hold_notification, AttachFailureHoldNotification::Error);
+            assert_eq!(
+                answer.hold_notification,
+                AttachFailureHoldNotification::Error
+            );
             assert!(answer.remedy.unwrap().contains("agent-doc repair <file>"));
-            assert!(answer.hold_message.unwrap().contains("agent-doc repair <file>"));
+            assert!(
+                answer
+                    .hold_message
+                    .unwrap()
+                    .contains("agent-doc repair <file>")
+            );
         }
     }
 

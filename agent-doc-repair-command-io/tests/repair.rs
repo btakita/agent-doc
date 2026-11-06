@@ -1815,11 +1815,14 @@ mod tests {
         let err = run(&doc).expect_err("repair must still defer to the retained write");
         let rendered = format!("{err:#}");
         assert!(
-            rendered.contains(agent_doc_turn::write_ownership::AWAIT_EDITOR_REPLICA_NO_DISK_WRITE_TOKEN),
+            rendered.contains(
+                agent_doc_turn::write_ownership::AWAIT_EDITOR_REPLICA_NO_DISK_WRITE_TOKEN
+            ),
             "{rendered}"
         );
         assert!(
-            !rendered.contains(agent_doc_turn::write_ownership::EDITOR_ATTACH_AWAITS_OPERATOR_STATE),
+            !rendered
+                .contains(agent_doc_turn::write_ownership::EDITOR_ATTACH_AWAITS_OPERATOR_STATE),
             "a closed document holds no paused attach: {rendered}"
         );
         assert_eq!(
@@ -1829,7 +1832,10 @@ mod tests {
         );
         let ops = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(ops.contains("reason=document_detached"), "{ops}");
-        assert!(ops.contains("repair_replay_deferred_to_retained_write"), "{ops}");
+        assert!(
+            ops.contains("repair_replay_deferred_to_retained_write"),
+            "{ops}"
+        );
         assert!(ops.contains("verdict=deferred"), "{ops}");
     }
 
@@ -2405,7 +2411,10 @@ mod tests {
         .expect_err("an unlandable response must be refused");
         let message = format!("{err:#}");
         assert!(message.contains("can never land"), "{message}");
-        assert!(message.contains("full document component dump"), "{message}");
+        assert!(
+            message.contains("full document component dump"),
+            "{message}"
+        );
         assert!(message.contains("Nothing was captured"), "{message}");
 
         assert_eq!(
@@ -2506,8 +2515,14 @@ mod tests {
         let err = agent_doc_repair_command_io::repair(&doc)
             .expect_err("repair must not replay an unlandable capture");
         let message = format!("{err:#}");
-        assert!(message.contains("captured_response_unlandable"), "{message}");
-        assert!(message.contains("--requote-unlandable-capture"), "{message}");
+        assert!(
+            message.contains("captured_response_unlandable"),
+            "{message}"
+        );
+        assert!(
+            message.contains("--requote-unlandable-capture"),
+            "{message}"
+        );
         assert_eq!(std::fs::read_to_string(&doc).unwrap(), content);
         assert!(
             agent_doc_session_check_io::current_unlandable_capture(&doc)
@@ -2601,7 +2616,8 @@ mod tests {
         let result = std::fs::read_to_string(&doc).unwrap();
         assert_eq!(result.matches("Repaired the queue.").count(), 1, "{result}");
         assert!(
-            result.contains("&lt;!-- agent:queue --&gt;\n- leaked item\n&lt;!-- /agent:queue --&gt;"),
+            result
+                .contains("&lt;!-- agent:queue --&gt;\n- leaked item\n&lt;!-- /agent:queue --&gt;"),
             "{result}"
         );
         assert!(
@@ -4914,9 +4930,14 @@ mod tests {
         .unwrap()
         {
             agent_doc_session_check_io::SessionCheckStatus::SteeringPending(message) => {
-                assert!(message.contains("Did you pick up the exchange prompt?"), "{message}");
+                assert!(
+                    message.contains("Did you pick up the exchange prompt?"),
+                    "{message}"
+                );
             }
-            status => panic!("session-check must preserve and admit the operator steering: {status:?}"),
+            status => {
+                panic!("session-check must preserve and admit the operator steering: {status:?}")
+            }
         }
 
         let recovered = run(&doc).expect("a landed capture must not enter replay recovery");

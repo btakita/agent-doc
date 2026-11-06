@@ -14,8 +14,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 /// `#integrationtesttargets`: this target drives the real `agent-doc` CLI, and
 /// a controller launch by that CLI is production behavior, so every spawned
 /// command opts in with this reason.
-const CONTROLLER_LAUNCH_REASON: &str =
-    "test_cli drives the agent-doc CLI end to end; a command that needs the project controller launches it exactly as production does";
+const CONTROLLER_LAUNCH_REASON: &str = "test_cli drives the agent-doc CLI end to end; a command that needs the project controller launches it exactly as production does";
 
 fn agent_doc_cmd() -> Command {
     let mut command = cargo_bin_cmd!("agent-doc");
@@ -2769,11 +2768,9 @@ fn test_document_sync_routes_explicit_backlog_to_named_queue() {
 
     let mut cmd = agent_doc_cmd();
     cmd.args(["sync", doc.to_str().unwrap()]);
-    cmd.assert()
-        .success()
-        .stdout(predicate::str::contains(
-            "routed explicit backlog id(s) into their named queues: #compile",
-        ));
+    cmd.assert().success().stdout(predicate::str::contains(
+        "routed explicit backlog id(s) into their named queues: #compile",
+    ));
 
     let synced = fs::read_to_string(&doc).unwrap();
     let triage_start = synced.find("<!-- agent:run id=triage -->").unwrap();
@@ -11213,7 +11210,8 @@ fn test_controller_orphan_drain_dispatch_is_serialized_scoped_and_durably_fenced
         "recovered-supervisor orphan dispatch must preserve background pane topology and focus (GH #307)"
     );
     assert!(
-        authoritative_dispatch.contains("let dispatch_origin = crate::invocation::dispatch_origin();")
+        authoritative_dispatch
+            .contains("let dispatch_origin = crate::invocation::dispatch_origin();")
             && authoritative_dispatch.contains("origin: dispatch_origin,")
             && authoritative_dispatch
                 .contains("AuthoritativeActorDispatchAction::DeferAutomatedBehindLiveTurn =>")
@@ -13293,9 +13291,8 @@ fn test_agent_doc_session_check_io_owns_guard_adapters() {
         session_check_command.contains("crate::resolve_current_document_content")
             && session_check_command.contains("\"latest_head_response_missing\"")
             && session_check_command.contains("read terminal closeout")
-            && session_check_command.contains(
-                "agent_doc_turn::exchange_tail::unresolved_exchange_prompt_in_content"
-            ),
+            && session_check_command
+                .contains("agent_doc_turn::exchange_tail::unresolved_exchange_prompt_in_content"),
         "ordinary guards use current-document authority, while the already-committed final gate uses a controller-free local read"
     );
     assert!(
@@ -13474,10 +13471,7 @@ fn test_document_realtime_io_owns_pipeline_frontmatter_runtime_effects() {
     // `#[cfg(test)]` attribute: deterministic test hooks (`#[cfg(test)]
     // thread_local!`/`fn`) legitimately sit beside the production code they
     // instrument.
-    let cycle_state_prod = cycle_state_io
-        .split("\n#[cfg(test)]\nmod ")
-        .next()
-        .unwrap();
+    let cycle_state_prod = cycle_state_io.split("\n#[cfg(test)]\nmod ").next().unwrap();
     for required in [
         "append_phase_event_to_session_log(file, &state, file_content)",
         "fn append_phase_event_to_session_log(file: &Path, state: &CycleState, file_content: Option<&str>)",
@@ -15366,8 +15360,7 @@ fn test_release_publishes_all_ranged_jetbrains_updates_when_marketplace_is_confi
             "Marketplace onboarding must document the external account/token step: {required}",
         );
     }
-    let specification =
-        fs::read_to_string(manifest_dir.join("editors/jetbrains/SPEC.md")).unwrap();
+    let specification = fs::read_to_string(manifest_dir.join("editors/jetbrains/SPEC.md")).unwrap();
     assert!(
         specification.contains("validate the complete three-ZIP set")
             && specification.contains("only stock automatic Remote Dev synchronization channel")
@@ -15464,10 +15457,8 @@ fn test_release_platform_assets_publish_independently_and_retry_idempotently() {
             && !plugins.contains("gh workflow run target-channel.yml || true"),
         "editor readiness must trigger promotion without waiting for unrelated matrix legs"
     );
-    let rollback = fs::read_to_string(
-        manifest_dir.join(".github/workflows/target-channel.yml"),
-    )
-    .unwrap();
+    let rollback =
+        fs::read_to_string(manifest_dir.join(".github/workflows/target-channel.yml")).unwrap();
     assert!(
         rollback.contains("args+=(--allow-rollback)")
             && rollback.contains("group: target-stable-channel-${{ github.repository }}")
@@ -15484,12 +15475,10 @@ fn test_release_platform_assets_publish_independently_and_retry_idempotently() {
         finalize.contains("needs: [build, plugins]")
             && finalize.contains("sha256sum --check \"$archive.sha256\"")
             && finalize.contains("sha256sum \"${archives[@]}\" | sort -k2 > SHA256SUMS")
-            && finalize.contains(
-                "gh release upload \"$GITHUB_REF_NAME\" artifacts/SHA256SUMS --clobber"
-            )
-            && finalize.contains(
-                "gh release edit \"$GITHUB_REF_NAME\" --prerelease=false --latest"
-            ),
+            && finalize
+                .contains("gh release upload \"$GITHUB_REF_NAME\" artifacts/SHA256SUMS --clobber")
+            && finalize
+                .contains("gh release edit \"$GITHUB_REF_NAME\" --prerelease=false --latest"),
         "the aggregate checksum must appear after every archive verifies and before stable promotion"
     );
     let manifest_upload = finalize
@@ -15826,9 +15815,8 @@ fn test_pypi_publish_is_dispatched_after_release_assets_not_a_wall_clock_poll() 
     let uploader = job("finalize-release").join("\n");
     assert!(
         uploader.contains("> SHA256SUMS")
-            && uploader.contains(
-                "gh release upload \"$GITHUB_REF_NAME\" artifacts/SHA256SUMS --clobber"
-            ),
+            && uploader
+                .contains("gh release upload \"$GITHUB_REF_NAME\" artifacts/SHA256SUMS --clobber"),
         "release.yml's `finalize-release` job must generate and upload the completion manifest"
     );
     let dispatcher = job("pypi");
@@ -16206,12 +16194,14 @@ fn test_check_shares_one_build_and_runs_batched_binaries_concurrently() {
     }
     let cross = recipe("cross-editor-simworld");
     assert!(
-        cross.contains("$(TEST_BUILD)") && cross.contains("test --workspace --test cross_editor_simworld"),
+        cross.contains("$(TEST_BUILD)")
+            && cross.contains("test --workspace --test cross_editor_simworld"),
         "cross-editor-simworld must reuse the shared build: {cross}"
     );
     assert!(
         makefile.contains("check: AUDIT_DOCS_FROM_TEST_BUILD := 1")
-            && recipe("audit-docs").contains("\"$(CARGO_TARGET_DIR_ABS)/debug/agent-doc\" audit-docs"),
+            && recipe("audit-docs")
+                .contains("\"$(CARGO_TARGET_DIR_ABS)/debug/agent-doc\" audit-docs"),
         "check's audit-docs must run the binary the shared build produced"
     );
 
@@ -16947,10 +16937,7 @@ fn test_hot_state_uses_state_db_and_only_recovery_uses_snapshot_paths() {
         fs::read_to_string(manifest_dir.join("agent-doc-cycle-state-io/src/lib.rs")).unwrap();
     // Production ends at the first test module; inline `#[cfg(test)]` hooks
     // are part of the production region they instrument.
-    let cycle = cycle
-        .split("\n#[cfg(test)]\nmod ")
-        .next()
-        .unwrap_or(&cycle);
+    let cycle = cycle.split("\n#[cfg(test)]\nmod ").next().unwrap_or(&cycle);
     assert!(cycle.contains("agent_doc_sqlite::state_store::open_state_db("));
     assert!(cycle.contains("insert_state_event_in_db("));
     assert!(!cycle.contains(".agent-doc/state/cycles"));
@@ -29054,9 +29041,8 @@ fn test_agent_doc_document_owns_claim_scaffold_policy() {
     );
 
     let jetbrains_claim = fs::read_to_string(
-        manifest_dir.join(
-            "editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/ClaimAction.kt",
-        ),
+        manifest_dir
+            .join("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/ClaimAction.kt"),
     )
     .unwrap();
     assert!(
@@ -31550,8 +31536,7 @@ fn test_operator_todo_authoring_contract_is_documented_across_instruction_surfac
     ] {
         let surface = fs::read_to_string(manifest_dir.join(relative_path)).unwrap();
         assert!(
-            surface.contains("runbooks/respond.md")
-                && surface.contains("runbooks/pending-ops.md"),
+            surface.contains("runbooks/respond.md") && surface.contains("runbooks/pending-ops.md"),
             "{relative_path} must route tracked-work mutations to the focused runbooks"
         );
     }
@@ -35926,7 +35911,11 @@ fn test_cli_skill_install_reload_restart_with_explicit_harness_and_root() {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
-    assert!(tmp.path().join(".claude/skills/agent-doc/SKILL.md").exists());
+    assert!(
+        tmp.path()
+            .join(".claude/skills/agent-doc/SKILL.md")
+            .exists()
+    );
 
     let mut cmd = agent_doc_cmd();
     cmd.args(["skill", "install", "--harness", "claude", "--root"])
@@ -36151,8 +36140,7 @@ fn test_skill_md_contains_required_steps() {
     let harness = std::fs::read_to_string(runbook_root.join("harness-invocation.md")).unwrap();
     let persist = std::fs::read_to_string(runbook_root.join("persist-closeout.md")).unwrap();
     let planning = std::fs::read_to_string(runbook_root.join("planning-dispatch.md")).unwrap();
-    let queue_auto_loop =
-        std::fs::read_to_string(runbook_root.join("queue-auto-loop.md")).unwrap();
+    let queue_auto_loop = std::fs::read_to_string(runbook_root.join("queue-auto-loop.md")).unwrap();
     let respond = std::fs::read_to_string(runbook_root.join("respond.md")).unwrap();
     let routed_contract =
         format!("{cycle}\n{harness}\n{persist}\n{planning}\n{queue_auto_loop}\n{respond}");
@@ -36353,7 +36341,9 @@ fn test_codex_skill_install_writes_hook_artifacts() {
     )
     .unwrap();
     assert!(invocation.contains("agent-doc skill install --harness codex"));
-    assert!(invocation.contains("re-read the installed `.codex/skills/agent-doc/SKILL.md` completely"));
+    assert!(
+        invocation.contains("re-read the installed `.codex/skills/agent-doc/SKILL.md` completely")
+    );
     assert!(invocation.contains("Do not restart the active supervisor"));
     assert!(invocation.contains("Do **not** type `/agent-doc`"));
 
@@ -36466,9 +36456,7 @@ fn test_opencode_skill_install_preserves_operator_authority_instructions() {
     assert!(cycle.contains("`#chatprompt`, GH #140"));
     assert!(cycle.contains("OpenCode has no `UserPromptSubmit` hook"));
     assert!(cycle.contains("self-apply this rule"));
-    assert!(cycle.contains(
-        "> **Chat prompt (#chatprompt:<id>):** <verbatim prompt>"
-    ));
+    assert!(cycle.contains("> **Chat prompt (#chatprompt:<id>):** <verbatim prompt>"));
 }
 
 #[test]

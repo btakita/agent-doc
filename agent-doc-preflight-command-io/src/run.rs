@@ -2629,26 +2629,30 @@ fn run_with_options_to_writer_in_pass(
     // `#subagentworkpool`: the pool status and, ahead of everything else,
     // claimed heads still owed their spawn + start. Diagnostic projection: a
     // failure is logged and never fails preflight.
-    let queue_subagent_pool = agent_doc_queue_io::subagent_dispatch::queue_subagent_dispatch_enabled_for_content(
-        file,
-        queue_authoritative_content,
-    )
-    .unwrap_or(false)
-    .then(|| {
-        agent_doc_queue_io::subagent_pool::pool_refill_for_content(
+    let queue_subagent_pool =
+        agent_doc_queue_io::subagent_dispatch::queue_subagent_dispatch_enabled_for_content(
             file,
             queue_authoritative_content,
-            agent_doc_queue::subagent_pool::PoolRefillTrigger::Plan,
         )
-        .map_err(|err| {
-            agent_doc_ops_log_io::log_op(
+        .unwrap_or(false)
+        .then(|| {
+            agent_doc_queue_io::subagent_pool::pool_refill_for_content(
                 file,
-                &format!("subagent_pool_projection_error file={} error={err:#}", file.display()),
-            );
+                queue_authoritative_content,
+                agent_doc_queue::subagent_pool::PoolRefillTrigger::Plan,
+            )
+            .map_err(|err| {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "subagent_pool_projection_error file={} error={err:#}",
+                        file.display()
+                    ),
+                );
+            })
+            .ok()
         })
-        .ok()
-    })
-    .flatten();
+        .flatten();
     let exchange_subagent_dispatch = if exchange_prompt_attrs.subagents {
         agent_doc_preflight_io::exchange_subagent_dispatch_entries(&active_exchange_prompt_targets)
     } else {
@@ -3030,7 +3034,11 @@ fn run_with_options_to_writer_in_pass(
         let prompts: Vec<&str> = selected_queue_prompts
             .iter()
             .map(String::as_str)
-            .chain(user_intent_prompt_changes.iter().map(|change| change.text.as_str()))
+            .chain(
+                user_intent_prompt_changes
+                    .iter()
+                    .map(|change| change.text.as_str()),
+            )
             .collect();
         answer_ledger_report.lookup_menu(&file.display().to_string(), &prompts)
     };
@@ -4334,18 +4342,15 @@ mod tests {
             "{parsed:#}"
         );
         assert_eq!(
-            parsed["queue_sync"]["reconcile_unknown"][0]["lifecycle"],
-            "reconcile_unknown",
+            parsed["queue_sync"]["reconcile_unknown"][0]["lifecycle"], "reconcile_unknown",
             "{parsed:#}"
         );
         assert_eq!(
-            parsed["queue_sync"]["reconcile_unknown"][0]["operation"],
-            "reconcile",
+            parsed["queue_sync"]["reconcile_unknown"][0]["operation"], "reconcile",
             "{parsed:#}"
         );
         assert_eq!(
-            parsed["queue_sync"]["reconcile_unknown"][0]["execution_evidence"],
-            "unknown",
+            parsed["queue_sync"]["reconcile_unknown"][0]["execution_evidence"], "unknown",
             "{parsed:#}"
         );
         let maintained = std::fs::read_to_string(&doc).unwrap();
@@ -5089,11 +5094,7 @@ mod tests {
         assert!(state.backlog_capture_heads[0].contains("[#q-"));
         assert_capture_gate_armed(&doc);
 
-        start_worker_mid_cycle(
-            &doc,
-            &state.backlog_capture_heads[0],
-            "subagent:review",
-        );
+        start_worker_mid_cycle(&doc, &state.backlog_capture_heads[0], "subagent:review");
         prewrite_capture_gate(&doc).expect("the head behind the requirement is worker-owned");
     }
 
@@ -5122,11 +5123,7 @@ mod tests {
             "do [#leftovercleanupbacklog]"
         );
 
-        start_worker_mid_cycle(
-            &doc,
-            &state.backlog_capture_heads[0],
-            "subagent:review",
-        );
+        start_worker_mid_cycle(&doc, &state.backlog_capture_heads[0], "subagent:review");
         assert_capture_gate_armed(&doc);
         start_worker_mid_cycle(&doc, "do [#leftovercleanupbacklog]", "subagent:cleanup");
         prewrite_capture_gate(&doc).expect("every head behind the requirement is worker-owned");

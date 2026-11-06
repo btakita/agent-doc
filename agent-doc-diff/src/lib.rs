@@ -5312,7 +5312,11 @@ Done.\n\
         let diff = unified_diff_from_contents(snapshot, &with_prompt).expect("diff");
         let changes = all_unstarted_prompt_bearing_changes_from_diff(&diff, &with_prompt);
         assert_eq!(changes.len(), 1, "{changes:#?}");
-        assert!(changes[0].text.contains("Audit the remaining install state."));
+        assert!(
+            changes[0]
+                .text
+                .contains("Audit the remaining install state.")
+        );
     }
 
     #[test]

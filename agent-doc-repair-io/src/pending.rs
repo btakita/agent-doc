@@ -291,7 +291,10 @@ mod tests {
         );
         let err = save_pending_with_current_content(&doc, transcript, content).unwrap_err();
 
-        assert!(err.to_string().contains("refusing to capture a pending response"));
+        assert!(
+            err.to_string()
+                .contains("refusing to capture a pending response")
+        );
         assert!(agent_doc_capture_io::load_active(&doc).unwrap().is_none());
         assert_eq!(load_active_pending_response(&doc).unwrap(), None);
     }

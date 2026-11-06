@@ -47,7 +47,11 @@ pub fn synthetic_diff_from_body(body: &str) -> String {
 /// multi-line prompt as an invocation when its document actually resolves; a
 /// paste naming a path from some other project root is operator content.
 pub fn is_multi_line_prompt(prompt: &str) -> bool {
-    prompt.lines().filter(|line| !line.trim().is_empty()).nth(1).is_some()
+    prompt
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .nth(1)
+        .is_some()
 }
 
 pub fn agent_doc_invocation_file_from_text(prompt: &str) -> Option<&str> {

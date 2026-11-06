@@ -49,10 +49,10 @@
 //! - release_search_skips_prereleases_and_drafts: the fallback walk matches `/releases/latest` stable-release semantics
 //! - github_rate_limit_error_reports_reset_and_auth_guidance: exhausted API limits produce an actionable diagnostic
 
+use crate::plugin_vscode_web::{VsCodeWebServe, running_vscode_web_serves};
 use anyhow::{Context, Result, bail};
 use serde_json::Value;
 use std::cmp::Ordering as CmpOrdering;
-use crate::plugin_vscode_web::{VsCodeWebServe, running_vscode_web_serves};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::{self, IsTerminal as _, Read as _, Write as _};
@@ -1285,7 +1285,9 @@ fn vscode_web_targets(
 ) -> Vec<VsCodeInstallTarget> {
     let mut targets: Vec<_> = running.iter().filter_map(vscode_web_serve_target).collect();
     if let Some(probed) = vscode_web_target(home)
-        && !targets.iter().any(|target| target.program == probed.program)
+        && !targets
+            .iter()
+            .any(|target| target.program == probed.program)
     {
         targets.push(probed);
     }
@@ -1431,10 +1433,7 @@ fn install_vsix_into_all(targets: &[VsCodeInstallTarget], vsix: &Path) -> Result
     if errors.is_empty() {
         Ok(())
     } else {
-        bail!(
-            "VS Code extension install failed:\n{}",
-            errors.join("\n")
-        )
+        bail!("VS Code extension install failed:\n{}", errors.join("\n"))
     }
 }
 
@@ -4356,6 +4355,10 @@ mod tests {
     }
 
     use super::{
+        BTreeSet, VsCodeInstallTarget, code_server_target, install_vsix_into_all,
+        vscode_install_targets, vscode_server_targets_in, vscode_web_target, vscode_web_targets,
+    };
+    use super::{
         EDITOR_PACKAGE_MANIFEST, compare_digest, editor_package_manifest_digest,
         editor_package_manifest_url, format_rate_limit_reset_at, missing_code_cli_message,
         parse_asset_digest, verify_editor_package,
@@ -4376,10 +4379,6 @@ mod tests {
         packaged_plugin_version, release_version, releases_page_url, replace_jetbrains_plugin_tree,
         unchanged_jetbrains_install_outcome_at, verify_local_install_version,
         vscode_extension_version_from_output,
-    };
-    use super::{
-        BTreeSet, VsCodeInstallTarget, code_server_target, install_vsix_into_all, vscode_install_targets,
-        vscode_server_targets_in, vscode_web_target, vscode_web_targets,
     };
     use super::{install_jetbrains_package_bytes, java_candidates_for_ide, resolve_java_for_ide};
     use serde_json::json;
@@ -4995,7 +4994,9 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
         stamp(&vscode.join("bin/1111"), 1_000);
         stamp(&vscode.join("cli/servers/Stable-2222"), 2_000);
         // A server whose CLI is not executable, and a root with no server, are skipped.
-        let codium = home.path().join(".vscodium-server/bin/3333/bin/codium-server");
+        let codium = home
+            .path()
+            .join(".vscodium-server/bin/3333/bin/codium-server");
         fs::create_dir_all(codium.parent().unwrap()).unwrap();
         fs::write(&codium, "#!/bin/sh\n").unwrap();
         fs::create_dir_all(home.path().join(".cursor-server/extensions")).unwrap();
@@ -5019,7 +5020,10 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
         executable(&relocated_cli, "#!/bin/sh\n");
         let targets = vscode_server_targets_in(home.path(), Some(&relocated));
         assert_eq!(
-            targets.iter().map(|target| target.program.clone()).collect::<Vec<_>>(),
+            targets
+                .iter()
+                .map(|target| target.program.clone())
+                .collect::<Vec<_>>(),
             vec![relocated_cli, newer.clone()]
         );
         let targets = vscode_server_targets_in(home.path(), Some(&vscode));
@@ -5177,16 +5181,25 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
             };
             // A stopped install at the fixed path is still reached.
             assert_eq!(
-                vscode_web_targets(Some(&home), &BTreeSet::from([serve(&prefix, Some("/srv/ext"))])),
+                vscode_web_targets(
+                    Some(&home),
+                    &BTreeSet::from([serve(&prefix, Some("/srv/ext"))])
+                ),
                 vec![custom.clone(), probed.clone()]
             );
-            assert_eq!(vscode_web_targets(Some(&home), &BTreeSet::new()), vec![probed]);
+            assert_eq!(
+                vscode_web_targets(Some(&home), &BTreeSet::new()),
+                vec![probed]
+            );
             // A server running from the fixed path replaces the bare probe: its
             // `--extensions-dir` is the directory it loads.
             let at_probe = serve(&home.join(".vscode-web"), Some("/srv/ext"));
             let targets = vscode_web_targets(Some(&home), &BTreeSet::from([at_probe]));
             assert_eq!(
-                targets.iter().map(|target| target.leading_args.len()).collect::<Vec<_>>(),
+                targets
+                    .iter()
+                    .map(|target| target.leading_args.len())
+                    .collect::<Vec<_>>(),
                 vec![2]
             );
         }
@@ -5197,15 +5210,25 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
         let server = VsCodeInstallTarget {
             label: "remote-ssh:/home/u/.vscode-server".into(),
             program: PathBuf::from("/home/u/.vscode-server/bin/c/bin/code-server"),
-            leading_args: vec!["--extensions-dir".into(), "/home/u/.vscode-server/extensions".into()],
+            leading_args: vec![
+                "--extensions-dir".into(),
+                "/home/u/.vscode-server/extensions".into(),
+            ],
         };
         let code_server = VsCodeInstallTarget::cli("code-server");
         assert_eq!(
             vscode_install_targets(Some("code"), vec![code_server.clone(), server.clone()]),
-            vec![VsCodeInstallTarget::cli("code"), code_server, server.clone()]
+            vec![
+                VsCodeInstallTarget::cli("code"),
+                code_server,
+                server.clone()
+            ]
         );
         // A headless Coder workspace has no desktop CLI; the server alone is enough.
-        assert_eq!(vscode_install_targets(None, vec![server.clone()]), vec![server]);
+        assert_eq!(
+            vscode_install_targets(None, vec![server.clone()]),
+            vec![server]
+        );
         assert!(vscode_install_targets(None, Vec::new()).is_empty());
     }
 
@@ -5230,14 +5253,20 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
         };
 
         let error = install_vsix_into_all(
-            &[target("broken", &failing), target("remote-ssh:/srv", &recorder)],
+            &[
+                target("broken", &failing),
+                target("remote-ssh:/srv", &recorder),
+            ],
             &vsix,
         )
         .unwrap_err();
         assert!(format!("{error:#}").contains("broken:"), "{error:#}");
         assert_eq!(
             fs::read_to_string(&log).unwrap(),
-            format!("--extensions-dir /srv/ext --install-extension {}\n", vsix.display()),
+            format!(
+                "--extensions-dir /srv/ext --install-extension {}\n",
+                vsix.display()
+            ),
             "a failing target must not stop the next one",
         );
         install_vsix_into_all(&[target("remote-ssh:/srv", &recorder)], &vsix).unwrap();
@@ -6712,10 +6741,12 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
 
     #[test]
     fn modular_install_scope_notice_refuses_to_imply_cross_peer_installation() {
-        assert!(super::jetbrains_remote_dev_install_scope_notice(
-            super::JetbrainsPackageRange::Classic242To261
-        )
-        .is_none());
+        assert!(
+            super::jetbrains_remote_dev_install_scope_notice(
+                super::JetbrainsPackageRange::Classic242To261
+            )
+            .is_none()
+        );
 
         for package_range in [
             super::JetbrainsPackageRange::Modular262,

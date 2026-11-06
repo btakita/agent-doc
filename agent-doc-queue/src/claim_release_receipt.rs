@@ -332,7 +332,11 @@ impl ClaimReleaseReceiptLedger {
         }) else {
             return Err(ReceiptRecordRefused::MissingResponseCapture);
         };
-        let Some(response) = existing.response.clone().filter(CapturedQueueResponse::is_valid) else {
+        let Some(response) = existing
+            .response
+            .clone()
+            .filter(CapturedQueueResponse::is_valid)
+        else {
             return Err(ReceiptRecordRefused::MissingResponseCapture);
         };
         let worker = claim.worker.as_ref().expect("validated worker");
@@ -728,7 +732,12 @@ mod tests {
         let consumed = "[#hookcreatedsubmodules] Keep or remove the settings files";
         let edited = "[#hookcreatedsubmodules] Approve removing the settings files";
         let mut ledger = ClaimReleaseReceiptLedger::default();
-        record(&mut ledger, &claim(consumed, "subagent:hookcreated"), 10, 50);
+        record(
+            &mut ledger,
+            &claim(consumed, "subagent:hookcreated"),
+            10,
+            50,
+        );
         record(&mut ledger, &claim("other line", "subagent:other"), 10, 50);
         let queued = live(&[edited, "other line"]);
         let none = ClaimedQueueItems::none();
@@ -743,7 +752,11 @@ mod tests {
             "closing is idempotent"
         );
         assert!(ledger.governing(20, Some(&queued), &none, edited).is_none());
-        assert!(!ledger.reported_items(20, Some(&queued), &none).claims(edited));
+        assert!(
+            !ledger
+                .reported_items(20, Some(&queued), &none)
+                .claims(edited)
+        );
         assert!(
             !ledger
                 .attested_reported_items(20, Some(&queued), &none)
@@ -829,15 +842,20 @@ mod tests {
 
     #[test]
     fn persist_instruction_names_the_echo_for_free_text_and_done_for_ids() {
-        let free =
-            persist_reported_instruction("tasks/docs.md", "What are the values?", "subagent:x", None);
+        let free = persist_reported_instruction(
+            "tasks/docs.md",
+            "What are the values?",
+            "subagent:x",
+            None,
+        );
         assert!(
             free.contains("> **Queue prompt:** What are the values?"),
             "{free}"
         );
         assert!(free.contains("agent-doc finalize tasks/docs.md"), "{free}");
         assert!(free.contains("Do NOT dispatch a new subagent"), "{free}");
-        let id = persist_reported_instruction("tasks/docs.md", "do [#gh275]", "subagent:y", Some(2));
+        let id =
+            persist_reported_instruction("tasks/docs.md", "do [#gh275]", "subagent:y", Some(2));
         assert!(id.contains("--done gh275"), "{id}");
         assert!(
             id.contains("agent-doc queue consume tasks/docs.md --ack-id gh275"),
@@ -888,14 +906,14 @@ mod tests {
                 "[#tdclireleasedownloads]: haiven-cli will be public",
                 "'[#tdclireleasedownloads]: haiven-cli will be public'",
             ),
-            ("Rebuild the SDK docs [#q-7f3a]", "'Rebuild the SDK docs [#q-7f3a]'"),
+            (
+                "Rebuild the SDK docs [#q-7f3a]",
+                "'Rebuild the SDK docs [#q-7f3a]'",
+            ),
             ("What are the values?", "'What are the values?'"),
             // A preset token plus only a generated q-id is still free text.
             // `--ack-id address` and `--ack-id q-…` both refuse.
-            (
-                "#address [#q-3f7fdc3da31f]",
-                "'#address [#q-3f7fdc3da31f]'",
-            ),
+            ("#address [#q-3f7fdc3da31f]", "'#address [#q-3f7fdc3da31f]'"),
             (
                 "https://example.test/merge_requests/2: #address [#q-3f7fdc3da31f]",
                 "'https://example.test/merge_requests/2: #address [#q-3f7fdc3da31f]'",
@@ -912,15 +930,28 @@ mod tests {
             assert!(!closeout.contains("Queue prompt"), "{closeout}");
             for legacy in [None, Some(("subagent:c690cli", 0))] {
                 let echo = queue_line_closeout("tasks/sdk.md", row, legacy);
-                assert!(echo.contains(&format!("> **Queue prompt:** {row}")), "{echo}");
+                assert!(
+                    echo.contains(&format!("> **Queue prompt:** {row}")),
+                    "{echo}"
+                );
                 assert!(!echo.contains("--ack-"), "{echo}");
             }
         }
-        let persisted =
-            persist_reported_instruction("tasks/sdk.md", "Rebuild the SDK docs [#q-7f3a]", "subagent:q", Some(3));
-        assert!(persisted.contains("--ack-owner 'subagent:q#3'"), "{persisted}");
+        let persisted = persist_reported_instruction(
+            "tasks/sdk.md",
+            "Rebuild the SDK docs [#q-7f3a]",
+            "subagent:q",
+            Some(3),
+        );
+        assert!(
+            persisted.contains("--ack-owner 'subagent:q#3'"),
+            "{persisted}"
+        );
         assert!(!persisted.contains("--ack-id"), "{persisted}");
-        assert!(persisted.contains("write the result to `agent:exchange`"), "{persisted}");
+        assert!(
+            persisted.contains("write the result to `agent:exchange`"),
+            "{persisted}"
+        );
         // A row whose result is already recorded is only struck: it must never
         // be told to record it again.
         let strike = queue_line_closeout(
@@ -1069,10 +1100,7 @@ mod tests {
             .unwrap();
         let captured = &ledger.receipts[0];
         assert_eq!(captured.released_at_secs, 0, "capture is not release proof");
-        assert_eq!(
-            captured.response.as_ref().unwrap().body,
-            "complete body"
-        );
+        assert_eq!(captured.response.as_ref().unwrap().body, "complete body");
         assert!(ledger.record(&candidate, key, 11, 50).is_ok());
     }
 

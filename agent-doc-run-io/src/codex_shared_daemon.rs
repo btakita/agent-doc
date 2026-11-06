@@ -92,7 +92,11 @@ pub fn invocation_descends_from_shared_codex_daemon() -> Option<u32> {
 pub fn daemon_attached_codex_tui_under(pane_pid: u32) -> Option<u32> {
     let mut children: std::collections::HashMap<u32, Vec<u32>> = Default::default();
     for entry in std::fs::read_dir("/proc").ok()?.flatten() {
-        let Some(pid) = entry.file_name().to_str().and_then(|n| n.parse::<u32>().ok()) else {
+        let Some(pid) = entry
+            .file_name()
+            .to_str()
+            .and_then(|n| n.parse::<u32>().ok())
+        else {
             continue;
         };
         if let Some(ppid) = parent_pid(pid) {
@@ -201,7 +205,8 @@ mod tests {
 
     #[test]
     fn remedy_says_the_pane_is_not_evidence_and_names_the_recovery() {
-        let requested = shared_daemon_owner_mismatch_remedy("/r/tasks/infra.md", "%12", "%3", 171804, Ok(()));
+        let requested =
+            shared_daemon_owner_mismatch_remedy("/r/tasks/infra.md", "%12", "%3", 171804, Ok(()));
         assert!(requested.contains("live owner pane %12"));
         assert!(requested.contains("reported invocation pane %3"));
         assert!(requested.contains("pid 171804"));

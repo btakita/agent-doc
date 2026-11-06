@@ -2980,10 +2980,9 @@ fn refuse_reconnect_candidate_adding_lossy_copy(
     editor_content: &str,
     candidate: String,
 ) -> Option<String> {
-    let Some(violation) = agent_doc_turn::committed_text_integrity::added_lossy_copy_pair(
-        &candidate,
-        editor_content,
-    ) else {
+    let Some(violation) =
+        agent_doc_turn::committed_text_integrity::added_lossy_copy_pair(&candidate, editor_content)
+    else {
         return Some(candidate);
     };
     agent_doc_ops_log_io::log_op(
@@ -4625,7 +4624,10 @@ mod tests {
             ops.contains("editor_attach_hold_transition file=tasks/sdk-dev.md source=jetbrains"),
             "{ops}"
         );
-        assert!(ops.contains("action=recorded status_token=ambiguous-retained-projection"), "{ops}");
+        assert!(
+            ops.contains("action=recorded status_token=ambiguous-retained-projection"),
+            "{ops}"
+        );
         assert!(ops.contains("action=superseded removed=true"), "{ops}");
     }
 
@@ -4758,14 +4760,20 @@ mod tests {
         let ptr = unsafe {
             agent_doc_deferred_write_post_register_content(path.as_ptr(), editor.as_ptr())
         };
-        assert!(ptr.is_null(), "a candidate carrying both copies must not be returned");
+        assert!(
+            ptr.is_null(),
+            "a candidate carrying both copies must not be returned"
+        );
         let projected = unsafe {
             agent_doc_deferred_write_post_register_project(path.as_ptr(), editor.as_ptr())
         };
-        assert_eq!(projected, 1, "nothing is projected; the editor keeps its bytes");
+        assert_eq!(
+            projected, 1,
+            "nothing is projected; the editor keeps its bytes"
+        );
         assert_eq!(std::fs::read_to_string(&file).unwrap(), baseline);
-        let ops = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log"))
-            .unwrap_or_default();
+        let ops =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
         assert!(
             ops.contains("deferred_write_lossy_copy_refused")
                 && ops.contains("kind=lossy_committed_text_copy"),

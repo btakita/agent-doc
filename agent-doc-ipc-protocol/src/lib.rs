@@ -1483,8 +1483,7 @@ mod tests {
     fn a_projection_changed_receipt_preserves_endpoint_ownership() {
         use super::{
             PROJECTION_CHANGED_RECEIPT_LINE, RefusalRunEffect, SocketDeliveryFailure,
-            SocketReceiptClassification, classify_socket_delivery_failure,
-            classify_socket_receipt,
+            SocketReceiptClassification, classify_socket_delivery_failure, classify_socket_receipt,
         };
         assert_eq!(
             classify_socket_receipt(PROJECTION_CHANGED_RECEIPT_LINE),

@@ -592,17 +592,19 @@ pub fn run(file: &Path, effects: &impl SessionCheckEffects) -> Result<()> {
 /// already waiting on an open operator request in `agent:todo`. Never fails
 /// the check: the closeout itself succeeded.
 fn report_pending_reported_closeout(file: &Path) {
-    let content =
-        match crate::resolve_current_document_content(file, "session_check_reported_closeout") {
-            Ok(content) => content,
-            Err(err) => {
-                eprintln!(
-                    "[session-check] WARNING: could not read {} to check owed reported closeouts: {err:#}",
-                    file.display()
-                );
-                return;
-            }
-        };
+    let content = match crate::resolve_current_document_content(
+        file,
+        "session_check_reported_closeout",
+    ) {
+        Ok(content) => content,
+        Err(err) => {
+            eprintln!(
+                "[session-check] WARNING: could not read {} to check owed reported closeouts: {err:#}",
+                file.display()
+            );
+            return;
+        }
+    };
     match agent_doc_queue_io::queue_claim::pending_reported_closeout_for_content(file, &content) {
         Ok(Some(pending)) => {
             println!(
@@ -1858,12 +1860,7 @@ fn read_only_retained_projection_before_effects(
         true,
         false,
     );
-    if !background_owns_read_only_projection(
-        decision,
-        ownership.verdict(),
-        false,
-        false,
-    ) {
+    if !background_owns_read_only_projection(decision, ownership.verdict(), false, false) {
         // Rejection, an unserved/unregistered route, and every unrelated real
         // divergence keep their established actionable guards and remedies.
         return Ok(None);
@@ -3534,8 +3531,7 @@ fn response_debt_blocks_current_closeout_facts(
     has_response_debt: bool,
 ) -> bool {
     has_response_debt
-        && (document_scope
-            == agent_doc_queue::queue_sync_payload::QueueSyncDocumentScope::Current
+        && (document_scope == agent_doc_queue::queue_sync_payload::QueueSyncDocumentScope::Current
             || !incomplete_since_previous_turn)
 }
 
@@ -5381,10 +5377,7 @@ mod terminal_convergence_tests {
             self.mutation_refused("commit-boundary recovery")
         }
 
-        fn resume_captured_finalize(
-            &self,
-            _file: &Path,
-        ) -> Result<CapturedFinalizeResumeOutcome> {
+        fn resume_captured_finalize(&self, _file: &Path) -> Result<CapturedFinalizeResumeOutcome> {
             self.mutation_refused("captured finalize")
         }
 
@@ -5401,17 +5394,12 @@ mod terminal_convergence_tests {
             &["operator_text_authority_v1", "lazily_transport_receipts_v1"],
         );
         let identity = format!("{tag}:{}", canonical.display());
-        let (client_id, bootstrap) = agent_doc_crdt_relay_io::register_replica_for_file(
-            &canonical,
-            &identity,
-        )
-        .unwrap()
-        .expect("live editor replica");
-        let replica = agent_doc_merge::crdt_sync::ReplicaState::from_encoded(
-            client_id,
-            &bootstrap,
-        )
-        .unwrap();
+        let (client_id, bootstrap) =
+            agent_doc_crdt_relay_io::register_replica_for_file(&canonical, &identity)
+                .unwrap()
+                .expect("live editor replica");
+        let replica =
+            agent_doc_merge::crdt_sync::ReplicaState::from_encoded(client_id, &bootstrap).unwrap();
         let current = replica.text();
         replica.apply_local_edit(0, current.len() as u32, authority);
         agent_doc_crdt_relay_io::relay_replica_update_for_file(
@@ -5941,7 +5929,9 @@ mod terminal_convergence_tests {
         let error = try_run_with_options(&file, false, &effects)
             .expect_err("late retained owner is a fail-closed race");
         assert!(
-            error.downcast_ref::<SessionCheckBackgroundPending>().is_none(),
+            error
+                .downcast_ref::<SessionCheckBackgroundPending>()
+                .is_none(),
             "late ownership cannot make the pre-effect no-mutation claim"
         );
         let interrupted = error
@@ -5976,10 +5966,16 @@ mod terminal_convergence_tests {
         // a commit, or a pointer.
         assert!(!effects.applies_self_heals());
         assert!(!effects.allows_response_replay_canonicalization());
-        assert!(effects.settle_response_replay_canonicalization(file).is_err());
+        assert!(
+            effects
+                .settle_response_replay_canonicalization(file)
+                .is_err()
+        );
         assert!(effects.restore_committed_response_evidence(file).is_err());
         assert_eq!(
-            effects.repair_committed_historical_snapshot_drift(file).unwrap(),
+            effects
+                .repair_committed_historical_snapshot_drift(file)
+                .unwrap(),
             None
         );
         assert_eq!(
@@ -6225,7 +6221,10 @@ mod terminal_convergence_tests {
         let pending = error
             .downcast_ref::<SessionCheckBackgroundPending>()
             .expect("pipeline returns typed background ownership");
-        assert!(pending.0.contains("component_divergence=queue:"), "{pending}");
+        assert!(
+            pending.0.contains("component_divergence=queue:"),
+            "{pending}"
+        );
         assert!(!pending.0.contains("INTERRUPTED"), "{pending}");
         effects.assert_no_effects();
         assert_eq!(
@@ -6274,7 +6273,9 @@ mod terminal_convergence_tests {
         let error = try_run_with_options(&file, false, &effects)
             .expect_err("operator conflict stays foreground actionable");
         assert!(
-            error.downcast_ref::<SessionCheckBackgroundPending>().is_none(),
+            error
+                .downcast_ref::<SessionCheckBackgroundPending>()
+                .is_none(),
             "operator conflict must never become exit-0 background work"
         );
         let interrupted = error
@@ -7422,7 +7423,9 @@ mod settle_window_tests {
         assert_eq!(calls.get(), 1, "background work is sampled once");
         let error = out.expect_err("background pending is not terminal success");
         assert!(
-            error.downcast_ref::<SessionCheckBackgroundPending>().is_some(),
+            error
+                .downcast_ref::<SessionCheckBackgroundPending>()
+                .is_some(),
             "the typed non-terminal outcome must survive the settle boundary"
         );
     }
@@ -7725,9 +7728,7 @@ mod supervisor_scope_claim_tests {
 
 #[cfg(test)]
 mod response_debt_scope_tests {
-    use super::{
-        report_coordinator_action_required, response_debt_blocks_current_closeout_facts,
-    };
+    use super::{report_coordinator_action_required, response_debt_blocks_current_closeout_facts};
     use agent_doc_queue::queue_sync_payload::QueueSyncDocumentScope::{Current, Related};
     use std::path::Path;
 

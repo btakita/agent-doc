@@ -186,8 +186,10 @@ mod tests {
         );
 
         doc.push_str("\n<!-- parked copy\n- [ ] [#lost1] Drifted out of backlog\n-->\n");
-        assert!(matches!(shadow_backlog_guard(&doc).unwrap(), BacklogGuardOutcome::Interrupt(message)
-            if message.contains("#lost1") && !message.contains("#td")));
+        assert!(
+            matches!(shadow_backlog_guard(&doc).unwrap(), BacklogGuardOutcome::Interrupt(message)
+            if message.contains("#lost1") && !message.contains("#td"))
+        );
     }
 
     #[test]

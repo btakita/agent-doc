@@ -257,7 +257,11 @@ mod tests {
         write(root, "member/Cargo.toml", "[package]\nname = \"member\"\n");
         write(root, "member/src/lib.rs", "pub fn ipc() -> u8 { 1 }\n");
         write(root, "member/tests/wire.rs", "#[test] fn t() {}\n");
-        write(root, "target/debug/build/generated.rs", "pub fn stale() {}\n");
+        write(
+            root,
+            "target/debug/build/generated.rs",
+            "pub fn stale() {}\n",
+        );
     }
 
     fn write(root: &Path, relative: &str, content: &str) {
@@ -281,7 +285,11 @@ mod tests {
         workspace(first.path());
         workspace(second.path());
         // Rewrite in place so mtimes advance without content changing.
-        write(first.path(), "member/src/lib.rs", "pub fn ipc() -> u8 { 1 }\n");
+        write(
+            first.path(),
+            "member/src/lib.rs",
+            "pub fn ipc() -> u8 { 1 }\n",
+        );
         assert_eq!(digest(first.path()), digest(second.path()));
     }
 
@@ -293,7 +301,11 @@ mod tests {
         let root = TempDir::new().unwrap();
         workspace(root.path());
         let before = digest(root.path());
-        write(root.path(), "member/src/lib.rs", "pub fn ipc() -> u8 { 2 }\n");
+        write(
+            root.path(),
+            "member/src/lib.rs",
+            "pub fn ipc() -> u8 { 2 }\n",
+        );
         assert_ne!(before, digest(root.path()));
     }
 
@@ -307,7 +319,11 @@ mod tests {
         write(root.path(), "Cargo.lock", "# lock\n# bumped\n");
         assert_ne!(before, digest(root.path()));
         let bumped = digest(root.path());
-        write(root.path(), "member/Cargo.toml", "[package]\nname = \"member\"\nversion = \"2\"\n");
+        write(
+            root.path(),
+            "member/Cargo.toml",
+            "[package]\nname = \"member\"\nversion = \"2\"\n",
+        );
         assert_ne!(bumped, digest(root.path()));
     }
 
@@ -346,9 +362,21 @@ mod tests {
         let root = TempDir::new().unwrap();
         workspace(root.path());
         let before = digest(root.path());
-        write(root.path(), "tests/integration.rs", "#[test] fn changed() {}\n");
-        write(root.path(), "member/tests/wire.rs", "#[test] fn changed() {}\n");
-        write(root.path(), "target/debug/build/generated.rs", "pub fn changed() {}\n");
+        write(
+            root.path(),
+            "tests/integration.rs",
+            "#[test] fn changed() {}\n",
+        );
+        write(
+            root.path(),
+            "member/tests/wire.rs",
+            "#[test] fn changed() {}\n",
+        );
+        write(
+            root.path(),
+            "target/debug/build/generated.rs",
+            "pub fn changed() {}\n",
+        );
         assert_eq!(before, digest(root.path()));
     }
 
@@ -356,9 +384,17 @@ mod tests {
     fn a_tests_module_inside_src_stays_in_the_digest() {
         let root = TempDir::new().unwrap();
         workspace(root.path());
-        write(root.path(), "member/src/tests/mod.rs", "pub fn helper() -> u8 { 1 }\n");
+        write(
+            root.path(),
+            "member/src/tests/mod.rs",
+            "pub fn helper() -> u8 { 1 }\n",
+        );
         let before = digest(root.path());
-        write(root.path(), "member/src/tests/mod.rs", "pub fn helper() -> u8 { 2 }\n");
+        write(
+            root.path(),
+            "member/src/tests/mod.rs",
+            "pub fn helper() -> u8 { 2 }\n",
+        );
         assert_ne!(before, digest(root.path()));
     }
 
@@ -398,7 +434,11 @@ mod tests {
     fn watch_directories_never_cover_build_or_runtime_state() {
         let root = TempDir::new().unwrap();
         workspace(root.path());
-        write(root.path(), "vendored/Cargo.toml", "[package]\nname = \"vendored\"\n");
+        write(
+            root.path(),
+            "vendored/Cargo.toml",
+            "[package]\nname = \"vendored\"\n",
+        );
         write(root.path(), "vendored/src/lib.rs", "pub fn v() {}\n");
         write(root.path(), "vendored/node_modules/x/index.js", "\n");
         write(root.path(), "member/src/deep/mod.rs", "pub fn d() {}\n");

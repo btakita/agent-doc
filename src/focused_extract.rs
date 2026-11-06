@@ -1958,12 +1958,9 @@ fn rollback(
     }
     match &prepared.target_before {
         Some(content) => {
-            if let Err(error) = write_extract_document(
-                target,
-                &prepared.target_after,
-                content,
-                frozen_files,
-            ) {
+            if let Err(error) =
+                write_extract_document(target, &prepared.target_after, content, frozen_files)
+            {
                 eprintln!("[extract] WARNING: failed to roll back target: {error:#}");
             }
         }

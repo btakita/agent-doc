@@ -212,7 +212,12 @@ pub fn completion_cell_line_ranges(text: &str) -> Vec<Range<usize>> {
 /// shape only when the quoted prompt matches the item encoded in the heading.
 fn completion_response_digest_index(lines: &[&str], heading_index: usize) -> Option<usize> {
     let next_index = heading_index.checked_add(1)?;
-    if lines.get(next_index).copied().and_then(response_digest).is_some() {
+    if lines
+        .get(next_index)
+        .copied()
+        .and_then(response_digest)
+        .is_some()
+    {
         return Some(next_index);
     }
 
@@ -734,10 +739,16 @@ mod tests {
             replaced,
             format!("### Re: r — m\n\nShould I push?\n\n{new}\n<!-- agent:boundary:b -->\n")
         );
-        for before in ["### Re: r — m\n\nShould I push?\n\n", "<!-- agent:exchange -->\n", ""] {
+        for before in [
+            "### Re: r — m\n\nShould I push?\n\n",
+            "<!-- agent:exchange -->\n",
+            "",
+        ] {
             let text = format!("{before}{old}\n");
             assert_eq!(
-                replace_attested_completion_cell(&text, "k", &new).unwrap().unwrap(),
+                replace_attested_completion_cell(&text, "k", &new)
+                    .unwrap()
+                    .unwrap(),
                 format!("{before}{new}\n")
             );
         }
@@ -1043,9 +1054,10 @@ mod tests {
         assert!(merged.find("key=ka").unwrap() < merged.find("boundary:keep").unwrap());
         assert!(merge_missing_attested_completion_cells(&merged, &source).is_none());
 
-        let filtered = merge_missing_attested_completion_cells_matching(base, &source, |evidence| {
-            evidence.item != "do [#a]"
-        });
+        let filtered =
+            merge_missing_attested_completion_cells_matching(base, &source, |evidence| {
+                evidence.item != "do [#a]"
+            });
         assert!(filtered.is_none(), "a closed row can veto cell recovery");
     }
 }

@@ -289,9 +289,7 @@ mod tests {
 
     #[test]
     fn verify_reports_an_unobserved_switch_rather_than_passing() {
-        let (_dir, doc) = setup_log(
-            "[2026-09-27T00:00:00Z] preflight_diff_start doc=throwaway\n",
-        );
+        let (_dir, doc) = setup_log("[2026-09-27T00:00:00Z] preflight_diff_start doc=throwaway\n");
         let err = verify(&doc, None).unwrap_err().to_string();
         assert!(
             err.contains("never observed") && err.contains("UNSAVED"),

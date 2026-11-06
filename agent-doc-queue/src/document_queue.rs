@@ -2236,11 +2236,20 @@ pub fn set_prompt_runtime_projections(
 /// release receipt, or completion evidence) can produce. `Pending`,
 /// `Blocked`, `Unknown`, `Skipped`, and `AwaitingOperator` targets carry no
 /// such record.
-pub fn durable_backed_marker(marker: agent_doc_document::queue_projection::QueueLifecycleMarker) -> bool {
+pub fn durable_backed_marker(
+    marker: agent_doc_document::queue_projection::QueueLifecycleMarker,
+) -> bool {
     use agent_doc_document::queue_projection::QueueLifecycleMarker::*;
     matches!(
         marker,
-        Claimed | Running | Reported | Lost | LostClaimed | LostRunning | LostReported | Reconciling
+        Claimed
+            | Running
+            | Reported
+            | Lost
+            | LostClaimed
+            | LostRunning
+            | LostReported
+            | Reconciling
     )
 }
 
@@ -2993,9 +3002,7 @@ pub fn settle_inert_group_parents(
                     QueueLifecycleMarker::Lost
                     | QueueLifecycleMarker::LostClaimed
                     | QueueLifecycleMarker::LostRunning,
-                ) => {
-                    "Retry the lost work and complete the parent item."
-                }
+                ) => "Retry the lost work and complete the parent item.",
                 Some(QueueLifecycleMarker::Claimed | QueueLifecycleMarker::Running) => {
                     "Complete the in-progress work for the parent item."
                 }
@@ -4634,11 +4641,14 @@ pub fn prompt_context_packet_at(
     }
     chain.reverse();
 
-    let origin_index = if entries.get(index).and_then(prompt_of).is_some_and(|prompt| {
-        prompt
-            .text
-            .contains(crate::queue_consume::WAITING_ON_YOU_ITEM_MARKER)
-    }) {
+    let origin_index = if entries
+        .get(index)
+        .and_then(prompt_of)
+        .is_some_and(|prompt| {
+            prompt
+                .text
+                .contains(crate::queue_consume::WAITING_ON_YOU_ITEM_MARKER)
+        }) {
         // The binary Waiting-on-you root is presentation, not the durable work
         // node that owns the operator's response edges.
         index
@@ -4927,8 +4937,7 @@ pub fn lineage_claim_text(entries: &[QueueEntry], index: usize) -> Option<String
     let is_projection_alias = alias_identity.as_ref().is_some_and(|identity| {
         entries.iter().enumerate().any(|(other_index, _)| {
             other_index != index
-                && generated_prompt_alias_identity(entries, other_index).as_ref()
-                    == Some(identity)
+                && generated_prompt_alias_identity(entries, other_index).as_ref() == Some(identity)
         })
     });
     let canonical = if is_projection_alias {
@@ -5048,9 +5057,8 @@ pub fn restore_missing_nested_claim_row(
         // the effect first so its parser can recover the generated q-id, then
         // remove that q-id before comparing with the claim-time nest vector.
         let without_effect = strip_queue_effect_annotation(&bare);
-        let canonical = agent_doc_element_queue::strip_generated_queue_prompt_id_annotation(
-            &without_effect,
-        );
+        let canonical =
+            agent_doc_element_queue::strip_generated_queue_prompt_id_annotation(&without_effect);
         if canonical == bare {
             return false;
         }
@@ -12575,7 +12583,9 @@ mod tests {
         let rendered = render(&collapsed);
 
         assert_eq!(
-            rendered.matches("Is there anything left in this tree?").count(),
+            rendered
+                .matches("Is there anything left in this tree?")
+                .count(),
             1,
             "one canonical leaf remains actionable:\n{rendered}"
         );
@@ -14183,7 +14193,10 @@ mod tests {
             "{rendered}"
         );
         let live = prompts(&annotated);
-        assert!(live.is_empty(), "the open Todo gate is not agent work: {live:?}");
+        assert!(
+            live.is_empty(),
+            "the open Todo gate is not agent work: {live:?}"
+        );
         let QueueEntry::Prompt(parent) = &annotated[0] else {
             panic!("waiting Todo parent must remain live");
         };
@@ -14273,7 +14286,9 @@ mod tests {
                 matches!(entries[index], QueueEntry::Freeform(_)),
                 "generated row stays inert: {needle}"
             );
-            assert!(crate::waiting_packet::is_agent_doc_reply_entry(&entries, index));
+            assert!(crate::waiting_packet::is_agent_doc_reply_entry(
+                &entries, index
+            ));
         }
         let texts = entries
             .iter()
@@ -14282,7 +14297,10 @@ mod tests {
             .collect::<Vec<_>>();
         assert!(texts.contains(&"use 8080 ▫️"), "{texts:#?}");
         assert!(texts.contains(&"fix the flaky test ▫️"), "{texts:#?}");
-        assert!(texts.contains(&"**Response:** an operator note ▫️"), "{texts:#?}");
+        assert!(
+            texts.contains(&"**Response:** an operator note ▫️"),
+            "{texts:#?}"
+        );
         let runnable = executable_prompt_indexes(&entries)
             .into_iter()
             .filter_map(|index| prompt_of(&entries[index]))
@@ -14364,7 +14382,10 @@ mod tests {
             render(&selected)
         );
         let head = lineage_claim_text(&selected, executable[0]).unwrap();
-        assert!(head.starts_with("[#yeja] Choose the project-root policy."), "{head}");
+        assert!(
+            head.starts_with("[#yeja] Choose the project-root policy."),
+            "{head}"
+        );
         assert!(!head.contains("pick: a + b"), "{head}");
         assert!(!head.contains("live-buffer"), "{head}");
         assert_eq!(
@@ -14399,8 +14420,7 @@ mod tests {
             panic!("open Todo must not strike its run selector");
         };
         assert!(
-            agent_doc_document::queue_projection::operator_action_ids(&parent.text)
-                .contains(&id)
+            agent_doc_document::queue_projection::operator_action_ids(&parent.text).contains(&id)
         );
         assert!(executable_prompt_indexes(&waiting).is_empty());
     }

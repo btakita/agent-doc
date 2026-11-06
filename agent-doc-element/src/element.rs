@@ -3694,7 +3694,10 @@ beta
             "unclosed component: the component has no close `/agent:run` (opening marker at line 3)"
         );
         let closed = format!("{open}<!-- /agent:run -->\n");
-        assert!(parse(&closed).is_ok(), "only the slashed close ends the run");
+        assert!(
+            parse(&closed).is_ok(),
+            "only the slashed close ends the run"
+        );
     }
 
     #[test]

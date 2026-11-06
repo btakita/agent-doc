@@ -1042,11 +1042,12 @@ mod tests {
             captured
         };
         // `#emptycanonicaldeadlock`: the saved document, when the case names one.
-        let disk_fact = |buffer: &serde_json::Value, disk: Option<&serde_json::Value>| {
-            match (buffer.as_str(), disk.and_then(serde_json::Value::as_str)) {
-                (Some(buffer), Some(disk)) => Some(buffer == disk),
-                _ => None,
-            }
+        let disk_fact = |buffer: &serde_json::Value, disk: Option<&serde_json::Value>| match (
+            buffer.as_str(),
+            disk.and_then(serde_json::Value::as_str),
+        ) {
+            (Some(buffer), Some(disk)) => Some(buffer == disk),
+            _ => None,
         };
 
         let cases = fixture["cases"].as_array().unwrap();

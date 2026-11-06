@@ -133,7 +133,9 @@ pub fn usage_limit_from_end(
             return structured_reason.map(HarnessUsageLimit::reported);
         }
     }
-    if let Some(tail) = transcript_tail.map(str::trim).filter(|text| !text.is_empty())
+    if let Some(tail) = transcript_tail
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
         && let Some(limit) = transcript_tail_usage_limit(tail)
     {
         return Some(limit);
@@ -216,9 +218,11 @@ fn quota_token(value: Option<&Value>) -> Option<String> {
     let value = value?;
     match value {
         Value::String(text) => known_quota_token(text),
-        Value::Object(map) => ["type", "code", "reason", "error"]
-            .iter()
-            .find_map(|key| map.get(*key).and_then(Value::as_str).and_then(known_quota_token)),
+        Value::Object(map) => ["type", "code", "reason", "error"].iter().find_map(|key| {
+            map.get(*key)
+                .and_then(Value::as_str)
+                .and_then(known_quota_token)
+        }),
         _ => None,
     }
 }
@@ -266,7 +270,8 @@ mod tests {
         assert_eq!(signal.worker_id, "worker-sdk");
         assert_eq!(signal.workspace_root.as_deref(), Some("/work/main"));
         assert!(signal.worktree.is_none());
-        let limit = usage_limit_from_end(signal.last_message.as_deref(), None, None).expect("limit");
+        let limit =
+            usage_limit_from_end(signal.last_message.as_deref(), None, None).expect("limit");
         assert_eq!(limit.limit, "session limit");
         assert_eq!(limit.harness.as_deref(), Some("claude"));
     }
@@ -358,7 +363,12 @@ Five. The phrase `You've hit your session limit` here is a quotation.\n";
 
     #[test]
     fn unrelated_stop_reasons_are_not_quota_tokens() {
-        for reason in ["end_turn", "channel_closed", "interrupted", "max_output_tokens"] {
+        for reason in [
+            "end_turn",
+            "channel_closed",
+            "interrupted",
+            "max_output_tokens",
+        ] {
             let payload = serde_json::json!({
                 "hook_event_name": "Stop",
                 "agent_id": "worker-sdk",

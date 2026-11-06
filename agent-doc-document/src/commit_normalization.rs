@@ -120,11 +120,10 @@ pub fn canonicalize_answered_prompt_prefixes(exchange_content: &str) -> String {
     // preceding response (no blank separator), the response's closing question
     // is the prose block directly above a `### Re:` heading and used to be
     // canonicalized into an answered `❯` prompt.
-    let completion_headings = crate::subagent_completion::completion_cell_heading_lines(
-        exchange_content,
-    )
-    .into_iter()
-    .collect::<std::collections::HashSet<_>>();
+    let completion_headings =
+        crate::subagent_completion::completion_cell_heading_lines(exchange_content)
+            .into_iter()
+            .collect::<std::collections::HashSet<_>>();
 
     let mut prefix_targets = vec![false; lines.len()];
     for idx in 0..lines.len() {
@@ -326,13 +325,9 @@ mod tests {
     /// `❯` prompt. An operator prompt answered by a real response still is.
     #[test]
     fn a_completion_cell_never_answers_the_closing_question_above_it() {
-        let cell = crate::subagent_completion::cell_with_response(
-            "subagent:x",
-            "do [#x]",
-            "k1",
-            "Done.",
-        )
-        .unwrap();
+        let cell =
+            crate::subagent_completion::cell_with_response("subagent:x", "do [#x]", "k1", "Done.")
+                .unwrap();
         let exchange = format!(
             "### Re: recovered response — opus-5-5\n\nThe cycle is committed.\n\nShould the PR path proceed, or remain on hold?\n{cell}\nShould I rerun the deploy check?\n### Re: deploy check — opus-5-5\n\nDone.\n"
         );
@@ -340,10 +335,15 @@ mod tests {
         let normalized = canonicalize_answered_prompt_prefixes(&exchange);
 
         assert!(
-            normalized.contains("\nShould the PR path proceed, or remain on hold?\n### Re: Subagent completed"),
+            normalized.contains(
+                "\nShould the PR path proceed, or remain on hold?\n### Re: Subagent completed"
+            ),
             "{normalized}"
         );
-        assert!(normalized.contains("\n❯ Should I rerun the deploy check?\n"), "{normalized}");
+        assert!(
+            normalized.contains("\n❯ Should I rerun the deploy check?\n"),
+            "{normalized}"
+        );
         assert_eq!(normalized.matches('❯').count(), 1, "{normalized}");
         // Heading text alone is not binary authority: an unattested lookalike
         // still reads as an answer.

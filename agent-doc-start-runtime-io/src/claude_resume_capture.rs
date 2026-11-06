@@ -317,9 +317,7 @@ mod tests {
             agent_doc_turn::write_ownership::AWAIT_EDITOR_REPLICA_NO_DISK_WRITE_TOKEN,
             agent_doc_turn::write_ownership::RETAINED_DELIVERY_PROJECTION_PENDING_TOKEN,
         );
-        assert!(
-            agent_doc_turn::write_ownership::is_retained_delivery_projection_pending(&error)
-        );
+        assert!(agent_doc_turn::write_ownership::is_retained_delivery_projection_pending(&error));
         assert!(!error.contains("STRANDED"));
         assert!(!error.contains("agent-doc commit"));
     }

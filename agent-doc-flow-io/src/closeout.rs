@@ -2318,9 +2318,7 @@ pub fn classify_closeout_recovery_state_for_file(
         .flatten()
         .is_some_and(|capture| {
             matches!(
-                agent_doc_template::replay_guard::classify_replay_payload(
-                    &capture.response_body
-                ),
+                agent_doc_template::replay_guard::classify_replay_payload(&capture.response_body),
                 agent_doc_template::replay_guard::ReplayPayloadClassification::Blocked(_)
             )
         });
@@ -2440,11 +2438,8 @@ fn uncommitted_response_vs_head(file: &Path, effects: &dyn CloseoutEffects) -> b
     else {
         return false;
     };
-    agent_doc_turn::document_drift::detect_bypassed_response_write_between(
-        &head,
-        current.content(),
-    )
-    .is_some()
+    agent_doc_turn::document_drift::detect_bypassed_response_write_between(&head, current.content())
+        .is_some()
 }
 
 /// `#closeoutduplicatedcommit`: the current document authority carries more

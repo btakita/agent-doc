@@ -2581,9 +2581,7 @@ fn apply_pending_and_status_mutations_with_mode(
                                     &queue_resolution_ids,
                                 )?;
                                 queue_consume::require_integrated_reported_repo_work_for_successor(
-                                    file,
-                                    content,
-                                    &projected,
+                                    file, content, &projected,
                                 )?;
                                 // `#atomicstrikeresponse`: the tracked-work strike
                                 // and its response lookup child are one target. A
@@ -5930,7 +5928,10 @@ mod closeout_owner_network_tests {
         projection.owner = Some(owner); // applied; the reply never arrived
 
         let second = stable_closeout_owner_id("foreground-finalize");
-        assert_eq!(first, second, "the same thread and role present the same id");
+        assert_eq!(
+            first, second,
+            "the same thread and role present the same id"
+        );
         assert!(
             matches!(
                 projection.decide_owner_claim(&request(&second), Some(true)),
@@ -6016,7 +6017,10 @@ mod closeout_owner_network_tests {
     fn heartbeat_retries_a_lost_refresh_and_reports_an_answered_loss() {
         let lost: Result<CloseoutOwnerClaimOutcome, anyhow::Error> =
             Err(anyhow::anyhow!("controller RPC timed out"));
-        assert_eq!(closeout_heartbeat_step(&lost), CloseoutHeartbeatStep::RetrySoon);
+        assert_eq!(
+            closeout_heartbeat_step(&lost),
+            CloseoutHeartbeatStep::RetrySoon
+        );
         let superseded: Result<CloseoutOwnerClaimOutcome, anyhow::Error> =
             Ok(CloseoutOwnerClaimOutcome::CycleSuperseded);
         assert_eq!(
@@ -7404,8 +7408,8 @@ mod tests {
         );
 
         fs::write(&doc, &struck).unwrap();
-        let outcome = consume_queue_prompts_for_response_closeout(&doc, &decision, &[], true, None)
-            .unwrap();
+        let outcome =
+            consume_queue_prompts_for_response_closeout(&doc, &decision, &[], true, None).unwrap();
         assert!(outcome.is_none(), "{outcome:?}");
         let after = fs::read_to_string(&doc).unwrap();
         assert_eq!(
@@ -9074,9 +9078,7 @@ mod retained_closeout_reap {
             "the stale blocker annotation must be removed with its marker:\n{after}"
         );
         assert!(
-            after.contains(
-                "- ⛔ ⟦blocked by sbx-handoff-infra-prep⟧ do [#bossroom-sbx-gh-build]"
-            ),
+            after.contains("- ⛔ ⟦blocked by sbx-handoff-infra-prep⟧ do [#bossroom-sbx-gh-build]"),
             "a multi-blocker row must retain only the blocker that is still open:\n{after}"
         );
         assert!(

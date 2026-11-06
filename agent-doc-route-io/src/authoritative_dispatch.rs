@@ -793,9 +793,7 @@ pub fn route_via_authoritative_actor(
     // reasoning. A pane out of usage reads as idle, so each of those would
     // conclude something false about it. The harness-switch handoff above runs
     // first because it is the remedy this refusal names.
-    if let Some(limit) =
-        owner_pane_usage_limit(tmux, &actor.record.pane_id, &closeout_harness)
-    {
+    if let Some(limit) = owner_pane_usage_limit(tmux, &actor.record.pane_id, &closeout_harness) {
         let queued = match prompt_context {
             Some(context) => Some(enqueue_route_dispatch_prompt(
                 file,
@@ -2558,7 +2556,9 @@ mod tests {
         let outcome =
             quota_blocked_owner_route_outcome(file, "%10", &limit, 0, Some("do [#sample]"));
         assert!(
-            outcome.message().contains("Queued \"do [#sample]\" in active agent:queue"),
+            outcome
+                .message()
+                .contains("Queued \"do [#sample]\" in active agent:queue"),
             "{}",
             outcome.message()
         );
@@ -2613,9 +2613,15 @@ mod tests {
         let CloseoutWaitRouteOutcome::Deferred(message) = outcome else {
             panic!("ownerless explicit send must be blocked");
         };
-        assert!(message.contains("retained captured-finalize worker"), "{message}");
+        assert!(
+            message.contains("retained captured-finalize worker"),
+            "{message}"
+        );
         assert!(message.contains("state and delivery edges"), "{message}");
-        assert!(message.contains("already ran immediate repair"), "{message}");
+        assert!(
+            message.contains("already ran immediate repair"),
+            "{message}"
+        );
         assert!(!message.contains("stale-empty-preflight"), "{message}");
     }
 

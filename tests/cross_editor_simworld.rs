@@ -1518,8 +1518,7 @@ fn native_plugin_harnesses_peer_through_real_agent_doc_controller() {
     let temp = tempfile::TempDir::new().unwrap();
     let project_root = temp.path();
     let baseline = "shared native-plugin baseline\n";
-    let file =
-        init_session_repo_with_doc(project_root, "native-network.md", baseline);
+    let file = init_session_repo_with_doc(project_root, "native-network.md", baseline);
     std::fs::create_dir_all(project_root.join(".agent-doc/logs")).unwrap();
     std::fs::create_dir_all(project_root.join(".agent-doc/snapshots")).unwrap();
 

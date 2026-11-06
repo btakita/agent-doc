@@ -2057,11 +2057,11 @@ mod tests {
             .unwrap()
             .expect("capture remains active");
         let applied_hash = replay_file_hash(&applied);
+        assert_eq!(refreshed.file_hash.as_deref(), Some(applied_hash.as_str()));
         assert_eq!(
-            refreshed.file_hash.as_deref(),
-            Some(applied_hash.as_str())
+            refreshed.baseline_content.as_deref(),
+            Some(applied.as_str())
         );
-        assert_eq!(refreshed.baseline_content.as_deref(), Some(applied.as_str()));
     }
 
     #[test]

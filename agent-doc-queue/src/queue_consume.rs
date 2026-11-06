@@ -5986,9 +5986,9 @@ fn waiting_segment_dispositions(
             Some(id) if !open_ids.contains(id) && completed.contains(id) => {
                 SegmentDisposition::Archive(crate::waiting_archive::ArchiveReason::TreeComplete)
             }
-            Some(id) if !open_ids.contains(id) => SegmentDisposition::Archive(
-                crate::waiting_archive::ArchiveReason::TodoClosed,
-            ),
+            Some(id) if !open_ids.contains(id) => {
+                SegmentDisposition::Archive(crate::waiting_archive::ArchiveReason::TodoClosed)
+            }
             _ if crate::waiting_archive::segment_has_operator_rows(&segment.raw) => {
                 SegmentDisposition::Retain { after: anchor }
             }
@@ -6122,12 +6122,8 @@ fn project_external_waiting_items(
                 .and_then(|packet| packet.response_timestamp.as_deref())
                 .or_else(|| latest_response_timestamp(document))
                 .unwrap_or(FALLBACK_RESPONSE_TIMESTAMP);
-            let metadata = render_waiting_metadata(
-                todo,
-                packet,
-                prompt.indent + 2,
-                response_timestamp,
-            );
+            let metadata =
+                render_waiting_metadata(todo, packet, prompt.indent + 2, response_timestamp);
             insertions.push((subtree_end, document_queue::parse_fragment(&metadata)?));
         }
 
@@ -14440,7 +14436,8 @@ Old.
             "{queue}"
         );
         assert!(
-            !old.iter().any(|line| line.contains("**Summary:**") || line.contains("**Response [#r-")),
+            !old.iter()
+                .any(|line| line.contains("**Summary:**") || line.contains("**Response [#r-")),
             "{queue}"
         );
         let flag = row_subtree(&queue, FLAG_ROW);
@@ -14450,7 +14447,9 @@ Old.
             "{queue}"
         );
         assert!(
-            !flag.iter().any(|line| line.contains("**Closed by:**") || line.contains("**Response [#r-")),
+            !flag
+                .iter()
+                .any(|line| line.contains("**Closed by:**") || line.contains("**Response [#r-")),
             "{queue}"
         );
         assert_eq!(queue.matches("**Closed by:** [#r-").count(), 1, "{queue}");

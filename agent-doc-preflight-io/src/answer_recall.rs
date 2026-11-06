@@ -128,8 +128,8 @@ impl TsiftRecall {
         if env.disabled {
             return Err("disabled by AGENT_DOC_ANSWER_RECALL");
         }
-        let root = agent_doc_project_root_io::project_root_containing(file)
-            .ok_or("no project root")?;
+        let root =
+            agent_doc_project_root_io::project_root_containing(file).ok_or("no project root")?;
         if !root.join(".tsift/index.db").is_file() {
             return Err("no .tsift/index.db in the project");
         }

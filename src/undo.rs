@@ -59,7 +59,11 @@ pub fn run(file: &Path, dry_run: bool) -> Result<()> {
     if dry_run {
         let removed: Vec<&str> = current.split_inclusive('\n').collect();
         let kept: Vec<&str> = undone.split_inclusive('\n').collect();
-        let prefix = removed.iter().zip(&kept).take_while(|(a, b)| a == b).count();
+        let prefix = removed
+            .iter()
+            .zip(&kept)
+            .take_while(|(a, b)| a == b)
+            .count();
         let suffix = removed[prefix..]
             .iter()
             .rev()
@@ -186,10 +190,12 @@ fn await_undo_on_disk(file: &Path, undone: &str) -> Result<()> {
             std::time::Instant::now() < deadline,
             "the editor holds the undone document but has not saved it to disk yet; it stays retained and saves on its own"
         );
-        if let Err(error) = agent_doc_controller_io::project_controller::await_delivery_convergence_for_file(
-            file,
-            std::time::Duration::from_millis(500),
-        ) {
+        if let Err(error) =
+            agent_doc_controller_io::project_controller::await_delivery_convergence_for_file(
+                file,
+                std::time::Duration::from_millis(500),
+            )
+        {
             eprintln!("[undo] delivery convergence wait failed: {error:#}");
             std::thread::sleep(std::time::Duration::from_millis(100));
         }
@@ -212,8 +218,12 @@ mod tests {
         let doc = dir.path().join("session.md");
         let base = "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n<!-- agent:exchange patch=append -->\nFix api.md issue\n<!-- /agent:exchange -->\n";
         std::fs::write(&doc, base).unwrap();
-        agent_doc_snapshot_io::checkpoint_document_baseline(&doc, base, agent_doc_ops_log_io::log_op)
-            .unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            base,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(base), Some(base)).unwrap();
         let response = "### Re: infra.md owner — opus-5-5\n\nReplayed body.\n";
         let capture = agent_doc_capture_io::capture_response(&doc, response).unwrap();

@@ -131,8 +131,7 @@ pub const TODO_COMPONENT: &str = "todo";
 
 /// Section inserted when a document has no `agent:todo` component. It matches
 /// the heading and markers of the default template scaffold.
-pub const TODO_SECTION: &str =
-    "\n## Todo\n\n<!-- agent:todo priority -->\n<!-- /agent:todo -->\n";
+pub const TODO_SECTION: &str = "\n## Todo\n\n<!-- agent:todo priority -->\n<!-- /agent:todo -->\n";
 
 /// Check whether a component name refers to the operator todo checklist.
 pub fn is_todo_component(name: &str) -> bool {
@@ -532,9 +531,7 @@ impl TodoLinkIndex {
     fn missing_todo_backlinks(&self) -> Vec<(String, String)> {
         self.open
             .iter()
-            .filter(|(_, component)| {
-                matches!(component.as_str(), "backlog" | "pending" | "icebox")
-            })
+            .filter(|(_, component)| matches!(component.as_str(), "backlog" | "pending" | "icebox"))
             .filter(|(tracked_id, _)| {
                 !self
                     .todo_ids_for_tracked(tracked_id)
@@ -844,7 +841,9 @@ fn action_with_source_reference(action: &str, id: &str, linked: Option<&str>) ->
     if action.ends_with(&suffix) {
         return action.to_string();
     }
-    let base = strip_trailing_source_reference(action).unwrap_or(action).trim_end();
+    let base = strip_trailing_source_reference(action)
+        .unwrap_or(action)
+        .trim_end();
     format!("{base} {suffix}")
 }
 
@@ -938,9 +937,7 @@ pub fn add_todo_item_to_document(
         .or_else(|| single_todo_source(None, &action, links));
     let contextual_action = contextual_source
         .as_ref()
-        .map(|(id, component)| {
-            action_with_source_reference(&action, id, Some(component.as_str()))
-        })
+        .map(|(id, component)| action_with_source_reference(&action, id, Some(component.as_str())))
         .unwrap_or_else(|| action.clone());
     let wanted = normalize_action_text(&contextual_action);
     let wanted_legacy = normalize_action_text(&action);
@@ -1321,13 +1318,11 @@ pub fn qualify_todo_source_references(
     let mut findings = Vec::new();
     let mut qualified = Vec::new();
     for item in body.items.clone() {
-        let Some((id, component)) =
-            single_todo_source(item.own_id.as_deref(), &item.action, links)
+        let Some((id, component)) = single_todo_source(item.own_id.as_deref(), &item.action, links)
         else {
             continue;
         };
-        let qualified_action =
-            action_with_source_reference(&item.action, &id, Some(&component));
+        let qualified_action = action_with_source_reference(&item.action, &id, Some(&component));
         if normalize_action_text(&qualified_action) == normalize_action_text(&item.action) {
             continue;
         }
@@ -2176,10 +2171,14 @@ pub fn todo_unreferenced_ids(content: &str, ids: &[String]) -> Vec<String> {
 fn same_item_identity(before: &LocatedItem, after: &LocatedItem) -> bool {
     match (&before.own_id, &after.own_id) {
         (Some(x), Some(y)) => x == y,
-        (None, None) => normalize_action_text(&before.action) == normalize_action_text(&after.action),
+        (None, None) => {
+            normalize_action_text(&before.action) == normalize_action_text(&after.action)
+        }
         // An id-less `after` copy of an id-bearing item (the agent dropped the
         // id while reproducing it) is still that item when the text matches.
-        (Some(_), None) => normalize_action_text(&before.action) == normalize_action_text(&after.action),
+        (Some(_), None) => {
+            normalize_action_text(&before.action) == normalize_action_text(&after.action)
+        }
         (None, Some(_)) => false,
     }
 }
@@ -2209,7 +2208,12 @@ pub fn preserve_checked_todo_items(before: &str, after: &str) -> (String, usize)
             continue;
         }
         if checked.iter().any(|done| same_item_identity(done, &item)) {
-            parsed.rewrite_line(item.line, TodoState::Done, item.own_id.as_deref(), &item.action);
+            parsed.rewrite_line(
+                item.line,
+                TodoState::Done,
+                item.own_id.as_deref(),
+                &item.action,
+            );
             restored += 1;
         }
     }
@@ -2336,9 +2340,11 @@ pub fn todo_link_findings(content: &str, links: &TodoLinkIndex) -> Result<Vec<To
         }
         if !item.state.is_open() {
             let mut open_sources: Vec<(String, String)> = own
-                .and_then(|id| links.open_component(id).map(|component| {
-                    (id.to_string(), component.to_string())
-                }))
+                .and_then(|id| {
+                    links
+                        .open_component(id)
+                        .map(|component| (id.to_string(), component.to_string()))
+                })
                 .into_iter()
                 .collect();
             if let Some(own) = own {
@@ -2370,12 +2376,18 @@ pub fn todo_link_findings(content: &str, links: &TodoLinkIndex) -> Result<Vec<To
         }
         if let Some(own) = own {
             if links.is_resolved(own) {
-                out.push(finding(TodoLinkFindingKind::LinkedWorkResolved, vec![own.to_string()]));
+                out.push(finding(
+                    TodoLinkFindingKind::LinkedWorkResolved,
+                    vec![own.to_string()],
+                ));
                 continue;
             }
             if links.linked_sources_resolved(own) {
-                let ids = links.sources_for_todo(own).into_iter()
-                    .map(|(id, _, _)| id).collect();
+                let ids = links
+                    .sources_for_todo(own)
+                    .into_iter()
+                    .map(|(id, _, _)| id)
+                    .collect();
                 out.push(finding(TodoLinkFindingKind::LinkedWorkResolved, ids));
                 continue;
             }
@@ -2441,7 +2453,10 @@ pub fn auto_complete_linked_todos_except(
     // projection preflight renders, then folds the copies this closeout's own
     // completion created (`#tododupdone`).
     let projection = project_todo_except(content, links, exempt)?;
-    let Some(projected) = projection.content.filter(|_| !projection.completed.is_empty()) else {
+    let Some(projected) = projection
+        .content
+        .filter(|_| !projection.completed.is_empty())
+    else {
         return Ok(TodoAutoCompleteOutcome {
             content: content.to_string(),
             completed: Vec::new(),
@@ -2538,7 +2553,8 @@ pub fn project_todo_except(
         })
         .collect();
     let rendered = body.render();
-    let content = (rendered != todo.content(content)).then(|| todo.replace_content(content, &rendered));
+    let content =
+        (rendered != todo.content(content)).then(|| todo.replace_content(content, &rendered));
     Ok(TodoProjection {
         content,
         completed,
@@ -2573,7 +2589,9 @@ mod tests {
         assert_eq!(projection.completed, vec!["done-work".to_string()]);
         assert_eq!(projection.duplicate_ids, vec![("twice".to_string(), 2)]);
         let projected = projection.content.expect("the resolved item closes");
-        assert!(projected.contains("- [x] [#done-work] Verify the release\n  - operator note stays\n"));
+        assert!(
+            projected.contains("- [x] [#done-work] Verify the release\n  - operator note stays\n")
+        );
         assert!(projected.contains("- [ ] [#open-work] Still waiting\n"));
         assert!(projected.contains("- [ ] Mentions [#done-work] only\n"));
         assert!(projected.contains("- [ ] [#twice] first copy\n- [ ] [#twice] second copy\n"));
@@ -2689,7 +2707,13 @@ mod tests {
     }
 
     fn add_linked(content: &str, text: &str, links: &TodoLinkIndex) -> Result<TodoAddOutcome> {
-        add_todo_item_to_document(content, text, &test_id, &std::collections::HashSet::new(), links)
+        add_todo_item_to_document(
+            content,
+            text,
+            &test_id,
+            &std::collections::HashSet::new(),
+            links,
+        )
     }
 
     fn wrap(body: &str) -> String {
@@ -2704,9 +2728,8 @@ mod tests {
     /// and the add was refused as an id collision.
     #[test]
     fn a_replayed_add_finds_its_decision_stamped_row() {
-        let content = wrap(
-            "- [ ] [#subagent-operator-request-x] Choose a port ⟦decision:dec-0123456789⟧\n",
-        );
+        let content =
+            wrap("- [ ] [#subagent-operator-request-x] Choose a port ⟦decision:dec-0123456789⟧\n");
         let outcome = add(&content, "[#subagent-operator-request-x] Choose a port").unwrap();
         assert!(!outcome.inserted, "{}", outcome.content);
         assert_eq!(outcome.content, content);
@@ -2847,7 +2870,9 @@ mod tests {
         let (updated, _, _) = ensure_todo_component_in_document(review_only).unwrap();
         assert_eq!(
             updated,
-            format!("# Notes\n\n<!-- agent:review -->\n<!-- /agent:review -->\n{TODO_SECTION}prose")
+            format!(
+                "# Notes\n\n<!-- agent:review -->\n<!-- /agent:review -->\n{TODO_SECTION}prose"
+            )
         );
 
         let plain = "# Notes only\n\nprose";
@@ -3476,14 +3501,22 @@ mod tests {
         let id = review.id.clone().unwrap();
         assert_ne!(id, "gate1", "a todo never takes a tracked item's id");
         assert!(id.starts_with('t'), "{id}");
-        assert_eq!(review.source, Some(("gate1".to_string(), "review".to_string())));
+        assert_eq!(
+            review.source,
+            Some(("gate1".to_string(), "review".to_string()))
+        );
         assert_eq!(
             todo_body(&review.content),
-            format!("- [ ] [#{id}] Verify [#gate1] in a live pane (source: agent:review [#gate1])\n")
+            format!(
+                "- [ ] [#{id}] Verify [#gate1] in a live pane (source: agent:review [#gate1])\n"
+            )
         );
         let backlog = add_linked(&wrap(""), "Grant CI access for (#work)", &index).unwrap();
         assert_ne!(backlog.id.as_deref(), Some("work"));
-        assert_eq!(backlog.source, Some(("work".to_string(), "backlog".to_string())));
+        assert_eq!(
+            backlog.source,
+            Some(("work".to_string(), "backlog".to_string()))
+        );
     }
 
     /// `#todoaddonsamecycledone`: an add evaluated in a closeout that also
@@ -3581,7 +3614,10 @@ mod tests {
         for action in ["Re-check (#old)", "Watch GH #267"] {
             let outcome = add_linked(&wrap(""), action, &index).unwrap();
             assert_eq!(outcome.source, None, "{action}");
-            assert!(outcome.id.as_deref().is_some_and(|id| id.starts_with('t')), "{action}");
+            assert!(
+                outcome.id.as_deref().is_some_and(|id| id.starts_with('t')),
+                "{action}"
+            );
         }
     }
 
@@ -3604,7 +3640,10 @@ mod tests {
         let follow = add_linked(&checked, "Re-verify [#gate1] after the fix", &index).unwrap();
         assert!(follow.inserted);
         assert_ne!(follow.id.as_deref(), Some("gate1"));
-        assert_eq!(follow.source, Some(("gate1".to_string(), "review".to_string())));
+        assert_eq!(
+            follow.source,
+            Some(("gate1".to_string(), "review".to_string()))
+        );
     }
 
     /// `#todoaddidhijack`: an explicit id that an OPEN tracked item owns is
@@ -3618,8 +3657,9 @@ mod tests {
             let err = add_linked(&wrap(""), &format!("id={id} Verify live"), &index).unwrap_err();
             let msg = err.to_string();
             assert!(
-                msg.contains(&format!("already owned by the open agent:{component} item [#{id}]"))
-                    && msg.contains("#todoaddidhijack")
+                msg.contains(&format!(
+                    "already owned by the open agent:{component} item [#{id}]"
+                )) && msg.contains("#todoaddidhijack")
                     && msg.contains("id=<todo-id>"),
                 "{msg}"
             );
@@ -3741,7 +3781,10 @@ mod tests {
         assert!(outcome.inserted);
         let id = outcome.id.clone().unwrap();
         assert_ne!(id, "cold");
-        assert_eq!(outcome.source, Some(("cold".to_string(), "icebox".to_string())));
+        assert_eq!(
+            outcome.source,
+            Some(("cold".to_string(), "icebox".to_string()))
+        );
         assert_eq!(
             todo_body(&outcome.content),
             format!("- [ ] [#{id}] Thaw or drop (#cold)? (source: agent:icebox [#cold])\n")
@@ -3752,7 +3795,10 @@ mod tests {
         assert_eq!(gh.source, Some(("gate1".to_string(), "review".to_string())));
         assert_ne!(gh.id.as_deref(), Some("gate1"));
         let err = add_linked(&wrap(""), "id=cold Decide whether to thaw", &index).unwrap_err();
-        assert!(err.to_string().contains("agent:icebox item [#cold]"), "{err}");
+        assert!(
+            err.to_string().contains("agent:icebox item [#cold]"),
+            "{err}"
+        );
     }
 
     /// `#todoaddidhijack`: a caller-chosen `id=` naming no tracked work is
@@ -3810,20 +3856,31 @@ mod tests {
     #[test]
     fn icebox_link_joins_the_operator_done_and_auto_complete_paths() {
         for (own, row) in [
-            ("t0x", "[#t0x] Thaw or drop (#cold)? (source: agent:icebox [#cold])"),
-            ("cold", "[#cold] Thaw or drop (#cold)? (source: agent:icebox [#cold])"),
+            (
+                "t0x",
+                "[#t0x] Thaw or drop (#cold)? (source: agent:icebox [#cold])",
+            ),
+            (
+                "cold",
+                "[#cold] Thaw or drop (#cold)? (source: agent:icebox [#cold])",
+            ),
         ] {
             let open = links(&[("cold", "icebox")], &[]);
             let checked = wrap(&format!("- [x] {row}\n"));
             let findings = todo_link_findings(&checked, &open).unwrap();
             assert_eq!(findings.len(), 1, "{findings:?}");
-            assert_eq!(findings[0].kind, TodoLinkFindingKind::OperatorDoneIceboxOpen);
+            assert_eq!(
+                findings[0].kind,
+                TodoLinkFindingKind::OperatorDoneIceboxOpen
+            );
             assert_eq!(findings[0].kind.as_str(), "operator_done_icebox_open");
             assert_eq!(findings[0].ids, vec!["cold".to_string()]);
             let pending = wrap(&format!("- [ ] {row}\n"));
             assert!(todo_link_findings(&pending, &open).unwrap().is_empty());
             let mut resolved = links(&[], &["cold"]);
-            resolved.resolve_todo_backlinks_from_document(&pending).unwrap();
+            resolved
+                .resolve_todo_backlinks_from_document(&pending)
+                .unwrap();
             let done = auto_complete_linked_todos(&pending, &resolved).unwrap();
             assert_eq!(done.completed, vec![own.to_string()]);
             assert_eq!(todo_body(&done.content), format!("- [x] {row}\n"));
@@ -3887,23 +3944,35 @@ mod tests {
             "- [x] [#a] Rotate key — note\n- [x] Call the vendor\n- [ ] [#b] Publish\n- [ ] [#c] New\n"
         );
         // Nothing checked before: the patch is untouched.
-        assert_eq!(preserve_checked_todo_items("- [ ] x\n", after), (after.to_string(), 0));
+        assert_eq!(
+            preserve_checked_todo_items("- [ ] x\n", after),
+            (after.to_string(), 0)
+        );
         // A patch that drops the id while reproducing the checked item still keeps the check.
-        let (body, restored) = preserve_checked_todo_items("- [x] [#a] Rotate key\n", "- [ ] Rotate key\n");
+        let (body, restored) =
+            preserve_checked_todo_items("- [x] [#a] Rotate key\n", "- [ ] Rotate key\n");
         assert_eq!((body.as_str(), restored), ("- [x] Rotate key\n", 1));
     }
 
     #[test]
     fn new_idless_items_lists_only_patch_added_items_without_an_id() {
         let before = "- [ ] Call the vendor\n- [ ] [#a] Rotate\n";
-        let after = "- [ ] Call the vendor\n- [ ] [#a] Rotate\n- [ ] [#n] Has id\n- [ ] Publish  draft\n";
-        assert_eq!(new_idless_todo_items(before, after), vec!["Publish draft".to_string()]);
+        let after =
+            "- [ ] Call the vendor\n- [ ] [#a] Rotate\n- [ ] [#n] Has id\n- [ ] Publish  draft\n";
+        assert_eq!(
+            new_idless_todo_items(before, after),
+            vec!["Publish draft".to_string()]
+        );
     }
 
     #[test]
     fn link_findings_map_each_state_to_one_documented_kind() {
         let index = links(
-            &[("gate1", "review"), ("work", "backlog"), ("open2", "review")],
+            &[
+                ("gate1", "review"),
+                ("work", "backlog"),
+                ("open2", "review"),
+            ],
             &["shipped", "gone"],
         );
         let content = wrap(concat!(
@@ -3924,19 +3993,54 @@ mod tests {
         assert_eq!(
             summary,
             vec![
-                ("legacy_source_unqualified", vec!["gate1".to_string()], "gate1".to_string()),
-                ("operator_done_review_open", vec!["gate1".to_string()], "gate1".to_string()),
-                ("legacy_source_unqualified", vec!["work".to_string()], "work".to_string()),
-                ("operator_done_backlog_open", vec!["work".to_string()], "work".to_string()),
-                ("linked_work_resolved", vec!["shipped".to_string()], "shipped".to_string()),
-                ("cited_work_resolved", vec!["gone".to_string()], "k3vd".to_string()),
-                ("legacy_source_unqualified", vec!["open2".to_string()], "k4vd".to_string()),
-                ("legacy_source_unqualified", vec!["open2".to_string()], "open2".to_string()),
+                (
+                    "legacy_source_unqualified",
+                    vec!["gate1".to_string()],
+                    "gate1".to_string()
+                ),
+                (
+                    "operator_done_review_open",
+                    vec!["gate1".to_string()],
+                    "gate1".to_string()
+                ),
+                (
+                    "legacy_source_unqualified",
+                    vec!["work".to_string()],
+                    "work".to_string()
+                ),
+                (
+                    "operator_done_backlog_open",
+                    vec!["work".to_string()],
+                    "work".to_string()
+                ),
+                (
+                    "linked_work_resolved",
+                    vec!["shipped".to_string()],
+                    "shipped".to_string()
+                ),
+                (
+                    "cited_work_resolved",
+                    vec!["gone".to_string()],
+                    "k3vd".to_string()
+                ),
+                (
+                    "legacy_source_unqualified",
+                    vec!["open2".to_string()],
+                    "k4vd".to_string()
+                ),
+                (
+                    "legacy_source_unqualified",
+                    vec!["open2".to_string()],
+                    "open2".to_string()
+                ),
             ]
         );
         let missing = todo_link_findings("no components", &index).unwrap();
         assert_eq!(missing.len(), 1);
-        assert_eq!(missing[0].kind, TodoLinkFindingKind::TrackedWorkMissingTodoBacklink);
+        assert_eq!(
+            missing[0].kind,
+            TodoLinkFindingKind::TrackedWorkMissingTodoBacklink
+        );
         assert_eq!(missing[0].ids, vec!["work".to_string()]);
     }
 
@@ -3952,7 +4056,10 @@ mod tests {
         ));
         let outcome = auto_complete_linked_todos(&content, &index).unwrap();
         assert_eq!(outcome.completed, vec!["shipped".to_string()]);
-        assert_eq!(outcome.reconciled, 1, "the checked copy folds into the item");
+        assert_eq!(
+            outcome.reconciled, 1,
+            "the checked copy folds into the item"
+        );
         assert_eq!(
             todo_body(&outcome.content),
             concat!(
@@ -3984,28 +4091,35 @@ mod tests {
     #[test]
     fn open_backlog_and_icebox_require_a_backlink_to_an_existing_todo() {
         let mut index = links(
-            &[("unlinked", "backlog"), ("dangling", "icebox"), ("gate", "review")],
+            &[
+                ("unlinked", "backlog"),
+                ("dangling", "icebox"),
+                ("gate", "review"),
+            ],
             &[],
         );
         index.mark_todo_backlink("dangling", "missing-todo");
         let findings = todo_link_findings("no todo component", &index).unwrap();
         let missing = findings
             .iter()
-            .filter(|finding| {
-                finding.kind == TodoLinkFindingKind::TrackedWorkMissingTodoBacklink
-            })
+            .filter(|finding| finding.kind == TodoLinkFindingKind::TrackedWorkMissingTodoBacklink)
             .map(|finding| finding.ids[0].clone())
             .collect::<Vec<_>>();
-        assert_eq!(missing, vec!["dangling".to_string(), "unlinked".to_string()]);
+        assert_eq!(
+            missing,
+            vec!["dangling".to_string(), "unlinked".to_string()]
+        );
 
         let content = wrap(concat!(
             "- [ ] [#approval] Approve (source: agent:backlog [#unlinked])\n",
             "- [ ] [#missing-todo] Decide (source: agent:icebox [#dangling])\n",
         ));
-        assert!(todo_link_findings(&content, &index)
-            .unwrap()
-            .iter()
-            .all(|finding| finding.kind != TodoLinkFindingKind::TrackedWorkMissingTodoBacklink));
+        assert!(
+            todo_link_findings(&content, &index)
+                .unwrap()
+                .iter()
+                .all(|finding| finding.kind != TodoLinkFindingKind::TrackedWorkMissingTodoBacklink)
+        );
     }
 
     #[test]
@@ -4034,17 +4148,22 @@ mod tests {
         let final_outcome = auto_complete_linked_todos(&first.content, &resolved).unwrap();
         assert_eq!(final_outcome.completed, vec!["operator-a".to_string()]);
         assert!(todo_body(&final_outcome.content).contains("- [x] [#operator-a] Approve rollout"));
-        assert!(todo_body(&final_outcome.content).contains("- [ ] [#unlinked] Read the release note"));
+        assert!(
+            todo_body(&final_outcome.content).contains("- [ ] [#unlinked] Read the release note")
+        );
     }
 
     #[test]
     fn todo_source_locator_resolves_a_backlink_and_checked_todo_unblocks_source() {
-        let checked = wrap(
-            "- [x] [#approval] Approve rollout (source: agent:backlog [#ship])\n",
-        );
+        let checked = wrap("- [x] [#approval] Approve rollout (source: agent:backlog [#ship])\n");
         let mut index = links(&[("ship", "backlog")], &[]);
-        index.resolve_todo_backlinks_from_document(&checked).unwrap();
-        assert_eq!(index.todo_ids_for_tracked("ship"), vec!["approval".to_string()]);
+        index
+            .resolve_todo_backlinks_from_document(&checked)
+            .unwrap();
+        assert_eq!(
+            index.todo_ids_for_tracked("ship"),
+            vec!["approval".to_string()]
+        );
 
         let findings = todo_link_findings(&checked, &index).unwrap();
         assert!(findings.iter().any(|finding| {

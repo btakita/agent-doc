@@ -1169,22 +1169,14 @@ mod tests {
         );
         let completion_only = doc(&format!("{cell}\n"));
         assert!(
-            !closed_cycle_steering_between(
-                Some(&baseline),
-                Some(&baseline),
-                &completion_only,
-            )
-            .is_present()
+            !closed_cycle_steering_between(Some(&baseline), Some(&baseline), &completion_only,)
+                .is_present()
         );
 
         let operator_prose = doc(&format!(
             "{cell}\n\nWhy did the clear never fire? Add a task for it.\n"
         ));
-        let set = closed_cycle_steering_between(
-            Some(&baseline),
-            Some(&baseline),
-            &operator_prose,
-        );
+        let set = closed_cycle_steering_between(Some(&baseline), Some(&baseline), &operator_prose);
         assert_eq!(set.len(), 1);
         assert!(set.verbatim_aggregate().unwrap().contains("Add a task"));
     }

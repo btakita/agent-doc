@@ -32,7 +32,8 @@ pub fn stale_supervisor_marker_holder_is_live(
     written_at_secs: u64,
 ) -> bool {
     holder_pid.is_some()
-        && holder_started_at_secs.is_some_and(|started| started <= written_at_secs.saturating_add(1))
+        && holder_started_at_secs
+            .is_some_and(|started| started <= written_at_secs.saturating_add(1))
 }
 
 /// Self-expiry window. A missed idle hook must not wedge the session busy.
@@ -1053,15 +1054,31 @@ mod tests {
     #[test]
     fn stale_marker_counts_only_while_its_writer_runs() {
         // The writer is still running (started before it wrote the row).
-        assert!(stale_supervisor_marker_holder_is_live(Some(7), Some(100), 200));
+        assert!(stale_supervisor_marker_holder_is_live(
+            Some(7),
+            Some(100),
+            200
+        ));
         // Start-time rounding slack.
-        assert!(stale_supervisor_marker_holder_is_live(Some(7), Some(201), 200));
+        assert!(stale_supervisor_marker_holder_is_live(
+            Some(7),
+            Some(201),
+            200
+        ));
         // The writer is gone.
         assert!(!stale_supervisor_marker_holder_is_live(Some(7), None, 200));
         // The pid was reused by a process that started after the write.
-        assert!(!stale_supervisor_marker_holder_is_live(Some(7), Some(5_000), 200));
+        assert!(!stale_supervisor_marker_holder_is_live(
+            Some(7),
+            Some(5_000),
+            200
+        ));
         // No writer recorded.
-        assert!(!stale_supervisor_marker_holder_is_live(None, Some(100), 200));
+        assert!(!stale_supervisor_marker_holder_is_live(
+            None,
+            Some(100),
+            200
+        ));
     }
 
     /// `#runctrlclaude`: only boundaries that end the conversation which ran
@@ -1940,7 +1957,11 @@ mod tests {
             None
         );
         assert!(turn_lease_ended_by_interrupt(&lease, evidence, settled));
-        assert!(!turn_lease_ended_by_interrupt(&lease, evidence, second_press));
+        assert!(!turn_lease_ended_by_interrupt(
+            &lease,
+            evidence,
+            second_press
+        ));
         // A snapshot older than the lease belongs to an earlier prompt, and
         // any other tail proves no abandoned prompt.
         let newer = TurnActiveMarker {

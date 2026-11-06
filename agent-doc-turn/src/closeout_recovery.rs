@@ -236,9 +236,7 @@ impl CloseoutRecoveryMutationReason {
 
     pub const fn capture_refresh_message(self) -> &'static str {
         match self {
-            Self::MaterializedResponseIntent => {
-                "retained response intent is already materialized"
-            }
+            Self::MaterializedResponseIntent => "retained response intent is already materialized",
             Self::QueueOnlyReplayBaseline => "queue-only drift detected",
             Self::WholeDocumentReplayCoalescedBaseline => {
                 "whole-document replay coalescence detected"

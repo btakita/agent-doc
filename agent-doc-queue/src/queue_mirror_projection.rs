@@ -288,7 +288,10 @@ mod tests {
             "element parser: main + issues"
         );
         let overlay = agent_doc_markdown_ast::overlay::components(&content);
-        let overlay_queues = overlay.iter().filter(|c| c.name == "queue").collect::<Vec<_>>();
+        let overlay_queues = overlay
+            .iter()
+            .filter(|c| c.name == "queue")
+            .collect::<Vec<_>>();
         assert_eq!(overlay_queues.len(), 2, "overlay: main + issues");
         let main_texts = overlay_queues[0]
             .items
@@ -307,7 +310,11 @@ mod tests {
             closers += usize::from(scan.close_at(offset, text).is_some());
             offset += line.len();
         }
-        assert_eq!((openers, closers), (2, 2), "shared marker scan: fenced markers are content");
+        assert_eq!(
+            (openers, closers),
+            (2, 2),
+            "shared marker scan: fenced markers are content"
+        );
 
         let graph = QueueGraph::parse(&content, &components).unwrap();
         let main = graph

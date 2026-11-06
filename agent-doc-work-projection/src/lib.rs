@@ -429,8 +429,8 @@ fn is_binary_active_group(line: &str) -> bool {
         "Review",
         "Icebox",
     ]
-        .iter()
-        .any(|group| trimmed.starts_with(&format!("- **{group}** (")))
+    .iter()
+    .any(|group| trimmed.starts_with(&format!("- **{group}** (")))
 }
 
 fn is_binary_active_item(line: &str) -> bool {

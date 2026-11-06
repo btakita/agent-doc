@@ -512,10 +512,10 @@ fn tool_admit(args: &Map<String, Value>) -> Result<Value> {
         &std::env::current_dir().context("failed to resolve MCP server working directory")?,
         agent_doc_tmux_io::current_pane_id_from_env().as_deref(),
     )?;
-    let admit = agent_doc_session_check_io::midturn_steering::admit_with_steering_seed(
-        &file,
-        |file| Ok(agent_doc_document_realtime_io::try_resolve_current_doc_from_file(file)?.content),
-    )?;
+    let admit =
+        agent_doc_session_check_io::midturn_steering::admit_with_steering_seed(&file, |file| {
+            Ok(agent_doc_document_realtime_io::try_resolve_current_doc_from_file(file)?.content)
+        })?;
     let mut structured = json!({
         "ok": true,
         "file": file.display().to_string(),
@@ -1755,7 +1755,9 @@ mod tests {
         let root = dir.path();
         std::fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
         let file = root.join("session.md");
-        let rows = (1..=7).map(|n| format!("- Grok task {n}.\n")).collect::<String>();
+        let rows = (1..=7)
+            .map(|n| format!("- Grok task {n}.\n"))
+            .collect::<String>();
         let content = format!(
             "---\nagent_doc_session: sid-1\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n### Re: prior\n\nDone.\n<!-- /agent:exchange -->\n\n## Queue\n\n<!-- agent:queue subagents=4 go -->\n{rows}<!-- /agent:queue -->\n"
         );
@@ -1780,7 +1782,8 @@ mod tests {
             }
         }));
         assert_eq!(admit["result"]["isError"], false);
-        let _later = agent_doc_queue_io::queue_claim::pin_claim_clock_for_current_thread(clock + 60);
+        let _later =
+            agent_doc_queue_io::queue_claim::pin_claim_clock_for_current_thread(clock + 60);
         let plan_call = |id: u64| {
             let plan = response_for(json!({
                 "jsonrpc": "2.0",
@@ -1812,19 +1815,33 @@ mod tests {
             "every free slot (4 - 1 dispatching) is handed out at once"
         );
         assert_eq!(contract["queue_subagent_pool"][0]["occupancy"]["free"], 3);
-        assert_eq!(contract["queue_subagent_pool"][0]["occupancy"]["dispatching"], 1);
+        assert_eq!(
+            contract["queue_subagent_pool"][0]["occupancy"]["dispatching"],
+            1
+        );
         let first = contract["required_commands"][0].as_str().unwrap();
         assert!(first.starts_with("URGENT"), "{first}");
         assert!(first.contains("Grok task 1."), "{first}");
 
         // Spawn + start the unstarted claim and the three new heads, then
         // one worker reports: its slot refills with the next head.
-        for (n, item) in ["Grok task 1.", "Grok task 2.", "Grok task 3.", "Grok task 4."].iter().enumerate() {
+        for (n, item) in [
+            "Grok task 1.",
+            "Grok task 2.",
+            "Grok task 3.",
+            "Grok task 4.",
+        ]
+        .iter()
+        .enumerate()
+        {
             let owner = format!("subagent:g{}", n + 1);
             let generation = if n == 0 {
                 1
             } else {
-                agent_doc_queue_io::queue_claim::claim(&file, item, &owner, 7200).unwrap().1.generation
+                agent_doc_queue_io::queue_claim::claim(&file, item, &owner, 7200)
+                    .unwrap()
+                    .1
+                    .generation
             };
             agent_doc_queue_io::queue_claim::start_attempt(
                 &file,
@@ -1839,7 +1856,11 @@ mod tests {
         assert!(items(&plan_call(52)).is_empty(), "the pool is full");
         agent_doc_queue_io::queue_claim::report_attempt(&file, "Grok task 2.", Some(1)).unwrap();
         let refill = plan_call(53);
-        assert_eq!(items(&refill), ["Grok task 5."], "the report freed one slot");
+        assert_eq!(
+            items(&refill),
+            ["Grok task 5."],
+            "the report freed one slot"
+        );
         assert_eq!(refill["queue_subagent_pool"][0]["occupancy"]["running"], 3);
     }
 
@@ -1937,8 +1958,7 @@ Done.
                 .contains("queue start")
         );
         assert_eq!(
-            contract["queue_subagent_dispatch"][2]["item"],
-            "Wire the live refresh.",
+            contract["queue_subagent_dispatch"][2]["item"], "Wire the live refresh.",
             "the next plan must project the newly runnable live-editor row"
         );
         assert_eq!(

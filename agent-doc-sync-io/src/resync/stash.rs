@@ -906,11 +906,7 @@ mod tests {
         respawn_pane_with_shell_command(
             &iso,
             &pane2,
-            &format!(
-                "cd {} && exec {} 60",
-                cwd.display(),
-                agent_bin.display()
-            ),
+            &format!("cd {} && exec {} 60", cwd.display(), agent_bin.display()),
         );
         assert!(wait_for_pane_current_command(
             &iso,
@@ -945,11 +941,7 @@ mod tests {
 
         let pane1 = iso.auto_start("test", &cwd).unwrap();
         let pane2 = iso.split_window(&pane1, &cwd, "-dh").unwrap();
-        respawn_pane_with_shell_command(
-            &iso,
-            &pane2,
-            &format!("exec {} 60", agent_bin.display()),
-        );
+        respawn_pane_with_shell_command(&iso, &pane2, &format!("exec {} 60", agent_bin.display()));
         assert!(
             wait_for_pane_current_command(
                 &iso,
@@ -1095,11 +1087,7 @@ mod tests {
         // Create a session with 2 panes in the same window
         let pane1 = iso.auto_start("test", cwd).unwrap();
         let pane2 = iso.split_window(&pane1, cwd, "-dh").unwrap();
-        respawn_pane_with_shell_command(
-            &iso,
-            &pane2,
-            &format!("exec {} 60", agent_bin.display()),
-        );
+        respawn_pane_with_shell_command(&iso, &pane2, &format!("exec {} 60", agent_bin.display()));
         assert!(wait_for_pane_current_command(
             &iso,
             &pane2,

@@ -1681,10 +1681,24 @@ pub fn block_attempt_on_quota(
             "queue_worker_quota_blocked owner={} generation={} worker_id={} harness={} limit={:?} branch={} item_bytes={} (#harnessquotaexhausted)",
             claim.owner,
             claim.generation,
-            claim.worker.as_ref().map_or("none", |worker| worker.worker_id.as_str()),
-            claim.quota_block.as_ref().and_then(|block| block.harness.as_deref()).unwrap_or("unknown"),
-            claim.quota_block.as_ref().map_or("", |block| block.limit.as_str()),
-            claim.quota_block.as_ref().and_then(|block| block.branch.as_deref()).unwrap_or("none"),
+            claim
+                .worker
+                .as_ref()
+                .map_or("none", |worker| worker.worker_id.as_str()),
+            claim
+                .quota_block
+                .as_ref()
+                .and_then(|block| block.harness.as_deref())
+                .unwrap_or("unknown"),
+            claim
+                .quota_block
+                .as_ref()
+                .map_or("", |block| block.limit.as_str()),
+            claim
+                .quota_block
+                .as_ref()
+                .and_then(|block| block.branch.as_deref())
+                .unwrap_or("none"),
             claim.item_text.trim().len(),
         ),
     );
@@ -2187,10 +2201,12 @@ pub fn pending_reported_closeout_for_content(
     if obligations.is_empty() {
         return Ok(None);
     }
-    Ok(agent_doc_queue::reported_closeout::pending_reported_closeout(
-        &obligations,
-        &agent_doc_element::todo::open_todo_ids(content),
-    ))
+    Ok(
+        agent_doc_queue::reported_closeout::pending_reported_closeout(
+            &obligations,
+            &agent_doc_element::todo::open_todo_ids(content),
+        ),
+    )
 }
 
 /// Every live `Reported` attempt as a plan obligation, classified against the
@@ -2821,15 +2837,9 @@ pub fn retire_exact_reported_attempt_for_identity(
     source: &str,
 ) -> Result<bool> {
     let retired = mutate_ledger(file, |ledger| {
-        let Some(index) = ledger
-            .claims
-            .iter()
-            .position(|claim| {
-                claim.identity == *identity
-                    && claim.owner == owner
-                    && claim.generation == generation
-            })
-        else {
+        let Some(index) = ledger.claims.iter().position(|claim| {
+            claim.identity == *identity && claim.owner == owner && claim.generation == generation
+        }) else {
             return Ok(None);
         };
         if ledger.claims[index].state != agent_doc_queue::queue_claim::QueueClaimState::Reported {
@@ -2995,15 +3005,9 @@ mod tests {
                 .and_then(|policy| policy.harness.as_deref()),
             Some("codex")
         );
-        let (_, idempotent) = claim_with_session_for_worker_harness(
-            &doc,
-            "#next",
-            "subagent:next",
-            600,
-            None,
-            None,
-        )
-        .unwrap();
+        let (_, idempotent) =
+            claim_with_session_for_worker_harness(&doc, "#next", "subagent:next", 600, None, None)
+                .unwrap();
         assert_eq!(idempotent.generation, claimed.generation);
         assert_eq!(
             idempotent
@@ -3206,10 +3210,7 @@ mod tests {
         let parent = "https://example.test/pull/17";
         let original = format!("{parent}: #address ⟦effect:2⟧");
         let renumbered = format!("{parent}: #address ⟦effect:4⟧");
-        let doc = write_doc(
-            dir.path(),
-            &[parent, "  - #address ⟦effect:2⟧"],
-        );
+        let doc = write_doc(dir.path(), &[parent, "  - #address ⟦effect:2⟧"]);
         // `write_doc` adds the list marker; replace the deliberately nested
         // fixture's doubled marker before parsing it.
         let content = std::fs::read_to_string(&doc)
@@ -3291,12 +3292,8 @@ mod tests {
             "a claim with no spawn acknowledgement is not lost execution debt"
         );
 
-        let (outcome, replacement) =
-            claim(&doc, "#unstarted", "subagent:unstarted", 600).unwrap();
-        assert_eq!(
-            outcome,
-            agent_doc_queue::queue_claim::ClaimOutcome::Created
-        );
+        let (outcome, replacement) = claim(&doc, "#unstarted", "subagent:unstarted", 600).unwrap();
+        assert_eq!(outcome, agent_doc_queue::queue_claim::ClaimOutcome::Created);
         assert_eq!(replacement.generation, first.generation + 1);
     }
 
@@ -3341,7 +3338,11 @@ mod tests {
         let pinned = 3_000_000;
         let _claimed_at = pin_claim_clock_for_current_thread(pinned);
         for (item, owner, worker) in [
-            ("review the pull request", "subagent:review", "worker:review"),
+            (
+                "review the pull request",
+                "subagent:review",
+                "worker:review",
+            ),
             ("#reportedid", "subagent:id", "worker:id"),
         ] {
             let (_, claimed) = claim(&doc, item, owner, 600).unwrap();
@@ -3373,7 +3374,10 @@ mod tests {
         let document = doc.display().to_string();
         for report in &reports {
             assert_eq!(report.assessment, "reported_pending_integration");
-            assert_eq!(report.visible_projection_state, "synchronized", "{report:#?}");
+            assert_eq!(
+                report.visible_projection_state, "synchronized",
+                "{report:#?}"
+            );
             let closeout = report.reported_closeout.as_ref().expect("closeout");
             assert_eq!(
                 closeout.shape,
@@ -3382,8 +3386,14 @@ mod tests {
             );
             let expected = if report.claim.owner == "subagent:review" {
                 vec![
-                    "agent-doc", "queue", "consume", &document, "--ack-text",
-                    "review the pull request", "--ack-owner", "subagent:review#1",
+                    "agent-doc",
+                    "queue",
+                    "consume",
+                    &document,
+                    "--ack-text",
+                    "review the pull request",
+                    "--ack-owner",
+                    "subagent:review#1",
                 ]
             } else {
                 vec![
@@ -3397,7 +3407,10 @@ mod tests {
                     "subagent:id#1",
                 ]
             };
-            assert_eq!(report.next_action_argv.as_deref().unwrap(), expected.as_slice());
+            assert_eq!(
+                report.next_action_argv.as_deref().unwrap(),
+                expected.as_slice()
+            );
         }
 
         // An out-of-sync row still repairs its projection first, keeping the

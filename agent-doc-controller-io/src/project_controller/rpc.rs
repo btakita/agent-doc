@@ -61937,7 +61937,6 @@ mod tests {
         );
     }
 
-
     fn write_controller_generation_record(
         dir: &tempfile::TempDir,
         generation: u64,

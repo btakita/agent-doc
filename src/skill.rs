@@ -2303,7 +2303,10 @@ pub(crate) fn session_documents_under(root: &Path) -> SessionDocumentScan {
         std::ops::ControlFlow::Continue(())
     });
     documents.sort();
-    SessionDocumentScan { documents, exhausted }
+    SessionDocumentScan {
+        documents,
+        exhausted,
+    }
 }
 
 /// Whether `root` holds at least one session document.
@@ -3148,10 +3151,7 @@ pub fn install_and_check_updated() -> Result<bool> {
 /// An explicit root is how a submodule-local install gets refreshed: bare root
 /// resolution prefers the superproject, so `src/agent-doc/.claude/...` is
 /// otherwise unreachable from inside the submodule (`#skillinstallstalemirror`).
-pub fn install_for_at(
-    env: agent_kit::detect::Environment,
-    root: Option<&Path>,
-) -> Result<bool> {
+pub fn install_for_at(env: agent_kit::detect::Environment, root: Option<&Path>) -> Result<bool> {
     let install_user_hooks = root.is_none();
     let resolved = root.map(|p| p.to_path_buf()).or_else(resolve_root);
     let updated = install_skill_for_env(env, resolved.as_deref())?;
@@ -5208,7 +5208,10 @@ mod tests {
         assert!(bundled_instruction_text().contains("`do #id` closeout rule"));
         assert!(bundled_instruction_text().contains("--done <id>"));
         assert!(bundled_instruction_text().contains("pending_done_guard"));
-        assert!(bundled_instruction_text().contains("An `[operator-verify]` tag alone never justifies `agent:review`"));
+        assert!(
+            bundled_instruction_text()
+                .contains("An `[operator-verify]` tag alone never justifies `agent:review`")
+        );
         assert!(bundled_instruction_text().contains("`--backlog-ungate <id>`"));
         assert!(bundled_instruction_text().contains("not `--review-edit`"));
     }
@@ -5217,37 +5220,40 @@ mod tests {
     fn bundled_skill_treats_imperative_document_edits_as_executable_work() {
         assert!(bundled_instruction_text().contains("Imperative edits are executable directives"));
         assert!(bundled_instruction_text().contains("authorize the named work"));
-        assert!(bundled_instruction_text().contains("Do not ask the operator\n  to say `go` / `push` again"));
+        assert!(
+            bundled_instruction_text()
+                .contains("Do not ask the operator\n  to say `go` / `push` again")
+        );
         assert!(bundled_instruction_text().contains("or invoke the preset again"));
         assert!(bundled_instruction_text().contains("harness-native tool-permission prompt"));
         assert!(
             bundled_instruction_text()
                 .contains("MCP auth / OAuth is a sub-step, not a closeout boundary")
         );
-        assert!(bundled_instruction_text().contains(
-            "\"starting/continuing\" status prose while requested work remains undone"
-        ));
+        assert!(
+            bundled_instruction_text().contains(
+                "\"starting/continuing\" status prose while requested work remains undone"
+            )
+        );
     }
 
     #[test]
     fn bundled_skill_routes_natural_language_focused_extract_requests() {
-        assert!(bundled_instruction_text().contains("The operator may ask naturally inside the source document"));
+        assert!(
+            bundled_instruction_text()
+                .contains("The operator may ask naturally inside the source document")
+        );
         assert!(SKILL_TEMPLATE.contains("[transfer-extract.md](runbooks/transfer-extract.md)"));
-        assert!(bundled_instruction_text().contains(
-            "An imperative extraction request authorizes the agent"
-        ));
-        assert!(bundled_instruction_text().contains(
-            "--apply --coordinate-live-editors"
-        ));
-        assert!(bundled_instruction_text().contains(
-            "If an endpoint lacks `coordinated_extract_v1`"
-        ));
-        assert!(bundled_instruction_text().contains(
-            "Exploratory/question wording authorizes"
-        ));
-        assert!(bundled_instruction_text().contains(
-            "supply IDs or a manifest"
-        ));
+        assert!(
+            bundled_instruction_text()
+                .contains("An imperative extraction request authorizes the agent")
+        );
+        assert!(bundled_instruction_text().contains("--apply --coordinate-live-editors"));
+        assert!(
+            bundled_instruction_text().contains("If an endpoint lacks `coordinated_extract_v1`")
+        );
+        assert!(bundled_instruction_text().contains("Exploratory/question wording authorizes"));
+        assert!(bundled_instruction_text().contains("supply IDs or a manifest"));
         assert!(bundled_instruction_text().contains("There is no `split` alias"));
     }
 
@@ -5305,14 +5311,22 @@ mod tests {
         assert!(bundled_instruction_text().contains(
             "queue report-complete <FILE> --item <...> --generation <N> --prose-only --response '<worker response>'"
         ));
-        assert!(bundled_instruction_text().contains("queue release <FILE> --item <...> --generation <N>"));
+        assert!(
+            bundled_instruction_text()
+                .contains("queue release <FILE> --item <...> --generation <N>")
+        );
         assert!(bundled_instruction_text().contains("`🟡` means reserved/dispatching"));
         assert!(bundled_instruction_text().contains("`make install` per integrated batch"));
-        assert!(bundled_instruction_text().contains("agent-doc orchestrate <FILE> --mode parallel"));
+        assert!(
+            bundled_instruction_text().contains("agent-doc orchestrate <FILE> --mode parallel")
+        );
         assert!(bundled_instruction_text().contains("(`#queuesubagents`)"));
         // `#waypostauthorization`: the coordinator pastes the binary-resolved
         // operator authorization into each subagent prompt.
-        assert!(bundled_instruction_text().contains("`authorization.subagent_prompt_preamble` VERBATIM"));
+        assert!(
+            bundled_instruction_text()
+                .contains("`authorization.subagent_prompt_preamble` VERBATIM")
+        );
         assert!(bundled_instruction_text().contains("agent-doc queue brief <FILE> --item <...>"));
         let runbook = |name: &str| {
             BUNDLED_RUNBOOKS
@@ -5359,9 +5373,13 @@ mod tests {
 
     #[test]
     fn bundled_skill_preserves_operator_visible_document_authority() {
-        assert!(bundled_instruction_text().contains("Operator-visible document text is authoritative"));
+        assert!(
+            bundled_instruction_text().contains("Operator-visible document text is authoritative")
+        );
         assert!(bundled_instruction_text().contains("content_ours"));
-        assert!(bundled_instruction_text().contains("backup/audit state, not\n  hot-path authority"));
+        assert!(
+            bundled_instruction_text().contains("backup/audit state, not\n  hot-path authority")
+        );
         assert!(bundled_instruction_text().contains("fail closed or retry through the editor"));
     }
 
@@ -5372,17 +5390,26 @@ mod tests {
         ));
         assert!(bundled_instruction_text().contains("executable workflow start"));
         assert!(bundled_instruction_text().contains("generic\n  document-editing request"));
-        assert!(SKILL_TEMPLATE.contains("Never manually patch the final response into the session document"));
+        assert!(
+            SKILL_TEMPLATE
+                .contains("Never manually patch the final response into the session document")
+        );
         assert!(bundled_instruction_text().contains("agent-doc respond <FILE>"));
         assert!(bundled_instruction_text().contains("binary resolves and commits the turn"));
         assert!(bundled_instruction_text().contains("$CODEX_HOME/hooks.json"));
-        assert!(bundled_instruction_text().contains("Manual repository commits exclude the active session document"));
+        assert!(
+            bundled_instruction_text()
+                .contains("Manual repository commits exclude the active session document")
+        );
         assert!(bundled_instruction_text().contains("code-enforced-directives.md"));
     }
 
     #[test]
     fn bundled_skill_contains_manual_repair_write_commit_rule() {
-        assert!(bundled_instruction_text().contains("Manual repair / missed patchback rule (all harnesses)"));
+        assert!(
+            bundled_instruction_text()
+                .contains("Manual repair / missed patchback rule (all harnesses)")
+        );
         assert!(
             bundled_instruction_text()
                 .contains("do **not** patch the\nassistant response directly into the file")
@@ -5396,7 +5423,9 @@ mod tests {
         assert!(bundled_instruction_text().contains("Captured finalize is\nbinary-owned"));
         assert!(bundled_instruction_text().contains("keyed supervisor worker"));
         assert!(bundled_instruction_text().contains("do not recapture, re-answer"));
-        assert!(bundled_instruction_text().contains("bounded retry and exact-once commit semantics"));
+        assert!(
+            bundled_instruction_text().contains("bounded retry and exact-once commit semantics")
+        );
         assert!(bundled_instruction_text().contains("whose exact bytes reach disk clears it"));
         assert!(!bundled_instruction_text().contains("then retry the same closeout once"));
     }
@@ -5460,9 +5489,7 @@ mod tests {
         assert!(cycle.contains("`#chatprompt`, GH #125"));
         assert!(cycle.contains("`#chatprompt`, GH #140"));
         assert!(cycle.contains("OpenCode has no `UserPromptSubmit` hook"));
-        assert!(cycle.contains(
-            "> **Chat prompt (#chatprompt:<id>):** <verbatim prompt>"
-        ));
+        assert!(cycle.contains("> **Chat prompt (#chatprompt:<id>):** <verbatim prompt>"));
         assert!(cycle.contains("A non-empty `chat_prompts` is never `no_changes`"));
         assert!(cycle.contains("`session-check` warns `chat prompt not recorded`"));
         for env in [
@@ -5488,9 +5515,10 @@ mod tests {
         assert!(bundled_instruction_text().contains("requires the cycle to reach `committed`"));
         assert!(bundled_instruction_text().contains("agent-doc session-check <FILE>"));
         assert!(bundled_instruction_text().contains("document-mutation boundary for the cycle"));
-        assert!(bundled_instruction_text().contains(
-            "`write --commit`, start no more long-running work for that turn"
-        ));
+        assert!(
+            bundled_instruction_text()
+                .contains("`write --commit`, start no more long-running work for that turn")
+        );
         assert!(bundled_instruction_text().contains("`finalize` is its compatibility alias"));
     }
 
@@ -5503,7 +5531,9 @@ mod tests {
     #[test]
     fn bundled_skill_contains_model_short_name_attribution_rule() {
         // `#timestampresponseheader`: the heading now carries model AND timestamp.
-        assert!(bundled_instruction_text().contains("### Re: topic — opus-5 · 2026-09-11T23:45-04:00"));
+        assert!(
+            bundled_instruction_text().contains("### Re: topic — opus-5 · 2026-09-11T23:45-04:00")
+        );
         assert!(bundled_instruction_text().contains("YYYY-MM-DDTHH:MM"));
         assert!(bundled_instruction_text().contains("never the harness label (`codex`, `claude`)"));
         // The one-em-dash invariant is what keeps all four heading parsers agreeing;
@@ -5649,10 +5679,8 @@ mod tests {
         let claude_shared = super::remove_markdown_section(&claude, "## Invocation");
         let codex_shared = super::remove_markdown_section(&codex, "## Invocation");
         let opencode_shared = super::remove_markdown_section(&opencode, "## Invocation");
-        let claude_shared = super::remove_markdown_section(
-            &claude_shared,
-            "## Claude queue continuation",
-        );
+        let claude_shared =
+            super::remove_markdown_section(&claude_shared, "## Claude queue continuation");
         let claude_shared = claude_shared.replace(CLAUDE_AUTO_UPDATE_LINE, "<AUTO_UPDATE>");
         let codex_shared = codex_shared.replace(CODEX_AUTO_UPDATE_LINE, "<AUTO_UPDATE>");
         let opencode_shared = opencode_shared.replace(OPENCODE_AUTO_UPDATE_LINE, "<AUTO_UPDATE>");
@@ -6055,9 +6083,10 @@ mod tests {
         assert!(session_cycle.contains("Imperative edits are executable directives"));
         assert!(session_cycle.contains("never the harness label (`codex`, `claude`)"));
         assert!(session_cycle.contains("#managedlistcompletionintent"));
-        assert!(session_cycle.contains(
-            "incomplete Managed List Item is a durable completion objective"
-        ));
+        assert!(
+            session_cycle
+                .contains("incomplete Managed List Item is a durable completion objective")
+        );
         assert!(session_cycle.contains(
             "the exact missing condition, who or what must satisfy it, and the next action"
         ));

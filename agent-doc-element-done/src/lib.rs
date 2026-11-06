@@ -26,8 +26,7 @@ pub fn descriptor() -> ElementDescriptor {
 }
 
 pub const DONE_SECTION_HEADING: &str = "## Done";
-pub const EMPTY_DONE_COMPONENT: &str =
-    "## Done\n\n<!-- agent:done -->\n<!-- /agent:done -->\n";
+pub const EMPTY_DONE_COMPONENT: &str = "## Done\n\n<!-- agent:done -->\n<!-- /agent:done -->\n";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TerminalDebrisPrune {
@@ -386,10 +385,17 @@ mod tests {
         // `work` is open in the document and resolved by the caller: open wins.
         assert_eq!(index.open_component("work"), Some("backlog"));
         assert!(!index.is_resolved("work"));
-        assert!(!index.knows("tdx"), "agent:todo ids are not tracked-work evidence");
+        assert!(
+            !index.knows("tdx"),
+            "agent:todo ids are not tracked-work evidence"
+        );
 
         let mut missing = |_: &str| -> anyhow::Result<Option<String>> { Ok(None) };
-        assert!(!todo_link_index_in_content(doc, &mut missing, &[]).unwrap().knows("archived"));
+        assert!(
+            !todo_link_index_in_content(doc, &mut missing, &[])
+                .unwrap()
+                .knows("archived")
+        );
         let mut broken =
             |_: &str| -> anyhow::Result<Option<String>> { anyhow::bail!("permission denied") };
         assert!(todo_link_index_in_content(doc, &mut broken, &[]).is_err());
@@ -412,17 +418,23 @@ mod tests {
         );
         let mut archive = |_: &str| -> anyhow::Result<Option<String>> {
             Ok(Some(
-                "- 2026-10-26 [#archived] Historical proof (todos: [#archived-todo])\n"
-                    .to_string(),
+                "- 2026-10-26 [#archived] Historical proof (todos: [#archived-todo])\n".to_string(),
             ))
         };
         let index = todo_link_index_in_content(doc, &mut archive, &[]).unwrap();
 
-        assert_eq!(index.todo_ids_for_tracked("build"),
-            vec!["announce".to_string(), "approval".to_string()]);
-        assert_eq!(index.todo_ids_for_tracked("deploy"), vec!["announce".to_string()]);
-        assert_eq!(index.todo_ids_for_tracked("archived"),
-            vec!["archived-todo".to_string()]);
+        assert_eq!(
+            index.todo_ids_for_tracked("build"),
+            vec!["announce".to_string(), "approval".to_string()]
+        );
+        assert_eq!(
+            index.todo_ids_for_tracked("deploy"),
+            vec!["announce".to_string()]
+        );
+        assert_eq!(
+            index.todo_ids_for_tracked("archived"),
+            vec!["archived-todo".to_string()]
+        );
         assert!(index.is_resolved("archived"));
     }
 

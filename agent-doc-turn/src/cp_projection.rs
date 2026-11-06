@@ -507,16 +507,27 @@ mod tests {
     #[test]
     fn deferred_clear_superseded_is_optional_and_round_trips() {
         let idle = TurnProjection::from_phase(CyclePhase::Committed);
-        assert!(!serde_json::to_string(&idle).unwrap().contains("deferred_clear_superseded"));
-        let dropped = idle.with_deferred_clear_superseded(Some(DeferredClearSupersededProjection {
-            clear_epoch: 7,
-            pane: "%149".into(),
-            reason: "newer_prompt".into(),
-            superseded_at: 1_040,
-        }));
+        assert!(
+            !serde_json::to_string(&idle)
+                .unwrap()
+                .contains("deferred_clear_superseded")
+        );
+        let dropped =
+            idle.with_deferred_clear_superseded(Some(DeferredClearSupersededProjection {
+                clear_epoch: 7,
+                pane: "%149".into(),
+                reason: "newer_prompt".into(),
+                superseded_at: 1_040,
+            }));
         let json = serde_json::to_string(&dropped).unwrap();
-        assert!(json.contains("\"deferred_clear_superseded\":{\"clear_epoch\":7"), "{json}");
-        assert_eq!(serde_json::from_str::<TurnProjection>(&json).unwrap(), dropped);
+        assert!(
+            json.contains("\"deferred_clear_superseded\":{\"clear_epoch\":7"),
+            "{json}"
+        );
+        assert_eq!(
+            serde_json::from_str::<TurnProjection>(&json).unwrap(),
+            dropped
+        );
     }
 
     #[test]

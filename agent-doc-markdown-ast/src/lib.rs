@@ -180,7 +180,9 @@ pub fn inline_code_ranges_within_list_items(
     }
     let line_start_of = |byte: usize| -> usize {
         let index = line_bounds.partition_point(|&(_, end)| end <= byte);
-        line_bounds.get(index).map_or(source.len(), |&(start, _)| start)
+        line_bounds
+            .get(index)
+            .map_or(source.len(), |&(start, _)| start)
     };
 
     let mut accepted: Vec<std::ops::Range<usize>> = Vec::new();

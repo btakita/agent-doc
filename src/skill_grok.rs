@@ -66,8 +66,8 @@ pub fn install(root: Option<&Path>) -> Result<bool> {
     std::fs::create_dir_all(&dir)?;
     let skill_path = dir.join("SKILL.md");
     let skill_content = content();
-    let skill_updated = std::fs::read_to_string(&skill_path)
-        .map_or(true, |existing| existing != skill_content);
+    let skill_updated =
+        std::fs::read_to_string(&skill_path).map_or(true, |existing| existing != skill_content);
     write_if_changed(&skill_path, &skill_content)?;
     install_bundle(&dir.join("runbooks"), BUNDLED_RUNBOOKS)?;
     install_bundle(&dir.join("okf"), BUNDLED_OKF)?;

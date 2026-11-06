@@ -1189,11 +1189,9 @@ mod tests {
             classify_closeout_recovery_state_for_file(&doc),
             CloseoutRecoveryState::BlockedCapture
         );
-        let command = closeout_recovery_command_for_file(
-            &doc,
-            CloseoutRecoveryState::BlockedCapture,
-        )
-        .unwrap();
+        let command =
+            closeout_recovery_command_for_file(&doc, CloseoutRecoveryState::BlockedCapture)
+                .unwrap();
         assert!(command.contains("agent-doc repair"), "{command}");
         assert!(!command.contains("write --commit"), "{command}");
     }

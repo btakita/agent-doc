@@ -704,7 +704,9 @@ mod tests {
     static FD2_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     fn fd2_lock() -> std::sync::MutexGuard<'static, ()> {
-        FD2_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+        FD2_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
     #[derive(Default)]
@@ -801,7 +803,11 @@ mod tests {
             &mut RecordingLaunchLog::default(),
         )
         .unwrap();
-        assert!(has_no_daemon(&explicit.base_args), "{:?}", explicit.base_args);
+        assert!(
+            has_no_daemon(&explicit.base_args),
+            "{:?}",
+            explicit.base_args
+        );
 
         // Other harnesses have no such flag.
         let (claude_fm, _) = frontmatter::parse("---\nagent: claude\n---\n").unwrap();
@@ -910,8 +916,7 @@ mod tests {
         let harness = HarnessConfig::codex();
         let mut log = RecordingLaunchLog::default();
 
-        let guard =
-            SupervisorStderrRedirect::maybe_start(project.path(), &harness, &mut log);
+        let guard = SupervisorStderrRedirect::maybe_start(project.path(), &harness, &mut log);
         drop(guard);
 
         let path = project.path().join(".agent-doc/logs/supervisor-stderr.log");
@@ -966,7 +971,10 @@ mod tests {
 
         assert_eq!(written, marker.len() as isize);
         assert_ne!(during, before, "fd2 must not stay on the pane TTY");
-        assert_eq!(after, before, "dropping the guard must restore the original fd2");
+        assert_eq!(
+            after, before,
+            "dropping the guard must restore the original fd2"
+        );
         let path = project.path().join(".agent-doc/logs/supervisor-stderr.log");
         let content = std::fs::read_to_string(&path).unwrap();
         assert!(

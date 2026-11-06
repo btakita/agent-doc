@@ -142,7 +142,9 @@ impl SearchHit {
     /// False for a registry record that no longer stands: an agent must not
     /// act on its text.
     pub fn is_current(&self) -> bool {
-        self.state.as_deref().is_none_or(|state| state == "accepted")
+        self.state
+            .as_deref()
+            .is_none_or(|state| state == "accepted")
     }
 }
 

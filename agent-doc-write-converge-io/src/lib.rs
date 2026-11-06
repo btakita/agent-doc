@@ -4323,10 +4323,7 @@ pub fn try_editor_converge(
                     "editor_convergence",
                 );
                 agent_doc_crdt_relay_io::note_strike_published_target(
-                    file,
-                    source,
-                    target,
-                    &recovered,
+                    file, source, target, &recovered,
                 );
                 Ok(true)
             } else {

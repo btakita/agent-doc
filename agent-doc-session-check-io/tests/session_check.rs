@@ -6777,10 +6777,7 @@ Body\n\
             .collect();
         agent_doc_cycle_state_io::record_active_queue_heads(&doc, &heads).unwrap();
         let message = gh129_interruption(&doc);
-        assert!(
-            message.contains("#hydroapproval, #nbapproval"),
-            "{message}"
-        );
+        assert!(message.contains("#hydroapproval, #nbapproval"), "{message}");
         assert!(
             message.contains(&format!(
                 "agent-doc backlog {} keep-unqueued hydroapproval nbapproval",
@@ -8964,7 +8961,10 @@ The exchange is 590+ lines; I'm continuing the queue.\n<!-- /agent:exchange -->"
             "\nAlso check the stale editor ids.\n<!-- /agent:exchange -->",
         );
         let note = unmerged_editor_steering_note(&with_operator, disk, &[disk, response]);
-        assert!(note.contains("Also check the stale editor ids."), "{note:?}");
+        assert!(
+            note.contains("Also check the stale editor ids."),
+            "{note:?}"
+        );
         assert!(!note.contains("GH #89: fixed"), "{note:?}");
     }
 

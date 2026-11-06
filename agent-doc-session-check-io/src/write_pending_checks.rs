@@ -989,8 +989,10 @@ fn content_closeout_pending_maintenance_need(
 
 #[cfg(test)]
 fn content_requires_closeout_pending_maintenance(content: &str) -> Result<bool> {
-    Ok(content_closeout_pending_maintenance_need(Path::new("test.md"), content)?
-        != CloseoutPendingMaintenanceNeed::None)
+    Ok(
+        content_closeout_pending_maintenance_need(Path::new("test.md"), content)?
+            != CloseoutPendingMaintenanceNeed::None,
+    )
 }
 fn editor_authority_resolution_unavailable(err: &anyhow::Error) -> bool {
     let detail = err
@@ -1033,10 +1035,7 @@ mod precommit_pending_capture_tests {
             "- [ ] [#current] Superseded copy\n",
         );
 
-        assert!(super::content_requires_closeout_pending_maintenance(
-            content
-        )
-        .unwrap());
+        assert!(super::content_requires_closeout_pending_maintenance(content).unwrap());
     }
 
     #[test]

@@ -334,7 +334,10 @@ pub fn parse_registry(markdown: &str) -> Result<Registry> {
         cursor = end;
     }
     outside_blocks.push_str(&markdown[cursor..]);
-    let outside = outside_blocks.split_whitespace().collect::<Vec<_>>().join(" ");
+    let outside = outside_blocks
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
     let canonical_outside = REGISTRY_HEADER
         .split_whitespace()
         .collect::<Vec<_>>()

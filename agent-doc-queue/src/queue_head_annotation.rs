@@ -599,7 +599,10 @@ mod tests {
         assert_eq!(
             missing
                 .iter()
-                .map(|annotation| (annotation.id.as_str(), annotation.annotation_verbatim.as_str()))
+                .map(|annotation| (
+                    annotation.id.as_str(),
+                    annotation.annotation_verbatim.as_str()
+                ))
                 .collect::<Vec<_>>(),
             vec![("a", "keep the old API")],
             "only the operator annotation gates the closeout"
@@ -635,12 +638,17 @@ mod tests {
     #[test]
     fn requeue_never_copies_a_waiting_rows_own_text_into_the_queue() {
         let content = waiting_doc(WAITING_TREE);
-        let head = "⟦you: 1 · agent: 0 · done: 0⟧ [#ask] Approve the ask. <!-- agent-doc:waiting-item -->"
-            .to_string();
+        let head =
+            "⟦you: 1 · agent: 0 · done: 0⟧ [#ask] Approve the ask. <!-- agent-doc:waiting-item -->"
+                .to_string();
         assert!(
-            requeue_unaddressed_annotations(&content, std::slice::from_ref(&head), &["no evidence"])
-                .unwrap()
-                .is_none()
+            requeue_unaddressed_annotations(
+                &content,
+                std::slice::from_ref(&head),
+                &["no evidence"]
+            )
+            .unwrap()
+            .is_none()
         );
     }
 

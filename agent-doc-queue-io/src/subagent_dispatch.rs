@@ -164,9 +164,7 @@ fn subagent_dispatch_candidates_for_content(file: &Path, content: &str) -> Resul
     let lineage = crate::queue_lineage::load(file)?;
     let lost_identities = lost
         .into_iter()
-        .filter(|claim| {
-            crate::queue_lineage::attempt_never_started(&lineage, claim)
-        })
+        .filter(|claim| crate::queue_lineage::attempt_never_started(&lineage, claim))
         .map(|claim| claim.identity)
         .chain(crate::queue_lineage::latest_unstarted_identities(&lineage))
         .collect::<Vec<_>>();
@@ -346,7 +344,10 @@ pub fn subagent_routed_head_ids_for_content(
 ) -> Result<std::collections::HashSet<String>> {
     let prompt_presets =
         agent_doc_frontmatter_io::session::effective_prompt_presets_for_file(content, file)?;
-    Ok(core::subagent_routed_queue_head_ids(content, &prompt_presets))
+    Ok(core::subagent_routed_queue_head_ids(
+        content,
+        &prompt_presets,
+    ))
 }
 
 /// Claims that choose which queue owns this cycle: ledger attempts (including
@@ -383,7 +384,8 @@ pub fn queue_attr_subagent_plan_and_pools(
     let prompt_presets =
         agent_doc_frontmatter_io::session::effective_prompt_presets_for_file(content, file)?;
     let mut pools = Vec::new();
-    let plan = queue_attr_subagent_plan_with_pools(file, content, &prompt_presets, Some(&mut pools))?;
+    let plan =
+        queue_attr_subagent_plan_with_pools(file, content, &prompt_presets, Some(&mut pools))?;
     Ok((plan, pools))
 }
 
@@ -486,16 +488,14 @@ fn queue_attr_subagent_plan_with_pools(
     let mut combined = agent_doc_queue::subagent_intent::QueueSubagentPlan::default();
     let mut saw_attr = false;
     for block in graph.blocks() {
-        agent_doc_queue::subagent_intent::validate_queue_subagents_attrs(
-            &block.component.attrs,
-        )
-        .map_err(anyhow::Error::msg)
-        .with_context(|| {
-            format!(
-                "refusing to plan queue `{}` with ambiguous subagent ownership",
-                block.id
-            )
-        })?;
+        agent_doc_queue::subagent_intent::validate_queue_subagents_attrs(&block.component.attrs)
+            .map_err(anyhow::Error::msg)
+            .with_context(|| {
+                format!(
+                    "refusing to plan queue `{}` with ambiguous subagent ownership",
+                    block.id
+                )
+            })?;
         let predecessor_live = block.dependencies.iter().any(|dependency| {
             graph.block(dependency).is_some_and(|predecessor| {
                 predecessor.state() != agent_doc_queue::queue_set::QueueNodeState::Empty
@@ -1596,7 +1596,10 @@ queue: go
         let error = pending_subagent_dispatch_for_content(&file, &content)
             .expect_err("ambiguous ownership must block pending dispatch planning");
         let message = format!("{error:#}");
-        assert!(message.contains("ambiguous subagent ownership"), "{message}");
+        assert!(
+            message.contains("ambiguous subagent ownership"),
+            "{message}"
+        );
         assert!(message.contains("use canonical `subagents`"), "{message}");
 
         let error = queue_attr_subagent_plan(&file, &content)
@@ -1678,9 +1681,7 @@ queue: go
             pending_subagent_dispatch_for_content(&file, &content).unwrap(),
             expected
         );
-        let plan = queue_attr_subagent_plan(&file, &content)
-            .unwrap()
-            .unwrap();
+        let plan = queue_attr_subagent_plan(&file, &content).unwrap().unwrap();
         assert!(plan.held.is_empty(), "a bare attr has no capacity hold");
     }
 
@@ -1792,9 +1793,7 @@ queue: go
             listed.iter().all(|head| !head.contains("do [#owned]")),
             "the claimed head stays off the list: {listed:?}"
         );
-        let plan = queue_attr_subagent_plan(&file, &content)
-            .unwrap()
-            .unwrap();
+        let plan = queue_attr_subagent_plan(&file, &content).unwrap().unwrap();
         assert!(
             plan.held
                 .iter()
@@ -1819,9 +1818,7 @@ queue: go
             pending_subagent_dispatch_for_content(&file, &content).unwrap(),
             vec!["do [#a]".to_string(), "do [#c]".to_string()]
         );
-        let plan = queue_attr_subagent_plan(&file, &content)
-            .unwrap()
-            .unwrap();
+        let plan = queue_attr_subagent_plan(&file, &content).unwrap().unwrap();
         assert_eq!(
             plan.held,
             vec!["do [#b]".to_string(), "do [#d]".to_string()]

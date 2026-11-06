@@ -29,6 +29,7 @@ pub mod queue_auto_clear;
 pub mod queue_blocked;
 pub mod queue_claim;
 pub use agent_doc_element_queue::QueueReportState;
+pub mod handback_followups;
 pub mod queue_closeout_guard;
 pub mod queue_command;
 pub mod queue_consume;
@@ -40,7 +41,6 @@ pub mod queue_head_alignment;
 pub mod queue_head_annotation;
 pub mod queue_head_entry;
 pub mod queue_heads;
-pub mod handback_followups;
 pub mod queue_inbound;
 pub mod queue_mirror_projection;
 pub mod queue_preemption;
@@ -53,24 +53,24 @@ pub mod queue_response;
 pub mod queue_schedule;
 pub mod queue_schedule_runtime;
 pub mod queue_set;
+pub mod queue_sync_payload;
 pub mod queue_tree;
 pub mod reported_closeout;
-pub mod tree_status;
-pub mod queue_sync_payload;
 pub mod route_dispatch;
 pub mod stale_completion_evidence;
+#[cfg(test)]
+mod stray_close_text_tests;
 pub mod subagent_brief;
 pub mod subagent_intent;
 pub mod subagent_pool;
+pub mod tree_status;
 pub mod waiting_archive;
+#[cfg(test)]
+mod waiting_done_tests;
+#[cfg(test)]
+mod waiting_fixture_tests;
 pub mod waiting_packet;
 pub mod waiting_status;
 pub mod waiting_subtree;
 pub mod worker_quota;
 pub mod worktree_layout;
-#[cfg(test)]
-mod stray_close_text_tests;
-#[cfg(test)]
-mod waiting_fixture_tests;
-#[cfg(test)]
-mod waiting_done_tests;

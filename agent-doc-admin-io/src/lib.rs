@@ -907,7 +907,9 @@ mod tests {
             "{rendered}"
         );
         assert!(
-            rendered.contains("scope=project:/work/project state=paused effective=true reason=explicit_pause"),
+            rendered.contains(
+                "scope=project:/work/project state=paused effective=true reason=explicit_pause"
+            ),
             "{rendered}"
         );
     }

@@ -141,7 +141,11 @@ mod tests {
         let known = registered_prompt_preset_ids(content);
 
         assert!(
-            coined_ids("matched #actionable-review inside the quoted bullet", &known).is_empty()
+            coined_ids(
+                "matched #actionable-review inside the quoted bullet",
+                &known
+            )
+            .is_empty()
         );
     }
 

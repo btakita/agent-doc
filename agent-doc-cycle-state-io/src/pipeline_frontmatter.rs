@@ -121,7 +121,10 @@ pub fn mark_committed_if_cycle(
     if state.is_some() {
         if let Some(content) = file_content {
             if let Err(e) = clear_pipeline_frontmatter_from_content(effects, file, content) {
-                effects.log_op(file, &format!("pipeline_clear_failed file={} err={}", file.display(), e));
+                effects.log_op(
+                    file,
+                    &format!("pipeline_clear_failed file={} err={}", file.display(), e),
+                );
             }
         } else {
             clear_pipeline_frontmatter(effects, file);
@@ -150,7 +153,10 @@ pub fn mark_committed_if_cycle_and_turn_fence(
     if state.is_some() {
         if let Some(content) = file_content {
             if let Err(e) = clear_pipeline_frontmatter_from_content(effects, file, content) {
-                effects.log_op(file, &format!("pipeline_clear_failed file={} err={}", file.display(), e));
+                effects.log_op(
+                    file,
+                    &format!("pipeline_clear_failed file={} err={}", file.display(), e),
+                );
             }
         } else {
             clear_pipeline_frontmatter(effects, file);
@@ -198,7 +204,10 @@ pub fn mark_abandoned_if_cycle(
     if state.is_some() {
         if let Some(content) = file_content {
             if let Err(e) = clear_pipeline_frontmatter_from_content(effects, file, content) {
-                effects.log_op(file, &format!("pipeline_clear_failed file={} err={}", file.display(), e));
+                effects.log_op(
+                    file,
+                    &format!("pipeline_clear_failed file={} err={}", file.display(), e),
+                );
             }
         } else {
             clear_pipeline_frontmatter(effects, file);
@@ -227,7 +236,10 @@ pub fn mark_abandoned_if_cycle_and_turn_fence(
     if state.is_some() {
         if let Some(content) = file_content {
             if let Err(e) = clear_pipeline_frontmatter_from_content(effects, file, content) {
-                effects.log_op(file, &format!("pipeline_clear_failed file={} err={}", file.display(), e));
+                effects.log_op(
+                    file,
+                    &format!("pipeline_clear_failed file={} err={}", file.display(), e),
+                );
             }
         } else {
             clear_pipeline_frontmatter(effects, file);

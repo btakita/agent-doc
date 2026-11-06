@@ -1684,7 +1684,9 @@ mod tests {
             "The practical options are listed below.\n",
             "<!-- /agent:exchange -->\n",
         );
-        assert!(response_materialized_in_exchange_response_cell(response, content));
+        assert!(response_materialized_in_exchange_response_cell(
+            response, content
+        ));
     }
 
     #[test]
@@ -1947,7 +1949,9 @@ mod tests {
             "<!-- /agent:exchange -->\n",
         );
 
-        assert!(response_materialized_in_exchange_response_cell(response, content));
+        assert!(response_materialized_in_exchange_response_cell(
+            response, content
+        ));
         assert_eq!(
             materialize_response_in_current_exchange(content, response).as_deref(),
             Some(content)

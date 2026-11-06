@@ -535,8 +535,7 @@ impl<'a> QueueGraph<'a> {
             .blocks
             .iter()
             .map(|block| {
-                let state =
-                    block.state_excluding_claimed_with_control(claimed, frontmatter_queue);
+                let state = block.state_excluding_claimed_with_control(claimed, frontmatter_queue);
                 let delegated = state == QueueNodeState::Ready && block.is_delegated_only(claimed);
                 (block.id.clone(), state, delegated)
             })
@@ -545,11 +544,12 @@ impl<'a> QueueGraph<'a> {
             .iter()
             .enumerate()
             .map(|(index, (id, state, delegated))| {
-                let later_inline = annotated[index + 1..].iter().any(
-                    |(_, later_state, later_delegated)| {
-                        *later_state == QueueNodeState::Ready && !*later_delegated
-                    },
-                );
+                let later_inline =
+                    annotated[index + 1..]
+                        .iter()
+                        .any(|(_, later_state, later_delegated)| {
+                            *later_state == QueueNodeState::Ready && !*later_delegated
+                        });
                 let state = if *delegated && later_inline {
                     QueueNodeState::Paused
                 } else {
@@ -1718,10 +1718,7 @@ mod tests {
             graph.block("first").unwrap().state_excluding_claimed(&none),
             QueueNodeState::Paused
         );
-        assert_ne!(
-            graph.block("first").unwrap().state(),
-            QueueNodeState::Empty
-        );
+        assert_ne!(graph.block("first").unwrap().state(), QueueNodeState::Empty);
         assert_eq!(
             graph.schedule_excluding_claimed(&none),
             QueueScheduleDecision::Ready {
@@ -1766,8 +1763,7 @@ mod tests {
             "<!-- agent:run id=third -->\n- third held\n<!-- /agent:run -->\n",
         );
         let frontmatter_components = element::parse(frontmatter).unwrap();
-        let frontmatter_graph =
-            QueueGraph::parse(frontmatter, &frontmatter_components).unwrap();
+        let frontmatter_graph = QueueGraph::parse(frontmatter, &frontmatter_components).unwrap();
         assert_eq!(
             frontmatter_graph.schedule_reaching_inline_work_with_control(&none, Some("pause")),
             QueueScheduleDecision::Ready {

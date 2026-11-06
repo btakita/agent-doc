@@ -116,10 +116,7 @@ const REFUSAL_SITES: [(&str, &str); 6] = [
     // promised in its own words that the retained intent "delivers it once the
     // editor replica converges", and the route re-ran it every 90 seconds for 20
     // minutes while that replica had paused its attach on operator evidence.
-    (
-        "agent-doc-repair-io/src/lib.rs",
-        "retained-replay refusal",
-    ),
+    ("agent-doc-repair-io/src/lib.rs", "retained-replay refusal"),
 ];
 
 /// Calls into the shared predicate. A site "reaches" it by calling one of these.

@@ -221,9 +221,7 @@ mod tests {
                 "{quiet:?} is unproven and must not raise an operator action"
             );
         }
-        assert!(
-            NativeSaveGateBlocker::ReceiptVetoedByRefusedEndpoint.needs_operator_inspection()
-        );
+        assert!(NativeSaveGateBlocker::ReceiptVetoedByRefusedEndpoint.needs_operator_inspection());
     }
 
     /// A refusal on record outranks every other reading: it is terminal proof,
@@ -241,7 +239,11 @@ mod tests {
     #[test]
     fn a_present_receipt_is_never_reported_as_vetoed() {
         assert_eq!(
-            NativeSaveGateBlocker::classify(true, true, Some(observation("same", "same", 1, false))),
+            NativeSaveGateBlocker::classify(
+                true,
+                true,
+                Some(observation("same", "same", 1, false))
+            ),
             NativeSaveGateBlocker::DeliveryUnconverged
         );
     }

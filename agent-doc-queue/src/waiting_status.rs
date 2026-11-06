@@ -140,10 +140,7 @@ impl WaitingStatus {
     pub fn head_token(&self) -> String {
         if matches!(self.state, WaitingState::Operator | WaitingState::Complete) {
             return agent_doc_element_queue::render_waiting_status_token(
-                "",
-                self.you,
-                self.agent,
-                self.done,
+                "", self.you, self.agent, self.done,
             );
         }
         self.token()
@@ -834,12 +831,17 @@ mod tests {
         // after this one) renders the same token: one fixed point.
         let bare = body.replacen("  - 🙋 Run", "  - Run", 1);
         assert!(
-            project(&bare, &["samplesmoke"]).contains("  - ⟦you: 1 · agent: 0 · done: 0⟧ Run the sample smoke test"),
+            project(&bare, &["samplesmoke"])
+                .contains("  - ⟦you: 1 · agent: 0 · done: 0⟧ Run the sample smoke test"),
             "{}",
             project(&bare, &["samplesmoke"])
         );
         assert_eq!(head.matches('🙋').count(), 1, "{once}");
-        assert_eq!(project(&once, &["samplesmoke"]), once, "a second pass is a no-op");
+        assert_eq!(
+            project(&once, &["samplesmoke"]),
+            once,
+            "a second pass is a no-op"
+        );
         let work = head.trim_start_matches("- ");
         assert_eq!(
             agent_doc_element_queue::strip_attempt_projection_prefix(work),
@@ -851,7 +853,9 @@ mod tests {
             "  - [#picked] Pick a port. <!-- agent-doc:waiting-item -->\n",
             "    - use 8080\n",
         );
-        assert!(project(answered, &["picked"]).contains("⟦📥 you: 0 · agent: 1 · done: 0⟧ [#picked]"));
+        assert!(
+            project(answered, &["picked"]).contains("⟦📥 you: 0 · agent: 1 · done: 0⟧ [#picked]")
+        );
     }
 
     #[test]

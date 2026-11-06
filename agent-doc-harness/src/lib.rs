@@ -22,11 +22,11 @@
 use agent_doc_config::Config;
 use agent_doc_frontmatter::frontmatter::Frontmatter;
 use agent_doc_turn_executor::codex_launch::codex_resume_restart_args;
+pub use agent_doc_turn_executor_tmux::prompt::strip_ansi;
 use agent_doc_turn_executor_tmux::prompt::{
     codex_idle_placeholder_candidate, codex_prompt_candidate_is_dim_placeholder,
     is_codex_footer_row, is_codex_idle_placeholder_prompt,
 };
-pub use agent_doc_turn_executor_tmux::prompt::strip_ansi;
 use anyhow::Result;
 use std::path::{Path, PathBuf};
 
@@ -51,8 +51,8 @@ pub mod managed_capability;
 pub mod prompt_source;
 pub mod spawn_program;
 pub mod steering_delivery;
-pub mod timeout;
 pub mod subagent_end;
+pub mod timeout;
 pub mod usage_limit;
 
 /// How the supervisor builds args on restart after a crash.
@@ -1362,12 +1362,12 @@ impl HarnessConfig {
             }
         }
 
-        latest_update_marker
-            .zip(latest_dialog_action)
-            .is_some_and(|(marker_index, action_index)| {
+        latest_update_marker.zip(latest_dialog_action).is_some_and(
+            |(marker_index, action_index)| {
                 action_index >= marker_index
                     && latest_ready_prompt.is_none_or(|prompt| prompt <= action_index)
-            })
+            },
+        )
     }
 
     /// Return a reason when the latest pane output shows live user input or
@@ -1741,8 +1741,7 @@ fn codex_without_new_chat_trailer(content: &str) -> std::borrow::Cow<'_, str> {
             continue;
         }
         let banner_path = offset <= 1 && (line.starts_with("~/") || line.starts_with('/'));
-        if banner_path || line.starts_with("Welcome back") || line.starts_with("Welcome to Codex")
-        {
+        if banner_path || line.starts_with("Welcome back") || line.starts_with("Welcome to Codex") {
             continue;
         }
         return std::borrow::Cow::Borrowed(content);
@@ -3561,7 +3560,8 @@ mod tests {
     #[test]
     fn claude_context_chip_preserves_typed_draft_and_ignores_dim_hint() {
         let h = HarnessConfig::claude();
-        let typed = "\x1b[38;5;246m❯\u{a0}\x1b[38;5;74m[⧉ In tasks/api.md] \x1b[39mkeep this draft\x1b[0m";
+        let typed =
+            "\x1b[38;5;246m❯\u{a0}\x1b[38;5;74m[⧉ In tasks/api.md] \x1b[39mkeep this draft\x1b[0m";
         assert_eq!(
             project_pane_composer(typed, &h),
             PaneComposerProjection::OperatorDraft {
@@ -4891,8 +4891,7 @@ Working (21s - esc to interrupt)
     #[test]
     fn a_claude_draft_of_several_rows_resolves_to_its_prompt_row() {
         const RULE: &str = "────────────────────────────────────────\n";
-        const FOOTER: &str =
-            "  Opus 5 ctx:20% ~/w main alex@host\n  ⏵⏵ bypass permissions on (shift+tab to cycle)\n";
+        const FOOTER: &str = "  Opus 5 ctx:20% ~/w main alex@host\n  ⏵⏵ bypass permissions on (shift+tab to cycle)\n";
         let h = HarnessConfig::claude();
         let is_first_row = |projection: PaneComposerProjection| {
             matches!(projection, PaneComposerProjection::OperatorDraft { preview }
@@ -5502,11 +5501,9 @@ To continue this session, run codex resume, then select Review lazily task\n\
         assert!(ready_prompt_candidate(&not_trailer, &h).is_none());
 
         // No composer above the banner (cold start still loading): not ready.
-        let no_composer = frame.replacen("Ask Codex to do anything", "loading", 1).replacen(
-            "\u{1b}[1m›\u{1b}[0m",
-            "",
-            1,
-        );
+        let no_composer = frame
+            .replacen("Ask Codex to do anything", "loading", 1)
+            .replacen("\u{1b}[1m›\u{1b}[0m", "", 1);
         assert!(ready_prompt_candidate(&no_composer, &h).is_none());
     }
 

@@ -356,18 +356,18 @@ fn dispose_task_worktrees(project_root: &Path, tasks: &[TaskState]) {
         let Some(worktree) = task.worktree.as_ref() else {
             continue;
         };
-        let residue = match crate::worktree::residue(&worktree.path, worktree.base_commit.as_deref())
-        {
-            Ok(residue) => residue,
-            Err(err) => {
-                eprintln!(
-                    "[parallel]   Warning: keeping worktree {} — could not read its state: {}",
-                    worktree.path.display(),
-                    err
-                );
-                continue;
-            }
-        };
+        let residue =
+            match crate::worktree::residue(&worktree.path, worktree.base_commit.as_deref()) {
+                Ok(residue) => residue,
+                Err(err) => {
+                    eprintln!(
+                        "[parallel]   Warning: keeping worktree {} — could not read its state: {}",
+                        worktree.path.display(),
+                        err
+                    );
+                    continue;
+                }
+            };
         match crate::worktree::classify_worktree_residue(&residue) {
             crate::worktree::WorktreeDisposition::Remove => {
                 eprintln!(

@@ -1217,7 +1217,10 @@ brian@host repo%
             .unwrap();
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
         while agent_doc_tmux_io::target_current_command(&iso, &pane).as_deref() != Some("cat") {
-            assert!(std::time::Instant::now() < deadline, "composer never rendered");
+            assert!(
+                std::time::Instant::now() < deadline,
+                "composer never rendered"
+            );
             std::thread::sleep(std::time::Duration::from_millis(20));
         }
         let doc = dir.path().join("session.md");

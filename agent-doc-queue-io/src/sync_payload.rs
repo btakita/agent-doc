@@ -129,29 +129,28 @@ pub fn build_project_queue_sync_payload(
             &claims,
         ) {
             Ok(mut document_payload) => {
-                let retained_capture_targets = agent_doc_cycle_state_io::load_document_projection(
-                    &document,
-                )
-                .ok()
-                .flatten()
-                .map(|projection| {
-                    if projection.document.pending_write_journal.is_empty() {
-                        projection
-                            .document
-                            .pending_write
-                            .into_iter()
-                            .map(|intent| intent.target_content)
-                            .collect::<Vec<_>>()
-                    } else {
-                        projection
-                            .document
-                            .pending_write_journal
-                            .into_iter()
-                            .map(|intent| intent.target_content)
-                            .collect::<Vec<_>>()
-                    }
-                })
-                .unwrap_or_default();
+                let retained_capture_targets =
+                    agent_doc_cycle_state_io::load_document_projection(&document)
+                        .ok()
+                        .flatten()
+                        .map(|projection| {
+                            if projection.document.pending_write_journal.is_empty() {
+                                projection
+                                    .document
+                                    .pending_write
+                                    .into_iter()
+                                    .map(|intent| intent.target_content)
+                                    .collect::<Vec<_>>()
+                            } else {
+                                projection
+                                    .document
+                                    .pending_write_journal
+                                    .into_iter()
+                                    .map(|intent| intent.target_content)
+                                    .collect::<Vec<_>>()
+                            }
+                        })
+                        .unwrap_or_default();
                 apply_response_evidence(
                     &mut document_payload,
                     &content,
@@ -566,8 +565,7 @@ fn durable_completion_response(
         .find(|receipt| {
             receipt.identity == claim.identity
                 && receipt.generation == claim.generation
-                && receipt.worker_id
-                    == claim.worker.as_ref().map(|worker| worker.worker_id.clone())
+                && receipt.worker_id == claim.worker.as_ref().map(|worker| worker.worker_id.clone())
                 && receipt.completion_key.as_deref() == Some(key)
         })
         .and_then(|receipt| receipt.response.as_ref())
@@ -586,8 +584,7 @@ fn matching_response_capture(
         .find(|receipt| {
             receipt.identity == claim.identity
                 && receipt.generation == claim.generation
-                && receipt.worker_id
-                    == claim.worker.as_ref().map(|worker| worker.worker_id.clone())
+                && receipt.worker_id == claim.worker.as_ref().map(|worker| worker.worker_id.clone())
                 && receipt.completion_key.as_deref() == Some(key)
         })
         .and_then(|receipt| receipt.response.as_ref())

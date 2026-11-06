@@ -121,7 +121,10 @@ fn scope_lines(scope: &ProjectSearchScope) -> Vec<String> {
         registry_phrase(&scope.registry)
     )];
     for skipped in &scope.skipped {
-        lines.push(format!("not searched: {} ({})", skipped.document, skipped.reason));
+        lines.push(format!(
+            "not searched: {} ({})",
+            skipped.document, skipped.reason
+        ));
     }
     if scope.scan_exhausted {
         lines.push(
@@ -233,7 +236,10 @@ mod tests {
     /// The form that predates `#decisionsearchnofile` keeps its meaning.
     #[test]
     fn a_first_word_naming_a_session_document_is_file() {
-        assert_eq!(resolve("tasks/plan.md port", false).unwrap(), document("port"));
+        assert_eq!(
+            resolve("tasks/plan.md port", false).unwrap(),
+            document("port")
+        );
         assert_eq!(
             resolve("tasks/plan.md which port now", false).unwrap(),
             document("which port now")
@@ -243,7 +249,10 @@ mod tests {
     #[test]
     fn with_no_file_every_word_is_the_query() {
         assert_eq!(resolve("port", false).unwrap(), project("port"));
-        assert_eq!(resolve("which port now", false).unwrap(), project("which port now"));
+        assert_eq!(
+            resolve("which port now", false).unwrap(),
+            project("which port now")
+        );
         assert_eq!(resolve("#tdport", false).unwrap(), project("#tdport"));
         // A later word never reads as FILE.
         assert_eq!(
@@ -275,7 +284,13 @@ mod tests {
             resolve("tasks/plan.md port", true).unwrap(),
             project("tasks/plan.md port")
         );
-        assert_eq!(resolve("tasks/plann.md", true).unwrap(), project("tasks/plann.md"));
-        assert_eq!(resolve("tasks/plan.md", true).unwrap(), project("tasks/plan.md"));
+        assert_eq!(
+            resolve("tasks/plann.md", true).unwrap(),
+            project("tasks/plann.md")
+        );
+        assert_eq!(
+            resolve("tasks/plan.md", true).unwrap(),
+            project("tasks/plan.md")
+        );
     }
 }

@@ -132,7 +132,7 @@ pub fn pool_refill_quota_block<'a>(
                 _ => true,
             },
         )
-.map(|(claim, _)| claim)
+        .map(|(claim, _)| claim)
 }
 
 /// The exact next step for a quota-blocked attempt, for every surface that
@@ -422,7 +422,10 @@ mod tests {
 
     #[test]
     fn autodetect_is_ambiguous_when_the_same_rank_starts_together() {
-        let rows = [(QueueClaimState::Running, 10), (QueueClaimState::Running, 10)];
+        let rows = [
+            (QueueClaimState::Running, 10),
+            (QueueClaimState::Running, 10),
+        ];
         assert_eq!(
             choose_quota_autodetect_claim(&rows),
             QuotaAutodetectChoice::Ambiguous

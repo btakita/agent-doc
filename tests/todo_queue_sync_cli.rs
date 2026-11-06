@@ -355,7 +355,10 @@ fn decision_search_finds_answers_and_the_menu_stays_off_work_turns() {
         args.push("--json");
         let output = Command::new(env!("CARGO_BIN_EXE_agent-doc"))
             .env("AGENT_DOC_ANSWER_RECALL", "off")
-            .env("AGENT_DOC_ROOT_CEILING_DIRECTORIES", dir.path().parent().unwrap())
+            .env(
+                "AGENT_DOC_ROOT_CEILING_DIRECTORIES",
+                dir.path().parent().unwrap(),
+            )
             .current_dir(dir.path())
             .args(&args)
             .output()
@@ -367,9 +370,18 @@ fn decision_search_finds_answers_and_the_menu_stays_off_work_turns() {
     let top = &by_id["hits"][0];
     assert_eq!(top["answer"], "Use port 3000.", "{by_id:#}");
     assert_eq!(top["match"], "copy_id", "{by_id:#}");
-    assert!(top["location"].as_str().is_some_and(|where_| !where_.is_empty()), "{by_id:#}");
     assert!(
-        top["open_items"].as_array().unwrap().iter().any(|item| item == "tdport"),
+        top["location"]
+            .as_str()
+            .is_some_and(|where_| !where_.is_empty()),
+        "{by_id:#}"
+    );
+    assert!(
+        top["open_items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item == "tdport"),
         "{by_id:#}"
     );
     assert_eq!(by_id["recall"]["status"], "unavailable", "{by_id:#}");
@@ -377,9 +389,18 @@ fn decision_search_finds_answers_and_the_menu_stays_off_work_turns() {
     let by_stamp = search(&[&format!("⟦decision:{decision}⟧")]);
     assert_eq!(by_stamp["hits"][0]["match"], "stamp", "{by_stamp:#}");
     let by_words = search(&["callback", "port"]);
-    assert_eq!(by_words["hits"][0]["decision_id"], decision.as_str(), "{by_words:#}");
+    assert_eq!(
+        by_words["hits"][0]["decision_id"],
+        decision.as_str(),
+        "{by_words:#}"
+    );
     assert_eq!(by_words["hits"][0]["match"], "wording", "{by_words:#}");
-    assert!(search(&["kubernetes", "namespace"])["hits"].as_array().unwrap().is_empty());
+    assert!(
+        search(&["kubernetes", "namespace"])["hits"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
 
     // Human-readable output names the recall outcome.
     let output = Command::new(env!("CARGO_BIN_EXE_agent-doc"))
@@ -401,10 +422,16 @@ fn decision_search_finds_answers_and_the_menu_stays_off_work_turns() {
         "- ~~[#subagent-operator-request-tdport-pick]: Use port 3000.~~\n",
         "- [x] [#subagent-operator-request-tdport-pick] Demo callback port: 3000 or 47616?\n",
     );
-    let output = run_agent_doc(quiet.path(), &["preflight", "--probe", doc.to_str().unwrap()]);
+    let output = run_agent_doc(
+        quiet.path(),
+        &["preflight", "--probe", doc.to_str().unwrap()],
+    );
     assert_ok(&output, "preflight --probe");
     let contract: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert!(contract.get("decision_lookup_menu").is_none(), "{contract:#}");
+    assert!(
+        contract.get("decision_lookup_menu").is_none(),
+        "{contract:#}"
+    );
 }
 
 /// `#decisionsearchnofile`: the first word is FILE only when it names a
@@ -448,7 +475,10 @@ fn decision_search_without_file_searches_the_project() {
     let run = |args: &[&str]| {
         Command::new(env!("CARGO_BIN_EXE_agent-doc"))
             .env("AGENT_DOC_ANSWER_RECALL", "off")
-            .env("AGENT_DOC_ROOT_CEILING_DIRECTORIES", dir.path().parent().unwrap())
+            .env(
+                "AGENT_DOC_ROOT_CEILING_DIRECTORIES",
+                dir.path().parent().unwrap(),
+            )
             .current_dir(dir.path())
             .arg("decision")
             .arg("search")
@@ -475,13 +505,28 @@ fn decision_search_without_file_searches_the_project() {
     // No FILE: one hit per source, each naming it; the words need no quotes.
     let report = json(&["license", "for", "crates"]);
     let found = documents(&report);
-    assert!(found.iter().any(|document| document == "tasks/other.md"), "{report:#}");
-    assert!(found.iter().any(|document| document == "decisions.md"), "{report:#}");
+    assert!(
+        found.iter().any(|document| document == "tasks/other.md"),
+        "{report:#}"
+    );
+    assert!(
+        found.iter().any(|document| document == "decisions.md"),
+        "{report:#}"
+    );
     assert!(report.get("document").is_none(), "{report:#}");
     assert_eq!(report["project"]["documents"], 2, "{report:#}");
-    assert_eq!(report["project"]["registry"]["status"], "read", "{report:#}");
-    assert_eq!(json(&["#licpick"])["hits"][0]["answer"], "Apache-2.0 for every crate.");
-    assert_eq!(json(&["DEC-license-001"])["hits"][0]["match"], "decision_id");
+    assert_eq!(
+        report["project"]["registry"]["status"], "read",
+        "{report:#}"
+    );
+    assert_eq!(
+        json(&["#licpick"])["hits"][0]["answer"],
+        "Apache-2.0 for every crate."
+    );
+    assert_eq!(
+        json(&["DEC-license-001"])["hits"][0]["match"],
+        "decision_id"
+    );
 
     // The FILE form keeps its reach and its report shape.
     let report = json(&[path, "license", "for", "crates"]);
@@ -492,10 +537,17 @@ fn decision_search_without_file_searches_the_project() {
     assert_eq!(report["hits"][0]["answer"], "Use port 3000.", "{report:#}");
 
     // A mistyped FILE, or a FILE alone, is refused rather than searched for.
-    for args in [&["sesion.md", "port"][..], &["README.md", "port"], &["session.md"]] {
+    for args in [
+        &["sesion.md", "port"][..],
+        &["README.md", "port"],
+        &["session.md"],
+    ] {
         let output = run(args);
         assert!(!output.status.success(), "{args:?}: {output:?}");
-        assert!(String::from_utf8_lossy(&output.stderr).contains("--project"), "{output:?}");
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("--project"),
+            "{output:?}"
+        );
     }
     // `--project` makes those words the query.
     let report = json(&["--project", "session.md"]);
@@ -507,15 +559,24 @@ fn decision_search_without_file_searches_the_project() {
     assert_ok(&output, "decision search (text)");
     let text = String::from_utf8_lossy(&output.stdout);
     assert!(text.contains(" in tasks/other.md ["), "{text}");
-    assert!(text.contains("`DEC-license-001` in decisions.md ["), "{text}");
+    assert!(
+        text.contains("`DEC-license-001` in decisions.md ["),
+        "{text}"
+    );
     assert!(text.contains("rationale: Patent grant."), "{text}");
-    assert!(text.contains("searched 2 session documents under "), "{text}");
+    assert!(
+        text.contains("searched 2 session documents under "),
+        "{text}"
+    );
     assert!(text.contains("and decisions.md (1 records)"), "{text}");
 
     // Outside a project there is nothing to search.
     let outside = tempfile::tempdir().unwrap();
     let output = Command::new(env!("CARGO_BIN_EXE_agent-doc"))
-        .env("AGENT_DOC_ROOT_CEILING_DIRECTORIES", outside.path().parent().unwrap())
+        .env(
+            "AGENT_DOC_ROOT_CEILING_DIRECTORIES",
+            outside.path().parent().unwrap(),
+        )
         .current_dir(outside.path())
         .args(["decision", "search", "port"])
         .output()
@@ -572,8 +633,9 @@ fn a_probe_preflight_reports_answered_decisions_without_writing() {
     assert!(
         contract["decision_lookup_menu"]
             .as_str()
-            .is_some_and(|menu| menu.contains("agent-doc decision search ")
-                && menu.contains("session.md")),
+            .is_some_and(
+                |menu| menu.contains("agent-doc decision search ") && menu.contains("session.md")
+            ),
         "{contract:#}"
     );
     assert_eq!(
@@ -739,8 +801,14 @@ fn registry_records_and_supersedes_links_reach_impact_and_why() {
     assert_ok(&output, "decision impact");
     let impact: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(impact["change"], "supersedes", "{impact:#}");
-    assert_eq!(impact["from_answer"], "Use SQLite for the cache", "{impact:#}");
-    assert_eq!(impact["superseded_decisions"][0], "DEC-store-v1", "{impact:#}");
+    assert_eq!(
+        impact["from_answer"], "Use SQLite for the cache",
+        "{impact:#}"
+    );
+    assert_eq!(
+        impact["superseded_decisions"][0], "DEC-store-v1",
+        "{impact:#}"
+    );
     assert!(
         impact["flagged"]
             .as_array()

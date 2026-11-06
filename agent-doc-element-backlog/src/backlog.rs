@@ -238,11 +238,9 @@ impl PendingLayout {
             let raw_line = lines[index];
             let has_newline = raw_line.ends_with('\n');
             let line = raw_line.strip_suffix('\n').unwrap_or(raw_line);
-            if let Some(mut item) = parse_item_line_outside_literals(
-                line,
-                line_starts[index],
-                &literal_ranges,
-            ) {
+            if let Some(mut item) =
+                parse_item_line_outside_literals(line, line_starts[index], &literal_ranges)
+            {
                 index += 1;
                 let mut continuation = String::new();
                 let mut pending_blank_lines = String::new();
@@ -7456,7 +7454,11 @@ mod tests {
                 .unwrap_or_else(|| panic!("{form} must be refused"));
             assert_eq!(collision.sources, vec![owner.to_string()], "{form}");
             let err = ensure_new_item_explicit_id_available(doc, form).unwrap_err();
-            assert!(err.to_string().contains("refusing to add item with explicit id"), "{err}");
+            assert!(
+                err.to_string()
+                    .contains("refusing to add item with explicit id"),
+                "{err}"
+            );
         }
     }
 

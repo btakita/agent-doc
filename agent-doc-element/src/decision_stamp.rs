@@ -88,9 +88,7 @@ fn split_source_locator(action: &str) -> (&str, Option<&str>) {
             && component
                 .chars()
                 .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
-            && id_tail
-                .strip_suffix("])")
-                .is_some_and(valid_decision_id)
+            && id_tail.strip_suffix("])").is_some_and(valid_decision_id)
     });
     if well_formed {
         (&action[..start], Some(action[start + 1..].trim()))

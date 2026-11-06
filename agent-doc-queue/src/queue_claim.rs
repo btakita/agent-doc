@@ -762,10 +762,7 @@ impl QueueClaim {
                 .frozen
                 .as_ref()
                 .is_some_and(|freeze| !freeze.is_abandon())
-            && matches!(
-                self.state,
-                QueueClaimState::Running | QueueClaimState::Lost
-            )
+            && matches!(self.state, QueueClaimState::Running | QueueClaimState::Lost)
     }
 
     /// The bound worker still owns this attempt, so a lapsed refresh must not
@@ -1189,27 +1186,24 @@ impl QueueClaimLedger {
                 .expect("worker map only stores bound claims")
                 .started_at_secs;
             let current_started = binding.started_at_secs;
-            let (older_index, newer_index, newer_started) =
-                if previous_started < current_started {
-                    (previous_index, index, current_started)
-                } else if current_started < previous_started {
-                    (index, previous_index, previous_started)
-                } else {
-                    let previous = &ledger.claims[previous_index];
-                    let current = &ledger.claims[index];
-                    anyhow::bail!(
-                        "queue worker {:?} is bound to both {:?} generation {} and {:?} generation {}",
-                        worker_id,
-                        previous.item_text,
-                        previous.generation,
-                        current.item_text,
-                        current.generation,
-                    );
-                };
+            let (older_index, newer_index, newer_started) = if previous_started < current_started {
+                (previous_index, index, current_started)
+            } else if current_started < previous_started {
+                (index, previous_index, previous_started)
+            } else {
+                let previous = &ledger.claims[previous_index];
+                let current = &ledger.claims[index];
+                anyhow::bail!(
+                    "queue worker {:?} is bound to both {:?} generation {} and {:?} generation {}",
+                    worker_id,
+                    previous.item_text,
+                    previous.generation,
+                    current.item_text,
+                    current.generation,
+                );
+            };
             let older = &ledger.claims[older_index];
-            if older.state == QueueClaimState::Reported
-                || older.expires_at_secs > newer_started
-            {
+            if older.state == QueueClaimState::Reported || older.expires_at_secs > newer_started {
                 let previous = &ledger.claims[previous_index];
                 let current = &ledger.claims[index];
                 anyhow::bail!(
@@ -1729,8 +1723,8 @@ impl QueueClaimLedger {
         else {
             return Err(refused(RefreshRefusal::Unclaimed));
         };
-        let lapsed =
-            self.claims[index].is_expired(now_secs) || self.claims[index].state == QueueClaimState::Lost;
+        let lapsed = self.claims[index].is_expired(now_secs)
+            || self.claims[index].state == QueueClaimState::Lost;
         let revive = lapsed
             && revive_expired_bound
             && self.claims[index].owner == owner
@@ -1924,10 +1918,7 @@ impl QueueClaimLedger {
             return Err(QueueClaimTransitionRefused::Missing);
         };
         validate_generation(claim, Some(expected_generation))?;
-        let current_worker = claim
-            .worker
-            .as_ref()
-            .map(|worker| worker.worker_id.clone());
+        let current_worker = claim.worker.as_ref().map(|worker| worker.worker_id.clone());
         if current_worker.as_deref() != Some(expected_worker_id) {
             return Err(QueueClaimTransitionRefused::StaleWorker {
                 expected: expected_worker_id.to_string(),
@@ -3309,8 +3300,7 @@ pub fn nest_leaf_matches(item: &str, live_heads: &[String]) -> Vec<String> {
     {
         return Vec::new();
     }
-    let accepts_legacy_text = queue_prompt_stable_id(item)
-        .is_none_or(|id| !id.starts_with("q-"));
+    let accepts_legacy_text = queue_prompt_stable_id(item).is_none_or(|id| !id.starts_with("q-"));
     live_heads
         .iter()
         .filter(|head| {
@@ -3566,7 +3556,10 @@ mod tests {
         );
         // With the tracked row gone, the quoting row is not a reference either.
         assert!(resolve_claim_target("#activesummaryurl", std::slice::from_ref(&report)).is_err());
-        assert!(selector_referenced_queue_ids(&report).is_empty(), "{report}");
+        assert!(
+            selector_referenced_queue_ids(&report).is_empty(),
+            "{report}"
+        );
         assert_eq!(
             selector_referenced_queue_ids("#subagents do [#a] see `[#b]`"),
             vec!["a".to_string()]
@@ -3602,7 +3595,10 @@ mod tests {
         claim.lost_from = None;
         claim.completion_recovered_after_loss = false;
         claim.mark_lost();
-        assert_eq!(claim.projection_marker(), QueueLifecycleMarker::LostReported);
+        assert_eq!(
+            claim.projection_marker(),
+            QueueLifecycleMarker::LostReported
+        );
         assert_eq!(claim.projection_marker().prefix(), "⚠️☑️");
 
         let diagnosis = diagnose_lifecycle(
@@ -3616,9 +3612,11 @@ mod tests {
 
         claim.state = QueueClaimState::Reported;
         claim.completion_recovered_after_loss = true;
-        assert_eq!(claim.projection_marker(), QueueLifecycleMarker::LostReported);
+        assert_eq!(
+            claim.projection_marker(),
+            QueueLifecycleMarker::LostReported
+        );
         assert_eq!(claim.projection_marker().prefix(), "⚠️☑️");
-
     }
 
     #[test]
@@ -3778,7 +3776,10 @@ mod tests {
             claim_identity("#subagents: first"),
             claim_identity("#other: first")
         );
-        assert_eq!(claim_identity("#parent: pick one"), claim_identity("pick one"));
+        assert_eq!(
+            claim_identity("#parent: pick one"),
+            claim_identity("pick one")
+        );
 
         let body = "\
 - #choicetermcheck
@@ -4075,10 +4076,8 @@ mod tests {
         let mut ledger = QueueClaimLedger::default();
         ledger.claim(source, "subagent:review", 100, 600);
 
-        let moved = ledger.transfer_prompt_identity_admissions(
-            200,
-            &[(source.to_string(), target.to_string())],
-        );
+        let moved = ledger
+            .transfer_prompt_identity_admissions(200, &[(source.to_string(), target.to_string())]);
         assert_eq!(
             moved,
             vec![(
@@ -4231,7 +4230,11 @@ mod tests {
                 "{unrelated:?} names another row"
             );
         }
-        assert_eq!(ledger.claims.len(), 1, "resolution never mutates the ledger");
+        assert_eq!(
+            ledger.claims.len(),
+            1,
+            "resolution never mutates the ledger"
+        );
     }
 
     /// The reverse direction and nest vectors: a row claimed by `do [#id]`
@@ -4479,10 +4482,10 @@ mod tests {
                     followed_from: Vec::new(),
                     followed_generation: 0,
                     claim_time_row: None,
-            reported_at_secs: None,
-            heartbeat_at_secs: None,
-            frozen: None,
-            quota_block: None,
+                    reported_at_secs: None,
+                    heartbeat_at_secs: None,
+                    frozen: None,
+                    quota_block: None,
                 },
                 QueueClaim {
                     identity: QueueItemIdentity::FreeText(format!("#gh-fix {url}")),
@@ -4503,10 +4506,10 @@ mod tests {
                     followed_from: Vec::new(),
                     followed_generation: 0,
                     claim_time_row: None,
-            reported_at_secs: None,
-            heartbeat_at_secs: None,
-            frozen: None,
-            quota_block: None,
+                    reported_at_secs: None,
+                    heartbeat_at_secs: None,
+                    frozen: None,
+                    quota_block: None,
                 },
             ],
             cancellations: Vec::new(),
@@ -4801,11 +4804,31 @@ mod tests {
         };
 
         let mut expired = live();
-        assert_eq!(revive(&mut expired, "subagent:b", Some(1)).unwrap_err().reason.kind(), "expired");
-        assert_eq!(revive(&mut expired, "subagent:a", Some(2)).unwrap_err().reason.kind(), "expired");
-        assert_eq!(revive(&mut expired, "subagent:a", None).unwrap_err().reason.kind(), "expired");
+        assert_eq!(
+            revive(&mut expired, "subagent:b", Some(1))
+                .unwrap_err()
+                .reason
+                .kind(),
+            "expired"
+        );
+        assert_eq!(
+            revive(&mut expired, "subagent:a", Some(2))
+                .unwrap_err()
+                .reason
+                .kind(),
+            "expired"
+        );
+        assert_eq!(
+            revive(&mut expired, "subagent:a", None)
+                .unwrap_err()
+                .reason
+                .kind(),
+            "expired"
+        );
         assert!(
-            expired.refresh_attempt_in_session("work", "subagent:a", 200, 50, None, Some(1)).is_err(),
+            expired
+                .refresh_attempt_in_session("work", "subagent:a", 200, 50, None, Some(1))
+                .is_err(),
             "the plain fenced refresh keeps refusing"
         );
 
@@ -4894,7 +4917,12 @@ mod tests {
         // A bound refusal never claims the head is dispatchable.
         let mut foreign = live();
         let refusal = revive(&mut foreign, "subagent:b", Some(1)).unwrap_err();
-        assert!(refusal.to_string().contains("NOT eligible for dispatch again"), "{refusal}");
+        assert!(
+            refusal
+                .to_string()
+                .contains("NOT eligible for dispatch again"),
+            "{refusal}"
+        );
     }
 
     #[test]
@@ -6142,12 +6170,7 @@ Add new issues into the backlog + queue except issue #40 + #45.";
             .unwrap();
 
         assert_eq!(
-            ledger.report_exact_worker_with_publication_state(
-                "work",
-                1,
-                "worker:stale",
-                None,
-            ),
+            ledger.report_exact_worker_with_publication_state("work", 1, "worker:stale", None,),
             Err(QueueClaimTransitionRefused::StaleWorker {
                 expected: "worker:stale".to_string(),
                 current: Some("worker:new".to_string()),

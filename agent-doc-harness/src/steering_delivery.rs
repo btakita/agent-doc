@@ -80,7 +80,9 @@ pub enum RunningTurnFollowUpComposer {
     /// draft; after route has proved the composer empty and injected its own
     /// text, this proves Enter did not submit the follow-up.
     Draft,
-    Blocked { reason: String },
+    Blocked {
+        reason: String,
+    },
     Unreadable,
 }
 

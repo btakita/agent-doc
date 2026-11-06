@@ -4,7 +4,6 @@
 //! Callers provide document text. File IO, snapshot persistence, and preflight
 //! side effects stay in orchestration.
 
-
 use agent_doc_document::queue_projection::strip_priority_markers;
 use agent_doc_element::element;
 use agent_doc_element_backlog::backlog;

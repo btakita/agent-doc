@@ -1230,10 +1230,7 @@ pub fn response_explicitly_echoes_nest_vector(
 /// instead of the canonical one-line `parent: leaf` vector. Requiring both
 /// parts in the same block preserves that exact-row proof without allowing a
 /// bare shared leaf elsewhere in the response to stand for every sibling.
-pub fn response_explicitly_echoes_nested_row_tree(
-    response_body: &str,
-    head_vector: &str,
-) -> bool {
+pub fn response_explicitly_echoes_nested_row_tree(response_body: &str, head_vector: &str) -> bool {
     let Some((ancestors, leaf)) = head_vector.rsplit_once(": ") else {
         return false;
     };
@@ -2222,11 +2219,7 @@ pub fn response_defers_queue_head(content: &str, response_body: &str, head_text:
 /// The cell runs from the echo to the next `### Re:` heading or queue-prompt
 /// echo. A text that never echoes the head is not a deferral of it (the head is
 /// simply unanswered). Returning `true` only ever prevents a strike.
-pub fn latest_echo_cell_lacks_goal_final_state(
-    content: &str,
-    text: &str,
-    head_text: &str,
-) -> bool {
+pub fn latest_echo_cell_lacks_goal_final_state(content: &str, text: &str, head_text: &str) -> bool {
     let states = crate::goal_preset_terminal::head_final_states(content, head_text);
     if states.is_empty() {
         return false;

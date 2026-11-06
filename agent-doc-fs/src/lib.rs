@@ -737,11 +737,11 @@ mod tests {
     use super::{
         document_state_hash, document_state_hash_from_str, find_project_root, inode_of_path,
         preserve_dropped_operator_buffer, preserve_unproven_reseed, quarantine_corrupt_file,
-        read_optional,
-        read_valid_or_quarantine, referenced_markdown_path, referenced_markdown_path_checked,
-        rewrite_start_path, running_exe_inode_for_pid, same_document_path, snapshot_path_for,
-        startup_document_lock_path_for, startup_session_lock_name, startup_session_lock_path_for,
-        startup_starting_dir_for, state_lock_path_for, write_atomic,
+        read_optional, read_valid_or_quarantine, referenced_markdown_path,
+        referenced_markdown_path_checked, rewrite_start_path, running_exe_inode_for_pid,
+        same_document_path, snapshot_path_for, startup_document_lock_path_for,
+        startup_session_lock_name, startup_session_lock_path_for, startup_starting_dir_for,
+        state_lock_path_for, write_atomic,
     };
     use std::path::Path;
 

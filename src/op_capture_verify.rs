@@ -509,9 +509,15 @@ mod tests {
             report.batch_recorded_count, 1,
             "the batch producer receipt must satisfy verification:\n{ops_log}"
         );
-        assert_eq!(report.accepted_count, 1, "merge acceptance missing:\n{ops_log}");
+        assert_eq!(
+            report.accepted_count, 1,
+            "merge acceptance missing:\n{ops_log}"
+        );
         assert_eq!(report.failed_count, 0);
-        assert_eq!(report.refused_count, 0, "a clean burst refuses nothing:\n{ops_log}");
+        assert_eq!(
+            report.refused_count, 0,
+            "a clean burst refuses nothing:\n{ops_log}"
+        );
         assert_eq!(
             report.proof_count, 1,
             "the reporter proof must be counted:\n{ops_log}"
@@ -564,7 +570,11 @@ mod tests {
             .lines()
             .filter(|line| OpsLogEvent::EditorOpCaptureProof.is_line(line))
             .collect();
-        assert_eq!(receipts.len(), 2, "both receipts must be written:\n{ops_log}");
+        assert_eq!(
+            receipts.len(),
+            2,
+            "both receipts must be written:\n{ops_log}"
+        );
         assert!(
             receipts[0].contains("epoch_generation=12")
                 && receipts[0].contains("operator_ops=3")

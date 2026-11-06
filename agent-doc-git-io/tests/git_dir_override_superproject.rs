@@ -60,7 +60,14 @@ fn git_dir_override_inside_submodule_worktree_is_not_a_submodule() {
     let url = format!("file://{}", origin.display());
     git(
         &outer,
-        &["-c", "protocol.file.allow=always", "submodule", "add", &url, "src/sub"],
+        &[
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "add",
+            &url,
+            "src/sub",
+        ],
     );
     git(&outer, &["commit", "-m", "add submodule", "--no-verify"]);
     let sub = outer.join("src/sub");

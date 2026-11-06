@@ -128,9 +128,9 @@ mod tests {
         assert_eq!(rows.len(), 1, "{rows:?}");
         assert!(!rows[0].in_waiting_packet);
         assert!(
-            rows[0]
-                .to_string()
-                .contains("shows ☑️ but no claim, receipt, or lineage record joins its work identity")
+            rows[0].to_string().contains(
+                "shows ☑️ but no claim, receipt, or lineage record joins its work identity"
+            )
         );
     }
 }

@@ -1472,8 +1472,7 @@ pub fn strip_priority_markers(text: &str) -> String {
             t = rest.trim_start();
             continue;
         }
-        if stripped_projection
-            && let Some(rest) = strip_repeated_projection_heading_prefix(trimmed)
+        if stripped_projection && let Some(rest) = strip_repeated_projection_heading_prefix(trimmed)
         {
             t = rest;
             continue;
@@ -1829,7 +1828,10 @@ mod tests {
             agent_doc_element_queue::queue_head_identity(&unmarked),
             agent_doc_element_queue::queue_head_identity("do [#activesummaryurl]")
         );
-        assert!(operator_request_item_matches_row(&row, "do [#activesummaryurl]"));
+        assert!(operator_request_item_matches_row(
+            &row,
+            "do [#activesummaryurl]"
+        ));
         let expected = format!("🙋 do [#activesummaryurl] [#{a}] [#{b}]");
         assert_eq!(
             apply_operator_action_ids(&row, &[a.to_string(), b.to_string()]),

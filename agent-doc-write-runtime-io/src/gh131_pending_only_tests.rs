@@ -179,13 +179,8 @@ fn pending_only_retention_settled_before_inspection_continues_after_landing_proo
     let file = file.canonicalize().unwrap();
 
     agent_doc_cycle_state_io::start_preflight(&file, Some(landed), Some(landed)).unwrap();
-    agent_doc_cycle_state_io::mark_committed(
-        &file,
-        "commit_success",
-        Some(landed),
-        Some(landed),
-    )
-    .unwrap();
+    agent_doc_cycle_state_io::mark_committed(&file, "commit_success", Some(landed), Some(landed))
+        .unwrap();
     agent_doc_cycle_state_io::record_requested_tracked_work(
         &file,
         &["turnleasesweep".to_string()],
@@ -219,13 +214,7 @@ fn pending_only_retention_settled_before_inspection_continues_after_landing_proo
         Some(false),
         "the shared landing witness accepts the retained envelope only after delivery"
     );
-    finish_settled_pending_only_mutation(
-        &file,
-        &["turnleasesweep".to_string()],
-        &[],
-        &[],
-    )
-    .unwrap();
+    finish_settled_pending_only_mutation(&file, &["turnleasesweep".to_string()], &[], &[]).unwrap();
     let state = agent_doc_cycle_state_io::load_with_closeout_projection(&file)
         .unwrap()
         .expect("cycle state");

@@ -785,9 +785,7 @@ pub fn strip_attempt_projection_prefix(text: &str) -> &str {
             t = rest.trim_start();
             continue;
         }
-        if stripped_projection
-            && let Some(rest) = strip_repeated_projection_heading(t)
-        {
+        if stripped_projection && let Some(rest) = strip_repeated_projection_heading(t) {
             t = rest;
             continue;
         }
@@ -1104,7 +1102,10 @@ mod tests {
             super::strip_attempt_projection_prefix(row),
             "do [#adnestedclaimedidrow]"
         );
-        assert_eq!(super::strip_priority_markers(row), "do [#adnestedclaimedidrow]");
+        assert_eq!(
+            super::strip_priority_markers(row),
+            "do [#adnestedclaimedidrow]"
+        );
         assert_eq!(
             super::queue_head_identity(row),
             super::QueueItemIdentity::Id("adnestedclaimedidrow".to_string())
@@ -1115,9 +1116,7 @@ mod tests {
         );
 
         assert_eq!(
-            super::strip_attempt_projection_prefix(
-                "🚧 [#subagent:x#1] ### authored heading"
-            ),
+            super::strip_attempt_projection_prefix("🚧 [#subagent:x#1] ### authored heading"),
             "### authored heading",
             "an authored heading is not swallowed without a repeated projection"
         );
@@ -1478,14 +1477,20 @@ mod tests {
                 queue_head_identity(&rendered),
                 queue_head_identity("do [#ship]")
             );
-            assert_eq!(strip_priority_markers(&format!("worker work {}", state.annotation())), "worker work");
+            assert_eq!(
+                strip_priority_markers(&format!("worker work {}", state.annotation())),
+                "worker work"
+            );
         }
         assert_eq!(
             strip_queue_report_state_annotation("explain ⟦local⟧ in prose"),
             "explain ⟦local⟧ in prose"
         );
         assert_eq!(
-            render_queue_report_state_annotation("parent\n  - child", Some(QueueReportState::Local)),
+            render_queue_report_state_annotation(
+                "parent\n  - child",
+                Some(QueueReportState::Local)
+            ),
             "parent ⟦local⟧\n  - child"
         );
     }
@@ -1497,9 +1502,7 @@ mod tests {
             "ship it"
         );
         assert_eq!(
-            strip_queue_prompt_stable_id_annotation(
-                "ship it [#q-abc123] ⟦published⟧\n  - context"
-            ),
+            strip_queue_prompt_stable_id_annotation("ship it [#q-abc123] ⟦published⟧\n  - context"),
             "ship it ⟦published⟧\n  - context"
         );
         assert_eq!(

@@ -51,10 +51,7 @@ fn multi_character_prefixes_render_parse_and_preserve_identity() {
     // prefix is active and after the documented default changes to ☑️.
     for legacy in ["📫", "📤"] {
         let row = format!("{legacy} do [#legacy-outbox]");
-        assert_eq!(
-            lifecycle_marker(&row),
-            Some(QueueLifecycleMarker::Reported)
-        );
+        assert_eq!(lifecycle_marker(&row), Some(QueueLifecycleMarker::Reported));
         assert_eq!(
             queue_head_identity(&row),
             QueueItemIdentity::Id("legacy-outbox".into())

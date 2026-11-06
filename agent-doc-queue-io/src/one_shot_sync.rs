@@ -134,11 +134,8 @@ pub fn sync_configured_backlog_queue_with_snapshot(
     let entries = document_queue::parse(body)
         .with_context(|| format!("failed to parse queue body in {}", file.display()))?;
 
-    let sibling_ids = backlog_sync::sibling_run_queue_reference_ids(
-        &components,
-        content,
-        qc.open_start,
-    )?;
+    let sibling_ids =
+        backlog_sync::sibling_run_queue_reference_ids(&components, content, qc.open_start)?;
     let synced = document_queue::sync_backlog_into_queue_with_external_ids(
         &entries,
         &ids,
@@ -177,14 +174,16 @@ pub fn sync_configured_backlog_queue_with_snapshot(
         .err()
         .map(|err| err.to_string());
 
-    Ok(Some(OneShotQueueSyncResult::Synced(OneShotQueueSyncApplied {
-        requested_count: ids.len(),
-        prompt_count: report.prompt_count,
-        mode: effective_mode,
-        already_present: report.already_present,
-        newly_materialized: report.newly_materialized,
-        snapshot_warning,
-    })))
+    Ok(Some(OneShotQueueSyncResult::Synced(
+        OneShotQueueSyncApplied {
+            requested_count: ids.len(),
+            prompt_count: report.prompt_count,
+            mode: effective_mode,
+            already_present: report.already_present,
+            newly_materialized: report.newly_materialized,
+            snapshot_warning,
+        },
+    )))
 }
 
 pub fn format_queue_ids(ids: &[String]) -> String {

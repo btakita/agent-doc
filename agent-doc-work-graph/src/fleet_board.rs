@@ -196,10 +196,9 @@ pub fn attention_reason(facts: &DocumentFacts, state: DocState) -> Option<String
             "{} drainable head(s), no live actor",
             facts.drainable_heads
         )),
-        DocState::OperatorVerify => Some(format!(
-            "{} operator-gated head(s)",
-            facts.deferred_heads
-        )),
+        DocState::OperatorVerify => {
+            Some(format!("{} operator-gated head(s)", facts.deferred_heads))
+        }
         DocState::Draining | DocState::Ready | DocState::Clear => None,
     }
 }
@@ -330,14 +329,7 @@ pub fn without_clear_rows(board: FleetBoard) -> FleetBoard {
 }
 
 const HEADERS: [&str; 8] = [
-    "state",
-    "document",
-    "queue",
-    "backlog",
-    "review",
-    "auto-dag",
-    "actor",
-    "needs",
+    "state", "document", "queue", "backlog", "review", "auto-dag", "actor", "needs",
 ];
 
 pub fn queue_cell(facts: &DocumentFacts) -> String {
@@ -701,9 +693,14 @@ mod tests {
 
         let rendered = render_board_dag(&build_board([one, two, empty]));
         assert!(rendered.contains("p (4 open)"));
-        assert!(rendered.contains("Path C — implementable now (no live pane, agent-executable): 3"));
+        assert!(
+            rendered.contains("Path C — implementable now (no live pane, agent-executable): 3")
+        );
         assert!(rendered.contains("Blocked on a design decision: 1"));
-        assert!(!rendered.contains("\nq ("), "a project with no open items is skipped");
+        assert!(
+            !rendered.contains("\nq ("),
+            "a project with no open items is skipped"
+        );
     }
 
     #[test]

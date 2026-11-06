@@ -81,7 +81,9 @@ pub fn preset_item_id_collision_warning(content: &str) -> Option<PreflightPolicy
 fn collision_remedy(collisions: &[String]) -> String {
     let split_gate_ids: Vec<&str> = collisions
         .iter()
-        .filter(|c| c.contains("agent:backlog") && c.contains("agent:review") && !c.contains("preset"))
+        .filter(|c| {
+            c.contains("agent:backlog") && c.contains("agent:review") && !c.contains("preset")
+        })
         .filter_map(|c| c.split_whitespace().next())
         .collect();
     let rename = "Rename the colliding prompt preset or tracked item before dispatch.";
@@ -318,9 +320,8 @@ pub fn format_dogfood_terminal_issue_prompt_with_action(
     } else {
         issue_class.to_string()
     };
-    let issue_key = agent_doc_hash::content_hash(&format!(
-        "dogfood-terminal:{document_id}:{discriminator}"
-    ));
+    let issue_key =
+        agent_doc_hash::content_hash(&format!("dogfood-terminal:{document_id}:{discriminator}"));
     let action = action
         .map(str::trim)
         .filter(|action| !action.is_empty())
@@ -514,7 +515,11 @@ mod tests {
         assert_eq!(warning.code, "preset_item_id_collision");
         assert!(warning.message.contains("#same"));
         assert!(warning.message.contains("Ambiguous identities"));
-        assert!(warning.message.contains("Rename the colliding prompt preset"));
+        assert!(
+            warning
+                .message
+                .contains("Rename the colliding prompt preset")
+        );
     }
 
     /// `#gatecollapse` (GH #68 §2): a backlog + review split is a half-applied
@@ -655,7 +660,9 @@ mod tests {
         assert!(is_dogfood_terminal_issue(
             "[session-check] INTERRUPTED: cycle `cycle-1` is still `write_applied`"
         ));
-        assert!(is_dogfood_terminal_issue("[lint-gate] INTERRUPTED: 1 blocking lint finding"));
+        assert!(is_dogfood_terminal_issue(
+            "[lint-gate] INTERRUPTED: 1 blocking lint finding"
+        ));
     }
 
     /// `#clearqueuedliveturn`: the guard refusing a clear into a proven-live

@@ -289,13 +289,15 @@ mod tests {
             load(project.path(), &file).unwrap(),
             Some(exhausted.clone())
         );
-        assert!(mark_roll_forward_refusal(
-            project.path(),
-            &file,
-            &exhausted.content_hash,
-            "visible_structure_invalid",
-        )
-        .unwrap());
+        assert!(
+            mark_roll_forward_refusal(
+                project.path(),
+                &file,
+                &exhausted.content_hash,
+                "visible_structure_invalid",
+            )
+            .unwrap()
+        );
         let refused = load(project.path(), &file).unwrap().unwrap();
         assert_eq!(
             refused.roll_forward_refusal.as_deref(),

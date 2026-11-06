@@ -577,7 +577,15 @@ mod tests {
             capacity: QueueSubagentsCapacity::AllEligible,
         };
         let pool = std::num::NonZeroUsize::new(2);
-        let plan = plan_queue_subagent_dispatch(bare, &heads, &heads, &none, &none, &Default::default(), pool);
+        let plan = plan_queue_subagent_dispatch(
+            bare,
+            &heads,
+            &heads,
+            &none,
+            &none,
+            &Default::default(),
+            pool,
+        );
         assert_eq!(plan.dispatch, strings(&["do [#a]", "do [#b]"]));
         assert_eq!(plan.held, strings(&["do [#c]", "do [#d]"]));
 
@@ -589,11 +597,27 @@ mod tests {
         let occupied = crate::queue_claim::ClaimedQueueItems::from_identities([
             crate::queue_claim::claim_identity("do [#b]"),
         ]);
-        let refill = plan_queue_subagent_dispatch(bare, &heads, &heads, &excluded, &occupied, &Default::default(), pool);
+        let refill = plan_queue_subagent_dispatch(
+            bare,
+            &heads,
+            &heads,
+            &excluded,
+            &occupied,
+            &Default::default(),
+            pool,
+        );
         assert_eq!(refill.dispatch, strings(&["do [#c]"]));
         assert_eq!(refill.held, strings(&["do [#d]"]));
 
-        let unbounded = plan_queue_subagent_dispatch(bare, &heads, &heads, &none, &none, &Default::default(), None);
+        let unbounded = plan_queue_subagent_dispatch(
+            bare,
+            &heads,
+            &heads,
+            &none,
+            &none,
+            &Default::default(),
+            None,
+        );
         assert_eq!(unbounded.dispatch, heads);
     }
 }

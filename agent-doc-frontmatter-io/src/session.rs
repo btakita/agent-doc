@@ -500,7 +500,13 @@ mod tests {
             // project value, session value, enabled, target suffix/current, auto
             (None, None, false, None, false),
             (Some("dogfood: false"), None, false, None, false),
-            (Some("dogfood: true"), None, true, Some("tasks/work.md"), false),
+            (
+                Some("dogfood: true"),
+                None,
+                true,
+                Some("tasks/work.md"),
+                false,
+            ),
             (
                 Some("dogfood: tasks/project-bugs.md"),
                 None,
@@ -547,22 +553,35 @@ mod tests {
 
         for (project, session, enabled, target_suffix, auto) in cases {
             match project {
-                Some(value) => std::fs::write(&project_file, format!("---\n{value}\n---\n"))
-                    .unwrap(),
+                Some(value) => {
+                    std::fs::write(&project_file, format!("---\n{value}\n---\n")).unwrap()
+                }
                 None => {
                     if project_file.exists() {
                         std::fs::remove_file(&project_file).unwrap();
                     }
                 }
             }
-            let content = format!("---\n{}\n---\n", session.unwrap_or("agent_doc_format: template"));
+            let content = format!(
+                "---\n{}\n---\n",
+                session.unwrap_or("agent_doc_format: template")
+            );
             std::fs::write(&doc, &content).unwrap();
             let resolved = effective_dogfood_for_file(&content, &doc).unwrap();
-            assert_eq!(resolved.enabled, enabled, "project={project:?} session={session:?}");
-            assert_eq!(resolved.auto, auto, "project={project:?} session={session:?}");
+            assert_eq!(
+                resolved.enabled, enabled,
+                "project={project:?} session={session:?}"
+            );
+            assert_eq!(
+                resolved.auto, auto,
+                "project={project:?} session={session:?}"
+            );
             match target_suffix {
                 Some(suffix) => assert!(
-                    resolved.target.as_ref().is_some_and(|path| path.ends_with(suffix)),
+                    resolved
+                        .target
+                        .as_ref()
+                        .is_some_and(|path| path.ends_with(suffix)),
                     "project={project:?} session={session:?} resolved={resolved:?}"
                 ),
                 None => assert!(resolved.target.is_none(), "resolved={resolved:?}"),

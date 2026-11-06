@@ -996,7 +996,10 @@ mod tests {
         assert!(nodes[0].node_key.starts_with("queue:1:"));
 
         let updated = consume_nodes_all(doc, "queue", &[&nodes[0].node_key]).unwrap();
-        assert!(updated.contains("- ### ~~publish the release~~\n"), "{updated}");
+        assert!(
+            updated.contains("- ### ~~publish the release~~\n"),
+            "{updated}"
+        );
     }
 
     /// Structural IPC patches carry all-occurrence node keys. A key from a

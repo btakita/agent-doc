@@ -149,22 +149,50 @@ fn ipc_seeds(out: &Path) {
 
 fn markdown_seeds(out: &Path, docs: &[(String, String)], responses: &[(String, String)]) {
     for (name, doc) in docs {
-        write(out, "markdown_patch", &format!("{name}.md"), clip(doc, 12 * 1024));
+        write(
+            out,
+            "markdown_patch",
+            &format!("{name}.md"),
+            clip(doc, 12 * 1024),
+        );
     }
     for (name, response) in responses {
-        write(out, "markdown_patch", &format!("{name}.md"), clip(response, 8 * 1024));
+        write(
+            out,
+            "markdown_patch",
+            &format!("{name}.md"),
+            clip(response, 8 * 1024),
+        );
     }
     if let (Some((_, doc)), Some((_, response))) = (docs.first(), responses.first()) {
         let pair = format!("{}\0{}", clip(doc, 6 * 1024), clip(response, 3 * 1024));
         write(out, "markdown_patch", "pair-doc-response.md", pair);
     }
     let handcrafted: &[(&str, &str)] = &[
-        ("nested", "<!-- agent:exchange -->\n<!-- agent:queue -->\n- a\n<!-- /agent:queue -->\n<!-- /agent:exchange -->\n"),
-        ("fenced-marker", "```\n<!-- patch:exchange -->\n```\n<!-- patch:exchange -->\nbody\n<!-- /patch:exchange -->\n"),
-        ("unterminated", "<!-- patch:exchange\n<!-- agent:queue -->\n"),
-        ("replace-pending", "<!-- replace:pending -->\n- [ ] lorem\n<!-- /replace:pending -->\ntrailing\n"),
-        ("boundary", "<!-- agent:exchange -->\n### Re: lorem\n<!-- agent:boundary:0a1b2c3d -->\n<!-- /agent:exchange -->\n"),
-        ("attrs", "<!-- patch:exchange transfer-source=\"a b\" mode=append -->\nx\n<!-- /patch:exchange -->\n"),
+        (
+            "nested",
+            "<!-- agent:exchange -->\n<!-- agent:queue -->\n- a\n<!-- /agent:queue -->\n<!-- /agent:exchange -->\n",
+        ),
+        (
+            "fenced-marker",
+            "```\n<!-- patch:exchange -->\n```\n<!-- patch:exchange -->\nbody\n<!-- /patch:exchange -->\n",
+        ),
+        (
+            "unterminated",
+            "<!-- patch:exchange\n<!-- agent:queue -->\n",
+        ),
+        (
+            "replace-pending",
+            "<!-- replace:pending -->\n- [ ] lorem\n<!-- /replace:pending -->\ntrailing\n",
+        ),
+        (
+            "boundary",
+            "<!-- agent:exchange -->\n### Re: lorem\n<!-- agent:boundary:0a1b2c3d -->\n<!-- /agent:exchange -->\n",
+        ),
+        (
+            "attrs",
+            "<!-- patch:exchange transfer-source=\"a b\" mode=append -->\nx\n<!-- /patch:exchange -->\n",
+        ),
         ("empty-comment", "<!---->\n<!-- -->\n<!--->\n"),
     ];
     for (name, text) in handcrafted {
@@ -184,10 +212,16 @@ fn frontmatter_seeds(out: &Path, docs: &[(String, String)]) {
         ("empty-block", "---\n---\nbody\n"),
         ("bom", "\u{feff}---\nagent: claude\n---\nbody\n"),
         ("indented", "  ---\nagent: codex\n---\n"),
-        ("presets-alias", "---\npresets:\n  '#a': lorem\nprompt_presets:\n  '#b': ipsum\n---\n"),
+        (
+            "presets-alias",
+            "---\npresets:\n  '#a': lorem\nprompt_presets:\n  '#b': ipsum\n---\n",
+        ),
         ("null-key", "---\nagent:\n'#k':\nqueue: start\n---\nbody"),
         ("unterminated", "---\nagent: claude\n"),
-        ("pipeline", "---\nagent_doc_format: template\nagent_doc_pipeline:\n  state: running\n---\n"),
+        (
+            "pipeline",
+            "---\nagent_doc_format: template\nagent_doc_pipeline:\n  state: running\n---\n",
+        ),
     ];
     for (name, text) in handcrafted {
         write(out, "frontmatter", &format!("hand-{name}.md"), text);
@@ -208,23 +242,54 @@ fn crdt_seeds(out: &Path, docs: &[(String, String)], legacy: &[(String, Vec<u8>)
         // envelope, so these seed the columnar / compact decoders directly.
         let unwrap = |envelope: &[u8], magic: &[u8]| -> Vec<u8> {
             let b64 = envelope.strip_prefix(magic).unwrap();
-            let compressed = base64::engine::general_purpose::STANDARD.decode(b64).unwrap();
+            let compressed = base64::engine::general_purpose::STANDARD
+                .decode(b64)
+                .unwrap();
             zstd::stream::decode_all(compressed.as_slice()).unwrap()
         };
-        write(out, "crdt_update", &format!("{name}-adcr2-body.msgpack"), unwrap(&columnar, b"ADCR2:"));
+        write(
+            out,
+            "crdt_update",
+            &format!("{name}-adcr2-body.msgpack"),
+            unwrap(&columnar, b"ADCR2:"),
+        );
         let ops = decode_update_ops(&columnar).unwrap();
-        write(out, "crdt_update", &format!("{name}-legacy.json"), serde_json::to_vec(&ops).unwrap());
+        write(
+            out,
+            "crdt_update",
+            &format!("{name}-legacy.json"),
+            serde_json::to_vec(&ops).unwrap(),
+        );
         let packed = rmp_serde::to_vec(&ops).unwrap();
         let compressed = zstd::stream::encode_all(packed.as_slice(), 3).unwrap();
         let mut adcr1 = b"ADCR1:".to_vec();
-        adcr1.extend_from_slice(base64::engine::general_purpose::STANDARD.encode(compressed).as_bytes());
+        adcr1.extend_from_slice(
+            base64::engine::general_purpose::STANDARD
+                .encode(compressed)
+                .as_bytes(),
+        );
         write(out, "crdt_update", &format!("{name}-adcr1.bin"), adcr1);
-        write(out, "crdt_update", &format!("{name}-adcr1-body.msgpack"), &packed);
+        write(
+            out,
+            "crdt_update",
+            &format!("{name}-adcr1-body.msgpack"),
+            &packed,
+        );
         let delta = peer.diff(&replica.state_vector()).unwrap();
         write(out, "crdt_update", &format!("{name}-delta.bin"), delta);
-        write(out, "crdt_update", &format!("{name}-vv.json"), peer.state_vector());
+        write(
+            out,
+            "crdt_update",
+            &format!("{name}-vv.json"),
+            peer.state_vector(),
+        );
         if let Ok(state) = MultiNodeState::from_text(text) {
-            write(out, "crdt_update", &format!("{name}-adn1.bin"), state.encode());
+            write(
+                out,
+                "crdt_update",
+                &format!("{name}-adn1.bin"),
+                state.encode(),
+            );
         }
         let projection = agent_doc_markdown_lossless::project(clip(text, 512));
         write(

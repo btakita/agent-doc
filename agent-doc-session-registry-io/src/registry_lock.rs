@@ -38,8 +38,8 @@ use std::time::Duration;
 use tmux_router::registry::RegistryLockWait;
 
 pub use tmux_router::registry::{
-    DEFAULT_REGISTRY_LOCK_WAIT, RegistryLockWaitExceeded, registry_lock_acquisitions_on_this_thread,
-    registry_lock_file_path,
+    DEFAULT_REGISTRY_LOCK_WAIT, RegistryLockWaitExceeded,
+    registry_lock_acquisitions_on_this_thread, registry_lock_file_path,
 };
 
 /// Overrides [`DEFAULT_REGISTRY_LOCK_WAIT`] in milliseconds.
@@ -153,8 +153,8 @@ mod tests {
             });
             locked_rx.recv().unwrap();
             let before = registry_lock_acquisitions_on_this_thread();
-            let error = acquire_within(&registry, "test the bound", Duration::from_millis(50))
-                .unwrap_err();
+            let error =
+                acquire_within(&registry, "test the bound", Duration::from_millis(50)).unwrap_err();
             assert_eq!(registry_lock_acquisitions_on_this_thread(), before);
             release_tx.send(()).unwrap();
             error

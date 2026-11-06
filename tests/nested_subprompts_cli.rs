@@ -146,11 +146,7 @@ fn without_admitted_queue_ids(text: &str) -> String {
         };
         let end = id_start + relative_end;
         let id = &normalized[id_start..end];
-        if !id.starts_with("q-")
-            || !id
-                .chars()
-                .all(|ch| ch.is_ascii_alphanumeric() || ch == '-')
-        {
+        if !id.starts_with("q-") || !id.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '-') {
             break;
         }
         normalized.replace_range(start..=end, "");
@@ -337,10 +333,7 @@ fn a_struck_parent_does_not_retire_its_leaves() {
         "the struck parent is context-only: {prompts:#?} {dispatch:#?}"
     );
     for child in [CHILDREN[0], CHILDREN[1]] {
-        assert!(
-            prompt_work.iter().any(|item| item == child),
-            "{prompts:#?}"
-        );
+        assert!(prompt_work.iter().any(|item| item == child), "{prompts:#?}");
         assert!(
             dispatch_work.iter().any(|item| item == child),
             "{dispatch:#?}"
@@ -696,9 +689,7 @@ fn equal_nested_children_close_by_parent_vector() {
     let second_parent = "https://github.com/haiven-dev/haiven-api/pull/823";
     let child = "#adversarial-pr";
     let second_vector = format!("{second_parent}: {child}");
-    let rows = format!(
-        "- {first_parent}\n  - {child}\n- {second_parent}\n  - {child}\n"
-    );
+    let rows = format!("- {first_parent}\n  - {child}\n- {second_parent}\n  - {child}\n");
     let doc = closeout_session(dir.path(), &rows, "");
     let path = doc.to_str().unwrap();
 

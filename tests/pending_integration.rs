@@ -1415,9 +1415,7 @@ fn write_todo_add_creates_missing_todo_component_and_preserves_items() {
     );
     assert_eq!(
         component_body(&content, "todo"),
-        format!(
-            "- [ ] [#{id}] Verify [#rvw1] in a live pane (source: agent:review [#rvw1])"
-        )
+        format!("- [ ] [#{id}] Verify [#rvw1] in a live pane (source: agent:review [#rvw1])")
     );
     let pending_open = content.find("<!-- agent:pending -->").unwrap();
     let todo_open = content
@@ -1814,15 +1812,11 @@ fn preflight_audits_and_migrates_legacy_todo_source_qualification() {
     let migrated = fs::read_to_string(&doc).unwrap();
     let todo = component_body(&migrated, "todo");
     assert!(
-        todo.contains(
-            "- [ ] [#alpha] Decide the alpha policy (source: agent:backlog [#alpha])"
-        ),
+        todo.contains("- [ ] [#alpha] Decide the alpha policy (source: agent:backlog [#alpha])"),
         "{todo}"
     );
     assert!(
-        todo.contains(
-            "- [ ] [#custom] Verify [#beta] live (source: agent:review [#beta])"
-        ),
+        todo.contains("- [ ] [#custom] Verify [#beta] live (source: agent:review [#beta])"),
         "{todo}"
     );
     assert!(
@@ -1840,12 +1834,17 @@ fn preflight_audits_and_migrates_legacy_todo_source_qualification() {
 
     let (second, second_stderr) = run();
     assert!(
-        second["todo_signals"].as_array().is_none_or(|signals| signals
-            .iter()
-            .all(|signal| signal["kind"] != "legacy_source_unqualified")),
+        second["todo_signals"]
+            .as_array()
+            .is_none_or(|signals| signals
+                .iter()
+                .all(|signal| signal["kind"] != "legacy_source_unqualified")),
         "{second}"
     );
-    assert!(!second_stderr.contains("#todocontextmigration"), "{second_stderr}");
+    assert!(
+        !second_stderr.contains("#todocontextmigration"),
+        "{second_stderr}"
+    );
     assert_eq!(fs::read_to_string(&doc).unwrap(), migrated);
 }
 
@@ -1856,7 +1855,12 @@ fn preflight_audits_and_migrates_legacy_todo_source_qualification() {
 fn write_todo_done_edit_reopen_remove_round_trip_preserves_operator_items() {
     let (_tmp, doc) = setup_doc("- [ ] [#open] backlog task");
     let write = |args: &[&str]| {
-        let mut full = vec!["write", doc.to_str().unwrap(), "--force-disk", "--backlog-only"];
+        let mut full = vec![
+            "write",
+            doc.to_str().unwrap(),
+            "--force-disk",
+            "--backlog-only",
+        ];
         full.extend_from_slice(args);
         agent_doc().args(&full).assert().success()
     };
@@ -1875,7 +1879,10 @@ fn write_todo_done_edit_reopen_remove_round_trip_preserves_operator_items() {
 
     let done = write(&["--todo-done", &id]);
     let stderr = String::from_utf8_lossy(&done.get_output().stderr);
-    assert!(stderr.contains(&format!("[todo] todo-done: #{id}")), "{stderr}");
+    assert!(
+        stderr.contains(&format!("[todo] todo-done: #{id}")),
+        "{stderr}"
+    );
     let body = component_body(&fs::read_to_string(&doc).unwrap(), "todo").to_string();
     assert_eq!(
         body,
@@ -1883,9 +1890,15 @@ fn write_todo_done_edit_reopen_remove_round_trip_preserves_operator_items() {
     );
     // A replayed done is a no-op.
     write(&["--todo-done", &format!("#{id}")]);
-    assert_eq!(component_body(&fs::read_to_string(&doc).unwrap(), "todo"), body);
+    assert_eq!(
+        component_body(&fs::read_to_string(&doc).unwrap(), "todo"),
+        body
+    );
 
-    write(&["--todo-edit", &format!("{id}=Rotate the deploy key (rotated Tue)")]);
+    write(&[
+        "--todo-edit",
+        &format!("{id}=Rotate the deploy key (rotated Tue)"),
+    ]);
     write(&["--todo-reopen", &id]);
     assert_eq!(
         component_body(&fs::read_to_string(&doc).unwrap(), "todo"),
@@ -2251,8 +2264,14 @@ fn write_review_resolve_with_open_todo_emits_todo_done_advisory() {
         stderr.contains("[todo] advisory (#tododone): this closeout resolved #rvw3"),
         "stderr: {stderr}"
     );
-    assert!(stderr.contains(&format!("--todo-done {id}")), "stderr: {stderr}");
-    assert!(!stderr.contains("[todo] auto-done"), "cite-only todos are never auto-completed: {stderr}");
+    assert!(
+        stderr.contains(&format!("--todo-done {id}")),
+        "stderr: {stderr}"
+    );
+    assert!(
+        !stderr.contains("[todo] auto-done"),
+        "cite-only todos are never auto-completed: {stderr}"
+    );
     // The advisory never writes: the item is still open.
     let content = fs::read_to_string(&doc).unwrap();
     assert!(
@@ -2271,7 +2290,10 @@ fn write_review_resolve_with_open_todo_emits_todo_done_advisory() {
         .assert()
         .success();
     let stderr = String::from_utf8_lossy(&closed.get_output().stderr);
-    assert!(!stderr.contains("(#tododone): this closeout"), "stderr: {stderr}");
+    assert!(
+        !stderr.contains("(#tododone): this closeout"),
+        "stderr: {stderr}"
+    );
     assert!(
         component_body(&fs::read_to_string(&doc).unwrap(), "todo")
             .starts_with(&format!("- [x] [#{id}]"))
@@ -2288,14 +2310,21 @@ fn tracked_work_backlinks_complete_all_todos_only_after_every_source_is_done() {
         "- [ ] [#deploy] Deploy release (todos: [#approval] [#announce])",
     ));
     let write = |args: &[&str]| {
-        let mut full = vec!["write", doc.to_str().unwrap(), "--force-disk", "--backlog-only"];
+        let mut full = vec![
+            "write",
+            doc.to_str().unwrap(),
+            "--force-disk",
+            "--backlog-only",
+        ];
         full.extend_from_slice(args);
         agent_doc().args(&full).assert().success()
     };
 
     write(&[
-        "--todo-add", "id=approval Approve the release",
-        "--todo-add", "id=announce Announce the release",
+        "--todo-add",
+        "id=approval Approve the release",
+        "--todo-add",
+        "id=announce Announce the release",
     ]);
     let first = write(&["--done", "build"]);
     let first_stderr = String::from_utf8_lossy(&first.get_output().stderr);
@@ -2306,8 +2335,14 @@ fn tracked_work_backlinks_complete_all_todos_only_after_every_source_is_done() {
 
     let second = write(&["--done", "deploy"]);
     let second_stderr = String::from_utf8_lossy(&second.get_output().stderr);
-    assert!(second_stderr.contains("[todo] auto-done: #approval"), "{second_stderr}");
-    assert!(second_stderr.contains("[todo] auto-done: #announce"), "{second_stderr}");
+    assert!(
+        second_stderr.contains("[todo] auto-done: #approval"),
+        "{second_stderr}"
+    );
+    assert!(
+        second_stderr.contains("[todo] auto-done: #announce"),
+        "{second_stderr}"
+    );
     let content = fs::read_to_string(&doc).unwrap();
     assert!(component_body(&content, "todo").contains("- [x] [#approval]"));
     assert!(component_body(&content, "todo").contains("- [x] [#announce]"));
@@ -2341,12 +2376,19 @@ fn free_text_queue_head_is_promoted_then_flagged_without_a_todo_backlink() {
             String::from_utf8_lossy(&output.stderr)
         )
     });
-    let signals = parsed["todo_signals"].as_array().expect("todo_signals array");
-    assert!(signals.iter().any(|signal| {
-        signal["kind"] == "tracked_work_missing_todo_backlink"
-            && signal["ids"].as_array().is_some_and(Vec::is_empty)
-            && signal["action"].as_str().is_some_and(|action| action.contains("promote"))
-    }), "{stdout}");
+    let signals = parsed["todo_signals"]
+        .as_array()
+        .expect("todo_signals array");
+    assert!(
+        signals.iter().any(|signal| {
+            signal["kind"] == "tracked_work_missing_todo_backlink"
+                && signal["ids"].as_array().is_some_and(Vec::is_empty)
+                && signal["action"]
+                    .as_str()
+                    .is_some_and(|action| action.contains("promote"))
+        }),
+        "{stdout}"
+    );
 }
 
 /// `#todoids` end to end: a todo linked to a review gate (by its canonical
@@ -2366,7 +2408,11 @@ fn todo_ids_link_review_gates_and_round_trip_through_preflight_and_closeout() {
     let write = |args: &[&str], stdin: &str| {
         let mut full = vec!["write", doc.to_str().unwrap(), "--force-disk"];
         full.extend_from_slice(args);
-        agent_doc().args(&full).write_stdin(stdin.to_string()).assert().success()
+        agent_doc()
+            .args(&full)
+            .write_stdin(stdin.to_string())
+            .assert()
+            .success()
     };
     let exchange = "<!-- patch:exchange -->\nok\n<!-- /patch:exchange -->\n";
     write(
@@ -2395,10 +2441,18 @@ fn todo_ids_link_review_gates_and_round_trip_through_preflight_and_closeout() {
         )
     );
     // A second todo for an already-prompted gate folds into the open item.
-    let again = write(&["--backlog-only", "--todo-add", "Verify [#gateb] again"], "");
+    let again = write(
+        &["--backlog-only", "--todo-add", "Verify [#gateb] again"],
+        "",
+    );
     let stderr = String::from_utf8_lossy(&again.get_output().stderr);
     assert!(stderr.contains("already present"), "{stderr}");
-    assert_eq!(component_body(&fs::read_to_string(&doc).unwrap(), "todo").lines().count(), 2);
+    assert_eq!(
+        component_body(&fs::read_to_string(&doc).unwrap(), "todo")
+            .lines()
+            .count(),
+        2
+    );
 
     // 2. The operator checks gatea's box; no agent write happens.
     let checked = fs::read_to_string(&doc).unwrap().replace(
@@ -2434,7 +2488,10 @@ fn todo_ids_link_review_gates_and_round_trip_through_preflight_and_closeout() {
         .unwrap_or_else(|| panic!("operator_done_review_open missing: {stdout}"));
     assert_eq!(signal["todo"], todo_a.as_str());
     assert!(
-        signal["action"].as_str().unwrap().contains("--review-resolve gatea"),
+        signal["action"]
+            .as_str()
+            .unwrap()
+            .contains("--review-resolve gatea"),
         "{stdout}"
     );
     // A stale patch:todo (built before the check) carries gatea open; the
@@ -2454,7 +2511,10 @@ fn todo_ids_link_review_gates_and_round_trip_through_preflight_and_closeout() {
     // 3. Resolving gateb checks its linked todo off in the same closeout.
     let resolved = write(&["--backlog-only", "--review-resolve", "gateb"], "");
     let stderr = String::from_utf8_lossy(&resolved.get_output().stderr);
-    assert!(stderr.contains(&format!("[todo] auto-done: #{todo_b}")), "{stderr}");
+    assert!(
+        stderr.contains(&format!("[todo] auto-done: #{todo_b}")),
+        "{stderr}"
+    );
     assert!(!stderr.contains("(#tododone): this closeout"), "{stderr}");
     let content = fs::read_to_string(&doc).unwrap();
     assert!(
@@ -2462,10 +2522,8 @@ fn todo_ids_link_review_gates_and_round_trip_through_preflight_and_closeout() {
             .contains(&format!("- [x] [#{todo_b}] Verify [#gateb] in the 263 IDE")),
         "{content}"
     );
-    let ops_log = fs::read_to_string(
-        doc.parent().unwrap().join(".agent-doc/logs/ops.log"),
-    )
-    .unwrap_or_default();
+    let ops_log = fs::read_to_string(doc.parent().unwrap().join(".agent-doc/logs/ops.log"))
+        .unwrap_or_default();
     assert!(
         ops_log.contains("todo_auto_done")
             && ops_log.contains(&format!("id={todo_b} reason=linked_work_resolved")),
@@ -2667,11 +2725,18 @@ fn two_done_and_todo_add_pairs_in_one_closeout_keep_both_follow_ups_open() {
 ///    writing.
 #[test]
 fn todo_ids_never_take_a_tracked_id_and_link_by_source_locator() {
-    let (_tmp, doc) = setup_doc_with_icebox("- [ ] [#open] backlog task", "- [ ] [#coldwork] parked idea");
+    let (_tmp, doc) = setup_doc_with_icebox(
+        "- [ ] [#open] backlog task",
+        "- [ ] [#coldwork] parked idea",
+    );
     let write = |args: &[&str], stdin: &str| {
         let mut full = vec!["write", doc.to_str().unwrap(), "--force-disk"];
         full.extend_from_slice(args);
-        agent_doc().args(&full).write_stdin(stdin.to_string()).assert().success()
+        agent_doc()
+            .args(&full)
+            .write_stdin(stdin.to_string())
+            .assert()
+            .success()
     };
     let added = write(
         &[
@@ -2689,7 +2754,10 @@ fn todo_ids_never_take_a_tracked_id_and_link_by_source_locator() {
         "<!-- patch:exchange -->\nok\n<!-- /patch:exchange -->\n",
     );
     let stderr = String::from_utf8_lossy(&added.get_output().stderr);
-    assert!(stderr.contains("[#tdgatex] (source: agent:review #gatex)"), "{stderr}");
+    assert!(
+        stderr.contains("[#tdgatex] (source: agent:review #gatex)"),
+        "{stderr}"
+    );
     assert!(!stderr.contains("not used"), "{stderr}");
     let content = fs::read_to_string(&doc).unwrap();
     let todo = component_body(&content, "todo");
@@ -2700,10 +2768,15 @@ fn todo_ids_never_take_a_tracked_id_and_link_by_source_locator() {
         "- [ ] [#tdgatex] Decide the launcher policy (#gatex) (source: agent:review [#gatex])"
     );
     let cold = todo_item_id(&content, "Thaw or drop the parked idea (#coldwork)?");
-    assert!(stderr.contains(&format!("[#{cold}] (source: agent:icebox #coldwork)")), "{stderr}");
+    assert!(
+        stderr.contains(&format!("[#{cold}] (source: agent:icebox #coldwork)")),
+        "{stderr}"
+    );
     assert_eq!(
         lines[1],
-        format!("- [ ] [#{cold}] Thaw or drop the parked idea (#coldwork)? (source: agent:icebox [#coldwork])")
+        format!(
+            "- [ ] [#{cold}] Thaw or drop the parked idea (#coldwork)? (source: agent:icebox [#coldwork])"
+        )
     );
     let two = todo_item_id(&content, "Decide #gatex before thawing #coldwork");
     let none = todo_item_id(&content, "Rotate the deploy key");
@@ -2745,7 +2818,10 @@ fn todo_ids_never_take_a_tracked_id_and_link_by_source_locator() {
         .unwrap_or_else(|| panic!("operator_done_icebox_open missing: {stdout}"));
     assert_eq!(signal["todo"], cold.as_str());
     assert!(
-        signal["action"].as_str().unwrap().contains("--done coldwork"),
+        signal["action"]
+            .as_str()
+            .unwrap()
+            .contains("--done coldwork"),
         "{stdout}"
     );
     assert!(
@@ -2758,7 +2834,10 @@ fn todo_ids_never_take_a_tracked_id_and_link_by_source_locator() {
     //    auto-completed in the same closeout.
     let done = write(&["--backlog-only", "--done", "coldwork"], "");
     let stderr = String::from_utf8_lossy(&done.get_output().stderr);
-    assert!(stderr.contains(&format!("[todo] auto-done: #{cold}")), "{stderr}");
+    assert!(
+        stderr.contains(&format!("[todo] auto-done: #{cold}")),
+        "{stderr}"
+    );
     let content = fs::read_to_string(&doc).unwrap();
     assert!(
         !component_body(&content, "icebox").contains("- [ ] [#coldwork]"),
@@ -2832,16 +2911,22 @@ fn todo_add_explicit_id_wins_over_a_cited_open_backlog_id_in_a_live_closeout() {
     );
     assert!(!todo.contains("[ ] [#jbshrinkrestarts]"), "{todo}");
     assert!(
-        todo.trim_end().ends_with("(source: agent:backlog [#jbshrinkrestarts])"),
+        todo.trim_end()
+            .ends_with("(source: agent:backlog [#jbshrinkrestarts])"),
         "the cited item stays a reference, linked by locator: {todo}"
     );
-    assert!(stderr.contains("[#jb339r1decision] (source: agent:backlog #jbshrinkrestarts)"), "{stderr}");
     assert!(
-        component_body(&content, "icebox").contains("[#jbfrontendswap] Swap the JetBrains frontend loader"),
+        stderr.contains("[#jb339r1decision] (source: agent:backlog #jbshrinkrestarts)"),
+        "{stderr}"
+    );
+    assert!(
+        component_body(&content, "icebox")
+            .contains("[#jbfrontendswap] Swap the JetBrains frontend loader"),
         "{content}"
     );
     assert!(
-        component_body(&content, "backlog").contains("- [/] [#jbshrinkrestarts] Shrink JetBrains restarts"),
+        component_body(&content, "backlog")
+            .contains("- [/] [#jbshrinkrestarts] Shrink JetBrains restarts"),
         "the backlog item keeps its id: {content}"
     );
 }
@@ -2851,15 +2936,26 @@ fn todo_add_explicit_id_wins_over_a_cited_open_backlog_id_in_a_live_closeout() {
 /// open backlog item owns; replaying an identical review add stays a no-op.
 #[test]
 fn review_add_refuses_an_explicit_id_an_open_backlog_item_owns() {
-    let (_tmp, doc) = setup_doc_with_icebox("- [ ] [#open] backlog task", "- [ ] [#parked] parked idea");
+    let (_tmp, doc) =
+        setup_doc_with_icebox("- [ ] [#open] backlog task", "- [ ] [#parked] parked idea");
     let before = fs::read_to_string(&doc).unwrap();
     for item in ["id=open needs a live check", "id=parked thaw decision"] {
         let refused = agent_doc()
-            .args(["write", doc.to_str().unwrap(), "--force-disk", "--backlog-only", "--review-add", item])
+            .args([
+                "write",
+                doc.to_str().unwrap(),
+                "--force-disk",
+                "--backlog-only",
+                "--review-add",
+                item,
+            ])
             .assert()
             .failure();
         let stderr = String::from_utf8_lossy(&refused.get_output().stderr);
-        assert!(stderr.contains("refusing to add item with explicit id"), "{item}: {stderr}");
+        assert!(
+            stderr.contains("refusing to add item with explicit id"),
+            "{item}: {stderr}"
+        );
         assert_eq!(fs::read_to_string(&doc).unwrap(), before, "{item}");
     }
     for _ in 0..2 {
@@ -2876,7 +2972,13 @@ fn review_add_refuses_an_explicit_id_an_open_backlog_item_owns() {
             .success();
     }
     let content = fs::read_to_string(&doc).unwrap();
-    assert_eq!(component_body(&content, "review").matches("[#gatey]").count(), 1, "{content}");
+    assert_eq!(
+        component_body(&content, "review")
+            .matches("[#gatey]")
+            .count(),
+        1,
+        "{content}"
+    );
 }
 
 /// `#tododupdone`, anonymized from the live 2026-10-15 session: a `patch:todo`
@@ -3214,9 +3316,8 @@ fn write_turn_with_subagent_report_requires_consolidated_report() {
     write_packet_closeout(&doc, &[], CONSOLIDATED_WITH_SUBAGENT_REPORT);
     let content = fs::read_to_string(&doc).unwrap();
     assert!(
-        content.contains(
-            "[#subagent-operator-request-pr759-dev-ruleset] subagent operator request"
-        ),
+        content
+            .contains("[#subagent-operator-request-pr759-dev-ruleset] subagent operator request"),
         "the subagent report stays: {content}"
     );
     assert!(
@@ -3231,11 +3332,7 @@ fn write_turn_with_subagent_report_requires_consolidated_report() {
 
 fn assert_layered_packet_todo(response: &str) {
     let (_tmp, doc) = setup_doc("- [ ] [#apipendingorphans] stuck pending chat messages");
-    let stderr = write_packet_closeout(
-        &doc,
-        &["--pending-gate", "apipendingorphans"],
-        response,
-    );
+    let stderr = write_packet_closeout(&doc, &["--pending-gate", "apipendingorphans"], response);
     let content = fs::read_to_string(&doc).unwrap();
     assert!(
         component_body(&content, "review").contains("- [/] [#apipendingorphans]"),
@@ -3809,12 +3906,7 @@ fn backlog_set_attr_makes_backlog_adds_mirrorable_into_the_queue() {
     );
 
     let output = agent_doc()
-        .args([
-            "backlog",
-            doc.to_str().unwrap(),
-            "set-attr",
-            "queue",
-        ])
+        .args(["backlog", doc.to_str().unwrap(), "set-attr", "queue"])
         .output()
         .unwrap();
     assert!(
@@ -3836,12 +3928,7 @@ fn backlog_set_attr_makes_backlog_adds_mirrorable_into_the_queue() {
 
     // And it round-trips: unset-attr returns the marker to its original shape.
     let output = agent_doc()
-        .args([
-            "backlog",
-            doc.to_str().unwrap(),
-            "unset-attr",
-            "queue",
-        ])
+        .args(["backlog", doc.to_str().unwrap(), "unset-attr", "queue"])
         .output()
         .unwrap();
     assert!(
@@ -3906,9 +3993,7 @@ fn backlog_set_attr_accepts_a_resolvable_queue_id_target() {
     let content = fs::read_to_string(&doc).unwrap();
     fs::write(
         &doc,
-        format!(
-            "{content}\n<!-- agent:run id=sideways -->\n<!-- /agent:run -->\n"
-        ),
+        format!("{content}\n<!-- agent:run id=sideways -->\n<!-- /agent:run -->\n"),
     )
     .unwrap();
 
@@ -4098,20 +4183,32 @@ fn preflight_moves_gated_backlog_items_into_review() {
         serde_json::Value::Array(warnings)
     );
     let content = fs::read_to_string(&doc).unwrap();
-    assert_eq!(component_body(&content, "backlog").trim(), "- [ ] [#aaaa] open");
+    assert_eq!(
+        component_body(&content, "backlog").trim(),
+        "- [ ] [#aaaa] open"
+    );
     // The item keeps its line and its child; existing review backfill gives
     // the child its own subtask id, as it would have in the backlog.
     let review = component_body(&content, "review");
     assert!(
-        review.contains("- [/] [#bbbb] [blocked: vendor] legacy gated\n") && review.contains("operator note"),
+        review.contains("- [/] [#bbbb] [blocked: vendor] legacy gated\n")
+            && review.contains("operator note"),
         "{content}"
     );
     let again = agent_doc()
         .args(["preflight", doc.to_str().unwrap()])
         .output()
         .unwrap();
-    assert!(again.status.success(), "{}", String::from_utf8_lossy(&again.stderr));
-    assert_eq!(fs::read_to_string(&doc).unwrap(), content, "a second preflight is a no-op");
+    assert!(
+        again.status.success(),
+        "{}",
+        String::from_utf8_lossy(&again.stderr)
+    );
+    assert_eq!(
+        fs::read_to_string(&doc).unwrap(),
+        content,
+        "a second preflight is a no-op"
+    );
 }
 
 #[test]

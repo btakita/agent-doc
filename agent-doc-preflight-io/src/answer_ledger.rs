@@ -797,7 +797,13 @@ pub fn probe_answer_ledger(file: &Path) -> Result<AnswerLedgerReport> {
     let mut ledger = pass.ledger;
     let graph = graph_of(file, &ledger, &pass.observations);
     ledger.recompute_liveness(&pass.observations.open_item_ids, &named_edges(&graph));
-    Ok(report_of(&ledger, &pass.observations, &graph, pass.closed, pass.stale_closed))
+    Ok(report_of(
+        &ledger,
+        &pass.observations,
+        &graph,
+        pass.closed,
+        pass.stale_closed,
+    ))
 }
 
 fn run_answer_ledger_maintenance_with_options(
@@ -920,7 +926,13 @@ fn run_answer_ledger_maintenance_with_options(
         report_ledger.recompute_liveness(&report_observations.open_item_ids, &named_edges(&graph));
         recalled = notes;
     }
-    let mut report = report_of(&report_ledger, &report_observations, &graph, closed, stale_closed);
+    let mut report = report_of(
+        &report_ledger,
+        &report_observations,
+        &graph,
+        closed,
+        stale_closed,
+    );
     report.recalled = recalled;
     for decision in &report.revived {
         eprintln!(
@@ -1090,7 +1102,10 @@ impl SearchRecallStatus {
     pub fn summary(&self) -> String {
         match self {
             Self::Used { hits, note: None } => format!("tsift recall: used ({hits} hits)"),
-            Self::Used { hits, note: Some(note) } => {
+            Self::Used {
+                hits,
+                note: Some(note),
+            } => {
                 format!("tsift recall: used ({hits} hits); {note}")
             }
             Self::Unavailable { detail } => {
@@ -1349,7 +1364,11 @@ pub fn search_project_decisions(
     let mut documents = Vec::new();
     let mut skipped = Vec::new();
     for path in &project.documents {
-        let display = path.strip_prefix(root).unwrap_or(path).to_string_lossy().into_owned();
+        let display = path
+            .strip_prefix(root)
+            .unwrap_or(path)
+            .to_string_lossy()
+            .into_owned();
         let read = match std::fs::metadata(path) {
             Ok(meta) if meta.len() > MAX_RECALL_DOCUMENT_BYTES => Err(format!(
                 "{} bytes, over the {MAX_RECALL_DOCUMENT_BYTES}-byte project limit; name it as FILE to search it",
@@ -1369,7 +1388,11 @@ pub fn search_project_decisions(
     let (records, registry) = project_registry(root);
     let mut hits = search::search_registry(&records, query);
     for document in &documents {
-        hits.extend(search::search_ledger(&document.ledger, query, &document.display));
+        hits.extend(search::search_ledger(
+            &document.ledger,
+            query,
+            &document.display,
+        ));
     }
     search::rank(&mut hits);
     let recall = add_search_recall(
@@ -1905,7 +1928,10 @@ mod tests {
         .unwrap();
         let top = report.hits.first().unwrap_or_else(|| panic!("{report:?}"));
         assert_eq!(top.answer, "Use the standard http ports.");
-        assert_eq!(top.matched, agent_doc_answer_ledger::search::SearchMatch::CopyId);
+        assert_eq!(
+            top.matched,
+            agent_doc_answer_ledger::search::SearchMatch::CopyId
+        );
         assert!(
             top.open_items
                 .contains(&"subagent-operator-request-tdport-allowlist".to_string()),
@@ -1914,19 +1940,31 @@ mod tests {
         let report = search_decisions(&doc, "tasks/session.md", "#tdport", &env, 10).unwrap();
         let top = report.hits.first().unwrap_or_else(|| panic!("{report:?}"));
         assert_eq!(top.answer, "Use the standard http ports.");
-        assert_eq!(top.matched, agent_doc_answer_ledger::search::SearchMatch::AppliesTo);
+        assert_eq!(
+            top.matched,
+            agent_doc_answer_ledger::search::SearchMatch::AppliesTo
+        );
         assert_eq!(
             report.recall,
             SearchRecallStatus::Unavailable {
                 detail: "no tsift executable on PATH".to_string()
             }
         );
-        assert!(report.recall.summary().contains("ranked by the answer ledger only"));
+        assert!(
+            report
+                .recall
+                .summary()
+                .contains("ranked by the answer ledger only")
+        );
         // Unanswered: nothing to look up.
         let none = search_decisions(&doc, "tasks/session.md", "#redir", &env, 10).unwrap();
         assert!(none.hits.is_empty(), "{none:?}");
         // Read-only.
-        assert!(std::fs::read_to_string(&doc).unwrap().contains("- [ ] [#subagent-operator-request-tdport-allowlist]"));
+        assert!(
+            std::fs::read_to_string(&doc)
+                .unwrap()
+                .contains("- [ ] [#subagent-operator-request-tdport-allowlist]")
+        );
     }
 
     /// With tsift, an answer in another session document is found; an index
@@ -1963,7 +2001,10 @@ mod tests {
             agent_doc_answer_ledger::search::SearchMatch::RecallSemantic
         );
         match &report.recall {
-            SearchRecallStatus::Used { hits: 1, note: Some(note) } => {
+            SearchRecallStatus::Used {
+                hits: 1,
+                note: Some(note),
+            } => {
                 assert!(note.contains("older than this document"), "{note}")
             }
             other => panic!("{other:?}"),
@@ -1990,9 +2031,14 @@ mod tests {
             std::time::Duration::from_millis(100)
         );
 
-        let report =
-            search_decisions(&doc, "tasks/session.md", "which port does the demo use", &env, 10)
-                .unwrap();
+        let report = search_decisions(
+            &doc,
+            "tasks/session.md",
+            "which port does the demo use",
+            &env,
+            10,
+        )
+        .unwrap();
         assert!(
             matches!(&report.recall, SearchRecallStatus::Used { hits, .. } if *hits > 0),
             "{:?}",
@@ -2012,7 +2058,9 @@ mod tests {
             ..recall_env(&bin_dir, 0)
         };
         let preflight = TsiftRecall::discover(&doc, &env).unwrap().deadline();
-        let search = TsiftRecall::discover_for_search(&doc, &env).unwrap().deadline();
+        let search = TsiftRecall::discover_for_search(&doc, &env)
+            .unwrap()
+            .deadline();
         assert_eq!(preflight, std::time::Duration::from_millis(2500));
         assert_eq!(search, std::time::Duration::from_secs(60));
     }
@@ -2115,9 +2163,8 @@ mod tests {
         std::fs::create_dir_all(&empty_path).unwrap();
         let env = recall_env(&empty_path, 2000);
         let project = project_documents(&doc, &other);
-        let search = |query: &str| {
-            search_project_decisions(dir.path(), &project, query, &env, 10).unwrap()
-        };
+        let search =
+            |query: &str| search_project_decisions(dir.path(), &project, query, &env, 10).unwrap();
 
         // One document's answer, by id, from either document.
         let here = search("#tdport");
@@ -2129,8 +2176,11 @@ mod tests {
 
         // A wording match spans documents and the registry.
         let report = search("demo sign-in");
-        let documents: BTreeSet<&str> =
-            report.hits.iter().map(|hit| hit.document.as_str()).collect();
+        let documents: BTreeSet<&str> = report
+            .hits
+            .iter()
+            .map(|hit| hit.document.as_str())
+            .collect();
         assert!(documents.contains("tasks/other.md"), "{report:?}");
         assert!(documents.contains("decisions.md"), "{report:?}");
 
@@ -2150,7 +2200,10 @@ mod tests {
         assert_eq!(scope.documents, 2);
         assert!(scope.skipped.is_empty());
         assert_eq!(scope.registry, RegistrySearchStatus::Read { records: 2 });
-        assert!(matches!(report.recall, SearchRecallStatus::Unavailable { .. }));
+        assert!(matches!(
+            report.recall,
+            SearchRecallStatus::Unavailable { .. }
+        ));
 
         // Limits apply to the merged list.
         let one = search_project_decisions(dir.path(), &project, "demo sign-in", &env, 1).unwrap();
@@ -2169,9 +2222,14 @@ mod tests {
         std::fs::create_dir_all(&empty_path).unwrap();
         let env = recall_env(&empty_path, 2000);
 
-        let report =
-            search_project_decisions(dir.path(), &project_documents(&doc, &other), "#tdport", &env, 10)
-                .unwrap();
+        let report = search_project_decisions(
+            dir.path(),
+            &project_documents(&doc, &other),
+            "#tdport",
+            &env,
+            10,
+        )
+        .unwrap();
         assert_eq!(
             report.project.as_ref().unwrap().registry,
             RegistrySearchStatus::Missing
@@ -2199,9 +2257,16 @@ mod tests {
             matches!(&scope.registry, RegistrySearchStatus::Unreadable { detail } if !detail.is_empty()),
             "{scope:?}"
         );
-        let skipped: Vec<&str> = scope.skipped.iter().map(|row| row.document.as_str()).collect();
+        let skipped: Vec<&str> = scope
+            .skipped
+            .iter()
+            .map(|row| row.document.as_str())
+            .collect();
         assert_eq!(skipped, ["tasks/huge.md", "tasks/gone.md"], "{scope:?}");
-        assert!(scope.skipped[0].reason.contains("name it as FILE"), "{scope:?}");
+        assert!(
+            scope.skipped[0].reason.contains("name it as FILE"),
+            "{scope:?}"
+        );
     }
 
     /// A project search maps a tsift hit onto the document's own ledger and
@@ -2234,7 +2299,10 @@ mod tests {
                 .unwrap();
         assert!(report.hits.is_empty(), "{report:?}");
         match &report.recall {
-            SearchRecallStatus::Used { hits: 1, note: Some(note) } => {
+            SearchRecallStatus::Used {
+                hits: 1,
+                note: Some(note),
+            } => {
                 assert!(note.contains("older than 2 searched documents"), "{note}")
             }
             other => panic!("{other:?}"),
@@ -2266,8 +2334,15 @@ mod tests {
         let menu = report
             .lookup_menu("session.md", &["do [#port]"])
             .unwrap_or_else(|| panic!("{report:?}"));
-        assert!(menu.contains("agent-doc decision search session.md"), "{menu}");
-        assert!(AnswerLedgerReport::default().lookup_menu("session.md", &["do [#port]"]).is_none());
+        assert!(
+            menu.contains("agent-doc decision search session.md"),
+            "{menu}"
+        );
+        assert!(
+            AnswerLedgerReport::default()
+                .lookup_menu("session.md", &["do [#port]"])
+                .is_none()
+        );
     }
 
     /// Agent-free path: a plain force-disk maintenance pass (the closeout

@@ -158,7 +158,9 @@ fn take_steering_surrogate_at(file: &Path, token: &str, observed_at_ms: u64) -> 
     anyhow::ensure!(
         !token.is_empty()
             && token.len() <= 64
-            && token.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '-'),
+            && token
+                .chars()
+                .all(|ch| ch.is_ascii_alphanumeric() || ch == '-'),
         "invalid steering token"
     );
     let root = project_root(file).context("steering document is outside a project")?;
@@ -176,8 +178,8 @@ fn take_steering_surrogate_at(file: &Path, token: &str, observed_at_ms: u64) -> 
         record.document == document,
         "steering token belongs to a different document"
     );
-    let current_cycle = load_watermark(&conn, &state_key("base", file))?
-        .map(|watermark| watermark.cycle_id);
+    let current_cycle =
+        load_watermark(&conn, &state_key("base", file))?.map(|watermark| watermark.cycle_id);
     anyhow::ensure!(
         current_cycle.as_deref() == Some(record.cycle_id.as_str()),
         "steering token belongs to a stale session cycle"
@@ -1914,7 +1916,8 @@ fn acknowledge_delivered(file: &Path, consumer: &str, delivered: &str) -> Result
     } else {
         ClosedCyclePolicy::Boundary
     };
-    if let Some(prepared) = prepare_with_gate_at(file, consumer, policy, true, None, Some(delivered))?
+    if let Some(prepared) =
+        prepare_with_gate_at(file, consumer, policy, true, None, Some(delivered))?
     {
         prepared.acknowledge(file)?;
     }
@@ -1949,7 +1952,10 @@ pub fn record_route_sync_steering_delivered(
                     first_error_line(&format!("{err:#}"))
                 ),
             );
-            failed.push(format!("{consumer}: {}", first_error_line(&format!("{err:#}"))));
+            failed.push(format!(
+                "{consumer}: {}",
+                first_error_line(&format!("{err:#}"))
+            ));
         }
     }
     if !failed.is_empty() {
@@ -2199,11 +2205,7 @@ pub fn emit_closeout_steering_status_only(file: &Path, writer: &mut impl std::io
     emit_closeout_steering_inner(file, writer, true);
 }
 
-fn emit_closeout_steering_inner(
-    file: &Path,
-    writer: &mut impl std::io::Write,
-    status_only: bool,
-) {
+fn emit_closeout_steering_inner(file: &Path, writer: &mut impl std::io::Write, status_only: bool) {
     let outcome = (|| -> Result<bool> {
         let prepared = if status_only {
             crate::take_status_only_deferred_write();
@@ -2739,7 +2741,9 @@ mod tests {
         let _later =
             agent_doc_queue_io::queue_claim::pin_claim_clock_for_current_thread(clock + 60);
 
-        let first = subagent_pool_checkpoint(&file, 1_000).unwrap().expect("refill");
+        let first = subagent_pool_checkpoint(&file, 1_000)
+            .unwrap()
+            .expect("refill");
         assert!(first.contains("URGENT"), "{first}");
         assert!(first.contains("do [#a]"), "{first}");
         assert!(first.contains("Refill a free pool slot"), "{first}");
@@ -2759,7 +2763,9 @@ mod tests {
             1,
         )
         .unwrap();
-        let second = subagent_pool_checkpoint(&file, 3_000).unwrap().expect("changed refill");
+        let second = subagent_pool_checkpoint(&file, 3_000)
+            .unwrap()
+            .expect("changed refill");
         assert!(!second.contains("URGENT"), "{second}");
         assert!(second.contains("do [#b]"), "{second}");
     }
@@ -2852,7 +2858,12 @@ mod tests {
         let first = prepare_route_sync_steering(&file)
             .unwrap()
             .expect("first send has a diff");
-        assert_eq!(first.instructions.lines().count(), 1, "{}", first.instructions);
+        assert_eq!(
+            first.instructions.lines().count(),
+            1,
+            "{}",
+            first.instructions
+        );
         assert!(first.instructions.contains("agent-doc steering"));
         let first_payload = take_steering_surrogate(&file, compact_token(&first.instructions))
             .expect("compact route steering resolves once");
@@ -2931,7 +2942,10 @@ mod tests {
         // 1. Read fails while preparing: nothing is handed over or recorded.
         let refused = with_provenance_fault(|| prepare_route_sync_steering(&file));
         let err = refused.expect_err("an unreadable item set is not an empty one");
-        assert!(format!("{err:#}").contains("timed out waiting for Lazily actor"), "{err:#}");
+        assert!(
+            format!("{err:#}").contains("timed out waiting for Lazily actor"),
+            "{err:#}"
+        );
         assert_eq!(route_sync_baseline_content(&file), None);
 
         // 2. Prepared fine, but the acknowledgement read fails after the
@@ -2941,13 +2955,18 @@ mod tests {
         let ack = with_provenance_fault(|| {
             record_route_sync_steering_delivered(&file, &first.cycle_id, &first.content)
         });
-        assert!(ack.is_err(), "a failed acknowledgement is reported, not swallowed");
+        assert!(
+            ack.is_err(),
+            "a failed acknowledgement is reported, not swallowed"
+        );
         assert_eq!(
             route_sync_baseline_content(&file),
             None,
             "the baseline must not advance past a failed provenance read"
         );
-        let retained = observe(&file, CONSUMER_CLI, false).unwrap().expect("retained");
+        let retained = observe(&file, CONSUMER_CLI, false)
+            .unwrap()
+            .expect("retained");
         assert_eq!(retained.items.len(), 1, "{retained:?}");
         assert_eq!(retained.items[0].verbatim, "ship the fix");
 
@@ -2957,7 +2976,10 @@ mod tests {
         let payload = take_steering_surrogate(&file, compact_token(&retry.instructions)).unwrap();
         assert!(payload.contains("ship the fix"), "{payload}");
         record_route_sync_steering_delivered(&file, &retry.cycle_id, &retry.content).unwrap();
-        assert_eq!(route_sync_baseline_content(&file).as_deref(), Some(edited.as_str()));
+        assert_eq!(
+            route_sync_baseline_content(&file).as_deref(),
+            Some(edited.as_str())
+        );
         assert!(prepare_route_sync_steering(&file).unwrap().is_none());
     }
 
@@ -2983,7 +3005,11 @@ mod tests {
 
         for consumer in [CONSUMER_HOOK, CONSUMER_CLI, CONSUMER_FOLLOW] {
             let report = observe(&file, consumer, false).unwrap().expect(consumer);
-            let texts: Vec<_> = report.items.iter().map(|item| item.verbatim.as_str()).collect();
+            let texts: Vec<_> = report
+                .items
+                .iter()
+                .map(|item| item.verbatim.as_str())
+                .collect();
             assert_eq!(texts, ["second ask"], "{consumer}: {report:?}");
         }
     }
@@ -3024,7 +3050,9 @@ mod tests {
             ["https://example.test/pull/212: #subagent #review"],
             "the 212 worker's claim must stay on its own row"
         );
-        let report = observe(&file, CONSUMER_HOOK, true).unwrap().expect("report");
+        let report = observe(&file, CONSUMER_HOOK, true)
+            .unwrap()
+            .expect("report");
         assert_eq!(report.items.len(), 1, "{report:?}");
         let item = &report.items[0];
         assert_eq!(item.verbatim, "#subagent #review");
@@ -3033,9 +3061,19 @@ mod tests {
             Some("https://example.test/pull/207: #subagent #review"),
             "{item:?}"
         );
-        assert_eq!(item.claim_text(), "https://example.test/pull/207: #subagent #review");
-        assert_ne!(item.dispatch, core::SteeringDispatch::ForwardToOwner, "{item:?}");
-        assert_eq!(item.owner, None, "the 212 worker does not own the 207 child: {item:?}");
+        assert_eq!(
+            item.claim_text(),
+            "https://example.test/pull/207: #subagent #review"
+        );
+        assert_ne!(
+            item.dispatch,
+            core::SteeringDispatch::ForwardToOwner,
+            "{item:?}"
+        );
+        assert_eq!(
+            item.owner, None,
+            "the 212 worker does not own the 207 child: {item:?}"
+        );
         let rendered = report.render().expect("rendered");
         assert!(
             rendered.contains("vector: https://example.test/pull/207: #subagent #review"),
@@ -3065,7 +3103,9 @@ mod tests {
             admit_with_steering_seed(&file, |file| Ok(std::fs::read_to_string(file)?)).unwrap();
         let root = project_root(&file).unwrap();
         let conn = agent_doc_sqlite::state_store::open_state_db(&root).unwrap();
-        let base = load_watermark(&conn, &state_key("base", &file)).unwrap().unwrap();
+        let base = load_watermark(&conn, &state_key("base", &file))
+            .unwrap()
+            .unwrap();
         assert_eq!(base.cycle_id, admitted.cycle_id);
         assert_ne!(base.cycle_id, "cycle-stale");
         assert_eq!(base.baseline, current);
@@ -3610,9 +3650,18 @@ mod tests {
         let report = observe(&file, CONSUMER_HOOK, true)
             .unwrap()
             .expect("operator edits produce a report");
-        let texts: Vec<_> = report.items.iter().map(|item| item.verbatim.as_str()).collect();
+        let texts: Vec<_> = report
+            .items
+            .iter()
+            .map(|item| item.verbatim.as_str())
+            .collect();
         assert_eq!(texts.len(), 2, "{report:?}");
-        assert!(texts.iter().any(|text| text.contains("and also the gutter")), "{texts:?}");
+        assert!(
+            texts
+                .iter()
+                .any(|text| text.contains("and also the gutter")),
+            "{texts:?}"
+        );
         assert!(texts.contains(&"review the release notes"), "{texts:?}");
 
         // A re-seed absorbs the inherited ownership into its own baseline.
@@ -3643,8 +3692,7 @@ mod tests {
                 .unwrap();
         seed_for_cycle(&file, &cycle_a.cycle_id, &baseline, None, Vec::new()).unwrap();
         close_cycle(&file, &baseline);
-        agent_doc_cycle_state_io::start_preflight(&file, Some(&baseline), Some(&baseline))
-            .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&file, Some(&baseline), Some(&baseline)).unwrap();
 
         let with_x = doc("- fix the flaky test\n");
         std::fs::write(&file, &with_x).unwrap();
@@ -3670,7 +3718,11 @@ mod tests {
         );
         std::fs::write(&file, doc("- fix the flaky test\n- and bump the version\n")).unwrap();
         let next = observe(&file, CONSUMER_HOOK, true).unwrap().expect("next");
-        let texts: Vec<_> = next.items.iter().map(|item| item.verbatim.as_str()).collect();
+        let texts: Vec<_> = next
+            .items
+            .iter()
+            .map(|item| item.verbatim.as_str())
+            .collect();
         assert_eq!(texts, ["and bump the version"], "{next:?}");
     }
 
@@ -4115,8 +4167,14 @@ mod tests {
         let cycle =
             agent_doc_cycle_state_io::start_preflight(&file, Some(baseline), Some(baseline))
                 .unwrap();
-        seed_for_cycle(&file, &cycle.cycle_id, baseline, Some("current task"), Vec::new())
-            .unwrap();
+        seed_for_cycle(
+            &file,
+            &cycle.cycle_id,
+            baseline,
+            Some("current task"),
+            Vec::new(),
+        )
+        .unwrap();
         let owner = grok_post_tool_use_payload("grok-sess", &root, None);
         let input: PostToolUseInput = serde_json::from_str(&owner).unwrap();
         assert_eq!(input.session_id, "grok-sess");
@@ -4176,8 +4234,14 @@ mod tests {
         let cycle =
             agent_doc_cycle_state_io::start_preflight(&file, Some(baseline), Some(baseline))
                 .unwrap();
-        seed_for_cycle(&file, &cycle.cycle_id, baseline, Some("current task"), Vec::new())
-            .unwrap();
+        seed_for_cycle(
+            &file,
+            &cycle.cycle_id,
+            baseline,
+            Some("current task"),
+            Vec::new(),
+        )
+        .unwrap();
         let owner = grok_post_tool_use_payload("grok-sess", &root, None);
 
         std::fs::write(
@@ -4767,8 +4831,7 @@ mod tests {
             .unwrap();
         assert!(combined_context.contains("agent-doc steering"));
         assert!(!combined_context.contains("inspect issue 42"));
-        let expanded =
-            take_steering_surrogate(&file, compact_token(combined_context)).unwrap();
+        let expanded = take_steering_surrogate(&file, compact_token(combined_context)).unwrap();
         assert!(expanded.contains(core::STEERING_MARKER));
         assert!(expanded.contains("inspect issue 42"));
         assert!(combined_context.contains(STATUS_SYNC_CHECKPOINT_MARKER));
@@ -6221,10 +6284,7 @@ mod tests {
             .find(|item| item.verbatim.contains(follow_up))
             .unwrap_or_else(|| panic!("reported leaf follow-up missing: {hook:?}"));
         assert_eq!(routed.change, core::SteeringChange::Added);
-        assert_eq!(
-            routed.dispatch,
-            core::SteeringDispatch::Subagent
-        );
+        assert_eq!(routed.dispatch, core::SteeringDispatch::Subagent);
         assert_eq!(routed.owner, None);
         let context = hook.render().expect("dispatch steering context");
         assert!(context.contains("dispatch this item NOW"), "{context}");
@@ -6291,10 +6351,7 @@ mod tests {
             .find(|item| item.verbatim.contains(response))
             .unwrap_or_else(|| panic!("reported nested follow-up missing: {hook:?}"));
         assert_eq!(routed.change, core::SteeringChange::Added);
-        assert_eq!(
-            routed.dispatch,
-            core::SteeringDispatch::Subagent
-        );
+        assert_eq!(routed.dispatch, core::SteeringDispatch::Subagent);
         assert_eq!(routed.owner, None);
         let dispatch =
             agent_doc_queue_io::subagent_dispatch::pending_subagent_dispatch_for_content(
@@ -6382,7 +6439,8 @@ mod tests {
             let dir = tempfile::tempdir().unwrap();
             std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
             let file = dir.path().join("plan.md");
-            let committed = "<!-- agent:queue subagents go -->\n- do [#other]\n<!-- /agent:queue -->\n";
+            let committed =
+                "<!-- agent:queue subagents go -->\n- do [#other]\n<!-- /agent:queue -->\n";
             let mut live = "<!-- agent:queue subagents go -->\n- do [#one]\n".to_string();
             if with_unclaimed {
                 live.push_str("- do [#two]\n");
@@ -6402,8 +6460,14 @@ mod tests {
                     Some(committed),
                 )
                 .unwrap();
-                seed_for_cycle(&file, &cycle.cycle_id, committed, Some("do [#other]"), Vec::new())
-                    .unwrap();
+                seed_for_cycle(
+                    &file,
+                    &cycle.cycle_id,
+                    committed,
+                    Some("do [#other]"),
+                    Vec::new(),
+                )
+                .unwrap();
                 close_cycle(&file, committed);
             }
             project_one(&file);

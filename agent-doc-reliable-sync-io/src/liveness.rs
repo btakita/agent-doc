@@ -385,8 +385,9 @@ impl ActivationReceipt {
                 .copied()
                 .ok_or(ActivationReceiptError::MissingField(key))
         };
-        let optional =
-            |key: &'static str| field(key).map(|value| (value != Self::NONE).then(|| value.to_string()));
+        let optional = |key: &'static str| {
+            field(key).map(|value| (value != Self::NONE).then(|| value.to_string()))
+        };
         let number = |key: &'static str| {
             let value = field(key)?;
             value
@@ -397,11 +398,12 @@ impl ActivationReceipt {
                 })
         };
         let role_value = field("role")?;
-        let role =
-            ActivationRole::parse(role_value).ok_or_else(|| ActivationReceiptError::InvalidValue {
+        let role = ActivationRole::parse(role_value).ok_or_else(|| {
+            ActivationReceiptError::InvalidValue {
                 field: "role",
                 value: role_value.to_string(),
-            })?;
+            }
+        })?;
         let spi_value = field("spi")?;
         let spi = spi_value
             .parse::<u32>()

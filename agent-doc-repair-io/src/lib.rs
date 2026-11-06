@@ -1214,8 +1214,9 @@ pub fn run_with_queue_completion_ids_and_force_disk<
         // evidence, so the promise could not come true. The retained intent IS a
         // durable projection holder; the verdict and the remedy come from the
         // shared ownership predicate, which also observes a paused attach.
-        let ownership = agent_doc_document_realtime_io::observed_retained_write_ownership(&canonical)
-            .with_retained_projection(true);
+        let ownership =
+            agent_doc_document_realtime_io::observed_retained_write_ownership(&canonical)
+                .with_retained_projection(true);
         agent_doc_ops_log_io::log_op(
             &canonical,
             &format!(
@@ -2622,12 +2623,11 @@ pub fn historical_committed_capture_replay(
             cycle_id: capture.cycle_id,
             capture_id: capture.capture_id,
             response_sha256: capture.response_sha256,
-            response_body:
-                agent_doc_turn::response_replay::retained_response_materialization_body(
-                    &capture.response_body,
-                    capture.intent_body.as_deref(),
-                )
-                .to_string(),
+            response_body: agent_doc_turn::response_replay::retained_response_materialization_body(
+                &capture.response_body,
+                capture.intent_body.as_deref(),
+            )
+            .to_string(),
             file_hash: capture.file_hash,
             baseline_content: capture.baseline_content,
         },
@@ -2661,12 +2661,11 @@ fn restore_committed_head_after_authority_regression(
             cycle_id: capture.cycle_id,
             capture_id: capture.capture_id,
             response_sha256: capture.response_sha256,
-            response_body:
-                agent_doc_turn::response_replay::retained_response_materialization_body(
-                    &capture.response_body,
-                    capture.intent_body.as_deref(),
-                )
-                .to_string(),
+            response_body: agent_doc_turn::response_replay::retained_response_materialization_body(
+                &capture.response_body,
+                capture.intent_body.as_deref(),
+            )
+            .to_string(),
             file_hash: capture.file_hash,
             baseline_content: capture.baseline_content,
         }
@@ -5498,8 +5497,7 @@ mod tests {
             "<!-- agent:exchange patch=append -->\n",
         );
         let head = format!("{prefix}{old_cell}\n{response_turn}<!-- /agent:exchange -->\n");
-        let snapshot =
-            format!("{prefix}{response_turn}{new_cell}\n<!-- /agent:exchange -->\n");
+        let snapshot = format!("{prefix}{response_turn}{new_cell}\n<!-- /agent:exchange -->\n");
         let current = format!(
             "{snapshot}\n<!-- agent:status -->\ncompletion pending integration\n<!-- /agent:status -->\n"
         );
@@ -5515,13 +5513,8 @@ mod tests {
         git(&["commit", "-m", "committed response", "--no-verify"]);
         agent_doc_cycle_state_io::start_preflight(&doc, Some(&head), Some(&head)).unwrap();
         agent_doc_capture_io::capture_response(&doc, response).unwrap();
-        agent_doc_cycle_state_io::mark_committed(
-            &doc,
-            "commit_success",
-            Some(&head),
-            Some(&head),
-        )
-        .unwrap();
+        agent_doc_cycle_state_io::mark_committed(&doc, "commit_success", Some(&head), Some(&head))
+            .unwrap();
         agent_doc_snapshot_io::checkpoint_document_baseline(
             &doc,
             &snapshot,

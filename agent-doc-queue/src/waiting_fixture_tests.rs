@@ -460,7 +460,10 @@ fn legacy_reply_comments_migrate_to_the_bare_trailing_glyph() {
             "a re-rendered generated row lost its ownership: {line}"
         );
     }
-    assert!(generated > 23, "every item has at least its Next row: {generated}");
+    assert!(
+        generated > 23,
+        "every item has at least its Next row: {generated}"
+    );
     // A fixed point: the next cycle changes nothing.
     assert_eq!(maintenance_cycle(&settled), settled);
 }
@@ -469,7 +472,6 @@ fn legacy_reply_comments_migrate_to_the_bare_trailing_glyph() {
 
 const OPERATOR_REPLIES_FIXTURE: &str =
     include_str!("../tests/fixtures/waiting_tree_operator_replies.md");
-
 
 /// The waiting items of the fixture whose packets hold an operator reply, with
 /// that reply's exact text (any stale binary `📥 ` paint removed).
@@ -543,9 +545,15 @@ fn operator_replies_nested_in_a_packet_are_decision_evidence_never_queue_rows() 
         };
         assert_eq!(classify_member(prompt), WaitingMember::Operator, "{reply}");
         assert_eq!(lifecycle_marker(&prompt.text), None, "{reply}");
-        assert!(!executable.contains(&row), "a reply is never queue work: {reply}");
+        assert!(
+            !executable.contains(&row),
+            "a reply is never queue work: {reply}"
+        );
         // The reply selects its item, once, as decision evidence.
-        assert!(crate::waiting_packet::has_operator_reply(&entries, head), "{id}");
+        assert!(
+            crate::waiting_packet::has_operator_reply(&entries, head),
+            "{id}"
+        );
         assert!(executable.contains(&head), "{id}");
         expected_executable.insert(head);
     }
@@ -564,22 +572,36 @@ fn operator_replies_nested_in_a_packet_are_decision_evidence_never_queue_rows() 
     for entry in &entries {
         if let QueueEntry::Prompt(prompt) = entry
             && prompt.indent == 0
-            && !prompt.text.contains(crate::queue_consume::WAITING_ON_YOU_ROOT_MARKER)
+            && !prompt
+                .text
+                .contains(crate::queue_consume::WAITING_ON_YOU_ROOT_MARKER)
         {
             expected_executable.insert(entries.iter().position(|e| e == entry).unwrap());
         }
     }
-    assert_eq!(executable, expected_executable, "{}", main_queue_body(&settled));
+    assert_eq!(
+        executable,
+        expected_executable,
+        "{}",
+        main_queue_body(&settled)
+    );
     // The binary's stale `📥` paint is gone from every reply, and no reply was
     // admitted a fresh `q-` id.
     for line in main_queue_body(&settled).lines() {
         if !line.starts_with("    ") {
             continue;
         }
-        assert!(!line.contains("📥"), "a packet row carries a pending projection: {line}");
+        assert!(
+            !line.contains("📥"),
+            "a packet row carries a pending projection: {line}"
+        );
     }
     let admission = crate::prompt_identity::project(&settled, "fixture");
-    assert!(admission.assignments.is_empty(), "{:?}", admission.assignments);
+    assert!(
+        admission.assignments.is_empty(),
+        "{:?}",
+        admission.assignments
+    );
     assert_eq!(maintenance_cycle(&settled), settled, "a fixed point");
 }
 
@@ -589,17 +611,29 @@ fn every_operator_row_survives_the_refresh_byte_for_byte() {
     for (id, reply) in OPERATOR_REPLIES {
         let original = OPERATOR_REPLIES_FIXTURE
             .lines()
-            .filter(|line| line.trim_start().trim_start_matches("- ").trim_start_matches("📥 ") == reply)
+            .filter(|line| {
+                line.trim_start()
+                    .trim_start_matches("- ")
+                    .trim_start_matches("📥 ")
+                    == reply
+            })
             .count();
         let kept = settled
             .lines()
             .filter(|line| line.trim_start() == format!("- {reply}"))
             .count();
-        assert!(original >= 1 && kept == original, "{id}: {reply:?} {original} -> {kept}");
+        assert!(
+            original >= 1 && kept == original,
+            "{id}: {reply:?} {original} -> {kept}"
+        );
     }
     // Each packet keeps its own Response timestamp instead of a regenerated
     // placeholder.
-    assert!(!settled.contains("1970-01-01"), "{}", main_queue_body(&settled));
+    assert!(
+        !settled.contains("1970-01-01"),
+        "{}",
+        main_queue_body(&settled)
+    );
 }
 
 /// `#operatorrepliesnested`: a closeout that struck a reply row, as the old
@@ -622,7 +656,11 @@ fn maintenance_never_unstrikes_a_struck_packet_row() {
             "maintenance un-struck {reply:?}:\n{}",
             main_queue_body(&once)
         );
-        assert!(!once.lines().any(|line| line.trim_start() == format!("- {reply}")));
+        assert!(
+            !once
+                .lines()
+                .any(|line| line.trim_start() == format!("- {reply}"))
+        );
     }
     for row in [
         "- ~~Resolve the open operator action to complete the parent item. [#rungamesessions-reopen] ⟦effect:2⟧~~",
@@ -632,7 +670,11 @@ fn maintenance_never_unstrikes_a_struck_packet_row() {
     }
     let entries = main_entries(&once);
     for index in document_queue::executable_prompt_indexes(&entries) {
-        assert!(!is_packet_row(&entries, index), "{:?}", row_text(&entries[index]));
+        assert!(
+            !is_packet_row(&entries, index),
+            "{:?}",
+            row_text(&entries[index])
+        );
     }
     assert_eq!(maintenance_cycle(&once), once, "a fixed point");
 }
@@ -653,10 +695,14 @@ fn offered_choices_in_a_waiting_packet_are_never_dispatched() {
             .find(|line| line.trim_start().starts_with(&format!("- {choice}")))
             .unwrap_or_else(|| panic!("{choice}"))
             .to_string();
-        assert!(line.ends_with(crate::queue_consume::AGENT_DOC_REPLY_GLYPH), "{line}");
         assert!(
-            !executable.iter().any(|index| row_text(&entries[*index])
-                .is_some_and(|text| text.starts_with(choice))),
+            line.ends_with(crate::queue_consume::AGENT_DOC_REPLY_GLYPH),
+            "{line}"
+        );
+        assert!(
+            !executable.iter().any(
+                |index| row_text(&entries[*index]).is_some_and(|text| text.starts_with(choice))
+            ),
             "an offered choice is an operator option, never work: {choice}"
         );
     }
@@ -689,7 +735,9 @@ fn a_closed_items_subtree_moves_to_done_byte_for_byte() {
     let len = rest
         .split_inclusive('\n')
         .enumerate()
-        .take_while(|(index, line)| *index == 0 || !line.starts_with("  - ") && !line.starts_with("- "))
+        .take_while(|(index, line)| {
+            *index == 0 || !line.starts_with("  - ") && !line.starts_with("- ")
+        })
         .map(|(_, line)| line.len())
         .sum::<usize>();
     let segment = &rest[..len];
@@ -715,9 +763,16 @@ fn a_closed_items_subtree_moves_to_done_byte_for_byte() {
         .to_string();
     let entry = &done[done.find("- ").expect("one receipt")..];
     let receipt = entry.lines().next().unwrap();
-    assert!(receipt.contains("archived waiting item `#sdkparitygate` (its Todo closed)"), "{receipt}");
+    assert!(
+        receipt.contains("archived waiting item `#sdkparitygate` (its Todo closed)"),
+        "{receipt}"
+    );
     assert!(receipt.ends_with(WAITING_ARCHIVE_MARKER), "{receipt}");
-    assert_eq!(unquote_archive_entry(entry), segment, "every byte of the packet is kept");
+    assert_eq!(
+        unquote_archive_entry(entry),
+        segment,
+        "every byte of the packet is kept"
+    );
     assert_eq!(done.matches(WAITING_ARCHIVE_MARKER).count(), 1);
 
     assert_eq!(
@@ -738,7 +793,10 @@ fn closed_by_back_references_no_longer_regraft_sibling_choices() {
     let lines = body.lines().collect::<Vec<_>>();
     let option = lines
         .iter()
-        .position(|line| line.trim_start().starts_with("- **Operator does it in the UI**"))
+        .position(|line| {
+            line.trim_start()
+                .starts_with("- **Operator does it in the UI**")
+        })
         .expect("the offered option row");
     let indent = lines[option].len() - lines[option].trim_start().len();
     let subtree = lines[option + 1..]
@@ -757,7 +815,10 @@ fn closed_by_back_references_no_longer_regraft_sibling_choices() {
         assert!(!joined.contains(copied), "{copied} re-copied:\n{joined}");
     }
     assert!(joined.contains("**Grant both**"), "{joined}");
-    assert!(joined.contains("~~pick~~"), "the operator's answer stays:\n{joined}");
+    assert!(
+        joined.contains("~~pick~~"),
+        "the operator's answer stays:\n{joined}"
+    );
     assert!(
         joined.contains("**Request**: [#subagent-operator-request-craig-ui-read]"),
         "{joined}"
@@ -808,7 +869,8 @@ fn a_rebuild_keeps_every_operator_reply_of_unmatched_items() {
             "operator reply lost or duplicated: {reply}\n{once}"
         );
     }
-    let ast = "Answer the blocking subagent question for queue item ‘The update to agent-doc-bugs.md";
+    let ast =
+        "Answer the blocking subagent question for queue item ‘The update to agent-doc-bugs.md";
     let body = main_queue_body(&once);
     let unmatched = body
         .lines()

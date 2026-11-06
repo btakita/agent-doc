@@ -5,11 +5,9 @@ pub mod build_slot;
 pub mod claim_release_receipt;
 pub mod completion_cell_restore;
 pub mod completion_feedback_lock;
-pub mod queue_marker_audit;
 pub mod continuation_detect;
 pub mod continuation_marker;
 pub mod continuation_request;
-pub mod reported_writeback_reminder;
 pub mod controller_pause;
 pub mod drain_owner;
 pub mod goal_loop_handoff;
@@ -24,13 +22,15 @@ pub mod queue_consumption_proof;
 pub mod queue_continuation;
 pub mod queue_edit_owner;
 pub mod queue_lineage;
+pub mod queue_marker_audit;
 pub mod queue_schedule;
 pub mod queue_tombstone;
+pub mod reported_writeback_reminder;
 pub mod stale_completion_repair;
 pub mod subagent_dispatch;
 pub mod subagent_pool;
-pub mod worker_quota_autodetect;
 pub mod sync_payload;
+pub mod worker_quota_autodetect;
 pub mod write_queue;
 
 /// `#goalpresetterminal`: install `file`'s effective prompt presets (document

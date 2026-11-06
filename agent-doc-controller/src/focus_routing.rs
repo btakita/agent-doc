@@ -35,10 +35,7 @@ pub enum FocusOwner<'a> {
 /// An unknown document root is never delegated: with no proof that some other
 /// controller owns the document, the local answer — including a local
 /// `missing_actor_record` — is still the honest one.
-pub fn focus_owner<'a>(
-    controller_root: &Path,
-    document_root: Option<&'a Path>,
-) -> FocusOwner<'a> {
+pub fn focus_owner<'a>(controller_root: &Path, document_root: Option<&'a Path>) -> FocusOwner<'a> {
     match document_root {
         Some(root) if root != controller_root => FocusOwner::Delegate(root),
         _ => FocusOwner::Local,

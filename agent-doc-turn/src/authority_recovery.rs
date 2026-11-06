@@ -248,7 +248,11 @@ mod tests {
             (WaitForSenderRecycle, AdmissionReplicaHold::RefuseNow),
             (WaitForEndpointGeneration, AdmissionReplicaHold::RefuseNow),
         ] {
-            assert_eq!(decide_admission_replica_hold(recovery), expected, "{recovery:?}");
+            assert_eq!(
+                decide_admission_replica_hold(recovery),
+                expected,
+                "{recovery:?}"
+            );
         }
     }
 

@@ -564,16 +564,31 @@ mod tests {
         };
         let installed = build(10, Some(2_000), false);
         // Same file: fresh.
-        assert!(!host_supervisor_build_is_stale(Some(build(10, Some(2_000), false)), installed));
+        assert!(!host_supervisor_build_is_stale(
+            Some(build(10, Some(2_000), false)),
+            installed
+        ));
         // #supdirstale: a supervisor on a NEWER different copy is not stale —
         // the churn shape (CLI on ~/.cargo/bin, supervisor on target/release).
-        assert!(!host_supervisor_build_is_stale(Some(build(11, Some(3_000), false)), installed));
+        assert!(!host_supervisor_build_is_stale(
+            Some(build(11, Some(3_000), false)),
+            installed
+        ));
         // An older different copy is stale.
-        assert!(host_supervisor_build_is_stale(Some(build(11, Some(1_000), false)), installed));
+        assert!(host_supervisor_build_is_stale(
+            Some(build(11, Some(1_000), false)),
+            installed
+        ));
         // Running bytes replaced on disk: stale regardless of mtime.
-        assert!(host_supervisor_build_is_stale(Some(build(11, Some(9_000), true)), installed));
+        assert!(host_supervisor_build_is_stale(
+            Some(build(11, Some(9_000), true)),
+            installed
+        ));
         // Unknown mtime keeps the inode rule; unknown running identity fails open.
-        assert!(host_supervisor_build_is_stale(Some(build(11, None, false)), installed));
+        assert!(host_supervisor_build_is_stale(
+            Some(build(11, None, false)),
+            installed
+        ));
         assert!(!host_supervisor_build_is_stale(None, installed));
     }
 

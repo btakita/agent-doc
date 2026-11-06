@@ -533,8 +533,12 @@ mod tests {
         let written_before = Arc::new(Mutex::new(Vec::new()));
         let before = make_shared("before-reexec", written_before.clone());
         assert_eq!(
-            agent_doc_supervisor_io::ipc::deliver_supervisor_inject(before.as_ref(), bytes, "ipc_inject")
-                .unwrap(),
+            agent_doc_supervisor_io::ipc::deliver_supervisor_inject(
+                before.as_ref(),
+                bytes,
+                "ipc_inject"
+            )
+            .unwrap(),
             agent_doc_supervisor_io::ipc::SupervisorInjectDeliveryOutcome::Delivered
         );
         drop(before);
@@ -543,18 +547,29 @@ mod tests {
         let written_after = Arc::new(Mutex::new(Vec::new()));
         let after = make_shared("after-reexec", written_after.clone());
         assert_eq!(
-            agent_doc_supervisor_io::ipc::deliver_supervisor_inject(after.as_ref(), bytes, "ipc_inject")
-                .unwrap(),
+            agent_doc_supervisor_io::ipc::deliver_supervisor_inject(
+                after.as_ref(),
+                bytes,
+                "ipc_inject"
+            )
+            .unwrap(),
             agent_doc_supervisor_io::ipc::SupervisorInjectDeliveryOutcome::DuplicateSuppressed
         );
-        assert!(written_after.lock().is_empty(), "the retransmit wrote nothing");
+        assert!(
+            written_after.lock().is_empty(),
+            "the retransmit wrote nothing"
+        );
 
         // The turn completes: Ready retires the admission; a new inject lands.
         *after.prompt_dispatch_projection.lock() = None;
         after.clear_durable_prompt_dispatch_key(None);
         assert_eq!(
-            agent_doc_supervisor_io::ipc::deliver_supervisor_inject(after.as_ref(), bytes, "ipc_inject")
-                .unwrap(),
+            agent_doc_supervisor_io::ipc::deliver_supervisor_inject(
+                after.as_ref(),
+                bytes,
+                "ipc_inject"
+            )
+            .unwrap(),
             agent_doc_supervisor_io::ipc::SupervisorInjectDeliveryOutcome::Delivered
         );
     }
@@ -753,7 +768,10 @@ mod tests {
 
         assert!(clear.ok, "ready clear must arm a fresh restart: {clear:?}");
         assert_eq!(
-            clear.data.as_ref().and_then(|data| data["restart_fresh"].as_bool()),
+            clear
+                .data
+                .as_ref()
+                .and_then(|data| data["restart_fresh"].as_bool()),
             Some(true),
         );
         // `#idleclearrestart`: Codex keeps the restart because its `/clear`
@@ -925,8 +943,8 @@ mod tests {
             *shared.inject_writer.lock() = Some(Arc::new(Mutex::new(SharedPtyWriter::new(
                 Box::new(RecordingWriter(written.clone())),
             ))));
-            let command = agent_doc_harness::HarnessConfig::from_agent_name(harness)
-                .context_clear_command();
+            let command =
+                agent_doc_harness::HarnessConfig::from_agent_name(harness).context_clear_command();
 
             let clear = agent_doc_supervisor_io::ipc::handle_supervisor_ipc(
                 IpcMethod::Clear {
@@ -935,14 +953,23 @@ mod tests {
                 shared.as_ref(),
             );
 
-            assert!(clear.ok, "{harness}: idle clear must be delivered: {clear:?}");
+            assert!(
+                clear.ok,
+                "{harness}: idle clear must be delivered: {clear:?}"
+            );
             assert_eq!(
-                clear.data.as_ref().and_then(|data| data["restart_fresh"].as_bool()),
+                clear
+                    .data
+                    .as_ref()
+                    .and_then(|data| data["restart_fresh"].as_bool()),
                 Some(false),
                 "{harness}"
             );
             assert_eq!(
-                clear.data.as_ref().and_then(|data| data["delivery"].as_str()),
+                clear
+                    .data
+                    .as_ref()
+                    .and_then(|data| data["delivery"].as_str()),
                 Some("native_clear"),
                 "{harness}"
             );

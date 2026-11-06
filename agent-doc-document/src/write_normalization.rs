@@ -247,8 +247,7 @@ pub fn latest_response_heading_missing_from_current(head: &str, current: &str) -
         latest_response_block_from_exchange_body(exchange.content(content))
     };
     if let (Some(head_block), Some(current_block)) = (latest_block(head), latest_block(current))
-        && compact_exchange_for_compare(&head_block)
-            == compact_exchange_for_compare(&current_block)
+        && compact_exchange_for_compare(&head_block) == compact_exchange_for_compare(&current_block)
     {
         return None;
     }

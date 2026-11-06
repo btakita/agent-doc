@@ -222,7 +222,13 @@ fn recall_hits_map_onto_answered_decisions_here_and_elsewhere() {
         },
     ];
     let mut hits = Vec::new();
-    add_recall_hits(&mut hits, std::slice::from_ref(&here), &recall, 6, &mut load_other);
+    add_recall_hits(
+        &mut hits,
+        std::slice::from_ref(&here),
+        &recall,
+        6,
+        &mut load_other,
+    );
     assert_eq!(hits.len(), 2, "{hits:?}");
     assert_eq!(hits[0].document, "tasks/there.md");
     assert_eq!(hits[0].answer, "Use port 8443.");
@@ -237,13 +243,25 @@ fn recall_hits_map_onto_answered_decisions_here_and_elsewhere() {
         ..here
     };
     let mut hits = Vec::new();
-    add_recall_hits(&mut hits, std::slice::from_ref(&stale), &recall, 6, &mut load_other);
+    add_recall_hits(
+        &mut hits,
+        std::slice::from_ref(&stale),
+        &recall,
+        6,
+        &mut load_other,
+    );
     assert_eq!(hits.len(), 1, "{hits:?}");
     assert_eq!(hits[0].document, "tasks/there.md");
 
     // Reads are bounded.
     let mut hits = Vec::new();
-    add_recall_hits(&mut hits, std::slice::from_ref(&stale), &recall, 0, &mut |_| panic!("no read"));
+    add_recall_hits(
+        &mut hits,
+        std::slice::from_ref(&stale),
+        &recall,
+        0,
+        &mut |_| panic!("no read"),
+    );
     assert!(hits.is_empty());
 }
 
@@ -278,7 +296,9 @@ fn recall_hits_land_on_any_of_the_documents_read() {
         semantic: false,
     }];
     let mut hits = Vec::new();
-    add_recall_hits(&mut hits, &documents, &recall, 6, &mut |_| panic!("no read"));
+    add_recall_hits(&mut hits, &documents, &recall, 6, &mut |_| {
+        panic!("no read")
+    });
     assert_eq!(hits.len(), 1, "{hits:?}");
     assert_eq!(hits[0].document, "tasks/there.md");
     assert_eq!(hits[0].answer, "Use port 8443.");
@@ -296,8 +316,18 @@ fn registry() -> Vec<RegistryDecision> {
     };
     vec![
         record("DEC-cache-000", "superseded", "Use a FIFO cache store", &[]),
-        record("DEC-cache-001", "accepted", "Use an LRU cache store", &["DEC-cache-000"]),
-        record("DEC-lic-001", "reversed", "License the crates under MIT", &[]),
+        record(
+            "DEC-cache-001",
+            "accepted",
+            "Use an LRU cache store",
+            &["DEC-cache-000"],
+        ),
+        record(
+            "DEC-lic-001",
+            "reversed",
+            "License the crates under MIT",
+            &[],
+        ),
     ]
 }
 
@@ -317,7 +347,10 @@ fn registry_records_match_every_band() {
     assert_eq!(by_id.document, "decisions.md");
     assert_eq!(by_id.answer, "Use an LRU cache store");
     assert_eq!(by_id.rationale.as_deref(), Some("Keeps the hit rate up."));
-    assert_eq!(by_id.location, "decisions.md (accepted, updated 2026-11-05T00:00:00Z)");
+    assert_eq!(
+        by_id.location,
+        "decisions.md (accepted, updated 2026-11-05T00:00:00Z)"
+    );
     assert!(by_id.is_current());
     assert_eq!(
         top(&crate::graph::registry_revision_id(&records[1])).matched,
@@ -325,7 +358,10 @@ fn registry_records_match_every_band() {
     );
     assert_eq!(top("⟦decision:DEC-cache-001⟧").matched, SearchMatch::Stamp);
     assert_eq!(top("decision:dec-cache-001").matched, SearchMatch::Stamp);
-    assert_eq!(top("Use an LRU cache store").matched, SearchMatch::QuestionText);
+    assert_eq!(
+        top("Use an LRU cache store").matched,
+        SearchMatch::QuestionText
+    );
     let by_words = top("hit rate lru");
     assert_eq!(by_words.matched, SearchMatch::Wording);
     assert_eq!(by_words.decision_id, "DEC-cache-001");

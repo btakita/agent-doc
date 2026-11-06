@@ -17,11 +17,10 @@ use crate::dispatch_start::{
 };
 use crate::supervisor_runtime::supervisor_socket_path;
 use agent_doc_controller::dispatch::{
-    DirectPaneDispatchStartProofFacts, DirectPaneSubmitPolicy,
-    PassThroughStrandedDraftAction, PassThroughStrandedDraftFacts,
-    PassThroughStrandedDraftLogFacts, PreDispatchStrandedDraftAction,
-    PreDispatchStrandedDraftFacts, RouteSubmitObservation, RoutedDispatchStartProof,
-    RoutedTriggerPayloadFacts, busy_dispatch_start_outcome,
+    DirectPaneDispatchStartProofFacts, DirectPaneSubmitPolicy, PassThroughStrandedDraftAction,
+    PassThroughStrandedDraftFacts, PassThroughStrandedDraftLogFacts,
+    PreDispatchStrandedDraftAction, PreDispatchStrandedDraftFacts, RouteSubmitObservation,
+    RoutedDispatchStartProof, RoutedTriggerPayloadFacts, busy_dispatch_start_outcome,
     classify_pass_through_stranded_draft_action, classify_pre_dispatch_stranded_draft_action,
     direct_pane_should_await_dispatch_start_proof, direct_pane_submit_acceptance_budget,
     direct_pane_submit_outcome, dispatch_start_busy_probe_timeout,
@@ -686,12 +685,7 @@ fn observe_pre_dispatch_stranded_draft(
 ) -> PreDispatchDraftObservation {
     let capture = agent_doc_tmux_io::capture_pane_with_ansi(tmux, pane).ok();
     let cursor_y = agent_doc_tmux_io::pane_cursor_y(tmux, pane);
-    classify_pre_dispatch_stranded_draft_observation(
-        capture.as_deref(),
-        cursor_y,
-        harness,
-        trigger,
-    )
+    classify_pre_dispatch_stranded_draft_observation(capture.as_deref(), cursor_y, harness, trigger)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -799,10 +793,7 @@ fn clear_non_operator_composer_residue(
         tmux,
         pane,
         "C-u",
-        agent_doc_tmux_io::input_diag::InputDiagSink::new(
-            Some(file),
-            agent_doc_ops_log_io::log_op,
-        ),
+        agent_doc_tmux_io::input_diag::InputDiagSink::new(Some(file), agent_doc_ops_log_io::log_op),
         "route.clear_non_operator_composer_residue",
     )
     .context("clear non-operator composer residue")?;
@@ -898,7 +889,10 @@ fn try_pre_dispatch_stranded_draft_submit(
                 pane,
                 harness.binary,
                 action.as_str(),
-                observation.draft_preview.as_deref().unwrap_or("<unavailable>"),
+                observation
+                    .draft_preview
+                    .as_deref()
+                    .unwrap_or("<unavailable>"),
             ),
         );
         let preview = observation
@@ -1513,12 +1507,7 @@ mod tests {
         ));
 
         assert_eq!(
-            classify_pre_dispatch_stranded_draft_capture(
-                Some(&pane),
-                Some(2),
-                &harness,
-                TRIGGER,
-            ),
+            classify_pre_dispatch_stranded_draft_capture(Some(&pane), Some(2), &harness, TRIGGER,),
             PreDispatchStrandedDraftAction::DispatchFresh,
             "faint trigger-shaped ghost text must not absorb repeated bare Enter submits"
         );
@@ -1530,12 +1519,7 @@ mod tests {
         let pane = claude_pane(&format!("❯\u{a0}{TRIGGER}"));
 
         assert_eq!(
-            classify_pre_dispatch_stranded_draft_capture(
-                Some(&pane),
-                Some(2),
-                &harness,
-                TRIGGER,
-            ),
+            classify_pre_dispatch_stranded_draft_capture(Some(&pane), Some(2), &harness, TRIGGER,),
             PreDispatchStrandedDraftAction::ResubmitStrandedDraft,
         );
     }
@@ -1546,12 +1530,7 @@ mod tests {
         let pane = claude_pane("❯\u{a0}do not overwrite this operator draft");
 
         assert_eq!(
-            classify_pre_dispatch_stranded_draft_capture(
-                Some(&pane),
-                Some(2),
-                &harness,
-                TRIGGER,
-            ),
+            classify_pre_dispatch_stranded_draft_capture(Some(&pane), Some(2), &harness, TRIGGER,),
             PreDispatchStrandedDraftAction::DeferForeignDraft,
         );
     }
@@ -1590,12 +1569,7 @@ mod tests {
         let chip = "\x1b[38;5;246m❯\u{a0}\x1b[38;5;74m[⧉ In tasks/docs.md]\x1b[0m";
         let pane = claude_pane(chip);
         assert_eq!(
-            classify_pre_dispatch_stranded_draft_capture(
-                Some(&pane),
-                Some(2),
-                &harness,
-                TRIGGER,
-            ),
+            classify_pre_dispatch_stranded_draft_capture(Some(&pane), Some(2), &harness, TRIGGER,),
             PreDispatchStrandedDraftAction::DispatchFresh,
         );
 
@@ -1611,7 +1585,10 @@ mod tests {
             observation.action,
             PreDispatchStrandedDraftAction::DeferForeignDraft
         );
-        assert_eq!(observation.draft_preview.as_deref(), Some("❯ operator text"));
+        assert_eq!(
+            observation.draft_preview.as_deref(),
+            Some("❯ operator text")
+        );
     }
 
     /// `#managedipcdraftguard`: a draft refuses under a running turn too, on
@@ -1660,16 +1637,10 @@ mod tests {
         }
 
         let harness = HarnessConfig::codex();
-        let frame = format!(
-            "• Working (3s • esc to interrupt)\n\n› {TRIGGER}\n\n  my own status line\n"
-        );
+        let frame =
+            format!("• Working (3s • esc to interrupt)\n\n› {TRIGGER}\n\n  my own status line\n");
         assert_eq!(
-            classify_pre_dispatch_stranded_draft_capture(
-                Some(&frame),
-                Some(2),
-                &harness,
-                TRIGGER
-            ),
+            classify_pre_dispatch_stranded_draft_capture(Some(&frame), Some(2), &harness, TRIGGER),
             PreDispatchStrandedDraftAction::DeferPaneBusy
         );
     }

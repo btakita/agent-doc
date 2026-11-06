@@ -162,12 +162,11 @@ pub fn queue_operator_answer_row_ids(content: &str) -> Result<Vec<String>> {
 pub fn sync_queue_operator_actions(file: &Path, actions: &[(String, String)]) -> Result<bool> {
     let full = read_command_document(file, "sync queue operator actions")?;
     let open_todo_ids = agent_doc_element::todo::open_todo_ids(&full);
-    let Some(target) =
-        agent_doc_queue::document_queue::project_all_prompt_operator_actions(
-            &full,
-            actions,
-            &open_todo_ids,
-        )?
+    let Some(target) = agent_doc_queue::document_queue::project_all_prompt_operator_actions(
+        &full,
+        actions,
+        &open_todo_ids,
+    )?
     else {
         return Ok(false);
     };
@@ -856,7 +855,10 @@ fn backlog_item_ids(content: &str) -> Result<Vec<String>> {
 fn add_readback_verdict(file: &Path, before: &str, after: &str, item: &str) -> Result<()> {
     let before_ids = backlog_item_ids(before)?;
     let after_ids = backlog_item_ids(after)?;
-    let lost: Vec<&String> = before_ids.iter().filter(|id| !after_ids.contains(id)).collect();
+    let lost: Vec<&String> = before_ids
+        .iter()
+        .filter(|id| !after_ids.contains(id))
+        .collect();
     let added = after_ids.iter().any(|id| !before_ids.contains(id));
     // A dedupe (the item was already tracked) is a satisfied no-op.
     let already_present = before == after && before.contains(item.trim());
@@ -873,7 +875,10 @@ fn add_readback_verdict(file: &Path, before: &str, after: &str, item: &str) -> R
         if lost.is_empty() {
             "none".to_string()
         } else {
-            lost.iter().map(|id| format!("#{id}")).collect::<Vec<_>>().join(", ")
+            lost.iter()
+                .map(|id| format!("#{id}"))
+                .collect::<Vec<_>>()
+                .join(", ")
         },
         file.display()
     )
@@ -919,7 +924,10 @@ pub fn upsert(file: &Path, key: &str, text: &str) -> Result<Option<String>> {
         many => anyhow::bail!(
             "--backlog-upsert: key `{key}` matches {} open backlog items ({}); make the key unique",
             many.len(),
-            many.iter().map(|item| format!("#{}", item.id)).collect::<Vec<_>>().join(", ")
+            many.iter()
+                .map(|item| format!("#{}", item.id))
+                .collect::<Vec<_>>()
+                .join(", ")
         ),
     }
 }
@@ -961,9 +969,7 @@ fn validate_editable_attr(list: backlog::TrackedWorkList, attr: &str) -> Result<
 fn validate_attr_value(attr: &str, value: Option<&str>) -> Result<()> {
     if attr != "queue" {
         if let Some(value) = value {
-            anyhow::bail!(
-                "`{attr}` is a boolean marker attribute; drop the `={value}` value"
-            );
+            anyhow::bail!("`{attr}` is a boolean marker attribute; drop the `={value}` value");
         }
         return Ok(());
     }
@@ -1096,11 +1102,7 @@ fn add_many_to_list(
     let doc_id = agent_doc_hash::document_id_for_path(file);
     let reserved = reserved_identity_ids(file, &full_content)?;
     let outcome = backlog::op_prepend_many_with_outcomes_reserved(
-        existing,
-        items,
-        &doc_id,
-        gated,
-        &reserved,
+        existing, items, &doc_id, gated, &reserved,
     )?;
     for failure in &outcome.failures {
         eprintln!(
@@ -2084,8 +2086,7 @@ pub fn todo_edit(file: &Path, selector: &str, text: &str) -> Result<bool> {
 /// no item matches; a finished item is checked off with [`todo_done`] instead.
 pub fn todo_remove(file: &Path, selector: &str) -> Result<bool> {
     let full_content = read_command_document(file, "todo_remove")?;
-    let outcome =
-        agent_doc_element::todo::remove_todo_item_from_document(&full_content, selector)?;
+    let outcome = agent_doc_element::todo::remove_todo_item_from_document(&full_content, selector)?;
     persist_todo_mutation(file, &full_content, outcome, "todo-remove")
 }
 
@@ -2615,7 +2616,8 @@ pub fn set_gate_verify(file: &Path, id: &str, spec: &str) -> Result<()> {
     persist_pending_write(file, &full_content, &new_doc)?;
     pending_receipt!(
         "[pending] set verify predicate on [#{}] (set_at={})",
-        id, set_at
+        id,
+        set_at
     );
     Ok(())
 }
@@ -3864,7 +3866,10 @@ mod tests {
         assert!(again.is_none(), "existing key edits in place");
         let content = fs::read_to_string(&doc).unwrap();
         assert_eq!(content.matches("[JIRA:ABC-1]").count(), 1, "{content}");
-        assert!(content.contains(&format!("[#{first}] [JIRA:ABC-1] approved")), "{content}");
+        assert!(
+            content.contains(&format!("[#{first}] [JIRA:ABC-1] approved")),
+            "{content}"
+        );
         assert!(content.contains("[#c3d4] Other"), "{content}");
     }
 
@@ -3891,7 +3896,10 @@ mod tests {
         })
         .unwrap();
         assert_eq!(staged.len(), 1, "{staged:?}");
-        assert!(staged[0].contains("review-resolve: archived 1 entry"), "{staged:?}");
+        assert!(
+            staged[0].contains("review-resolve: archived 1 entry"),
+            "{staged:?}"
+        );
         assert!(staged_receipts().is_none(), "dry run drops the envelope");
         assert!(
             fs::read_to_string(&doc).unwrap().contains("- [/] [#a1b2]"),
@@ -4396,7 +4404,11 @@ mod tests {
     fn todo_done_edit_reopen_remove_preserve_operator_items() {
         let (tmp, doc) = setup_test_dir();
         let operator = "<!-- agent:todo -->\nOperator note\n- [x] Done by operator\n- [ ] Open by operator\n<!-- /agent:todo -->\n";
-        fs::write(&doc, format!("---\nagent_doc_session: test\n---\n\n{operator}")).unwrap();
+        fs::write(
+            &doc,
+            format!("---\nagent_doc_session: test\n---\n\n{operator}"),
+        )
+        .unwrap();
         assert!(force_pending(|| todo_add(&doc, "Rotate the deploy key")));
         let id = todo_own_id(&fs::read_to_string(&doc).unwrap(), "Rotate the deploy key");
         let body = || {
@@ -4409,11 +4421,18 @@ mod tests {
         let operator_lines = "Operator note\n- [x] Done by operator\n- [ ] Open by operator\n";
 
         assert!(force_pending(|| todo_done(&doc, &id)));
-        assert_eq!(body(), format!("{operator_lines}- [x] [#{id}] Rotate the deploy key\n"));
+        assert_eq!(
+            body(),
+            format!("{operator_lines}- [x] [#{id}] Rotate the deploy key\n")
+        );
         // Idempotent replay.
         assert!(!force_pending(|| todo_done(&doc, &format!("#{id}"))));
 
-        assert!(force_pending(|| todo_edit(&doc, &id, "Rotate the deploy key (rotated Tue)")));
+        assert!(force_pending(|| todo_edit(
+            &doc,
+            &id,
+            "Rotate the deploy key (rotated Tue)"
+        )));
         assert_eq!(
             body(),
             format!("{operator_lines}- [x] [#{id}] Rotate the deploy key (rotated Tue)\n")
@@ -4428,10 +4447,17 @@ mod tests {
         assert!(body().contains("- [x] Open by operator\n"), "{}", body());
 
         assert!(force_pending(|| todo_remove(&doc, &id)));
-        assert_eq!(body(), "Operator note\n- [x] Done by operator\n- [x] Open by operator\n");
-        let err = with_test_effects(|| with_force_disk_pending_writes(true, || todo_remove(&doc, &id)))
-            .unwrap_err();
-        assert!(err.to_string().contains("no agent:todo item matches"), "{err}");
+        assert_eq!(
+            body(),
+            "Operator note\n- [x] Done by operator\n- [x] Open by operator\n"
+        );
+        let err =
+            with_test_effects(|| with_force_disk_pending_writes(true, || todo_remove(&doc, &id)))
+                .unwrap_err();
+        assert!(
+            err.to_string().contains("no agent:todo item matches"),
+            "{err}"
+        );
         drop(tmp);
     }
 

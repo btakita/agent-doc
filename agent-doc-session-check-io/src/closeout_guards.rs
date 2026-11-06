@@ -447,8 +447,8 @@ pub fn open_cycle_message(
         agent_doc_ops_log_io::latest_ipc_proof_diagnostic_hint_for_cycle(file, &state.cycle_id)?
             .map(|hint| format!(" {hint}"))
             .unwrap_or_default();
-    let usage_limit = agent_doc_turn_status_io::owner_pane_usage_limit_for_file(file)
-        .map(|owner| {
+    let usage_limit =
+        agent_doc_turn_status_io::owner_pane_usage_limit_for_file(file).map(|owner| {
             format!(
                 "{} on pane `{}`. {}",
                 owner.limit.cause(),

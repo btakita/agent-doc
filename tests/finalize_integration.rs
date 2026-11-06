@@ -10,8 +10,7 @@ use tempfile::TempDir;
 /// `#integrationtesttargets`: this target drives the real `agent-doc` CLI, and
 /// a controller launch by that CLI is production behavior, so every spawned
 /// command opts in with this reason.
-const CONTROLLER_LAUNCH_REASON: &str =
-    "finalize/respond CLI commands close out through the project controller, which they launch as production does";
+const CONTROLLER_LAUNCH_REASON: &str = "finalize/respond CLI commands close out through the project controller, which they launch as production does";
 
 fn agent_doc() -> Command {
     let mut command = cargo_bin_cmd!("agent-doc");
@@ -513,7 +512,8 @@ fn status_repair_folds_nested_status_sync_and_leaves_the_cycle_open() {
     );
     assert_eq!(
         after.replace(
-            &after[after.find("<!-- agent:status").unwrap()..after.find("<!-- agent:queue").unwrap()],
+            &after
+                [after.find("<!-- agent:status").unwrap()..after.find("<!-- agent:queue").unwrap()],
             ""
         ),
         content.replace(status, ""),
@@ -5972,9 +5972,7 @@ fn finalize_strikes_a_mid_turn_head_whose_reported_worker_was_released() {
     // receipt can truthfully advance it to running (`🚧`).
     let current = fs::read_to_string(&doc).unwrap().replace(
         &format!("- 🚧 [#subagent:setup#1] {setup}\n<!-- /agent:queue -->"),
-        &format!(
-            "- 🚧 [#subagent:setup#1] {setup}\n- {question}\n<!-- /agent:queue -->"
-        ),
+        &format!("- 🚧 [#subagent:setup#1] {setup}\n- {question}\n<!-- /agent:queue -->"),
     );
     fs::write(&doc, &current).unwrap();
     agent_doc_at_claim_clock(claim_clock)
@@ -5992,11 +5990,9 @@ fn finalize_strikes_a_mid_turn_head_whose_reported_worker_was_released() {
         .success();
     let dispatching_projection = fs::read_to_string(&doc).unwrap();
     assert!(
-        dispatching_projection.contains(&format!(
-            "- 🟡 [#subagent:page-status-enum#1] {question}\n"
-        )) && dispatching_projection.contains(&format!(
-            "- 🚧 [#subagent:setup#1] {setup}\n"
-        )),
+        dispatching_projection
+            .contains(&format!("- 🟡 [#subagent:page-status-enum#1] {question}\n"))
+            && dispatching_projection.contains(&format!("- 🚧 [#subagent:setup#1] {setup}\n")),
         "a fresh claim projects dispatching beside a worker-bound row:\n{dispatching_projection}"
     );
     agent_doc_at_claim_clock(claim_clock)
@@ -6018,11 +6014,9 @@ fn finalize_strikes_a_mid_turn_head_whose_reported_worker_was_released() {
         .success();
     let claimed_projection = fs::read_to_string(&doc).unwrap();
     assert!(
-        claimed_projection.contains(&format!(
-            "- 🚧 [#subagent:setup#1] {setup}\n"
-        )) && claimed_projection.contains(&format!(
-            "- 🚧 [#subagent:page-status-enum#1] {question}\n"
-        )),
+        claimed_projection.contains(&format!("- 🚧 [#subagent:setup#1] {setup}\n"))
+            && claimed_projection
+                .contains(&format!("- 🚧 [#subagent:page-status-enum#1] {question}\n")),
         "start advances only its own generation to worker-bound:\n{claimed_projection}"
     );
     let worker_response =
@@ -6068,11 +6062,9 @@ fn finalize_strikes_a_mid_turn_head_whose_reported_worker_was_released() {
     );
     let released_projection = fs::read_to_string(&doc).unwrap();
     assert!(
-        released_projection.contains(&format!(
-            "- 🚧 [#subagent:setup#1] {setup}\n"
-        )) && released_projection.contains(&format!(
-            "- ☑️ [#subagent:page-status-enum#1] {question}\n"
-        ))
+        released_projection.contains(&format!("- 🚧 [#subagent:setup#1] {setup}\n"))
+            && released_projection
+                .contains(&format!("- ☑️ [#subagent:page-status-enum#1] {question}\n"))
             && !released_projection.contains(&format!("- 🟡 {question}\n")),
         "reported release must retain a distinct awaiting-integration marker:\n{released_projection}"
     );
@@ -6117,9 +6109,7 @@ fn finalize_strikes_a_mid_turn_head_whose_reported_worker_was_released() {
         "the echoed, worker-reported head must be struck:\n{head}"
     );
     assert!(
-        head.contains(&format!(
-            "- 🚧 [#subagent:setup#1] {setup}\n"
-        )),
+        head.contains(&format!("- 🚧 [#subagent:setup#1] {setup}\n")),
         "the unrelated claimed head stays queued:\n{head}"
     );
     let receipts = agent_doc_queue_io::claim_release_receipt::load(&doc)

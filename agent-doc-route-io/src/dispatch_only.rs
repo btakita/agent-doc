@@ -700,11 +700,8 @@ pub fn dispatch_only_send_reopen(
             // signal that tells them apart and reports every autosuggest hint as an
             // operator draft. Prompt parsing strips ANSI per line itself
             // (`last_prompt_candidate`), so the candidate is unchanged either way.
-            if let Ok(content) =
-                agent_doc_tmux_io::capture_pane_with_ansi(tmux, &dispatch_pane)
-            {
-                let projection =
-                    pane_composer_projection(tmux, &dispatch_pane, &content, harness);
+            if let Ok(content) = agent_doc_tmux_io::capture_pane_with_ansi(tmux, &dispatch_pane) {
+                let projection = pane_composer_projection(tmux, &dispatch_pane, &content, harness);
                 match dispatch_only_starting_pane_blocker(
                     &projection,
                     &route_trigger,
@@ -732,7 +729,9 @@ pub fn dispatch_only_send_reopen(
                     }
                     StartingPaneBlocker::OperatorDraft => {
                         let PaneComposerProjection::OperatorDraft { preview } = &projection else {
-                            unreachable!("operator-draft blocker requires operator-draft projection")
+                            unreachable!(
+                                "operator-draft blocker requires operator-draft projection"
+                            )
                         };
                         agent_doc_ops_log_io::log_op(
                             file,
@@ -934,13 +933,15 @@ pub fn dispatch_only_send_reopen(
                 ),
             );
             let file_display = file.display().to_string();
-            let blocker = projection.as_ref().map_or(StartingPaneBlocker::Booting, |projection| {
-                dispatch_only_starting_pane_blocker(
-                    projection,
-                    &route_trigger,
-                    harness.context_clear_command(),
-                )
-            });
+            let blocker = projection
+                .as_ref()
+                .map_or(StartingPaneBlocker::Booting, |projection| {
+                    dispatch_only_starting_pane_blocker(
+                        projection,
+                        &route_trigger,
+                        harness.context_clear_command(),
+                    )
+                });
             let outcome_fields =
                 agent_doc_flow::outcome::blocked_with_exact_unblocker_fields(blocker.unblocker());
             match (blocker, projection.as_ref()) {
@@ -1925,7 +1926,6 @@ mod tests {
         );
     }
 
-
     #[test]
     fn send_edge_coalesces_an_open_cycle_that_started_after_the_outer_drain() {
         let dir = tempfile::tempdir().unwrap();
@@ -2376,10 +2376,7 @@ mod tests {
                 Ok(())
             },
             || {
-                assert_eq!(
-                    events.borrow().as_slice(),
-                    ["submit_clear", "record_clear"]
-                );
+                assert_eq!(events.borrow().as_slice(), ["submit_clear", "record_clear"]);
                 events.borrow_mut().push("await_ready");
                 true
             },

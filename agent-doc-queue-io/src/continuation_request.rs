@@ -202,9 +202,7 @@ pub fn clear_continuation_request(file: &Path) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        ContinuationRequest, NonAdvancingContinuation, non_advancing_continuation,
-    };
+    use super::{ContinuationRequest, NonAdvancingContinuation, non_advancing_continuation};
 
     fn request(run_id: Option<&str>, head: &str) -> ContinuationRequest {
         ContinuationRequest {
@@ -217,7 +215,10 @@ mod tests {
     /// Nothing has been asked yet, so nothing is a repeat.
     #[test]
     fn a_first_request_always_advances() {
-        assert_eq!(non_advancing_continuation(None, Some("cycle-1"), "do [#a]"), None);
+        assert_eq!(
+            non_advancing_continuation(None, Some("cycle-1"), "do [#a]"),
+            None
+        );
     }
 
     /// The production shape the shipped guard could not see: the head moved
@@ -242,11 +243,7 @@ mod tests {
     fn a_run_that_completes_without_striking_the_head_is_non_advancing() {
         let previous = request(Some("cycle-1"), "do [#focusstashedactor");
         assert_eq!(
-            non_advancing_continuation(
-                Some(&previous),
-                Some("cycle-2"),
-                "do [#focusstashedactor"
-            ),
+            non_advancing_continuation(Some(&previous), Some("cycle-2"), "do [#focusstashedactor"),
             Some(NonAdvancingContinuation::HeadDidNotAdvance)
         );
     }

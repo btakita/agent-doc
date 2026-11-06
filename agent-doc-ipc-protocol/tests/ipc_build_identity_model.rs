@@ -120,8 +120,14 @@ fn step(state: &State, action: Action) -> Option<State> {
         Action::Handshake => {
             let model_admits = state.code[0] == state.code[1];
             let (listener_admits, client_admits) = wire_handshake(state);
-            assert_eq!(listener_admits, model_admits, "listener verdict vs model: {state:?}");
-            assert_eq!(client_admits, model_admits, "client verdict vs model: {state:?}");
+            assert_eq!(
+                listener_admits, model_admits,
+                "listener verdict vs model: {state:?}"
+            );
+            assert_eq!(
+                client_admits, model_admits,
+                "client verdict vs model: {state:?}"
+            );
             next.verdict = if listener_admits {
                 Verdict::Admitted
             } else {
@@ -150,7 +156,10 @@ fn tla_identity_and_handshake_text_match_the_transcription() {
         "verdict' = IF Identity(\"client\") = Identity(\"listener\")\n                    THEN \"admitted\"\n                    ELSE \"rejected\""
     ));
     let cfg = include_str!("../../formal/tla/IpcBuildIdentity.cfg");
-    assert!(cfg.contains("ContentDerived = TRUE"), "shipped config is the fix");
+    assert!(
+        cfg.contains("ContentDerived = TRUE"),
+        "shipped config is the fix"
+    );
 }
 
 fn arb_peer() -> impl Strategy<Value = Peer> {

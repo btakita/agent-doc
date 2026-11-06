@@ -1397,7 +1397,7 @@ mod tests {
         )
         .unwrap();
 
-                let _force_disk_guard =
+        let _force_disk_guard =
             agent_doc_route_io::invocation::ForceDiskRouteWritesGuard::set(true);
         let _trigger_only = agent_doc_route_io::invocation::TriggerOnlyGuard::set(true);
         assert_eq!(
@@ -2001,10 +2001,9 @@ mod tests {
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(updated.contains("<!-- agent:queue go -->"));
         assert!(!updated.contains("agent:queue auto"));
-        assert!(
-            updated
-                .contains("- ### first queued prompt\n- ### second queued prompt\n- ### third queued prompt")
-        );
+        assert!(updated.contains(
+            "- ### first queued prompt\n- ### second queued prompt\n- ### third queued prompt"
+        ));
     }
     #[test]
     fn route_enqueue_priority_dispatch_preempts_legacy_auto_queue_as_plain_queue() {

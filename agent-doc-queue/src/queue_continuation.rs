@@ -2891,10 +2891,7 @@ mod tests {
         let continuation = required_continuation(content, Some(content))
             .unwrap()
             .expect("a ready nested leaf must force a non-terminal continuation");
-        assert_eq!(
-            continuation.head_prompt,
-            "📥 address reviewer feedback"
-        );
+        assert_eq!(continuation.head_prompt, "📥 address reviewer feedback");
         assert!(continuation.reason.contains("agent:queue go"));
 
         let completed = content.replace(

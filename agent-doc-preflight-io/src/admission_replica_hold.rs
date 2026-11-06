@@ -120,13 +120,17 @@ where
             last_nudge = at;
         }
         // Never sleep past the budget: the last observation lands at it.
-        sleep(poll.min(budget.saturating_sub(held)).max(Duration::from_millis(1)));
+        sleep(
+            poll.min(budget.saturating_sub(held))
+                .max(Duration::from_millis(1)),
+        );
     }
 }
 
 /// Map the preflight authority observation onto the shared vocabulary.
 fn hold_observation(file: &Path) -> HoldObservation {
-    let observed = crate::debounce::observe_lazily_current(file, "preflight_admission_replica_hold");
+    let observed =
+        crate::debounce::observe_lazily_current(file, "preflight_admission_replica_hold");
     let observation = match observed.state {
         "detached" => AuthorityObservation::Detached,
         // A pending delivery already carries the controller's canonical cut
@@ -301,7 +305,10 @@ mod tests {
 
     impl std::fmt::Display for Refused {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            write!(f, "editor is still attached; missing_replica recovery exhausted")
+            write!(
+                f,
+                "editor is still attached; missing_replica recovery exhausted"
+            )
         }
     }
 
@@ -434,7 +441,10 @@ mod tests {
             },
         )
         .expect("a self-healing refusal is admitted once the replica returns");
-        assert_eq!(admitted.content, "editor text with the finished queue line\n");
+        assert_eq!(
+            admitted.content,
+            "editor text with the finished queue line\n"
+        );
         assert_eq!(
             admitted.replica_hold.map(|report| report.waited),
             Some(Duration::from_secs(6))
@@ -447,7 +457,11 @@ mod tests {
         let error = resolve_admitting_transient_replica(
             file(),
             "initial",
-            || Err(anyhow::Error::new(Refused(AttachedEditorRecoveryDecision::ReregisterEditor))),
+            || {
+                Err(anyhow::Error::new(Refused(
+                    AttachedEditorRecoveryDecision::ReregisterEditor,
+                )))
+            },
             classify,
             || {
                 ReplicaHoldOutcome::Expired(ReplicaHoldReport {

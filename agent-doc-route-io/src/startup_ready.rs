@@ -723,7 +723,10 @@ mod tests {
                 rendered: "› Ask Codex to do anything".to_string(),
             },
         };
-        assert_eq!(agent_doc_harness::project_pane_composer(&idle, &harness), ready);
+        assert_eq!(
+            agent_doc_harness::project_pane_composer(&idle, &harness),
+            ready
+        );
         assert_eq!(harness.protected_prompt_input_reason(&idle), None);
         assert!(agent_doc_harness::ready_prompt_candidate(&idle, &harness).is_some());
 
@@ -753,7 +756,10 @@ mod tests {
             agent_doc_harness::protected_prompt_draft_preview(&harness, &typed),
             Some(format!("› {CODEX_TRIGGER}"))
         );
-        assert_eq!(agent_doc_harness::ready_prompt_candidate(&typed, &harness), None);
+        assert_eq!(
+            agent_doc_harness::ready_prompt_candidate(&typed, &harness),
+            None
+        );
     }
 
     /// The default status row has no `Context` item, so it posed as the composer

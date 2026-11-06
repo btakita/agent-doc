@@ -1867,10 +1867,8 @@ pub fn pending_committed_response_evidence_repair(file: &Path) -> Result<Option<
 /// Read-only plan for [`restore_and_commit_historical_response_evidence`]: the
 /// response ids it would restore/index, or `None` when it would do nothing.
 fn historical_response_evidence_restore_plan(file: &Path) -> Result<Option<BTreeSet<String>>> {
-    let authority = commit_current_document_content(
-        file,
-        "plan_historical_response_evidence_authority",
-    )?;
+    let authority =
+        commit_current_document_content(file, "plan_historical_response_evidence_authority")?;
     let Some(head) = agent_doc_git_io::revision::show_head(file)? else {
         return Ok(None);
     };
@@ -1920,10 +1918,8 @@ fn duplicate_queue_response_projection_plan(file: &Path) -> Result<Option<BTreeS
 /// Read-only plan for [`detach_and_commit_orphaned_queue_response_projections`]:
 /// the response ids whose struck queue projection it would detach.
 fn orphaned_queue_response_projection_plan(file: &Path) -> Result<Option<BTreeSet<String>>> {
-    let authority = commit_current_document_content(
-        file,
-        "plan_orphaned_queue_response_projection_authority",
-    )?;
+    let authority =
+        commit_current_document_content(file, "plan_orphaned_queue_response_projection_authority")?;
     let disk = agent_doc_document_realtime_io::resolve_disk_current_document_content(
         file,
         "plan_orphaned_queue_response_projection_disk",
@@ -2854,8 +2850,7 @@ fn adopt_pending_completion_cells_from_disk(file: &Path, current: &mut String, s
         agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(content)
             .lines()
             .filter(|line| {
-                !line.trim().is_empty()
-                    && !line.trim().starts_with("<!-- agent:boundary:")
+                !line.trim().is_empty() && !line.trim().starts_with("<!-- agent:boundary:")
             })
             .map(str::to_string)
             .collect::<Vec<_>>()
@@ -4087,7 +4082,9 @@ where
     let mut snapshot_active_projection_reconciled = false;
     if let Some(reconciled) = snapshot_content
         .as_deref()
-        .map(|snapshot| agent_doc_work_projection::reconcile_managed_active_items_for(file, snapshot))
+        .map(|snapshot| {
+            agent_doc_work_projection::reconcile_managed_active_items_for(file, snapshot)
+        })
         .transpose()?
         .flatten()
     {

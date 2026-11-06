@@ -289,8 +289,8 @@ fn retained_refusal(file: &Path, message: String) -> anyhow::Error {
 /// that has not settled yet.
 fn retained_intent_refusal(file: &Path, intent_id: &str, message: String) -> anyhow::Error {
     // An empty id proves nothing, so it adds no ownership.
-    let ownership = observed_retained_write_ownership(file)
-        .with_retained_projection(!intent_id.is_empty());
+    let ownership =
+        observed_retained_write_ownership(file).with_retained_projection(!intent_id.is_empty());
     await_editor_replica_no_disk_write(format!(
         "{message}. {}",
         agent_doc_turn::write_ownership::retained_write_remedy(
@@ -309,16 +309,15 @@ fn retained_intent_refusal(file: &Path, intent_id: &str, message: String) -> any
 /// editor-recovery verdicts still win and withhold the marker.
 fn retained_delivery_projection_refusal(file: &Path, message: String) -> anyhow::Error {
     let ownership = observed_retained_write_ownership(file).with_retained_projection(true);
-    let pending_marker = if ownership.verdict()
-        == agent_doc_turn::write_ownership::RetainedWriteVerdict::Deferred
-    {
-        format!(
-            " [{}]",
-            agent_doc_turn::write_ownership::RETAINED_DELIVERY_PROJECTION_PENDING_TOKEN
-        )
-    } else {
-        String::new()
-    };
+    let pending_marker =
+        if ownership.verdict() == agent_doc_turn::write_ownership::RetainedWriteVerdict::Deferred {
+            format!(
+                " [{}]",
+                agent_doc_turn::write_ownership::RETAINED_DELIVERY_PROJECTION_PENDING_TOKEN
+            )
+        } else {
+            String::new()
+        };
     await_editor_replica_no_disk_write(format!(
         "{message}. {}{pending_marker}",
         agent_doc_turn::write_ownership::retained_write_remedy(
@@ -2112,12 +2111,7 @@ pub fn atomic_write_detached_canonical_through_authority(
         );
     }
 
-    atomic_write_detached_canonical_through_authority_inner(
-        path,
-        expected_current,
-        content,
-        source,
-    )
+    atomic_write_detached_canonical_through_authority_inner(path, expected_current, content, source)
 }
 
 fn atomic_write_detached_canonical_through_authority_inner(
@@ -2439,17 +2433,15 @@ fn captured_response_materialized_in_document_or_archive(
     captured_response: &str,
     content: &str,
 ) -> bool {
-    agent_doc_turn::response_replay::response_materialized_in_content(
-        captured_response,
-        content,
-    ) || agent_doc_archive_io::read_head_compact_archives(path, content)
-        .into_iter()
-        .any(|archive| {
-            agent_doc_turn::response_replay::response_materialized_in_content(
-                captured_response,
-                &archive,
-            )
-        })
+    agent_doc_turn::response_replay::response_materialized_in_content(captured_response, content)
+        || agent_doc_archive_io::read_head_compact_archives(path, content)
+            .into_iter()
+            .any(|archive| {
+                agent_doc_turn::response_replay::response_materialized_in_content(
+                    captured_response,
+                    &archive,
+                )
+            })
 }
 
 pub fn settle_retained_captured_projection_through_authority(
@@ -2525,11 +2517,8 @@ pub fn settle_retained_captured_projection_through_authority(
     // A newer authority cut that already contains the durable response is the
     // desired semantic result. Replaying an older incomplete intent over it can
     // only regress the closeout and may discard newer operator-owned edits.
-    let response_already_materialized = captured_response_materialized_in_document_or_archive(
-        path,
-        captured_response,
-        &canonical,
-    );
+    let response_already_materialized =
+        captured_response_materialized_in_document_or_archive(path, captured_response, &canonical);
     let pending_journal = pending_document_write_journal(path);
     let has_superseded_capture_lineage = pending_journal.iter().any(|intent| {
         !captured_response_materialized_in_document_or_archive(
@@ -2593,11 +2582,7 @@ pub fn settle_retained_captured_projection_through_authority(
         }
         canonical = try_resolve_current_document_content(path, source)?;
     }
-    if !captured_response_materialized_in_document_or_archive(
-        path,
-        captured_response,
-        &canonical,
-    ) {
+    if !captured_response_materialized_in_document_or_archive(path, captured_response, &canonical) {
         // A reconnect intent can itself be the incomplete value: older
         // recovery code retained the editor/CRDT merge as the newest target
         // even when that merge had dropped the captured response. Replaying
@@ -4966,13 +4951,11 @@ pub fn normalize_recoverable_response_replay_duplication_for_file(
             agent_doc_template::response_materialization::response_materialization_probe_from_response(
                 &checkpoint.response_body,
             );
-        if let Some(recovery) =
-            agent_doc_merge::response_cell::reconcile_captured_response_replays(
-                content,
-                baseline,
-                &materialization,
-            )?
-        {
+        if let Some(recovery) = agent_doc_merge::response_cell::reconcile_captured_response_replays(
+            content,
+            baseline,
+            &materialization,
+        )? {
             let recovered = recovery.content;
             agent_doc_ops_log_io::log_op(
                 file,
@@ -5034,17 +5017,17 @@ pub fn classify_response_replay_repair_settlement_for_file(
     observed: &str,
     source: &str,
 ) -> Result<agent_doc_document_realtime::write_policy::SemanticRepairSettlement> {
-    let observed_repair = normalize_recoverable_response_replay_duplication_for_file(
-        file, observed, source,
-    )?;
+    let observed_repair =
+        normalize_recoverable_response_replay_duplication_for_file(file, observed, source)?;
     // `Some(observed)` still means replay was recognized but could not be
     // advanced to different canonical bytes. Likewise an invalid projection
     // with no narrow repair candidate is unresolved, not successful.
-    let observed_still_requires_repair = observed_repair.is_some()
-        || !agent_projection_integrity_valid(observed);
-    let advanced_authority_proven = agent_doc_document_realtime::write_policy::buffer_proves_reference_response(
-        target, observed,
-    );
+    let observed_still_requires_repair =
+        observed_repair.is_some() || !agent_projection_integrity_valid(observed);
+    let advanced_authority_proven =
+        agent_doc_document_realtime::write_policy::buffer_proves_reference_response(
+            target, observed,
+        );
     Ok(
         agent_doc_document_realtime::write_policy::decide_semantic_repair_settlement(
             observed == target,
@@ -5252,11 +5235,9 @@ fn collapse_progressive_queue_projection(
             .into_iter()
             .map(|revision| (revision.id, revision.text))
             .collect::<Vec<_>>();
-        let body = agent_doc_element_backlog::backlog::op_edit_many(
-            backlog.content(&reconciled),
-            &edits,
-        )
-        .ok()?;
+        let body =
+            agent_doc_element_backlog::backlog::op_edit_many(backlog.content(&reconciled), &edits)
+                .ok()?;
         reconciled = backlog.replace_content(&reconciled, &body);
     }
     Some(reconciled)
@@ -5590,7 +5571,8 @@ fn record_document_authority(
             file,
             &format!(
                 "document_authority_test_actor_error file={} source={} error={error:#}",
-                file.display(), source,
+                file.display(),
+                source,
             ),
         );
     }
@@ -5607,7 +5589,8 @@ fn record_document_authority(
             file,
             &format!(
                 "document_authority_state_event_error file={} source={} error={error:#}",
-                file.display(), source,
+                file.display(),
+                source,
             ),
         ),
     }
@@ -7353,7 +7336,6 @@ fn editor_delivery_waits_entered(file: &Path) -> usize {
         .unwrap_or(0)
 }
 
-
 /// Max re-merge attempts when reconciling the visible-write guard with a
 /// foreign disk write that landed after the merge was computed
 /// (#ipc-drift-visbuf-reconcile). After this many drifting re-reads, fall back
@@ -7445,8 +7427,7 @@ pub fn guard_visible_delivery_convergence(file: &Path, source: &str) -> Result<(
                     "visible document write for {} is retained by the lazy delivery projection; the attached editor replica is not registered, so no snapshot or commit effect is eligible. {}",
                     file.display(),
                     agent_doc_turn::write_ownership::retained_write_remedy(
-                        observed_retained_write_ownership(file)
-                            .with_replica_unserved(true),
+                        observed_retained_write_ownership(file).with_replica_unserved(true),
                         &file.display().to_string(),
                     ),
                 )));
@@ -7484,10 +7465,7 @@ pub fn guard_canonical_editor_projection_persisted(
             );
             Ok(())
         }
-        agent_doc_crdt_relay_io::CurrentText::Current {
-            text,
-            ..
-        } => {
+        agent_doc_crdt_relay_io::CurrentText::Current { text, .. } => {
             anyhow::ensure!(
                 text == canonical,
                 "{source}: editor authority for {} advanced before its route snapshot; recovery=retry_crdt_merge",
@@ -7502,9 +7480,7 @@ pub fn guard_canonical_editor_projection_persisted(
                 {
                     Ok(())
                 }
-                agent_doc_crdt_relay_io::CurrentText::Current { text, .. }
-                    if text != canonical =>
-                {
+                agent_doc_crdt_relay_io::CurrentText::Current { text, .. } if text != canonical => {
                     anyhow::bail!(
                         "{source}: editor authority for {} advanced while its route snapshot awaited native save; recovery=retry_crdt_merge",
                         file.display(),
@@ -7514,12 +7490,9 @@ pub fn guard_canonical_editor_projection_persisted(
                     delivery_version,
                     live_editors,
                     ..
-                } => defer_visible_delivery_projection(
-                    file,
-                    source,
-                    delivery_version,
-                    live_editors,
-                ),
+                } => {
+                    defer_visible_delivery_projection(file, source, delivery_version, live_editors)
+                }
                 agent_doc_crdt_relay_io::CurrentText::Detached => anyhow::bail!(
                     "{source}: detached disk projection for {} did not preserve the route write; recovery=retry_crdt_merge",
                     file.display(),
@@ -9402,16 +9375,14 @@ fn record_editor_endpoint_definitive_refusal(
     build_mismatch_refusal: Option<agent_doc_turn::authority_recovery::BuildMismatchRefusal>,
     editor_pids: Vec<u64>,
 ) {
-    EDITOR_ENDPOINT_DEFINITIVELY_REFUSED
-        .lock()
-        .insert(
-            file.to_path_buf(),
-            EditorEndpointRecoveryRefusal {
-                witness,
-                build_mismatch_refusal,
-                editor_pids,
-            },
-        );
+    EDITOR_ENDPOINT_DEFINITIVELY_REFUSED.lock().insert(
+        file.to_path_buf(),
+        EditorEndpointRecoveryRefusal {
+            witness,
+            build_mismatch_refusal,
+            editor_pids,
+        },
+    );
 }
 
 fn clear_editor_endpoint_definitive_refusal(file: &std::path::Path) {
@@ -9480,12 +9451,7 @@ fn reobserve_missing_editor_replica_with_reregistration(
                 editor_replica_accepted_unserved_corroborated(file, &paused_witness),
             )
         {
-            record_editor_endpoint_definitive_refusal(
-                file,
-                paused_witness,
-                None,
-                Vec::new(),
-            );
+            record_editor_endpoint_definitive_refusal(file, paused_witness, None, Vec::new());
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
@@ -9947,11 +9913,7 @@ fn attached_editor_refusal_remedy(
     });
     let build_mismatch_refusal = refusal.and_then(|refusal| refusal.build_mismatch_refusal);
     (
-        attached_editor_recovery_decision_from(
-            &editors,
-            &unreachable,
-            build_mismatch_refusal,
-        ),
+        attached_editor_recovery_decision_from(&editors, &unreachable, build_mismatch_refusal),
         attached_editor_refusal_remedy_from(
             &superseded,
             &editors,
@@ -11168,9 +11130,11 @@ fn select_session_closeout_holder(
             intent_id: intent_id.to_string(),
         });
     }
-    compact.map(|continuation| RetainedSessionCloseoutHolder::CompactProjection {
-        continuation_id: continuation.continuation_id.clone(),
-    })
+    compact.map(
+        |continuation| RetainedSessionCloseoutHolder::CompactProjection {
+            continuation_id: continuation.continuation_id.clone(),
+        },
+    )
 }
 
 /// Read the compact continuation from the existing controller projection.
@@ -11303,11 +11267,8 @@ mod tests {
             None,
             None,
         );
-        let recovery = attached_editor_recovery_decision_from(
-            &[("jetbrains".into(), 4242)],
-            &[],
-            None,
-        );
+        let recovery =
+            attached_editor_recovery_decision_from(&[("jetbrains".into(), 4242)], &[], None);
         assert_eq!(
             recovery,
             agent_doc_turn::authority_recovery::AttachedEditorRecoveryDecision::ReloadEditor,
@@ -11321,10 +11282,7 @@ mod tests {
             remedy.contains("agent-doc-jetbrains-0.2.455.jar"),
             "{remedy}"
         );
-        assert!(
-            remedy.contains("agent-doc admin reload-lib"),
-            "{remedy}"
-        );
+        assert!(remedy.contains("agent-doc admin reload-lib"), "{remedy}");
         assert!(
             remedy.contains("advisory for document authority"),
             "{remedy}"
@@ -11350,11 +11308,11 @@ mod tests {
             None,
             None,
         );
+        assert!(remedy.contains("agent-doc admin reload-lib"), "{remedy}");
         assert!(
-            remedy.contains("agent-doc admin reload-lib"),
+            remedy.contains("advisory for document authority"),
             "{remedy}"
         );
-        assert!(remedy.contains("advisory for document authority"), "{remedy}");
         assert!(!remedy.contains("Restart that editor"), "{remedy}");
     }
 
@@ -11362,13 +11320,8 @@ mod tests {
     /// the holding editor instead of only the mechanism.
     #[test]
     fn attached_editor_refusal_names_a_remedy_without_superseded_bytes() {
-        let remedy = attached_editor_refusal_remedy_from(
-            &[],
-            &[("jetbrains".into(), 7)],
-            &[],
-            None,
-            None,
-        );
+        let remedy =
+            attached_editor_refusal_remedy_from(&[], &[("jetbrains".into(), 7)], &[], None, None);
         assert!(remedy.contains("jetbrains pid 7"), "{remedy}");
         assert!(remedy.contains("agent-doc admin reload-lib"), "{remedy}");
         let unnamed = attached_editor_refusal_remedy_from(&[], &[], &[], None, None);
@@ -11391,7 +11344,10 @@ mod tests {
         );
 
         assert!(remedy.contains("sender_executable_replaced"), "{remedy}");
-        assert!(remedy.contains("safe-boundary supervisor recycle"), "{remedy}");
+        assert!(
+            remedy.contains("safe-boundary supervisor recycle"),
+            "{remedy}"
+        );
         assert!(remedy.contains("other-open-cycle.md"), "{remedy}");
         assert!(remedy.contains("route-owned supervisor"), "{remedy}");
         assert!(
@@ -11406,9 +11362,7 @@ mod tests {
             &[],
             &[("jetbrains".into(), 4242)],
             &[],
-            Some(
-                agent_doc_turn::authority_recovery::BuildMismatchRefusal::ReloadAlreadyRequested,
-            ),
+            Some(agent_doc_turn::authority_recovery::BuildMismatchRefusal::ReloadAlreadyRequested),
             None,
         );
 
@@ -11609,8 +11563,7 @@ mod tests {
     #[test]
     fn pending_editor_handoff_refuses_detached_disk_over_stale_disk_projection() {
         let (dir, file, _canonical) = temp_git_doc(&["operator queue edit\n"]);
-        let document_hash =
-            agent_doc_hash::document_id_for_path(&file.canonicalize().unwrap());
+        let document_hash = agent_doc_hash::document_id_for_path(&file.canonicalize().unwrap());
         let authority_event = |event_id: &str, authority, authority_epoch| {
             agent_doc_state_backbone::StateEvent::new(
                 event_id,
@@ -11734,7 +11687,9 @@ mod tests {
             EditorAttachHoldReading::Held
         );
         assert_eq!(
-            editor_attach_hold_describes(&Ok(agent_doc_crdt_relay_io::CurrentText::EditorSyncPending)),
+            editor_attach_hold_describes(&Ok(
+                agent_doc_crdt_relay_io::CurrentText::EditorSyncPending
+            )),
             EditorAttachHoldReading::Held
         );
         assert_eq!(
@@ -12225,7 +12180,10 @@ mod tests {
             observations, 2,
             "one baseline and one immediate observation"
         );
-        assert!(sleeps.is_empty(), "a zero budget must not sleep: {sleeps:?}");
+        assert!(
+            sleeps.is_empty(),
+            "a zero budget must not sleep: {sleeps:?}"
+        );
     }
 
     /// A controller transport error while the editor is still registered is
@@ -12285,11 +12243,18 @@ mod tests {
             let mut skipped = 0;
             while should_pause_editor_replica_self_heal(file, &observed) {
                 skipped += 1;
-                assert!(skipped <= UNANSWERED_SELF_HEAL_MAX_SKIP, "never pauses forever");
+                assert!(
+                    skipped <= UNANSWERED_SELF_HEAL_MAX_SKIP,
+                    "never pauses forever"
+                );
             }
             pauses.push(skipped);
         }
-        assert_eq!(pauses, vec![1, 2, 4, 8], "the backoff doubles per unanswered budget");
+        assert_eq!(
+            pauses,
+            vec![1, 2, 4, 8],
+            "the backoff doubles per unanswered budget"
+        );
 
         // An answered budget at the same witness is a fact about the endpoint.
         record_editor_replica_self_heal_exhausted(file, observed.clone());
@@ -12767,12 +12732,7 @@ mod tests {
         assert!(recovered.contains("queue: stop"));
         assert_eq!(recovered.matches("agent:boundary:").count(), 1);
         assert_eq!(
-            editor_operator_cut_for_agent_rebase(
-                &file,
-                base,
-                &unclosed_exchange,
-                "test_reconnect",
-            ),
+            editor_operator_cut_for_agent_rebase(&file, base, &unclosed_exchange, "test_reconnect",),
             operator_cut
         );
         assert_eq!(
@@ -12816,8 +12776,9 @@ mod tests {
         );
         assert!(canonical_document_target_is_valid(&raced_projection));
 
-        let collapsed = collapse_progressive_queue_projection(base, &agent_target, &raced_projection)
-            .expect("the raced projection should expose a progressive queue chain");
+        let collapsed =
+            collapse_progressive_queue_projection(base, &agent_target, &raced_projection)
+                .expect("the raced projection should expose a progressive queue chain");
         let recovered = editor_operator_cut_for_agent_rebase(
             &file,
             base,
@@ -12899,8 +12860,7 @@ mod tests {
 
     #[test]
     fn materialized_queue_revision_keeps_one_id_across_projection_retry() {
-        let partial =
-            "Re: Cross-platform mise bootstrap: Can this be run remotely via uvx?";
+        let partial = "Re: Cross-platform mise bootstrap: Can this be run remotely via uvx?";
         let complete = concat!(
             "Re: Cross-platform mise bootstrap: Can this be run remotely via uvx...",
             "cross platform?",
@@ -12942,7 +12902,8 @@ mod tests {
             "<!-- /agent:exchange -->\n",
         );
         let current = "In sample-app, describe setup and add installation usage docs with Python 3.14 and other dependencies.";
-        let stale = "In sample-app, describe setup and add installation usage docs with Python 3.14.";
+        let stale =
+            "In sample-app, describe setup and add installation usage docs with Python 3.14.";
         let raced_projection = base.replacen(
             "<!-- /agent:queue -->",
             &format!("- 🚧 {current}\n- {stale}\n<!-- /agent:queue -->"),
@@ -13026,8 +12987,9 @@ mod tests {
             1,
         );
 
-        let collapsed = collapse_progressive_queue_projection(base, &agent_target, &raced_projection)
-            .expect("the completed live edit must supersede its stale baseline prefix");
+        let collapsed =
+            collapse_progressive_queue_projection(base, &agent_target, &raced_projection)
+                .expect("the completed live edit must supersede its stale baseline prefix");
         assert_eq!(collapsed.matches(complete_prompt.trim_end()).count(), 1);
         assert!(
             !collapsed
@@ -13269,11 +13231,9 @@ mod tests {
             .unwrap();
         })
         .unwrap();
-        let observed = try_resolve_current_document_content(
-            &file,
-            "response_replay_repair_race_observed",
-        )
-        .unwrap();
+        let observed =
+            try_resolve_current_document_content(&file, "response_replay_repair_race_observed")
+                .unwrap();
         assert_eq!(observed, editor_cut);
         assert_eq!(
             classify_response_replay_repair_settlement_for_file(
@@ -13294,7 +13254,10 @@ mod tests {
         .unwrap();
         let pending = pending_document_write(&file)
             .expect("advanced editor authority must remain the retained delivery target");
-        assert_eq!(pending.expected_content.as_deref(), Some(repair_target.as_str()));
+        assert_eq!(
+            pending.expected_content.as_deref(),
+            Some(repair_target.as_str())
+        );
         assert_eq!(pending.target_content, editor_cut);
         assert_eq!(
             try_resolve_current_document_content(
@@ -15349,8 +15312,8 @@ mod tests {
         // flaked under a load-128 parallel `make check` (8.4s) while the
         // write still took the fresh-recipient path. The two slow paths this
         // guards against each leave their own ops-log event.
-        let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log"))
-            .unwrap_or_default();
+        let log =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
         assert!(
             !log.contains("_editor_delivery_worker_stale "),
             "a fresh relay recipient must not take the stale-worker recovery branch:\n{log}",
@@ -15400,14 +15363,19 @@ mod tests {
         let message = format!("{err:#}");
         let display = file.display().to_string();
         assert!(
-            message.contains(&agent_doc_turn::write_ownership::editor_attach_operator_action(&display)),
+            message.contains(
+                &agent_doc_turn::write_ownership::editor_attach_operator_action(&display)
+            ),
             "{message}"
         );
         assert!(
             !message.contains(agent_doc_turn::write_ownership::editor_replica_recovery()),
             "a native reload re-runs the same refused attach: {message}"
         );
-        assert!(!message.contains("deferral, not a lost response"), "{message}");
+        assert!(
+            !message.contains("deferral, not a lost response"),
+            "{message}"
+        );
 
         seed_reliable_sync_close(&file, identity);
         assert!(
@@ -15478,9 +15446,8 @@ mod tests {
     /// caller names `agent-doc commit` instead of waiting forever.
     #[test]
     fn unregistered_endpoint_with_zero_live_replicas_is_an_unowned_route() {
-        let (dir, file, _canonical) = temp_doc(
-            "---\nsession: gh144-unowned-route\n---\n\n# Session\n",
-        );
+        let (dir, file, _canonical) =
+            temp_doc("---\nsession: gh144-unowned-route\n---\n\n# Session\n");
         drop(agent_doc_sqlite::state_store::open_state_db(dir.path()).expect("state db"));
         let identity = "test-gh144-unowned-route";
         seed_reliable_sync_open(&file, identity);
@@ -15521,8 +15488,7 @@ mod tests {
         }
 
         assert!(editor_route_unowned(&file));
-        let ownership = observed_retained_write_ownership(&file)
-            .with_retained_projection(true);
+        let ownership = observed_retained_write_ownership(&file).with_retained_projection(true);
         assert!(ownership.delivery_rejected, "{ownership:?}");
         assert!(ownership.editor_route_unowned, "{ownership:?}");
         assert_eq!(
@@ -16099,11 +16065,8 @@ mod tests {
             item = item,
             prioritized_item = prioritized_item,
         );
-        let completion = agent_doc_document::subagent_completion::cell(
-            "subagent:gh342",
-            item,
-            "attempt-342",
-        );
+        let completion =
+            agent_doc_document::subagent_completion::cell("subagent:gh342", item, "attempt-342");
         let retained_completion = base.replace(
             "<!-- agent:boundary:base -->",
             &format!("{completion}\n<!-- agent:boundary:base -->"),
@@ -16164,9 +16127,11 @@ mod tests {
                 .contains(&format!("~~{prioritized_item}~~"))
         );
         assert!(!pending.target_content.contains("claim remains active"));
-        assert!(!pending
-            .target_content
-            .contains("agent-doc-subagent-completion"));
+        assert!(
+            !pending
+                .target_content
+                .contains("agent-doc-subagent-completion")
+        );
     }
 
     #[test]
@@ -17413,10 +17378,8 @@ mod tests {
             "{}\n-->\n",
             prior_cut.replace("- 📥 prior head\n", "- 📥 stale prior head\n")
         );
-        let current_cut = prior_cut.replace(
-            "- 📥 prior head\n",
-            "- 📥 operator-owned current head\n",
-        );
+        let current_cut =
+            prior_cut.replace("- 📥 prior head\n", "- 📥 operator-owned current head\n");
         let captured_response = "### Re: investigate\n\nRecovered the current response.\n";
         let replayed_target =
             agent_doc_turn::response_replay::materialize_response_in_current_exchange(
@@ -18609,10 +18572,7 @@ mod tests {
         )
         .unwrap()
         .expect("a pending owned response must fold into canonical");
-        let expected = receipt.replace(
-            "- 📥 do #a\n",
-            "- 📥 do #a\n- 📥 #b typed later\n",
-        );
+        let expected = receipt.replace("- 📥 do #a\n", "- 📥 do #a\n- 📥 #b typed later\n");
         assert_eq!(folded, expected);
         assert_eq!(
             try_resolve_current_document_content(&file, "appliedresponsefold_check").unwrap(),

@@ -507,8 +507,8 @@ mod tests {
         // Each gap the matrix states is pinned to the adapter source, so closing
         // the gap fails here until the matrix is updated in the same change.
         let declares_kind = VSCODE_MANIFEST.contains("\"extensionKind\"");
-        let declares_workspace = VSCODE_MANIFEST
-            .contains("\"extensionKind\": [\n    \"workspace\"\n  ]");
+        let declares_workspace =
+            VSCODE_MANIFEST.contains("\"extensionKind\": [\n    \"workspace\"\n  ]");
         assert_eq!(
             row("VS Code on Coder")[1].contains("`extensionKind` undeclared"),
             !declares_kind,

@@ -188,7 +188,9 @@ pub fn close_exact_reported_receipt(
     source: &str,
 ) -> Result<bool> {
     let now = now_secs();
-    let closed = mutate(file, |ledger| ledger.close_exact_attempt(owner, generation, now))?;
+    let closed = mutate(file, |ledger| {
+        ledger.close_exact_attempt(owner, generation, now)
+    })?;
     if closed > 0 {
         agent_doc_ops_log_io::log_op(
             file,
@@ -322,8 +324,7 @@ pub fn capture_response(
         .find(|receipt| {
             receipt.identity == claim.identity
                 && receipt.generation == claim.generation
-                && receipt.worker_id
-                    == claim.worker.as_ref().map(|worker| worker.worker_id.clone())
+                && receipt.worker_id == claim.worker.as_ref().map(|worker| worker.worker_id.clone())
         })
         .context("captured queue response receipt was not persisted")?;
     agent_doc_ops_log_io::log_op(
@@ -384,10 +385,9 @@ fn ensure_captured_response(file: &Path, claim: &QueueClaim) -> Result<()> {
     });
     anyhow::ensure!(
         receipt.is_some_and(|receipt| {
-            receipt
-                .response
-                .as_ref()
-                .is_some_and(agent_doc_queue::claim_release_receipt::CapturedQueueResponse::is_valid)
+            receipt.response.as_ref().is_some_and(
+                agent_doc_queue::claim_release_receipt::CapturedQueueResponse::is_valid,
+            )
         }),
         "refusing reported release for generation {}: no durable response receipt; use `agent-doc queue report-complete` first",
         claim.generation,
@@ -751,10 +751,12 @@ pub fn retire_struck(
 }
 
 fn terminal_projection_pending(file: &Path) -> Result<bool> {
-    Ok(agent_doc_cycle_state_io::load_document_projection(file)?.is_some_and(|projection| {
-        projection.document.pending_write.is_some()
-            || !projection.document.pending_write_journal.is_empty()
-    }))
+    Ok(
+        agent_doc_cycle_state_io::load_document_projection(file)?.is_some_and(|projection| {
+            projection.document.pending_write.is_some()
+                || !projection.document.pending_write_journal.is_empty()
+        }),
+    )
 }
 
 /// End the struck rows' durable finished-work evidence (`#strikeretires`):
@@ -895,8 +897,7 @@ mod tests {
         // A strike that left the receipt open (pre-close binary, deferred or
         // hand strike): the reappearing row is still governed by it.
         let struck = live.replace(&format!("- {item}\n"), &format!("- ~~{item}~~\n"));
-        let reappeared =
-            live.replace(&format!("- {item}\n"), &format!("- ~~{item}~~\n- {item}\n"));
+        let reappeared = live.replace(&format!("- {item}\n"), &format!("- ~~{item}~~\n- {item}\n"));
         assert!(
             governing_receipt(&doc, &reappeared, item).is_some(),
             "the legacy open receipt revives the re-added row"
@@ -907,9 +908,17 @@ mod tests {
                 .reported_checkmark
                 .len()
         };
-        assert_eq!(reported_rows(&reappeared), 1, "preflight serves it as reported");
+        assert_eq!(
+            reported_rows(&reappeared),
+            1,
+            "preflight serves it as reported"
+        );
 
-        assert_eq!(prune_closed(&doc, &struck).unwrap(), 0, "the capture is kept");
+        assert_eq!(
+            prune_closed(&doc, &struck).unwrap(),
+            0,
+            "the capture is kept"
+        );
         let receipts = load(&doc).unwrap().receipts;
         assert_eq!(receipts.len(), 1, "{receipts:?}");
         assert!(receipts[0].attempt_closed(), "{receipts:?}");
@@ -921,7 +930,10 @@ mod tests {
         );
 
         for current in [live.as_str(), reappeared.as_str()] {
-            assert!(governing_receipt(&doc, current, item).is_none(), "{current}");
+            assert!(
+                governing_receipt(&doc, current, item).is_none(),
+                "{current}"
+            );
             assert!(!reported_items_for_content(&doc, current).claims(item));
             assert!(!attested_reported_items_for_content(&doc, current).claims(item));
             assert!(reported_head_texts_for_content(&doc, current).is_empty());
@@ -943,7 +955,10 @@ mod tests {
         // A live row keeps an open receipt governing it: closure needs the
         // row to be gone, exactly like the plain-receipt prune.
         let (_, next) = crate::queue_claim::claim(&doc, item, owner, 3600).unwrap();
-        assert!(next.generation > claim.generation, "lineage keeps the fence");
+        assert!(
+            next.generation > claim.generation,
+            "lineage keeps the fence"
+        );
         crate::queue_claim::start_attempt(
             &doc,
             item,

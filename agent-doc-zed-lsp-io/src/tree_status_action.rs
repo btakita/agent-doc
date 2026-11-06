@@ -49,9 +49,8 @@ pub(crate) fn code_actions(
     };
     let wanted = |kind: &str| {
         only.is_none_or(|only| {
-            only.iter().any(|requested| {
-                kind == requested || kind.starts_with(&format!("{requested}."))
-            })
+            only.iter()
+                .any(|requested| kind == requested || kind.starts_with(&format!("{requested}.")))
         })
     };
     let mut actions = Vec::new();
@@ -173,7 +172,10 @@ mod tests {
         let delete = &actions[1];
         assert_eq!(delete["kind"], "quickfix");
         assert!(
-            delete["title"].as_str().unwrap().starts_with("Agent Doc: Delete L5–L6 "),
+            delete["title"]
+                .as_str()
+                .unwrap()
+                .starts_with("Agent Doc: Delete L5–L6 "),
             "{delete}"
         );
         assert_eq!(

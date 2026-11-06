@@ -143,7 +143,10 @@ mod tests {
         assert_eq!(content.matches("### Re: topic").count(), 1);
         assert_eq!(effects.writes.get(), 1);
         assert_eq!(effects.snapshots.get(), 1);
-        assert_eq!(effects.checkpoint.borrow().as_deref(), Some(content.as_str()));
+        assert_eq!(
+            effects.checkpoint.borrow().as_deref(),
+            Some(content.as_str())
+        );
     }
 
     /// `#dedupepresettle`: a write the delivery projection accepted but has not

@@ -67,10 +67,7 @@ fn read_site(relative: &str) -> String {
 /// component, so each site would otherwise need its own reading of the same
 /// question.
 const SHARED_LEDGER_PREDICATES: &[(&str, &str)] = &[
-    (
-        "archived_tracked_ids",
-        "done_archive::archived_tracked_ids",
-    ),
+    ("archived_tracked_ids", "done_archive::archived_tracked_ids"),
     (
         "registered_prompt_preset_ids",
         "coined_ids::registered_prompt_preset_ids",

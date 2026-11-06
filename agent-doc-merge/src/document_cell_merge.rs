@@ -2251,10 +2251,13 @@ mod tests {
     /// could retain the nested copy and expose a duplicate choice.
     #[test]
     fn nested_lifecycle_projection_keeps_the_operator_list_slot() {
-        let parent = "~~do [#rungamesessions] [#subagent-operator-request-rungamesessions-reopen]~~";
-        let choice = "[#subagent:rungamesessions_reconcile_choice#1] **Reconcile and reopen (Recommended)**";
+        let parent =
+            "~~do [#rungamesessions] [#subagent-operator-request-rungamesessions-reopen]~~";
+        let choice =
+            "[#subagent:rungamesessions_reconcile_choice#1] **Reconcile and reopen (Recommended)**";
         let marked = format!("🙋⚠️ {choice}");
-        let nested_prompt = "🚧 [#subagent:rungamesessions_reconcile_gui#1] Reconcile the live session";
+        let nested_prompt =
+            "🚧 [#subagent:rungamesessions_reconcile_gui#1] Reconcile the live session";
         let base = q(&format!(
             "- {parent}\n  - {choice}\n    - {nested_prompt}\n"
         ));

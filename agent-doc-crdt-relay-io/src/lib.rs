@@ -595,10 +595,7 @@ const DOCUMENT_MODEL_ENSURE_MISSING_REPLICA_TIMEOUT_MS: u64 = 60;
 const DOCUMENT_MODEL_ENSURE_MISSING_REPLICA_TIMEOUT_MS: u64 = 400;
 
 fn document_model_ensure_poll_delay(completed_polls: usize) -> std::time::Duration {
-    document_model_ensure_poll_delay_with_max(
-        completed_polls,
-        DOCUMENT_MODEL_ENSURE_POLL_MAX_MS,
-    )
+    document_model_ensure_poll_delay_with_max(completed_polls, DOCUMENT_MODEL_ENSURE_POLL_MAX_MS)
 }
 
 fn document_model_ensure_poll_delay_with_max(
@@ -1294,16 +1291,15 @@ fn durable_queue_attempt_projection(file: &Path, current: &str) -> Result<String
             agent_doc_queue::queue_claim::QueueClaimLedger::from_state_payload(&record.payload_json)
         })
         .transpose();
-    let receipt_ledger =
-        receipt_record
-            .as_ref()
-            .map(|record| {
-                serde_json::from_str::<
+    let receipt_ledger = receipt_record
+        .as_ref()
+        .map(|record| {
+            serde_json::from_str::<
                     agent_doc_queue::claim_release_receipt::ClaimReleaseReceiptLedger,
                 >(&record.payload_json)
                 .context("parse durable queue report outbox")
-            })
-            .transpose();
+        })
+        .transpose();
     let state_degraded = claim_ledger.is_err() || receipt_ledger.is_err();
     let mut ledger = claim_ledger.unwrap_or_default().unwrap_or_default();
     let receipts = receipt_ledger
@@ -4747,7 +4743,8 @@ fn apply_binary_authored_on_hub(
     source: &str,
 ) -> Result<agent_doc_document_realtime::crdt_relay::BroadcastPacket> {
     binary_write_attribution::seed_hub(file, hub);
-    let packet = hub.apply_binary_authored_replace_scoped(expected_current, content, scope, source)?;
+    let packet =
+        hub.apply_binary_authored_replace_scoped(expected_current, content, scope, source)?;
     binary_write_attribution::persist_hub(file, hub);
     Ok(packet)
 }
@@ -10384,7 +10381,10 @@ mod tests {
         let pull = pull_replica_updates_for_file(&doc, identity)
             .unwrap()
             .expect("the registered member pulls");
-        assert!(!pull.updates.is_empty(), "the write was queued for the editor");
+        assert!(
+            !pull.updates.is_empty(),
+            "the write was queued for the editor"
+        );
         assert_eq!(pull.history_lineage, registration.history_lineage);
         assert!(
             pull.updates
@@ -11411,7 +11411,10 @@ mod tests {
             }
         );
         assert_eq!(
-            classify_reseed_committed_history("# doc\n\nv1\noperator typing\n", [Some(v2), Some(v1)]),
+            classify_reseed_committed_history(
+                "# doc\n\nv1\noperator typing\n",
+                [Some(v2), Some(v1)]
+            ),
             ReseedCommittedHistory::Unproven,
             "editor-only text is never rolled over"
         );
@@ -11433,10 +11436,16 @@ mod tests {
     fn controllerrecyclelost_fresh_controller_reseed_hydrates_the_newest_committed_text() {
         let (dir, doc) = temp_doc("recycle-lost.md");
         std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
-        let older = "# recycle-lost.md\n\n<!-- agent:exchange -->\nprompt\n<!-- /agent:exchange -->\n";
+        let older =
+            "# recycle-lost.md\n\n<!-- agent:exchange -->\nprompt\n<!-- /agent:exchange -->\n";
         let committed = "# recycle-lost.md\n\n<!-- agent:exchange -->\nprompt\n\n### Re: committed response\n\nBody.\n<!-- /agent:exchange -->\n";
         git_commit_document(dir.path(), &doc, older);
-        git_commit_next_revision(dir.path(), &doc, committed, "agent-doc(recycle-lost): response");
+        git_commit_next_revision(
+            dir.path(),
+            &doc,
+            committed,
+            "agent-doc(recycle-lost): response",
+        );
         // The 12:19 commit came from the snapshot: disk kept the older bytes.
         std::fs::write(&doc, older).unwrap();
         forget_controller_relay_state_for_test(&doc);
@@ -11493,7 +11502,12 @@ mod tests {
         let older = "# recycle-typed.md\n\nbody\n";
         let committed = "# recycle-typed.md\n\nbody\n\ncommitted response\n";
         git_commit_document(dir.path(), &doc, older);
-        git_commit_next_revision(dir.path(), &doc, committed, "agent-doc(recycle-typed): response");
+        git_commit_next_revision(
+            dir.path(),
+            &doc,
+            committed,
+            "agent-doc(recycle-typed): response",
+        );
         forget_controller_relay_state_for_test(&doc);
         seed_live_reliable_sync_open(&doc.display().to_string());
 
@@ -11511,8 +11525,14 @@ mod tests {
 
         with_hub(&doc, |hub| assert_eq!(hub.canonical_text(), typed)).unwrap();
         let ops = ops_log(dir.path());
-        assert!(ops.contains("crdt_reseed_committed_history_unproven"), "{ops}");
-        assert!(!ops.contains("crdt_reseed_committed_history_rolled_forward"), "{ops}");
+        assert!(
+            ops.contains("crdt_reseed_committed_history_unproven"),
+            "{ops}"
+        );
+        assert!(
+            !ops.contains("crdt_reseed_committed_history_rolled_forward"),
+            "{ops}"
+        );
     }
 
     /// Test-only controller recycle: drop this process's relay hub and its
@@ -14957,8 +14977,8 @@ mod tests {
         let mut elapsed_ms = 0_u64;
         let mut probes = 0usize;
         while elapsed_ms < 5_000 {
-            let delay_ms = document_model_ensure_poll_delay_with_max(probes, 250).as_millis()
-                as u64;
+            let delay_ms =
+                document_model_ensure_poll_delay_with_max(probes, 250).as_millis() as u64;
             elapsed_ms = elapsed_ms.saturating_add(delay_ms);
             probes += 1;
         }

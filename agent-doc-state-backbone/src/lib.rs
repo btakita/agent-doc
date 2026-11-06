@@ -1672,9 +1672,10 @@ impl DocumentStateProjection {
     /// abandoned-cycle allowance cannot cross into a new turn.
     pub fn active_captured_response_for_queue_strike(&self) -> Option<&CapturedResponseProjection> {
         let capture = self.closeout.captured_response.as_ref()?;
-        (self.closeout.phase.is_some_and(|phase| {
-            phase.is_open() || phase == CyclePhase::Abandoned
-        })
+        (self
+            .closeout
+            .phase
+            .is_some_and(|phase| phase.is_open() || phase == CyclePhase::Abandoned)
             && self.closeout.cycle_id.as_deref() == Some(capture.cycle_id.as_str())
             && !self.captured_response_terminally_proven(capture))
         .then_some(capture)
@@ -2463,9 +2464,9 @@ impl DocumentStateProjection {
                         // remains in the journal.
                         self.document
                             .seed_pending_write_journal_from_legacy_projection();
-                        self.document.pending_write_journal.retain(|pending| {
-                            pending.target_content != superseded_compact_target
-                        });
+                        self.document
+                            .pending_write_journal
+                            .retain(|pending| pending.target_content != superseded_compact_target);
                         self.document.pending_write =
                             self.document.pending_write_journal.last().cloned();
                     }
@@ -4232,7 +4233,8 @@ impl QueueContextClearProjection {
     /// harness turn (no auto-queue loop involved).
     pub fn is_live_turn_deferred_operator_clear(&self) -> bool {
         matches!(self.phase, QueueContextClearPhase::Deferred)
-            && self.source.as_deref() == Some(QUEUE_CONTEXT_CLEAR_SOURCE_OPERATOR_LIVE_TURN_DEFERRED)
+            && self.source.as_deref()
+                == Some(QUEUE_CONTEXT_CLEAR_SOURCE_OPERATOR_LIVE_TURN_DEFERRED)
     }
 
     pub fn is_manual_operator_clear_cooldown(&self) -> bool {
@@ -10316,7 +10318,15 @@ mod tests {
         // A newer queued clear retires the notice.
         ledger.append(deferred("deferred-2", 2, 1_100));
         let projection = ledger.project();
-        assert_eq!(projection.document("doc-a").unwrap().queue.context_clear.superseded, None);
+        assert_eq!(
+            projection
+                .document("doc-a")
+                .unwrap()
+                .queue
+                .context_clear
+                .superseded,
+            None
+        );
 
         // A delivered clear (settled with no retirement reason) is not a drop.
         ledger.append(settled("settled-2", 2, 1_200, None));
@@ -10324,7 +10334,11 @@ mod tests {
         let context_clear = &projection.document("doc-a").unwrap().queue.context_clear;
         assert_eq!(context_clear.phase, QueueContextClearPhase::Idle);
         assert_eq!(context_clear.superseded, None);
-        assert!(!serde_json::to_string(context_clear).unwrap().contains("superseded"));
+        assert!(
+            !serde_json::to_string(context_clear)
+                .unwrap()
+                .contains("superseded")
+        );
 
         // A reason on a clear that was not deferred (in-flight) is not a drop.
         let mut ledger = EventLedger::new();
@@ -10345,7 +10359,15 @@ mod tests {
         ));
         ledger.append(settled("settled-started-1", 1, 1_010, Some("newer_prompt")));
         let projection = ledger.project();
-        assert_eq!(projection.document("doc-a").unwrap().queue.context_clear.superseded, None);
+        assert_eq!(
+            projection
+                .document("doc-a")
+                .unwrap()
+                .queue
+                .context_clear
+                .superseded,
+            None
+        );
     }
 
     #[test]

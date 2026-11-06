@@ -130,10 +130,7 @@ mod tests {
                 .expect("a nested pending leaf must prevent terminal closeout");
 
         assert_eq!(continuation.head_id, None);
-        assert_eq!(
-            continuation.head_prompt,
-            "📥 address reviewer feedback"
-        );
+        assert_eq!(continuation.head_prompt, "📥 address reviewer feedback");
     }
 
     #[test]

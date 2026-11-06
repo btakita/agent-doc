@@ -27,8 +27,7 @@ use agent_doc_document_realtime_io::{
     AttachedEditorDiskReadRefused, attached_editor_disk_read_refusal,
 };
 use agent_doc_preflight_io::admission_replica_hold::{
-    HoldObservation, hold_for_replica_with_effects,
-    resolve_admitting_transient_replica,
+    HoldObservation, hold_for_replica_with_effects, resolve_admitting_transient_replica,
 };
 use agent_doc_turn::authority_recovery::{AttachedEditorRecoveryDecision, AuthorityObservation};
 
@@ -196,7 +195,11 @@ fn run_while_typing_through_a_transient_missing_replica_is_admitted_on_coherent_
                             .lines()
                             .filter(|line| line.starts_with("- f"))
                             .count();
-                        assert!(line_lines <= 1, "operator text duplicated: {}", admitted.content);
+                        assert!(
+                            line_lines <= 1,
+                            "operator text duplicated: {}",
+                            admitted.content
+                        );
                         if admitted.content.contains("- f")
                             && !admitted.content.contains(QUEUE_LINE)
                         {
@@ -253,7 +256,11 @@ fn incident_timeline_replica_back_after_six_seconds_is_admitted() {
     assert_eq!(report.reregister_nudges, 1);
     // Six keystrokes landed during the hold; all six, once each, and not the
     // stale disk image that lacks them.
-    assert!(admitted.content.contains(&format!("{}\n<!--", &QUEUE_LINE[..6])));
+    assert!(
+        admitted
+            .content
+            .contains(&format!("{}\n<!--", &QUEUE_LINE[..6]))
+    );
     assert_ne!(admitted.content, DISK);
 }
 

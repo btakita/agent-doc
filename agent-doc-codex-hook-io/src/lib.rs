@@ -1667,7 +1667,11 @@ mod tests {
 
         assert_ne!(first_id, second_id);
         let entries = ledger_entries(&dir, &doc);
-        assert_eq!(entries.len(), 1, "duplicate text remains ledger-deduplicated");
+        assert_eq!(
+            entries.len(),
+            1,
+            "duplicate text remains ledger-deduplicated"
+        );
         assert_eq!(entries[0].surrogate_id, second_id);
     }
 

@@ -199,7 +199,10 @@ impl ConversationHolderReport {
                 conversation,
             } => {
                 let mut lines = vec![format!("conversation_holders: {} live", live.len())];
-                lines.extend(live.iter().map(|s| format!("conversation_holders.live: {s}")));
+                lines.extend(
+                    live.iter()
+                        .map(|s| format!("conversation_holders.live: {s}")),
+                );
                 lines.extend(conversation.status_line());
                 lines.extend(
                     stale
@@ -505,8 +508,16 @@ mod tests {
         }
         let lines = report.status_lines();
         assert_eq!(lines.len(), 3);
-        assert!(lines.iter().any(|l| l.starts_with("conversation_holders.live:")));
-        assert!(lines.iter().any(|l| l.starts_with("conversation_holders.stale:")));
+        assert!(
+            lines
+                .iter()
+                .any(|l| l.starts_with("conversation_holders.live:"))
+        );
+        assert!(
+            lines
+                .iter()
+                .any(|l| l.starts_with("conversation_holders.stale:"))
+        );
     }
 
     /// After `agent: claude` -> `agent: codex` the document keeps its old
@@ -557,8 +568,10 @@ mod tests {
         let lines = report.status_lines();
         assert_eq!(lines[0], "conversation_holders: 1 live");
         assert!(
-            lines.iter().any(|l| l.contains("claude=baaf5655 is not held")
-                && l.contains("outside the terminal")),
+            lines
+                .iter()
+                .any(|l| l.contains("claude=baaf5655 is not held")
+                    && l.contains("outside the terminal")),
             "{lines:#?}"
         );
     }

@@ -62,6 +62,7 @@ mod decision_derive;
 mod decision_search;
 mod dedupe_cmd;
 mod describe_image;
+mod document_cmd;
 mod dogfood_cmd;
 mod env_cmd;
 mod exchange;
@@ -103,7 +104,6 @@ mod read;
 mod reliable_sync_status_cmd;
 mod rename;
 mod reset;
-mod document_cmd;
 mod runbook;
 mod runtime_update;
 mod self_install;
@@ -1580,9 +1580,9 @@ fn ack_text_selector(
         (Some(_), Some(_)) => anyhow::bail!(
             "--ack-occurrence and --ack-owner are alternative selectors; pass exactly one"
         ),
-        (Some(0), None) => anyhow::bail!(
-            "--ack-occurrence is one-based and must be greater than zero"
-        ),
+        (Some(0), None) => {
+            anyhow::bail!("--ack-occurrence is one-based and must be greater than zero")
+        }
         (Some(occurrence), None) => Ok(Some(AckTextSelector::Occurrence(occurrence))),
         (None, Some(raw)) => Ok(Some(AckTextSelector::Owner(parse_ack_owner(raw)?))),
         (None, None) => Ok(None),
@@ -4559,10 +4559,15 @@ enum DecisionAction {
 /// The decision graph for a session document (`#decisiongraph`).
 fn load_decision_graph(
     file: &Path,
-) -> anyhow::Result<(agent_doc_answer_ledger::Ledger, agent_doc_answer_ledger::graph::DecisionGraph)> {
+) -> anyhow::Result<(
+    agent_doc_answer_ledger::Ledger,
+    agent_doc_answer_ledger::graph::DecisionGraph,
+)> {
     let content = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
-    Ok(agent_doc_preflight_io::answer_ledger::build_graph(file, &content))
+    Ok(agent_doc_preflight_io::answer_ledger::build_graph(
+        file, &content,
+    ))
 }
 
 fn resolve_graph_decision(
@@ -4572,17 +4577,27 @@ fn resolve_graph_decision(
     if let Some(decision) = graph.resolve_decision(id) {
         return Ok(decision);
     }
-    let bare = id.trim_start_matches("[#").trim_start_matches('#').trim_end_matches(']');
+    let bare = id
+        .trim_start_matches("[#")
+        .trim_start_matches('#')
+        .trim_end_matches(']');
     match graph.decisions_applying_to(bare).as_slice() {
         [one] => Ok(one.clone()),
         [] => anyhow::bail!("{id} is not a decision, a revision, or a question copy"),
-        many => anyhow::bail!("{id} is an item several decisions apply to; name one: {}", many.join(", ")),
+        many => anyhow::bail!(
+            "{id} is an item several decisions apply to; name one: {}",
+            many.join(", ")
+        ),
     }
 }
 
 fn run_decision_action(action: DecisionAction) -> anyhow::Result<()> {
     match action {
-        DecisionAction::Read { project_root, id, json } => {
+        DecisionAction::Read {
+            project_root,
+            id,
+            json,
+        } => {
             if let Some(id) = id {
                 let record = agent_doc_decision_io::read_decision(&project_root, &id)?
                     .with_context(|| format!("decision {id} was not found"))?;
@@ -4594,8 +4609,16 @@ fn run_decision_action(action: DecisionAction) -> anyhow::Result<()> {
                         record.id,
                         record.state.as_str(),
                         record.updated_at,
-                        if record.evidence_response_ids.is_empty() { "(none)".to_string() } else { record.evidence_response_ids.join(", ") },
-                        if record.supersedes.is_empty() { "(none)".to_string() } else { record.supersedes.join(", ") },
+                        if record.evidence_response_ids.is_empty() {
+                            "(none)".to_string()
+                        } else {
+                            record.evidence_response_ids.join(", ")
+                        },
+                        if record.supersedes.is_empty() {
+                            "(none)".to_string()
+                        } else {
+                            record.supersedes.join(", ")
+                        },
                         record.decision,
                         record.rationale
                     );
@@ -4603,20 +4626,56 @@ fn run_decision_action(action: DecisionAction) -> anyhow::Result<()> {
             } else {
                 let registry = agent_doc_decision_io::read_registry(&project_root)?;
                 if json {
-                    println!("{}", serde_json::to_string_pretty(&registry.records.values().collect::<Vec<_>>())?);
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(
+                            &registry.records.values().collect::<Vec<_>>()
+                        )?
+                    );
                 } else {
                     print!("{}", agent_doc_decision_io::render_registry(&registry));
                 }
             }
             Ok(())
         }
-        DecisionAction::Plan { project_root, id, state, decision, rationale, evidence, remove_evidence, supersedes, clear_supersedes, delete, output } => {
-            let state = state.as_deref().map(agent_doc_decision_io::DecisionState::parse).transpose()?;
-            let supersedes = if clear_supersedes { Some(Vec::new()) } else if supersedes.is_empty() { None } else { Some(supersedes) };
-            let plan = agent_doc_decision_io::plan(&project_root, agent_doc_decision_io::MutationRequest {
-                id, state, decision, rationale, add_evidence: evidence, remove_evidence,
-                supersedes, delete, updated_at: None,
-            })?;
+        DecisionAction::Plan {
+            project_root,
+            id,
+            state,
+            decision,
+            rationale,
+            evidence,
+            remove_evidence,
+            supersedes,
+            clear_supersedes,
+            delete,
+            output,
+        } => {
+            let state = state
+                .as_deref()
+                .map(agent_doc_decision_io::DecisionState::parse)
+                .transpose()?;
+            let supersedes = if clear_supersedes {
+                Some(Vec::new())
+            } else if supersedes.is_empty() {
+                None
+            } else {
+                Some(supersedes)
+            };
+            let plan = agent_doc_decision_io::plan(
+                &project_root,
+                agent_doc_decision_io::MutationRequest {
+                    id,
+                    state,
+                    decision,
+                    rationale,
+                    add_evidence: evidence,
+                    remove_evidence,
+                    supersedes,
+                    delete,
+                    updated_at: None,
+                },
+            )?;
             let json = serde_json::to_string_pretty(&plan)?;
             if let Some(output) = output {
                 std::fs::write(&output, format!("{json}\n"))
@@ -4627,27 +4686,43 @@ fn run_decision_action(action: DecisionAction) -> anyhow::Result<()> {
             }
             Ok(())
         }
-        DecisionAction::Apply { plan, commit, message } => {
+        DecisionAction::Apply {
+            plan,
+            commit,
+            message,
+        } => {
             let json = if plan == Path::new("-") {
                 let mut json = String::new();
                 std::io::stdin().read_to_string(&mut json)?;
                 json
             } else {
-                std::fs::read_to_string(&plan).with_context(|| format!("failed to read {}", plan.display()))?
+                std::fs::read_to_string(&plan)
+                    .with_context(|| format!("failed to read {}", plan.display()))?
             };
             let plan: agent_doc_decision_io::DecisionPlan = serde_json::from_str(&json)?;
             agent_doc_decision_io::apply(&plan)?;
-            println!("applied decision mutation to {}", plan.registry_path.display());
+            println!(
+                "applied decision mutation to {}",
+                plan.registry_path.display()
+            );
             if commit {
                 let committed = agent_doc_decision_io::commit_plan(&plan, message.as_deref())?;
-                println!("{}", if committed { "committed decision mutation" } else { "decision mutation already matched HEAD" });
+                println!(
+                    "{}",
+                    if committed {
+                        "committed decision mutation"
+                    } else {
+                        "decision mutation already matched HEAD"
+                    }
+                );
             }
             Ok(())
         }
         DecisionAction::Answered { file, json } => {
             let content = std::fs::read_to_string(&file)
                 .with_context(|| format!("failed to read {}", file.display()))?;
-            let (observations, ledger) = agent_doc_preflight_io::answer_ledger::build_ledger(&file, &content);
+            let (observations, ledger) =
+                agent_doc_preflight_io::answer_ledger::build_ledger(&file, &content);
             let facts = ledger.answered_facts();
             if json {
                 let value = serde_json::json!({
@@ -4662,10 +4737,19 @@ fn run_decision_action(action: DecisionAction) -> anyhow::Result<()> {
                 });
                 println!("{}", serde_json::to_string_pretty(&value)?);
             } else {
-                for decision in ledger.decisions.iter().filter(|decision| !decision.revisions.is_empty()) {
+                for decision in ledger
+                    .decisions
+                    .iter()
+                    .filter(|decision| !decision.revisions.is_empty())
+                {
                     println!("{} {}", decision.id, decision.question);
                     for revision in &decision.revisions {
-                        println!("  {} “{}” ({})", revision.relation.as_str(), revision.answer, revision.location);
+                        println!(
+                            "  {} “{}” ({})",
+                            revision.relation.as_str(),
+                            revision.answer,
+                            revision.location
+                        );
                     }
                     if !decision.open_items.is_empty() {
                         println!("  open copies: {}", decision.open_items.join(", "));
@@ -4674,10 +4758,18 @@ fn run_decision_action(action: DecisionAction) -> anyhow::Result<()> {
                 let size = ledger.hot_store_size();
                 println!(
                     "\nhot store (#decisionprune): {} of {} decisions hot ({} archived, {} revived), {} of {} keys, {} of {} revisions",
-                    size.hot_decisions, size.decisions, size.archived_decisions, size.revived_decisions,
-                    size.hot_keys, size.keys, size.hot_revisions, size.revisions
+                    size.hot_decisions,
+                    size.decisions,
+                    size.archived_decisions,
+                    size.revived_decisions,
+                    size.hot_keys,
+                    size.keys,
+                    size.hot_revisions,
+                    size.revisions
                 );
-                if let Some(guidance) = agent_doc_answer_ledger::contract_guidance(&facts, &ledger.possible) {
+                if let Some(guidance) =
+                    agent_doc_answer_ledger::contract_guidance(&facts, &ledger.possible)
+                {
                     println!("\n{guidance}");
                 }
             }
@@ -4686,33 +4778,53 @@ fn run_decision_action(action: DecisionAction) -> anyhow::Result<()> {
         DecisionAction::Graph { file, json } => {
             let (_, graph) = load_decision_graph(&file)?;
             if json {
-                println!("{}", serde_json::to_string_pretty(&serde_json::json!({
-                    "nodes": graph.nodes.values().collect::<Vec<_>>(),
-                    "edges": graph.edges,
-                }))?);
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "nodes": graph.nodes.values().collect::<Vec<_>>(),
+                        "edges": graph.edges,
+                    }))?
+                );
             } else {
                 for node in graph.nodes.values() {
                     println!("{} [{}] {}", node.id, node.kind.as_str(), node.label);
                 }
                 println!();
                 for edge in &graph.edges {
-                    println!("{} {} {} ({})", edge.from, edge.kind.as_str(), edge.to, edge.source.as_str());
+                    println!(
+                        "{} {} {} ({})",
+                        edge.from,
+                        edge.kind.as_str(),
+                        edge.to,
+                        edge.source.as_str()
+                    );
                 }
             }
             Ok(())
         }
-        DecisionAction::Impact { file, id, revision, json } => {
+        DecisionAction::Impact {
+            file,
+            id,
+            revision,
+            json,
+        } => {
             let (_, graph) = load_decision_graph(&file)?;
             let decision = resolve_graph_decision(&graph, &id)?;
-            let impact = graph.impact(&decision, revision.as_deref()).with_context(|| match &revision {
-                Some(revision) => format!("decision {decision} has no revision {revision}"),
-                None => format!("decision {decision} has no answer yet"),
-            })?;
+            let impact = graph
+                .impact(&decision, revision.as_deref())
+                .with_context(|| match &revision {
+                    Some(revision) => format!("decision {decision} has no revision {revision}"),
+                    None => format!("decision {decision} has no answer yet"),
+                })?;
             if json {
                 println!("{}", serde_json::to_string_pretty(&impact)?);
             } else {
                 println!("{} {}", impact.decision_id, impact.question);
-                println!("  change: {} ({})", impact.change, impact.change_source.as_str());
+                println!(
+                    "  change: {} ({})",
+                    impact.change,
+                    impact.change_source.as_str()
+                );
                 if let Some(from) = &impact.from_answer {
                     println!("  from: “{from}”");
                 }
@@ -4727,7 +4839,10 @@ fn run_decision_action(action: DecisionAction) -> anyhow::Result<()> {
                     println!("  conflicts with: {}", impact.conflicts_with.join(", "));
                 }
                 if !impact.superseded_decisions.is_empty() {
-                    println!("  supersedes decisions: {}", impact.superseded_decisions.join(", "));
+                    println!(
+                        "  supersedes decisions: {}",
+                        impact.superseded_decisions.join(", ")
+                    );
                 }
                 if impact.unaffected > 0 {
                     println!("  unaffected dependents: {}", impact.unaffected);
@@ -4744,13 +4859,19 @@ fn run_decision_action(action: DecisionAction) -> anyhow::Result<()> {
             // document (global, project, document) and the derivation chain
             // they support, including the steps `#firstprinciplesstore`
             // keeps in state.db with the reviews the document shows applied.
-            let composition = agent_doc_preflight_command_io::composed_rules_and_principles(&file, &content);
+            let composition =
+                agent_doc_preflight_command_io::composed_rules_and_principles(&file, &content);
             let principles = composition.principles;
             let stored = if agent_doc_project_root_io::project_root_containing(&file).is_some() {
                 match agent_doc_preflight_io::derivation_store::load(&file, &content) {
-                    Ok(stored) => stored.iter().map(agent_doc_preflight_io::derivation_store::StoredDerivation::to_model).collect(),
+                    Ok(stored) => stored
+                        .iter()
+                        .map(agent_doc_preflight_io::derivation_store::StoredDerivation::to_model)
+                        .collect(),
                     Err(err) => {
-                        eprintln!("[decision why] stored derivations unreadable ({err:#}); showing operator-stated steps only");
+                        eprintln!(
+                            "[decision why] stored derivations unreadable ({err:#}); showing operator-stated steps only"
+                        );
                         Vec::new()
                     }
                 }
@@ -4761,19 +4882,27 @@ fn run_decision_action(action: DecisionAction) -> anyhow::Result<()> {
             for message in &skipped {
                 eprintln!("[decision why] {message}");
             }
-            let bare = id.trim_start_matches("[#").trim_start_matches('#').trim_end_matches(']');
+            let bare = id
+                .trim_start_matches("[#")
+                .trim_start_matches('#')
+                .trim_end_matches(']');
             let decisions = match graph.resolve_decision(&id) {
                 Some(decision) => vec![decision],
                 None if !derivations.why(bare).steps.is_empty() => vec![bare.to_string()],
                 None => {
                     let applying = graph.decisions_applying_to(bare);
-                    anyhow::ensure!(!applying.is_empty(), "{id} is not a decision, a revision, a question copy, or an item a decision applies to");
+                    anyhow::ensure!(
+                        !applying.is_empty(),
+                        "{id} is not a decision, a revision, a question copy, or an item a decision applies to"
+                    );
                     applying
                 }
             };
             let whys: Vec<_> = decisions
                 .iter()
-                .filter_map(|decision| why_chain::reasoned_why(&graph, &derivations, &principles, decision))
+                .filter_map(|decision| {
+                    why_chain::reasoned_why(&graph, &derivations, &principles, decision)
+                })
                 .collect();
             if json {
                 println!("{}", serde_json::to_string_pretty(&whys)?);
@@ -4786,17 +4915,36 @@ fn run_decision_action(action: DecisionAction) -> anyhow::Result<()> {
             }
             Ok(())
         }
-        DecisionAction::Search { words, project, limit, json } => {
-            decision_search::run_search(&words, project, limit, json)
-        }
-        DecisionAction::Derive { file, premises, inference, decision, answer, id, json } => {
-            decision_derive::run_derive(
-                &file,
-                &agent_doc_preflight_io::derivation_store::DeriveRequest { premises, inference, decision, answer, id },
-                json,
-            )
-        }
-        DecisionAction::Validate { project_root, json, document } => {
+        DecisionAction::Search {
+            words,
+            project,
+            limit,
+            json,
+        } => decision_search::run_search(&words, project, limit, json),
+        DecisionAction::Derive {
+            file,
+            premises,
+            inference,
+            decision,
+            answer,
+            id,
+            json,
+        } => decision_derive::run_derive(
+            &file,
+            &agent_doc_preflight_io::derivation_store::DeriveRequest {
+                premises,
+                inference,
+                decision,
+                answer,
+                id,
+            },
+            json,
+        ),
+        DecisionAction::Validate {
+            project_root,
+            json,
+            document,
+        } => {
             // `#decisionstaleaudit`: with a session document, also report the
             // tracked items a delivered decision already settles. Advisory:
             // they never fail validation, and validate never writes.
@@ -4804,11 +4952,20 @@ fn run_decision_action(action: DecisionAction) -> anyhow::Result<()> {
             if let Some(document) = &document {
                 let content = std::fs::read_to_string(document)
                     .with_context(|| format!("failed to read {}", document.display()))?;
-                let (observations, ledger) = agent_doc_preflight_io::answer_ledger::build_ledger(document, &content);
+                let (observations, ledger) =
+                    agent_doc_preflight_io::answer_ledger::build_ledger(document, &content);
                 for cluster in &ledger.near_duplicates {
-                    eprintln!("near-duplicate questions (confirm once with the operator): {}", cluster.join(", "));
+                    eprintln!(
+                        "near-duplicate questions (confirm once with the operator): {}",
+                        cluster.join(", ")
+                    );
                 }
-                for stale in agent_doc_preflight_io::answer_ledger::stale_tracked_items_of(document, &content, &ledger, &observations) {
+                for stale in agent_doc_preflight_io::answer_ledger::stale_tracked_items_of(
+                    document,
+                    &content,
+                    &ledger,
+                    &observations,
+                ) {
                     if !json {
                         eprintln!(
                             "stale tracked item: agent:{} [#{}] {} — decision `{}`{}: {}",
@@ -4816,7 +4973,11 @@ fn run_decision_action(action: DecisionAction) -> anyhow::Result<()> {
                             stale.item,
                             stale.kind.as_str(),
                             stale.decision_id,
-                            if stale.auto_close { " (preflight closes it)" } else { "" },
+                            if stale.auto_close {
+                                " (preflight closes it)"
+                            } else {
+                                ""
+                            },
                             stale.action
                         );
                     }
@@ -4829,19 +4990,34 @@ fn run_decision_action(action: DecisionAction) -> anyhow::Result<()> {
                 if document.is_some()
                     && let Some(object) = value.as_object_mut()
                 {
-                    object.insert("stale_tracked_items".to_string(), serde_json::to_value(&stale_signals)?);
+                    object.insert(
+                        "stale_tracked_items".to_string(),
+                        serde_json::to_value(&stale_signals)?,
+                    );
                 }
                 println!("{}", serde_json::to_string_pretty(&value)?);
             } else if report.valid {
-                println!("decision registry valid: {} decisions, {} pinned responses", report.decision_count, report.pinned_response_ids.len());
+                println!(
+                    "decision registry valid: {} decisions, {} pinned responses",
+                    report.decision_count,
+                    report.pinned_response_ids.len()
+                );
             } else {
-                for id in &report.dangling_response_ids { eprintln!("dangling response evidence: {id}"); }
-                for id in &report.dangling_decision_references { eprintln!("dangling decision reference: {id}"); }
+                for id in &report.dangling_response_ids {
+                    eprintln!("dangling response evidence: {id}");
+                }
+                for id in &report.dangling_decision_references {
+                    eprintln!("dangling decision reference: {id}");
+                }
             }
             anyhow::ensure!(report.valid, "decision registry validation failed");
             Ok(())
         }
-        DecisionAction::History { project_root, id, json } => {
+        DecisionAction::History {
+            project_root,
+            id,
+            json,
+        } => {
             let revisions = agent_doc_decision_io::history(&project_root, &id)?;
             if json {
                 println!("{}", serde_json::to_string_pretty(&revisions)?);
@@ -5452,7 +5628,10 @@ enum QueueAction {
         #[arg(long)]
         generation: Option<u64>,
         /// Worker-reported local/published state rendered as a canonical queue annotation.
-        #[arg(long = "publication-state", value_name = "local|published|published+local")]
+        #[arg(
+            long = "publication-state",
+            value_name = "local|published|published+local"
+        )]
         publication_state: Option<agent_doc_queue::QueueReportState>,
         /// Declare that this worker result carries no repository/worktree changes.
         #[arg(long)]
@@ -6515,10 +6694,7 @@ fn report_retained_cli_write_deferral(
     deferral: &agent_doc_write_converge_io::retained_cli_write::RetainedCliWriteDeferred,
 ) -> ExitCode {
     let mut stderr = std::io::stderr().lock();
-    let _ = write_terminal_error_report(
-        &mut stderr,
-        &render_retained_cli_write_deferral(deferral),
-    );
+    let _ = write_terminal_error_report(&mut stderr, &render_retained_cli_write_deferral(deferral));
     ExitCode::from(
         agent_doc_write_converge_io::retained_cli_write::RETAINED_CLI_WRITE_DEFERRED_EXIT_CODE,
     )
@@ -6666,10 +6842,7 @@ fn print_worker_quota_blocked(
         "[queue] worker {} ({}) {}",
         claim.owner,
         agent_doc_queue::worker_quota::WORKER_QUOTA_EXHAUSTED_REASON,
-        agent_doc_queue::worker_quota::quota_blocked_next_step(
-            &file.display().to_string(),
-            claim,
-        ),
+        agent_doc_queue::worker_quota::quota_blocked_next_step(&file.display().to_string(), claim,),
     );
     Ok(())
 }
@@ -6701,10 +6874,7 @@ fn print_terminal_error_report(err: &anyhow::Error) {
     let _ = write_terminal_error_report(&mut stderr, &report);
 }
 
-fn dogfood_terminal_issue_prompt(
-    file: &Path,
-    diagnostic: &str,
-) -> Option<(String, String, bool)> {
+fn dogfood_terminal_issue_prompt(file: &Path, diagnostic: &str) -> Option<(String, String, bool)> {
     agent_doc_controller_io::project_controller::dogfood_agent_doc_crate_root(file)?;
     let document_id = agent_doc_hash::document_id_for_path(file);
     let custom_action = dogfood_cmd::resolve(file)
@@ -6929,9 +7099,7 @@ fn try_main() -> anyhow::Result<()> {
     match cli.command {
         Commands::Env { json } => env_cmd::run(json),
         Commands::Tmux { action } => match action {
-            TmuxAction::Start { file, client_id } => {
-                tmux_cmd::start(&file, client_id.as_deref())
-            }
+            TmuxAction::Start { file, client_id } => tmux_cmd::start(&file, client_id.as_deref()),
             TmuxAction::Ensure {
                 file,
                 session,
@@ -7007,9 +7175,7 @@ fn try_main() -> anyhow::Result<()> {
                 path,
                 auto,
                 prompt,
-            } => {
-                dogfood_cmd::set(&file, path.as_deref(), auto, prompt.as_deref())
-            }
+            } => dogfood_cmd::set(&file, path.as_deref(), auto, prompt.as_deref()),
         },
         Commands::VerifyOpCapture {
             file,
@@ -7119,9 +7285,7 @@ fn try_main() -> anyhow::Result<()> {
                 file,
                 text,
                 force_disk,
-            } => agent_doc_status_io::set_standalone_with_runtime_options(
-                &file, &text, force_disk,
-            ),
+            } => agent_doc_status_io::set_standalone_with_runtime_options(&file, &text, force_disk),
             StatusAction::Repair { file, force_disk } => {
                 match agent_doc_status_io::repair_standalone_with_runtime_options(
                     &file, force_disk,
@@ -7564,9 +7728,7 @@ fn try_main() -> anyhow::Result<()> {
         Commands::Outline { file, json } => outline_cmd::run_outline(&file, json),
         Commands::BuildSlot { .. } => unreachable!("build-slot exits before config load"),
         Commands::Principles { file, json } => principles_cmd::run(&file, json),
-        Commands::Document { pane, json } => {
-            document_cmd::run(pane.as_deref(), json)
-        }
+        Commands::Document { pane, json } => document_cmd::run(pane.as_deref(), json),
         Commands::AutoDag { file, json } => auto_dag::run_command(&file, json),
         Commands::Board {
             root,
@@ -9618,11 +9780,7 @@ fn try_main() -> anyhow::Result<()> {
             } => {
                 if refresh {
                     let claim = agent_doc_queue_io::queue_claim::refresh_attempt(
-                        &file,
-                        &item,
-                        &owner,
-                        ttl_secs,
-                        generation,
+                        &file, &item, &owner, ttl_secs, generation,
                     )?;
                     let queue_effects = CliQueueCommandEffects;
                     agent_doc_queue_io::queue_cmd::project_claim_item_runtime_state_with_effects(
@@ -9640,13 +9798,13 @@ fn try_main() -> anyhow::Result<()> {
                 let queue_effects = CliQueueCommandEffects;
                 let (outcome, claim) =
                     agent_doc_queue_io::queue_cmd::claim_with_runtime_projection_for_harness(
-                    &queue_effects,
-                    &file,
-                    &item,
-                    &owner,
-                    ttl_secs,
-                    harness.as_deref(),
-                )?;
+                        &queue_effects,
+                        &file,
+                        &item,
+                        &owner,
+                        ttl_secs,
+                        harness.as_deref(),
+                    )?;
                 let on_harness = claim
                     .dispatch_policy
                     .as_ref()
@@ -9655,11 +9813,7 @@ fn try_main() -> anyhow::Result<()> {
                     .unwrap_or_default();
                 eprintln!(
                     "[queue] claimed {:?} for {} generation {} until {} ({:?}, dispatching{on_harness})",
-                    claim.item_text,
-                    claim.owner,
-                    claim.generation,
-                    claim.expires_at_secs,
-                    outcome
+                    claim.item_text, claim.owner, claim.generation, claim.expires_at_secs, outcome
                 );
                 let acknowledgement =
                     agent_doc_queue_io::queue_claim::dispatch_acknowledgement_obligation(
@@ -9810,7 +9964,11 @@ fn try_main() -> anyhow::Result<()> {
                 println!(
                     "{}: queue id `{id}` attributes {}",
                     file.display(),
-                    if changed { "updated" } else { "already satisfied" }
+                    if changed {
+                        "updated"
+                    } else {
+                        "already satisfied"
+                    }
                 );
                 Ok(())
             }
@@ -9858,12 +10016,11 @@ fn try_main() -> anyhow::Result<()> {
                 // declared final state is an interrupted loop. Keep the same
                 // row open, requeue the attempt, and carry the hand-back to the
                 // next worker instead of reporting it as complete.
-                if let Some(requeue) = queue_completion_feedback::requeue_nonterminal_goal_hand_back(
-                    &file,
-                    &item,
-                    generation,
-                    &response,
-                )? {
+                if let Some(requeue) =
+                    queue_completion_feedback::requeue_nonterminal_goal_hand_back(
+                        &file, &item, generation, &response,
+                    )?
+                {
                     let queue_effects = CliQueueCommandEffects;
                     agent_doc_queue_io::queue_cmd::project_claim_runtime_state_with_effects(
                         &queue_effects,
@@ -9888,23 +10045,37 @@ fn try_main() -> anyhow::Result<()> {
                     Ok(())
                 } else {
                     let has_repository_result = publication_state.is_some()
-                        || source_repo.is_some() || source_sha.is_some()
-                        || sink_repo.is_some() || sink_ref.is_some()
-                        || worktree.is_some() || branch.is_some()
-                        || base_sha.is_some() || pushed_ref.is_some();
+                        || source_repo.is_some()
+                        || source_sha.is_some()
+                        || sink_repo.is_some()
+                        || sink_ref.is_some()
+                        || worktree.is_some()
+                        || branch.is_some()
+                        || base_sha.is_some()
+                        || pushed_ref.is_some();
                     anyhow::ensure!(
                         prose_only ^ has_repository_result,
                         "queue report-complete requires exactly one result class: --prose-only, or explicit repository provenance (--source-repo, --source-sha, --sink-repo, --sink-ref)"
                     );
                     let repository = if has_repository_result {
                         Some(queue_completion_feedback::RepositoryCompletion {
-                            source_repo: source_repo.context("repository completion requires explicit --source-repo")?,
-                            source_sha: source_sha.context("repository completion requires explicit --source-sha")?,
-                            sink_repo: sink_repo.context("repository completion requires explicit --sink-repo")?,
-                            sink_ref: sink_ref.context("repository completion requires explicit designated --sink-ref")?,
-                            worktree, branch, base_sha, pushed_ref,
+                            source_repo: source_repo
+                                .context("repository completion requires explicit --source-repo")?,
+                            source_sha: source_sha
+                                .context("repository completion requires explicit --source-sha")?,
+                            sink_repo: sink_repo
+                                .context("repository completion requires explicit --sink-repo")?,
+                            sink_ref: sink_ref.context(
+                                "repository completion requires explicit designated --sink-ref",
+                            )?,
+                            worktree,
+                            branch,
+                            base_sha,
+                            pushed_ref,
                         })
-                    } else { None };
+                    } else {
+                        None
+                    };
                     // `#reportcompletenomatch`: no matching subagent claim is
                     // an error that names the candidate rows and claims.
                     let outcome = queue_completion_feedback::report_complete(
@@ -9922,15 +10093,16 @@ fn try_main() -> anyhow::Result<()> {
                             &file.display().to_string(),
                             &outcome.claim,
                         );
-                    let next = match agent_doc_queue_io::queue_lineage::require_integrated_claim_repo_work(
-                        &file,
-                        &outcome.claim,
-                    ) {
-                        Ok(()) => format!(
-                            "integration proof is verified (or this attempt is declared prose-only); now run: {closeout}"
-                        ),
-                        Err(err) => err.to_string(),
-                    };
+                    let next =
+                        match agent_doc_queue_io::queue_lineage::require_integrated_claim_repo_work(
+                            &file,
+                            &outcome.claim,
+                        ) {
+                            Ok(()) => format!(
+                                "integration proof is verified (or this attempt is declared prose-only); now run: {closeout}"
+                            ),
+                            Err(err) => err.to_string(),
+                        };
                     let followups = queue_completion_feedback::describe_handback_followups(
                         &file,
                         &outcome.claim.item_text,
@@ -9979,10 +10151,7 @@ fn try_main() -> anyhow::Result<()> {
                 reason,
             } => {
                 let claim = agent_doc_queue_io::queue_claim::freeze_attempt(
-                    &file,
-                    &item,
-                    generation,
-                    &reason,
+                    &file, &item, generation, &reason,
                 )?;
                 eprintln!(
                     "[queue] froze {:?} (owner {}, generation {}); its work-pool slot is free, its claim and worker binding are kept. A report from the same worker is still accepted; `queue claim --refresh` clears the freeze.",
@@ -10100,8 +10269,7 @@ fn try_main() -> anyhow::Result<()> {
             }
             QueueAction::RepairManagedState { file, apply, keys } => {
                 let keys = keys.into_iter().collect();
-                let report =
-                    queue_completion_feedback::repair_managed_state(&file, apply, &keys)?;
+                let report = queue_completion_feedback::repair_managed_state(&file, apply, &keys)?;
                 queue_completion_feedback::print_managed_state_report(&report);
                 Ok(())
             }
@@ -10181,11 +10349,8 @@ fn try_main() -> anyhow::Result<()> {
                 json,
                 verbose,
             } => {
-                let report = agent_doc_queue_io::queue_lineage::query(
-                    &file,
-                    item.as_deref(),
-                    generation,
-                )?;
+                let report =
+                    agent_doc_queue_io::queue_lineage::query(&file, item.as_deref(), generation)?;
                 if json {
                     println!("{}", serde_json::to_string_pretty(&report)?);
                 } else if verbose {
@@ -10457,7 +10622,9 @@ mod controller_auto_start_policy_tests {
             "upgrade::warn_if_outdated();",
             "agent_doc_config::load()",
         ] {
-            let at = body.find(later).unwrap_or_else(|| panic!("{later} in try_main"));
+            let at = body
+                .find(later)
+                .unwrap_or_else(|| panic!("{later} in try_main"));
             assert!(bridge < at, "the bridge must start before `{later}`");
         }
     }
@@ -10962,10 +11129,7 @@ mod recycle_force_tests {
             Commands::Dogfood {
                 action:
                     DogfoodAction::Set {
-                        path,
-                        auto,
-                        prompt,
-                        ..
+                        path, auto, prompt, ..
                     },
             } => {
                 assert_eq!(path, None);
@@ -11545,7 +11709,10 @@ mod startup_critical_path_tests {
     #[test]
     fn editor_bootstrap_commands_skip_the_command_entry_supervisor_probe() {
         assert!(!command_entry_supervisor_probe_applies(&parse(&[
-            "agent-doc", "tmux", "start", "plan.md",
+            "agent-doc",
+            "tmux",
+            "start",
+            "plan.md",
         ])));
         assert!(!command_entry_supervisor_probe_applies(&parse(&[
             "agent-doc",
@@ -11556,10 +11723,14 @@ mod startup_critical_path_tests {
             "--json",
         ])));
         assert!(command_entry_supervisor_probe_applies(&parse(&[
-            "agent-doc", "preflight", "plan.md",
+            "agent-doc",
+            "preflight",
+            "plan.md",
         ])));
         assert!(command_entry_supervisor_probe_applies(&parse(&[
-            "agent-doc", "start", "plan.md",
+            "agent-doc",
+            "start",
+            "plan.md",
         ])));
     }
 }

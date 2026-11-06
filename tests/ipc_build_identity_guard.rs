@@ -146,7 +146,11 @@ fn the_declared_inputs_reach_the_member_packages() {
 fn a_member_package_edit_moves_the_identity() {
     let scratch = tempfile::TempDir::new().expect("scratch workspace");
     let root = scratch.path();
-    write(root, "Cargo.toml", "[workspace]\nmembers = [\"agent-doc-ipc-io\"]\n");
+    write(
+        root,
+        "Cargo.toml",
+        "[workspace]\nmembers = [\"agent-doc-ipc-io\"]\n",
+    );
     write(root, "src/main.rs", "fn main() {}\n");
     write(
         root,

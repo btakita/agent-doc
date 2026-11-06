@@ -703,8 +703,14 @@ mod tests {
         deferred.deferred_cycle_open = 1;
         let message = format!("{:#}", reload_lib_verdict(&deferred).unwrap_err());
         assert!(message.contains("safely deferred"), "{message}");
-        assert!(message.contains("did not perform an immediate recovery"), "{message}");
-        assert!(message.contains("admin reregister-editor <FILE>"), "{message}");
+        assert!(
+            message.contains("did not perform an immediate recovery"),
+            "{message}"
+        );
+        assert!(
+            message.contains("admin reregister-editor <FILE>"),
+            "{message}"
+        );
     }
 
     #[test]

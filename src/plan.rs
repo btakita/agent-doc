@@ -267,9 +267,7 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
             0,
         )?;
     let (_, queue_subagent_pool) =
-        agent_doc_queue_io::subagent_dispatch::queue_attr_subagent_plan_and_pools(
-            file, &content,
-        )?;
+        agent_doc_queue_io::subagent_dispatch::queue_attr_subagent_plan_and_pools(file, &content)?;
     // `#subagentworkpool`: a due heartbeat is a warning on every plan, so a
     // long-running worker is refreshed before its claim expires.
     let queue_refresh_warnings = agent_doc_queue_io::subagent_pool::pool_refill_for_content(
@@ -293,9 +291,7 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
     // unrelated claims or spawns (sdk-dev 2026-11-04: one unanswered sink
     // question held every new claim, an independent `#review` head included).
     let queue_reported_closeout =
-        agent_doc_queue_io::queue_claim::reported_closeout_obligations_for_content(
-            file, &content,
-        )?;
+        agent_doc_queue_io::queue_claim::reported_closeout_obligations_for_content(file, &content)?;
     // `#queuemodesteer`: a head this cycle already runs inline that is now
     // subagent work (the operator added `subagents` mid-turn) carries the
     // hand-off rule on its dispatch steps, so it never runs twice.
@@ -409,8 +405,11 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
         let has_queue_lifecycle_work = !queue_lifecycle_required_commands.is_empty();
         let (task_class, blockers, warnings) = if has_queue_lifecycle_work {
             (
-                queue_lifecycle_task_class(&queue_subagent_dispatch, &queue_dispatch_acknowledgement_required)
-                    .to_string(),
+                queue_lifecycle_task_class(
+                    &queue_subagent_dispatch,
+                    &queue_dispatch_acknowledgement_required,
+                )
+                .to_string(),
                 Vec::new(),
                 Vec::new(),
             )
@@ -874,7 +873,9 @@ fn open_cycle_inline_heads(file: &Path) -> Vec<String> {
             let mut heads = cycle.selected_free_text_queue_heads;
             agent_doc_prompt_contract::push_unique_strings(
                 &mut heads,
-                cycle.queue_task_id.map(|id| format!("do [#{}]", id.trim_start_matches('#'))),
+                cycle
+                    .queue_task_id
+                    .map(|id| format!("do [#{}]", id.trim_start_matches('#'))),
             );
             heads
         }
@@ -942,35 +943,32 @@ fn queue_lifecycle_required_commands(
             .iter()
             .map(|obligation| obligation.message()),
     );
-    commands.extend(dispatch
-        .iter()
-        .flat_map(|entry| {
-            let handoff = is_inline_head(inline_heads, &entry.item).then(|| {
-                inline_head_handoff_rule(&entry.item)
-            });
-            let mut steps = [
-                format!(
-                    "Reserve queue item {:?} before spawn: run `{}` and do not call the native \
+    commands.extend(dispatch.iter().flat_map(|entry| {
+        let handoff = is_inline_head(inline_heads, &entry.item)
+            .then(|| inline_head_handoff_rule(&entry.item));
+        let mut steps = [
+            format!(
+                "Reserve queue item {:?} before spawn: run `{}` and do not call the native \
                      spawn tool unless it succeeds and projects the row as claimed (🟡).",
-                    entry.item, entry.claim_command,
-                ),
-                format!(
-                    "Only after the successful claim for queue item {:?}, launch one native \
+                entry.item, entry.claim_command,
+            ),
+            format!(
+                "Only after the successful claim for queue item {:?}, launch one native \
                      background subagent with `authorization.subagent_prompt_preamble` verbatim.",
-                    entry.item,
-                ),
-                format!(
-                    "Immediately after spawn returns the worker id for queue item {:?}, before \
+                entry.item,
+            ),
+            format!(
+                "Immediately after spawn returns the worker id for queue item {:?}, before \
                      other coordinator work, run `{}` with that id and the claim's printed \
                      generation so the row projects running (🚧).",
-                    entry.item, entry.start_command,
-                ),
-            ];
-            if let Some(handoff) = handoff {
-                steps[0] = format!("{handoff} {}", steps[0]);
-            }
-            steps
-        }));
+                entry.item, entry.start_command,
+            ),
+        ];
+        if let Some(handoff) = handoff {
+            steps[0] = format!("{handoff} {}", steps[0]);
+        }
+        steps
+    }));
     let dispatch_len = commands.len();
     let commands_for = |readiness: ReportedCloseoutReadiness| {
         reported
@@ -1855,7 +1853,10 @@ mod tests {
         );
         let phases = &tree.root.children[0].children[0].children;
         assert_eq!(
-            phases.iter().map(|node| node.id.as_str()).collect::<Vec<_>>(),
+            phases
+                .iter()
+                .map(|node| node.id.as_str())
+                .collect::<Vec<_>>(),
             [
                 "phase.queue_dispatch",
                 "phase.reported_closeout",
@@ -2100,10 +2101,22 @@ Done.
         assert_eq!(plan.required_commands.len(), 7);
         for chunk in plan.required_commands[..6].as_chunks::<3>().0 {
             assert!(chunk[0].contains("before spawn"), "{chunk:?}");
-            assert!(chunk[0].contains("projects the row as claimed (🟡)"), "{chunk:?}");
-            assert!(chunk[1].contains("Only after the successful claim"), "{chunk:?}");
-            assert!(chunk[1].contains("launch one native background subagent"), "{chunk:?}");
-            assert!(chunk[2].contains("Immediately after spawn returns"), "{chunk:?}");
+            assert!(
+                chunk[0].contains("projects the row as claimed (🟡)"),
+                "{chunk:?}"
+            );
+            assert!(
+                chunk[1].contains("Only after the successful claim"),
+                "{chunk:?}"
+            );
+            assert!(
+                chunk[1].contains("launch one native background subagent"),
+                "{chunk:?}"
+            );
+            assert!(
+                chunk[2].contains("Immediately after spawn returns"),
+                "{chunk:?}"
+            );
             assert!(chunk[2].contains("projects running (🚧)"), "{chunk:?}");
         }
         assert_eq!(
@@ -2156,7 +2169,14 @@ Done.
                 .env_remove("GIT_DIR")
                 .env_remove("GIT_WORK_TREE")
                 .env_remove("GIT_INDEX_FILE")
-                .args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"])
+                .args([
+                    "-c",
+                    "user.name=t",
+                    "-c",
+                    "user.email=t@t",
+                    "-c",
+                    "commit.gpgsign=false",
+                ])
                 .args(args)
                 .output()
                 .unwrap();
@@ -2255,8 +2275,14 @@ Done.
         let closeout_len = obligation.required_commands().len();
         assert_eq!(closeout_len, obligation.closeout.steps.len() + 1);
         let execute = find_node(&plan.operation_tree.root, "path.execute").unwrap();
-        assert_eq!(execute.children[0].id, "phase.queue_dispatch", "{execute:#?}");
-        assert_eq!(execute.children[1].id, "phase.reported_closeout", "{execute:#?}");
+        assert_eq!(
+            execute.children[0].id, "phase.queue_dispatch",
+            "{execute:#?}"
+        );
+        assert_eq!(
+            execute.children[1].id, "phase.reported_closeout",
+            "{execute:#?}"
+        );
         assert_eq!(execute.children[1].children.len(), closeout_len);
     }
 
@@ -2292,7 +2318,11 @@ Done.
             .filter(|command| command.contains(&request_id))
             .collect::<Vec<_>>();
         assert_eq!(packets.len(), 1, "{:#?}", plan.required_commands);
-        assert!(packets[0].contains("gates only this item"), "{}", packets[0]);
+        assert!(
+            packets[0].contains("gates only this item"),
+            "{}",
+            packets[0]
+        );
         assert!(
             plan.required_commands
                 .iter()
@@ -2389,7 +2419,12 @@ Done.
         assert!(dispatched.contains(&"do [#docs]"), "{dispatched:?}");
         assert!(!dispatched.contains(&"do [#usesdk]"), "{dispatched:?}");
         assert!(!dispatched.contains(&"do [#portsdk]"), "{dispatched:?}");
-        assert_eq!(reserve_index(&plan, "do [#docs]"), Some(0), "{:#?}", plan.required_commands);
+        assert_eq!(
+            reserve_index(&plan, "do [#docs]"),
+            Some(0),
+            "{:#?}",
+            plan.required_commands
+        );
         assert!(reserve_index(&plan, "do [#usesdk]").is_none());
     }
 
@@ -2406,19 +2441,37 @@ Done.
         let dir = setup_project();
         let doc = dir.path().join("plan.md");
         let rows = [
-            "Claimed one.", "Claimed two.", "Claimed three.",
-            "Reported one.", "Reported two.",
+            "Claimed one.",
+            "Claimed two.",
+            "Claimed three.",
+            "Reported one.",
+            "Reported two.",
             "Running one.",
-            "Fresh one.", "Fresh two.", "Fresh three.", "Fresh four.",
+            "Fresh one.",
+            "Fresh two.",
+            "Fresh three.",
+            "Fresh four.",
         ];
-        let queue = rows.iter().map(|row| format!("- {row}\n")).collect::<String>();
+        let queue = rows
+            .iter()
+            .map(|row| format!("- {row}\n"))
+            .collect::<String>();
         let content = subagents_queue_doc()
-            .replace("<!-- agent:queue priority subagents go -->", "<!-- agent:queue priority subagents=6 go -->")
-            .replace("- Fix the claim button.\n- Align the Close button.\n", &queue);
+            .replace(
+                "<!-- agent:queue priority subagents go -->",
+                "<!-- agent:queue priority subagents=6 go -->",
+            )
+            .replace(
+                "- Fix the claim button.\n- Align the Close button.\n",
+                &queue,
+            );
         std::fs::write(&doc, &content).unwrap();
         let clock = agent_doc_queue_io::queue_claim::claim_clock_now_secs();
         let _pin = agent_doc_queue_io::queue_claim::pin_claim_clock_for_current_thread(clock);
-        for (index, item) in ["Claimed one.", "Claimed two.", "Claimed three."].iter().enumerate() {
+        for (index, item) in ["Claimed one.", "Claimed two.", "Claimed three."]
+            .iter()
+            .enumerate()
+        {
             agent_doc_queue_io::queue_claim::claim(&doc, item, &format!("subagent:c{index}"), 7200)
                 .unwrap();
         }
@@ -2441,11 +2494,16 @@ Done.
         .unwrap();
         checkpoint_for_plan(&doc);
         // Past the dispatch grace, well inside the frozen bound.
-        let _later = agent_doc_queue_io::queue_claim::pin_claim_clock_for_current_thread(clock + 60);
+        let _later =
+            agent_doc_queue_io::queue_claim::pin_claim_clock_for_current_thread(clock + 60);
 
         let plan = build(&doc).unwrap();
 
-        assert_eq!(plan.queue_dispatch_acknowledgement_required.len(), 3, "{plan:#?}");
+        assert_eq!(
+            plan.queue_dispatch_acknowledgement_required.len(),
+            3,
+            "{plan:#?}"
+        );
         assert_eq!(
             plan.queue_subagent_dispatch
                 .iter()
@@ -2455,7 +2513,11 @@ Done.
             "exactly the free slots are refilled"
         );
         let pool = &plan.queue_subagent_pool[0].occupancy;
-        assert_eq!((pool.size, pool.running, pool.dispatching, pool.free), (6, 1, 3, 2), "{pool:?}");
+        assert_eq!(
+            (pool.size, pool.running, pool.dispatching, pool.free),
+            (6, 1, 3, 2),
+            "{pool:?}"
+        );
         for (index, command) in plan.required_commands.iter().take(3).enumerate() {
             assert!(
                 command.starts_with("URGENT, before any reported-result integration")
@@ -2465,8 +2527,18 @@ Done.
                 plan.required_commands
             );
         }
-        assert_eq!(reserve_index(&plan, "Fresh one."), Some(3), "{:#?}", plan.required_commands);
-        assert_eq!(reserve_index(&plan, "Fresh two."), Some(6), "{:#?}", plan.required_commands);
+        assert_eq!(
+            reserve_index(&plan, "Fresh one."),
+            Some(3),
+            "{:#?}",
+            plan.required_commands
+        );
+        assert_eq!(
+            reserve_index(&plan, "Fresh two."),
+            Some(6),
+            "{:#?}",
+            plan.required_commands
+        );
         let first_closeout = plan
             .required_commands
             .iter()
@@ -2544,7 +2616,11 @@ Done.
             .position(|command| command.starts_with("Reserve queue item"))
             .unwrap_or_else(|| panic!("{:#?}", plan.required_commands));
         assert_eq!(first_claim, 0, "{:#?}", plan.required_commands);
-        assert!(first_claim < closeout_index, "{:#?}", plan.required_commands);
+        assert!(
+            first_claim < closeout_index,
+            "{:#?}",
+            plan.required_commands
+        );
         assert_eq!(plan.task_class, "queue_subagent_dispatch");
         assert_eq!(
             plan.required_proof,
@@ -2557,8 +2633,14 @@ Done.
 
         // The operation tree carries the same order.
         let execute = find_node(&plan.operation_tree.root, "path.execute").expect("execute path");
-        assert_eq!(execute.children[0].id, "phase.queue_dispatch", "{execute:#?}");
-        assert_eq!(execute.children[1].id, "phase.reported_closeout", "{execute:#?}");
+        assert_eq!(
+            execute.children[0].id, "phase.queue_dispatch",
+            "{execute:#?}"
+        );
+        assert_eq!(
+            execute.children[1].id, "phase.reported_closeout",
+            "{execute:#?}"
+        );
         let closeout_phase = &execute.children[1];
         assert!(
             closeout_phase.children[0]
@@ -2657,7 +2739,11 @@ Done.
             );
         }
         for item in items {
-            assert!(reserve_index(&plan, item).is_some(), "{:#?}", plan.required_commands);
+            assert!(
+                reserve_index(&plan, item).is_some(),
+                "{:#?}",
+                plan.required_commands
+            );
         }
     }
 
@@ -2928,7 +3014,10 @@ Done.
 
         let error = build(&doc).expect_err("ambiguous subagent ownership must block plan");
         let message = format!("{error:#}");
-        assert!(message.contains("ambiguous subagent ownership"), "{message}");
+        assert!(
+            message.contains("ambiguous subagent ownership"),
+            "{message}"
+        );
         assert!(message.contains("use canonical `subagents`"), "{message}");
     }
 

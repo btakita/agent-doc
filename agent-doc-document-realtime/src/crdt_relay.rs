@@ -472,14 +472,11 @@ fn visible_insertion_runs(delta: &[u8]) -> Result<Vec<String>> {
     let mut by_peer = BTreeMap::<u64, Vec<_>>::new();
     for op in decode_update_ops(delta)? {
         if op.deleted.is_none() {
-            by_peer
-                .entry(op.id.peer())
-                .or_default()
-                .push((
-                    op.id.counter(),
-                    op.origin.map(|origin| (origin.counter(), origin.peer())),
-                    op.ch,
-                ));
+            by_peer.entry(op.id.peer()).or_default().push((
+                op.id.counter(),
+                op.origin.map(|origin| (origin.counter(), origin.peer())),
+                op.ch,
+            ));
         }
     }
 
@@ -658,7 +655,9 @@ pub enum DiskChangeOutcome {
 /// without corrupting the canonical.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DocumentOpDeltaOutcome {
-    Applied { changed: bool },
+    Applied {
+        changed: bool,
+    },
     StaleLineage,
     LegacyQuarantined,
     /// The matching-lineage delta would make binary-owned component markers
@@ -1845,8 +1844,7 @@ impl RelayHub {
             last_committed_text: self.last_committed_text.clone(),
             last_committed_state_vector: self.last_committed_state_vector.clone(),
             compact_epoch_requested: self.compact_epoch_requested,
-            automatic_history_compaction_requested: self
-                .automatic_history_compaction_requested,
+            automatic_history_compaction_requested: self.automatic_history_compaction_requested,
             retained_replica_reseed_pending: self.retained_replica_reseed_pending(),
             component_structure_fenced: self.component_structure_fenced,
             binary_write_attribution: self.binary_write_attribution.clone(),
@@ -2498,10 +2496,7 @@ impl RelayHub {
     /// than corrupting. The resulting canonical delta is broadcast to every live
     /// member so connected editors also converge. Returns the broadcast packet;
     /// `packet.update` is the empty-delta encoding when the frame added nothing new.
-    fn apply_document_op_delta_checked(
-        &mut self,
-        delta: &[u8],
-    ) -> Result<Option<BroadcastPacket>> {
+    fn apply_document_op_delta_checked(&mut self, delta: &[u8]) -> Result<Option<BroadcastPacket>> {
         let before_text = self.canonical.text();
         let before = self.canonical.state_vector();
         let candidate_text = self.canonical.preview_update_text(delta)?;
@@ -6933,7 +6928,11 @@ mod tests {
         assert_eq!(hub.lineage(), history, "a new hub starts one history");
 
         hub.fence_replica_generation();
-        assert_ne!(hub.lineage(), history, "the fence rotates the durable lineage");
+        assert_ne!(
+            hub.lineage(),
+            history,
+            "the fence rotates the durable lineage"
+        );
         assert_eq!(
             hub.history_lineage(),
             history,
@@ -6943,13 +6942,19 @@ mod tests {
         let queued = hub.pending_updates(7).unwrap();
         assert!(!queued.is_empty());
         assert!(
-            queued.iter().all(|update| update.history_lineage == history),
+            queued
+                .iter()
+                .all(|update| update.history_lineage == history),
             "a queued delivery is stamped with the history it was encoded in"
         );
 
         let text = hub.canonical_text();
         hub.compact_authoritative_epoch(&text).unwrap();
-        assert_ne!(hub.history_lineage(), history, "a text rebuild starts a new history");
+        assert_ne!(
+            hub.history_lineage(),
+            history,
+            "a text rebuild starts a new history"
+        );
         assert_eq!(hub.history_lineage(), hub.lineage());
         assert!(hub.member_lineage_retired(7));
 

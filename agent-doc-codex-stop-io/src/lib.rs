@@ -2915,9 +2915,7 @@ fn committed_prompt_diff_stop_response_with(
                 agent_doc_queue::claim_release_receipt::queue_line_closeout(
                     &disp,
                     &item.verbatim,
-                    item.owner
-                        .as_deref()
-                        .zip(item.generation),
+                    item.owner.as_deref().zip(item.generation),
                 )
             )
         })
@@ -9692,7 +9690,11 @@ Reviewed the gated items.\n\
         agent_doc_queue_io::queue_continuation::reconcile_marker(&doc, "session-check")
             .expect("continuation required");
 
-        for (reason, subagent) in [("channel_closed", None), ("shutdown", None), ("end_turn", Some("explore"))] {
+        for (reason, subagent) in [
+            ("channel_closed", None),
+            ("shutdown", None),
+            ("end_turn", Some("explore")),
+        ] {
             let response =
                 claude_stop_response(Some(&grok_stop_payload(dir.path(), reason, subagent)))
                     .unwrap();
@@ -13705,16 +13707,17 @@ mod closeout_guidance_agreement_tests {
         ];
         for (kind, item, expected) in cases {
             let claim = reported(item);
-            let session_check = agent_doc_queue::reported_closeout::overdue_reported_closeout_warning(
-                &claim,
-                &agent_doc_queue::reported_closeout::reported_claim_closeout(
-                    DOC,
+            let session_check =
+                agent_doc_queue::reported_closeout::overdue_reported_closeout_warning(
                     &claim,
-                    &agent_doc_queue::reported_closeout::ReportedRepoEvidence::ProseOnly,
-                )
-                .unwrap(),
-                2,
-            );
+                    &agent_doc_queue::reported_closeout::reported_claim_closeout(
+                        DOC,
+                        &claim,
+                        &agent_doc_queue::reported_closeout::ReportedRepoEvidence::ProseOnly,
+                    )
+                    .unwrap(),
+                    2,
+                );
             let rendered = [
                 (
                     "completion feedback",

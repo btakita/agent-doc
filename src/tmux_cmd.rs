@@ -20,7 +20,9 @@ pub fn start(file: &Path, client_id: Option<&str>) -> Result<()> {
     )?;
     println!(
         "started agent-doc for {} in tmux session '{}' pane {}",
-        file.display(), outcome.session_name, outcome.pane_id,
+        file.display(),
+        outcome.session_name,
+        outcome.pane_id,
     );
     Ok(())
 }

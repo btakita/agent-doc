@@ -2352,7 +2352,8 @@ fn run_pending_maintenance_with_options(
     // `#managedlistnodrift`: an item's tracked list is derived from its state.
     // A gated backlog item moves verbatim into agent:review here; a duplicate
     // open id is reported, never merged. Each document derives independently.
-    let tracked = agent_doc_work_projection::tracked_lists::project_tracked_lists(&current_content)?;
+    let tracked =
+        agent_doc_work_projection::tracked_lists::project_tracked_lists(&current_content)?;
     for action in &tracked.actions {
         eprintln!("[preflight] tracked lists: {action} (#managedlistnodrift)");
     }
@@ -10013,9 +10014,9 @@ mod tests {
         );
         assert!(guidance.contains(agent_doc_queue::build_slot::SUBAGENT_BUILD_SLOT_RULE));
         assert!(guidance.contains(agent_doc_queue::subagent_brief::SUBAGENT_TMUX_ISOLATION_RULE));
-        assert!(guidance.ends_with(
-            agent_doc_queue::worktree_layout::SUBAGENT_WORKTREE_LAYOUT_RULE
-        ));
+        assert!(
+            guidance.ends_with(agent_doc_queue::worktree_layout::SUBAGENT_WORKTREE_LAYOUT_RULE)
+        );
     }
 
     // `#qdonestrike-durable`: a not-ready Lazily head used to discard the whole
@@ -10836,7 +10837,10 @@ mod tests {
         assert_eq!(stale.component.as_deref(), Some("backlog"));
         let decision = stale.decision.clone().expect("cites a decision");
         assert!(
-            stale.ids.iter().any(|id| id.starts_with(&format!("{decision}@"))),
+            stale
+                .ids
+                .iter()
+                .any(|id| id.starts_with(&format!("{decision}@"))),
             "{stale:?}"
         );
         assert!(stale.action.contains("--done portdocs"), "{stale:?}");
@@ -11252,7 +11256,9 @@ mod tests {
         for item in 0..(5 * scale) {
             doc.push_str(&format!("- [ ] [#bl{item}] Backlog item {item}\n"));
         }
-        doc.push_str("<!-- /agent:backlog -->\n\n## Exchange <!-- agent:exchange patch=append -->\n");
+        doc.push_str(
+            "<!-- /agent:backlog -->\n\n## Exchange <!-- agent:exchange patch=append -->\n",
+        );
         for turn in 0..(40 * scale) {
             doc.push_str(&format!(
                 "### Re: turn {turn}\n\nAnswer {turn} with `inline` code, *emphasis*, and a list:\n\n- one\n- two `x`\n\n"
@@ -12941,8 +12947,11 @@ mod tests {
         assert!(QUEUE_SUBAGENT_DISPATCH_GUIDANCE.contains("request, context, and every choice"));
         // `#subagentworkpool`
         assert!(QUEUE_SUBAGENT_DISPATCH_GUIDANCE.contains("dispatch EVERY entry now"));
-        assert!(QUEUE_SUBAGENT_DISPATCH_GUIDANCE
-            .contains("Spawn and start every claimed head before integrating any reported result"));
+        assert!(
+            QUEUE_SUBAGENT_DISPATCH_GUIDANCE.contains(
+                "Spawn and start every claimed head before integrating any reported result"
+            )
+        );
         assert!(QUEUE_SUBAGENT_DISPATCH_GUIDANCE.contains("agent-doc queue freeze"));
         assert!(QUEUE_SUBAGENT_DISPATCH_GUIDANCE.contains("is proof of life, so refresh it"));
         assert!(QUEUE_SUBAGENT_DISPATCH_GUIDANCE.contains("Expiry alone frees no slot"));
@@ -12992,10 +13001,14 @@ mod tests {
             "unset launch policy must be omitted"
         );
         assert!(QUEUE_SUBAGENT_DISPATCH_GUIDANCE.contains("`reasoning_effort`"));
-        assert!(QUEUE_SUBAGENT_DISPATCH_GUIDANCE
-            .contains(agent_doc_queue::worktree_layout::SUBAGENT_WORKTREE_LAYOUT_RULE));
-        assert!(QUEUE_SUBAGENT_DISPATCH_GUIDANCE
-            .ends_with(agent_doc_queue::worktree_layout::SUBAGENT_WORKTREE_LAYOUT_RULE));
+        assert!(
+            QUEUE_SUBAGENT_DISPATCH_GUIDANCE
+                .contains(agent_doc_queue::worktree_layout::SUBAGENT_WORKTREE_LAYOUT_RULE)
+        );
+        assert!(
+            QUEUE_SUBAGENT_DISPATCH_GUIDANCE
+                .ends_with(agent_doc_queue::worktree_layout::SUBAGENT_WORKTREE_LAYOUT_RULE)
+        );
         let state = run_queue_maintenance(&doc, None).unwrap();
         assert_eq!(
             queue_work_texts(&state.selected_queue_prompts),
@@ -19617,9 +19630,8 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
 
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(
-            updated.contains(
-                "Resolve agent:active item identity `lost-work` (status: lost): close"
-            ),
+            updated
+                .contains("Resolve agent:active item identity `lost-work` (status: lost): close"),
             "{updated}"
         );
         assert!(

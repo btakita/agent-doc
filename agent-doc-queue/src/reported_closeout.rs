@@ -728,7 +728,8 @@ fn conflict_resolved_record_step(
         detail,
     );
     let source = facts.source_sha.as_deref().unwrap_or("<source-sha>");
-    step.argv.extend(["--resolves".to_string(), source.to_string()]);
+    step.argv
+        .extend(["--resolves".to_string(), source.to_string()]);
     step.concrete = !step.argv.iter().any(|arg| is_placeholder(arg));
     step
 }
@@ -785,7 +786,15 @@ fn merge_steps(
     vec![
         ReportedCloseoutStep {
             action: ReportedCloseoutAction::MergeIntoSink,
-            argv: argv(&["git", "-C", worktree, "merge", "--no-ff", "--no-edit", source]),
+            argv: argv(&[
+                "git",
+                "-C",
+                worktree,
+                "merge",
+                "--no-ff",
+                "--no-edit",
+                source,
+            ]),
             concrete: checked_out.is_some() && facts.source_sha.is_some(),
             alternative: Some(MERGE.to_string()),
             detail: format!(
@@ -1186,11 +1195,15 @@ fn unintegrated_closeout(
                     choices: vec![
                         choice(
                             CHERRY_PICK,
-                            format!("apply {source} as one new commit on {sink_ref}; the record step verifies patch-id equivalence"),
+                            format!(
+                                "apply {source} as one new commit on {sink_ref}; the record step verifies patch-id equivalence"
+                            ),
                         ),
                         choice(
                             MERGE,
-                            format!("merge {source} into {sink_ref}, keeping the worker commit itself reachable"),
+                            format!(
+                                "merge {source} into {sink_ref}, keeping the worker commit itself reachable"
+                            ),
                         ),
                     ],
                     requires_operator: false,
@@ -1231,7 +1244,9 @@ fn unintegrated_closeout(
                         ),
                         choice(
                             CHERRY_PICK,
-                            format!("port the change: cherry-pick {source} onto {sink_ref} in a worktree of {sink_repo}"),
+                            format!(
+                                "port the change: cherry-pick {source} onto {sink_ref} in a worktree of {sink_repo}"
+                            ),
                         ),
                     ],
                     requires_operator: true,
@@ -2413,9 +2428,8 @@ mod tests {
             reported_claim_closeout(DOC, &claim, &ReportedRepoEvidence::Undeclared).unwrap(),
             &HashSet::new(),
         );
-        let pending =
-            pending_reported_closeout(std::slice::from_ref(&obligation), &HashSet::new())
-                .expect("an owed closeout never ends the turn silently");
+        let pending = pending_reported_closeout(std::slice::from_ref(&obligation), &HashSet::new())
+            .expect("an owed closeout never ends the turn silently");
         assert_eq!(pending.shape, ReportedCloseoutShape::MissingFacts);
         assert!(pending.next_command.is_none());
         assert!(

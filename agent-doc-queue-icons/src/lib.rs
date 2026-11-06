@@ -263,14 +263,8 @@ impl QueueIconSet {
             running: config.running.clone().unwrap_or(defaults.running),
             reported: config.reported.clone().unwrap_or(defaults.reported),
             lost: config.lost.clone().unwrap_or(defaults.lost),
-            lost_claimed: config
-                .lost_claimed
-                .clone()
-                .unwrap_or(defaults.lost_claimed),
-            lost_running: config
-                .lost_running
-                .clone()
-                .unwrap_or(defaults.lost_running),
+            lost_claimed: config.lost_claimed.clone().unwrap_or(defaults.lost_claimed),
+            lost_running: config.lost_running.clone().unwrap_or(defaults.lost_running),
             lost_reported: config
                 .lost_reported
                 .clone()
@@ -365,10 +359,11 @@ static QUEUE_ICONS: OnceLock<QueueIconSet> = OnceLock::new();
 
 mod legend;
 pub use legend::{
-    AGENT_DOC_REPLY_GLYPH, ALL_QUEUE_MARKERS, QUEUE_REPLY_LEGEND_ENTRY, QUEUE_REPLY_MEANING, QUEUE_MARKER_ANNOTATIONS, QUEUE_MARKER_LEGEND_ANCHOR,
-    QUEUE_MARKER_LEGEND_LINE_PREFIX, QUEUE_MARKER_LEGEND_URL, QueueMarker, QueueMarkerAnnotation,
-    is_queue_marker_legend_line, queue_marker_legend_help, queue_marker_legend_help_for,
-    queue_marker_legend_line, queue_marker_legend_line_for, queue_marker_legend_markdown_table,
+    AGENT_DOC_REPLY_GLYPH, ALL_QUEUE_MARKERS, QUEUE_MARKER_ANNOTATIONS, QUEUE_MARKER_LEGEND_ANCHOR,
+    QUEUE_MARKER_LEGEND_LINE_PREFIX, QUEUE_MARKER_LEGEND_URL, QUEUE_REPLY_LEGEND_ENTRY,
+    QUEUE_REPLY_MEANING, QueueMarker, QueueMarkerAnnotation, is_queue_marker_legend_line,
+    queue_marker_legend_help, queue_marker_legend_help_for, queue_marker_legend_line,
+    queue_marker_legend_line_for, queue_marker_legend_markdown_table,
 };
 
 /// Install a validated palette before parsing or rendering queue rows.

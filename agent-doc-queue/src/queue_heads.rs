@@ -201,8 +201,11 @@ pub fn queue_skip_diagnostic_for_response(content: &str, response: &str) -> Resu
         return queue_skip_diagnostic_for_content(content);
     };
     let queue_head_display = display_queue_prompt_text(&queue_head);
-    if crate::queue_response::latest_echo_cell_lacks_goal_final_state(content, response, &queue_head)
-    {
+    if crate::queue_response::latest_echo_cell_lacks_goal_final_state(
+        content,
+        response,
+        &queue_head,
+    ) {
         let states = crate::goal_preset_terminal::head_final_states(content, &queue_head);
         return Ok(format!(
             "[queue] kept goal-loop head `{queue_head_display}` live because its preset declares final states ({}) and the response cell for its echo has no line that begins with one (#goalpresetterminal). A posted review or pushed fix is a step, not the row's result. Next: `agent-doc queue report-complete` requeues an interrupted worker attempt; redispatch the same row to continue the loop, and close it only with a response line that begins with a declared final state.",
@@ -544,7 +547,10 @@ mod tests {
     fn waiting_status_token_is_not_head_identity() {
         let head = "⟦📥 you: 0 · agent: 1 · done: 0⟧ [#subagent-operator-request-sample-workspace] Provide a real sample workspace";
         let doc = format!("<!-- agent:queue -->\n- {head}\n<!-- /agent:queue -->\n");
-        assert!(super::is_do_directive(head), "the head is id-backed: {head}");
+        assert!(
+            super::is_do_directive(head),
+            "the head is id-backed: {head}"
+        );
         assert!(
             super::active_free_text_queue_heads(&doc).is_empty(),
             "{:?}",

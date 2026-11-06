@@ -426,10 +426,17 @@ fn repair_stale_completion_cli_is_dry_run_first_narrow_and_idempotent() {
         "{stdout}"
     );
     assert!(!stdout.contains("livekey retire"), "{stdout}");
-    assert_eq!(fs::read_to_string(&doc).unwrap(), original, "dry run writes nothing");
+    assert_eq!(
+        fs::read_to_string(&doc).unwrap(),
+        original,
+        "dry run writes nothing"
+    );
 
     let (stdout, _) = run(&["--apply"]);
-    assert!(stdout.contains("retired completion cell key=stalekey"), "{stdout}");
+    assert!(
+        stdout.contains("retired completion cell key=stalekey"),
+        "{stdout}"
+    );
     let repaired = fs::read_to_string(&doc).unwrap();
     assert!(!repaired.contains(&stale), "{repaired}");
     assert!(repaired.contains(&live), "{repaired}");
@@ -544,7 +551,11 @@ fn repair_completion_cells_cli_restores_deleted_cells_from_saved_responses() {
         "{stdout}\n{stderr}"
     );
     assert!(stderr.contains("dry run; rerun with --apply"), "{stderr}");
-    assert_eq!(fs::read_to_string(&doc).unwrap(), deleted, "dry run writes nothing");
+    assert_eq!(
+        fs::read_to_string(&doc).unwrap(),
+        deleted,
+        "dry run writes nothing"
+    );
 
     let (stdout, _) = run(&["queue", "repair-completion-cells", path, "--apply"]);
     assert_eq!(
@@ -556,18 +567,27 @@ fn repair_completion_cells_cli_restores_deleted_cells_from_saved_responses() {
     for cell in &cells {
         assert!(restored.contains(cell.as_str()), "{cell}\n---\n{restored}");
     }
-    assert!(restored.contains("### Re: prior — gpt-5\n\nDone.\nOperator edit that must survive.\n"));
+    assert!(
+        restored.contains("### Re: prior — gpt-5\n\nDone.\nOperator edit that must survive.\n")
+    );
     let queue = |text: &str| {
         let start = text.find("<!-- agent:queue").unwrap();
         text[start..].to_string()
     };
-    assert_eq!(queue(&restored), queue(&deleted), "queue rows are unchanged");
+    assert_eq!(
+        queue(&restored),
+        queue(&deleted),
+        "queue rows are unchanged"
+    );
     agent_doc_lint_io::validate_structure_on_content(&doc, &restored)
         .expect("the restored document must pass the session-check integrity classifier");
 
     let (stdout, stderr) = run(&["queue", "repair-completion-cells", path, "--apply"]);
     assert!(!stdout.contains("restored completion cell"), "{stdout}");
-    assert!(stderr.contains("0 completion cell(s) to restore; 2 already present"), "{stderr}");
+    assert!(
+        stderr.contains("0 completion cell(s) to restore; 2 already present"),
+        "{stderr}"
+    );
     assert_eq!(fs::read_to_string(&doc).unwrap(), restored);
 
     let (stdout, _) = run(&["queue", "repair-stale-completion", path]);
@@ -818,7 +838,15 @@ fn a_completion_cell_under_a_closing_question_is_separated_and_never_prefixed() 
     );
     let owner = "subagent:gh741";
     for args in [
-        vec!["queue", "claim", doc.to_str().unwrap(), "--item", item, "--owner", owner],
+        vec![
+            "queue",
+            "claim",
+            doc.to_str().unwrap(),
+            "--item",
+            item,
+            "--owner",
+            owner,
+        ],
         vec![
             "queue",
             "start",
@@ -968,21 +996,88 @@ fn report_complete_joins_repository_provenance_to_the_exact_attempt() {
     let dir = tempfile::tempdir().unwrap();
     let doc = committed_session(dir.path(), &["repository work"]);
     let path = doc.to_str().unwrap();
-    assert_ok(&run_agent_doc(dir.path(), &["queue", "claim", path, "--item", "repository work", "--owner", "subagent:repo"]), "claim");
-    assert_ok(&run_agent_doc(dir.path(), &["queue", "start", path, "--item", "repository work", "--owner", "subagent:repo", "--generation", "1", "--worker-id", "worker:repo"]), "start");
+    assert_ok(
+        &run_agent_doc(
+            dir.path(),
+            &[
+                "queue",
+                "claim",
+                path,
+                "--item",
+                "repository work",
+                "--owner",
+                "subagent:repo",
+            ],
+        ),
+        "claim",
+    );
+    assert_ok(
+        &run_agent_doc(
+            dir.path(),
+            &[
+                "queue",
+                "start",
+                path,
+                "--item",
+                "repository work",
+                "--owner",
+                "subagent:repo",
+                "--generation",
+                "1",
+                "--worker-id",
+                "worker:repo",
+            ],
+        ),
+        "start",
+    );
 
-    let unclassified = run_agent_doc(dir.path(), &["queue", "report-complete", path, "--item", "repository work", "--generation", "1", "--response", "implemented"]);
+    let unclassified = run_agent_doc(
+        dir.path(),
+        &[
+            "queue",
+            "report-complete",
+            path,
+            "--item",
+            "repository work",
+            "--generation",
+            "1",
+            "--response",
+            "implemented",
+        ],
+    );
     assert!(!unclassified.status.success());
     assert!(String::from_utf8_lossy(&unclassified.stderr).contains("exactly one result class"));
 
-    let source = String::from_utf8(git(dir.path(), &["rev-parse", "HEAD"]).stdout).unwrap().trim().to_string();
-    let sink_ref = String::from_utf8(git(dir.path(), &["branch", "--show-current"]).stdout).unwrap().trim().to_string();
-    let report = run_agent_doc(dir.path(), &[
-        "queue", "report-complete", path, "--item", "repository work", "--generation", "1",
-        "--source-repo", dir.path().to_str().unwrap(), "--source-sha", &source,
-        "--sink-repo", dir.path().to_str().unwrap(), "--sink-ref", &sink_ref,
-        "--response", "implemented and tested",
-    ]);
+    let source = String::from_utf8(git(dir.path(), &["rev-parse", "HEAD"]).stdout)
+        .unwrap()
+        .trim()
+        .to_string();
+    let sink_ref = String::from_utf8(git(dir.path(), &["branch", "--show-current"]).stdout)
+        .unwrap()
+        .trim()
+        .to_string();
+    let report = run_agent_doc(
+        dir.path(),
+        &[
+            "queue",
+            "report-complete",
+            path,
+            "--item",
+            "repository work",
+            "--generation",
+            "1",
+            "--source-repo",
+            dir.path().to_str().unwrap(),
+            "--source-sha",
+            &source,
+            "--sink-repo",
+            dir.path().to_str().unwrap(),
+            "--sink-ref",
+            &sink_ref,
+            "--response",
+            "implemented and tested",
+        ],
+    );
     assert_ok(&report, "report repository completion");
     assert!(String::from_utf8_lossy(&report.stderr).contains("is not integrated"));
     // `#repositoryreportcell`: a repository result writes the same
@@ -1007,12 +1102,30 @@ fn report_complete_joins_repository_provenance_to_the_exact_attempt() {
         Some("implemented and tested"),
         "{written}"
     );
-    let lineage = run_agent_doc(dir.path(), &["queue", "lineage", path, "--item", "repository work", "--generation", "1", "--json"]);
+    let lineage = run_agent_doc(
+        dir.path(),
+        &[
+            "queue",
+            "lineage",
+            path,
+            "--item",
+            "repository work",
+            "--generation",
+            "1",
+            "--json",
+        ],
+    );
     assert_ok(&lineage, "query lineage");
     let json: serde_json::Value = serde_json::from_slice(&lineage.stdout).unwrap();
     assert_eq!(json["attempts"][0]["source_sha"], source);
-    assert_eq!(json["attempts"][0]["source_repo_path"], dir.path().to_string_lossy().as_ref());
-    assert_eq!(json["attempts"][0]["sink_repo_path"], dir.path().to_string_lossy().as_ref());
+    assert_eq!(
+        json["attempts"][0]["source_repo_path"],
+        dir.path().to_string_lossy().as_ref()
+    );
+    assert_eq!(
+        json["attempts"][0]["sink_repo_path"],
+        dir.path().to_string_lossy().as_ref()
+    );
     assert_eq!(json["attempts"][0]["state"], "committed");
 }
 
@@ -1141,7 +1254,9 @@ fn a_claimed_mirrored_id_head_stays_one_row_through_its_whole_attempt() {
         let stderr = String::from_utf8_lossy(&report.stderr);
         assert!(stderr.contains("awaiting integration."), "{stderr}");
         assert!(
-            stderr.contains("side-worktree commit, or published side branch is not terminal completion"),
+            stderr.contains(
+                "side-worktree commit, or published side branch is not terminal completion"
+            ),
             "report-complete must explain that a worker handback is integration debt: {stderr}"
         );
         assert!(
@@ -1479,7 +1594,15 @@ fn report_complete_resolves_an_id_selector_to_a_row_claimed_by_full_text() {
         stderr
     };
     let path = doc.to_str().unwrap();
-    ok(&["queue", "claim", path, "--item", row, "--owner", "subagent:lazilyrelease"]);
+    ok(&[
+        "queue",
+        "claim",
+        path,
+        "--item",
+        row,
+        "--owner",
+        "subagent:lazilyrelease",
+    ]);
     ok(&[
         "queue",
         "start",
@@ -1494,7 +1617,11 @@ fn report_complete_resolves_an_id_selector_to_a_row_claimed_by_full_text() {
         "worker:lazilyrelease",
     ]);
 
-    for selector in ["#lazilyreleasedecision", "lazilyreleasedecision", "do [#lazilyreleasedecision]"] {
+    for selector in [
+        "#lazilyreleasedecision",
+        "lazilyreleasedecision",
+        "do [#lazilyreleasedecision]",
+    ] {
         let stderr = ok(&[
             "queue",
             "report-complete",
@@ -1722,7 +1849,10 @@ fn report_complete_without_a_matching_subagent_claim_fails_and_names_candidates(
         stderr.contains("matched no subagent claim for \"finish nothing\" generation 1"),
         "{stderr}"
     );
-    assert!(stderr.contains("the worker result is NOT recorded"), "{stderr}");
+    assert!(
+        stderr.contains("the worker result is NOT recorded"),
+        "{stderr}"
+    );
     assert!(
         stderr.contains("candidate rows (2):")
             && stderr.contains("  - \"finish sdk\"")
@@ -1799,22 +1929,53 @@ fn report_complete_and_freeze_print_the_work_pool_refill() {
         String::from_utf8_lossy(&output.stderr).into_owned()
     };
     ok(
-        run(base, &["queue", "claim", &path, "--item", "task one", "--owner", "subagent:one"]),
+        run(
+            base,
+            &[
+                "queue",
+                "claim",
+                &path,
+                "--item",
+                "task one",
+                "--owner",
+                "subagent:one",
+            ],
+        ),
         "claim one",
     );
     ok(
         run(
             base,
             &[
-                "queue", "start", &path, "--item", "task one", "--owner", "subagent:one",
-                "--generation", "1", "--worker-id", "worker:one",
+                "queue",
+                "start",
+                &path,
+                "--item",
+                "task one",
+                "--owner",
+                "subagent:one",
+                "--generation",
+                "1",
+                "--worker-id",
+                "worker:one",
             ],
         ),
         "start one",
     );
     // Claimed, never spawned: the Grok miss.
     ok(
-        run(base, &["queue", "claim", &path, "--item", "task two", "--owner", "subagent:two"]),
+        run(
+            base,
+            &[
+                "queue",
+                "claim",
+                &path,
+                "--item",
+                "task two",
+                "--owner",
+                "subagent:two",
+            ],
+        ),
         "claim two",
     );
 
@@ -1823,8 +1984,16 @@ fn report_complete_and_freeze_print_the_work_pool_refill() {
         run(
             later,
             &[
-                "queue", "report-complete", "--prose-only", &path, "--item", "task one",
-                "--generation", "1", "--response", "Completed task one.",
+                "queue",
+                "report-complete",
+                "--prose-only",
+                &path,
+                "--item",
+                "task one",
+                "--generation",
+                "1",
+                "--response",
+                "Completed task one.",
             ],
         ),
         "report one",
@@ -1840,7 +2009,10 @@ fn report_complete_and_freeze_print_the_work_pool_refill() {
     assert!(urgent < refill, "{report}");
     assert!(report.contains("\"task two\""), "{report}");
     assert!(report.contains("agent-doc queue start"), "{report}");
-    assert!(report.contains("--generation 1 --worker-id <worker-id>"), "{report}");
+    assert!(
+        report.contains("--generation 1 --worker-id <worker-id>"),
+        "{report}"
+    );
     assert!(report.contains("\"task three\""), "{report}");
     assert!(report.contains("agent-doc queue claim"), "{report}");
     assert!(report.contains("agent-doc queue brief"), "{report}");
@@ -1851,22 +2023,51 @@ fn report_complete_and_freeze_print_the_work_pool_refill() {
         run(
             later,
             &[
-                "queue", "start", &path, "--item", "task two", "--owner", "subagent:two",
-                "--generation", "1", "--worker-id", "worker:two",
+                "queue",
+                "start",
+                &path,
+                "--item",
+                "task two",
+                "--owner",
+                "subagent:two",
+                "--generation",
+                "1",
+                "--worker-id",
+                "worker:two",
             ],
         ),
         "start two",
     );
     ok(
-        run(later, &["queue", "claim", &path, "--item", "task three", "--owner", "subagent:three"]),
+        run(
+            later,
+            &[
+                "queue",
+                "claim",
+                &path,
+                "--item",
+                "task three",
+                "--owner",
+                "subagent:three",
+            ],
+        ),
         "claim three",
     );
     ok(
         run(
             later,
             &[
-                "queue", "start", &path, "--item", "task three", "--owner", "subagent:three",
-                "--generation", "1", "--worker-id", "worker:three",
+                "queue",
+                "start",
+                &path,
+                "--item",
+                "task three",
+                "--owner",
+                "subagent:three",
+                "--generation",
+                "1",
+                "--worker-id",
+                "worker:three",
             ],
         ),
         "start three",
@@ -1875,7 +2076,14 @@ fn report_complete_and_freeze_print_the_work_pool_refill() {
         run(
             later,
             &[
-                "queue", "freeze", &path, "--item", "task two", "--generation", "1", "--reason",
+                "queue",
+                "freeze",
+                &path,
+                "--item",
+                "task two",
+                "--generation",
+                "1",
+                "--reason",
                 "ended without a result",
             ],
         ),
@@ -1888,7 +2096,10 @@ fn report_complete_and_freeze_print_the_work_pool_refill() {
     assert!(pool.status.success());
     let pool: serde_json::Value = serde_json::from_slice(&pool.stdout).unwrap();
     assert_eq!(pool["pools"][0]["occupancy"]["size"], 2, "{pool}");
-    assert_eq!(pool["pools"][0]["occupancy"]["source"], "queue_cap", "{pool}");
+    assert_eq!(
+        pool["pools"][0]["occupancy"]["source"], "queue_cap",
+        "{pool}"
+    );
     assert_eq!(pool["pools"][0]["occupancy"]["frozen"], 1, "{pool}");
     assert_eq!(pool["pools"][0]["occupancy"]["free"], 1, "{pool}");
     assert_eq!(pool["frozen"][0]["item"], "task two", "{pool}");
@@ -1908,13 +2119,36 @@ fn report_complete_structures_the_handback_and_queues_its_action_items() {
     let doc = committed_run_session(dir.path(), &["- do [#alpha]", "- later work"]);
     let path = doc.to_str().unwrap();
     assert_ok(
-        &run_agent_doc(dir.path(), &["queue", "claim", path, "--item", "do [#alpha]", "--owner", "subagent:alpha"]),
+        &run_agent_doc(
+            dir.path(),
+            &[
+                "queue",
+                "claim",
+                path,
+                "--item",
+                "do [#alpha]",
+                "--owner",
+                "subagent:alpha",
+            ],
+        ),
         "claim",
     );
     assert_ok(
         &run_agent_doc(
             dir.path(),
-            &["queue", "start", path, "--item", "do [#alpha]", "--owner", "subagent:alpha", "--generation", "1", "--worker-id", "worker:alpha"],
+            &[
+                "queue",
+                "start",
+                path,
+                "--item",
+                "do [#alpha]",
+                "--owner",
+                "subagent:alpha",
+                "--generation",
+                "1",
+                "--worker-id",
+                "worker:alpha",
+            ],
         ),
         "start",
     );
@@ -1929,14 +2163,26 @@ fn report_complete_structures_the_handback_and_queues_its_action_items() {
     let report = |what: &str| {
         let output = run_agent_doc(
             dir.path(),
-            &["queue", "report-complete", "--prose-only", path, "--item", "do [#alpha]", "--generation", "1", "--response", handback],
+            &[
+                "queue",
+                "report-complete",
+                "--prose-only",
+                path,
+                "--item",
+                "do [#alpha]",
+                "--generation",
+                "1",
+                "--response",
+                handback,
+            ],
         );
         assert_ok(&output, what);
         String::from_utf8_lossy(&output.stderr).into_owned()
     };
     let stderr = report("report-complete");
     assert!(
-        stderr.contains("Queued 2 action item(s) as follow-up row(s)") && stderr.contains("queue id `default`"),
+        stderr.contains("Queued 2 action item(s) as follow-up row(s)")
+            && stderr.contains("queue id `default`"),
         "{stderr}"
     );
 
@@ -1971,10 +2217,21 @@ fn report_complete_structures_the_handback_and_queues_its_action_items() {
     assert!(position("later work") > alpha + 2, "{rows:#?}");
 
     let stderr = report("repeated report-complete");
-    assert!(stderr.contains("2 action item(s) already have a follow-up row"), "{stderr}");
+    assert!(
+        stderr.contains("2 action item(s) already have a follow-up row"),
+        "{stderr}"
+    );
     let rows = run_rows(&doc);
-    assert_eq!(rows.iter().filter(|row| row.ends_with(first)).count(), 1, "{rows:#?}");
-    assert_eq!(rows.iter().filter(|row| row.ends_with(second)).count(), 1, "{rows:#?}");
+    assert_eq!(
+        rows.iter().filter(|row| row.ends_with(first)).count(),
+        1,
+        "{rows:#?}"
+    );
+    assert_eq!(
+        rows.iter().filter(|row| row.ends_with(second)).count(),
+        1,
+        "{rows:#?}"
+    );
 
     assert_session_check_does_not_accuse_patchback(dir.path(), &doc);
     assert_preflight_admits(dir.path(), &doc, 1);
@@ -1991,13 +2248,36 @@ fn report_complete_holds_open_items_for_triage_instead_of_queueing_them() {
     let doc = committed_run_session(dir.path(), &["- do [#alpha]", "- later work"]);
     let path = doc.to_str().unwrap();
     assert_ok(
-        &run_agent_doc(dir.path(), &["queue", "claim", path, "--item", "do [#alpha]", "--owner", "subagent:alpha"]),
+        &run_agent_doc(
+            dir.path(),
+            &[
+                "queue",
+                "claim",
+                path,
+                "--item",
+                "do [#alpha]",
+                "--owner",
+                "subagent:alpha",
+            ],
+        ),
         "claim",
     );
     assert_ok(
         &run_agent_doc(
             dir.path(),
-            &["queue", "start", path, "--item", "do [#alpha]", "--owner", "subagent:alpha", "--generation", "1", "--worker-id", "worker:alpha"],
+            &[
+                "queue",
+                "start",
+                path,
+                "--item",
+                "do [#alpha]",
+                "--owner",
+                "subagent:alpha",
+                "--generation",
+                "1",
+                "--worker-id",
+                "worker:alpha",
+            ],
         ),
         "start",
     );
@@ -2012,16 +2292,33 @@ fn report_complete_holds_open_items_for_triage_instead_of_queueing_them() {
     );
     let output = run_agent_doc(
         dir.path(),
-        &["queue", "report-complete", "--prose-only", path, "--item", "do [#alpha]", "--generation", "1", "--response", handback],
+        &[
+            "queue",
+            "report-complete",
+            "--prose-only",
+            path,
+            "--item",
+            "do [#alpha]",
+            "--generation",
+            "1",
+            "--response",
+            handback,
+        ],
     );
     assert_ok(&output, "report-complete");
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("2 open item(s) were held for triage and NOT queued"), "{stderr}");
+    assert!(
+        stderr.contains("2 open item(s) were held for triage and NOT queued"),
+        "{stderr}"
+    );
     assert!(stderr.contains("queue follow-up"), "{stderr}");
 
     let rows = run_rows(&doc);
     assert_eq!(rows.len(), before.len(), "{rows:#?}");
-    assert!(!rows.iter().any(|row| row.contains("follow up on")), "{rows:#?}");
+    assert!(
+        !rows.iter().any(|row| row.contains("follow up on")),
+        "{rows:#?}"
+    );
     let written = fs::read_to_string(&doc).unwrap();
     assert!(
         written.contains(concat!(
@@ -2039,16 +2336,42 @@ fn report_complete_holds_open_items_for_triage_instead_of_queueing_them() {
 #[test]
 fn report_complete_prints_a_runnable_command_when_placement_is_refused() {
     let dir = tempfile::tempdir().unwrap();
-    let doc = committed_run_session(dir.path(), &["- do [#alpha]", "- do [#alpha]", "- later work"]);
+    let doc = committed_run_session(
+        dir.path(),
+        &["- do [#alpha]", "- do [#alpha]", "- later work"],
+    );
     let path = doc.to_str().unwrap();
     assert_ok(
-        &run_agent_doc(dir.path(), &["queue", "claim", path, "--item", "do [#alpha]", "--owner", "subagent:alpha"]),
+        &run_agent_doc(
+            dir.path(),
+            &[
+                "queue",
+                "claim",
+                path,
+                "--item",
+                "do [#alpha]",
+                "--owner",
+                "subagent:alpha",
+            ],
+        ),
         "claim",
     );
     assert_ok(
         &run_agent_doc(
             dir.path(),
-            &["queue", "start", path, "--item", "do [#alpha]", "--owner", "subagent:alpha", "--generation", "1", "--worker-id", "worker:alpha"],
+            &[
+                "queue",
+                "start",
+                path,
+                "--item",
+                "do [#alpha]",
+                "--owner",
+                "subagent:alpha",
+                "--generation",
+                "1",
+                "--worker-id",
+                "worker:alpha",
+            ],
         ),
         "start",
     );
@@ -2061,7 +2384,18 @@ fn report_complete_prints_a_runnable_command_when_placement_is_refused() {
     );
     let output = run_agent_doc(
         dir.path(),
-        &["queue", "report-complete", "--prose-only", path, "--item", "do [#alpha]", "--generation", "1", "--response", handback],
+        &[
+            "queue",
+            "report-complete",
+            "--prose-only",
+            path,
+            "--item",
+            "do [#alpha]",
+            "--generation",
+            "1",
+            "--response",
+            handback,
+        ],
     );
     assert_ok(&output, "report-complete");
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -2070,7 +2404,10 @@ fn report_complete_prints_a_runnable_command_when_placement_is_refused() {
         .find(|line| line.starts_with("agent-doc queue follow-up"))
         .unwrap_or_else(|| panic!("no runnable command:\n{stderr}"))
         .to_string();
-    assert!(!command.contains("<origin>") && !command.contains("<text>"), "{command}");
+    assert!(
+        !command.contains("<origin>") && !command.contains("<text>"),
+        "{command}"
+    );
     assert!(command.contains("--id default"), "{command}");
     assert!(command.contains("--after "), "{command}");
     assert!(command.contains("do [#alpha]"), "{command}");
@@ -2095,8 +2432,17 @@ fn report_complete_prints_a_runnable_command_when_placement_is_refused() {
         .iter()
         .position(|row| row.contains("do [#alpha]") && !row.contains("follow up"))
         .unwrap_or_else(|| panic!("origin row missing: {rows:#?}"));
-    assert_eq!(rows.iter().filter(|row| row.contains("do [#alpha]") && !row.contains("follow up")).count(), 1, "{rows:#?}");
-    assert!(position(first) > alpha && position(second) > position(first), "{rows:#?}");
+    assert_eq!(
+        rows.iter()
+            .filter(|row| row.contains("do [#alpha]") && !row.contains("follow up"))
+            .count(),
+        1,
+        "{rows:#?}"
+    );
+    assert!(
+        position(first) > alpha && position(second) > position(first),
+        "{rows:#?}"
+    );
 }
 
 fn drop_second_run_row(content: &str, origin: &str) -> String {
@@ -2107,9 +2453,9 @@ fn drop_second_run_row(content: &str, origin: &str) -> String {
     let mut body = String::new();
     for line in content[body_start..end].split_inclusive('\n') {
         let work = line.trim_end_matches(['\n', '\r']).trim_start();
-        let is_origin = work.strip_prefix("- ").is_some_and(|rest| {
-            !rest.contains("follow up") && rest.contains(origin)
-        });
+        let is_origin = work
+            .strip_prefix("- ")
+            .is_some_and(|rest| !rest.contains("follow up") && rest.contains(origin));
         if is_origin {
             seen += 1;
             if seen == 2 {
@@ -2118,7 +2464,12 @@ fn drop_second_run_row(content: &str, origin: &str) -> String {
         }
         body.push_str(line);
     }
-    assert_eq!(seen, 2, "expected two origin rows:\n{}", &content[body_start..end]);
+    assert_eq!(
+        seen,
+        2,
+        "expected two origin rows:\n{}",
+        &content[body_start..end]
+    );
     let mut out = String::new();
     out.push_str(&content[..body_start]);
     out.push_str(&body);
@@ -2154,18 +2505,46 @@ fn followups_of_a_nested_origin_leave_the_parent_children_alone_and_stay_acknowl
     let dir = tempfile::tempdir().unwrap();
     let doc = committed_run_session(
         dir.path(),
-        &["- parent work", "  - leaf work", "  - sibling work", "- later work"],
+        &[
+            "- parent work",
+            "  - leaf work",
+            "  - sibling work",
+            "- later work",
+        ],
     );
     let path = doc.to_str().unwrap();
     let item = "parent work: leaf work";
     assert_ok(
-        &run_agent_doc(dir.path(), &["queue", "claim", path, "--item", item, "--owner", "subagent:leaf"]),
+        &run_agent_doc(
+            dir.path(),
+            &[
+                "queue",
+                "claim",
+                path,
+                "--item",
+                item,
+                "--owner",
+                "subagent:leaf",
+            ],
+        ),
         "claim",
     );
     assert_ok(
         &run_agent_doc(
             dir.path(),
-            &["queue", "start", path, "--item", item, "--owner", "subagent:leaf", "--generation", "1", "--worker-id", "worker:leaf"],
+            &[
+                "queue",
+                "start",
+                path,
+                "--item",
+                item,
+                "--owner",
+                "subagent:leaf",
+                "--generation",
+                "1",
+                "--worker-id",
+                "worker:leaf",
+            ],
         ),
         "start",
     );
@@ -2178,7 +2557,18 @@ fn followups_of_a_nested_origin_leave_the_parent_children_alone_and_stay_acknowl
     assert_ok(
         &run_agent_doc(
             dir.path(),
-            &["queue", "report-complete", "--prose-only", path, "--item", item, "--generation", "1", "--response", handback],
+            &[
+                "queue",
+                "report-complete",
+                "--prose-only",
+                path,
+                "--item",
+                item,
+                "--generation",
+                "1",
+                "--response",
+                handback,
+            ],
         ),
         "report-complete",
     );
@@ -2192,16 +2582,27 @@ fn followups_of_a_nested_origin_leave_the_parent_children_alone_and_stay_acknowl
             .position(|row| row.ends_with(needle))
             .unwrap_or_else(|| panic!("{needle:?} missing: {rows:#?}"))
     };
-    assert!(rows[position("sibling work")].starts_with("  - "), "{rows:#?}");
-    assert_eq!(position("sibling work") + 1, position(followup), "{rows:#?}");
+    assert!(
+        rows[position("sibling work")].starts_with("  - "),
+        "{rows:#?}"
+    );
+    assert_eq!(
+        position("sibling work") + 1,
+        position(followup),
+        "{rows:#?}"
+    );
     assert!(rows[position(followup)].starts_with("- "), "{rows:#?}");
     assert_eq!(position(followup) + 1, position("later work"), "{rows:#?}");
 
-    let output = run_agent_doc(dir.path(), &["queue", "consume", path, "--ack-text", followup]);
+    let output = run_agent_doc(
+        dir.path(),
+        &["queue", "consume", path, "--ack-text", followup],
+    );
     assert_ok(&output, "ack the follow-up row");
     let rows = run_rows(&doc);
     assert!(
-        rows.iter().any(|row| row.contains("sibling work") && !row.contains("~~")),
+        rows.iter()
+            .any(|row| row.contains("sibling work") && !row.contains("~~")),
         "the parent's other child is untouched: {rows:#?}"
     );
 }

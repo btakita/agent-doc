@@ -101,7 +101,9 @@ pub struct WorktreeResidue {
 pub enum WorktreeDisposition {
     Remove,
     /// Keep it, and say exactly what would have been destroyed.
-    Retain { reason: String },
+    Retain {
+        reason: String,
+    },
 }
 
 /// Decide a finished task's worktree disposition (`#orchworktreeleak`).

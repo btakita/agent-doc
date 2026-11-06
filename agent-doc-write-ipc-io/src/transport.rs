@@ -1300,7 +1300,9 @@ mod gh131nonipc_tests {
                 tag: "registration-lag".to_string(),
             }]);
 
-        assert!(agent_doc_crdt_relay_io::reliable_sync_editor_live_for_file(&file));
+        assert!(agent_doc_crdt_relay_io::reliable_sync_editor_live_for_file(
+            &file
+        ));
         assert!(registered_editor_delivery_target(&file).is_none());
 
         let result = try_ipc_inner(
@@ -1319,10 +1321,7 @@ mod gh131nonipc_tests {
         assert!(!result.success);
         assert!(!result.skipped_committed_cycle);
         let ops = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
-        assert!(
-            ops.contains("action=document_authority_recovery"),
-            "{ops}"
-        );
+        assert!(ops.contains("action=document_authority_recovery"), "{ops}");
     }
 
     /// `#gh131nonipc`: the `socket_visible_write` divergence refusal happens

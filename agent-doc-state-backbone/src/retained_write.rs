@@ -586,8 +586,7 @@ fn settlement_input(
             );
         }
         if authority.content_hash == pending.target_hash
-            || pending.operator_superseding_hash.as_deref()
-                == Some(authority.content_hash.as_str())
+            || pending.operator_superseding_hash.as_deref() == Some(authority.content_hash.as_str())
             || (pending.carries_response_payload && authority.payload_materialized)
             || (pending.carries_content_delta && authority.intent_delta_materialized)
         {
@@ -601,8 +600,7 @@ fn settlement_input(
     // landed, while the preceding rows prove that this intent's own content did.
     let evidence = if authority.content_hash == pending.target_hash {
         ConvergenceEvidence::ExactTarget
-    } else if pending.operator_superseding_hash.as_deref()
-        == Some(authority.content_hash.as_str())
+    } else if pending.operator_superseding_hash.as_deref() == Some(authority.content_hash.as_str())
     {
         ConvergenceEvidence::OperatorSupersededProgressiveReconnect
     } else if pending.carries_response_payload && authority.payload_materialized {
@@ -967,9 +965,7 @@ mod tests {
             SettlementDecision::Unsettled(UnsettledCause::DiskProjectionPending),
             SettlementDecision::Satisfied(SatisfiedProof::CommittedStateOnlyAuthorityMaterialized),
             SettlementDecision::Satisfied(SatisfiedProof::ExactTarget),
-            SettlementDecision::Satisfied(
-                SatisfiedProof::OperatorSupersededProgressiveReconnect,
-            ),
+            SettlementDecision::Satisfied(SatisfiedProof::OperatorSupersededProgressiveReconnect),
             SettlementDecision::Satisfied(SatisfiedProof::RebasedPayloadMaterialized),
             SettlementDecision::Satisfied(SatisfiedProof::SupersededDeltaMaterialized),
             SettlementDecision::Satisfied(SatisfiedProof::SupersededByLaterCloseoutStage),

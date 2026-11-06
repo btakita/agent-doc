@@ -71,7 +71,10 @@ where
     let encoded = serde_json::to_string(&first).expect("decoded wire value must re-encode");
     let second: T = serde_json::from_str(&encoded).expect("re-encoded wire value must decode");
     let reencoded = serde_json::to_string(&second).expect("wire value must re-encode");
-    assert_eq!(encoded, reencoded, "wire value is not a fixed point of decode/encode");
+    assert_eq!(
+        encoded, reencoded,
+        "wire value is not a fixed point of decode/encode"
+    );
 }
 
 /// IPC wire decode: one NDJSON line as it arrives on an editor or actor socket.
@@ -223,15 +226,18 @@ pub fn frontmatter(data: &[u8]) {
     assert_same_decisions(&fm, &canonical);
     let rewritten =
         agent_doc_frontmatter::write(&canonical, rebody).expect("canonical frontmatter must write");
-    assert_eq!(rewritten, written, "write must reach a fixed point after one canonicalization");
+    assert_eq!(
+        rewritten, written,
+        "write must reach a fixed point after one canonicalization"
+    );
     let expected = serde_yaml::to_value(&canonical).expect("frontmatter must serialize");
 
     // `write_preserving` claims byte preservation of unchanged keys; at minimum
     // it must produce a document that parses back to the same frontmatter.
     let preserved = agent_doc_frontmatter::write_preserving(content, &fm, body)
         .expect("parsed frontmatter must write preserving");
-    let (reparsed, rebody) = agent_doc_frontmatter::parse(&preserved)
-        .expect("write_preserving output must re-parse");
+    let (reparsed, rebody) =
+        agent_doc_frontmatter::parse(&preserved).expect("write_preserving output must re-parse");
     assert_eq!(rebody, body, "write_preserving must preserve the body");
     assert_same_decisions(&fm, &reparsed);
     assert_eq!(
@@ -245,8 +251,15 @@ fn assert_same_decisions(
     before: &agent_doc_frontmatter::Frontmatter,
     after: &agent_doc_frontmatter::Frontmatter,
 ) {
-    assert_eq!(before.queue_active, after.queue_active, "queue state changed");
-    assert_eq!(before.resolve_mode(), after.resolve_mode(), "document mode changed");
+    assert_eq!(
+        before.queue_active, after.queue_active,
+        "queue state changed"
+    );
+    assert_eq!(
+        before.resolve_mode(),
+        after.resolve_mode(),
+        "document mode changed"
+    );
     assert_eq!(before.session, after.session, "session id changed");
     assert_eq!(
         before.active_resume_harness(),
@@ -285,7 +298,9 @@ pub fn crdt_update(data: &[u8]) {
     if replica.apply_update(data).is_ok() {
         let text = replica.text();
         // Idempotent: re-applying a known delta is a no-op.
-        replica.apply_update(data).expect("re-applying an applied update");
+        replica
+            .apply_update(data)
+            .expect("re-applying an applied update");
         assert_eq!(replica.text(), text);
         // A peer bootstrapped from this replica's state converges with it.
         let peer = ReplicaState::from_encoded(10, &replica.encode_state())
@@ -353,7 +368,11 @@ pub fn crdt_edits(data: &[u8]) {
         model.splice(start..end, insert.chars());
 
         let expected: String = model.iter().collect();
-        assert_eq!(editor.text(), expected, "replica diverged from the edit model");
+        assert_eq!(
+            editor.text(),
+            expected,
+            "replica diverged from the edit model"
+        );
 
         // Incremental sync round: the follower announces its frontier and
         // applies only the delta it is missing.

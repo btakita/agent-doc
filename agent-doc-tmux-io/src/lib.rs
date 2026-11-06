@@ -1200,9 +1200,8 @@ mod tests {
         // SAFETY: `getpid` and `write` on an open fd are async-signal-safe, and
         // nothing here allocates.
         unsafe {
-            command.pre_exec(move || {
-                (&child_pid_file).write_all(&std::process::id().to_ne_bytes())
-            });
+            command
+                .pre_exec(move || (&child_pid_file).write_all(&std::process::id().to_ne_bytes()));
         }
         let started = Instant::now();
         let err = command_output_bounded(command, "test-tmux", Duration::from_millis(30))

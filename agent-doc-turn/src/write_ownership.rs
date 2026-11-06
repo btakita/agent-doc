@@ -333,7 +333,8 @@ impl RetainedWriteOwnership {
             // wait, a resume worker, a reload, nor a recycle can end this; the
             // terminating move is the operator's, and it is named exactly.
             RetainedWriteVerdict::EditorAttachAwaitsOperator
-        } else if self.retained_capture && self.capture_resume_unowned && !self.retained_projection {
+        } else if self.retained_capture && self.capture_resume_unowned && !self.retained_projection
+        {
             // `#capturedresumeunowned`: the capture is durable, but the worker
             // that would re-drive it is not running. Waiting is the one thing
             // that cannot work, so this must not read as Deferred.
@@ -725,8 +726,7 @@ pub fn editor_holds_unmerged_visible_text_remedy(file: &str) -> String {
 /// [`RetainedWriteVerdict::EditorAttachAwaitsOperator`] verdict token.
 pub const EDITOR_ATTACH_AWAITS_OPERATOR_STATE: &str = "editor_attach_awaits_operator";
 /// The operator action every reader of that hold names, as a machine token.
-pub const REOPEN_DETACHED_AFTER_REPAIR_OPERATOR_ACTION: &str =
-    "close_tab_repair_detached_reopen";
+pub const REOPEN_DETACHED_AFTER_REPAIR_OPERATOR_ACTION: &str = "close_tab_repair_detached_reopen";
 
 /// The exact operator action that supplies the evidence a paused editor
 /// replica attach waits for (`#controllerrecyclelost`).
@@ -2218,8 +2218,14 @@ mod tests {
         );
         assert!(remedy.contains("REJECTED the delivery receipt"), "{remedy}");
         assert!(remedy.contains("restart or reload the editor"), "{remedy}");
-        assert!(remedy.contains("agent-doc session-check plan.md"), "{remedy}");
-        assert!(remedy.contains("re-send"), "the response is durable: {remedy}");
+        assert!(
+            remedy.contains("agent-doc session-check plan.md"),
+            "{remedy}"
+        );
+        assert!(
+            remedy.contains("re-send"),
+            "the response is durable: {remedy}"
+        );
         for forbidden_claim in [
             "deferral, not a lost response",
             "commits itself",
@@ -2422,7 +2428,11 @@ mod tests {
                 assert!(remedy.contains(named), "{named}: {remedy}");
             }
             assert!(remedy.contains(&editor_attach_operator_action("plan.md")));
-            for forbidden in ["re-send", "force disk", "Do NOT run `agent-doc commit plan.md`"] {
+            for forbidden in [
+                "re-send",
+                "force disk",
+                "Do NOT run `agent-doc commit plan.md`",
+            ] {
                 assert!(remedy.contains(forbidden), "{forbidden}: {remedy}");
             }
             assert!(
@@ -2485,8 +2495,14 @@ mod tests {
         let remedy = retained_write_remedy(owned, "plan.md");
         assert!(remedy.contains(editor_replica_recovery()), "{remedy}");
         assert!(remedy.contains("agent-doc admin reload-lib"), "{remedy}");
-        assert!(remedy.contains("agent-doc session-check plan.md"), "{remedy}");
-        assert!(remedy.contains("re-send"), "retained work is durable: {remedy}");
+        assert!(
+            remedy.contains("agent-doc session-check plan.md"),
+            "{remedy}"
+        );
+        assert!(
+            remedy.contains("re-send"),
+            "retained work is durable: {remedy}"
+        );
         assert!(
             !remedy.contains("deferral, not a lost response"),
             "an unserved replica never converges on its own: {remedy}"
@@ -2574,7 +2590,10 @@ mod tests {
                         admission,
                         TrackedWorkRepairAdmission::RecoverEditorFirst(write_path_verdict)
                     );
-                    assert!(instruction.contains("AFTER recovering the editor"), "{instruction}");
+                    assert!(
+                        instruction.contains("AFTER recovering the editor"),
+                        "{instruction}"
+                    );
                 }
                 _ => {
                     assert_eq!(admission, TrackedWorkRepairAdmission::Admissible);
@@ -2622,8 +2641,14 @@ mod tests {
             );
         }
         let notice = pending_only_absorbed_notice("plan.md", "abc");
-        assert!(notice.contains("agent-doc session-check plan.md"), "{notice}");
-        assert!(!notice.contains("deferral, not a lost response"), "{notice}");
+        assert!(
+            notice.contains("agent-doc session-check plan.md"),
+            "{notice}"
+        );
+        assert!(
+            !notice.contains("deferral, not a lost response"),
+            "{notice}"
+        );
     }
 
     #[test]

@@ -221,11 +221,14 @@ fn recover_shared_codex_daemon_mismatch(
     use crate::codex_shared_daemon as shared;
     let daemon_pid = shared::invocation_descends_from_shared_codex_daemon()?;
     let tmux = agent_doc_tmux_io::configured_tmux();
-    let pane_pid: u32 =
-        agent_doc_tmux_io::display_message_value_nonempty(&tmux, Some(owner_pane_id), "#{pane_pid}")?
-            .trim()
-            .parse()
-            .ok()?;
+    let pane_pid: u32 = agent_doc_tmux_io::display_message_value_nonempty(
+        &tmux,
+        Some(owner_pane_id),
+        "#{pane_pid}",
+    )?
+    .trim()
+    .parse()
+    .ok()?;
     shared::daemon_attached_codex_tui_under(pane_pid)?;
     let requested = agent_doc_project_root_io::project_root_containing(file)
         .ok_or_else(|| "no project root".to_string())

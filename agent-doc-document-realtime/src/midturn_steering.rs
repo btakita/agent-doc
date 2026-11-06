@@ -731,7 +731,9 @@ fn queue_modes(
             let line_start = content[..component.open_start]
                 .rfind('\n')
                 .map_or(0, |index| index + 1);
-            let marker = content[line_start..component.open_end].trim_end().to_string();
+            let marker = content[line_start..component.open_end]
+                .trim_end()
+                .to_string();
             (
                 block.id.to_string(),
                 (
@@ -752,12 +754,15 @@ fn queue_mode_candidates(
     prompt_presets: &agent_doc_frontmatter::frontmatter::PromptPresets,
 ) -> QueueModeCandidates {
     let baseline_modes = queue_modes(&watermark.baseline, prompt_presets);
-    let mut acknowledged = watermark.acknowledged_queue_modes.clone().unwrap_or_else(|| {
-        baseline_modes
-            .iter()
-            .map(|(queue, (_, subagents))| (queue.clone(), *subagents))
-            .collect()
-    });
+    let mut acknowledged = watermark
+        .acknowledged_queue_modes
+        .clone()
+        .unwrap_or_else(|| {
+            baseline_modes
+                .iter()
+                .map(|(queue, (_, subagents))| (queue.clone(), *subagents))
+                .collect()
+        });
     let mut candidates = Vec::new();
     let mut changes = Vec::new();
     for (queue, (marker, subagents)) in queue_modes(current, prompt_presets) {
@@ -2895,7 +2900,10 @@ mod tests {
         assert!(!item.queue_mode.as_ref().unwrap().subagents);
         let rendered = render_closeout_steering_context("plan.md", &off.ready, 0).unwrap();
         assert!(rendered.contains("subagents=off"), "{rendered}");
-        assert!(rendered.contains("Stop claiming or spawning new heads"), "{rendered}");
+        assert!(
+            rendered.contains("Stop claiming or spawning new heads"),
+            "{rendered}"
+        );
         assert!(rendered.contains("continue to completion"), "{rendered}");
         assert!(rendered.contains("drain inline"), "{rendered}");
     }
@@ -2910,7 +2918,11 @@ mod tests {
             "<!-- agent:queue -->",
             "<!-- agent:queue preset=\"#subagents\" -->",
         );
-        let obs = observe(&seeded(&baseline, Some("current task")), &current, &quiet_ctx(&owned));
+        let obs = observe(
+            &seeded(&baseline, Some("current task")),
+            &current,
+            &quiet_ctx(&owned),
+        );
         assert_eq!(obs.ready.len(), 1, "{:?}", obs.ready);
         assert_eq!(obs.ready[0].dispatch, SteeringDispatch::QueueModeChanged);
         assert!(obs.ready[0].queue_mode.as_ref().unwrap().subagents);
@@ -4533,7 +4545,10 @@ mod tests {
             agent_doc_queue::queue_continuation::live_queue_head_texts(answered).unwrap();
         let (_, eligible, dispatch_live) = queue_attr_subagent_heads(answered)
             .expect("the subagents run exposes one selected work node");
-        assert_eq!(claim_heads, dispatch_live, "claim and dispatch share one live set");
+        assert_eq!(
+            claim_heads, dispatch_live,
+            "claim and dispatch share one live set"
+        );
         assert_eq!(eligible, dispatch_live);
         assert_eq!(dispatch_live.len(), 1, "{dispatch_live:#?}");
         assert!(dispatch_live[0].contains("[#yeja]"), "{dispatch_live:#?}");
@@ -4889,7 +4904,8 @@ mod tests {
             (unmarked(&baseline), unmarked(&current)),
         ] {
             for mode in [ObserveMode::Boundary, ObserveMode::InTurn] {
-                let obs = observe_with_mode(&seeded(&baseline, None), &current, &quiet_ctx(&owned), mode);
+                let obs =
+                    observe_with_mode(&seeded(&baseline, None), &current, &quiet_ctx(&owned), mode);
                 assert!(obs.ready.is_empty(), "{mode:?}: {:?}", obs.ready);
             }
         }
@@ -5284,7 +5300,9 @@ mod tests {
         let answered = doc(&format!("{packet}    - use 8080 ▫️\n"), EX);
         let obs = observe(&seeded(&baseline, None), &answered, &quiet_ctx(&owned));
         assert!(
-            obs.ready.iter().any(|item| item.verbatim.contains("[#pick]")),
+            obs.ready
+                .iter()
+                .any(|item| item.verbatim.contains("[#pick]")),
             "{:?}",
             obs.ready
         );

@@ -550,7 +550,48 @@ fn codex_prompt_line_body_starts_dim(raw_line: &str) -> bool {
     prompt_line_body_style(raw_line).is_some_and(|(faint, _)| faint)
 }
 
-fn prompt_line_body_style(raw_line: &str) -> Option<(bool, bool)> {
+/// ANSI-free composer text with every harness ghost suggestion removed.
+///
+/// `#plaincaptureghost`: a plain `capture-pane -p` drops the faint/italic SGR
+/// styling that is the only thing separating a harness ghost suggestion
+/// (Grok's next-prompt prediction, Claude's autosuggest, a Codex placeholder)
+/// from operator-typed text, so a ghost `agent-doc <FILE>` read as a pending
+/// draft. Callers that match a trigger or a draft against pane text capture
+/// with ANSI and project through this: on each prompt line whose body renders
+/// as ghost text ([`prompt_line_body_is_ghost_placeholder`]) the faint/italic
+/// glyphs after the prompt glyph are dropped, keeping the prompt glyph and any
+/// composer frame (`│ ❯  │`). Every other line is only ANSI-stripped, so a
+/// typed draft, a dim transcript line, and status chrome read exactly as a
+/// plain capture would.
+pub fn composer_text_without_ghost_suggestions(content: &str) -> String {
+    let mut projected = content
+        .lines()
+        .map(|line| {
+            if prompt_line_body_is_ghost_placeholder(line) {
+                let visible = styled_visible_chars(line);
+                let prompt = visible
+                    .iter()
+                    .position(|(ch, _, _)| matches!(ch, '>' | '›' | '❯'))
+                    .unwrap_or(0);
+                visible
+                    .iter()
+                    .enumerate()
+                    .filter(|(index, (_, faint, italic))| *index <= prompt || !(*faint || *italic))
+                    .map(|(_, (ch, _, _))| *ch)
+                    .collect::<String>()
+            } else {
+                strip_ansi(line)
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    if content.ends_with('\n') {
+        projected.push('\n');
+    }
+    projected
+}
+
+fn styled_visible_chars(raw_line: &str) -> Vec<(char, bool, bool)> {
     let mut faint = false;
     let mut italic = false;
     let mut visible = Vec::new();
@@ -572,6 +613,11 @@ fn prompt_line_body_style(raw_line: &str) -> Option<(bool, bool)> {
         }
         visible.push((ch, faint, italic));
     }
+    visible
+}
+
+fn prompt_line_body_style(raw_line: &str) -> Option<(bool, bool)> {
+    let visible = styled_visible_chars(raw_line);
 
     let prompt = visible
         .iter()
@@ -1066,6 +1112,46 @@ in @filename
         assert!(!prompt_line_body_is_dim_placeholder(
             "\x1b[2m  some dim transcript text\x1b[0m"
         ));
+    }
+
+    #[test]
+    fn composer_text_without_ghost_suggestions_drops_only_ghost_bodies() {
+        // `#plaincaptureghost`: Grok's italic RGB ghost and Claude's faint
+        // autosuggest both vanish; the frame and prompt glyph stay.
+        let grok_ghost = concat!(
+            "╭────────────────────────╮\n",
+            "\x1b[38;2;88;88;88m│\x1b[0m \x1b[38;2;122;162;247m❯\x1b[0m ",
+            "\x1b[3;38;2;88;88;88magent-doc tasks/sample.md\x1b[0m ",
+            "\x1b[38;2;88;88;88m│\x1b[0m\n",
+            "╰──── Grok 4.7 (high) ───╯\n",
+        );
+        let projected = composer_text_without_ghost_suggestions(grok_ghost);
+        assert!(
+            !projected.contains("agent-doc tasks/sample.md"),
+            "{projected}"
+        );
+        assert!(projected.contains("│ ❯  │"), "{projected}");
+        assert!(projected.contains("Grok 4.7 (high)"));
+        assert!(projected.ends_with('\n'));
+
+        let claude_ghost = "\x1b[39m❯ \x1b[2m/agent-doc tasks/sample.md\x1b[0m";
+        assert_eq!(composer_text_without_ghost_suggestions(claude_ghost), "❯ ");
+
+        // Operator-typed text at normal intensity is never removed, and a dim
+        // transcript line that is not a composer prompt is only ANSI-stripped.
+        let typed = concat!(
+            "\x1b[38;2;88;88;88m│\x1b[0m \x1b[38;2;122;162;247m❯\x1b[0m ",
+            "\x1b[38;2;192;202;245magent-doc tasks/sample.md\x1b[0m ",
+            "\x1b[38;2;88;88;88m│\x1b[0m",
+        );
+        assert_eq!(
+            composer_text_without_ghost_suggestions(typed),
+            "│ ❯ agent-doc tasks/sample.md │"
+        );
+        assert_eq!(
+            composer_text_without_ghost_suggestions("\x1b[2m  dim transcript\x1b[0m"),
+            "  dim transcript"
+        );
     }
 
     #[test]

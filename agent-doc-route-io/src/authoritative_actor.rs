@@ -1386,6 +1386,31 @@ mod tests {
             !source.contains("agent_doc_tmux_io::capture_pane(tmux,"),
             "a composer-classifying ready proof is reading a plain capture again"
         );
+        // `#plaincaptureghost`: the route's startup, auto-start and
+        // dispatch-start composer checks classify the same composer, so they
+        // must not read a plain `capture-pane -p` either. Production code only;
+        // a test fixture may still name the plain helper.
+        for (name, full) in [
+            ("startup_ready.rs", include_str!("startup_ready.rs")),
+            ("dispatch_start.rs", include_str!("dispatch_start.rs")),
+            (
+                "direct_pane_dispatch.rs",
+                include_str!("direct_pane_dispatch.rs"),
+            ),
+        ] {
+            let production = full
+                .split_once("\n#[cfg(test)]\nmod tests {")
+                .map_or(full, |(production, _)| production);
+            assert!(
+                production.contains("capture_pane_with_ansi("),
+                "{name}: composer check moved; update this guard"
+            );
+            assert!(
+                !production.contains("agent_doc_tmux_io::capture_pane("),
+                "{name}: a route composer check is reading a plain capture again; \
+                 use capture_pane_with_ansi and composer_text_without_ghost_suggestions"
+            );
+        }
         let harness = agent_doc_harness::HarnessConfig::grok();
         let idle_with_ghost = concat!(
             "╭────────────────────────╮\n",

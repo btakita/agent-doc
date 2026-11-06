@@ -18822,7 +18822,7 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "fn opencode_pane_dispatch_start_proof_facts",
         "pub fn wait_for_routed_dispatch_start(",
         "agent_doc_codex_hook_io::load_latest_prompt_state_for_file(",
-        "agent_doc_tmux_io::capture_pane(",
+        "agent_doc_tmux_io::capture_pane_with_ansi(",
         "classify_codex_routed_dispatch_start_proof(",
         "opencode_pane_state_changed_from_idle(",
     ] {

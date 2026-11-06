@@ -118,6 +118,7 @@ Before a **queue-sourced** auto-run (`--from-queue`, sequential or dag) executes
   2. Supervisor IPC
   3. `tmux send-keys` through the authoritative pane
   4. Fail closed
+- **No queue-command path types onto a composer it has not read (`#queuecommanddraftguard`).** Supervisor IPC inject and tmux send-keys both run `auto_trigger_draft_guard` on one ANSI pane capture immediately before typing. The capture is `capture_pane_with_ansi` at the cursor; a plain `capture-pane -p` is not a fallback (`#plaincaptureghost`). An exact idle draft of this command is submitted with Enter and is not typed again. Otherwise nothing is typed for an unread composer (no registered pane, or a failed capture), a different draft on an idle or a busy pane, an agent-addressed composer, history-recall or agent-doc residue, protected input, or this command held unsubmitted behind a running turn. A busy composer with no draft is still safe to type into. Inline `/model` and `/compact`, and the guarded session `/clear`, do not take this path. A refusal is `queue_dispatch_draft_refused` and types nothing; a later run after the operator submits or clears the draft delivers normally. The decision is the one `auto_trigger_inject_command` already uses (`#autotriggerdraftguard`, `#managedipcdraftguard`). The supervisor `Inject` handler itself does not read the composer, so this check has to happen in `src/queue_dispatch.rs` before the bytes are sent.
 
 ## `--mode sequential`
 

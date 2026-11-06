@@ -1023,6 +1023,19 @@ pub struct PreflightResponseContract {
     pub opening_marker: String,
     pub closing_marker: String,
     pub plain_stdin_allowed: bool,
+    /// The turn's recap, written beside the exchange patch (`#agentrecap`). It
+    /// is optional for the write: a closeout without one still lands.
+    pub recap: PreflightRecapContract,
+}
+
+/// The recap half of the closeout: the same markers and one format for every
+/// harness (`#agentrecap`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PreflightRecapContract {
+    pub opening_marker: String,
+    pub closing_marker: String,
+    pub format_runbook: String,
+    pub required: bool,
 }
 
 impl PreflightResponseContract {
@@ -1033,6 +1046,12 @@ impl PreflightResponseContract {
             opening_marker: "<!-- patch:exchange -->".to_string(),
             closing_marker: "<!-- /patch:exchange -->".to_string(),
             plain_stdin_allowed: false,
+            recap: PreflightRecapContract {
+                opening_marker: "<!-- patch:recap -->".to_string(),
+                closing_marker: "<!-- /patch:recap -->".to_string(),
+                format_runbook: "runbooks/recap.md".to_string(),
+                required: false,
+            },
         }
     }
 }

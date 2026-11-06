@@ -427,6 +427,11 @@ mod tests {
     }
 
     #[test]
+    fn recap_is_agent_owned_so_a_closeout_keeps_its_replacement() {
+        assert_eq!(component_conflict_policy("recap"), ConflictPolicy::OursWins);
+    }
+
+    #[test]
     fn custom_components_default_to_operator_authority() {
         assert_eq!(
             component_conflict_policy("signals"),

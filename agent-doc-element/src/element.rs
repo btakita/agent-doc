@@ -137,8 +137,9 @@ pub fn canonical_component_name(name: &str) -> &str {
 
 /// Queue-centric order used by new template scaffolds and by repairs that must
 /// insert a missing managed component. Existing components are never moved.
-pub const CANONICAL_MANAGED_COMPONENT_ORDER: [&str; 10] = [
-    "status", "active", "queue", "review", "todo", "backlog", "icebox", "notes", "done", "exchange",
+pub const CANONICAL_MANAGED_COMPONENT_ORDER: [&str; 11] = [
+    "status", "recap", "active", "queue", "review", "todo", "backlog", "icebox", "notes", "done",
+    "exchange",
 ];
 
 /// Return a managed component's queue-centric scaffold rank.
@@ -183,11 +184,32 @@ pub fn canonical_managed_component_insertion_offset(
                 .iter()
                 .filter_map(|component| {
                     let rank = canonical_managed_component_rank(&component.name)?;
-                    (rank > target_rank).then_some(component.open_start)
+                    (rank > target_rank).then(|| section_start(content, component.open_start))
                 })
                 .min()
         })
         .unwrap_or(content.len())
+}
+
+/// Where the section headed by the opener at `open_start` begins: the opener
+/// itself, or the ATX heading that owns it, on the same line or the one above.
+/// Inserting at a bare opener offset would split that heading from its marker.
+/// A level-one heading above a standalone opener is the document title, so it
+/// stays above whatever is inserted.
+fn section_start(content: &str, open_start: usize) -> usize {
+    let line_start = content[..open_start]
+        .rfind('\n')
+        .map_or(0, |index| index + 1);
+    if is_atx_heading_prefix(content[line_start..open_start].trim_end()) {
+        return line_start;
+    }
+    let above = content[..line_start].trim_end();
+    let above_start = above.rfind('\n').map_or(0, |index| index + 1);
+    let heading = above[above_start..].trim_start();
+    if is_atx_heading_prefix(heading) && !heading.starts_with("# ") {
+        return above_start;
+    }
+    open_start
 }
 
 /// Add semantics implied by a component's canonical marker spelling.
@@ -3298,8 +3320,8 @@ mod tests {
         assert_eq!(
             CANONICAL_MANAGED_COMPONENT_ORDER,
             [
-                "status", "active", "queue", "review", "todo", "backlog", "icebox", "notes",
-                "done", "exchange",
+                "status", "recap", "active", "queue", "review", "todo", "backlog", "icebox",
+                "notes", "done", "exchange",
             ]
         );
         let legacy = concat!(
@@ -3309,8 +3331,7 @@ mod tests {
             "<!-- agent:backlog -->\n<!-- /agent:backlog -->\n",
         );
         let components = parse(legacy).unwrap();
-        let todo_offset =
-            canonical_managed_component_insertion_offset(legacy, &components, "todo");
+        let todo_offset = canonical_managed_component_insertion_offset(legacy, &components, "todo");
         assert_eq!(
             todo_offset,
             components
@@ -3320,10 +3341,11 @@ mod tests {
                 .close_end
         );
         assert!(todo_offset > legacy.find("<!-- /agent:exchange -->").unwrap());
-        assert_eq!(canonical_managed_component_rank("pending"), Some(5));
-        assert_eq!(canonical_managed_component_rank("run"), Some(2));
-        assert_eq!(canonical_managed_component_rank("open-items"), Some(1));
-        assert_eq!(canonical_managed_component_rank("active"), Some(1));
+        assert_eq!(canonical_managed_component_rank("pending"), Some(6));
+        assert_eq!(canonical_managed_component_rank("run"), Some(3));
+        assert_eq!(canonical_managed_component_rank("open-items"), Some(2));
+        assert_eq!(canonical_managed_component_rank("active"), Some(2));
+        assert_eq!(canonical_managed_component_rank("recap"), Some(1));
     }
 
     #[test]

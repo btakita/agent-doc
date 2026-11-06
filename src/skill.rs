@@ -232,6 +232,7 @@ const BUNDLED_RUNBOOKS: &[(&str, &str)] = &[
         "persist-closeout.md",
         include_str!("../runbooks/persist-closeout.md"),
     ),
+    ("recap.md", include_str!("../runbooks/recap.md")),
     (
         "describe-image.md",
         include_str!("../runbooks/describe-image.md"),

@@ -10172,6 +10172,9 @@ struct ControllerResponseCellAddPayload {
     operation_id: String,
     response_sha256: String,
     response: String,
+    /// The turn's recap, landed in the same canonical cut (`#agentrecap`).
+    #[serde(default)]
+    recap: Option<String>,
     #[serde(default)]
     committed_content: Option<String>,
     #[serde(default)]
@@ -10183,12 +10186,14 @@ struct ControllerResponseCellAddPayload {
 
 /// Add one assistant response cell through the controller-owned canonical CRDT
 /// model. The caller supplies no whole-document baseline or replacement.
+#[allow(clippy::too_many_arguments)]
 pub fn add_response_cell_via_controller_model_for_doc(
     doc: &Path,
     cycle_id: &str,
     operation_id: &str,
     response_sha256: &str,
     response: &str,
+    recap: Option<&str>,
     committed_content: Option<&str>,
     source: &str,
 ) -> Result<Option<agent_doc_crdt_relay_io::ResponseCellRelayWrite>> {
@@ -10198,6 +10203,7 @@ pub fn add_response_cell_via_controller_model_for_doc(
         operation_id,
         response_sha256,
         response,
+        recap,
         committed_content,
         false,
         false,
@@ -10223,6 +10229,7 @@ pub fn checkpoint_response_cell_via_controller_model_for_doc(
         operation_id,
         response_sha256,
         response,
+        None,
         committed_content,
         true,
         false,
@@ -10246,6 +10253,7 @@ pub fn salient_response_via_controller_model_for_doc(
         response_sha256,
         response,
         None,
+        None,
         true,
         true,
         source,
@@ -10259,6 +10267,7 @@ fn response_cell_via_controller_model_for_doc(
     operation_id: &str,
     response_sha256: &str,
     response: &str,
+    recap: Option<&str>,
     committed_content: Option<&str>,
     checkpoint_only: bool,
     salient_only: bool,
@@ -10278,6 +10287,7 @@ fn response_cell_via_controller_model_for_doc(
         operation_id: operation_id.to_string(),
         response_sha256: response_sha256.to_string(),
         response: response.to_string(),
+        recap: recap.map(str::to_string),
         committed_content: committed_content.map(str::to_string),
         checkpoint_only,
         salient_only,
@@ -12048,6 +12058,7 @@ fn handle_response_cell_add_rpc(
                 &canonical,
                 payload.committed_content.as_deref(),
                 &payload.response,
+                payload.recap.as_deref(),
                 source,
             )?
         }

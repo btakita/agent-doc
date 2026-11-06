@@ -165,6 +165,7 @@ fn heading_key(tag: &str) -> &str {
 pub(crate) fn canonical_component_heading(tag: &str) -> Option<&'static str> {
     Some(match heading_key(tag) {
         "status" => "Status",
+        "recap" => "Recap",
         "exchange" => "Exchange",
         "run" => "Run",
         "todo" => "Todo",
@@ -240,6 +241,7 @@ pub(crate) fn render_component_section(
 /// in the default template order, with each opener's attributes.
 const TARGET_SCAFFOLD_COMPONENTS: &[(&str, &str)] = &[
     ("status", " patch=replace"),
+    ("recap", " patch=replace"),
     // No `go`: a queue with no control already runs in go-mode (`#queuegodefault`).
     ("run", " priority subagents clear"),
     ("review", ""),
@@ -1191,6 +1193,7 @@ mod tests {
             headings,
             vec![
                 "## Status <!-- agent:status patch=replace -->",
+                "## Recap <!-- agent:recap patch=replace -->",
                 "## Run <!-- agent:run priority subagents clear -->",
                 "## Review <!-- agent:review -->",
                 "## Todo <!-- agent:todo priority -->",
@@ -1212,7 +1215,7 @@ mod tests {
         );
         assert!(body.starts_with("\n# Title\n\n## Status "), "{body}");
         let components = element::parse(body).unwrap();
-        assert_eq!(components.len(), 9, "{body}");
+        assert_eq!(components.len(), 10, "{body}");
     }
 
     /// `#extractlayout`: a heading the operator wrote on a source opener line

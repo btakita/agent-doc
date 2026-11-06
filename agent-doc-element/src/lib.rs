@@ -17,6 +17,7 @@ pub mod content_memo;
 pub mod decision_stamp;
 pub mod element;
 pub mod id;
+pub mod recap;
 pub mod rules;
 #[doc(hidden)]
 pub mod sibling_span_fixture;
@@ -105,7 +106,7 @@ impl ElementTurnRole {
 /// prompt must remain visible rather than being silently treated as metadata.
 pub fn turn_role_for_component_name(name: &str) -> ElementTurnRole {
     match name {
-        "notes" | "todo" | "rules" => ElementTurnRole::Informational,
+        "notes" | "todo" | "rules" | "recap" => ElementTurnRole::Informational,
         _ => ElementTurnRole::Trigger,
     }
 }
@@ -272,6 +273,10 @@ mod tests {
         );
         assert_eq!(
             turn_role_for_component_name("rules"),
+            ElementTurnRole::Informational
+        );
+        assert_eq!(
+            turn_role_for_component_name("recap"),
             ElementTurnRole::Informational
         );
         assert_eq!(

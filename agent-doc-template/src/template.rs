@@ -1072,6 +1072,19 @@ fn append_exchange_patch_after_prompt_anchor(
     Ok(Some(comp.replace_content(current_doc, &new_content)))
 }
 
+/// The recap body a response carries (`#agentrecap`): the last non-blank
+/// `patch:recap`, since the component only ever holds one.
+pub fn recap_patch_body(patches: &[PatchBlock]) -> Option<&str> {
+    patches
+        .iter()
+        .rev()
+        .find(|patch| {
+            patch.name == agent_doc_element::recap::RECAP_COMPONENT
+                && !patch.content.trim().is_empty()
+        })
+        .map(|patch| patch.content.as_str())
+}
+
 /// Apply patches with per-component mode overrides (e.g., stream mode forces "replace"
 /// for cumulative buffers even on append-mode components like exchange).
 ///
@@ -1143,6 +1156,14 @@ pub fn apply_patches_with_overrides_pure(
         }
     }
 
+    // `#agentrecap`: the recap body is always replaced whole, so no marker or
+    // project mode can turn it into history, and a document that predates the
+    // component gains it here instead of spilling the recap into the exchange.
+    if let Some(recap) = recap_patch_body(patches) {
+        result = agent_doc_element::recap::replace_recap_in_document(&result, recap)
+            .context("failed to apply patch:recap")?;
+    }
+
     // Apply patches in reverse order (by position) to preserve byte offsets
     let components = element::parse(&result).context("failed to parse components")?;
 
@@ -1156,6 +1177,9 @@ pub fn apply_patches_with_overrides_pure(
     let mut ops: Vec<(usize, &PatchBlock)> = Vec::new();
     let mut overflow = String::new();
     for patch in patches {
+        if patch.name == agent_doc_element::recap::RECAP_COMPONENT {
+            continue;
+        }
         if let Some(idx) = components.iter().position(|c| c.name == patch.name) {
             ops.push((idx, patch));
         } else {
@@ -2974,6 +2998,96 @@ Interstitial text.
         assert!(result.contains("new\n"));
         assert!(!result.contains("old\n"));
     }
+    /// `#agentrecap`: the component holds one recap, so neither the marker nor
+    /// the project config can turn it into an appending history.
+    #[test]
+    fn patch_recap_replaces_whatever_mode_the_marker_or_config_names() {
+        let dir = setup_project();
+        let doc_path = dir.path().join("test.md");
+        std::fs::write(
+            dir.path().join(".agent-doc/config.toml"),
+            "[components.recap]\npatch = \"append\"\n",
+        )
+        .unwrap();
+        for marker in [
+            "agent:recap",
+            "agent:recap patch=append",
+            "agent:recap patch=prepend",
+        ] {
+            let doc = format!("<!-- {marker} -->\nold\n<!-- /agent:recap -->\n");
+            std::fs::write(&doc_path, &doc).unwrap();
+            let patches = vec![PatchBlock::new("recap", "new\n")];
+            let result = apply_patches_via_path(&doc, &patches, "", &doc_path).unwrap();
+            assert_eq!(
+                result,
+                format!("<!-- {marker} -->\nnew\n<!-- /agent:recap -->\n")
+            );
+        }
+    }
+
+    /// `#agentrecap`: a document that predates the component gains it. The recap
+    /// never spills into the exchange as missing-target overflow.
+    #[test]
+    fn patch_recap_creates_a_missing_component_below_status() {
+        let dir = setup_project();
+        let doc_path = dir.path().join("test.md");
+        let doc = concat!(
+            "<!-- agent:status patch=replace -->\nReady.\n<!-- /agent:status -->\n\n",
+            "<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n",
+        );
+        std::fs::write(&doc_path, doc).unwrap();
+        let (patches, unmatched) = parse_patches(concat!(
+            "<!-- patch:exchange -->\n### Re: topic — gpt-5\n\nBody.\n<!-- /patch:exchange -->\n",
+            "<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
+        ))
+        .unwrap();
+        assert_eq!(unmatched, "");
+
+        let result = apply_patches_via_path(doc, &patches, "", &doc_path).unwrap();
+
+        let components = element::parse(&result).unwrap();
+        let names: Vec<_> = components.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(names, ["status", "recap", "exchange"]);
+        assert_eq!(components[1].content(&result), "Committed.\n");
+        assert!(!components[2].content(&result).contains("Committed."));
+        assert!(
+            components[2]
+                .content(&result)
+                .contains("### Re: topic — gpt-5")
+        );
+    }
+
+    #[test]
+    fn patch_recap_last_nonblank_block_wins() {
+        let dir = setup_project();
+        let doc_path = dir.path().join("test.md");
+        let doc = "<!-- agent:recap -->\nold\n<!-- /agent:recap -->\n";
+        std::fs::write(&doc_path, doc).unwrap();
+        let patches = vec![
+            PatchBlock::new("recap", "first\n"),
+            PatchBlock::new("recap", "second\n"),
+            PatchBlock::new("recap", "\n"),
+        ];
+        let result = apply_patches_via_path(doc, &patches, "", &doc_path).unwrap();
+        assert_eq!(
+            result,
+            "<!-- agent:recap -->\nsecond\n<!-- /agent:recap -->\n"
+        );
+    }
+
+    /// `#agentrecap`: a blank recap is no recap. It keeps the previous one, and
+    /// it neither creates the component nor leaks into the exchange.
+    #[test]
+    fn patch_recap_blank_block_changes_nothing() {
+        let dir = setup_project();
+        let doc_path = dir.path().join("test.md");
+        let doc = "<!-- agent:status -->\nReady.\n<!-- /agent:status -->\n";
+        std::fs::write(&doc_path, doc).unwrap();
+        let patches = vec![PatchBlock::new("recap", "  \n")];
+        let result = apply_patches_via_path(doc, &patches, "", &doc_path).unwrap();
+        assert_eq!(result, doc);
+    }
+
     #[test]
     fn no_inline_attr_no_config_falls_back_to_default() {
         // No inline attr, no config → built-in defaults

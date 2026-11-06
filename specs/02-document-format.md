@@ -1022,14 +1022,26 @@ inserts an empty `## Todo` section with `<!-- agent:todo priority -->` /
 `<!-- /agent:todo -->` markers at one deterministic, operator-facing location.
 Missing managed components use the queue-centric canonical rank below: the
 repair inserts after the last canonical predecessor already present, otherwise
-before the first canonical successor, otherwise at the end. Nothing outside
+before the first canonical successor (above the ATX heading that owns its
+opener, on the same line or the one above, unless that is the level-one document
+title), otherwise at the end. Nothing outside
 the inserted section changes. A document that already has `agent:todo` is left
 structurally unchanged, wherever its Todo section sits.
 
+**Recap component (`#agentrecap`).** `agent:recap` holds the last turn's recap and nothing else. It is agent-authored and informational: its content is excluded from turn detection (`ElementTurnRole::Informational`), it has no scheduling role, and its text is never read as a prompt, a queue row, or tracked work. The agent supplies it through the normal closeout as a `patch:recap` block beside `patch:exchange`.
+
+- **Replacement.** A `patch:recap` replaces the whole body, whatever `patch=` value the marker or project configuration names, so the component can never accumulate history. The stored body is the patch text trimmed of surrounding whitespace plus one trailing newline, which makes an exact replay a no-op. When a response carries several blocks, the last non-blank one wins.
+- **Same operation as the response.** A closeout whose only patches are `exchange` and `recap` stays on the semantic response-cell path: the controller applies both to the apply-time canonical in one CRDT transaction, so the recap needs no separate delivery or acknowledgement and cannot move every closeout onto the composite write path. Any other patch, or a document with no live controller model, uses the composite path, which applies the same replacement. A recap that cannot be applied on the semantic path is logged and the response still lands.
+- **Merge.** `recap` is agent-owned for per-cell conflicts, like `status`: the closeout's replacement wins over a concurrent edit of the same cell.
+- **Existing documents.** A document with no `agent:recap` gains an empty `## Recap <!-- agent:recap patch=replace -->` section the first time a closeout carries a non-blank recap, at the canonical slot below. The insertion changes nothing else. Without this, the recap would spill into `agent:exchange` as missing-target overflow. One known gap: a composite-path write whose response-only rebase takes the editor cut carries nothing when the layouts differ, so that first recap is lost with no warning. The response still lands, and the next closeout creates the section.
+- **Not required.** A closeout with no recap, or with a blank one, still lands for every harness and leaves the previous recap in place: the component keeps showing the last recap that was written. The harness Stop-hook paths capture a response with no recap, so requiring one would strand their turns.
+- **Format.** One format for all harnesses, in this order, omitting any section after the first that has nothing to say: (1) an outcome paragraph stating the outcome, the current state, and what the reader does not need to read; (2) a paragraph on what the main open item is waiting on, with what was and was not checked; (3) `Queue rows this cycle:`, the changed rows grouped by state with the existing queue markers; (4) `Still can't close:`, each open item with its reason; (5) `Your decisions, most urgent first:`, a numbered list with a recommendation where there is one. `runbooks/recap.md` is the single source every harness mirror receives, and preflight's `response_contract.recap` names its markers and runbook.
+- **Validation.** `agent_doc_element::recap::recap_format_findings` checks only the cheap, deterministic part of the format: the recap opens with a paragraph, has no Markdown heading outside a code fence, keeps the three labels in order with a list under each, and numbers its decisions. Findings, and a missing recap, are advisories on the closeout's stderr (`[recap] advisory (#agentrecap): ...`). They never refuse a closeout.
+
 **Default template order.** The default template scaffold (Claim for Tmux Pane,
 Sync, and `claim` on an empty or component-less template document) emits the
-canonical managed components in this order: `agent:status`, `agent:active`,
-`agent:run`,
+canonical managed components in this order: `agent:status`, `agent:recap`,
+`agent:active`, `agent:run`,
 `agent:review`, `agent:todo`, `agent:backlog`, `agent:icebox`, `agent:notes`,
 `agent:done`, `agent:exchange`. The queue stays near status and the exchange is
 the final managed component. `agent:todo` carries bare `priority` by default.

@@ -722,6 +722,66 @@ fn write_commit_backfills_patch_todo_id_before_commit() {
     );
 }
 
+/// `#agentrecap`: a document that predates `agent:recap` gains it from the first
+/// recap, each later closeout replaces the body whole, and a closeout with no
+/// recap still commits, keeping the last one and printing only an advisory.
+#[test]
+fn write_commit_lands_one_recap_per_turn_and_never_requires_it() {
+    let (tmp, doc) = setup_session_template_doc();
+    init_git_repo(tmp.path(), &doc);
+    let closeout = |topic: &str, recap: &str| {
+        agent_doc()
+            .current_dir(tmp.path())
+            .args(["write", "--commit", doc.to_str().unwrap()])
+            .write_stdin(format!(
+                "<!-- patch:exchange -->\n### Re: {topic} — gpt-5\nok\n<!-- /patch:exchange -->\n{recap}"
+            ))
+            .assert()
+            .success()
+    };
+
+    let first = closeout(
+        "first",
+        "<!-- patch:recap -->\nFirst outcome.\n\nStill can't close:\n- do [#from-recap]: blocked.\n<!-- /patch:recap -->\n",
+    );
+    let stderr = String::from_utf8_lossy(&first.get_output().stderr).into_owned();
+    assert!(!stderr.contains("[recap] advisory"), "{stderr}");
+    let committed = head_blob(tmp.path());
+    assert!(
+        committed.contains(concat!(
+            "## Recap <!-- agent:recap patch=replace -->\n",
+            "First outcome.\n\n",
+            "Still can't close:\n",
+            "- do [#from-recap]: blocked.\n",
+            "<!-- /agent:recap -->\n",
+        )),
+        "{committed}"
+    );
+    assert!(
+        committed.find("<!-- /agent:recap -->") < committed.find("<!-- agent:exchange"),
+        "{committed}"
+    );
+
+    closeout(
+        "second",
+        "<!-- patch:recap -->\nSecond outcome.\n<!-- /patch:recap -->\n",
+    );
+    let committed = head_blob(tmp.path());
+    assert!(committed.contains("Second outcome.\n"), "{committed}");
+    assert!(!committed.contains("First outcome."), "{committed}");
+    assert_eq!(committed.matches("<!-- agent:recap").count(), 1);
+
+    let third = closeout("third", "");
+    let stderr = String::from_utf8_lossy(&third.get_output().stderr).into_owned();
+    assert!(
+        stderr.contains("[recap] advisory (#agentrecap): this closeout carries no `patch:recap`"),
+        "{stderr}"
+    );
+    let committed = head_blob(tmp.path());
+    assert!(committed.contains("Second outcome.\n"), "{committed}");
+    assert!(committed.contains("### Re: third — gpt-5"), "{committed}");
+}
+
 /// The logical implication is enforced, not merely documented: if the typing
 /// gate cannot coin a newly introduced row, strict closeout cannot publish it.
 #[test]

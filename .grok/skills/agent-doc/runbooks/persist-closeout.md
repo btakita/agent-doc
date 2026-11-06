@@ -106,6 +106,10 @@ missing either `<!-- patch:exchange mode="append" -->` or
 `<!-- /patch:exchange -->` fails before capture or mutation; add the markers and
 retry the same closeout rather than converting it into a plain append implicitly.
 
+The same closeout carries the turn's recap in a `patch:recap` block, in the shared
+format in [recap.md](recap.md). Unlike `patch:exchange`, it is not required: a
+missing or malformed recap prints an advisory and never fails the closeout.
+
 `finalize` requires the cycle to reach `committed` and the post-commit
 `session-check` guard to pass before success, including prompt-only exchange-tail
 checks. `agent-doc write --commit <FILE>` shares that fail-closed boundary for

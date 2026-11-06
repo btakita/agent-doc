@@ -2960,11 +2960,10 @@ mod tests {
         // witness must not change either outcome. `/tmp/...md` has no `.agent-doc`
         // project root, so `await_delivery_convergence_for_file` returns Err (the
         // controller cannot be asked) and the retry proceeds fail-open — no live
-        // controller and no real wait, which is also why the elapsed bound below holds.
+        // controller and no real wait, which the structural checks below pin.
         use std::sync::atomic::{AtomicUsize, Ordering};
         let doc = std::path::Path::new("/tmp/does-not-matter.md");
         let base = "prompt\n";
-        let started = std::time::Instant::now();
 
         // Re-settled live text: the gated retry still converges.
         let resettled = RetryConvergeEffects {
@@ -2995,10 +2994,21 @@ mod tests {
             "unexpected error: {err:#}"
         );
 
+        // `#wallclockassertsweep`: "no real wait" is pinned structurally, not
+        // by elapsed time a loaded host can exceed. The gate fails open at once
+        // (no project root, so no controller to ask), and even a gate that did
+        // wait is capped per retry by the test build's token window.
         assert!(
-            started.elapsed() < std::time::Duration::from_secs(2),
-            "the convergence gate must not block on a real wait in tests (elapsed={:?})",
-            started.elapsed()
+            agent_doc_controller_io::project_controller::await_delivery_convergence_for_file(
+                doc,
+                COMPACT_CONVERGE_DELIVERY_WAIT,
+            )
+            .is_err(),
+            "the convergence gate must fail open (controller unreachable) in tests"
+        );
+        assert!(
+            COMPACT_CONVERGE_DELIVERY_WAIT <= std::time::Duration::from_millis(5),
+            "tests must use the token delivery window, not the production wait"
         );
     }
 

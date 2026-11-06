@@ -3973,14 +3973,19 @@ mod tests {
     /// the Codex relaunch hostage when the document write queue stalls.
     #[test]
     fn bounded_writeback_returns_when_the_job_never_finishes() {
+        // `#wallclockassertsweep`: ordering, not elapsed time. The job is
+        // released only after `run_bounded` returns, so a `run_bounded` that
+        // waited for it would see the job finish at the release's hang ceiling
+        // and return `Some(false)` instead of `None`.
+        const HANG_CEILING: Duration = Duration::from_secs(30);
         let (release, blocked) = std::sync::mpsc::channel::<()>();
-        let started = Instant::now();
-        let outcome = run_bounded(Duration::from_millis(50), move || blocked.recv().is_ok());
+        let outcome = run_bounded(Duration::from_millis(50), move || {
+            blocked.recv_timeout(HANG_CEILING).is_ok()
+        });
         assert_eq!(outcome, None);
-        assert!(started.elapsed() < Duration::from_secs(5));
         drop(release);
 
-        assert_eq!(run_bounded(Duration::from_secs(5), || 7), Some(7));
+        assert_eq!(run_bounded(HANG_CEILING, || 7), Some(7));
     }
 
     /// `#preflightprojpass`: the claim scan walks every document in `state.db`

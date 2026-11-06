@@ -14899,7 +14899,7 @@ pub(crate) fn spawn_controller_sentinel(project_root: &Path) -> std::process::Ch
     // reaper's `is_same_project_controller_pid` gate sees it deterministically.
     let pid = child.id();
     let start = Instant::now();
-    while start.elapsed() < Duration::from_secs(2)
+    while start.elapsed() < blocking_effect_gate::HANG_CEILING
         && !is_same_project_controller_pid(project_root, pid)
     {
         std::thread::sleep(Duration::from_millis(10));
@@ -14941,7 +14941,7 @@ pub(crate) fn spawn_preparing_controller_sentinel_with_args(
         .expect("spawn preparing controller sentinel");
     let pid = child.id();
     let start = Instant::now();
-    while start.elapsed() < Duration::from_secs(2)
+    while start.elapsed() < blocking_effect_gate::HANG_CEILING
         && !(is_same_project_controller_pid(project_root, pid)
             && crate::process::cmdline_has_preparing_handoff(pid))
     {
@@ -14986,7 +14986,7 @@ pub(crate) fn spawn_controller_sentinel_with_fork_image(
         if fork_image.is_some() && is_same_project_controller_pid(project_root, child.id()) {
             break fork_image;
         }
-        if start.elapsed() >= Duration::from_secs(5) {
+        if start.elapsed() >= blocking_effect_gate::HANG_CEILING {
             break None;
         }
         std::thread::sleep(Duration::from_millis(10));
@@ -16217,7 +16217,7 @@ mod tests {
 
         authority_graph.acquire_subscription(document_hash, document_id);
         started_receiver
-            .recv_timeout(Duration::from_secs(1))
+            .recv_timeout(blocking_effect_gate::HANG_CEILING)
             .expect("authority publisher did not receive the initial projection");
 
         actor_graph.set(BTreeMap::from([(
@@ -18988,7 +18988,8 @@ mod tests {
         });
         // Times out far enough above the holder's release that contention resolves
         // into a successful acquire rather than an error.
-        let acquired = LaunchClaim::acquire_blocking(dir.path(), Duration::from_secs(2));
+        let acquired =
+            LaunchClaim::acquire_blocking(dir.path(), blocking_effect_gate::HANG_CEILING);
         assert!(
             acquired.is_ok(),
             "blocking acquire should wait out the holder"
@@ -23072,7 +23073,9 @@ agent:queue\n\
         });
         queue.shutdown();
         assert_eq!(
-            done_rx.recv_timeout(Duration::from_secs(2)).unwrap(),
+            done_rx
+                .recv_timeout(blocking_effect_gate::HANG_CEILING)
+                .unwrap(),
             None
         );
     }
@@ -23091,7 +23094,7 @@ agent:queue\n\
         let waiter = std::thread::spawn(move || {
             waiting.send(()).unwrap();
             waiter_graph
-                .await_terminal("cmd-reactive", Duration::from_secs(1))
+                .await_terminal("cmd-reactive", blocking_effect_gate::HANG_CEILING)
                 .unwrap()
         });
         waiting_observer.recv().unwrap();
@@ -23157,7 +23160,10 @@ agent:queue\n\
         let waiting_hash = first_hash.clone();
         let waiter = std::thread::spawn(move || {
             waiting_runtime
-                .wait_for_supervisor_recycle_settle_for(Some(&waiting_hash), Duration::from_secs(2))
+                .wait_for_supervisor_recycle_settle_for(
+                    Some(&waiting_hash),
+                    blocking_effect_gate::HANG_CEILING,
+                )
                 .unwrap()
         });
         rpc::handle_supervisor_recycle_settled(&bootstrap, &runtime, request(&first)).unwrap();
@@ -23197,7 +23203,9 @@ agent:queue\n\
                 .unwrap();
         });
         assert!(
-            project_done_rx.recv_timeout(Duration::from_secs(2)).unwrap(),
+            project_done_rx
+                .recv_timeout(blocking_effect_gate::HANG_CEILING)
+                .unwrap(),
             "the project-wide waiter must inspect the held memory guard without relocking it"
         );
     }
@@ -24176,7 +24184,7 @@ agent:queue\n\
         .unwrap();
         let status = wait_for_test_child_exit(
             predecessor,
-            Duration::from_secs(2),
+            blocking_effect_gate::HANG_CEILING,
             "an expired-lease predecessor must be reaped",
         );
         let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
@@ -24238,13 +24246,14 @@ agent:queue\n\
             false,
             "test",
         );
-        let fork_image_exited = wait_for_test_pid_exit(fork_image, Duration::from_secs(2));
+        let fork_image_exited =
+            wait_for_test_pid_exit(fork_image, blocking_effect_gate::HANG_CEILING);
         if !fork_image_exited {
             kill_test_pid(fork_image);
         }
         let status = wait_for_test_child_exit(
             sentinel,
-            Duration::from_secs(2),
+            blocking_effect_gate::HANG_CEILING,
             "removed-root controller must be reaped",
         );
         let (reaped, _) = result.unwrap();
@@ -24281,7 +24290,7 @@ agent:queue\n\
 
         let status = wait_for_test_child_exit(
             sentinel,
-            Duration::from_secs(2),
+            blocking_effect_gate::HANG_CEILING,
             "stable temp-root controller must be reaped after its project root disappears",
         );
         assert!(
@@ -24323,7 +24332,7 @@ agent:queue\n\
         // The aged orphan is our child; poll try_wait for its termination.
         let status = wait_for_test_child_exit(
             sentinel,
-            Duration::from_secs(2),
+            blocking_effect_gate::HANG_CEILING,
             "aged preparing orphan must be reaped by recycle",
         );
         assert!(
@@ -24362,7 +24371,7 @@ agent:queue\n\
 
         let status = wait_for_test_child_exit(
             sentinel,
-            Duration::from_secs(2),
+            blocking_effect_gate::HANG_CEILING,
             "stale bootstrap-owned preparing controller must be reaped by recycle",
         );
         assert!(
@@ -24714,7 +24723,7 @@ agent:queue\n\
         // a killed process lingers as a zombie until `wait()` — poll `try_wait`.
         let status = wait_for_test_child_exit(
             sentinel,
-            Duration::from_secs(2),
+            blocking_effect_gate::HANG_CEILING,
             "aged cross-project preparing orphan must be reaped",
         );
         assert!(
@@ -25216,7 +25225,7 @@ agent:queue\n\
             Some(observation("target")),
         );
 
-        let deadline = Instant::now() + Duration::from_secs(2);
+        let deadline = Instant::now() + blocking_effect_gate::HANG_CEILING;
         while pending_intent_id(&runtime, &document_hash).is_some() {
             assert!(
                 Instant::now() < deadline,
@@ -27886,7 +27895,7 @@ revised operator request
             .document_graphs
             .observe_retained_delivery_with_change(&document_hash, Some(materialized.clone()));
 
-        let deadline = Instant::now() + Duration::from_secs(2);
+        let deadline = Instant::now() + blocking_effect_gate::HANG_CEILING;
         while pending_intent_id(&runtime, &document_hash).is_some() {
             assert!(
                 Instant::now() < deadline,
@@ -28290,7 +28299,7 @@ revised operator request
             .unwrap();
 
         assert_eq!(projected, 1);
-        let deadline = Instant::now() + Duration::from_secs(2);
+        let deadline = Instant::now() + blocking_effect_gate::HANG_CEILING;
         let state = loop {
             let state = runtime.document_state_projection(&document_hash).unwrap();
             if state.as_ref().is_some_and(|state| {

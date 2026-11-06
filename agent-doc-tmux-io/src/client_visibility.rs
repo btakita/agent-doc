@@ -582,7 +582,8 @@ mod tests {
         assert!(unwatched_pane(&iso, &watched_pane).is_some());
 
         let _client = iso.attach_control_mode(Some("1")).unwrap();
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        // `#wallclockassertsweep`: a hang ceiling, not a latency bound.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
         while session_attached_client_count(&iso, "1") == 0 {
             assert!(
                 std::time::Instant::now() < deadline,

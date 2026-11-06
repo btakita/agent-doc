@@ -44789,7 +44789,7 @@ mod tests {
         });
         assert!(
             receive
-                .recv_timeout(Duration::from_secs(1))
+                .recv_timeout(super::blocking_effect_gate::HANG_CEILING)
                 .unwrap()
                 .unwrap(),
             "a sibling document admission must not wait for maintenance"
@@ -44820,7 +44820,7 @@ mod tests {
         drop(guard);
         assert!(
             receive
-                .recv_timeout(Duration::from_secs(1))
+                .recv_timeout(super::blocking_effect_gate::HANG_CEILING)
                 .unwrap()
                 .unwrap()
         );
@@ -45893,7 +45893,7 @@ mod tests {
             let started = std::time::Instant::now();
             while !gh383_ops(dir.path()).contains("sync_tmux_layout_published_layout_awaiting") {
                 assert!(
-                    started.elapsed() < Duration::from_secs(5),
+                    started.elapsed() < super::blocking_effect_gate::HANG_CEILING,
                     "awaiting log did not appear: {}",
                     gh383_ops(dir.path())
                 );
@@ -47365,7 +47365,9 @@ mod tests {
         );
 
         assert_eq!(
-            receiver.recv_timeout(Duration::from_secs(1)).unwrap(),
+            receiver
+                .recv_timeout(super::blocking_effect_gate::HANG_CEILING)
+                .unwrap(),
             expected,
             "the retained Source/Effect edge must dispatch the durable pending fact",
         );
@@ -47385,7 +47387,9 @@ mod tests {
             &other_state,
         );
         assert_eq!(
-            receiver.recv_timeout(Duration::from_secs(1)).unwrap(),
+            receiver
+                .recv_timeout(super::blocking_effect_gate::HANG_CEILING)
+                .unwrap(),
             other,
         );
         assert_eq!(graph.ctx.get(&graph.lifecycle_commands).len(), 2);
@@ -47585,10 +47589,10 @@ mod tests {
 
         let mut commands = vec![
             lifecycle_receiver
-                .recv_timeout(Duration::from_secs(1))
+                .recv_timeout(super::blocking_effect_gate::HANG_CEILING)
                 .expect("first durable pending binding"),
             lifecycle_receiver
-                .recv_timeout(Duration::from_secs(1))
+                .recv_timeout(super::blocking_effect_gate::HANG_CEILING)
                 .expect("second durable pending binding"),
         ];
         assert!(lifecycle_receiver.try_recv().is_err());
@@ -47741,7 +47745,7 @@ mod tests {
         )
         .unwrap();
         let bind_command = lifecycle_receiver
-            .recv_timeout(Duration::from_secs(1))
+            .recv_timeout(super::blocking_effect_gate::HANG_CEILING)
             .expect("durable BindPending dispatches only after append/apply");
         assert_eq!(bind_command.state, pending_bind);
         let bind_receipt =
@@ -47787,7 +47791,7 @@ mod tests {
         )
         .unwrap();
         let release_command = lifecycle_receiver
-            .recv_timeout(Duration::from_secs(1))
+            .recv_timeout(super::blocking_effect_gate::HANG_CEILING)
             .expect("durable ReleasePending dispatches only after append/apply");
         assert_eq!(release_command.state, pending_release);
         let release_receipt =
@@ -47937,7 +47941,7 @@ mod tests {
             ),
         )
         .unwrap();
-        let deadline = Instant::now() + Duration::from_secs(2);
+        let deadline = Instant::now() + super::blocking_effect_gate::HANG_CEILING;
         while restarted.state_projection_activation_queue.counts() != (0, 0) {
             assert!(
                 Instant::now() < deadline,
@@ -53015,7 +53019,10 @@ mod tests {
                 "dispatch_only": true,
                 "plain_trigger": true,
                 "client_id": client,
-                "wait_for_ready_secs": 2,
+                // `#wallclockassertsweep`: twice the hang ceiling, so "no layout
+                // wait" below means "did not spend the budget" rather than a
+                // latency bound a loaded host can miss.
+                "wait_for_ready_secs": super::blocking_effect_gate::HANG_CEILING.as_secs() * 2,
             });
             let mut request = empty_controller_request("editor_route");
             request.file = Some(canonical.clone());
@@ -53035,8 +53042,8 @@ mod tests {
         let (result, elapsed) = route("jetbrains@RD.9f8e7d6c-pid:42");
         assert_eq!(result.exit_code, 0, "{}", result.output);
         assert!(
-            elapsed < Duration::from_secs(2),
-            "no layout wait: {elapsed:?}"
+            elapsed < super::blocking_effect_gate::HANG_CEILING,
+            "no layout wait: a route that waited spends the whole budget: {elapsed:?}"
         );
         let notice = result
             .output
@@ -56619,7 +56626,7 @@ mod tests {
 
         let error = await_editor_route_layout_gates(
             "/repo/a.md",
-            Instant::now() + Duration::from_secs(5),
+            Instant::now() + super::blocking_effect_gate::HANG_CEILING,
             superseded,
             |_, _| panic!("terminal foreground supersession must not re-observe"),
         )
@@ -56671,7 +56678,7 @@ mod tests {
         let mut reobserved = Vec::new();
         let (receipt, observations) = await_editor_route_layout_gates(
             "/repo/a.md",
-            Instant::now() + Duration::from_secs(5),
+            Instant::now() + super::blocking_effect_gate::HANG_CEILING,
             gh110_receipt(
                 false,
                 "superseded_by_newer_layout_state",
@@ -56692,7 +56699,8 @@ mod tests {
                 .contains("reason=superseded_by_newer_layout_state")
         );
         assert!(
-            reobserved[0].1 > Duration::ZERO && reobserved[0].1 <= Duration::from_secs(5),
+            reobserved[0].1 > Duration::ZERO
+                && reobserved[0].1 <= super::blocking_effect_gate::HANG_CEILING,
             "re-observation is bounded by the remaining budget: {:?}",
             reobserved[0].1
         );
@@ -56702,7 +56710,7 @@ mod tests {
     fn gh110_layout_gates_absorb_a_momentarily_missing_column() {
         let (receipt, observations) = await_editor_route_layout_gates(
             "/repo/a.md",
-            Instant::now() + Duration::from_secs(5),
+            Instant::now() + super::blocking_effect_gate::HANG_CEILING,
             gh110_receipt(true, "observed_convergence", &["/repo/other.md"]),
             |_, _| Ok(gh110_receipt(true, "observed_convergence", &["/repo/a.md"])),
         )
@@ -56778,7 +56786,7 @@ mod tests {
     fn gh110_operator_owned_layout_is_terminal_not_retried() {
         let error = await_editor_route_layout_gates(
             "/repo/a.md",
-            Instant::now() + Duration::from_secs(5),
+            Instant::now() + super::blocking_effect_gate::HANG_CEILING,
             gh110_receipt(false, "operator_owned_layout", &["/repo/a.md"]),
             |_, _| panic!("operator-owned layout must not be re-observed"),
         )
@@ -56792,7 +56800,7 @@ mod tests {
     fn gh110_layout_gates_propagate_a_reobservation_error() {
         let error = await_editor_route_layout_gates(
             "/repo/a.md",
-            Instant::now() + Duration::from_secs(5),
+            Instant::now() + super::blocking_effect_gate::HANG_CEILING,
             gh110_receipt(
                 false,
                 "superseded_by_newer_layout_state",
@@ -58577,7 +58585,11 @@ mod tests {
         };
         let adopted = runtime
             .async_editor_commands
-            .await_terminal_adopting("cmd-forwarded-later", Duration::from_secs(5), || Some(456))
+            .await_terminal_adopting(
+                "cmd-forwarded-later",
+                super::blocking_effect_gate::HANG_CEILING,
+                || Some(456),
+            )
             .unwrap();
         publisher.join().unwrap();
         assert_eq!(adopted["exit_code"], 0);
@@ -60653,13 +60665,14 @@ mod tests {
         let pid = sentinel.id();
 
         let outcome = force_restart_controller(dir.path(), true);
-        let fork_image_exited = wait_for_test_pid_exit(fork_image, Duration::from_secs(2));
+        let fork_image_exited =
+            wait_for_test_pid_exit(fork_image, super::blocking_effect_gate::HANG_CEILING);
         if !fork_image_exited {
             kill_test_pid(fork_image);
         }
         let status = wait_for_test_child_exit(
             sentinel,
-            Duration::from_secs(2),
+            super::blocking_effect_gate::HANG_CEILING,
             "forced restart must reap the controller",
         );
         // `reaped_pids` cannot name the sentinel here: it is this test's own
@@ -60701,7 +60714,7 @@ mod tests {
                     crate::process::process_parent_pid(*candidate) == Some(pid)
                         && crate::process::open_supervisor_document(*candidate).is_some()
                 });
-            if fork_image.is_some() || start.elapsed() > Duration::from_secs(5) {
+            if fork_image.is_some() || start.elapsed() > super::blocking_effect_gate::HANG_CEILING {
                 break fork_image;
             }
             std::thread::sleep(Duration::from_millis(10));
@@ -60879,7 +60892,7 @@ mod tests {
         // ACK under load. Assert the ordering itself: read the handoff table
         // first, and once it is empty the ledger read that follows must hold
         // the event.
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let deadline = Instant::now() + super::blocking_effect_gate::HANG_CEILING;
         loop {
             let acknowledged = state_store::load_document_authority_handoffs(dir.path())
                 .unwrap()
@@ -61256,7 +61269,7 @@ mod tests {
         };
 
         assert!(handle_state_event_append(&bootstrap, &runtime, request()).unwrap());
-        let deadline = Instant::now() + Duration::from_secs(2);
+        let deadline = Instant::now() + super::blocking_effect_gate::HANG_CEILING;
         while runtime.state_projection_activation_queue.counts() != (0, 0) {
             assert!(Instant::now() < deadline, "wake projection did not drain");
             std::thread::sleep(Duration::from_millis(10));
@@ -62649,7 +62662,7 @@ mod tests {
 
         durable_writer.execute_batch("ROLLBACK").unwrap();
         let outcome = result_rx
-            .recv_timeout(Duration::from_secs(5))
+            .recv_timeout(super::blocking_effect_gate::HANG_CEILING)
             .expect("claim completes after durable writer releases")
             .unwrap();
         claimant.join().unwrap();
@@ -65760,7 +65773,7 @@ mod tests {
         // `wait()` it — poll `try_wait` instead of `process_is_alive`.
         let status = wait_for_test_child_exit(
             sentinel,
-            Duration::from_secs(2),
+            super::blocking_effect_gate::HANG_CEILING,
             "wedged sentinel pid must be reaped",
         );
         assert!(
@@ -65793,7 +65806,7 @@ mod tests {
         // lingers as a zombie until `wait()` — poll `try_wait`.
         let status = wait_for_test_child_exit(
             sentinel,
-            Duration::from_secs(2),
+            super::blocking_effect_gate::HANG_CEILING,
             "aged preparing orphan must be reaped",
         );
         assert!(

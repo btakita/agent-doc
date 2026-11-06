@@ -620,7 +620,10 @@ the first prompt for a child and after later `busy` dispatches return to an
 idle prompt.
 - Supervisor-owned dispatch paths report `busy` before injection, using
   `ipc_inject` for routed IPC and `auto_trigger_inject` for restart-triggered
-  reopen commands.
+  reopen commands. `auto_trigger_inject_command` reads the composer before that
+  busy transition and before the dispatch projection (`#autotriggerdraftguard`):
+  a refusal returns `draft_refused` and types nothing. The decision is under
+  Dispatch below.
 - A restart-triggered reopen is derived from restart provenance and pending
   work, never hard-coded on every IPC restart (`#idlecleartriggerinject`).
 - Operator Clear Session Context (`Clear` IPC) TYPES the harness-native clear
@@ -1418,6 +1421,20 @@ probe look `alive-busy`, the watch debounces that ready/busy conflict for the
   `payload_kind=trigger` and
   `submit_mode=tmux_hex_text_cr|pty_cr`; failures log
   `idle_queue_watch_drain_failed`.
+- `auto_trigger_inject_command` reads the composer before the dispatch
+  projection and the busy transition (`#autotriggerdraftguard`). A tmux inject
+  pane uses an ANSI capture at the cursor. A child with no pane reads the
+  supervisor screen, and an empty screen is a completed read. A failed pane
+  capture refuses. An exact idle draft of this command is submitted with Enter
+  and is not typed again. Otherwise nothing is typed for a different draft
+  (idle or busy), an agent-addressed placeholder, history-recall or agent-doc
+  residue (refused, and not cleared with `C-u`), protected input, or this
+  command held unsubmitted behind a running turn. A busy composer with no
+  draft still accepts a type, so the Codex capacity retry can submit
+  `continue` into the capacity error. A refusal returns `draft_refused`,
+  leaves the actor unmoved, and does not spend a capacity-recovery attempt;
+  the retry stays armed until the composer is clear. Nothing is typed on a
+  refusal. `/clear` stays on `auto_trigger_clear_command`.
 - **Stale-busy self-heal (`#stale-busy-after-auto-inject-no-clear`).** The
   one-shot busy→ready completion transition on the pty→stdout thread is
   edge-triggered on the latest output chunk. When an injected turn returns but

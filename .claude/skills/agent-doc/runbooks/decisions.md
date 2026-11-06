@@ -127,8 +127,9 @@ choices block, a question todo), search the recorded answers:
 then a decision stamp, then the same normalized question, then the work
 item a request was raised for, then wording and tsift recall (which also finds answers in other session documents). Each hit
 shows the verbatim answer, where and when it was given, and the copies still
-open. The last line says whether tsift recall ran; when tsift is missing or
-its index is stale, the ranking is the ledger's alone. If a hit answers your
+open. The last line says whether tsift recall ran; when tsift is missing, its
+index is stale, or it passes its deadline (60s,
+`AGENT_DOC_DECISION_SEARCH_TIMEOUT_MS`), the ranking is the ledger's alone. If a hit answers your
 question, act on it and cite its decision id; ask only when nothing does,
 and say you searched.
 

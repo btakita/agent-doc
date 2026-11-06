@@ -4448,15 +4448,24 @@ enum DecisionAction {
     /// rank a session document's answered decisions against a question, an
     /// id or a decision stamp (exact id, then stamp, then normalized
     /// question text, then wording and optional tsift recall across session
-    /// documents), each with its verbatim answer, where and when it was
-    /// given, and the copies still open. Read-only.
+    /// documents), each with its verbatim answer, the document and place it
+    /// was given in, when, and the copies still open. Without FILE it
+    /// searches every session document of the project at or above the
+    /// current directory and its `decisions.md` registry
+    /// (`#decisionsearchnofile`). Read-only.
+    #[command(override_usage = "agent-doc decision search [FILE] <QUERY>... [OPTIONS]")]
     Search {
-        /// Session document
-        file: PathBuf,
-        /// Question text, `[#id]`, decision / revision id, or
-        /// `⟦decision:<id>⟧` stamp; several words need no quotes
-        #[arg(required = true, num_args = 1..)]
-        query: Vec<String>,
+        /// Optional FILE, then the query: question text, `[#id]`, decision /
+        /// revision id, or `⟦decision:<id>⟧` stamp; several words need no
+        /// quotes. A first word naming an existing session document is FILE,
+        /// and needs a query after it; any other first word ending in `.md`
+        /// is refused as a mistyped FILE; everything else is the query.
+        /// `--project` makes every word the query.
+        #[arg(value_name = "WORDS", required = true, num_args = 1..)]
+        words: Vec<String>,
+        /// Search the whole project; no word is read as FILE
+        #[arg(long)]
+        project: bool,
         /// Most hits to show
         #[arg(long, default_value_t = 10)]
         limit: usize,
@@ -4732,8 +4741,8 @@ fn run_decision_action(action: DecisionAction) -> anyhow::Result<()> {
             }
             Ok(())
         }
-        DecisionAction::Search { file, query, limit, json } => {
-            decision_search::run_search(&file, &query.join(" "), limit, json)
+        DecisionAction::Search { words, project, limit, json } => {
+            decision_search::run_search(&words, project, limit, json)
         }
         DecisionAction::Derive { file, premises, inference, decision, answer, id, json } => {
             decision_derive::run_derive(

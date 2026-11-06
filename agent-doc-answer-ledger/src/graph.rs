@@ -36,7 +36,10 @@ use crate::extract::{Observations, QuestionSource, bracket_ids};
 use crate::{EdgeKind, Ledger, RevisionRelation, id_key, text};
 
 mod registry;
-pub use registry::{REGISTRY_LOCATION, RegistryCitation, RegistryDecision, registry_revision_id};
+pub use registry::{
+    REGISTRY_LOCATION, RegistryCitation, RegistryDecision, registry_revision_id,
+    registry_revision_location,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

@@ -70,6 +70,14 @@ pub fn registry_revision_id(record: &RegistryDecision) -> String {
     )
 }
 
+/// Where a record's current text is given: `decisions.md (<state>, updated <ts>)`.
+pub fn registry_revision_location(record: &RegistryDecision) -> String {
+    format!(
+        "{REGISTRY_LOCATION} ({}, updated {})",
+        record.state, record.updated_at
+    )
+}
+
 impl DecisionGraph {
     /// Add the project registry's records, their `supersedes` links and the
     /// session items citing them. Idempotent.
@@ -95,10 +103,7 @@ impl DecisionGraph {
                 kind: NodeKind::Revision,
                 label: record.decision.clone(),
                 open: None,
-                location: Some(format!(
-                    "{REGISTRY_LOCATION} ({}, updated {})",
-                    record.state, record.updated_at
-                )),
+                location: Some(registry_revision_location(record)),
                 first_seen_at: None,
                 in_document: true,
             });

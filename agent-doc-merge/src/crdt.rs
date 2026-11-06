@@ -1173,12 +1173,23 @@ fn list_item_key(item: &str) -> String {
 }
 
 /// Durable key for an `### Re:` exchange block: its heading line minus the
-/// working-tree-only ` (HEAD)` annotation.
+/// binary-owned ` (HEAD)` annotation and compact `[#r-…]` lookup id.
+///
+/// `#responseblockmovedtail`: the queue backlink adds the lookup id to a heading
+/// that is already in the document. Keying on the literal line made the annotated
+/// and plain headings two children, so a rebase over a live cut kept both copies
+/// of the response (agent-doc-bugs.md, 2026-11-05 19:31 EST, cycle-1793925083277).
 fn exchange_heading_key(block: &str) -> String {
-    let heading = block.lines().next().unwrap_or("").trim();
-    heading
+    response_heading_without_binary_annotations(block.lines().next().unwrap_or(""))
+}
+
+fn response_heading_without_binary_annotations(line: &str) -> String {
+    let heading = line.trim();
+    let heading = heading
         .strip_suffix(" (HEAD)")
         .unwrap_or(heading)
+        .trim_end();
+    agent_doc_markdown_ast::exchange_tree::strip_response_id_from_heading(heading)
         .trim_end()
         .to_string()
 }
@@ -2421,18 +2432,14 @@ fn is_transient_merge_line(line: &str) -> bool {
 }
 
 /// Collect normalized `### Re:` heading lines from a document, ignoring the
-/// working-tree-only ` (HEAD)` annotation and surrounding whitespace. Matches
-/// how the rest of the binary treats committed response headings.
+/// binary-owned ` (HEAD)` annotation, the `[#r-…]` lookup id, and surrounding
+/// whitespace. Matches how the rest of the binary treats committed response
+/// headings.
 fn response_headings(text: &str) -> Vec<String> {
     text.lines()
         .map(str::trim)
         .filter(|l| l.starts_with("### Re:"))
-        .map(|l| {
-            l.strip_suffix(" (HEAD)")
-                .unwrap_or(l)
-                .trim_end()
-                .to_string()
-        })
+        .map(response_heading_without_binary_annotations)
         .collect()
 }
 
@@ -5805,6 +5812,36 @@ Second answer line three.
             2,
             "both headings must survive; the keying is lossless by design:\n{exchange}"
         );
+    }
+
+    /// `#responseblockmovedtail` (agent-doc-bugs.md, 2026-11-05 19:31 EST): the
+    /// queue backlink added `[#r-…]` to a response heading while the live cut held
+    /// the plain heading and a concurrent queue row. The rebase kept both copies
+    /// of the response. It is one response, and the annotation lands on it.
+    #[test]
+    fn response_id_annotation_rebases_onto_the_plain_heading_as_one_response() {
+        let doc = |heading: &str, queue: &str| {
+            format!(
+                "<!-- agent:exchange patch=append -->\n### Re: earlier\n\nFirst.\n\n{heading}\n\nBody.\n\n> **Queue prompt:** do it\n<!-- agent:boundary:b1 -->\n<!-- /agent:exchange -->\n\n<!-- agent:queue -->\n{queue}<!-- /agent:queue -->\n"
+            )
+        };
+        let plain = "### Re: one decision \u{2014} opus-5-5";
+        let annotated = format!("{plain} [#r-f8f3df8f44f1]");
+        let base = doc(plain, "- do [#one]\n");
+        let ours = doc(&annotated, "- do [#one]\n");
+        let theirs = doc(plain, "- do [#one]\n- do [#two]\n");
+        let base_state = CrdtDoc::from_text(&base).encode_state();
+
+        let merged = merge_by_component(Some(&base_state), &ours, &theirs).unwrap();
+
+        assert_eq!(
+            merged.matches("### Re: one decision").count(),
+            1,
+            "{merged}"
+        );
+        assert_eq!(merged.matches("[#r-f8f3df8f44f1]").count(), 1, "{merged}");
+        assert_eq!(merged.matches("Body.").count(), 1, "{merged}");
+        assert!(merged.contains("- do [#two]"), "{merged}");
     }
 
     #[test]

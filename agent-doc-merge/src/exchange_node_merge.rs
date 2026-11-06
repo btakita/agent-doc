@@ -16,7 +16,8 @@
 //! contract at the node level.
 
 use agent_doc_markdown_ast::exchange_tree::{
-    ExchangeNode, ExchangeNodeKind, parse_exchange_nodes, render_exchange_nodes,
+    ExchangeNode, ExchangeNodeKind, duplicate_response_cell_node_indices, parse_exchange_nodes,
+    render_exchange_nodes,
 };
 use std::collections::HashSet;
 
@@ -103,22 +104,28 @@ pub fn merge_exchange_nodes(_base: &str, ours: &str, theirs: &str) -> String {
     out
 }
 
-/// `#exchangeconverge` — collapse nodes that share a [`ExchangeNode::node_id`],
-/// keeping the first occurrence in document order. Returns the deduped list and
-/// whether any duplicate was removed.
+/// `#exchangeconverge` — collapse repeated identities, keeping the first
+/// occurrence in document order. Returns the deduped list and whether anything
+/// was removed.
 ///
-/// Node identity keys on the response heading (`r:hash(key)`) / the prompt body
-/// (`p:hash(body)`), so two nodes collide only when they are the same response
-/// turn or a byte-identical prompt — exactly the non-adjacent / mirror-ordered
-/// duplicates a failed 3-way merge leaves behind. Distinct turns and distinct
-/// prompts have distinct ids and are never collapsed. This is the same identity
-/// the node merge keys on, so the operation is idempotent.
+/// Prompts collide on their byte-identical body. Responses collide only as whole
+/// cells (`#responseblockmovedtail`): every `### ` heading opens a node, so one
+/// node of a multi-section response is not a turn, and two replies that share an
+/// opening node or a section are still distinct turns. That leaves exactly the
+/// non-adjacent / mirror-ordered duplicates a failed 3-way merge leaves behind,
+/// and the operation stays idempotent.
 fn dedup_nodes_by_identity(nodes: Vec<ExchangeNode>) -> (Vec<ExchangeNode>, bool) {
+    let duplicate_cell_nodes = duplicate_response_cell_node_indices(&nodes);
     let mut seen: HashSet<String> = HashSet::with_capacity(nodes.len());
     let mut out: Vec<ExchangeNode> = Vec::with_capacity(nodes.len());
     let mut removed = false;
-    for node in nodes {
-        if seen.insert(node.node_id()) {
+    for (index, node) in nodes.into_iter().enumerate() {
+        let keep = if matches!(node.kind, ExchangeNodeKind::Response { .. }) {
+            !duplicate_cell_nodes.contains(&index)
+        } else {
+            seen.insert(node.node_id())
+        };
+        if keep {
             out.push(node);
         } else {
             removed = true;
@@ -160,6 +167,30 @@ mod tests {
         let a_start = merged.find("### Re: A").unwrap();
         let b_start = merged.find("### Re: B").unwrap();
         assert!(a_start < b_start);
+    }
+
+    /// `#responseblockmovedtail`: the document-cell merge runs this pass on every
+    /// merged exchange, so it must not delete the opening node of a reply that
+    /// shares it with an earlier reply to the same prompt.
+    #[test]
+    fn replies_sharing_an_opening_node_keep_their_headings() {
+        let exchange = concat!(
+            "### Re: Response\n\n> **Queue prompt:** tags\n\n",
+            "### Batch integrated\n\nPushed.\n\n",
+            "### Re: Response\n\n> **Queue prompt:** tags\n\n",
+            "### Tags integrated\n\nFixed.\n",
+        );
+        assert_eq!(dedup_exchange_nodes_by_identity(exchange), exchange);
+    }
+
+    #[test]
+    fn repeated_whole_multi_section_cell_collapses() {
+        let cell = "### Re: A\n\nSummary.\n\n### Details\n\nBody.\n\n";
+        let exchange = format!("{cell}\u{276f} Between.\n\n{cell}");
+        assert_eq!(
+            dedup_exchange_nodes_by_identity(&exchange),
+            format!("{cell}\u{276f} Between.\n\n")
+        );
     }
 
     #[test]

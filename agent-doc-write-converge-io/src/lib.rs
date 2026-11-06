@@ -15,7 +15,8 @@ use agent_doc_document_realtime::write_policy::{
     WholeBufferDeliveryAction, classify_socket_receipt_mismatch_recovery,
     decide_whole_buffer_delivery, dropped_prompt_lines_after_content_ours,
     editor_authority_blocks_disk_write, first_response_heading,
-    ipc_snapshot_would_absorb_live_prompt_drift_after_preflight, live_prompt_drift_recovery_target,
+    ipc_snapshot_would_absorb_live_prompt_drift_after_preflight,
+    live_prompt_drift_missing_block_committed_heading, live_prompt_drift_recovery_target,
     new_agent_response_headings, normalize_visible_recovery_compare, operator_reconcile_step,
     response_already_in_current, response_converged_in_visible_target,
     response_target_disjoint_from_user_edit, snapshot_contains_dropped_prompt,
@@ -2682,6 +2683,28 @@ pub fn try_auto_recover_live_prompt_drift(
         .chain(cycle.dropped_queue_prompts.iter())
         .any(|prompt| !snapshot_contains_dropped_prompt(snapshot, prompt));
     if dropped_missing_from_snapshot {
+        return Ok(None);
+    }
+    // `#responseblockmovedtail`: only this cycle's uncommitted response can be
+    // the missing one. A failed HEAD read keeps the prior behaviour, because the
+    // block guards in the recovery target still apply.
+    if let Some(head) = agent_doc_git_io::revision::show_head(file).ok().flatten()
+        && let Some(heading) = live_prompt_drift_missing_block_committed_heading(
+            snapshot,
+            file_content,
+            &head,
+            normalize_visible_recovery_compare,
+        )
+    {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "live_prompt_drift_recovery_refused_committed_response file={} heading={:?} file_len={} action=leave_document_unchanged #responseblockmovedtail",
+                file.display(),
+                heading,
+                file_content.len(),
+            ),
+        );
         return Ok(None);
     }
     let Some(recovery_target) = live_prompt_drift_recovery_target(

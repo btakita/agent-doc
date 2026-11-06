@@ -21,7 +21,12 @@ that retained cut to disk; zero-member delivery alone is never visible-write
 proof. A reconnect/replay transient containing duplicate response cells or
 standalone protocol boundaries is normalized through Lazily before the generic
 integrity gate. Malformed component structure and inline boundary text continue
-to fail closed.
+to fail closed. A duplicate response is a whole repeated response cell: a `### Re:`
+heading through its `###` sections (`#responseblockmovedtail`). Replies that share
+an opening heading and quoted queue prompt, or share a section, are distinct and
+all keep their text. A merge keys a response on its heading without the
+binary-owned ` (HEAD)` and `[#r-…]` annotations, so annotating a heading that is
+already in the document never yields a second copy.
 
 This spec is the canonical workflow authority for live session documents. It is
 implementation-independent: editor plugins, CRDT transports, IPC payloads,

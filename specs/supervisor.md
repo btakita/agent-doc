@@ -1435,6 +1435,12 @@ probe look `alive-busy`, the watch debounces that ready/busy conflict for the
   leaves the actor unmoved, and does not spend a capacity-recovery attempt;
   the retry stays armed until the composer is clear. Nothing is typed on a
   refusal. `/clear` stays on `auto_trigger_clear_command`.
+- Orchestration queue commands (`src/queue_dispatch.rs`, `#queuecommanddraftguard`)
+  are a different caller of the same decision. They read the registered pane
+  with an ANSI capture and refuse before `Inject` or tmux `send-keys`. The
+  `Inject` handler does not read the composer itself. An exact idle draft is
+  an Enter (`\r` over IPC, the harness submit key over tmux) and is not typed
+  again. No registered pane is an unread composer.
 - **Stale-busy self-heal (`#stale-busy-after-auto-inject-no-clear`).** The
   one-shot busy→ready completion transition on the pty→stdout thread is
   edge-triggered on the latest output chunk. When an injected turn returns but

@@ -25,6 +25,8 @@ pub(crate) fn build_dispatch_context(file: &Path) -> queue_dispatch::DispatchCon
             session_uuid: None,
             pane_id: None,
             harness: "claude".to_string(),
+            #[cfg(test)]
+            composer_read: None,
         }
     })
 }

@@ -17,6 +17,8 @@
 //! - `/compact <file>` delegates to `agent-doc compact` as a subprocess.
 //! - Unknown commands that cannot be dispatched via supervisor or tmux fail
 //!   immediately with a descriptive error.
+//! - Supervisor IPC and tmux both read the composer before typing
+//!   (`#queuecommanddraftguard`). The decision is `auto_trigger_draft_guard`.
 //!
 //! ## Evals
 //! - dispatch_inline_model_updates_override
@@ -37,6 +39,7 @@ use agent_doc_queue::dispatch_item::{
     InlineDispatchCommand, QueueItem, inline_dispatch_command, is_session_clear_command,
     item_fingerprint, sanitize_progress_field,
 };
+use agent_doc_supervisor::auto_trigger::{AutoTriggerDraftGuard, auto_trigger_draft_guard};
 use agent_doc_supervisor::ipc_protocol::IpcMethod;
 #[cfg(test)]
 use agent_doc_supervisor::ipc_protocol::IpcResponse;
@@ -59,6 +62,19 @@ pub struct DispatchContext {
     pub session_uuid: Option<String>,
     pub pane_id: Option<String>,
     pub harness: String,
+    /// Test-only composer snapshot. `Some` skips the pane capture so unit tests
+    /// never touch the live tmux server. Production builds do not have this field.
+    #[cfg(test)]
+    pub composer_read: Option<TestQueueCommandComposerRead>,
+}
+
+/// One composer snapshot substituted for a pane capture (`#queuecommanddraftguard`).
+#[cfg(test)]
+pub struct TestQueueCommandComposerRead {
+    /// `false` is a failed capture: unread, not an empty composer.
+    pub captured: bool,
+    pub content: String,
+    pub cursor_y: Option<usize>,
 }
 
 impl DispatchContext {
@@ -84,6 +100,8 @@ impl DispatchContext {
             session_uuid: fm.session,
             pane_id,
             harness: fm.agent.unwrap_or_else(|| "claude".to_string()),
+            #[cfg(test)]
+            composer_read: None,
         })
     }
 }
@@ -209,6 +227,73 @@ fn dispatch_inline(
     }
 }
 
+/// What a queue command may do after the composer has been read
+/// (`#queuecommanddraftguard`).
+#[derive(Clone, Copy)]
+enum QueueCommandTyping {
+    /// The read composer can take this command as new text.
+    Type,
+    /// This exact command is already the idle draft. Press Enter; do not type it again.
+    SubmitStranded,
+}
+
+/// Read the composer a queue command is about to type into.
+///
+/// No pane, and a failed ANSI capture, are unread. An empty screen is not
+/// invented from a plain `capture-pane -p` (`#plaincaptureghost`).
+fn read_queue_command_composer(ctx: &DispatchContext) -> (Option<String>, Option<usize>) {
+    #[cfg(test)]
+    if let Some(read) = &ctx.composer_read {
+        return (read.captured.then(|| read.content.clone()), read.cursor_y);
+    }
+    let Some(pane_id) = ctx.pane_id.as_deref() else {
+        return (None, None);
+    };
+    let tmux = tmux_router::Tmux::default();
+    let content = agent_doc_tmux_io::capture_pane_with_ansi(&tmux, pane_id).ok();
+    let cursor_y = content
+        .as_ref()
+        .and_then(|_| agent_doc_tmux_io::pane_cursor_y(&tmux, pane_id));
+    (content, cursor_y)
+}
+
+/// `#queuecommanddraftguard`: the guard for a queue command that types through
+/// supervisor IPC or tmux with no composer check of its own. A refusal types
+/// nothing. The decision is the one idle-queue inject already uses.
+fn guard_queue_command_before_typing(
+    ctx: &DispatchContext,
+    item: &QueueItem,
+    command: &str,
+) -> Result<QueueCommandTyping> {
+    let harness = agent_doc_harness::HarnessConfig::from_agent_name(&ctx.harness);
+    let (content, cursor_y) = read_queue_command_composer(ctx);
+    let (facts, preview) = agent_doc_start_runtime_io::read_auto_trigger_draft(
+        content.as_deref(),
+        cursor_y,
+        &harness,
+        command,
+    );
+    match auto_trigger_draft_guard(facts) {
+        AutoTriggerDraftGuard::Type => Ok(QueueCommandTyping::Type),
+        AutoTriggerDraftGuard::SubmitStranded => Ok(QueueCommandTyping::SubmitStranded),
+        AutoTriggerDraftGuard::Refuse(reason) => {
+            let preview_text = preview.as_deref().unwrap_or("<unavailable>");
+            log_dispatch_progress(
+                ctx,
+                format!(
+                    "queue_dispatch_draft_refused reason={reason} draft_preview_bytes={} draft_preview_sha256={} #queuecommanddraftguard note=nothing was typed {}",
+                    preview_text.len(),
+                    agent_doc_hash::content_hash(preview_text),
+                    item_fingerprint(item),
+                ),
+            );
+            anyhow::bail!(
+                "queue command dispatch refused to type into the composer ({reason}); nothing was typed. Submit or clear that draft, then retry. Redacted draft preview: {preview_text:?}. (#queuecommanddraftguard)"
+            )
+        }
+    }
+}
+
 /// Try dispatching via supervisor IPC. Returns `None` if no supervisor is available.
 fn try_supervisor_dispatch(
     item: &QueueItem,
@@ -224,32 +309,40 @@ fn try_supervisor_dispatch(
         return Ok(None);
     }
 
+    // The harness interprets `/command` lines natively. The composer check is
+    // first: `Inject` itself does not read the composer.
+    let bytes = agent_doc_tmux_commands::submitted_text_without_trailing_line_endings(&item.raw)
+        .to_string();
+    let typing = guard_queue_command_before_typing(ctx, item, &bytes)?;
+    let (payload, source, diag) = match typing {
+        QueueCommandTyping::Type => (bytes, "queue_dispatch.supervisor_ipc", "type"),
+        QueueCommandTyping::SubmitStranded => (
+            "\r".to_string(),
+            "queue_dispatch.supervisor_ipc_stranded",
+            "submit_stranded",
+        ),
+    };
     log_dispatch_progress(
         ctx,
         format!(
-            "queue_dispatch_progress transport=supervisor_ipc destination={} {}",
+            "queue_dispatch_progress transport=supervisor_ipc composer={diag} destination={} {}",
             sanitize_progress_field(&format!("socket:{}", sock.display())),
             item_fingerprint(item)
         ),
     );
-
-    // Use `inject` method to send the command text to the harness stdin.
-    // The harness interprets `/command` lines natively.
-    let bytes = agent_doc_tmux_commands::submitted_text_without_trailing_line_endings(&item.raw)
-        .to_string();
     agent_doc_tmux_io::input_diag::log_text_submit(
         agent_doc_tmux_io::input_diag::InputDiagSink::new(
             Some(&ctx.file),
             agent_doc_ops_log_io::log_op,
         ),
-        "queue_dispatch.supervisor_ipc",
+        source,
         &format!("socket:{}", sock.display()),
-        &bytes,
+        &payload,
         None,
         "supervisor_ipc_inject",
         "Inject",
     );
-    let method = IpcMethod::Inject { bytes };
+    let method = IpcMethod::Inject { bytes: payload };
     let resp =
         supervisor_ipc::send_command(&sock, &method).context("supervisor IPC dispatch failed")?;
 
@@ -268,10 +361,22 @@ fn try_tmux_dispatch(item: &QueueItem, ctx: &DispatchContext) -> Result<Option<D
         None => return Ok(None),
     };
 
+    let bytes = agent_doc_tmux_commands::submitted_text_without_trailing_line_endings(&item.raw)
+        .to_string();
+    let typing = guard_queue_command_before_typing(ctx, item, &bytes)?;
+    let (payload, source, diag) = match typing {
+        QueueCommandTyping::Type => (bytes, "queue_dispatch.tmux_send_keys", "type"),
+        QueueCommandTyping::SubmitStranded => (
+            String::new(),
+            "queue_dispatch.tmux_send_keys_stranded",
+            "submit_stranded",
+        ),
+    };
+
     log_dispatch_progress(
         ctx,
         format!(
-            "queue_dispatch_progress transport=tmux_send_keys destination={} {}",
+            "queue_dispatch_progress transport=tmux_send_keys composer={diag} destination={} {}",
             sanitize_progress_field(&format!("pane:{pane_id}")),
             item_fingerprint(item)
         ),
@@ -280,15 +385,16 @@ fn try_tmux_dispatch(item: &QueueItem, ctx: &DispatchContext) -> Result<Option<D
     let tmux = tmux_router::Tmux::default();
     let profile = agent_doc_tmux_commands::tmux_submit_profile_for_harness(&ctx.harness);
 
-    // Send the command text through the canonical tmux submit path.
+    // Send the command text through the canonical tmux submit path. A stranded
+    // draft sends no text: an empty payload is the harness submit key only.
     agent_doc_tmux_io::input_diag::log_text_submit(
         agent_doc_tmux_io::input_diag::InputDiagSink::new(
             Some(&ctx.file),
             agent_doc_ops_log_io::log_op,
         ),
-        "queue_dispatch.tmux_send_keys",
+        source,
         &format!("pane:{pane_id}"),
-        &item.raw,
+        &payload,
         Some(&ctx.harness),
         profile.transform(),
         profile.submit_key(),
@@ -296,11 +402,20 @@ fn try_tmux_dispatch(item: &QueueItem, ctx: &DispatchContext) -> Result<Option<D
     agent_doc_tmux_io::send_submitted_text_for_harness_logged(
         &tmux,
         &pane_id,
-        &item.raw,
+        &payload,
         &ctx.harness,
         agent_doc_tmux_io::input_diag::InputDiagSink::new(None, agent_doc_ops_log_io::log_op),
         "sessions.send_submitted_text_for_harness",
     )?;
+    if matches!(typing, QueueCommandTyping::SubmitStranded) {
+        // The command was already visible. The acceptance poll treats that text
+        // as "not yet consumed" and would wait out its budget on every repair.
+        log_dispatch_progress(
+            ctx,
+            "queue_dispatch_progress transport=tmux_send_keys outcome=submit_stranded".to_string(),
+        );
+        return Ok(Some(DispatchResult::Ok));
+    }
 
     // Poll for completion: wait until the command text disappears from the
     // pane's last few visible lines (same approach as route.rs send_command).
@@ -391,7 +506,59 @@ mod tests {
             session_uuid: None,
             pane_id: None,
             harness: "codex".to_string(),
+            composer_read: None,
         }
+    }
+
+    fn claude_composer(body: &str) -> String {
+        format!(
+            "────────────────────────────────────────\n\
+             {body}\n\
+             ────────────────────────────────────────\n\
+             ⏵⏵ bypass permissions on (shift+tab to cycle)\n"
+        )
+    }
+
+    fn composer_read(content: impl Into<String>) -> TestQueueCommandComposerRead {
+        TestQueueCommandComposerRead {
+            captured: true,
+            content: content.into(),
+            cursor_y: None,
+        }
+    }
+
+    struct RecordingIpc {
+        ipc: agent_doc_supervisor_io::ipc::SupervisorIpc,
+        captured: std::sync::Arc<parking_lot::Mutex<Vec<String>>>,
+    }
+
+    fn start_recording_ipc(dir: &Path) -> RecordingIpc {
+        let captured = std::sync::Arc::new(parking_lot::Mutex::new(Vec::<String>::new()));
+        let captured_for_ipc = captured.clone();
+        let ipc = agent_doc_supervisor_io::ipc::SupervisorIpc::start(
+            dir,
+            "queue-session",
+            move |method| match method {
+                IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
+                    captured_for_ipc.lock().push(bytes);
+                    IpcResponse::ok_empty()
+                }
+                IpcMethod::State
+                | IpcMethod::Pid
+                | IpcMethod::Restart { .. }
+                | IpcMethod::Stop { .. }
+                | IpcMethod::StopAgent { .. } => IpcResponse::ok_empty(),
+            },
+        )
+        .unwrap();
+        RecordingIpc { ipc, captured }
+    }
+
+    fn session_doc(dir: &Path) -> std::path::PathBuf {
+        std::fs::create_dir_all(dir.join(".agent-doc")).unwrap();
+        let doc = dir.join("doc.md");
+        std::fs::write(&doc, "---\nagent_doc_session: queue-session\n---\n").unwrap();
+        doc
     }
 
     #[test]
@@ -431,35 +598,16 @@ mod tests {
         );
 
         let dir = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-        let doc = dir.path().join("doc.md");
-        std::fs::write(&doc, "---\nagent_doc_session: queue-session\n---\n").unwrap();
-
-        let captured = std::sync::Arc::new(parking_lot::Mutex::new(Vec::<String>::new()));
-        let captured_for_ipc = captured.clone();
-        let mut ipc = agent_doc_supervisor_io::ipc::SupervisorIpc::start(
-            dir.path(),
-            "queue-session",
-            move |method| match method {
-                IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
-                    captured_for_ipc.lock().push(bytes);
-                    IpcResponse::ok_empty()
-                }
-                IpcMethod::State
-                | IpcMethod::Pid
-                | IpcMethod::Restart { .. }
-                | IpcMethod::Stop { .. }
-                | IpcMethod::StopAgent { .. } => IpcResponse::ok_empty(),
-            },
-        )
-        .unwrap();
+        let doc = session_doc(dir.path());
+        let mut ipc = start_recording_ipc(dir.path());
 
         let item = classify("/doctor");
-        let ctx = DispatchContext::from_file(&doc).unwrap();
+        let mut ctx = DispatchContext::from_file(&doc).unwrap();
+        ctx.composer_read = Some(composer_read(claude_composer("❯")));
         let result = dispatch_command(&item, &ctx).unwrap();
         assert!(matches!(result, DispatchResult::Ok));
         assert_eq!(
-            captured.lock().as_slice(),
+            ipc.captured.lock().as_slice(),
             &[
                 agent_doc_tmux_commands::submitted_text_without_trailing_line_endings("/doctor")
                     .to_string()
@@ -485,7 +633,226 @@ mod tests {
             "ops progress must not contain raw queue command text:\n{ops}"
         );
 
-        ipc.stop();
+        ipc.ipc.stop();
+    }
+
+    /// `#queuecommanddraftguard`: no pane and no capture is an unread composer.
+    /// The supervisor socket is live and must still receive nothing.
+    #[test]
+    fn dispatch_supervisor_refuses_an_unread_composer_and_types_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = session_doc(dir.path());
+        let ipc = start_recording_ipc(dir.path());
+
+        let item = classify("/doctor");
+        let ctx = DispatchContext::from_file(&doc).unwrap();
+        let err = dispatch_command(&item, &ctx).unwrap_err().to_string();
+        assert!(
+            err.contains("composer_unreadable"),
+            "an unread composer must refuse: {err}"
+        );
+        assert!(err.contains("nothing was typed"), "{err}");
+        assert!(
+            ipc.captured.lock().is_empty(),
+            "refusing must not inject: {:?}",
+            ipc.captured.lock()
+        );
+
+        let ops = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(ops.contains("queue_dispatch_draft_refused"), "{ops}");
+        assert!(ops.contains("reason=composer_unreadable"), "{ops}");
+        assert!(ops.contains("#queuecommanddraftguard"), "{ops}");
+        assert!(
+            !ops.contains("queue_dispatch_progress transport=supervisor_ipc"),
+            "a refusal is not a typed dispatch: {ops}"
+        );
+        assert!(!ops.contains("/doctor"), "{ops}");
+    }
+
+    /// `#queuecommanddraftguard`: a different draft refuses on the supervisor
+    /// path, idle or not. Nothing is injected.
+    #[test]
+    fn dispatch_supervisor_refuses_a_foreign_draft_and_types_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = session_doc(dir.path());
+        let ipc = start_recording_ipc(dir.path());
+
+        let item = classify("/doctor");
+        let mut ctx = DispatchContext::from_file(&doc).unwrap();
+        ctx.composer_read = Some(composer_read(claude_composer("❯ keep going")));
+        let err = dispatch_command(&item, &ctx).unwrap_err().to_string();
+        assert!(err.contains("foreign_draft"), "{err}");
+        assert!(err.contains("keep going"), "{err}");
+        assert!(ipc.captured.lock().is_empty(), "{:?}", ipc.captured.lock());
+
+        let ops = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(ops.contains("reason=foreign_draft"), "{ops}");
+        assert!(
+            !ops.contains("keep going"),
+            "ops must not contain the raw draft: {ops}"
+        );
+        assert!(!ops.contains("/doctor"), "{ops}");
+    }
+
+    /// `#queuecommanddraftguard`: the same command already sitting in an idle
+    /// composer is submitted with Enter and is not typed again.
+    #[test]
+    fn dispatch_supervisor_submits_a_stranded_command_without_retyping() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = session_doc(dir.path());
+        let ipc = start_recording_ipc(dir.path());
+
+        let item = classify("/doctor");
+        let mut ctx = DispatchContext::from_file(&doc).unwrap();
+        ctx.composer_read = Some(composer_read(claude_composer("❯ /doctor")));
+        dispatch_command(&item, &ctx).unwrap();
+        assert_eq!(ipc.captured.lock().as_slice(), &["\r".to_string()]);
+
+        let ops = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(ops.contains("composer=submit_stranded"), "{ops}");
+        assert!(
+            ops.contains("source=queue_dispatch.supervisor_ipc_stranded"),
+            "{ops}"
+        );
+        assert!(!ops.contains("/doctor"), "{ops}");
+    }
+
+    /// `#queuecommanddraftguard`: this command held behind a running turn is
+    /// not submitted and not appended to.
+    #[test]
+    fn dispatch_supervisor_refuses_a_command_behind_a_running_turn() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = session_doc(dir.path());
+        let ipc = start_recording_ipc(dir.path());
+
+        let item = classify("/doctor");
+        let mut ctx = DispatchContext::from_file(&doc).unwrap();
+        ctx.composer_read = Some(composer_read(
+            "✶ Generating… (3s · esc to interrupt)\n\
+             ────────────────────────────────────────\n\
+             ❯ /doctor\n\
+             ────────────────────────────────────────\n\
+             ⏵⏵ bypass permissions on · 1 shell\n",
+        ));
+        let err = dispatch_command(&item, &ctx).unwrap_err().to_string();
+        assert!(err.contains("command_behind_running_turn"), "{err}");
+        assert!(ipc.captured.lock().is_empty(), "{:?}", ipc.captured.lock());
+    }
+
+    /// `#queuecommanddraftguard`: a dim ghost of the command is not a draft.
+    /// The command is typed.
+    #[test]
+    fn dispatch_supervisor_types_over_a_ghost_of_the_command() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = session_doc(dir.path());
+        let ipc = start_recording_ipc(dir.path());
+
+        let item = classify("/doctor");
+        let mut ctx = DispatchContext::from_file(&doc).unwrap();
+        ctx.harness = "codex".to_string();
+        ctx.composer_read = Some(composer_read(
+            "\x1b[1m›\x1b[0m \x1b[2m/doctor\x1b[0m\n\
+             gpt-5.5 high · ~/work/btakita/agent-loop · Context 40% used\n",
+        ));
+        dispatch_command(&item, &ctx).unwrap();
+        assert_eq!(
+            ipc.captured.lock().as_slice(),
+            &[
+                agent_doc_tmux_commands::submitted_text_without_trailing_line_endings("/doctor")
+                    .to_string()
+            ]
+        );
+    }
+
+    /// `#queuecommanddraftguard`: the tmux path refuses before send-keys. The
+    /// composer snapshot stands in for the pane, so this test never calls tmux.
+    #[test]
+    fn dispatch_tmux_refuses_a_foreign_draft_before_send_keys() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = session_doc(dir.path());
+        let item = classify("/doctor");
+        let mut ctx = DispatchContext::from_file(&doc).unwrap();
+        ctx.project_root = None;
+        ctx.session_uuid = None;
+        ctx.pane_id = Some("%queue-command-draft".to_string());
+        ctx.composer_read = Some(composer_read(claude_composer("❯ keep going")));
+
+        let err = dispatch_command(&item, &ctx).unwrap_err().to_string();
+        assert!(err.contains("foreign_draft"), "{err}");
+        let ops = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(ops.contains("reason=foreign_draft"), "{ops}");
+        assert!(
+            !ops.contains("queue_dispatch_progress transport=tmux_send_keys"),
+            "a refusal must not reach send-keys: {ops}"
+        );
+    }
+
+    /// `#queuecommanddraftguard`: a failed capture is unread even when a pane
+    /// id is known, and the tmux path still types nothing.
+    #[test]
+    fn dispatch_tmux_refuses_a_failed_capture() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = session_doc(dir.path());
+        let item = classify("/doctor");
+        let mut ctx = DispatchContext::from_file(&doc).unwrap();
+        ctx.project_root = None;
+        ctx.session_uuid = None;
+        ctx.pane_id = Some("%queue-command-draft".to_string());
+        ctx.composer_read = Some(TestQueueCommandComposerRead {
+            captured: false,
+            content: claude_composer("❯"),
+            cursor_y: None,
+        });
+
+        let err = dispatch_command(&item, &ctx).unwrap_err().to_string();
+        assert!(err.contains("composer_unreadable"), "{err}");
+    }
+
+    #[test]
+    fn queue_command_paths_consult_the_composer_guard_before_typing() {
+        let source = include_str!("queue_dispatch.rs");
+        let supervisor = source
+            .split_once("fn try_supervisor_dispatch(")
+            .and_then(|(_, tail)| tail.split_once("\nfn try_tmux_dispatch("))
+            .map(|(body, _)| body)
+            .expect("supervisor dispatch");
+        let tmux = source
+            .split_once("fn try_tmux_dispatch(")
+            .and_then(|(_, tail)| tail.split_once("\n/// Look up the tmux pane"))
+            .map(|(body, _)| body)
+            .expect("tmux dispatch");
+        for (name, body) in [("supervisor", supervisor), ("tmux", tmux)] {
+            let guard = body
+                .find("guard_queue_command_before_typing(")
+                .unwrap_or_else(|| panic!("{name} must call the composer guard"));
+            let typed = body
+                .find("IpcMethod::Inject")
+                .or_else(|| body.find("send_submitted_text_for_harness_logged("))
+                .unwrap_or_else(|| panic!("{name} must still type"));
+            assert!(guard < typed, "{name} types before reading the composer");
+        }
+        let observe = source
+            .split_once("fn read_queue_command_composer(")
+            .and_then(|(_, tail)| tail.split_once("\nfn guard_queue_command_before_typing("))
+            .map(|(body, _)| body)
+            .expect("composer read");
+        assert!(
+            observe.contains("capture_pane_with_ansi("),
+            "the composer read must use a styled capture"
+        );
+        assert!(
+            !observe.contains("capture_pane("),
+            "a plain capture cannot tell a ghost from a draft"
+        );
+        let clear = source
+            .split_once("fn dispatch_clear(")
+            .and_then(|(_, tail)| tail.split_once("\nfn dispatch_inline("))
+            .map(|(body, _)| body)
+            .expect("clear");
+        assert!(
+            !clear.contains("guard_queue_command_before_typing("),
+            "session clear keeps its own guard"
+        );
     }
 
     #[test]

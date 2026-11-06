@@ -923,10 +923,13 @@ fn composer_draft_is_exactly_command(draft: &str, command: &str) -> bool {
 
 /// Classify one composer read for [`auto_trigger_inject_command`].
 ///
+/// Queue command dispatch uses the same read (`#queuecommanddraftguard`): one
+/// ANSI capture, then `auto_trigger_draft_guard`.
+///
 /// `command_drafted` is an exact draft match, not a substring. The capacity
 /// retry's command is the word `continue`; a composer holding "please
 /// continue" is the operator's text and must refuse (`#autotriggerdraftguard`).
-fn read_auto_trigger_draft(
+pub fn read_auto_trigger_draft(
     content: Option<&str>,
     cursor_y: Option<usize>,
     harness: &agent_doc_harness::HarnessConfig,

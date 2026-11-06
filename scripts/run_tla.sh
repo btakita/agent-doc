@@ -230,7 +230,7 @@ work_dir="$(mktemp -d "${TMPDIR:-/tmp}/agent-doc-tla.XXXXXX")"
 trap 'rm -rf "${work_dir}"' EXIT
 isolate_run "${work_dir}"
 
-modules=(AgentDocCloseout PassiveTmuxSync JetBrainsFileCache CloseoutChurn CrdtLineageFence ResponseCheckpoint PaneExecutionAuthority SupervisorGenerationTransition ReactiveTopology EditorReplicaStrand TransientRefusalLatch VisibleDeliveryReceipt PlanClosureContract IpcBuildIdentity StopHookContinuation StopHookFailClosed RefusedSaveOperatorAction RecycleSettleDispatch RetainedProjectionHold RegistrationAcknowledgedBase RetainedTransitionFixedPoint RealtimeSteeringStop EditorAuthorityLadder ConflictReconciliation AdmissionSplitMerge AdmissionCutExclusivity StaleColumnRecycle NetChannelRetransmit VisibleDeliveryReceiptNet EditorReplicaStrandNet RecycleSettleDispatchNet AgentDocCloseoutNet PassiveTmuxSyncNet PassiveTmuxSyncRetireNet LifecycleSequence LayoutWidthBound RemoteLayoutNoGuess EditorTransportHealth ControllerLifecycle AuthorityHandoffFold)
+modules=(AgentDocCloseout PassiveTmuxSync JetBrainsFileCache CloseoutChurn CrdtLineageFence ResponseCheckpoint PaneExecutionAuthority SupervisorGenerationTransition ReactiveTopology EditorReplicaStrand TransientRefusalLatch VisibleDeliveryReceipt PlanClosureContract IpcBuildIdentity StopHookContinuation StopHookFailClosed RefusedSaveOperatorAction RecycleSettleDispatch RetainedProjectionHold RegistrationAcknowledgedBase RetainedTransitionFixedPoint RealtimeSteeringStop EditorAuthorityLadder ConflictReconciliation AdmissionSplitMerge AdmissionCutExclusivity StaleColumnRecycle NetChannelRetransmit VisibleDeliveryReceiptNet EditorReplicaStrandNet RecycleSettleDispatchNet AgentDocCloseoutNet PassiveTmuxSyncNet PassiveTmuxSyncRetireNet LifecycleSequence LayoutWidthBound RemoteLayoutNoGuess EditorTransportHealth ControllerLifecycle AuthorityHandoffFold PredecessorWriteAfterLoad)
 
 # Library modules: INSTANCE'd by the models above, never checked on their own
 # (no Spec, no .cfg). They only need to sit next to the importing model.
@@ -519,6 +519,11 @@ must_violate=(
     # is a real interleaving of the fixed model.
     AuthorityHandoffFold:AuthorityHandoffFoldLateAckWedge
     AuthorityHandoffFold:AuthorityHandoffFoldLateAckReach
+    # `#predecessorwriteafterload`: a ledger row with no handoff receipt, committed
+    # after the successor's load, never reaches the projection if the drain does
+    # not look for it; reach proves that late write is a real interleaving.
+    PredecessorWriteAfterLoad:PredecessorWriteAfterLoadWedge
+    PredecessorWriteAfterLoad:PredecessorWriteAfterLoadReach
 )
 
 for module in "${modules[@]}"; do

@@ -4055,10 +4055,14 @@ struct ControllerMemoryState {
     /// `state_events.id` of the last durable row folded into
     /// `state_projection` (0 when none). A durable reload that ran off the
     /// ingress lock replays only the rows after it under the lock
-    /// (`#refreshmemlockstall`). Only meaningful on a freshly loaded snapshot:
-    /// the live projection also folds controller-owned appends whose row ids it
-    /// does not record.
+    /// (`#refreshmemlockstall`). It does not advance on a live apply.
+    /// `live_applied_event_ids` is that uncheckpointed suffix: a drain drops an
+    /// id once this high-water covers its row, and uses the set to tell this
+    /// controller's own append from a predecessor write
+    /// (`#predecessorwriteafterload`). It is not a second copy of the ledger
+    /// (GH #141).
     durable_sequence: u64,
+    live_applied_event_ids: HashSet<String>,
     map_backend: &'static str,
 }
 
@@ -4106,6 +4110,7 @@ impl ControllerMemoryState {
                 state_projection,
                 pending_document_authority_handoffs: HashMap::new(),
                 durable_sequence,
+                live_applied_event_ids: HashSet::new(),
                 map_backend: "std_btree_map",
             },
             load_actor_store(project_root)?,
@@ -4420,8 +4425,8 @@ fn run_state_projection_effect_test_hook(document_hash: &str) {
 fn run_state_projection_effect_test_hook(_document_hash: &str) {}
 
 #[cfg(test)]
-fn state_projection_derived_test_hook(
-) -> &'static Mutex<Option<(String, StateProjectionEffectTestHook)>> {
+fn state_projection_derived_test_hook()
+-> &'static Mutex<Option<(String, StateProjectionEffectTestHook)>> {
     static HOOK: OnceLock<Mutex<Option<(String, StateProjectionEffectTestHook)>>> = OnceLock::new();
     HOOK.get_or_init(|| Mutex::new(None))
 }
@@ -5017,9 +5022,8 @@ struct ControllerDocumentGraphs {
     ctx: ThreadSafeContext,
     /// Lock-only authoritative plane updated on state ingress. It provides
     /// immediate read-your-write without entering Lazily or flushing Effects.
-    latest_projection: Mutex<
-        HashMap<String, Option<agent_doc_state_backbone::DocumentStateProjection>>,
-    >,
+    latest_projection:
+        Mutex<HashMap<String, Option<agent_doc_state_backbone::DocumentStateProjection>>>,
     /// Worker-owned reactive projection. Everything retained-write-shaped is
     /// derived from this only after the activation worker copies the newest
     /// authoritative value across the boundary.
@@ -7973,13 +7977,12 @@ impl ControllerDocumentGraphs {
             .latest_projection(document_hash)
             .as_ref()
             .and_then(retained_intent_facts_from_projection);
-        let immediate =
-            agent_doc_state_backbone::retained_write::settlement_verdict_with_receipt(
-                pending.as_ref(),
-                authority.as_ref(),
-                disk.as_ref(),
-                settlement_receipt.as_ref(),
-            );
+        let immediate = agent_doc_state_backbone::retained_write::settlement_verdict_with_receipt(
+            pending.as_ref(),
+            authority.as_ref(),
+            disk.as_ref(),
+            settlement_receipt.as_ref(),
+        );
         // One batch: the two planes are one observation, and a settle effect that
         // ran between them would be judging a fresh authority against a stale disk.
         self.ctx.batch(|ctx| {
@@ -9579,16 +9582,14 @@ fn progressive_reconnect_operator_successor_hash(
     .filter(|capture| capture.base_hash.eq_ignore_ascii_case(&intent.target_hash))
     .filter(|capture| !capture.tip_hash.is_empty())
     .filter_map(|capture| {
-        let ops = serde_json::from_str::<Vec<agent_doc_merge::crdt::EditorOp>>(&capture.ops_json)
-            .ok()?;
+        let ops =
+            serde_json::from_str::<Vec<agent_doc_merge::crdt::EditorOp>>(&capture.ops_json).ok()?;
         Some((capture, ops))
     })
     .filter(|(_, ops)| !ops.is_empty())
     .find_map(|(capture, ops)| {
         agent_doc_merge::crdt::replay_editor_ops(&intent.target_content, &ops)
-            .filter(|tip| {
-                agent_doc_hash::content_hash(tip).eq_ignore_ascii_case(&capture.tip_hash)
-            })
+            .filter(|tip| agent_doc_hash::content_hash(tip).eq_ignore_ascii_case(&capture.tip_hash))
             .map(|_| capture.tip_hash.clone())
     })
 }
@@ -9680,9 +9681,9 @@ fn retained_transition_state(
     // older expected cut. Check that durable successor proof before the
     // `delivery == base_content` fast path below; otherwise that shortcut
     // replays the superseded snapshot and reverses the operator's correction.
-    if progressive_reconnect_operator_successor_hash(projection, intent).is_some_and(|hash| {
-        hash.eq_ignore_ascii_case(&delivery.content_hash)
-    }) {
+    if progressive_reconnect_operator_successor_hash(projection, intent)
+        .is_some_and(|hash| hash.eq_ignore_ascii_case(&delivery.content_hash))
+    {
         return RetainedTransitionState::TargetVisible {
             intent_id: intent.intent_id.clone(),
             target_hash: delivery.content_hash.clone(),
@@ -10190,8 +10191,9 @@ fn retained_intent_facts_from_projection(
             // (`#adwritesourceenum`). Settlement itself observes only content
             // planes, so it cannot tell a later stage from an older cycle's.
             superseding_stage: document.document.superseding_closeout_stage(pending),
-            operator_superseding_hash:
-                progressive_reconnect_operator_successor_hash(document, pending),
+            operator_superseding_hash: progressive_reconnect_operator_successor_hash(
+                document, pending,
+            ),
             carries_response_payload,
             carries_content_delta,
             closeout_committed: document.closeout.phase
@@ -10570,7 +10572,12 @@ impl ControllerRuntime {
     }
 
     fn wake_document_authority_handoff_worker(&self) {
-        let Some(wake) = self.document_authority_handoff_wake.lock().as_ref().cloned() else {
+        let Some(wake) = self
+            .document_authority_handoff_wake
+            .lock()
+            .as_ref()
+            .cloned()
+        else {
             return;
         };
         match wake.try_send(()) {
@@ -10584,10 +10591,7 @@ impl ControllerRuntime {
         }
     }
 
-    fn note_pending_document_authority_handoff(
-        &self,
-        event: agent_doc_state_backbone::StateEvent,
-    ) {
+    fn note_pending_document_authority_handoff(&self, event: agent_doc_state_backbone::StateEvent) {
         let Some(incoming_epoch) = document_authority_epoch(&event) else {
             return;
         };
@@ -11026,6 +11030,10 @@ impl ControllerRuntime {
             // SQLite accepted the unique event id before this transition. Keep
             // only the current projection and epoch in the process: the durable
             // store, not controller RSS, owns historical replay (GH #141).
+            // `#predecessorwriteafterload`: the id stays only until a drain's
+            // high-water covers the row, so a predecessor's row is the one with
+            // no id here.
+            memory.live_applied_event_ids.insert(event.event_id.clone());
             memory.state_projection.apply_durable_unique(event);
             self.state_apply_generation.fetch_add(1, Ordering::AcqRel);
             memory
@@ -11269,7 +11277,8 @@ impl ControllerRuntime {
     /// Compare one authority event's ledger sequence with the high-water of the
     /// rows this projection folded. It only ever errs toward a reload: the
     /// high-water does not move on a live apply, so a row this controller
-    /// applied live reads as `LedgeredAfterLoad`, and a reload is always safe.
+    /// applied live reads as `LedgeredAfterLoad` until a drain advances the
+    /// high-water over it (`#predecessorwriteafterload`). A reload is always safe.
     fn document_authority_handoff_ledger_position(
         &self,
         sequence: Option<u64>,
@@ -11284,6 +11293,69 @@ impl ControllerRuntime {
                 folded_through,
             },
         }
+    }
+
+    /// Fold predecessor ledger writes that are not authority-handoff receipts.
+    /// `true` means the rows remain for the next drain.
+    ///
+    /// `#predecessorwriteafterload`: `#predecessorlandandack` reconciles only
+    /// acknowledgement receipts. Any other fact a predecessor commits after this
+    /// controller's load is a `state_events` row with no handoff row and no
+    /// receipt, and it used to wait for whatever next called `refresh_memory`.
+    /// The high-water does not move on a live apply, so a row above it is either
+    /// one this controller appended (its event id was recorded at apply, under
+    /// the same ingress lock as the insert) or one another writer committed.
+    /// The first kind advances the high-water with no reload. The second kind is
+    /// folded by one durable reload before this drain acknowledges anything. A
+    /// failed reload keeps the rows.
+    fn reconcile_predecessor_ledger_writes(&self, project_root: &Path) -> Result<bool> {
+        let folded_through = self.memory.lock().durable_sequence;
+        let conn = open_state_db(project_root)?;
+        let rows = state_store::load_state_events_after_from_db(&conn, folded_through)?;
+        drop(conn);
+        if rows.is_empty() {
+            return Ok(false);
+        }
+        let foreign = {
+            let mut memory = self.memory.lock();
+            if memory.durable_sequence != folded_through {
+                false
+            } else if rows
+                .iter()
+                .any(|row| !memory.live_applied_event_ids.contains(&row.event_id))
+            {
+                true
+            } else {
+                if let Some(last) = rows.last() {
+                    memory.durable_sequence = last.sequence;
+                }
+                for row in &rows {
+                    memory.live_applied_event_ids.remove(&row.event_id);
+                }
+                false
+            }
+        };
+        if !foreign {
+            return Ok(false);
+        }
+        if let Err(error) = self.refresh_memory() {
+            agent_doc_ops_log_io::log_op(
+                project_root,
+                &format!(
+                    "predecessor_ledger_write_fold_deferred rows={} folded_through={folded_through} error={error:#} (#predecessorwriteafterload)",
+                    rows.len(),
+                ),
+            );
+            return Ok(true);
+        }
+        agent_doc_ops_log_io::log_op(
+            project_root,
+            &format!(
+                "predecessor_ledger_write_refolded rows={} folded_through={folded_through} (#predecessorwriteafterload)",
+                rows.len(),
+            ),
+        );
+        Ok(false)
     }
 
     /// Fold what older generations acknowledged behind this controller's back.
@@ -11346,9 +11418,16 @@ impl ControllerRuntime {
 
     /// Fold every durable latest-value authority handoff this controller can
     /// generation-fence. `true` means at least one row remains retryable.
+    ///
+    /// The first step folds predecessor ledger writes that are not handoff
+    /// receipts (`#predecessorwriteafterload`), so a fact with nothing to claim
+    /// still reaches this projection before the handoff pass.
     fn drain_document_authority_handoffs(&self, project_root: &Path) -> Result<bool> {
         let generation = self.bootstrap.lock().controller_generation;
-        let mut retry = self.reconcile_predecessor_authority_acks(project_root, generation)?;
+        let mut retry = self.reconcile_predecessor_ledger_writes(project_root)?;
+        if self.reconcile_predecessor_authority_acks(project_root, generation)? {
+            retry = true;
+        }
         for handoff in state_store::load_document_authority_handoffs(project_root)? {
             if !state_store::claim_document_authority_handoff(
                 project_root,
@@ -11908,7 +11987,11 @@ impl ControllerRuntime {
     fn supervisor_recycle_projection(
         &self,
     ) -> Result<agent_doc_state_backbone::SupervisorRecycleProjection> {
-        Ok(self.memory.lock().state_projection.project_supervisor_recycle())
+        Ok(self
+            .memory
+            .lock()
+            .state_projection
+            .project_supervisor_recycle())
     }
 
     fn supervisor_recycle_projection_for(
@@ -11937,7 +12020,10 @@ impl ControllerRuntime {
                 hook();
             }
         });
-        if let Some(event) = memory.pending_document_authority_handoffs.get(document_hash) {
+        if let Some(event) = memory
+            .pending_document_authority_handoffs
+            .get(document_hash)
+        {
             projection
                 .get_or_insert_with(|| {
                     agent_doc_state_backbone::DocumentStateProjection::new(document_hash)
@@ -22679,6 +22765,7 @@ agent:queue\n\
                 state_projection,
                 pending_document_authority_handoffs: HashMap::new(),
                 durable_sequence: 0,
+                live_applied_event_ids: HashSet::new(),
                 map_backend: "std_btree_map",
             }),
             state_event_ingress: Mutex::new(()),
@@ -22802,7 +22889,11 @@ agent:queue\n\
                 event_id,
                 StateFact::EditorViewBindingObserved {
                     document_hash: document_hash.to_string(),
-                    canonical_path: dir.path().join("tasks/sdk.md").to_string_lossy().to_string(),
+                    canonical_path: dir
+                        .path()
+                        .join("tasks/sdk.md")
+                        .to_string_lossy()
+                        .to_string(),
                     binding_epoch: 1,
                     state: EditorViewBindingState::Released {
                         binding: EditorViewBindingIdentity {
@@ -23063,8 +23154,7 @@ agent:queue\n\
             let _ = entered_tx.send(());
             let _ = release_rx.lock().recv();
         });
-        *state_projection_derived_test_hook().lock() =
-            Some((document_hash.to_string(), hook));
+        *state_projection_derived_test_hook().lock() = Some((document_hash.to_string(), hook));
 
         // The first activation installed a persistent retained-transition
         // Effect. Updating its durable projection must ACK before the worker
@@ -23238,8 +23328,7 @@ agent:queue\n\
                 ACTIVATION.pass(document_hash);
             }
         });
-        *state_projection_effect_test_hook().lock() =
-            Some((document_hash.to_string(), hook));
+        *state_projection_effect_test_hook().lock() = Some((document_hash.to_string(), hook));
 
         // The refresh publishes Sources and returns while derived activation
         // remains blocked on another thread.
@@ -23312,8 +23401,7 @@ agent:queue\n\
                 let _ = release_rx.lock().recv();
             }
         });
-        *state_projection_effect_test_hook().lock() =
-            Some((document_hash.to_string(), hook));
+        *state_projection_effect_test_hook().lock() = Some((document_hash.to_string(), hook));
 
         let first = deferred_document_write_event(document_hash, "intent-0", "target-0");
         assert!(
@@ -23353,7 +23441,10 @@ agent:queue\n\
         release_tx.send(()).unwrap();
         let deadline = Instant::now() + blocking_effect_gate::HANG_CEILING;
         while runtime.state_projection_activation_queue.counts() != (0, 0) {
-            assert!(Instant::now() < deadline, "coalesced activation did not drain");
+            assert!(
+                Instant::now() < deadline,
+                "coalesced activation did not drain"
+            );
             std::thread::sleep(Duration::from_millis(10));
         }
         assert_eq!(calls.load(Ordering::SeqCst), 2);
@@ -23369,8 +23460,7 @@ agent:queue\n\
         let hook: StateProjectionEffectTestHook = Arc::new(|| {
             panic!("synthetic projection activation failure");
         });
-        *state_projection_effect_test_hook().lock() =
-            Some((document_hash.to_string(), hook));
+        *state_projection_effect_test_hook().lock() = Some((document_hash.to_string(), hook));
 
         let event = deferred_document_write_event(document_hash, "panic-intent", "panic-target");
         assert!(
@@ -23380,7 +23470,10 @@ agent:queue\n\
         );
         let deadline = Instant::now() + blocking_effect_gate::HANG_CEILING;
         while !runtime.controller_generation_poisoned() {
-            assert!(Instant::now() < deadline, "worker panic did not poison generation");
+            assert!(
+                Instant::now() < deadline,
+                "worker panic did not poison generation"
+            );
             std::thread::sleep(Duration::from_millis(10));
         }
         assert_eq!(
@@ -29206,11 +29299,7 @@ revised operator request
         // independently persisted snapshot, but that effect must explicitly
         // decline a live write.
         runtime
-            .document_queue_authority_observe(
-                &document_hash,
-                &canonical,
-                repaired.clone(),
-            )
+            .document_queue_authority_observe(&document_hash, &canonical, repaired.clone())
             .unwrap();
         let snapshot_only = runtime
             .document_graphs
@@ -29891,7 +29980,10 @@ mod retained_persistence_retry_tests {
                 false,
             )
             .expect("a refused current epoch keeps retrying");
-            assert!(decision.schedule_retry, "transport faults remain level-triggered");
+            assert!(
+                decision.schedule_retry,
+                "transport faults remain level-triggered"
+            );
             assert_eq!(decision.delay, Duration::from_secs(30));
             assert!(
                 !decision.request_replica_rebuild,
@@ -30005,7 +30097,11 @@ mod retained_persistence_retry_tests {
             'x',
             300_425usize.saturating_sub(large.len()),
         ));
-        assert_eq!(large.len(), 300_425, "fixture matches the measured document scale");
+        assert_eq!(
+            large.len(),
+            300_425,
+            "fixture matches the measured document scale"
+        );
         let content_hash = agent_doc_hash::content_hash(&large);
         let content = (content_hash.as_str(), large.len());
         let mut retries = std::collections::HashMap::new();

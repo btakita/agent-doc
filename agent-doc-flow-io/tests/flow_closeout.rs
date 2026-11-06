@@ -1365,6 +1365,89 @@ mod tests {
         );
     }
 
+    /// A committed cycle whose durable baseline is `baseline` and whose HEAD is
+    /// `head`, so the document carries snapshot/HEAD content drift.
+    fn classify_recovery_for_head_over_baseline(
+        head: &str,
+        baseline: &str,
+    ) -> CloseoutRecoveryState {
+        let (_dir, doc) = setup_git_project_with_doc(head);
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(head), Some(head)).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            baseline,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &TEST_PIPELINE_FRONTMATTER_EFFECTS,
+            &doc,
+            "commit_success",
+            Some(baseline),
+            Some(baseline),
+        )
+        .unwrap();
+        classify_closeout_recovery_state_for_file(&doc)
+    }
+
+    fn exchange_document(body: &str) -> String {
+        format!(
+            concat!(
+                "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+                "## Exchange\n\n",
+                "<!-- agent:exchange -->\n{}\n<!-- /agent:exchange -->\n",
+            ),
+            body
+        )
+    }
+
+    #[test]
+    fn classify_recovery_escaped_template_patch_when_head_added_escaped_block() {
+        let baseline = exchange_document("### Re: x — gpt-5\n\nDone.");
+        let head = exchange_document(concat!(
+            "### Re: x — gpt-5\n\nDone.\n\n",
+            "&lt;!-- agent:exchange --&gt;\n### Re: y — gpt-5\n\nLeaked.\n",
+            "&lt;!-- /agent:exchange --&gt;",
+        ));
+        assert_eq!(
+            classify_recovery_for_head_over_baseline(&head, &baseline),
+            CloseoutRecoveryState::EscapedTemplatePatch
+        );
+    }
+
+    #[test]
+    fn escapedpatchprosefalsepositive_quoted_marker_prose_keeps_the_real_drift_recovery() {
+        let baseline = exchange_document("### Re: x — gpt-5\n\nDone.");
+        for prose in [
+            "The sanitizer writes &lt;!-- agent:exchange --&gt; and &lt;!-- /agent:exchange --&gt;.",
+            "`&lt;!-- agent:queue --&gt;` is the escaped form.",
+            "> &lt;!-- agent:exchange --&gt;\n> &lt;!-- /agent:exchange --&gt;",
+            "```\n&lt;!-- agent:exchange --&gt;\n&lt;!-- /agent:exchange --&gt;\n```",
+            "&lt;!-- agent:queue --&gt;",
+        ] {
+            let head = exchange_document(&format!("### Re: x — gpt-5\n\nDone.\n\n{prose}"));
+            assert_eq!(
+                classify_recovery_for_head_over_baseline(&head, &baseline),
+                CloseoutRecoveryState::UnsafeUserContentDrift,
+                "{prose}"
+            );
+        }
+    }
+
+    #[test]
+    fn escapedpatchprosefalsepositive_block_already_in_baseline_is_not_the_drift_cause() {
+        let earlier_reply = concat!(
+            "### Re: x — gpt-5\n\n",
+            "&lt;!-- agent:queue --&gt;\n- leaked item\n&lt;!-- /agent:queue --&gt;",
+        );
+        let baseline = exchange_document(earlier_reply);
+        let head = exchange_document(&format!("{earlier_reply}\n\nReal unreviewed user content."));
+        assert_eq!(
+            classify_recovery_for_head_over_baseline(&head, &baseline),
+            CloseoutRecoveryState::UnsafeUserContentDrift
+        );
+    }
+
     #[test]
     fn classify_recovery_abandoned_cycle_with_response_hidden_from_snapshot_names_write_commit() {
         // `#retaineddeferwedge`: observed 2026-09-29 on `cycle-1790658555784`.

@@ -1709,6 +1709,65 @@ pub fn structural_marker_occurrences(text: &str) -> Vec<StructuralMarkerOccurren
     out
 }
 
+/// `#escapedpatchprosefalsepositive`: count the fully-formed component blocks
+/// that reached `text` in escaped form: an `&lt;!-- agent:NAME --&gt;` line
+/// matched by a later `&lt;!-- /agent:NAME --&gt;` line.
+///
+/// This is the escaped image of the raw-template form that
+/// `raw_component_block_count` refuses, and it deliberately keeps that shape:
+/// each marker must stand on its own line (an opener may also follow an ATX
+/// heading, the one other place a live marker can sit) and must carry a valid
+/// component name. Everything else is prose: an escaped marker mid-sentence,
+/// in a list item or blockquote, inside code or a quoted span, a boundary
+/// marker, or a lone marker with no partner.
+pub fn escaped_component_block_count(text: &str) -> usize {
+    const ESCAPED_OPEN: &str = "&lt;!--";
+    const ESCAPED_CLOSE: &str = "--&gt;";
+    if !text.contains(ESCAPED_OPEN) {
+        return 0;
+    }
+    let masked = find_marker_prose_ranges(text);
+    let mut open_tags: Vec<&str> = Vec::new();
+    let mut blocks = 0usize;
+    let mut offset = 0usize;
+    for raw_line in text.split_inclusive('\n') {
+        let line_start = offset;
+        offset += raw_line.len();
+        let line = raw_line.trim_end();
+        let Some(marker_at) = line.find(ESCAPED_OPEN) else {
+            continue;
+        };
+        let Some(inner) = line[marker_at + ESCAPED_OPEN.len()..].strip_suffix(ESCAPED_CLOSE) else {
+            continue;
+        };
+        let comment = inner.trim();
+        if comment.contains(ESCAPED_CLOSE)
+            || !is_agent_marker(comment)
+            || is_agent_boundary_marker(comment)
+            || byte_in_ranges(line_start + marker_at, &masked)
+        {
+            continue;
+        }
+        let Some(tag) = comment.split_whitespace().next() else {
+            continue;
+        };
+        let prefix = &line[..marker_at];
+        if !(prefix.trim().is_empty() || component_heading_prefix_matches_tag(prefix, tag)) {
+            continue;
+        }
+        match tag.strip_prefix('/') {
+            Some(closed) => {
+                if let Some(index) = open_tags.iter().rposition(|open| *open == closed) {
+                    open_tags.truncate(index);
+                    blocks += 1;
+                }
+            }
+            None => open_tags.push(tag),
+        }
+    }
+    blocks
+}
+
 /// `#trackedworkdropped`: one live agent-doc component marker found inside the
 /// text of a tracked item (`--backlog-add`, `--todo-add`, an edit, ...).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -4011,6 +4070,67 @@ new content here\n\
             "preset attr should survive quote-masking, got {:?}",
             components[0].attrs.get("preset")
         );
+    }
+
+    #[test]
+    fn escaped_component_block_count_counts_the_escaped_raw_template_form() {
+        let one =
+            "### Re: x\n\n&lt;!-- agent:exchange --&gt;\nbody\n&lt;!-- /agent:exchange --&gt;\n";
+        assert_eq!(escaped_component_block_count(one), 1);
+
+        let two = concat!(
+            "&lt;!-- agent:status --&gt;\nok\n&lt;!-- /agent:status --&gt;\n\n",
+            "&lt;!-- agent:exchange --&gt;\nbody\n&lt;!-- /agent:exchange --&gt;\n",
+        );
+        assert_eq!(escaped_component_block_count(two), 2);
+
+        let nested = concat!(
+            "&lt;!-- agent:exchange --&gt;\n",
+            "  &lt;!-- agent:queue --&gt;\n  &lt;!-- /agent:queue --&gt;\n",
+            "&lt;!-- /agent:exchange --&gt;\n",
+        );
+        assert_eq!(escaped_component_block_count(nested), 2);
+
+        let attributed_heading = concat!(
+            "## Run &lt;!-- agent:run id=\"main\" subagents --&gt;\r\n",
+            "- item\r\n",
+            "&lt;!-- /agent:run --&gt;\r\n",
+        );
+        assert_eq!(escaped_component_block_count(attributed_heading), 1);
+    }
+
+    #[test]
+    fn escaped_component_block_count_treats_quoted_prose_as_prose() {
+        for prose in [
+            // Mid-sentence, which is how the sanitizer leaves a bare mention.
+            "Quoted &lt;!-- agent:exchange --&gt; opens and &lt;!-- /agent:exchange --&gt; closes.\n",
+            // One marker pair per list item.
+            "- &lt;!-- agent:exchange --&gt;\n- &lt;!-- /agent:exchange --&gt;\n",
+            // Blockquoted evidence.
+            "> &lt;!-- agent:exchange --&gt;\n> body\n> &lt;!-- /agent:exchange --&gt;\n",
+            // Inline code and double-quoted spans.
+            "`&lt;!-- agent:exchange --&gt;`\n`&lt;!-- /agent:exchange --&gt;`\n",
+            "\"&lt;!-- agent:exchange --&gt;\"\n\"&lt;!-- /agent:exchange --&gt;\"\n",
+            // Fenced code.
+            "```\n&lt;!-- agent:exchange --&gt;\nbody\n&lt;!-- /agent:exchange --&gt;\n```\n",
+            // Trailing prose on the marker line.
+            "&lt;!-- agent:exchange --&gt; is the opener\n&lt;!-- /agent:exchange --&gt; closes\n",
+            // Two markers sharing one line.
+            "&lt;!-- agent:exchange --&gt; &lt;!-- /agent:exchange --&gt;\n",
+            // A lone marker is an example, not a block.
+            "&lt;!-- agent:exchange --&gt;\n",
+            "&lt;!-- /agent:exchange --&gt;\n&lt;!-- agent:exchange --&gt;\n",
+            // Mismatched names do not pair.
+            "&lt;!-- agent:exchange --&gt;\n&lt;!-- /agent:queue --&gt;\n",
+            // Not a component marker at all.
+            "&lt;!-- agent: --&gt;\n&lt;!-- /agent: --&gt;\n",
+            "&lt;!-- patch:exchange --&gt;\n&lt;!-- /patch:exchange --&gt;\n",
+            "&lt;!-- agent:boundary:abc123 --&gt;\n&lt;!-- /agent:boundary:abc123 --&gt;\n",
+            // An unescaped marker is structure, not the escaped form.
+            "<!-- agent:exchange -->\n<!-- /agent:exchange -->\n",
+        ] {
+            assert_eq!(escaped_component_block_count(prose), 0, "{prose}");
+        }
     }
 
     #[test]

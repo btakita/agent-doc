@@ -3829,8 +3829,9 @@ Implementations must keep tests for these cases:
   retires superseded ordinary retained-write lineage for that document, and
   writes through the audited raw disk path instead of re-entering live CRDT
   convergence. `escaped_template_patch` diagnosis applies only when HEAD itself
-  drifted from the durable baseline; escaped-marker prose in an unchanged HEAD
-  must not mask a doubled or otherwise corrupt visible projection;
+  drifted from the durable baseline and that drift added an escaped component
+  block to `agent:exchange`; escaped-marker prose in an unchanged HEAD must not
+  mask a doubled or otherwise corrupt visible projection;
 - response-replay semantic normalization emits only a candidate-prepared event.
   Recovery success is emitted exactly once after re-reading live authority and
   observing the exact target content/hash. The JetBrains EditorSurface

@@ -4129,6 +4129,7 @@ mod tests {
             baseline.replace("  - ~~#review~~\n", "  - ~~#review~~\n  - #review\n"),
         )
         .unwrap();
+        no_quiet_evidence(&file);
         assert_eq!(
             post_tool_use_response(&owner).unwrap(),
             None,

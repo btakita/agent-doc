@@ -128,6 +128,7 @@ Extends `editors/SPEC.md` with VS Code-specific behavior.
   deltas; reconnect and recovery never publish the full visible buffer as local
   operator input.
 - Replica registration opens the controller bootstrap and projects it downstream. Dirty operator changes originate only from subsequent editor events; disk candidates are never component-merged or promoted while a controller-owned document remains attached.
+- **Attributed canonical adoption (`#attachattributionvscode`).** VS Code does not run JetBrains' `registration_projection` hold, so it never records `ambiguous-retained-projection`. A restarted window still attaches the replica to controller canonical while the buffer can be an older generation, and `baseline-diverged-lazy-canonical-projection` then retries with the buffer unchanged when no pending delivery names that buffer. `replica_register` carries `canonical_content_hash` and `binary_attributed_ancestor_hashes` (the canonical generations from which only agent-doc's own recorded binary-authored writes lead to that hash). When the buffer's SHA-256 is in that list and the replica text hashes to `canonical_content_hash`, attach adopts that canonical into the buffer and projects the visible hash. An empty or absent list, a canonical the list was not proven against, a pending local edit, or any other buffer leaves the text untouched.
 - This is the same FFI and authority lifecycle as JetBrains. VS Code must not implement a private disk reread, Git fallback, or extension-local pending-response slot.
 
 ## Native String Ownership

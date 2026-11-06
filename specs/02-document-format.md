@@ -1161,7 +1161,11 @@ queue row (`#choicecontextinrow`, [§7](07-orchestration-commands.md)),
 an optional `- *recommendation:*` row names one offered choice
 (`#recommendationinrow`, [§7](07-orchestration-commands.md)),
 and a line nested beneath a field belongs to that field, never to the packet's
-fields ([§7](07-orchestration-commands.md)). Historical values on the key
+fields ([§7](07-orchestration-commands.md)). A `- ` bullet at the same indent as
+an empty `*context:*` belongs to that context, the way a `- ` bullet at the same
+indent as an empty `*choices:*` is a choice, so the packet still renders a
+`**Context:**` row (`#flatcontextbullets`, [§7](07-orchestration-commands.md)).
+Historical values on the key
 line, plain fields, and emphasized or bold key variants remain readable; the
 protocol's `<...>` placeholders never count. Marker ids use the reserved
 `subagent-operator-request-` prefix plus a request-specific alphanumeric/hyphen

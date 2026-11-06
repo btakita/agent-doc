@@ -525,9 +525,14 @@ fn parsed_blocking_operator_request_packets(
                 break;
             }
             index += 1;
+            // `#flatcontextbullets`: a flush `- ` bullet under `*context:*` is
+            // context, as a flush `- ` bullet under `*choices:*` is a choice.
+            // A flush bullet that is itself a packet field starts that field.
             if line_indent > level
-                || (matches!(current_key.as_str(), "choices" | "recommendation")
-                    && is_legacy_choice_line(field))
+                || (matches!(
+                    current_key.as_str(),
+                    "choices" | "recommendation" | "context"
+                ) && is_same_indent_value_bullet(field))
             {
                 match current_key.as_str() {
                     "choices" => {
@@ -616,7 +621,11 @@ fn append_nested_value(value: Option<&mut String>, field: &str) {
     value.push_str(text);
 }
 
-fn is_legacy_choice_line(field: &str) -> bool {
+/// A `- ` bullet at the field indent that is not itself a packet field.
+///
+/// Choices already take this shape (`- **label**: effect` flush under
+/// `*choices:*`). Context takes it too (`#flatcontextbullets`).
+fn is_same_indent_value_bullet(field: &str) -> bool {
     field.starts_with("- ")
         && !operator_request_field(field).is_some_and(|(key, _)| {
             matches!(
@@ -819,6 +828,88 @@ mod tests {
         let mut packets = blocking_operator_request_packets(response);
         assert_eq!(packets.len(), 1, "{response}");
         packets.remove(0)
+    }
+
+    /// `#flatcontextbullets`: a `- ` bullet flush with `*context:*` is context,
+    /// the way a `- ` bullet flush with `*choices:*` is already a choice. The
+    /// packet then has a `**Context:**` row. A flush packet field still starts
+    /// that field. `request` does not take this flat form.
+    #[test]
+    fn flat_context_bullets_are_context_and_render_a_context_row() {
+        let nested = concat!(
+            "[#subagent-operator-request-flatctx] subagent operator request\n",
+            "- *queue_item:*\n  - do [#flatcontextbullets]\n",
+            "- *kind:* question\n",
+            "- *blocking:* true\n",
+            "- *request:*\n  - Which target?\n",
+            "- *context:*\n",
+            "  - Production is frozen.\n",
+            "  - Review https://example.test/pull/93: merge is blocked.\n",
+            "- *choices:*\n",
+            "  - **staging**: Ship staging.\n",
+            "  - **production**: Ship production.\n",
+        );
+        let flat = nested
+            .replace("\n  - Production", "\n- Production")
+            .replace("\n  - Review", "\n- Review")
+            .replace("\n  - **", "\n- **");
+        let nested_packet = only_packet(nested);
+        let flat_packet = only_packet(&flat);
+        assert_eq!(flat_packet.context, nested_packet.context);
+        assert_eq!(
+            flat_packet.context.as_deref(),
+            Some("Production is frozen. Review https://example.test/pull/93: merge is blocked.")
+        );
+        assert_eq!(
+            flat_packet.context_row().as_deref(),
+            Some(
+                "**Context:** Production is frozen. Review https://example.test/pull/93: merge is blocked."
+            )
+        );
+        assert_eq!(flat_packet.choice_labels, nested_packet.choice_labels);
+        assert_eq!(flat_packet.choice_rows, nested_packet.choice_rows);
+        assert_eq!(flat_packet.request, nested_packet.request);
+        assert_eq!(flat_packet.queue_item, nested_packet.queue_item);
+
+        let choices_only = concat!(
+            "[#subagent-operator-request-flatctx] subagent operator request\n",
+            "- *kind:* question\n",
+            "- *blocking:* true\n",
+            "- *request:*\n  - Which target?\n",
+            "- *context:*\n",
+            "- *choices:*\n",
+            "- **staging**: Ship staging.\n",
+        );
+        let packet = only_packet(choices_only);
+        assert_eq!(packet.context, None);
+        assert_eq!(packet.context_row(), None);
+        assert_eq!(packet.choice_labels, ["staging"]);
+
+        let prose = concat!(
+            "[#subagent-operator-request-flatctx] subagent operator request\n",
+            "- *kind:* question\n",
+            "- *blocking:* true\n",
+            "- *request:*\n  - Which target?\n",
+            "- *context:*\n",
+            "Production is frozen.\n",
+            "- *choices:*\n",
+            "  - **staging**: Ship staging.\n",
+        );
+        assert_eq!(only_packet(prose).context, None);
+
+        let flat_request = concat!(
+            "[#subagent-operator-request-flatreq] subagent operator request\n",
+            "- *kind:* question\n",
+            "- *blocking:* true\n",
+            "- *request:*\n",
+            "- Which target?\n",
+            "- *choices:*\n",
+            "- **staging**: Ship staging.\n",
+        );
+        assert!(
+            blocking_operator_request_packets(flat_request).is_empty(),
+            "a flush bullet beside an empty *request:* is not the request"
+        );
     }
 
     #[test]

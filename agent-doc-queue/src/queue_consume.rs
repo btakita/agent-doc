@@ -13834,6 +13834,66 @@ Old.
         );
     }
 
+    /// `#flatcontextbullets`: context bullets flush with `*context:*` are
+    /// context, so the struck row still gets a `**Context:**` line. A colon
+    /// inside one of those bullets does not end the field, and the flush
+    /// choices that follow stay choices.
+    #[test]
+    fn flat_context_bullets_render_a_context_row() {
+        let row = "moving the tag: go [#q-7ef51b5d460a]";
+        let response = format!(
+            "### Re: held rows — test\n\n\
+> **Queue prompt:** {row}\n\n\
+[#subagent-operator-request-flatctx] subagent operator request\n\
+- *queue_item:*\n  - {row}\n\
+- *kind:* question\n\
+- *blocking:* true\n\
+- *request:*\n  - Which target?\n\
+- *context:*\n\
+- Production is frozen.\n\
+- Review https://example.test/pull/93: merge is blocked.\n\
+- *choices:*\n\
+- **staging**: Ship staging.\n\
+- **production**: Ship production.\n"
+        );
+        let waiting = parse_waiting_operator_packets(&response);
+        assert_eq!(waiting.len(), 1, "{waiting:?}");
+        assert_eq!(
+            waiting[0].1.context,
+            "Production is frozen. Review https://example.test/pull/93: merge is blocked."
+        );
+        assert_eq!(
+            waiting[0].1.choices,
+            [
+                "**staging**: Ship staging.",
+                "**production**: Ship production."
+            ]
+        );
+
+        let queue = annotated_queue_of(row, &response);
+        assert!(
+            queue.contains(concat!(
+                "    - **Context:** Production is frozen. Review https://example.test/pull/93: merge is blocked.\n",
+                "    - **Choices:**\n",
+                "      - **Request**: [#subagent-operator-request-flatctx]\n",
+                "      - **staging**: Ship staging.\n",
+                "      - **production**: Ship production.\n",
+            )),
+            "{queue}"
+        );
+
+        let mut rendered = HashSet::new();
+        let child =
+            response_back_reference_child(row, &response, "[#r-0123456789ab]", &mut rendered);
+        assert!(
+            child.contains(
+                "- **Context:** Production is frozen. Review https://example.test/pull/93: merge is blocked.\n"
+            ),
+            "{child}"
+        );
+        assert!(child.contains("**staging**: Ship staging."), "{child}");
+    }
+
     #[test]
     fn a_packet_with_no_context_renders_no_context_row() {
         let row = "moving the tag: go [#q-7ef51b5d460a]";

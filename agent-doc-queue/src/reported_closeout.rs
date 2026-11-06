@@ -488,7 +488,7 @@ fn consume_step(document: &str, claim: &QueueClaim) -> ReportedCloseoutStep {
     let strike = claim_row_strike(claim);
     let detail = match &strike {
         ReportedRowStrike::AckId { id, .. } => format!(
-            "strike the reported row; the tracked item stays open and the struck row names its `(stays open: ...)` reason (#ackstrikeopenbacklog). When the worker's or operator's answer resolves the tracked item, pass `--done {id}` to `agent-doc finalize {document}` instead and close any parent item the same answer resolves; never acknowledge a head whose item the answer finished"
+            "strike the reported row only after the open item records a `(stays open: <reason>)` clause; `--ack-id` refuses and leaves the row unstruck without one (#acknoreason), and a successful strike names that reason (#ackstrikeopenbacklog). When the worker's or operator's answer resolves the tracked item, pass `--done {id}` to `agent-doc finalize {document}` instead and close any parent item the same answer resolves; never acknowledge a head whose item the answer finished"
         ),
         _ => "strike the reported free-text row, fenced to this exact worker attempt".to_string(),
     };

@@ -5581,7 +5581,7 @@ mod tests {
                 "- current task\n",
                 "<!-- /agent:queue -->\n\n",
                 "## Todo <!-- agent:todo priority -->\n",
-                "- [ ] [#{id}] Track the worker result\n",
+                "- [ ] [#{id}] Track the worker result (stays open: the worker result is still tracked)\n",
                 "<!-- /agent:todo -->\n",
             ),
             id = id,

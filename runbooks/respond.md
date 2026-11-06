@@ -602,7 +602,9 @@ and the pending granular-flags-only rule. This runbook carries the rest.
      lost attempt (`#nestedechostrike`). The struck row keeps saying the item
      is open: `~~do [#id]~~ — auto-struck: acknowledged; backlog #id stays
      open: <reason>`, where the reason is the item's own `(stays open: ...)`
-     clause (`#ackstrikeopenbacklog`), so write that clause accurately. Use
+     clause (`#ackstrikeopenbacklog`). `--ack-id` refuses and leaves the row
+     unstruck when that clause is missing (`#acknoreason`), so record
+     `(stays open: <reason>)` on the open item before acknowledging. Use
      `--ack-id` only when the item really stays open: when the worker's or the
      operator's answer resolves it (for example "no livestream" answers the
      check its parent asked for), close the item with `--done <id>` (or

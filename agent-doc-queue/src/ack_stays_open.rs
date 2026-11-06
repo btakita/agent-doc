@@ -17,6 +17,11 @@
 //! reason is the tracked item's own `(stays open: ...)` clause, so a wrong
 //! reason is visible beside the struck head instead of hidden in the backlog.
 //!
+//! `#acknoreason`: `--ack-id` does not strike when that clause is missing.
+//! The caller records `(stays open: <reason>)` and acknowledges again, or
+//! closes the item when the answer resolves it. An already-struck row stays
+//! an idempotent no-op and is not rewritten here.
+//!
 //! This module is pure: document text in, document text out.
 
 use std::collections::HashSet;
@@ -225,10 +230,56 @@ pub fn annotate_struck_line(line: &str, note: &str) -> String {
     format!("{trimmed_end}{STRUCK_ANNOTATION_SEPARATOR}{note}{trailing_ws}{newline}")
 }
 
+/// `--ack-id` refusal when `item` (or an open id this parser could not read)
+/// has no `(stays open: ...)` reason (`#acknoreason`). The row was not struck.
+pub fn missing_stays_open_reason_refusal(
+    document: &str,
+    id: &str,
+    item: Option<&OpenTrackedItem>,
+) -> String {
+    let kind = item.map(|item| item.kind);
+    let record = match kind {
+        Some(OpenTrackedKind::Todo) => format!(
+            "record `(stays open: <reason>)` on the open Todo with \
+             `--todo-edit '{id}=<text> (stays open: <reason>)'` on \
+             `agent-doc finalize {document}`"
+        ),
+        Some(OpenTrackedKind::Backlog) => format!(
+            "record `(stays open: <reason>)` on the open backlog item with \
+             `agent-doc backlog {document} edit {id} \"<text> (stays open: <reason>)\"`"
+        ),
+        None => format!(
+            "record `(stays open: <reason>)` on the open item \
+             (`agent-doc backlog {document} edit {id} \"<text> (stays open: <reason>)\"` \
+             or `--todo-edit '{id}=<text> (stays open: <reason>)'` on \
+             `agent-doc finalize {document}`)"
+        ),
+    };
+    let close = match kind {
+        Some(OpenTrackedKind::Todo) => {
+            format!("`--done {id}` on `agent-doc finalize {document}`")
+        }
+        Some(OpenTrackedKind::Backlog) => {
+            format!("`agent-doc backlog {document} done {id}`")
+        }
+        None => format!(
+            "`agent-doc backlog {document} done {id}` or `--done {id}` on \
+             `agent-doc finalize {document}`"
+        ),
+    };
+    format!(
+        "[#{id}] stays open with no `(stays open: ...)` reason, so `--ack-id` did not \
+         strike the row (#acknoreason). {record}, then run `--ack-id {id}` again so the \
+         struck row names that reason. When the answer resolves the item, close it with \
+         {close} instead, and close any parent item the same answer resolves."
+    )
+}
+
 /// Closeout guidance printed after an acknowledgement leaves `item` open: the
 /// acknowledgement is right only while the item really stays open. When the
 /// answer resolves it, the agent closes the item (and any parent the same
 /// answer resolves) instead of leaving a struck head beside open work.
+/// A missing reason never reaches this path (`#acknoreason`).
 pub fn ack_stays_open_guidance(document: &str, item: &OpenTrackedItem) -> String {
     let id = &item.id;
     let close = match item.kind {
@@ -402,9 +453,27 @@ mod tests {
         assert!(guidance.contains("close any parent item"), "{guidance}");
         assert!(guidance.contains("#tdoauthcodestream still has unstruck children"));
         let bare = open_tracked_item(&content, "p7d7").unwrap();
+        let refusal = missing_stays_open_reason_refusal("d.md", &bare.id, Some(&bare));
+        assert!(refusal.contains("did not strike"), "{refusal}");
+        assert!(refusal.contains("#acknoreason"), "{refusal}");
         assert!(
-            ack_stays_open_guidance("d.md", &bare).contains("`(stays open: <reason>)`"),
-            "a missing reason asks for one"
+            refusal.contains("`agent-doc backlog d.md edit p7d7"),
+            "{refusal}"
+        );
+        assert!(
+            refusal.contains("`agent-doc backlog d.md done p7d7`"),
+            "{refusal}"
+        );
+        let todo = OpenTrackedItem {
+            id: "checkit".to_string(),
+            kind: OpenTrackedKind::Todo,
+            reason: None,
+        };
+        let todo_refusal = missing_stays_open_reason_refusal("d.md", "checkit", Some(&todo));
+        assert!(todo_refusal.contains("--todo-edit"), "{todo_refusal}");
+        assert!(
+            todo_refusal.contains("`--done checkit` on `agent-doc finalize d.md`"),
+            "{todo_refusal}"
         );
     }
 

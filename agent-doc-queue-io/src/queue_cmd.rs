@@ -1697,7 +1697,8 @@ pub fn consume_with_options(
                  If it is only an acknowledgement/correction for still-open work, or a reported \
                  (☑️) dispatch row whose backlog/Todo item must stay open, use \
                  `agent-doc queue consume <FILE> --ack-id <id>` to strike the head without closing \
-                 the tracked item. Otherwise leave it queued.",
+                 the tracked item. The open item must already carry a `(stays open: <reason>)` \
+                 clause (`#acknoreason`). Otherwise leave it queued.",
                 file.display()
             );
         }

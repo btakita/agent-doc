@@ -333,6 +333,7 @@ mod tests {
         let pane = String::from_utf8_lossy(&pane_id.stdout).trim().to_string();
 
         let harness = HarnessConfig::claude();
+        // `#routelivefallthroughwaits`: expiry is the pass. Keep 2s.
         let ready = wait_for_agent_ready(&iso, &pane, std::time::Duration::from_secs(2), &harness);
         assert!(!ready, "should time out when no ❯ prompt appears");
     }
@@ -397,6 +398,7 @@ mod tests {
         );
 
         let harness = HarnessConfig::codex();
+        // `#routelivefallthroughwaits`: not-ready is the pass. Keep 2s.
         let ready = wait_for_agent_ready(&iso, &pane, std::time::Duration::from_secs(2), &harness);
         assert!(
             !ready,
@@ -430,6 +432,7 @@ mod tests {
         );
 
         let harness = HarnessConfig::codex();
+        // `#routelivefallthroughwaits`: not-ready is the pass. This bound is 3s.
         let ready = wait_for_agent_ready(&iso, &pane, std::time::Duration::from_secs(3), &harness);
         assert!(
             !ready,
@@ -602,6 +605,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         );
 
         let harness = HarnessConfig::codex();
+        // `#routelivefallthroughwaits`: not-ready is the pass. Keep 2s.
         let ready = wait_for_agent_ready(&iso, &pane, std::time::Duration::from_secs(2), &harness);
         assert!(
             !ready,
@@ -874,6 +878,9 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         let registry_root = dir.path().to_path_buf();
         let restart_called_for_thread = restart_called.clone();
         let replacement = std::thread::spawn(move || {
+            // `#routelivefallthroughwaits`: publish the replacement on expiry.
+            // A 10s miss is not a hang; panicking at 30s only slows the pass
+            // the route finishes without a fresh restart.
             let wait_start = std::time::Instant::now();
             while !restart_called_for_thread.load(Ordering::Relaxed)
                 && wait_start.elapsed() < Duration::from_secs(10)
@@ -891,6 +898,9 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
                     ),
                 )
                 .unwrap();
+            // `#routelivefallthroughwaits`: the `"> "` glyph is not the claim.
+            // A 30s wait would spend the route's 20s handoff budget. A miss
+            // falls through.
             let prompt_wait_start = std::time::Instant::now();
             while prompt_wait_start.elapsed() < Duration::from_secs(5) {
                 let captured = agent_doc_tmux_io::capture_pane(&iso_for_thread, &replacement_pane)
@@ -1145,6 +1155,9 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         let restart_called_for_thread = restart_called.clone();
         let injected_pane_for_thread = injected_pane.clone();
         let replacement = std::thread::spawn(move || {
+            // `#routelivefallthroughwaits`: publish the handoff on expiry so
+            // the route's 20s budget still sees it. The glyph below only aims
+            // later injects; it is not the claim.
             let wait_start = std::time::Instant::now();
             while !restart_called_for_thread.load(Ordering::Relaxed)
                 && wait_start.elapsed() < Duration::from_secs(2)
@@ -1310,6 +1323,8 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         let pane_for_thread = pane.clone();
         let restart_called_for_thread = restart_called.clone();
         let replacement = std::thread::spawn(move || {
+            // `#routelivefallthroughwaits`: publish on expiry. The route can
+            // finish without a fresh restart; a 30s panic only slows that miss.
             let wait_start = std::time::Instant::now();
             while !restart_called_for_thread.load(Ordering::Relaxed)
                 && wait_start.elapsed() < Duration::from_secs(2)
@@ -1477,6 +1492,8 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         let restart_called_for_thread = restart_called.clone();
         let busy_pane_for_thread = busy_pane.clone();
         let replacement = std::thread::spawn(move || {
+            // `#routelivefallthroughwaits`: keep this 10s assert. The miss is
+            // the claim failing, not a hang, so a 30s ceiling only delays it.
             let wait_start = std::time::Instant::now();
             while !restart_called_for_thread.load(Ordering::Relaxed)
                 && wait_start.elapsed() < Duration::from_secs(10)
@@ -1498,6 +1515,9 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
                     ),
                 )
                 .unwrap();
+            // `#routelivefallthroughwaits`: injects are recorded by the IPC
+            // handler, not this glyph. Fall through so the handoff is still
+            // published inside the route's 20s budget.
             let prompt_wait_start = std::time::Instant::now();
             while prompt_wait_start.elapsed() < Duration::from_secs(5) {
                 let captured = agent_doc_tmux_io::capture_pane(&iso_for_thread, &replacement_pane)

@@ -863,6 +863,7 @@ fn render_preamble(
     );
     out.push_str(concat!("- ", subagent_scratch_isolation_rule!(), "\n"));
     out.push_str(concat!("- ", subagent_tmux_isolation_rule!(), "\n"));
+    out.push_str(concat!("- ", crate::subagent_build_slot_rule!(), "\n"));
     out.push_str(
         "- Commit and push only when the authorization above includes it. Use your own branch and \
          fast-forward by default. An explicitly named target branch or explicit force-push directive \
@@ -1666,6 +1667,34 @@ agent_doc_format: template
             "never `pkill`/`killall` tmux",
         ] {
             assert!(SUBAGENT_TMUX_ISOLATION_RULE.contains(phrase), "{phrase}");
+        }
+    }
+
+    /// `#buildconcurrencygate`: every preamble names the build-slot gate,
+    /// inside the coordinator rules, before commit/push.
+    #[test]
+    fn every_status_restates_the_build_slot_rule() {
+        let resolved = doc(
+            PRESETS,
+            "subagents preset=\"#spec-test-build-install-commit-push\"",
+            &["do [#abc]"],
+            &["[ ] [#abc] x"],
+        );
+        let unresolved = doc("", "subagents preset=\"#nosuch\"", &["do [#abc]"], &[]);
+        let item_only = doc("", "subagents", &["look at foo"], &[]);
+        let bullet = format!("- {}\n", crate::build_slot::SUBAGENT_BUILD_SLOT_RULE);
+        for (content, item) in [
+            (&resolved, "do [#abc]"),
+            (&unresolved, "do [#abc]"),
+            (&item_only, "look at foo"),
+        ] {
+            let p = subagent_authorization("doc.md", content, item).subagent_prompt_preamble;
+            let rule_at = p.find(&bullet).unwrap_or_else(|| panic!("{p}"));
+            assert!(p.find("Coordinator rules").unwrap() < rule_at, "{p}");
+            assert!(
+                rule_at < p.find("- Commit and push only when").unwrap(),
+                "{p}"
+            );
         }
     }
 

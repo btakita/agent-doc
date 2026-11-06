@@ -3034,6 +3034,24 @@ enum Commands {
         #[arg(long)]
         json: bool,
     },
+    /// Run a heavy build or test command holding one of the machine's shared
+    /// build slots, and exit with its status (`#buildconcurrencygate`).
+    /// Slots default to one per 8 cores, fewer while the load average exceeds
+    /// the core count; waiters queue FIFO
+    BuildSlot {
+        /// Slot count (default: `AGENT_DOC_BUILD_SLOTS`, else cores / 8, min 1)
+        #[arg(long)]
+        slots: Option<std::num::NonZeroUsize>,
+        /// Slot directory (default: `AGENT_DOC_BUILD_SLOT_DIR`, else a per-user runtime dir)
+        #[arg(long)]
+        dir: Option<PathBuf>,
+        /// Niceness increment for the command (0 keeps its priority)
+        #[arg(long, default_value_t = 10)]
+        nice: i32,
+        /// The command and its arguments, after `--`
+        #[arg(last = true, required = true)]
+        command: Vec<OsString>,
+    },
     /// Display markdown outline with section structure and token counts
     Outline {
         /// Path to the markdown document
@@ -6529,6 +6547,27 @@ fn try_main() -> anyhow::Result<()> {
     reject_plain_shell_bare_file_invocation(&raw_args)?;
     let cli = Cli::parse_from(rewrite_bare_file_invocation(raw_args));
 
+    // `#buildconcurrencygate`: a build gate is not a document command. It skips
+    // the upgrade check, config, and supervisor probe, and exits with the
+    // gated command's status.
+    if let Commands::BuildSlot {
+        slots,
+        dir,
+        nice,
+        command,
+    } = cli.command
+    {
+        let code = agent_doc_queue_io::build_slot::run(
+            agent_doc_queue_io::build_slot::BuildSlotOptions {
+                slots,
+                dir,
+                nice,
+                command,
+            },
+        )?;
+        std::process::exit(code);
+    }
+
     // A document-scoped command is also a cheap freshness observation. The
     // supervisor's `pid` response refreshes its process-scoped Lazily projection;
     // a proven-stale owner is marked for the existing safe-boundary recycle.
@@ -7253,6 +7292,7 @@ fn try_main() -> anyhow::Result<()> {
             steering_cmd::run(&file, json, peek, follow, token.as_deref())
         }
         Commands::Outline { file, json } => outline_cmd::run_outline(&file, json),
+        Commands::BuildSlot { .. } => unreachable!("build-slot exits before config load"),
         Commands::Principles { file, json } => principles_cmd::run(&file, json),
         Commands::Document { pane, json } => {
             document_cmd::run(pane.as_deref(), json)

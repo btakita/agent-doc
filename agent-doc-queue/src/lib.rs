@@ -7,6 +7,7 @@
 pub mod ack_stays_open;
 pub mod answer_ack;
 pub mod backlog_sync;
+pub mod build_slot;
 pub mod capture_scope;
 pub mod claim_release_receipt;
 pub mod component_attrs;

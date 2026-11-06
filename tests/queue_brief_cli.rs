@@ -89,6 +89,10 @@ fn brief_prints_preset_and_backlog_authorization_for_an_id_head() {
             "- {}\n",
             agent_doc_queue::subagent_brief::SUBAGENT_TMUX_ISOLATION_RULE
         )))
+        .stdout(predicate::str::contains(format!(
+            "- {}\n",
+            agent_doc_queue::build_slot::SUBAGENT_BUILD_SLOT_RULE
+        )))
         .stdout(predicate::str::contains("AUTHORIZATION NOT RESOLVED").not());
 }
 
@@ -276,4 +280,31 @@ fn brief_resolves_a_free_text_row_of_an_idless_run_beside_an_idless_loop() {
     let preamble = json["subagent_prompt_preamble"].as_str().unwrap();
     assert!(preamble.contains("Origin queue id (dispatch-time provenance):\n> run"));
     assert!(preamble.contains("--id run --after <origin>"));
+}
+
+/// `#buildconcurrencygate`: the command the brief tells workers to use runs
+/// the gated command under a slot and exits with its status.
+#[test]
+fn build_slot_named_by_the_brief_runs_the_command_and_keeps_its_exit_status() {
+    let dir = tempfile::tempdir().unwrap();
+    cargo_bin_cmd!("agent-doc")
+        .env_remove("AGENT_DOC_BUILD_SLOT_HELD")
+        .args(["build-slot", "--slots", "1", "--nice", "0", "--dir"])
+        .arg(dir.path().join("slots"))
+        .args([
+            "--",
+            "sh",
+            "-c",
+            "printf %s \"$AGENT_DOC_BUILD_SLOT_HELD\"; exit 7",
+        ])
+        .assert()
+        .code(7)
+        .stdout("1/1")
+        .stderr(predicate::str::contains(
+            "[agent-doc build-slot] slot 1/1 acquired",
+        ));
+    cargo_bin_cmd!("agent-doc")
+        .args(["build-slot", "--slots", "1"])
+        .assert()
+        .failure();
 }

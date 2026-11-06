@@ -406,6 +406,18 @@ A response-bound preflight invoked from the authoritative actor's own pane may r
 
 `agent-doc outline <FILE> [--json]` reports markdown heading structure, line counts, and approximate token counts.
 
+## build-slot
+
+`agent-doc build-slot [--slots N] [--dir DIR] [--nice N] -- <command...>` runs one heavy build or test command while holding one of the machine's shared build slots, and exits with that command's status (128 + signal when a signal ended it) (`#buildconcurrencygate`). On 2026-11-05 a `subagents` queue dispatched 20 workers whose concurrent `make check` runs drove load to ~100 on 32 cores, causing wall-clock test flakes, a 12.3 s IDE start past the plugin's 10 s kill, and Lazily actor timeouts that failed a closeout.
+
+- **Sizing (pure, `agent_doc_queue::build_slot`).** The base count is `--slots`, else `AGENT_DOC_BUILD_SLOTS`, else one slot per 8 cores (minimum 1). While the one-minute load average exceeds the core count, the open slots are `floor(base * cores / load1)`, never below 1, re-read on every poll, so load the gate does not control slows queued commands without stopping them.
+- **Slots.** Slots are `flock(2)` files `slot1..slotN` in one per-user directory shared by every worktree and session: `--dir`, else `AGENT_DOC_BUILD_SLOT_DIR`, else `$XDG_RUNTIME_DIR/agent-doc/build-slots`, else `/tmp/agent-doc-build-slots-<uid>` (never `TMPDIR`, which a harness may make per-session). The kernel releases a slot when the holding process exits for any reason; on Linux the command gets SIGTERM if the gate process dies first. A holder records `pid <pid> in <cwd>: <command>` in its slot file.
+- **Waiting.** Waiters queue FIFO on `gate.lock`; only the gate holder polls the slots (every 2 s). The first wait prints `[agent-doc build-slot] all N build slots are busy ...` with each slot's recorded holder; acquisition prints `slot i/N acquired after Ns`. A missing command after `--` is a usage error.
+- **Priority.** The command runs `--nice` (default 10) lower than the gate; `--nice 0` keeps its priority.
+- **Nesting.** The command runs with `AGENT_DOC_BUILD_SLOT_HELD=i/N`. A `build-slot` that inherits it runs its command directly inside the parent's slot instead of waiting on it (which would deadlock at one slot).
+- **Not a document command.** It skips the upgrade check, config load, and supervisor freshness probe.
+- **Worker brief.** Every queue-subagent preamble and exchange-subagent guidance names `agent-doc build-slot -- <command...>` as a coordinator rule. The gate bounds concurrent heavy verification, not dispatch; a dispatch pool sizes from the same host count (`agent_doc_queue_io::build_slot::host_base_build_slots`).
+
 ## principles
 
 `agent-doc principles <FILE> [--json]` lists the operator first principles in scope for a document, the `fact [#id]:` premises in scope (`#firstprinciplesfactlist`), and the warnings their authoring produces (`#firstprincipleslist`). See [Document Format: First principles](02-document-format.md#first-principles-firstprinciples).

@@ -2215,6 +2215,8 @@ pub fn instruction_for(item: &SteeringItem) -> &'static str {
                  subagent prompt: ",
                 agent_doc_queue::subagent_scratch_isolation_rule!(),
                 " ",
+                agent_doc_queue::subagent_build_slot_rule!(),
+                " ",
                 agent_doc_queue::subagent_tmux_isolation_rule!()
             )
         }
@@ -2395,6 +2397,8 @@ pub fn render_closeout_steering_context(
                      reports back, carry its result into the next response cycle; the current \
                      response is already committed. Put these rules in the subagent prompt: ",
                     agent_doc_queue::subagent_scratch_isolation_rule!(),
+                    " ",
+                    agent_doc_queue::subagent_build_slot_rule!(),
                     " ",
                     agent_doc_queue::subagent_tmux_isolation_rule!()
                 )
@@ -4278,8 +4282,11 @@ mod tests {
         let tmux = agent_doc_queue::subagent_brief::SUBAGENT_TMUX_ISOLATION_RULE;
         assert!(text.contains(scratch), "{text}");
         assert!(text.contains(tmux), "{text}");
+        let build = agent_doc_queue::build_slot::SUBAGENT_BUILD_SLOT_RULE;
+        assert!(text.contains(build), "{text}");
         let instruction = instruction_for(&item_clone);
         assert!(instruction.contains(scratch), "{instruction}");
+        assert!(instruction.contains(build), "{instruction}");
         assert!(instruction.ends_with(tmux), "{instruction}");
     }
 

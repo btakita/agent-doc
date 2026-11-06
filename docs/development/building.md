@@ -50,6 +50,13 @@ wins. `make build-priority-probe` prints what a recipe actually runs under, and
 wiring. Machine and IDE settings that only the operator can change are
 covered in [IDE responsiveness](ide-responsiveness.md).
 
+Priority lowers each check; it does not bound how many run at once. When
+several worktrees or dispatched subagents verify concurrently, wrap each heavy
+command in `agent-doc build-slot -- make check` (`#buildconcurrencygate`): it
+holds one of the machine's shared build slots (one per 8 cores, fewer while
+load exceeds the core count; `AGENT_DOC_BUILD_SLOTS` overrides) and exits with
+the command's status. See [build-slot](../../specs/07-core-commands.md#build-slot).
+
 ## .gitignore
 
 The following are gitignored:

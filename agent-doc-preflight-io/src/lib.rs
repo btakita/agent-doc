@@ -1255,6 +1255,8 @@ and perform the normal binary-owned closeout. No queue claim/release applies to 
 Exchange prompts have no preamble, so put these rules in each subagent prompt yourself: ",
     agent_doc_queue::subagent_scratch_isolation_rule!(),
     " ",
+    agent_doc_queue::subagent_build_slot_rule!(),
+    " ",
     agent_doc_queue::subagent_tmux_isolation_rule!()
 );
 
@@ -9956,6 +9958,7 @@ mod tests {
         assert!(
             guidance.contains(agent_doc_queue::subagent_brief::SUBAGENT_SCRATCH_ISOLATION_RULE)
         );
+        assert!(guidance.contains(agent_doc_queue::build_slot::SUBAGENT_BUILD_SLOT_RULE));
         assert!(guidance.ends_with(agent_doc_queue::subagent_brief::SUBAGENT_TMUX_ISOLATION_RULE));
     }
 

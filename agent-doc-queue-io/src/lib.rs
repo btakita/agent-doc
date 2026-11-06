@@ -1,6 +1,7 @@
 //! Queue-related marker storage I/O for agent-doc.
 
 pub mod active_lifecycle;
+pub mod build_slot;
 pub mod claim_release_receipt;
 pub mod completion_feedback_lock;
 pub mod queue_marker_audit;

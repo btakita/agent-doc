@@ -73,8 +73,10 @@ after the successor loaded the ledger:
   only for an event its own projection holds;
 - no overlay entry outlives the drain, and an entry stops answering reads only
   for an event the projection holds (`#orphanhandoffoverlay`);
-- the ledger never holds the event twice; and
-- the row is eventually acknowledged under weak fairness.
+- the ledger never holds the event twice;
+- the row is eventually acknowledged under weak fairness; and
+- however the row left the table, the successor's projection eventually holds
+  the event (`#predecessorlandandack`).
 
 `AuthorityHandoffFoldWedge` restores the shipped rule (every `inserted == false`
 duplicate is acknowledged as-is) and must violate; `AuthorityHandoffFoldReach`
@@ -84,8 +86,14 @@ the drain that walks only durable rows (the entry outlives it) and
 (reads lose the authority); both must violate, and
 `AuthorityHandoffFoldOrphanReach` witnesses an orphan the settle must reload for.
 A predecessor that lands *and* acknowledges its row after the successor's load
-and before its row read is out of scope: no row or entry remains, so the
-successor learns the event only from its next general durable reload.
+and before its row read leaves no row or entry, so an ACK commits a receipt
+naming the event in the transaction that deletes the row, and a successor
+reconciles older generations' receipts at the head of every drain.
+`AuthorityHandoffFoldLateAckWedge` removes that reconcile and must violate
+`EventuallyFolded`; `AuthorityHandoffFoldLateAckReach` witnesses the late ACK.
+The rest of the class of any predecessor write committed after a successor's
+load stays out of scope: a fact with no handoff row and no receipt reaches the
+successor through its next general durable reload.
 
 `ReactiveTopology.tla` checks the shared lifetime-scoped graph contract used by
 agent-doc's Lazily state machines:

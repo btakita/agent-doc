@@ -61533,6 +61533,209 @@ mod tests {
         );
     }
 
+    /// A successor (generation 2) whose ledger load missed `event`, because the
+    /// predecessor (generation 1) landed it and acknowledged its row from inside
+    /// the load. `ControllerRuntime::new` installs no handoff worker, so the
+    /// test owns every drain and the interleaving is pinned, not timed.
+    fn successor_loaded_before_predecessor_landed_and_acked(
+        dir: &tempfile::TempDir,
+        event: &agent_doc_state_backbone::StateEvent,
+        authority_epoch: u64,
+    ) -> ControllerRuntime {
+        let bootstrap = test_bootstrap(dir);
+        assert!(
+            state_store::enqueue_document_authority_handoff(
+                dir.path(),
+                &state_store::DocumentAuthorityHandoff {
+                    document_hash: "doc".to_string(),
+                    authority_epoch,
+                    controller_generation: 1,
+                    payload_json: serde_json::to_string(event).unwrap(),
+                },
+            )
+            .unwrap()
+        );
+        assert!(
+            state_store::claim_document_authority_handoff(dir.path(), "doc", authority_epoch, 1)
+                .unwrap()
+        );
+        let landed = std::sync::Arc::new(AtomicBool::new(false));
+        {
+            let (landed, project_root, event) =
+                (landed.clone(), dir.path().to_path_buf(), event.clone());
+            super::super::set_full_durable_load_test_hook(Some(Box::new(move || {
+                if !landed.swap(true, Ordering::SeqCst) {
+                    assert!(
+                        super::super::append_state_event_for_test(&project_root, &event).unwrap()
+                    );
+                    assert!(
+                        state_store::acknowledge_document_authority_handoff(
+                            &project_root,
+                            "doc",
+                            authority_epoch,
+                            1,
+                            &event.event_id,
+                        )
+                        .unwrap()
+                    );
+                }
+            })));
+        }
+        let successor = ControllerRuntime::new(ControllerBootstrap {
+            controller_generation: 2,
+            previous_controller_pid: None,
+            ..bootstrap
+        });
+        super::super::set_full_durable_load_test_hook(None);
+        let successor = successor.unwrap();
+        assert!(
+            landed.load(Ordering::SeqCst),
+            "the predecessor must land and acknowledge inside the successor's load"
+        );
+        assert!(
+            state_store::load_document_authority_handoffs(dir.path())
+                .unwrap()
+                .is_empty(),
+            "the race leaves the successor no row to drain"
+        );
+        successor
+    }
+
+    fn ledgered_authority_epoch(runtime: &ControllerRuntime) -> Option<u64> {
+        // Deliberately not `document_state_projection`: the pending overlay must
+        // not stand in for the fold.
+        runtime
+            .memory
+            .lock()
+            .state_projection
+            .document("doc")
+            .and_then(|projection| projection.document.latest_authority.clone())
+            .map(|authority| authority.authority_epoch)
+    }
+
+    /// `#predecessorlandandack`: the deleted row leaves nothing to drain, so the
+    /// predecessor's ACK receipt is what carries the event into the successor's
+    /// projection. The row was gone before any overlay could note it, so the
+    /// overlay holds nothing that could stand in for the fold.
+    #[test]
+    fn successor_folds_a_handoff_the_predecessor_landed_and_acked_after_its_load() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let event = authority_handoff_test_event("authority-late-ack", "doc", 404);
+        let successor = successor_loaded_before_predecessor_landed_and_acked(&dir, &event, 404);
+        assert_eq!(ledgered_authority_epoch(&successor), None);
+
+        assert!(
+            !successor
+                .drain_document_authority_handoffs(dir.path())
+                .unwrap()
+        );
+
+        assert_eq!(
+            ledgered_authority_epoch(&successor),
+            Some(404),
+            "an event its predecessor landed and acknowledged after the load must be folded"
+        );
+        assert!(
+            state_store::load_document_authority_ack_receipts_before(dir.path(), 2)
+                .unwrap()
+                .is_empty(),
+            "a reconciled receipt is consumed, so the next drain does not reload again"
+        );
+    }
+
+    /// `#predecessorlandandack`: a receipt whose row the load folded proves
+    /// nothing is missing, so a restart's first drain does not pay for a reload.
+    #[test]
+    fn predecessor_ack_receipt_folded_by_the_load_needs_no_reload() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        drop(open_state_db(dir.path()).unwrap());
+        let event = authority_handoff_test_event("authority-ack-before-load", "doc", 505);
+        assert!(super::super::append_state_event_for_test(dir.path(), &event).unwrap());
+        assert!(
+            state_store::enqueue_document_authority_handoff(
+                dir.path(),
+                &state_store::DocumentAuthorityHandoff {
+                    document_hash: "doc".to_string(),
+                    authority_epoch: 505,
+                    controller_generation: 1,
+                    payload_json: serde_json::to_string(&event).unwrap(),
+                },
+            )
+            .unwrap()
+        );
+        assert!(
+            state_store::acknowledge_document_authority_handoff(
+                dir.path(),
+                "doc",
+                505,
+                1,
+                &event.event_id,
+            )
+            .unwrap()
+        );
+
+        let successor = ControllerRuntime::new(ControllerBootstrap {
+            controller_generation: 2,
+            previous_controller_pid: None,
+            ..bootstrap
+        })
+        .unwrap();
+        let hook_fired = std::sync::Arc::new(AtomicBool::new(false));
+        {
+            let hook_fired = hook_fired.clone();
+            super::super::set_full_durable_load_test_hook(Some(Box::new(move || {
+                hook_fired.store(true, Ordering::SeqCst);
+            })));
+        }
+        let drained = successor.drain_document_authority_handoffs(dir.path());
+        super::super::set_full_durable_load_test_hook(None);
+
+        assert!(!drained.unwrap());
+        assert!(
+            !hook_fired.load(Ordering::SeqCst),
+            "a row the load folded must not cost a durable reload"
+        );
+        assert_eq!(ledgered_authority_epoch(&successor), Some(505));
+        assert!(
+            state_store::load_document_authority_ack_receipts_before(dir.path(), 2)
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    /// `#predecessorlandandack`: a generation consumes only older receipts, so
+    /// the predecessor still serving cannot take the one its successor needs.
+    #[test]
+    fn predecessor_drain_leaves_its_own_ack_receipt_for_the_successor() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let event = authority_handoff_test_event("authority-own-ack", "doc", 606);
+        let successor = successor_loaded_before_predecessor_landed_and_acked(&dir, &event, 606);
+        let mut predecessor_bootstrap = test_bootstrap(&dir);
+        predecessor_bootstrap.controller_generation = 1;
+        let predecessor = ControllerRuntime::new(predecessor_bootstrap).unwrap();
+
+        assert!(
+            !predecessor
+                .drain_document_authority_handoffs(dir.path())
+                .unwrap()
+        );
+        assert_eq!(
+            state_store::load_document_authority_ack_receipts_before(dir.path(), 2)
+                .unwrap()
+                .len(),
+            1,
+            "the receipt belongs to the successor that loaded before it"
+        );
+
+        assert!(
+            !successor
+                .drain_document_authority_handoffs(dir.path())
+                .unwrap()
+        );
+        assert_eq!(ledgered_authority_epoch(&successor), Some(606));
+    }
+
     /// `#retiredhandoffapplyrace`: the duplicate's ledger sequence, compared
     /// with the projection's folded high-water, is what tells "already folded"
     /// from "ledgered by another writer after the load".
@@ -61648,6 +61851,7 @@ mod tests {
                         event.document_hash(),
                         authority_epoch,
                         1,
+                        &event.event_id,
                     )
                     .unwrap(),
                     "the predecessor's generation-fenced ACK removes its own row"

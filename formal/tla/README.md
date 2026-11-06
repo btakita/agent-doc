@@ -64,6 +64,22 @@ opening/closing (specs/08b § Controller process lifecycle):
 a stale-binary recycle can retire) each reproduce one 2026-10-10 thrash class and
 must violate; three Reach configs witness retire, abandon, and promotion.
 
+`AuthorityHandoffFold.tla` (`#retiredhandoffapplyrace`) checks one durable
+document-authority handoff row across a controller handoff, where a retired
+predecessor's parked main-ledger insert may commit at any point, including
+after the successor loaded the ledger:
+
+- the successor acknowledges the row and clears its pending-authority overlay
+  only for an event its own projection holds;
+- the ledger never holds the event twice; and
+- the row is eventually acknowledged under weak fairness.
+
+`AuthorityHandoffFoldWedge` restores the shipped rule (every `inserted == false`
+duplicate is acknowledged as-is) and must violate; `AuthorityHandoffFoldReach`
+witnesses the late duplicate itself. A predecessor that lands *and*
+acknowledges its row after the successor's load is out of scope: the successor
+then learns the event only from its next general durable reload.
+
 `ReactiveTopology.tla` checks the shared lifetime-scoped graph contract used by
 agent-doc's Lazily state machines:
 

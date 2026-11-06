@@ -2821,6 +2821,18 @@ document-write proof, git commit, and terminal closeout facts retain the normal
 durable ingress budget and ordering. A short-lived client never owns an
 authority-observation mailbox and never needs a shutdown flush.
 
+A controller acknowledges a handoff row, and clears the pending-authority
+overlay that answers reads until the fold, only once the row's event is folded
+into its own projection (`#retiredhandoffapplyrace`). An append that finds the
+event already in the ledger is not proof of that: a retired predecessor's apply
+parked in SQLite's busy handler can commit the row after the successor loaded
+the ledger. The duplicate's ledger sequence decides. A row at or below the
+projection's folded high-water was folded by the load and is acknowledged at
+once; a row above it was committed by another writer since, so the controller
+first reloads the durable ledger (which replaces the projection wholesale and so
+never folds a row it also applied live twice), then acknowledges. A failed
+reload keeps the row claimed and the overlay in place for the next drain.
+
 A retained document-write owner therefore keeps the same delivery/native-save
 transition across the captured-response/write-applied boundary. Once the editor
 acknowledges the exact canonical cut, `session-check` may request the

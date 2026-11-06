@@ -4216,6 +4216,25 @@ pub fn load_state_events_after_from_db(
     Ok(events)
 }
 
+/// The durable sequence (`state_events.id`) of one event, or `None` when the
+/// ledger does not hold it.
+///
+/// `#retiredhandoffapplyrace`: an `INSERT OR IGNORE` that reports "already
+/// present" says nothing about whether the caller's projection folded the row.
+/// Comparing this sequence with the high-water of the rows a projection folded
+/// does: a row at or below it was folded, a row above it was committed by
+/// another writer after the projection was loaded.
+pub fn state_event_sequence_in_db(conn: &Connection, event_id: &str) -> Result<Option<u64>> {
+    conn.query_row(
+        "SELECT id FROM state_events WHERE event_id = ?1",
+        [event_id],
+        |row| row.get::<_, i64>(0),
+    )
+    .optional()
+    .map(|sequence| sequence.map(|sequence| sequence.max(0) as u64))
+    .map_err(Into::into)
+}
+
 /// Stable key for the PID-scoped editor registration that owns a replay cursor.
 ///
 /// The decimal PID is terminated by a delimiter, so arbitrary editor ids remain

@@ -4109,6 +4109,23 @@ const STATE_PROJECTION_ACTIVATION_BARRIER_TIMEOUT: Duration = Duration::from_sec
 /// closeout facts have no such freedom and keep the normal durable timeout.
 const TELEMETRY_EVENT_INGRESS_BUSY_TIMEOUT: Duration = Duration::from_millis(100);
 
+/// Whether a drained authority handoff's event is folded into this controller's
+/// projection after its ledger append (`#retiredhandoffapplyrace`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AuthorityHandoffLedgerOutcome {
+    /// This append inserted the event and applied it to the projection.
+    Applied,
+    /// The ledger already held the event in a row the projection folded.
+    AlreadyFolded,
+    /// The ledger already held the event in a row committed after the
+    /// projection was loaded (a retired predecessor's in-flight apply): the
+    /// projection has not folded it, so the drain must reload before its ACK.
+    LedgeredAfterLoad {
+        sequence: Option<u64>,
+        folded_through: u64,
+    },
+}
+
 fn document_authority_epoch(event: &agent_doc_state_backbone::StateEvent) -> Option<u64> {
     match &event.fact {
         agent_doc_state_backbone::StateFact::DocumentAuthorityObserved {
@@ -11162,6 +11179,54 @@ impl ControllerRuntime {
         Ok(inserted)
     }
 
+    /// Append one durable authority handoff to the main ledger and report
+    /// whether this controller's projection holds its event.
+    ///
+    /// `#retiredhandoffapplyrace`: `inserted == false` only says the ledger
+    /// already held the event id, not that this projection folded it. A retired
+    /// predecessor's apply parked in SQLite's busy handler can commit the row
+    /// *after* this controller loaded the ledger; acknowledging that row and
+    /// clearing the pending-authority overlay then lost the authority from the
+    /// projection until some later durable reload. The duplicate's ledger
+    /// sequence decides it: a row at or below the folded high-water was folded
+    /// by the load, a row above it was committed by another writer since.
+    fn append_apply_document_authority_handoff(
+        &self,
+        project_root: &Path,
+        event: &agent_doc_state_backbone::StateEvent,
+    ) -> Result<AuthorityHandoffLedgerOutcome> {
+        let document_fence = self.document_maintenance_fence(event.fact.document_hash());
+        let _document_guard = document_fence.lock();
+        let _ingress = self.lock_state_event_ingress(
+            project_root,
+            "append_apply_state_event",
+            event.fact.label(),
+        );
+        let conn = match telemetry_event_ingress_busy_timeout(event) {
+            Some(busy_timeout) => {
+                open_state_db_for_event_ingress_with_timeout(project_root, busy_timeout)?
+            }
+            None => open_state_db_for_event_ingress(project_root)?,
+        };
+        if insert_state_event_on_connection(&conn, event)? {
+            self.apply_state_event(event)?;
+            return Ok(AuthorityHandoffLedgerOutcome::Applied);
+        }
+        let sequence = state_store::state_event_sequence_in_db(&conn, &event.event_id)?;
+        // Read under the ingress lock: a durable reload swaps the snapshot (and
+        // its high-water) only while holding it.
+        let folded_through = self.memory.lock().durable_sequence;
+        Ok(match sequence {
+            Some(sequence) if sequence <= folded_through => {
+                AuthorityHandoffLedgerOutcome::AlreadyFolded
+            }
+            sequence => AuthorityHandoffLedgerOutcome::LedgeredAfterLoad {
+                sequence,
+                folded_through,
+            },
+        })
+    }
+
     /// Fold every durable latest-value authority handoff this controller can
     /// generation-fence. `true` means at least one row remains retryable.
     fn drain_document_authority_handoffs(&self, project_root: &Path) -> Result<bool> {
@@ -11190,8 +11255,41 @@ impl ControllerRuntime {
                 "document-authority handoff epoch mismatch for {}",
                 handoff.document_hash,
             );
-            match self.append_apply_state_event_serialized(project_root, &event) {
-                Ok(_) => {
+            match self.append_apply_document_authority_handoff(project_root, &event) {
+                Ok(outcome) => {
+                    if let AuthorityHandoffLedgerOutcome::LedgeredAfterLoad {
+                        sequence,
+                        folded_through,
+                    } = outcome
+                    {
+                        // `#retiredhandoffapplyrace`: fold the ledger before the
+                        // ACK and the overlay clear, never instead of them. The
+                        // durable reload replaces the projection wholesale, so a
+                        // row this controller also applied live is not folded
+                        // twice. Until it succeeds the row stays claimed and the
+                        // overlay keeps answering reads.
+                        let sequence = sequence
+                            .map(|sequence| sequence.to_string())
+                            .unwrap_or_else(|| "none".to_string());
+                        if let Err(error) = self.refresh_memory() {
+                            agent_doc_ops_log_io::log_op(
+                                project_root,
+                                &format!(
+                                    "document_authority_handoff_fold_deferred document_hash={} authority_epoch={} controller_generation={} ledger_sequence={sequence} folded_through={folded_through} error={error:#} (#retiredhandoffapplyrace)",
+                                    handoff.document_hash, handoff.authority_epoch, generation,
+                                ),
+                            );
+                            retry = true;
+                            continue;
+                        }
+                        agent_doc_ops_log_io::log_op(
+                            project_root,
+                            &format!(
+                                "document_authority_handoff_ledgered_after_load_refolded document_hash={} authority_epoch={} controller_generation={} ledger_sequence={sequence} folded_through={folded_through} (#retiredhandoffapplyrace)",
+                                handoff.document_hash, handoff.authority_epoch, generation,
+                            ),
+                        );
+                    }
                     if let Err(error) = state_store::acknowledge_document_authority_handoff(
                         project_root,
                         &handoff.document_hash,

@@ -354,9 +354,14 @@ and the pending granular-flags-only rule. This runbook carries the rest.
      `agent-doc queue brief <FILE> --item <...>` (or the entry's
      `brief_command`; `--json` for the whole object) re-prints the same text.
   3. Dispatch one background subagent per item. When it touches a repo, give it
-     its own git worktree OUTSIDE the IDE-watched project (for example
-     `~/worktrees/<repo>-<label>`), and never run two subagents in
-     one checkout. Heads that `agent-doc plan` gives the same repo
+     its own git worktree OUTSIDE the IDE-watched project, and never run two subagents in
+     one checkout. agent-doc worktree setup is the paired layout
+     (`#worktreetmuxrouterskew`): `<parent>/<label>/agent-doc` beside a private
+     detached `<parent>/<label>/tmux-router` at the revision this tree builds
+     against. Never place that checkout directly under `~/worktrees`:
+     `../tmux-router` (and a nested crate's `../../tmux-router`) would resolve
+     to the shared `~/worktrees/tmux-router` checkout, which is stale against
+     main. Do not refresh or move that shared checkout. Heads that `agent-doc plan` gives the same repo
      `write_scope` still get separate worktrees, but they are integrated one at a
      time. Claim, spawn, and start EVERY independent entry from this cycle's
      dispatch list before waiting for a result or beginning serial integration.

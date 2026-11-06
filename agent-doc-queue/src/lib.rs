@@ -67,6 +67,7 @@ pub mod waiting_packet;
 pub mod waiting_status;
 pub mod waiting_subtree;
 pub mod worker_quota;
+pub mod worktree_layout;
 #[cfg(test)]
 mod stray_close_text_tests;
 #[cfg(test)]

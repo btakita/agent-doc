@@ -5330,6 +5330,9 @@ mod tests {
             "queue report-complete <FILE> --item <...> --generation <N> --prose-only --response '<worker response>'",
             "OUTSIDE the IDE-watched project",
             "never run two subagents in\n     one checkout",
+            "#worktreetmuxrouterskew",
+            "`<parent>/<label>/agent-doc`",
+            "shared `~/worktrees/tmux-router`",
             "ONE\n     `make install` per integrated batch",
             "agent-doc queue release <FILE> --item <...>",
             "agent-doc queue release <FILE> --item <...> --generation <N>",
@@ -5341,11 +5344,17 @@ mod tests {
         ] {
             assert!(respond.contains(needle), "respond.md missing {needle:?}");
         }
+        assert!(
+            !respond.contains("~/worktrees/<repo>-<label>"),
+            "respond.md still shows the flat worktree layout"
+        );
         let planning = runbook("planning-dispatch.md");
         assert!(planning.contains("Under `<!-- agent:run subagents -->`"));
         assert!(planning.contains("`agent-doc orchestrate <FILE> --mode parallel`"));
         assert!(planning.contains("(`#queuesubagents`)"));
         assert!(planning.contains("`authorization.subagent_prompt_preamble` pasted verbatim"));
+        assert!(planning.contains("#worktreetmuxrouterskew"));
+        assert!(planning.contains("~/worktrees/tmux-router"));
     }
 
     #[test]

@@ -2191,22 +2191,26 @@ pub fn instruction_for(item: &SteeringItem) -> &'static str {
              with the current work."
         }
         (SteeringDispatch::Subagent, SteeringSource::Queue, _, _) => {
-            "subagent intent: dispatch this item NOW to a NEW background subagent (one \
-             subagent per item). If it touches a repository, give that subagent its own git \
-             worktree outside the IDE-watched project; never run two subagents against one \
-             checkout. Before dispatching, claim it with `agent-doc queue claim <FILE> --item \
-             <id-or-line> --owner subagent:<label>` so the loop and Stop hook do not re-enter for \
-             it; then paste the output of `agent-doc queue brief <FILE> --item <id-or-line>` \
-             verbatim at the top of the subagent prompt (the operator's authorization for the \
-             item, `#waypostauthorization`). When the subagent reports back, persist its result \
-             in THIS turn, but first execute and verify every authorized current-item or \
-             returned-subagent outward effect before closeout; \
-             a prepared artifact does not defer a post/publish/push/message/API effect to \
-             auto-clear (`#effectbeforecloseout`). Use the closeout that strikes the item \
-             (`agent-doc finalize` with the \
-             verbatim `> **Queue prompt:** <line>` echo, or `--done <id>`); that also ends the \
-             claim. Keep working the current item yourself; record the item as dispatched in \
-             your response."
+            concat!(
+                "subagent intent: dispatch this item NOW to a NEW background subagent (one \
+                 subagent per item). If it touches a repository, give that subagent its own git \
+                 worktree outside the IDE-watched project; never run two subagents against one \
+                 checkout. ",
+                agent_doc_queue::subagent_worktree_layout_rule!(),
+                " Before dispatching, claim it with `agent-doc queue claim <FILE> --item \
+                 <id-or-line> --owner subagent:<label>` so the loop and Stop hook do not re-enter for \
+                 it; then paste the output of `agent-doc queue brief <FILE> --item <id-or-line>` \
+                 verbatim at the top of the subagent prompt (the operator's authorization for the \
+                 item, `#waypostauthorization`). When the subagent reports back, persist its result \
+                 in THIS turn, but first execute and verify every authorized current-item or \
+                 returned-subagent outward effect before closeout; \
+                 a prepared artifact does not defer a post/publish/push/message/API effect to \
+                 auto-clear (`#effectbeforecloseout`). Use the closeout that strikes the item \
+                 (`agent-doc finalize` with the \
+                 verbatim `> **Queue prompt:** <line>` echo, or `--done <id>`); that also ends the \
+                 claim. Keep working the current item yourself; record the item as dispatched in \
+                 your response."
+            )
         }
         (SteeringDispatch::Subagent, SteeringSource::Exchange, _, _) => {
             concat!(
@@ -2221,7 +2225,9 @@ pub fn instruction_for(item: &SteeringItem) -> &'static str {
                 " ",
                 agent_doc_queue::subagent_build_slot_rule!(),
                 " ",
-                agent_doc_queue::subagent_tmux_isolation_rule!()
+                agent_doc_queue::subagent_tmux_isolation_rule!(),
+                " ",
+                agent_doc_queue::subagent_worktree_layout_rule!()
             )
         }
         (SteeringDispatch::AwaitReportedCloseout, _, _, _) => {
@@ -2385,11 +2391,12 @@ pub fn render_closeout_steering_context(
                  after the harness returns a worker identity, acknowledge that exact generation \
                  with `{}`; this changes 🟡 dispatching to 🚧 running and is not optional. If it \
                  touches a repository, give the subagent its own git worktree outside the \
-                 IDE-watched project. Paste the output of `{}` verbatim at the top of the \
+                 IDE-watched project. {} Paste the output of `{}` verbatim at the top of the \
                  subagent prompt: it carries the operator's authorization for the item \
                  (`#waypostauthorization`). {}",
                 claim_command_for(document, item.claim_text()),
                 start_command_for(document, item.claim_text()),
+                agent_doc_queue::worktree_layout::SUBAGENT_WORKTREE_LAYOUT_RULE,
                 brief_command_for(document, item.claim_text()),
                 REPORTED_WORKER_CLOSEOUT,
             ),
@@ -2404,7 +2411,9 @@ pub fn render_closeout_steering_context(
                     " ",
                     agent_doc_queue::subagent_build_slot_rule!(),
                     " ",
-                    agent_doc_queue::subagent_tmux_isolation_rule!()
+                    agent_doc_queue::subagent_tmux_isolation_rule!(),
+                    " ",
+                    agent_doc_queue::subagent_worktree_layout_rule!()
                 )
                 .to_string()
             }
@@ -4288,10 +4297,13 @@ mod tests {
         assert!(text.contains(tmux), "{text}");
         let build = agent_doc_queue::build_slot::SUBAGENT_BUILD_SLOT_RULE;
         assert!(text.contains(build), "{text}");
+        let layout = agent_doc_queue::worktree_layout::SUBAGENT_WORKTREE_LAYOUT_RULE;
+        assert!(text.contains(layout), "{text}");
         let instruction = instruction_for(&item_clone);
         assert!(instruction.contains(scratch), "{instruction}");
         assert!(instruction.contains(build), "{instruction}");
-        assert!(instruction.ends_with(tmux), "{instruction}");
+        assert!(instruction.contains(tmux), "{instruction}");
+        assert!(instruction.ends_with(layout), "{instruction}");
     }
 
     #[test]

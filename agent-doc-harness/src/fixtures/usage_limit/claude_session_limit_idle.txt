@@ -1,10 +1,12 @@
-⏺ Bash(cargo test -p agent-doc-harness)
-  ⎿  Running…
+  ⎿  You've hit your session limit · resets 4:20pm (America/New_York)
+     /usage-credits to finish what you’re working on.
 
-  ⎿  You've hit your session limit · resets 9pm (America/New_York)
-     /upgrade to increase your usage limit.
+✻ Baked for 3m 42s
 
-────────────────────────────────────────────────────────────────────────────────
-❯ 
-────────────────────────────────────────────────────────────────────────────────
-  ⏵⏵ bypass permissions on (shift+tab to cycle)
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Press Ctrl-D again to exit
+
+Resume this session with:
+claude --resume 255f2c7b-1cb2-412c-972b-0d29b3edfe09

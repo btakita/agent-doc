@@ -40,6 +40,39 @@ private const val ENSURE_CONTROLLER_MIN_INTERVAL_MS = 30_000L
 internal fun shouldAttemptControllerLaunch(nowMs: Long, lastAttemptMs: Long): Boolean =
     lastAttemptMs == 0L || nowMs - lastAttemptMs >= ENSURE_CONTROLLER_MIN_INTERVAL_MS
 
+/**
+ * Whether a controller delivery must be refused (`#deliverylineagestamp`): this
+ * replica's registration bootstrapped CRDT history [registered], and the
+ * delivery is stamped with history [stamped].
+ *
+ * Op ids name characters of exactly one history. A delivery from another
+ * history whose op ids are all new to this replica merges without any error
+ * and lands at the wrong place, so the stamp is the only evidence. A missing
+ * value on either side is unknown, never a mismatch: an older controller sends
+ * no stamp and an older registration recorded none. Mirrors the shared Rust
+ * `delivery_history_lineage_mismatch`.
+ */
+internal fun deliveryHistoryLineageMismatchUtil(registered: String?, stamped: String?): Boolean =
+    !registered.isNullOrEmpty() && !stamped.isNullOrEmpty() && registered != stamped
+
+/** The first update a replica registered in [registered] must refuse, or null. */
+internal fun foreignHistoryDeliveryUtil(
+    registered: String?,
+    updates: List<ReplicaRemoteUpdate>,
+): ReplicaRemoteUpdate? = updates.firstOrNull { deliveryHistoryLineageMismatchUtil(registered, it.historyLineage) }
+
+/**
+ * The CRDT history one pulled update was encoded in (`#deliverylineagestamp`):
+ * its own `history_lineage`, else the pull response's, else unknown (a
+ * controller that predates the stamp).
+ */
+internal fun replicaUpdateHistoryLineageUtil(update: JsonObject, pull: JsonObject?): String? =
+    update.get("history_lineage")?.takeUnless { it.isJsonNull }?.asString
+        ?: pull?.get("history_lineage")?.takeUnless { it.isJsonNull }?.asString
+
+/** Typed [ReplicaPullDelivery.Unavailable] reason for a refused foreign-history delivery. */
+internal const val DELIVERY_HISTORY_LINEAGE_MISMATCH = "delivery_history_lineage_mismatch"
+
 private data class IncrementalPublishResult(
     val updateBytes: Int,
     val durable: Boolean,
@@ -96,6 +129,13 @@ class CrdtReplicaForwarder(
      */
     private var undurableLocalFrontier: ByteArray? = null
     private var lineage: String? = null
+    /**
+     * `#deliverylineagestamp`: the CRDT history the registration bootstrapped
+     * [node] from. Unlike [lineage] (the durable-frame fence, which a sibling
+     * replacement may rotate), it changes only when the controller rebuilds its
+     * canonical from text. Null from a controller that predates the stamp.
+     */
+    private var historyLineage: String? = null
     /**
      * Exact visible text of [node] after the last successful mutation.
      *
@@ -161,6 +201,7 @@ class CrdtReplicaForwarder(
                 resumeState?.stateVector,
                 expectedCanonicalHash,
                 provisionalReplacement,
+                resumeState?.historyLineage,
             ).also {
                 logSlow("transport.register", registerStarted, details = "ok=${it != null}")
             }
@@ -182,6 +223,7 @@ class CrdtReplicaForwarder(
             }
             clientId = ack.clientId
             lineage = ack.lineage
+            historyLineage = ack.historyLineage
             canonicalProjectionRetained = ack.canonicalProjectionRetained
             retainedReplicaReseedPending = ack.retainedReplicaReseedPending
             canonicalCoversRetainedFrontier = ack.canonicalCoversRetainedFrontier
@@ -489,7 +531,7 @@ class CrdtReplicaForwarder(
         if (!attached) return null
         val encodedState = node.encodeState() ?: return null
         val stateVector = node.stateVector() ?: return null
-        return ReplicaResumeState(encodedState.copyOf(), stateVector.copyOf())
+        return ReplicaResumeState(encodedState.copyOf(), stateVector.copyOf(), historyLineage)
     }
 
     /** Pull remote updates the document model queued for this replica. */
@@ -506,7 +548,24 @@ class CrdtReplicaForwarder(
     fun pullRemoteDelivery(): ReplicaPullDelivery {
         if (!attached) return ReplicaPullDelivery.Deltas(emptyList())
         val started = System.nanoTime()
-        val delivery = transport.pullDelivery(filePath, identity)
+        val pulled = transport.pullDelivery(filePath, identity)
+        // `#deliverylineagestamp`: refuse, before any byte reaches the native
+        // replica, a delivery encoded in another CRDT history than the one this
+        // registration bootstrapped. The manager answers Unavailable by
+        // re-registering, and the registration names this history beside the
+        // retained frontier so the controller bootstraps it in full.
+        val foreign = (pulled as? ReplicaPullDelivery.Deltas)
+            ?.let { foreignHistoryDeliveryUtil(historyLineage, it.updates) }
+        val delivery = if (foreign != null) {
+            log.warn(
+                "[crdt-replica] refused a delivery from another CRDT history for ${File(filePath).name}; " +
+                    "patch_id=${foreign.patchId} registered_history=$historyLineage " +
+                    "delivery_history=${foreign.historyLineage} recovery=reregister (#deliverylineagestamp)",
+            )
+            ReplicaPullDelivery.Unavailable(DELIVERY_HISTORY_LINEAGE_MISMATCH)
+        } else {
+            pulled
+        }
         val detail = when (delivery) {
             is ReplicaPullDelivery.Deltas -> "updates=${delivery.updates.size}"
             is ReplicaPullDelivery.Replace -> "replace_chars=${delivery.text.length}"
@@ -561,6 +620,7 @@ class CrdtReplicaForwarder(
         pushedVersion = null
         undurableLocalFrontier = null
         lineage = null
+        historyLineage = null
         knownReplicaText = null
         logSlow("native.close", closeStarted)
         check(ownership.send(MergeOwnershipEvent.EditorDetached)) {
@@ -589,6 +649,8 @@ class CrdtReplicaForwarder(
 data class ReplicaResumeState(
     val encodedState: ByteArray,
     val stateVector: ByteArray,
+    /** `#deliverylineagestamp`: the CRDT history [encodedState] belongs to, if known. */
+    val historyLineage: String? = null,
 )
 
 enum class ReplicaBootstrapKind(val wireName: String) {
@@ -607,6 +669,8 @@ data class ReplicaRegisterAck(
     val retainedReplicaReseedPending: Boolean = false,
     val canonicalCoversRetainedFrontier: Boolean? = null,
     val canonicalContentHash: String? = null,
+    /** `#deliverylineagestamp`: the CRDT history [bootstrap] belongs to. */
+    val historyLineage: String? = null,
 )
 
 /** Build the typed controller payload for one process-scoped editor replica. */
@@ -632,6 +696,11 @@ data class ReplicaRemoteUpdate(
     val generation: Long,
     val expectedContentHash: String? = null,
     val update: ByteArray,
+    /**
+     * `#deliverylineagestamp`: the CRDT history [update] was encoded in, or null
+     * from a controller that predates the stamp.
+     */
+    val historyLineage: String? = null,
     /**
      * Wall-clock ms at which this replica received the intent, stamped where the
      * pull response is parsed. This distinguishes controller-to-editor transport
@@ -707,6 +776,22 @@ interface ReplicaTransport {
         provisionalReplacement: Boolean,
     ): ReplicaRegisterAck? =
         if (provisionalReplacement) null else register(filePath, identity, stateVector, expectedCanonicalHash)
+
+    /**
+     * `#deliverylineagestamp`: also name the CRDT history [stateVector] counts
+     * ops of, so a controller whose history differs bootstraps in full instead
+     * of answering with a delta against a foreign frontier. Transports that
+     * predate it ignore the history.
+     */
+    fun register(
+        filePath: String,
+        identity: String,
+        stateVector: ByteArray?,
+        expectedCanonicalHash: String?,
+        provisionalReplacement: Boolean,
+        retainedHistoryLineage: String?,
+    ): ReplicaRegisterAck? =
+        register(filePath, identity, stateVector, expectedCanonicalHash, provisionalReplacement)
 
     /** Commit a provisional replacement against the exact registered frontier. */
     fun promoteReplacement(
@@ -812,6 +897,16 @@ class CpSocketReplicaTransport(
         stateVector: ByteArray?,
         expectedCanonicalHash: String?,
         provisionalReplacement: Boolean,
+    ): ReplicaRegisterAck? =
+        register(filePath, identity, stateVector, expectedCanonicalHash, provisionalReplacement, null)
+
+    override fun register(
+        filePath: String,
+        identity: String,
+        stateVector: ByteArray?,
+        expectedCanonicalHash: String?,
+        provisionalReplacement: Boolean,
+        retainedHistoryLineage: String?,
     ): ReplicaRegisterAck? {
         val response = send(
             controllerRequest("replica_register", filePath, identity) {
@@ -823,6 +918,7 @@ class CpSocketReplicaTransport(
                         "state_vector_b64",
                         Base64.getEncoder().encodeToString(stateVector),
                     )
+                    retainedHistoryLineage?.let { history -> it.addProperty("history_lineage", history) }
                 }
                 if (provisionalReplacement) {
                     it.addProperty("provisional_replacement", true)
@@ -866,6 +962,7 @@ class CpSocketReplicaTransport(
                 ?.asBoolean
         val canonicalContentHash = data.get("canonical_content_hash")?.asString
         val lineage = data.get("lineage")?.asString
+        val historyLineage = data.get("history_lineage")?.takeUnless { it.isJsonNull }?.asString
         lastRegisterError = null
         return ReplicaRegisterAck(
             clientId = clientId,
@@ -877,6 +974,7 @@ class CpSocketReplicaTransport(
             retainedReplicaReseedPending = retainedReplicaReseedPending,
             canonicalCoversRetainedFrontier = canonicalCoversRetainedFrontier,
             canonicalContentHash = canonicalContentHash,
+            historyLineage = historyLineage,
         )
     }
 
@@ -974,6 +1072,7 @@ class CpSocketReplicaTransport(
                 generation = item.get("generation")?.asLong ?: return@mapNotNull null,
                 expectedContentHash = item.get("expected_content_hash")?.asString,
                 update = decodeBase64(updateB64) ?: return@mapNotNull null,
+                historyLineage = replicaUpdateHistoryLineageUtil(item, data),
                 pulledAtMs = pulledAtMs,
             )
         }

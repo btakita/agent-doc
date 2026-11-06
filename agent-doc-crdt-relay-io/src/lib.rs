@@ -2897,6 +2897,9 @@ pub struct ReplicaPull {
     pub client_id: u64,
     pub updates: Vec<PendingReplicaUpdate>,
     pub delivery: ReplicaDeliverySnapshot,
+    /// The hub's current history lineage at this pull (`#deliverylineagestamp`).
+    /// Each update also carries the lineage it was encoded in.
+    pub history_lineage: String,
 }
 
 /// Registration payload returned to an editor replica.
@@ -2925,6 +2928,10 @@ pub struct ReplicaRegistration {
     /// editor supplied no usable frontier, so consumers must remain fail-closed.
     pub canonical_covers_retained_frontier: Option<bool>,
     pub canonical_content_hash: String,
+    /// The CRDT history the bootstrap belongs to (`#deliverylineagestamp`),
+    /// read under the same hub lock as the bootstrap. The editor keeps it and
+    /// refuses any later delivery stamped with a different history lineage.
+    pub history_lineage: String,
 }
 
 /// Register an editor replica with the document's per-document hub on the live
@@ -3104,6 +3111,39 @@ pub fn register_replica_for_file_with_precondition_and_replacement_mode(
     expected_canonical_hash: Option<&str>,
     provisional_replacement: bool,
 ) -> Result<Option<ReplicaRegistration>> {
+    register_replica_for_file_with_retained_history(
+        file,
+        identity,
+        retained_state_vector,
+        None,
+        editor_pid,
+        force_full_bootstrap,
+        expected_canonical_hash,
+        provisional_replacement,
+    )
+}
+
+/// [`register_replica_for_file_with_precondition_and_replacement_mode`] for an
+/// editor that names the CRDT history its retained replica belongs to
+/// (`#deliverylineagestamp`).
+///
+/// `retained_history_lineage` is the `history_lineage` the editor's previous
+/// registration returned. When it differs from the hub's current history, the
+/// retained frontier counts op ids of another history: an incremental delta
+/// against it would apply by id onto unrelated characters, so the editor gets
+/// the full canonical and no coverage proof. `None` (an older editor) keeps the
+/// previous behaviour.
+#[allow(clippy::too_many_arguments)]
+pub fn register_replica_for_file_with_retained_history(
+    file: &Path,
+    identity: &str,
+    retained_state_vector: Option<&[u8]>,
+    retained_history_lineage: Option<&str>,
+    editor_pid: Option<u32>,
+    force_full_bootstrap: bool,
+    expected_canonical_hash: Option<&str>,
+    provisional_replacement: bool,
+) -> Result<Option<ReplicaRegistration>> {
     let result = register_replica_for_file_incremental_with_liveness_and_precondition(
         file,
         identity,
@@ -3113,6 +3153,7 @@ pub fn register_replica_for_file_with_precondition_and_replacement_mode(
         ReplicaRegistrationPrecondition {
             expected_canonical_hash,
             provisional_replacement,
+            retained_history_lineage,
         },
         agent_doc_reliable_sync_io::process_pid_is_live,
     );
@@ -3169,6 +3210,8 @@ fn register_replica_for_file_incremental_with_liveness(
 struct ReplicaRegistrationPrecondition<'a> {
     expected_canonical_hash: Option<&'a str>,
     provisional_replacement: bool,
+    /// See [`register_replica_for_file_with_retained_history`].
+    retained_history_lineage: Option<&'a str>,
 }
 
 fn register_replica_for_file_incremental_with_liveness_and_precondition(
@@ -3295,6 +3338,7 @@ fn register_replica_for_file_incremental_locked(
     let ReplicaRegistrationPrecondition {
         expected_canonical_hash,
         provisional_replacement,
+        retained_history_lineage,
     } = precondition;
     let authority = authority_for_file(&file.display().to_string());
     // `replica_register` is itself a process-scoped proof that an editor has
@@ -3425,6 +3469,7 @@ fn register_replica_for_file_incremental_locked(
         canonical_projection_retained,
         canonical_covers_retained_frontier,
         canonical_content_hash,
+        history_lineage,
     ) = with_hub_seeded_from_file(file, |hub| {
         // Check the command's captured base in the same live-hub transition as
         // generation retirement. Checking after register in the plugin is too
@@ -3438,11 +3483,33 @@ fn register_replica_for_file_incremental_locked(
         // Metadata readers release their lock before entering the hub. Publish
         // the successor only after its precondition passes, before membership.
         record_replica_identity(&document_hash, client_id, identity, &retired_client_ids)?;
+        // `#deliverylineagestamp`: the editor named the history its retained
+        // replica belongs to, and it is not this hub's. Its frontier counts op
+        // ids of that other history, so neither an incremental delta against it
+        // nor a coverage answer about it means anything here. A fresh
+        // controller reseeding from that retained replica is the exception: its
+        // empty canonical adopts the editor's history.
+        let retained_history_foreign = !restore_fresh_controller_from_retained_replica
+            && retained_state_vector.is_some()
+            && retained_history_lineage.is_some_and(|lineage| lineage != hub.history_lineage());
+        if retained_history_foreign {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "crdt_replica_register_history_lineage_mismatch file={} client_id={} retained_history_lineage={} history_lineage={} bootstrap_kind=full (#deliverylineagestamp)",
+                    file.display(),
+                    client_id,
+                    retained_history_lineage.unwrap_or("-"),
+                    hub.history_lineage(),
+                ),
+            );
+        }
+        let same_history_state_vector = retained_state_vector.filter(|_| !retained_history_foreign);
         // Causal coverage is independent of bootstrap shape. A retained
         // canonical projection forces a full bootstrap, but the supplied
         // native frontier still proves whether adopting that bootstrap can
         // discard any editor-only operation.
-        let canonical_covers_retained_frontier = retained_state_vector.and_then(
+        let canonical_covers_retained_frontier = same_history_state_vector.and_then(
             |state_vector| match hub.canonical_covers_state_vector(state_vector) {
                 Ok(covers) => Some(covers),
                 Err(error) => {
@@ -3462,9 +3529,10 @@ fn register_replica_for_file_incremental_locked(
         // Preserve that unsettled visible-write obligation under the new
         // identity, and force a full canonical bootstrap so a stale retained
         // native frontier cannot union-merge over it.
-        let retained_lineage_unproven = !restore_fresh_controller_from_retained_replica
+        let retained_lineage_unproven = (!restore_fresh_controller_from_retained_replica
             && !hub.controller_projection_established()
-            && retained_state_vector.is_some();
+            && retained_state_vector.is_some())
+            || retained_history_foreign;
         let canonical_projection_retained = !restore_fresh_controller_from_retained_replica
             && (force_full_bootstrap || retained_lineage_unproven || !hub.delivery_converged());
         // `#replicapositiondrift`: a member registered before the canonical
@@ -3564,6 +3632,7 @@ fn register_replica_for_file_incremental_locked(
             hub.ensure_canonical_projection_receipt(client_id)?;
         }
         let canonical_content_hash = agent_doc_hash::content_hash(&hub.canonical_text());
+        let history_lineage = hub.history_lineage().to_string();
         Ok::<_, anyhow::Error>((
             bootstrap,
             canonical_state_vector,
@@ -3571,6 +3640,7 @@ fn register_replica_for_file_incremental_locked(
             canonical_projection_retained,
             canonical_covers_retained_frontier,
             canonical_content_hash,
+            history_lineage,
         ))
     })??;
     // Editor attach is an explicit event → drive the reactive open-docs authority.
@@ -3609,6 +3679,7 @@ fn register_replica_for_file_incremental_locked(
         retained_replica_reseed_pending: restore_fresh_controller_from_retained_replica,
         canonical_covers_retained_frontier,
         canonical_content_hash,
+        history_lineage,
     }))
 }
 
@@ -5232,7 +5303,8 @@ pub fn pull_replica_updates_for_file(file: &Path, identity: &str) -> Result<Opti
             .find(|entry| entry.client_id == client_id)
             .ok_or_else(|| anyhow::anyhow!("replica {client_id} is not registered"))?;
         let recovery_now = hub.claim_nonconverging_recovery(client_id)?;
-        Ok::<_, anyhow::Error>(Some((updates, delivery, recovery_now)))
+        let history_lineage = hub.history_lineage().to_string();
+        Ok::<_, anyhow::Error>(Some((updates, delivery, recovery_now, history_lineage)))
     })?
     else {
         // Passive polls carry no editor state with which to rebuild an evicted
@@ -5240,7 +5312,7 @@ pub fn pull_replica_updates_for_file(file: &Path, identity: &str) -> Result<Opti
         // first; otherwise a stale poll recreates the phantom zero-member hub.
         return Ok(None);
     };
-    let Some((updates, delivery, recovery_now)) = pull? else {
+    let Some((updates, delivery, recovery_now, history_lineage)) = pull? else {
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
@@ -5326,6 +5398,7 @@ pub fn pull_replica_updates_for_file(file: &Path, identity: &str) -> Result<Opti
         client_id,
         updates,
         delivery,
+        history_lineage,
     }))
 }
 
@@ -6556,6 +6629,11 @@ pub fn check_editor_ops_component_markers(
 /// Current canonical lineage returned to a newly registered editor.
 pub fn current_lineage_for_file(file: &Path) -> Result<Option<String>> {
     with_existing_hub(file, |hub| hub.lineage().to_string())
+}
+
+/// Current CRDT history lineage of the document's hub (`#deliverylineagestamp`).
+pub fn current_history_lineage_for_file(file: &Path) -> Result<Option<String>> {
+    with_existing_hub(file, |hub| hub.history_lineage().to_string())
 }
 
 pub fn reconcile_disk_projection_for_file(file: &Path, projection: &[u8]) -> Result<Option<bool>> {
@@ -10080,6 +10158,116 @@ mod tests {
         assert!(pull.delivery.live);
         let log = std::fs::read_to_string(&ops_log).unwrap();
         assert!(log.contains("crdt_replica_register_lineage_renewed"));
+    }
+
+    /// `#deliverylineagestamp`: every delivery names the CRDT history its op ids
+    /// belong to, matching the history the registration bootstrapped, and a
+    /// registration that names another history for its retained frontier is
+    /// never answered with an incremental delta against that frontier.
+    #[test]
+    fn deliveries_carry_the_registered_history_and_a_foreign_retained_history_bootstraps_in_full() {
+        let (dir, doc) = temp_doc("delivery-lineage-stamp.md");
+        let ops_log = dir.path().join(".agent-doc/logs/ops.log");
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_format: template\n---\n\n<!-- agent:exchange patch=append -->\n❯ operator prompt\n<!-- agent:boundary:abc -->\n<!-- /agent:exchange -->\n",
+        )
+        .unwrap();
+        seed_live_reliable_sync_open(&doc.display().to_string());
+        let identity = "intellij:delivery-lineage-stamp";
+        let registration = register_replica_for_file_incremental(&doc, identity, None)
+            .unwrap()
+            .expect("live editor should register with the relay");
+        let hub_history = with_existing_hub(&doc, |hub| hub.history_lineage().to_string())
+            .unwrap()
+            .unwrap();
+        assert_eq!(registration.history_lineage, hub_history);
+
+        let response = "### Re: operator prompt — gpt-5\n\nStamped.";
+        add_response_cell_for_file(&doc, None, response, "test")
+            .unwrap()
+            .expect("editor-attached response add should use the relay");
+        let pull = pull_replica_updates_for_file(&doc, identity)
+            .unwrap()
+            .expect("the registered member pulls");
+        assert!(!pull.updates.is_empty(), "the write was queued for the editor");
+        assert_eq!(pull.history_lineage, registration.history_lineage);
+        assert!(
+            pull.updates
+                .iter()
+                .all(|update| update.history_lineage == registration.history_lineage),
+            "each queued update is stamped with the history it was encoded in"
+        );
+
+        let native = agent_doc_merge::crdt_sync::ReplicaState::from_encoded(
+            registration.client_id,
+            &registration.bootstrap,
+        )
+        .unwrap();
+        for update in &pull.updates {
+            native.apply_update_verified(&update.update).unwrap();
+        }
+        let canonical = with_existing_hub(&doc, |hub| hub.canonical_text())
+            .unwrap()
+            .unwrap();
+        assert_eq!(native.text(), canonical);
+        observe_replica_projection_for_file(
+            &doc,
+            identity,
+            &agent_doc_hash::content_hash(&canonical),
+        )
+        .unwrap();
+        let frontier = native.state_vector();
+
+        let same_history = register_replica_for_file_with_retained_history(
+            &doc,
+            identity,
+            Some(&frontier),
+            Some(&registration.history_lineage),
+            None,
+            false,
+            None,
+            false,
+        )
+        .unwrap()
+        .expect("the same editor re-registers");
+        assert!(
+            same_history.incremental,
+            "a retained frontier in the hub's own history keeps the incremental bootstrap"
+        );
+        assert_eq!(same_history.canonical_covers_retained_frontier, Some(true));
+
+        let foreign = register_replica_for_file_with_retained_history(
+            &doc,
+            identity,
+            Some(&frontier),
+            Some("another-history"),
+            None,
+            false,
+            None,
+            false,
+        )
+        .unwrap()
+        .expect("the editor re-registers");
+        assert!(
+            !foreign.incremental,
+            "a frontier counted in another history is never answered with a delta"
+        );
+        assert_eq!(
+            foreign.canonical_covers_retained_frontier, None,
+            "coverage of a foreign frontier proves nothing"
+        );
+        assert!(foreign.canonical_projection_retained);
+        assert_eq!(foreign.history_lineage, hub_history);
+        let full = agent_doc_merge::crdt_sync::ReplicaState::from_encoded(
+            foreign.client_id,
+            &foreign.bootstrap,
+        )
+        .unwrap();
+        assert_eq!(full.text(), canonical);
+        let log = std::fs::read_to_string(&ops_log).unwrap();
+        assert!(log.contains("crdt_replica_register_history_lineage_mismatch"));
+        assert!(log.contains("retained_history_lineage=another-history"));
     }
 
     #[test]

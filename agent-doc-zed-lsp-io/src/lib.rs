@@ -10,6 +10,7 @@ mod input;
 mod queue_tree_view;
 mod tree_status_action;
 
+use agent_doc_document_realtime::crdt_relay::delivery_history_lineage_mismatch;
 use agent_doc_document_realtime::editor_contract::{
     DOCUMENT_ONLY_LAYOUT_AUTHORITY, ZED_EDITOR_KIND, ZED_LSP_CAPABILITIES,
 };
@@ -36,6 +37,9 @@ struct OpenDocument {
     project_root: PathBuf,
     identity: String,
     client_id: u64,
+    /// `#deliverylineagestamp`: the CRDT history the registration bootstrapped
+    /// [`Self::replica`] from; `None` from a controller that predates the stamp.
+    history_lineage: Option<String>,
     replica: ReplicaState,
     shadow: String,
     pending_apply_target: Option<String>,
@@ -533,6 +537,10 @@ impl<W: Write, I: LspInput> Server<W, I> {
         if replica.apply_update(&bootstrap).is_err() {
             return;
         }
+        let history_lineage = data
+            .get("history_lineage")
+            .and_then(Value::as_str)
+            .map(str::to_string);
         let canonical = replica.text();
         let mut document = OpenDocument {
             uri: uri.to_string(),
@@ -540,6 +548,7 @@ impl<W: Write, I: LspInput> Server<W, I> {
             project_root,
             identity,
             client_id,
+            history_lineage,
             replica,
             shadow: editor_text.to_string(),
             pending_apply_target: None,
@@ -625,7 +634,20 @@ impl<W: Write, I: LspInput> Server<W, I> {
             };
             let mut changed = false;
             let mut divergent = false;
+            let pull_history_lineage = data.get("history_lineage").and_then(Value::as_str);
             for update in updates {
+                // `#deliverylineagestamp`: an update stamped with another CRDT
+                // history than this replica's registration is refused before it
+                // is decoded, even when every op id is new here (the shape the
+                // replica's own divergence check cannot see).
+                let stamped = update
+                    .get("history_lineage")
+                    .and_then(Value::as_str)
+                    .or(pull_history_lineage);
+                if delivery_history_lineage_mismatch(document.history_lineage.as_deref(), stamped) {
+                    divergent = true;
+                    break;
+                }
                 let Some(origin) = update.get("origin").and_then(Value::as_u64) else {
                     continue;
                 };

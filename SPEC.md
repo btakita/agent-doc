@@ -237,6 +237,23 @@
   and the Zed sidecar) refuses whole any update that restates a stored op id
   with a different character or origin, leaving the replica and buffer
   untouched. See [Real-Time Workflow](specs/14-realtime-workflow.md).
+- `#deliverylineagestamp`: every controller delivery names the CRDT history its
+  op ids belong to. The hub keeps a `history_lineage` beside its durable-frame
+  `lineage`; it changes only when the canonical is rebuilt from text (a
+  generation fence rotates `lineage` alone), survives a relay recreated from
+  retained state, and is restored from paired recovery metadata. The
+  `replica_register` ack returns it (`history_lineage`), and each `replica_pull`
+  update carries the history it was queued in (also stamped on the pull
+  response). JetBrains, VS Code and the Zed sidecar refuse a delta delivery
+  whose stamp differs from their registration's before any byte reaches the
+  native replica, and re-register; a registration from retained state sends
+  the retained `history_lineage` beside `state_vector_b64`, and a controller
+  whose history differs answers with a full bootstrap, no coverage proof, and a
+  retained canonical projection. A missing stamp or registration value is
+  unknown, never a mismatch, so older controllers and editors keep their
+  behaviour. This closes the cross-history delta whose op ids are all new to
+  the replica, which `apply_update_verified` cannot detect. See
+  [Real-Time Workflow](specs/14-realtime-workflow.md).
 - A selected-document focus that resolves a proven live-owner pane outside the
   active `agent-doc` window must surface that pane before selection. Promotion
   and selection share the editor focus-generation fence, and the controller

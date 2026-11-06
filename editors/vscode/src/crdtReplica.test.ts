@@ -6,6 +6,8 @@ CrdtReplicaManager,
 ControllerSocketReplicaTransport,
 coalescedReplicaTextChange,
 controllerReplicaPayload,
+    DELIVERY_HISTORY_LINEAGE_MISMATCH,
+    deliveryHistoryLineageMismatch,
   localReplicaBaselineDecision,
     parsePullDelivery,
     parsePullResponse,
@@ -1121,5 +1123,126 @@ describe('#editorauth2 forced re-registration keeps the retained frontier', () =
         assert.strictEqual(transport.registerStateVectors[0], null);
         assert.deepStrictEqual(transport.registerStateVectors[1], Buffer.from([7, 7]));
         manager.dispose();
+    });
+});
+
+describe('delivery history lineage (#deliverylineagestamp)', () => {
+    class StampedTransport implements ReplicaTransport {
+        pending: ReplicaRemoteUpdate[] = [];
+        registeredHistories: Array<string | null | undefined> = [];
+
+        constructor(private readonly historyLineage: string | null) {}
+
+        async register(
+            _filePath: string,
+            _identity: string,
+            _stateVector?: Uint8Array | null,
+            retainedHistoryLineage?: string | null,
+        ) {
+            this.registeredHistories.push(retainedHistoryLineage);
+            return { clientId: 42, bootstrap: Buffer.from([9]), historyLineage: this.historyLineage };
+        }
+
+        async broadcastUpdate(): Promise<void> {}
+
+        async pullUpdates(): Promise<ReplicaRemoteUpdate[]> {
+            return this.pending;
+        }
+
+        async deregister(): Promise<void> {}
+    }
+
+    const stamped = (generation: number, historyLineage: string | null): ReplicaRemoteUpdate => ({
+        patchId: `crdt:1:42:${generation}`,
+        origin: 1,
+        target: 42,
+        generation,
+        update: Buffer.from([generation]),
+        historyLineage,
+    });
+
+    it('refuses only two known, different histories', () => {
+        assert.equal(deliveryHistoryLineageMismatch('history-a', 'history-b'), true);
+        assert.equal(deliveryHistoryLineageMismatch('history-a', 'history-a'), false);
+        // An older controller stamps nothing: unknown, never a mismatch.
+        assert.equal(deliveryHistoryLineageMismatch('history-a', null), false);
+        assert.equal(deliveryHistoryLineageMismatch(null, 'history-b'), false);
+        assert.equal(deliveryHistoryLineageMismatch(undefined, undefined), false);
+        assert.equal(deliveryHistoryLineageMismatch('', 'history-b'), false);
+    });
+
+    it('parses the registration history and each update stamp, falling back to the pull stamp', () => {
+        const ack = parseRegisterResponse({
+            ok: true,
+            data: { client_id: 7, bootstrap_b64: 'AA==', history_lineage: 'history-a' },
+        });
+        assert.equal(ack?.historyLineage, 'history-a');
+        assert.equal(
+            parseRegisterResponse({ ok: true, data: { client_id: 7 } })?.historyLineage,
+            null,
+        );
+        const updates = parsePullResponse({
+            ok: true,
+            data: {
+                history_lineage: 'pull-history',
+                updates: [
+                    { patch_id: 'p1', generation: 1, update_b64: 'AA==', history_lineage: 'update-history' },
+                    { patch_id: 'p2', generation: 2, update_b64: 'AA==' },
+                ],
+            },
+        });
+        assert.deepEqual(updates.map((update) => update.historyLineage), ['update-history', 'pull-history']);
+        const legacy = parsePullResponse({
+            ok: true,
+            data: { updates: [{ patch_id: 'p1', generation: 1, update_b64: 'AA==' }] },
+        });
+        assert.equal(legacy[0].historyLineage, null);
+    });
+
+    it('refuses a delivery from another history before applying it', async () => {
+        const node = new FakeNode('base');
+        const transport = new StampedTransport('history-a');
+        transport.pending = [stamped(1, 'history-a'), stamped(2, 'history-b')];
+        const forwarder = new CrdtReplicaForwarder('plan.md', 'vscode:lineage', node, transport);
+        assert.equal(await forwarder.register(), true);
+
+        const delivery = await forwarder.pullRemoteDelivery();
+
+        assert.deepEqual(delivery, { kind: 'unavailable', reason: DELIVERY_HISTORY_LINEAGE_MISMATCH });
+        assert.equal(node.updates.length, 0, 'nothing reached the native replica');
+    });
+
+    it('keeps same-history and unstamped deliveries, and an older registration accepts all', async () => {
+        const transport = new StampedTransport('history-a');
+        transport.pending = [stamped(1, 'history-a'), stamped(2, null)];
+        const forwarder = new CrdtReplicaForwarder('plan.md', 'vscode:lineage', new FakeNode(), transport);
+        assert.equal(await forwarder.register(), true);
+        const delivery = await forwarder.pullRemoteDelivery();
+        assert.equal(delivery.kind, 'deltas');
+
+        const legacyTransport = new StampedTransport(null);
+        legacyTransport.pending = [stamped(1, 'history-b')];
+        const legacy = new CrdtReplicaForwarder('plan.md', 'vscode:legacy', new FakeNode(), legacyTransport);
+        assert.equal(await legacy.register(), true);
+        assert.equal((await legacy.pullRemoteDelivery()).kind, 'deltas');
+    });
+
+    it('names the retained history when re-registering from retained state', async () => {
+        class FrontierNode extends FakeNode {
+            stateVector(): Uint8Array | null {
+                return Buffer.from([2]);
+            }
+        }
+        const first = new StampedTransport('history-a');
+        const original = new CrdtReplicaForwarder('plan.md', 'vscode:lineage-1', new FrontierNode(), first);
+        assert.equal(await original.register(), true);
+        const resume = original.captureResumeState();
+        assert.equal(resume?.historyLineage, 'history-a');
+        const node = new FakeNode();
+
+        const second = new StampedTransport('history-b');
+        const replacement = new CrdtReplicaForwarder('plan.md', 'vscode:lineage-2', node, second, resume);
+        assert.equal(await replacement.register(), true);
+        assert.deepEqual(second.registeredHistories, ['history-a']);
     });
 });

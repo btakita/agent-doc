@@ -33,6 +33,7 @@ class CrdtReplicaForwarderTest {
                 stateVector: ByteArray?,
                 expectedCanonicalHash: String?,
                 provisionalReplacement: Boolean,
+                retainedHistoryLineage: String?,
             ): ReplicaRegisterAck? {
                 capturedHash = expectedCanonicalHash
                 return null
@@ -80,6 +81,7 @@ class CrdtReplicaForwarderTest {
                 stateVector: ByteArray?,
                 expectedCanonicalHash: String?,
                 provisionalReplacement: Boolean,
+                retainedHistoryLineage: String?,
             ): ReplicaRegisterAck {
                 registeredProvisionally = provisionalReplacement
                 return ReplicaRegisterAck(
@@ -192,6 +194,7 @@ class CrdtReplicaForwarderTest {
         private val canonicalContentHash: String? = null,
         var durablePushSucceeds: Boolean = true,
         private val broadcastFails: Boolean = false,
+        private val historyLineage: String? = null,
     ) : ReplicaTransport {
         var registered = false
         var registeredStateVector: ByteArray? = null
@@ -224,6 +227,7 @@ class CrdtReplicaForwarderTest {
                 retainedReplicaReseedPending = retainedReplicaReseedPending,
                 canonicalCoversRetainedFrontier = canonicalCoversRetainedFrontier,
                 canonicalContentHash = canonicalContentHash,
+                historyLineage = historyLineage,
             )
         }
 
@@ -666,6 +670,117 @@ class CrdtReplicaForwarderTest {
         )
         assertEquals(listOf(false), transport.projectedDiskStates)
         assertTrue(transport.pendingUpdates.isEmpty())
+    }
+
+    private fun stampedUpdate(historyLineage: String?) =
+        ReplicaRemoteUpdate(
+            patchId = "crdt:1:42:1",
+            origin = 1L,
+            target = 42L,
+            generation = 1L,
+            update = "FROM-PEER".toByteArray(),
+            historyLineage = historyLineage,
+        )
+
+    @Test
+    fun `delivery history lineage mismatch refuses only two known different histories`() {
+        assertTrue(deliveryHistoryLineageMismatchUtil("history-a", "history-b"))
+        assertFalse(deliveryHistoryLineageMismatchUtil("history-a", "history-a"))
+        // An older controller stamps nothing and an older registration recorded
+        // nothing: unknown, never a mismatch.
+        assertFalse(deliveryHistoryLineageMismatchUtil("history-a", null))
+        assertFalse(deliveryHistoryLineageMismatchUtil(null, "history-b"))
+        assertFalse(deliveryHistoryLineageMismatchUtil(null, null))
+        assertFalse(deliveryHistoryLineageMismatchUtil("", "history-b"))
+    }
+
+    @Test
+    fun `pulled update history falls back from its own stamp to the pull stamp`() {
+        val pull = com.google.gson.JsonObject().apply { addProperty("history_lineage", "pull-history") }
+        val stamped = com.google.gson.JsonObject().apply { addProperty("history_lineage", "update-history") }
+        val unstamped = com.google.gson.JsonObject()
+        assertEquals("update-history", replicaUpdateHistoryLineageUtil(stamped, pull))
+        assertEquals("pull-history", replicaUpdateHistoryLineageUtil(unstamped, pull))
+        assertNull(replicaUpdateHistoryLineageUtil(unstamped, com.google.gson.JsonObject()))
+        assertNull(replicaUpdateHistoryLineageUtil(unstamped, null))
+    }
+
+    @Test
+    fun `pull refuses a delivery stamped with another CRDT history before applying it`() {
+        val node = FakeNode()
+        val transport = CapturingTransport(bootstrap = "BASE".toByteArray(), historyLineage = "history-a")
+        transport.pendingUpdates.add(stampedUpdate("history-a"))
+        transport.pendingUpdates.add(stampedUpdate("history-b").copy(patchId = "crdt:1:42:2", generation = 2L))
+        val fwd = CrdtReplicaForwarder("plan.md", "intellij:lineage", node, transport)
+        assertTrue(fwd.register())
+
+        val delivery = fwd.pullRemoteDelivery()
+
+        assertEquals(ReplicaPullDelivery.Unavailable(DELIVERY_HISTORY_LINEAGE_MISMATCH), delivery)
+        assertTrue(
+            "a refused foreign-history delivery is a replica refresh request",
+            pullDeliveryRequestsReplicaRefreshUtil(delivery),
+        )
+        assertEquals("nothing reached the native replica", "BASE", node.text())
+    }
+
+    @Test
+    fun `pull keeps a same-history or unstamped delivery`() {
+        val transport = CapturingTransport(bootstrap = "BASE".toByteArray(), historyLineage = "history-a")
+        transport.pendingUpdates.add(stampedUpdate("history-a"))
+        transport.pendingUpdates.add(stampedUpdate(null).copy(patchId = "crdt:1:42:2", generation = 2L))
+        val fwd = CrdtReplicaForwarder("plan.md", "intellij:lineage", FakeNode(), transport)
+        assertTrue(fwd.register())
+
+        val delivery = fwd.pullRemoteDelivery()
+
+        assertTrue(delivery is ReplicaPullDelivery.Deltas)
+        assertEquals(2, (delivery as ReplicaPullDelivery.Deltas).updates.size)
+    }
+
+    @Test
+    fun `a registration from an older controller accepts every delivery`() {
+        val transport = CapturingTransport(bootstrap = "BASE".toByteArray(), historyLineage = null)
+        transport.pendingUpdates.add(stampedUpdate("history-b"))
+        val fwd = CrdtReplicaForwarder("plan.md", "intellij:lineage", FakeNode(), transport)
+        assertTrue(fwd.register())
+
+        assertTrue(fwd.pullRemoteDelivery() is ReplicaPullDelivery.Deltas)
+    }
+
+    @Test
+    fun `retained registration names the history its frontier counts`() {
+        val first = CapturingTransport(bootstrap = "BASE".toByteArray(), historyLineage = "history-a")
+        val original = CrdtReplicaForwarder("plan.md", "intellij:lineage-1", FakeNode(), first)
+        assertTrue(original.register())
+        val resume = original.captureResumeState()!!
+        assertEquals("history-a", resume.historyLineage)
+
+        val second = CapturingTransport(bootstrap = "BASE".toByteArray(), historyLineage = "history-b")
+        var sentHistory: String? = null
+        val capturing = object : ReplicaTransport by second {
+            override fun register(
+                filePath: String,
+                identity: String,
+                stateVector: ByteArray?,
+                expectedCanonicalHash: String?,
+                provisionalReplacement: Boolean,
+                retainedHistoryLineage: String?,
+            ): ReplicaRegisterAck? {
+                sentHistory = retainedHistoryLineage
+                return second.register(filePath, identity, stateVector)
+            }
+        }
+        val replacement =
+            CrdtReplicaForwarder("plan.md", "intellij:lineage-2", FakeNode(), capturing, resumeState = resume)
+        assertTrue(replacement.register())
+        assertEquals("history-a", sentHistory)
+        // The new registration adopts the controller's history for later pulls.
+        second.pendingUpdates.add(stampedUpdate("history-a"))
+        assertEquals(
+            ReplicaPullDelivery.Unavailable(DELIVERY_HISTORY_LINEAGE_MISMATCH),
+            replacement.pullRemoteDelivery(),
+        )
     }
 
     @Test

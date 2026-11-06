@@ -311,6 +311,29 @@ pub struct PendingReplicaUpdate {
     /// converged (#crdt-content-ack).
     pub expected_content_hash: String,
     pub update: Vec<u8>,
+    /// The hub's [`RelayHub::history_lineage`] when this update was encoded
+    /// (`#deliverylineagestamp`). An update names op ids of exactly one CRDT
+    /// history; the editor compares this stamp with the history lineage its
+    /// registration bootstrapped from and refuses a mismatch, which catches a
+    /// cross-history delta whose op ids are all new to the replica (the shape
+    /// [`ReplicaState::apply_update_verified`] cannot detect).
+    pub history_lineage: String,
+}
+
+/// Whether an editor replica must refuse a controller delivery
+/// (`#deliverylineagestamp`): its registration bootstrapped history
+/// `registered`, and the delivery is stamped with history `stamped`.
+///
+/// A missing value on either side is *unknown*, never a mismatch: an older
+/// controller sends no stamp and an older registration recorded none, and both
+/// keep the behaviour they had before the stamp existed. Only two known,
+/// different histories refuse.
+pub fn delivery_history_lineage_mismatch(registered: Option<&str>, stamped: Option<&str>) -> bool {
+    matches!(
+        (registered, stamped),
+        (Some(registered), Some(stamped))
+            if !registered.is_empty() && !stamped.is_empty() && registered != stamped
+    )
 }
 
 fn content_hash(text: &str) -> String {
@@ -676,6 +699,9 @@ pub struct RetainedCanonicalProjection {
     /// This is an in-memory controller handoff value, not a second authority.
     pub current_text: String,
     pub lineage: String,
+    /// [`RelayHub::history_lineage`] at the same frontier
+    /// (`#deliverylineagestamp`).
+    pub history_lineage: String,
     pub last_committed_text: Option<String>,
     pub last_committed_state_vector: Option<Vec<u8>>,
     pub compact_epoch_requested: bool,
@@ -702,6 +728,14 @@ pub struct RelayHub {
     /// the canonical is replaced from text/full-state rather than advanced by
     /// an update from that history.
     lineage: String,
+    /// Opaque identity of the CRDT *history* (op-id namespace) the canonical
+    /// extends (`#deliverylineagestamp`). Unlike [`Self::lineage`], which also
+    /// rotates to fence a superseded editor generation's durable frames while
+    /// the history is unchanged, this rotates only when the canonical is
+    /// rebuilt from text (a fresh epoch that mints `(canonical, 1..n)` again).
+    /// Every delivery and registration carries it, so an editor replica can
+    /// refuse a delivery from a history other than the one it bootstrapped.
+    history_lineage: String,
     /// Rolling-upgrade compatibility for plugins that predate lineage-tagged
     /// document-op frames. Once a replacement rotates lineage, untagged frames
     /// are ambiguous and must be quarantined.
@@ -1357,6 +1391,17 @@ impl RelayHub {
         self.legacy_document_ops_allowed = false;
     }
 
+    /// The canonical was just rebuilt from text: start a new history
+    /// (`#deliverylineagestamp`, `#replicapositiondrift`). Rotates both the
+    /// durable-frame lineage and the history lineage stamped on deliveries, and
+    /// retires every current member, whose editor replica still holds the old
+    /// history.
+    fn begin_rebuilt_history(&mut self) {
+        self.rotate_lineage();
+        self.history_lineage = self.lineage.clone();
+        self.retire_member_lineages();
+    }
+
     /// Fence durable frames produced by a superseded incarnation of one logical
     /// editor replica without changing the canonical text/state.
     ///
@@ -1548,10 +1593,14 @@ impl RelayHub {
         } = Self::build_liveness_core();
         let live_document_projection = cell_doc_tree_cutover_enabled()
             .then(|| Mutex::new(LiveDocumentProjection::new(&ctx, "")));
+        // A new hub starts one history; both identities begin equal and only
+        // diverge when a generation fence rotates `lineage` alone.
+        let lineage = Self::mint_lineage();
         Self {
             canonical: ReplicaState::new(canonical_id),
             canonical_id,
-            lineage: Self::mint_lineage(),
+            history_lineage: lineage.clone(),
+            lineage,
             legacy_document_ops_allowed: true,
             members: HashMap::new(),
             awareness: AwarenessChannel::new(),
@@ -1615,6 +1664,12 @@ impl RelayHub {
         hub.reset_live_document_projection(&recovered_text);
         if let Some(lineage) = lineage.filter(|value| !value.is_empty()) {
             hub.lineage = lineage.to_string();
+            // `#deliverylineagestamp`: the projection's history is the one that
+            // lineage named when it was persisted. If a generation fence rotated
+            // the durable lineage since the last rebuild this differs from what
+            // editors registered with, and they re-register (safe); otherwise
+            // their registrations stay valid across the restart.
+            hub.history_lineage = lineage.to_string();
         }
         hub.last_committed_text = Some(recovered_text);
         hub.last_committed_state_vector = Some(hub.canonical.state_vector());
@@ -1647,6 +1702,11 @@ impl RelayHub {
         if let Some(lineage) = (!projection.lineage.is_empty()).then_some(&projection.lineage) {
             hub.lineage = lineage.clone();
         }
+        if !projection.history_lineage.is_empty() {
+            // The retained state is the same history, so deliveries from the
+            // recreated relay stay acceptable to editors registered before it.
+            hub.history_lineage = projection.history_lineage.clone();
+        }
         hub.last_committed_text = projection.last_committed_text.clone();
         hub.last_committed_state_vector = projection.last_committed_state_vector.clone();
         hub.compact_epoch_requested = projection.compact_epoch_requested;
@@ -1671,6 +1731,7 @@ impl RelayHub {
             state: self.canonical.encode_state(),
             current_text: self.canonical.text(),
             lineage: self.lineage.clone(),
+            history_lineage: self.history_lineage.clone(),
             last_committed_text: self.last_committed_text.clone(),
             last_committed_state_vector: self.last_committed_state_vector.clone(),
             compact_epoch_requested: self.compact_epoch_requested,
@@ -1683,6 +1744,12 @@ impl RelayHub {
 
     pub fn lineage(&self) -> &str {
         &self.lineage
+    }
+
+    /// The CRDT history this hub's canonical extends (`#deliverylineagestamp`).
+    /// See the `history_lineage` field.
+    pub fn history_lineage(&self) -> &str {
+        &self.history_lineage
     }
 
     /// The canonical (authoritative) converged text.
@@ -2548,6 +2615,7 @@ impl RelayHub {
             return;
         }
         let expected_content_hash = content_hash(&self.canonical.text());
+        let history_lineage = self.history_lineage.clone();
         for target in &packet.targets {
             let Some(member) = self.members.get_mut(target) else {
                 continue;
@@ -2571,6 +2639,7 @@ impl RelayHub {
                 generation,
                 expected_content_hash: expected_content_hash.clone(),
                 update: packet.update.clone(),
+                history_lineage: history_lineage.clone(),
             });
         }
         // Queueing work for any live member un-converges delivery.
@@ -2598,6 +2667,7 @@ impl RelayHub {
         let expected_content_hash = content_hash(&self.canonical.text());
         let canonical_state = self.canonical.encode_state();
         let canonical_id = self.canonical_id;
+        let history_lineage = self.history_lineage.clone();
         let member = self
             .members
             .get_mut(&client_id)
@@ -2623,6 +2693,7 @@ impl RelayHub {
             generation,
             expected_content_hash,
             update: canonical_state,
+            history_lineage,
         });
         self.bump_delivery_epoch();
         Ok(true)
@@ -3277,8 +3348,7 @@ impl RelayHub {
         let bootstrap = fresh.encode_state();
         self.canonical = fresh;
         self.sync_live_document_projection(&before_text, on_disk);
-        self.rotate_lineage();
-        self.retire_member_lineages();
+        self.begin_rebuilt_history();
         let ids: Vec<u64> = self.members.keys().copied().collect();
         for id in ids {
             let replica = ReplicaState::from_encoded(id, &bootstrap)?;
@@ -3428,8 +3498,7 @@ impl RelayHub {
         let bootstrap = fresh.encode_state();
         self.canonical = fresh;
         self.sync_live_document_projection(before_text, text);
-        self.rotate_lineage();
-        self.retire_member_lineages();
+        self.begin_rebuilt_history();
         let ids: Vec<u64> = self.members.keys().copied().collect();
         for id in ids {
             let replica = ReplicaState::from_encoded(id, &bootstrap)?;
@@ -6659,6 +6728,100 @@ mod tests {
         assert!(recovered.retained_replica_reseed_pending());
         assert!(!recovered.commit_barrier_ready().unwrap());
         assert!(!recovered.commit_barrier().unwrap());
+    }
+
+    /// `#deliverylineagestamp`: the history lineage names the op-id namespace.
+    /// A generation fence rotates only the durable-frame lineage; a text
+    /// rebuild starts a new history; recovery keeps the history it can prove.
+    #[test]
+    fn history_lineage_survives_a_generation_fence_and_rotates_with_a_text_rebuild() {
+        let mut hub = RelayHub::from_text(1, "- do [#a]\n- do [#b]\n");
+        hub.register(7).unwrap();
+        let history = hub.history_lineage().to_string();
+        assert_eq!(hub.lineage(), history, "a new hub starts one history");
+
+        hub.fence_replica_generation();
+        assert_ne!(hub.lineage(), history, "the fence rotates the durable lineage");
+        assert_eq!(
+            hub.history_lineage(),
+            history,
+            "a generation fence keeps the op-id namespace"
+        );
+        assert!(hub.ensure_canonical_projection_receipt(7).unwrap());
+        let queued = hub.pending_updates(7).unwrap();
+        assert!(!queued.is_empty());
+        assert!(
+            queued.iter().all(|update| update.history_lineage == history),
+            "a queued delivery is stamped with the history it was encoded in"
+        );
+
+        let text = hub.canonical_text();
+        hub.compact_authoritative_epoch(&text).unwrap();
+        assert_ne!(hub.history_lineage(), history, "a text rebuild starts a new history");
+        assert_eq!(hub.history_lineage(), hub.lineage());
+        assert!(hub.member_lineage_retired(7));
+
+        let retained = hub.retained_canonical_projection();
+        let recreated = RelayHub::from_retained_canonical_projection(1, &retained).unwrap();
+        assert_eq!(
+            recreated.history_lineage(),
+            hub.history_lineage(),
+            "a relay recreated around retained state keeps its history"
+        );
+        let state = hub.canonical_encoded_state();
+        let recovered =
+            RelayHub::recover_from_projection_with_lineage(1, &state, Some(hub.lineage())).unwrap();
+        assert_eq!(recovered.history_lineage(), hub.history_lineage());
+        let unpaired = RelayHub::recover_from_projection(1, &state).unwrap();
+        assert_ne!(
+            unpaired.history_lineage(),
+            hub.history_lineage(),
+            "without paired metadata the history cannot be proven, so it is new"
+        );
+    }
+
+    /// `#deliverylineagestamp`: the out-of-band reconcile rebuild keeps queued
+    /// updates, so a queued update must still name the history it was encoded
+    /// in rather than the hub's current one.
+    #[test]
+    fn an_update_queued_before_a_rebuild_keeps_the_history_it_was_encoded_in() {
+        let mut hub = RelayHub::from_text(1, "- do [#a]\n");
+        hub.register(7).unwrap();
+        let history = hub.history_lineage().to_string();
+        assert!(hub.ensure_canonical_projection_receipt(7).unwrap());
+
+        assert!(
+            hub.reconcile_canonical_against_baseline("- do [#b]\n- do [#c]\n")
+                .unwrap(),
+            "the out-of-band correction rebuilds the canonical"
+        );
+        assert_ne!(hub.history_lineage(), history);
+
+        let queued = hub.pending_updates(7).unwrap();
+        assert!(!queued.is_empty(), "this rebuild path keeps queued updates");
+        assert!(
+            queued
+                .iter()
+                .all(|update| update.history_lineage == history),
+            "the stamp is the encoding history, so a replica in the new history refuses it"
+        );
+    }
+
+    #[test]
+    fn delivery_history_lineage_mismatch_refuses_only_two_known_different_histories() {
+        assert!(delivery_history_lineage_mismatch(Some("a"), Some("b")));
+        assert!(!delivery_history_lineage_mismatch(Some("a"), Some("a")));
+        assert!(
+            !delivery_history_lineage_mismatch(Some("a"), None),
+            "an older controller sends no stamp: unknown, not a mismatch"
+        );
+        assert!(
+            !delivery_history_lineage_mismatch(None, Some("b")),
+            "a registration from an older controller recorded none"
+        );
+        assert!(!delivery_history_lineage_mismatch(None, None));
+        assert!(!delivery_history_lineage_mismatch(Some(""), Some("b")));
+        assert!(!delivery_history_lineage_mismatch(Some("a"), Some("")));
     }
 
     #[test]

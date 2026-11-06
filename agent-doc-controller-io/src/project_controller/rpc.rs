@@ -11490,6 +11490,11 @@ struct ControllerCrdtReplicaPayload {
     identity: Option<String>,
     #[serde(default)]
     state_vector_b64: Option<String>,
+    /// `#deliverylineagestamp`: the `history_lineage` the editor's previous
+    /// registration returned, sent beside `state_vector_b64` so a retained
+    /// replica from another CRDT history is bootstrapped in full.
+    #[serde(default)]
+    history_lineage: Option<String>,
     expected_canonical_hash: Option<String>,
     #[serde(default)]
     provisional_replacement: bool,
@@ -16489,10 +16494,11 @@ fn controller_crdt_replica_data(
                 .editor_pid
                 .or_else(|| agent_doc_crdt_relay_io::editor_process_id_from_identity(identity));
             let registration =
-                agent_doc_crdt_relay_io::register_replica_for_file_with_precondition_and_replacement_mode(
+                agent_doc_crdt_relay_io::register_replica_for_file_with_retained_history(
                     canonical,
                     identity,
                     retained_state_vector.as_deref(),
+                    payload.history_lineage.as_deref(),
                     resolved_editor_pid,
                     durable_projection_retained,
                     payload.expected_canonical_hash.as_deref(),
@@ -16535,6 +16541,10 @@ fn controller_crdt_replica_data(
                         "canonical_content_hash": registration.canonical_content_hash,
                         "lineage": agent_doc_crdt_relay_io::current_lineage_for_file(canonical)?
                             .context("registered replica is missing its canonical lineage")?,
+                        // `#deliverylineagestamp`: the CRDT history this bootstrap
+                        // belongs to. The editor refuses any later delivery stamped
+                        // with a different one.
+                        "history_lineage": registration.history_lineage,
                     }))
                 }
                 None => Ok(crdt_replica_refused_data("detached_authority")),
@@ -16622,9 +16632,14 @@ fn controller_crdt_replica_data(
             if let Some(canonical_text) =
                 agent_doc_crdt_relay_io::pull_rebootstrap_for_file(canonical, identity)?
             {
+                // A replace delivery is installed as text and followed by a fresh
+                // registration, so its stamp is informational only.
                 return Ok(serde_json::json!({
                     "kind": "replace",
                     "replace": canonical_text,
+                    "history_lineage": agent_doc_crdt_relay_io::current_history_lineage_for_file(
+                        canonical,
+                    )?,
                 }));
             }
             match agent_doc_crdt_relay_io::pull_replica_updates_for_file(canonical, identity)? {
@@ -16640,6 +16655,9 @@ fn controller_crdt_replica_data(
                                 "generation": update.generation,
                                 "expected_content_hash": update.expected_content_hash,
                                 "update_b64": base64_standard_encode(&update.update),
+                                // `#deliverylineagestamp`: the history these op ids
+                                // belong to, stamped when the update was queued.
+                                "history_lineage": update.history_lineage,
                             })
                         })
                         .collect();
@@ -16650,6 +16668,7 @@ fn controller_crdt_replica_data(
                         "current_generation": pull.delivery.current_generation,
                         "last_ack_generation": pull.delivery.last_ack_generation,
                         "pending_updates": pull.delivery.pending_updates,
+                        "history_lineage": pull.history_lineage,
                     }))
                 }
                 // The authority gate above already proved this document is
@@ -71348,6 +71367,79 @@ body
         ));
     }
 
+    /// `#deliverylineagestamp`: the wire contract the editors parse. The
+    /// foreign-history case is told apart by `canonical_covers_retained_frontier`,
+    /// not `bootstrap_kind`: the receipt queued below already forces a full
+    /// bootstrap, so `full` alone would pass with the request field ignored.
+    #[test]
+    fn replica_rpc_stamps_deliveries_and_honours_the_retained_history_lineage() {
+        let _env = reliable_sync_env_lock();
+        let dir = tempfile::TempDir::new().unwrap();
+        let file = dir.path().join("sample-session.md");
+        std::fs::write(&file, "---\nagent_doc_session: sample\n---\nbody\n").unwrap();
+        let canonical = file.canonicalize().unwrap();
+        let identity = format!(
+            "jetbrains-{}-stamped:{}",
+            std::process::id(),
+            canonical.display()
+        );
+        let call = |method, fields: serde_json::Value| {
+            let mut value = serde_json::json!({
+                "method": match method {
+                    ControllerCrdtReplicaMethod::Register => "replica_register",
+                    _ => "replica_pull",
+                },
+                "editor_pid": std::process::id(),
+            });
+            value
+                .as_object_mut()
+                .unwrap()
+                .extend(fields.as_object().unwrap().clone());
+            let payload: ControllerCrdtReplicaPayload = serde_json::from_value(value).unwrap();
+            controller_crdt_replica_data(None, &canonical, method, &identity, &payload).unwrap()
+        };
+
+        let registered = call(ControllerCrdtReplicaMethod::Register, serde_json::json!({}));
+        let history = registered["history_lineage"]
+            .as_str()
+            .expect("the register ack names the history")
+            .to_string();
+        agent_doc_crdt_relay_io::ensure_canonical_projection_receipt_for_file(
+            &canonical, &identity,
+        )
+        .unwrap()
+        .expect("the registered member queues a receipt");
+
+        let pulled = call(ControllerCrdtReplicaMethod::Pull, serde_json::json!({}));
+        assert_eq!(pulled["kind"], "delta");
+        assert_eq!(pulled["history_lineage"], history.as_str());
+        let updates = pulled["updates"].as_array().unwrap();
+        assert!(!updates.is_empty(), "{pulled}");
+        assert!(
+            updates
+                .iter()
+                .all(|update| update["history_lineage"] == history.as_str()),
+            "{pulled}"
+        );
+
+        let frontier = registered["canonical_state_vector_b64"].clone();
+        let same = call(
+            ControllerCrdtReplicaMethod::Register,
+            serde_json::json!({ "state_vector_b64": frontier, "history_lineage": history }),
+        );
+        assert_eq!(same["canonical_covers_retained_frontier"], true, "{same}");
+        let foreign = call(
+            ControllerCrdtReplicaMethod::Register,
+            serde_json::json!({ "state_vector_b64": frontier, "history_lineage": "another-history" }),
+        );
+        assert!(
+            foreign["canonical_covers_retained_frontier"].is_null(),
+            "{foreign}"
+        );
+        assert_eq!(foreign["bootstrap_kind"], "full", "{foreign}");
+        assert_eq!(foreign["history_lineage"], history.as_str());
+    }
+
     #[test]
     fn retained_capture_is_rearmed_when_a_live_editor_replica_registers() {
         let _env = reliable_sync_env_lock();
@@ -71366,6 +71458,7 @@ body
             method: ControllerCrdtReplicaMethod::Register,
             identity: None,
             state_vector_b64,
+            history_lineage: None,
             expected_canonical_hash: None,
             provisional_replacement: false,
             expected_canonical_state_vector_b64: None,
@@ -71561,6 +71654,7 @@ body
                 method: ControllerCrdtReplicaMethod::Pull,
                 identity: Some("jetbrains:prior-controller".into()),
                 state_vector_b64: None,
+                history_lineage: None,
                 expected_canonical_hash: None,
                 provisional_replacement: false,
                 expected_canonical_state_vector_b64: None,

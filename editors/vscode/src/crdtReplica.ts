@@ -26,11 +26,15 @@ export interface ReplicaRegisterAck {
     lineage?: string | null;
     bootstrapKind?: 'full' | 'delta';
     canonicalStateVector?: Uint8Array | null;
+    /** `#deliverylineagestamp`: the CRDT history the bootstrap belongs to. */
+    historyLineage?: string | null;
 }
 
 export interface ReplicaResumeState {
     encodedState: Uint8Array;
     stateVector: Uint8Array;
+    /** `#deliverylineagestamp`: the CRDT history `encodedState` belongs to, if known. */
+    historyLineage?: string | null;
 }
 
 export interface ReplicaRemoteUpdate {
@@ -40,13 +44,35 @@ export interface ReplicaRemoteUpdate {
     generation: number;
     expectedContentHash?: string;
     update: Uint8Array;
+    /** `#deliverylineagestamp`: the CRDT history `update` was encoded in, if stamped. */
+    historyLineage?: string | null;
 }
+
+/**
+ * `#deliverylineagestamp`: whether a replica registered in history `registered`
+ * must refuse a delivery stamped with history `stamped`. Op ids name characters
+ * of exactly one history, and a delivery from another history whose ids are all
+ * new merges without error at the wrong place, so the stamp is the only
+ * evidence. A missing value on either side is unknown, never a mismatch (an
+ * older controller stamps nothing). Mirrors the shared Rust
+ * `delivery_history_lineage_mismatch` and the JetBrains util.
+ */
+export function deliveryHistoryLineageMismatch(
+    registered: string | null | undefined,
+    stamped: string | null | undefined,
+): boolean {
+    return !!registered && !!stamped && registered !== stamped;
+}
+
+/** Typed `unavailable` reason for a refused foreign-history delivery. */
+export const DELIVERY_HISTORY_LINEAGE_MISMATCH = 'delivery_history_lineage_mismatch';
 
 export interface ReplicaTransport {
     register(
         filePath: string,
         identity: string,
         stateVector?: Uint8Array | null,
+        retainedHistoryLineage?: string | null,
     ): Promise<ReplicaRegisterAck | null>;
     broadcastUpdate(filePath: string, identity: string, update: Uint8Array): Promise<void>;
     pushDocumentOps?(filePath: string, lineage: string | null, deltaJson: string): Promise<boolean>;
@@ -309,11 +335,19 @@ export function parseRegisterResponse(response: ControllerResponse): ReplicaRegi
         lineage: typeof response.data.lineage === 'string' ? response.data.lineage : null,
         bootstrapKind: response.data.bootstrap_kind === 'delta' ? 'delta' : 'full',
         canonicalStateVector: decodeBase64(response.data.canonical_state_vector_b64),
+        historyLineage: typeof response.data.history_lineage === 'string'
+            ? response.data.history_lineage
+            : null,
     };
 }
 
 export function parsePullResponse(response: ControllerResponse): ReplicaRemoteUpdate[] {
     if (!response.ok || !isRecord(response.data) || !Array.isArray(response.data.updates)) return [];
+    // `#deliverylineagestamp`: each update names its history; the pull-level
+    // stamp covers a controller that stamps only the response.
+    const pullHistoryLineage = typeof response.data.history_lineage === 'string'
+        ? response.data.history_lineage
+        : null;
     return response.data.updates.flatMap((entry): ReplicaRemoteUpdate[] => {
         if (!isRecord(entry)) return [];
         const patchId = typeof entry.patch_id === 'string' ? entry.patch_id : null;
@@ -324,8 +358,11 @@ export function parsePullResponse(response: ControllerResponse): ReplicaRemoteUp
             ? entry.expected_content_hash
             : undefined;
         const update = decodeBase64(entry.update_b64);
+        const historyLineage = typeof entry.history_lineage === 'string'
+            ? entry.history_lineage
+            : pullHistoryLineage;
         if (!patchId || generation == null || update == null) return [];
-        return [{ patchId, origin, target, generation, expectedContentHash, update }];
+        return [{ patchId, origin, target, generation, expectedContentHash, update, historyLineage }];
     });
 }
 
@@ -394,10 +431,16 @@ export class ControllerSocketReplicaTransport implements ReplicaTransport {
         filePath: string,
         identity: string,
         stateVector?: Uint8Array | null,
+        retainedHistoryLineage?: string | null,
     ): Promise<ReplicaRegisterAck | null> {
         const response = await this.send(this.controllerRequest('replica_register', filePath, identity, {
             ...(stateVector
                 ? { state_vector_b64: Buffer.from(stateVector).toString('base64') }
+                : {}),
+            // `#deliverylineagestamp`: name the history the retained frontier
+            // counts, so a controller in another history bootstraps in full.
+            ...(stateVector && retainedHistoryLineage
+                ? { history_lineage: retainedHistoryLineage }
                 : {}),
         }));
         return response ? parseRegisterResponse(response) : null;
@@ -533,6 +576,13 @@ export class CrdtReplicaForwarder {
     private clientId = 0;
     private pushedVersion: Uint8Array | null = null;
     private lineage: string | null = null;
+    /**
+     * `#deliverylineagestamp`: the CRDT history this registration bootstrapped.
+     * Unlike `lineage` (the durable-frame fence a sibling replacement may
+     * rotate), it changes only when the controller rebuilds its canonical from
+     * text. Null from a controller that predates the stamp.
+     */
+    private historyLineage: string | null = null;
     private readonly ownership = new MergeOwnershipStateChart();
 
     constructor(
@@ -560,10 +610,12 @@ export class CrdtReplicaForwarder {
             this.filePath,
             this.identity,
             this.resumeState?.stateVector,
+            this.resumeState?.historyLineage ?? null,
         );
         if (!ack) return false;
         this.clientId = ack.clientId;
         this.lineage = ack.lineage ?? null;
+        this.historyLineage = ack.historyLineage ?? null;
         const incremental = ack.bootstrapKind === 'delta';
         if (incremental && (!this.resumeState || !ack.canonicalStateVector)) {
             await this.transport.deregister(this.filePath, this.identity);
@@ -642,6 +694,7 @@ export class CrdtReplicaForwarder {
         return {
             encodedState: encodedState.slice(),
             stateVector: stateVector.slice(),
+            historyLineage: this.historyLineage,
         };
     }
 
@@ -652,14 +705,23 @@ export class CrdtReplicaForwarder {
 
     /** D2: pull the pending delivery (normal deltas, or a replace delivery whose
      * text the caller installs wholesale for an out-of-band deletion re-bootstrap). */
-    pullRemoteDelivery(): Promise<ReplicaPullDelivery> {
-        if (!this.attached) return Promise.resolve({ kind: 'deltas', updates: [] });
-        if (this.transport.pullDelivery) {
-            return this.transport.pullDelivery(this.filePath, this.identity);
+    async pullRemoteDelivery(): Promise<ReplicaPullDelivery> {
+        if (!this.attached) return { kind: 'deltas', updates: [] };
+        const delivery: ReplicaPullDelivery = this.transport.pullDelivery
+            ? await this.transport.pullDelivery(this.filePath, this.identity)
+            : { kind: 'deltas', updates: await this.transport.pullUpdates(this.filePath, this.identity) };
+        // `#deliverylineagestamp`: refuse, before any byte reaches the native
+        // replica, a delivery encoded in another CRDT history than this
+        // registration's. The manager answers `unavailable` by re-registering,
+        // naming this history beside the retained frontier.
+        if (
+            delivery.kind === 'deltas' &&
+            delivery.updates.some((update) =>
+                deliveryHistoryLineageMismatch(this.historyLineage, update.historyLineage))
+        ) {
+            return { kind: 'unavailable', reason: DELIVERY_HISTORY_LINEAGE_MISMATCH };
         }
-        return this.transport
-            .pullUpdates(this.filePath, this.identity)
-            .then((updates) => ({ kind: 'deltas', updates }));
+        return delivery;
     }
 
     projectVisibleState(text: string, diskPersisted = false): Promise<boolean> {
@@ -678,6 +740,7 @@ export class CrdtReplicaForwarder {
         this.node.close(this.clientId);
         this.pushedVersion = null;
         this.lineage = null;
+        this.historyLineage = null;
         if (!this.ownership.send('editor_detached')) {
             throw new Error(
                 `merge-ownership chart rejected editor detach from ${this.ownership.phase}`,

@@ -2174,6 +2174,43 @@ The FFI apply returns `-4` and the Zed sidecar re-registers from its visible
 buffer. A cross-history delta whose ids are all new to the replica cannot be
 told apart there; the controller-side retirement is what stops those.
 
+**Every delivery names its CRDT history (`#deliverylineagestamp`).** Retirement
+depends on the controller knowing which members predate a rebuild; a member
+reattached by a replacement controller, a pending update queued before a
+rebuild, or any other path where a delivery and the replica's bootstrap come
+from different histories leaves an apply whose op ids are all new to the
+replica and that merges without error at the wrong place. The stamp makes that
+case visible at the replica. The hub keeps `history_lineage`, the identity of
+its op-id namespace, separately from `lineage`, the durable-frame fence: a
+generation fence (one editor replacing its own registration) rotates `lineage`
+but leaves the history, so it never forces other editors to re-register, while
+every rebuild from text rotates both. A relay recreated around retained state
+keeps the history, and recovery from a durable projection restores it from the
+paired lineage metadata (without metadata the history cannot be proven and a
+new one is minted). Wire contract:
+
+- `replica_register` ack: `history_lineage`, read under the same hub lock as
+  the bootstrap.
+- `replica_pull` delta delivery: each update's `history_lineage` is the history
+  it was queued in; the response's `history_lineage` is the hub's current one
+  and stands in for an update that carries none. A replace delivery carries it
+  for diagnostics only, since its text is installed and then re-registered.
+- `replica_register` request: an editor registering from a retained replica
+  sends that replica's `history_lineage` beside `state_vector_b64`. A
+  controller whose history differs answers with a full bootstrap, no
+  `canonical_covers_retained_frontier` answer, and a retained canonical
+  projection (`crdt_replica_register_history_lineage_mismatch` in ops.log). A
+  fresh controller reseeding from that retained replica is exempt: its empty
+  canonical adopts the replica's history.
+
+JetBrains (all generations, through the classic sources), VS Code and the Zed
+sidecar refuse a delta delivery whose stamp differs from their registration's
+history before decoding or applying it, and answer as for transport loss
+(`delivery_history_lineage_mismatch`): they re-register, naming the retained
+history. A missing value on either side is unknown, never a mismatch, so an
+older controller (no stamp) or an older editor (no registration value, no
+request field) keeps its previous behaviour.
+
 The answer is the canonical-relative splices that produce the merge, so the
 plugin forwards them exactly like a translated batch: on the attached endpoint
 when it already holds that canonical, otherwise on a replacement registered at

@@ -23,9 +23,142 @@ use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 const PULL_INTERVAL: Duration = Duration::from_millis(250);
+
+/// `#divergentapplyreregister`: minimum gap between immediate re-registers of
+/// one document after its replica refused a delivery as a divergent CRDT
+/// history (FFI -4). One re-register installs a full bootstrap in the
+/// controller's current history, so a second refusal inside the window means
+/// the controller keeps encoding against another one. Inside the window the
+/// refusal falls back to the controller's redelivery budget and lineage
+/// retirement. Mirrors the JetBrains and VS Code constant.
+const DIVERGENT_HISTORY_REREGISTER_MIN_INTERVAL_MS: u64 = 30_000;
+
+/// Whether a divergent-history re-register is allowed now.
+///
+/// A clock rollback (`now_ms < last`) permits the re-register instead of
+/// suppressing it until the wall clock catches the stamp.
+fn divergent_history_reregister_due(now_ms: u64, last_attempt_ms: Option<u64>) -> bool {
+    match last_attempt_ms {
+        None => true,
+        Some(last) => {
+            now_ms < last
+                || now_ms.saturating_sub(last) >= DIVERGENT_HISTORY_REREGISTER_MIN_INTERVAL_MS
+        }
+    }
+}
+
+fn unix_epoch_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|elapsed| u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX))
+        .unwrap_or(0)
+}
+
+/// What one pulled delivery did to the open replica.
+enum PulledUpdateEffect {
+    /// `#deliverylineagestamp`: another history, refused before decode.
+    /// Re-register immediately; this is not the -4 window.
+    LineageMismatch,
+    /// FFI -4. The document is marked. The caller runs the guarded re-register
+    /// and does not project this batch.
+    DivergentHistory,
+    /// Already marked. Nothing in this pull was applied.
+    AlreadyDivergent,
+    /// Same-history updates. `changed` is false when the pull had nothing to apply.
+    Applied { changed: bool },
+}
+
+/// Apply one `replica_pull` body, or refuse it.
+///
+/// A replica already marked divergent is not touched, even when this pull is
+/// empty: the mark outlives the refused delivery.
+fn apply_pulled_updates(document: &mut OpenDocument, data: &Value) -> PulledUpdateEffect {
+    if document.history_divergent {
+        return PulledUpdateEffect::AlreadyDivergent;
+    }
+    let Some(updates) = data.get("updates").and_then(Value::as_array) else {
+        return PulledUpdateEffect::Applied { changed: false };
+    };
+    let pull_history_lineage = data.get("history_lineage").and_then(Value::as_str);
+    let mut changed = false;
+    for update in updates {
+        // `#deliverylineagestamp`: an update stamped with another CRDT history
+        // than this replica's registration is refused before it is decoded,
+        // even when every op id is new here.
+        let stamped = update
+            .get("history_lineage")
+            .and_then(Value::as_str)
+            .or(pull_history_lineage);
+        if delivery_history_lineage_mismatch(document.history_lineage.as_deref(), stamped) {
+            return PulledUpdateEffect::LineageMismatch;
+        }
+        let Some(origin) = update.get("origin").and_then(Value::as_u64) else {
+            continue;
+        };
+        if origin == document.client_id {
+            continue;
+        }
+        let Some(bytes) = update
+            .get("update_b64")
+            .and_then(Value::as_str)
+            .and_then(|encoded| BASE64_STANDARD.decode(encoded).ok())
+        else {
+            continue;
+        };
+        match document.replica.apply_update_verified(&bytes) {
+            Ok(()) => changed = true,
+            // `#replicapositiondrift`: encoded against another CRDT history.
+            // Leave the buffer alone. The caller re-registers, inside the
+            // one-per-document window.
+            Err(error) if error.is::<DivergentHistory>() => {
+                document.history_divergent = true;
+                return PulledUpdateEffect::DivergentHistory;
+            }
+            Err(_) => continue,
+        }
+    }
+    PulledUpdateEffect::Applied { changed }
+}
+
+enum DivergentReregisterDecision {
+    NotDivergent,
+    /// An in-flight editor edit. Do not stamp the window.
+    Deferred,
+    /// Inside the window. Leave the member for controller lineage retirement.
+    Suppressed {
+        since_last_ms: u64,
+    },
+    /// Stamp `now_ms` and re-register from the visible buffer.
+    Attempt {
+        visible: String,
+    },
+}
+
+fn divergent_reregister_decision(
+    document: &OpenDocument,
+    now_ms: u64,
+    last_attempt_ms: Option<u64>,
+) -> DivergentReregisterDecision {
+    if !document.history_divergent {
+        return DivergentReregisterDecision::NotDivergent;
+    }
+    // The shadow is the visible buffer. An in-flight `workspace/applyEdit`
+    // means that buffer has not echoed yet, so the swap is not stable.
+    if document.pending_apply_target.is_some() {
+        return DivergentReregisterDecision::Deferred;
+    }
+    if !divergent_history_reregister_due(now_ms, last_attempt_ms) {
+        return DivergentReregisterDecision::Suppressed {
+            since_last_ms: now_ms.saturating_sub(last_attempt_ms.unwrap_or(now_ms)),
+        };
+    }
+    DivergentReregisterDecision::Attempt {
+        visible: document.shadow.clone(),
+    }
+}
 
 /// Set by the Zed extension: the version in `editors/zed/extension.toml` of
 /// the extension that launched this server.
@@ -43,6 +176,10 @@ struct OpenDocument {
     replica: ReplicaState,
     shadow: String,
     pending_apply_target: Option<String>,
+    /// `#divergentapplyreregister`: a delivery was refused as another CRDT
+    /// history (FFI -4). Later polls must not apply to this replica; they
+    /// retry a guarded re-register instead. Outlives the refused delivery.
+    history_divergent: bool,
 }
 
 pub fn run() -> Result<()> {
@@ -118,6 +255,10 @@ struct Server<W, I> {
     next_request_id: u64,
     shutdown_requested: bool,
     binary_watch: Option<BinaryWatch>,
+    /// `#divergentapplyreregister`: last divergent-history re-register attempt
+    /// per document URI. Survives the detach and attach that replace the
+    /// document, and is carried through binary handoff.
+    divergent_history_reregister_at_ms: HashMap<String, u64>,
 }
 
 impl<W: Write, I: LspInput> Server<W, I> {
@@ -131,6 +272,7 @@ impl<W: Write, I: LspInput> Server<W, I> {
             next_request_id: 1,
             shutdown_requested: false,
             binary_watch: None,
+            divergent_history_reregister_at_ms: HashMap::new(),
         }
     }
 
@@ -143,6 +285,10 @@ impl<W: Write, I: LspInput> Server<W, I> {
         self.pending_input = pending;
         for document in session.documents {
             self.documents.insert(document.uri.clone(), document);
+        }
+        for stamp in session.divergent_history_reregister_at_ms {
+            self.divergent_history_reregister_at_ms
+                .insert(stamp.uri, stamp.at_ms);
         }
     }
 
@@ -228,6 +374,14 @@ impl<W: Write, I: LspInput> Server<W, I> {
                 .documents
                 .values()
                 .map(HandoffDocument::capture)
+                .collect(),
+            divergent_history_reregister_at_ms: self
+                .divergent_history_reregister_at_ms
+                .iter()
+                .map(|(uri, at_ms)| handoff::DivergentReregisterStamp {
+                    uri: uri.clone(),
+                    at_ms: *at_ms,
+                })
                 .collect(),
         }
     }
@@ -435,6 +589,14 @@ impl<W: Write, I: LspInput> Server<W, I> {
         let Some(document) = self.documents.get_mut(uri) else {
             return;
         };
+        if document.history_divergent {
+            // The replica's op ids belong to a retired history. Publishing a
+            // local edit from it would encode the operator's text there.
+            // Keep the visible buffer; the guarded re-register bootstraps it.
+            document.pending_apply_target = None;
+            document.shadow = text.to_string();
+            return;
+        }
         document.pending_apply_target = None;
         if document.replica.text() == text {
             document.shadow = text.to_string();
@@ -552,6 +714,7 @@ impl<W: Write, I: LspInput> Server<W, I> {
             replica,
             shadow: editor_text.to_string(),
             pending_apply_target: None,
+            history_divergent: false,
         };
         publish_replica_projection(&document, false);
 
@@ -608,112 +771,157 @@ impl<W: Write, I: LspInput> Server<W, I> {
     fn poll_remote_updates(&mut self) {
         let uris: Vec<String> = self.documents.keys().cloned().collect();
         for uri in uris {
-            let Some(document) = self.documents.get_mut(&uri) else {
-                continue;
-            };
-            let Ok(data) = controller_replica_request(
-                &document.project_root,
-                &document.file,
-                "replica_pull",
-                &document.identity,
-                Value::Null,
-            ) else {
-                continue;
+            let data = {
+                let Some(document) = self.documents.get(&uri) else {
+                    continue;
+                };
+                match controller_replica_request(
+                    &document.project_root,
+                    &document.file,
+                    "replica_pull",
+                    &document.identity,
+                    Value::Null,
+                ) {
+                    Ok(data) => data,
+                    Err(_) => continue,
+                }
             };
             if data.get("kind").and_then(Value::as_str) == Some("replace") {
                 // A replace-capable recovery is fenced through a fresh registration
                 // so the local node receives the controller's current CRDT lineage.
-                let visible = document.shadow.clone();
-                let uri = document.uri.clone();
-                self.detach(&uri);
-                self.attach(&uri, &visible);
-                continue;
-            }
-            let Some(updates) = data.get("updates").and_then(Value::as_array) else {
-                continue;
-            };
-            let mut changed = false;
-            let mut divergent = false;
-            let pull_history_lineage = data.get("history_lineage").and_then(Value::as_str);
-            for update in updates {
-                // `#deliverylineagestamp`: an update stamped with another CRDT
-                // history than this replica's registration is refused before it
-                // is decoded, even when every op id is new here (the shape the
-                // replica's own divergence check cannot see).
-                let stamped = update
-                    .get("history_lineage")
-                    .and_then(Value::as_str)
-                    .or(pull_history_lineage);
-                if delivery_history_lineage_mismatch(document.history_lineage.as_deref(), stamped) {
-                    divergent = true;
-                    break;
-                }
-                let Some(origin) = update.get("origin").and_then(Value::as_u64) else {
-                    continue;
-                };
-                if origin == document.client_id {
-                    continue;
-                }
-                let Some(bytes) = update
-                    .get("update_b64")
-                    .and_then(Value::as_str)
-                    .and_then(|encoded| BASE64_STANDARD.decode(encoded).ok())
+                // This is not the -4 window: the controller asked for the replace.
+                let Some(visible) = self
+                    .documents
+                    .get(&uri)
+                    .map(|document| document.shadow.clone())
                 else {
                     continue;
                 };
-                match document.replica.apply_update_verified(&bytes) {
-                    Ok(()) => changed = true,
-                    // `#replicapositiondrift`: the delivery was encoded against
-                    // a different CRDT history, so applying it would land by id
-                    // on unrelated characters. Leave the buffer alone and
-                    // re-register from it so the controller bootstraps this
-                    // replica in its current lineage.
-                    Err(error) if error.is::<DivergentHistory>() => {
-                        divergent = true;
-                        break;
-                    }
-                    Err(_) => continue,
-                }
-            }
-            if divergent {
-                let visible = document.shadow.clone();
-                let uri = document.uri.clone();
                 self.detach(&uri);
                 self.attach(&uri, &visible);
                 continue;
             }
-            if !changed {
-                continue;
-            }
-            let target = document.replica.text();
-            if target == document.shadow {
-                publish_replica_projection(document, false);
-                continue;
-            }
-            if document.pending_apply_target.as_deref() == Some(&target) {
-                continue;
-            }
-            let range = full_document_range(&document.shadow);
-            let edit = json!({
-                "edit": {
-                    "changes": {
-                        document.uri.clone(): [{
-                            "range": range,
-                            "newText": target
-                        }]
+            let effect = {
+                let Some(document) = self.documents.get_mut(&uri) else {
+                    continue;
+                };
+                apply_pulled_updates(document, &data)
+            };
+            match effect {
+                PulledUpdateEffect::LineageMismatch => {
+                    let Some(visible) = self
+                        .documents
+                        .get(&uri)
+                        .map(|document| document.shadow.clone())
+                    else {
+                        continue;
+                    };
+                    self.detach(&uri);
+                    self.attach(&uri, &visible);
+                }
+                PulledUpdateEffect::DivergentHistory | PulledUpdateEffect::AlreadyDivergent => {
+                    // Never project a divergent replica, including updates applied
+                    // earlier in this batch. The mark outlives an empty pull.
+                    self.reregister_after_divergent_history(&uri);
+                }
+                PulledUpdateEffect::Applied { changed: false } => {}
+                PulledUpdateEffect::Applied { changed: true } => {
+                    let Some(document) = self.documents.get_mut(&uri) else {
+                        continue;
+                    };
+                    let target = document.replica.text();
+                    if target == document.shadow {
+                        publish_replica_projection(document, false);
+                        continue;
                     }
-                },
-                "label": "agent-doc realtime update"
-            });
-            let request_id = self.next_request_id;
-            self.next_request_id += 1;
-            document.pending_apply_target = Some(target);
-            let _ = self.send(json!({
-                "jsonrpc": "2.0",
-                "id": request_id,
-                "method": "workspace/applyEdit",
-                "params": edit
-            }));
+                    if document.pending_apply_target.as_deref() == Some(&target) {
+                        continue;
+                    }
+                    let range = full_document_range(&document.shadow);
+                    let edit = json!({
+                        "edit": {
+                            "changes": {
+                                document.uri.clone(): [{
+                                    "range": range,
+                                    "newText": target
+                                }]
+                            }
+                        },
+                        "label": "agent-doc realtime update"
+                    });
+                    let request_id = self.next_request_id;
+                    self.next_request_id += 1;
+                    document.pending_apply_target = Some(target);
+                    let _ = self.send(json!({
+                        "jsonrpc": "2.0",
+                        "id": request_id,
+                        "method": "workspace/applyEdit",
+                        "params": edit
+                    }));
+                }
+            }
+        }
+    }
+
+    /// `#divergentapplyreregister`: re-register from the visible buffer after
+    /// FFI -4, at most once per document per 30 s. The window is stamped only
+    /// when a registration is attempted.
+    fn reregister_after_divergent_history(&mut self, uri: &str) -> bool {
+        self.reregister_after_divergent_history_at(uri, unix_epoch_ms())
+    }
+
+    fn reregister_after_divergent_history_at(&mut self, uri: &str, now_ms: u64) -> bool {
+        let Some(document) = self.documents.get(uri) else {
+            return false;
+        };
+        let file_name = document
+            .file
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or(uri)
+            .to_string();
+        let decision = divergent_reregister_decision(
+            document,
+            now_ms,
+            self.divergent_history_reregister_at_ms.get(uri).copied(),
+        );
+        match decision {
+            DivergentReregisterDecision::NotDivergent => false,
+            DivergentReregisterDecision::Deferred => {
+                eprintln!(
+                    "[crdt-replica] divergent-history re-register deferred for {file_name}; \
+                     reason=editor_not_stable (#divergentapplyreregister)"
+                );
+                false
+            }
+            DivergentReregisterDecision::Suppressed { since_last_ms } => {
+                eprintln!(
+                    "[crdt-replica] divergent-history re-register suppressed for {file_name}; \
+                     since_last_ms={since_last_ms} \
+                     min_interval_ms={DIVERGENT_HISTORY_REREGISTER_MIN_INTERVAL_MS} \
+                     fallback=controller_lineage_retirement (#divergentapplyreregister)"
+                );
+                false
+            }
+            DivergentReregisterDecision::Attempt { visible } => {
+                self.divergent_history_reregister_at_ms
+                    .insert(uri.to_string(), now_ms);
+                self.detach(uri);
+                self.attach(uri, &visible);
+                if self.documents.contains_key(uri) {
+                    eprintln!(
+                        "[crdt-replica] re-registered {file_name} from the buffer after a \
+                         divergent-history delivery (#divergentapplyreregister)"
+                    );
+                    true
+                } else {
+                    eprintln!(
+                        "[crdt-replica] divergent-history re-register did not commit for {file_name}; \
+                         reason=swap_refused (#divergentapplyreregister)"
+                    );
+                    false
+                }
+            }
         }
     }
 
@@ -910,6 +1118,369 @@ fn write_lsp_message(writer: &mut impl Write, message: &Value) -> Result<()> {
 mod tests {
     use super::*;
 
+    fn sample_document(uri: &str, text: &str) -> OpenDocument {
+        OpenDocument {
+            uri: uri.to_string(),
+            file: PathBuf::from("/tmp/session.md"),
+            project_root: PathBuf::from("/tmp"),
+            identity: format!("zed-lsp:{}:test", std::process::id()),
+            client_id: 7,
+            history_lineage: Some("history-a".into()),
+            replica: ReplicaState::from_text(7, text),
+            shadow: text.to_string(),
+            pending_apply_target: None,
+            history_divergent: false,
+        }
+    }
+
+    /// A controller rebuilt from different text under the same canonical client
+    /// id, so its snapshot restates stored op ids with other characters.
+    fn fresh_epoch_snapshot(editor_text: &str) -> (ReplicaState, String) {
+        let epoch_a = ReplicaState::new(1);
+        epoch_a.apply_local_edit(0, 0, editor_text);
+        let editor = ReplicaState::from_encoded(7, &epoch_a.encode_state()).unwrap();
+        let epoch_b = ReplicaState::new(1);
+        epoch_b.apply_local_edit(0, 0, &format!("other {editor_text}"));
+        let encoded = BASE64_STANDARD.encode(epoch_b.encode_state());
+        (editor, encoded)
+    }
+
+    fn same_history_peer_update(editor: &ReplicaState) -> String {
+        let peer = ReplicaState::from_encoded(1, &editor.encode_state()).unwrap();
+        let before = peer.state_vector();
+        peer.apply_local_edit(0, 0, "Z");
+        BASE64_STANDARD.encode(peer.diff(&before).unwrap())
+    }
+
+    #[test]
+    fn the_re_register_loop_guard_allows_one_attempt_per_window() {
+        assert!(divergent_history_reregister_due(100_000, None));
+        assert!(!divergent_history_reregister_due(100_000, Some(100_000)));
+        assert!(!divergent_history_reregister_due(
+            100_000 + DIVERGENT_HISTORY_REREGISTER_MIN_INTERVAL_MS - 1,
+            Some(100_000),
+        ));
+        assert!(divergent_history_reregister_due(
+            100_000 + DIVERGENT_HISTORY_REREGISTER_MIN_INTERVAL_MS,
+            Some(100_000),
+        ));
+    }
+
+    #[test]
+    fn a_clock_rollback_permits_the_re_register_instead_of_suppressing_it() {
+        assert!(divergent_history_reregister_due(90_000, Some(100_000)));
+    }
+
+    #[test]
+    fn the_decision_attempts_once_per_window_from_the_visible_buffer() {
+        let mut document = sample_document("file:///a.md", "alpha\n");
+        document.history_divergent = true;
+        document.shadow = "visible\n".into();
+        assert!(matches!(
+            divergent_reregister_decision(&document, 1_000, None),
+            DivergentReregisterDecision::Attempt { visible } if visible == "visible\n"
+        ));
+
+        document.pending_apply_target = Some("pending".into());
+        assert!(matches!(
+            divergent_reregister_decision(&document, 1_000, None),
+            DivergentReregisterDecision::Deferred
+        ));
+
+        document.pending_apply_target = None;
+        assert!(matches!(
+            divergent_reregister_decision(
+                &document,
+                1_000 + DIVERGENT_HISTORY_REREGISTER_MIN_INTERVAL_MS - 1,
+                Some(1_000),
+            ),
+            DivergentReregisterDecision::Suppressed { .. }
+        ));
+        assert!(matches!(
+            divergent_reregister_decision(
+                &document,
+                1_000 + DIVERGENT_HISTORY_REREGISTER_MIN_INTERVAL_MS,
+                Some(1_000),
+            ),
+            DivergentReregisterDecision::Attempt { .. }
+        ));
+        assert!(matches!(
+            divergent_reregister_decision(&document, 500, Some(1_000)),
+            DivergentReregisterDecision::Attempt { .. }
+        ));
+    }
+
+    #[test]
+    fn a_divergent_delivery_is_refused_whole_and_later_pulls_are_not_applied() {
+        let (editor, bad) = fresh_epoch_snapshot("alpha\n");
+        let before = editor.text();
+        let mut document = sample_document("file:///a.md", "alpha\n");
+        document.replica = editor;
+        let effect = apply_pulled_updates(
+            &mut document,
+            &json!({ "updates": [{ "origin": 1_u64, "update_b64": bad }] }),
+        );
+        assert!(matches!(effect, PulledUpdateEffect::DivergentHistory));
+        assert!(document.history_divergent);
+        assert_eq!(document.replica.text(), before);
+
+        let peer = same_history_peer_update(&document.replica);
+        let effect = apply_pulled_updates(
+            &mut document,
+            &json!({ "updates": [{ "origin": 1_u64, "update_b64": peer }] }),
+        );
+        assert!(matches!(effect, PulledUpdateEffect::AlreadyDivergent));
+        assert_eq!(
+            document.replica.text(),
+            before,
+            "a replica known to hold another history must not take a later delivery"
+        );
+
+        let effect = apply_pulled_updates(&mut document, &json!({ "updates": [] }));
+        assert!(
+            matches!(effect, PulledUpdateEffect::AlreadyDivergent),
+            "the mark outlives the refused delivery"
+        );
+    }
+
+    #[test]
+    fn an_ordinary_apply_failure_is_not_a_divergent_history() {
+        let mut document = sample_document("file:///a.md", "alpha\n");
+        let before = document.replica.text();
+        let garbage = BASE64_STANDARD.encode(b"not-a-crdt-update");
+        let effect = apply_pulled_updates(
+            &mut document,
+            &json!({ "updates": [{ "origin": 1_u64, "update_b64": garbage }] }),
+        );
+        assert!(matches!(
+            effect,
+            PulledUpdateEffect::Applied { changed: false }
+        ));
+        assert!(!document.history_divergent);
+        assert_eq!(document.replica.text(), before);
+    }
+
+    #[test]
+    fn a_same_history_peer_update_still_applies() {
+        let mut document = sample_document("file:///a.md", "alpha\n");
+        let before = document.replica.text();
+        let peer = same_history_peer_update(&document.replica);
+        let effect = apply_pulled_updates(
+            &mut document,
+            &json!({ "updates": [{ "origin": 1_u64, "update_b64": peer }] }),
+        );
+        assert!(matches!(
+            effect,
+            PulledUpdateEffect::Applied { changed: true }
+        ));
+        assert!(!document.history_divergent);
+        assert_ne!(document.replica.text(), before);
+    }
+
+    #[test]
+    fn a_history_lineage_mismatch_is_not_the_divergent_window() {
+        let mut document = sample_document("file:///a.md", "alpha\n");
+        let before = document.replica.text();
+        let peer = same_history_peer_update(&document.replica);
+        let effect = apply_pulled_updates(
+            &mut document,
+            &json!({
+                "history_lineage": "history-b",
+                "updates": [{
+                    "origin": 1_u64,
+                    "history_lineage": "history-b",
+                    "update_b64": peer
+                }]
+            }),
+        );
+        assert!(matches!(effect, PulledUpdateEffect::LineageMismatch));
+        assert!(!document.history_divergent);
+        assert_eq!(document.replica.text(), before);
+    }
+
+    #[test]
+    fn a_second_refusal_inside_the_window_does_not_reregister() {
+        let (mut server, _sender) = scripted_server();
+        let mut kept = sample_document("file:///kept.md", "alpha\n");
+        kept.history_divergent = true;
+        let mut other = sample_document("file:///other.md", "beta\n");
+        other.history_divergent = true;
+        let kept_uri = kept.uri.clone();
+        let other_uri = other.uri.clone();
+        server.documents.insert(kept_uri.clone(), kept);
+        server.documents.insert(other_uri.clone(), other);
+        let now_ms = 1_000_000_u64;
+        server
+            .divergent_history_reregister_at_ms
+            .insert(kept_uri.clone(), now_ms);
+
+        let attempted = server.reregister_after_divergent_history_at(
+            &kept_uri,
+            now_ms + DIVERGENT_HISTORY_REREGISTER_MIN_INTERVAL_MS - 1,
+        );
+        assert!(!attempted);
+        assert!(
+            server.documents.contains_key(&kept_uri),
+            "inside the window the member stays attached"
+        );
+        assert_eq!(
+            server.divergent_history_reregister_at_ms[&kept_uri], now_ms,
+            "a suppressed refusal must not refresh the stamp"
+        );
+        let other_decision = divergent_reregister_decision(
+            server.documents.get(&other_uri).unwrap(),
+            now_ms,
+            server
+                .divergent_history_reregister_at_ms
+                .get(&other_uri)
+                .copied(),
+        );
+        assert!(
+            matches!(other_decision, DivergentReregisterDecision::Attempt { .. }),
+            "the window is one document, not the whole sidecar"
+        );
+    }
+
+    #[test]
+    fn an_inflight_apply_edit_defers_without_spending_the_window() {
+        let (mut server, _sender) = scripted_server();
+        let mut document = sample_document("file:///s.md", "alpha\n");
+        document.history_divergent = true;
+        document.pending_apply_target = Some("alpha\nremote\n".into());
+        let uri = document.uri.clone();
+        server.documents.insert(uri.clone(), document);
+
+        let attempted = server.reregister_after_divergent_history_at(&uri, 1_000_000);
+        assert!(!attempted);
+        assert!(
+            server
+                .divergent_history_reregister_at_ms
+                .get(&uri)
+                .is_none(),
+            "a buffer that moved must not spend the window"
+        );
+        assert!(server.documents.contains_key(&uri));
+    }
+
+    #[test]
+    fn a_local_edit_on_a_divergent_replica_updates_the_buffer_and_does_not_publish() {
+        let (mut server, _sender) = scripted_server();
+        let mut document =
+            sample_document("file:///s.md", "---\nagent_doc_session: s\n---\nbody\n");
+        document.history_divergent = true;
+        let before = document.replica.text();
+        server.documents.insert(document.uri.clone(), document);
+        server
+            .handle_message(json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/didChange",
+                "params": {
+                    "textDocument": { "uri": "file:///s.md" },
+                    "contentChanges": [{
+                        "text": "---\nagent_doc_session: s\n---\nbody\ntyped\n"
+                    }]
+                }
+            }))
+            .unwrap();
+        let document = server.documents.get("file:///s.md").unwrap();
+        assert!(document.history_divergent);
+        assert_eq!(document.replica.text(), before);
+        assert!(document.shadow.ends_with("typed\n"));
+        assert!(document.pending_apply_target.is_none());
+        assert!(
+            server.writer.is_empty(),
+            "a retired history must not emit an editor edit"
+        );
+    }
+
+    #[test]
+    fn resume_restores_the_divergent_reregister_stamp() {
+        let (mut server, _sender) = scripted_server();
+        let mut document = sample_document("file:///s.md", "alpha\n");
+        document.history_divergent = true;
+        server.resume(handoff::ResumedSession {
+            next_request_id: 4,
+            shutdown_requested: false,
+            pending_input: Vec::new(),
+            documents: vec![document],
+            divergent_history_reregister_at_ms: vec![handoff::DivergentReregisterStamp {
+                uri: "file:///s.md".into(),
+                at_ms: 42,
+            }],
+        });
+        assert!(server.documents["file:///s.md"].history_divergent);
+        assert_eq!(
+            server
+                .divergent_history_reregister_at_ms
+                .get("file:///s.md"),
+            Some(&42)
+        );
+        let state = server.handoff_state();
+        assert_eq!(state.divergent_history_reregister_at_ms.len(), 1);
+        assert_eq!(state.divergent_history_reregister_at_ms[0].at_ms, 42);
+        assert!(state.documents[0].history_divergent);
+    }
+
+    #[test]
+    fn the_poll_routes_divergent_history_through_the_guard() {
+        let source = include_str!("lib.rs");
+        let poll = source
+            .split("fn poll_remote_updates(&mut self) {")
+            .nth(1)
+            .and_then(|tail| tail.split("fn reregister_after_divergent_history(").next())
+            .expect("poll body");
+        assert!(
+            poll.contains(
+                "PulledUpdateEffect::DivergentHistory | PulledUpdateEffect::AlreadyDivergent"
+            ),
+            "a -4 mark must reach the guarded re-register"
+        );
+        assert!(poll.contains("self.reregister_after_divergent_history(&uri)"));
+        assert!(
+            poll.contains("PulledUpdateEffect::LineageMismatch"),
+            "a history-lineage mismatch stays on its own immediate path"
+        );
+        let mismatch = poll
+            .split("PulledUpdateEffect::LineageMismatch =>")
+            .nth(1)
+            .and_then(|tail| tail.split("PulledUpdateEffect::DivergentHistory").next())
+            .expect("lineage arm");
+        assert!(
+            !mismatch.contains("reregister_after_divergent_history"),
+            "the lineage mismatch must not spend the -4 window"
+        );
+        let reregister = source
+            .split("fn reregister_after_divergent_history_at(")
+            .nth(1)
+            .and_then(|tail| tail.split("fn respond(&mut self").next())
+            .expect("reregister body");
+        let decision = reregister
+            .find("divergent_reregister_decision(")
+            .expect("decision");
+        let stamp = reregister
+            .find(".insert(uri.to_string(), now_ms)")
+            .expect("stamp");
+        let detach = reregister.find("self.detach(uri)").expect("detach");
+        assert!(decision < stamp, "decide before stamping");
+        assert!(
+            stamp < detach,
+            "the window is stamped when the registration is attempted"
+        );
+        let guard = source
+            .split("fn divergent_reregister_decision(")
+            .nth(1)
+            .and_then(|tail| tail.split("pub fn is_agent_doc_markdown").next())
+            .expect("decision body");
+        let fence = guard.find("pending_apply_target.is_some()").expect("fence");
+        let due = guard
+            .find("divergent_history_reregister_due(")
+            .expect("due");
+        assert!(
+            fence < due,
+            "an in-flight edit must not reach the window check"
+        );
+    }
+
     #[test]
     fn agent_doc_mode_requires_a_nonempty_session_marker() {
         assert!(is_agent_doc_markdown(
@@ -1081,8 +1652,12 @@ mod tests {
                 }
             })
         };
-        server.handle_message(code_action(1, "file:///s.md")).unwrap();
-        server.handle_message(code_action(2, "file:///plain.md")).unwrap();
+        server
+            .handle_message(code_action(1, "file:///s.md"))
+            .unwrap();
+        server
+            .handle_message(code_action(2, "file:///plain.md"))
+            .unwrap();
         let output = decode_output(std::mem::take(&mut server.writer));
         let actions = output[0]["result"].as_array().expect("actions");
         assert_eq!(actions.len(), 2, "{output:?}");
@@ -1118,7 +1693,9 @@ mod tests {
     fn initialize_advertises_tree_status_code_actions_and_command() {
         let (mut server, _sender) = scripted_server();
         server
-            .handle_message(json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}))
+            .handle_message(
+                json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}),
+            )
             .unwrap();
         let output = decode_output(std::mem::take(&mut server.writer));
         let capabilities = &output[0]["result"]["capabilities"];
@@ -1167,6 +1744,7 @@ mod tests {
             shutdown_requested: false,
             pending_input: head.to_vec(),
             documents: Vec::new(),
+            divergent_history_reregister_at_ms: Vec::new(),
         });
         let exit = json!({"jsonrpc": "2.0", "method": "exit"});
         let mut rest = tail.to_vec();

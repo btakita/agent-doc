@@ -57,6 +57,19 @@ pub(crate) struct HandoffDocument {
     pub replica_text_hash: String,
     pub shadow: String,
     pub pending_apply_target: Option<String>,
+    /// `#divergentapplyreregister`: the replica refused a delivery as another
+    /// CRDT history. Absent in a handoff written by an older image.
+    #[serde(default)]
+    pub history_divergent: bool,
+}
+
+/// One document's last divergent-history re-register attempt.
+///
+/// Carried so an in-place binary handoff does not reset the 30 s window.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct DivergentReregisterStamp {
+    pub uri: String,
+    pub at_ms: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -71,6 +84,10 @@ pub(crate) struct HandoffState {
     /// Bytes read from Zed and not yet cut into a frame.
     pub pending_input_b64: String,
     pub documents: Vec<HandoffDocument>,
+    /// `#divergentapplyreregister`: per-document re-register stamps. Absent in
+    /// a handoff written by an older image, which resumes with the window open.
+    #[serde(default)]
+    pub divergent_history_reregister_at_ms: Vec<DivergentReregisterStamp>,
 }
 
 impl HandoffDocument {
@@ -86,6 +103,7 @@ impl HandoffDocument {
             replica_text_hash: agent_doc_hash::content_hash(&document.replica.text()),
             shadow: document.shadow.clone(),
             pending_apply_target: document.pending_apply_target.clone(),
+            history_divergent: document.history_divergent,
         }
     }
 
@@ -115,6 +133,7 @@ impl HandoffDocument {
             replica,
             shadow: self.shadow.clone(),
             pending_apply_target: self.pending_apply_target.clone(),
+            history_divergent: self.history_divergent,
         })
     }
 }
@@ -125,6 +144,7 @@ pub(crate) struct ResumedSession {
     pub shutdown_requested: bool,
     pub pending_input: Vec<u8>,
     pub documents: Vec<OpenDocument>,
+    pub divergent_history_reregister_at_ms: Vec<DivergentReregisterStamp>,
 }
 
 impl HandoffState {
@@ -155,6 +175,7 @@ impl HandoffState {
             shutdown_requested: self.shutdown_requested,
             pending_input,
             documents,
+            divergent_history_reregister_at_ms: self.divergent_history_reregister_at_ms.clone(),
         })
     }
 }
@@ -426,6 +447,7 @@ mod tests {
             replica: ReplicaState::from_text(client_id, text),
             shadow: text.to_string(),
             pending_apply_target: Some(format!("{text}remote\n")),
+            history_divergent: false,
         }
     }
 
@@ -438,6 +460,7 @@ mod tests {
             shutdown_requested: false,
             pending_input_b64: BASE64_STANDARD.encode(b"Content-Length: 40\r\n\r\n{\"jso"),
             documents,
+            divergent_history_reregister_at_ms: Vec::new(),
         }
     }
 
@@ -458,6 +481,49 @@ mod tests {
         assert_eq!(restored.shadow, original.shadow);
         assert_eq!(restored.pending_apply_target, original.pending_apply_target);
         assert_eq!(restored.replica.text(), original.replica.text());
+        assert!(!restored.history_divergent);
+    }
+
+    /// `#divergentapplyreregister`: replacing the binary must not clear the
+    /// divergent mark or open a fresh 30 s window.
+    #[test]
+    fn handoff_keeps_a_divergent_mark_and_its_reregister_stamp() {
+        let mut original = document(41, "text\n");
+        original.history_divergent = true;
+        let mut written = state(vec![HandoffDocument::capture(&original)]);
+        written.divergent_history_reregister_at_ms = vec![DivergentReregisterStamp {
+            uri: original.uri.clone(),
+            at_ms: 1_700_000_000_000,
+        }];
+        let decoded: HandoffState =
+            serde_json::from_slice(&serde_json::to_vec(&written).unwrap()).unwrap();
+        let session = decoded.restore(Some(std::process::id())).unwrap();
+        assert!(session.documents[0].history_divergent);
+        assert_eq!(
+            session.divergent_history_reregister_at_ms,
+            written.divergent_history_reregister_at_ms
+        );
+    }
+
+    /// An image from before the guard omits both fields. Resume stays unmarked
+    /// with the window open, which is the old behaviour for one attempt.
+    #[test]
+    fn an_older_handoff_without_the_guard_fields_resumes_unmarked() {
+        let mut value =
+            serde_json::to_value(state(vec![HandoffDocument::capture(&document(3, "x\n"))]))
+                .unwrap();
+        value
+            .as_object_mut()
+            .unwrap()
+            .remove("divergent_history_reregister_at_ms");
+        value["documents"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("history_divergent");
+        let decoded: HandoffState = serde_json::from_value(value).unwrap();
+        let session = decoded.restore(None).unwrap();
+        assert!(!session.documents[0].history_divergent);
+        assert!(session.divergent_history_reregister_at_ms.is_empty());
     }
 
     /// The restored replica continues the same CRDT peer: an edit made after

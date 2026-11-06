@@ -2223,9 +2223,11 @@ visible projection proves the buffer text, not the replica's history. The
 editor replica itself refuses, before applying anything, any delivery that
 restates an op id it stores with a different character or origin: op ids are
 unique within one history, so such a delta was encoded against another one.
-The FFI apply returns `-4` and the Zed sidecar re-registers from its visible
-buffer. A cross-history delta whose ids are all new to the replica cannot be
-told apart there; the controller-side retirement is what stops those.
+The FFI apply returns `-4`. JetBrains, VS Code, and the Zed sidecar re-register
+from the visible buffer, at most once per document per 30 s
+(`#divergentapplyreregister`). A cross-history delta whose ids are all new to
+the replica cannot be told apart there; the controller-side retirement is what
+stops those.
 
 **Every delivery names its CRDT history (`#deliverylineagestamp`).** Retirement
 depends on the controller knowing which members predate a rebuild; a member
@@ -2267,28 +2269,39 @@ request field) keeps its previous behaviour.
 **A divergent-history refusal re-registers at once (`#divergentapplyreregister`).**
 JetBrains (the classic package and the modular 262/263 backends, which compile
 the same sources) and VS Code read `-4` as its own outcome instead of a plain
-apply failure. The forwarder marks itself divergent; the remote drain then
-re-registers from the buffer in the same pass rather than leaving the refused
-delivery pending until the controller's redelivery budget (about 25 s) retires
-the member. Rules:
+apply failure. The Zed sidecar reads the same refusal from
+`ReplicaState::apply_update_verified` (`DivergentHistory`). The editor marks
+the replica divergent; the remote drain then re-registers from the buffer in
+the same pass rather than leaving the refused delivery pending until the
+controller's redelivery budget (about 25 s) retires the member. Rules:
 
 - The drain never projects a divergent replica's text, including updates it
-  applied earlier in the same batch.
+  applied earlier in the same batch. The Zed sidecar also refuses to publish a
+  local edit from a replica already marked divergent: the visible buffer is
+  kept, and only the replacement registration publishes it.
 - The mark outlives the refused delivery. A later drain retries a deferred or
   suppressed re-register before applying anything, even with nothing pending.
+  On the Zed sidecar the mark is part of the open document, so an in-place
+  binary handoff keeps it.
 - A divergent forwarder never offers its state as a resume state: its frontier
   names op ids of the retired history. The replacement is a full bootstrap from
   the controller canonical, and the ordinary registration decision keeps the
-  buffer authoritative (adopt, merge forward, or hold).
+  buffer authoritative (adopt, merge forward, or hold). The Zed sidecar's
+  registration is always that full bootstrap.
 - The swap is fenced on the buffer still equal to the drain's shadow with no
   pending local edit. A buffer that moved defers the re-register without
-  spending the loop guard.
+  spending the loop guard. On the Zed sidecar an in-flight
+  `workspace/applyEdit` is that fence.
 - Loop guard: at most one divergent-history re-register per document per
-  30 s, stamped when a registration is attempted. A second refusal inside the
-  window means the controller keeps encoding against another history, so the
-  editor stops paying full-bootstrap round trips and falls back to the
-  controller's lineage retirement (`missing_replica`). A wall-clock rollback
-  permits the re-register.
+  30 s, on JetBrains, VS Code, and the Zed sidecar, stamped when a
+  registration is attempted. A second refusal inside the window means the
+  controller keeps encoding against another history, so the editor stops
+  paying full-bootstrap round trips and falls back to the controller's
+  lineage retirement (`missing_replica`). A wall-clock rollback permits the
+  re-register. The Zed sidecar keeps that stamp across an in-place binary
+  handoff, so replacing the image does not open a new window. A history-lineage
+  mismatch (`#deliverylineagestamp`) is not this window: it still re-registers
+  immediately.
 
 The answer is the canonical-relative splices that produce the merge, so the
 plugin forwards them exactly like a translated batch: on the attached endpoint

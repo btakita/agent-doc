@@ -270,13 +270,13 @@
   [Real-Time Workflow](specs/14-realtime-workflow.md).
 - `#divergentapplyreregister`: an editor whose replica refuses a delivery as a
   divergent history (FFI `-4`) re-registers from its buffer in the same remote
-  drain, the way the Zed sidecar does, instead of leaving the delivery refused
-  until the controller's redelivery budget retires the member. JetBrains (every
-  plugin generation) and VS Code never project that drain's text, never offer
-  the divergent replica's state as a resume (the replacement is a full
-  bootstrap), and fence the swap on the buffer still matching the shadow.
-  At most one such re-register runs per document per 30 s; a further refusal
-  inside the window falls back to the controller's lineage retirement.
+  drain, instead of leaving the delivery refused until the controller's
+  redelivery budget retires the member. JetBrains (every plugin generation),
+  VS Code, and the Zed sidecar never project that drain's text, never resume
+  from the divergent replica (the replacement is a full bootstrap), and fence
+  the swap on the buffer still matching the shadow. At most one such
+  re-register runs per document per 30 s; a further refusal inside the window
+  falls back to the controller's lineage retirement.
 - A selected-document focus that resolves a proven live-owner pane outside the
   active `agent-doc` window must surface that pane before selection. Promotion
   and selection share the editor focus-generation fence, and the controller

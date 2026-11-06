@@ -34,8 +34,8 @@ pub use observation_cache::{
 
 use std::error::Error;
 use std::fmt;
+use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::io::Read as _;
 use std::process::{Command, Output, Stdio};
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
@@ -778,7 +778,9 @@ pub fn capture_pane_with_ansi(
 ///
 /// Controller admission uses this instead of the generic runner so a wedged
 /// tmux server cannot wedge the project controller. A timed-out child is killed
-/// and reaped before this function returns.
+/// and reaped before this function returns. Stdout and stderr are drained
+/// during the wait, so a large pane cannot fill the pipe and stall until the
+/// deadline (`#ctlcapturepipedeadlock`).
 pub fn capture_pane_with_ansi_bounded(
     tmux: &tmux_router::Tmux,
     target: &str,
@@ -798,48 +800,99 @@ fn command_output_bounded(
     timeout: Duration,
 ) -> Result<Output, TmuxIoError> {
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
-    let mut child = command.spawn().map_err(|err| TmuxIoError::Spawn {
-        binary: binary.to_string(),
-        message: err.to_string(),
-    })?;
+    let mut child = command.spawn().map_err(|err| spawn_error(binary, err))?;
+    // `#ctlcapturepipedeadlock`: a capture larger than the pipe buffer blocks
+    // the child in `write` until this process reads. Reading only after exit
+    // therefore waits out `timeout` and admission reports the pane unavailable.
+    // These threads drain both pipes for the whole wait, including after a
+    // kill: `stop_bounded_child` closes the write ends, so the reads see EOF.
+    let stdout_reader = match spawn_pipe_reader(child.stdout.take(), "tmux-io-stdout") {
+        Ok(reader) => reader,
+        Err(err) => {
+            stop_bounded_child(&mut child);
+            return Err(spawn_error(binary, err));
+        }
+    };
+    let stderr_reader = match spawn_pipe_reader(child.stderr.take(), "tmux-io-stderr") {
+        Ok(reader) => reader,
+        Err(err) => {
+            stop_bounded_child(&mut child);
+            let _ = stdout_reader.join();
+            return Err(spawn_error(binary, err));
+        }
+    };
     let started = Instant::now();
-    loop {
-        match child.try_wait().map_err(|err| TmuxIoError::Spawn {
-            binary: binary.to_string(),
-            message: err.to_string(),
-        })? {
-            Some(status) => {
-                let mut stdout = Vec::new();
-                let mut stderr = Vec::new();
-                if let Some(mut pipe) = child.stdout.take() {
-                    pipe.read_to_end(&mut stdout)
-                        .map_err(|err| TmuxIoError::Spawn {
-                            binary: binary.to_string(),
-                            message: err.to_string(),
-                        })?;
-                }
-                if let Some(mut pipe) = child.stderr.take() {
-                    pipe.read_to_end(&mut stderr)
-                        .map_err(|err| TmuxIoError::Spawn {
-                            binary: binary.to_string(),
-                            message: err.to_string(),
-                        })?;
-                }
-                return Ok(Output { status, stdout, stderr });
-            }
-            None if started.elapsed() >= timeout => {
-                let _ = child.kill();
-                let _ = child.wait();
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if started.elapsed() >= timeout => {
+                stop_bounded_child(&mut child);
+                let _ = stdout_reader.join();
+                let _ = stderr_reader.join();
                 return Err(TmuxIoError::Timeout {
                     binary: binary.to_string(),
                     timeout_ms: timeout.as_millis(),
                 });
             }
-            None => {
+            Ok(None) => {
                 let remaining = timeout.saturating_sub(started.elapsed());
                 std::thread::sleep(remaining.min(Duration::from_millis(5)));
             }
+            Err(err) => {
+                stop_bounded_child(&mut child);
+                let _ = stdout_reader.join();
+                let _ = stderr_reader.join();
+                return Err(spawn_error(binary, err));
+            }
         }
+    };
+    let stdout = join_pipe_reader(stdout_reader, binary)?;
+    let stderr = join_pipe_reader(stderr_reader, binary)?;
+    Ok(Output {
+        status,
+        stdout,
+        stderr,
+    })
+}
+
+fn spawn_error(binary: &str, err: impl std::fmt::Display) -> TmuxIoError {
+    TmuxIoError::Spawn {
+        binary: binary.to_string(),
+        message: err.to_string(),
+    }
+}
+
+fn stop_bounded_child(child: &mut std::process::Child) {
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
+fn spawn_pipe_reader<R>(
+    pipe: Option<R>,
+    name: &str,
+) -> std::io::Result<std::thread::JoinHandle<std::io::Result<Vec<u8>>>>
+where
+    R: Read + Send + 'static,
+{
+    std::thread::Builder::new()
+        .name(name.to_string())
+        .spawn(move || {
+            let mut buf = Vec::new();
+            if let Some(mut pipe) = pipe {
+                pipe.read_to_end(&mut buf)?;
+            }
+            Ok(buf)
+        })
+}
+
+fn join_pipe_reader(
+    reader: std::thread::JoinHandle<std::io::Result<Vec<u8>>>,
+    binary: &str,
+) -> Result<Vec<u8>, TmuxIoError> {
+    match reader.join() {
+        Ok(Ok(bytes)) => Ok(bytes),
+        Ok(Err(err)) => Err(spawn_error(binary, err)),
+        Err(_) => Err(spawn_error(binary, "pipe reader panicked")),
     }
 }
 
@@ -1177,6 +1230,45 @@ mod tests {
         assert!(
             !std::path::Path::new(&format!("/proc/{pid}")).exists(),
             "the timed-out child {pid} must be killed and reaped"
+        );
+    }
+
+    /// `#ctlcapturepipedeadlock`: both pipes are larger than `pipe-max-size`,
+    /// so the child blocks in `write` unless the parent drains during the wait.
+    /// Stderr is filled only after stdout, so a reader that drains just one
+    /// pipe still fails the deadline.
+    #[cfg(unix)]
+    #[test]
+    fn bounded_command_drains_pipes_larger_than_the_buffer() {
+        let payload_len = (1 << 20) + (64 << 10);
+        let dir = tempfile::tempdir().unwrap();
+        let stdout_path = dir.path().join("out.bin");
+        let stderr_path = dir.path().join("err.bin");
+        std::fs::write(&stdout_path, vec![b'o'; payload_len]).unwrap();
+        std::fs::write(&stderr_path, vec![b'e'; payload_len]).unwrap();
+        let mut command = Command::new("sh");
+        command
+            .arg("-c")
+            .arg("cat \"$1\" && cat \"$2\" >&2")
+            .arg("sh")
+            .arg(&stdout_path)
+            .arg(&stderr_path);
+        let output = command_output_bounded(command, "test-tmux", Duration::from_secs(15))
+            .expect("a capture larger than the pipe buffer must finish within the deadline");
+        assert!(
+            output.status.success(),
+            "large capture status: {}",
+            output.status
+        );
+        assert_eq!(output.stdout.len(), payload_len, "stdout truncated");
+        assert!(
+            output.stdout.iter().all(|byte| *byte == b'o'),
+            "stdout bytes were not preserved"
+        );
+        assert_eq!(output.stderr.len(), payload_len, "stderr truncated");
+        assert!(
+            output.stderr.iter().all(|byte| *byte == b'e'),
+            "stderr bytes were not preserved"
         );
     }
 

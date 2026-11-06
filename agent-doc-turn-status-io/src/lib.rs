@@ -705,6 +705,41 @@ pub fn active_turn_owner_for_file(file: &Path) -> Option<TurnActiveMarker> {
         .filter(|marker| turn_active_marker_matches_pane(marker, &owner.pane))
 }
 
+/// A document's owning pane, idle on a harness usage limit.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OwnerPaneUsageLimit {
+    pub pane: String,
+    pub limit: agent_doc_harness::usage_limit::HarnessUsageLimit,
+}
+
+/// `#harnessquotaexhausted`: what stops `file`'s owning pane, read from a live
+/// capture. `None` for no owner, no capture, a running turn, or no limit.
+/// A read-only diagnostic: it never changes turn, lease, or actor state.
+pub fn owner_pane_usage_limit_for_file(file: &Path) -> Option<OwnerPaneUsageLimit> {
+    let root = agent_doc_project_root_io::project_root_containing(file)?;
+    let record = agent_doc_session_actor_io::load_record_in(&root, &file.to_string_lossy())
+        .ok()
+        .flatten()?;
+    let tmux = agent_doc_tmux_io::configured_tmux();
+    let capture = agent_doc_tmux_io::capture_pane_with_ansi(&tmux, &record.pane_id).ok()?;
+    owner_pane_usage_limit_in_capture(&record.pane_id, &record.harness, &capture)
+}
+
+fn owner_pane_usage_limit_in_capture(
+    pane: &str,
+    harness: &str,
+    capture: &str,
+) -> Option<OwnerPaneUsageLimit> {
+    let harness = agent_doc_harness::HarnessConfig::from_agent_name(harness);
+    if harness.has_busy_cue(capture) {
+        return None;
+    }
+    Some(OwnerPaneUsageLimit {
+        pane: pane.to_string(),
+        limit: agent_doc_harness::usage_limit::pane_usage_limit(capture, &harness)?,
+    })
+}
+
 /// Publish the stale-supervisor flag in the project state database.
 /// Best-effort cross-process channel for the supervisor → turn-status hook.
 pub fn set_supervisor_stale_marker(base: &Path, pane: &str, stale: bool) -> Result<()> {
@@ -1454,6 +1489,17 @@ mod tests {
 
         assert!(turn_active_for_pane(base, "%7"));
         assert!(!turn_active_for_pane(base, "%8"));
+    }
+
+    #[test]
+    fn owner_pane_usage_limit_ignores_a_running_turn() {
+        let idle = "⎿  You've hit your session limit · resets 9pm\n❯ \n";
+        let owner = owner_pane_usage_limit_in_capture("%10", "claude", idle).expect("limit");
+        assert_eq!(owner.pane, "%10");
+        assert_eq!(owner.limit.limit, "session limit");
+        assert!(owner_pane_usage_limit_in_capture("%10", "claude", "❯ \n").is_none());
+        let grok = "│ ❯   │\n╰── Weekly limit left: 0% · Grok 4.7 (high) ─╯\nCtrl+c:cancel\n";
+        assert!(owner_pane_usage_limit_in_capture("%10", "grok", grok).is_none());
     }
 
     #[test]

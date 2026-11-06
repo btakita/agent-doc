@@ -1,0 +1,11 @@
+**Summary** Fixed quota detection. The route now names `Weekly limit left: 0%`.
+
+Tested against the Claude wording:
+
+```
+You've hit your session limit · resets 9pm
+```
+
+> You've hit your weekly limit · resets Mon 9am
+
+**Verification** `make check` exit=0; 11000 tests passed.

@@ -716,6 +716,13 @@ fn claim_next_shared_leaf(
                     .any(|claim| claim.identity == item.identity && claim.blocks_dispatch(now))
             })
             .unwrap_or(&prepared[0]);
+        refuse_claim_on_exhausted_harness(
+            file,
+            ledger,
+            &chosen.identity,
+            owner,
+            owner_session_for_claim.as_ref(),
+        )?;
         let outcome = ledger.claim_in_session_with_generation_floor(
             &chosen.target,
             owner,
@@ -746,11 +753,64 @@ fn claim_next_shared_leaf(
     persist_claim_result(file, result, occurrences)
 }
 
+/// `#harnessquotaexhausted`: every subagent dispatch passes through a claim,
+/// so this is the gate that keeps a new worker off a harness a sibling worker
+/// just ran out of, however the dispatch was decided. Only proven-equal
+/// harnesses refuse here; a coordinator session of unknown harness may be
+/// dispatching anything. The row's own blocked attempt is refused by
+/// [`ClaimOutcome::QuotaBlocked`] instead, with its own next step.
+fn refuse_claim_on_exhausted_harness(
+    file: &Path,
+    ledger: &QueueClaimLedger,
+    identity: &agent_doc_element_queue::QueueItemIdentity,
+    owner: &str,
+    owner_session: Option<&ClaimOwnerSession>,
+) -> Result<()> {
+    if !owner.trim().starts_with("subagent:") {
+        return Ok(());
+    }
+    let Some(harness) = owner_session.and_then(|session| session.harness.as_deref()) else {
+        return Ok(());
+    };
+    let blocked = ledger
+        .claims
+        .iter()
+        .filter(|claim| claim.identity != *identity)
+        .filter(|claim| {
+            claim
+                .quota_block
+                .as_ref()
+                .is_some_and(|block| block.harness.is_some())
+        });
+    if let Some(claim) = agent_doc_queue::worker_quota::pool_refill_quota_block(blocked, Some(harness)) {
+        bail!(
+            "refusing to start a new worker on {harness} ({}): {}",
+            agent_doc_queue::worker_quota::WORKER_QUOTA_EXHAUSTED_REASON,
+            agent_doc_queue::worker_quota::quota_blocked_next_step(
+                &file.display().to_string(),
+                claim,
+            ),
+        );
+    }
+    Ok(())
+}
+
 fn persist_claim_result(
     file: &Path,
     result: (ClaimOutcome, QueueClaim),
     occurrences: usize,
 ) -> Result<(ClaimOutcome, QueueClaim)> {
+    if result.0 == ClaimOutcome::QuotaBlocked {
+        bail!(
+            "queue head {:?} is not available for redispatch ({}): {}",
+            result.1.item_text,
+            agent_doc_queue::worker_quota::WORKER_QUOTA_EXHAUSTED_REASON,
+            agent_doc_queue::worker_quota::quota_blocked_next_step(
+                &file.display().to_string(),
+                &result.1,
+            ),
+        );
+    }
     if result.0 == ClaimOutcome::HeldByOther {
         bail!(
             "queue head {:?} is already held by {} generation {}; release/expire that attempt before redispatch",
@@ -864,6 +924,7 @@ pub fn claim_with_session(
     let lineage_generation_floor = crate::queue_lineage::max_generation(file, &target)?;
     let now = now_secs();
     let result = mutate_ledger(file, |ledger| {
+        refuse_claim_on_exhausted_harness(file, ledger, &identity, owner, owner_session.as_ref())?;
         let outcome = ledger.claim_in_session_with_generation_floor(
             &target,
             owner,
@@ -1450,6 +1511,47 @@ pub fn abandon_attempt(
     })
 }
 
+/// Record that this attempt's worker stopped on a harness usage limit
+/// (`#harnessquotaexhausted`). The claim, its worker binding, and the named
+/// worktree and branch are kept as evidence; see
+/// [`agent_doc_queue::queue_claim::QueueClaimState::QuotaBlocked`].
+pub fn block_attempt_on_quota(
+    file: &Path,
+    item: &str,
+    generation: Option<u64>,
+    block: agent_doc_queue::worker_quota::WorkerQuotaBlock,
+) -> Result<QueueClaim> {
+    let resolved = resolve_live_claim_target(file, item, "queue_claim_quota_block").ok();
+    let target = resolved
+        .as_ref()
+        .map(|(target, _)| target.clone())
+        .unwrap_or_else(|| item.to_string());
+    let heads = resolved.map(|(_, heads)| heads);
+    let now = now_secs();
+    let claim = mutate_ledger(file, |ledger| {
+        if let Some(heads) = heads.as_ref() {
+            log_followed(file, &ledger.follow_edits_in_view(now, heads));
+        }
+        ledger
+            .block_on_quota(&target, generation, block)
+            .map_err(anyhow::Error::from)
+    })?;
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "queue_worker_quota_blocked owner={} generation={} worker_id={} harness={} limit={:?} branch={} item_bytes={} (#harnessquotaexhausted)",
+            claim.owner,
+            claim.generation,
+            claim.worker.as_ref().map_or("none", |worker| worker.worker_id.as_str()),
+            claim.quota_block.as_ref().and_then(|block| block.harness.as_deref()).unwrap_or("unknown"),
+            claim.quota_block.as_ref().map_or("", |block| block.limit.as_str()),
+            claim.quota_block.as_ref().and_then(|block| block.branch.as_deref()).unwrap_or("none"),
+            claim.item_text.trim().len(),
+        ),
+    );
+    Ok(claim)
+}
+
 /// Compensate a claim admission whose visible runtime projection failed before
 /// the harness received permission to spawn (`#claimbeforespawn`). The exact
 /// generation may be restored only while it is still unstarted; a concurrent
@@ -1982,6 +2084,10 @@ fn claim_assessment(claim: &QueueClaim, owner_session_state: &str) -> (&'static 
         QueueClaimState::Lost => (
             "lost",
             "The attempt expired or was abandoned; it is recovery-eligible and does not prove current work.".to_string(),
+        ),
+        QueueClaimState::QuotaBlocked => (
+            agent_doc_queue::worker_quota::WORKER_QUOTA_EXHAUSTED_REASON,
+            agent_doc_queue::worker_quota::quota_blocked_next_step("<FILE>", claim),
         ),
         QueueClaimState::Reported => (
             "reported_pending_integration",

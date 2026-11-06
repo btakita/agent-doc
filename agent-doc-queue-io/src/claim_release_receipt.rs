@@ -448,6 +448,9 @@ pub fn release_attempt(
         }
         ReleaseKind::Requeue => {
             let released = crate::queue_claim::abandon_attempt(file, item, generation)?;
+            if let Some(claim) = released.as_ref() {
+                crate::goal_loop_handoff::record_quota_requeue(file, claim)?;
+            }
             apply_release_receipt(file, item, kind, released)
         }
     }

@@ -1,0 +1,8 @@
+  Bash cargo test -p agent-doc-harness
+  12 passed
+
+┃  Go usage limit reached. It will reset in 3 hours 12 minutes. To continue using this model now, enable usage from your available balance
+
+┃
+┃  Build  kimi-k2.6  opencode go
+╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀

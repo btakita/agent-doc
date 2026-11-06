@@ -732,6 +732,9 @@ fn classify_lifecycle(item: &str, claim: Option<&QueueClaim>) -> QueueSyncLifecy
             }
             QueueClaimState::Reported => QueueSyncLifecycle::ReportedCheckmark,
             QueueClaimState::Lost => QueueSyncLifecycle::Lost,
+            // `#harnessquotaexhausted`: nothing runs and nothing may be retried
+            // until the limit resets: the coordinator acts on it, never redispatches.
+            QueueClaimState::QuotaBlocked => QueueSyncLifecycle::Blocked,
         };
     }
     use agent_doc_document::queue_projection::QueueLifecycleMarker;

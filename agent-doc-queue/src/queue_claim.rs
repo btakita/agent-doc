@@ -223,6 +223,10 @@ pub struct QueueClaim {
     /// heartbeat on a still-live attempt clears the freeze.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub frozen: Option<QueueWorkerFreeze>,
+    /// What stopped the attempt, while `state` is
+    /// [`QueueClaimState::QuotaBlocked`] (`#harnessquotaexhausted`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quota_block: Option<crate::worker_quota::WorkerQuotaBlock>,
 }
 
 /// Recorded stop of one bound worker (`#subagentworkpool`).
@@ -317,6 +321,11 @@ pub enum QueueClaimState {
     /// The attempt expired or was explicitly abandoned. It does not block a
     /// new claim, but remains visible until reclaimed or the queue head closes.
     Lost,
+    /// The worker stopped on a harness usage or credit limit
+    /// (`#harnessquotaexhausted`). No worker is running and the attempt never
+    /// expires into `Lost`: it holds its row, worktree, and branch until the
+    /// coordinator resumes the same worker or requeues it explicitly.
+    QuotaBlocked,
 }
 
 /// What the invariant detector can prove about the worker for an attempt.
@@ -403,7 +412,7 @@ pub fn diagnose_lifecycle(
     };
     let worker_liveness = match claim.state {
         QueueClaimState::Running | QueueClaimState::Reported => WorkerLivenessEvidence::Proven,
-        QueueClaimState::Lost => WorkerLivenessEvidence::Absent,
+        QueueClaimState::Lost | QueueClaimState::QuotaBlocked => WorkerLivenessEvidence::Absent,
         QueueClaimState::Claimed if claim.is_expired(now_secs) => WorkerLivenessEvidence::Absent,
         QueueClaimState::Claimed => WorkerLivenessEvidence::Unknown,
     };
@@ -472,7 +481,10 @@ pub fn struck_row_reopened_in_queue(
 
 impl QueueClaimState {
     pub fn blocks_dispatch(self) -> bool {
-        matches!(self, Self::Claimed | Self::Running | Self::Reported)
+        matches!(
+            self,
+            Self::Claimed | Self::Running | Self::Reported | Self::QuotaBlocked
+        )
     }
 
     pub fn projection_marker(self) -> agent_doc_document::queue_projection::QueueLifecycleMarker {
@@ -482,6 +494,8 @@ impl QueueClaimState {
             Self::Running => QueueLifecycleMarker::Running,
             Self::Reported => QueueLifecycleMarker::Reported,
             Self::Lost => QueueLifecycleMarker::Lost,
+            // Never `Running`: nothing is working on the row.
+            Self::QuotaBlocked => QueueLifecycleMarker::Blocked,
         }
     }
 }
@@ -506,7 +520,7 @@ impl QueueClaim {
                 Some(QueueClaimState::Reported) => {
                     agent_doc_document::queue_projection::QueueLifecycleMarker::LostReported
                 }
-                Some(QueueClaimState::Running) => {
+                Some(QueueClaimState::Running | QueueClaimState::QuotaBlocked) => {
                     agent_doc_document::queue_projection::QueueLifecycleMarker::LostRunning
                 }
                 Some(QueueClaimState::Claimed) => {
@@ -699,7 +713,10 @@ const FOLLOWED_FROM_LIMIT: usize = 8;
 
 impl QueueClaim {
     pub fn is_expired(&self, now_secs: u64) -> bool {
-        self.state != QueueClaimState::Reported && now_secs >= self.expires_at_secs
+        !matches!(
+            self.state,
+            QueueClaimState::Reported | QueueClaimState::QuotaBlocked
+        ) && now_secs >= self.expires_at_secs
     }
 
     pub fn blocks_dispatch(&self, now_secs: u64) -> bool {
@@ -873,6 +890,10 @@ pub enum ClaimOutcome {
     Reassigned,
     /// A different owner still holds a live attempt. No mutation occurred.
     HeldByOther,
+    /// The attempt stopped on a harness usage limit
+    /// (`#harnessquotaexhausted`). No mutation occurred: it is resumed or
+    /// requeued explicitly, never replaced by a plain claim.
+    QuotaBlocked,
 }
 
 /// A stale or invalid attempt-scoped lifecycle transition.
@@ -1039,7 +1060,8 @@ fn rekey_claim_supersedes(candidate: &QueueClaim, kept: &QueueClaim) -> bool {
             QueueClaimState::Claimed => 0,
             QueueClaimState::Running => 1,
             QueueClaimState::Lost => 2,
-            QueueClaimState::Reported => 3,
+            QueueClaimState::QuotaBlocked => 3,
+            QueueClaimState::Reported => 4,
         }
     }
 
@@ -1275,12 +1297,16 @@ impl QueueClaimLedger {
             reported_at_secs: None,
             heartbeat_at_secs: None,
             frozen: None,
+            quota_block: None,
         };
         match self
             .claims
             .iter_mut()
             .find(|claim| claim.identity == identity)
         {
+            Some(existing) if existing.state == QueueClaimState::QuotaBlocked => {
+                ClaimOutcome::QuotaBlocked
+            }
             Some(existing)
                 if existing.owner == fresh.owner && existing.blocks_dispatch(now_secs) =>
             {
@@ -1484,14 +1510,20 @@ impl QueueClaimLedger {
                 other.state = QueueClaimState::Lost;
             }
         }
-        if already_bound {
+        let resumes_quota_block = self.claims[index].state == QueueClaimState::QuotaBlocked;
+        if already_bound && !resumes_quota_block {
             return Ok(self.claims[index].clone());
         }
         let claim = &mut self.claims[index];
-        claim.worker = Some(QueueWorkerBinding {
-            worker_id: worker_id.to_string(),
-            started_at_secs: now_secs,
-        });
+        if resumes_quota_block {
+            claim.quota_block = None;
+        }
+        if !already_bound {
+            claim.worker = Some(QueueWorkerBinding {
+                worker_id: worker_id.to_string(),
+                started_at_secs: now_secs,
+            });
+        }
         claim.state = QueueClaimState::Running;
         claim.expires_at_secs = now_secs.saturating_add(ttl_secs.max(1));
         Ok(claim.clone())
@@ -1659,7 +1691,11 @@ impl QueueClaimLedger {
                 detail: reason.to_string(),
             }));
         }
-        if existing.state == QueueClaimState::Claimed || existing.worker.is_none() {
+        if matches!(
+            existing.state,
+            QueueClaimState::Claimed | QueueClaimState::QuotaBlocked
+        ) || existing.worker.is_none()
+        {
             return Err(refused(RefreshRefusal::NotRunning));
         }
         existing.expires_at_secs = now_secs.saturating_add(ttl_secs.max(1));
@@ -1716,6 +1752,40 @@ impl QueueClaimLedger {
         Ok(claim.clone())
     }
 
+    /// Record that this attempt's worker stopped on a harness usage or credit
+    /// limit (`#harnessquotaexhausted`). A `Lost` attempt qualifies: a worker
+    /// that outlived its TTL and then came back exhausted is the same attempt,
+    /// and leaving it `Lost` would hand its row to a new worker. Repeating the
+    /// transition refreshes the evidence and keeps the first block time.
+    pub fn block_on_quota(
+        &mut self,
+        item: &str,
+        expected_generation: Option<u64>,
+        mut block: crate::worker_quota::WorkerQuotaBlock,
+    ) -> Result<QueueClaim, QueueClaimTransitionRefused> {
+        let Some(index) = self.claim_index(item) else {
+            return Err(QueueClaimTransitionRefused::Missing);
+        };
+        let claim = &mut self.claims[index];
+        validate_generation(claim, expected_generation)?;
+        if claim.state == QueueClaimState::Reported {
+            return Err(QueueClaimTransitionRefused::Terminal {
+                generation: claim.generation,
+                state: claim.state,
+            });
+        }
+        if let Some(prior) = &claim.quota_block {
+            block.blocked_at_secs = prior.blocked_at_secs;
+            block.worktree = block.worktree.or_else(|| prior.worktree.clone());
+            block.branch = block.branch.or_else(|| prior.branch.clone());
+        }
+        claim.state = QueueClaimState::QuotaBlocked;
+        claim.lost_from = None;
+        claim.frozen = None;
+        claim.quota_block = Some(block);
+        Ok(claim.clone())
+    }
+
     /// Mark the matching attempt reported. New generated claims require their
     /// generation; legacy generation-zero claims accept an omitted fence.
     pub fn report(
@@ -1755,6 +1825,7 @@ impl QueueClaimLedger {
             });
         }
         claim.state = QueueClaimState::Reported;
+        claim.quota_block = None;
         if publication_state.is_some() {
             claim.publication_state = publication_state;
         }
@@ -1802,6 +1873,7 @@ impl QueueClaimLedger {
             });
         }
         claim.state = QueueClaimState::Reported;
+        claim.quota_block = None;
         if publication_state.is_some() {
             claim.publication_state = publication_state;
         }
@@ -4221,6 +4293,7 @@ mod tests {
             reported_at_secs: None,
             heartbeat_at_secs: None,
             frozen: None,
+            quota_block: None,
                 },
                 QueueClaim {
                     identity: QueueItemIdentity::FreeText(format!("#gh-fix {url}")),
@@ -4244,6 +4317,7 @@ mod tests {
             reported_at_secs: None,
             heartbeat_at_secs: None,
             frozen: None,
+            quota_block: None,
                 },
             ],
             cancellations: Vec::new(),

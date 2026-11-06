@@ -219,7 +219,13 @@ pub enum AttemptSlot {
 /// Classify one attempt. Callers may pass an attempt whose expiry was already
 /// projected to `Lost`, or one still `Running` past its expiry.
 pub fn classify_attempt(claim: &QueueClaim, now_secs: u64, frozen_secs: u64) -> AttemptSlot {
-    if claim.state == QueueClaimState::Reported {
+    // `#harnessquotaexhausted`: an exhausted worker holds no slot and is not
+    // frozen. Whether its harness may refill the slot is
+    // `worker_quota::pool_refill_quota_block`.
+    if matches!(
+        claim.state,
+        QueueClaimState::Reported | QueueClaimState::QuotaBlocked
+    ) {
         return AttemptSlot::Free;
     }
     let lapsed = claim.state == QueueClaimState::Lost || claim.is_expired(now_secs);
@@ -598,6 +604,7 @@ mod tests {
             reported_at_secs: None,
             heartbeat_at_secs: None,
             frozen: None,
+            quota_block: None,
         }
     }
 

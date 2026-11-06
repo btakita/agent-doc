@@ -1413,6 +1413,7 @@ fn run_with_options_to_writer_in_pass(
         Some(&diff_result_with_current.previous),
     )?;
     warnings.extend(queue_state.warnings.clone());
+    warnings.extend(agent_doc_preflight_io::warnings::harness_usage_limit_warnings(file));
     // #qconvbaseline: the queue maintenance above may converge the live editor
     // buffer to a corrected queue shape (auto-pins, backlog→queue mirrors, do-prompt
     // sort, queue-control frontmatter) via IPC WITHOUT a disk write when a plugin

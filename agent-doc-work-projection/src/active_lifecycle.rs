@@ -32,6 +32,9 @@ pub enum ActiveGroup {
     Running,
     /// Lost before a report: needs recovery, not integration.
     Lost,
+    /// Stopped on a harness usage limit (`#harnessquotaexhausted`): nothing is
+    /// running it, and it is not lost.
+    QuotaBlocked,
     NeedsIntegration,
 }
 
@@ -40,6 +43,7 @@ impl ActiveGroup {
         match self {
             ActiveGroup::Running => "Running",
             ActiveGroup::Lost => "Lost",
+            ActiveGroup::QuotaBlocked => "Blocked by quota",
             ActiveGroup::NeedsIntegration => "Needs integration",
         }
     }
@@ -49,6 +53,7 @@ impl ActiveGroup {
         match self {
             ActiveGroup::Running => "running",
             ActiveGroup::Lost => "lost",
+            ActiveGroup::QuotaBlocked => "quota-blocked",
             ActiveGroup::NeedsIntegration => "needs-integration",
         }
     }
@@ -61,6 +66,8 @@ impl ActiveGroup {
             QueueLifecycleMarker::Lost
             | QueueLifecycleMarker::LostClaimed
             | QueueLifecycleMarker::LostRunning => ActiveGroup::Lost,
+            // A durable attempt reads `Blocked` only from `QuotaBlocked`.
+            QueueLifecycleMarker::Blocked => ActiveGroup::QuotaBlocked,
             _ => ActiveGroup::Running,
         }
     }
@@ -305,5 +312,14 @@ mod tests {
             without_age_values("    - **Age:** since released 2026-11-04T02:06Z"),
             "    - **Age:** since released 2026-11-04T02:06Z"
         );
+    }
+
+    /// `#harnessquotaexhausted`: an exhausted worker must leave **Running**.
+    #[test]
+    fn a_quota_blocked_attempt_never_groups_as_running() {
+        let group = ActiveGroup::of_marker(QueueLifecycleMarker::Blocked);
+        assert_eq!(group, ActiveGroup::QuotaBlocked);
+        assert_eq!(group.key(), "quota-blocked");
+        assert_eq!(group.title(), "Blocked by quota");
     }
 }

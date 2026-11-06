@@ -1278,6 +1278,7 @@ dependencies = [
  "anyhow",
  "libc",
  "parking_lot",
+ "serde_json",
  "tempfile",
 ]
 
@@ -3006,7 +3007,9 @@ dependencies = [
 name = "agent-doc-turn-status-io"
 version = "0.35.568"
 dependencies = [
+ "agent-doc-harness",
  "agent-doc-project-root-io",
+ "agent-doc-session-actor-io",
  "agent-doc-session-registry-io",
  "agent-doc-sqlite",
  "agent-doc-tmux-io",

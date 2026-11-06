@@ -58,12 +58,11 @@ fn node_trailing_boundary_split(node: &ExchangeNode) -> Option<(Vec<String>, Vec
 /// for signature parity with the 3-way merge and reserved for per-node body merge
 /// in Phase 3; node bodies are never cross-merged here.
 pub fn merge_exchange_nodes(_base: &str, ours: &str, theirs: &str) -> String {
-    // `#exchangeconverge`: collapse any duplicate node identities the operator
-    // side already carries (a poisoned/scrambled buffer from a prior failed 3-way
+    // `#exchangeconverge`: collapse duplicate response cells the operator side
+    // already carries (a poisoned/scrambled buffer from a prior failed 3-way
     // merge) BEFORE merging, so the merge output converges instead of preserving
-    // mirror-ordered duplicates. Node identity keys on the response heading /
-    // prompt body, so this only removes true duplicates — distinct turns and
-    // distinct prompts are untouched.
+    // mirror-ordered response duplicates. A repeated operator prompt is kept
+    // (`#identicalpromptdedupe`).
     let (theirs_nodes, _) = dedup_nodes_by_identity(parse_exchange_nodes(theirs));
     let ours_nodes = parse_exchange_nodes(ours);
 
@@ -108,19 +107,21 @@ pub fn merge_exchange_nodes(_base: &str, ours: &str, theirs: &str) -> String {
 /// occurrence in document order. Returns the deduped list and whether anything
 /// was removed.
 ///
-/// Prompts collide on their byte-identical body. Responses collide only as whole
-/// cells (`#responseblockmovedtail`): every `### ` heading opens a node, so one
-/// node of a multi-section response is not a turn, and two replies that share an
-/// opening node or a section are still distinct turns. That leaves exactly the
-/// non-adjacent / mirror-ordered duplicates a failed 3-way merge leaves behind,
-/// and the operation stays idempotent.
+/// Responses collide only as whole cells (`#responseblockmovedtail`): every
+/// `### ` heading opens a node, so one node of a multi-section response is not
+/// a turn, and two replies that share an opening node or a section are still
+/// distinct turns. Salient nodes still collapse on their cycle id. Operator
+/// prompts are kept even when the body is byte-identical (`#identicalpromptdedupe`):
+/// a second `yes` is a repeat, not a duplicate. The operation stays idempotent.
 fn dedup_nodes_by_identity(nodes: Vec<ExchangeNode>) -> (Vec<ExchangeNode>, bool) {
     let duplicate_cell_nodes = duplicate_response_cell_node_indices(&nodes);
     let mut seen: HashSet<String> = HashSet::with_capacity(nodes.len());
     let mut out: Vec<ExchangeNode> = Vec::with_capacity(nodes.len());
     let mut removed = false;
     for (index, node) in nodes.into_iter().enumerate() {
-        let keep = if matches!(node.kind, ExchangeNodeKind::Response { .. }) {
+        let keep = if matches!(node.kind, ExchangeNodeKind::Prompt) {
+            true
+        } else if matches!(node.kind, ExchangeNodeKind::Response { .. }) {
             !duplicate_cell_nodes.contains(&index)
         } else {
             seen.insert(node.node_id())
@@ -275,10 +276,19 @@ mod tests {
     }
 
     #[test]
-    fn dedup_collapses_byte_identical_duplicate_prompts() {
-        let poisoned = "❯ Do the thing.\n\n❯ Do the thing.\n";
-        let converged = dedup_exchange_nodes_by_identity(poisoned);
-        assert_eq!(converged.matches("❯ Do the thing.").count(), 1);
+    fn dedup_keeps_byte_identical_duplicate_prompts() {
+        let repeated = "❯ Do the thing.\n\n❯ Do the thing.\n";
+        let converged = dedup_exchange_nodes_by_identity(repeated);
+        assert_eq!(converged.matches("❯ Do the thing.").count(), 2);
+        assert_eq!(converged, repeated);
+    }
+
+    #[test]
+    fn dedup_keeps_a_second_yes_prompt() {
+        let repeated = "❯ yes\n\n❯ yes\n";
+        let converged = dedup_exchange_nodes_by_identity(repeated);
+        assert_eq!(converged.matches("❯ yes").count(), 2);
+        assert_eq!(converged, repeated);
     }
 
     #[test]

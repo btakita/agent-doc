@@ -3373,9 +3373,12 @@ writes and malformed projections derive no action.
 - Repeating that retained replay with the original content-bearing merge base is
 idempotent per component. An unsplittable exchange race is isolated to the
 exchange leaf; it cannot re-merge an already-composed queue as flat text.
-  Operator-owned list multiplicity remains exact: intentional duplicate prompts
-  are preserved when present in the operator cut, while retained-target-only
-  replay copies are removed on the next merge over a cleaned operator cut.
+  Operator-owned list multiplicity remains exact: a repeated operator row is
+  not a duplicate, so a second byte-identical prompt such as `yes` stays when
+  the operator cut has it (`#identicalpromptdedupe`), and a same-key row
+  inserted ahead does not renumber the other rows (`#duplicateordinalshift`).
+  Retained-target-only replay copies beyond that operator count are removed on
+  the next merge over a cleaned operator cut.
 - IDE document selection is operator-owned. Replica refresh, reconnect,
   controller activity, tmux focus changes, and background queue work must not
   open, select, or focus a different JetBrains document.

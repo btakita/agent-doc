@@ -102,7 +102,12 @@
   rolls forward where the operator left the component untouched, a component
   both sides changed goes through the per-cell authorship policy, and any agent
   component op a rebase still leaves at the editor's body is reported on stderr
-  as `agent_component_patch_dropped`. A component the agent created (a first
+  as `agent_component_patch_dropped`. A rebase that keeps the component but drops
+  agent rows inside it reports each dropped row as `agent_row_dropped`
+  (`#rebasedroppedrowswarning`): on 2026-11-05 a queue rebase kept `**Summary:**`
+  and lost the response-wrapper rows around it, and the whole-component warning
+  stayed silent because the body was no longer the editor cut's
+  (`#responsewrapperlossrootcause`). A component the agent created (a first
   `agent:recap`, a `patch:todo` that creates `agent:todo`) is inserted at its
   canonical slot, or reported the same way when it cannot be carried
   (`#recapcreaterebasecarry`). Status-sync checkpoints quote the current

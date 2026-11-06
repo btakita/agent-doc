@@ -1914,7 +1914,16 @@ The rules:
   component at the editor's body prints
   `[write] warning: agent_component_patch_dropped component=<name> …
   operator_changed=<bool>` on stderr, so a dropped patch is never reported as a
-  clean write. A component the agent created over the merge base (a first
+  clean write. That warning compares whole component bodies. A rebase that
+  keeps the component but drops agent rows inside it (on 2026-11-05 the queue
+  kept `**Summary:**` and lost `**Response**`, `**Timestamp:**`, `**State:**`,
+  `**Guidance:**`, and `**Closed by:**`, `#responsewrapperlossrootcause`) prints
+  one `[write] warning: agent_row_dropped component=<name> occurrence=<n>
+  operator_changed=<bool> key=<merge identity>` line per dropped row, naming
+  the row (`#rebasedroppedrowswarning`). A row the operator edited, whose edit
+  the rebase kept, is `operator_changed=true`; a row nothing justified losing
+  is `operator_changed=false`. A component already reported as wholly dropped
+  is not repeated row by row. A component the agent created over the merge base (a first
   `agent:recap`, a `patch:todo` that creates `agent:todo`) is inserted at its
   canonical slot when the editor cut does not already hold it, and reported
   with that same warning when the rebase still does not carry its body

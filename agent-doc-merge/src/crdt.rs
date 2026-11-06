@@ -1080,6 +1080,41 @@ pub(crate) struct KeyedChild {
     pub(crate) text: String,
 }
 
+/// One list row of a keyed component, in document order.
+///
+/// `text` is the exact source slice of that row (including its trailing
+/// newline and any continuation lines). `key` is the identity
+/// [`split_list_children`] gives the merge, so a generated response row is
+/// scoped to the row it hangs under (`#responsewrapperlossrootcause`) and a
+/// caller can see a row the rebase dropped inside a component that otherwise
+/// survived (`#rebasedroppedrowswarning`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KeyedComponentRow {
+    pub key: String,
+    pub text: String,
+}
+
+/// List rows of a keyed component body (`queue`, `backlog`, `review`, `done`,
+/// `todo`). `None` when `component` is not keyed per item, or the body has no
+/// list row (the caller then has nothing to compare). The preamble before the
+/// first row is not a row.
+pub fn keyed_component_rows(component: &str, body: &str) -> Option<Vec<KeyedComponentRow>> {
+    if !is_keyed_item_component(component) {
+        return None;
+    }
+    let children = split_list_children(body)?;
+    Some(
+        children
+            .into_iter()
+            .filter(|child| child.key != PREAMBLE_KEY)
+            .map(|child| KeyedComponentRow {
+                key: child.key,
+                text: child.text,
+            })
+            .collect(),
+    )
+}
+
 /// First `[#id]` token in `s` (e.g. `do [#qnodemerge3]` → `qnodemerge3`), the
 /// durable identity the queue/backlog strike paths key off. `None` for a
 /// free-text child with no id.

@@ -430,6 +430,9 @@ fn rebase_agent_candidate_over_editor_cut_reconciled(
 /// slot when the editor cut does not already hold it. Any other layout change
 /// is left uncarried, and [`warn_dropped_agent_component_ops`] reports a
 /// created component that still did not land (`#recapcreaterebasecarry`).
+/// A row the agent added or rewrote inside a component that otherwise survived
+/// is reported the same way (`#rebasedroppedrowswarning`): the whole-component
+/// check stays silent when any other byte of the body landed.
 pub fn carry_agent_component_ops_onto_response_rebase(
     merge_base: &str,
     agent_target: &str,
@@ -629,17 +632,246 @@ pub fn dropped_agent_component_ops(
     dropped
 }
 
+/// One agent list row a rebase onto the editor cut did not carry, inside a
+/// component that may otherwise have survived.
+///
+/// `#rebasedroppedrowswarning`: [`DroppedAgentComponentOp`] compares whole
+/// component bodies. On 2026-11-05 a queue rebase kept `**Summary:**` and
+/// lost `**Response**`, `**Timestamp:**`, `**State:**`, `**Guidance:**`, and
+/// `**Closed by:**` (`#responsewrapperlossrootcause`). The body was no longer
+/// the editor cut's, so the component warning stayed empty and the wrapper
+/// loss was silent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DroppedAgentRow {
+    /// Component marker name (`queue`, `todo`, ...).
+    pub component: String,
+    /// Zero-based occurrence among components sharing the name.
+    pub occurrence: usize,
+    /// Merge identity of the row ([`agent_doc_merge::crdt::KeyedComponentRow::key`]).
+    pub key: String,
+    /// First line of the row, trimmed, so the warning names it.
+    pub row: String,
+    /// True when the operator changed this same row and the rebase kept their
+    /// text; false when nothing justified losing the agent's row.
+    pub operator_changed: bool,
+}
+
+/// Agent list rows (added or rewritten over `merge_base`) that `rebased` does
+/// not carry, inside keyed components (`queue`, `backlog`, `review`, `done`,
+/// `todo`).
+///
+/// A row the agent left byte-identical to the base is the operator's to delete
+/// and is not reported. A row is carried when its exact source text is still
+/// in the rebased component, even if dropping a parent row changed the merge
+/// key of what remains (the 2026-11-05 rebase kept `**Summary:**` and lost the
+/// wrapper rows around it). A row whose rebased text is neither the agent's
+/// nor the editor's was leaf-merged, not dropped. Empty when every agent row
+/// landed, or when the component is not a keyed list (a status patch is still
+/// only the whole-component warning).
+pub fn dropped_agent_rows(
+    merge_base: &str,
+    agent_target: &str,
+    editor_cut: &str,
+    rebased: &str,
+) -> Vec<DroppedAgentRow> {
+    use agent_doc_element::component_scope::top_level_component_bodies;
+    let (Some(base), Some(agent), Some(editor), Some(current)) = (
+        top_level_component_bodies(merge_base),
+        top_level_component_bodies(agent_target),
+        top_level_component_bodies(editor_cut),
+        top_level_component_bodies(rebased),
+    ) else {
+        return Vec::new();
+    };
+    let mut dropped = Vec::new();
+    for agent_body in &agent {
+        let Some(base_body) = base
+            .iter()
+            .find(|body| body.component == agent_body.component)
+        else {
+            // A component the agent created has no base rows. Its whole body is
+            // still [`dropped_agent_component_ops`]'s report when it did not
+            // land; rows here cover a body that only partly landed.
+            let rebased_rows = current
+                .iter()
+                .find(|body| body.component == agent_body.component)
+                .map(|body| component_rows(rebased, body))
+                .unwrap_or_default();
+            let editor_rows = editor
+                .iter()
+                .find(|body| body.component == agent_body.component)
+                .map(|body| component_rows(editor_cut, body))
+                .unwrap_or_default();
+            let agent_rows = component_rows(agent_target, agent_body);
+            report_dropped_rows(
+                &agent_body.component.name,
+                agent_body.component.occurrence,
+                &[],
+                &agent_rows,
+                &editor_rows,
+                &rebased_rows,
+                &mut dropped,
+            );
+            continue;
+        };
+        let Some(editor_body) = editor
+            .iter()
+            .find(|body| body.component == base_body.component)
+        else {
+            continue;
+        };
+        let Some(current_body) = current
+            .iter()
+            .find(|body| body.component == base_body.component)
+        else {
+            continue;
+        };
+        let base_rows = component_rows(merge_base, base_body);
+        let agent_rows = component_rows(agent_target, agent_body);
+        let editor_rows = component_rows(editor_cut, editor_body);
+        let rebased_rows = component_rows(rebased, current_body);
+        report_dropped_rows(
+            &base_body.component.name,
+            base_body.component.occurrence,
+            &base_rows,
+            &agent_rows,
+            &editor_rows,
+            &rebased_rows,
+            &mut dropped,
+        );
+    }
+    dropped
+}
+
+fn component_rows(
+    doc: &str,
+    body: &agent_doc_element::component_scope::TopLevelComponentBody,
+) -> Vec<agent_doc_merge::crdt::KeyedComponentRow> {
+    agent_doc_merge::crdt::keyed_component_rows(&body.component.name, &doc[body.body.clone()])
+        .unwrap_or_default()
+}
+
+fn report_dropped_rows(
+    component: &str,
+    occurrence: usize,
+    base: &[agent_doc_merge::crdt::KeyedComponentRow],
+    agent: &[agent_doc_merge::crdt::KeyedComponentRow],
+    editor: &[agent_doc_merge::crdt::KeyedComponentRow],
+    rebased: &[agent_doc_merge::crdt::KeyedComponentRow],
+    dropped: &mut Vec<DroppedAgentRow>,
+) {
+    let mut base_remaining = text_counts(base);
+    let mut rebased_remaining = text_counts(rebased);
+    for row in agent {
+        if let Some(count) = base_remaining.get_mut(row.text.as_str())
+            && *count > 0
+        {
+            *count -= 1;
+            continue;
+        }
+        if let Some(count) = rebased_remaining.get_mut(row.text.as_str())
+            && *count > 0
+        {
+            *count -= 1;
+            continue;
+        }
+        // A leaf merge rewrites the row into text that is neither side's.
+        // That row landed in some form. An editor-identical result, or a
+        // missing row, dropped the agent's copy.
+        if rebased_has_third_text(row, editor, rebased) {
+            continue;
+        }
+        dropped.push(DroppedAgentRow {
+            component: component.to_string(),
+            occurrence,
+            key: row.key.clone(),
+            row: row_warning_label(&row.text),
+            operator_changed: operator_kept_their_row(&row.key, base, editor, rebased),
+        });
+    }
+}
+
+/// `rebased` holds this row's key as some text that is neither the agent's
+/// copy nor the editor's. That is a leaf merge, not a dropped row.
+fn rebased_has_third_text(
+    row: &agent_doc_merge::crdt::KeyedComponentRow,
+    editor: &[agent_doc_merge::crdt::KeyedComponentRow],
+    rebased: &[agent_doc_merge::crdt::KeyedComponentRow],
+) -> bool {
+    rebased.iter().any(|candidate| {
+        candidate.key == row.key
+            && candidate.text != row.text
+            && !editor
+                .iter()
+                .any(|editor_row| editor_row.key == row.key && editor_row.text == candidate.text)
+    })
+}
+
+fn operator_kept_their_row(
+    key: &str,
+    base: &[agent_doc_merge::crdt::KeyedComponentRow],
+    editor: &[agent_doc_merge::crdt::KeyedComponentRow],
+    rebased: &[agent_doc_merge::crdt::KeyedComponentRow],
+) -> bool {
+    let base_texts = key_text_counts(base, key);
+    let editor_texts = key_text_counts(editor, key);
+    editor_texts != base_texts && key_text_counts(rebased, key) == editor_texts
+}
+
+fn text_counts(
+    rows: &[agent_doc_merge::crdt::KeyedComponentRow],
+) -> std::collections::HashMap<&str, usize> {
+    let mut counts = std::collections::HashMap::new();
+    for row in rows {
+        *counts.entry(row.text.as_str()).or_insert(0) += 1;
+    }
+    counts
+}
+
+fn key_text_counts<'a>(
+    rows: &'a [agent_doc_merge::crdt::KeyedComponentRow],
+    key: &str,
+) -> std::collections::HashMap<&'a str, usize> {
+    let mut counts = std::collections::HashMap::new();
+    for row in rows {
+        if row.key == key {
+            *counts.entry(row.text.as_str()).or_insert(0) += 1;
+        }
+    }
+    counts
+}
+
+fn row_warning_label(text: &str) -> String {
+    let line = text.lines().next().unwrap_or("").trim();
+    const MAX_CHARS: usize = 200;
+    if line.chars().count() <= MAX_CHARS {
+        return line.to_string();
+    }
+    let end = line
+        .char_indices()
+        .nth(MAX_CHARS)
+        .map_or(line.len(), |(index, _)| index);
+    format!("{}…", &line[..end])
+}
+
 /// `#statuspatchdrop` (b): say so on stderr when a rebase discards an agent
 /// component op, so `respond`/`finalize` output never reports success for a
 /// patch that did not land. The operator-changed case is the authorship policy
 /// keeping the operator's concurrent edit; the other case is a defect.
+///
+/// `#rebasedroppedrowswarning`: a component the rebase only partly carried
+/// does not trip the whole-component warning. Each agent row it dropped is
+/// reported on its own. A component already reported as wholly dropped is not
+/// repeated row by row.
 fn warn_dropped_agent_component_ops(
     merge_base: &str,
     agent_target: &str,
     editor_cut: &str,
     rebased: &str,
 ) {
-    for dropped in dropped_agent_component_ops(merge_base, agent_target, editor_cut, rebased) {
+    let dropped_components =
+        dropped_agent_component_ops(merge_base, agent_target, editor_cut, rebased);
+    for dropped in &dropped_components {
         let reason = if dropped.operator_changed {
             "the operator edited the same component concurrently and their edit was kept"
         } else {
@@ -648,6 +880,26 @@ fn warn_dropped_agent_component_ops(
         eprintln!(
             "[write] warning: agent_component_patch_dropped component={} occurrence={} operator_changed={}: the agent's patch:{} did not land ({reason}); re-read the document and re-apply it (for agent:status use `agent-doc status set`)",
             dropped.component, dropped.occurrence, dropped.operator_changed, dropped.component,
+        );
+    }
+    for dropped in dropped_agent_rows(merge_base, agent_target, editor_cut, rebased) {
+        if dropped_components.iter().any(|component| {
+            component.component == dropped.component && component.occurrence == dropped.occurrence
+        }) {
+            continue;
+        }
+        let reason = if dropped.operator_changed {
+            "the operator edited the same row concurrently and their edit was kept"
+        } else {
+            "the rebase onto the editor cut discarded it"
+        };
+        eprintln!(
+            "[write] warning: agent_row_dropped component={} occurrence={} operator_changed={} key={}: the agent's row did not land ({reason}); re-read the document and re-apply it. row: {}",
+            dropped.component,
+            dropped.occurrence,
+            dropped.operator_changed,
+            dropped.key,
+            dropped.row,
         );
     }
 }
@@ -6493,6 +6745,114 @@ mod status_patch_drop_tests {
             rebased,
             queue_doc(&format!("{routed}{CLOSED_TREE}{STRUCK_REPLIES}"))
         );
+        assert!(
+            dropped_agent_rows(&base, &target, &cut, &rebased).is_empty(),
+            "a carried response tree is not a dropped row: {rebased}"
+        );
+    }
+
+    /// `#rebasedroppedrowswarning`: the whole-component warning compares bodies.
+    /// Keeping `**Summary:**` makes the queue body differ from the editor cut,
+    /// so the wrapper rows lost around it used to be silent.
+    #[test]
+    fn a_rebase_that_keeps_only_the_summary_reports_the_dropped_wrapper_rows() {
+        let routed = "- ### do [#routed]\n";
+        let base = queue_doc(&format!("{CLOSED_TREE}{OPEN_REPLIES}"));
+        let target = queue_doc(&format!("{CLOSED_TREE}{STRUCK_REPLIES}"));
+        let cut = queue_doc(&format!("{routed}{CLOSED_TREE}{OPEN_REPLIES}"));
+        let carried = rebase_agent_candidate_over_editor_cut(&base, &target, &cut).unwrap();
+        let stripped = carried
+            .lines()
+            .filter(|line| {
+                let trimmed = line.trim();
+                !trimmed.starts_with("- **Response")
+                    && !trimmed.starts_with("- **Timestamp:")
+                    && !trimmed.starts_with("- **State:")
+                    && !trimmed.starts_with("- **Guidance:")
+                    && !trimmed.starts_with("- **Closed by:")
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+            + "\n";
+
+        assert!(
+            dropped_agent_component_ops(&base, &target, &cut, &stripped).is_empty(),
+            "summary and the strikes still differ from the editor cut: {stripped}"
+        );
+        let rows = dropped_agent_rows(&base, &target, &cut, &stripped);
+        let labels: Vec<&str> = rows.iter().map(|row| row.row.as_str()).collect();
+        assert_eq!(
+            labels,
+            vec![
+                "- **Response [#r-0123456789ab]**",
+                "- **Timestamp:** 2026-11-05T19:10:10.000Z",
+                "- **State:** Complete.",
+                "- **Guidance:** Keep the tree under [#parent]: [#parent] is still open.",
+                "- **Closed by:** [#r-0123456789ab]",
+            ],
+            "{rows:?}"
+        );
+        assert!(
+            rows.iter().all(|row| !row.operator_changed),
+            "the operator added a different row; they did not edit these: {rows:?}"
+        );
+    }
+
+    /// An operator edit of one row, kept by the rebase, is attributed to them.
+    /// Another agent row landing in the same component keeps the whole-component
+    /// warning silent, which is the hole the row report exists to close.
+    #[test]
+    fn dropped_agent_rows_attributes_an_operator_row_inside_a_carried_component() {
+        let base = doc(&status_body("p"), "", "- do [#alpha]\n- do [#beta]\n");
+        let target = doc(
+            &status_body("p"),
+            RESPONSE,
+            "- do [#alpha] from the agent\n- do [#beta] kept\n",
+        );
+        let cut = doc(
+            &status_body("p"),
+            "",
+            "- do [#alpha] from the operator\n- do [#beta]\n",
+        );
+        let rebased = doc(
+            &status_body("p"),
+            RESPONSE,
+            "- do [#alpha] from the operator\n- do [#beta] kept\n",
+        );
+
+        assert!(
+            dropped_agent_component_ops(&base, &target, &cut, &rebased).is_empty(),
+            "{rebased}"
+        );
+        assert_eq!(
+            dropped_agent_rows(&base, &target, &cut, &rebased),
+            vec![DroppedAgentRow {
+                component: "queue".to_string(),
+                occurrence: 0,
+                key: "id:alpha".to_string(),
+                row: "- do [#alpha] from the agent".to_string(),
+                operator_changed: true,
+            }]
+        );
+    }
+
+    /// A leaf merge that rewrites a row into neither side's text did not drop it.
+    #[test]
+    fn dropped_agent_rows_ignores_a_leaf_merged_row() {
+        let base = doc(&status_body("p"), "", "- do [#alpha]\n");
+        let target = doc(
+            &status_body("p"),
+            RESPONSE,
+            "- do [#alpha] from the agent\n",
+        );
+        let cut = doc(&status_body("p"), "", "- do [#alpha] from the operator\n");
+        let rebased = doc(
+            &status_body("p"),
+            RESPONSE,
+            "- do [#alpha] from the agent and the operator\n",
+        );
+
+        assert!(dropped_agent_rows(&base, &target, &cut, &rebased).is_empty());
     }
 
     /// A tree inserted ahead of an older one must not renumber it: ordinal

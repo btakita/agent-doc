@@ -339,6 +339,32 @@ pub struct SupervisorReplacementTargetFacts {
     pub lease_pid: Option<u32>,
 }
 
+/// Continue-mode cold start found no exact `resume:` id for the dead harness.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum MissingResumeColdStart {
+    /// Launch the route-owned supervisor without an exact conversation id.
+    LaunchFresh,
+    /// Do not launch. A fresh conversation would discard a thread this harness
+    /// cannot mint back (`#restartresume`).
+    Refuse,
+}
+
+/// Whether a continue-mode cold start may launch when the editor document has
+/// no exact resume id for `harness_binary`.
+///
+/// Codex and Claude stay refused: their thread is the recorded id, and
+/// starting fresh here is how a dead supervisor loses the conversation. Grok's
+/// id is assigned by the supervisor (`--session-id`). A route-owned Grok pane
+/// whose child is already gone has no harness to resume and no operator at the
+/// restart prompt. Refusing leaves that pane at a bare shell; the watchdog
+/// records the loss and stops. Launch a fresh child instead.
+pub fn missing_resume_cold_start(harness_binary: &str) -> MissingResumeColdStart {
+    match harness_binary.trim() {
+        "grok" | "grok-build" => MissingResumeColdStart::LaunchFresh,
+        _ => MissingResumeColdStart::Refuse,
+    }
+}
+
 /// `#stalesupervisorhidden`: the supervisor a replacement stops.
 ///
 /// The route-owned `/proc` scan used to be the only witness. It never sees an
@@ -400,6 +426,33 @@ pub fn parse_supervisor_replacement_request(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A crashed route-owned Grok child whose editor document has no
+    /// `resume.grok` must still be cold-started. Codex and Claude keep the
+    /// `#restartresume` refusal.
+    #[test]
+    fn grok_child_gone_without_resume_id_still_cold_starts() {
+        assert_eq!(
+            missing_resume_cold_start("grok"),
+            MissingResumeColdStart::LaunchFresh
+        );
+        assert_eq!(
+            missing_resume_cold_start("grok-build"),
+            MissingResumeColdStart::LaunchFresh
+        );
+        assert_eq!(
+            missing_resume_cold_start("codex"),
+            MissingResumeColdStart::Refuse
+        );
+        assert_eq!(
+            missing_resume_cold_start("claude"),
+            MissingResumeColdStart::Refuse
+        );
+        assert_eq!(
+            missing_resume_cold_start("opencode"),
+            MissingResumeColdStart::Refuse
+        );
+    }
 
     /// `#replacementwithdraw` regression (2026-10-20 `agent-doc-bugs.md`,
     /// receipt 2172): a stale-binary `continue` replacement escalated three

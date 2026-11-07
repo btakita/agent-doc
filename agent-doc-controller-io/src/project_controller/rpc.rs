@@ -14,8 +14,9 @@ use agent_doc_controller::pane_layout::MANUAL_PANE_LAYOUT_COMMAND_TIMEOUT;
 use agent_doc_controller::status;
 #[cfg(not(any(test, feature = "test-support")))]
 use agent_doc_controller::supervisor_replacement::{
-    SupervisorReplacementEscalation, SupervisorReplacementEscalationFacts,
+    MissingResumeColdStart, SupervisorReplacementEscalation, SupervisorReplacementEscalationFacts,
     SupervisorReplacementIpcOutcome, decide_supervisor_replacement_escalation,
+    missing_resume_cold_start,
 };
 #[cfg(any(test, not(feature = "test-support")))]
 use agent_doc_controller::supervisor_replacement::{
@@ -43600,6 +43601,29 @@ fn cold_start_supervisor_replacement(work: &SupervisorReplacementWork) -> Result
             .resume_for_harness(&document_harness)
             .map(|id| agent_doc_harness::ResumeRequest::Id(id.to_string())),
     };
+    // A missing id refuses the launch for harnesses whose thread cannot be
+    // minted back. Grok is the exception: the child is already gone, so the
+    // route-owned pane must get a fresh supervisor instead of a bare shell.
+    let launch_fresh_without_resume = mode == SupervisorReplacementMode::Continue
+        && resume.is_none()
+        && missing_resume_cold_start(&document_harness) == MissingResumeColdStart::LaunchFresh;
+    if launch_fresh_without_resume {
+        agent_doc_ops_log_io::log_op(
+            &work.file,
+            &format!(
+                "controller_supervisor_replacement_missing_resume_launch_fresh mode={} harness={} session={} pane={} generation={} receipt_id={} reason=route_owned_child_gone",
+                work.mode,
+                document_harness,
+                work.session_id,
+                work.pane_id,
+                work.generation,
+                work.operator_receipt_id,
+            ),
+        );
+    }
+    let refuse_missing_resume = mode == SupervisorReplacementMode::Continue
+        && resume.is_none()
+        && !launch_fresh_without_resume;
     if !work.pane_id.trim().is_empty() {
         let pane_alive = tmux.pane_alive(&work.pane_id);
         let current_command = if pane_alive {
@@ -43677,7 +43701,7 @@ fn cold_start_supervisor_replacement(work: &SupervisorReplacementWork) -> Result
             process_tree_exactly_owns_document(&tmux, &work.pane_id, &work.file),
         ) {
             SupervisorReplacementPaneDecision::PreserveExistingShell => {
-                if mode == SupervisorReplacementMode::Continue && resume.is_none() {
+                if refuse_missing_resume {
                     anyhow::bail!(
                         "cannot cold-start supervisor recovery for {} in continue mode: the editor-authoritative document records no exact `resume:` conversation id; the existing pane was preserved and no fresh session was started",
                         work.file.display()
@@ -43791,7 +43815,7 @@ fn cold_start_supervisor_replacement(work: &SupervisorReplacementWork) -> Result
             SupervisorReplacementPaneDecision::AutoStartNew => {}
         }
     }
-    if mode == SupervisorReplacementMode::Continue && resume.is_none() {
+    if refuse_missing_resume {
         anyhow::bail!(
             "cannot cold-start supervisor recovery for {} in continue mode: the editor-authoritative document records no exact `resume:` conversation id; no fresh session was started",
             work.file.display()

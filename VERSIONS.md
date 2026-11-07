@@ -4,7 +4,7 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 ## 0.35.569
 
-- **Publish `c76d268b8c` as `0.35.569`.** Tag `v0.35.568` remains `37f3bcbaf5f7`. This tag is 278 commits later and fast-forwards `main`. Package manifests, internal constraints, `Cargo.lock`, `pyproject.toml`, and the bundled skill sources move to `0.35.569`. JetBrains plugin generations stay `0.2.943`, `0.2.944`, and `0.2.945`. The Zed extension moves from `0.1.5` to `0.1.6` because `agent-doc-zed-lsp-io` sources changed after `0.1.5` (`bf292516db` limits divergent-history re-register to once per 30s).
+- **Publish `c76d268b8c` as `0.35.569`.** Tag `v0.35.568` remains `37f3bcbaf5f7`. That tip was 278 commits after the previous tag; this release fast-forwards `main` from there. Package manifests, internal constraints, `Cargo.lock`, `pyproject.toml`, and the bundled skill sources move to `0.35.569`. JetBrains plugin generations stay `0.2.943`, `0.2.944`, and `0.2.945`. The Zed extension moves from `0.1.5` to `0.1.6` because `agent-doc-zed-lsp-io` sources changed after `0.1.5` (`bf292516db` limits divergent-history re-register to once per 30s).
 - **`make check` is gated on `cargo fmt`** (`#fmtcigate`, `c76d268b8c`).
 - **Notes written under `## 0.35.568` after that tag ship here.** `#ackidattemptfence` (`3308214110`) and `#claimworkerharness` (`69f0f36c33`) stay under the previous heading.
 

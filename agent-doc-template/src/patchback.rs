@@ -3,8 +3,10 @@
 use std::fmt;
 
 use agent_doc_element::element;
+use agent_doc_element::recap::RECAP_COMPONENT;
 use agent_doc_flow::types::{FlowEvent, FlowName, FlowOutcome, FlowStage};
 
+use crate::response_materialization::serialize_template_response;
 use crate::template::{PatchBlock, parse_patches};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -345,13 +347,22 @@ pub fn normalize_child_template_response(response: String) -> ChildPatchbackNorm
             decision: ChildPatchbackNormalizationDecision::KeptUnparseable,
         };
     };
-    if patches.is_empty() && !unmatched.trim().is_empty() {
+    // A plain body may sit beside an authored recap. Wrapping only the body
+    // would drop that recap and strict template closeout would refuse the turn.
+    let recap_only = patches.iter().all(|patch| patch.name == RECAP_COMPONENT);
+    if recap_only && !unmatched.trim().is_empty() {
         if classify_orchestrate_plain_response(unmatched.trim()).is_accepted() {
+            let mut wrapped = vec![PatchBlock::new(
+                "exchange",
+                format!("{}\n", unmatched.trim_end()),
+            )];
+            wrapped.extend(
+                patches
+                    .into_iter()
+                    .filter(|patch| patch.name == RECAP_COMPONENT),
+            );
             return ChildPatchbackNormalization {
-                response: format!(
-                    "<!-- patch:exchange -->\n{}\n<!-- /patch:exchange -->\n",
-                    unmatched.trim_end()
-                ),
+                response: serialize_template_response(&wrapped, ""),
                 decision: ChildPatchbackNormalizationDecision::WrappedPlainResponse,
             };
         }
@@ -594,6 +605,31 @@ mod tests {
         );
         assert!(normalized.response.starts_with("<!-- patch:exchange -->"));
         assert!(normalized.response.contains("### Re: child"));
+    }
+
+    #[test]
+    fn child_plain_response_keeps_authored_recap_beside_wrapped_exchange() {
+        let normalized = normalize_child_template_response(
+            "### Re: child — gpt-5\n\nImplemented.\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n"
+                .to_string(),
+        );
+
+        assert_eq!(
+            normalized.decision,
+            ChildPatchbackNormalizationDecision::WrappedPlainResponse
+        );
+        let (patches, unmatched) = parse_patches(&normalized.response).unwrap();
+        assert!(unmatched.trim().is_empty());
+        assert!(
+            patches
+                .iter()
+                .any(|patch| patch.name == "exchange" && patch.content.contains("### Re: child"))
+        );
+        assert!(
+            patches
+                .iter()
+                .any(|patch| patch.name == RECAP_COMPONENT && patch.content.contains("Committed."))
+        );
     }
 
     #[test]

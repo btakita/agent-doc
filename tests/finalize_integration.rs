@@ -328,7 +328,7 @@ fn status_sync_checkpoint_commit_lands_status_beside_pending_completion_cells() 
         .current_dir(tmp.path())
         .args(["write", "--commit", file, "--force-disk"])
         .write_stdin(
-            "<!-- patch:exchange -->\n### Re: the thing — claude\n\nDid the thing.\n<!-- /patch:exchange -->\n",
+            "<!-- patch:exchange -->\n### Re: the thing — claude\n\nDid the thing.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         )
         .assert()
         .success();
@@ -448,7 +448,7 @@ fn status_sync_checkpoint_commit_lands_status_beside_pending_completion_cells() 
             "work",
         ])
         .write_stdin(
-            "<!-- patch:exchange -->\n### Re: integrated work — claude\n\nIntegrated.\n<!-- /patch:exchange -->\n",
+            "<!-- patch:exchange -->\n### Re: integrated work — claude\n\nIntegrated.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         )
         .assert()
         .success();
@@ -563,7 +563,7 @@ fn finalize_requires_git_repo_before_mutating_document() {
     agent_doc()
         .args(["finalize", doc.to_str().unwrap()])
         .write_stdin(
-            "<!-- patch:exchange -->\n### Re: test — gpt-5\nbody\n<!-- /patch:exchange -->\n",
+            "<!-- patch:exchange -->\n### Re: test — gpt-5\nbody\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         )
         .assert()
         .failure()
@@ -616,7 +616,7 @@ fn finalize_skips_ignored_untracked_session_doc() {
         .current_dir(tmp.path())
         .args(["finalize", doc.to_str().unwrap()])
         .write_stdin(
-            "<!-- patch:exchange -->\n### Re: ignored doc — gpt-5\nbody\n<!-- /patch:exchange -->\n",
+            "<!-- patch:exchange -->\n### Re: ignored doc — gpt-5\nbody\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         )
         .assert()
         // GH #119: the cycle is terminal (`abandoned`, commit refused by
@@ -673,7 +673,7 @@ fn write_commit_requires_git_repo_before_mutating_session_document() {
     agent_doc()
         .args(["write", "--commit", doc.to_str().unwrap()])
         .write_stdin(
-            "<!-- patch:exchange -->\n### Re: repair — gpt-5\nbody\n<!-- /patch:exchange -->\n",
+            "<!-- patch:exchange -->\n### Re: repair — gpt-5\nbody\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         )
         .assert()
         .failure()
@@ -700,7 +700,7 @@ fn write_commit_backfills_patch_todo_id_before_commit() {
         .current_dir(tmp.path())
         .args(["write", "--commit", doc.to_str().unwrap()])
         .write_stdin(
-            "<!-- patch:exchange -->\n### Re: todo id — gpt-5\nok\n<!-- /patch:exchange -->\n<!-- patch:todo -->\n- [ ] Say go to do the thing\n<!-- /patch:todo -->\n",
+            "<!-- patch:exchange -->\n### Re: todo id — gpt-5\nok\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nThe todo row is addressable.\n<!-- /patch:recap -->\n<!-- patch:todo -->\n- [ ] Say go to do the thing\n<!-- /patch:todo -->\n",
         )
         .assert()
         .success();
@@ -724,11 +724,11 @@ fn write_commit_backfills_patch_todo_id_before_commit() {
 
 /// `#agentrecap` / `#recappair`: a document that predates `agent:recap` gains it
 /// from the first recap. While the turn is open the previous recap stays beside
-/// the new one; the commit drops it, so HEAD keeps only the current recap. A
-/// closeout with no recap still commits, keeping the last one and printing only
-/// an advisory.
+/// the new one; the commit drops it, so HEAD keeps only the current recap. An
+/// agent-authored closeout with no recap is refused before capture, so the last
+/// committed recap stays and the exchange is not written.
 #[test]
-fn write_commit_lands_one_recap_per_turn_and_never_requires_it() {
+fn write_commit_lands_one_recap_per_turn_and_refuses_a_missing_one() {
     let (tmp, doc) = setup_session_template_doc();
     init_git_repo(tmp.path(), &doc);
     let closeout = |topic: &str, recap: &str| {
@@ -736,7 +736,7 @@ fn write_commit_lands_one_recap_per_turn_and_never_requires_it() {
             .current_dir(tmp.path())
             .args(["write", "--commit", doc.to_str().unwrap()])
             .write_stdin(format!(
-                "<!-- patch:exchange -->\n### Re: {topic} — gpt-5\nok\n<!-- /patch:exchange -->\n{recap}"
+                "<!-- patch:exchange -->\n### Re: {topic} — gpt-5\nok\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n{recap}"
             ))
             .assert()
             .success()
@@ -773,15 +773,28 @@ fn write_commit_lands_one_recap_per_turn_and_never_requires_it() {
     assert!(!committed.contains("First outcome."), "{committed}");
     assert_eq!(committed.matches("<!-- agent:recap").count(), 1);
 
-    let third = closeout("third", "");
+    let before_third = head_blob(tmp.path());
+    let third = agent_doc()
+        .current_dir(tmp.path())
+        .args(["write", "--commit", doc.to_str().unwrap()])
+        .write_stdin(
+            "<!-- patch:exchange -->\n### Re: third — gpt-5\nok\n<!-- /patch:exchange -->\n",
+        )
+        .assert()
+        .failure();
     let stderr = String::from_utf8_lossy(&third.get_output().stderr).into_owned();
     assert!(
-        stderr.contains("[recap] advisory (#agentrecap): this closeout carries no `patch:recap`"),
+        stderr.contains("requires a non-blank `<!-- patch:recap -->`"),
         "{stderr}"
     );
+    assert!(
+        !stderr.contains("[recap] advisory"),
+        "a refusal is not the missing-recap advisory: {stderr}"
+    );
     let committed = head_blob(tmp.path());
+    assert_eq!(committed, before_third, "{committed}");
     assert!(committed.contains("Second outcome.\n"), "{committed}");
-    assert!(committed.contains("### Re: third — gpt-5"), "{committed}");
+    assert!(!committed.contains("### Re: third — gpt-5"), "{committed}");
 }
 
 /// The logical implication is enforced, not merely documented: if the typing
@@ -795,7 +808,7 @@ fn write_commit_refuses_new_patch_todo_that_remains_idless() {
         .current_dir(tmp.path())
         .args(["write", "--commit", doc.to_str().unwrap()])
         .write_stdin(
-            "<!-- patch:exchange -->\n### Re: unfinished todo — gpt-5\nok\n<!-- /patch:exchange -->\n<!-- patch:todo -->\n- [ ] Should we publish the\n<!-- /patch:todo -->\n",
+            "<!-- patch:exchange -->\n### Re: unfinished todo — gpt-5\nok\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nThe id-less todo is refused.\n<!-- /patch:recap -->\n<!-- patch:todo -->\n- [ ] Should we publish the\n<!-- /patch:todo -->\n",
         )
         .assert()
         .failure()
@@ -833,7 +846,7 @@ fn write_commit_accepts_backticked_marker_prefix_in_backlog_item() {
         .current_dir(tmp.path())
         .args(["write", "--commit", doc.to_str().unwrap()])
         .write_stdin(
-            "<!-- patch:exchange -->\n### Re: prefix — gpt-5\nok\n<!-- /patch:exchange -->\n",
+            "<!-- patch:exchange -->\n### Re: prefix — gpt-5\nok\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nThe backticked marker stays prose.\n<!-- /patch:recap -->\n",
         )
         .assert()
         .success()
@@ -867,7 +880,7 @@ fn write_commit_lint_gate_refuses_before_mutating_document() {
         .current_dir(tmp.path())
         .args(["write", "--commit", doc.to_str().unwrap()])
         .write_stdin(
-            "<!-- patch:exchange -->\n### Re: gated — gpt-5\nbody\n<!-- /patch:exchange -->\n",
+            "<!-- patch:exchange -->\n### Re: gated — gpt-5\nbody\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         )
         .assert()
         .failure()
@@ -923,7 +936,7 @@ fn finalize_stale_snapshot_does_not_block_response_or_pending_flags() {
             "id=partial Pending item that must land with the response",
         ])
         .write_stdin(
-            "<!-- patch:exchange -->\n### Re: stale snapshot — gpt-5\nbody\n<!-- /patch:exchange -->\n",
+            "<!-- patch:exchange -->\n### Re: stale snapshot — gpt-5\nbody\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         )
         .assert()
         .success();
@@ -948,7 +961,7 @@ fn write_commit_writes_and_commits_session_response() {
         .current_dir(tmp.path())
         .args(["write", "--commit", doc.to_str().unwrap()])
         .write_stdin(
-            "<!-- patch:exchange -->\n### Re: repair — gpt-5\nbody\n<!-- /patch:exchange -->\n",
+            "<!-- patch:exchange -->\n### Re: repair — gpt-5\nbody\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         )
         .assert()
         .success();
@@ -1021,7 +1034,7 @@ fn finalize_stream_editor_absent_skips_ipc_and_writes_directly() {
             "--stream",
         ])
         .write_stdin(
-            "<!-- patch:exchange -->\n### Re: ipc timeout — gpt-5\nbody\n<!-- /patch:exchange -->\n",
+            "<!-- patch:exchange -->\n### Re: ipc timeout — gpt-5\nbody\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         )
         .assert()
         .success()
@@ -1092,7 +1105,7 @@ fn finalize_editor_absent_replays_operator_deleted_struck_queue_rows() {
         .current_dir(tmp.path())
         .args(["finalize", doc.to_str().unwrap(), "--stream"])
         .write_stdin(
-            "<!-- patch:exchange -->\n### Re: capacity pause — gpt-5\n\nResumed safely.\n<!-- /patch:exchange -->\n",
+            "<!-- patch:exchange -->\n### Re: capacity pause — gpt-5\n\nResumed safely.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         )
         .assert()
         .success();
@@ -1151,7 +1164,7 @@ fn finalize_editor_absent_skips_ipc_and_applies_done_directly() {
         .current_dir(tmp.path())
         .args(["finalize", doc.to_str().unwrap(), "--done", "done1"])
         .write_stdin(
-            "<!-- patch:exchange -->\n### Re: #done1 close the loop — gpt-5\nImplemented and verified.\n<!-- /patch:exchange -->\n",
+            "<!-- patch:exchange -->\n### Re: #done1 close the loop — gpt-5\nImplemented and verified.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         )
         .assert()
         .success()
@@ -1206,7 +1219,7 @@ fn retained_stream_write_archives_done_in_the_same_closeout() {
             "rrta",
         ])
         .write_stdin(
-            "<!-- patch:exchange -->\n### Re: #rrta retained closeout — gpt-5\nImplemented and verified.\n<!-- /patch:exchange -->\n",
+            "<!-- patch:exchange -->\n### Re: #rrta retained closeout — gpt-5\nImplemented and verified.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         )
         .assert()
         .failure()
@@ -1283,7 +1296,7 @@ fn attached_model_missing_does_not_merge_from_stale_recovery_projection() {
             "--commit",
         ])
         .write_stdin(
-            "<!-- patch:exchange -->\n### Re: ipc stale crdt — gpt-5\nbody\n<!-- /patch:exchange -->\n",
+            "<!-- patch:exchange -->\n### Re: ipc stale crdt — gpt-5\nbody\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         )
         .assert()
         .failure()
@@ -1356,7 +1369,7 @@ fn explicit_ipc_on_detached_session_fails_without_creating_an_inbox() {
             "--commit",
         ])
         .write_stdin(
-            "<!-- patch:exchange -->\n### Re: editorless disk fallback — gpt-5\nbody\n<!-- /patch:exchange -->\n",
+            "<!-- patch:exchange -->\n### Re: editorless disk fallback — gpt-5\nbody\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         )
         .assert()
         .failure();
@@ -1470,7 +1483,7 @@ fn template_flag_on_crdt_doc_routes_to_stream_merge_instead_of_diff3() {
             "--commit",
         ])
         .write_stdin(
-            "<!-- patch:exchange -->\n### Re: crdt template route - gpt-5\n\nDone.\n<!-- /patch:exchange -->\n",
+            "<!-- patch:exchange -->\n### Re: crdt template route - gpt-5\n\nDone.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         )
         .assert()
         .success();
@@ -1506,7 +1519,7 @@ fn bare_write_stream_on_session_doc_fails_before_mutating_the_document() {
         .current_dir(tmp.path())
         .args(["write", doc.to_str().unwrap(), "--stream"])
         .write_stdin(
-            "<!-- patch:exchange -->\n### Re: repair — gpt-5\nbody\n<!-- /patch:exchange -->\n",
+            "<!-- patch:exchange -->\n### Re: repair — gpt-5\nbody\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         )
         .assert()
         .failure();
@@ -1825,7 +1838,7 @@ fn write_commit_malformed_response_rejects_before_done_dry_run_diagnostics() {
             "done1",
         ])
         .write_stdin(
-            "### Re: done1 — gpt-5\n<!-- patch:exchange -->\nResolved.\n<!-- /patch:exchange -->\n",
+            "### Re: done1 — gpt-5\n<!-- patch:exchange -->\nResolved.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         )
         .output()
         .unwrap();
@@ -1867,7 +1880,7 @@ fn write_commit_done_queue_consume_does_not_warn_about_expected_missing_snapshot
             "done1",
         ])
         .write_stdin(
-            "<!-- patch:exchange -->\n### Re: done1 — gpt-5\n\nResolved.\n<!-- /patch:exchange -->\n",
+            "<!-- patch:exchange -->\n### Re: done1 — gpt-5\n\nResolved.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         )
         .output()
         .unwrap();
@@ -1895,7 +1908,7 @@ fn write_commit_remains_best_effort_for_non_session_document() {
     agent_doc()
         .args(["write", "--commit", doc.to_str().unwrap()])
         .write_stdin(
-            "<!-- patch:exchange -->\n### Re: note — gpt-5\nbody\n<!-- /patch:exchange -->\n",
+            "<!-- patch:exchange -->\n### Re: note — gpt-5\nbody\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         )
         .assert()
         .success();
@@ -1919,7 +1932,7 @@ fn finalize_writes_and_commits_template_response() {
             "follow up task",
         ])
         .write_stdin(
-            "<!-- patch:exchange -->\n### Re: test — gpt-5\nbody\n<!-- /patch:exchange -->\n",
+            "<!-- patch:exchange -->\n### Re: test — gpt-5\nbody\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         )
         .assert()
         .success();
@@ -1983,7 +1996,7 @@ fn finalize_stream_auto_reopens_committed_cycle_for_new_response() {
             "skill",
         ])
         .write_stdin(
-            "<!-- patch:exchange -->\n### Re: first — gpt-5\n\nFirst response.\n<!-- /patch:exchange -->\n",
+            "<!-- patch:exchange -->\n### Re: first — gpt-5\n\nFirst response.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         )
         .assert()
         .success();
@@ -2006,7 +2019,7 @@ fn finalize_stream_auto_reopens_committed_cycle_for_new_response() {
             "skill",
         ])
         .write_stdin(
-            "<!-- patch:exchange -->\n### Re: second — gpt-5\n\nSecond response.\n<!-- /patch:exchange -->\n",
+            "<!-- patch:exchange -->\n### Re: second — gpt-5\n\nSecond response.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         )
         .assert()
         .success();
@@ -2073,7 +2086,7 @@ fn finalize_late_claimed_response_ignores_unrelated_visible_queue_heads() {
             "skill",
         ])
         .write_stdin(
-            "<!-- patch:exchange -->\n### Re: setup — gpt-5\n\nFirst response.\n<!-- /patch:exchange -->\n",
+            "<!-- patch:exchange -->\n### Re: setup — gpt-5\n\nFirst response.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         )
         .assert()
         .success();
@@ -2095,7 +2108,7 @@ fn finalize_late_claimed_response_ignores_unrelated_visible_queue_heads() {
             "skill",
         ])
         .write_stdin(
-            "<!-- patch:exchange -->\n### Re: GH #186 — gpt-5\n\nFixed and verified issue #186.\n<!-- /patch:exchange -->\n",
+            "<!-- patch:exchange -->\n### Re: GH #186 — gpt-5\n\nFixed and verified issue #186.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         )
         .assert()
         .success();
@@ -2140,7 +2153,7 @@ fn finalize_stream_rejects_true_duplicate_replay_after_committed_cycle() {
     let original = fs::read_to_string(&doc).unwrap();
     checkpoint_baseline(tmp.path(), &original);
 
-    let first_response = "<!-- patch:exchange -->\n### Re: first — gpt-5\n\nFirst response.\n<!-- /patch:exchange -->\n";
+    let first_response = "<!-- patch:exchange -->\n### Re: first — gpt-5\n\nFirst response.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n";
 
     agent_doc()
         .current_dir(tmp.path())
@@ -2222,7 +2235,7 @@ fn write_commit_pending_only_update_reopens_committed_cycle() {
             "--origin",
             "skill",
         ])
-        .write_stdin("<!-- patch:exchange -->\n### Re: first — gpt-5\n\nFirst response.\n<!-- /patch:exchange -->\n")
+        .write_stdin("<!-- patch:exchange -->\n### Re: first — gpt-5\n\nFirst response.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n")
         .assert()
         .success();
 
@@ -2283,7 +2296,7 @@ fn response_and_done_reopen_acquires_fresh_cycle_owner_before_capture() {
             "--origin",
             "skill",
         ])
-        .write_stdin("<!-- patch:exchange -->\n### Re: first — gpt-5\n\nFirst response.\n<!-- /patch:exchange -->\n")
+        .write_stdin("<!-- patch:exchange -->\n### Re: first — gpt-5\n\nFirst response.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n")
         .assert()
         .success();
 
@@ -2299,7 +2312,7 @@ fn response_and_done_reopen_acquires_fresh_cycle_owner_before_capture() {
             "done1",
             "--no-followups",
         ])
-        .write_stdin("<!-- patch:exchange -->\n### Re: second — gpt-5\n\nSecond response.\n<!-- /patch:exchange -->\n")
+        .write_stdin("<!-- patch:exchange -->\n### Re: second — gpt-5\n\nSecond response.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n")
         .assert()
         .success();
 
@@ -2380,7 +2393,7 @@ fn reopened_pending_only_bare_tag_add_applied_twice_lands_exactly_once() {
             "head",
         ])
         .write_stdin(
-            "<!-- patch:exchange -->\n### Re: do [#head] — gpt-5\nDone.\n<!-- /patch:exchange -->\n",
+            "<!-- patch:exchange -->\n### Re: do [#head] — gpt-5\nDone.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         )
         .assert()
         .success();
@@ -2403,7 +2416,7 @@ fn reopened_pending_only_bare_tag_add_applied_twice_lands_exactly_once() {
                 "append",
             ])
             .write_stdin(format!(
-                "<!-- patch:exchange -->\n### Re: follow-ups ({application}) — gpt-5\nFiled the load-budget follow-up.\n<!-- /patch:exchange -->\n"
+                "<!-- patch:exchange -->\n### Re: follow-ups ({application}) — gpt-5\nFiled the load-budget follow-up.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n"
             ))
             .assert()
             .success();
@@ -2492,7 +2505,7 @@ fn backlog_add_mirrors_into_heading_anchored_run_beside_a_loop() {
                 placement,
             ])
             .write_stdin(
-                "<!-- patch:exchange -->\n### Re: do [#head] — gpt-5\nFiled the follow-up.\n<!-- /patch:exchange -->\n",
+                "<!-- patch:exchange -->\n### Re: do [#head] — gpt-5\nFiled the follow-up.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
             )
             .assert()
             .success();
@@ -2546,7 +2559,7 @@ fn write_commit_without_mutations_still_rejects_replay_after_committed_cycle() {
             "--origin",
             "skill",
         ])
-        .write_stdin("<!-- patch:exchange -->\n### Re: only — gpt-5\n\nOnly response.\n<!-- /patch:exchange -->\n")
+        .write_stdin("<!-- patch:exchange -->\n### Re: only — gpt-5\n\nOnly response.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n")
         .assert()
         .success();
 
@@ -2577,7 +2590,7 @@ fn finalize_stream_rebases_stale_exchange_baseline_to_head_after_new_preflight()
             "skill",
         ])
         .write_stdin(
-            "<!-- patch:exchange -->\n### Re: first — gpt-5\n\nFirst response.\n<!-- /patch:exchange -->\n",
+            "<!-- patch:exchange -->\n### Re: first — gpt-5\n\nFirst response.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         )
         .assert()
         .success();
@@ -2615,7 +2628,7 @@ fn finalize_stream_rebases_stale_exchange_baseline_to_head_after_new_preflight()
             "skill",
         ])
         .write_stdin(
-            "<!-- patch:exchange -->\n### Re: Follow-up prompt — gpt-5\n\nSecond response.\n<!-- /patch:exchange -->\n",
+            "<!-- patch:exchange -->\n### Re: Follow-up prompt — gpt-5\n\nSecond response.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         )
         .assert()
         .success();
@@ -2664,7 +2677,7 @@ fn finalize_rejects_status_only_response_for_imperative_directive() {
             "--force-disk",
         ])
         .write_stdin(
-            "<!-- patch:exchange -->\n### Re: test — gpt-5\nIn progress. Continuing now.\n<!-- /patch:exchange -->\n",
+            "<!-- patch:exchange -->\n### Re: test — gpt-5\nIn progress. Continuing now.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         )
         .assert()
         .failure()
@@ -2700,7 +2713,7 @@ fn finalize_rejects_status_only_response_for_natural_language_pending_task() {
             "--force-disk",
         ])
         .write_stdin(
-            "<!-- patch:exchange -->\n### Re: test — gpt-5\nI’m starting #n8q4 now. First pass is underway.\n<!-- /patch:exchange -->\n",
+            "<!-- patch:exchange -->\n### Re: test — gpt-5\nI’m starting #n8q4 now. First pass is underway.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         )
         .assert()
         .failure()
@@ -2726,7 +2739,7 @@ fn finalize_fails_closed_when_internal_session_check_rejects_closeout() {
         .current_dir(tmp.path())
         .args(["finalize", doc.to_str().unwrap()])
         .write_stdin(
-            "<!-- patch:exchange -->\n### Re: recommendations — gpt-5\n## Recommendations\n1. Add regression coverage\n2. Update the spec\n<!-- /patch:exchange -->\n",
+            "<!-- patch:exchange -->\n### Re: recommendations — gpt-5\n## Recommendations\n1. Add regression coverage\n2. Update the spec\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         )
         .assert()
         .failure()
@@ -2765,7 +2778,7 @@ fn finalize_no_followups_records_closeout_intent_without_visible_guard_marker() 
             "--force-disk",
         ])
         .write_stdin(
-            "<!-- patch:exchange -->\n### Re: complete — gpt-5\nThe requested work is complete.\n<!-- /patch:exchange -->\n",
+            "<!-- patch:exchange -->\n### Re: complete — gpt-5\nThe requested work is complete.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         )
         .assert()
         .success();
@@ -2816,7 +2829,7 @@ fn finalize_prewrite_guard_failure_leaves_cycle_open_for_retry() {
         Some("preflight_started")
     );
 
-    let response = "<!-- patch:exchange -->\n### Re: recommendations — gpt-5\n## Recommendations\n1. Add regression coverage\n2. Update the spec\n<!-- /patch:exchange -->\n";
+    let response = "<!-- patch:exchange -->\n### Re: recommendations — gpt-5\n## Recommendations\n1. Add regression coverage\n2. Update the spec\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n";
 
     agent_doc()
         .current_dir(tmp.path())
@@ -2902,7 +2915,7 @@ fn finalize_pending_add_multiple_flags_keep_cli_order_at_top() {
             "id=third third task",
         ])
         .write_stdin(
-            "<!-- patch:exchange -->\n### Re: ordered pending adds — gpt-5\nDone.\n<!-- /patch:exchange -->\n",
+            "<!-- patch:exchange -->\n### Re: ordered pending adds — gpt-5\nDone.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         )
         .assert()
         .success();
@@ -2979,7 +2992,7 @@ fn finalize_next_steps_pending_adds_keep_priority_order_and_status_top() {
             "Added #next-steps follow-ups. Top backlog item: #first.",
         ])
         .write_stdin(
-            "<!-- patch:exchange -->\n### Re: #next-steps — gpt-5\n\nCaptured follow-ups in priority order.\n<!-- /patch:exchange -->\n",
+            "<!-- patch:exchange -->\n### Re: #next-steps — gpt-5\n\nCaptured follow-ups in priority order.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         )
         .assert()
         .success();
@@ -3022,7 +3035,7 @@ fn finalize_blocks_session_closeout_when_completed_pending_lacks_pending_done() 
         .current_dir(tmp.path())
         .args(["finalize", doc.to_str().unwrap()])
         .write_stdin(
-            "<!-- patch:exchange -->\n### Re: #4qja streaming orchestrate patchback — gpt-5\nImplemented the sequential orchestration streaming path for CRDT docs.\nVerification:\n- cargo test\n<!-- /patch:exchange -->\n",
+            "<!-- patch:exchange -->\n### Re: #4qja streaming orchestrate patchback — gpt-5\nImplemented the sequential orchestration streaming path for CRDT docs.\nVerification:\n- cargo test\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         )
         .assert()
         .failure()
@@ -3064,7 +3077,7 @@ fn finalize_fails_before_write_when_completed_pending_line_is_malformed() {
         .current_dir(tmp.path())
         .args(["finalize", doc.to_str().unwrap()])
         .write_stdin(
-            "<!-- patch:exchange -->\n### Re: #pcops — gpt-5\nImplemented #pcops.\n<!-- /patch:exchange -->\n",
+            "<!-- patch:exchange -->\n### Re: #pcops — gpt-5\nImplemented #pcops.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         )
         .assert()
         .failure()
@@ -3111,7 +3124,7 @@ fn finalize_reaps_completed_pending_items_in_same_closeout_commit() {
             "done1",
         ])
         .write_stdin(
-            "<!-- patch:exchange -->\n### Re: #done1 close the loop — gpt-5\nImplemented and verified.\n<!-- /patch:exchange -->\n",
+            "<!-- patch:exchange -->\n### Re: #done1 close the loop — gpt-5\nImplemented and verified.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         )
         .assert()
         .success();
@@ -3165,7 +3178,7 @@ fn finalize_accepts_hash_prefixed_pending_done_id() {
             "#done1",
         ])
         .write_stdin(
-            "<!-- patch:exchange -->\n### Re: #done1 close the loop — gpt-5\nImplemented and verified.\n<!-- /patch:exchange -->\n",
+            "<!-- patch:exchange -->\n### Re: #done1 close the loop — gpt-5\nImplemented and verified.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         )
         .assert()
         .success();
@@ -3205,7 +3218,7 @@ fn finalize_rejects_removed_done_aliases() {
                 "done1",
             ])
             .write_stdin(
-                "<!-- patch:exchange -->\n### Re: #done1 close the loop — gpt-5\nImplemented and verified.\n<!-- /patch:exchange -->\n",
+                "<!-- patch:exchange -->\n### Re: #done1 close the loop — gpt-5\nImplemented and verified.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
             )
             .assert()
             .failure();
@@ -3252,7 +3265,7 @@ fn finalize_pending_done_is_noop_when_item_was_already_reaped() {
             "done1",
         ])
         .write_stdin(
-            "<!-- patch:exchange -->\n### Re: #done1 close the loop — gpt-5\nImplemented and verified.\n<!-- /patch:exchange -->\n",
+            "<!-- patch:exchange -->\n### Re: #done1 close the loop — gpt-5\nImplemented and verified.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         )
         .assert()
         .success();
@@ -3276,7 +3289,7 @@ fn finalize_stream_rejects_empty_exchange_shell_before_commit() {
     agent_doc()
         .current_dir(tmp.path())
         .args(["finalize", doc.to_str().unwrap(), "--stream"])
-        .write_stdin("<!-- patch:exchange -->\n<!-- /patch:exchange -->\n")
+        .write_stdin("<!-- patch:exchange -->\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n")
         .assert()
         .failure()
         .stderr(predicates::str::contains("no real response-body write"));
@@ -3308,7 +3321,7 @@ fn write_commit_fails_closed_when_internal_session_check_rejects_closeout() {
         .current_dir(tmp.path())
         .args(["write", "--commit", doc.to_str().unwrap()])
         .write_stdin(
-            "<!-- patch:exchange -->\n### Re: recommendations — gpt-5\n## Recommendations\n1. Add regression coverage\n2. Update the spec\n<!-- /patch:exchange -->\n",
+            "<!-- patch:exchange -->\n### Re: recommendations — gpt-5\n## Recommendations\n1. Add regression coverage\n2. Update the spec\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         )
         .assert()
         .failure()
@@ -3361,7 +3374,7 @@ fn finalize_reports_concurrent_prompt_added_after_baseline_as_pending_steering()
             "--stream",
         ])
         .write_stdin(
-            "<!-- patch:exchange -->\n### Re: Please reply — gpt-5\nAnswered only the original prompt.\n<!-- /patch:exchange -->\n",
+            "<!-- patch:exchange -->\n### Re: Please reply — gpt-5\nAnswered only the original prompt.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         )
         .assert()
         .success()
@@ -3426,7 +3439,7 @@ fn finalize_forward_merges_late_comment_tail_edit_outside_exchange() {
             "--stream",
         ])
         .write_stdin(
-            "<!-- patch:exchange -->\n### Re: Please reply — gpt-5\nAnswered the original prompt.\n<!-- /patch:exchange -->\n",
+            "<!-- patch:exchange -->\n### Re: Please reply — gpt-5\nAnswered the original prompt.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         )
         .assert()
         .success();
@@ -3490,7 +3503,7 @@ fn finalize_preserves_current_duplicate_prompt_html_comment_body() {
             "--stream",
         ])
         .write_stdin(
-            "<!-- patch:exchange -->\n### Re: comment cleanup — gpt-5\nPreserved the post-exchange scratch comment.\n<!-- /patch:exchange -->\n",
+            "<!-- patch:exchange -->\n### Re: comment cleanup — gpt-5\nPreserved the post-exchange scratch comment.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         )
         .assert()
         .success();
@@ -3542,7 +3555,7 @@ fn finalize_ignores_concurrent_duplicate_prompt_comment_for_session_check() {
             "--stream",
         ])
         .write_stdin(
-            "<!-- patch:exchange -->\n### Re: IPC comment typing — gpt-5\nPreserved the scratch comment without replaying it into the exchange.\n<!-- /patch:exchange -->\n",
+            "<!-- patch:exchange -->\n### Re: IPC comment typing — gpt-5\nPreserved the scratch comment without replaying it into the exchange.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         )
         .assert()
         .success();
@@ -3625,7 +3638,7 @@ fn finalize_preserves_compacted_exchange_ipc_scratch_comment() {
             "--stream",
         ])
         .write_stdin(
-            "<!-- patch:exchange -->\n### Re: compact IPC scratch — gpt-5\nPreserved the compacted-session scratch comment without whole-document replay.\n<!-- /patch:exchange -->\n",
+            "<!-- patch:exchange -->\n### Re: compact IPC scratch — gpt-5\nPreserved the compacted-session scratch comment without whole-document replay.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         )
         .assert()
         .success();
@@ -3694,7 +3707,7 @@ fn finalize_preserves_baseline_prompt_html_comment_body() {
             "--stream",
         ])
         .write_stdin(
-            "<!-- patch:exchange -->\n### Re: sqlitedb graph performance next steps — gpt-5\nAnswered without deleting the parked scratch comment.\n<!-- /patch:exchange -->\n",
+            "<!-- patch:exchange -->\n### Re: sqlitedb graph performance next steps — gpt-5\nAnswered without deleting the parked scratch comment.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         )
         .assert()
         .success();
@@ -3751,7 +3764,7 @@ fn finalize_pending_add_prepends_to_active_go_backlog_queue_after_consuming_head
             "[#fresh] same-cycle follow-up",
         ])
         .write_stdin(
-            "<!-- patch:exchange -->\n### Re: do [#head] — gpt-5\nChanged paths: tests/finalize_integration.rs and agent-doc-orchestration/src/write.rs.\nCommands: cargo test finalize_pending_add_appends_to_active_go_backlog_queue_after_consuming_head.\nVerification: passed.\n<!-- /patch:exchange -->\n",
+            "<!-- patch:exchange -->\n### Re: do [#head] — gpt-5\nChanged paths: tests/finalize_integration.rs and agent-doc-orchestration/src/write.rs.\nCommands: cargo test finalize_pending_add_appends_to_active_go_backlog_queue_after_consuming_head.\nVerification: passed.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         )
         .assert()
         .success()
@@ -3810,7 +3823,7 @@ fn finalize_pending_add_multiple_flags_keep_cli_order_at_active_go_queue_head() 
             "[#third] third follow-up",
         ])
         .write_stdin(
-            "<!-- patch:exchange -->\n### Re: do [#head] — gpt-5\nDone.\n<!-- /patch:exchange -->\n",
+            "<!-- patch:exchange -->\n### Re: do [#head] — gpt-5\nDone.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         )
         .assert()
         .success()
@@ -3880,7 +3893,7 @@ fn finalize_pending_add_back_appends_to_active_go_queue() {
             "id=agentsignals realtime agent:signals follow-up",
         ])
         .write_stdin(
-            "<!-- patch:exchange -->\n### Re: do [#head] — gpt-5\nCaptured the signals follow-up.\n<!-- /patch:exchange -->\n",
+            "<!-- patch:exchange -->\n### Re: do [#head] — gpt-5\nCaptured the signals follow-up.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         )
         .assert()
         .success()
@@ -3991,7 +4004,7 @@ fn finalize_icebox_add_back_does_not_append_to_active_go_queue() {
             "id=agentsignals parked realtime agent:signals follow-up",
         ])
         .write_stdin(
-            "<!-- patch:exchange -->\n### Re: do [#head] — gpt-5\nParked the signals follow-up.\n<!-- /patch:exchange -->\n",
+            "<!-- patch:exchange -->\n### Re: do [#head] — gpt-5\nParked the signals follow-up.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         )
         .assert()
         .success();
@@ -4041,7 +4054,7 @@ fn finalize_consumes_first_queue_prompt_after_commit() {
             "--force-disk",
         ])
         .write_stdin(
-            "<!-- patch:exchange -->\n### Re: do #fix1 — gpt-5\nImplemented and verified.\n<!-- /patch:exchange -->\n",
+            "<!-- patch:exchange -->\n### Re: do #fix1 — gpt-5\nImplemented and verified.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         )
         .assert()
         .success()
@@ -4088,7 +4101,7 @@ fn finalize_skips_queue_consumption_when_unrelated_prompt_is_already_in_baseline
             "--force-disk",
         ])
         .write_stdin(
-            "<!-- patch:exchange -->\n### Re: #next-steps — gpt-5\nTop backlog item remains unchanged.\n<!-- /patch:exchange -->\n",
+            "<!-- patch:exchange -->\n### Re: #next-steps — gpt-5\nTop backlog item remains unchanged.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         )
         .assert()
         .success()
@@ -4129,7 +4142,7 @@ fn finalize_consumes_synthetic_queue_prompt_when_response_topic_targets_head_id(
             "--force-disk",
         ])
         .write_stdin(
-            "<!-- patch:exchange -->\n### Re: #spec-test-build-install-commit-push — gpt-5\nImplemented and verified.\n<!-- /patch:exchange -->\n",
+            "<!-- patch:exchange -->\n### Re: #spec-test-build-install-commit-push — gpt-5\nImplemented and verified.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         )
         .assert()
         .success()
@@ -4197,7 +4210,7 @@ fn finalize_consumes_resolved_preset_from_expansion_without_literal_quote() {
         "<!-- patch:exchange -->\n",
         "### Re: actionable review — gpt-5\n\n",
         "Add actionable review items into backlog + queue. Added three items.\n",
-        "<!-- /patch:exchange -->\n",
+        "<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
     );
     assert!(
         !response.contains("> **Queue prompt:**"),
@@ -4250,7 +4263,7 @@ fn finalize_echoes_consumed_free_text_queue_prompt_into_response() {
             "--force-disk",
         ])
         .write_stdin(
-            "<!-- patch:exchange -->\n### Re: queue prompt copy — gpt-5\n\n> **Queue prompt:**\n>\n> Make queue responses copy the originating prompt.\n> This line documents the request.\n\nImplemented and verified.\n<!-- /patch:exchange -->\n",
+            "<!-- patch:exchange -->\n### Re: queue prompt copy — gpt-5\n\n> **Queue prompt:**\n>\n> Make queue responses copy the originating prompt.\n> This line documents the request.\n\nImplemented and verified.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         )
         .assert()
         .success()
@@ -4314,7 +4327,7 @@ fn finalize_keeps_deferred_leading_free_text_queue_head() {
             "### Re: #upgrade to 0.35.471 — gpt-5\n\n",
             "> **Queue prompt:** #upgrade\n\n",
             "**Deferred:** claimed as `subagent:upgrade471`. It starts after this response commits.\n",
-            "<!-- /patch:exchange -->\n",
+            "<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         ))
         .assert()
         .success();
@@ -4364,7 +4377,7 @@ fn finalize_preserves_explicit_empty_preset_marker_without_lint_override() {
             "### Re: #upgrade — gpt-5\n\n",
             "> **Queue prompt:** #upgrade\n\n",
             "**Deferred:** claimed as `subagent:upgrade`. It starts after this response commits.\n",
-            "<!-- /patch:exchange -->\n",
+            "<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         ))
         .assert()
         .success();
@@ -4400,7 +4413,7 @@ fn finalize_skips_queue_consumption_when_user_prompt_diff_targets_other_work() {
             doc.to_str().unwrap(),
         ])
         .write_stdin(
-            "<!-- patch:exchange -->\n### Re: continuation — gpt-5\nImplemented and verified.\n<!-- /patch:exchange -->\n",
+            "<!-- patch:exchange -->\n### Re: continuation — gpt-5\nImplemented and verified.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         )
         .assert()
         .success()
@@ -4454,7 +4467,7 @@ fn finalize_keeps_free_text_queue_head_when_cycle_answers_foreign_exchange_promp
             doc.to_str().unwrap(),
         ])
         .write_stdin(
-            "<!-- patch:exchange -->\n### Re: which module owns queue consumption — gpt-5\nwrite.rs owns it.\n<!-- /patch:exchange -->\n",
+            "<!-- patch:exchange -->\n### Re: which module owns queue consumption — gpt-5\nwrite.rs owns it.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         )
         .assert()
         .success()
@@ -4495,7 +4508,7 @@ fn finalize_consumes_queue_prompt_after_dispatch_directive() {
             "--force-disk",
         ])
         .write_stdin(
-            "<!-- patch:exchange -->\n### Re: do #has9 — gpt-5\nChanged paths: src/write.rs.\nCommands: cargo test finalize_queue.\nVerification: passed.\n<!-- /patch:exchange -->\n",
+            "<!-- patch:exchange -->\n### Re: do #has9 — gpt-5\nChanged paths: src/write.rs.\nCommands: cargo test finalize_queue.\nVerification: passed.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         )
         .assert()
         .success()
@@ -4544,7 +4557,7 @@ fn finalize_drains_queue_and_clears_active_on_last_prompt() {
             "--force-disk",
         ])
         .write_stdin(
-            "<!-- patch:exchange -->\n### Re: describe the project — gpt-5\nThe project is a CLI tool for interactive document sessions with AI agents.\n<!-- /patch:exchange -->\n",
+            "<!-- patch:exchange -->\n### Re: describe the project — gpt-5\nThe project is a CLI tool for interactive document sessions with AI agents.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         )
         .assert()
         .success()
@@ -4593,7 +4606,7 @@ fn finalize_drains_queue_and_removes_dispatch_directive_on_last_prompt() {
             "--force-disk",
         ])
         .write_stdin(
-            "<!-- patch:exchange -->\n### Re: do #has9 — gpt-5\nChanged paths: src/write.rs.\nCommands: cargo test finalize_queue.\nVerification: passed.\n<!-- /patch:exchange -->\n",
+            "<!-- patch:exchange -->\n### Re: do #has9 — gpt-5\nChanged paths: src/write.rs.\nCommands: cargo test finalize_queue.\nVerification: passed.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         )
         .assert()
         .success()
@@ -4650,7 +4663,7 @@ fn finalize_consumes_contiguous_queue_items_resolved_by_done_ids() {
             "cobs",
         ])
         .write_stdin(
-            "<!-- patch:exchange -->\n### Re: queued batch — gpt-5\nChanged paths: specs.md, tests.rs, write.rs, ops.md.\nCommands: cargo test queue_batch.\nVerification: passed.\n<!-- /patch:exchange -->\n",
+            "<!-- patch:exchange -->\n### Re: queued batch — gpt-5\nChanged paths: specs.md, tests.rs, write.rs, ops.md.\nCommands: cargo test queue_batch.\nVerification: passed.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         )
         .assert()
         .success()
@@ -4711,7 +4724,7 @@ fn finalize_done_strike_lands_with_its_response_child() {
             "atomstrike",
         ])
         .write_stdin(
-            "<!-- patch:exchange -->\n### Re: atomic strike — gpt-5\n\n> **Queue prompt:**\n>\n> do [#atomstrike]\n\nCompleted and published the atomic strike.\n<!-- /patch:exchange -->\n",
+            "<!-- patch:exchange -->\n### Re: atomic strike — gpt-5\n\n> **Queue prompt:**\n>\n> do [#atomstrike]\n\nCompleted and published the atomic strike.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         )
         .assert()
         .success();
@@ -4748,7 +4761,7 @@ fn finalize_refused_response_backlink_never_lands_a_bare_struck_row() {
             "atomstrike",
         ])
         .write_stdin(
-            "<!-- patch:exchange -->\n### Re: atomic strike — gpt-5\n\n> **Queue prompt:**\n>\n> do [#atomstrike]\n\nImplemented the atomic strike; the fix remains uncommitted.\n<!-- /patch:exchange -->\n",
+            "<!-- patch:exchange -->\n### Re: atomic strike — gpt-5\n\n> **Queue prompt:**\n>\n> do [#atomstrike]\n\nImplemented the atomic strike; the fix remains uncommitted.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         )
         .output()
         .unwrap();
@@ -4816,7 +4829,7 @@ fn finalize_consumes_done_id_queue_items_interspersed_with_priority_prompt() {
             "cobs",
         ])
         .write_stdin(
-            "<!-- patch:exchange -->\n### Re: queued batch — gpt-5\nChanged paths: specs.md, tests.rs, write.rs, ops.md.\nCommands: cargo test queue_batch.\nVerification: passed.\n<!-- /patch:exchange -->\n",
+            "<!-- patch:exchange -->\n### Re: queued batch — gpt-5\nChanged paths: specs.md, tests.rs, write.rs, ops.md.\nCommands: cargo test queue_batch.\nVerification: passed.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         )
         .assert()
         .success()
@@ -4989,7 +5002,7 @@ fn finalize_does_not_consume_when_queue_inactive() {
             doc.to_str().unwrap(),
         ])
         .write_stdin(
-            "<!-- patch:exchange -->\n### Re: describe the project — gpt-5\nThe project is a CLI tool for interactive document sessions.\n<!-- /patch:exchange -->\n",
+            "<!-- patch:exchange -->\n### Re: describe the project — gpt-5\nThe project is a CLI tool for interactive document sessions.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         )
         .assert()
         .success();
@@ -5024,7 +5037,7 @@ fn finalize_queue_consume_updates_document_and_commit_atomically() {
             "--force-disk",
         ])
         .write_stdin(
-            "<!-- patch:exchange -->\n### Re: do #fix1 — gpt-5\nChanged paths: src/write.rs.\nCommands: cargo test finalize_queue.\nVerification: passed.\n<!-- /patch:exchange -->\n",
+            "<!-- patch:exchange -->\n### Re: do #fix1 — gpt-5\nChanged paths: src/write.rs.\nCommands: cargo test finalize_queue.\nVerification: passed.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         )
         .assert()
         .success()
@@ -5065,7 +5078,7 @@ fn finalize_fails_closed_when_active_queue_component_is_missing() {
             doc.to_str().unwrap(),
         ])
         .write_stdin(
-            "<!-- patch:exchange -->\n### Re: describe the project — gpt-5\nResponse text.\n<!-- /patch:exchange -->\n",
+            "<!-- patch:exchange -->\n### Re: describe the project — gpt-5\nResponse text.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         )
         .assert()
         .failure()
@@ -5105,7 +5118,7 @@ fn finalize_freetext_polluted_queue_parses_but_active_empty_queue_still_fails_cl
             doc.to_str().unwrap(),
         ])
         .write_stdin(
-            "<!-- patch:exchange -->\n### Re: describe the project — gpt-5\nResponse text.\n<!-- /patch:exchange -->\n",
+            "<!-- patch:exchange -->\n### Re: describe the project — gpt-5\nResponse text.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         )
         .assert()
         .failure()
@@ -5139,7 +5152,7 @@ fn finalize_keeps_queue_head_when_later_strict_pending_gate_fails() {
             doc.to_str().unwrap(),
         ])
         .write_stdin(
-            "<!-- patch:exchange -->\n### Re: recommendations — gpt-5\n## Recommendations\n1. Add regression coverage\n2. Update the spec\n<!-- /patch:exchange -->\n",
+            "<!-- patch:exchange -->\n### Re: recommendations — gpt-5\n## Recommendations\n1. Add regression coverage\n2. Update the spec\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         )
         .assert()
         .failure()
@@ -5213,7 +5226,7 @@ fn finalize_rejecting_a_tracked_work_mutation_never_publishes_the_response() {
             "[#gscaccess] duplicate id",
         ])
         .write_stdin(
-            "<!-- patch:exchange -->\n### Re: split — gpt-5\n\nHalf-applied body.\n<!-- /patch:exchange -->\n",
+            "<!-- patch:exchange -->\n### Re: split — gpt-5\n\nHalf-applied body.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         )
         .assert()
         .failure();
@@ -5270,7 +5283,7 @@ fn finalize_valid_tracked_work_mutations_still_apply_exactly_once() {
             "id=followup a genuinely new item",
         ])
         .write_stdin(
-            "<!-- patch:exchange -->\n### Re: whole — gpt-5\n\nWhole body.\n<!-- /patch:exchange -->\n",
+            "<!-- patch:exchange -->\n### Re: whole — gpt-5\n\nWhole body.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         )
         .assert()
         .success();
@@ -5346,7 +5359,7 @@ fn init_then_first_write_commit_commits_with_a_lintable_boundary() {
     agent_doc()
         .current_dir(root)
         .args(["write", "--commit", "scratch.md", "--origin", "skill"])
-        .write_stdin("<!-- patch:exchange -->\nPlain response.\n<!-- /patch:exchange -->\n")
+        .write_stdin("<!-- patch:exchange -->\nPlain response.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n")
         .assert()
         .success();
 
@@ -5433,7 +5446,7 @@ fn unstrike_then_response_closeout_case(disk_holds_operator_cut: bool) {
         .current_dir(tmp.path())
         .args(["finalize", doc.to_str().unwrap(), "--stream"])
         .write_stdin(
-            "<!-- patch:exchange -->\n### Re: dispatch — gpt-5\n\n> **Queue prompt:** do [#stillopen]\n\nDispatched to a subagent.\n<!-- /patch:exchange -->\n",
+            "<!-- patch:exchange -->\n### Re: dispatch — gpt-5\n\n> **Queue prompt:** do [#stillopen]\n\nDispatched to a subagent.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         )
         .assert()
         .success();
@@ -5475,7 +5488,7 @@ fn all_struck_queue_already_done_doc_content() -> String {
     "---\nagent_doc_session: test-session\nagent_doc_format: template\nagent_doc_write: crdt\nqueue: go\nqueue_active: true\nagent: codex\nmodel: gpt-5\n---\n\n<!-- agent:exchange -->\n❯ #gt-fix https://github.com/btakita/agent-doc/issues/234\n<!-- agent:boundary:1234abcd -->\n<!-- /agent:exchange -->\n\n<!-- agent:backlog queue -->\n- [ ] [#other1] Unrelated open item\n<!-- /agent:backlog -->\n\n<!-- agent:queue -->\n- ~~#gt-fix https://github.com/btakita/agent-doc/issues/234~~\n- ~~do [#done1]~~\n<!-- /agent:queue -->\n\n<!-- agent:done -->\n- [x] [#done1] Close the loop\n<!-- /agent:done -->\n".to_string()
 }
 
-const ALREADY_STRUCK_RESPONSE: &str = "<!-- patch:exchange -->\n### Re: gt-fix 234 — gpt-5\n> **Queue prompt:** #gt-fix https://github.com/btakita/agent-doc/issues/234\n\nAlready handled.\n<!-- /patch:exchange -->\n";
+const ALREADY_STRUCK_RESPONSE: &str = "<!-- patch:exchange -->\n### Re: gt-fix 234 — gpt-5\n> **Queue prompt:** #gt-fix https://github.com/btakita/agent-doc/issues/234\n\nAlready handled.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n";
 
 #[test]
 fn respond_done_on_already_done_id_with_all_struck_queue_commits() {
@@ -5720,7 +5733,7 @@ fn backlog_edit_on_a_struck_head_id_does_not_requeue_it() {
             "other=other work; kept open 2026-10-11",
         ])
         .write_stdin(
-            "<!-- patch:exchange -->\n### Re: kept\n\nKept open.\n<!-- /patch:exchange -->\n",
+            "<!-- patch:exchange -->\n### Re: kept\n\nKept open.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         )
         .assert()
         .success();
@@ -5791,7 +5804,7 @@ fn respond_closes_out_a_document_whose_run_opener_shares_a_nonmatching_heading()
         .current_dir(tmp.path())
         .env("AGENT_DOC_SESSION_CHECK_SETTLE_SECS", "1")
         .args(["respond", doc.to_str().unwrap(), "--force-disk"])
-        .write_stdin("<!-- patch:exchange -->\n### Re: reply — gpt-5\n\nReplied.\n<!-- /patch:exchange -->\n")
+        .write_stdin("<!-- patch:exchange -->\n### Re: reply — gpt-5\n\nReplied.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n")
         .output()
         .unwrap();
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -5859,7 +5872,7 @@ fn respond_does_not_supersede_a_session_check_refusal_that_survives_its_commit()
         .current_dir(tmp.path())
         .env("AGENT_DOC_SESSION_CHECK_SETTLE_SECS", "1")
         .args(["respond", doc.to_str().unwrap(), "--force-disk"])
-        .write_stdin("<!-- patch:exchange -->\n### Re: reply — gpt-5\n\nReplied.\n<!-- /patch:exchange -->\n")
+        .write_stdin("<!-- patch:exchange -->\n### Re: reply — gpt-5\n\nReplied.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n")
         .output()
         .unwrap();
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -5962,7 +5975,7 @@ fn finalize_strikes_a_mid_turn_head_whose_reported_worker_was_released() {
         .current_dir(tmp.path())
         .args(["finalize", doc.to_str().unwrap(), "--stream", "--origin", "skill"])
         .write_stdin(
-            "<!-- patch:exchange -->\n### Re: setup — gpt-5\n\nFirst response.\n<!-- /patch:exchange -->\n",
+            "<!-- patch:exchange -->\n### Re: setup — gpt-5\n\nFirst response.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         )
         .assert()
         .success();
@@ -6099,7 +6112,7 @@ fn finalize_strikes_a_mid_turn_head_whose_reported_worker_was_released() {
         .current_dir(tmp.path())
         .args(["finalize", doc.to_str().unwrap(), "--stream", "--origin", "skill"])
         .write_stdin(format!(
-            "<!-- patch:exchange -->\n### Re: page status enum — gpt-5\n\n> **Queue prompt:** {question}\n\n{worker_response}\n<!-- /patch:exchange -->\n"
+            "<!-- patch:exchange -->\n### Re: page status enum — gpt-5\n\n> **Queue prompt:** {question}\n\n{worker_response}\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n"
         ))
         .assert()
         .success();

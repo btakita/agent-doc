@@ -124,9 +124,11 @@
   turn and is never read as a prompt or a queue row. A numbered decision that
   recommends a choice nests the `#recommendationinrow` row
   `- **Recommendation:** **<label>** — <reason>`; that line is not projected
-  into `**Choices:**` (`#recaprecommendationrow`). A missing recap or a format
-  finding is an advisory, never a refusal. All harnesses write one format, from
-  `runbooks/recap.md`. See [Document Format](specs/02-document-format.md).
+  into `**Choices:**` (`#recaprecommendationrow`). An agent-authored template
+  closeout is refused before capture when the recap is missing or blank.
+  Format findings stay advisory. Binary-owned replay still lands without a
+  recap. All harnesses write one format, from `runbooks/recap.md`. See
+  [Document Format](specs/02-document-format.md).
 
 - A template patch whose target no patch path applies is refused with a
   message, never dropped (`#staleretainedwrite`): `patch:queue`, `patch:run`,

@@ -1,6 +1,6 @@
 //! Pure template response materialization policy.
 
-use anyhow::Result;
+use anyhow::{Result, bail};
 
 use crate::PatchBlock;
 
@@ -99,6 +99,7 @@ pub fn template_response_write_proof(
         explicit_components: patches
             .iter()
             .filter(|patch| patch.name != "frontmatter")
+            .filter(|patch| patch.name != agent_doc_element::recap::RECAP_COMPONENT)
             .filter(|patch| !agent_doc_element::element::is_backlog_component(&patch.name))
             .filter(|patch| !agent_doc_element::element::is_review_component(&patch.name))
             .filter(|patch| !patch.content.trim().is_empty())
@@ -154,9 +155,26 @@ pub fn ensure_strict_template_patch_markers(
     );
 }
 
-/// Advisories for a strict closeout's recap (`#agentrecap`). None is ever a
-/// refusal: a harness that omits the recap or strays from the format still
-/// closes its turn, and the previous recap stays until a new one lands.
+/// Refusal for an agent-authored strict template closeout that has no recap
+/// (`#agentrecap`). Binary-owned replay does not call this: a Stop hook can
+/// capture only `patch:exchange`, and requiring a recap there would strand
+/// the turn.
+pub const MISSING_STRICT_TEMPLATE_RECAP: &str = "strict template closeout requires a non-blank `<!-- patch:recap -->` ... `<!-- /patch:recap -->` block beside the exchange (see runbooks/recap.md); a missing or blank recap is refused before capture";
+
+pub fn refuse_missing_strict_template_recap(patches: &[PatchBlock]) -> Result<()> {
+    if crate::recap_patch_body(patches).is_none() {
+        bail!("{MISSING_STRICT_TEMPLATE_RECAP}");
+    }
+    Ok(())
+}
+
+/// Advisories for a strict closeout's recap (`#agentrecap`).
+///
+/// A missing or blank recap is an advisory only on paths that do not require
+/// one (binary-owned replay). Format findings stay advisory on every path:
+/// they never refuse a closeout. Agent-authored template closeouts refuse a
+/// missing recap through [`refuse_missing_strict_template_recap`] before these
+/// advisories run.
 pub fn recap_closeout_advisories(patches: &[PatchBlock]) -> Vec<String> {
     let Some(recap) = crate::recap_patch_body(patches) else {
         return vec![
@@ -920,6 +938,19 @@ mod tests {
     }
 
     #[test]
+    fn template_response_write_proof_ignores_a_recap_beside_an_empty_exchange() {
+        let patches = vec![
+            PatchBlock::new("exchange", ""),
+            PatchBlock::new("recap", "Committed.\n"),
+        ];
+        let proof = template_response_write_proof(&patches, "");
+        assert!(proof.explicit_components.is_empty());
+        assert!(!proof.has_real_body());
+        let err = ensure_template_response_write_proof(&patches, "").unwrap_err();
+        assert!(err.to_string().contains("no real response-body write"));
+    }
+
+    #[test]
     fn template_response_write_proof_counts_real_response_body() {
         let patches = vec![
             PatchBlock::new("frontmatter", "agent: codex"),
@@ -1402,8 +1433,8 @@ mod tests {
         assert!(!same_ignoring_trailing_newlines("a\nb", "a"));
     }
 
-    /// `#agentrecap`: nothing about the recap refuses a closeout. A missing
-    /// recap and a stray format are advisories, for every harness.
+    /// `#agentrecap`: a missing recap refuses an agent-authored template
+    /// closeout. Format findings stay advisories. A blank recap is missing.
     #[test]
     fn recap_advisories_cover_a_missing_recap_and_format_findings() {
         let exchange = PatchBlock::new("exchange", "### Re: x — gpt-5\n\nBody.\n");
@@ -1411,16 +1442,25 @@ mod tests {
         let missing = recap_closeout_advisories(std::slice::from_ref(&exchange));
         assert_eq!(missing.len(), 1);
         assert!(missing[0].contains("no `patch:recap`"), "{missing:?}");
+        let missing_err = refuse_missing_strict_template_recap(std::slice::from_ref(&exchange))
+            .unwrap_err()
+            .to_string();
+        assert!(
+            missing_err.contains(MISSING_STRICT_TEMPLATE_RECAP),
+            "{missing_err}"
+        );
 
         let blank = PatchBlock::new("recap", "\n");
         assert_eq!(
-            recap_closeout_advisories(&[exchange.clone(), blank]),
+            recap_closeout_advisories(&[exchange.clone(), blank.clone()]),
             missing,
             "a blank recap is no recap"
         );
+        assert!(refuse_missing_strict_template_recap(&[exchange.clone(), blank]).is_err());
 
         let good = PatchBlock::new("recap", "Committed, nothing to read.\n");
-        assert!(recap_closeout_advisories(&[exchange.clone(), good]).is_empty());
+        assert!(recap_closeout_advisories(&[exchange.clone(), good.clone()]).is_empty());
+        refuse_missing_strict_template_recap(&[exchange.clone(), good]).unwrap();
 
         let stray = PatchBlock::new("recap", "- starts with a list\n");
         let advisories = recap_closeout_advisories(&[exchange, stray]);

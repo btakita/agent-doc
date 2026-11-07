@@ -1276,7 +1276,7 @@ mod tests {
             json["response_contract"]["recap"]["format_runbook"],
             "runbooks/recap.md"
         );
-        assert_eq!(json["response_contract"]["recap"]["required"], false);
+        assert_eq!(json["response_contract"]["recap"]["required"], true);
 
         let inline = "---\nagent_doc_session: test\nagent_doc_format: append\n---\n\n# Session\n";
         assert!(response_contract_for_content(inline).is_none());

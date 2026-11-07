@@ -88,7 +88,7 @@ Your decisions, most urgent first:
 ## What the binary checks
 
 The binary checks only what it can check cheaply and deterministically, and each
-finding is an advisory on stderr. A recap never fails a closeout:
+format finding is an advisory on stderr. A format nit never fails a closeout:
 
 - The recap opens with a paragraph, not a label, list, quote, or heading.
 - It contains no Markdown heading outside a code fence.
@@ -100,6 +100,8 @@ finding is an advisory on stderr. A recap never fails a closeout:
   does not guess which choice the prose meant, and it does not read the line as
   a `**Choices:**` row.
 
-Everything else in this runbook is your responsibility. A closeout with no recap
-or a blank one still lands, leaves the previous recap in place, and prints an
-advisory.
+Everything else in this runbook is your responsibility. An agent-authored
+template closeout with no recap, or with a blank one, is refused before capture
+and leaves the previous recap in place. Say that in `patch:recap`, or, on
+`agent_doc_finalize`, in `recap`. Binary-owned replay of an already captured
+response still lands without a recap and prints an advisory.

@@ -88,10 +88,11 @@ committed recaps. When a response has several `patch:recap` blocks, the last
 non-blank one wins. That block is this turn's recap.
 
 A document that predates the component gains it the first time a closeout
-carries a recap, in the canonical slot directly below `agent:status`. A recap is
-never required: a closeout with no recap or a blank one still lands, leaves the
-previous recap in place, and prints an advisory on stderr. So does a recap that
-strays from the format.
+carries a recap, in the canonical slot directly below `agent:status`. An
+agent-authored template closeout requires a non-blank recap and is refused
+before capture without one, leaving the previous recap in place. Binary-owned
+replay still lands without a recap and prints an advisory on stderr. A recap
+that strays from the format also prints an advisory and still lands.
 
 Every harness writes the same format, defined in
 [`runbooks/recap.md`](../../runbooks/recap.md).

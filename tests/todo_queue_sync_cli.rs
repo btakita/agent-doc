@@ -290,6 +290,7 @@ fn an_answered_question_closes_its_duplicate_and_a_reask_is_refused() {
         "  - **3000**: use port 3000.\n",
         "  - **47616**: use port 47616.\n",
         "<!-- /agent:exchange -->\n",
+        "<!-- patch:recap -->\nThe port question stays refused.\n<!-- /patch:recap -->\n",
     )
     .replace("<!-- /agent:exchange -->", "<!-- /patch:exchange -->");
     let mut child = Command::new(env!("CARGO_BIN_EXE_agent-doc"))

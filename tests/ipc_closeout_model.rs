@@ -177,7 +177,7 @@ fn session_doc_content() -> String {
 
 fn response_text(topic: &str) -> String {
     format!(
-        "<!-- patch:exchange -->\n### Re: {topic} - gpt-5\n\nBody for {topic}.\n<!-- /patch:exchange -->\n"
+        "<!-- patch:exchange -->\n### Re: {topic} - gpt-5\n\nBody for {topic}.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nBody for {topic} is committed.\n<!-- /patch:recap -->\n"
     )
 }
 

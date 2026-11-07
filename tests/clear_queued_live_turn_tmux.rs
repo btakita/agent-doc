@@ -2050,7 +2050,7 @@ impl LiveClearScenario {
             .unwrap()
             .expect("preflight leaves the admitted queue head active");
         let response = format!(
-            "<!-- patch:exchange -->\n### Re: {head} — test-model\n\n> **Queue prompt:** {queue_head}\n\nDone: {head}.\n<!-- /patch:exchange -->\n"
+            "<!-- patch:exchange -->\n### Re: {head} — test-model\n\n> **Queue prompt:** {queue_head}\n\nDone: {head}.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nDone: {head}.\n<!-- /patch:recap -->\n"
         );
         let write = self.agent_doc(&["write", "--commit", DOC], &pane, Some(&response));
         assert!(

@@ -12026,6 +12026,62 @@ Old.
         );
     }
 
+    /// A required `patch:recap` rides along with the exchange. It is not answer
+    /// text, and it must not keep an exactly echoed nest vector queued.
+    #[test]
+    fn answered_nested_vector_still_strikes_when_the_response_carries_a_recap() {
+        let document = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "- ### https://github.com/haiven-dev/haiven-api/pull/822\n",
+            "  - 📥 #adversarial-pr ⟦effect:1⟧ [#q-111111111111]\n",
+            "- ### https://github.com/haiven-dev/haiven-api/pull/823\n",
+            "  - ☑️ [#subagent:adversarial-pr-823#1] #adversarial-pr ⟦effect:2⟧ [#q-222222222222]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let response = concat!(
+            "<!-- patch:exchange -->\n",
+            "### Re: adversarial review — gpt-5\n\n",
+            "> **Queue prompt:** https://github.com/haiven-dev/haiven-api/pull/822\n\n",
+            "**Deferred:** Its child remains queued.\n\n",
+            "> **Queue prompt:** https://github.com/haiven-dev/haiven-api/pull/823: #adversarial-pr\n\n",
+            "Reviewed pull request 823.\n",
+            "<!-- /patch:exchange -->\n",
+            "<!-- patch:recap -->\n",
+            "Done.\n",
+            "<!-- /patch:recap -->\n",
+        );
+        let vector = "https://github.com/haiven-dev/haiven-api/pull/823: #adversarial-pr";
+        let projection =
+            project_answered_free_text_strike_with_claims(document, response, Some(document), &[])
+                .unwrap()
+                .expect("a recap patch must not hide the echoed nest vector");
+        let _claimed_same = project_answered_free_text_strike_with_claims(
+            document,
+            response,
+            Some(document),
+            &[vector.to_string()],
+        )
+        .unwrap()
+        .expect("claiming the vector still strikes it");
+        assert!(
+            projection.target_content.contains(
+                "- ### https://github.com/haiven-dev/haiven-api/pull/823\n  - ~~#adversarial-pr ⟦effect:2⟧ [#q-222222222222]~~"
+            ),
+            "the addressed vector is struck:\n{}",
+            projection.target_content
+        );
+        assert!(
+            projection
+                .target_content
+                .contains("  - 📥 #adversarial-pr ⟦effect:1⟧ [#q-111111111111]\n"),
+            "the deferred sibling stays live:\n{}",
+            projection.target_content
+        );
+    }
+
     #[test]
     fn answered_free_text_strike_does_not_consume_later_heads_named_by_closeout_prose() {
         let document = concat!(

@@ -946,7 +946,7 @@ fn bound_session_with_committed_cycle(session: &str) -> (TempDir, PathBuf) {
     respond(
         tmp.path(),
         &doc,
-        "<!-- patch:exchange -->\n### Re: Please reply — gpt-5\n\nReplied.\n<!-- /patch:exchange -->\n",
+        "<!-- patch:exchange -->\n### Re: Please reply — gpt-5\n\nReplied.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nReplied.\n<!-- /patch:recap -->\n",
     );
     session_check_stderr(tmp.path(), &doc);
     (tmp, doc)
@@ -1002,7 +1002,7 @@ fn chat_prompt_is_carried_by_the_next_contract_and_unrecorded_closeout_warns() {
     respond(
         root,
         &doc,
-        "<!-- patch:exchange -->\n### Re: release — gpt-5\n\nNothing new.\n<!-- /patch:exchange -->\n",
+        "<!-- patch:exchange -->\n### Re: release — gpt-5\n\nNothing new.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nNothing new.\n<!-- /patch:recap -->\n",
     );
     let stderr = session_check_stderr(root, &doc);
     assert!(
@@ -1022,7 +1022,7 @@ fn chat_prompt_is_carried_by_the_next_contract_and_unrecorded_closeout_warns() {
         root,
         &doc,
         &format!(
-            "<!-- patch:exchange -->\n{record}\n\n### Re: release (chat) — gpt-5\n\nRecorded the chat turn.\n<!-- /patch:exchange -->\n"
+            "<!-- patch:exchange -->\n{record}\n\n### Re: release (chat) — gpt-5\n\nRecorded the chat turn.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nRecorded the chat turn.\n<!-- /patch:recap -->\n"
         ),
     );
     assert!(stderr.contains("auto-reopened a fresh cycle"), "{stderr}");
@@ -1062,7 +1062,7 @@ fn a_pure_chat_turn_records_its_prompt_through_respond_and_clears_the_ledger() {
         root,
         &doc,
         &format!(
-            "<!-- patch:exchange -->\n{record}\n\n### Re: release — gpt-5\n\nNothing new since 1.2.\n<!-- /patch:exchange -->\n"
+            "<!-- patch:exchange -->\n{record}\n\n### Re: release — gpt-5\n\nNothing new since 1.2.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nNothing new since 1.2.\n<!-- /patch:recap -->\n"
         ),
     );
     let head = head_document(root);

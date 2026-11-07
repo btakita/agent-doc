@@ -15,8 +15,10 @@
 //!   never read as a prompt or a queue row.
 //! - A document that predates the component gains it the first time a closeout
 //!   carries a recap, at the canonical slot directly below `agent:status`.
-//! - A recap is never required. A closeout without one leaves the previous recap
-//!   in place, and a blank recap counts as no recap.
+//! - An agent-authored strict template closeout requires a non-blank recap and
+//!   is refused before capture when the recap is missing or blank. Binary-owned
+//!   replay, including harness Stop hooks, still lands without one and leaves
+//!   the previous recap in place. A blank recap counts as no recap.
 //! - [`recap_format_findings`] checks only what is cheap and deterministic, and
 //!   its findings are advisory. The format itself lives in `runbooks/recap.md`.
 //! - A recommended decision nests the `#recommendationinrow` row

@@ -2931,10 +2931,31 @@ pub fn claim_identity_at(
 /// (attempt-projection prefix stripped). The parent-line fallback is retained
 /// only for a legacy folded row; canonical context parents never reach this
 /// executable-row predicate. A longer line sharing only the id does not match.
+///
+/// Preflight stamps `⟦effect:N⟧` and a generated `[#q-…]` onto a row after
+/// `report-complete` recorded the cell from the claim's nest vector. Those
+/// occurrence annotations keep equal leaves under different parents distinct,
+/// but they are not part of the work the cell names (`#queueeffectidentity`).
 pub fn completion_evidence_matches_row(cell_item: &str, row_text: &str) -> bool {
     let cell = agent_doc_document::subagent_completion::heading_item_text(cell_item);
+    completion_row_heading_forms_match(&cell, row_text)
+        || completion_row_heading_forms_match(
+            &cell,
+            &completion_row_without_occurrence_annotations(row_text),
+        )
+}
+
+fn completion_row_heading_forms_match(cell: &str, row_text: &str) -> bool {
     let (full, head) = completion_row_heading_forms(row_text);
     cell == full || cell == head
+}
+
+/// Row work with binary occurrence annotations removed: `⟦effect:N⟧` and a
+/// generated `[#q-…]`. Authored ids and the parent nest vector stay.
+fn completion_row_without_occurrence_annotations(row_text: &str) -> String {
+    let stripped = agent_doc_element_queue::strip_attempt_projection_prefix(row_text);
+    let without_effect = crate::document_queue::strip_queue_effect_annotation(stripped.trim());
+    agent_doc_element_queue::strip_queue_prompt_stable_id_annotation(&without_effect)
 }
 
 /// Heading forms of a row's own work, plus the parent-line compatibility form
@@ -3589,6 +3610,24 @@ impl ClaimedQueueItems {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A completion cell recorded from the claim's nest vector still names the
+    /// row after preflight stamps `⟦effect:N⟧` and `[#q-…]`. The equal leaf
+    /// under the other parent does not match.
+    #[test]
+    fn completion_cell_matches_effect_projection_of_its_own_parent_vector() {
+        let cell = "https://github.com/haiven-dev/haiven-api/pull/823: #adversarial-pr";
+        let projected = "https://github.com/haiven-dev/haiven-api/pull/823: #adversarial-pr ⟦effect:2⟧ [#q-7a35baa12b2a]";
+        let sibling = "https://github.com/haiven-dev/haiven-api/pull/822: #adversarial-pr ⟦effect:1⟧ [#q-ba40d50f88ee]";
+        let display =
+            "☑️ [#subagent:adversarial-pr-823#1] #adversarial-pr ⟦effect:2⟧ [#q-7a35baa12b2a]";
+        assert!(completion_evidence_matches_row(cell, projected));
+        assert!(!completion_evidence_matches_row(cell, display));
+        assert!(!completion_evidence_matches_row(cell, sibling));
+        let specific = "https://github.com/haiven-dev/haiven-api/pull/823: #adversarial-pr ⟦effect:2⟧ [#q-7a35baa12b2a]";
+        assert!(completion_evidence_matches_row(specific, projected));
+        assert!(!completion_evidence_matches_row(specific, sibling));
+    }
 
     /// agent-doc-bugs.md 2026-11-05 (`#dupetags`): `--item '#activesummaryurl'`
     /// resolved to the operator's free-text report row that QUOTES the real

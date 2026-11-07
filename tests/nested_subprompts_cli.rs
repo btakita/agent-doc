@@ -659,7 +659,7 @@ fn a_verbatim_nested_echo_closes_the_reported_leaf_not_the_parent() {
         })
         .collect();
     let response = format!(
-        "<!-- patch:exchange -->\n### Re: PM sync — gpt-5\n\n> **Queue prompt:** {PARENT}\n{echo}\nPart 1 shipped; Part 2 is a design doc.\n<!-- /patch:exchange -->\n"
+        "<!-- patch:exchange -->\n### Re: PM sync — gpt-5\n\n> **Queue prompt:** {PARENT}\n{echo}\nPart 1 shipped; Part 2 is a design doc.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nPart 1 shipped; Part 2 is a design doc.\n<!-- /patch:recap -->\n"
     );
     let output = run_agent_doc_stdin(dir.path(), &["respond", path, "--force-disk"], &response);
     assert_ok(&output, "respond");
@@ -701,7 +701,7 @@ fn equal_nested_children_close_by_parent_vector() {
     );
     preflight_json(dir.path(), &doc);
     let response = format!(
-        "<!-- patch:exchange -->\n### Re: adversarial review — gpt-5\n\n> **Queue prompt:** {first_parent}\n\n**Deferred:** Its child remains queued.\n\n> **Queue prompt:** {second_vector}\n\nReviewed pull request 823.\n<!-- /patch:exchange -->\n"
+        "<!-- patch:exchange -->\n### Re: adversarial review — gpt-5\n\n> **Queue prompt:** {first_parent}\n\n**Deferred:** Its child remains queued.\n\n> **Queue prompt:** {second_vector}\n\nReviewed pull request 823.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nDone.\n<!-- /patch:recap -->\n"
     );
     let output = run_agent_doc_stdin(dir.path(), &["respond", path, "--force-disk"], &response);
     assert_ok(&output, "respond");
@@ -860,7 +860,7 @@ fn a_live_answer_leaf_lazily_reopens_its_struck_parent() {
     );
 
     let response = format!(
-        "<!-- patch:exchange -->\n### Re: stale replay — gpt-5\n\n> **Queue prompt:** 🙋 {PAUSED_ROW} [#{REQUEST_ID}]\n\nClosed.\n<!-- /patch:exchange -->\n"
+        "<!-- patch:exchange -->\n### Re: stale replay — gpt-5\n\n> **Queue prompt:** 🙋 {PAUSED_ROW} [#{REQUEST_ID}]\n\nClosed.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nClosed.\n<!-- /patch:recap -->\n"
     );
     let output = run_agent_doc_stdin(dir.path(), &["respond", path, "--force-disk"], &response);
     assert_ok(&output, "respond");

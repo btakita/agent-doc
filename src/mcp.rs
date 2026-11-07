@@ -245,6 +245,12 @@ fn finalize_input_schema() -> Value {
         string_property(Some("Assistant response or template patchback body.")),
     );
     properties.insert(
+        "recap".to_string(),
+        string_property(Some(
+            "Optional turn recap body. On a template closeout this is written as `<!-- patch:recap -->` ... `<!-- /patch:recap -->` when `response` does not already contain a non-blank recap patch. A template closeout is refused before capture when both `response` and this field lack a non-blank recap. Not required for a non-template finalize, or when `response` already carries the block. Stop-hook repair of an already captured response is exempt.",
+        )),
+    );
+    properties.insert(
         "template".to_string(),
         bool_property(Some("Treat the response as a template patchback body.")),
     );
@@ -442,7 +448,7 @@ fn tools_list_result() -> Value {
             {
                 "name": "agent_doc_finalize",
                 "title": "Finalize agent-doc response",
-                "description": "Write an assistant response through the strict agent-doc finalize path, require a committed closeout, and return any next queue continuation without a follow-up session-check.",
+                "description": "Write an assistant response through the strict agent-doc finalize path, require a committed closeout, and return any next queue continuation without a follow-up session-check. A template closeout also needs a non-blank recap, via `recap` or a `patch:recap` block in `response`.",
                 "inputSchema": finalize_input_schema()
             }
         ]
@@ -699,10 +705,47 @@ fn tool_steering(args: &Map<String, Value>) -> Result<Value> {
     Ok(tool_success_result(payload, structured))
 }
 
+/// Attach `recap` when the response has no non-blank `patch:recap` yet.
+///
+/// The field is the body, not a second copy of a block the response already
+/// carries. A blank field leaves the response unchanged so the closeout gate
+/// can refuse it.
+fn finalize_response_with_recap(response: String, recap: Option<&str>) -> String {
+    if response_has_nonblank_recap(&response) {
+        return response;
+    }
+    let Some(recap) = recap.map(str::trim).filter(|body| !body.is_empty()) else {
+        return response;
+    };
+    let mut out = response;
+    if !out.ends_with('\n') {
+        out.push('\n');
+    }
+    if recap.contains("<!-- patch:recap") {
+        out.push_str(recap);
+        out.push('\n');
+    } else {
+        out.push_str("<!-- patch:recap -->\n");
+        out.push_str(recap);
+        out.push_str("\n<!-- /patch:recap -->\n");
+    }
+    out
+}
+
+fn response_has_nonblank_recap(response: &str) -> bool {
+    agent_doc_template::parse_patches(response)
+        .ok()
+        .and_then(|(patches, _)| agent_doc_template::recap_patch_body(&patches).map(|_| ()))
+        .is_some()
+}
+
 fn tool_finalize(args: &Map<String, Value>) -> Result<Value> {
     ensure_mcp_binary_fresh_for_mutation()?;
     let file = required_path_arg(args, "file")?;
-    let response = required_string_arg(args, "response")?;
+    let response = finalize_response_with_recap(
+        required_string_arg(args, "response")?,
+        optional_string_arg(args, "recap")?.as_deref(),
+    );
     let origin = optional_string_arg(args, "origin")?.unwrap_or_else(|| "mcp".to_string());
     let mut pending_add = string_vec_arg(args, "backlog_add")?;
     pending_add.extend(string_vec_arg(args, "pending_add")?);
@@ -1585,6 +1628,7 @@ mod tests {
             "force_disk_operator_override",
             "no_followups",
             "no_pending_capture",
+            "recap",
         ] {
             assert!(props.contains_key(key), "missing finalize schema key {key}");
         }
@@ -1594,6 +1638,33 @@ mod tests {
                 .unwrap()
                 .contains("operator's explicit decision"),
             "force-disk override schema must describe the operator authority boundary"
+        );
+        let recap_description = props["recap"]["description"].as_str().unwrap();
+        assert!(
+            recap_description.contains("refused before capture")
+                && recap_description.contains("both `response` and this field"),
+            "{recap_description}"
+        );
+        assert!(
+            !finalize["inputSchema"]["required"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|key| key.as_str() == Some("recap")),
+            "recap stays optional in the JSON schema"
+        );
+    }
+
+    #[test]
+    fn finalize_recap_argument_fills_a_missing_patch_and_does_not_duplicate() {
+        let exchange = "<!-- patch:exchange -->\n### Re: x — gpt-5\nok\n<!-- /patch:exchange -->";
+        let filled = finalize_response_with_recap(exchange.to_string(), Some("Committed.\n"));
+        assert!(filled.contains("<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->"));
+        let again = finalize_response_with_recap(filled.clone(), Some("Second."));
+        assert_eq!(again, filled);
+        assert_eq!(
+            finalize_response_with_recap(exchange.to_string(), Some("  \n")),
+            exchange
         );
     }
 

@@ -173,11 +173,14 @@ cat <<'RESPONSE' | agent-doc respond <FILE> --stream --origin skill
 RESPONSE
 ```
 
-Template responses require both `patch:exchange` markers. The `patch:recap` block
-is this turn's recap. While the turn is in progress, `agent:recap` also keeps
-the previous turn's recap; committing the turn removes that previous recap.
-Every harness writes the recap in the shared format in [recap.md](recap.md). A closeout without one still
-lands and only prints an advisory. `respond` must reach `committed`
+Template responses require both `patch:exchange` markers and a non-blank
+`patch:recap` block. The recap is this turn's recap. While the turn is in
+progress, `agent:recap` also keeps the previous turn's recap; committing the
+turn removes that previous recap. Every harness writes the recap in the shared
+format in [recap.md](recap.md). An agent-authored closeout with no recap, or
+with a blank one, is refused before capture. Format nits stay advisory. Grok
+passes the body as `recap` on `agent_doc_finalize` when it is not already in
+`response`. `respond` must reach `committed`
 and pass its binary-owned post-commit check. Direct-exec Codex/OpenCode paths
 also run `agent-doc session-check <FILE>`; connected clients consume the
 terminal finalize result and do not run a redundant check. After `respond` /

@@ -536,6 +536,10 @@ pub(crate) struct WriteFlags {
     pub(crate) queue_completion_ids: Vec<String>,
     pub(crate) pending_kept_open_ids: Vec<String>,
     pub(crate) strict_closeout: bool,
+    /// Agent-authored strict template closeouts refuse a missing `patch:recap`
+    /// before capture (`#agentrecap`). False for checkpoints, non-commits, and
+    /// binary-owned replay, which may carry only the captured exchange.
+    pub(crate) require_recap: bool,
     /// `#visibleresponseabsorb`: the caller asked for a commit (`write --commit`
     /// or a strict closeout), so an empty body may absorb a visible response.
     pub(crate) commit_requested: bool,
@@ -1191,6 +1195,7 @@ fn validate_template_response_shape_before_tracked_work(
     current_content: &str,
     response: &str,
     allow_replace_pending: bool,
+    require_recap: bool,
 ) -> Result<()> {
     let mut response = response.to_string();
     agent_doc_template::response_materialization::sanitize_template_patchback_response(
@@ -1221,6 +1226,11 @@ fn validate_template_response_shape_before_tracked_work(
         agent_doc_template::response_materialization::ensure_template_response_write_proof(
             &normalized.patches,
             &normalized.unmatched,
+        )?;
+    }
+    if require_recap {
+        agent_doc_template::response_materialization::refuse_missing_strict_template_recap(
+            &normalized.patches,
         )?;
     }
     Ok(())
@@ -1339,6 +1349,7 @@ fn prevalidate_template_response_before_tracked_work(
         &current_content,
         &response,
         options.allow_replace_pending,
+        !options.response_input_provenance.is_binary_owned_replay(),
     )?;
     RESPONSE_STDIN_OVERRIDE.with(|slot| {
         slot.borrow_mut().replace(response);
@@ -3756,6 +3767,8 @@ fn run_command_inner_within_pass(
         queue_completion_ids: options.queue_completion_ids.clone(),
         pending_kept_open_ids: pending_kept_open_ids.clone(),
         strict_closeout: commit_mode == CommitMode::Required,
+        require_recap: commit_mode == CommitMode::Required
+            && !options.response_input_provenance.is_binary_owned_replay(),
         commit_requested: commit_mode != CommitMode::None,
         force_disk: options.force_disk,
         no_pending_capture: options.no_pending_capture,
@@ -6228,9 +6241,10 @@ mod tests {
             "<!-- /patch:exchange -->\n",
         );
 
-        let err =
-            validate_template_response_shape_before_tracked_work(&doc, current, response, false)
-                .expect_err("unmatched heading must fail before tracked-work validation");
+        let err = validate_template_response_shape_before_tracked_work(
+            &doc, current, response, false, true,
+        )
+        .expect_err("unmatched heading must fail before tracked-work validation");
 
         assert!(
             err.to_string().contains("unsafe unmatched content"),
@@ -6254,8 +6268,30 @@ mod tests {
             "<!-- /patch:exchange -->\n",
         );
 
-        validate_template_response_shape_before_tracked_work(&doc, current, response, false)
+        validate_template_response_shape_before_tracked_work(&doc, current, response, false, false)
             .expect("fully fenced response must pass prevalidation");
+
+        let missing = validate_template_response_shape_before_tracked_work(
+            &doc, current, response, false, true,
+        )
+        .expect_err("an agent-authored template closeout needs a recap");
+        assert!(
+            missing.to_string().contains(
+                agent_doc_template::response_materialization::MISSING_STRICT_TEMPLATE_RECAP
+            ),
+            "{missing:#}"
+        );
+        let with_recap = format!(
+            "{response}<!-- patch:recap -->\nCommitted, nothing else to read.\n<!-- /patch:recap -->\n"
+        );
+        validate_template_response_shape_before_tracked_work(
+            &doc,
+            current,
+            &with_recap,
+            false,
+            true,
+        )
+        .expect("a non-blank recap passes prevalidation");
     }
 
     #[test]

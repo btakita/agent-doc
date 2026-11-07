@@ -501,6 +501,7 @@ fn enforce_strict_template_closeout_contract(
     patches: &[template::PatchBlock],
     unmatched: &str,
     strict_closeout: bool,
+    require_recap: bool,
 ) -> Result<()> {
     if !strict_closeout {
         return Ok(());
@@ -519,6 +520,13 @@ fn enforce_strict_template_closeout_contract(
         patches,
         unmatched,
     )?;
+    if template_mode && require_recap {
+        // Before capture. A missing recap must not become a durable retry of
+        // an exchange-only closeout.
+        agent_doc_template::response_materialization::refuse_missing_strict_template_recap(
+            patches,
+        )?;
+    }
     if template_mode {
         for advisory in
             agent_doc_template::response_materialization::recap_closeout_advisories(patches)
@@ -1169,6 +1177,7 @@ pub(crate) fn run_template(
         &patches,
         &unmatched,
         flags.strict_closeout,
+        flags.require_recap,
     )?;
     let pending_flags = super::pending_write_flags(&flags);
     agent_doc_session_check_io::prewrite_pending_capture_check(file, &response, &pending_flags)?;
@@ -1591,6 +1600,7 @@ pub(crate) fn run_stream(
         &patches,
         &unmatched,
         flags.strict_closeout,
+        flags.require_recap,
     )?;
     let pending_flags = super::pending_write_flags(&flags);
     if let Err(err) =
@@ -2407,6 +2417,7 @@ fn capture_validated_stream_closeout_before_authority_resolution(
             &parsed.patches,
             &parsed.unmatched,
             true,
+            flags.require_recap,
         )?;
         // The free-text queue gate asks which heads the operator currently has
         // selected, so its witness must be the operator-visible queue, not the
@@ -2576,6 +2587,7 @@ pub(crate) fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) ->
         &patches,
         &unmatched,
         flags.strict_closeout,
+        flags.require_recap,
     )?;
     let pending_flags = super::pending_write_flags(&flags);
     if let Err(err) =
@@ -2860,6 +2872,10 @@ fn apply_simple_exchange_patch_to_current(
 
     let mut exchange_patch: Option<&str> = None;
     let mut frontmatter_patch: Option<&str> = None;
+    // A required recap must not drop this boundary-preserving splice. The
+    // full patch applier moves the boundary to the end of the exchange and
+    // would commit operator text that still belongs after it.
+    let mut recap_patch: Option<&str> = None;
     for patch in patches {
         match patch.name.as_str() {
             "exchange" => {
@@ -2870,6 +2886,11 @@ fn apply_simple_exchange_patch_to_current(
             "frontmatter" => {
                 if frontmatter_patch.replace(patch.content.as_str()).is_some() {
                     return None;
+                }
+            }
+            name if name == agent_doc_element::recap::RECAP_COMPONENT => {
+                if !patch.content.trim().is_empty() {
+                    recap_patch = Some(patch.content.as_str());
                 }
             }
             _ => return None,
@@ -2917,6 +2938,10 @@ fn apply_simple_exchange_patch_to_current(
         if let Some(frontmatter_patch) = frontmatter_patch {
             result = agent_doc_frontmatter::frontmatter::merge_fields(&result, frontmatter_patch)
                 .context("failed to merge frontmatter patch")?;
+        }
+        if let Some(recap_patch) = recap_patch {
+            result = agent_doc_element::recap::replace_recap_in_document(&result, recap_patch)
+                .context("failed to apply patch:recap")?;
         }
         Ok(result)
     })())
@@ -3320,6 +3345,7 @@ mod tests {
             queue_completion_ids: Vec::new(),
             pending_kept_open_ids: Vec::new(),
             strict_closeout: true,
+            require_recap: false,
             commit_requested: true,
             force_disk: false,
             no_pending_capture: false,
@@ -3395,6 +3421,7 @@ mod tests {
             queue_completion_ids: Vec::new(),
             pending_kept_open_ids: Vec::new(),
             strict_closeout: true,
+            require_recap: false,
             commit_requested: true,
             force_disk: false,
             no_pending_capture: false,
@@ -3455,6 +3482,7 @@ mod tests {
         );
         let flags = WriteFlags {
             strict_closeout: true,
+            require_recap: false,
             commit_requested: true,
             ..Default::default()
         };
@@ -3505,6 +3533,7 @@ mod tests {
         fs::write(&doc, current).unwrap();
         let flags = WriteFlags {
             strict_closeout: true,
+            require_recap: false,
             commit_requested: true,
             ..Default::default()
         };
@@ -3601,6 +3630,7 @@ mod tests {
         agent_doc_cycle_state_io::record_queue_selection_preempted(&doc, true).unwrap();
         let flags = WriteFlags {
             strict_closeout: true,
+            require_recap: false,
             commit_requested: true,
             ..Default::default()
         };
@@ -3641,6 +3671,7 @@ mod tests {
         let claims_before = agent_doc_queue_io::queue_claim::load_ledger(&doc).unwrap();
         let flags = WriteFlags {
             strict_closeout: true,
+            require_recap: false,
             commit_requested: true,
             ..Default::default()
         };
@@ -3673,6 +3704,7 @@ mod tests {
         let response = "### Re: fpebatchchartobs\n\nBefore and after measurements recorded.";
         let free_text_flags = WriteFlags {
             strict_closeout: true,
+            require_recap: false,
             commit_requested: true,
             ..Default::default()
         };
@@ -3712,6 +3744,7 @@ mod tests {
         let response = "### Re: FPE lanes\n\nProfiled the CPU and GPU lanes.";
         let without_done = WriteFlags {
             strict_closeout: true,
+            require_recap: false,
             commit_requested: true,
             ..Default::default()
         };
@@ -3770,6 +3803,7 @@ mod tests {
         );
         let flags = WriteFlags {
             strict_closeout: true,
+            require_recap: false,
             commit_requested: true,
             pending_done_ids: vec!["adtypingdupsiblings".to_string()],
             ..Default::default()
@@ -3826,6 +3860,7 @@ mod tests {
         );
         let flags = WriteFlags {
             strict_closeout: true,
+            require_recap: false,
             commit_requested: true,
             pending_done_ids: vec!["sdkrestemitnative".to_string()],
             ..Default::default()
@@ -3881,6 +3916,7 @@ mod tests {
         );
         let flags = WriteFlags {
             strict_closeout: true,
+            require_recap: false,
             commit_requested: true,
             pending_done_ids: vec!["a".to_string()],
             ..Default::default()
@@ -3910,6 +3946,7 @@ mod tests {
             .unwrap();
         let flags = WriteFlags {
             strict_closeout: true,
+            require_recap: false,
             commit_requested: true,
             ..Default::default()
         };
@@ -3975,6 +4012,7 @@ mod tests {
             queue_completion_ids: Vec::new(),
             pending_kept_open_ids: Vec::new(),
             strict_closeout: true,
+            require_recap: false,
             commit_requested: true,
             force_disk: false,
             no_pending_capture: false,
@@ -4017,8 +4055,8 @@ mod tests {
             "### Re: retained — gpt-5\n\nRecovered.\n",
             "<!-- /agent:patch:exchange -->\n",
         );
-        let err =
-            enforce_strict_template_closeout_contract(current, 0, &[], legacy, true).unwrap_err();
+        let err = enforce_strict_template_closeout_contract(current, 0, &[], legacy, true, true)
+            .unwrap_err();
         assert!(
             err.to_string().contains("<!-- patch:exchange -->"),
             "legacy/unmarked payload must fail the common strict contract: {err:#}"
@@ -4026,7 +4064,25 @@ mod tests {
 
         let canonical =
             template::PatchBlock::new("exchange", "\n### Re: retained — gpt-5\n\nRecovered.\n");
-        enforce_strict_template_closeout_contract(current, 2, &[canonical], "", true).unwrap();
+        let missing_recap = enforce_strict_template_closeout_contract(
+            current,
+            2,
+            &[canonical.clone()],
+            "",
+            true,
+            true,
+        )
+        .unwrap_err();
+        assert!(
+            missing_recap.to_string().contains(
+                agent_doc_template::response_materialization::MISSING_STRICT_TEMPLATE_RECAP
+            ),
+            "{missing_recap:#}"
+        );
+        // Repair replay of an already captured exchange-only body does not
+        // require a recap.
+        enforce_strict_template_closeout_contract(current, 2, &[canonical], "", true, false)
+            .unwrap();
     }
 
     #[test]

@@ -177,7 +177,7 @@ fn write_mock_streaming_agent(root: &Path) -> (PathBuf, PathBuf) {
     fs::write(
         &script,
         format!(
-            "#!/bin/sh\ncat >/dev/null\nprintf '%s\\n' '{{\"type\":\"assistant\",\"message\":{{\"content\":[{{\"type\":\"text\",\"text\":\"<!-- patch:exchange -->\\n### Re: orchestrate streaming — gpt-5\\n\"}}]}}}}'\ni=0\nwhile [ ! -f '{release}' ] && [ \"$i\" -lt 300 ]; do\n  i=$((i + 1))\n  sleep 0.1\ndone\nprintf '%s\\n' '{{\"type\":\"result\",\"result\":\"<!-- patch:exchange -->\\n### Re: orchestrate streaming — gpt-5\\n\\nImplemented and verified.\\n\\nVerification:\\n- `cargo test`\\n<!-- /patch:exchange -->\\n\",\"session_id\":\"sess-stream\"}}'\n",
+            "#!/bin/sh\ncat >/dev/null\nprintf '%s\\n' '{{\"type\":\"assistant\",\"message\":{{\"content\":[{{\"type\":\"text\",\"text\":\"<!-- patch:exchange -->\\n### Re: orchestrate streaming — gpt-5\\n\"}}]}}}}'\ni=0\nwhile [ ! -f '{release}' ] && [ \"$i\" -lt 300 ]; do\n  i=$((i + 1))\n  sleep 0.1\ndone\nprintf '%s\\n' '{{\"type\":\"result\",\"result\":\"<!-- patch:exchange -->\\n### Re: orchestrate streaming — gpt-5\\n\\nImplemented and verified.\\n\\nVerification:\\n- `cargo test`\\n<!-- /patch:exchange -->\\n<!-- patch:recap -->\\nCommitted.\\n<!-- /patch:recap -->\\n\",\"session_id\":\"sess-stream\"}}'\n",
             release = release.display()
         ),
     )
@@ -410,7 +410,7 @@ fn run_template_mode_writes_inside_exchange_and_commits() {
 
     let script = write_mock_agent(
         tmp.path(),
-        "<!-- patch:exchange -->\n### Re: topic — gpt-5\nbody\n<!-- /patch:exchange -->\n",
+        "<!-- patch:exchange -->\n### Re: topic — gpt-5\nbody\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
     );
     let config_root = write_config(tmp.path(), &script);
 
@@ -454,7 +454,7 @@ fn project_default_agent_overrides_global_default_for_run() {
 
     let script = write_mock_agent(
         tmp.path(),
-        "<!-- patch:exchange -->\n### Re: project default\nproject-selected backend\n<!-- /patch:exchange -->\n",
+        "<!-- patch:exchange -->\n### Re: project default\nproject-selected backend\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
     );
     let config_root = write_config(tmp.path(), &script);
     let global_path = config_root.join("agent-doc/config.toml");
@@ -491,7 +491,7 @@ fn grok_native_json_run_commits_response_and_its_own_resume_slot() {
     init_git_repo(tmp.path(), &doc);
     let script = tmp.path().join("grok-fixture.sh");
     let payload = serde_json::json!({
-        "text": "<!-- patch:exchange -->\n### Re: topic — grok-4.6\nGrok response body\n<!-- /patch:exchange -->\n",
+        "text": "<!-- patch:exchange -->\n### Re: topic — grok-4.6\nGrok response body\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         "stopReason": "end_turn",
         "sessionId": "grok-thread",
         "thought": "private fixture reasoning"
@@ -546,7 +546,7 @@ fn bare_path_alias_uses_same_template_safe_path() {
 
     let script = write_mock_agent(
         tmp.path(),
-        "<!-- patch:exchange -->\n### Re: bare path — gpt-5\nbody\n<!-- /patch:exchange -->\n",
+        "<!-- patch:exchange -->\n### Re: bare path — gpt-5\nbody\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
     );
     let config_root = write_config(tmp.path(), &script);
 
@@ -604,7 +604,7 @@ fn run_refuses_to_resume_the_live_harness_session_it_runs_inside() {
 
     let (script, marker) = write_marker_agent(
         tmp.path(),
-        "<!-- patch:exchange -->\n### Re: reply — gpt-5\nAnswered.\n<!-- /patch:exchange -->\n",
+        "<!-- patch:exchange -->\n### Re: reply — gpt-5\nAnswered.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
     );
     let config_root = write_claude_config(tmp.path(), &script);
 
@@ -686,7 +686,7 @@ fn run_answers_fresh_typed_component_edit_after_committed_cycle() {
 
     let prior_script = write_mock_agent(
         tmp.path(),
-        "<!-- patch:exchange -->\n### Re: prior — gpt-5\nPrior turn closed.\n<!-- /patch:exchange -->\n",
+        "<!-- patch:exchange -->\n### Re: prior — gpt-5\nPrior turn closed.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
     );
     let config_root = write_config(tmp.path(), &prior_script);
     agent_doc()
@@ -715,7 +715,7 @@ fn run_answers_fresh_typed_component_edit_after_committed_cycle() {
 
     let (current_script, marker) = write_marker_agent(
         tmp.path(),
-        "<!-- patch:exchange -->\n### Re: current edit — gpt-5\nAnswered once.\n\nVerification:\n- `cargo test --test run_integration`\n<!-- /patch:exchange -->\n",
+        "<!-- patch:exchange -->\n### Re: current edit — gpt-5\nAnswered once.\n\nVerification:\n- `cargo test --test run_integration`\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
     );
     let config_root = write_config(tmp.path(), &current_script);
     agent_doc()
@@ -1030,7 +1030,7 @@ fn run_stops_before_child_dispatch_when_precommit_consumes_stale_repair_diff() {
 
     let (script, marker) = write_marker_agent(
         tmp.path(),
-        "<!-- patch:exchange -->\n### Re: should not run — gpt-5\nbody\n<!-- /patch:exchange -->\n",
+        "<!-- patch:exchange -->\n### Re: should not run — gpt-5\nbody\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
     );
     let config_root = write_config(tmp.path(), &script);
 
@@ -1062,7 +1062,7 @@ fn run_heartbeats_are_visible_and_persisted_while_child_is_waiting() {
 
     let script = write_delayed_mock_agent(
         tmp.path(),
-        "<!-- patch:exchange -->\n### Re: delayed — gpt-5\nbody\n<!-- /patch:exchange -->\n",
+        "<!-- patch:exchange -->\n### Re: delayed — gpt-5\nbody\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         3,
     );
     let config_root = write_config(tmp.path(), &script);
@@ -1119,7 +1119,7 @@ fn run_heartbeats_redirect_stderr_under_managed_tui_but_persist_progress() {
 
     let script = write_delayed_mock_agent(
         tmp.path(),
-        "<!-- patch:exchange -->\n### Re: delayed — gpt-5\nbody\n<!-- /patch:exchange -->\n",
+        "<!-- patch:exchange -->\n### Re: delayed — gpt-5\nbody\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         3,
     );
     let config_root = write_config(tmp.path(), &script);
@@ -1705,7 +1705,7 @@ fn orchestrate_handles_already_open_preflight_cycle_for_first_step() {
 
     let script = write_mock_agent(
         tmp.path(),
-        "<!-- patch:exchange -->\n### Re: orchestrate step — gpt-5\nImplemented and verified.\n\nVerification:\n- `cargo test`\n<!-- /patch:exchange -->\n",
+        "<!-- patch:exchange -->\n### Re: orchestrate step — gpt-5\nImplemented and verified.\n\nVerification:\n- `cargo test`\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
     );
     let config_root = write_config(tmp.path(), &script);
 
@@ -1803,7 +1803,7 @@ fn orchestrate_accepts_clean_plain_template_response() {
     init_git_repo(tmp.path(), &doc);
     seed_snapshot(tmp.path(), &doc);
 
-    let plain_response = "### Re: clean orchestrate closeout — gpt-5\n\nImplemented and verified.\n\nVerification:\n- `cargo test`\n";
+    let plain_response = "### Re: clean orchestrate closeout — gpt-5\n\nImplemented and verified.\n\nVerification:\n- `cargo test`\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n";
     let script = write_mock_agent(tmp.path(), plain_response);
     let config_root = write_config(tmp.path(), &script);
 
@@ -1910,7 +1910,7 @@ fn interrupted_run_leaves_write_applied_and_preflight_finishes_commit() {
 
     let script = write_mock_agent(
         tmp.path(),
-        "<!-- patch:exchange -->\n### Re: interrupted closeout — gpt-5\nbody\n<!-- /patch:exchange -->\n",
+        "<!-- patch:exchange -->\n### Re: interrupted closeout — gpt-5\nbody\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
     );
     let config_root = write_config(tmp.path(), &script);
 
@@ -1985,7 +1985,7 @@ fn write_applied_interruption_names_the_commit_that_resolves_it() {
 
     let script = write_mock_agent(
         tmp.path(),
-        "<!-- patch:exchange -->\n### Re: stranded write — gpt-5\nbody\n<!-- /patch:exchange -->\n",
+        "<!-- patch:exchange -->\n### Re: stranded write — gpt-5\nbody\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
     );
     let config_root = write_config(tmp.path(), &script);
 

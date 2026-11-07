@@ -1097,6 +1097,10 @@ fn apply_simple_exchange_patch_to_current(
 
     let mut exchange_patch: Option<&str> = None;
     let mut frontmatter_patch: Option<&str> = None;
+    // A required recap must not drop this boundary-preserving splice. The
+    // full patch applier moves the boundary to the end of the exchange and
+    // would commit operator text that still belongs after it.
+    let mut recap_patch: Option<&str> = None;
     for patch in patches {
         match patch.name.as_str() {
             "exchange" => {
@@ -1107,6 +1111,11 @@ fn apply_simple_exchange_patch_to_current(
             "frontmatter" => {
                 if frontmatter_patch.replace(patch.content.as_str()).is_some() {
                     return None;
+                }
+            }
+            name if name == agent_doc_element::recap::RECAP_COMPONENT => {
+                if !patch.content.trim().is_empty() {
+                    recap_patch = Some(patch.content.as_str());
                 }
             }
             _ => return None,
@@ -1153,6 +1162,10 @@ fn apply_simple_exchange_patch_to_current(
         if let Some(frontmatter_patch) = frontmatter_patch {
             result = frontmatter::merge_fields(&result, frontmatter_patch)
                 .context("failed to merge frontmatter patch")?;
+        }
+        if let Some(recap_patch) = recap_patch {
+            result = agent_doc_element::recap::replace_recap_in_document(&result, recap_patch)
+                .context("failed to apply patch:recap")?;
         }
         Ok(result)
     })())

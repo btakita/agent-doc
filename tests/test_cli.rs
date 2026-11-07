@@ -720,6 +720,7 @@ fn mcp_serve_admit_plan_read_finalize_uses_one_cycle() {
             "arguments": {
                 "file": doc.display().to_string(),
                 "response": "<!-- patch:exchange -->\n### Re: Connected closeout - gpt-5\nbody\n<!-- /patch:exchange -->\n",
+                "recap": "Connected closeout.",
                 "no_followups": true
             }
         }
@@ -863,6 +864,7 @@ fn mcp_serve_admit_without_file_admits_the_pane_claim_through_one_cycle() {
             "arguments": {
                 "file": doc.display().to_string(),
                 "response": "<!-- patch:exchange -->\n### Re: Connected closeout - grok\nbody\n<!-- /patch:exchange -->\n",
+                "recap": "Connected closeout.",
                 "no_followups": true
             }
         }
@@ -985,7 +987,8 @@ fn mcp_finalize_uses_strict_write_commit_path() {
             "name": "agent_doc_finalize",
             "arguments": {
                 "file": doc.display().to_string(),
-                "response": "<!-- patch:exchange -->\n### Re: MCP finalize - gpt-5\nbody\n<!-- /patch:exchange -->\n"
+                "response": "<!-- patch:exchange -->\n### Re: MCP finalize - gpt-5\nbody\n<!-- /patch:exchange -->\n",
+                "recap": "MCP finalize."
             }
         }
     });
@@ -33881,7 +33884,7 @@ fn test_preflight_finalize_preflight_follow_up_lifecycle_has_no_stale_cycle() {
     finalize.args(["finalize", doc.to_str().unwrap(), "--origin", "skill"]);
     finalize
         .write_stdin(
-            "<!-- patch:exchange -->\n### Re: follow-up — gpt-5\n\nHandled.\n<!-- /patch:exchange -->\n",
+            "<!-- patch:exchange -->\n### Re: follow-up — gpt-5\n\nHandled.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nThe follow-up is handled.\n<!-- /patch:recap -->\n",
         )
         .assert()
         .success();

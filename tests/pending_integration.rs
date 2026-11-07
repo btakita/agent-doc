@@ -466,7 +466,7 @@ fn write_pending_add_creates_item_with_hash() {
             "--pending-add",
             "new task",
         ])
-        .write_stdin("<!-- patch:exchange -->\nresponse text\n<!-- /patch:exchange -->\n")
+        .write_stdin("<!-- patch:exchange -->\nresponse text\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n")
         .assert()
         .success();
     let content = fs::read_to_string(&doc).unwrap();
@@ -486,7 +486,7 @@ fn write_pending_add_dedupes_symptom_key_into_existing_backlog_item() {
             "--pending-add",
             &format!("stale pause observed again {key}"),
         ])
-        .write_stdin("<!-- patch:exchange -->\nresponse text\n<!-- /patch:exchange -->\n")
+        .write_stdin("<!-- patch:exchange -->\nresponse text\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n")
         .assert()
         .success();
     let content = fs::read_to_string(&doc).unwrap();
@@ -514,7 +514,7 @@ fn write_pending_add_after_and_back_position_items_explicitly() {
             "--pending-add-back",
             "appended at tail",
         ])
-        .write_stdin("<!-- patch:exchange -->\nresponse text\n<!-- /patch:exchange -->\n")
+        .write_stdin("<!-- patch:exchange -->\nresponse text\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n")
         .assert()
         .success();
     let content = fs::read_to_string(&doc).unwrap();
@@ -543,7 +543,7 @@ fn write_icebox_edit_preserves_hash_and_backlog_untouched() {
             "--icebox-edit",
             "park1=renamed parked task",
         ])
-        .write_stdin("<!-- patch:exchange -->\nresponse text\n<!-- /patch:exchange -->\n")
+        .write_stdin("<!-- patch:exchange -->\nresponse text\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n")
         .assert()
         .success();
     let content = fs::read_to_string(&doc).unwrap();
@@ -573,7 +573,7 @@ fn write_icebox_reorder_and_clear_target_icebox_only() {
             "--icebox-reorder",
             "park2,park1",
         ])
-        .write_stdin("<!-- patch:exchange -->\nresponse text\n<!-- /patch:exchange -->\n")
+        .write_stdin("<!-- patch:exchange -->\nresponse text\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n")
         .assert()
         .success();
     let content = fs::read_to_string(&doc).unwrap();
@@ -594,7 +594,7 @@ fn write_icebox_reorder_and_clear_target_icebox_only() {
             "--force-disk",
             "--icebox-clear",
         ])
-        .write_stdin("<!-- patch:exchange -->\nsecond response\n<!-- /patch:exchange -->\n")
+        .write_stdin("<!-- patch:exchange -->\nsecond response\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n")
         .assert()
         .success();
     let content = fs::read_to_string(&doc).unwrap();
@@ -685,7 +685,7 @@ fn write_pending_add_to_updates_target_not_current_doc() {
             target.to_str().unwrap(),
             "id=xdoc cross document task",
         ])
-        .write_stdin("<!-- patch:exchange -->\nresponse text\n<!-- /patch:exchange -->\n")
+        .write_stdin("<!-- patch:exchange -->\nresponse text\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n")
         .assert()
         .success();
 
@@ -712,7 +712,7 @@ fn write_pending_add_to_missing_target_fails_closed() {
             missing.to_str().unwrap(),
             "id=xdoc cross document task",
         ])
-        .write_stdin("<!-- patch:exchange -->\nresponse text\n<!-- /patch:exchange -->\n")
+        .write_stdin("<!-- patch:exchange -->\nresponse text\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n")
         .assert()
         .failure()
         .stderr(predicates::str::contains(
@@ -739,7 +739,7 @@ fn write_pending_add_to_target_without_backlog_fails_closed() {
             target.to_str().unwrap(),
             "id=xdoc cross document task",
         ])
-        .write_stdin("<!-- patch:exchange -->\nresponse text\n<!-- /patch:exchange -->\n")
+        .write_stdin("<!-- patch:exchange -->\nresponse text\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n")
         .assert()
         .failure()
         .stderr(predicates::str::contains(
@@ -762,7 +762,7 @@ fn write_pending_add_multiple_flags_keep_cli_order_at_top() {
             "--pending-add",
             "id=third third task",
         ])
-        .write_stdin("<!-- patch:exchange -->\nresponse text\n<!-- /patch:exchange -->\n")
+        .write_stdin("<!-- patch:exchange -->\nresponse text\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n")
         .assert()
         .success();
 
@@ -795,7 +795,7 @@ fn write_pending_add_accepts_custom_id_prefix() {
             "--pending-add",
             "id=fix42 new task",
         ])
-        .write_stdin("<!-- patch:exchange -->\nresponse text\n<!-- /patch:exchange -->\n")
+        .write_stdin("<!-- patch:exchange -->\nresponse text\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n")
         .assert()
         .success();
     let content = fs::read_to_string(&doc).unwrap();
@@ -813,7 +813,7 @@ fn write_pending_add_accepts_bracketed_custom_id_prefix() {
             "--pending-add",
             "[#fix42] new task",
         ])
-        .write_stdin("<!-- patch:exchange -->\nresponse text\n<!-- /patch:exchange -->\n")
+        .write_stdin("<!-- patch:exchange -->\nresponse text\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n")
         .assert()
         .success();
     let content = fs::read_to_string(&doc).unwrap();
@@ -831,7 +831,7 @@ fn write_pending_add_accepts_long_bracketed_custom_id_prefix() {
             "--pending-add",
             "[#sdig2matrix] new task",
         ])
-        .write_stdin("<!-- patch:exchange -->\nresponse text\n<!-- /patch:exchange -->\n")
+        .write_stdin("<!-- patch:exchange -->\nresponse text\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n")
         .assert()
         .success();
     let content = fs::read_to_string(&doc).unwrap();
@@ -845,7 +845,7 @@ fn write_normalizes_replace_pending_block_into_pending_ops() {
         "<!-- patch:exchange -->\n",
         "### Re: topic — gpt-5\n\n",
         "Done.\n",
-        "<!-- /patch:exchange -->\n",
+        "<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         "<!-- replace:pending -->\n",
         "- [x] [#aaaa] existing\n",
         "- [ ] [#bbbb] add regression coverage\n",
@@ -871,7 +871,7 @@ fn write_normalizes_replace_pending_block_preserves_long_custom_id() {
         "<!-- patch:exchange -->\n",
         "### Re: topic — gpt-5\n\n",
         "Done.\n",
-        "<!-- /patch:exchange -->\n",
+        "<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         "<!-- replace:pending -->\n",
         "- [ ] [#sdig2matrix] Fixture evidence matrix\n",
         "<!-- /replace:pending -->\n",
@@ -977,7 +977,7 @@ fn write_applies_replace_icebox_block_without_exchange_fallback() {
         "<!-- patch:exchange -->\n",
         "### Re: #iceboxpatch — gpt-5\n\n",
         "Applied the icebox rewrite through the binary-owned template path.\n",
-        "<!-- /patch:exchange -->\n",
+        "<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         "<!-- replace:icebox -->\n",
         "- [ ] [#park1] Parked follow-up\n",
         "<!-- /replace:icebox -->\n",
@@ -1067,7 +1067,7 @@ fn write_pending_done_marks_checked() {
             "--done",
             "abcd",
         ])
-        .write_stdin("<!-- patch:exchange -->\nok\n<!-- /patch:exchange -->\n")
+        .write_stdin("<!-- patch:exchange -->\nok\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n")
         .assert()
         .success();
     let content = fs::read_to_string(&doc).unwrap();
@@ -1085,7 +1085,7 @@ fn write_pending_done_accepts_hash_prefixed_id() {
             "--done",
             "#abcd",
         ])
-        .write_stdin("<!-- patch:exchange -->\nok\n<!-- /patch:exchange -->\n")
+        .write_stdin("<!-- patch:exchange -->\nok\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n")
         .assert()
         .success();
     let content = fs::read_to_string(&doc).unwrap();
@@ -1104,7 +1104,7 @@ fn write_done_rejects_removed_done_aliases() {
                 removed_alias,
                 "abcd",
             ])
-            .write_stdin("<!-- patch:exchange -->\nok\n<!-- /patch:exchange -->\n")
+            .write_stdin("<!-- patch:exchange -->\nok\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n")
             .assert()
             .failure();
         let stderr = String::from_utf8_lossy(&assert_result.get_output().stderr);
@@ -1137,7 +1137,7 @@ fn write_pending_gate_open_to_gated() {
             "--pending-gate",
             "abcd",
         ])
-        .write_stdin("<!-- patch:exchange -->\nok\n<!-- /patch:exchange -->\n")
+        .write_stdin("<!-- patch:exchange -->\nok\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n")
         .assert()
         .success();
     let content = fs::read_to_string(&doc).unwrap();
@@ -1163,7 +1163,7 @@ fn write_pending_gate_idempotent_on_gated() {
             "--pending-gate",
             "abcd",
         ])
-        .write_stdin("<!-- patch:exchange -->\nok\n<!-- /patch:exchange -->\n")
+        .write_stdin("<!-- patch:exchange -->\nok\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n")
         .assert()
         .success();
     let content = fs::read_to_string(&doc).unwrap();
@@ -1182,7 +1182,7 @@ fn write_pending_gate_done_errors() {
             "--pending-gate",
             "abcd",
         ])
-        .write_stdin("<!-- patch:exchange -->\nok\n<!-- /patch:exchange -->\n")
+        .write_stdin("<!-- patch:exchange -->\nok\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n")
         .assert()
         .failure();
     let stderr = String::from_utf8_lossy(&assert_result.get_output().stderr);
@@ -1209,7 +1209,7 @@ fn write_pending_ungate_gated_to_open() {
             "--pending-ungate",
             "abcd",
         ])
-        .write_stdin("<!-- patch:exchange -->\nok\n<!-- /patch:exchange -->\n")
+        .write_stdin("<!-- patch:exchange -->\nok\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n")
         .assert()
         .success();
     let content = fs::read_to_string(&doc).unwrap();
@@ -1228,7 +1228,7 @@ fn write_pending_ungate_open_errors() {
             "--pending-ungate",
             "abcd",
         ])
-        .write_stdin("<!-- patch:exchange -->\nok\n<!-- /patch:exchange -->\n")
+        .write_stdin("<!-- patch:exchange -->\nok\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n")
         .assert()
         .failure();
     let stderr = String::from_utf8_lossy(&assert_result.get_output().stderr);
@@ -1250,7 +1250,7 @@ fn write_pending_gate_then_done_in_one_call() {
             "--done",
             "abcd",
         ])
-        .write_stdin("<!-- patch:exchange -->\nok\n<!-- /patch:exchange -->\n")
+        .write_stdin("<!-- patch:exchange -->\nok\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n")
         .assert()
         .success();
     let content = fs::read_to_string(&doc).unwrap();
@@ -1270,7 +1270,7 @@ fn write_review_add_and_edit_mutate_review_component() {
             "--review-edit",
             "rvw1=review text updated",
         ])
-        .write_stdin("<!-- patch:exchange -->\nok\n<!-- /patch:exchange -->\n")
+        .write_stdin("<!-- patch:exchange -->\nok\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n")
         .assert()
         .success();
     let content = fs::read_to_string(&doc).unwrap();
@@ -1299,7 +1299,7 @@ fn write_quotes_literal_component_marker_in_tracked_item_text() {
             "--backlog-add",
             "id=fpefollow Verify the <!-- agent:run --> opener in fpe.md",
         ])
-        .write_stdin("<!-- patch:exchange -->\nresponse landed\n<!-- /patch:exchange -->\n")
+        .write_stdin("<!-- patch:exchange -->\nresponse landed\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n")
         .assert()
         .success();
     let stderr = String::from_utf8_lossy(&output.get_output().stderr);
@@ -1390,7 +1390,7 @@ fn write_todo_add_creates_missing_todo_component_and_preserves_items() {
             "--todo-add",
             "Verify [#rvw1] in a live pane",
         ])
-        .write_stdin("<!-- patch:exchange -->\nok\n<!-- /patch:exchange -->\n")
+        .write_stdin("<!-- patch:exchange -->\nok\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n")
         .assert()
         .success();
     let stderr = String::from_utf8_lossy(&first.get_output().stderr);
@@ -1447,7 +1447,7 @@ fn write_todo_add_creates_missing_todo_component_and_preserves_items() {
             "--todo-add",
             "Publish draft docs/launch-note.md",
         ])
-        .write_stdin("<!-- patch:exchange -->\nok again\n<!-- /patch:exchange -->\n")
+        .write_stdin("<!-- patch:exchange -->\nok again\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n")
         .assert()
         .success();
     let content = fs::read_to_string(&doc).unwrap();
@@ -2237,7 +2237,7 @@ fn write_review_resolve_with_open_todo_emits_todo_done_advisory() {
             "--todo-add",
             "id=vrfy3 Verify [#rvw3] and [#rvw4] in a live pane",
         ])
-        .write_stdin("<!-- patch:exchange -->\nok\n<!-- /patch:exchange -->\n")
+        .write_stdin("<!-- patch:exchange -->\nok\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n")
         .assert()
         .success();
     let id = todo_item_id(
@@ -2414,7 +2414,7 @@ fn todo_ids_link_review_gates_and_round_trip_through_preflight_and_closeout() {
             .assert()
             .success()
     };
-    let exchange = "<!-- patch:exchange -->\nok\n<!-- /patch:exchange -->\n";
+    let exchange = "<!-- patch:exchange -->\nok\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n";
     write(
         &[
             "--review-add",
@@ -2499,7 +2499,7 @@ fn todo_ids_link_review_gates_and_round_trip_through_preflight_and_closeout() {
     write(
         &[],
         &format!(
-            "<!-- patch:exchange -->\nstale\n<!-- /patch:exchange -->\n<!-- patch:todo -->\n- [ ] [#{todo_a}] Decide the launcher policy (#gatea) (source: agent:review [#gatea])\n- [ ] [#{todo_b}] Verify [#gateb] in the 263 IDE (source: agent:review [#gateb])\n<!-- /patch:todo -->\n"
+            "<!-- patch:exchange -->\nstale\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n<!-- patch:todo -->\n- [ ] [#{todo_a}] Decide the launcher policy (#gatea) (source: agent:review [#gatea])\n- [ ] [#{todo_b}] Verify [#gateb] in the 263 IDE (source: agent:review [#gateb])\n<!-- /patch:todo -->\n"
         ),
     );
     assert!(
@@ -2573,7 +2573,7 @@ fn todo_add_citing_an_item_the_same_closeout_resolves_mints_one_open_follow_up()
         args.extend_from_slice(extra);
         agent_doc()
             .args(&args)
-            .write_stdin("<!-- patch:exchange -->\nok\n<!-- /patch:exchange -->\n")
+            .write_stdin("<!-- patch:exchange -->\nok\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n")
             .assert()
             .success()
     };
@@ -2682,7 +2682,7 @@ fn two_done_and_todo_add_pairs_in_one_closeout_keep_both_follow_ups_open() {
             "--todo-add",
             layered,
         ])
-        .write_stdin("<!-- patch:exchange -->\nok\n<!-- /patch:exchange -->\n")
+        .write_stdin("<!-- patch:exchange -->\nok\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n")
         .assert()
         .success();
     let stderr = String::from_utf8_lossy(&out.get_output().stderr).to_string();
@@ -2751,7 +2751,7 @@ fn todo_ids_never_take_a_tracked_id_and_link_by_source_locator() {
             "--todo-add",
             "Rotate the deploy key",
         ],
-        "<!-- patch:exchange -->\nok\n<!-- /patch:exchange -->\n",
+        "<!-- patch:exchange -->\nok\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
     );
     let stderr = String::from_utf8_lossy(&added.get_output().stderr);
     assert!(
@@ -2899,7 +2899,7 @@ fn todo_add_explicit_id_wins_over_a_cited_open_backlog_id_in_a_live_closeout() {
             "--todo-add",
             "id=jb339r1decision Decide whether to queue GH #339 shell stage R1 (restart-free shell) once #jbshrinkrestarts reports its benchmark and moves. Same decision: restate the \"Exact-263 decision\" reopen rule",
         ])
-        .write_stdin("<!-- patch:exchange -->\nok\n<!-- /patch:exchange -->\n")
+        .write_stdin("<!-- patch:exchange -->\nok\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n")
         .assert()
         .success();
     let stderr = String::from_utf8_lossy(&output.get_output().stderr);
@@ -2996,7 +2996,7 @@ fn write_patch_todo_completion_copy_checks_existing_item_without_duplicating() {
     agent_doc()
         .args(["write", doc.to_str().unwrap(), "--force-disk"])
         .write_stdin(format!(
-            "<!-- patch:exchange -->\nseed\n<!-- /patch:exchange -->\n<!-- patch:todo -->\n{original}<!-- /patch:todo -->\n"
+            "<!-- patch:exchange -->\nseed\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n<!-- patch:todo -->\n{original}<!-- /patch:todo -->\n"
         ))
         .assert()
         .success();
@@ -3012,7 +3012,7 @@ fn write_patch_todo_completion_copy_checks_existing_item_without_duplicating() {
     agent_doc()
         .args(["write", doc.to_str().unwrap(), "--force-disk"])
         .write_stdin(format!(
-            "<!-- patch:exchange -->\nclosing\n<!-- /patch:exchange -->\n<!-- patch:todo -->\n{patch}<!-- /patch:todo -->\n"
+            "<!-- patch:exchange -->\nclosing\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n<!-- patch:todo -->\n{patch}<!-- /patch:todo -->\n"
         ))
         .assert()
         .success();
@@ -3043,7 +3043,7 @@ fn write_review_add_without_operator_todo_emits_advisory() {
             "--review-add",
             "id=rvw2 waiting on operator",
         ])
-        .write_stdin("<!-- patch:exchange -->\nok\n<!-- /patch:exchange -->\n")
+        .write_stdin("<!-- patch:exchange -->\nok\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n")
         .assert()
         .success();
     let stderr = String::from_utf8_lossy(&assert_result.get_output().stderr);
@@ -3079,7 +3079,7 @@ fn write_response_request_without_todo_add_emits_operator_todo_advisory() {
             "old",
         ])
         .write_stdin(
-            "<!-- patch:exchange -->\n**Description: draft below, not posted.** Say `post` to apply it. Full draft: `docs/launch-note.md`.\n<!-- /patch:exchange -->\n",
+            "<!-- patch:exchange -->\n**Description: draft below, not posted.** Say `post` to apply it. Full draft: `docs/launch-note.md`.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         )
         .assert()
         .success();
@@ -3114,7 +3114,7 @@ fn write_residual_work_list_with_one_todo_add_still_emits_operator_todo_advisory
             "Rotate the deploy key",
         ])
         .write_stdin(
-            "<!-- patch:exchange -->\n### Re: alice reply posted, note rewritten\n\nPosted the reply.\n\n**Still stale:**\n- Your note `n-a` in `t-a` still argues for tags over a list.\n- The description section still cites note `n-b` for the tags-vs-list argument.\n<!-- /patch:exchange -->\n",
+            "<!-- patch:exchange -->\n### Re: alice reply posted, note rewritten\n\nPosted the reply.\n\n**Still stale:**\n- Your note `n-a` in `t-a` still argues for tags over a list.\n- The description section still cites note `n-b` for the tags-vs-list argument.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         )
         .assert()
         .success();
@@ -3164,7 +3164,7 @@ fn write_heading_or_already_recorded_ask_emits_no_operator_todo_advisory() {
     let assert_result = agent_doc()
         .args(["write", doc.to_str().unwrap(), "--force-disk"])
         .write_stdin(
-            "<!-- patch:exchange -->\n### Re: alice reply posted, note rewritten\n\nPosted the reply.\n\n**Still stale:**\n- Your note `n-a` in `t-a` still argues for tags over a list.\n<!-- /patch:exchange -->\n",
+            "<!-- patch:exchange -->\n### Re: alice reply posted, note rewritten\n\nPosted the reply.\n\n**Still stale:**\n- Your note `n-a` in `t-a` still argues for tags over a list.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         )
         .assert()
         .success();
@@ -3199,7 +3199,7 @@ const BLOCKING_PACKET_RESPONSE: &str = "<!-- patch:exchange -->\n\
 \x20\x20- **leave**: change nothing.\n\
 \n\
 **Recommendation:** withdraw, after STG gets migration `0022`.\n\
-<!-- /patch:exchange -->\n";
+<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n";
 
 /// The same closeout in the historical layout (each value on its key line) that
 /// documents written before nested values still carry.
@@ -3219,7 +3219,7 @@ const LEGACY_FLAT_PACKET_RESPONSE: &str = "<!-- patch:exchange -->\n\
 \x20\x20- **leave**: change nothing.\n\
 \n\
 **Recommendation:** withdraw, after STG gets migration `0022`.\n\
-<!-- /patch:exchange -->\n";
+<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n";
 
 const PACKET_TODO: &str = "Answer the blocking subagent question for tracked work apipendingorphans for queue item ‘do [#apipendingorphans]’ in agent:exchange: What should happen to the chat messages already stuck in `pending` on STG (including the rows from the 2026-10-20 incident)? (choices: withdraw, resubmit, release, leave)";
 
@@ -3263,7 +3263,7 @@ const PACKET_ONLY_SUBAGENT_REPORT: &str = "<!-- patch:exchange -->\n\
 Publication and pin details are in the worker handback.\n\
 Commands: contracts-propose.sh\n\
 Tests that passed: the focused suite.\n\
-<!-- /patch:exchange -->\n";
+<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n";
 
 /// The same packet beside the coordinator's consolidated report.
 const CONSOLIDATED_WITH_SUBAGENT_REPORT: &str = "<!-- patch:exchange -->\n\
@@ -3285,7 +3285,7 @@ The worker report stays in this exchange, and this turn still prints the consoli
 \x20\x20- **Stop**: stop\n\
 \n\
 queue_worker_binding: subagent:pr759-choice\n\
-<!-- /patch:exchange -->\n";
+<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n";
 
 /// `#consolidatedreport`: a turn that has a subagent report and omits the
 /// consolidated report is refused. A turn that prints both keeps both in
@@ -3429,7 +3429,7 @@ fn write_blocking_operator_request_projects_and_clears_queue_indicator() {
     let stderr = write_packet_closeout(
         &doc,
         &[],
-        "<!-- patch:exchange -->\nOperator answered.\n<!-- /patch:exchange -->\n",
+        "<!-- patch:exchange -->\nOperator answered.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
     );
     let content = fs::read_to_string(&doc).unwrap();
     assert!(
@@ -3494,7 +3494,7 @@ fn write_nonblocking_or_quoted_operator_request_packet_records_no_todo() {
 fn write_rejects_duplicate_blocking_operator_request_ids() {
     let (_tmp, doc) = setup_doc("- [ ] [#open] backlog task");
     let duplicate = BLOCKING_PACKET_RESPONSE.replace(
-        "<!-- /patch:exchange -->\n",
+        "<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         &format!("\n{BLOCKING_PACKET_RESPONSE}"),
     );
     agent_doc()
@@ -3543,7 +3543,7 @@ fn write_patch_todo_creates_missing_todo_component() {
     agent_doc()
         .args(["write", doc.to_str().unwrap(), "--force-disk"])
         .write_stdin(
-            "<!-- patch:exchange -->\nok\n<!-- /patch:exchange -->\n<!-- patch:todo -->\n- [ ] Publish draft docs/launch-note.md\n<!-- /patch:todo -->\n",
+            "<!-- patch:exchange -->\nok\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n<!-- patch:todo -->\n- [ ] Publish draft docs/launch-note.md\n<!-- /patch:todo -->\n",
         )
         .assert()
         .success();
@@ -3601,7 +3601,7 @@ fn write_mixed_review_closeout_mutations_land_as_one_valid_envelope() {
             "--pending-add",
             "id=fresh newly captured follow-up",
         ])
-        .write_stdin("<!-- patch:exchange -->\nok\n<!-- /patch:exchange -->\n")
+        .write_stdin("<!-- patch:exchange -->\nok\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n")
         .assert()
         .success();
 
@@ -3647,7 +3647,7 @@ fn write_mixed_review_closeout_error_rolls_back_all_tracked_work() {
             "--icebox-add",
             "id=parked duplicate id must fail",
         ])
-        .write_stdin("<!-- patch:exchange -->\nok\n<!-- /patch:exchange -->\n")
+        .write_stdin("<!-- patch:exchange -->\nok\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n")
         .assert()
         .failure();
 
@@ -3680,7 +3680,7 @@ fn write_review_add_dedupes_symptom_key_into_existing_review_item() {
             "--review-add",
             &format!("second drift symptom {key}"),
         ])
-        .write_stdin("<!-- patch:exchange -->\nok\n<!-- /patch:exchange -->\n")
+        .write_stdin("<!-- patch:exchange -->\nok\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n")
         .assert()
         .success();
     let content = fs::read_to_string(&doc).unwrap();
@@ -3708,7 +3708,7 @@ fn write_review_done_guard_strict_blocks_backlog_done() {
             "--done",
             "abcd",
         ])
-        .write_stdin("<!-- patch:exchange -->\nok\n<!-- /patch:exchange -->\n")
+        .write_stdin("<!-- patch:exchange -->\nok\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n")
         .assert()
         .failure();
     let stderr = String::from_utf8_lossy(&assert_result.get_output().stderr);
@@ -3734,7 +3734,7 @@ fn write_review_done_guard_strict_allows_gate_then_done() {
             "--done",
             "abcd",
         ])
-        .write_stdin("<!-- patch:exchange -->\nok\n<!-- /patch:exchange -->\n")
+        .write_stdin("<!-- patch:exchange -->\nok\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n")
         .assert()
         .success();
     let content = fs::read_to_string(&doc).unwrap();

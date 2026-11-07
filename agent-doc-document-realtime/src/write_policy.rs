@@ -366,9 +366,15 @@ fn last_standalone_exchange_boundary_id(doc: &str) -> Option<String> {
         .map(|(_, _, id)| id)
 }
 
+/// One standalone protocol boundary: `(line_start, line_end, id)`.
+/// `line_end` is the byte just after that marker line.
+type StandaloneBoundarySpan = (usize, usize, String);
+/// Exchange close offset, then the standalone boundaries outside fenced code.
+type StandaloneExchangeBoundaries = (usize, Vec<StandaloneBoundarySpan>);
+
 /// Standalone protocol boundaries in the exchange, outside fenced code.
 /// `line_end` is the byte just after that marker line.
-fn standalone_exchange_boundaries(doc: &str) -> Option<(usize, Vec<(usize, usize, String)>)> {
+fn standalone_exchange_boundaries(doc: &str) -> Option<StandaloneExchangeBoundaries> {
     let components = element::parse(doc).ok()?;
     let exchange = components
         .iter()

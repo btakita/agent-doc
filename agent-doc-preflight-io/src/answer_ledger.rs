@@ -2274,6 +2274,16 @@ mod tests {
     #[test]
     fn project_search_maps_recall_onto_the_documents_it_read() {
         let (dir, doc, other) = recall_project();
+        // `recall_project` writes the empty index before the documents. On a
+        // nanosecond filesystem that already makes the index older than both
+        // files, so the first search would skip its hits. Stamp the index
+        // current here; the block below is what ages it.
+        std::fs::File::options()
+            .write(true)
+            .open(dir.path().join(".tsift/index.db"))
+            .unwrap()
+            .set_modified(std::time::SystemTime::now())
+            .unwrap();
         let bin_dir = fake_tsift(dir.path(), &other, "0");
         let env = recall_env(&bin_dir, 10_000);
         let project = project_documents(&doc, &other);

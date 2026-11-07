@@ -4,13 +4,14 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 ## 0.35.570
 
-- **Publish `8e13ed0d0cb1453891f7a80d471e584075b270b6` as `0.35.570`.** Tag `v0.35.569` remains `88fef765af30590129f92acdaa457586d413c48b`. Package manifests, internal constraints, `Cargo.lock`, `pyproject.toml`, and the bundled skill sources move to `0.35.570`. JetBrains plugin generations stay `0.2.946`, `0.2.948`, and `0.2.947`. VS Code stays `0.2.99`. Zed stays `0.1.7`.
+- **Publish `abc7d9aa68e7754b5c6637d6623ccd33e0a90e7a` as `0.35.570`.** Tag `v0.35.569` remains `88fef765af30590129f92acdaa457586d413c48b`. Package manifests, internal constraints, `Cargo.lock`, `pyproject.toml`, and the bundled skill sources move to `0.35.570`. JetBrains plugin generations stay `0.2.946`, `0.2.948`, and `0.2.947`. VS Code stays `0.2.99`. Zed stays `0.1.7`.
 - **One queue generation keeps one lineage attempt** (`39197dd069`, #396).
 - **A reported free-text row strikes by its generated q-id** (`bbad43d44d`, #394).
 - **An inactive editor surface no longer cycles tmux panes** (`d140f7374b`, #397).
 - **A turn in progress shows the previous recap beside the current one** (`dba8a91333`). Committing the turn removes the previous recap.
 - **An agent-authored template closeout requires a non-blank recap** (`787230e4ea`). The strict closeout test satisfies clippy (`7bca97f04f`), and orchestrate closeouts carry a recap (`8e13ed0d0c`).
 - **A route-owned Grok child with no resume id cold-starts** (`64fb1b8a6c`). Codex, Claude, and OpenCode still refuse that launch.
+- **`agent:worktrees` lists live worktrees after `agent:active`** (`abc7d9aa68`).
 
 ## 0.35.569
 

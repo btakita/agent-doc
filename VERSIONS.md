@@ -10,6 +10,7 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 - **An inactive editor surface no longer cycles tmux panes** (`d140f7374b`, #397).
 - **A turn in progress shows the previous recap beside the current one** (`dba8a91333`). Committing the turn removes the previous recap.
 - **An agent-authored template closeout requires a non-blank recap** (`787230e4ea`). The strict closeout test satisfies clippy (`7bca97f04f`), and orchestrate closeouts carry a recap (`8e13ed0d0c`).
+- **A route-owned Grok child with no resume id cold-starts** (`64fb1b8a6c`). Codex, Claude, and OpenCode still refuse that launch.
 
 ## 0.35.569
 

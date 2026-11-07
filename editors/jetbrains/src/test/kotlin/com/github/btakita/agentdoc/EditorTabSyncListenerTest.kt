@@ -94,6 +94,27 @@ class EditorTabSyncListenerTest {
                 projectDisposed = false,
             ),
         )
+        // GH #397: the same inactive surface must not publish a structural
+        // layout. Each such publication promoted another stash pane into the
+        // visible tmux window. Remote Dev still publishes from selection evidence.
+        assertFalse(
+            EditorTabSyncListener.shouldPublishStructuralLayout(
+                projectWindowActive = false,
+                remoteControllerSelectionFocusEvidence = false,
+            ),
+        )
+        assertTrue(
+            EditorTabSyncListener.shouldPublishStructuralLayout(
+                projectWindowActive = true,
+                remoteControllerSelectionFocusEvidence = false,
+            ),
+        )
+        assertTrue(
+            EditorTabSyncListener.shouldPublishStructuralLayout(
+                projectWindowActive = false,
+                remoteControllerSelectionFocusEvidence = true,
+            ),
+        )
         assertEquals(
             EditorTabSyncListener.FocusProjectionPublicationGate.Disposed,
             EditorTabSyncListener.focusProjectionPublicationGate(
@@ -1224,6 +1245,8 @@ Files.readString(
                 .substringAfter("override fun selectionChanged(event: FileEditorManagerEvent)")
 .substringBefore("fun onEditorFocusGained")
 assertTrue(selection.contains("requestObservation("))
+assertTrue(selection.contains("shouldPublishStructuralLayout("))
+assertTrue(selection.contains("reason=project_surface_inactive"))
 assertTrue(selection.contains("requestFocusProjection("))
 assertTrue(selection.contains("remoteControllerSelectionFocusEvidence ="))
 assertTrue(selection.contains("requiredFocusGeneration = requestedFocusGeneration"))

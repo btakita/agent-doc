@@ -8,6 +8,34 @@ use std::time::Duration;
 
 pub use agent_doc_editor_surface::editor_view_policy::MainLayoutEligibility;
 
+/// GH #397: how long an automatic editor-surface structural effect waits
+/// before it moves a pane.
+///
+/// A burst of selections (several documents each becoming the left editor
+/// split within a second) published one generation per document. The effect
+/// worker checked supersession before `sync_tmux_layout`, but that call moves
+/// the pane and a newer generation arriving during it was only logged
+/// `phase=after_structural_effect`. The intermediate stash promotion had
+/// already happened. Waiting this long, and waking early when a newer
+/// revision is scheduled, lets the burst supersede the generation before any
+/// pane moves. A single settled editor split still applies after the wait.
+/// Manual commands and editor routes do not wait.
+pub const AUTOMATIC_EDITOR_SURFACE_STRUCTURAL_SETTLE: Duration = Duration::from_millis(1_000);
+
+/// Settle budget for the first structural attempt of an automatic
+/// editor-surface publication. `None` means the effect runs immediately.
+pub fn automatic_editor_surface_structural_settle(
+    caller_kind: &str,
+    publisher: &str,
+    attempt: u64,
+) -> Option<Duration> {
+    if attempt == 1 && caller_kind == "automatic" && publisher == "editor_surface" {
+        Some(AUTOMATIC_EDITOR_SURFACE_STRUCTURAL_SETTLE)
+    } else {
+        None
+    }
+}
+
 /// Maximum readiness budget owned by a manual pane-layout effect.
 ///
 /// The command projection must wait longer than this effect-local deadline so
@@ -1155,6 +1183,32 @@ mod tests {
         );
         assert_eq!(kept, cols(&["a"]));
         assert_eq!(decision, LayoutWidthDecision::Within);
+    }
+
+    #[test]
+    fn automatic_editor_surface_burst_settles_before_a_pane_moves() {
+        assert_eq!(
+            automatic_editor_surface_structural_settle("automatic", "editor_surface", 1),
+            Some(AUTOMATIC_EDITOR_SURFACE_STRUCTURAL_SETTLE)
+        );
+        assert!(AUTOMATIC_EDITOR_SURFACE_STRUCTURAL_SETTLE >= Duration::from_millis(800));
+        assert_eq!(
+            automatic_editor_surface_structural_settle("automatic", "editor_surface", 2),
+            None,
+            "a retry of the settled generation must not wait out another burst"
+        );
+        assert_eq!(
+            automatic_editor_surface_structural_settle("manual", "command", 1),
+            None
+        );
+        assert_eq!(
+            automatic_editor_surface_structural_settle("editor_route", "route", 1),
+            None
+        );
+        assert_eq!(
+            automatic_editor_surface_structural_settle("automatic", "command", 1),
+            None
+        );
     }
 
     #[test]

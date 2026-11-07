@@ -178,6 +178,19 @@ class EditorTabSyncListener : FileEditorManagerListener {
             instances.remove(project)?.shutdown(policy)
         }
 
+        /**
+         * GH #397: a selection while the IDE frame is not the keyboard-focused
+         * surface still reached `requestObservation`, and each automatic
+         * editor-surface sync promoted a different stash pane into the visible
+         * tmux window. Focus projection already refuses that case. Structural
+         * layout publication must refuse it too. Remote Dev has no backend
+         * window, so its selection evidence remains a publish.
+         */
+        internal fun shouldPublishStructuralLayout(
+            projectWindowActive: Boolean,
+            remoteControllerSelectionFocusEvidence: Boolean,
+        ): Boolean = projectWindowActive || remoteControllerSelectionFocusEvidence
+
         internal fun shouldPublishFocusProjection(
             requestedGeneration: Long,
             currentGeneration: Long,
@@ -1878,6 +1891,18 @@ internal fun selectionChanged(
 val selectionProbeGeneration = selectionFocusProbeGeneration.incrementAndGet()
 val file = event.newFile ?: return
 val project = event.manager.project
+        if (
+            !shouldPublishStructuralLayout(
+                projectWindowActive = JetBrainsEditorSurfaces.isProjectSurfaceActive(project),
+                remoteControllerSelectionFocusEvidence = remoteControllerSelectionFocusEvidence,
+            )
+        ) {
+            LOG.info(
+                "[layout-sync] selection kept tmux layout reason=project_surface_inactive " +
+                    "file=${file.name}",
+            )
+            return
+        }
         if (!AgentDocSessionFiles.isSessionDocument(file)) {
             // A plain Markdown/source tab can occupy one editor split while that window still
             // stands for its last agent-doc tab. Reproject the spanning layout, but never route
@@ -1998,9 +2023,12 @@ requiredFocusGeneration = requestedFocusGeneration,
             }
             val selectedFile =
                 FileEditorManagerEx.getInstanceEx(project).currentWindow?.selectedFile
+            if (!JetBrainsEditorSurfaces.isProjectSurfaceActive(project)) {
+                LOG.info("[layout-sync] ideActivated kept tmux layout reason=project_surface_inactive")
+                return@doWhenFocusSettlesDown
+            }
             if (
-                JetBrainsEditorSurfaces.isProjectSurfaceActive(project) &&
-                    selectedFile != null &&
+                selectedFile != null &&
                     AgentDocSessionFiles.isSessionDocument(selectedFile)
             ) {
                 log("ideActivated: selected session file=${selectedFile.name}; focus projection queued")
@@ -2035,6 +2063,13 @@ requiredFocusGeneration = requestedFocusGeneration,
     * operator moves between existing splits, so both edges are required.
      */
     fun onEditorFocusGained(project: Project, file: VirtualFile) {
+        if (!JetBrainsEditorSurfaces.isProjectSurfaceActive(project)) {
+            LOG.info(
+                "[layout-sync] focusGained kept tmux layout reason=project_surface_inactive " +
+                    "file=${file.name}",
+            )
+            return
+        }
         selectionFocusProbeGeneration.incrementAndGet()
         if (!AgentDocSessionFiles.isSessionDocument(file)) {
             requestObservation(
@@ -2067,6 +2102,10 @@ requiredFocusGeneration = requestedFocusGeneration,
      * owner.
      */
     fun onEditorLayoutChanged(project: Project) {
+        if (!JetBrainsEditorSurfaces.isProjectSurfaceActive(project)) {
+            LOG.info("[layout-sync] layoutChanged kept tmux layout reason=project_surface_inactive")
+            return
+        }
         val pendingSelection =
             latestSurfaceObservation.get()?.takeIf {
                 it.project === project &&
@@ -2093,6 +2132,13 @@ requiredFocusGeneration = requestedFocusGeneration,
      */
     override fun fileOpened(source: FileEditorManager, file: VirtualFile) {
         if (!AgentDocSessionFiles.isSessionDocument(file)) {
+            if (!JetBrainsEditorSurfaces.isProjectSurfaceActive(source.project)) {
+                LOG.info(
+                    "[layout-sync] fileOpened kept tmux layout reason=project_surface_inactive " +
+                        "file=${file.name}",
+                )
+                return
+            }
             requestObservation(
                 PendingSurfaceObservation(
                     project = source.project,
@@ -2180,6 +2226,13 @@ requiredFocusGeneration = requestedFocusGeneration,
         val preferredFile =
             manager.selectedEditor?.file?.takeIf { it.isValid }
                 ?: lastReady.takeIf { it.isValid && manager.isFileOpen(it) }
+        if (!JetBrainsEditorSurfaces.isProjectSurfaceActive(project)) {
+            LOG.info(
+                "[layout-sync] fileOpened kept tmux layout reason=project_surface_inactive " +
+                    "preferred=${preferredFile?.name}",
+            )
+            return
+        }
         requestObservation(
             PendingSurfaceObservation(
                 project = project,
@@ -2200,6 +2253,13 @@ requiredFocusGeneration = requestedFocusGeneration,
     override fun fileClosed(source: FileEditorManager, file: VirtualFile) {
         if (!file.name.endsWith(".md")) return
         StateProjectionBridge.evictForFile(file.path)
+        if (!JetBrainsEditorSurfaces.isProjectSurfaceActive(source.project)) {
+            LOG.info(
+                "[layout-sync] fileClosed kept tmux layout reason=project_surface_inactive " +
+                    "file=${file.name}",
+            )
+            return
+        }
         requestObservation(
             PendingSurfaceObservation(
                 project = source.project,

@@ -11319,15 +11319,37 @@ impl ControllerRuntime {
         if rows.is_empty() {
             return Ok(false);
         }
+        // `#abandonedreplacementhandoff`: a live successor's receipt event is in
+        // the ledger, and a wholesale reload would fold it into this older
+        // projection. It is not a predecessor write. Leave it above the
+        // high-water for that successor.
+        let generation = self.bootstrap.lock().controller_generation;
+        let mut live_successor_events = Vec::new();
+        for receipt in
+            state_store::load_document_authority_ack_receipts_after(project_root, generation)?
+        {
+            if !self.abandoned_replacement_authority_generation_for(
+                project_root,
+                receipt.controller_generation,
+            )? {
+                live_successor_events.push(receipt.event_id);
+            }
+        }
+        let live_successor = |event_id: &str| live_successor_events.iter().any(|id| id == event_id);
         let foreign = {
             let mut memory = self.memory.lock();
             if memory.durable_sequence != folded_through {
                 false
-            } else if rows
-                .iter()
-                .any(|row| !memory.live_applied_event_ids.contains(&row.event_id))
-            {
+            } else if rows.iter().any(|row| {
+                !memory.live_applied_event_ids.contains(&row.event_id)
+                    && !live_successor(&row.event_id)
+            }) {
                 true
+            } else if rows.iter().any(|row| {
+                live_successor(&row.event_id)
+                    && !memory.live_applied_event_ids.contains(&row.event_id)
+            }) {
+                false
             } else {
                 if let Some(last) = rows.last() {
                     memory.durable_sequence = last.sequence;

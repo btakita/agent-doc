@@ -58,7 +58,14 @@ VSCODE_NODE_LOCK := editors/vscode/node_modules/.package-lock.json
 # `git bisect run`, `git rebase --exec`, or a hook) makes a fixture's `git init` /
 # `git config` rewrite the REAL repository; see git-env-isolation-self-test.
 GIT_LOCAL_REPO_ENV := GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_COMMON_DIR GIT_CONFIG GIT_CONFIG_COUNT GIT_CONFIG_PARAMETERS GIT_DIR GIT_GRAFT_FILE GIT_IMPLICIT_WORK_TREE GIT_INDEX_FILE GIT_NO_REPLACE_OBJECTS GIT_OBJECT_DIRECTORY GIT_PREFIX GIT_REPLACE_REF_BASE GIT_SHALLOW_FILE GIT_WORK_TREE
-CARGO_CLEAN_ENV = env $(foreach var,$(GIT_LOCAL_REPO_ENV),-u $(var))
+# `#testharnessisolation`: detect_harness() trusts GROK_SESSION_ID before Claude,
+# Codex, and OpenCode. make test/check from inside one of those sessions must
+# still simulate the harness a test sets, not the operator's session.
+# AGENT_DOC_LOG makes a command create `.agent-doc/logs` in the cwd project.
+# The supervisor and write-authority vars would otherwise point tests at the
+# operator's live session.
+HARNESS_LEAK_ENV := GROK_SESSION_ID CLAUDECODE CLAUDE_CODE CLAUDE_CODE_SESSION CODEX CODEX_CLI CODEX_SESSION CODEX_THREAD_ID OPENCODE OPENCODE_CLIENT AGENT_DOC_LOG AGENT_DOC_SUPERVISOR AGENT_DOC_WRITE_AUTHORITY AGENT_DOC_PREFLIGHT_HOOK_BUDGET_SECS
+CARGO_CLEAN_ENV = env $(foreach var,$(GIT_LOCAL_REPO_ENV) $(HARNESS_LEAK_ENV),-u $(var))
 CARGO_CMD ?= ./scripts/with-cargo-cache cargo
 NEXTEST_QUIET_FLAGS ?= --cargo-quiet --show-progress none --status-level fail --final-status-level fail --failure-output immediate-final --success-output never
 BATCHED_TEST_PACKAGES := agent-doc-controller agent-doc-controller-io agent-doc-route-io agent-doc-session-check-io agent-doc-start-runtime-io

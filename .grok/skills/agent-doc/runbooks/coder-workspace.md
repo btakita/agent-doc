@@ -60,10 +60,13 @@ creates one with the receipt's attach command.
   after VS Code has connected once. Reload the remote window after an install.
   VS Code Web loads extensions from `~/.vscode-server/extensions` (or
   `$VSCODE_AGENT_FOLDER/extensions`) unless the template sets the module's
-  `extensions_dir`. While the server runs, a custom `install_prefix` or
-  `extensions_dir` needs nothing extra: the install reads both from your
-  `serve-local` process, and `agent-doc plugin list` names the directory. With
-  the server stopped, start the workspace first or install the VSIX by hand:
+  `extensions_dir`, or a hand-started server passes `--server-data-dir`.
+  While the server runs, a custom `install_prefix`, `extensions_dir`,
+  `--server-data-dir`, or that process's own `VSCODE_AGENT_FOLDER` needs
+  nothing extra: the install reads them from the `serve-local` process, not
+  from the shell that runs the install, and `agent-doc plugin list` names
+  the directory. With the server stopped, start the workspace first or
+  install the VSIX by hand:
   `<install_prefix>/bin/code-server --extensions-dir <extensions_dir> --install-extension <vsix>`.
   `vscode.env.remoteName` is passed to the binary, and to the `agent-doc`
   terminal the extension creates, as an opaque IDE observation.

@@ -69,6 +69,18 @@
           }
         ]
       }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "command": "agent-doc hook subagent-stop",
+            "statusMessage": "Recording a subagent usage limit",
+            "timeout": 15,
+            "type": "command"
+          }
+        ]
+      }
     ]
   }
 }

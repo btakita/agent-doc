@@ -464,7 +464,11 @@ and the pending granular-flags-only rule. This runbook carries the rest.
      **Notes**, and **Next actions** into the response structure and queues each
      Action items bullet as a follow-up row right after the originating head, or
      after the top-level row that holds a nested head, so do not add those rows
-     again with `queue follow-up` (`#workerresponsestructure`). Notes never
+     again with `queue follow-up` (`#workerresponsestructure`). When that
+     placement is refused, the report line prints one exact `queue follow-up`
+     command on its own line, with the real origin and each unplaced item
+     already filled in; run that line as printed
+     (`#handbackrefusedcommandexact`). Notes never
      become rows. Bullets under the older **Open items** label are not queued
      either, because that label does not say which are work: when the report
      line says they were held for triage, read them and queue only the work with
@@ -602,7 +606,9 @@ and the pending granular-flags-only rule. This runbook carries the rest.
      lost attempt (`#nestedechostrike`). The struck row keeps saying the item
      is open: `~~do [#id]~~ — auto-struck: acknowledged; backlog #id stays
      open: <reason>`, where the reason is the item's own `(stays open: ...)`
-     clause (`#ackstrikeopenbacklog`), so write that clause accurately. Use
+     clause (`#ackstrikeopenbacklog`). `--ack-id` refuses and leaves the row
+     unstruck when that clause is missing (`#acknoreason`), so record
+     `(stays open: <reason>)` on the open item before acknowledging. Use
      `--ack-id` only when the item really stays open: when the worker's or the
      operator's answer resolves it (for example "no livestream" answers the
      check its parent asked for), close the item with `--done <id>` (or

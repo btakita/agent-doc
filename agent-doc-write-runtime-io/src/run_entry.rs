@@ -4067,7 +4067,7 @@ mod tests {
         let missing_recap = enforce_strict_template_closeout_contract(
             current,
             2,
-            &[canonical.clone()],
+            std::slice::from_ref(&canonical),
             "",
             true,
             true,

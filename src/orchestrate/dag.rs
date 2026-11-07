@@ -666,7 +666,7 @@ mod tests {
         fresh_calls: RefCell::new(0),
         streaming_calls: RefCell::new(0),
         response:
-            "<!-- patch:exchange -->\n### Re: task — gpt-5\n\nImplemented and verified.\n\nVerification:\n- `cargo test`\n<!-- /patch:exchange -->\n"
+            "<!-- patch:exchange -->\n### Re: task — gpt-5\n\nImplemented and verified.\n\nVerification:\n- `cargo test`\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nImplemented and verified.\n<!-- /patch:recap -->\n"
                 .to_string(),
         streaming_chunks: None,
     };
@@ -727,7 +727,7 @@ mod tests {
             fresh_calls: RefCell::new(0),
             streaming_calls: RefCell::new(0),
             response:
-                "<!-- patch:exchange -->\n### Re: task — gpt-5\n\nImplemented and verified.\n\nVerification:\n- `cargo test orchestrate`\n<!-- /patch:exchange -->\n"
+                "<!-- patch:exchange -->\n### Re: task — gpt-5\n\nImplemented and verified.\n\nVerification:\n- `cargo test orchestrate`\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nImplemented and verified.\n<!-- /patch:recap -->\n"
                     .to_string(),
             streaming_chunks: None,
         };
@@ -798,7 +798,7 @@ mod tests {
         fresh_calls: RefCell::new(0),
         streaming_calls: RefCell::new(0),
         response:
-            "<!-- patch:exchange -->\n### Re: task — gpt-5\n\nImplemented and verified.\n\nVerification:\n- `cargo test`\n<!-- /patch:exchange -->\n"
+            "<!-- patch:exchange -->\n### Re: task — gpt-5\n\nImplemented and verified.\n\nVerification:\n- `cargo test`\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nImplemented and verified.\n<!-- /patch:recap -->\n"
                 .to_string(),
         streaming_chunks: None,
     };
@@ -860,7 +860,7 @@ mod tests {
         fresh_calls: RefCell::new(0),
         streaming_calls: RefCell::new(0),
         response:
-            "<!-- patch:exchange -->\n### Re: task — gpt-5\n\nImplemented and verified.\n\nVerification:\n- `cargo test orchestrate`\n<!-- /patch:exchange -->\n"
+            "<!-- patch:exchange -->\n### Re: task — gpt-5\n\nImplemented and verified.\n\nVerification:\n- `cargo test orchestrate`\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nImplemented and verified.\n<!-- /patch:recap -->\n"
                 .to_string(),
         streaming_chunks: None,
     };
@@ -914,7 +914,7 @@ mod tests {
         let agent = MutatingAgentRunner {
             fresh_calls: RefCell::new(0),
             response:
-                "<!-- patch:exchange -->\n### Re: first — gpt-5\n\nImplemented and verified.\n\nVerification:\n- `cargo test orchestrate`\n<!-- /patch:exchange -->\n"
+                "<!-- patch:exchange -->\n### Re: first — gpt-5\n\nImplemented and verified.\n\nVerification:\n- `cargo test orchestrate`\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nImplemented and verified.\n<!-- /patch:recap -->\n"
                     .to_string(),
         };
         let tasks = vec![
@@ -990,7 +990,7 @@ mod tests {
                 session_id: None,
             },
             StreamChunk {
-                text: "<!-- patch:exchange -->\n### Re: streamed — gpt-5\n\nImplemented and verified.\n\nVerification:\n- `cargo test`\n<!-- /patch:exchange -->\n".to_string(),
+                text: "<!-- patch:exchange -->\n### Re: streamed — gpt-5\n\nImplemented and verified.\n\nVerification:\n- `cargo test`\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nImplemented and verified.\n<!-- /patch:recap -->\n".to_string(),
                 thinking: None,
                 is_final: true,
                 session_id: Some("sess-stream".to_string()),
@@ -1044,7 +1044,7 @@ mod tests {
             fresh_calls: RefCell::new(0),
             streaming_calls: RefCell::new(0),
             response:
-                "<!-- patch:exchange -->\n### Re: task — gpt-5\n\nImplemented and verified.\n\nVerification:\n- `cargo test orchestrate`\n<!-- /patch:exchange -->\n"
+                "<!-- patch:exchange -->\n### Re: task — gpt-5\n\nImplemented and verified.\n\nVerification:\n- `cargo test orchestrate`\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nImplemented and verified.\n<!-- /patch:recap -->\n"
                     .to_string(),
             streaming_chunks: None,
         };
@@ -1510,7 +1510,7 @@ exit 2
         fresh_calls: RefCell::new(0),
         streaming_calls: RefCell::new(0),
         response:
-            "<!-- patch:exchange -->\n### Re: network — gpt-5\n\nImplemented and verified.\n\nVerification:\n- `cargo test orchestrate`\n<!-- /patch:exchange -->\n"
+            "<!-- patch:exchange -->\n### Re: network — gpt-5\n\nImplemented and verified.\n\nVerification:\n- `cargo test orchestrate`\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nImplemented and verified.\n<!-- /patch:recap -->\n"
                 .to_string(),
         streaming_chunks: None,
     };

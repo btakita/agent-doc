@@ -879,7 +879,10 @@ fn finalize_orchestration_batch_changed(
         "<!-- patch:exchange -->\n\
 ### Re: orchestration batch changed — gpt-5\n\n\
 Stopped sequential orchestration after {completed_steps} of {total_steps} step(s) because the source task list changed while the batch was running. The remaining and newly added tasks are still open for the next explicit orchestration run.\n\
-<!-- /patch:exchange -->\n"
+<!-- /patch:exchange -->\n\
+<!-- patch:recap -->\n\
+Stopped sequential orchestration after {completed_steps} of {total_steps} step(s) because the source task list changed. The remaining tasks stay open.\n\
+<!-- /patch:recap -->\n"
     );
     lifecycle
         .finalize(file, &response, fm.resolve_mode())

@@ -13599,8 +13599,9 @@ mod stop_input_tests {
 /// `#closeoutguidanceagree`: every closeout emitter names the same exact strike
 /// for one reported attempt. On 2026-11-05 completion feedback and the Stop
 /// hook read the first `#` of a free-text row (`--ack-id <id>` for an
-/// `[#id]: answer` row, `--ack-id q-…` for a `[#q-…]` row) while session-check
-/// named `--ack-text <row> --ack-owner owner#gen` for the same attempt.
+/// `[#id]: answer` row) while session-check named `--ack-text`. A generated
+/// `[#q-…]` row is `--ack-id <q-…>` (issue 394), the command that strikes a
+/// nested reported child.
 #[cfg(test)]
 mod closeout_guidance_agreement_tests {
     use super::*;
@@ -13694,7 +13695,7 @@ mod closeout_guidance_agreement_tests {
                 "q- row",
                 "Rebuild the SDK docs [#q-7f3a]",
                 format!(
-                    "agent-doc queue consume {DOC} --ack-text 'Rebuild the SDK docs [#q-7f3a]' --ack-owner '{OWNER}#{GENERATION}'"
+                    "agent-doc queue consume {DOC} --ack-id q-7f3a --ack-owner '{OWNER}#{GENERATION}'"
                 ),
             ),
             (

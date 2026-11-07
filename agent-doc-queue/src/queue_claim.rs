@@ -1871,14 +1871,10 @@ impl QueueClaimLedger {
         expected_generation: Option<u64>,
         publication_state: Option<QueueReportState>,
     ) -> Result<QueueClaim, QueueClaimTransitionRefused> {
-        let identity = claim_identity(item);
-        let Some(claim) = self
-            .claims
-            .iter_mut()
-            .find(|claim| claim.identity == identity)
-        else {
+        let Some(index) = self.transition_index(item) else {
             return Err(QueueClaimTransitionRefused::Missing);
         };
+        let claim = &mut self.claims[index];
         validate_generation(claim, expected_generation)?;
         if claim.state == QueueClaimState::Lost {
             return Err(QueueClaimTransitionRefused::Terminal {
@@ -1909,14 +1905,10 @@ impl QueueClaimLedger {
         expected_worker_id: &str,
         publication_state: Option<QueueReportState>,
     ) -> Result<QueueClaim, QueueClaimTransitionRefused> {
-        let identity = claim_identity(item);
-        let Some(claim) = self
-            .claims
-            .iter_mut()
-            .find(|claim| claim.identity == identity)
-        else {
+        let Some(index) = self.transition_index(item) else {
             return Err(QueueClaimTransitionRefused::Missing);
         };
+        let claim = &mut self.claims[index];
         validate_generation(claim, Some(expected_generation))?;
         let current_worker = claim.worker.as_ref().map(|worker| worker.worker_id.clone());
         if current_worker.as_deref() != Some(expected_worker_id) {
@@ -1989,6 +1981,31 @@ impl QueueClaimLedger {
             validate_generation(&self.claims[index], expected_generation)?;
         }
         Ok(Some(self.claims.remove(index)))
+    }
+
+    /// [`Self::claim_index`], plus the one claim whose row carries a generated
+    /// `[#q-…]` when `item` names that id (issue 394). A projection that
+    /// admits the id changes the nest-vector text; report-complete still
+    /// names the pre-projection vector or the bare `q-…` id.
+    fn transition_index(&self, item: &str) -> Option<usize> {
+        if let Some(index) = self.claim_index(item) {
+            return Some(index);
+        }
+        let id = claim_selector_id(item)?;
+        if !id.starts_with("q-") {
+            return None;
+        }
+        let matching: Vec<usize> = self
+            .claims
+            .iter()
+            .enumerate()
+            .filter(|(_, claim)| claim_row_id(&claim.item_text).as_deref() == Some(id.as_str()))
+            .map(|(index, _)| index)
+            .collect();
+        match matching.as_slice() {
+            [only] => Some(*only),
+            _ => None,
+        }
     }
 
     /// The claim keyed by `item`'s exact identity, the one claim that
@@ -3317,6 +3334,23 @@ pub fn nest_leaf_matches(item: &str, live_heads: &[String]) -> Vec<String> {
         .collect()
 }
 
+/// A generated `[#q-…]` named by `item`: the stable id of a row, or a bare
+/// `q-…` word. Authored backlog ids are not generated prompt ids.
+fn generated_prompt_selector(item: &str) -> Option<String> {
+    let trimmed = item.trim();
+    if let Some(id) = agent_doc_element_queue::queue_prompt_stable_id(trimmed)
+        && id.starts_with("q-")
+    {
+        return Some(id);
+    }
+    let bare = trimmed.trim_start_matches('#').to_ascii_lowercase();
+    (bare.starts_with("q-")
+        && bare
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_')))
+    .then_some(bare)
+}
+
 /// Resolve a claim `--item` to the live queue head it names.
 ///
 /// The item matches a head by claim identity (the exact line, marker-
@@ -3330,6 +3364,29 @@ pub fn resolve_claim_target(item: &str, live_heads: &[String]) -> Result<String,
         .find(|head| claim_identity(head) == identity)
     {
         return Ok(head.clone());
+    }
+    // Issue 394: `--item q-…` or a row whose only id is the generated
+    // occurrence names that one live head. Two heads with the same id refuse.
+    if let Some(id) = generated_prompt_selector(item) {
+        let matches: Vec<String> = live_heads
+            .iter()
+            .filter(|head| {
+                agent_doc_element_queue::queue_prompt_stable_id(head).as_deref()
+                    == Some(id.as_str())
+            })
+            .cloned()
+            .collect();
+        match matches.len() {
+            1 => return Ok(matches.into_iter().next().expect("length checked")),
+            0 => {}
+            _ => {
+                return Err(QueueClaimMiss {
+                    item: item.trim().to_string(),
+                    live_heads: live_heads.to_vec(),
+                    ambiguous: matches,
+                });
+            }
+        }
     }
     // Stable-id admission must not invalidate an already-authored command or
     // copied `--item` value. Resolve the legacy work text only when it names a
@@ -5980,6 +6037,119 @@ Add new issues into the backlog + queue except issue #40 + #45.";
             assert!(!claimed_items.claims(head), "{head} must stay dispatchable");
         }
         assert!(!struck_row_reopened_by_claim(Some(claim)));
+    }
+
+    fn address_queue(parent: &str, leaf: &str) -> String {
+        format!("<!-- agent:queue -->\n- {parent}\n  - {leaf}\n<!-- /agent:queue -->\n")
+    }
+
+    /// Issue 394: a running `#address` claim stays on the row when the
+    /// projection admits `⟦effect:N⟧` and `[#q-…]` and drops `[#owner#gen]`.
+    /// Report by the pre-projection nest and by the bare q-id both find it.
+    /// A second sibling q-id does not inherit the claim when its row is deleted.
+    #[test]
+    fn running_address_claim_follows_projection_decoration() {
+        let now = 2_000;
+        let parent = "https://example.test/merge/1";
+        let nest = format!("{parent}: #address");
+        let qid = "q-3e3d37140e5a";
+        let decorated_leaf = format!("📥 #address ⟦effect:2⟧ [#{qid}]");
+        let decorated = format!("{parent}: #address ⟦effect:2⟧ [#{qid}]");
+
+        let mut ledger = QueueClaimLedger::default();
+        ledger.claim(&nest, "subagent:w5", now, 3600);
+        let generation = ledger.claims[0].generation;
+        ledger
+            .start(
+                &nest,
+                "subagent:w5",
+                "worker:w5",
+                now,
+                3600,
+                Some(generation),
+            )
+            .unwrap();
+        let before = address_queue(parent, "🚧 [#subagent:w5#2] #address");
+        let before_view = ClaimQueueView::from_content(&before).unwrap();
+        assert!(
+            before_view.claim_keys().iter().any(|key| key == &nest),
+            "claim keys: {:?}",
+            before_view.claim_keys()
+        );
+        assert!(
+            ledger
+                .follow_edits_in_view(now, &before_view)
+                .followed
+                .is_empty()
+        );
+        assert!(ledger.claims[0].anchor.is_some());
+
+        let after = address_queue(parent, &decorated_leaf);
+        let after_view = ClaimQueueView::from_content(&after).unwrap();
+        ledger.follow_edits_in_view(now + 1, &after_view);
+        assert_eq!(
+            ledger.claims[0].item_text,
+            decorated,
+            "keys: {:?}",
+            after_view.claim_keys()
+        );
+        assert_eq!(ledger.claims[0].identity, claim_identity(&decorated));
+        ledger.report(&nest, Some(generation)).unwrap();
+        assert_eq!(ledger.claims[0].state, QueueClaimState::Reported);
+
+        let mut by_id = QueueClaimLedger::default();
+        by_id.claim(&nest, "subagent:w5", now, 3600);
+        let generation = by_id.claims[0].generation;
+        by_id
+            .start(
+                &nest,
+                "subagent:w5",
+                "worker:w5",
+                now,
+                3600,
+                Some(generation),
+            )
+            .unwrap();
+        by_id.follow_edits_in_view(now, &before_view);
+        by_id.follow_edits_in_view(now + 1, &after_view);
+        by_id.report(qid, Some(generation)).unwrap();
+        assert_eq!(by_id.claims[0].item_text, decorated);
+
+        let heads = after_view.claim_keys();
+        assert_eq!(resolve_claim_target(qid, &heads).unwrap(), decorated);
+        assert_eq!(
+            resolve_claim_target(&format!("[#{qid}]"), &heads).unwrap(),
+            decorated
+        );
+
+        let q_a = "q-3f7fdc3da31f";
+        let q_b = "q-096acdc5caca";
+        let first = format!("{parent}: #address [#{q_a}]");
+        let siblings = format!(
+            "<!-- agent:queue -->\n- {parent}\n  - #address [#{q_a}]\n  - #address [#{q_b}]\n<!-- /agent:queue -->\n"
+        );
+        let mut distinct = QueueClaimLedger::default();
+        distinct.claim(&first, "subagent:w5", now, 3600);
+        distinct
+            .start(
+                &first,
+                "subagent:w5",
+                "worker:w5",
+                now,
+                3600,
+                Some(distinct.claims[0].generation),
+            )
+            .unwrap();
+        let sibling_view = ClaimQueueView::from_content(&siblings).unwrap();
+        distinct.follow_edits_in_view(now, &sibling_view);
+        let survivor = format!(
+            "<!-- agent:queue -->\n- {parent}\n  - #address [#{q_b}]\n<!-- /agent:queue -->\n"
+        );
+        distinct.follow_edits_in_view(now + 1, &ClaimQueueView::from_content(&survivor).unwrap());
+        assert_eq!(
+            distinct.claims[0].item_text, first,
+            "deleting one q-id must not move the claim onto its sibling"
+        );
     }
 
     /// `#claimclosureallqueues`: closure is judged against the claim's own

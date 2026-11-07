@@ -530,12 +530,14 @@ impl ClaimReleaseReceiptLedger {
 /// closes with `queue consume --ack-id <id> --ack-owner <owner#gen>` when the
 /// worker handoff is integrated but the tracked item stays open (unfenced
 /// `--ack-id <id>` when the attempt is unknown), or with `--done <id>` when
-/// its tracked work is complete. A free-text row bound to an attempt (prose,
-/// `[#id]: answer`, a `[#q-…]` row) closes with the attempt-fenced `--ack-text
-/// <row> --ack-owner <owner#gen>`; its `#` mentions never name a backlog id.
-/// Only a free-text row with no exact attempt falls back to the verbatim
-/// `> **Queue prompt:**` echo. A heading-only answer leaves the line queued,
-/// so it is served (and dispatched) again.
+/// its tracked work is complete. A generated `[#q-…]` row closes with
+/// `--ack-id <q-…>` (issue 394), including when it is nested and not the
+/// active head; that id is not a backlog item and needs no stays-open reason.
+/// Any other free-text row bound to an attempt (prose, `[#id]: answer`) closes
+/// with the attempt-fenced `--ack-text <row> --ack-owner <owner#gen>`. Only a
+/// free-text row with no generated id and no exact attempt falls back to the
+/// verbatim `> **Queue prompt:**` echo. A heading-only answer leaves the line
+/// queued, so it is served (and dispatched) again.
 pub fn queue_line_closeout(
     document: &str,
     item_text: &str,
@@ -546,6 +548,9 @@ pub fn queue_line_closeout(
     let strike = reported_row_strike(item, attempt);
     let command = strike.argv(document).map(|argv| shell_command(&argv));
     match (&strike, command) {
+        (ReportedRowStrike::AckId { id, .. }, Some(command)) if id.starts_with("q-") => format!(
+            "strike the reported row with `{command}` (its generated prompt id; not a backlog item, so no stays-open reason is required). The row may be nested and need not be the active head"
+        ),
         (ReportedRowStrike::AckId { id, .. }, Some(command)) => format!(
             "strike the reported row with `{command}` only after the open backlog or Todo item records a `(stays open: <reason>)` clause (`--ack-id` refuses and leaves the row unstruck without one, #acknoreason; the struck row then names that reason, and this also closes a `☑️` row nested under a waiting parent). Record the clause on the open item, then run the command. When the answer resolves the tracked item, pass `--done {id}` to `agent-doc finalize {document}` instead and close any parent item the same answer resolves (#ackstrikeopenbacklog)"
         ),
@@ -574,6 +579,9 @@ pub fn queue_line_persist_closeout(
     let closeout = queue_line_closeout(document, item_text, attempt);
     match reported_row_strike(item_text, attempt) {
         ReportedRowStrike::AckText { .. } => format!(
+            "write the result to `agent:exchange` with `agent-doc finalize {document}`, then {closeout}; a `### Re:` heading alone leaves the line queued"
+        ),
+        ReportedRowStrike::AckId { id, .. } if id.starts_with("q-") => format!(
             "write the result to `agent:exchange` with `agent-doc finalize {document}`, then {closeout}; a `### Re:` heading alone leaves the line queued"
         ),
         _ => closeout,
@@ -893,12 +901,10 @@ mod tests {
     }
 
     /// `#closeoutguidanceagree`: a free-text row bound to an attempt never
-    /// gets `--ack-id` from a `#` it merely mentions. The 2026-11-05 shapes:
-    /// an operator answer row `[#id]: answer` (whose `--ack-id <id>` refused
-    /// once a second attempt also reported for `<id>`) and a binary-admitted
-    /// `[#q-…]` row (`q-…` is never a backlog id, so `--ack-id` always
-    /// refused). Both name the attempt-fenced `--ack-text`/`--ack-owner`
-    /// command; with no exact attempt the line falls back to the echo.
+    /// gets `--ack-id` from a `#` it merely mentions. The 2026-11-05 shape
+    /// `[#id]: answer` stays on the attempt-fenced `--ack-text`. A generated
+    /// `[#q-…]` is an occurrence id (issue 394): the prescribed command is
+    /// `--ack-id <q-…>`, which strikes that row even when it is nested.
     #[test]
     fn free_text_rows_bound_to_an_attempt_prescribe_the_fenced_ack_text() {
         for (row, quoted) in [
@@ -906,18 +912,7 @@ mod tests {
                 "[#tdclireleasedownloads]: haiven-cli will be public",
                 "'[#tdclireleasedownloads]: haiven-cli will be public'",
             ),
-            (
-                "Rebuild the SDK docs [#q-7f3a]",
-                "'Rebuild the SDK docs [#q-7f3a]'",
-            ),
             ("What are the values?", "'What are the values?'"),
-            // A preset token plus only a generated q-id is still free text.
-            // `--ack-id address` and `--ack-id q-…` both refuse.
-            ("#address [#q-3f7fdc3da31f]", "'#address [#q-3f7fdc3da31f]'"),
-            (
-                "https://example.test/merge_requests/2: #address [#q-3f7fdc3da31f]",
-                "'https://example.test/merge_requests/2: #address [#q-3f7fdc3da31f]'",
-            ),
         ] {
             let closeout = queue_line_closeout("tasks/sdk.md", row, Some(("subagent:c690cli", 1)));
             assert!(
@@ -937,6 +932,34 @@ mod tests {
                 assert!(!echo.contains("--ack-"), "{echo}");
             }
         }
+        for (row, qid) in [
+            ("Rebuild the SDK docs [#q-7f3a]", "q-7f3a"),
+            ("#address [#q-3f7fdc3da31f]", "q-3f7fdc3da31f"),
+            (
+                "https://example.test/merge_requests/2: #address [#q-3f7fdc3da31f]",
+                "q-3f7fdc3da31f",
+            ),
+        ] {
+            let closeout = queue_line_closeout("tasks/sdk.md", row, Some(("subagent:c690cli", 1)));
+            assert!(
+                closeout.contains(&format!(
+                    "`agent-doc queue consume tasks/sdk.md --ack-id {qid} --ack-owner 'subagent:c690cli#1'`"
+                )),
+                "{closeout}"
+            );
+            assert!(!closeout.contains("--ack-text"), "{closeout}");
+            assert!(!closeout.contains("stays open"), "{closeout}");
+            assert!(!closeout.contains("Queue prompt"), "{closeout}");
+            let unfenced = queue_line_closeout("tasks/sdk.md", row, None);
+            assert!(
+                unfenced.contains(&format!(
+                    "`agent-doc queue consume tasks/sdk.md --ack-id {qid}`"
+                )),
+                "{unfenced}"
+            );
+            assert!(!unfenced.contains("--ack-owner"), "{unfenced}");
+            assert!(!unfenced.contains("--ack-text"), "{unfenced}");
+        }
         let persisted = persist_reported_instruction(
             "tasks/sdk.md",
             "Rebuild the SDK docs [#q-7f3a]",
@@ -944,10 +967,10 @@ mod tests {
             Some(3),
         );
         assert!(
-            persisted.contains("--ack-owner 'subagent:q#3'"),
+            persisted.contains("--ack-id q-7f3a --ack-owner 'subagent:q#3'"),
             "{persisted}"
         );
-        assert!(!persisted.contains("--ack-id"), "{persisted}");
+        assert!(!persisted.contains("--ack-text"), "{persisted}");
         assert!(
             persisted.contains("write the result to `agent:exchange`"),
             "{persisted}"

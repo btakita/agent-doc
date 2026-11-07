@@ -3249,7 +3249,7 @@ mod tests {
 
         let changes =
             ensure_claude_hooks_in_settings(&settings, PREFLIGHT_HOOK_TIMEOUT_SECS, true).unwrap();
-        assert_eq!(changes.len(), 7, "{changes:?}");
+        assert_eq!(changes.len(), 8, "{changes:?}");
         let after = std::fs::read_to_string(&settings).unwrap();
         let position = |needle: &str| {
             after
@@ -3266,6 +3266,10 @@ mod tests {
         assert!(
             position("echo bye") < position(CLAUDE_STOP_COMMAND),
             "a new Stop hook is appended after the operator's"
+        );
+        assert!(
+            after.contains(SUBAGENT_STOP_COMMAND),
+            "the SubagentStop hook is part of the Claude project set: {after}"
         );
 
         let rendered = after.clone();

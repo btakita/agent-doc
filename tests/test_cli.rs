@@ -34018,6 +34018,7 @@ fn test_cli_bare_file_path_aliases_to_run() {
     let mut cmd = agent_doc_cmd();
     cmd.arg(&missing);
     cmd.env_remove("CLAUDECODE");
+    cmd.env_remove("GROK_SESSION_ID");
     cmd.env_remove("CLAUDE_CODE");
     cmd.env_remove("CLAUDE_CODE_SESSION");
     cmd.env_remove("OPENCODE");
@@ -34033,6 +34034,7 @@ fn test_cli_bare_file_path_aliases_to_run() {
     let mut plain_shell = agent_doc_cmd();
     plain_shell.arg(&missing);
     plain_shell.env_remove("CLAUDECODE");
+    plain_shell.env_remove("GROK_SESSION_ID");
     plain_shell.env_remove("CLAUDE_CODE");
     plain_shell.env_remove("CLAUDE_CODE_SESSION");
     plain_shell.env_remove("OPENCODE");

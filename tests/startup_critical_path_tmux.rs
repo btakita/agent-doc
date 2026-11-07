@@ -49,6 +49,7 @@ impl Project {
             .env_remove("TMUX")
             .env_remove("TMUX_PANE")
             .env_remove("CLAUDECODE")
+            .env_remove("GROK_SESSION_ID")
             .env("HOME", &self.home)
             .env("XDG_CONFIG_HOME", self.home.join(".config"))
             .env("AGENT_DOC_TMUX_SOCKET", &self.socket)

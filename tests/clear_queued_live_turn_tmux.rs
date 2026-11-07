@@ -621,7 +621,8 @@ impl LiveClearScenario {
             .env("AGENT_DOC_ROOT_CEILING_DIRECTORIES", &self.ceiling)
             .env_remove("TMUX")
             .env_remove("TMUX_PANE")
-            .env_remove("CLAUDECODE");
+            .env_remove("CLAUDECODE")
+            .env_remove("GROK_SESSION_ID");
         for (key, value) in envs {
             command.env(key, value);
         }

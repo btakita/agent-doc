@@ -556,6 +556,7 @@ fn bare_path_alias_uses_same_template_safe_path() {
         // Bare `agent-doc <FILE>` is a harness-native alias. Simulate Codex
         // explicitly so this positive path is deterministic in plain CI shells.
         .env_remove("CLAUDECODE")
+        .env_remove("GROK_SESSION_ID")
         .env_remove("CLAUDE_CODE")
         .env_remove("CLAUDE_CODE_SESSION")
         .env_remove("OPENCODE")
@@ -1136,6 +1137,7 @@ fn run_heartbeats_redirect_stderr_under_managed_tui_but_persist_progress() {
         .env("AGENT_DOC_RUN_HEARTBEAT_SECS", "1")
         .env("AGENT_DOC_FORCE_RUN_STDERR_REDIRECT", "1")
         .env_remove("CLAUDECODE")
+        .env_remove("GROK_SESSION_ID")
         .env_remove("CLAUDE_CODE")
         .env_remove("CLAUDE_CODE_SESSION")
         .env_remove("OPENCODE")
@@ -1204,6 +1206,7 @@ fn bare_file_invocation_outside_supported_harness_fails_before_run_cycle() {
     agent_doc()
         .current_dir(tmp.path())
         .env_remove("CLAUDECODE")
+        .env_remove("GROK_SESSION_ID")
         .env_remove("CLAUDE_CODE")
         .env_remove("CLAUDE_CODE_SESSION")
         .env_remove("OPENCODE")
@@ -1256,6 +1259,7 @@ fn codex_bare_run_inside_owning_pane_with_unresolved_prompt_fails_before_pre_com
         // (e.g. running the suite from inside a Claude Code session) would
         // otherwise short-circuit the codex owner-pane guard.
         .env_remove("CLAUDECODE")
+        .env_remove("GROK_SESSION_ID")
         .env_remove("CLAUDE_CODE")
         .env_remove("CLAUDE_CODE_SESSION")
         .env_remove("OPENCODE")
@@ -1310,6 +1314,7 @@ fn codex_owned_pane_active_auto_queue_hands_off_without_drift() {
     command
         .current_dir(tmp.path())
         .env_remove("CLAUDECODE")
+        .env_remove("GROK_SESSION_ID")
         .env_remove("CLAUDE_CODE")
         .env_remove("CLAUDE_CODE_SESSION")
         .env_remove("OPENCODE")
@@ -1373,6 +1378,7 @@ fn codex_owned_pane_independent_queue_edit_defers_until_closeout() {
     command
         .current_dir(tmp.path())
         .env_remove("CLAUDECODE")
+        .env_remove("GROK_SESSION_ID")
         .env_remove("CLAUDE_CODE")
         .env_remove("CLAUDE_CODE_SESSION")
         .env_remove("OPENCODE")
@@ -1475,6 +1481,7 @@ fn preflight_emits_owned_pane_self_invocation_for_unresolved_prompt() {
     let out = command
         .current_dir(tmp.path())
         .env_remove("CLAUDECODE")
+        .env_remove("GROK_SESSION_ID")
         .env_remove("CLAUDE_CODE")
         .env_remove("CLAUDE_CODE_SESSION")
         .env_remove("OPENCODE")
@@ -1528,6 +1535,7 @@ fn preflight_owned_pane_self_invocation_absent_for_non_owner_pane() {
     let out = command
         .current_dir(tmp.path())
         .env_remove("CLAUDECODE")
+        .env_remove("GROK_SESSION_ID")
         .env_remove("CLAUDE_CODE")
         .env_remove("CLAUDE_CODE_SESSION")
         .env_remove("OPENCODE")
@@ -1569,6 +1577,7 @@ fn preflight_emits_owned_pane_self_invocation_for_active_queue_head() {
     let out = command
         .current_dir(tmp.path())
         .env_remove("CLAUDECODE")
+        .env_remove("GROK_SESSION_ID")
         .env_remove("CLAUDE_CODE")
         .env_remove("CLAUDE_CODE_SESSION")
         .env_remove("OPENCODE")
@@ -1626,6 +1635,7 @@ fn preflight_suppresses_owned_pane_self_invocation_for_independent_queue_edit() 
     let out = command
         .current_dir(tmp.path())
         .env_remove("CLAUDECODE")
+        .env_remove("GROK_SESSION_ID")
         .env_remove("CLAUDE_CODE")
         .env_remove("CLAUDE_CODE_SESSION")
         .env_remove("OPENCODE")

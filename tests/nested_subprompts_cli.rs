@@ -727,14 +727,16 @@ fn equal_nested_children_close_by_parent_vector() {
 /// `#nestedechostrike` (the ahfe row): a reported `do [#id]` dispatch row whose
 /// id is an open Todo awaiting an operator check closes with
 /// `queue consume --ack-id`, which leaves the Todo open; `--done` would
-/// resolve it. The same command refuses while the attempt is still running.
+/// resolve it. The open Todo records `(stays open: ...)` so the strike can
+/// name that reason (`#acknoreason`). The same command refuses while the
+/// attempt is still running.
 #[test]
 fn ack_id_closes_a_reported_todo_backed_row_and_keeps_the_todo_open() {
     let dir = tempfile::tempdir().unwrap();
     let doc = closeout_session(
         dir.path(),
         "- do [#ahfe]\n- separate flat head\n",
-        "- [ ] [#ahfe] live-check the IDE\n",
+        "- [ ] [#ahfe] live-check the IDE (stays open: the IDE check is still waiting)\n",
     );
     let path = doc.to_str().unwrap();
 
@@ -754,7 +756,9 @@ fn ack_id_closes_a_reported_todo_backed_row_and_keeps_the_todo_open() {
     assert!(body.starts_with("- ### ~~do [#ahfe]~~"), "{body}");
     assert!(body.contains("separate flat head\n"), "{body}");
     assert!(
-        after.contains("- [ ] [#ahfe] live-check the IDE\n"),
+        after.contains(
+            "- [ ] [#ahfe] live-check the IDE (stays open: the IDE check is still waiting)\n"
+        ),
         "{after}"
     );
     assert!(claim_owners(dir.path(), path).is_empty());

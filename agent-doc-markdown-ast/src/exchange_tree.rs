@@ -1009,9 +1009,9 @@ mod tests {
             "the leading plain cell is the duplicate"
         );
 
-        let annotated_then_plain = parse_exchange_nodes(&format!(
-            "### Re: topic [#r-0123456789ab]\n\nDone.\n\n\u{276f} Prompt.\n\n### Re: topic\n\nDone.\n"
-        ));
+        let annotated_then_plain = parse_exchange_nodes(
+            "### Re: topic [#r-0123456789ab]\n\nDone.\n\n\u{276f} Prompt.\n\n### Re: topic\n\nDone.\n",
+        );
         assert_eq!(
             duplicate_response_cell_node_indices(&annotated_then_plain),
             HashSet::from([2]),

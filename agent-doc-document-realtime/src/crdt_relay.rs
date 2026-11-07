@@ -6308,6 +6308,14 @@ mod tests {
     fn from_text_seeds_canonical_and_registered_members() {
         let mut hub = RelayHub::from_text(1, "# plan\n\nexisting queue\n");
         assert_eq!(hub.canonical_text(), "# plan\n\nexisting queue\n");
+        assert_eq!(
+            hub.last_committed_text_for_test(),
+            Some("# plan\n\nexisting queue\n")
+        );
+        assert!(
+            hub.is_safe_to_evict(),
+            "a disk seed is the committed baseline"
+        );
 
         hub.register(2).unwrap();
         assert_eq!(
@@ -6319,10 +6327,7 @@ mod tests {
             hub.last_committed_text_for_test(),
             Some("# plan\n\nexisting queue\n")
         );
-        assert!(
-            hub.is_safe_to_evict(),
-            "a disk seed is the committed baseline"
-        );
+        assert!(!hub.is_safe_to_evict(), "a registered member keeps the hub");
     }
 
     #[test]

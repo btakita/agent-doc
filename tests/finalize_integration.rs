@@ -722,9 +722,11 @@ fn write_commit_backfills_patch_todo_id_before_commit() {
     );
 }
 
-/// `#agentrecap`: a document that predates `agent:recap` gains it from the first
-/// recap, each later closeout replaces the body whole, and a closeout with no
-/// recap still commits, keeping the last one and printing only an advisory.
+/// `#agentrecap` / `#recappair`: a document that predates `agent:recap` gains it
+/// from the first recap. While the turn is open the previous recap stays beside
+/// the new one; the commit drops it, so HEAD keeps only the current recap. A
+/// closeout with no recap still commits, keeping the last one and printing only
+/// an advisory.
 #[test]
 fn write_commit_lands_one_recap_per_turn_and_never_requires_it() {
     let (tmp, doc) = setup_session_template_doc();

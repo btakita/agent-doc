@@ -52,9 +52,10 @@ pub const TODO_DESCRIPTOR: ElementDescriptor = ElementDescriptor {
     realtime: true,
 };
 
-/// The last turn's recap (`#agentrecap`). The agent writes it through the
-/// closeout, each closeout replaces the whole body, and the text is never read
-/// back as a prompt, a queue row, or a turn trigger.
+/// This turn's recap (`#agentrecap`, `#recappair`). While the turn is in
+/// progress the previous turn's recap stays beside it; commit removes the
+/// previous one. The text is never read back as a prompt, a queue row, or a
+/// turn trigger.
 pub const RECAP_DESCRIPTOR: ElementDescriptor = ElementDescriptor {
     name: agent_doc_element::recap::RECAP_COMPONENT,
     aliases: &[],

@@ -916,6 +916,51 @@ impl agent_doc_git_io::pre_stage_repair::CommitPreStageRepairEffects
     }
 }
 
+/// `#recappair`: a turn that has published its recap and not yet committed shows
+/// that recap beside the previous turn. Committing is what completes the turn,
+/// so the snapshot and the worktree both drop the previous recap before staging.
+fn settle_in_progress_recap_for_commit(
+    file: &Path,
+    snapshot_content: &mut Option<String>,
+    file_content: &mut String,
+) -> Result<()> {
+    use agent_doc_git_io::pre_stage_repair::CommitPreStageRepairEffects;
+
+    let effects = &COMMIT_PRE_STAGE_REPAIR_EFFECTS;
+    let settled_file = agent_doc_element::recap::settle_recap_in_document(file_content)?;
+    if settled_file != *file_content {
+        effects.atomic_write(file, &settled_file).with_context(|| {
+            format!(
+                "failed to drop the previous turn recap before commit for {}",
+                file.display()
+            )
+        })?;
+        effects.log_op(
+            file,
+            &format!(
+                "commit_settled_in_progress_recap file={} target=worktree (#recappair)",
+                file.display()
+            ),
+        );
+        *file_content = settled_file;
+    }
+    if let Some(snapshot) = snapshot_content.as_deref() {
+        let settled_snapshot = agent_doc_element::recap::settle_recap_in_document(snapshot)?;
+        if settled_snapshot != snapshot {
+            effects.save_snapshot(file, &settled_snapshot)?;
+            effects.log_op(
+                file,
+                &format!(
+                    "commit_settled_in_progress_recap file={} target=snapshot (#recappair)",
+                    file.display()
+                ),
+            );
+            *snapshot_content = Some(settled_snapshot);
+        }
+    }
+    Ok(())
+}
+
 impl agent_doc_git_io::commit_result_reporting::CommitResultReportingEffects
     for RuntimeCommitResultReportingEffects
 {
@@ -4070,6 +4115,7 @@ where
         &mut snapshot_content,
         &mut file_content,
     )?;
+    settle_in_progress_recap_for_commit(file, &mut snapshot_content, &mut file_content)?;
     if let Some(snapshot) = snapshot_content.as_mut() {
         adopt_pending_completion_cells_from_disk(file, snapshot, "snapshot_before_stage");
     }

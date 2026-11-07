@@ -115,12 +115,14 @@
   memory. See [Real-Time Workflow Authority](specs/14-realtime-workflow.md#retained-writes-never-replace-operator-text)
   and [Document Format](specs/02-document-format.md).
 
-- `agent:recap` holds the last turn's recap and nothing else (`#agentrecap`).
-  A closeout's `patch:recap` replaces the whole body in the response's own
-  operation, creating the component below `agent:status` when the document
-  predates it. The text is informational: it never starts a turn and is never
-  read as a prompt or a queue row. A numbered decision that recommends a
-  choice nests the `#recommendationinrow` row
+- `agent:recap` holds this turn's recap (`#agentrecap`). While the turn is in
+  progress the previous turn's recap stays beside it; committing the turn
+  removes the previous one, so the completed document keeps only the current
+  recap (`#recappair`). A closeout's `patch:recap` supplies that current recap
+  in the response's own operation, creating the component below `agent:status`
+  when the document predates it. The text is informational: it never starts a
+  turn and is never read as a prompt or a queue row. A numbered decision that
+  recommends a choice nests the `#recommendationinrow` row
   `- **Recommendation:** **<label>** — <reason>`; that line is not projected
   into `**Choices:**` (`#recaprecommendationrow`). A missing recap or a format
   finding is an advisory, never a refusal. All harnesses write one format, from

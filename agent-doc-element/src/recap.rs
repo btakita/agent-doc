@@ -1,9 +1,16 @@
-//! `agent:recap`: the one current end-of-turn recap (`#agentrecap`).
+//! `agent:recap`: this turn's recap, with the previous turn beside it until
+//! the turn commits (`#agentrecap`, `#recappair`).
 //!
 //! # Spec
-//! - The component holds the last turn's recap and nothing else. A closeout
-//!   replaces its whole body, whatever mode the marker or project config names,
-//!   so it can never accumulate history.
+//! - While a turn is in progress, a closeout that carries a recap shows that
+//!   recap and the previous turn's recap. The previous one is the last settled
+//!   body, not an earlier in-progress draft.
+//! - When the turn commits, [`settle_recap_in_document`] removes the previous
+//!   turn's recap. The completed document keeps only the current turn's recap,
+//!   so the component never accumulates history across committed turns.
+//! - A marker `patch=` value or project config cannot change that. The stored
+//!   current body is the patch text trimmed of surrounding whitespace plus one
+//!   trailing newline.
 //! - It is agent-authored and informational. Its body never starts a turn and is
 //!   never read as a prompt or a queue row.
 //! - A document that predates the component gains it the first time a closeout
@@ -19,10 +26,12 @@
 //!
 //! # Agentic Contracts
 //! - [`replace_recap_in_document`] changes nothing outside the recap section.
+//! - [`settle_recap_in_document`] changes nothing outside the recap section, and
+//!   it is idempotent on a settled body.
 //! - [`normalize_recap_body`] is idempotent, so replaying a closeout is a no-op.
 //!
 //! # Evals
-//! - replace_is_total_and_keeps_no_history
+//! - stage_keeps_the_previous_recap_until_settle
 //! - replace_creates_the_section_below_status_and_nothing_else
 //! - format_findings_accept_the_full_shape_and_any_omitted_section
 //! - decision_recommendation_uses_the_rendered_marker
@@ -56,10 +65,88 @@ pub fn normalize_recap_body(raw: &str) -> Option<String> {
     (!body.is_empty()).then(|| format!("{body}\n"))
 }
 
-/// Replace the whole `agent:recap` body with `raw`, creating the section when
-/// the document has none. A blank `raw` returns the document unchanged.
+/// Visible label above this turn's recap while the previous turn is still shown.
+pub const CURRENT_TURN_LABEL: &str = "Current turn";
+
+/// Visible label above the previous turn's recap while this turn is in progress.
+pub const PREVIOUS_TURN_LABEL: &str = "Previous turn";
+
+const CURRENT_OPEN: &str = "<!-- recap-current -->";
+const CURRENT_CLOSE: &str = "<!-- /recap-current -->";
+const PREVIOUS_OPEN: &str = "<!-- recap-previous -->";
+const PREVIOUS_CLOSE: &str = "<!-- /recap-previous -->";
+
+struct InProgressRecap {
+    current: String,
+    previous: String,
+}
+
+/// The in-progress body: this turn's recap, then the previous turn's recap.
+///
+/// `current` and `previous` are normalized bodies (trimmed, one trailing
+/// newline). The markers are reserved; a recap that already contains one is
+/// stored alone so the pair cannot be parsed back wrong.
+pub fn render_in_progress_recap(current: &str, previous: &str) -> String {
+    format!(
+        "{CURRENT_TURN_LABEL}\n{CURRENT_OPEN}\n{current}{CURRENT_CLOSE}\n\n{PREVIOUS_TURN_LABEL}\n{PREVIOUS_OPEN}\n{previous}{PREVIOUS_CLOSE}\n"
+    )
+}
+
+fn reserved_recap_marker(text: &str) -> bool {
+    text.contains(CURRENT_OPEN)
+        || text.contains(CURRENT_CLOSE)
+        || text.contains(PREVIOUS_OPEN)
+        || text.contains(PREVIOUS_CLOSE)
+}
+
+fn parse_in_progress_recap(body: &str) -> Option<InProgressRecap> {
+    if reserved_recap_marker(body) && body.matches(CURRENT_OPEN).count() != 1 {
+        return None;
+    }
+    let current_open = body.find(CURRENT_OPEN)?;
+    let after_current_open = current_open + CURRENT_OPEN.len();
+    let current_close = body[after_current_open..].find(CURRENT_CLOSE)? + after_current_open;
+    let previous_open = body[current_close..].find(PREVIOUS_OPEN)? + current_close;
+    let after_previous_open = previous_open + PREVIOUS_OPEN.len();
+    let previous_close = body[after_previous_open..].find(PREVIOUS_CLOSE)? + after_previous_open;
+    let current = normalize_recap_body(&body[after_current_open..current_close])?;
+    let previous = normalize_recap_body(&body[after_previous_open..previous_close])?;
+    Some(InProgressRecap { current, previous })
+}
+
+/// Body to store when `current` arrives and the turn is still in progress.
+///
+/// A settled body becomes the previous turn. An in-progress body keeps that
+/// same previous turn and replaces only the current section. No previous body,
+/// or a reserved marker that would make the pair unparsable, stores `current`
+/// alone.
+fn stage_recap_body(existing: &str, current: &str) -> String {
+    if reserved_recap_marker(current) {
+        return current.to_string();
+    }
+    if let Some(pair) = parse_in_progress_recap(existing) {
+        if pair.current == current {
+            // Exact replay stays byte-identical, including the previous section.
+            return existing.to_string();
+        }
+        if reserved_recap_marker(&pair.previous) {
+            return current.to_string();
+        }
+        return render_in_progress_recap(current, &pair.previous);
+    }
+    match normalize_recap_body(existing) {
+        Some(previous) if previous != current && !reserved_recap_marker(&previous) => {
+            render_in_progress_recap(current, &previous)
+        }
+        _ => current.to_string(),
+    }
+}
+
+/// Show `raw` as this turn's recap, keeping the previous turn's recap beside it
+/// until [`settle_recap_in_document`]. Creates the section when the document has
+/// none. A blank `raw` returns the document unchanged.
 pub fn replace_recap_in_document(doc: &str, raw: &str) -> Result<String> {
-    let Some(body) = normalize_recap_body(raw) else {
+    let Some(current) = normalize_recap_body(raw) else {
         return Ok(doc.to_string());
     };
     let doc = ensure_recap_component_in_document(doc)?;
@@ -68,7 +155,27 @@ pub fn replace_recap_in_document(doc: &str, raw: &str) -> Result<String> {
         .iter()
         .find(|component| component.name == RECAP_COMPONENT)
         .context("document has no recap component after insertion")?;
+    let body = stage_recap_body(recap.content(&doc), &current);
+    if body == recap.content(&doc) {
+        return Ok(doc);
+    }
     Ok(recap.replace_content(&doc, &body))
+}
+
+/// Drop the previous turn's recap. A settled body, or a document with no recap,
+/// is unchanged. This is the completed-turn shape.
+pub fn settle_recap_in_document(doc: &str) -> Result<String> {
+    let components = element::parse(doc).context("failed to parse components")?;
+    let Some(recap) = components
+        .iter()
+        .find(|component| component.name == RECAP_COMPONENT)
+    else {
+        return Ok(doc.to_string());
+    };
+    let Some(pair) = parse_in_progress_recap(recap.content(doc)) else {
+        return Ok(doc.to_string());
+    };
+    Ok(recap.replace_content(doc, &pair.current))
 }
 
 /// Insert an empty `agent:recap` section when the document has none.
@@ -473,13 +580,37 @@ mod tests {
     }
 
     #[test]
-    fn replace_is_total_and_keeps_no_history() {
+    fn stage_keeps_the_previous_recap_until_settle() {
         let first = replace_recap_in_document(&doc(), "First turn.").unwrap();
         let second = replace_recap_in_document(&first, "Second turn.").unwrap();
 
-        assert_eq!(recap_body(&second), "Second turn.\n");
-        assert!(!second.contains("First turn."));
+        assert_eq!(
+            recap_body(&second),
+            render_in_progress_recap("Second turn.\n", "First turn.\n")
+        );
+        assert!(second.contains("Current turn"));
+        assert!(second.contains("Previous turn"));
+        let current = second.find("Second turn.").unwrap();
+        let previous = second.find("First turn.").unwrap();
+        assert!(current < previous, "{second}");
         assert_eq!(second.matches("<!-- agent:recap").count(), 1);
+
+        let third = replace_recap_in_document(&second, "Third turn.").unwrap();
+        assert_eq!(
+            recap_body(&third),
+            render_in_progress_recap("Third turn.\n", "First turn.\n")
+        );
+        assert!(!third.contains("Second turn."));
+
+        let settled = settle_recap_in_document(&third).unwrap();
+        assert_eq!(recap_body(&settled), "Third turn.\n");
+        assert!(!settled.contains("First turn."));
+        assert!(!settled.contains("Previous turn"));
+        assert_eq!(settle_recap_in_document(&settled).unwrap(), settled);
+        assert_eq!(
+            replace_recap_in_document(&settled, "Third turn.\n").unwrap(),
+            settled
+        );
     }
 
     #[test]

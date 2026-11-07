@@ -1073,7 +1073,8 @@ fn append_exchange_patch_after_prompt_anchor(
 }
 
 /// The recap body a response carries (`#agentrecap`): the last non-blank
-/// `patch:recap`, since the component only ever holds one.
+/// `patch:recap`. That text is this turn's recap. The previous turn stays
+/// beside it until commit (`#recappair`).
 pub fn recap_patch_body(patches: &[PatchBlock]) -> Option<&str> {
     patches
         .iter()
@@ -1156,9 +1157,10 @@ pub fn apply_patches_with_overrides_pure(
         }
     }
 
-    // `#agentrecap`: the recap body is always replaced whole, so no marker or
-    // project mode can turn it into history, and a document that predates the
-    // component gains it here instead of spilling the recap into the exchange.
+    // `#agentrecap` / `#recappair`: this turn's recap is shown beside the
+    // previous turn until commit settles the section. No marker or project mode
+    // can append a history of committed recaps, and a document that predates
+    // the component gains it here instead of spilling the recap into the exchange.
     if let Some(recap) = recap_patch_body(patches) {
         result = agent_doc_element::recap::replace_recap_in_document(&result, recap)
             .context("failed to apply patch:recap")?;
@@ -3018,9 +3020,10 @@ Interstitial text.
             std::fs::write(&doc_path, &doc).unwrap();
             let patches = vec![PatchBlock::new("recap", "new\n")];
             let result = apply_patches_via_path(&doc, &patches, "", &doc_path).unwrap();
+            let body = agent_doc_element::recap::render_in_progress_recap("new\n", "old\n");
             assert_eq!(
                 result,
-                format!("<!-- {marker} -->\nnew\n<!-- /agent:recap -->\n")
+                format!("<!-- {marker} -->\n{body}<!-- /agent:recap -->\n")
             );
         }
     }
@@ -3069,9 +3072,10 @@ Interstitial text.
             PatchBlock::new("recap", "\n"),
         ];
         let result = apply_patches_via_path(doc, &patches, "", &doc_path).unwrap();
+        let body = agent_doc_element::recap::render_in_progress_recap("second\n", "old\n");
         assert_eq!(
             result,
-            "<!-- agent:recap -->\nsecond\n<!-- /agent:recap -->\n"
+            format!("<!-- agent:recap -->\n{body}<!-- /agent:recap -->\n")
         );
     }
 

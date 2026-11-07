@@ -116,8 +116,10 @@ missing either `<!-- patch:exchange mode="append" -->` or
 retry the same closeout rather than converting it into a plain append implicitly.
 
 The same closeout carries the turn's recap in a `patch:recap` block, in the shared
-format in [recap.md](recap.md). Unlike `patch:exchange`, it is not required: a
-missing or malformed recap prints an advisory and never fails the closeout.
+format in [recap.md](recap.md). An agent-authored template closeout requires a
+non-blank recap and fails before capture without one. A malformed recap still
+prints an advisory and does not fail the closeout. Binary-owned replay of an
+already captured response, including Stop hooks, still lands with no recap.
 
 `finalize` requires the cycle to reach `committed` and the post-commit
 `session-check` guard to pass before success, including prompt-only exchange-tail

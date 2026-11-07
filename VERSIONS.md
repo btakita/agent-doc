@@ -2,6 +2,15 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.570
+
+- **Publish `8e13ed0d0cb1453891f7a80d471e584075b270b6` as `0.35.570`.** Tag `v0.35.569` remains `88fef765af30590129f92acdaa457586d413c48b`. Package manifests, internal constraints, `Cargo.lock`, `pyproject.toml`, and the bundled skill sources move to `0.35.570`. JetBrains plugin generations stay `0.2.946`, `0.2.948`, and `0.2.947`. VS Code stays `0.2.99`. Zed stays `0.1.7`.
+- **One queue generation keeps one lineage attempt** (`39197dd069`, #396).
+- **A reported free-text row strikes by its generated q-id** (`bbad43d44d`, #394).
+- **An inactive editor surface no longer cycles tmux panes** (`d140f7374b`, #397).
+- **A turn in progress shows the previous recap beside the current one** (`dba8a91333`). Committing the turn removes the previous recap.
+- **An agent-authored template closeout requires a non-blank recap** (`787230e4ea`). The strict closeout test satisfies clippy (`7bca97f04f`), and orchestrate closeouts carry a recap (`8e13ed0d0c`).
+
 ## 0.35.569
 
 - **Publish `c76d268b8c` as `0.35.569`.** Tag `v0.35.568` remains `37f3bcbaf5f7`. That tip was 278 commits after the previous tag; this release fast-forwards `main` from there. Package manifests, internal constraints, `Cargo.lock`, `pyproject.toml`, and the bundled skill sources move to `0.35.569`. JetBrains plugin generations stay `0.2.943`, `0.2.944`, and `0.2.945`. The Zed extension moves from `0.1.5` to `0.1.7`. `0.1.6` covers the divergent-history re-register limit (`bf292516db`). `0.1.7` covers the later test edit in `agent-doc-zed-lsp-io` that the generation fence counts as source drift.

@@ -106,7 +106,7 @@ impl ElementTurnRole {
 /// prompt must remain visible rather than being silently treated as metadata.
 pub fn turn_role_for_component_name(name: &str) -> ElementTurnRole {
     match name {
-        "notes" | "todo" | "rules" | "recap" => ElementTurnRole::Informational,
+        "notes" | "todo" | "rules" | "recap" | "worktrees" => ElementTurnRole::Informational,
         _ => ElementTurnRole::Trigger,
     }
 }
@@ -277,6 +277,10 @@ mod tests {
         );
         assert_eq!(
             turn_role_for_component_name("recap"),
+            ElementTurnRole::Informational
+        );
+        assert_eq!(
+            turn_role_for_component_name("worktrees"),
             ElementTurnRole::Informational
         );
         assert_eq!(

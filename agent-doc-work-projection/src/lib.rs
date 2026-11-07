@@ -7,6 +7,7 @@ pub mod active_lifecycle;
 mod active_summary;
 pub mod managed_list;
 pub mod tracked_lists;
+pub mod worktrees;
 
 use active_summary::summarize_text;
 use agent_doc_element_backlog::backlog::{self, PendingState};

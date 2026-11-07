@@ -1214,6 +1214,44 @@ struct Facts {
     release_state: Option<ReleaseState>,
 }
 
+/// One worktree a lineage attempt recorded, before the live-directory filter.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LineageWorktree {
+    pub item_text: String,
+    pub branch: Option<String>,
+    pub directory: String,
+    pub generation: u64,
+    /// A `removed` receipt disposed of this worktree.
+    pub removed: bool,
+}
+
+/// Worktrees named by `ledger`, in attempt order. Attempts with no directory
+/// are omitted. Removed attempts stay in the list so the caller can tell a
+/// disposed path from one that was never recorded.
+pub fn lineage_worktrees(ledger: &QueueLineageLedger) -> Vec<LineageWorktree> {
+    ledger
+        .attempts
+        .iter()
+        .filter_map(|attempt| {
+            let facts = facts(attempt);
+            let directory = facts.worktree_path?;
+            if directory.trim().is_empty() {
+                return None;
+            }
+            Some(LineageWorktree {
+                item_text: attempt.item_text.clone(),
+                branch: facts.branch,
+                directory,
+                generation: attempt.generation,
+                removed: attempt
+                    .events
+                    .iter()
+                    .any(|event| event.kind == QueueLineageEventKind::Removed),
+            })
+        })
+        .collect()
+}
+
 fn facts(attempt: &QueueLineageAttempt) -> Facts {
     let mut facts = Facts::default();
     for event in &attempt.events {

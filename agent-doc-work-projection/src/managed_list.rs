@@ -1,8 +1,9 @@
 //! The no-drift contract every managed list shares (`#managedlistnodrift`).
 //!
-//! A managed list — `agent:active`, the lifecycle markers on `agent:run` /
-//! `agent:queue` rows, `agent:todo`, `agent:backlog`, `agent:review`,
-//! `agent:icebox`, and `agent:done` — is a projection of durable state:
+//! A managed list — `agent:active`, `agent:worktrees`, the lifecycle markers on
+//! `agent:run` / `agent:queue` rows, `agent:todo`, `agent:backlog`,
+//! `agent:review`, `agent:icebox`, and `agent:done` — is a projection of
+//! durable state:
 //!
 //! ```text
 //! render(durable_state) -> component text
@@ -39,6 +40,9 @@ pub enum ManagedList {
     /// `agent:active`: running and needs-integration work, from claims,
     /// release receipts, and lineage.
     Active,
+    /// `agent:worktrees`: live worktrees for this document (topic, branch,
+    /// directory), from lineage receipts whose directory still exists.
+    Worktrees,
     /// Lifecycle markers on `agent:run` / `agent:queue` / `agent:loop` rows,
     /// from claims, release receipts, and completion evidence.
     Queue,
@@ -57,8 +61,9 @@ pub enum ManagedList {
 
 impl ManagedList {
     /// Every managed list, in canonical component order.
-    pub const ALL: [ManagedList; 7] = [
+    pub const ALL: [ManagedList; 8] = [
         ManagedList::Active,
+        ManagedList::Worktrees,
         ManagedList::Queue,
         ManagedList::Review,
         ManagedList::Todo,
@@ -71,6 +76,7 @@ impl ManagedList {
     pub fn component(self) -> &'static str {
         match self {
             ManagedList::Active => agent_doc_element::element::ACTIVE_COMPONENT,
+            ManagedList::Worktrees => agent_doc_element::element::WORKTREES_COMPONENT,
             ManagedList::Queue => agent_doc_element::element::QUEUE_COMPONENT,
             ManagedList::Todo => "todo",
             ManagedList::Backlog => "backlog",
@@ -84,6 +90,7 @@ impl ManagedList {
     pub fn label(self) -> &'static str {
         match self {
             ManagedList::Active => "agent:active",
+            ManagedList::Worktrees => "agent:worktrees",
             ManagedList::Queue => "agent:run",
             ManagedList::Todo => "agent:todo",
             ManagedList::Backlog => "agent:backlog",

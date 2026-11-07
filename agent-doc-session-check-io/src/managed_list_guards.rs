@@ -21,6 +21,7 @@ pub fn managed_list_mismatches(
 ) -> Vec<(ManagedList, Result<Option<ListMismatch>>)> {
     vec![
         (ManagedList::Active, active_mismatch(file, content)),
+        (ManagedList::Worktrees, worktrees_mismatch(file, content)),
         (ManagedList::Queue, queue_mismatch(file, content)),
         (ManagedList::Todo, todo_mismatch(file, content)),
         (
@@ -63,6 +64,15 @@ pub fn tracked_finding_lines(content: &str) -> Vec<String> {
         ));
     }
     lines
+}
+
+/// `agent:worktrees` == render(lineage worktrees whose directory still exists).
+fn worktrees_mismatch(file: &Path, content: &str) -> Result<Option<ListMismatch>> {
+    agent_doc_work_projection::managed_list::check_list(
+        ManagedList::Worktrees,
+        content,
+        |content| agent_doc_queue_io::worktree_inventory::reconcile(file, content),
+    )
 }
 
 /// `agent:active` == render(claims, receipts, lineage). The age value is a

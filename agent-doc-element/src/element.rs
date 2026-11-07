@@ -103,6 +103,14 @@ pub const REVIEW_COMPONENT: &str = "review";
 /// Canonical component name for the binary-owned active-work index.
 pub const ACTIVE_COMPONENT: &str = "active";
 
+/// Canonical component name for the live worktree inventory.
+pub const WORKTREES_COMPONENT: &str = "worktrees";
+
+/// Empty `agent:worktrees` section. The leading newline is the blank line
+/// between managed sections in the document template.
+pub const WORKTREES_SECTION: &str =
+    "\n## Worktrees <!-- agent:worktrees -->\n<!-- /agent:worktrees -->\n";
+
 /// Legacy alias for [`ACTIVE_COMPONENT`].
 pub const OPEN_ITEMS_COMPONENT_ALIAS: &str = "open-items";
 
@@ -137,8 +145,18 @@ pub fn canonical_component_name(name: &str) -> &str {
 
 /// Queue-centric order used by new template scaffolds and by repairs that must
 /// insert a missing managed component. Existing components are never moved.
-pub const CANONICAL_MANAGED_COMPONENT_ORDER: [&str; 11] = [
-    "status", "recap", "active", "queue", "review", "todo", "backlog", "icebox", "notes", "done",
+pub const CANONICAL_MANAGED_COMPONENT_ORDER: [&str; 12] = [
+    "status",
+    "recap",
+    "active",
+    "worktrees",
+    "queue",
+    "review",
+    "todo",
+    "backlog",
+    "icebox",
+    "notes",
+    "done",
     "exchange",
 ];
 
@@ -2250,6 +2268,7 @@ const SINGLETON_COMPONENT_NAMES: &[&str] = &[
     EXCHANGE_COMPONENT,
     "status",
     ACTIVE_COMPONENT,
+    WORKTREES_COMPONENT,
     BACKLOG_COMPONENT,
     REVIEW_COMPONENT,
     ICEBOX_COMPONENT,
@@ -3388,8 +3407,18 @@ mod tests {
         assert_eq!(
             CANONICAL_MANAGED_COMPONENT_ORDER,
             [
-                "status", "recap", "active", "queue", "review", "todo", "backlog", "icebox",
-                "notes", "done", "exchange",
+                "status",
+                "recap",
+                "active",
+                "worktrees",
+                "queue",
+                "review",
+                "todo",
+                "backlog",
+                "icebox",
+                "notes",
+                "done",
+                "exchange",
             ]
         );
         let legacy = concat!(
@@ -3409,8 +3438,9 @@ mod tests {
                 .close_end
         );
         assert!(todo_offset > legacy.find("<!-- /agent:exchange -->").unwrap());
-        assert_eq!(canonical_managed_component_rank("pending"), Some(6));
-        assert_eq!(canonical_managed_component_rank("run"), Some(3));
+        assert_eq!(canonical_managed_component_rank("pending"), Some(7));
+        assert_eq!(canonical_managed_component_rank("run"), Some(4));
+        assert_eq!(canonical_managed_component_rank("worktrees"), Some(3));
         assert_eq!(canonical_managed_component_rank("open-items"), Some(2));
         assert_eq!(canonical_managed_component_rank("active"), Some(2));
         assert_eq!(canonical_managed_component_rank("recap"), Some(1));

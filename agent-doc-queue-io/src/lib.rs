@@ -31,6 +31,7 @@ pub mod subagent_dispatch;
 pub mod subagent_pool;
 pub mod sync_payload;
 pub mod worker_quota_autodetect;
+pub mod worktree_inventory;
 pub mod write_queue;
 
 /// `#goalpresetterminal`: install `file`'s effective prompt presets (document

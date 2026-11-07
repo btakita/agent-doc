@@ -88,6 +88,22 @@ pub const ACTIVE_DESCRIPTOR: ElementDescriptor = ElementDescriptor {
     realtime: true,
 };
 
+/// Live worktrees for this document. Binary-owned, like `agent:active`:
+/// the inventory is not a prompt and must not start a turn.
+pub const WORKTREES_DESCRIPTOR: ElementDescriptor = ElementDescriptor {
+    name: "worktrees",
+    aliases: &[],
+    source: ElementSource::BuiltIn,
+    shape: ElementShape::Component,
+    authority: ElementAuthority::DerivedProjection,
+    write_policy: ElementWritePolicy::ProjectionOnly,
+    scheduling_role: ElementSchedulingRole::None,
+    turn_role: ElementTurnRole::Informational,
+    realtime_model: ElementRealtimeModel::None,
+    composition_role: ElementCompositionRole::Observer,
+    realtime: true,
+};
+
 pub const BUILT_IN_ELEMENTS: &[ElementDescriptor] = &[
     agent_doc_element_exchange::DESCRIPTOR,
     agent_doc_element_boundary::DESCRIPTOR,
@@ -99,6 +115,7 @@ pub const BUILT_IN_ELEMENTS: &[ElementDescriptor] = &[
     agent_doc_element_status::DESCRIPTOR,
     RECAP_DESCRIPTOR,
     ACTIVE_DESCRIPTOR,
+    WORKTREES_DESCRIPTOR,
     agent_doc_element_signals::DESCRIPTOR,
     TODO_DESCRIPTOR,
     NOTES_DESCRIPTOR,
@@ -173,6 +190,7 @@ mod tests {
         assert_eq!(find_built_in("pending").unwrap().name, "backlog");
         assert_eq!(find_built_in("signals").unwrap().name, "signals");
         assert_eq!(find_built_in("active").unwrap().name, "active");
+        assert_eq!(find_built_in("worktrees").unwrap().name, "worktrees");
         assert_eq!(find_built_in("open-items").unwrap().name, "active");
         assert_eq!(find_built_in("boundary").unwrap().name, "boundary");
         assert_eq!(find_built_in("todo").unwrap().name, "todo");
@@ -216,6 +234,20 @@ mod tests {
         assert_eq!(backlog.realtime_model, ElementRealtimeModel::TrackedItems);
         assert_eq!(queue.composition_role, ElementCompositionRole::Consumer);
         assert_eq!(queue.realtime_model, ElementRealtimeModel::Queue);
+    }
+
+    #[test]
+    fn worktrees_is_an_informational_derived_projection() {
+        let worktrees = find_built_in("worktrees").unwrap();
+        assert_eq!(worktrees.authority, ElementAuthority::DerivedProjection);
+        assert_eq!(worktrees.write_policy, ElementWritePolicy::ProjectionOnly);
+        assert_eq!(worktrees.scheduling_role, ElementSchedulingRole::None);
+        assert_eq!(worktrees.turn_role, ElementTurnRole::Informational);
+        assert_eq!(
+            worktrees.turn_role,
+            agent_doc_element::turn_role_for_component_name("worktrees")
+        );
+        assert_eq!(worktrees.composition_role, ElementCompositionRole::Observer);
     }
 
     #[test]

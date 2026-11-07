@@ -3118,7 +3118,15 @@ pub fn detect_exchange_compaction_request(diff: &str) -> bool {
 }
 
 /// Components whose body is a list of task entries rather than exchange prose.
-const MANAGED_LIST_COMPONENTS: &[&str] = &["queue", "backlog", "review", "todo", "icebox", "done"];
+const MANAGED_LIST_COMPONENTS: &[&str] = &[
+    "queue",
+    "backlog",
+    "review",
+    "todo",
+    "icebox",
+    "done",
+    "worktrees",
+];
 
 /// `<!-- agent:queue ... -->` (with optional attributes) opens a managed list
 /// component; returns its name.

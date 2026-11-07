@@ -2844,6 +2844,20 @@ fn run_pending_maintenance_with_options(
         snapshot_mutated = true;
         active_status_mutated = true;
     }
+    if let Some(reconciled) =
+        agent_doc_queue_io::worktree_inventory::reconcile(file, &current_content)?
+    {
+        eprintln!("[preflight] worktrees: reconciled managed list");
+        current_content = reconciled;
+        mutated = true;
+    }
+    if let Some(ref mut snap_content) = snapshot_content
+        && let Some(reconciled) =
+            agent_doc_queue_io::worktree_inventory::reconcile(file, snap_content)?
+    {
+        *snap_content = reconciled;
+        snapshot_mutated = true;
+    }
 
     let mut stale_supervisor_marker_mutated = false;
     // Historical versions wrote an operator-facing stale-supervisor marker into
@@ -8449,6 +8463,13 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
         mutated = true;
         eprintln!("[preflight] active: reconciled after queue lifecycle projection");
     }
+    if let Some(reconciled) =
+        agent_doc_queue_io::worktree_inventory::reconcile(file, &current_content)?
+    {
+        current_content = reconciled;
+        mutated = true;
+        eprintln!("[preflight] worktrees: reconciled after queue lifecycle projection");
+    }
 
     // Persist file mutations.
     if mutated {
@@ -8609,6 +8630,11 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
 
         if let Some(reconciled) =
             agent_doc_work_projection::reconcile_managed_active_items_for(file, &new_snap)?
+        {
+            new_snap = reconciled;
+        }
+        if let Some(reconciled) =
+            agent_doc_queue_io::worktree_inventory::reconcile(file, &new_snap)?
         {
             new_snap = reconciled;
         }

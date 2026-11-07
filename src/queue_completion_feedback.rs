@@ -857,7 +857,12 @@ fn project_managed_lists(file: &Path, current: &str) -> Result<(Option<String>, 
         }
         .to_string()
     }));
-    let target = todo.content.unwrap_or(after_tracked);
+    let after_todo = todo.content.unwrap_or(after_tracked);
+    let worktrees = agent_doc_queue_io::worktree_inventory::reconcile(file, &after_todo)?;
+    if worktrees.is_some() {
+        actions.push("agent:worktrees: re-projected the live worktree inventory".to_string());
+    }
+    let target = worktrees.unwrap_or(after_todo);
     Ok(((target != current).then_some(target), actions))
 }
 

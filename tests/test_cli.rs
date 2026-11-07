@@ -18537,13 +18537,16 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             "project_controller must not wrap controller process-scan helpers: {forbidden_snippet}"
         );
     }
+    let process_use = project_controller_source
+        .lines()
+        .find(|line| line.contains("use crate::process::{"))
+        .unwrap_or("");
     assert!(
         project_controller_source.contains("crate::process::process_start_age_secs(")
             && project_controller_source.contains("crate::process::controller_serve_project_root(")
             && project_controller_source.contains("crate::process::cmdline_has_preparing_handoff(")
-            && project_controller_source.contains(
-                "use crate::process::{is_same_project_controller_pid, process_is_alive};"
-            ),
+            && process_use.contains("is_same_project_controller_pid")
+            && process_use.contains("process_is_alive"),
         "project_controller should call focused controller process-scan helpers directly"
     );
     assert!(

@@ -113,6 +113,18 @@ pub enum SinkContainment {
     Unverifiable { reason: String },
 }
 
+/// One lineage attempt that matched a reported row but could not be chosen.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AmbiguousLineageAttempt {
+    pub item_text: String,
+    pub state: String,
+    pub verification: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worker_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub diagnostics: Vec<String>,
+}
+
 /// Lineage evidence for one exact reported attempt, classified with the rule
 /// `queue consume` enforces before it strikes a reported row.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -120,8 +132,15 @@ pub enum SinkContainment {
 pub enum ReportedRepoEvidence {
     /// No lineage attempt matches this identity and generation.
     LineageMissing,
-    /// More than one lineage attempt matches; nothing may be picked silently.
-    LineageAmbiguous,
+    /// More than one lineage attempt matches, and they are not one worker's
+    /// no-commit split (a prose-only declaration beside a degraded attempt
+    /// that records no repository facts, `#gh396`). Nothing may be picked
+    /// silently. `attempts` names each match so a question's choices are
+    /// those attempts.
+    LineageAmbiguous {
+        #[serde(default)]
+        attempts: Vec<AmbiguousLineageAttempt>,
+    },
     /// The attempt carries an explicit `prose_only` declaration and records
     /// no repository, worktree, or commit facts.
     ProseOnly,
@@ -883,6 +902,17 @@ fn fetch_step(facts: &ReportedRepoFacts) -> Option<ReportedCloseoutStep> {
     })
 }
 
+fn compact_attempt_text(value: &str) -> String {
+    const MAX_CHARS: usize = 72;
+    let mut chars = value.chars();
+    let prefix = chars.by_ref().take(MAX_CHARS).collect::<String>();
+    if chars.next().is_some() {
+        format!("{prefix}…")
+    } else {
+        prefix
+    }
+}
+
 fn choice(label: &str, detail: impl Into<String>) -> ReportedCloseoutChoice {
     ReportedCloseoutChoice {
         label: label.to_string(),
@@ -977,8 +1007,36 @@ pub fn reported_claim_closeout(
             "queue_lineage_attempt",
             "no lineage attempt records this generation, so prose-only versus repository work is unknown and `queue consume` refuses the row; `lineage-record` establishes the attempt from the live claim".to_string(),
         ),
-        ReportedRepoEvidence::LineageAmbiguous => {
+        ReportedRepoEvidence::LineageAmbiguous { attempts } => {
             let detail = "more than one lineage attempt matches this generation; `queue consume` refuses to pick one".to_string();
+            let mut named = attempts.clone();
+            named.sort_by(|left, right| {
+                left.item_text
+                    .cmp(&right.item_text)
+                    .then(left.worker_id.cmp(&right.worker_id))
+                    .then(left.state.cmp(&right.state))
+            });
+            let choices = named
+                .iter()
+                .enumerate()
+                .map(|(index, attempt)| {
+                    let label = format!("attempt-{}", index + 1);
+                    let worker = attempt.worker_id.as_deref().unwrap_or("-");
+                    let diagnostics = if attempt.diagnostics.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" ({})", attempt.diagnostics.join("; "))
+                    };
+                    let item = compact_attempt_text(&attempt.item_text);
+                    choice(
+                        &label,
+                        format!(
+                            "{label} is this report: {item:?} [{}/{}] worker {worker}{diagnostics}. Cancel the other attempts.",
+                            attempt.state, attempt.verification
+                        ),
+                    )
+                })
+                .collect::<Vec<_>>();
             ReportedClaimCloseout {
                 shape: ReportedCloseoutShape::MissingFacts,
                 missing_facts: vec!["unambiguous_queue_lineage_attempt".to_string()],
@@ -989,7 +1047,7 @@ pub fn reported_claim_closeout(
                         claim.generation,
                         claim_item_handle(&claim.item_text)
                     ),
-                    choices: Vec::new(),
+                    choices,
                     requires_operator: true,
                 }),
                 steps: vec![inspect_step(document, claim, detail.clone()), consume],
@@ -2320,12 +2378,65 @@ mod tests {
         }
     }
 
+    /// `#gh396`: an ambiguous reported row asks which attempt is the report.
+    /// The choices are those attempts, not an empty list.
+    #[test]
+    fn ambiguous_lineage_question_names_each_attempt() {
+        let claim = reported("do [#split]", "subagent:split");
+        let evidence = ReportedRepoEvidence::LineageAmbiguous {
+            attempts: vec![
+                AmbiguousLineageAttempt {
+                    item_text: "do [#split]".to_string(),
+                    state: "attached".to_string(),
+                    verification: "degraded".to_string(),
+                    worker_id: Some("worker:split".to_string()),
+                    diagnostics: vec![
+                        "source_repo_unrecorded: record repository work with --source-repo, or declare a prose-only result with --event prose-only".to_string(),
+                    ],
+                },
+                AmbiguousLineageAttempt {
+                    item_text: "do [#split]".to_string(),
+                    state: "prose_only".to_string(),
+                    verification: "verified".to_string(),
+                    worker_id: Some("worker:other".to_string()),
+                    diagnostics: Vec::new(),
+                },
+            ],
+        };
+        let closeout = reported_claim_closeout(DOC, &claim, &evidence).unwrap();
+        let choices = &closeout.decision.expect("a question").choices;
+        assert_eq!(choices.len(), 2, "{choices:#?}");
+        assert!(
+            choices.iter().any(|choice| {
+                choice.detail.contains("attached")
+                    && choice.detail.contains("degraded")
+                    && choice.detail.contains("worker:split")
+                    && choice.detail.contains("source_repo_unrecorded")
+            }),
+            "{choices:#?}"
+        );
+        assert!(
+            choices.iter().any(|choice| {
+                choice.detail.contains("prose_only")
+                    && choice.detail.contains("verified")
+                    && choice.detail.contains("worker:other")
+            }),
+            "{choices:#?}"
+        );
+        let packet = &closeout.operator_request_packet;
+        assert!(packet.contains("**attempt-1**"), "{packet}");
+        assert!(packet.contains("**attempt-2**"), "{packet}");
+        assert!(!packet.contains("*choices:* []"), "{packet}");
+    }
+
     #[test]
     fn every_shape_has_a_next_action_or_a_decision() {
         let claim = reported("do [#any]", "subagent:any");
         let mut evidences = vec![
             ReportedRepoEvidence::LineageMissing,
-            ReportedRepoEvidence::LineageAmbiguous,
+            ReportedRepoEvidence::LineageAmbiguous {
+                attempts: Vec::new(),
+            },
             ReportedRepoEvidence::ProseOnly,
             ReportedRepoEvidence::Undeclared,
             ReportedRepoEvidence::IntegratedVerified,
@@ -2380,7 +2491,7 @@ mod tests {
             if !closeout.missing_facts.is_empty() {
                 assert!(closeout.decision.is_some(), "{evidence:?}");
                 assert!(
-                    evidence == ReportedRepoEvidence::LineageAmbiguous
+                    matches!(evidence, ReportedRepoEvidence::LineageAmbiguous { .. })
                         || closeout.steps.iter().any(|step| matches!(
                             step.action,
                             ReportedCloseoutAction::RecordRepositoryWork

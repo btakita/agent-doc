@@ -13,7 +13,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use agent_doc_element_queue::QueueItemIdentity;
 use agent_doc_queue::queue_claim::{QueueClaim, claim_identity};
 use agent_doc_queue::reported_closeout::{
-    ReportedRepoEvidence, ReportedRepoFacts, SinkContainment,
+    AmbiguousLineageAttempt, ReportedRepoEvidence, ReportedRepoFacts, SinkContainment,
 };
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
@@ -609,50 +609,270 @@ pub fn admission_refused_identities(
         .collect()
 }
 
+fn attempt_worker_id(attempt: &QueueLineageAttempt) -> Option<&str> {
+    attempt
+        .events
+        .iter()
+        .rev()
+        .find_map(|event| event.worker_id.as_deref())
+        .filter(|worker| !worker.is_empty())
+}
+
+fn claim_worker_id(claim: &QueueClaim) -> Option<&str> {
+    let worker = claim.worker.as_ref()?;
+    let id = worker.worker_id.trim();
+    if id.is_empty() { None } else { Some(id) }
+}
+
+fn rekey_attempt_to_claim(attempt: &mut QueueLineageAttempt, claim: &QueueClaim) {
+    if attempt.identity != claim.identity {
+        if !attempt.identity_history.contains(&attempt.identity) {
+            attempt.identity_history.push(attempt.identity.clone());
+        }
+        attempt.identity = claim.identity.clone();
+    }
+    if attempt.item_text != claim.item_text {
+        if !attempt.item_text_history.contains(&attempt.item_text) {
+            attempt.item_text_history.push(attempt.item_text.clone());
+        }
+        attempt.item_text = claim.item_text.clone();
+    }
+    for text in &claim.followed_from {
+        if text != &attempt.item_text && !attempt.item_text_history.contains(text) {
+            attempt.item_text_history.push(text.clone());
+        }
+        let identity = claim_identity(text);
+        if identity != attempt.identity && !attempt.identity_history.contains(&identity) {
+            attempt.identity_history.push(identity);
+        }
+    }
+}
+
+/// Fold no-commit attempts that are one worker's split row back into one
+/// attempt (`#gh396`). Prose-only events stay last, so the attempt's state
+/// is the declaration rather than the degraded `attached` receipt.
+fn fold_norepo_attempts(
+    ledger: &mut QueueLineageLedger,
+    indexes: &[usize],
+    rekey: Option<&QueueClaim>,
+) {
+    if indexes.is_empty() {
+        return;
+    }
+    if indexes.len() == 1 {
+        if let Some(claim) = rekey {
+            rekey_attempt_to_claim(&mut ledger.attempts[indexes[0]], claim);
+        }
+        return;
+    }
+    let keeper_slot = indexes
+        .iter()
+        .copied()
+        .enumerate()
+        .min_by_key(|(order, index)| {
+            let attempt = &ledger.attempts[*index];
+            let rank = if attempt
+                .events
+                .iter()
+                .any(|event| event.kind == QueueLineageEventKind::Attached)
+            {
+                0
+            } else if attempt_declares_prose_only(attempt) {
+                1
+            } else {
+                2
+            };
+            (rank, *order)
+        })
+        .map(|(_, index)| index)
+        .expect("indexes is non-empty");
+    let prose_identity = indexes.iter().copied().find_map(|index| {
+        let attempt = &ledger.attempts[index];
+        attempt_declares_prose_only(attempt)
+            .then(|| (attempt.identity.clone(), attempt.item_text.clone()))
+    });
+    let mut created: Option<QueueLineageEvent> = None;
+    let mut middle = Vec::new();
+    let mut prose = Vec::new();
+    let mut identity_history = Vec::new();
+    let mut item_text_history = Vec::new();
+    for index in indexes {
+        let attempt = &ledger.attempts[*index];
+        identity_history.push(attempt.identity.clone());
+        identity_history.extend(attempt.identity_history.iter().cloned());
+        item_text_history.push(attempt.item_text.clone());
+        item_text_history.extend(attempt.item_text_history.iter().cloned());
+        for event in &attempt.events {
+            match event.kind {
+                QueueLineageEventKind::Created => {
+                    let replace = match &created {
+                        None => true,
+                        Some(existing) => event.at_secs < existing.at_secs,
+                    };
+                    if replace {
+                        created = Some(event.clone());
+                    }
+                }
+                QueueLineageEventKind::ProseOnly => prose.push(event.clone()),
+                _ => middle.push(event.clone()),
+            }
+        }
+    }
+    middle.sort_by_key(|event| event.at_secs);
+    prose.sort_by_key(|event| event.at_secs);
+    let mut events = Vec::new();
+    if let Some(created) = created {
+        events.push(created);
+    }
+    for event in middle.into_iter().chain(prose) {
+        if !events.contains(&event) {
+            events.push(event);
+        }
+    }
+    {
+        let keeper = &mut ledger.attempts[keeper_slot];
+        keeper.events = events;
+        for identity in identity_history {
+            if identity != keeper.identity && !keeper.identity_history.contains(&identity) {
+                keeper.identity_history.push(identity);
+            }
+        }
+        for text in item_text_history {
+            if text != keeper.item_text && !keeper.item_text_history.contains(&text) {
+                keeper.item_text_history.push(text);
+            }
+        }
+        if let Some(claim) = rekey {
+            rekey_attempt_to_claim(keeper, claim);
+        } else if let Some((identity, text)) = prose_identity {
+            if keeper.identity != identity {
+                if !keeper.identity_history.contains(&keeper.identity) {
+                    keeper.identity_history.push(keeper.identity.clone());
+                }
+                keeper.identity = identity;
+            }
+            if keeper.item_text != text {
+                if !keeper.item_text_history.contains(&keeper.item_text) {
+                    keeper.item_text_history.push(keeper.item_text.clone());
+                }
+                keeper.item_text = text;
+            }
+        }
+    }
+    let mut remove = indexes
+        .iter()
+        .copied()
+        .filter(|index| *index != keeper_slot)
+        .collect::<Vec<_>>();
+    remove.sort_unstable_by(|left, right| right.cmp(left));
+    for index in remove {
+        ledger.attempts.remove(index);
+    }
+}
+
+/// Reuse this claim's attempt. A worker already bound at this generation is
+/// that attempt even when the row text no longer matches: recording prose-only
+/// must not leave the degraded `attached` receipt beside a second attempt
+/// (`#gh396`). Same-owner no-commit splits fold into one attempt.
+fn adopt_existing_attempt(
+    ledger: &mut QueueLineageLedger,
+    claim: &QueueClaim,
+) -> Result<Option<QueueLineageAttempt>> {
+    let followed = claim
+        .followed_from
+        .iter()
+        .map(|text| claim_identity(text))
+        .collect::<Vec<_>>();
+    let worker = claim_worker_id(claim);
+    let mut own = Vec::new();
+    let mut foreign_owner = false;
+    for (index, attempt) in ledger.attempts.iter().enumerate() {
+        if attempt.generation != claim.generation {
+            continue;
+        }
+        let identity_match = attempt.matches_identity(&claim.identity)
+            || followed
+                .iter()
+                .any(|identity| attempt.matches_identity(identity));
+        let worker_match = worker.is_some()
+            && attempt.owner == claim.owner
+            && attempt_worker_id(attempt) == worker;
+        if identity_match && attempt.owner != claim.owner {
+            foreign_owner = true;
+            continue;
+        }
+        if identity_match || worker_match {
+            own.push(index);
+        }
+    }
+    if own.is_empty() {
+        if foreign_owner {
+            bail!(
+                "queue lineage owner mismatch for generation {}: claim {:?}",
+                claim.generation,
+                claim.owner
+            );
+        }
+        return Ok(None);
+    }
+    let mut workers = BTreeSet::new();
+    for index in &own {
+        if let Some(worker) = attempt_worker_id(&ledger.attempts[*index]) {
+            workers.insert(worker.to_string());
+        }
+    }
+    let no_repo = own
+        .iter()
+        .all(|index| !attempt_carries_repo_work(&ledger.attempts[*index]));
+    if own.len() > 1 && workers.len() <= 1 && no_repo {
+        fold_norepo_attempts(ledger, &own, Some(claim));
+        let found = ledger
+            .attempts
+            .iter()
+            .find(|attempt| {
+                attempt.generation == claim.generation
+                    && attempt.owner == claim.owner
+                    && attempt.matches_identity(&claim.identity)
+            })
+            .cloned();
+        return Ok(found);
+    }
+    let chosen = own
+        .iter()
+        .copied()
+        .find(|index| {
+            worker.is_some()
+                && ledger.attempts[*index].owner == claim.owner
+                && attempt_worker_id(&ledger.attempts[*index]) == worker
+        })
+        .or_else(|| {
+            own.iter().copied().find(|index| {
+                let attempt = &ledger.attempts[*index];
+                attempt.matches_identity(&claim.identity)
+                    || followed
+                        .iter()
+                        .any(|identity| attempt.matches_identity(identity))
+            })
+        });
+    if let Some(index) = chosen {
+        rekey_attempt_to_claim(&mut ledger.attempts[index], claim);
+        return Ok(Some(ledger.attempts[index].clone()));
+    }
+    Ok(None)
+}
+
 /// Idempotently establish the durable attempt after `queue claim`.
 pub fn record_claim(file: &Path, claim: &QueueClaim) -> Result<QueueLineageAttempt> {
     mutate(file, |ledger| {
+        if let Some(attempt) = adopt_existing_attempt(ledger, claim)? {
+            return Ok(attempt);
+        }
         let current_identity = claim.identity.clone();
         let followed_identities = claim
             .followed_from
             .iter()
             .map(|text| claim_identity(text))
             .collect::<Vec<_>>();
-        let existing = ledger.attempts.iter_mut().find(|attempt| {
-            attempt.generation == claim.generation
-                && (attempt.matches_identity(&current_identity)
-                    || followed_identities
-                        .iter()
-                        .any(|identity| attempt.matches_identity(identity)))
-        });
-        if let Some(attempt) = existing {
-            if attempt.owner != claim.owner {
-                bail!(
-                    "queue lineage owner mismatch for generation {}: stored {:?}, claim {:?}",
-                    claim.generation,
-                    attempt.owner,
-                    claim.owner
-                );
-            }
-            if attempt.identity != current_identity {
-                if !attempt.identity_history.contains(&attempt.identity) {
-                    attempt.identity_history.push(attempt.identity.clone());
-                }
-                attempt.identity = current_identity;
-            }
-            if attempt.item_text != claim.item_text {
-                if !attempt.item_text_history.contains(&attempt.item_text) {
-                    attempt.item_text_history.push(attempt.item_text.clone());
-                }
-                attempt.item_text = claim.item_text.clone();
-            }
-            for text in &claim.followed_from {
-                if text != &attempt.item_text && !attempt.item_text_history.contains(text) {
-                    attempt.item_text_history.push(text.clone());
-                }
-            }
-            return Ok(attempt.clone());
-        }
         if ledger.attempts.iter().any(|attempt| {
             attempt.matches_identity(&current_identity) && attempt.generation == claim.generation
         }) {
@@ -1528,16 +1748,48 @@ impl<'a> ClaimAliases<'a> {
 /// The lineage attempt a reported `(item, generation)` names.
 enum ResolvedReportedAttempt<'a> {
     Missing,
-    Ambiguous,
+    Ambiguous(Vec<&'a QueueLineageAttempt>),
     One(&'a QueueLineageAttempt),
 }
 
-fn resolve_reported_attempt<'a>(
-    ledger: &'a QueueLineageLedger,
+/// `TryWeaker` when nothing matched, so the caller can try a weaker alias.
+/// A known owner that excludes every match is `Missing` and must not fall
+/// through onto a sibling.
+enum ScopedIndexes {
+    TryWeaker,
+    Missing,
+    Matched(Vec<usize>),
+}
+
+fn fence_indexes(
+    ledger: &QueueLineageLedger,
+    matches: impl Iterator<Item = usize>,
+    owner: Option<&str>,
+) -> ScopedIndexes {
+    let matches = matches.collect::<Vec<_>>();
+    if matches.is_empty() {
+        return ScopedIndexes::TryWeaker;
+    }
+    let scoped = match owner {
+        Some(owner) => matches
+            .into_iter()
+            .filter(|index| ledger.attempts[*index].owner == owner)
+            .collect::<Vec<_>>(),
+        None => matches,
+    };
+    if scoped.is_empty() {
+        ScopedIndexes::Missing
+    } else {
+        ScopedIndexes::Matched(scoped)
+    }
+}
+
+fn scoped_match_indexes(
+    ledger: &QueueLineageLedger,
     item: &str,
     generation: u64,
     aliases: Option<ClaimAliases<'_>>,
-) -> ResolvedReportedAttempt<'a> {
+) -> ScopedIndexes {
     let identity = claim_identity(item);
     // Admission can add a binary-owned `[#q-...]` after claim/start recorded
     // an authored nested lineage (`parent: leaf`). That projection is the
@@ -1550,43 +1802,52 @@ fn resolve_reported_attempt<'a>(
     let authored_identity = claim_identity(&authored_item);
     let owner = aliases.map(|aliases| aliases.owner);
     let item_key = item.trim();
-    let generation_matches = ledger
+    let generation_indexes = ledger
         .attempts
         .iter()
-        .filter(|attempt| attempt.generation == generation)
+        .enumerate()
+        .filter(|(_, attempt)| attempt.generation == generation)
+        .map(|(index, _)| index)
         .collect::<Vec<_>>();
-
-    if let Some(resolved) = fence_attempt_matches(
-        generation_matches
-            .iter()
-            .copied()
-            .filter(|attempt| attempt.item_text.trim() == item_key),
-        owner,
-    ) {
-        return resolved;
-    }
-    if let Some(resolved) = fence_attempt_matches(
-        generation_matches
-            .iter()
-            .copied()
-            .filter(|attempt| attempt.matches_identity(&identity)),
-        owner,
-    ) {
-        return resolved;
+    let stages = [
+        fence_indexes(
+            ledger,
+            generation_indexes
+                .iter()
+                .copied()
+                .filter(|index| ledger.attempts[*index].item_text.trim() == item_key),
+            owner,
+        ),
+        fence_indexes(
+            ledger,
+            generation_indexes
+                .iter()
+                .copied()
+                .filter(|index| ledger.attempts[*index].matches_identity(&identity)),
+            owner,
+        ),
+    ];
+    for stage in stages {
+        match stage {
+            ScopedIndexes::TryWeaker => {}
+            other => return other,
+        }
     }
     // One-way authored alias. Used only when the exact text and the exact
     // identity name nothing, so a pre-admission claim still resolves after
     // its `[#q-…]` is admitted.
-    if authored_identity != identity
-        && let Some(resolved) = fence_attempt_matches(
-            generation_matches
+    if authored_identity != identity {
+        match fence_indexes(
+            ledger,
+            generation_indexes
                 .iter()
                 .copied()
-                .filter(|attempt| attempt.matches_identity(&authored_identity)),
+                .filter(|index| ledger.attempts[*index].matches_identity(&authored_identity)),
             owner,
-        )
-    {
-        return resolved;
+        ) {
+            ScopedIndexes::TryWeaker => {}
+            other => return other,
+        }
     }
     if let Some(aliases) = aliases {
         let followed = aliases
@@ -1595,47 +1856,114 @@ fn resolve_reported_attempt<'a>(
             .map(|text| claim_identity(text))
             .filter(|alias| alias != &identity && alias != &authored_identity)
             .collect::<Vec<_>>();
-        if !followed.is_empty()
-            && let Some(resolved) = fence_attempt_matches(
-                generation_matches.iter().copied().filter(|attempt| {
+        if !followed.is_empty() {
+            return fence_indexes(
+                ledger,
+                generation_indexes.iter().copied().filter(|index| {
+                    let attempt = &ledger.attempts[*index];
                     attempt.owner == aliases.owner
                         && followed.iter().any(|alias| attempt.matches_identity(alias))
                 }),
                 None,
-            )
-        {
-            return resolved;
+            );
         }
     }
-    ResolvedReportedAttempt::Missing
+    ScopedIndexes::Missing
 }
 
-/// `None` when nothing matched, so the caller can try a weaker alias.
-/// A known owner that excludes every match is `Missing` and must not fall
-/// through onto a sibling.
-fn fence_attempt_matches<'a>(
-    matches: impl Iterator<Item = &'a QueueLineageAttempt>,
-    owner: Option<&str>,
-) -> Option<ResolvedReportedAttempt<'a>> {
-    let matches = matches.collect::<Vec<_>>();
-    if matches.is_empty() {
+fn resolve_reported_attempt<'a>(
+    ledger: &'a QueueLineageLedger,
+    item: &str,
+    generation: u64,
+    aliases: Option<ClaimAliases<'_>>,
+) -> ResolvedReportedAttempt<'a> {
+    let ScopedIndexes::Matched(indexes) = scoped_match_indexes(ledger, item, generation, aliases)
+    else {
+        return ResolvedReportedAttempt::Missing;
+    };
+    let attempts = indexes
+        .iter()
+        .map(|index| &ledger.attempts[*index])
+        .collect::<Vec<_>>();
+    if attempts.len() == 1 {
+        return ResolvedReportedAttempt::One(attempts[0]);
+    }
+    if let Some(one) = unify_same_owner_norepo_prose_split(&attempts) {
+        return ResolvedReportedAttempt::One(one);
+    }
+    ResolvedReportedAttempt::Ambiguous(attempts)
+}
+
+/// One worker, one generation, no repository commit: a degraded attached
+/// attempt beside a prose-only attempt is the same row split in two
+/// (`#gh396`). The declaration is that attempt. Different workers, or any
+/// recorded repository work, stay ambiguous.
+fn unify_same_owner_norepo_prose_split<'a>(
+    attempts: &[&'a QueueLineageAttempt],
+) -> Option<&'a QueueLineageAttempt> {
+    let owner = attempts.first()?.owner.as_str();
+    if attempts.iter().any(|attempt| attempt.owner != owner) {
         return None;
     }
-    let scoped = match owner {
-        Some(owner) => matches
-            .iter()
-            .copied()
-            .filter(|attempt| attempt.owner == owner)
-            .collect::<Vec<_>>(),
-        None => matches,
+    if attempts
+        .iter()
+        .any(|attempt| attempt_carries_repo_work(attempt))
+    {
+        return None;
+    }
+    let mut workers = BTreeSet::new();
+    for attempt in attempts {
+        if let Some(worker) = attempt_worker_id(attempt) {
+            workers.insert(worker);
+        }
+    }
+    if workers.len() > 1 {
+        return None;
+    }
+    let mut prose = attempts
+        .iter()
+        .copied()
+        .filter(|attempt| attempt_declares_prose_only(attempt));
+    let only = prose.next()?;
+    prose.next().is_none().then_some(only)
+}
+
+fn repair_unifiable_norepo_split(
+    file: &Path,
+    item: &str,
+    generation: u64,
+    aliases: Option<ClaimAliases<'_>>,
+) -> Result<()> {
+    let ledger = load(file)?;
+    let ScopedIndexes::Matched(indexes) = scoped_match_indexes(&ledger, item, generation, aliases)
+    else {
+        return Ok(());
     };
-    if scoped.is_empty() {
-        return Some(ResolvedReportedAttempt::Missing);
+    let attempts = indexes
+        .iter()
+        .map(|index| &ledger.attempts[*index])
+        .collect::<Vec<_>>();
+    if attempts.len() < 2 || unify_same_owner_norepo_prose_split(&attempts).is_none() {
+        return Ok(());
     }
-    if scoped.len() == 1 {
-        return Some(ResolvedReportedAttempt::One(scoped[0]));
-    }
-    Some(ResolvedReportedAttempt::Ambiguous)
+    mutate(file, |ledger| {
+        let ScopedIndexes::Matched(indexes) =
+            scoped_match_indexes(ledger, item, generation, aliases)
+        else {
+            return Ok(());
+        };
+        let should_fold = {
+            let attempts = indexes
+                .iter()
+                .map(|index| &ledger.attempts[*index])
+                .collect::<Vec<_>>();
+            attempts.len() >= 2 && unify_same_owner_norepo_prose_split(&attempts).is_some()
+        };
+        if should_fold {
+            fold_norepo_attempts(ledger, &indexes, None);
+        }
+        Ok(())
+    })
 }
 
 /// Whether one receipt records repository work.
@@ -1842,7 +2170,12 @@ fn reported_repo_evidence_resolved(
 ) -> ReportedRepoEvidence {
     match resolve_reported_attempt(ledger, item, generation, aliases) {
         ResolvedReportedAttempt::Missing => ReportedRepoEvidence::LineageMissing,
-        ResolvedReportedAttempt::Ambiguous => ReportedRepoEvidence::LineageAmbiguous,
+        ResolvedReportedAttempt::Ambiguous(attempts) => ReportedRepoEvidence::LineageAmbiguous {
+            attempts: attempts
+                .into_iter()
+                .map(ambiguous_lineage_attempt)
+                .collect(),
+        },
         ResolvedReportedAttempt::One(attempt) if !attempt_carries_repo_work(attempt) => {
             if attempt_declares_prose_only(attempt) {
                 ReportedRepoEvidence::ProseOnly
@@ -1881,9 +2214,10 @@ fn require_integrated_repo_work_inner(
     aliases: Option<ClaimAliases<'_>>,
     require_attempt: bool,
 ) -> Result<()> {
+    repair_unifiable_norepo_split(file, item, generation, aliases)?;
     let ledger = load(file)?;
     let attempt = match resolve_reported_attempt(&ledger, item, generation, aliases) {
-        ResolvedReportedAttempt::Ambiguous => bail!(
+        ResolvedReportedAttempt::Ambiguous(_) => bail!(
             "ambiguous queue lineage attempts for {item:?} generation {generation} after resolving its admitted prompt-id projection; keep the reported row live and inspect `agent-doc queue lineage {} --generation {generation}`",
             file.display(),
         ),
@@ -1974,6 +2308,17 @@ fn report_attempt(attempt: &QueueLineageAttempt) -> QueueLineageAttemptReport {
         release_state: facts.release_state,
         diagnostics: diagnostics.into_iter().map(|entry| entry.text).collect(),
         events: attempt.events.clone(),
+    }
+}
+
+fn ambiguous_lineage_attempt(attempt: &QueueLineageAttempt) -> AmbiguousLineageAttempt {
+    let report = report_attempt(attempt);
+    AmbiguousLineageAttempt {
+        item_text: report.item_text,
+        state: report.state,
+        verification: report.verification,
+        worker_id: report.worker_id,
+        diagnostics: report.diagnostics,
     }
 }
 
@@ -3753,6 +4098,226 @@ mod tests {
                 ReportedRepoEvidence::ProseOnly
             );
             require_integrated_claim_repo_work(&fixture.doc, &claim).unwrap();
+        }
+
+        /// `#gh396`: a worker's attached attempt has no repository commit.
+        /// Declaring prose-only on the row's later text must join that attempt,
+        /// not leave a degraded `source_repo_unrecorded` receipt beside a
+        /// second verified prose-only attempt.
+        #[test]
+        fn prose_only_joins_the_workers_attached_attempt() {
+            let fixture = RepoFixture::new();
+            let original = "review the notes";
+            let mut claim = reported(make_claim(
+                &fixture.doc,
+                original,
+                "subagent:review",
+                Some("worker:review"),
+            ));
+            record_started(&fixture.doc, &claim).unwrap();
+            let current = "review the notes [#q-aaaaaaaaaaaa]";
+            claim.identity = claim_identity(current);
+            claim.item_text = current.to_string();
+            claim.followed_from.clear();
+            record_prose_only(&fixture.doc, &claim, "no repository commit").unwrap();
+
+            let ledger = load(&fixture.doc).unwrap();
+            assert_eq!(ledger.attempts.len(), 1, "{:#?}", ledger.attempts);
+            assert_eq!(
+                reported_claim_evidence_in(&ledger, &claim),
+                ReportedRepoEvidence::ProseOnly
+            );
+            let report = query(&fixture.doc, Some(current), Some(claim.generation)).unwrap();
+            assert_eq!(report.attempts.len(), 1, "{report:#?}");
+            assert_eq!(report.attempts[0].state, "prose_only");
+            assert_eq!(report.attempts[0].verification, "verified");
+            assert!(
+                report.attempts[0].diagnostics.is_empty(),
+                "{:?}",
+                report.attempts[0].diagnostics
+            );
+            assert_eq!(
+                report.attempts[0].worker_id.as_deref(),
+                Some("worker:review")
+            );
+            require_integrated_claim_repo_work(&fixture.doc, &claim).unwrap();
+        }
+
+        /// The split already happened: `attached`/`degraded` plus
+        /// `prose_only`/`verified` for one worker and generation. Recording
+        /// prose-only again folds them, and closeout names that one attempt.
+        #[test]
+        fn recording_prose_only_folds_a_degraded_sibling() {
+            let fixture = RepoFixture::new();
+            let original = "review the notes";
+            let current = "review the notes [#q-bbbbbbbbbbbb]";
+            let mut claim = reported(make_claim(
+                &fixture.doc,
+                original,
+                "subagent:review",
+                Some("worker:review"),
+            ));
+            claim.identity = claim_identity(current);
+            claim.item_text = current.to_string();
+            claim.followed_from.clear();
+            claim.generation = 1;
+            super::mutate(&fixture.doc, |ledger| {
+                ledger.attempts.push(QueueLineageAttempt {
+                    identity: claim_identity(current),
+                    identity_history: vec![claim_identity(original)],
+                    item_text: current.to_string(),
+                    item_text_history: vec![original.to_string()],
+                    generation: 1,
+                    owner: claim.owner.clone(),
+                    events: vec![
+                        QueueLineageEvent {
+                            kind: QueueLineageEventKind::Created,
+                            at_secs: 10,
+                            detail: Some(format!("owner={}", claim.owner)),
+                            ..QueueLineageEvent::default()
+                        },
+                        QueueLineageEvent {
+                            kind: QueueLineageEventKind::Attached,
+                            at_secs: 11,
+                            worker_id: Some("worker:review".to_string()),
+                            ..QueueLineageEvent::default()
+                        },
+                    ],
+                });
+                ledger.attempts.push(QueueLineageAttempt {
+                    identity: claim_identity(current),
+                    identity_history: Vec::new(),
+                    item_text: current.to_string(),
+                    item_text_history: Vec::new(),
+                    generation: 1,
+                    owner: claim.owner.clone(),
+                    events: vec![
+                        QueueLineageEvent {
+                            kind: QueueLineageEventKind::Created,
+                            at_secs: 12,
+                            detail: Some("split".to_string()),
+                            ..QueueLineageEvent::default()
+                        },
+                        QueueLineageEvent {
+                            kind: QueueLineageEventKind::ProseOnly,
+                            at_secs: 13,
+                            detail: Some("already declared".to_string()),
+                            ..QueueLineageEvent::default()
+                        },
+                    ],
+                });
+                Ok(())
+            })
+            .unwrap();
+            let split = load(&fixture.doc).unwrap();
+            assert!(
+                matches!(
+                    reported_claim_evidence_in(&split, &claim),
+                    ReportedRepoEvidence::ProseOnly
+                ),
+                "closeout names the prose attempt before the fold"
+            );
+
+            let mut claims = agent_doc_queue::queue_claim::QueueClaimLedger::default();
+            claims.claims.push(claim.clone());
+            crate::queue_claim::store_ledger_for_test(&fixture.doc, &claims).unwrap();
+            record_following_live_claim(
+                &fixture.doc,
+                current,
+                claim.generation,
+                RecordRequest {
+                    kind: QueueLineageEventKind::ProseOnly,
+                    ..RecordRequest::default()
+                },
+            )
+            .unwrap();
+            let ledger = load(&fixture.doc).unwrap();
+            assert_eq!(ledger.attempts.len(), 1, "{:#?}", ledger.attempts);
+            let report = query(&fixture.doc, Some(current), Some(1)).unwrap();
+            assert_eq!(report.attempts.len(), 1, "{report:#?}");
+            assert_eq!(report.attempts[0].state, "prose_only");
+            assert_eq!(report.attempts[0].verification, "verified");
+            assert!(
+                !report.attempts[0]
+                    .diagnostics
+                    .iter()
+                    .any(|diagnostic| diagnostic.contains("source_repo_unrecorded")),
+                "{:?}",
+                report.attempts[0].diagnostics
+            );
+            require_integrated_claim_repo_work(&fixture.doc, &claim).unwrap();
+            assert_eq!(load(&fixture.doc).unwrap().attempts.len(), 1);
+        }
+
+        /// Two workers at one generation stay ambiguous, and the question
+        /// names each attempt.
+        #[test]
+        fn different_workers_stay_ambiguous_and_the_question_names_them() {
+            let fixture = RepoFixture::new();
+            let item = "shared row";
+            let claim = reported(make_claim(
+                &fixture.doc,
+                item,
+                "subagent:shared",
+                Some("worker:one"),
+            ));
+            super::mutate(&fixture.doc, |ledger| {
+                for (worker, kind, at_secs) in [
+                    ("worker:one", QueueLineageEventKind::Attached, 11),
+                    ("worker:two", QueueLineageEventKind::ProseOnly, 13),
+                ] {
+                    ledger.attempts.push(QueueLineageAttempt {
+                        identity: claim_identity(item),
+                        identity_history: Vec::new(),
+                        item_text: item.to_string(),
+                        item_text_history: Vec::new(),
+                        generation: claim.generation,
+                        owner: claim.owner.clone(),
+                        events: vec![
+                            QueueLineageEvent {
+                                kind: QueueLineageEventKind::Created,
+                                at_secs: 10,
+                                ..QueueLineageEvent::default()
+                            },
+                            QueueLineageEvent {
+                                kind,
+                                at_secs,
+                                worker_id: Some(worker.to_string()),
+                                ..QueueLineageEvent::default()
+                            },
+                        ],
+                    });
+                }
+                Ok(())
+            })
+            .unwrap();
+            let evidence = reported_claim_evidence_in(&load(&fixture.doc).unwrap(), &claim);
+            let ReportedRepoEvidence::LineageAmbiguous { attempts } = &evidence else {
+                panic!("{evidence:?}");
+            };
+            assert_eq!(attempts.len(), 2, "{attempts:#?}");
+            let closeout = reported_claim_closeout("doc.md", &claim, &evidence).unwrap();
+            let choices = &closeout.decision.expect("question").choices;
+            assert_eq!(choices.len(), 2, "{choices:#?}");
+            assert!(
+                choices
+                    .iter()
+                    .any(|choice| choice.detail.contains("worker:one")
+                        && choice.detail.contains("attached")),
+                "{choices:#?}"
+            );
+            assert!(
+                choices
+                    .iter()
+                    .any(|choice| choice.detail.contains("worker:two")
+                        && choice.detail.contains("prose_only")),
+                "{choices:#?}"
+            );
+            assert!(
+                !closeout.operator_request_packet.contains("*choices:* []"),
+                "{}",
+                closeout.operator_request_packet
+            );
         }
 
         /// `lineage-record` for an attempt with no lineage at all establishes

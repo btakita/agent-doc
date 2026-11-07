@@ -83,7 +83,7 @@ established components; valid documents in the previous order are not silently r
 - `<!-- agent:icebox -->` — project icebox for items parked outside the active backlog. Sits after `agent:backlog` in the default template.
 - `<!-- agent:signals -->` — realtime signal definitions/readings. Built-in tests, queue, supervisor, and IPC signals are expected first; custom signal plugins are deferred.
 - `<!-- agent:status -->`, `<!-- agent:log -->`, `<!-- agent:architecture -->`, ... — agent-managed via targeted patch blocks.
-- `<!-- agent:recap -->` — the last turn's recap and nothing else. Each closeout's `patch:recap` replaces the whole body; see [recap.md](recap.md).
+- `<!-- agent:recap -->` — this turn's recap. While the turn is in progress the previous turn's recap stays beside it; committing the turn removes the previous one. See [recap.md](recap.md).
 
 Built-in element semantics live in the `agent-doc-element-*` crate family and
 are composed by `agent-doc-element-registry`. An unregistered `agent:*`

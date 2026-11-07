@@ -20,8 +20,10 @@ The recap.
 <!-- /patch:recap -->
 ```
 
-The block replaces the whole `agent:recap` body, so the component only ever
-shows the last recap. Do not repeat earlier recaps or carry their text forward.
+The block is this turn's recap. While the turn is in progress, `agent:recap`
+shows it beside the previous turn's recap. When the turn commits, the previous
+turn's recap is removed, so the completed document keeps only this turn's
+recap. Do not repeat earlier recaps or carry their text forward yourself.
 Use it only in template documents, the ones whose preflight publishes a
 `response_contract`.
 

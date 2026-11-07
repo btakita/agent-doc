@@ -1728,7 +1728,7 @@ pub fn observe_for_wake_with(file: &Path, carry: &mut WakeSettleCarry) -> Result
     // `#claimsteeringwake`: a claim projection of a row the committed baseline
     // has not absorbed yet is a held queue addition (`pending: 1`, no settled
     // items) until the typing gate's quiet window elapses. The agent channel
-    // still delivers it once settled, labelled already claimed. The idle wake
+    // still sends the settled addition, labelled already claimed. The idle wake
     // must not schedule a recheck for that hold: the recheck is itself a
     // drain edge, so every claim would cost the coordinator a turn even
     // though the settled addition is filtered above. An operator addition

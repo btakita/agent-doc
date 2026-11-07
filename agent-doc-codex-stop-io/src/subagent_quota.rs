@@ -148,10 +148,11 @@ fn scan_paths(signal: &SubagentEnd) -> Vec<PathBuf> {
         signal.cwd.as_deref(),
         signal.workspace_root.as_deref(),
         signal.transcript_path.as_deref(),
-    ] {
-        if let Some(path) = path {
-            paths.push(PathBuf::from(path));
-        }
+    ]
+    .into_iter()
+    .flatten()
+    {
+        paths.push(PathBuf::from(path));
     }
     if let Ok(cwd) = std::env::current_dir() {
         paths.push(cwd);

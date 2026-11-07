@@ -387,9 +387,10 @@ pub fn operator_request_id(claim: &QueueClaim) -> String {
 /// two different commands for one attempt. They disagreed on 2026-11-05: the
 /// completion feedback and the Stop hook read the first `#` of a free-text row,
 /// so `[#id]: answer` got `--ack-id <id>` (refused when another attempt also
-/// reported for `<id>`) and a `[#q-…]` row got `--ack-id q-…` (not a backlog
-/// id, always refused), while session-check named the attempt-fenced
-/// `--ack-text <row> --ack-owner owner#gen` for the same attempt.
+/// reported for `<id>`). A generated `[#q-…]` was then prescribed as
+/// `--ack-text`, which cannot strike a nested reported child that is not the
+/// active head (issue 394). The generated id is now `--ack-id <q-…>`, and that
+/// command strikes the unique visible reported row carrying it.
 ///
 /// `#ackidattemptfence`: an id strike names that same `--ack-owner` fence when
 /// the attempt is known, so two visible rows that both strike by id are two
@@ -397,16 +398,16 @@ pub fn operator_request_id(claim: &QueueClaim) -> String {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReportedRowStrike {
     /// `queue consume <doc> --ack-id <id> [--ack-owner <owner#gen>]`: an
-    /// id-backed row (`do [#id]`, `[#id]`), or a waiting-tree parent whose
-    /// reported `☑️` attempt is nested under it, which only `--ack-id <parent
-    /// id>` strikes (`#nestedreceiptack`, `#reportedwritebackprescription`).
-    /// `owner` is `Some(owner#gen)` when the attempt is known
-    /// (`#ackidattemptfence`); a correction head or a legacy generation-0
-    /// receipt stays unfenced.
+    /// id-backed row (`do [#id]`, `[#id]`), a waiting-tree parent whose
+    /// reported `☑️` attempt is nested under it (`#nestedreceiptack`,
+    /// `#reportedwritebackprescription`), or a free-text row whose generated
+    /// `[#q-…]` occurrence id is `<id>` (issue 394). `owner` is
+    /// `Some(owner#gen)` when the attempt is known (`#ackidattemptfence`); a
+    /// correction head or a legacy generation-0 receipt stays unfenced.
     AckId { id: String, owner: Option<String> },
     /// `queue consume <doc> --ack-text <row> --ack-owner <owner#gen>`: a
-    /// free-text row (prose, `[#id]: answer`, a `[#q-…]` row) bound to one
-    /// exact worker attempt.
+    /// free-text row with no generated `[#q-…]` (prose, `[#id]: answer`) bound
+    /// to one exact worker attempt.
     AckText { handle: String, owner: String },
     /// A free-text row with no exact attempt to fence the strike to: the
     /// verbatim `> **Queue prompt:**` echo persisted by `agent-doc finalize`.
@@ -457,13 +458,14 @@ impl ReportedRowStrike {
 /// (`owner`, `generation`) when the caller knows it (`#closeoutguidanceagree`).
 ///
 /// The row's claim identity decides: an id-backed row acknowledges by id. A
-/// free-text row's `#` mentions never name a tracked item, with one exception:
-/// a waiting-tree parent (`[#id] ... <!-- agent-doc:waiting-item -->`) whose
-/// reported attempt is a nested child row, which `--ack-text <parent>` cannot
-/// address. Every other free-text row is fenced to its attempt; a legacy
-/// generation-0 receipt or an unknown attempt falls back to the echo. An id
-/// strike carries the same fence when the attempt is known
-/// (`#ackidattemptfence`).
+/// free-text row's `#` mentions never name a tracked item, with two
+/// exceptions: a waiting-tree parent (`[#id] ... <!-- agent-doc:waiting-item
+/// -->`) whose reported attempt is a nested child row, and a generated
+/// trailing `[#q-…]`, which `--ack-id <q-…>` strikes even when the row is
+/// nested and is not the active head (issue 394). Every other free-text row
+/// is fenced to its attempt; a legacy generation-0 receipt or an unknown
+/// attempt falls back to the echo. An id strike carries the same fence when
+/// the attempt is known (`#ackidattemptfence`).
 pub fn reported_row_strike(item_text: &str, attempt: Option<(&str, u64)>) -> ReportedRowStrike {
     let item = item_text.trim();
     let owner = known_attempt_owner(attempt);
@@ -476,6 +478,14 @@ pub fn reported_row_strike(item_text: &str, attempt: Option<(&str, u64)>) -> Rep
         && let Some(id) = crate::queue_response::queue_prompt_done_id(
             &agent_doc_element_queue::strip_generated_queue_prompt_id_annotation(item),
         )
+    {
+        return ReportedRowStrike::AckId { id, owner };
+    }
+    // Issue 394: the Stop hook and `report-complete` name `--ack-id <q-…>`
+    // for a reported free-text child. That id is not a backlog item; the
+    // consume path strikes the unique visible reported row that carries it.
+    if let Some(id) = agent_doc_element_queue::queue_prompt_stable_id(item)
+        && id.starts_with("q-")
     {
         return ReportedRowStrike::AckId { id, owner };
     }
@@ -506,6 +516,9 @@ pub fn claim_row_strike(claim: &QueueClaim) -> ReportedRowStrike {
 fn consume_step(document: &str, claim: &QueueClaim) -> ReportedCloseoutStep {
     let strike = claim_row_strike(claim);
     let detail = match &strike {
+        ReportedRowStrike::AckId { id, .. } if id.starts_with("q-") => {
+            "strike the reported free-text row by its generated [#q-…] id, fenced to this exact worker attempt. The id is not a backlog item and does not need a stays-open reason".to_string()
+        }
         ReportedRowStrike::AckId { id, .. } => format!(
             "strike the reported row only after the open item records a `(stays open: <reason>)` clause; `--ack-id` refuses and leaves the row unstruck without one (#acknoreason), and a successful strike names that reason (#ackstrikeopenbacklog). When the worker's or operator's answer resolves the tracked item, pass `--done {id}` to `agent-doc finalize {document}` instead and close any parent item the same answer resolves; never acknowledge a head whose item the answer finished"
         ),
@@ -1748,6 +1761,8 @@ mod tests {
         let closeout =
             reported_claim_closeout(DOC, &claim, &ReportedRepoEvidence::ProseOnly).unwrap();
         assert_eq!(closeout.shape, ReportedCloseoutShape::ProseConsume);
+        // Issue 394: the generated `[#q-…]` is the strike id. `--ack-text` of
+        // the nest cannot reach a nested child that is not the active head.
         assert_eq!(
             closeout.next_action_argv().unwrap(),
             argv(&[
@@ -1755,8 +1770,8 @@ mod tests {
                 "queue",
                 "consume",
                 DOC,
-                "--ack-text",
-                "https://example.test/pull/207: #review [#q-5e1afb7bfdd7]",
+                "--ack-id",
+                "q-5e1afb7bfdd7",
                 "--ack-owner",
                 "subagent:c631sdk207#3",
             ])

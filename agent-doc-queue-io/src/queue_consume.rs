@@ -2598,22 +2598,84 @@ pub fn require_integrated_reported_repo_work_for_successor(
     // Both sides are nest-vector lineage keys. Leaf work identity of
     // `#address [#q-…]` is `queue-id:q-…`, which never matches the parent
     // vector, so a still-visible nested row looked closed and one unresolvable
-    // attempt blocked every unrelated `--done` in the same closeout.
+    // attempt blocked every unrelated `--done` in the same closeout. A
+    // projection that then admits `⟦effect:N⟧` or `[#q-…]` changes that same
+    // key again (issue 394); the row is still live.
     let after_heads = agent_doc_queue::queue_continuation::all_queue_head_texts(after)
         .context("integration closeout guard: failed to parse queue graph")?;
-    let after_live = after_heads
-        .iter()
-        .map(|head| agent_doc_queue::queue_claim::claim_identity(head))
-        .collect::<HashSet<_>>();
     let mut seen = HashSet::new();
     let closed = before_heads
-        .into_iter()
+        .iter()
         .filter(|head| {
             let identity = agent_doc_queue::queue_claim::claim_identity(head);
-            !after_live.contains(&identity) && seen.insert(identity)
+            !reported_head_still_live(head, &before_heads, &after_heads) && seen.insert(identity)
         })
+        .cloned()
         .collect::<Vec<_>>();
     require_integrated_reported_repo_work_for_heads(file, before, &closed)
+}
+
+/// Whether `head` is still a visible occurrence after a projection.
+///
+/// Exact claim identity wins. An effect-only rewrite of the same text and
+/// q-id is the same row. A generated `[#q-…]` that the projection admits onto
+/// a row which had none is the same row when that authored text was unique
+/// before; two siblings that already carry different q-ids stay distinct, so
+/// striking one still demands its own integration proof.
+fn reported_head_still_live(head: &str, before_heads: &[String], after_heads: &[String]) -> bool {
+    let identity = agent_doc_queue::queue_claim::claim_identity(head);
+    if after_heads
+        .iter()
+        .any(|after| agent_doc_queue::queue_claim::claim_identity(after) == identity)
+    {
+        return true;
+    }
+    let qid = generated_occurrence_id(head);
+    let family = agent_doc_queue::queue_claim::claim_identity(
+        &agent_doc_queue::document_queue::strip_queue_effect_annotation(head),
+    );
+    if after_heads.iter().any(|after| {
+        generated_occurrence_id(after) == qid
+            && agent_doc_queue::queue_claim::claim_identity(
+                &agent_doc_queue::document_queue::strip_queue_effect_annotation(after),
+            ) == family
+    }) {
+        return true;
+    }
+    // A unique generated id is one occurrence even when the projection
+    // rewrites the authored text. A q-id shared by two parents is not: striking
+    // one of those rows still demands that attempt's own proof.
+    if let Some(qid) = qid.as_ref() {
+        let same = |heads: &[String]| {
+            heads
+                .iter()
+                .filter(|head| generated_occurrence_id(head).as_deref() == Some(qid.as_str()))
+                .count()
+        };
+        if same(before_heads) == 1 && same(after_heads) == 1 {
+            return true;
+        }
+    }
+    let authored = authored_occurrence_identity(head);
+    let before_same = before_heads
+        .iter()
+        .filter(|other| authored_occurrence_identity(other) == authored)
+        .count();
+    before_same == 1
+        && after_heads
+            .iter()
+            .any(|after| authored_occurrence_identity(after) == authored)
+}
+
+fn generated_occurrence_id(head: &str) -> Option<String> {
+    agent_doc_element_queue::queue_prompt_stable_id(head).filter(|id| id.starts_with("q-"))
+}
+
+fn authored_occurrence_identity(head: &str) -> agent_doc_element_queue::QueueItemIdentity {
+    let stripped = agent_doc_element_queue::strip_generated_queue_prompt_id_annotation(
+        &agent_doc_queue::document_queue::strip_queue_effect_annotation(head),
+    );
+    agent_doc_queue::queue_claim::claim_identity(&stripped)
 }
 
 /// Recover an answered-head projection from the durable captured response.
@@ -3477,6 +3539,121 @@ fn visible_reported_receipt_attempts(
 /// This is intentionally separate from [`strike_orphan_id_backed_queue_head`]:
 /// `--id` proves the head is an orphan, while `--ack-id` accepts only one
 /// unique, top-level bare `[#id]` correction head or durable Reported evidence.
+/// Strike the unique visible reported row whose generated `[#q-…]` is
+/// `target_id` (issue 394).
+///
+/// The id is not a backlog or Todo item, so this path does not require a
+/// stays-open reason and does not consume the active head. A pending,
+/// claimed, or running row is left queued. A missing lineage attempt keeps
+/// that row live. An already-struck row is a successful no-op.
+fn acknowledge_generated_prompt_id(
+    file: &Path,
+    content: &str,
+    target_id: &str,
+    attempt: Option<&agent_doc_document::queue_projection::QueueOwnerProjection>,
+    effects: &dyn QueueConsumeWriteEffects,
+) -> Result<bool> {
+    use agent_doc_document::queue_projection::{QueueLifecycleMarker, lifecycle_marker};
+    let rows = addressable_executable_rows(content)?;
+    let nodes =
+        agent_doc_markdown_ast::mutations::item_nodes_all(content, "queue").map_err(|err| {
+            anyhow::anyhow!("generated prompt ack: failed to derive queue nodes: {err}")
+        })?;
+    let matches: Vec<&AddressableExecutableRow> = rows
+        .iter()
+        .filter(|row| {
+            let carries = |text: &str| {
+                agent_doc_element_queue::queue_prompt_stable_id(text).as_deref() == Some(target_id)
+            };
+            carries(&row.lineage) || carries(&row.display)
+        })
+        .collect();
+    if matches.is_empty() {
+        let struck = nodes.iter().any(|node| {
+            node.item.struck
+                && agent_doc_element_queue::queue_prompt_stable_id(node.item.text.trim()).as_deref()
+                    == Some(target_id)
+        });
+        if struck {
+            return Ok(false);
+        }
+        anyhow::bail!(
+            "{}: [#{target_id}] does not name a visible queue row. `--ack-id` strikes the unique \
+             reported row carrying that generated id; it does not consume the active head.",
+            file.display()
+        );
+    }
+    let claims = crate::queue_claim::claim_states_for_content(file, content)
+        .context("generated prompt ack: failed to inspect queue attempt state")?;
+    let receipts = crate::claim_release_receipt::load(file)?.receipts;
+    let reported_marker = |row: &AddressableExecutableRow| {
+        nodes.iter().any(|node| {
+            node.node_key == row.node_key
+                && matches!(
+                    lifecycle_marker(node.item.text.trim()),
+                    Some(QueueLifecycleMarker::Reported | QueueLifecycleMarker::LostReported)
+                )
+        })
+    };
+    let is_reported = |row: &AddressableExecutableRow| {
+        if reported_marker(row) {
+            return true;
+        }
+        let identity = agent_doc_queue::queue_claim::claim_identity(&row.lineage);
+        claims.iter().any(|claim| {
+            claim.identity == identity
+                && claim.state == agent_doc_queue::queue_claim::QueueClaimState::Reported
+        }) || receipts.iter().any(|receipt| {
+            receipt.identity == identity && receipt.generation > 0 && !receipt.attempt_closed()
+        })
+    };
+    let mut reported: Vec<&AddressableExecutableRow> = matches
+        .iter()
+        .copied()
+        .filter(|row| is_reported(row))
+        .collect();
+    if let Some(selected) = attempt {
+        reported.retain(|row| {
+            row.owner.as_ref().is_some_and(|owner| {
+                owner.owner == selected.owner && owner.generation == selected.generation
+            })
+        });
+        if reported.is_empty() {
+            anyhow::bail!(
+                "{}: --ack-owner {}#{} did not match a visible reported row for [#{target_id}]; \
+                 no change was applied.",
+                file.display(),
+                selected.owner,
+                selected.generation
+            );
+        }
+    }
+    if reported.is_empty() {
+        anyhow::bail!(
+            "{}: [#{target_id}] names a queue row that is not a reported attempt. Leave it queued \
+             until its worker reports; `--ack-id` does not strike an undispatched or running row.",
+            file.display()
+        );
+    }
+    if reported.len() > 1 {
+        anyhow::bail!(
+            "{}: [#{target_id}] matches {} reported rows. Pass --ack-owner OWNER#GENERATION for \
+             the one to strike; no change was applied.",
+            file.display(),
+            reported.len()
+        );
+    }
+    let row = reported[0];
+    let selector = row.owner.clone().map(AckTextSelector::Owner);
+    let outcome = acknowledge_paused_free_text_queue_head_with_selector_and_outcome(
+        file,
+        &row.lineage,
+        selector.as_ref(),
+        effects,
+    )?;
+    Ok(outcome.is_some())
+}
+
 /// Supplying the flag is not evidence. The command refuses runnable, mirrored,
 /// nested, and dispatch-owned rows without a Reported attempt/release receipt,
 /// and refuses prose that merely mentions `#id`; prose stays on the normal
@@ -3525,6 +3702,14 @@ pub fn acknowledge_open_id_backed_queue_head_for_attempt(
     }
     let open_backlog = head_id_names_open_backlog_item(&content, &target_id);
     let open_todo = agent_doc_element::todo::open_todo_ids(&content).contains(&target_id);
+    // Issue 394: a generated `[#q-…]` is not an open backlog or Todo id. Strike
+    // the unique visible reported row that carries it, including a nested
+    // child that is not the active head. Do not fall through to the
+    // free-text active-head bail, which told the operator to consume the
+    // wrong row.
+    if !open_backlog && !open_todo && target_id.starts_with("q-") {
+        return acknowledge_generated_prompt_id(file, &content, &target_id, attempt, effects);
+    }
     if !open_backlog && !open_todo {
         if queue_head_is_free_text_prompt(&content)? {
             anyhow::bail!(
@@ -12421,8 +12606,8 @@ Old.
     /// `#closeoutguidanceagree`: guidance is only right if the command lands.
     /// Derive the strike from exactly what the Stop hook reads (the governed
     /// head text plus the governing receipt's owner and generation), not from
-    /// a hand-written row, and run it. The same row's old `--ack-id q-…`
-    /// prescription is refused, which is the defect this replaced.
+    /// a hand-written row, and run it. A generated `[#q-…]` strikes by
+    /// `--ack-id` (issue 394). Prose without that id stays on `--ack-text`.
     #[test]
     fn closeoutguidanceagree_derived_strike_lands_on_released_free_text_rows() {
         use agent_doc_queue::reported_closeout::{ReportedRowStrike, reported_row_strike};
@@ -12444,31 +12629,38 @@ Old.
             let (owner, generation) = owners.get(&identity).expect("a governing receipt");
             assert_eq!((owner.as_str(), *generation), ("subagent:agree", 1));
 
-            let ReportedRowStrike::AckText { handle, .. } =
-                reported_row_strike(head, Some((owner, *generation)))
-            else {
-                panic!("{row} is free text bound to an attempt");
+            let strike = reported_row_strike(head, Some((owner, *generation)));
+            let owner_projection = agent_doc_document::queue_projection::QueueOwnerProjection {
+                owner: owner.clone(),
+                generation: *generation,
             };
-            if row.contains("[#q-") {
-                assert!(
-                    acknowledge_open_id_backed_queue_head(&doc, "q-7f3a").is_err(),
-                    "`q-7f3a` is not a tracked id, so `--ack-id` must refuse it"
-                );
+            match strike {
+                ReportedRowStrike::AckId { id, .. } => {
+                    assert!(row.contains("[#q-"), "{row} prescribed --ack-id {id}");
+                    assert!(
+                        acknowledge_open_id_backed_queue_head_for_attempt(
+                            &doc,
+                            &id,
+                            Some(&owner_projection),
+                            &TEST_EFFECTS,
+                        )
+                        .unwrap(),
+                        "{row} --ack-id {id} strikes the reported row"
+                    );
+                }
+                ReportedRowStrike::AckText { handle, .. } => {
+                    assert!(!row.contains("[#q-"), "{row} should prescribe --ack-id");
+                    super::acknowledge_paused_free_text_queue_head_with_selector_and_outcome(
+                        &doc,
+                        &handle,
+                        Some(&super::AckTextSelector::Owner(owner_projection)),
+                        &TEST_EFFECTS,
+                    )
+                    .unwrap()
+                    .expect("the derived command strikes its row");
+                }
+                ReportedRowStrike::Echo => panic!("{row} has an attempt and must not echo"),
             }
-            let selector = super::AckTextSelector::Owner(
-                agent_doc_document::queue_projection::QueueOwnerProjection {
-                    owner: owner.clone(),
-                    generation: *generation,
-                },
-            );
-            super::acknowledge_paused_free_text_queue_head_with_selector_and_outcome(
-                &doc,
-                &handle,
-                Some(&selector),
-                &TEST_EFFECTS,
-            )
-            .unwrap()
-            .expect("the derived command strikes its row");
             let result = std::fs::read_to_string(&doc).unwrap();
             assert!(!result.contains("- ☑️ [#subagent:agree#1]"), "{result}");
             assert!(
@@ -12476,6 +12668,123 @@ Old.
                 "{result}"
             );
         }
+    }
+
+    /// Issue 394: a reported free-text child under a parent is not the active
+    /// head. `--ack-id` of its generated id strikes that child and leaves the
+    /// active sibling queued. A pending row with a q-id is not struck.
+    #[test]
+    fn generated_prompt_ack_strikes_nested_reported_child_not_the_active_head() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("bugs.md");
+        let parent_a = "https://example.test/merge/1";
+        let parent_b = "https://example.test/merge/2";
+        let active = "Confirm the schedule [#q-aaaaaaaaaaaa]";
+        let reported = "Address the comment [#q-bbbbbbbbbbbb]";
+        let other = "Answer the question [#q-cccccccccccc]";
+        let pending = "Investigate the cause [#q-dddddddddddd]";
+        let page = |run: &str| {
+            format!(
+                concat!(
+                    "---\nsession: sid\nagent_doc_format: template\nqueue_active: true\n---\n\n",
+                    "<!-- agent:exchange -->\n### Re: worker report\n\nreported.\n",
+                    "<!-- /agent:exchange -->\n\n",
+                    "## Run <!-- agent:run subagents priority go -->\n",
+                    "{run}",
+                    "<!-- /agent:run -->\n",
+                ),
+                run = run,
+            )
+        };
+        let selectable = page(&format!(
+            "- {parent_a}\n  - {active}\n  - {reported}\n  - {pending}\n- {parent_b}\n  - {other}\n"
+        ));
+        std::fs::write(&doc, &selectable).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &selectable,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        for (item, owner) in [
+            (&format!("{parent_a}: {reported}"), "subagent:w1"),
+            (&format!("{parent_b}: {other}"), "subagent:w3"),
+        ] {
+            let generation = running_claim(&doc, item, owner);
+            let reported_claim =
+                crate::queue_claim::report_attempt(&doc, item, Some(generation)).unwrap();
+            crate::queue_lineage::record_prose_only(&doc, &reported_claim, "prose result").unwrap();
+            crate::claim_release_receipt::capture_response_for_attempt(
+                &doc, item, generation, "done",
+            )
+            .unwrap();
+            crate::claim_release_receipt::release(
+                &doc,
+                item,
+                crate::claim_release_receipt::ReleaseKind::Reported,
+            )
+            .unwrap();
+        }
+        let shown = page(&format!(
+            concat!(
+                "- {parent_a}\n",
+                "  - {active}\n",
+                "  - ☑️ [#subagent:w1#1] {reported}\n",
+                "  - {pending}\n",
+                "- {parent_b}\n",
+                "  - ☑️ [#subagent:w3#1] {other}\n",
+            ),
+            parent_a = parent_a,
+            parent_b = parent_b,
+            active = active,
+            reported = reported,
+            pending = pending,
+            other = other,
+        ));
+        std::fs::write(&doc, &shown).unwrap();
+        let pending_err = acknowledge_open_id_backed_queue_head_for_attempt(
+            &doc,
+            "q-dddddddddddd",
+            None,
+            &TEST_EFFECTS,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            pending_err.contains("not a reported attempt"),
+            "{pending_err}"
+        );
+        assert!(!pending_err.contains("without `--ack-id`"), "{pending_err}");
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), shown);
+
+        assert!(
+            acknowledge_open_id_backed_queue_head_for_attempt(
+                &doc,
+                "q-bbbbbbbbbbbb",
+                None,
+                &TEST_EFFECTS,
+            )
+            .unwrap()
+        );
+        let result = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            result.contains("~~Address the comment [#q-bbbbbbbbbbbb]~~"),
+            "the nested reported child is struck:\n{result}"
+        );
+        assert!(
+            !result.contains("[#subagent:w1#1]"),
+            "the reported attempt marker is gone:\n{result}"
+        );
+        assert!(
+            result.contains("q-aaaaaaaaaaaa"),
+            "the active sibling stays queued:\n{result}"
+        );
+        assert!(
+            result.contains("q-cccccccccccc"),
+            "the other parent's reported row stays until its own id is acked:\n{result}"
+        );
+        assert!(result.contains("q-dddddddddddd"), "{result}");
     }
 
     #[test]

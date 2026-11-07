@@ -2985,6 +2985,126 @@ mod tests {
         assert!(err.contains(&b1), "{err}");
     }
 
+    /// Issue 394: a projection that admits `⟦effect:N⟧` and `[#q-…]` onto a
+    /// reported row, and drops an unrelated head, does not close that row.
+    /// Deleting the decorated row still demands that attempt's own proof.
+    #[test]
+    fn projection_admitted_decoration_does_not_close_the_reported_row() {
+        use agent_doc_queue::queue_claim::claim_identity;
+
+        let live = RepoFixture::new();
+        let before = concat!(
+            "<!-- agent:queue -->\n",
+            "- https://example.test/merge/1\n",
+            "  - #address\n",
+            "- do [#other]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        std::fs::write(&live.doc, before).unwrap();
+        let heads =
+            agent_doc_queue::queue_continuation::all_queue_head_texts(before).expect("queue graph");
+        let address = heads
+            .iter()
+            .find(|head| head.contains("#address"))
+            .expect("address head")
+            .clone();
+        assert!(
+            address.contains("example.test/merge/1"),
+            "lineage head lost its parent: {address}"
+        );
+        let mut claim = make_claim(&live.doc, &address, "subagent:w5", None);
+        claim.state = QueueClaimState::Reported;
+        claim.generation = 1;
+        let mut claims = QueueClaimLedger::default();
+        claims.claims.push(claim);
+        super::mutate(&live.doc, |ledger| {
+            ledger.attempts.push(QueueLineageAttempt {
+                identity: claim_identity(&address),
+                identity_history: Vec::new(),
+                item_text: address.clone(),
+                item_text_history: Vec::new(),
+                generation: 1,
+                owner: "subagent:w5".to_string(),
+                events: vec![QueueLineageEvent {
+                    kind: QueueLineageEventKind::Created,
+                    at_secs: 10,
+                    detail: Some("owner=subagent:w5".into()),
+                    ..QueueLineageEvent::default()
+                }],
+            });
+            Ok(())
+        })
+        .unwrap();
+        crate::queue_claim::store_ledger_for_test(&live.doc, &claims).unwrap();
+
+        let decorated = concat!(
+            "<!-- agent:queue -->\n",
+            "- https://example.test/merge/1\n",
+            "  - #address ⟦effect:2⟧ [#q-3e3d37140e5a]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        crate::queue_consume::require_integrated_reported_repo_work_for_successor(
+            &live.doc, before, decorated,
+        )
+        .expect("admitting effect and a q-id leaves the reported row live");
+
+        let removed = RepoFixture::new();
+        let decorated_before = decorated;
+        std::fs::write(&removed.doc, decorated_before).unwrap();
+        let decorated_heads =
+            agent_doc_queue::queue_continuation::all_queue_head_texts(decorated_before)
+                .expect("decorated queue graph");
+        let decorated_address = decorated_heads
+            .iter()
+            .find(|head| head.contains("q-3e3d37140e5a"))
+            .expect("decorated head")
+            .clone();
+        let mut decorated_claim = make_claim(&removed.doc, &decorated_address, "subagent:w5", None);
+        decorated_claim.state = QueueClaimState::Reported;
+        decorated_claim.generation = 1;
+        let mut decorated_claims = QueueClaimLedger::default();
+        decorated_claims.claims.push(decorated_claim);
+        super::mutate(&removed.doc, |ledger| {
+            ledger.attempts.push(QueueLineageAttempt {
+                identity: claim_identity(&decorated_address),
+                identity_history: Vec::new(),
+                item_text: decorated_address.clone(),
+                item_text_history: Vec::new(),
+                generation: 1,
+                owner: "subagent:w5".to_string(),
+                events: vec![QueueLineageEvent {
+                    kind: QueueLineageEventKind::Created,
+                    at_secs: 10,
+                    detail: Some("owner=subagent:w5".into()),
+                    ..QueueLineageEvent::default()
+                }],
+            });
+            Ok(())
+        })
+        .unwrap();
+        crate::queue_claim::store_ledger_for_test(&removed.doc, &decorated_claims).unwrap();
+        let gone = concat!(
+            "<!-- agent:queue -->\n",
+            "- https://example.test/merge/1\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let err = crate::queue_consume::require_integrated_reported_repo_work_for_successor(
+            &removed.doc,
+            decorated_before,
+            gone,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            err.contains("neither repository work nor a prose-only"),
+            "{err}"
+        );
+        assert!(
+            err.contains("q-3e3d37140e5a") || err.contains(&decorated_address),
+            "{err}"
+        );
+    }
+
     #[test]
     fn verifies_cherry_pick_across_distinct_git_object_databases() {
         let fixture = RepoFixture::new();

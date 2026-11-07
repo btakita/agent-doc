@@ -3246,6 +3246,60 @@ mod tests {
         assert_eq!(released.item_text, renumbered);
     }
 
+    /// Issue 394: report-complete still names the nest the worker was given,
+    /// or the q-id the projection admitted, after the visible row gains
+    /// `⟦effect:N⟧` and `[#q-…]` and loses `[#owner#gen]`.
+    #[test]
+    fn report_follows_address_projection_by_old_nest_and_by_q_id() {
+        fn exercise(after_leaf: &str, report_item: &str, expected_fragment: &str) {
+            let dir = tempfile::tempdir().unwrap();
+            let parent = "https://example.test/merge/1";
+            let doc = write_doc(dir.path(), &[parent, "  - 🚧 [#subagent:w5#2] #address"]);
+            let content = std::fs::read_to_string(&doc)
+                .unwrap()
+                .replace("-   - ", "  - ");
+            std::fs::write(&doc, &content).unwrap();
+            let nest = format!("{parent}: #address");
+            let (_, claimed) = claim(&doc, &nest, "subagent:w5", 600).unwrap();
+            start_attempt(
+                &doc,
+                &nest,
+                "subagent:w5",
+                "/root/address",
+                600,
+                claimed.generation,
+            )
+            .unwrap();
+            let rewritten = std::fs::read_to_string(&doc)
+                .unwrap()
+                .replace("🚧 [#subagent:w5#2] #address", after_leaf);
+            std::fs::write(&doc, rewritten).unwrap();
+            let reported = report_attempt(&doc, report_item, Some(claimed.generation)).unwrap();
+            assert!(
+                reported.item_text.contains(expected_fragment),
+                "report item {report_item:?} stayed on {:?}, want {expected_fragment}",
+                reported.item_text
+            );
+            assert_eq!(
+                reported.state,
+                agent_doc_queue::queue_claim::QueueClaimState::Reported
+            );
+        }
+
+        let qid = "q-3e3d37140e5a";
+        exercise(
+            &format!("📥 #address ⟦effect:2⟧ [#{qid}]"),
+            "https://example.test/merge/1: #address",
+            qid,
+        );
+        exercise(&format!("📥 #address ⟦effect:2⟧ [#{qid}]"), qid, qid);
+        exercise(
+            &format!("📥 #address [#{qid}]"),
+            "https://example.test/merge/1: #address",
+            qid,
+        );
+    }
+
     #[test]
     fn claim_reports_distinguish_expiry_from_explicit_requeue_abandonment() {
         let dir = tempfile::tempdir().unwrap();

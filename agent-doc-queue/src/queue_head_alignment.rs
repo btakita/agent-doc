@@ -27,7 +27,11 @@
 //! in one hunk and a line added in another never pair either, so a consumed
 //! head followed by an operator addition elsewhere is a delete plus an add.
 
-use agent_doc_element_queue::queue_head_identity;
+use agent_doc_element_queue::{
+    queue_head_identity, queue_prompt_stable_id, strip_generated_queue_prompt_id_annotation,
+};
+
+use crate::document_queue::strip_queue_effect_annotation;
 
 /// Normalize a queue head for comparison: progress, pin and priority markers
 /// are cosmetic and never read as an operator edit.
@@ -40,9 +44,31 @@ pub fn normalize_queue_head_text(text: &str) -> String {
     .to_string()
 }
 
+/// Authored work identity plus a generated `[#q-…]`, with `⟦effect:N⟧` removed.
+///
+/// Effect copies stay distinct because a present q-id is part of the key.
+/// A row that has not yet been admitted a q-id shares the authored id with
+/// the decorated successor only through [`pair_replaced_lines`], so one bare
+/// `#address` is not an identity match for every effect sibling.
+fn authored_alignment(norm: &str) -> (agent_doc_element_queue::QueueItemIdentity, Option<String>) {
+    let without_effect = strip_queue_effect_annotation(norm);
+    let qid = queue_prompt_stable_id(without_effect.trim()).filter(|id| id.starts_with("q-"));
+    let authored = strip_generated_queue_prompt_id_annotation(&without_effect);
+    (queue_head_identity(authored.trim()), qid)
+}
+
 /// The comparable work-identity key of a normalized head.
+///
+/// A generated `[#q-…]` on an id-backed row (`#address [#q-…]`) keys as that
+/// authored id plus the occurrence id, so two preset siblings stay distinct
+/// while a later snapshot of the same occurrence still matches. Effect-only
+/// copies keep today's free-text key, which already includes `⟦effect:N⟧`.
 fn identity_key(norm: &str) -> String {
-    format!("{:?}", queue_head_identity(norm))
+    let (authored, qid) = authored_alignment(norm);
+    match qid {
+        Some(qid) if authored.is_id_backed() => format!("{authored:?}\n{qid}"),
+        _ => format!("{:?}", queue_head_identity(norm)),
+    }
 }
 
 /// How the heads of a newer queue snapshot pair with an older one.
@@ -158,6 +184,16 @@ pub fn pair_replaced_lines(old: &[String], new: &[String]) -> Vec<(usize, usize)
                 queue_head_identity(new_text).is_id_backed(),
             ];
             if id_backed == [true, true] {
+                // `#address` and `#address [#q-…]` are both id-backed, but the
+                // second id is the generated occurrence of the first. Pair
+                // that annotation. Two different q-ids, or two different
+                // authored ids, stay unpaired.
+                let (old_authored, old_q) = authored_alignment(old_text);
+                let (new_authored, new_q) = authored_alignment(new_text);
+                let q_compatible = old_q == new_q || old_q.is_none() || new_q.is_none();
+                if old_authored == new_authored && old_authored.is_id_backed() && q_compatible {
+                    scored.push((0.99, o, n));
+                }
                 continue;
             }
             let contains =
@@ -177,6 +213,18 @@ pub fn pair_replaced_lines(old: &[String], new: &[String]) -> Vec<(usize, usize)
             }
         }
     }
+    // A bare `#address` contained by two decorated siblings is not either of
+    // them. Containment scores 1.0 and the q-id annotation scores 0.99; drop
+    // both when one old row has more than one such candidate.
+    let mut exact_counts = std::collections::HashMap::<usize, usize>::new();
+    for (score, old_index, _) in &scored {
+        if *score == 0.99 || *score == 1.0 {
+            *exact_counts.entry(*old_index).or_insert(0) += 1;
+        }
+    }
+    scored.retain(|(score, old_index, _)| {
+        (*score != 0.99 && *score != 1.0) || exact_counts.get(old_index).copied().unwrap_or(0) == 1
+    });
     scored.sort_by(|a, b| {
         b.0.partial_cmp(&a.0)
             .unwrap_or(std::cmp::Ordering::Equal)
@@ -327,6 +375,44 @@ mod tests {
             continued,
             vec![0, 1],
             "each copy continues exactly one line"
+        );
+    }
+
+    /// Issue 394: admitting `[#q-…]` onto `#address` is the same row. Two
+    /// different q-ids, and one bare row beside two decorated siblings, are not.
+    #[test]
+    fn generated_prompt_annotation_pairs_without_collapsing_siblings() {
+        let paired = pair_replaced_lines(
+            &heads(&["#address"]),
+            &heads(&["#address [#q-3e3d37140e5a]"]),
+        );
+        assert_eq!(paired, vec![(0, 0)]);
+
+        let effect = pair_replaced_lines(
+            &heads(&["#address"]),
+            &heads(&["#address ⟦effect:2⟧ [#q-3e3d37140e5a]"]),
+        );
+        assert_eq!(effect, vec![(0, 0)]);
+
+        let distinct = pair_replaced_lines(
+            &heads(&["#address [#q-3f7fdc3da31f]"]),
+            &heads(&["#address [#q-096acdc5caca]"]),
+        );
+        assert!(
+            distinct.is_empty(),
+            "different q-ids are different occurrences: {distinct:?}"
+        );
+
+        let ambiguous = pair_replaced_lines(
+            &heads(&["#address"]),
+            &heads(&[
+                "#address ⟦effect:1⟧ [#q-3f7fdc3da31f]",
+                "#address ⟦effect:3⟧ [#q-096acdc5caca]",
+            ]),
+        );
+        assert!(
+            ambiguous.is_empty(),
+            "one bare row is not either decorated sibling: {ambiguous:?}"
         );
     }
 }

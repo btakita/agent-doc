@@ -33,7 +33,7 @@ pub struct SubagentQuotaBlockApplied {
 /// What the scan did with one worker id.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SubagentQuotaAutodetect {
-    Applied(SubagentQuotaBlockApplied),
+    Applied(Box<SubagentQuotaBlockApplied>),
     /// No Running, Lost, or QuotaBlocked attempt is bound to this worker.
     NoMatch,
     /// Two attempts of the same rank started together. Nothing was written.
@@ -109,13 +109,13 @@ fn apply_hit(hit: &Hit, mut block: WorkerQuotaBlock) -> Result<SubagentQuotaAuto
         && hit.prior_evidence.as_deref() == Some(block.evidence.as_str())
         && hit.prior_harness == block.harness);
     let claim = block_attempt_on_quota(&hit.file, &hit.item_text, Some(hit.generation), block)?;
-    Ok(SubagentQuotaAutodetect::Applied(
+    Ok(SubagentQuotaAutodetect::Applied(Box::new(
         SubagentQuotaBlockApplied {
             file: hit.file.clone(),
             claim,
             announce,
         },
-    ))
+    )))
 }
 
 fn collect_hits(roots: &[PathBuf], worker_id: &str) -> Vec<Hit> {

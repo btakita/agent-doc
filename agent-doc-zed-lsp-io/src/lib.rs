@@ -1353,10 +1353,7 @@ mod tests {
         let attempted = server.reregister_after_divergent_history_at(&uri, 1_000_000);
         assert!(!attempted);
         assert!(
-            server
-                .divergent_history_reregister_at_ms
-                .get(&uri)
-                .is_none(),
+            !server.divergent_history_reregister_at_ms.contains_key(&uri),
             "a buffer that moved must not spend the window"
         );
         assert!(server.documents.contains_key(&uri));

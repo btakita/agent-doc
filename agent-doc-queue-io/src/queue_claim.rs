@@ -837,13 +837,13 @@ fn assign_dispatch_policy(
     );
     if admitted {
         if let Some(harness) = worker_harness {
-            let stored = claim.dispatch_policy.get_or_insert_with(|| {
+            let stored = claim.dispatch_policy.get_or_insert(
                 agent_doc_queue::queue_claim::SubagentDispatchPolicy {
                     model: None,
                     effort: None,
                     harness: None,
-                }
-            });
+                },
+            );
             stored.harness = Some(harness.to_string());
             return;
         }
@@ -857,13 +857,14 @@ fn assign_dispatch_policy(
     let Some(harness) = previous_harness else {
         return;
     };
-    let stored = claim.dispatch_policy.get_or_insert_with(|| {
-        agent_doc_queue::queue_claim::SubagentDispatchPolicy {
-            model: None,
-            effort: None,
-            harness: None,
-        }
-    });
+    let stored =
+        claim
+            .dispatch_policy
+            .get_or_insert(agent_doc_queue::queue_claim::SubagentDispatchPolicy {
+                model: None,
+                effort: None,
+                harness: None,
+            });
     if stored.harness.is_none() {
         stored.harness = Some(harness);
     }

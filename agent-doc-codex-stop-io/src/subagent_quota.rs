@@ -58,7 +58,7 @@ pub(crate) fn observe_value(value: &Value) -> Result<Option<SubagentQuotaBlockAp
         &signal.worker_id,
         block,
     )? {
-        SubagentQuotaAutodetect::Applied(applied) if applied.announce => Ok(Some(applied)),
+        SubagentQuotaAutodetect::Applied(applied) if applied.announce => Ok(Some(*applied)),
         SubagentQuotaAutodetect::Applied(_) | SubagentQuotaAutodetect::NoMatch => Ok(None),
         SubagentQuotaAutodetect::Ambiguous => {
             eprintln!(

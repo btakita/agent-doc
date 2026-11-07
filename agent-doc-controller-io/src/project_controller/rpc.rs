@@ -37675,6 +37675,23 @@ fn pane_layout_effect_worker(
             }
         }
 
+        // GH #397: absorb a burst of automatic editor-surface publications
+        // before this generation moves a pane. `wake` is notified when a
+        // newer revision is scheduled, so the wait returns early and the
+        // supersession check below cancels this generation with no tmux
+        // mutation. See `automatic_editor_surface_structural_settle`.
+        if let Some(settle) =
+            agent_doc_controller::pane_layout::automatic_editor_surface_structural_settle(
+                &desired.invocation.caller_kind,
+                desired.provenance.publisher.label(),
+                attempt,
+            )
+        {
+            let mut worker = state.lock();
+            if !worker.is_superseded(work_revision) {
+                let _ = wake.wait_for(&mut worker, settle);
+            }
+        }
         if state.lock().is_superseded(work_revision) {
             agent_doc_ops_log_io::log_op(
                 &bootstrap.project_root,

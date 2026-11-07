@@ -4156,7 +4156,7 @@ pub fn annotate_newly_struck_queue_items_with_response_id_at(
         replacements.push((start, end, replacement));
     }
     replacements.extend(closed_by_rewrites);
-    replacements.sort_by(|left, right| right.0.cmp(&left.0));
+    replacements.sort_by_key(|item| std::cmp::Reverse(item.0));
     let mut out = after;
     for (start, end, replacement) in replacements {
         out.replace_range(start..end, &replacement);

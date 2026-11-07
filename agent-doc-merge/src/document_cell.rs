@@ -196,10 +196,11 @@ fn duplicate_primary_identity(key: &str) -> Option<&str> {
     // `:repeat:` is an operator row that matched no base row. A base-matched
     // `:slot:` is the row itself, so it is not a replay marker.
     for marker in [":duplicate:", ":repeat:"] {
-        if let Some((primary, ordinal)) = key.rsplit_once(marker) {
-            if !ordinal.is_empty() && ordinal.bytes().all(|byte| byte.is_ascii_digit()) {
-                return Some(primary);
-            }
+        if let Some((primary, ordinal)) = key.rsplit_once(marker)
+            && !ordinal.is_empty()
+            && ordinal.bytes().all(|byte| byte.is_ascii_digit())
+        {
+            return Some(primary);
         }
     }
     None
@@ -209,10 +210,11 @@ fn duplicate_primary_identity(key: &str) -> Option<&str> {
 /// use a position count. `:occ:` exists only inside one projection.
 fn repeat_disambiguator_primary(identity: &str) -> &str {
     for marker in [":duplicate:", ":repeat:", ":slot:", ":occ:"] {
-        if let Some((primary, ordinal)) = identity.rsplit_once(marker) {
-            if !ordinal.is_empty() && ordinal.bytes().all(|byte| byte.is_ascii_digit()) {
-                return primary;
-            }
+        if let Some((primary, ordinal)) = identity.rsplit_once(marker)
+            && !ordinal.is_empty()
+            && ordinal.bytes().all(|byte| byte.is_ascii_digit())
+        {
+            return primary;
         }
     }
     identity
@@ -3688,7 +3690,7 @@ while I was typing the next queue item\n\
             "- do [#same] second\n",
             "<!-- /agent:queue -->\n",
         );
-        let out = merge_3way(base, ours, &theirs);
+        let out = merge_3way(base, ours, theirs);
         assert!(
             !out.fell_back,
             "same-key ahead insert stays on the keyed path"
@@ -3728,7 +3730,7 @@ while I was typing the next queue item\n\
             "- do [#same] inserted\n",
             "<!-- /agent:queue -->\n",
         );
-        let out = merge_3way(base, ours, &theirs);
+        let out = merge_3way(base, ours, theirs);
         assert!(!out.fell_back);
         assert!(
             out.merged_text.contains("- ~~do [#same] first~~"),
@@ -3757,7 +3759,7 @@ while I was typing the next queue item\n\
             "- do [#same] second\n",
             "<!-- /agent:queue -->\n",
         );
-        let diffs = diff_document(old, &new);
+        let diffs = diff_document(old, new);
         let queue = queue_diff(&diffs);
         let inserts: Vec<_> = queue
             .ops

@@ -25402,13 +25402,10 @@ fn handle_reliable_sync_outbox(
     let channel_lock = reliable_sync_outbox_channel_lock(project_root, &payload.document_hash);
     let _channel_guard = channel_lock.lock();
     let database_path = agent_doc_sqlite::state_store::state_db_path(project_root);
-    // `#sqlitebusyupgrade`: `lazily::SqliteOutbox::open` uses a bare
-    // `Connection::open` (no busy handler); its appends and cursor saves then
-    // failed (and were only logged) whenever another writer held state.db.
-    let outbox = lazily::SqliteOutbox::with_store(lazily::SqliteStore::with_connection(
-        agent_doc_sqlite::write_lock::open_state_db_file(&database_path)?,
-        payload.document_hash.clone(),
-    )?);
+    // lazily 0.61.1 `SqliteOutbox::open` sets the 30s busy timeout. Outbox
+    // ops are single autocommit statements; a future read-then-write
+    // transaction has to be BEGIN IMMEDIATE.
+    let outbox = lazily::SqliteOutbox::open(&database_path, &payload.document_hash)?;
     let acked_through = outbox.acked_through();
     // The receiver journal shares this database. Allocate strictly above every
     // epoch it has observed, not just above the sender's own ACK cursor: a lost

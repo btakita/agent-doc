@@ -162,7 +162,7 @@ dependencies = [
  "indexmap",
  "instruction-files",
  "lazily 0.58.0",
- "lazily 0.61.0",
+ "lazily 0.61.1",
  "libc",
  "libloading",
  "module-harness",
@@ -523,7 +523,7 @@ dependencies = [
  "agent-doc-work-projection",
  "agent-doc-write-converge-io",
  "anyhow",
- "lazily 0.61.0",
+ "lazily 0.61.1",
  "parking_lot",
  "serde_json",
  "tempfile",
@@ -615,7 +615,7 @@ dependencies = [
  "base64 0.22.1",
  "fs2",
  "interprocess",
- "lazily 0.61.0",
+ "lazily 0.61.1",
  "libc",
  "parking_lot",
  "rusqlite",
@@ -656,7 +656,7 @@ dependencies = [
  "agent-doc-template",
  "agent-doc-turn",
  "anyhow",
- "lazily 0.61.0",
+ "lazily 0.61.1",
  "parking_lot",
  "rusqlite",
  "serde",
@@ -686,7 +686,7 @@ dependencies = [
  "agent-doc-supervisor-io",
  "agent-doc-turn",
  "anyhow",
- "lazily 0.61.0",
+ "lazily 0.61.1",
  "serde",
  "serde_json",
  "tempfile",
@@ -780,7 +780,7 @@ dependencies = [
  "agent-doc-template",
  "agent-doc-turn",
  "anyhow",
- "lazily 0.61.0",
+ "lazily 0.61.1",
  "parking_lot",
  "serde",
  "sha2",
@@ -828,7 +828,7 @@ dependencies = [
  "agent-doc-turn",
  "agent-doc-write-converge-io",
  "anyhow",
- "lazily 0.61.0",
+ "lazily 0.61.1",
  "parking_lot",
  "serde_json",
  "tempfile",
@@ -861,7 +861,7 @@ dependencies = [
  "agent-doc-hash",
  "agent-doc-state-scope",
  "agent-doc-turn",
- "lazily 0.61.0",
+ "lazily 0.61.1",
  "proptest",
  "regex",
  "serde",
@@ -879,7 +879,7 @@ dependencies = [
  "agent-doc-state-scope",
  "agent-doc-tmux-io",
  "anyhow",
- "lazily 0.61.0",
+ "lazily 0.61.1",
  "serde",
  "serde_json",
 ]
@@ -1014,7 +1014,7 @@ dependencies = [
  "agent-doc-element",
  "agent-doc-queue-icons",
  "agent-doc-state-scope",
- "lazily 0.61.0",
+ "lazily 0.61.1",
  "serde",
 ]
 
@@ -1401,7 +1401,7 @@ dependencies = [
  "agent-doc-element",
  "agent-doc-hash",
  "agent-doc-markdown-ast",
- "lazily 0.61.0",
+ "lazily 0.61.1",
  "serde",
  "serde_json",
 ]
@@ -1447,7 +1447,7 @@ dependencies = [
  "agent-doc-state-scope",
  "anyhow",
  "base64 0.22.1",
- "lazily 0.61.0",
+ "lazily 0.61.1",
  "parking_lot",
  "rmp-serde",
  "serde",
@@ -1518,7 +1518,7 @@ dependencies = [
  "agent-doc-state-scope",
  "agent-doc-turn",
  "anyhow",
- "lazily 0.61.0",
+ "lazily 0.61.1",
  "parking_lot",
  "serde",
  "serde_json",
@@ -1720,7 +1720,7 @@ version = "0.35.570"
 dependencies = [
  "agent-doc-controller",
  "agent-doc-state-scope",
- "lazily 0.61.0",
+ "lazily 0.61.1",
 ]
 
 [[package]]
@@ -1776,7 +1776,7 @@ dependencies = [
  "agent-doc-hash",
  "agent-doc-session-accretion",
  "agent-doc-state-scope",
- "lazily 0.61.0",
+ "lazily 0.61.1",
  "serde",
  "serde_json",
 ]
@@ -1852,7 +1852,7 @@ dependencies = [
  "agent-doc-prompt-lines",
  "agent-doc-state-scope",
  "anyhow",
- "lazily 0.61.0",
+ "lazily 0.61.1",
  "libc",
  "parking_lot",
  "proptest",
@@ -1927,7 +1927,7 @@ dependencies = [
  "agent-doc-merge",
  "anyhow",
  "base64 0.22.1",
- "lazily 0.61.0",
+ "lazily 0.61.1",
  "libc",
  "parking_lot",
  "serde",
@@ -2153,7 +2153,7 @@ dependencies = [
  "agent-doc-session-registry-io",
  "agent-doc-snapshot-io",
  "anyhow",
- "lazily 0.61.0",
+ "lazily 0.61.1",
  "parking_lot",
  "tempfile",
  "tmux-router",
@@ -2354,7 +2354,7 @@ dependencies = [
  "agent-doc-work-projection",
  "agent-doc-workflow",
  "anyhow",
- "lazily 0.61.0",
+ "lazily 0.61.1",
  "serde",
  "serde_json",
  "tempfile",
@@ -2560,7 +2560,7 @@ version = "0.35.570"
 dependencies = [
  "agent-doc-state-scope",
  "agent-doc-turn",
- "lazily 0.61.0",
+ "lazily 0.61.1",
  "serde",
  "serde_json",
 ]
@@ -2587,7 +2587,7 @@ dependencies = [
 name = "agent-doc-state-scope"
 version = "0.35.570"
 dependencies = [
- "lazily 0.61.0",
+ "lazily 0.61.1",
 ]
 
 [[package]]
@@ -2599,7 +2599,7 @@ dependencies = [
  "anyhow",
  "base64 0.22.1",
  "interprocess",
- "lazily 0.61.0",
+ "lazily 0.61.1",
  "serde",
  "serde_json",
  "tempfile",
@@ -2673,7 +2673,7 @@ dependencies = [
  "agent-doc-state-scope",
  "agent-doc-tmux-commands",
  "agent-doc-turn-executor-tmux",
- "lazily 0.61.0",
+ "lazily 0.61.1",
  "proptest",
  "serde",
  "serde_json",
@@ -2702,7 +2702,7 @@ dependencies = [
  "anyhow",
  "indexmap",
  "interprocess",
- "lazily 0.61.0",
+ "lazily 0.61.1",
  "libc",
  "parking_lot",
  "portable-pty",
@@ -2806,7 +2806,7 @@ dependencies = [
  "agent-doc-workflow-io",
  "anyhow",
  "fs2",
- "lazily 0.61.0",
+ "lazily 0.61.1",
  "libc",
  "parking_lot",
  "portable-pty",
@@ -2896,7 +2896,7 @@ name = "agent-doc-tmux"
 version = "0.35.570"
 dependencies = [
  "agent-doc-state-scope",
- "lazily 0.61.0",
+ "lazily 0.61.1",
  "serde",
  "tempfile",
 ]
@@ -2924,7 +2924,7 @@ dependencies = [
  "agent-doc-tmux",
  "agent-doc-tmux-commands",
  "anyhow",
- "lazily 0.61.0",
+ "lazily 0.61.1",
  "libc",
  "serde",
  "serde_json",
@@ -2962,7 +2962,7 @@ dependencies = [
  "agent-doc-state-scope",
  "agent-doc-template",
  "agent-doc-topic",
- "lazily 0.61.0",
+ "lazily 0.61.1",
  "proptest",
  "regex",
  "serde",
@@ -3170,7 +3170,7 @@ dependencies = [
  "agent-doc-workflow",
  "anyhow",
  "fs2",
- "lazily 0.61.0",
+ "lazily 0.61.1",
  "parking_lot",
  "serde_json",
  "tempfile",
@@ -4522,9 +4522,9 @@ dependencies = [
 
 [[package]]
 name = "lazily"
-version = "0.61.0"
+version = "0.61.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dea0e947b3766b88f327012f0d8392fb5a5c702050933cbb19467dedd3273c12"
+checksum = "c6ee0bc58306462c55eb8b42edb56e00f78c1683bd15a189d18e714dfa7d6439"
 dependencies = [
  "arc-swap",
  "lazily-macros 0.23.1",

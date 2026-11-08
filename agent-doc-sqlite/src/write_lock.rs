@@ -31,7 +31,8 @@
 //! [`open_state_db_file`] covers the other half: a raw `Connection::open` has
 //! no busy handler at all, so even an autocommit write fails immediately under
 //! contention. Co-tenant table owners that cannot run the state-store
-//! initialization (the op log, Lazily's reliable-sync outbox) open through it.
+//! initialization (the op log) open through it. Lazily's reliable-sync outbox
+//! uses `SqliteStore::open`, which installs the same 30s timeout.
 
 use anyhow::{Context, Result};
 use rusqlite::{Connection, Transaction, TransactionBehavior};
@@ -59,9 +60,10 @@ pub fn immediate_transaction_unchecked(conn: &Connection) -> rusqlite::Result<Tr
 /// Open a raw connection to an existing-or-new `state.db` file with the
 /// standard busy timeout, without the state-store schema initialization.
 ///
-/// For co-tenant tables whose owner manages its own schema (the op log, the
-/// Lazily reliable-sync outbox). A bare `Connection::open` has no busy handler,
-/// so every contended statement on it fails immediately with `SQLITE_BUSY`.
+/// For co-tenant tables whose owner manages its own schema (the op log).
+/// Lazily's reliable-sync outbox uses `SqliteStore::open` instead. A bare
+/// `Connection::open` has no busy handler, so every contended statement on it
+/// fails immediately with `SQLITE_BUSY`.
 pub fn open_state_db_file(path: &Path) -> Result<Connection> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)

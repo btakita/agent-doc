@@ -56,7 +56,7 @@ agent-doc-run-context-io = { path = "../agent-doc-run-context-io", version = "0.
 agent-doc-snapshot-io = { path = "../agent-doc-snapshot-io", version = "0.35.570" }
 agent-doc-state-scope = { path = "../agent-doc-state-scope", version = "0.35.570" }
 agent-doc-sync-io = { path = "../agent-doc-sync-io", version = "0.35.570" }
-lazily = "0.61.0"
+lazily = "0.61.1"
 agent-doc-state-observer-io = { path = "../agent-doc-state-observer-io", version = "0.35.570" }
 agent-doc-supervisor-io = { path = "../agent-doc-supervisor-io", version = "0.35.570" }
 agent-doc-turn = { path = "../agent-doc-turn", version = "0.35.570" }

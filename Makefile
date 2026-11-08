@@ -734,7 +734,10 @@ wheel: python-bootstrap-test
 
 # Publish to PyPI
 publish-pypi:
-	.venv/bin/python -m twine upload --skip-existing dist/*
+	@set +x; \
+		token="$$(passage btak/PYPI_PUBLISH_TOKEN)" || { printf '%s\n' 'PYPI_PUBLISH_TOKEN lookup failed' >&2; exit 1; }; \
+		test -n "$$token" || { printf '%s\n' 'PYPI_PUBLISH_TOKEN lookup returned empty' >&2; exit 1; }; \
+		TWINE_USERNAME=__token__ TWINE_PASSWORD="$$token" .venv/bin/python -m twine upload --skip-existing dist/*
 
 # agent-doc's Rust workspace is private; release binaries through GitHub and PyPI.
 publish: publish-pypi

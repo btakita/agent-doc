@@ -27,28 +27,66 @@ internal object JetBrainsEditorSurfaces {
     private val LOG = Logger.getInstance(JetBrainsEditorSurfaces::class.java)
     fun forEditorWindow(project: Project, editorWindow: EditorWindow?): JetBrainsEditorSurface {
         val frame = editorWindow?.let(::frameOf)
-        val activeFrame = KeyboardFocusManager.getCurrentKeyboardFocusManager().activeWindow
-        val pane = toolWindowPanes(project).firstOrNull { paneFrame(it) === frame }
+        val activeFrame = keyboardFocusWindow()
+        val pane = toolWindowPanes(project).firstOrNull { pane ->
+            paneFrame(pane)?.let { paneFrame -> paneFrame === frame } == true
+        }
         val paneId = pane?.let(MarketplacePlatformBridge::paneId)
         return JetBrainsEditorSurface(
             surfaceId = paneId ?: fallbackSurfaceId(frame),
             toolWindowPaneId = paneId,
             frame = frame,
-            active = frame != null && frame === activeFrame,
+            active = frame != null && windowBelongsToFrame(activeFrame, frame),
         )
     }
 
     fun activeProjectSurface(project: Project): JetBrainsEditorSurface? {
-        val activeFrame = KeyboardFocusManager.getCurrentKeyboardFocusManager().activeWindow
-            ?: return null
-        val pane = toolWindowPanes(project).firstOrNull { paneFrame(it) === activeFrame }
-            ?: return null
+        val activeFrame = keyboardFocusWindow() ?: return null
+        val pane = toolWindowPanes(project).firstOrNull { pane ->
+            paneFrame(pane)?.let { frame -> windowBelongsToFrame(activeFrame, frame) } == true
+        } ?: return null
+        val frame = paneFrame(pane) ?: return null
+        val paneId = MarketplacePlatformBridge.paneId(pane) ?: return null
         return JetBrainsEditorSurface(
-            surfaceId = MarketplacePlatformBridge.paneId(pane) ?: return null,
-            toolWindowPaneId = MarketplacePlatformBridge.paneId(pane),
-            frame = activeFrame,
+            surfaceId = paneId,
+            toolWindowPaneId = paneId,
+            frame = frame,
             active = true,
         )
+    }
+
+    /**
+     * Focus state lives on the EDT AppContext. Auto-sync rechecks the gate from
+     * the focus executor; reading `KeyboardFocusManager` on that thread reports
+     * a null active window and drops the select-pane path.
+     */
+    internal fun keyboardFocusWindow(): Window? {
+        val read = { KeyboardFocusManager.getCurrentKeyboardFocusManager().activeWindow }
+        if (SwingUtilities.isEventDispatchThread()) {
+            return read()
+        }
+        val holder = arrayOfNulls<Window>(1)
+        try {
+            SwingUtilities.invokeAndWait { holder[0] = read() }
+        } catch (_: InterruptedException) {
+            Thread.currentThread().interrupt()
+            return null
+        } catch (_: Exception) {
+            return null
+        }
+        return holder[0]
+    }
+
+    /** The IDE frame is the keyboard surface when focus is that frame or an owned child. */
+    internal fun windowBelongsToFrame(active: Window?, frame: Window): Boolean {
+        var cursor = active
+        var guard = 0
+        while (cursor != null && guard < 16) {
+            if (cursor === frame) return true
+            cursor = cursor.owner
+            guard += 1
+        }
+        return false
     }
 
     fun isProjectSurfaceActive(project: Project): Boolean = activeProjectSurface(project) != null

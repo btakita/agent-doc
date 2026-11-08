@@ -7,6 +7,7 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.openapi.wm.ToolWindowManager
 import java.awt.Window
+import java.lang.reflect.Method
 
 /**
  * Optional platform capabilities that have no supported IntelliJ API.
@@ -50,11 +51,32 @@ internal object MarketplacePlatformBridge {
 
     fun toolWindowPanes(project: Project): List<Any> = runCatching {
         val manager = ToolWindowManager.getInstance(project)
-        val method = manager.javaClass.methods.firstOrNull {
-            it.name.startsWith("getToolWindowPanes") && it.parameterCount == 0
-        } ?: return emptyList()
-        (method.invoke(manager) as? Iterable<*>)?.filterNotNull().orEmpty()
+        val method = selectToolWindowPanesMethod(manager.javaClass.methods) ?: return emptyList()
+        toolWindowPaneInstances(method.invoke(manager))
     }.getOrDefault(emptyList())
+
+    /**
+     * IDEA 2026.3 publishes two public zero-arg `getToolWindowPanes$…` methods:
+     * the property getter returns `LinkedHashMap`, and the list getter returns
+     * `List`. `Class.getMethods` order is unspecified and the map getter is
+     * first in the 2026.3 class file. A map is not a `java.lang.Iterable`, so
+     * taking the first match yields no panes and every auto-sync gate stays
+     * `project_surface_inactive`. Prefer the list. A platform that only has the
+     * map still contributes its values.
+     */
+    internal fun selectToolWindowPanesMethod(methods: Array<out Method>): Method? {
+        val zeroArg = methods.filter { method ->
+            method.parameterCount == 0 && method.name.startsWith("getToolWindowPanes")
+        }
+        return zeroArg.firstOrNull { java.util.List::class.java.isAssignableFrom(it.returnType) }
+            ?: zeroArg.firstOrNull { java.util.Map::class.java.isAssignableFrom(it.returnType) }
+    }
+
+    internal fun toolWindowPaneInstances(value: Any?): List<Any> = when (value) {
+        is Map<*, *> -> value.values.filterNotNull()
+        is Iterable<*> -> value.filterNotNull()
+        else -> emptyList()
+    }
 
     fun paneId(pane: Any): String? = runCatching {
         pane.javaClass.methods.firstOrNull {
@@ -62,10 +84,15 @@ internal object MarketplacePlatformBridge {
         }?.invoke(pane) as? String
     }.getOrNull()
 
+    internal fun selectPaneFrameMethod(methods: Array<out Method>): Method? =
+        methods.firstOrNull { method ->
+            method.parameterCount == 0 &&
+                method.name.startsWith("getFrame") &&
+                Window::class.java.isAssignableFrom(method.returnType)
+        }
+
     fun paneFrame(pane: Any): Window? = runCatching {
-        pane.javaClass.methods.firstOrNull {
-            it.name.startsWith("getFrame") && it.parameterCount == 0
-        }?.invoke(pane) as? Window
+        selectPaneFrameMethod(pane.javaClass.methods)?.invoke(pane) as? Window
     }.getOrNull()
 
     fun relocateToolWindow(manager: ToolWindowManager, vararg arguments: Any): Boolean = runCatching {

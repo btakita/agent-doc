@@ -1195,8 +1195,10 @@ pub fn status(
 ///
 /// Each roster item without a live head of the same identity is restored: a
 /// struck (`~~…~~`) copy of it is removed and the item is re-appended, in
-/// roster order, before the closing marker. Every other byte of the queue is
-/// preserved. `None` when every roster item is already live.
+/// roster order, before the closing marker. Nested `**Closed by:**` children
+/// of that copy are removed with it and written back beneath the re-appended
+/// item, so the unstrike does not leave them without a parent. Every other
+/// byte of the queue is preserved. `None` when every roster item is already live.
 pub fn plan_loop_restore(content: &str, roster: &[String]) -> anyhow::Result<Option<String>> {
     let Some(schedule) = identified_queue_schedules(content)?.into_iter().next() else {
         anyhow::bail!("no agent:queue component to restore loop items into");
@@ -1249,16 +1251,29 @@ pub fn plan_loop_restore_for_queue(
         missing.iter().map(|item| identity(item)).collect();
     let mut removed: std::collections::HashSet<QueueItemIdentity> =
         std::collections::HashSet::new();
+    let mut children_by_id: std::collections::HashMap<QueueItemIdentity, String> =
+        std::collections::HashMap::new();
     let mut kept_body = String::with_capacity(body.len());
     let mut cursor = 0;
-    for (entry, range) in &spans {
-        if let QueueEntry::Completed(prompt) = entry {
-            let id = identity(&prompt.text);
-            if missing_ids.contains(&id) && removed.insert(id) {
-                kept_body.push_str(&body[cursor..range.start]);
-                cursor = range.end;
-            }
+    let mut index = 0;
+    while index < spans.len() {
+        let (entry, range) = &spans[index];
+        let QueueEntry::Completed(prompt) = entry else {
+            index += 1;
+            continue;
+        };
+        let id = identity(&prompt.text);
+        if !missing_ids.contains(&id) || !removed.insert(id.clone()) {
+            index += 1;
+            continue;
         }
+        kept_body.push_str(&body[cursor..range.start]);
+        let (child_end, next_index) = closed_by_children_end(body, &spans, index, prompt.indent);
+        if child_end > range.end {
+            children_by_id.insert(id, body[range.end..child_end].to_string());
+        }
+        cursor = child_end;
+        index = next_index;
     }
     kept_body.push_str(&body[cursor..]);
     if !kept_body.is_empty() && !kept_body.ends_with('\n') {
@@ -1276,12 +1291,76 @@ pub fn plan_loop_restore_for_queue(
             kept_body.push_str(line);
             kept_body.push('\n');
         }
+        if let Some(children) = children_by_id.get(&identity(item)) {
+            kept_body.push_str(children);
+            if !children.ends_with('\n') {
+                kept_body.push('\n');
+            }
+        }
     }
     let mut updated = String::with_capacity(content.len() + kept_body.len());
     updated.push_str(&content[..queue.open_end]);
     updated.push_str(&kept_body);
     updated.push_str(&content[queue.close_start..]);
     Ok(Some(updated))
+}
+
+/// End of the nested `**Closed by:**` block that belongs to the completed row
+/// at `parent_index`, and the span index just after that block.
+///
+/// The block is the contiguous deeper list rows that are `**Closed by:**`
+/// back-references, plus any list rows indented beneath those back-references.
+/// A blank line may sit between them. Anything else stays where it is, so a
+/// sibling row is not pulled into the restore.
+fn closed_by_children_end(
+    body: &str,
+    spans: &[(QueueEntry, std::ops::Range<usize>)],
+    parent_index: usize,
+    parent_indent: usize,
+) -> (usize, usize) {
+    let mut end = spans[parent_index].1.end;
+    let mut closed_by_indent: Option<usize> = None;
+    let mut index = parent_index + 1;
+    while index < spans.len() {
+        let range = &spans[index].1;
+        if range.start < end {
+            break;
+        }
+        let gap = &body[end..range.start];
+        if !gap.bytes().all(|byte| byte == b'\n' || byte == b'\r') {
+            break;
+        }
+        let Some(first_line) = body[range.start..range.end].lines().next() else {
+            break;
+        };
+        let Some((indent, content)) = list_item_indent_and_body(first_line) else {
+            break;
+        };
+        if indent <= parent_indent {
+            break;
+        }
+        let closed_by = content.starts_with("**Closed by:**");
+        let nested_under_closed_by = closed_by_indent.is_some_and(|marker| indent > marker);
+        if !closed_by && !nested_under_closed_by {
+            break;
+        }
+        if closed_by && closed_by_indent.is_none() {
+            closed_by_indent = Some(indent);
+        }
+        end = range.end;
+        index += 1;
+    }
+    (end, index)
+}
+
+fn list_item_indent_and_body(line: &str) -> Option<(usize, &str)> {
+    let indent = line.len() - line.trim_start_matches(' ').len();
+    let rest = &line[indent..];
+    let body = rest
+        .strip_prefix("- ")
+        .or_else(|| rest.strip_prefix("* "))
+        .or_else(|| rest.strip_prefix("+ "))?;
+    Some((indent, body.trim()))
 }
 
 #[cfg(test)]
@@ -1970,6 +2049,28 @@ mod tests {
             plan_loop_restore(&restored, &heads(&["a", "b"])).unwrap(),
             None
         );
+    }
+
+    /// Unstriking a loop item re-appends the row and keeps its `**Closed by:**`
+    /// children nested under it. On 2026-11-08 the agent-doc-bugs loop left
+    /// those children at the top of the component when the struck watch row
+    /// was removed.
+    #[test]
+    fn restore_keeps_closed_by_children_under_the_unstuck_loop_item() {
+        const WATCH: &str = "Watch https://github.com/btakita/agent-doc/issues for new issues. Add new issues into the backlog + queue except issue #40 + #45. [#q-241aecb69d4f]";
+        let struck = format!(
+            "- ~~{WATCH}~~ — auto-struck: addressed this cycle ⟦addressed-at:2026-11-01T14:47:32.000Z⟧; response: [#r-fc6c69471~~do [#trackedworkdropped] ⟦published⟧~~y open issues #40 and #45, both explicitly excluded. No backlog or queue item was added.\n  - **Closed by:** [#r-7fd5420c7f28]\n  - **Closed by:** [#r-2e5433bdab4b]\n"
+        );
+        let content = format!(
+            "# Doc\n\n## Loop <!-- agent:loop interval=\"1h\" priority keep stop -->\n{struck}- ~~other~~\n  - **Closed by:** [#r-aaaaaaaaaaaa]\n<!-- /agent:loop -->\n"
+        );
+        let restored = plan_loop_restore(&content, &heads(&[WATCH]))
+            .unwrap()
+            .expect("the struck watch row is restored");
+        let expected = format!(
+            "# Doc\n\n## Loop <!-- agent:loop interval=\"1h\" priority keep stop -->\n- ~~other~~\n  - **Closed by:** [#r-aaaaaaaaaaaa]\n- {WATCH}\n  - **Closed by:** [#r-7fd5420c7f28]\n  - **Closed by:** [#r-2e5433bdab4b]\n<!-- /agent:loop -->\n"
+        );
+        assert_eq!(restored, expected);
     }
 
     #[test]

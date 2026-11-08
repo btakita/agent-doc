@@ -38897,40 +38897,37 @@ fn automatic_focus_survey_runs_in_background(
 /// Manual and fenced focus still resolve them before the receipt. Automatic
 /// observe-only focus schedules them on `agent-doc-focus-survey` and returns
 /// an empty survey so the 1s focus lane can select the bound pane or refuse.
-fn spawn_automatic_focus_off_path_survey(
-    policy: MissingFocusPanePolicy,
-    focus_fenced: bool,
+struct OffPathFocusSurveyInput {
     session_id: Option<String>,
     canonical: PathBuf,
     registry_pane: Option<String>,
     rescue_pane: Option<String>,
     project_root: PathBuf,
     document_id: String,
+}
+
+fn spawn_automatic_focus_off_path_survey(
+    policy: MissingFocusPanePolicy,
+    focus_fenced: bool,
+    input: OffPathFocusSurveyInput,
 ) -> OffPathFocusSurvey {
     if automatic_focus_survey_runs_in_background(policy, focus_fenced) {
-        let has_work = session_id.is_some() || registry_pane.is_some() || rescue_pane.is_some();
+        let has_work = input.session_id.is_some()
+            || input.registry_pane.is_some()
+            || input.rescue_pane.is_some();
         if has_work
             && !OFF_PATH_FOCUS_SURVEY_IN_FLIGHT.swap(true, std::sync::atomic::Ordering::AcqRel)
-        {
-            if std::thread::Builder::new()
+            && std::thread::Builder::new()
                 .name("agent-doc-focus-survey".to_string())
                 .spawn(move || {
                     let _guard = OffPathFocusSurveyGuard;
                     let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        apply_off_path_focus_survey(
-                            session_id,
-                            canonical,
-                            registry_pane,
-                            rescue_pane,
-                            project_root,
-                            document_id,
-                        );
+                        apply_off_path_focus_survey(input);
                     }));
                 })
                 .is_err()
-            {
-                OFF_PATH_FOCUS_SURVEY_IN_FLIGHT.store(false, std::sync::atomic::Ordering::Release);
-            }
+        {
+            OFF_PATH_FOCUS_SURVEY_IN_FLIGHT.store(false, std::sync::atomic::Ordering::Release);
         }
         return OffPathFocusSurvey {
             proven_live_owner: None,
@@ -38940,15 +38937,17 @@ fn spawn_automatic_focus_off_path_survey(
         };
     }
     let tmux = agent_doc_tmux_io::configured_tmux();
-    let proven_live_owner = session_id.as_deref().and_then(|session_id| {
-        proven_session_log_focus_owner(&tmux, &canonical, session_id)
-    });
-    let registry_pane_owns_document = registry_pane.as_deref().is_some_and(|pane| {
-        process_tree_exactly_owns_document(&tmux, pane, &canonical)
-    });
+    let proven_live_owner = input
+        .session_id
+        .as_deref()
+        .and_then(|session_id| proven_session_log_focus_owner(&tmux, &input.canonical, session_id));
+    let registry_pane_owns_document = input
+        .registry_pane
+        .as_deref()
+        .is_some_and(|pane| process_tree_exactly_owns_document(&tmux, pane, &input.canonical));
     OffPathFocusSurvey {
         proven_live_owner,
-        registry_pane: registry_pane.unwrap_or_default(),
+        registry_pane: input.registry_pane.unwrap_or_default(),
         registry_pane_owns_document,
         deferred: false,
     }
@@ -38965,21 +38964,21 @@ impl Drop for OffPathFocusSurveyGuard {
     }
 }
 
-fn apply_off_path_focus_survey(
-    session_id: Option<String>,
-    canonical: PathBuf,
-    registry_pane: Option<String>,
-    rescue_pane: Option<String>,
-    project_root: PathBuf,
-    document_id: String,
-) {
+fn apply_off_path_focus_survey(input: OffPathFocusSurveyInput) {
+    let OffPathFocusSurveyInput {
+        session_id,
+        canonical,
+        registry_pane,
+        rescue_pane,
+        project_root,
+        document_id,
+    } = input;
     let tmux = agent_doc_tmux_io::configured_tmux();
-    let proven_live_owner = session_id.as_deref().and_then(|session_id| {
-        proven_session_log_focus_owner(&tmux, &canonical, session_id)
-    });
-    let registry_owner = registry_pane.filter(|pane| {
-        process_tree_exactly_owns_document(&tmux, pane, &canonical)
-    });
+    let proven_live_owner = session_id
+        .as_deref()
+        .and_then(|session_id| proven_session_log_focus_owner(&tmux, &canonical, session_id));
+    let registry_owner =
+        registry_pane.filter(|pane| process_tree_exactly_owns_document(&tmux, pane, &canonical));
     let rescued = rescue_pane.filter(|pane| {
         active_pane_process_owner_document(&tmux, pane, &project_root).as_deref()
             == Some(document_id.as_str())
@@ -39298,9 +39297,8 @@ fn handle_focus_document_pane_with_policy(
             still_owns_document,
         }
     });
-    let actor_owns_document = actor.is_some_and(|candidate| {
-        candidate.focusable && candidate.still_owns_document
-    });
+    let actor_owns_document =
+        actor.is_some_and(|candidate| candidate.focusable && candidate.still_owns_document);
     let rescue_pane = match &actor {
         Some(candidate) if !candidate.still_owns_document => Some(candidate.pane_id.to_string()),
         _ => None,
@@ -39311,12 +39309,14 @@ fn handle_focus_document_pane_with_policy(
         Some(spawn_automatic_focus_off_path_survey(
             missing_pane_policy,
             focus_fence.is_some(),
-            session_id.clone(),
-            canonical.clone(),
-            registry_entry.as_ref().map(|entry| entry.pane.clone()),
-            rescue_pane,
-            bootstrap.project_root.clone(),
-            document_id.clone(),
+            OffPathFocusSurveyInput {
+                session_id: session_id.clone(),
+                canonical: canonical.clone(),
+                registry_pane: registry_entry.as_ref().map(|entry| entry.pane.clone()),
+                rescue_pane,
+                project_root: bootstrap.project_root.clone(),
+                document_id: document_id.clone(),
+            },
         ))
     };
     let proven_live_owner = off_path_survey
@@ -39338,7 +39338,9 @@ fn handle_focus_document_pane_with_policy(
             not_alive_reason,
         } => (pane_id.to_string(), focused_reason, not_alive_reason),
         FocusPaneCandidateDecision::Reject { reason, pane_id } => {
-            let pane_owner_document = if off_path_survey.as_ref().is_some_and(|survey| survey.deferred)
+            let pane_owner_document = if off_path_survey
+                .as_ref()
+                .is_some_and(|survey| survey.deferred)
             {
                 None
             } else {

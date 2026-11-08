@@ -1004,10 +1004,9 @@ fn awaiting_operator_answer(
             &file.display().to_string(),
             claim,
             &evidence,
-        ) {
-            if closeout.coordinator_command_only() {
-                return false;
-            }
+        ) && closeout.coordinator_command_only()
+        {
+            return false;
         }
     }
     true

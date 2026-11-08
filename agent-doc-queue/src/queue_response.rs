@@ -454,7 +454,19 @@ pub fn queue_prompt_text_is_free_text(content: &str, text: &str) -> bool {
     if let Some(ids) = crate::queue_directive::topic_resolves_to_only_id_directives(&normalized)
         .or_else(|| crate::queue_directive::explicit_do_directive_with_note_ids(&normalized))
     {
-        return ids
+        // A trailing `[#q-…]` is the row's generated prompt id, not a second
+        // directive. `#fix-ci [#q-fad1e081fca1]` is still the preset head.
+        // An open backlog id that happens to start with `q-` stays a directive.
+        let decisive: Vec<&String> = ids
+            .iter()
+            .filter(|id| {
+                !(id.starts_with("q-") && !head_id_names_tracked_directive_item(content, id))
+            })
+            .collect();
+        if decisive.is_empty() {
+            return true;
+        }
+        return decisive
             .iter()
             .all(|id| head_id_is_registered_preset(content, id));
     }
@@ -2767,6 +2779,20 @@ mod tests {
             content,
             "[#editorauth2]: a note"
         ));
+        let preset = "---\nprompt_presets:\n  '#fix-ci': Fix CI\n---\n";
+        assert!(
+            queue_prompt_text_is_free_text(preset, "#fix-ci [#q-fad1e081fca1]"),
+            "a preset head plus its generated [#q-…] id is free text"
+        );
+        assert!(queue_prompt_text_is_free_text(preset, "[#q-fad1e081fca1]"));
+        let tracked = concat!(
+            "---\nprompt_presets:\n  '#fix-ci': Fix CI\n---\n",
+            "<!-- agent:backlog -->\n- [ ] [#q-tracked] real work\n<!-- /agent:backlog -->\n",
+        );
+        assert!(
+            !queue_prompt_text_is_free_text(tracked, "do [#q-tracked]"),
+            "an open backlog id that starts with q- stays id-backed"
+        );
     }
 
     #[test]

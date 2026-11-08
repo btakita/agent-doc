@@ -295,7 +295,7 @@ fn pull_request_state_for(
     pr_state: &mut dyn FnMut(&PullRequestRef) -> PullRequestState,
 ) -> Option<PullRequestState> {
     let named = named_pull_requests(item_text);
-    let states: Vec<_> = named.iter().map(|pr| pr_state(pr)).collect();
+    let states: Vec<_> = named.iter().map(pr_state).collect();
     combine_pull_request_states(&states)
 }
 
@@ -608,16 +608,16 @@ mod tests {
             1,
             false,
         );
-        let plan = plan_for(&vec![closed.clone()], "", PullRequestState::Closed);
+        let plan = plan_for(std::slice::from_ref(&closed), "", PullRequestState::Closed);
         assert_eq!(plan.removals.len(), 1);
         assert_eq!(plan.removals[0].reason, "closed pull request");
         assert!(plan.instructions.is_empty());
 
-        let open = plan_for(&vec![closed], "", PullRequestState::Open);
+        let open = plan_for(std::slice::from_ref(&closed), "", PullRequestState::Open);
         assert!(open.removals.is_empty());
         assert!(
             plan_for(
-                &vec![observed(
+                &[observed(
                     "https://github.com/example/repo/pull/837: rebase the request",
                     Some("feat/rebase"),
                     "/tmp/wt-closed",
@@ -638,9 +638,13 @@ mod tests {
         let entry = observed(item, Some("feat/live"), "/tmp/wt-live", 1, false);
         let live = format!("## Run <!-- agent:run -->\n- {item}\n<!-- /agent:run -->\n");
         assert!(
-            plan_for(&[entry.clone()], &live, PullRequestState::Closed)
-                .removals
-                .is_empty()
+            plan_for(
+                std::slice::from_ref(&entry),
+                &live,
+                PullRequestState::Closed
+            )
+            .removals
+            .is_empty()
         );
         let struck = format!("## Run <!-- agent:run -->\n- ~~{item}~~\n<!-- /agent:run -->\n");
         let plan = plan_for(&[entry], &struck, PullRequestState::Closed);
@@ -657,7 +661,7 @@ mod tests {
             false,
         );
         entry.completed = true;
-        let plan = plan_for(&[entry.clone()], "", PullRequestState::Open);
+        let plan = plan_for(std::slice::from_ref(&entry), "", PullRequestState::Open);
         assert_eq!(plan.removals.len(), 1);
         assert_eq!(plan.removals[0].reason, "completed work");
         entry.completed = false;
@@ -690,7 +694,11 @@ mod tests {
             ),
             dir = dir
         );
-        let plan = plan_for(&[entry.clone()], &delete, PullRequestState::Open);
+        let plan = plan_for(
+            std::slice::from_ref(&entry),
+            &delete,
+            PullRequestState::Open,
+        );
         assert_eq!(plan.removals.len(), 1);
         assert_eq!(plan.removals[0].reason, "operator remove");
         assert!(plan.instructions.is_empty());

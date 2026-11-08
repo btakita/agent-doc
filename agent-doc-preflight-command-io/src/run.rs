@@ -1217,12 +1217,11 @@ fn run_with_options_to_writer_in_pass(
     // `#blockerdisregard`: consume `disregard` / `[disregard]` / `disregard
     // blockers` before the diff, so an invented blocker the operator named
     // never reaches the agent as a prompt. Best-effort, same as `status?`.
-    if !options.probe {
-        if let Err(err) =
+    if !options.probe
+        && let Err(err) =
             agent_doc_preflight_io::blocker_disregard::run_blocker_disregard_maintenance(file)
-        {
-            eprintln!("[preflight] blocker disregard: not applied this pass: {err:#}");
-        }
+    {
+        eprintln!("[preflight] blocker disregard: not applied this pass: {err:#}");
     }
 
     crate::progress::enter("compute_diff")?;

@@ -329,13 +329,10 @@ pub fn combine_pull_request_states(states: &[PullRequestState]) -> Option<PullRe
     if states.is_empty() {
         return None;
     }
-    if states.iter().any(|state| *state == PullRequestState::Open) {
+    if states.contains(&PullRequestState::Open) {
         return Some(PullRequestState::Open);
     }
-    if states
-        .iter()
-        .any(|state| *state == PullRequestState::Unknown)
-    {
+    if states.contains(&PullRequestState::Unknown) {
         return Some(PullRequestState::Unknown);
     }
     Some(PullRequestState::Closed)

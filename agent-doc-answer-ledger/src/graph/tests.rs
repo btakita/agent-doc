@@ -532,7 +532,7 @@ fn closed_upstream_moots_only_the_decision_that_cites_it() {
     );
     assert!(graph.resolve_decision("tdsmoke").is_none());
 
-    let moot = graph.moot_by_closed_upstream(&observations, &[issue.clone()]);
+    let moot = graph.moot_by_closed_upstream(&observations, std::slice::from_ref(&issue));
     let mooted: Vec<&str> = moot.iter().map(|row| row.decision_id.as_str()).collect();
     assert!(mooted.contains(&cite.as_str()), "{moot:?}");
     assert!(mooted.contains(&bare.as_str()), "{moot:?}");
@@ -551,11 +551,12 @@ fn closed_upstream_moots_only_the_decision_that_cites_it() {
     let alien_ledger = Ledger::build(&alien_observations, &PriorIndex::default(), NOW, None);
     let mut alien_graph = DecisionGraph::build(&alien_ledger, &alien_observations);
     let alien = decision(&alien_graph, "tdalien");
-    let alien_moot = alien_graph.moot_by_closed_upstream(&alien_observations, &[issue.clone()]);
+    let alien_moot =
+        alien_graph.moot_by_closed_upstream(&alien_observations, std::slice::from_ref(&issue));
     assert!(alien_moot.is_empty(), "{alien_moot:?}");
     assert_ne!(alien, cite);
 
-    let moot_pull = graph.moot_by_closed_upstream(&observations, &[pull.clone()]);
+    let moot_pull = graph.moot_by_closed_upstream(&observations, std::slice::from_ref(&pull));
     let mooted_pull: Vec<&str> = moot_pull
         .iter()
         .map(|row| row.decision_id.as_str())
@@ -585,7 +586,7 @@ fn bare_issue_mention_stays_when_the_closed_number_is_ambiguous() {
             .moot_by_closed_upstream(&observations, &[issue.clone(), alien])
             .is_empty()
     );
-    let moot = graph.moot_by_closed_upstream(&observations, &[issue.clone()]);
+    let moot = graph.moot_by_closed_upstream(&observations, std::slice::from_ref(&issue));
     assert_eq!(moot.len(), 1, "{moot:?}");
     assert_eq!(moot[0].decision_id, bare);
     assert_eq!(moot[0].upstream, issue);

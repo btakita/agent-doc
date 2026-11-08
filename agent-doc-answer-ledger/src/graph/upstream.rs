@@ -293,10 +293,9 @@ fn parse_github_path(text: &str) -> Option<Parsed<'_>> {
         (GithubUpstreamKind::Issue, rest)
     } else if let Some(rest) = rest.strip_prefix("pull/") {
         (GithubUpstreamKind::PullRequest, rest)
-    } else if let Some(rest) = rest.strip_prefix("pulls/") {
-        (GithubUpstreamKind::PullRequest, rest)
     } else {
-        return None;
+        let rest = rest.strip_prefix("pulls/")?;
+        (GithubUpstreamKind::PullRequest, rest)
     };
     let (number, rest) = take_number(rest)?;
     Some(Parsed {
@@ -435,11 +434,14 @@ mod tests {
         let text = "see https://github.com/btakita/agent-doc/issues/395#issuecomment-1 and PR #12";
         let cited = citations(text, &[], &[]);
         assert_eq!(cited, vec![issue.clone()]);
-        let cited = citations(text, &[], &[pull.clone()]);
+        let cited = citations(text, &[], std::slice::from_ref(&pull));
         assert!(cited.contains(&pull));
         let alien = GithubUpstream::issue("other", "repo", 395);
         let bare = "choices: Wait on issue 395";
         assert!(citations(bare, &[], &[issue.clone(), alien]).is_empty());
-        assert_eq!(citations(bare, &[], &[issue.clone()]), vec![issue]);
+        assert_eq!(
+            citations(bare, &[], std::slice::from_ref(&issue)),
+            vec![issue]
+        );
     }
 }

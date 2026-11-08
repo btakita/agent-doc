@@ -655,11 +655,11 @@ fn selection_for_item(content: &str, raw: &str) -> Result<Selection> {
     }
     let mut items = BTreeSet::new();
     let mut requests = BTreeSet::new();
-    if let Some(id) = explicit_id(raw) {
-        if document_mentions_id(content, &id) {
-            items.insert(id);
-            return Ok(Selection::items(items, requests));
-        }
+    if let Some(id) = explicit_id(raw)
+        && document_mentions_id(content, &id)
+    {
+        items.insert(id);
+        return Ok(Selection::items(items, requests));
     }
     let mut matched = false;
     for row in list_bodies(content) {

@@ -110,7 +110,9 @@ impl AnswerLedgerReport {
             .filter(|signal| {
                 let about_todo_row = match signal.kind.as_str() {
                     "tracked_work_missing_todo_backlink" => false,
-                    "stale_tracked_item" => signal.component.as_deref() == Some("todo"),
+                    "stale_tracked_item" | "closing_pull_request" => {
+                        signal.component.as_deref() == Some("todo")
+                    }
                     _ => true,
                 };
                 !(about_todo_row && closed.contains(&signal.todo.to_ascii_lowercase()))
@@ -259,7 +261,7 @@ fn graph_rows(
     let nodes = graph
         .nodes
         .values()
-        .filter(|node| node.in_document)
+        .filter(|node| graph.persists_cache_node(node))
         .map(
             |node| agent_doc_sqlite::answer_ledger_index::AnswerNodeRow {
                 id: node.id.clone(),
@@ -333,15 +335,21 @@ fn load_prior_graph(file: &Path) -> (Vec<Node>, Vec<GraphEdge>) {
 }
 
 /// The ledger's decision graph plus cached history the document no longer
-/// shows (`#decisiongraph`). Read-only.
+/// shows (`#decisiongraph`). Read-only. Document lines that name a pull
+/// request and a todo or backlog id record the closing association, and a
+/// cached association from the other creation order is restored by
+/// `merge_prior` before that link runs again.
 fn graph_of(
     file: &Path,
     ledger: &Ledger,
     observations: &agent_doc_answer_ledger::extract::Observations,
+    content: &str,
 ) -> DecisionGraph {
     let mut graph = DecisionGraph::build(ledger, observations);
     let (nodes, edges) = load_prior_graph(file);
     graph.merge_prior(nodes, edges);
+    let known = agent_doc_answer_ledger::graph::known_upstreams_in_document(content);
+    graph.link_closing_upstreams(observations, &known);
     graph
 }
 
@@ -350,7 +358,7 @@ fn graph_of(
 /// (`#decisionregistrygraph`; never cached). Read-only.
 pub fn build_graph(file: &Path, content: &str) -> (Ledger, DecisionGraph) {
     let (observations, ledger) = build_ledger(file, content);
-    let mut graph = graph_of(file, &ledger, &observations);
+    let mut graph = graph_of(file, &ledger, &observations, content);
     crate::decision_registry_graph::overlay_project_registry(file, &mut graph, &observations);
     (ledger, graph)
 }
@@ -795,7 +803,7 @@ pub fn probe_answer_ledger(file: &Path) -> Result<AnswerLedgerReport> {
     let keys = lookup_keys(file, &content, &BTreeSet::new());
     let pass = plan_pass(file, &content, &load_prior(file, &keys), now)?;
     let mut ledger = pass.ledger;
-    let graph = graph_of(file, &ledger, &pass.observations);
+    let graph = graph_of(file, &ledger, &pass.observations, &content);
     ledger.recompute_liveness(&pass.observations.open_item_ids, &named_edges(&graph));
     Ok(report_of(
         &ledger,
@@ -899,7 +907,7 @@ fn run_answer_ledger_maintenance_with_options(
         (report_observations, report_ledger) = build_with_prior(file, &persisted, &prior, now);
         final_content = persisted;
     }
-    let graph = graph_of(file, &report_ledger, &report_observations);
+    let graph = graph_of(file, &report_ledger, &report_observations, &final_content);
     // `#decisionprune` x `#decisiongraph`: graph edges (depends_on,
     // conflicts_with, derived_from, exception_to, ...) carry liveness too.
     report_ledger.recompute_liveness(&report_observations.open_item_ids, &named_edges(&graph));
@@ -955,6 +963,28 @@ fn run_answer_ledger_maintenance_with_options(
         );
     }
     Ok(report)
+}
+
+/// `#prannotate`: open todo and backlog items a pull request (or issue)
+/// closes, whose own text does not yet cite that artifact. The action tells
+/// the agent to add the URL. Read-only: the document is not rewritten.
+/// Cached associations survive when the citing text was on the other side
+/// and is no longer in `content`.
+pub fn closing_pull_signals(file: &Path, content: &str) -> Vec<crate::TodoSignal> {
+    let (observations, ledger) = build_ledger(file, content);
+    let graph = graph_of(file, &ledger, &observations, content);
+    graph
+        .work_upstream_annotations(&observations)
+        .into_iter()
+        .map(|found| crate::TodoSignal {
+            kind: "closing_pull_request".to_string(),
+            todo: found.item_id.clone(),
+            ids: vec![found.item_id],
+            action: found.instruction,
+            component: Some(found.component.as_str().to_string()),
+            ..crate::TodoSignal::default()
+        })
+        .collect()
 }
 
 /// `#decisionstaleaudit`: every open tracked item a delivered decision makes
@@ -1049,7 +1079,7 @@ pub fn stale_tracked_items_of(
     } else {
         Default::default()
     };
-    let graph = graph_of(file, ledger, observations);
+    let graph = graph_of(file, ledger, observations, content);
     let responses = LocalResponses { file, content };
     let evidence = agent_doc_answer_ledger::stale::DoneEvidence {
         graph: Some(&graph),
@@ -2465,5 +2495,71 @@ mod tests {
         let observations = agent_doc_answer_ledger::extract::observe(&pruned, &[]);
         let document_only = Ledger::build(&observations, &PriorIndex::default(), 0, None);
         assert!(document_only.answered_facts().is_empty());
+    }
+
+    /// `#prannotate`: a document line that names the pull request and the
+    /// backlog id instructs the agent to add the URL. Once the item cites
+    /// the URL, the signal stops.
+    #[test]
+    fn closing_pull_signal_names_the_backlog_item_and_the_pull_request() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("session.md");
+        let url = "https://github.com/haiven-dev/haiven-api/pull/852";
+        let content = format!(
+            "---\nagent_doc_session: prannotate\n---\n\n\
+             ## Backlog\n\n<!-- agent:backlog -->\n\
+             - [ ] [#publishtelemetryannotati] Publish TelemetryAnnotation required provenance\n\
+             <!-- /agent:backlog -->\n\n\
+             {url} closes [#publishtelemetryannotati].\n"
+        );
+        std::fs::write(&doc, &content).unwrap();
+        let signals = closing_pull_signals(&doc, &content);
+        assert_eq!(signals.len(), 1, "{signals:?}");
+        assert_eq!(signals[0].kind, "closing_pull_request");
+        assert_eq!(signals[0].todo, "publishtelemetryannotati");
+        assert_eq!(signals[0].ids, vec!["publishtelemetryannotati".to_string()]);
+        assert_eq!(signals[0].component.as_deref(), Some("backlog"));
+        assert!(signals[0].action.contains("[#publishtelemetryannotati]"));
+        assert!(signals[0].action.contains(url));
+        assert!(signals[0].action.contains("--backlog-edit"));
+
+        let cited = content.replace(
+            "Publish TelemetryAnnotation required provenance",
+            &format!("Publish TelemetryAnnotation required provenance {url}"),
+        );
+        let signals = closing_pull_signals(&doc, &cited);
+        assert!(signals.is_empty(), "{signals:?}");
+    }
+
+    /// The pull request cited the id before the backlog item existed. After
+    /// that graph is cached, adding the item still produces the instruction
+    /// even though the citing line is gone.
+    #[test]
+    fn closing_pull_signal_joins_a_cached_pull_request_when_the_item_appears() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("session.md");
+        let url = "https://github.com/haiven-dev/haiven-api/pull/852";
+        let citing = format!(
+            "---\nagent_doc_session: prannotate\n---\n\n\
+             {url} closes [#publishtelemetryannotati].\n"
+        );
+        std::fs::write(&doc, &citing).unwrap();
+        run_answer_ledger_maintenance_force_disk(&doc, &DiskEffects).unwrap();
+        assert!(closing_pull_signals(&doc, &citing).is_empty());
+
+        let item = "---\nagent_doc_session: prannotate\n---\n\n\
+             ## Backlog\n\n<!-- agent:backlog -->\n\
+             - [ ] [#publishtelemetryannotati] Publish TelemetryAnnotation required provenance\n\
+             <!-- /agent:backlog -->\n";
+        std::fs::write(&doc, item).unwrap();
+        let signals = closing_pull_signals(&doc, item);
+        assert_eq!(signals.len(), 1, "{signals:?}");
+        assert_eq!(signals[0].kind, "closing_pull_request");
+        assert_eq!(signals[0].todo, "publishtelemetryannotati");
+        assert_eq!(signals[0].component.as_deref(), Some("backlog"));
+        assert!(signals[0].action.contains(url), "{signals:?}");
+        assert!(signals[0].action.contains("--backlog-edit"), "{signals:?}");
     }
 }

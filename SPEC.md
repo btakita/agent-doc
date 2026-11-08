@@ -59,6 +59,10 @@
   in the same closeout when the action is finished or moot, including
   standalone rows with no tracked-work link. A row stays open only while a
   concrete operator action remains; uncertain evidence never completes it.
+  A `closing_pull_request` signal (`#prannotate`) tells the agent to put the
+  closing pull request's URL on an open todo or backlog item that does not yet
+  cite it, whichever of the pull request and the item existed first. The binary
+  records the association and does not rewrite the item.
   See [Document Format](specs/02-document-format.md#components) and
   [Closeout Commands](specs/07-closeout-commands.md#write-path-invariants).
 

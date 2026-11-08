@@ -155,9 +155,11 @@ pub enum EdgeKind {
     /// derivation `concludes` the decision it answers; the edge's clause is
     /// the concluded answer (`#firstprinciplesstore`).
     Concludes,
-    /// GitHub issue or pull request `upstream_of` a decision: the decision
-    /// exists because that upstream is open. Closing the upstream moots the
-    /// decision (`DecisionGraph::moot_by_closed_upstream`).
+    /// GitHub issue or pull request `upstream_of` a decision (clause `open`):
+    /// the decision exists because that upstream is open. Closing the
+    /// upstream moots the decision (`DecisionGraph::moot_by_closed_upstream`).
+    /// Clause `closes` is the same edge onto a todo or backlog item the
+    /// artifact closes; that item is not a decision and is not mooted.
     UpstreamOf,
 }
 

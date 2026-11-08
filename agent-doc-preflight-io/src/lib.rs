@@ -280,7 +280,7 @@ pub struct TodoSignal {
     /// `tracked_work_missing_todo_backlink`, `legacy_source_unqualified`,
     /// `operator_done_review_open`, `operator_done_backlog_open`, `operator_done_icebox_open`,
     /// `linked_work_resolved`, `cited_work_resolved`,
-    /// `stale_tracked_item`, or `todo_sync_required`.
+    /// `stale_tracked_item`, `closing_pull_request`, or `todo_sync_required`.
     pub kind: String,
     /// The `--todo-*` selector of the item (its own id, else its text). For
     /// `stale_tracked_item` it is the stale item's own id in `component`.
@@ -623,6 +623,7 @@ pub fn todo_signals_for_document(file: &Path, content: &str) -> Vec<TodoSignal> 
             );
             let mut signals = sync_signals();
             append_stale_tracked_signals(file, content, &mut signals);
+            signals.extend(answer_ledger::closing_pull_signals(file, content));
             return signals;
         }
     };
@@ -647,6 +648,7 @@ pub fn todo_signals_for_document(file: &Path, content: &str) -> Vec<TodoSignal> 
                 );
             append_unlinked_queue_signals(content, &links, &preset_only, &mut signals);
             append_stale_tracked_signals(file, content, &mut signals);
+            signals.extend(answer_ledger::closing_pull_signals(file, content));
             signals
         }
         Err(err) => {
@@ -655,6 +657,7 @@ pub fn todo_signals_for_document(file: &Path, content: &str) -> Vec<TodoSignal> 
             );
             let mut signals = sync_signals();
             append_stale_tracked_signals(file, content, &mut signals);
+            signals.extend(answer_ledger::closing_pull_signals(file, content));
             signals
         }
     }

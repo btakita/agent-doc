@@ -3,16 +3,29 @@
 //!
 //! A cited issue or pull request is an evidence node. `upstream_of` records
 //! that it is upstream of a decision: the decision exists because the
-//! upstream is open. Closing the upstream moots that decision. There is no
-//! second causality graph.
+//! upstream is open. Closing the upstream moots that decision.
+//!
+//! The same edge, with clause [`CLOSES_CLAUSE`], records that the artifact
+//! closes a todo or backlog item. The item does not become a decision, and
+//! the document is not rewritten. The association is recorded from either
+//! side: the item's text cites the artifact, or the artifact's text (or a
+//! document line that names it) cites the item. Whichever side appears
+//! second still joins, including across [`DecisionGraph::merge_prior`]. An
+//! open item that does not yet name the artifact yields an annotation
+//! instruction for the agent.
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
 use super::{DecisionGraph, EdgeSource, GraphEdge, Node, NodeKind};
-use crate::extract::Observations;
+use crate::extract::{Observations, TrackedComponent, TrackedItemObs, bracket_ids};
 use crate::{EdgeKind, text};
+
+/// Clause on `upstream_of` when the artifact closes a todo or backlog item.
+/// Decision citations keep clause `open` and are what
+/// [`DecisionGraph::moot_by_closed_upstream`] returns.
+pub const CLOSES_CLAUSE: &str = "closes";
 
 /// Issue or pull request. GitHub shares one number space, but the URL path
 /// distinguishes them, and a bare `issue N` does not cite a pull request.
@@ -89,6 +102,27 @@ pub struct MootDecision {
     pub upstream: GithubUpstream,
 }
 
+/// Pull request or issue text the caller already has. `in_document` is false
+/// when the text is a pull-request body that the session document does not
+/// contain.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KnownUpstream {
+    pub upstream: GithubUpstream,
+    pub text: String,
+    pub in_document: bool,
+}
+
+/// An open todo or backlog item the agent should annotate with the artifact
+/// that closes it. The graph records the edge either way; this is only the
+/// missing visible citation.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct WorkUpstreamAnnotation {
+    pub item_id: String,
+    pub component: TrackedComponent,
+    pub upstream: GithubUpstream,
+    pub instruction: String,
+}
+
 impl DecisionGraph {
     /// Record `upstream_of` for citations of `closed`, then return every open
     /// decision that cites one of them. A decision that does not cite a
@@ -103,6 +137,10 @@ impl DecisionGraph {
         let mut out = Vec::new();
         for edge in &self.edges {
             if edge.kind != EdgeKind::UpstreamOf || !closed_ids.contains(&edge.from) {
+                continue;
+            }
+            // A todo/backlog close is not a decision to moot.
+            if edge.clause.as_deref() == Some(CLOSES_CLAUSE) {
                 continue;
             }
             let Some(node) = self.nodes.get(&edge.to) else {
@@ -126,6 +164,96 @@ impl DecisionGraph {
         out.dedup();
         out
     }
+
+    /// Record `upstream_of` (clause [`CLOSES_CLAUSE`]) from a pull request or
+    /// issue to the todo or backlog item it closes.
+    ///
+    /// Either observation is enough, and the later one still joins:
+    /// - the tracked item's own text cites the artifact (the item was written
+    ///   while the pull request already existed, or it was annotated);
+    /// - `known` text cites the item id (the pull request was written while
+    ///   the item already existed, or the item is added later and a prior
+    ///   call's edge is restored with [`DecisionGraph::merge_prior`]).
+    ///
+    /// An id that is not a tracked item yet is a placeholder item node so the
+    /// edge survives until the item appears. Review and icebox rows are not
+    /// associated. Does not rewrite the document.
+    pub fn link_closing_upstreams(&mut self, observations: &Observations, known: &[KnownUpstream]) {
+        link_work(self, observations, known);
+        self.finish();
+    }
+
+    /// Open todo and backlog items associated with a closing artifact whose
+    /// own text does not yet cite it. Each [`WorkUpstreamAnnotation::instruction`]
+    /// tells the agent to add the URL. Already-cited items stay associated
+    /// and are not returned.
+    pub fn work_upstream_annotations(
+        &self,
+        observations: &Observations,
+    ) -> Vec<WorkUpstreamAnnotation> {
+        let mut out = Vec::new();
+        for item in work_items(observations) {
+            if !item.open {
+                continue;
+            }
+            for edge in self.incoming(&item.id, EdgeKind::UpstreamOf) {
+                if edge.clause.as_deref() != Some(CLOSES_CLAUSE) {
+                    continue;
+                }
+                let Some(upstream) = upstream_from_node_id(&edge.from) else {
+                    continue;
+                };
+                if item_names_upstream(&item.text, &upstream) {
+                    continue;
+                }
+                out.push(WorkUpstreamAnnotation {
+                    instruction: annotation_instruction(item, &upstream),
+                    item_id: item.id.clone(),
+                    component: item.component,
+                    upstream,
+                });
+            }
+        }
+        out.sort();
+        out.dedup();
+        out
+    }
+}
+
+/// Explicit `github.com/<owner>/<repo>/issues|pull|pulls/<n>` URLs in
+/// `document`, with the item ids named on that line or on a following
+/// non-list continuation line. The same artifact's texts are concatenated.
+pub fn known_upstreams_in_document(document: &str) -> Vec<KnownUpstream> {
+    let lines: Vec<&str> = document.lines().collect();
+    let mut grouped: BTreeMap<GithubUpstream, String> = BTreeMap::new();
+    for (index, line) in lines.iter().enumerate() {
+        let urls = explicit_upstreams(line);
+        if urls.is_empty() {
+            continue;
+        }
+        let mut text = (*line).to_string();
+        if let Some(next) = lines.get(index + 1)
+            && continuation_cites_work(next)
+        {
+            text.push('\n');
+            text.push_str(next);
+        }
+        for upstream in urls {
+            let entry = grouped.entry(upstream).or_default();
+            if !entry.is_empty() {
+                entry.push('\n');
+            }
+            entry.push_str(&text);
+        }
+    }
+    grouped
+        .into_iter()
+        .map(|(upstream, text)| KnownUpstream {
+            upstream,
+            text,
+            in_document: true,
+        })
+        .collect()
 }
 
 /// Project citations onto `upstream_of` edges. `closed` binds a bare
@@ -423,6 +551,215 @@ fn is_name_byte(byte: u8) -> bool {
     byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_' || byte == b'.'
 }
 
+fn work_items(observations: &Observations) -> impl Iterator<Item = &TrackedItemObs> {
+    observations.tracked.iter().filter(|item| {
+        matches!(
+            item.component,
+            TrackedComponent::Todo | TrackedComponent::Backlog
+        )
+    })
+}
+
+/// Item self-citations and `known` texts. A cited id with no tracked row yet
+/// is a placeholder so a later item joins the edge already stored.
+pub(super) fn link_work(
+    graph: &mut DecisionGraph,
+    observations: &Observations,
+    known: &[KnownUpstream],
+) {
+    let tracked: Vec<&TrackedItemObs> = work_items(observations).collect();
+    for item in &tracked {
+        graph.node(Node {
+            id: item.id.clone(),
+            kind: NodeKind::Item,
+            label: item.text.clone(),
+            open: Some(item.open),
+            location: None,
+            first_seen_at: None,
+            in_document: true,
+        });
+        for upstream in explicit_upstreams(&item.text) {
+            note_closes(graph, &upstream, &item.id, true);
+        }
+    }
+    let tracked_ids: BTreeSet<&str> = tracked.iter().map(|item| item.id.as_str()).collect();
+    for known in known {
+        let mut cited = cited_work_ids(&known.text);
+        cited.retain(|id| {
+            tracked_ids.contains(id.as_str()) || !is_tracked_elsewhere(observations, id)
+        });
+        for id in cited {
+            if !tracked_ids.contains(id.as_str()) {
+                graph.node(Node {
+                    id: id.clone(),
+                    kind: NodeKind::Item,
+                    label: String::new(),
+                    open: None,
+                    location: None,
+                    first_seen_at: None,
+                    in_document: false,
+                });
+            }
+            note_closes(graph, &known.upstream, &id, known.in_document);
+        }
+    }
+}
+
+/// Review and icebox rows are tracked, but they are not this association.
+fn is_tracked_elsewhere(observations: &Observations, id: &str) -> bool {
+    observations.tracked.iter().any(|item| {
+        item.id == id
+            && !matches!(
+                item.component,
+                TrackedComponent::Todo | TrackedComponent::Backlog
+            )
+    })
+}
+
+fn note_closes(
+    graph: &mut DecisionGraph,
+    upstream: &GithubUpstream,
+    item_id: &str,
+    in_document: bool,
+) {
+    let id = upstream.node_id();
+    graph.node(Node {
+        id: id.clone(),
+        kind: NodeKind::Evidence,
+        label: upstream.url(),
+        open: None,
+        location: None,
+        first_seen_at: None,
+        in_document,
+    });
+    graph.edge(GraphEdge {
+        from: id,
+        kind: EdgeKind::UpstreamOf,
+        to: item_id.to_string(),
+        source: EdgeSource::Derived,
+        clause: Some(CLOSES_CLAUSE.to_string()),
+    });
+}
+
+fn annotation_instruction(item: &TrackedItemObs, upstream: &GithubUpstream) -> String {
+    let noun = match upstream.kind {
+        GithubUpstreamKind::PullRequest => "pull request",
+        GithubUpstreamKind::Issue => "issue",
+    };
+    let flag = match item.component {
+        TrackedComponent::Todo => "--todo-edit",
+        TrackedComponent::Backlog => "--backlog-edit",
+        TrackedComponent::Review | TrackedComponent::Icebox => "--backlog-edit",
+    };
+    format!(
+        "Annotate the open {} item [#{id}] with the {noun} that closes it: {url}. Add that URL to the item text with {flag} in this closeout. Do not wait for the operator to ask, and do not check the item off only because the {noun} exists.",
+        item.component.as_str(),
+        id = item.id,
+        url = upstream.url(),
+    )
+}
+
+/// The item already shows this artifact: a `github.com/.../pull|issues/<n>`
+/// URL or `owner/repo#<n>`. A bare `PR 852` does not.
+fn item_names_upstream(text: &str, upstream: &GithubUpstream) -> bool {
+    let lower = text.to_ascii_lowercase();
+    let host = format!(
+        "github.com/{}/{}/{}/{}",
+        upstream.owner,
+        upstream.repo,
+        upstream.kind.path(),
+        upstream.number
+    );
+    if lower.contains(&host) {
+        return true;
+    }
+    if upstream.kind == GithubUpstreamKind::PullRequest {
+        let pulls = format!(
+            "github.com/{}/{}/pulls/{}",
+            upstream.owner, upstream.repo, upstream.number
+        );
+        if lower.contains(&pulls) {
+            return true;
+        }
+    }
+    lower.contains(&format!(
+        "{}/{}#{}",
+        upstream.owner, upstream.repo, upstream.number
+    ))
+}
+
+fn cited_work_ids(text: &str) -> Vec<String> {
+    let mut out = bracket_ids(text);
+    let chars: Vec<char> = text.chars().collect();
+    let mut index = 0;
+    while index < chars.len() {
+        if chars[index] != '#' || (index > 0 && chars[index - 1] == '[') {
+            index += 1;
+            continue;
+        }
+        let preceded = index == 0 || chars[index - 1].is_whitespace() || chars[index - 1] == '(';
+        let start = index + 1;
+        let mut end = start;
+        while end < chars.len() && is_work_id_char(chars[end]) {
+            end += 1;
+        }
+        if preceded && end > start {
+            let id: String = chars[start..end]
+                .iter()
+                .flat_map(|ch| ch.to_lowercase())
+                .collect();
+            if id.chars().next().is_some_and(|ch| ch.is_ascii_alphabetic())
+                && !id.starts_with("subagent-operator-request")
+            {
+                out.push(id);
+            }
+        }
+        index = end.max(index + 1);
+    }
+    out.sort();
+    out.dedup();
+    out
+}
+
+fn is_work_id_char(ch: char) -> bool {
+    ch.is_ascii_alphanumeric() || ch == '-' || ch == '_'
+}
+
+fn continuation_cites_work(line: &str) -> bool {
+    let trimmed = line.trim();
+    if trimmed.is_empty()
+        || trimmed.starts_with(['-', '*', '+', '#', '<', '>'])
+        || !explicit_upstreams(trimmed).is_empty()
+    {
+        return false;
+    }
+    !cited_work_ids(trimmed).is_empty()
+}
+
+/// `github:{owner}/{repo}/issues|pull/{n}` back to the artifact. Anything else
+/// is not a closing upstream this module recorded.
+fn upstream_from_node_id(id: &str) -> Option<GithubUpstream> {
+    let rest = id.strip_prefix("github:")?;
+    let (owner, rest) = rest.split_once('/')?;
+    let (repo, rest) = rest.split_once('/')?;
+    let (kind, number) = rest.split_once('/')?;
+    let kind = match kind {
+        "issues" => GithubUpstreamKind::Issue,
+        "pull" => GithubUpstreamKind::PullRequest,
+        _ => return None,
+    };
+    let number = number.parse().ok()?;
+    if number == 0 || owner.is_empty() || repo.is_empty() {
+        return None;
+    }
+    Some(GithubUpstream {
+        owner: owner.to_string(),
+        repo: repo.to_string(),
+        kind,
+        number,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -443,5 +780,49 @@ mod tests {
             citations(bare, &[], std::slice::from_ref(&issue)),
             vec![issue]
         );
+    }
+
+    #[test]
+    fn document_lines_keep_a_citation_on_its_own_line() {
+        let url = "https://github.com/haiven-dev/haiven-api/pull/852";
+        let pull = GithubUpstream::pull_request("haiven-dev", "haiven-api", 852);
+        let same_line = format!("Ship telemetry. {url} closes [#publishtelemetryannotati].");
+        let known = known_upstreams_in_document(&same_line);
+        assert_eq!(known.len(), 1);
+        assert_eq!(known[0].upstream, pull);
+        assert!(known[0].in_document);
+        assert_eq!(
+            cited_work_ids(&known[0].text),
+            vec!["publishtelemetryannotati".to_string()]
+        );
+
+        let other = format!(
+            "{url} closes [#publishtelemetryannotati].\n- [ ] [#otheritem] leave this alone\n"
+        );
+        let known = known_upstreams_in_document(&other);
+        let ids = cited_work_ids(&known[0].text);
+        assert_eq!(ids, vec!["publishtelemetryannotati".to_string()]);
+
+        let wrapped = format!("{url}\ncloses [#publishtelemetryannotati]\n");
+        let known = known_upstreams_in_document(&wrapped);
+        assert_eq!(
+            cited_work_ids(&known[0].text),
+            vec!["publishtelemetryannotati".to_string()]
+        );
+
+        let checklist = format!("{url}\n- [ ] [#publishtelemetryannotati] not joined\n");
+        let known = known_upstreams_in_document(&checklist);
+        assert!(cited_work_ids(&known[0].text).is_empty(), "{known:?}");
+    }
+
+    #[test]
+    fn cited_work_ids_skip_numbers_fragments_and_operator_requests() {
+        let text = "see https://github.com/haiven-dev/haiven-api/pull/852#issuecomment-1 \
+                    and haiven-dev/haiven-api#852 and #852 and (#publishtelemetryannotati)";
+        assert_eq!(
+            cited_work_ids(text),
+            vec!["publishtelemetryannotati".to_string()]
+        );
+        assert!(cited_work_ids("#subagent-operator-request-prannotate").is_empty());
     }
 }

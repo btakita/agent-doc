@@ -5308,9 +5308,13 @@ mod tests {
         }
 
         for harness in ["claude", "codex", "default"] {
-            let text =
-                render_steering_context_for_harness("tasks/bugs.md", &[edited.clone()], 0, harness)
-                    .unwrap();
+            let text = render_steering_context_for_harness(
+                "tasks/bugs.md",
+                std::slice::from_ref(&edited),
+                0,
+                harness,
+            )
+            .unwrap();
             assert!(!text.contains("send_subagent_message"), "{harness}: {text}");
             assert!(text.contains("FORWARD the change"), "{harness}: {text}");
             assert!(text.contains("SendMessage"), "{harness}: {text}");

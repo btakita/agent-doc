@@ -25,7 +25,8 @@ pub fn explicit_queue_start_mode(
 }
 
 /// Whether the queue is held. `pause` is the only hold (`#queuestopremove`);
-/// a legacy `stop` marker token reads as `pause`.
+/// a legacy `stop` marker token reads as `pause` on a queue that does not
+/// repeat. A repeating queue's marker `stop` is not a hold (`#loopunstrike`).
 pub fn explicit_queue_stop_mode(
     attrs: &HashMap<String, String>,
     frontmatter_queue: Option<&str>,
@@ -80,8 +81,9 @@ impl QueueBindingMode {
 
     fn from_marker(attrs: &HashMap<String, String>) -> Option<Self> {
         // `#queuestopremove`: a legacy `stop` marker token is the operator's
-        // hold gesture, i.e. `pause`.
-        if attrs.contains_key("stop") || attrs.contains_key("pause") {
+        // hold gesture, i.e. `pause`, except on a repeating queue
+        // (`#loopunstrike`). Explicit `pause` holds every queue.
+        if attrs.contains_key("pause") || legacy_marker_stop_holds(attrs) {
             Some(Self::Pause)
         } else if attrs.contains_key("go") {
             Some(Self::Go)
@@ -107,6 +109,16 @@ impl QueueBindingMode {
             Self::Pause => None,
         }
     }
+}
+
+/// Marker `stop` holds a queue that does not repeat.
+///
+/// A repeating queue (`loop`, including the attribute `agent:loop` projects)
+/// already holds its heads between passes. Legacy marker `stop` on that queue
+/// must not skip the due tick that unstrikes the roster (`#loopunstrike`).
+/// Explicit `pause` is a separate token and still holds.
+pub(crate) fn legacy_marker_stop_holds(attrs: &HashMap<String, String>) -> bool {
+    attrs.contains_key("stop") && !attrs.contains_key(crate::queue_schedule::QUEUE_LOOP_ATTR)
 }
 
 fn resolved_queue_binding(
@@ -819,6 +831,27 @@ mod tests {
         let mut stop_marker = HashMap::new();
         stop_marker.insert("stop".to_string(), String::new());
         assert!(explicit_queue_pause_mode(&stop_marker, None));
+    }
+
+    #[test]
+    fn loop_marker_stop_is_not_a_hold() {
+        let mut loop_stop = HashMap::new();
+        loop_stop.insert("loop".to_string(), String::new());
+        loop_stop.insert("keep".to_string(), String::new());
+        loop_stop.insert("stop".to_string(), String::new());
+        loop_stop.insert("interval".to_string(), "1h".to_string());
+        assert!(!explicit_queue_pause_mode(&loop_stop, None));
+        assert!(explicit_queue_go_mode(&loop_stop, Some("go")));
+        assert!(queue_control_activation(&loop_stop, Some("go")));
+        assert!(explicit_queue_pause_mode(&loop_stop, Some("pause")));
+
+        let mut loop_pause = loop_stop.clone();
+        loop_pause.insert("pause".to_string(), String::new());
+        assert!(explicit_queue_pause_mode(&loop_pause, Some("go")));
+
+        let mut ordinary_stop = HashMap::new();
+        ordinary_stop.insert("stop".to_string(), String::new());
+        assert!(explicit_queue_pause_mode(&ordinary_stop, Some("go")));
     }
 
     #[test]

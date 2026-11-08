@@ -3896,12 +3896,14 @@ pub fn has_auto_attr(attrs: &std::collections::HashMap<String, String>) -> bool 
 /// migrates a present control into frontmatter and strips it from the tag, so
 /// activation then flows through the normal persisted/frontmatter path. `auto`
 /// is handled separately via [`has_auto_attr`] as the legacy alias. `stop` wins
-/// over `start`/`go` if both are (erroneously) present.
+/// over `start`/`go` if both are (erroneously) present, except on a repeating
+/// queue where marker `stop` is not a hold (`#loopunstrike`).
 pub fn marker_control(
     attrs: &std::collections::HashMap<String, String>,
 ) -> Option<agent_doc_frontmatter::frontmatter::QueueControl> {
-    // `pause` is the operator's hold; like `stop` it keeps the queue inactive.
-    if attrs.contains_key("stop") || attrs.contains_key("pause") {
+    // `pause` is the operator's hold. Legacy `stop` holds a queue that does
+    // not repeat; a repeating queue's cadence is that hold instead.
+    if attrs.contains_key("pause") || crate::control_binding::legacy_marker_stop_holds(attrs) {
         return Some(agent_doc_frontmatter::frontmatter::QueueControl::Pause);
     }
     if attrs.contains_key("start") || attrs.contains_key("go") {
@@ -10475,6 +10477,14 @@ mod tests {
         assert_eq!(marker_control(&attrs), Some(QueueControl::Pause));
         // stop wins over start/go if both are present.
         attrs.insert("go".to_string(), String::new());
+        assert_eq!(marker_control(&attrs), Some(QueueControl::Pause));
+        attrs.clear();
+        attrs.insert("loop".to_string(), String::new());
+        attrs.insert("stop".to_string(), String::new());
+        assert_eq!(marker_control(&attrs), None);
+        attrs.insert("go".to_string(), String::new());
+        assert_eq!(marker_control(&attrs), Some(QueueControl::Start));
+        attrs.insert("pause".to_string(), String::new());
         assert_eq!(marker_control(&attrs), Some(QueueControl::Pause));
     }
 

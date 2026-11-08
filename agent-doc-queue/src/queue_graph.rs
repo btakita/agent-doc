@@ -251,11 +251,12 @@ impl QueueBlock<'_> {
 
     /// [`Self::state_excluding_claimed`] that also honors a `pause` control.
     ///
-    /// A marker `pause` or legacy `stop` holds the queue. Frontmatter
-    /// `queue: pause` holds it when the marker has no token; a marker `go`
-    /// or `start` overrides that. An empty queue stays `Empty`, so `after=`
-    /// does not wait on a drained predecessor. A held queue with live heads
-    /// stays `Paused`, not `Empty`.
+    /// A marker `pause`, or legacy `stop` on a queue that does not repeat,
+    /// holds the queue. Marker `stop` on a repeating queue is not a hold
+    /// (`#loopunstrike`). Frontmatter `queue: pause` holds it when the marker
+    /// has no token; a marker `go` or `start` overrides that. An empty queue
+    /// stays `Empty`, so `after=` does not wait on a drained predecessor. A
+    /// held queue with live heads stays `Paused`, not `Empty`.
     pub fn state_excluding_claimed_with_control(
         &self,
         claimed: &crate::queue_claim::ClaimedQueueItems,
@@ -431,11 +432,12 @@ impl<'a> QueueGraph<'a> {
 
     /// Select the first queue with work available to this drain owner.
     ///
-    /// A queue whose control is `pause` (a legacy marker `stop` included), or
-    /// whose every executable head is claimed, operator-gated (`🙋`), or only
-    /// a non-executable group label, is paused, not empty: independent later
-    /// queues remain selectable, while an `after=` dependent still waits for
-    /// the externally owned work to finish.
+    /// A queue whose control is `pause` (a legacy marker `stop` on a
+    /// non-repeating queue included), or whose every executable head is
+    /// claimed, operator-gated (`🙋`), or only a non-executable group label,
+    /// is paused, not empty: independent later queues remain selectable, while
+    /// an `after=` dependent still waits for the externally owned work to
+    /// finish. Marker `stop` does not pause a repeating queue.
     pub fn selected_excluding_claimed(
         &self,
         claimed: &crate::queue_claim::ClaimedQueueItems,
@@ -1771,6 +1773,63 @@ mod tests {
                 occurrence: 1,
             }
         );
+    }
+
+    /// A restored `agent:loop` keeps legacy marker `stop` and stays ready.
+    /// Explicit `pause` still holds that loop. An earlier live `agent:run`
+    /// is still selected first.
+    #[test]
+    fn loop_marker_stop_leaves_the_repeating_queue_ready() {
+        let doc = concat!(
+            "<!-- agent:run go -->\n- run work\n<!-- /agent:run -->\n",
+            "<!-- agent:loop interval=\"1h\" priority keep stop -->\n- watch issues\n<!-- /agent:loop -->\n",
+        );
+        let components = element::parse(doc).unwrap();
+        let graph = QueueGraph::parse(doc, &components).unwrap();
+        let none = crate::queue_claim::ClaimedQueueItems::none();
+        assert_eq!(
+            graph
+                .block("loop")
+                .unwrap()
+                .state_excluding_claimed_with_control(&none, Some("go")),
+            QueueNodeState::Ready
+        );
+        assert_eq!(
+            graph.schedule_excluding_claimed_with_control(&none, Some("go")),
+            QueueScheduleDecision::Ready {
+                queue_id: "run".into(),
+                occurrence: 0,
+            }
+        );
+
+        let only_loop = concat!(
+            "<!-- agent:run go -->\n<!-- /agent:run -->\n",
+            "<!-- agent:loop interval=\"1h\" priority keep stop -->\n- watch issues\n<!-- /agent:loop -->\n",
+        );
+        let only_components = element::parse(only_loop).unwrap();
+        let only_graph = QueueGraph::parse(only_loop, &only_components).unwrap();
+        assert_eq!(
+            only_graph.schedule_excluding_claimed(&none),
+            QueueScheduleDecision::Ready {
+                queue_id: "loop".into(),
+                occurrence: 1,
+            }
+        );
+
+        let paused = only_loop.replace("keep stop", "keep pause");
+        let paused_components = element::parse(&paused).unwrap();
+        let paused_graph = QueueGraph::parse(&paused, &paused_components).unwrap();
+        assert_eq!(
+            paused_graph
+                .block("loop")
+                .unwrap()
+                .state_excluding_claimed(&none),
+            QueueNodeState::Paused
+        );
+        assert!(!matches!(
+            paused_graph.schedule_excluding_claimed(&none),
+            QueueScheduleDecision::Ready { .. }
+        ));
     }
 
     #[test]

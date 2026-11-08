@@ -1956,6 +1956,136 @@ mod tests {
         }));
     }
 
+    /// `#loopunstrike`: legacy marker `stop` on `agent:loop` is not a cadence
+    /// hold. The next due tick unstrikes the roster, opens the pass, and
+    /// leaves the head unheld so the ordinary drain can run it. An earlier
+    /// live `agent:run` is still selected first. The marker token stays.
+    #[test]
+    fn loop_marker_stop_recovers_the_struck_roster_on_the_next_due_tick() {
+        const WATCH: &str = "Watch https://github.com/btakita/agent-doc/issues for new issues. Add new issues into the backlog + queue except issue #40 + #45. [#q-241aecb69d4f]";
+        let body = format!(
+            "- ~~{WATCH}~~ — auto-struck: addressed this cycle ⟦addressed-at:2026-11-01T14:47:32.000Z⟧; response: [#r-fc6c69471~~do [#trackedworkdropped] ⟦published⟧~~y open issues\n  - **Closed by:** [#r-7fd5420c7f28]\n"
+        );
+        let content = format!(
+            "---\nqueue: go\n---\n\n<!-- agent:run go -->\n- run work\n<!-- /agent:run -->\n<!-- agent:loop interval=\"1h\" priority keep stop -->\n{body}<!-- /agent:loop -->\n"
+        );
+        assert_eq!(
+            queue_schedule::completed_heads_for_queue(&content, "loop").unwrap(),
+            vec![WATCH.to_string()],
+            "the auto-struck annotation, including a nested strike, is not the roster identity"
+        );
+        assert!(
+            queue_schedule::live_heads_for_queue(&content, "loop")
+                .unwrap()
+                .is_empty()
+        );
+        let (_dir, file) = project(&content);
+        let io = FakeIo::new(&content);
+        let worker = worker(&io);
+        worker.refresh(&file);
+        mutate_schedule_state(&file, "loop", 1_000, |prev| {
+            let mut state = prev.expect("schedule admitted");
+            state.passes_completed = 7;
+            state.window = queue_schedule::ScheduleWindow::Closed;
+            state.restore_pending = None;
+            (Some(state), ())
+        })
+        .unwrap();
+
+        worker.run_due(&due_for(&file, "loop"));
+
+        let text = io.text.lock().clone();
+        assert!(
+            text.contains(&format!("- {WATCH}\n")),
+            "the next tick unstrikes the loop item\n{text}"
+        );
+        assert!(
+            !text.contains(&format!("~~{WATCH}~~")),
+            "the struck copy is removed\n{text}"
+        );
+        assert!(text.contains("priority keep stop"), "{text}");
+        assert!(text.contains("- run work\n"), "{text}");
+        let state = load_schedule_state_for_queue(&file, "loop")
+            .unwrap()
+            .unwrap();
+        assert_eq!(state.passes_completed, 7);
+        assert!(state.restore_pending.is_none());
+        assert_eq!(
+            state.window,
+            queue_schedule::ScheduleWindow::Open {
+                pass: 8,
+                opened_secs: 1_000,
+                roster: vec![WATCH.into()],
+                ran: Vec::new(),
+            }
+        );
+        let schedule = queue_schedule::identified_queue_schedules(&text)
+            .unwrap()
+            .into_iter()
+            .find(|schedule| schedule.queue_id == "loop")
+            .expect("loop schedule");
+        assert!(
+            queue_schedule::held_heads_for_queue(&text, &schedule, Some(&state))
+                .unwrap()
+                .is_empty(),
+            "an open pass does not hold the restored head"
+        );
+        let components = agent_doc_element::element::parse(&text).unwrap();
+        let graph = agent_doc_queue::queue_graph::QueueGraph::parse(&text, &components).unwrap();
+        let none = agent_doc_queue::queue_claim::ClaimedQueueItems::none();
+        assert_eq!(
+            graph
+                .block("loop")
+                .unwrap()
+                .state_excluding_claimed_with_control(&none, Some("go")),
+            agent_doc_queue::queue_graph::QueueNodeState::Ready
+        );
+        assert_eq!(
+            graph.schedule_excluding_claimed_with_control(&none, Some("go")),
+            agent_doc_queue::queue_graph::QueueScheduleDecision::Ready {
+                queue_id: "run".into(),
+                occurrence: 0,
+            }
+        );
+        let logs = io.logs.lock();
+        assert!(logs.iter().any(|line| {
+            line.contains("queue_schedule_tick") && line.contains("decision=recovered")
+        }));
+        assert!(
+            logs.iter()
+                .all(|line| !line.contains("decision=skipped_paused"))
+        );
+    }
+
+    #[test]
+    fn loop_marker_pause_still_skips_the_due_tick() {
+        let content = concat!(
+            "---\nqueue: go\n---\n\n",
+            "<!-- agent:run go -->\n- run work\n<!-- /agent:run -->\n",
+            "<!-- agent:loop interval=\"1h\" pause -->\n",
+            "- ~~watch issues~~\n",
+            "<!-- /agent:loop -->\n",
+        );
+        let (_dir, file) = project(content);
+        let io = FakeIo::new(content);
+        let worker = worker(&io);
+        worker.refresh(&file);
+        worker.run_due(&due_for(&file, "loop"));
+        let state = load_schedule_state_for_queue(&file, "loop")
+            .unwrap()
+            .unwrap();
+        assert!(!state.window_open());
+        assert_eq!(*io.text.lock(), content);
+        assert!(
+            io.logs
+                .lock()
+                .iter()
+                .any(|line| line.contains("decision=skipped_paused")),
+            "{:?}",
+            io.logs.lock()
+        );
+    }
+
     /// GH #348: a failed self-heal still sees the old struck row. That row is
     /// the pending restore's input, not proof that the recovered pass ran.
     #[test]

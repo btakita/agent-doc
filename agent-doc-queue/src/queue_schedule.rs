@@ -493,9 +493,11 @@ pub fn content_is_scheduled(content: &str) -> bool {
     identified_queue_schedules(content).is_ok_and(|schedules| !schedules.is_empty())
 }
 
-/// Whether the queue's control holds it (`pause`, legacy `stop`, or a legacy
-/// inert `queue_active:` flag): a scheduled tick then skips instead of
-/// opening a window. No control at all is `go` (`#queuegodefault`).
+/// Whether the queue's control holds it (`pause`, legacy `stop` on a queue
+/// that does not repeat, or a legacy inert `queue_active:` flag): a scheduled
+/// tick then skips instead of opening a window. Marker `stop` on a repeating
+/// queue is not a hold (`#loopunstrike`). No control at all is `go`
+/// (`#queuegodefault`).
 pub fn queue_held_by_control(content: &str) -> bool {
     identified_queue_schedules(content)
         .ok()
@@ -820,7 +822,8 @@ pub enum FireDecision {
     Recovered,
     /// The tick found no live head; the window stays closed.
     EmptyPoll,
-    /// The queue is held (`pause`/`stop`); the tick is skipped, not deferred.
+    /// The queue is held (`pause`, or legacy `stop` outside a repeating loop);
+    /// the tick is skipped, not deferred.
     SkippedPaused,
     /// The previous pass is still running; the tick is folded into it.
     SkippedBusy,
@@ -834,7 +837,8 @@ pub struct FireFacts {
     pub live_heads: Vec<String>,
     /// Completed rows still present in this queue.
     pub completed_heads: Vec<String>,
-    /// The queue control resolves to a hold (`pause`, legacy `stop`).
+    /// The queue control resolves to a hold (`pause`, or legacy `stop` on a
+    /// queue that does not repeat).
     pub paused: bool,
 }
 
@@ -1932,10 +1936,24 @@ mod tests {
     fn pause_holds_a_scheduled_queue() {
         assert!(!queue_held_by_control(&doc("interval=5m", "- a\n")));
         assert!(queue_held_by_control(&doc("interval=5m pause", "- a\n")));
+        assert!(queue_held_by_control(&doc("interval=5m stop", "- a\n")));
+        assert!(!queue_held_by_control(&doc(
+            "interval=5m loop stop",
+            "- a\n"
+        )));
+        assert!(!queue_held_by_control(
+            "<!-- agent:loop interval=\"1h\" priority keep stop -->\n- a\n<!-- /agent:loop -->\n"
+        ));
+        assert!(queue_held_by_control(
+            "<!-- agent:loop interval=\"1h\" pause -->\n- a\n<!-- /agent:loop -->\n"
+        ));
         assert!(queue_held_by_control(&format!(
             "---\nqueue: pause\n---\n{}",
             doc("interval=5m", "- a\n")
         )));
+        assert!(queue_held_by_control(
+            "---\nqueue: pause\n---\n<!-- agent:loop interval=\"1h\" priority keep stop -->\n- a\n<!-- /agent:loop -->\n"
+        ));
     }
 
     #[test]

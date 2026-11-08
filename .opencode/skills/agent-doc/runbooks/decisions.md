@@ -160,6 +160,11 @@ the decision and changes or adds one clause. `depends on [#id]` says this
 decision assumes another; `conflicts with [#id]` says they cannot both hold.
 Never write these forms yourself: they are the operator's words.
 
+A GitHub issue or pull request a decision cites is upstream of that
+decision on the same graph (`upstream_of`). Closing the issue or pull
+request makes the citing decision moot. A decision that does not cite it
+stays. The binary records the edge; it does not delete the decision.
+
 When a reply has no `change:` or `amend:`, the binary proposes the kind and
 the contract says so. If it matters, ask the operator once to confirm by
 starting the reply with `change:` or `amend:`. The operator's word outlives

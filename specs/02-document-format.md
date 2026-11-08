@@ -956,6 +956,18 @@ action is finished or moot:
   `accepted`; the signal then cites the `DEC-…` id. The finding's `location`
   names the source (`response [#r-…] cited by …`, `commit … recorded on a
   closed copy`, `decisions.md DEC-…`).
+  `closing_pull_request` (`#prannotate`) names an open todo or backlog item
+  that a GitHub pull request or issue closes, and whose own text does not yet
+  cite that artifact's URL. The decision graph records `upstream_of` with
+  clause `closes` from `github:<owner>/<repo>/issues|pull/<n>` to the item id.
+  The edge is written from either side, including across the cached graph: the
+  item already exists when the pull request's text cites its id, or the item
+  is added when the pull request already cited it. The signal's `action` tells
+  the agent to add the URL (`--todo-edit` or `--backlog-edit`). The binary
+  does not rewrite the item. An item that already cites the URL keeps the edge
+  and raises no signal. Review and icebox rows are not associated. Closing the
+  upstream still moots only a citing decision (clause `open`); a `closes` edge
+  is not a decision.
 - **Agent closeout audit** consumes every `todo_sync_required` signal. It
   includes `--todo-done <selector>` for every action current evidence proves
   finished or moot, even when the row has no tracked-work link and the operator

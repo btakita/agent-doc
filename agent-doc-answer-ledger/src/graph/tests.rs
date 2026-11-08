@@ -531,11 +531,18 @@ fn closed_upstream_moots_only_the_decision_that_cites_it() {
         .is_some()
     );
     assert!(graph.resolve_decision("tdsmoke").is_none());
+    // The todo cites the issue in its own text, so the same artifact also
+    // closes that item. The item stays a work row, not a mooted decision.
+    let smoke = has_edge(&graph, &issue.node_id(), EdgeKind::UpstreamOf, "tdsmoke")
+        .expect("tdsmoke cites the issue");
+    assert_eq!(smoke.clause.as_deref(), Some(CLOSES_CLAUSE));
+    assert_ne!(graph.nodes["tdsmoke"].kind, NodeKind::Decision);
 
     let moot = graph.moot_by_closed_upstream(&observations, std::slice::from_ref(&issue));
     let mooted: Vec<&str> = moot.iter().map(|row| row.decision_id.as_str()).collect();
     assert!(mooted.contains(&cite.as_str()), "{moot:?}");
     assert!(mooted.contains(&bare.as_str()), "{moot:?}");
+    assert!(!mooted.contains(&"tdsmoke"), "{moot:?}");
     assert!(!mooted.contains(&other.as_str()), "{moot:?}");
     assert!(!mooted.contains(&pull_decision.as_str()), "{moot:?}");
     assert!(moot.iter().all(|row| row.upstream == issue));
@@ -593,4 +600,277 @@ fn bare_issue_mention_stays_when_the_closed_number_is_ambiguous() {
     assert_ne!(moot[0].decision_id, other);
     assert!(has_edge(&graph, &issue.node_id(), EdgeKind::UpstreamOf, &bare).is_some());
     assert!(has_edge(&graph, &issue.node_id(), EdgeKind::UpstreamOf, &other).is_none());
+}
+
+const PR852_URL: &str = "https://github.com/haiven-dev/haiven-api/pull/852";
+const TELEMETRY: &str = "publishtelemetryannotati";
+
+fn pr852() -> GithubUpstream {
+    GithubUpstream::pull_request("haiven-dev", "haiven-api", 852)
+}
+
+fn session(body: &str) -> String {
+    format!("---\nagent_doc_session: prannotate\n---\n\n{body}")
+}
+
+fn tracked(component: &str, marker: &str, id: &str, text: &str) -> String {
+    format!(
+        "<!-- agent:{component} -->\n- [{marker}] [#{id}] {text}\n<!-- /agent:{component} -->\n"
+    )
+}
+
+fn built(content: &str) -> (extract::Observations, DecisionGraph) {
+    let observations = extract::observe(content, &[]);
+    let ledger = Ledger::build(&observations, &PriorIndex::default(), NOW, None);
+    let graph = DecisionGraph::build(&ledger, &observations);
+    (observations, graph)
+}
+
+fn cite_pr(text: &str) -> KnownUpstream {
+    KnownUpstream {
+        upstream: pr852(),
+        text: text.to_string(),
+        in_document: false,
+    }
+}
+
+fn assert_closes(graph: &DecisionGraph) {
+    let id = pr852().node_id();
+    let edge = has_edge(graph, &id, EdgeKind::UpstreamOf, TELEMETRY).expect("closes edge");
+    assert_eq!(edge.clause.as_deref(), Some(CLOSES_CLAUSE));
+    assert_eq!(edge.source, EdgeSource::Derived);
+    assert_eq!(edge.to, TELEMETRY);
+    assert!(
+        graph
+            .outgoing(&id, EdgeKind::UpstreamOf)
+            .any(|edge| edge.to == TELEMETRY && edge.clause.as_deref() == Some(CLOSES_CLAUSE))
+    );
+    assert!(
+        graph
+            .incoming(TELEMETRY, EdgeKind::UpstreamOf)
+            .any(|edge| edge.from == id && edge.clause.as_deref() == Some(CLOSES_CLAUSE))
+    );
+}
+
+#[test]
+fn pull_request_citing_an_existing_backlog_item_records_closes() {
+    let content = session(&tracked(
+        "backlog",
+        " ",
+        TELEMETRY,
+        "Publish TelemetryAnnotation required provenance",
+    ));
+    let (observations, mut graph) = built(&content);
+    assert!(has_edge(&graph, &pr852().node_id(), EdgeKind::UpstreamOf, TELEMETRY).is_none());
+    graph.link_closing_upstreams(
+        &observations,
+        std::slice::from_ref(&cite_pr(
+            "Publish telemetry. Closes [#publishtelemetryannotati].",
+        )),
+    );
+    assert_closes(&graph);
+    assert_eq!(graph.nodes[TELEMETRY].kind, NodeKind::Item);
+    assert!(!graph.nodes[&pr852().node_id()].in_document);
+    let notes = graph.work_upstream_annotations(&observations);
+    assert_eq!(notes.len(), 1, "{notes:?}");
+    assert_eq!(notes[0].item_id, TELEMETRY);
+    assert_eq!(notes[0].component, extract::TrackedComponent::Backlog);
+    assert_eq!(notes[0].upstream, pr852());
+    assert!(notes[0].instruction.contains("[#publishtelemetryannotati]"));
+    assert!(notes[0].instruction.contains(PR852_URL));
+    assert!(notes[0].instruction.contains("--backlog-edit"));
+    assert!(
+        notes[0]
+            .instruction
+            .contains("Do not wait for the operator to ask")
+    );
+    assert!(
+        notes[0]
+            .instruction
+            .contains("do not check the item off only because the pull request exists")
+    );
+}
+
+#[test]
+fn item_added_after_the_pull_request_joins_the_cached_edge() {
+    let (earlier, mut prior) = built(&session(""));
+    prior.link_closing_upstreams(
+        &earlier,
+        std::slice::from_ref(&cite_pr("Closes [#publishtelemetryannotati].")),
+    );
+    assert_closes(&prior);
+    assert!(!prior.nodes[TELEMETRY].in_document);
+    assert!(prior.nodes[TELEMETRY].label.is_empty());
+    assert!(prior.persists_cache_node(&prior.nodes[TELEMETRY]));
+    assert!(prior.persists_cache_node(&prior.nodes[&pr852().node_id()]));
+    assert!(prior.work_upstream_annotations(&earlier).is_empty());
+    prior.merge_prior(
+        vec![Node {
+            id: "unrelated".to_string(),
+            kind: NodeKind::Item,
+            label: String::new(),
+            open: None,
+            location: None,
+            first_seen_at: None,
+            in_document: true,
+        }],
+        Vec::new(),
+    );
+    assert!(!prior.nodes["unrelated"].in_document);
+    assert!(!prior.persists_cache_node(&prior.nodes["unrelated"]));
+
+    let content = session(&tracked(
+        "backlog",
+        " ",
+        TELEMETRY,
+        "Publish TelemetryAnnotation required provenance",
+    ));
+    let (observations, mut graph) = built(&content);
+    assert!(has_edge(&graph, &pr852().node_id(), EdgeKind::UpstreamOf, TELEMETRY).is_none());
+    assert!(graph.persists_cache_node(&graph.nodes[TELEMETRY]));
+    graph.merge_prior(prior.nodes.into_values().collect(), prior.edges);
+    graph.link_closing_upstreams(&observations, &[]);
+    assert_closes(&graph);
+    assert!(graph.nodes[TELEMETRY].in_document);
+    let notes = graph.work_upstream_annotations(&observations);
+    assert_eq!(notes.len(), 1, "{notes:?}");
+    assert!(notes[0].instruction.contains(PR852_URL), "{notes:?}");
+    assert_eq!(notes[0].component, extract::TrackedComponent::Backlog);
+}
+
+#[test]
+fn item_that_already_exists_is_associated_when_the_pull_request_cites_it() {
+    let content = session(&tracked(
+        "backlog",
+        " ",
+        TELEMETRY,
+        "Publish TelemetryAnnotation required provenance",
+    ));
+    let (observations, mut graph) = built(&content);
+    assert!(graph.work_upstream_annotations(&observations).is_empty());
+    graph.link_closing_upstreams(
+        &observations,
+        std::slice::from_ref(&cite_pr("Needed for [#publishtelemetryannotati].")),
+    );
+    assert_closes(&graph);
+    assert_eq!(graph.work_upstream_annotations(&observations).len(), 1);
+}
+
+#[test]
+fn item_created_citing_the_pull_request_keeps_the_edge_without_an_instruction() {
+    let content = session(&tracked(
+        "backlog",
+        " ",
+        TELEMETRY,
+        &format!("Publish TelemetryAnnotation required provenance. {PR852_URL}"),
+    ));
+    let (observations, graph) = built(&content);
+    assert_closes(&graph);
+    assert!(graph.nodes[&pr852().node_id()].in_document);
+    assert!(
+        graph.work_upstream_annotations(&observations).is_empty(),
+        "{:?}",
+        graph.work_upstream_annotations(&observations)
+    );
+
+    let shorthand = session(&tracked(
+        "todo",
+        " ",
+        TELEMETRY,
+        "Publish TelemetryAnnotation required provenance. haiven-dev/haiven-api#852",
+    ));
+    let (observations, mut graph) = built(&shorthand);
+    graph.link_closing_upstreams(
+        &observations,
+        std::slice::from_ref(&cite_pr("Closes [#publishtelemetryannotati].")),
+    );
+    assert_closes(&graph);
+    assert!(
+        graph.work_upstream_annotations(&observations).is_empty(),
+        "owner/repo#n is already a citation"
+    );
+    assert_eq!(
+        graph.nodes[TELEMETRY].kind,
+        NodeKind::Item,
+        "a work todo is not a decision"
+    );
+}
+
+#[test]
+fn closed_item_keeps_the_edge_and_review_items_are_not_associated() {
+    let closed = session(&tracked(
+        "backlog",
+        "x",
+        TELEMETRY,
+        "Publish TelemetryAnnotation required provenance",
+    ));
+    let (observations, mut graph) = built(&closed);
+    graph.link_closing_upstreams(
+        &observations,
+        std::slice::from_ref(&cite_pr("Closes [#publishtelemetryannotati].")),
+    );
+    assert_closes(&graph);
+    assert!(graph.work_upstream_annotations(&observations).is_empty());
+
+    let review = session(&tracked(
+        "review",
+        " ",
+        TELEMETRY,
+        "Publish TelemetryAnnotation required provenance",
+    ));
+    let (observations, mut graph) = built(&review);
+    graph.link_closing_upstreams(
+        &observations,
+        std::slice::from_ref(&cite_pr("Closes [#publishtelemetryannotati].")),
+    );
+    assert!(has_edge(&graph, &pr852().node_id(), EdgeKind::UpstreamOf, TELEMETRY).is_none());
+    assert!(graph.work_upstream_annotations(&observations).is_empty());
+    assert!(!graph.nodes.contains_key(TELEMETRY));
+}
+
+#[test]
+fn document_line_associates_only_the_item_that_line_cites() {
+    let item = tracked(
+        "backlog",
+        " ",
+        TELEMETRY,
+        "Publish TelemetryAnnotation required provenance",
+    );
+    let content = session(&format!(
+        "{item}\n{PR852_URL} closes [#publishtelemetryannotati].\n- [ ] [#otheritem] not this pull request\n"
+    ));
+    let (observations, mut graph) = built(&content);
+    let known = known_upstreams_in_document(&content);
+    assert_eq!(known.len(), 1, "{known:?}");
+    assert!(known[0].in_document);
+    graph.link_closing_upstreams(&observations, &known);
+    assert_closes(&graph);
+    assert!(
+        has_edge(
+            &graph,
+            &pr852().node_id(),
+            EdgeKind::UpstreamOf,
+            "otheritem"
+        )
+        .is_none()
+    );
+    assert_eq!(graph.work_upstream_annotations(&observations).len(), 1);
+
+    let wrapped = session(&format!(
+        "{item}\n{PR852_URL}\ncloses [#publishtelemetryannotati]\n"
+    ));
+    let (observations, mut graph) = built(&wrapped);
+    graph.link_closing_upstreams(&observations, &known_upstreams_in_document(&wrapped));
+    assert_closes(&graph);
+
+    let checklist = session(&format!(
+        "{item}{PR852_URL}\n- [ ] [#publishtelemetryannotati] not joined from the next checklist item\n"
+    ));
+    let (observations, mut graph) = built(&checklist);
+    graph.link_closing_upstreams(&observations, &known_upstreams_in_document(&checklist));
+    assert!(
+        has_edge(&graph, &pr852().node_id(), EdgeKind::UpstreamOf, TELEMETRY).is_none(),
+        "a following checklist item is a different row"
+    );
+    assert!(graph.work_upstream_annotations(&observations).is_empty());
 }

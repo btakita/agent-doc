@@ -904,6 +904,12 @@ fn render_preamble(
          in the verbatim authorization overrides only that default: execute the exact authorized \
          scope, never broaden it, and route any harness-native permission through the request protocol.\n",
     );
+    out.push_str(
+        "- When a pull request closes a todo or backlog item, annotate that item with the pull \
+         request URL in the same work, without waiting to be asked. Do it when you open the pull \
+         request for an item that already exists, and when you add the item for a pull request that \
+         already exists. A `closing_pull_request` preflight signal names the item and the URL.\n",
+    );
     out.push_str(concat!("- ", subagent_handback_shape_rule!(), "\n"));
     out.push('\n');
     let queue_item = agent_doc_document::queue_projection::operator_request_origin_item(&auth.item);
@@ -955,6 +961,7 @@ mod tests {
         assert!(p.contains("> do [#abc]"));
         assert!(p.contains("> Add a way to post authorization"));
         assert!(p.contains("Never run `make install`"));
+        assert!(p.contains("A `closing_pull_request` preflight signal names the item and the URL"));
         // Sibling subagents share the coordinator's scratchpad: one `make check`
         // read another worktree's nextest output from a shared `check.log`.
         assert!(

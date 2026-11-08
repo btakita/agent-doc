@@ -1029,6 +1029,14 @@ check the box or mention the stale item, and do not limit the audit to
 `linked_work_resolved` / `cited_work_resolved` signals. When evidence is
 uncertain, preserve the open item rather than guessing.
 
+**Annotate the pull request that closes the item (`#prannotate`).** When you
+open a pull request for an open `agent:todo` or `agent:backlog` item, or you
+add that item while the pull request already exists, put the pull request URL
+on the item in the same closeout (`--todo-edit` or `--backlog-edit`). Do not
+wait for the operator to ask, and do not check the item off only because the
+pull request exists. Preflight repeats a `closing_pull_request` signal, naming
+the item and the URL, until the item text cites that URL.
+
 Record it with the closeout flag `--todo-add "<action>"` (repeatable), for
 example `agent-doc write --commit <FILE> --todo-add "Verify [#gate1] in a live pane"`.
 The binary appends `- [ ] [#<id>] <action>`, creates `agent:todo` when the

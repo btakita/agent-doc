@@ -15,9 +15,11 @@
 //!   `restates`, `depends_on`, `conflicts_with`, `applies_to`,
 //!   `evidenced_by`, `copy_of`, `same_as`, `derived_from` / `concludes`
 //!   (derivation → premise / decision), `upstream_of` (a cited GitHub issue
-//!   or pull request is upstream of a decision; closing it moots that
-//!   decision), plus `subsumes` / `exception_to` reserved for
-//!   `#decisionprune`.
+//!   or pull request is upstream of a decision, clause `open`, so closing it
+//!   moots that decision; the same edge with clause `closes` associates the
+//!   artifact with the todo or backlog item it closes, in either creation
+//!   order, without turning the item into a decision), plus `subsumes` /
+//!   `exception_to` reserved for `#decisionprune`.
 //!   Each edge carries its [`EdgeSource`]: `derived` (the binary read it off
 //!   the document structure), `operator` (the operator's explicit words:
 //!   `change:`, `amend:`, `same as [#id]`, `depends on [#id]`), or `proposed`
@@ -44,7 +46,10 @@ pub use registry::{
     REGISTRY_LOCATION, RegistryCitation, RegistryDecision, registry_revision_id,
     registry_revision_location,
 };
-pub use upstream::{GithubUpstream, GithubUpstreamKind, MootDecision};
+pub use upstream::{
+    CLOSES_CLAUSE, GithubUpstream, GithubUpstreamKind, KnownUpstream, MootDecision,
+    WorkUpstreamAnnotation, known_upstreams_in_document,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -419,10 +424,28 @@ impl DecisionGraph {
         }
         // Citations of a GitHub issue or pull request: that artifact is
         // upstream of the decision. Bare `issue N` binds once a closed
-        // upstream is supplied to `moot_by_closed_upstream`.
+        // upstream is supplied to `moot_by_closed_upstream`. Todo and
+        // backlog rows that cite an artifact in their own text record
+        // `upstream_of` with clause `closes` onto the item, not the decision.
         upstream::link(&mut graph, observations, &[]);
+        upstream::link_work(&mut graph, observations, &[]);
         graph.finish();
         graph
+    }
+
+    /// A node the decision-graph cache must keep. In-document nodes always
+    /// persist. A todo/backlog close (`upstream_of` clause `closes`) also
+    /// persists both ends when the item or the pull request is not in the
+    /// document yet, so the other side still joins on a later build.
+    pub fn persists_cache_node(&self, node: &Node) -> bool {
+        if node.in_document {
+            return true;
+        }
+        self.edges.iter().any(|edge| {
+            edge.kind == EdgeKind::UpstreamOf
+                && edge.clause.as_deref() == Some(upstream::CLOSES_CLAUSE)
+                && (edge.from == node.id || edge.to == node.id)
+        })
     }
 
     /// Add cached nodes and edges the current document no longer produces.

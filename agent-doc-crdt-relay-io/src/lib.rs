@@ -10689,7 +10689,11 @@ mod tests {
         assert!(revised.content.contains("Committed, nothing to read."));
         let current = revised.content.find("Revised recap.").unwrap();
         let previous = revised.content.find("Committed, nothing to read.").unwrap();
-        assert!(current < previous, "{}", revised.content);
+        assert!(
+            previous < current,
+            "recap-current must be under recap-previous:\n{}",
+            revised.content
+        );
         assert_eq!(hub.canonical_text(), revised.content);
 
         let settled = agent_doc_element::recap::settle_recap_in_document(&revised.content).unwrap();

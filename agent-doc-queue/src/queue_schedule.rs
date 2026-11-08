@@ -2056,10 +2056,10 @@ mod tests {
     /// those children at the top of the component when the struck watch row
     /// was removed.
     #[test]
-    fn restore_keeps_closed_by_children_under_the_unstuck_loop_item() {
+    fn restore_keeps_closed_by_children_under_the_unstruck_loop_item() {
         const WATCH: &str = "Watch https://github.com/btakita/agent-doc/issues for new issues. Add new issues into the backlog + queue except issue #40 + #45. [#q-241aecb69d4f]";
         let struck = format!(
-            "- ~~{WATCH}~~ — auto-struck: addressed this cycle ⟦addressed-at:2026-11-01T14:47:32.000Z⟧; response: [#r-fc6c69471~~do [#trackedworkdropped] ⟦published⟧~~y open issues #40 and #45, both explicitly excluded. No backlog or queue item was added.\n  - **Closed by:** [#r-7fd5420c7f28]\n  - **Closed by:** [#r-2e5433bdab4b]\n"
+            "- ~~{WATCH}~~\n  - **Closed by:** [#r-7fd5420c7f28]\n  - **Closed by:** [#r-2e5433bdab4b]\n"
         );
         let content = format!(
             "# Doc\n\n## Loop <!-- agent:loop interval=\"1h\" priority keep stop -->\n{struck}- ~~other~~\n  - **Closed by:** [#r-aaaaaaaaaaaa]\n<!-- /agent:loop -->\n"

@@ -490,3 +490,106 @@ fn a_pruned_operator_word_stays_the_operators_call_in_the_cycle_contract() {
         .unwrap();
     assert_ne!(fact.change_source, Some(EdgeSource::Operator));
 }
+
+#[test]
+fn closed_upstream_moots_only_the_decision_that_cites_it() {
+    let content = concat!(
+        "---\nagent_doc_session: upstream-fixture\n---\n\n",
+        "## Main <!-- agent:run id=\"main\" -->\n",
+        "- ### Waiting on you <!-- agent-doc:waiting-on-you -->\n",
+        "  - 🙋 [#tdcite] Decide whether to keep waiting on https://github.com/btakita/agent-doc/issues/395 <!-- agent-doc:waiting-item -->\n",
+        "  - 🙋 [#tdbare] Answer the blocking host question (choices: Open the workspace, Wait on issue 395, Defer) <!-- agent-doc:waiting-item -->\n",
+        "  - 🙋 [#tdother] Decide whether the demo callback port stays 8080 <!-- agent-doc:waiting-item -->\n",
+        "  - 🙋 [#tdpull] Decide whether to merge https://github.com/btakita/agent-doc/pull/12 <!-- agent-doc:waiting-item -->\n",
+        "<!-- /agent:run -->\n",
+        "## Todo <!-- agent:todo -->\n",
+        "- [ ] [#tdsmoke] Run the coder smoke while https://github.com/btakita/agent-doc/issues/395 is open\n",
+        "<!-- /agent:todo -->\n",
+    );
+    let observations = extract::observe(content, &[]);
+    let ledger = Ledger::build(&observations, &PriorIndex::default(), NOW, None);
+    let mut graph = DecisionGraph::build(&ledger, &observations);
+    let issue = GithubUpstream::issue("btakita", "agent-doc", 395);
+    let pull = GithubUpstream::pull_request("btakita", "agent-doc", 12);
+    let cite = decision(&graph, "tdcite");
+    let bare = decision(&graph, "tdbare");
+    let other = decision(&graph, "tdother");
+    let pull_decision = decision(&graph, "tdpull");
+    let edge = has_edge(&graph, &issue.node_id(), EdgeKind::UpstreamOf, &cite).expect("cite edge");
+    assert_eq!(edge.source, EdgeSource::Derived);
+    assert_eq!(edge.clause.as_deref(), Some("open"));
+    assert_eq!(graph.nodes[&issue.node_id()].kind, NodeKind::Evidence);
+    // The document names issue 395 once, so "Wait on issue 395" cites it.
+    assert!(has_edge(&graph, &issue.node_id(), EdgeKind::UpstreamOf, &bare).is_some());
+    assert!(
+        has_edge(
+            &graph,
+            &pull.node_id(),
+            EdgeKind::UpstreamOf,
+            &pull_decision
+        )
+        .is_some()
+    );
+    assert!(graph.resolve_decision("tdsmoke").is_none());
+
+    let moot = graph.moot_by_closed_upstream(&observations, &[issue.clone()]);
+    let mooted: Vec<&str> = moot.iter().map(|row| row.decision_id.as_str()).collect();
+    assert!(mooted.contains(&cite.as_str()), "{moot:?}");
+    assert!(mooted.contains(&bare.as_str()), "{moot:?}");
+    assert!(!mooted.contains(&other.as_str()), "{moot:?}");
+    assert!(!mooted.contains(&pull_decision.as_str()), "{moot:?}");
+    assert!(moot.iter().all(|row| row.upstream == issue));
+
+    let alien_content = concat!(
+        "---\nagent_doc_session: alien-upstream\n---\n\n",
+        "## Main <!-- agent:run id=\"main\" -->\n",
+        "- ### Waiting on you <!-- agent-doc:waiting-on-you -->\n",
+        "  - 🙋 [#tdalien] Decide whether https://github.com/other/repo/issues/395 blocks the port <!-- agent-doc:waiting-item -->\n",
+        "<!-- /agent:run -->\n",
+    );
+    let alien_observations = extract::observe(alien_content, &[]);
+    let alien_ledger = Ledger::build(&alien_observations, &PriorIndex::default(), NOW, None);
+    let mut alien_graph = DecisionGraph::build(&alien_ledger, &alien_observations);
+    let alien = decision(&alien_graph, "tdalien");
+    let alien_moot = alien_graph.moot_by_closed_upstream(&alien_observations, &[issue.clone()]);
+    assert!(alien_moot.is_empty(), "{alien_moot:?}");
+    assert_ne!(alien, cite);
+
+    let moot_pull = graph.moot_by_closed_upstream(&observations, &[pull.clone()]);
+    let mooted_pull: Vec<&str> = moot_pull
+        .iter()
+        .map(|row| row.decision_id.as_str())
+        .collect();
+    assert_eq!(mooted_pull, vec![pull_decision.as_str()]);
+}
+
+#[test]
+fn bare_issue_mention_stays_when_the_closed_number_is_ambiguous() {
+    let content = concat!(
+        "---\nagent_doc_session: bare-upstream\n---\n\n",
+        "## Main <!-- agent:run id=\"main\" -->\n",
+        "- ### Waiting on you <!-- agent-doc:waiting-on-you -->\n",
+        "  - 🙋 [#tdbare] Answer the blocking host question (choices: Open the workspace, Wait on issue 395, Defer) <!-- agent-doc:waiting-item -->\n",
+        "  - 🙋 [#tdother] Decide whether the demo callback port stays 8080 <!-- agent-doc:waiting-item -->\n",
+        "<!-- /agent:run -->\n",
+    );
+    let observations = extract::observe(content, &[]);
+    let ledger = Ledger::build(&observations, &PriorIndex::default(), NOW, None);
+    let mut graph = DecisionGraph::build(&ledger, &observations);
+    let bare = decision(&graph, "tdbare");
+    let other = decision(&graph, "tdother");
+    let issue = GithubUpstream::issue("btakita", "agent-doc", 395);
+    let alien = GithubUpstream::issue("other", "repo", 395);
+    assert!(
+        graph
+            .moot_by_closed_upstream(&observations, &[issue.clone(), alien])
+            .is_empty()
+    );
+    let moot = graph.moot_by_closed_upstream(&observations, &[issue.clone()]);
+    assert_eq!(moot.len(), 1, "{moot:?}");
+    assert_eq!(moot[0].decision_id, bare);
+    assert_eq!(moot[0].upstream, issue);
+    assert_ne!(moot[0].decision_id, other);
+    assert!(has_edge(&graph, &issue.node_id(), EdgeKind::UpstreamOf, &bare).is_some());
+    assert!(has_edge(&graph, &issue.node_id(), EdgeKind::UpstreamOf, &other).is_none());
+}

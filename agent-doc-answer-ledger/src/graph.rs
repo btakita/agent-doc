@@ -7,14 +7,17 @@
 //! - **Nodes** ([`NodeKind`]): questions (todo / waiting / request copies that
 //!   ask the operator something), decisions, revisions (one per distinct
 //!   operator answer), items (work the decisions apply to) and evidence
-//!   (responses `r-<hex>`, commits `commit:<sha>`). Principle, fact and
+//!   (responses `r-<hex>`, commits `commit:<sha>`, GitHub artifacts
+//!   `github:<owner>/<repo>/issues|pull/<n>`). Principle, fact and
 //!   derivation nodes hold first-principles derivations
 //!   (`#firstprinciplesstore`, written by `agent-doc decision derive`).
 //! - **Edges** ([`EdgeKind`]): `answers`, `supersedes`, `amends`,
 //!   `restates`, `depends_on`, `conflicts_with`, `applies_to`,
 //!   `evidenced_by`, `copy_of`, `same_as`, `derived_from` / `concludes`
-//!   (derivation → premise / decision), plus `subsumes` / `exception_to`
-//!   reserved for `#decisionprune`.
+//!   (derivation → premise / decision), `upstream_of` (a cited GitHub issue
+//!   or pull request is upstream of a decision; closing it moots that
+//!   decision), plus `subsumes` / `exception_to` reserved for
+//!   `#decisionprune`.
 //!   Each edge carries its [`EdgeSource`]: `derived` (the binary read it off
 //!   the document structure), `operator` (the operator's explicit words:
 //!   `change:`, `amend:`, `same as [#id]`, `depends on [#id]`), or `proposed`
@@ -36,10 +39,12 @@ use crate::extract::{Observations, QuestionSource, bracket_ids};
 use crate::{EdgeKind, Ledger, RevisionRelation, id_key, text};
 
 mod registry;
+mod upstream;
 pub use registry::{
     REGISTRY_LOCATION, RegistryCitation, RegistryDecision, registry_revision_id,
     registry_revision_location,
 };
+pub use upstream::{GithubUpstream, GithubUpstreamKind, MootDecision};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -412,6 +417,10 @@ impl DecisionGraph {
                 clause: None,
             });
         }
+        // Citations of a GitHub issue or pull request: that artifact is
+        // upstream of the decision. Bare `issue N` binds once a closed
+        // upstream is supplied to `moot_by_closed_upstream`.
+        upstream::link(&mut graph, observations, &[]);
         graph.finish();
         graph
     }

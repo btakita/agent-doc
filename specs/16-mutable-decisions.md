@@ -69,16 +69,20 @@ one of another kind.
 operator, `copy_of` its decision), `decision`, `revision` (one per distinct
 operator answer, id `<decision>@<hash>`), `item` (work the decisions apply
 to; a work todo nobody asked about is an item, never a decision), and
-`evidence` (`r-<hex>` response ids, `commit:<sha>`). `principle`, `fact` and
-`derivation` nodes hold first-principles derivations (below).
+`evidence` (`r-<hex>` response ids, `commit:<sha>`, GitHub artifacts
+`github:<owner>/<repo>/issues/<n>` or `github:<owner>/<repo>/pull/<n>`).
+`principle`, `fact` and `derivation` nodes hold first-principles
+derivations (below).
 
 **Edges** read `from <kind> to`: `answers` (revision → decision),
 `restates` / `amends` / `supersedes` (revision → previous revision),
 `depends_on` (B assumes A), `conflicts_with`, `applies_to` (from concerns
 to), `evidenced_by` (revision or decision → evidence), `copy_of`, `same_as`,
 `derived_from` (derivation → premise) and `concludes` (derivation →
-decision, its clause the concluded answer); `subsumes` and `exception_to`
-are reserved for `#decisionprune`. Each edge has a source: `derived`
+decision, its clause the concluded answer), and `upstream_of` (a cited
+GitHub issue or pull request → the decision that exists because that
+upstream is open, clause `open`); `subsumes` and `exception_to` are
+reserved for `#decisionprune`. Each edge has a source: `derived`
 (read off document structure), `operator` (the operator's explicit words), or
 `proposed` (the binary's classification, standing until the operator confirms
 or corrects it). An `amends` edge carries the amended clause.
@@ -113,6 +117,19 @@ latest operator relation any of its archived rows recorded.
 their decisions. A row that holds nothing but such phrases is a link, not an
 answer. Commit SHAs and `[#r-…]` ids in an answer, or on a closed copy,
 become `evidenced_by` edges.
+
+**Closed upstream.** No second causality graph. A decision cites a GitHub
+issue or pull request when its question text (choices included) contains
+`github.com/<owner>/<repo>/issues/<n>` or `.../pull/<n>`, or `owner/repo#<n>`
+for a known upstream with that owner, repo, and number. A bare `issue <n>`,
+`issues/<n>`, `PR <n>`, or `pull request <n>` cites an upstream only when
+that text does not name a different repo for the number and exactly one
+explicit URL in the document, or else exactly one upstream the caller
+reports closed, has that kind and number. `DecisionGraph::build` records
+`upstream_of` for explicit citations. `DecisionGraph::moot_by_closed_upstream`
+binds the remaining bare citations and reports every still-open decision
+that cites a closed upstream as moot. A decision that does not cite it
+stays. Work items are not decisions and are not mooted.
 
 **Impact walk** (`DecisionGraph::impact`). Dependents of a decision are its
 copies, items tied to it or its copies by `applies_to` in either direction,

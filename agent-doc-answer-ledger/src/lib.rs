@@ -155,10 +155,14 @@ pub enum EdgeKind {
     /// derivation `concludes` the decision it answers; the edge's clause is
     /// the concluded answer (`#firstprinciplesstore`).
     Concludes,
+    /// GitHub issue or pull request `upstream_of` a decision: the decision
+    /// exists because that upstream is open. Closing the upstream moots the
+    /// decision (`DecisionGraph::moot_by_closed_upstream`).
+    UpstreamOf,
 }
 
 impl EdgeKind {
-    pub const ALL: [Self; 14] = [
+    pub const ALL: [Self; 15] = [
         Self::Answers,
         Self::Restates,
         Self::Amends,
@@ -173,6 +177,7 @@ impl EdgeKind {
         Self::Subsumes,
         Self::ExceptionTo,
         Self::Concludes,
+        Self::UpstreamOf,
     ];
 
     pub const fn as_str(self) -> &'static str {
@@ -191,6 +196,7 @@ impl EdgeKind {
             Self::Subsumes => "subsumes",
             Self::ExceptionTo => "exception_to",
             Self::Concludes => "concludes",
+            Self::UpstreamOf => "upstream_of",
         }
     }
 

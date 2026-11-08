@@ -56,6 +56,8 @@ pub fn liveness_flow(kind: &str) -> LivenessFlow {
     match kind {
         "depends_on" | "derived_from" | "refines" | "evidenced_by" => LivenessFlow::Forward,
         "applies_to" | "exception_to" | "conflicts_with" | "same_as" => LivenessFlow::Both,
+        // `upstream_of` is absent on purpose: closing the upstream moots the
+        // decision, so the edge must not keep it hot.
         _ => LivenessFlow::None,
     }
 }

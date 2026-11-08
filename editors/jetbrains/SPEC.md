@@ -1887,6 +1887,18 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
   suppression. Visible restored files may therefore acquire missing panes
   without an imperative republish, while merely open background files remain
   outside the desired columns.
+- The synchronous critical path of automatic pane sync is only the editor-event
+  decision: this project frame is the keyboard-focused surface, and this session
+  document is the one it selected. That decision runs on the event thread and
+  hands the focus/`select-pane` effect off without waiting for structural
+  reconcile. Project-root resolution, surface delivery, ownership proof, and the
+  tmux layout effect are background jobs. The frame decision reads tool-window
+  panes from the zero-argument accessor whose return type is a `List`. IntelliJ
+  2026.3 declares two public `getToolWindowPanes$intellij_platform_ide_impl`
+  methods; the first returns a `LinkedHashMap` and is not a pane list. Taking
+  that overload made `isProjectSurfaceActive` false for every selection, focus,
+  and IDE activation, so automatic sync published nothing while manual
+  `Sync Tmux Layout` (which does not consult the probe) still moved panes.
 - A native-library generation handoff has one shared five-second CRDT-worker
   shutdown deadline across all open projects. Operator-triggered Compact
   Exchange and manual layout sync wait on the handoff completion edge instead

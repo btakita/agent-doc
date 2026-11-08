@@ -11198,9 +11198,9 @@ mod tests {
             component_names,
             [
                 "status",
+                "worktrees",
                 "recap",
                 "active",
-                "worktrees",
                 "queue",
                 "review",
                 "todo",
@@ -11215,7 +11215,7 @@ mod tests {
         assert_eq!(components[0].patch_mode(), Some("replace"));
         assert_eq!(components[11].patch_mode(), Some("append"));
         assert_eq!(
-            components[2].attrs.get("priority").map(String::as_str),
+            components[3].attrs.get("priority").map(String::as_str),
             Some("")
         );
         assert_eq!(

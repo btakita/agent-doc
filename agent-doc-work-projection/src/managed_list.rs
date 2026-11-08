@@ -62,8 +62,8 @@ pub enum ManagedList {
 impl ManagedList {
     /// Every managed list, in canonical component order.
     pub const ALL: [ManagedList; 8] = [
-        ManagedList::Active,
         ManagedList::Worktrees,
+        ManagedList::Active,
         ManagedList::Queue,
         ManagedList::Review,
         ManagedList::Todo,

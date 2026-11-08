@@ -64,7 +64,7 @@ The body contains named components delimited by HTML comment markers:
 ```
 
 New scaffolds use this queue-centric order:
-status, recap, active, run, review, todo, backlog,
+status, worktrees, recap, active, run, review, todo, backlog,
 icebox, notes, done, then exchange last. `active` is a binary-owned
 informational projection of started, unclosed work grouped by authoritative
 source; it is never an executable work source. Legacy `agent:open-items`

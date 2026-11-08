@@ -147,9 +147,9 @@ pub fn canonical_component_name(name: &str) -> &str {
 /// insert a missing managed component. Existing components are never moved.
 pub const CANONICAL_MANAGED_COMPONENT_ORDER: [&str; 12] = [
     "status",
+    "worktrees",
     "recap",
     "active",
-    "worktrees",
     "queue",
     "review",
     "todo",
@@ -3408,9 +3408,9 @@ mod tests {
             CANONICAL_MANAGED_COMPONENT_ORDER,
             [
                 "status",
+                "worktrees",
                 "recap",
                 "active",
-                "worktrees",
                 "queue",
                 "review",
                 "todo",
@@ -3440,10 +3440,10 @@ mod tests {
         assert!(todo_offset > legacy.find("<!-- /agent:exchange -->").unwrap());
         assert_eq!(canonical_managed_component_rank("pending"), Some(7));
         assert_eq!(canonical_managed_component_rank("run"), Some(4));
-        assert_eq!(canonical_managed_component_rank("worktrees"), Some(3));
-        assert_eq!(canonical_managed_component_rank("open-items"), Some(2));
-        assert_eq!(canonical_managed_component_rank("active"), Some(2));
-        assert_eq!(canonical_managed_component_rank("recap"), Some(1));
+        assert_eq!(canonical_managed_component_rank("worktrees"), Some(1));
+        assert_eq!(canonical_managed_component_rank("open-items"), Some(3));
+        assert_eq!(canonical_managed_component_rank("active"), Some(3));
+        assert_eq!(canonical_managed_component_rank("recap"), Some(2));
     }
 
     #[test]

@@ -282,9 +282,9 @@ mod tests {
                 .collect::<Vec<_>>(),
             [
                 "status",
+                "worktrees",
                 "recap",
                 "active",
-                "worktrees",
                 "queue",
                 "review",
                 "todo",

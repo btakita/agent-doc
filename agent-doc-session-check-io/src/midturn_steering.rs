@@ -73,15 +73,30 @@ pub struct SteeringReport {
     /// When a held item's settle decision can next change (ms from now).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub recheck_after_ms: Option<u64>,
+    /// Session harness the action text is rendered for (frontmatter `agent:`).
+    /// Empty or `unknown` falls back to `detect_harness`. Not part of the JSON
+    /// item contract.
+    #[serde(skip)]
+    pub harness: String,
 }
 
 impl SteeringReport {
     /// Agent-facing context, `None` when nothing is ready.
     pub fn render(&self) -> Option<String> {
         if self.after_close {
-            core::render_closeout_steering_context(&self.document, &self.items, self.pending)
+            core::render_closeout_steering_context_for_harness(
+                &self.document,
+                &self.items,
+                self.pending,
+                &self.harness,
+            )
         } else {
-            core::render_steering_context(&self.document, &self.items, self.pending)
+            core::render_steering_context_for_harness(
+                &self.document,
+                &self.items,
+                self.pending,
+                &self.harness,
+            )
         }
     }
 }
@@ -1431,10 +1446,11 @@ fn prepare_with_gate_at(
             &mut observation.ready,
         )?;
     }
+    let harness = document_harness(&content);
     let gate = crate::steering_gate_log::GateObservation {
         document,
         consumer: consumer.to_string(),
-        harness: document_harness(&content),
+        harness: harness.clone(),
         operator: crate::steering_gate_log::operator_id(),
         now_ms: ctx.now_ms,
         document_changed_ms: ctx.document_changed_ms,
@@ -1459,6 +1475,7 @@ fn prepare_with_gate_at(
         pending: observation.pending,
         after_close: boundary,
         recheck_after_ms: observation.recheck_after_ms,
+        harness,
     };
     prepared(Some(next), Some(report), boundary, Some(gate))
 }
@@ -1885,8 +1902,12 @@ pub fn prepare_route_sync_steering(file: &Path) -> Result<Option<RouteSyncSteeri
     let diff = previous
         .as_deref()
         .and_then(|previous| agent_doc_diff::unified_diff_from_contents(previous, &content));
-    let full_instructions =
-        core::render_route_sync_steering(&file.display().to_string(), diff.as_deref(), &items);
+    let full_instructions = core::render_route_sync_steering_for_harness(
+        &file.display().to_string(),
+        diff.as_deref(),
+        &items,
+        &document_harness(&content),
+    );
     let Some(full_instructions) = full_instructions else {
         return Ok(None);
     };
@@ -2183,7 +2204,12 @@ pub fn render_pending_steering_items(items: &[SteeringItem]) -> Option<String> {
 
 /// Render a report for the turn-boundary surface.
 pub fn render_closeout(report: &SteeringReport) -> Option<String> {
-    core::render_closeout_steering_context(&report.document, &report.items, report.pending)
+    core::render_closeout_steering_context_for_harness(
+        &report.document,
+        &report.items,
+        report.pending,
+        &report.harness,
+    )
 }
 
 /// Emit unsurfaced steering into the terminal report of `respond` /

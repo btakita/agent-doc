@@ -1657,8 +1657,19 @@ pub fn render_route_sync_steering(
     diff: Option<&str>,
     items: &[SteeringItem],
 ) -> Option<String> {
+    render_route_sync_steering_for_harness(document, diff, items, "")
+}
+
+/// [`render_route_sync_steering`] for an explicit harness. An empty or
+/// `unknown` harness uses [`agent_doc_model_tier::detect_harness`].
+pub fn render_route_sync_steering_for_harness(
+    document: &str,
+    diff: Option<&str>,
+    items: &[SteeringItem],
+    harness: &str,
+) -> Option<String> {
     let diff = diff.map(str::trim).filter(|diff| !diff.is_empty());
-    let items_text = render_steering_context(document, items, 0);
+    let items_text = render_steering_context_for_harness(document, items, 0, harness);
     match (diff, items_text) {
         (None, None) => None,
         (Some(diff), items_text) => {
@@ -1680,11 +1691,28 @@ pub fn render_route_sync_steering(
 
 /// Render settled steering as agent-facing context. `None` when nothing is
 /// ready (pending-only observations stay silent).
+///
+/// The harness is [`agent_doc_model_tier::detect_harness`]. Callers that
+/// already know the session harness use [`render_steering_context_for_harness`].
 pub fn render_steering_context(
     document: &str,
     ready: &[SteeringItem],
     pending: usize,
 ) -> Option<String> {
+    render_steering_context_for_harness(document, ready, pending, "")
+}
+
+/// [`render_steering_context`] for `harness`. An empty or `unknown` harness
+/// uses [`agent_doc_model_tier::detect_harness`]. Unit tests pass `grok` or
+/// another harness explicitly so `GROK_SESSION_ID` cannot flip them.
+pub fn render_steering_context_for_harness(
+    document: &str,
+    ready: &[SteeringItem],
+    pending: usize,
+    harness: &str,
+) -> Option<String> {
+    let mut detected = String::new();
+    let harness = resolve_steering_harness(harness, &mut detected);
     if ready.is_empty() {
         return None;
     }
@@ -1751,7 +1779,10 @@ pub fn render_steering_context(
                 .join("; ");
             out.push_str(&format!("\npresets: {names}"));
         }
-        out.push_str(&format!("\naction: {}", action_for(document, item)));
+        out.push_str(&format!(
+            "\naction: {}",
+            action_for(document, item, harness)
+        ));
     }
     if pending > 0 {
         out.push_str(&format!(
@@ -2033,7 +2064,7 @@ pub fn hold_subagent_dispatch_for_reported(items: &mut [SteeringItem]) {
 
 /// The document-specific action for `item`: [`instruction_for`], except a
 /// reported line names its exact closeout (`#reportedrelease`).
-fn action_for(document: &str, item: &SteeringItem) -> String {
+fn action_for(document: &str, item: &SteeringItem, harness: &str) -> String {
     match item.dispatch {
         SteeringDispatch::CancelClaimed => cancel_claimed_instruction(document, item),
         SteeringDispatch::DegradedClaimMismatch => {
@@ -2048,7 +2079,7 @@ fn action_for(document: &str, item: &SteeringItem) -> String {
             )
         }
         SteeringDispatch::ForwardToOwner if item.change != SteeringChange::Deleted => {
-            forward_to_owner_instruction(document, item)
+            forward_to_owner_instruction(document, item, harness)
         }
         SteeringDispatch::QueueModeChanged => match &item.queue_mode {
             Some(change) => queue_mode_change_instruction(document, change),
@@ -2058,6 +2089,42 @@ fn action_for(document: &str, item: &SteeringItem) -> String {
     }
 }
 
+/// Empty or `unknown` means the caller did not name a session harness.
+fn steering_harness_unspecified(harness: &str) -> bool {
+    let harness = harness.trim();
+    harness.is_empty() || harness.eq_ignore_ascii_case("unknown")
+}
+
+fn resolve_steering_harness<'a>(harness: &'a str, detected: &'a mut String) -> &'a str {
+    if steering_harness_unspecified(harness) {
+        *detected = agent_doc_model_tier::detect_harness();
+        detected.as_str()
+    } else {
+        harness
+    }
+}
+
+fn steering_harness_is_grok(harness: &str) -> bool {
+    matches!(
+        harness
+            .trim()
+            .to_ascii_lowercase()
+            .replace(['_', ' '], "-")
+            .as_str(),
+        "grok" | "grok-build"
+    )
+}
+
+/// A claimed edit or added note that names the running worker (`#claimedsteerwake`).
+fn grok_claimed_owner_forward(harness: &str, item: &SteeringItem) -> bool {
+    steering_harness_is_grok(harness)
+        && item
+            .worker_id
+            .as_deref()
+            .is_some_and(|worker_id| !worker_id.trim().is_empty())
+        && matches!(item.change, SteeringChange::Edited | SteeringChange::Added)
+}
+
 /// Render the worker handoff together with its generation-fenced unavailable-owner
 /// recovery (`#staleownersteer`).
 ///
@@ -2065,8 +2132,9 @@ fn action_for(document: &str, item: &SteeringItem) -> String {
 /// worker's lifecycle. The harness handoff result is therefore the boundary fact:
 /// a successful handoff keeps the attempt, while an explicit unavailable/exited
 /// result abandons exactly this generation and leaves the operator's edited row in
-/// place for a fresh dispatch generation.
-fn forward_to_owner_instruction(document: &str, item: &SteeringItem) -> String {
+/// place for a fresh dispatch generation. On Grok, a missing
+/// `send_subagent_message` tool or a rejected send is the same failed handoff.
+fn forward_to_owner_instruction(document: &str, item: &SteeringItem, harness: &str) -> String {
     let generation = item
         .generation
         .map(|generation| generation.to_string())
@@ -2077,6 +2145,9 @@ fn forward_to_owner_instruction(document: &str, item: &SteeringItem) -> String {
         shell_single_quote(item.claim_text()),
         generation,
     );
+    if grok_claimed_owner_forward(harness, item) {
+        return grok_send_subagent_message_instruction(item, &requeue);
+    }
     format!(
         "{} If the harness reports that the exact worker is unavailable or has exited, the \
          handoff did NOT happen: do not drop this operator answer/edit, claim it was forwarded, \
@@ -2085,6 +2156,39 @@ fn forward_to_owner_instruction(document: &str, item: &SteeringItem) -> String {
          the edited row redispatchable; let the normal queue dispatcher start its replacement \
          under a fresh generation.",
         instruction_for(item),
+    )
+}
+
+/// Grok claimed-owner handoff (`#claimedsteerwake`). `subagent_id` is the
+/// steering `worker=` id, never `parent`. `delivery` is `steer`.
+fn grok_send_subagent_message_instruction(item: &SteeringItem, requeue: &str) -> String {
+    let worker = item.worker_id.as_deref().unwrap_or("").trim();
+    let lead = match item.change {
+        SteeringChange::Added => {
+            "the operator added a note on a queue item a worker already claimed (`owner` above)"
+        }
+        _ => {
+            "the operator EDITED a queue item a worker already claimed (`owner` above; the claim \
+             followed the edit)"
+        }
+    };
+    format!(
+        "{lead}. Call `send_subagent_message` now with `subagent_id` `{worker}` (never \
+         `parent`), `delivery` `steer`, and `message` containing `previous` and `verbatim` so \
+         the worker sees the edit. That `message` must also say: if `verbatim` adds or keeps a \
+         nested line that says `push` or `publish`, that line is operator authorization to \
+         perform that action now (`#nestedoutwardauth`): it is not a question, not a chat reply, \
+         and not blocked by a preset or skill that says to wait until asked. A trailing \
+         `⟦effect:N⟧` marker does not remove it. `publish` on a review posts the review as a \
+         plain comment unless the line says approve. Do NOT dispatch a new subagent and do NOT \
+         re-claim the item. If `send_subagent_message` is not in the tool list when \
+         `active_agent_messages` is off, or the send is rejected, or the harness reports that \
+         the exact worker is unavailable or has exited, the handoff did NOT happen: do not drop \
+         this operator answer/edit, claim it was forwarded, or keep routing only to the \
+         unreachable owner. Preserve `verbatim` in the queue and run `{requeue}`. That \
+         generation-fenced transition abandons only the stale attempt and makes the edited row \
+         redispatchable; let the normal queue dispatcher start its replacement under a fresh \
+         generation."
     )
 }
 
@@ -2336,6 +2440,19 @@ pub fn render_closeout_steering_context(
     ready: &[SteeringItem],
     pending: usize,
 ) -> Option<String> {
+    render_closeout_steering_context_for_harness(document, ready, pending, "")
+}
+
+/// [`render_closeout_steering_context`] for `harness`. An empty or `unknown`
+/// harness uses [`agent_doc_model_tier::detect_harness`].
+pub fn render_closeout_steering_context_for_harness(
+    document: &str,
+    ready: &[SteeringItem],
+    pending: usize,
+    harness: &str,
+) -> Option<String> {
+    let mut detected = String::new();
+    let harness = resolve_steering_harness(harness, &mut detected);
     if ready.is_empty() {
         return None;
     }
@@ -2389,7 +2506,7 @@ pub fn render_closeout_steering_context(
                 | SteeringDispatch::PersistReported
                 | SteeringDispatch::QueueModeChanged,
                 _,
-            ) => action_for(document, item),
+            ) => action_for(document, item, harness),
             (SteeringDispatch::Subagent, SteeringSource::Queue) => format!(
                 "DISPATCH NOW to a NEW background subagent (one per item). Claim it first with \
                  `{}` so the loop and Stop hook do not drain it inline, then dispatch. Only \
@@ -5100,6 +5217,137 @@ mod tests {
                 item.owner.as_deref(),
                 Some("subagent:artifact_response_refs")
             );
+        }
+    }
+
+    /// Grok claimed-owner edits and added notes call `send_subagent_message`.
+    /// Other harnesses keep the SendMessage wording.
+    #[test]
+    fn grok_forward_to_owner_calls_send_subagent_message() {
+        let worker = "worker-grok-42";
+        let edited = forward_owner_item(
+            SteeringChange::Edited,
+            Some("previous wording".to_string()),
+            "verbatim wording with a nested publish",
+            Some(worker.to_string()),
+        );
+        let added = forward_owner_item(
+            SteeringChange::Added,
+            None,
+            "verbatim added note",
+            Some(worker.to_string()),
+        );
+        let unbound = forward_owner_item(
+            SteeringChange::Edited,
+            Some("previous wording".to_string()),
+            "verbatim wording",
+            None,
+        );
+
+        for item in [&edited, &added] {
+            for harness in ["grok", "grok-build", "Grok"] {
+                for text in [
+                    render_steering_context_for_harness(
+                        "tasks/bugs.md",
+                        std::slice::from_ref(item),
+                        0,
+                        harness,
+                    )
+                    .unwrap(),
+                    render_closeout_steering_context_for_harness(
+                        "tasks/bugs.md",
+                        std::slice::from_ref(item),
+                        0,
+                        harness,
+                    )
+                    .unwrap(),
+                ] {
+                    let action = text.split_once("action: ").expect(&text).1;
+                    assert!(
+                        action.contains("send_subagent_message"),
+                        "{harness}: {action}"
+                    );
+                    assert!(
+                        action.contains(&format!("`subagent_id` `{worker}`")),
+                        "{harness}: {action}"
+                    );
+                    assert!(action.contains("`delivery` `steer`"), "{harness}: {action}");
+                    let tool_at = action.find("send_subagent_message").unwrap();
+                    let steer_at = action.find("`delivery` `steer`").unwrap();
+                    assert!(
+                        steer_at > tool_at && steer_at - tool_at < 160,
+                        "{harness}: {action}"
+                    );
+                    assert!(action.contains("previous"), "{harness}: {action}");
+                    assert!(action.contains("verbatim"), "{harness}: {action}");
+                    assert!(action.contains("#nestedoutwardauth"), "{harness}: {action}");
+                    assert!(action.contains("not a chat reply"), "{harness}: {action}");
+                    assert!(
+                        action.contains(
+                            "`send_subagent_message` is not in the tool list when `active_agent_messages` is off"
+                        ),
+                        "{harness}: {action}"
+                    );
+                    assert!(
+                        action.contains("the handoff did NOT happen"),
+                        "{harness}: {action}"
+                    );
+                    assert!(
+                        action.contains("agent-doc queue release 'tasks/bugs.md' --item")
+                            && action.contains("--generation 4 --requeue"),
+                        "{harness}: {action}"
+                    );
+                    assert!(
+                        action.contains("Do NOT dispatch a new subagent"),
+                        "{action}"
+                    );
+                    assert!(action.contains("do NOT re-claim"), "{action}");
+                    assert!(!action.contains("`subagent_id` `parent`"), "{action}");
+                }
+            }
+        }
+
+        for harness in ["claude", "codex", "default"] {
+            let text =
+                render_steering_context_for_harness("tasks/bugs.md", &[edited.clone()], 0, harness)
+                    .unwrap();
+            assert!(!text.contains("send_subagent_message"), "{harness}: {text}");
+            assert!(text.contains("FORWARD the change"), "{harness}: {text}");
+            assert!(text.contains("SendMessage"), "{harness}: {text}");
+            assert!(text.contains("#nestedoutwardauth"), "{harness}: {text}");
+            assert!(text.contains("not a chat reply"), "{harness}: {text}");
+        }
+
+        let unbound_text =
+            render_steering_context_for_harness("tasks/bugs.md", &[unbound], 0, "grok").unwrap();
+        assert!(
+            !unbound_text.contains("send_subagent_message"),
+            "{unbound_text}"
+        );
+        assert!(unbound_text.contains("SendMessage"), "{unbound_text}");
+    }
+
+    fn forward_owner_item(
+        change: SteeringChange,
+        previous: Option<String>,
+        verbatim: &str,
+        worker_id: Option<String>,
+    ) -> SteeringItem {
+        SteeringItem {
+            source: SteeringSource::Queue,
+            change,
+            dispatch: SteeringDispatch::ForwardToOwner,
+            current_item: false,
+            verbatim: verbatim.to_string(),
+            previous,
+            presets: Vec::new(),
+            possibly_partial: false,
+            owner: Some("subagent:owner".to_string()),
+            generation: Some(4),
+            worker_id,
+            explicit: false,
+            vector: None,
+            queue_mode: None,
         }
     }
 

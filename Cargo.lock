@@ -773,6 +773,7 @@ dependencies = [
  "agent-doc-flow",
  "agent-doc-frontmatter",
  "agent-doc-merge",
+ "agent-doc-model-tier",
  "agent-doc-prompt-lines",
  "agent-doc-queue",
  "agent-doc-state-backbone",

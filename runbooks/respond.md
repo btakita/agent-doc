@@ -205,9 +205,15 @@ and the pending granular-flags-only rule. This runbook carries the rest.
   - `forward_to_owner` (`#claimedsteerwake`): a queue item a worker already
     claimed; `owner=subagent:<label>` names it. For an edit, FORWARD
     `previous` -> `verbatim` to that running subagent (for example with
-    SendMessage). A nested child that says `push` or `publish` (ignore a
-    trailing `⟦effect:N⟧`, a struck child, and a negation such as `do not
-    push`) is operator authorization to do that action now
+    SendMessage). On Grok Build, call `send_subagent_message` now with
+    `subagent_id` equal to the steering `worker=` id (never `parent`),
+    `delivery` `steer`, and a `message` that contains `previous` and
+    `verbatim` so the worker sees the edit, including the nested `push` or
+    `publish` authorization below. That tool is absent until `[features]
+    active_agent_messages` or `GROK_ACTIVE_AGENT_MESSAGES` is set. A nested
+    child that says `push` or `publish` (ignore a trailing `⟦effect:N⟧`, a
+    struck child, and a negation such as `do not push`) is operator
+    authorization to do that action now
     (`#nestedoutwardauth`): tell the owner it is not a question, not a chat
     reply, and not blocked by a preset or skill that says to wait.
     `publish` on a review posts it as a plain comment unless the line says
@@ -215,8 +221,10 @@ and the pending granular-flags-only rule. This runbook carries the rest.
     the claim follows its line through an in-place edit, whether an appended
     note or a corrected URL or wording (`#claimfollowedit`), and the worker
     can still `--refresh` / `release` by the text it was handed. If the harness
-    reports that the exact worker is unavailable or exited, the handoff did not
-    happen (`#staleownersteer`): preserve the verbatim operator answer/edit in
+    reports that the exact worker is unavailable or exited, or on Grok the send
+    is rejected or `send_subagent_message` is not in the tool list when
+    `active_agent_messages` is off, the handoff did not happen
+    (`#staleownersteer`): preserve the verbatim operator answer/edit in
     the queue and run the rendered generation-fenced `queue release ...
     --generation <N> --requeue` command. That abandons only the stale attempt
     and makes the edited row dispatchable under a fresh generation; do not drop

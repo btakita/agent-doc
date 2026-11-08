@@ -318,6 +318,12 @@ mod tests {
         }
         assert!(respond.contains("native background worker per dispatch item"));
         assert!(!respond.contains("Codex, OpenCode, Grok Build,"));
+        assert!(
+            respond.contains("`send_subagent_message`")
+                && respond.contains("`subagent_id` equal to the steering `worker=` id")
+                && respond.contains("SendMessage"),
+            "Grok forward_to_owner must name send_subagent_message without dropping SendMessage"
+        );
         assert!(auto_loop.contains("`spawn_subagent(background=true)`"));
         assert!(auto_loop.contains("automatic on the first admitted cycle"));
         assert!(auto_loop.contains("(never one at a time)"), "{auto_loop}");

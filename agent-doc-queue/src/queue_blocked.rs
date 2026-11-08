@@ -159,11 +159,18 @@ impl QueueBlockers {
         if open.is_empty() {
             return Self::default();
         }
+        // `#blockerdisregard`: an operator record names the exact invented
+        // edges to ignore. Parsing the comment does not call back into this
+        // derivation. Edges the comment does not name still block.
+        let disregarded = crate::blocker_disregard::QueueDisregards::from_content(content);
         let after_deps = crate::backlog_sync::collect_after_deps(&components, content);
         let mut by_item: BTreeMap<String, Vec<String>> = BTreeMap::new();
         let mut add = |item: &str, dep: &str| -> bool {
             let dep = backlog::normalize_pending_id(dep);
             if dep.is_empty() || dep == item || !open.contains(&dep) {
+                return false;
+            }
+            if disregarded.ignores(item, &dep) {
                 return false;
             }
             let slot = by_item.entry(item.to_string()).or_default();
@@ -367,6 +374,25 @@ mod tests {
         );
         let merged = doc.replace("- [/] [#pre]", "- [x] [#pre]");
         assert_eq!(queue_blockers(&merged).blockers_for_id("dep"), None);
+    }
+
+    #[test]
+    fn a_recorded_disregard_drops_only_the_named_edge() {
+        let doc = format!(
+            "<!-- agent-doc:blocker-disregard queue=bossroom-sbx-provision:sbx-deploy-749 -->\n{}",
+            sdk_demo_like()
+        );
+        let blockers = queue_blockers(&doc);
+        assert_eq!(blockers.blockers_for_id("bossroom-sbx-provision"), None);
+        assert_eq!(
+            blockers.blockers_for_id("bossroom-stg-provision"),
+            Some(&["bossroom-sbx-provision".to_string()][..])
+        );
+        assert!(
+            !blockers.deferred_ids().contains("bossroom-sbx-provision"),
+            "the disregarded stays-open edge is no longer a drain deferral"
+        );
+        assert!(blockers.deferred_ids().contains("bossroom-stg-provision"));
     }
 
     #[test]

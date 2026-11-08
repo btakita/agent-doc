@@ -1213,6 +1213,18 @@ fn run_with_options_to_writer_in_pass(
         }
     }
 
+    crate::progress::enter("blocker_disregard")?;
+    // `#blockerdisregard`: consume `disregard` / `[disregard]` / `disregard
+    // blockers` before the diff, so an invented blocker the operator named
+    // never reaches the agent as a prompt. Best-effort, same as `status?`.
+    if !options.probe {
+        if let Err(err) =
+            agent_doc_preflight_io::blocker_disregard::run_blocker_disregard_maintenance(file)
+        {
+            eprintln!("[preflight] blocker disregard: not applied this pass: {err:#}");
+        }
+    }
+
     crate::progress::enter("compute_diff")?;
     // Step 4: Compute diff between snapshot and current document.
     eprintln!("[preflight] step 4: diff");

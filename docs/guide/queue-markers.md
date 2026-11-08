@@ -160,8 +160,12 @@ A live attempt still outranks it: a claimed, running, reported, lost, or
 reconciling row keeps that marker. `⛔` outranks `⏳`, `⏭️`, and `📥`.
 agent-doc never edits the row's text or the tracked item: only the marker and
 annotation change. To unblock a row by hand, close the blocker or edit the
-clause in the tracked item. The exact rule is in
-`specs/07-orchestration-commands.md` (`#queueblocked`).
+clause in the tracked item. To disregard a blocker an agent invented without
+closing that work, run `agent-doc queue disregard` or add a `disregard` child
+line (`#blockerdisregard`). A real operator gate, a question that cites an
+upstream you still have to answer, and a harness permission prompt stay. The
+exact rule is in `specs/07-orchestration-commands.md` (`#queueblocked`,
+`#blockerdisregard`).
 
 ## When a `☑️` row closes
 

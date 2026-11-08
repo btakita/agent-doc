@@ -1190,6 +1190,7 @@ the dispatch actor and produce receipts.
   it safe. This controller-owned fence is the final check before route input,
   so a stale `Ready` projection cannot inject into a long-running turn even if a
   route-side probe raced it.
+- When the session document records `dispatch=actor_turn_busy` in `<!-- agent-doc:blocker-disregard ... -->` (`#blockerdisregard`) and the pane reason does not contain a permission prompt, a live `actor_turn_busy` cue still returns `Blocked` and still does not inject, but its user-facing outcome is `queued_behind_owner` / `wait_for_owner_turn_to_drain` (the same fields as `actor_busy_draining`) instead of `resume_or_clear_queue_control`. A permission-prompt reason, a deliberate `queue_paused` pause, and `actor_turn_observation_unavailable` keep their existing outcomes.
 - That pane observation is bounded and load-aware (`#recoverableautoretry`,
   `#ctlprobeloadbudget`). Only a tmux *timeout* is re-read (any other capture
   error is an answer and fails closed at once), at most three reads, each read

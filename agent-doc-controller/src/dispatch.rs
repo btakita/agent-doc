@@ -259,6 +259,34 @@ impl std::fmt::Display for DispatchBlockedUserFacingOutcomeFields {
 }
 
 pub fn dispatch_blocked_user_facing_outcome_fields(stage: &str, reason: &str) -> String {
+    dispatch_blocked_user_facing_outcome_fields_disregarded(stage, reason, false)
+}
+
+/// [`dispatch_blocked_user_facing_outcome_fields`] with the operator's
+/// `#blockerdisregard` of the `actor_turn_busy` catch-all.
+///
+/// A non-permission busy turn then reports the same fields as
+/// `actor_busy_draining` (`queued_behind_owner`, wait). The controller still
+/// refuses to inject. A permission prompt, `queue_paused`, and
+/// `actor_turn_observation_unavailable` keep their own outcomes.
+pub fn dispatch_blocked_user_facing_outcome_fields_disregarded(
+    stage: &str,
+    reason: &str,
+    disregard_actor_turn_busy: bool,
+) -> String {
+    if disregard_actor_turn_busy
+        && stage == "actor_turn_busy"
+        && !reason.to_ascii_lowercase().contains("permission")
+    {
+        return DispatchBlockedUserFacingOutcome {
+            outcome: "queued_behind_owner",
+            class: "ok",
+            next_action: "wait_for_owner_turn_to_drain",
+            unblocker: None,
+        }
+        .log_fields()
+        .to_string();
+    }
     let lower = reason.to_ascii_lowercase();
     let outcome = if stage == "actor_turn_observation_unavailable" {
         // The controller could not read the owner pane (for example a tmux
@@ -333,13 +361,16 @@ pub struct DispatchBlockedProofFacts<'a> {
     pub reason: &'a str,
     pub blocked_head: Option<&'a str>,
     pub trigger: Option<&'a str>,
+    /// Document recorded `dispatch=actor_turn_busy` (`#blockerdisregard`).
+    pub disregard_actor_turn_busy: bool,
 }
 
 pub fn dispatch_blocked_proof_fields(facts: DispatchBlockedProofFacts<'_>) -> String {
     let mut fields = Vec::new();
-    fields.push(dispatch_blocked_user_facing_outcome_fields(
+    fields.push(dispatch_blocked_user_facing_outcome_fields_disregarded(
         facts.stage,
         facts.reason,
+        facts.disregard_actor_turn_busy,
     ));
     if let Some(head) = facts.blocked_head {
         fields.push(format!("blocked_head_bytes={}", head.len()));
@@ -9352,6 +9383,56 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
     }
 
     #[test]
+    fn disregarded_actor_turn_busy_waits_unless_the_reason_is_a_permission_prompt() {
+        let draining = dispatch_blocked_user_facing_outcome_fields("actor_busy_draining", "busy");
+        let disregarded = dispatch_blocked_user_facing_outcome_fields_disregarded(
+            "actor_turn_busy",
+            "thinking",
+            true,
+        );
+        assert_eq!(disregarded, draining);
+        assert!(!disregarded.contains("resume_or_clear_queue_control"));
+        assert_eq!(
+            dispatch_blocked_user_facing_outcome_fields_disregarded(
+                "actor_turn_busy",
+                "active permission prompt",
+                true,
+            ),
+            dispatch_blocked_user_facing_outcome_fields(
+                "actor_turn_busy",
+                "active permission prompt"
+            )
+        );
+        assert_eq!(
+            dispatch_blocked_user_facing_outcome_fields_disregarded(
+                "queue_paused",
+                "operator pause",
+                true,
+            ),
+            dispatch_blocked_user_facing_outcome_fields("queue_paused", "operator pause"),
+        );
+        assert_eq!(
+            dispatch_blocked_user_facing_outcome_fields_disregarded(
+                "actor_turn_observation_unavailable",
+                "tmux command timed out",
+                true,
+            ),
+            dispatch_blocked_user_facing_outcome_fields(
+                "actor_turn_observation_unavailable",
+                "tmux command timed out"
+            ),
+        );
+        assert_eq!(
+            dispatch_blocked_user_facing_outcome_fields_disregarded(
+                "actor_turn_busy",
+                "thinking",
+                false,
+            ),
+            dispatch_blocked_user_facing_outcome_fields("actor_turn_busy", "thinking"),
+        );
+    }
+
+    #[test]
     fn dispatch_blocked_proof_fields_use_supplied_io_facts() {
         let head = "abc";
         let trigger = "agent-doc doc.md";
@@ -9362,6 +9443,7 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
                 reason: "manual review",
                 blocked_head: Some(head),
                 trigger: Some(trigger),
+                disregard_actor_turn_busy: false,
             }),
             format!(
                 "ui_outcome_contract=ui-outcome-v1 ui_outcome=deferred_for_operator_proof ui_outcome_class=operator next_action=operator_proof_required blocked_head_bytes=3 blocked_head_sha256=ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad trigger_bytes=16 trigger_sha256={}",

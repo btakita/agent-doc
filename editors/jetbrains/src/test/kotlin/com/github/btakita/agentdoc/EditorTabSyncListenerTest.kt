@@ -376,6 +376,59 @@ class EditorTabSyncListenerTest {
     }
 
     @Test
+    fun `focus projection never waits for EDT while holding lifecycle lock`() {
+        val source =
+            Files.readString(
+                Paths.get("src/main/kotlin/com/github/btakita/agentdoc/EditorTabSyncListener.kt")
+                    .takeIf { Files.exists(it) }
+                    ?: Paths.get(
+                        "editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/EditorTabSyncListener.kt",
+                    ),
+            )
+        val focusProjection =
+            source
+                .substringAfter("private fun requestFocusProjection(")
+                .substringBefore("private fun shutdown()")
+        val projectWindowRead =
+            focusProjection.indexOf(
+                "val projectWindowActive =\n                                JetBrainsEditorSurfaces.isProjectSurfaceActive(project)",
+            )
+        val receiptLock =
+            focusProjection.indexOf("synchronized(lifecycleLock) {", startIndex = projectWindowRead)
+
+        assertTrue(projectWindowRead >= 0)
+        assertTrue(receiptLock > projectWindowRead)
+        val receiptCriticalSection =
+            focusProjection.substring(receiptLock).substringBefore("} catch (error: Throwable)")
+        assertFalse(receiptCriticalSection.contains("JetBrainsEditorSurfaces.isProjectSurfaceActive"))
+        assertTrue(receiptCriticalSection.contains("projectWindowActive = projectWindowActive"))
+    }
+
+    @Test
+    fun `plain markdown selection cannot start a focus projection`() {
+        val source =
+            Files.readString(
+                Paths.get("src/main/kotlin/com/github/btakita/agentdoc/EditorTabSyncListener.kt")
+                    .takeIf { Files.exists(it) }
+                    ?: Paths.get(
+                        "editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/EditorTabSyncListener.kt",
+                    ),
+            )
+        val selectionChanged =
+            source
+                .substringAfter("internal fun selectionChanged(")
+                .substringBefore("private fun scheduleSettledSelectionFocusProbe(")
+        val sessionGuard =
+            selectionChanged.indexOf("if (!AgentDocSessionFiles.isSessionDocument(file))")
+        val guardReturn = selectionChanged.indexOf("return", startIndex = sessionGuard)
+        val focusProjection = selectionChanged.indexOf("requestFocusProjection(")
+
+        assertTrue(sessionGuard >= 0)
+        assertTrue(guardReturn > sessionGuard)
+        assertTrue(focusProjection > guardReturn)
+    }
+
+    @Test
     fun `focus projection installs a handoff lease only after exact pane selection`() {
         assertTrue(
             EditorTabSyncListener.focusProjectionApplied(

@@ -1691,6 +1691,13 @@ internal data class CapturedSurface(
                             if (!continueAfterGate("after_transport")) {
                                 return@focus
                             }
+                            // `isProjectSurfaceActive` synchronously hops to the EDT when this
+                            // focus effect runs on its background executor. Never perform that
+                            // hop while holding lifecycleLock: selectionChanged runs on the EDT
+                            // and must acquire the same lock to publish its layout observation.
+                            // Holding the lock across the hop deadlocks the two threads.
+                            val projectWindowActive =
+                                JetBrainsEditorSurfaces.isProjectSurfaceActive(project)
                             synchronized(lifecycleLock) {
                                 if (response.transport.exitCode == 0) {
                                     surfaceEndpoints.record(
@@ -1701,8 +1708,7 @@ internal data class CapturedSurface(
                                     decideFocusProjectionReceipt(
                                         response = response,
                                         currentGeneration = focusProjectionGeneration.get(),
-                                        projectWindowActive =
-                                            JetBrainsEditorSurfaces.isProjectSurfaceActive(project),
+                                        projectWindowActive = projectWindowActive,
                                     )
                                 ) {
                                     FocusProjectionReceiptDecision.Applied -> {

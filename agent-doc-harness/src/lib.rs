@@ -51,6 +51,7 @@ pub mod managed_capability;
 pub mod prompt_source;
 pub mod spawn_program;
 pub mod steering_delivery;
+pub mod subagent_edit_handoff;
 pub mod subagent_end;
 pub mod timeout;
 pub mod usage_limit;

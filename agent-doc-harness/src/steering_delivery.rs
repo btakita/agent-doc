@@ -130,6 +130,40 @@ pub fn running_turn_follow_up_composer_at_cursor(
     }
 }
 
+/// Which hook stdout reaches the model (`#hookcontextinjection`).
+///
+/// Claude Code and Codex inject on user-prompt, post-tool, and stop. Grok
+/// Build's guide (10-hooks) discards allowing `UserPromptSubmit` stdout, delivers
+/// `PostToolUse` `additionalContext`, and lets `Stop` / `SubagentStop` continue
+/// a turn. OpenCode and Cursor have no such hook in this table.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HookContextInjection {
+    pub user_prompt_submit: bool,
+    pub post_tool_use: bool,
+    pub stop_can_continue: bool,
+}
+
+/// Hook injection for `harness`. Spellings match [`steering_delivery_adapter`].
+pub fn hook_context_injection(harness: &str) -> HookContextInjection {
+    match steering_delivery_adapter(harness).harness {
+        "claude" | "codex" => HookContextInjection {
+            user_prompt_submit: true,
+            post_tool_use: true,
+            stop_can_continue: true,
+        },
+        "grok" => HookContextInjection {
+            user_prompt_submit: false,
+            post_tool_use: true,
+            stop_can_continue: true,
+        },
+        _ => HookContextInjection {
+            user_prompt_submit: false,
+            post_tool_use: false,
+            stop_can_continue: false,
+        },
+    }
+}
+
 /// The delivery adapter for `harness` (any spelling `normalize_harness_name`
 /// or `HarnessConfig::from_agent_name` accepts). Unknown names fall back to
 /// the Claude Code adapter, matching `HarnessConfig::from_agent_name`.
@@ -175,11 +209,16 @@ pub fn steering_delivery_adapter(harness: &str) -> SteeringDeliveryAdapter {
         },
         "grok" | "grok-build" => SteeringDeliveryAdapter {
             harness: "grok",
-            // Grok Build lifecycle hooks are notifications: stdout cannot
-            // inject context into the running turn. Explicit Run Agent Doc
-            // uses the shared composer follow-up (`#routesyncsteer`); passive
-            // delivery stays a poll.
-            busy: BusyDelivery::PollAndCommandBoundary,
+            // PostToolUse stdout is read: `hookSpecificOutput.additionalContext`
+            // is delivered with the tool result (Grok Build user guide, 10-hooks,
+            // PostToolUse Output). The installed
+            // `agent-doc hook steering-post-tool-use` hook is that injection.
+            // An allowing UserPromptSubmit still discards stdout, so admission
+            // stays MCP `agent_doc_admit`. Stop can continue a turn; closeout
+            // stays `agent_doc_finalize`. Poll remains the fallback when this
+            // hook is silent. Explicit Run Agent Doc uses the shared composer
+            // follow-up (`#routesyncsteer`).
+            busy: BusyDelivery::PostToolUseHook,
             idle: IdleDelivery::SupervisorTrigger,
             // `grok -p <PROMPT>` is its single-turn headless mode.
             classifier: Some(ClassifierCli {
@@ -318,13 +357,35 @@ mod tests {
             steering_delivery_adapter("codex").busy,
             BusyDelivery::PostToolUseHook
         );
-        for harness in ["opencode", "grok", "cursor"] {
+        for harness in ["grok", "grok-build"] {
+            assert_eq!(
+                steering_delivery_adapter(harness).busy,
+                BusyDelivery::PostToolUseHook,
+                "{harness}"
+            );
+        }
+        for harness in ["opencode", "cursor"] {
             assert_eq!(
                 steering_delivery_adapter(harness).busy,
                 BusyDelivery::PollAndCommandBoundary,
                 "{harness}"
             );
         }
+    }
+
+    #[test]
+    fn post_tool_use_injection_matches_busy_delivery() {
+        for harness in SUPPORTED_HARNESSES {
+            let injects = hook_context_injection(harness).post_tool_use;
+            let hooked = steering_delivery_adapter(harness).busy == BusyDelivery::PostToolUseHook;
+            assert_eq!(injects, hooked, "{harness}");
+        }
+        let grok = hook_context_injection("grok");
+        assert!(!grok.user_prompt_submit);
+        assert!(grok.post_tool_use);
+        assert!(grok.stop_can_continue);
+        assert!(!hook_context_injection("opencode").stop_can_continue);
+        assert!(!hook_context_injection("cursor").post_tool_use);
     }
 
     #[test]

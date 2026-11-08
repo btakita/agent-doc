@@ -101,16 +101,64 @@ fn strip_harness_envelopes(prompt: &str) -> String {
     out
 }
 
+/// A background-task completion injected by the harness, not operator text.
+///
+/// Claude Code and Codex deliver a leading `<task-notification>`. Grok Build's
+/// `Notification` payload sets `notificationType` (alias `notification_type`)
+/// to `task_complete` (user guide, 10-hooks). The transcript chip
+/// "Task completed" is display text and is not this signal. A Codex rollout
+/// `type` of `task_complete` is a turn-activity record, not this notification.
+pub fn is_background_task_completion(prompt: &str) -> bool {
+    let trimmed = prompt.trim();
+    if envelope_tag_at(trimmed) == Some("task-notification") {
+        return true;
+    }
+    if grok_task_complete_notification(trimmed) {
+        return true;
+    }
+    let stripped = strip_harness_envelopes(trimmed);
+    let stripped = stripped.trim();
+    stripped != trimmed && grok_task_complete_notification(stripped)
+}
+
+/// JSON object whose notification type is Grok's `task_complete`.
+fn grok_task_complete_notification(text: &str) -> bool {
+    let trimmed = text.trim();
+    if !trimmed.starts_with('{') || !trimmed.ends_with('}') {
+        return false;
+    }
+    json_string_field_eq(trimmed, "notificationType", "task_complete")
+        || json_string_field_eq(trimmed, "notification_type", "task_complete")
+}
+
+/// `"key" : "value"` with optional whitespace around the colon.
+fn json_string_field_eq(text: &str, key: &str, value: &str) -> bool {
+    let needle = format!("\"{key}\"");
+    let quoted_value = format!("\"{value}\"");
+    let mut rest = text;
+    while let Some(at) = rest.find(&needle) {
+        let after = rest[at + needle.len()..].trim_start();
+        if let Some(after) = after.strip_prefix(':') {
+            if after.trim_start().starts_with(&quoted_value) {
+                return true;
+            }
+        }
+        rest = &rest[at + needle.len()..];
+    }
+    false
+}
+
 /// Whether a submitted prompt is harness-generated rather than typed: it
 /// starts with an `<agent-message>` (Codex collaboration output) or a
-/// `<task-notification>` (a background subagent's completion event), or nothing
-/// but harness envelope elements remain once they are removed (`#chatprompt`).
+/// background-task completion (`<task-notification>` or Grok `task_complete`),
+/// or nothing but harness envelope elements remain once they are removed
+/// (`#chatprompt`).
 pub fn is_harness_generated_prompt(prompt: &str) -> bool {
     let trimmed = prompt.trim();
-    matches!(
-        envelope_tag_at(trimmed),
-        Some("agent-message" | "task-notification")
-    ) || (envelope_tag_at(trimmed).is_some() && strip_harness_envelopes(trimmed).trim().is_empty())
+    is_background_task_completion(trimmed)
+        || matches!(envelope_tag_at(trimmed), Some("agent-message"))
+        || (envelope_tag_at(trimmed).is_some()
+            && strip_harness_envelopes(trimmed).trim().is_empty())
 }
 
 /// The operator text of a harness prompt that is not an `agent-doc` trigger.
@@ -518,6 +566,32 @@ mod tests {
             chat_prompt_text("<local-command-stdout>ok</local-command-stdout>"),
             None
         );
+    }
+
+    /// Grok `Notification` `task_complete` is a completion wake, not a chat prompt.
+    #[test]
+    fn grok_task_complete_notification_is_not_a_chat_prompt() {
+        let camel = r#"{"notificationType":"task_complete","message":"done"}"#;
+        let snake = "{\n  \"notification_type\" : \"task_complete\"\n}";
+        assert!(is_background_task_completion(camel));
+        assert_eq!(chat_prompt_text(camel), None);
+        assert_eq!(chat_prompt_text(snake), None);
+        assert_eq!(
+            chat_prompt_text(&format!("<system-reminder>\n{camel}\n</system-reminder>")),
+            None
+        );
+        assert_eq!(
+            chat_prompt_text("Task completed"),
+            Some("Task completed".to_string())
+        );
+        let rollout = r#"{"type":"task_complete","payload":{}}"#;
+        assert!(!is_background_task_completion(rollout));
+        assert_eq!(chat_prompt_text(rollout), Some(rollout.to_string()));
+        let idle = r#"{"notificationType":"idle_prompt","message":"idle"}"#;
+        assert_eq!(chat_prompt_text(idle), Some(idle.to_string()));
+        assert!(!is_background_task_completion(
+            r#"{"notificationType":"task_complete_extra"}"#
+        ));
     }
 
     #[test]

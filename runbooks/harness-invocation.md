@@ -29,21 +29,27 @@ when required by the host. Select `agent: grok` (`grok-build` is an alias).
 Submit `agent-doc <FILE>` as a normal prompt. With no FILE (`/agent-doc` or
 `agent-doc` alone), call connected `agent_doc_admit` without `file`: it admits
 the document this tmux pane claims and returns it as `file`; use that path as
-FILE for the whole cycle, and stop on a refusal. Grok's passive hooks cannot supply
-the Claude/Codex admission marker or block Stop. For Grok, call connected
-`agent_doc_admit` before reading/planning/answering and `agent_doc_finalize`
-for the terminal write/commit and queue continuation. This admission rule
-supersedes hook-marker instructions below. Never recursively invoke the owner
-pane or shell preflight. Continue actionable queue heads in the same turn after
-committed closeout; do not run another session-check after a terminal connected
-finalize.
+FILE for the whole cycle, and stop on a refusal. An allowing Grok
+`UserPromptSubmit` hook discards stdout (no `additionalContext`), so it cannot
+supply the Claude/Codex admission marker. Call connected `agent_doc_admit`
+before reading/planning/answering and `agent_doc_finalize` for the terminal
+write/commit and queue continuation. `Stop` can continue a turn
+(`decision: "block"` or non-error `additionalContext`), but closeout stays
+`agent_doc_finalize`: a session-end Stop is observe-only, a readable JSON reply
+decides over exit 2, and the gate is overridden after 8 continuations. This
+admission rule supersedes hook-marker instructions below. Never recursively
+invoke the owner pane or shell preflight. Continue actionable queue heads in
+the same turn after committed closeout; do not run another session-check after
+a terminal connected finalize.
 
-Grok lifecycle hooks are notifications, so a passive edit is not pushed into
-the turn (`#midturn-steering`): poll `agent-doc steering <FILE>` between long
-steps (inspect without consuming with `agent-doc steering --peek <FILE>`), and
-read the steering block in the connected finalize's terminal report. When the
-turn ends, the supervisor wakes the idle Grok pane for settled, unsurfaced,
-unclaimed steering (`#steeringwake`) through the same guarded idle dispatch.
+`PostToolUse` delivers `hookSpecificOutput.additionalContext` into the running
+turn (`#midturn-steering`). The installed Claude-format
+`agent-doc hook steering-post-tool-use` hook is that injection. When the hook
+is silent, poll `agent-doc steering <FILE>` between long steps (inspect without
+consuming with `agent-doc steering --peek <FILE>`), and read the steering block
+in the connected finalize's terminal report. When the turn ends, the supervisor
+wakes the idle Grok pane for settled, unsurfaced, unclaimed steering
+(`#steeringwake`) through the same guarded idle dispatch.
 
 For every route-owned TUI harness (Claude Code, Codex, OpenCode, and Grok
 Build), an explicit `Run Agent Doc` while the document's turn is already

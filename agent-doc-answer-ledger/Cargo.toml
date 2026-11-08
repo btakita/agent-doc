@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-answer-ledger"
-version = "0.35.570"
+version = "0.35.571"
 edition = "2024"
 license = "Apache-2.0"
 description = "Per-document operator answer ledger: capture, question matching, and re-ask enforcement facts for agent-doc"
@@ -8,11 +8,11 @@ repository = "https://github.com/btakita/agent-doc"
 publish = false
 
 [dependencies]
-agent-doc-element = { path = "../agent-doc-element", version = "0.35.570" }
-agent-doc-element-backlog = { path = "../agent-doc-element-backlog", version = "0.35.570" }
-agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.570" }
-agent-doc-principles = { path = "../agent-doc-principles", version = "0.35.570" }
-agent-doc-queue = { path = "../agent-doc-queue", version = "0.35.570" }
+agent-doc-element = { path = "../agent-doc-element", version = "0.35.571" }
+agent-doc-element-backlog = { path = "../agent-doc-element-backlog", version = "0.35.571" }
+agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.571" }
+agent-doc-principles = { path = "../agent-doc-principles", version = "0.35.571" }
+agent-doc-queue = { path = "../agent-doc-queue", version = "0.35.571" }
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }
 

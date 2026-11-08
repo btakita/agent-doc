@@ -116,9 +116,9 @@
   and [Document Format](specs/02-document-format.md).
 
 - `agent:recap` holds this turn's recap (`#agentrecap`). While the turn is in
-  progress the previous turn's recap stays beside it; committing the turn
-  removes the previous one, so the completed document keeps only the current
-  recap (`#recappair`). A closeout's `patch:recap` supplies that current recap
+  progress the previous turn's recap stays and this turn's recap is placed
+  under it; committing the turn removes the previous one, so the completed
+  document keeps only the current recap (`#recappair`). A closeout's `patch:recap` supplies that current recap
   in the response's own operation, creating the component below `agent:status`
   when the document predates it. The text is informational: it never starts a
   turn and is never read as a prompt or a queue row. A numbered decision that

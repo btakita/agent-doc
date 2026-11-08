@@ -21,7 +21,10 @@ The recap.
 ```
 
 The block is this turn's recap. While the turn is in progress, `agent:recap`
-shows it beside the previous turn's recap. When the turn commits, the previous
+keeps the previous turn's recap and places this turn's recap under it. The
+body is `Previous turn`, then `<!-- recap-previous -->`, then `Current turn`,
+then `<!-- recap-current -->`. The previous recap remains; the new recap
+follows it and does not replace it. When the turn commits, the previous
 turn's recap is removed, so the completed document keeps only this turn's
 recap. Do not repeat earlier recaps or carry their text forward yourself.
 Use it only in template documents, the ones whose preflight publishes a

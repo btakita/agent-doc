@@ -81,8 +81,9 @@ The cycle is committed, and nothing you need to read changed.
 <!-- /patch:recap -->
 ```
 
-While the turn is in progress the body is labeled `Current turn` and
-`Previous turn`. Commit removes the previous turn and the labels. A `patch=`
+While the turn is in progress the previous turn stays first, labeled
+`Previous turn`, and this turn's recap is placed under it, labeled
+`Current turn`. Commit removes the previous turn and the labels. A `patch=`
 value on the marker or in project configuration cannot append a history of
 committed recaps. When a response has several `patch:recap` blocks, the last
 non-blank one wins. That block is this turn's recap.

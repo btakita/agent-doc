@@ -1073,8 +1073,8 @@ fn append_exchange_patch_after_prompt_anchor(
 }
 
 /// The recap body a response carries (`#agentrecap`): the last non-blank
-/// `patch:recap`. That text is this turn's recap. The previous turn stays
-/// beside it until commit (`#recappair`).
+/// `patch:recap`. That text is this turn's recap. It is placed under the
+/// previous turn until commit (`#recappair`).
 pub fn recap_patch_body(patches: &[PatchBlock]) -> Option<&str> {
     patches
         .iter()
@@ -1157,7 +1157,7 @@ pub fn apply_patches_with_overrides_pure(
         }
     }
 
-    // `#agentrecap` / `#recappair`: this turn's recap is shown beside the
+    // `#agentrecap` / `#recappair`: this turn's recap is placed under the
     // previous turn until commit settles the section. No marker or project mode
     // can append a history of committed recaps, and a document that predates
     // the component gains it here instead of spilling the recap into the exchange.

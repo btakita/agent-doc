@@ -2,9 +2,9 @@
 //! the turn commits (`#agentrecap`, `#recappair`).
 //!
 //! # Spec
-//! - While a turn is in progress, a closeout that carries a recap shows that
-//!   recap and the previous turn's recap. The previous one is the last settled
-//!   body, not an earlier in-progress draft.
+//! - While a turn is in progress, a closeout that carries a recap keeps the
+//!   previous turn's recap and places this turn's recap under it. The previous
+//!   one is the last settled body, not an earlier in-progress draft.
 //! - When the turn commits, [`settle_recap_in_document`] removes the previous
 //!   turn's recap. The completed document keeps only the current turn's recap,
 //!   so the component never accumulates history across committed turns.
@@ -83,14 +83,15 @@ struct InProgressRecap {
     previous: String,
 }
 
-/// The in-progress body: this turn's recap, then the previous turn's recap.
+/// The in-progress body: the previous turn's recap, then this turn's recap
+/// under it.
 ///
 /// `current` and `previous` are normalized bodies (trimmed, one trailing
 /// newline). The markers are reserved; a recap that already contains one is
 /// stored alone so the pair cannot be parsed back wrong.
 pub fn render_in_progress_recap(current: &str, previous: &str) -> String {
     format!(
-        "{CURRENT_TURN_LABEL}\n{CURRENT_OPEN}\n{current}{CURRENT_CLOSE}\n\n{PREVIOUS_TURN_LABEL}\n{PREVIOUS_OPEN}\n{previous}{PREVIOUS_CLOSE}\n"
+        "{PREVIOUS_TURN_LABEL}\n{PREVIOUS_OPEN}\n{previous}{PREVIOUS_CLOSE}\n\n{CURRENT_TURN_LABEL}\n{CURRENT_OPEN}\n{current}{CURRENT_CLOSE}\n"
     )
 }
 
@@ -101,19 +102,51 @@ fn reserved_recap_marker(text: &str) -> bool {
         || text.contains(PREVIOUS_CLOSE)
 }
 
+fn marked_section(body: &str, open: &str, close: &str) -> Option<String> {
+    let open_at = body.find(open)?;
+    let after_open = open_at + open.len();
+    let close_at = body[after_open..].find(close)? + after_open;
+    let inner = &body[after_open..close_at];
+    if reserved_recap_marker(inner) {
+        return None;
+    }
+    normalize_recap_body(inner)
+}
+
+/// `recap-current` follows `recap-previous`. A body that still has this turn
+/// above the previous one is readable, but it is not the shape a closeout writes.
+fn current_is_under_previous(body: &str) -> bool {
+    match (body.find(PREVIOUS_OPEN), body.find(CURRENT_OPEN)) {
+        (Some(previous), Some(current)) => previous < current,
+        _ => false,
+    }
+}
+
 fn parse_in_progress_recap(body: &str) -> Option<InProgressRecap> {
-    if reserved_recap_marker(body) && body.matches(CURRENT_OPEN).count() != 1 {
+    if body.matches(CURRENT_OPEN).count() != 1
+        || body.matches(CURRENT_CLOSE).count() != 1
+        || body.matches(PREVIOUS_OPEN).count() != 1
+        || body.matches(PREVIOUS_CLOSE).count() != 1
+    {
         return None;
     }
     let current_open = body.find(CURRENT_OPEN)?;
-    let after_current_open = current_open + CURRENT_OPEN.len();
-    let current_close = body[after_current_open..].find(CURRENT_CLOSE)? + after_current_open;
-    let previous_open = body[current_close..].find(PREVIOUS_OPEN)? + current_close;
-    let after_previous_open = previous_open + PREVIOUS_OPEN.len();
-    let previous_close = body[after_previous_open..].find(PREVIOUS_CLOSE)? + after_previous_open;
-    let current = normalize_recap_body(&body[after_current_open..current_close])?;
-    let previous = normalize_recap_body(&body[after_previous_open..previous_close])?;
-    Some(InProgressRecap { current, previous })
+    let current_close = body.find(CURRENT_CLOSE)?;
+    let previous_open = body.find(PREVIOUS_OPEN)?;
+    let previous_close = body.find(PREVIOUS_CLOSE)?;
+    if current_close < current_open || previous_close < previous_open {
+        return None;
+    }
+    let current_span = current_open..current_close + CURRENT_CLOSE.len();
+    let previous_span = previous_open..previous_close + PREVIOUS_CLOSE.len();
+    let overlaps = current_span.start < previous_span.end && previous_span.start < current_span.end;
+    if overlaps {
+        return None;
+    }
+    Some(InProgressRecap {
+        current: marked_section(body, CURRENT_OPEN, CURRENT_CLOSE)?,
+        previous: marked_section(body, PREVIOUS_OPEN, PREVIOUS_CLOSE)?,
+    })
 }
 
 /// Body to store when `current` arrives and the turn is still in progress.
@@ -127,8 +160,8 @@ fn stage_recap_body(existing: &str, current: &str) -> String {
         return current.to_string();
     }
     if let Some(pair) = parse_in_progress_recap(existing) {
-        if pair.current == current {
-            // Exact replay stays byte-identical, including the previous section.
+        if pair.current == current && current_is_under_previous(existing) {
+            // Exact replay of the canonical order stays byte-identical.
             return existing.to_string();
         }
         if reserved_recap_marker(&pair.previous) {
@@ -144,9 +177,10 @@ fn stage_recap_body(existing: &str, current: &str) -> String {
     }
 }
 
-/// Show `raw` as this turn's recap, keeping the previous turn's recap beside it
-/// until [`settle_recap_in_document`]. Creates the section when the document has
-/// none. A blank `raw` returns the document unchanged.
+/// Show `raw` as this turn's recap, under the previous turn's recap, until
+/// [`settle_recap_in_document`]. Creates the section when the document has
+/// none. A blank `raw` returns the document unchanged. The previous recap
+/// remains; `raw` does not replace it.
 pub fn replace_recap_in_document(doc: &str, raw: &str) -> Result<String> {
     let Some(current) = normalize_recap_body(raw) else {
         return Ok(doc.to_string());
@@ -594,7 +628,11 @@ mod tests {
         assert!(second.contains("Previous turn"));
         let current = second.find("Second turn.").unwrap();
         let previous = second.find("First turn.").unwrap();
-        assert!(current < previous, "{second}");
+        assert!(
+            previous < current,
+            "recap-current must be under recap-previous and must not replace it:\n{second}"
+        );
+        assert!(second.find(PREVIOUS_OPEN).unwrap() < second.find(CURRENT_OPEN).unwrap());
         assert_eq!(second.matches("<!-- agent:recap").count(), 1);
 
         let third = replace_recap_in_document(&second, "Third turn.").unwrap();
@@ -613,6 +651,32 @@ mod tests {
             replace_recap_in_document(&settled, "Third turn.\n").unwrap(),
             settled
         );
+    }
+
+    /// A document that still has this turn above the previous one keeps that
+    /// previous body. The next closeout rewrites it so recap-current is under
+    /// recap-previous instead of replacing the previous recap.
+    #[test]
+    fn legacy_current_first_recap_is_kept_under_previous() {
+        let legacy = format!(
+            "{CURRENT_TURN_LABEL}\n{CURRENT_OPEN}\nSecond turn.\n{CURRENT_CLOSE}\n\n{PREVIOUS_TURN_LABEL}\n{PREVIOUS_OPEN}\nFirst turn.\n{PREVIOUS_CLOSE}\n"
+        );
+        let document =
+            format!("<!-- agent:recap patch=replace -->\n{legacy}<!-- /agent:recap -->\n");
+        let rewritten = replace_recap_in_document(&document, "Second turn.").unwrap();
+        assert_eq!(
+            recap_body(&rewritten),
+            render_in_progress_recap("Second turn.\n", "First turn.\n")
+        );
+        let next = replace_recap_in_document(&document, "Third turn.").unwrap();
+        let body = recap_body(&next);
+        assert_eq!(
+            body,
+            render_in_progress_recap("Third turn.\n", "First turn.\n")
+        );
+        assert!(body.contains("First turn."));
+        assert!(!body.contains("Second turn."));
+        assert!(body.find(PREVIOUS_OPEN).unwrap() < body.find(CURRENT_OPEN).unwrap());
     }
 
     #[test]

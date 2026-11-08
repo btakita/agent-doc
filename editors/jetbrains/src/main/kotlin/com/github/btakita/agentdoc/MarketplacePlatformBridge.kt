@@ -7,6 +7,7 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.openapi.wm.ToolWindowManager
 import java.awt.Window
+import java.lang.reflect.Method
 
 /**
  * Optional platform capabilities that have no supported IntelliJ API.
@@ -48,12 +49,24 @@ internal object MarketplacePlatformBridge {
         invokeIterable(tracker, "getActiveEditors").filterIsInstance<Editor>().toSet()
     }.getOrDefault(emptySet())
 
+    /**
+     * IU 263 declares two public zero-arg `getToolWindowPanes$intellij_platform_ide_impl`
+     * methods. The first returns `LinkedHashMap`; the pane list is the later `List`.
+     * `Class.getMethods()` order picks the map, and a map is not a pane list, so the
+     * activity probe treated every focused frame as inactive and automatic pane sync
+     * never published. Manual Sync Tmux Layout does not use this probe.
+     */
+    internal fun selectToolWindowPanesMethod(methods: Array<Method>): Method? =
+        methods.firstOrNull { method ->
+            method.name.startsWith("getToolWindowPanes") &&
+                method.parameterCount == 0 &&
+                List::class.java.isAssignableFrom(method.returnType)
+        }
+
     fun toolWindowPanes(project: Project): List<Any> = runCatching {
         val manager = ToolWindowManager.getInstance(project)
-        val method = manager.javaClass.methods.firstOrNull {
-            it.name.startsWith("getToolWindowPanes") && it.parameterCount == 0
-        } ?: return emptyList()
-        (method.invoke(manager) as? Iterable<*>)?.filterNotNull().orEmpty()
+        val method = selectToolWindowPanesMethod(manager.javaClass.methods) ?: return emptyList()
+        (method.invoke(manager) as? List<*>)?.filterNotNull().orEmpty()
     }.getOrDefault(emptyList())
 
     fun paneId(pane: Any): String? = runCatching {

@@ -168,6 +168,13 @@ pub struct TerminalOperatorRequestTodoReconciliation {
 /// the todo stays open until every projected copy is terminal. Only a todo's
 /// own reserved request id is eligible; cited ids and unrelated todos are never
 /// changed.
+///
+/// A choiceless reported-closeout todo is terminal on its own
+/// (`#choicelesscloseout`). Older binaries recorded
+/// `subagent-operator-request-reportedcloseout-*` with the request "cannot
+/// proceed" and no choices. Nothing can answer it, and the row that cites the
+/// id is not an exact request row, so the strike path above never sees it.
+/// A todo that still offers choices stays open.
 pub fn reconcile_terminal_operator_request_todos(
     content: &str,
     terminal_heads: &[String],
@@ -189,6 +196,15 @@ pub fn reconcile_terminal_operator_request_todos(
             terminal_ids.insert(id);
         } else {
             live_ids.insert(id);
+        }
+    }
+    for item in agent_doc_element::todo::open_todo_audit_items(content) {
+        let selector = item.selector.to_ascii_lowercase();
+        if selector.starts_with("subagent-operator-request-reportedcloseout-")
+            && item.action.contains("cannot proceed")
+            && !item.action.contains("(choices:")
+        {
+            terminal_ids.insert(selector);
         }
     }
 
@@ -6947,6 +6963,59 @@ mod tests {
             reconcile_terminal_operator_request_todos(&without_live_duplicate, &[]).unwrap();
         assert!(outcome.content.contains("- [ ] [#citation-only]"));
         assert!(outcome.content.contains(&format!("- [x] [#{request_id}]")));
+    }
+
+    /// `#choicelesscloseout`: a reported-closeout todo whose request is
+    /// "cannot proceed" and that offers no choices is residue. Check it off.
+    /// A real choice todo, an unrelated todo, and a live exact request row of
+    /// the same id stay open.
+    #[test]
+    fn choiceless_reported_closeout_todo_is_checked_off() {
+        let stale = "subagent-operator-request-reportedcloseout-618b385b8d5f";
+        let real = "subagent-operator-request-reportedcloseout-aaaaaaaaaaaa";
+        let document = format!(
+            "<!-- agent:queue -->\n\
+             - ### [#subagent:bossroom-license-recommend#1] do [#haivensdkunity] [#{stale}]\n\
+             <!-- /agent:queue -->\n\
+             <!-- agent:todo -->\n\
+             - [ ] [#{stale}] Answer the blocking subagent question for queue item ‘#haivensdkunity’ in agent:exchange: The prose_consume closeout of subagent:bossroom-license-recommend's reported attempt (generation 1) for \"#haivensdkunity\" cannot proceed.\n\
+             - [ ] [#{real}] Answer the blocking subagent question in agent:exchange: Which sink should the attempt integrate into? (choices: correct_sink, cherry_pick)\n\
+             - [ ] [#unrelated] Leave this operator item open\n\
+             <!-- /agent:todo -->\n"
+        );
+
+        let outcome = reconcile_terminal_operator_request_todos(&document, &[]).unwrap();
+
+        assert_eq!(outcome.completed_ids, vec![stale]);
+        assert!(
+            outcome.content.contains(&format!("- [x] [#{stale}]")),
+            "{}",
+            outcome.content
+        );
+        assert!(
+            outcome.content.contains(&format!("- [ ] [#{real}]")),
+            "{}",
+            outcome.content
+        );
+        assert!(
+            outcome
+                .content
+                .contains("- [ ] [#unrelated] Leave this operator item open"),
+            "{}",
+            outcome.content
+        );
+
+        let held = document.replace(
+            "<!-- agent:queue -->\n",
+            &format!("<!-- agent:queue -->\n- [#{stale}]\n"),
+        );
+        let held = reconcile_terminal_operator_request_todos(&held, &[]).unwrap();
+        assert!(
+            held.completed_ids.is_empty(),
+            "a live exact request row keeps the todo open: {:?}",
+            held.completed_ids
+        );
+        assert!(held.content.contains(&format!("- [ ] [#{stale}]")));
     }
 
     #[test]

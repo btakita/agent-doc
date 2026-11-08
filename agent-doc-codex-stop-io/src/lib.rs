@@ -873,7 +873,14 @@ fn reported_writeback_debts(file: &Path, content: &str) -> Result<Vec<ReportedWr
     let mut awaiting_operator = 0usize;
     for claim in claims {
         if claim.state == QueueClaimState::Reported && seen.insert(claim.identity.clone()) {
-            if awaiting_operator_answer(content, &claim, &receipts, &open_todo_ids) {
+            if awaiting_operator_answer(
+                file,
+                content,
+                &claim,
+                &receipts,
+                &open_todo_ids,
+                lineage.as_ref(),
+            ) {
                 awaiting_operator += 1;
                 continue;
             }
@@ -909,10 +916,12 @@ fn reported_writeback_debts(file: &Path, content: &str) -> Result<Vec<ReportedWr
         let receipt = receipt_by_identity.get(&identity).copied();
         if receipt.is_some_and(|receipt| {
             awaiting_operator_answer(
+                file,
                 content,
                 &receipt.as_reported_claim(),
                 &receipts,
                 &open_todo_ids,
+                lineage.as_ref(),
             )
         }) {
             awaiting_operator += 1;
@@ -961,19 +970,47 @@ fn reported_writeback_debts(file: &Path, content: &str) -> Result<Vec<ReportedWr
 /// explicit `🙋` wait. It was surfaced once; holding the final answer for it
 /// again re-raises an answered-elsewhere question instead of letting the
 /// operator answer it. A recovered-after-loss attempt stays urgent debt.
+///
+/// A command-only closeout (prose consume, integrated consume, or another
+/// concrete coordinator command) is not that wait (`#choicelesscloseout`).
+/// An open copy of its request id is residue from a packet that had no
+/// choices, so the strike reminder stays. When lineage cannot be read, the
+/// older wait stands: a missing lineage is itself a decision.
 fn awaiting_operator_answer(
+    file: &Path,
     content: &str,
     claim: &agent_doc_queue::queue_claim::QueueClaim,
     receipts: &[agent_doc_queue::claim_release_receipt::ClaimReleaseReceipt],
     open_todo_ids: &std::collections::HashSet<String>,
+    lineage: Option<&agent_doc_queue_io::queue_lineage::QueueLineageLedger>,
 ) -> bool {
-    !claim.completion_recovered_after_loss
-        && open_todo_ids.contains(
-            &agent_doc_queue::reported_closeout::operator_request_id(claim).to_ascii_lowercase(),
-        )
-        && agent_doc_queue_io::sync_payload::reported_result_recorded_in_document(
-            content, claim, receipts,
-        )
+    if claim.completion_recovered_after_loss {
+        return false;
+    }
+    if !open_todo_ids.contains(
+        &agent_doc_queue::reported_closeout::operator_request_id(claim).to_ascii_lowercase(),
+    ) {
+        return false;
+    }
+    if !agent_doc_queue_io::sync_payload::reported_result_recorded_in_document(
+        content, claim, receipts,
+    ) {
+        return false;
+    }
+    if let Some(lineage) = lineage {
+        let evidence =
+            agent_doc_queue_io::queue_lineage::reported_claim_evidence_in(lineage, claim);
+        if let Some(closeout) = agent_doc_queue::reported_closeout::reported_claim_closeout(
+            &file.display().to_string(),
+            claim,
+            &evidence,
+        ) {
+            if closeout.coordinator_command_only() {
+                return false;
+            }
+        }
+    }
+    true
 }
 
 /// The Claude Stop reminder for [`ReportedWritebackDebt`] rows.
@@ -10290,30 +10327,32 @@ Reviewed the gated items.\n\
         let ops = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(ops.contains("awaiting_integration=1"), "{ops}");
 
-        // `#questionsneverblock`: once the closeout's operator request is open
-        // in agent:todo, the row is the explicit `🙋` wait. The Stop hook no
-        // longer holds the final answer for it.
+        // `#choicelesscloseout`: this fixture's closeout is integration proof
+        // with no decision, so an open copy of its request id is residue. The
+        // strike-or-integrate reminder stays; the todo is not an operator wait.
         let request_id = agent_doc_queue::reported_closeout::operator_request_id(&running);
         let waiting = fs::read_to_string(&doc).unwrap().replace(
             "## Queue\n",
             &format!(
-                "## Todo\n\n<!-- agent:todo -->\n- [ ] [#{request_id}] Choose the sink\n<!-- /agent:todo -->\n\n## Queue\n"
+                "## Todo\n\n<!-- agent:todo -->\n- [ ] [#{request_id}] The integration_proof closeout cannot proceed.\n<!-- /agent:todo -->\n\n## Queue\n"
             ),
         );
         fs::write(&doc, &waiting).unwrap();
         invalidate_stop_document_cache();
-        let answered_elsewhere = ClaudeStopInput {
-            session_id: "awaiting-operator-session".to_string(),
+        let residue = ClaudeStopInput {
+            session_id: "choiceless-closeout-session".to_string(),
             ..fresh
         };
+        let still_due = claude_reported_writeback_continuation_with(&residue, &doc, |_| false)
+            .expect("a choiceless closeout todo does not suppress the integration reminder");
         assert!(
-            claude_reported_writeback_continuation_with(&answered_elsewhere, &doc, |_| false)
-                .is_none(),
-            "an open operator request is the wait, not coordinator debt"
+            still_due.reason.contains("not integrated yet") || still_due.reason.contains("Next: `"),
+            "{}",
+            still_due.reason
         );
         let ops = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
-            ops.contains("claude_stop_reported_writeback_awaiting_operator rows=1"),
+            !ops.contains("claude_stop_reported_writeback_awaiting_operator"),
             "{ops}"
         );
     }
@@ -10530,6 +10569,103 @@ Reviewed the gated items.\n\
         );
         let ops = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(ops.contains("result_recorded=1"), "{ops}");
+
+        // This attempt recorded no prose-only or repository receipt, so its
+        // closeout still has a decision. An open request for that decision is
+        // the `🙋` wait (`#questionsneverblock`).
+        let request_id = agent_doc_queue::reported_closeout::operator_request_id(&running);
+        let waiting = fs::read_to_string(&doc).unwrap().replace(
+            "## Queue\n",
+            &format!(
+                "## Todo\n\n<!-- agent:todo -->\n- [ ] [#{request_id}] Did the attempt change a repository? (choices: repository_work, prose_only)\n<!-- /agent:todo -->\n\n## Queue\n"
+            ),
+        );
+        fs::write(&doc, &waiting).unwrap();
+        invalidate_stop_document_cache();
+        let answered_elsewhere = ClaudeStopInput {
+            session_id: "awaiting-operator-session".to_string(),
+            ..input
+        };
+        assert!(
+            claude_reported_writeback_continuation_with(&answered_elsewhere, &doc, |_| false)
+                .is_none(),
+            "an open decision request is the wait, not coordinator debt"
+        );
+        let ops = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops.contains("claude_stop_reported_writeback_awaiting_operator rows=1"),
+            "{ops}"
+        );
+    }
+
+    /// `#choicelesscloseout`: a prose-only reported row whose result is already
+    /// recorded still owes its strike. An open "cannot proceed" todo from an
+    /// older choiceless packet does not suppress that reminder.
+    #[test]
+    fn claude_stop_prose_closeout_todo_does_not_suppress_the_strike() {
+        let dir = setup_project();
+        let doc = write_claimed_subagent_queue_doc(&dir, "Dispatched `do [#held]`.");
+        init_git_repo(dir.path(), &doc);
+        let (_, claim) =
+            agent_doc_queue_io::queue_claim::claim(&doc, "do [#held]", "subagent:held", 3600)
+                .unwrap();
+        let running = agent_doc_queue_io::queue_claim::start_attempt(
+            &doc,
+            "do [#held]",
+            "subagent:held",
+            "worker:held",
+            3600,
+            claim.generation,
+        )
+        .unwrap();
+        agent_doc_queue_io::queue_lineage::record_prose_only(&doc, &running, "prose result")
+            .unwrap();
+        track_doc(&dir, &doc, "");
+        complete_run(&doc);
+        agent_doc_queue_io::queue_claim::report_attempt(&doc, "do [#held]", Some(claim.generation))
+            .unwrap();
+        let cell = agent_doc_document::subagent_completion::cell_with_response(
+            &running.owner,
+            &running.item_text,
+            &agent_doc_queue_io::queue_claim::completion_feedback_key(&running).unwrap(),
+            "Answered the held question; no repository change.",
+        )
+        .unwrap();
+        let request_id = agent_doc_queue::reported_closeout::operator_request_id(&running);
+        let current = fs::read_to_string(&doc).unwrap().replace(
+            "<!-- /agent:exchange -->",
+            &format!("{cell}\n<!-- /agent:exchange -->"),
+        );
+        let current = current.replace(
+            "## Queue\n",
+            &format!(
+                "## Todo\n\n<!-- agent:todo -->\n- [ ] [#{request_id}] The prose_consume closeout cannot proceed.\n<!-- /agent:todo -->\n\n## Queue\n"
+            ),
+        );
+        fs::write(&doc, &current).unwrap();
+        invalidate_stop_document_cache();
+        let input = ClaudeStopInput {
+            session_id: "prose-choiceless-session".to_string(),
+            cwd: dir.path().display().to_string(),
+            stop_hook_active: false,
+            transcript_path: None,
+            reason: None,
+            subagent_type: None,
+        };
+        let recorded = claude_reported_writeback_continuation_with(&input, &doc, |_| false)
+            .expect("a prose closeout still owes its strike");
+        assert!(
+            recorded.reason.contains("only the strike is missing")
+                || recorded.reason.contains("--done held")
+                || recorded.reason.contains("queue consume"),
+            "{}",
+            recorded.reason
+        );
+        let ops = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            !ops.contains("claude_stop_reported_writeback_awaiting_operator"),
+            "{ops}"
+        );
     }
 
     /// `#stopneedsclosedcycle`: the marker is document-level and outlives the

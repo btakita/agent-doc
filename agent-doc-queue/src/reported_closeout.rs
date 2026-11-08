@@ -31,13 +31,18 @@
 //! `concrete: false`. Inspecting lineage alone is never the whole plan: it
 //! re-confirms the gap without closing it (the 2026-11-04 sdk-dev stall).
 //!
-//! Every closeout also carries a deterministic operator-request packet
-//! ([`ReportedClaimCloseout::operator_request_packet`]). When the remaining
-//! step needs a fact or choice the coordinator cannot settle from durable
-//! evidence, presenting that packet is the closeout's next action: it becomes
-//! the ordinary `agent:todo` + `🙋` operator wait (`#packettodo`), and until
-//! then the turn's closeout report keeps continuation required
-//! ([`pending_reported_closeout`]) instead of ending in silence.
+//! A closeout with a [`ReportedCloseoutDecision`] also carries a deterministic
+//! operator-request packet ([`ReportedClaimCloseout::operator_request_packet`]).
+//! When the remaining step needs a fact or choice the coordinator cannot
+//! settle from durable evidence, presenting that packet is the closeout's next
+//! action: it becomes the ordinary `agent:todo` + `🙋` operator wait
+//! (`#packettodo`), and until then the turn's closeout report keeps
+//! continuation required ([`pending_reported_closeout`]) instead of ending in
+//! silence. A closeout with no decision — prose consume, integrated consume,
+//! or another concrete command the coordinator can run — carries an empty
+//! packet. A refused command is surfaced from `queue claims`; it is never
+//! turned into a choiceless "how should it close?" question
+//! (`#choicelesscloseout`).
 //!
 //! This module is pure: no clock, no storage, no git. The caller supplies the
 //! evidence and the commit counts.
@@ -296,12 +301,15 @@ pub struct ReportedClaimCloseout {
     pub decision: Option<ReportedCloseoutDecision>,
     pub steps: Vec<ReportedCloseoutStep>,
     /// Stable `subagent-operator-request-reportedcloseout-<hash>` id of this
-    /// attempt's operator request; an open `agent:todo` item with this id
-    /// means the closeout is waiting on the operator.
+    /// attempt's operator request. An open `agent:todo` item with this id
+    /// waits on the operator only when the closeout has a decision. A
+    /// command-only closeout ignores a leftover copy (`#choicelesscloseout`).
     #[serde(default)]
     pub operator_request_id: String,
     /// The exact blocking operator-request packet to present in the response
-    /// when the closeout needs the operator (`#packettodo`).
+    /// when the closeout needs the operator (`#packettodo`). Empty when the
+    /// closeout has no decision: a concrete coordinator command is not an
+    /// operator question (`#choicelesscloseout`).
     #[serde(default)]
     pub operator_request_packet: String,
 }
@@ -323,6 +331,14 @@ impl ReportedClaimCloseout {
         self.decision
             .as_ref()
             .is_some_and(|decision| decision.requires_operator)
+    }
+
+    /// A concrete command the coordinator runs, with no operator decision.
+    /// An open copy of [`Self::operator_request_id`] does not freeze this
+    /// closeout: that todo is residue from a choiceless packet
+    /// (`#choicelesscloseout`).
+    pub fn coordinator_command_only(&self) -> bool {
+        self.decision.is_none() && self.next_action_argv().is_some()
     }
 }
 
@@ -1366,17 +1382,16 @@ fn unintegrated_closeout(
 /// The blocking operator-request packet for one reported attempt, in the
 /// `SUBAGENT_OPERATOR_REQUEST_PROTOCOL` shape so finalize records it as the
 /// ordinary `agent:todo` + `🙋` operator wait (`#packettodo`).
+///
+/// Empty when the closeout has no decision. The old fallback asked "how
+/// should it close?" with `*choices:* []`, which no answer can settle, so
+/// every later cycle presented the same question (`#choicelesscloseout`).
 fn operator_request_packet(claim: &QueueClaim, closeout: &ReportedClaimCloseout) -> String {
-    let item = claim_item_handle(&claim.item_text);
-    let request = match &closeout.decision {
-        Some(decision) => decision.question.clone(),
-        None => format!(
-            "The {} closeout of {}'s reported attempt (generation {}) for {item:?} cannot proceed. How should it close?",
-            closeout.shape.as_str(),
-            claim.owner,
-            claim.generation,
-        ),
+    let Some(decision) = &closeout.decision else {
+        return String::new();
     };
+    let item = claim_item_handle(&claim.item_text);
+    let request = decision.question.clone();
     let mut packet = format!(
         "[#{}] subagent operator request\n- *queue_item:*\n  - {item}\n- *kind:* question\n- *blocking:* true\n- *request:*\n  - {request}\n- *context:*\n  - Reported attempt {}#{} ({}).\n  - {}\n",
         closeout.operator_request_id,
@@ -1391,11 +1406,7 @@ fn operator_request_packet(claim: &QueueClaim, closeout: &ReportedClaimCloseout)
             closeout.missing_facts.join(", ")
         ));
     }
-    let choices = closeout
-        .decision
-        .as_ref()
-        .map(|decision| decision.choices.as_slice())
-        .unwrap_or_default();
+    let choices = decision.choices.as_slice();
     if choices.is_empty() {
         packet.push_str("- *choices:* []\n");
     } else {
@@ -1434,6 +1445,10 @@ pub fn reported_closeout_overdue(commits_since_report: usize) -> bool {
 /// decision and, when only the operator can answer, the packet to present.
 pub fn closeout_next_move(closeout: &ReportedClaimCloseout) -> String {
     match (closeout.next_action_argv(), &closeout.decision) {
+        (Some(next), _) if closeout.operator_request_packet.is_empty() => format!(
+            "Next: `{}`. If that command is refused, re-run `agent-doc queue claims` and surface the refusal. This closeout is a coordinator command, not an operator question.",
+            shell_command(next),
+        ),
         (Some(next), _) => format!(
             "Next: `{}`. If a step is refused and `agent-doc queue claims` derives no other runnable step, present the blocking packet [#{}] from `reported_closeout.operator_request_packet` instead of ending the turn.",
             shell_command(next),
@@ -1454,10 +1469,7 @@ pub fn closeout_next_move(closeout: &ReportedClaimCloseout) -> String {
                 .join(" | "),
             closeout.operator_request_id,
         ),
-        (None, None) => format!(
-            "Next: present the blocking packet [#{}] from `reported_closeout.operator_request_packet`.",
-            closeout.operator_request_id
-        ),
+        (None, None) => "Next: re-run `agent-doc queue claims` and surface why this closeout has neither a concrete step nor a decision.".to_string(),
     }
 }
 
@@ -1525,14 +1537,23 @@ impl ReportedClaimCloseout {
     }
 
     /// [`ReportedCloseoutReadiness`] against the open `agent:todo` ids.
+    ///
+    /// A command-only closeout stays [`ReportedCloseoutReadiness::Coordinator`]
+    /// even when a leftover choiceless todo is still open
+    /// (`#choicelesscloseout`). A closeout that has a decision waits once that
+    /// request is open.
     pub fn readiness(&self, open_todo_ids: &HashSet<String>) -> ReportedCloseoutReadiness {
-        if open_todo_ids.contains(&self.operator_request_id.to_ascii_lowercase()) {
-            ReportedCloseoutReadiness::AwaitingOperator
-        } else if self.coordinator_can_act() {
-            ReportedCloseoutReadiness::Coordinator
-        } else {
-            ReportedCloseoutReadiness::OperatorRequest
+        let waiting = open_todo_ids.contains(&self.operator_request_id.to_ascii_lowercase());
+        if waiting && !self.coordinator_command_only() {
+            return ReportedCloseoutReadiness::AwaitingOperator;
         }
+        if self.coordinator_can_act() {
+            return ReportedCloseoutReadiness::Coordinator;
+        }
+        if waiting {
+            return ReportedCloseoutReadiness::AwaitingOperator;
+        }
+        ReportedCloseoutReadiness::OperatorRequest
     }
 }
 
@@ -1569,9 +1590,15 @@ impl ReportedCloseoutObligation {
 
     /// The open `agent:todo` ids include this attempt's operator request: the
     /// closeout is waiting on the operator, not on the coordinator.
+    ///
+    /// A command-only closeout is never that wait. Its stored readiness stays
+    /// the first clause, so an obligation already built as
+    /// [`ReportedCloseoutReadiness::AwaitingOperator`] still reports the wait
+    /// when called with an empty id set.
     pub fn awaiting_operator(&self, open_todo_ids: &HashSet<String>) -> bool {
         self.readiness == ReportedCloseoutReadiness::AwaitingOperator
-            || open_todo_ids.contains(&self.closeout.operator_request_id.to_ascii_lowercase())
+            || (open_todo_ids.contains(&self.closeout.operator_request_id.to_ascii_lowercase())
+                && !self.closeout.coordinator_command_only())
     }
 
     /// Plan `required_commands` entries in order (`#questionsneverblock`).
@@ -2537,12 +2564,65 @@ mod tests {
                     assert!(!step.concrete, "{step:?}");
                 }
             }
-            // The packet is always one the closeout machinery records.
+            // A decision carries one packet whose choices match. A command-only
+            // closeout carries none: a choiceless packet cannot be answered
+            // (`#choicelesscloseout`).
             let packets = crate::operator_request_packet::blocking_operator_request_packets(
                 &closeout.operator_request_packet,
             );
-            assert_eq!(packets.len(), 1, "{}", closeout.operator_request_packet);
-            assert_eq!(packets[0].choice_labels, labels);
+            if closeout.decision.is_none() {
+                assert!(
+                    closeout.operator_request_packet.is_empty(),
+                    "{evidence:?} -> {}",
+                    closeout.operator_request_packet
+                );
+                assert!(packets.is_empty(), "{evidence:?} -> {packets:?}");
+                assert!(
+                    !closeout_next_move(&closeout).contains("present the blocking packet"),
+                    "{evidence:?} -> {}",
+                    closeout_next_move(&closeout)
+                );
+            } else {
+                assert_eq!(packets.len(), 1, "{}", closeout.operator_request_packet);
+                assert_eq!(packets[0].choice_labels, labels);
+            }
+        }
+    }
+
+    /// `#choicelesscloseout` (sdk-dev `#haivensdkunity`, 2026-11-07): a prose
+    /// or integrated consume is a coordinator command. An open copy of the
+    /// old choiceless "cannot proceed" todo must not freeze it, and the
+    /// closeout stays continuation-required until the row is struck.
+    #[test]
+    fn command_only_closeout_ignores_a_choiceless_open_todo() {
+        let claim = reported(
+            "do [#haivensdkunity]",
+            "subagent:bossroom-license-recommend",
+        );
+        for evidence in [
+            ReportedRepoEvidence::ProseOnly,
+            ReportedRepoEvidence::IntegratedVerified,
+        ] {
+            let closeout = reported_claim_closeout(DOC, &claim, &evidence).unwrap();
+            assert!(closeout.coordinator_command_only(), "{evidence:?}");
+            assert!(closeout.operator_request_packet.is_empty(), "{evidence:?}");
+            let next = closeout_next_move(&closeout);
+            assert!(!next.contains("present the blocking packet"), "{next}");
+            assert!(next.contains("not an operator question"), "{next}");
+            assert!(next.contains("agent-doc queue consume"), "{next}");
+            let open = HashSet::from([closeout.operator_request_id.clone()]);
+            let obligation = ReportedCloseoutObligation::new(&claim, closeout, &open);
+            assert_eq!(
+                obligation.readiness,
+                ReportedCloseoutReadiness::Coordinator,
+                "{evidence:?}"
+            );
+            assert!(!obligation.awaiting_operator(&open), "{evidence:?}");
+            assert!(
+                pending_reported_closeout(std::slice::from_ref(&obligation), &open).is_some(),
+                "{evidence:?}"
+            );
+            assert!(!obligation.required_commands().is_empty(), "{evidence:?}");
         }
     }
 

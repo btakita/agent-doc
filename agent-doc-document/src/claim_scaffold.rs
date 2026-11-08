@@ -44,7 +44,7 @@ pub fn render_default_template_components(exchange_content: &str) -> String {
         format!("{exchange_body}\n")
     };
     format!(
-        "{DEFAULT_TEMPLATE_STATUS_OPEN}{}{DEFAULT_TEMPLATE_STATUS_CLOSE}{DEFAULT_TEMPLATE_RECAP_AND_ACTIVE}{worktrees}{DEFAULT_TEMPLATE_COMPONENTS_BEFORE_EXCHANGE}{DEFAULT_TEMPLATE_EXCHANGE_OPEN}{exchange_body}{DEFAULT_TEMPLATE_EXCHANGE_CLOSE}",
+        "{DEFAULT_TEMPLATE_STATUS_OPEN}{}{DEFAULT_TEMPLATE_STATUS_CLOSE}{worktrees}{DEFAULT_TEMPLATE_RECAP_AND_ACTIVE}{DEFAULT_TEMPLATE_COMPONENTS_BEFORE_EXCHANGE}{DEFAULT_TEMPLATE_EXCHANGE_OPEN}{exchange_body}{DEFAULT_TEMPLATE_EXCHANGE_CLOSE}",
         status_body.trim_start_matches('\n'),
         worktrees = agent_doc_element::element::WORKTREES_SECTION,
     )
@@ -211,9 +211,9 @@ mod tests {
             section_headers,
             [
                 "## Status <!-- agent:status patch=replace -->",
+                "## Worktrees <!-- agent:worktrees -->",
                 "## Recap <!-- agent:recap patch=replace -->",
                 "## Active <!-- agent:active priority -->",
-                "## Worktrees <!-- agent:worktrees -->",
                 "## Run <!-- agent:run priority subagents clear -->",
                 "## Review <!-- agent:review -->",
                 "## Todo <!-- agent:todo priority -->",
@@ -254,9 +254,9 @@ mod tests {
             component_names,
             [
                 "status",
+                "worktrees",
                 "recap",
                 "active",
-                "worktrees",
                 "queue",
                 "review",
                 "todo",
@@ -269,7 +269,7 @@ mod tests {
             "claim scaffolds every canonical component in stable document order"
         );
         assert_eq!(components[0].patch_mode(), Some("replace"));
-        assert_eq!(components[1].patch_mode(), Some("replace"));
+        assert_eq!(components[2].patch_mode(), Some("replace"));
         assert_eq!(components[11].patch_mode(), Some("append"));
         let backlog = components
             .iter()
@@ -424,9 +424,9 @@ mod tests {
             component_names,
             [
                 "status",
+                "worktrees",
                 "recap",
                 "active",
-                "worktrees",
                 "queue",
                 "review",
                 "todo",

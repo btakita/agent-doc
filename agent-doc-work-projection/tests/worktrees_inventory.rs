@@ -1,4 +1,4 @@
-//! `agent:worktrees` is the managed-list inventory after `agent:active`.
+//! `agent:worktrees` is the managed-list inventory before `agent:recap`.
 
 use agent_doc_work_projection::worktrees::{
     WorktreeCandidate, WorktreeRecord, active_records, reconcile,
@@ -13,14 +13,18 @@ fn record(topic: &str, branch: &str, directory: &str) -> WorktreeRecord {
 }
 
 const DOC: &str = concat!(
-    "## Active <!-- agent:active priority -->\n",
+    "## Status <!-- agent:status patch=replace -->\n",
+    "<!-- /agent:status -->\n",
+    "\n## Recap <!-- agent:recap patch=replace -->\n",
+    "<!-- /agent:recap -->\n",
+    "\n## Active <!-- agent:active priority -->\n",
     "<!-- /agent:active -->\n",
     "\n## Run <!-- agent:run -->\n",
     "<!-- /agent:run -->\n",
 );
 
 #[test]
-fn inventory_lands_after_active_and_is_a_fixed_point() {
+fn inventory_lands_before_recap_and_is_a_fixed_point() {
     let records = vec![
         record("Ship the list", "feat/worktrees", "/tmp/wt-b"),
         record("Earlier topic", "feat/earlier", "/tmp/wt-a"),
@@ -28,12 +32,13 @@ fn inventory_lands_after_active_and_is_a_fixed_point() {
     let updated = reconcile(DOC, &records)
         .unwrap()
         .expect("a live worktree inserts the section");
-    let active = updated.find("<!-- /agent:active -->").unwrap();
+    let status = updated.find("<!-- /agent:status -->").unwrap();
     let worktrees = updated.find("<!-- agent:worktrees -->").unwrap();
-    let run = updated.find("<!-- agent:run -->").unwrap();
+    let recap = updated.find("<!-- agent:recap patch=replace -->").unwrap();
+    let active = updated.find("<!-- agent:active priority -->").unwrap();
     assert!(
-        active < worktrees && worktrees < run,
-        "agent:worktrees sits between agent:active and agent:run:\n{updated}"
+        status < worktrees && worktrees < recap && recap < active,
+        "agent:worktrees sits before agent:recap:\n{updated}"
     );
     assert!(
         updated.contains(concat!(

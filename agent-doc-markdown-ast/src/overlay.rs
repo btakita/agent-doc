@@ -760,18 +760,21 @@ fn response_next_action_decision_child_end(
 /// Labels the binary renders only as response-structure rows beneath a
 /// `**Response [#r-…]**` parent (`#responserowqueuehead`). Labels that take a
 /// value end with a space; the container labels stand alone.
-const GENERATED_RESPONSE_STRUCTURE_VALUE_LABELS: [&str; 4] = [
+const GENERATED_RESPONSE_STRUCTURE_VALUE_LABELS: [&str; 5] = [
     "**Timestamp:** ",
     "**Summary:** ",
     "**State:** ",
     "**Guidance:** ",
+    // `#blockerdisregard`: a refused gesture is this note, not a queue row.
+    "**Disregard:** ",
 ];
 const GENERATED_RESPONSE_STRUCTURE_CONTAINER_LABELS: [&str; 2] =
     ["**Choices:**", "**Next actions:**"];
 
 /// Whether a list item's content is a generated response-structure row
 /// (`**Summary:** …`, `**State:** …`, `**Guidance:** …`, `**Timestamp:** …`,
-/// `**Choices:**`, `**Next actions:**`), whatever its parent is.
+/// `**Choices:**`, `**Next actions:**`, `**Disregard:** …`), whatever its
+/// parent is.
 ///
 /// `#responserowqueuehead`: on 2026-11-05 a closeout's response tree lost its
 /// `**Response [#r-…]**` wrapper on the editor replica, and the orphaned

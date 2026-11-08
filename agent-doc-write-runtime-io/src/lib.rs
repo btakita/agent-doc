@@ -5132,21 +5132,32 @@ fn derive_blocking_operator_requests(
     validate_blocking_operator_request_recommendations(options, &packets)?;
     // An unreadable document only loses the response-citation fallback; the
     // gate ids and the packet itself still derive the todo.
-    let document_ids = if options.force_disk {
+    let loaded = if options.force_disk {
         std::fs::read_to_string(file).ok()
     } else {
         resolve_current_document(file, "packet_todo_tracked_ids")
             .ok()
             .map(|current| current.into_content())
-    }
-    .map(|content| {
-        agent_doc_element_backlog::backlog::document_reserved_identity_ids(&content)
-            .into_iter()
-            .map(|id| id.to_ascii_lowercase())
-            .collect()
-    })
-    .unwrap_or_default();
-    let texts = blocking_operator_request_todo_texts(options, &response, &document_ids);
+    };
+    let document_ids = loaded
+        .as_deref()
+        .map(|content| {
+            agent_doc_element_backlog::backlog::document_reserved_identity_ids(content)
+                .into_iter()
+                .map(|id| id.to_ascii_lowercase())
+                .collect()
+        })
+        .unwrap_or_default();
+    // `#blockerdisregard`: a request the operator already disregarded must not
+    // come back as a todo or a 🙋 annotation on the next closeout.
+    let texts: Vec<_> = blocking_operator_request_todo_texts(options, &response, &document_ids)
+        .into_iter()
+        .filter(|text| {
+            loaded.as_deref().is_none_or(|content| {
+                !agent_doc_queue::blocker_disregard::response_todo_is_disregarded(content, text)
+            })
+        })
+        .collect();
     for text in &texts {
         eprintln!(
             "[todo] blocking operator request packet (#packettodo): recording the operator decision in agent:todo: {text}"
@@ -5164,6 +5175,11 @@ fn derive_blocking_operator_requests(
     }
     let queue_actions = packets
         .iter()
+        .filter(|packet| {
+            loaded.as_deref().is_none_or(|content| {
+                !agent_doc_queue::blocker_disregard::request_was_disregarded(content, &packet.id)
+            })
+        })
         .filter_map(|packet| {
             packet.queue_item.as_ref().map(|queue_item| {
                 agent_doc_write_command_io::QueueOperatorAction {

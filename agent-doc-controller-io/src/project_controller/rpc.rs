@@ -29639,13 +29639,15 @@ pub(crate) fn handle_dispatch(
         } else {
             bootstrap.project_root.join(&file)
         };
-        let blocked_head = std::fs::read_to_string(&file_path)
-            .ok()
-            .and_then(|content| {
-                agent_doc_queue::queue_heads::active_queue_head_text(&content)
-                    .ok()
-                    .flatten()
-            });
+        let file_text = std::fs::read_to_string(&file_path).ok();
+        let disregard_actor_turn_busy = file_text
+            .as_deref()
+            .is_some_and(agent_doc_queue::blocker_disregard::disregards_actor_turn_busy);
+        let blocked_head = file_text.as_deref().and_then(|content| {
+            agent_doc_queue::queue_heads::active_queue_head_text(content)
+                .ok()
+                .flatten()
+        });
         let trigger = dispatch_diagnostic_field(&diagnostic_payload, "harness").map(|harness| {
             agent_doc_harness::HarnessConfig::from_agent_name(harness)
                 .trigger_command(&file.to_string_lossy())
@@ -29655,6 +29657,7 @@ pub(crate) fn handle_dispatch(
             reason,
             blocked_head: blocked_head.as_deref(),
             trigger: trigger.as_deref(),
+            disregard_actor_turn_busy,
         });
         let blocked_diagnostic_payload =
             append_dispatch_proof_payload(&diagnostic_payload, &proof_fields);

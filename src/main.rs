@@ -5545,6 +5545,31 @@ enum QueueAction {
         #[arg(long = "remove", value_name = "KEY")]
         remove: Vec<String>,
     },
+    /// Disregard agent-invented blockers so the session can continue
+    /// (`#blockerdisregard`).
+    ///
+    /// With no selector, disregards every invented blocker in the document:
+    /// queue rows blocked by stays-open clauses or `after=` edges, open
+    /// subagent operator-request packets, and the Waiting-on-you rows those
+    /// packets project, plus the `actor_turn_busy` dispatch catch-all that
+    /// names `resume_or_clear_queue_control`. A real operator gate, a question
+    /// that cites an upstream the operator still has to answer, and a harness
+    /// permission prompt stay in place.
+    ///
+    /// The same control in the document, applied by preflight before any model
+    /// turn: a `disregard` child line or a `[disregard]` token on one row, or
+    /// a `disregard blockers` line for every invented blocker.
+    Disregard {
+        /// Path to the session document
+        file: PathBuf,
+        /// One queue row or request: `#id`, `do [#id]`, or the row text.
+        /// Does not record the dispatch disregard.
+        #[arg(long, value_name = "ID_OR_TEXT", conflicts_with = "dispatch")]
+        item: Option<String>,
+        /// Record only the `actor_turn_busy` dispatch disregard.
+        #[arg(long, conflicts_with = "item")]
+        dispatch: bool,
+    },
     /// Reserve a live queue head for dispatch to a worker outside the
     /// in-session loop (`#queueclaim`). A claim blocks duplicate dispatch but
     /// does not prove that a worker is running; `queue start` records that
@@ -9972,6 +9997,41 @@ fn try_main() -> anyhow::Result<()> {
                 );
                 Ok(())
             }
+            QueueAction::Disregard {
+                file,
+                item,
+                dispatch,
+            } => {
+                let target = match (item, dispatch) {
+                    (Some(item), false) => {
+                        agent_doc_queue::blocker_disregard::DisregardTarget::Item(item)
+                    }
+                    (None, true) => agent_doc_queue::blocker_disregard::DisregardTarget::Dispatch,
+                    (None, false) => {
+                        agent_doc_queue::blocker_disregard::DisregardTarget::AllInvented
+                    }
+                    (Some(_), true) => {
+                        anyhow::bail!("queue disregard: `--item` and `--dispatch` conflict")
+                    }
+                };
+                let queue_effects = CliQueueCommandEffects;
+                let plan = agent_doc_queue_io::blocker_disregard::edit_with_effects(
+                    &queue_effects,
+                    &file,
+                    target,
+                )?;
+                if !plan.changed {
+                    println!("{}: nothing to disregard", file.display());
+                } else {
+                    for line in &plan.disregarded {
+                        println!("disregarded {line}");
+                    }
+                    for (label, reason) in &plan.kept {
+                        println!("kept {label}: {reason}");
+                    }
+                }
+                Ok(())
+            }
             QueueAction::ReportComplete {
                 file,
                 item,
@@ -11039,6 +11099,56 @@ mod recycle_force_tests {
                 assert_eq!(remove, ["time"]);
             }
             _ => panic!("expected queue attr subcommand"),
+        }
+    }
+
+    #[test]
+    fn queue_disregard_parses_item_dispatch_and_the_default() {
+        match parse(&["agent-doc", "queue", "disregard", "tasks/session.md"]) {
+            Commands::Queue {
+                action:
+                    QueueAction::Disregard {
+                        file,
+                        item,
+                        dispatch,
+                    },
+            } => {
+                assert_eq!(file, PathBuf::from("tasks/session.md"));
+                assert_eq!(item, None);
+                assert!(!dispatch);
+            }
+            _ => panic!("expected queue disregard"),
+        }
+        match parse(&[
+            "agent-doc",
+            "queue",
+            "disregard",
+            "tasks/session.md",
+            "--item",
+            "#dep",
+        ]) {
+            Commands::Queue {
+                action: QueueAction::Disregard { item, dispatch, .. },
+            } => {
+                assert_eq!(item.as_deref(), Some("#dep"));
+                assert!(!dispatch);
+            }
+            _ => panic!("expected queue disregard --item"),
+        }
+        match parse(&[
+            "agent-doc",
+            "queue",
+            "disregard",
+            "tasks/session.md",
+            "--dispatch",
+        ]) {
+            Commands::Queue {
+                action: QueueAction::Disregard { item, dispatch, .. },
+            } => {
+                assert_eq!(item, None);
+                assert!(dispatch);
+            }
+            _ => panic!("expected queue disregard --dispatch"),
         }
     }
 

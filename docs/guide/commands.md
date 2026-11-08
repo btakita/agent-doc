@@ -150,6 +150,32 @@ need repository paths, commit evidence, or diagnostics; use `--json` for tools.
 Normal queue lifecycle commands record lineage silently and do not add lineage
 annotations to the session document.
 
+## queue disregard
+
+```
+agent-doc queue disregard <FILE>
+agent-doc queue disregard <FILE> --item ID_OR_TEXT
+agent-doc queue disregard <FILE> --dispatch
+```
+
+Disregard a blocker an agent invented so the session can continue
+(`#blockerdisregard`). With no selector, this records every invented queue
+block (a stays-open blocker clause or an `after=` edge), checks off invented
+subagent operator-request todos, and records the `actor_turn_busy` dispatch
+catch-all so a non-permission busy turn waits instead of asking you to resume
+or clear queue control. `--item` limits that to one row and does not record
+the dispatch disregard. `--dispatch` records only the dispatch disregard.
+
+A real operator gate, a question that cites a GitHub issue or pull request
+you still have to answer, and a harness permission prompt stay in place. A
+row whose remaining blockers are all of those is refused and the file is not
+changed.
+
+The same control can be written in the document. A child line `disregard`, a
+`[disregard]` token on a row, or a line `disregard blockers` is applied by
+preflight before any model turn. A protected row becomes an inert
+`**Disregard:** kept — … ▫️` note. The cited backlog or review item stays open.
+
 ## prompt
 
 ```

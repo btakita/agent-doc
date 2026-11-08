@@ -456,7 +456,15 @@ pub fn queue_prompt_text_is_free_text(content: &str, text: &str) -> bool {
     {
         // A trailing `[#q-…]` is the row's generated prompt id, not a second
         // directive. `#fix-ci [#q-fad1e081fca1]` is still the preset head.
+        // Claim identity already keys that shape as free text, including when
+        // the preset is inherited from project.md and is absent here.
         // An open backlog id that happens to start with `q-` stays a directive.
+        if let agent_doc_element_queue::QueueItemIdentity::FreeText(key) =
+            agent_doc_element_queue::queue_prompt_stable_identity(text)
+            && key.starts_with("queue-id:")
+        {
+            return true;
+        }
         let decisive: Vec<&String> = ids
             .iter()
             .filter(|id| {
@@ -2792,6 +2800,11 @@ mod tests {
         assert!(
             !queue_prompt_text_is_free_text(tracked, "do [#q-tracked]"),
             "an open backlog id that starts with q- stays id-backed"
+        );
+        let project_preset = "---\npresets:\n  '#audit': Audit\n---\n";
+        assert!(
+            queue_prompt_text_is_free_text(project_preset, "#fix-ci [#q-fad1e081fca1]"),
+            "a leading tag plus its generated id stays free text when the tag is not in this document"
         );
     }
 

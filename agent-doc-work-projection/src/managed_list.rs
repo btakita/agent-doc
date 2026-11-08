@@ -41,7 +41,9 @@ pub enum ManagedList {
     /// release receipts, and lineage.
     Active,
     /// `agent:worktrees`: live worktrees for this document (topic, branch,
-    /// directory), from lineage receipts whose directory still exists.
+    /// directory), from lineage receipts whose directory still exists and
+    /// whose attempt has no `removed` receipt. Operator list children are
+    /// actions; this render keeps them until preflight consumes them.
     Worktrees,
     /// Lifecycle markers on `agent:run` / `agent:queue` / `agent:loop` rows,
     /// from claims, release receipts, and completion evidence.

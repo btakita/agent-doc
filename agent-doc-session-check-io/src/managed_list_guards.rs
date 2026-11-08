@@ -66,7 +66,8 @@ pub fn tracked_finding_lines(content: &str) -> Vec<String> {
     lines
 }
 
-/// `agent:worktrees` == render(lineage worktrees whose directory still exists).
+/// `agent:worktrees` == render(lineage worktrees whose directory still exists
+/// and whose attempt has no `removed` receipt). The check does not prune.
 fn worktrees_mismatch(file: &Path, content: &str) -> Result<Option<ListMismatch>> {
     agent_doc_work_projection::managed_list::check_list(
         ManagedList::Worktrees,

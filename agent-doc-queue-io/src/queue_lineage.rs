@@ -1223,6 +1223,8 @@ pub struct LineageWorktree {
     pub generation: u64,
     /// A `removed` receipt disposed of this worktree.
     pub removed: bool,
+    /// The attempt has an `integrated` or `released` receipt.
+    pub completed: bool,
 }
 
 /// Worktrees named by `ledger`, in attempt order. Attempts with no directory
@@ -1247,6 +1249,12 @@ pub fn lineage_worktrees(ledger: &QueueLineageLedger) -> Vec<LineageWorktree> {
                     .events
                     .iter()
                     .any(|event| event.kind == QueueLineageEventKind::Removed),
+                completed: attempt.events.iter().any(|event| {
+                    matches!(
+                        event.kind,
+                        QueueLineageEventKind::Integrated | QueueLineageEventKind::Released
+                    )
+                }),
             })
         })
         .collect()

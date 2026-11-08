@@ -2845,7 +2845,7 @@ fn run_pending_maintenance_with_options(
         active_status_mutated = true;
     }
     if let Some(reconciled) =
-        agent_doc_queue_io::worktree_inventory::reconcile(file, &current_content)?
+        agent_doc_queue_io::worktree_inventory::reconcile_maintained(file, &current_content)?
     {
         eprintln!("[preflight] worktrees: reconciled managed list");
         current_content = reconciled;
@@ -5771,6 +5771,31 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
         );
     }
 
+    // Operator list children under `agent:worktrees` are actions. A removal
+    // stays for `reconcile_maintained` below. Every other instruction is
+    // queued here so the agent performs it instead of leaving inert text.
+    if let Some(promoted) = agent_doc_work_projection::worktrees::promote_worktree_instructions(
+        &current_content,
+        &selected_queue_id,
+    )? {
+        current_content = promoted.content;
+        components = agent_doc_element::element::parse(&current_content)?;
+        comp = agent_doc_queue::queue_set::component_for_id(
+            &current_content,
+            &components,
+            &selected_queue_id,
+        )?
+        .context(
+            "queue maintenance: queue component vanished after worktree instruction promotion",
+        )?
+        .clone();
+        mutated = true;
+        eprintln!(
+            "[preflight] worktrees: queued {} operator instruction(s) for the agent",
+            promoted.inserted
+        );
+    }
+
     let body = &current_content[comp.open_end..comp.close_start];
     let entries = match agent_doc_queue::document_queue::parse(body) {
         Ok(e) => e,
@@ -8464,7 +8489,7 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
         eprintln!("[preflight] active: reconciled after queue lifecycle projection");
     }
     if let Some(reconciled) =
-        agent_doc_queue_io::worktree_inventory::reconcile(file, &current_content)?
+        agent_doc_queue_io::worktree_inventory::reconcile_maintained(file, &current_content)?
     {
         current_content = reconciled;
         mutated = true;

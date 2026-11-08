@@ -926,7 +926,25 @@ pub(crate) fn repair_managed_state(
         file,
         "queue_repair_managed_lists",
     )?;
+    let worktrees = if apply {
+        agent_doc_queue_io::worktree_inventory::maintain(file, &current)?
+    } else {
+        agent_doc_queue_io::worktree_inventory::inspect(file, &current)?
+    };
     let (target, mut actions) = project_managed_lists(file, &current)?;
+    let verb = if apply { "removed" } else { "would remove" };
+    for removal in &worktrees.removed {
+        actions.push(format!(
+            "agent:worktrees: {verb} `{}` ({})",
+            removal.directory, removal.reason
+        ));
+    }
+    for refusal in &worktrees.refused {
+        actions.push(format!(
+            "agent:worktrees: left `{}` in place ({})",
+            refusal.directory, refusal.reason
+        ));
+    }
     // `#managedlistnodrift`: name every `☑️` that no durable record backs.
     actions.extend(
         agent_doc_queue_io::queue_marker_audit::unbacked_reported_rows(file, &current)?

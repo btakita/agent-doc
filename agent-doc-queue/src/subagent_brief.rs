@@ -612,6 +612,25 @@ pub const SUBAGENT_OPERATOR_REQUEST_MARKER: &str =
 pub const LEGACY_SUBAGENT_OPERATOR_REQUEST_MARKER: &str =
     "[#subagent-operator-request] subagent operator request";
 
+/// Agent-owned lifecycle/disposition choices are not operator questions.
+///
+/// The worker and coordinator already have the queue item, prompt tree,
+/// resolved presets, and current evidence needed to choose how authorized work
+/// continues. Routing that bookkeeping back to the operator stalls the queue
+/// without obtaining any product or authorization input.
+pub const SUBAGENT_PROCEDURAL_CHOICE_RULE: &str = concat!(
+    "Before sending an operator request, classify the missing input. Do not ask the operator to ",
+    "choose an agent-doc lifecycle or work-disposition step for already-authorized work. Choices ",
+    "such as `leave-tracked`, `review`, or `address`, queue/review/todo placement, which worker ",
+    "continues, or whether to keep incomplete work open are agent-owned procedural choices. ",
+    "Resolve them from the queue item, its prompt tree, resolved presets, current evidence, and ",
+    "completion state: continue the concrete authorized objective while actionable work remains; ",
+    "use a genuine review/external gate only when execution is complete; otherwise keep the item ",
+    "tracked with its concrete blocker. Ask the operator only when the answer changes product ",
+    "behavior or scope, supplies an external fact the agents cannot know, authorizes an outward ",
+    "action not already authorized, or must be granted by the harness permission UI.\n"
+);
+
 /// The tracked id carried by a subagent operator-request marker line.
 ///
 /// New markers require a non-empty alphanumeric/hyphen suffix. The fixed
@@ -906,6 +925,8 @@ fn render_preamble(
     );
     out.push_str(concat!("- ", subagent_handback_shape_rule!(), "\n"));
     out.push('\n');
+    out.push_str(SUBAGENT_PROCEDURAL_CHOICE_RULE);
+    out.push('\n');
     let queue_item = agent_doc_document::queue_projection::operator_request_origin_item(&auth.item);
     out.push_str(&SUBAGENT_OPERATOR_REQUEST_PROTOCOL.replace("<origin-queue-item>", &queue_item));
     out
@@ -993,6 +1014,54 @@ mod tests {
             "{}",
             auth.subagent_prompt_preamble
         );
+    }
+
+    #[test]
+    fn pr_worker_keeps_procedural_disposition_choices_off_the_operator_queue() {
+        let item =
+            "https://github.com/haiven-dev/haiven-sdk-unity-bossroom/pull/5 [#q-e935b5c271d6]";
+        let content = doc("", "subagents", &[item], &[]);
+
+        let auth = subagent_authorization("sdk-dev.md", &content, item);
+        let preamble = &auth.subagent_prompt_preamble;
+
+        assert!(preamble.contains(SUBAGENT_PROCEDURAL_CHOICE_RULE));
+        assert!(preamble.contains("Choices such as `leave-tracked`, `review`, or `address`"));
+        assert!(preamble.contains("are agent-owned procedural choices"));
+        assert!(
+            preamble.contains(
+                "continue the concrete authorized objective while actionable work remains"
+            )
+        );
+        assert!(
+            preamble.contains(
+                "Ask the operator only when the answer changes product behavior or scope"
+            )
+        );
+
+        let source_runbook = include_str!("../../runbooks/respond.md");
+        let bundled_runbook = include_str!("../../.claude/skills/agent-doc/runbooks/respond.md");
+        assert_eq!(source_runbook, bundled_runbook);
+        assert!(source_runbook.contains("#agentownedproceduralchoice"));
+        assert!(
+            source_runbook
+                .contains("`leave-tracked` / `review` / `address`, queue/review/todo placement")
+        );
+        assert!(source_runbook.contains(
+            "resume the worker with that derived\n     disposition instead of adding a question"
+        ));
+
+        let source_planning = include_str!("../../runbooks/planning-dispatch.md");
+        let bundled_planning =
+            include_str!("../../.claude/skills/agent-doc/runbooks/planning-dispatch.md");
+        assert_eq!(source_planning, bundled_planning);
+        assert!(
+            source_planning
+                .contains("Before presenting a worker packet, apply `#agentownedproceduralchoice`")
+        );
+        assert!(source_planning.contains(
+            "Only genuinely operator-owned input\n   becomes an exchange question and TODO"
+        ));
     }
 
     #[test]

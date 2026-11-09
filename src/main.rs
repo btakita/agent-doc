@@ -6414,6 +6414,22 @@ enum PluginAction {
     },
     /// List installed editor plugins
     List,
+    /// Show an actionable restart dialog in every live JetBrains editor
+    #[command(name = "prompt-restart")]
+    PromptRestart {
+        /// Plugin version the IDE will load after restart
+        #[arg(long, value_name = "VERSION")]
+        version: String,
+        /// Why the running generation cannot load the installed package
+        #[arg(
+            long,
+            default_value = "The installed Agent Doc plugin generation requires an IDE restart."
+        )]
+        reason: String,
+        /// Emit the delivery and acknowledgement report as JSON
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -7882,6 +7898,11 @@ fn try_main() -> anyhow::Result<()> {
                 }
             }
             PluginAction::List => plugin::list(),
+            PluginAction::PromptRestart {
+                version,
+                reason,
+                json,
+            } => plugin::prompt_restart(&version, &reason, json),
         },
         Commands::ResponseCheckpoint { file } => {
             let mut response = String::new();
@@ -11811,6 +11832,30 @@ mod startup_critical_path_tests {
             .expect("spawn parse thread")
             .join()
             .expect("parse thread")
+    }
+
+    #[test]
+    fn plugin_prompt_restart_parses_delivery_evidence_options() {
+        let command = parse(&[
+            "agent-doc",
+            "plugin",
+            "prompt-restart",
+            "--version",
+            "0.2.963",
+            "--reason",
+            "modular package",
+            "--json",
+        ]);
+        assert!(matches!(
+            command,
+            Commands::Plugin {
+                action: PluginAction::PromptRestart {
+                    version,
+                    reason,
+                    json: true,
+                },
+            } if version == "0.2.963" && reason == "modular package"
+        ));
     }
 
     /// `#startupcriticalpath`: the editor bootstrap commands leave the

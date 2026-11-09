@@ -60,6 +60,7 @@ private enum class EditorIntent(val token: String) {
     FreezeForExtract("freeze_for_extract"),
     ResumeAfterExtract("resume_after_extract"),
     RefreshVcs("refresh_vcs"),
+    PromptRestart("prompt_restart"),
     ReloadLibrary("reload_library"),
 }
 
@@ -780,6 +781,19 @@ class PatchWatcher(private val project: Project) : Disposable {
                 recordProjectSurfaceOps("vcs_refresh", "refresh_vcs", "commit_vcs_refresh", "triggered")
                 refreshVcs(extractStringField(json, "file"))
                 APPLY_APPLIED
+            }
+            EditorIntent.PromptRestart.token -> {
+                val pendingVersion = extractStringField(json, "pending_version") ?: return APPLY_FAILED
+                val reason = extractStringField(json, "reason")
+                LOG.info(
+                    "[socket] prompt_restart received (pending_version=$pendingVersion); " +
+                        "scheduling operator dialog",
+                )
+                if (PluginRestartRequiredNotifier.promptNow(pendingVersion, reason)) {
+                    APPLY_APPLIED
+                } else {
+                    APPLY_FAILED
+                }
             }
             EditorIntent.ReloadLibrary.token -> {
                 val libVersion = extractStringField(json, "lib_version") ?: "?"

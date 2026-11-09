@@ -99,4 +99,18 @@ class PluginRestartRequiredNotifierTest {
         assertTrue(reasonLine, reasonLine.endsWith("..."))
         assertTrue(reasonLine, reasonLine.length < 320)
     }
+
+    @Test
+    fun `an explicit restart request renders the requested generation and reason`() {
+        val verdict = PluginRestartRequired(
+            "0.2.962",
+            "0.2.963",
+            "requested",
+            "the modular package cannot be swapped dynamically",
+        )
+        val message = pluginRestartRequiredMessage(verdict)
+        assertTrue(message, message.startsWith("Agent Doc v0.2.963 requires an IDE restart"))
+        assertTrue(message, message.contains("the modular package cannot be swapped dynamically"))
+        assertTrue(message, message.endsWith("Restart the IDE to load it."))
+    }
 }

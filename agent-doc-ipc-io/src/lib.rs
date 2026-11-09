@@ -1473,6 +1473,25 @@ pub fn send_reload_library_to_editor(
     }
 }
 
+/// Ask one registered editor process to show its native restart prompt.
+///
+/// A successful result means the editor returned the terminal IPC receipt for
+/// the request; it is delivery evidence, not an assertion that the operator
+/// chose Restart rather than Later.
+pub fn send_prompt_restart_to_editor(
+    project_root: &Path,
+    editor_pid: u64,
+    editor_id: &str,
+    pending_version: &str,
+    reason: &str,
+) -> Result<bool> {
+    let mut message = agent_doc_ipc_protocol::prompt_restart_message(pending_version, reason);
+    message["editor_id"] = serde_json::Value::String(editor_id.to_string());
+    message["editor_pid"] = serde_json::Value::from(editor_pid);
+
+    send_message_to_pid(project_root, editor_pid, &message).map(|_| true)
+}
+
 /// Outcome of sending an editor intent across a rolling native-library build
 /// boundary.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

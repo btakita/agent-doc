@@ -957,6 +957,13 @@ fn install_jetbrains_into(release: &Value, target_dir: &Path) -> Result<Jetbrain
     );
     print_jetbrains_activation_outcome(outcome.clone());
     print_jetbrains_remote_dev_install_scope(package_range);
+    match &outcome {
+        JetbrainsLocalInstallOutcome::RestartRequired { reason }
+        | JetbrainsLocalInstallOutcome::StagedForRestart { reason } => {
+            prompt_restart(&expected_version, reason, false)?;
+        }
+        _ => {}
+    }
     Ok(JetbrainsReleaseInstall {
         outcome,
         replaced_unreleased,
@@ -1464,6 +1471,120 @@ pub fn install(editor: &str) -> Result<()> {
     install_with_plugins_dir(editor, None)
 }
 
+/// Ask every live JetBrains process to show its native Restart IDE / Later
+/// dialog, and fail unless at least one editor acknowledges the typed request.
+pub fn prompt_restart(pending_version: &str, reason: &str, json: bool) -> Result<()> {
+    let pending_version = pending_version.trim();
+    if pending_version.is_empty() {
+        bail!("--version must not be empty");
+    }
+    let reason = reason.trim();
+    if reason.is_empty() {
+        bail!("--reason must not be empty");
+    }
+    let report = agent_doc_controller_io::project_controller::prompt_restart_all_projects(
+        pending_version,
+        reason,
+    );
+    if json {
+        println!(
+            "{}",
+            serde_json::json!({
+                "pending_version": pending_version,
+                "projects": report.projects,
+                "endpoints": report.endpoints,
+                "delivered": report.delivered(),
+                "acknowledged_editor_pids": report.acknowledged_editor_pids,
+                "failed": report.failed(),
+                "failures": report.failures.iter().map(ToString::to_string).collect::<Vec<_>>(),
+            })
+        );
+    } else if report.delivered() > 0 {
+        let pids = report
+            .acknowledged_editor_pids
+            .iter()
+            .map(u64::to_string)
+            .collect::<Vec<_>>()
+            .join(", ");
+        eprintln!(
+            "[plugin] restart prompt acknowledged by {}/{} live JetBrains editor process(es): pid {pids}",
+            report.delivered(),
+            report.endpoints,
+        );
+    }
+
+    restart_prompt_delivery_result(&report)
+}
+
+fn restart_prompt_delivery_result(
+    report: &agent_doc_controller_io::project_controller::RestartPromptFanoutReport,
+) -> Result<()> {
+    if report.endpoints == 0 {
+        bail!("no live JetBrains editor endpoint was registered; no restart dialog was delivered");
+    }
+    if report.delivered() == 0 || report.failed() > 0 {
+        let failures = report
+            .failures
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("; ");
+        bail!(
+            "restart dialog delivery incomplete: {}/{} editor process(es) acknowledged; {}",
+            report.delivered(),
+            report.endpoints,
+            if failures.is_empty() {
+                "no terminal acknowledgement received".to_string()
+            } else {
+                failures
+            }
+        );
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod restart_prompt_delivery_tests {
+    use super::restart_prompt_delivery_result;
+    use agent_doc_controller_io::project_controller::{
+        RestartPromptEndpointFailure, RestartPromptFanoutReport,
+    };
+
+    #[test]
+    fn no_endpoint_is_an_explicit_delivery_failure() {
+        let error = restart_prompt_delivery_result(&RestartPromptFanoutReport::default())
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("no live JetBrains editor endpoint"),
+            "{error}"
+        );
+        assert!(error.contains("no restart dialog was delivered"), "{error}");
+    }
+
+    #[test]
+    fn partial_delivery_names_the_unacknowledged_pid() {
+        let report = RestartPromptFanoutReport {
+            endpoints: 2,
+            acknowledged_editor_pids: vec![11],
+            failures: vec![RestartPromptEndpointFailure {
+                project_root: "/work/project".into(),
+                editor_pid: Some(12),
+                reason: "editor refused the restart-prompt intent".to_string(),
+            }],
+            ..RestartPromptFanoutReport::default()
+        };
+        let error = restart_prompt_delivery_result(&report)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("1/2 editor process(es) acknowledged"),
+            "{error}"
+        );
+        assert!(error.contains("editor pid 12"), "{error}");
+    }
+}
+
 pub fn install_with_plugins_dir(editor: &str, plugins_dir: Option<&Path>) -> Result<()> {
     let live_plugin_replaced = match editor {
         "jetbrains" | "jb" | "idea" => matches!(
@@ -1538,6 +1659,7 @@ fn install_jetbrains_local(plugins_dir: Option<&Path>) -> Result<JetbrainsLocalI
     let target_dir = choose_plugins_dir(&dirs, plugins_dir)?;
     let package_range = jetbrains_package_range(&target_dir)?;
     let zip_path = local_jetbrains_zip(&target_dir)?;
+    let pending_version = local_jetbrains_zip_version(&zip_path)?;
     let outcome = install_jetbrains_local_zip_into(&zip_path, &target_dir)?;
     match &outcome {
         JetbrainsLocalInstallOutcome::Installed => {
@@ -1566,6 +1688,13 @@ fn install_jetbrains_local(plugins_dir: Option<&Path>) -> Result<JetbrainsLocalI
         }
     }
     print_jetbrains_remote_dev_install_scope(package_range);
+    match &outcome {
+        JetbrainsLocalInstallOutcome::RestartRequired { reason }
+        | JetbrainsLocalInstallOutcome::StagedForRestart { reason } => {
+            prompt_restart(&pending_version, reason, false)?;
+        }
+        _ => {}
+    }
     Ok(outcome)
 }
 
@@ -1604,7 +1733,9 @@ fn install_jetbrains_local_all_existing() -> Result<usize> {
     let mut hot_upgraded = 0usize;
     let mut unchanged = 0usize;
     let mut restart_pending = 0usize;
+    let mut restart_prompt: Option<(String, String)> = None;
     for (target_dir, zip_path) in &targets {
+        let pending_version = local_jetbrains_zip_version(zip_path)?;
         match install_jetbrains_local_zip_into(zip_path, target_dir)? {
             JetbrainsLocalInstallOutcome::Installed => {
                 installed += 1;
@@ -1625,6 +1756,7 @@ fn install_jetbrains_local_all_existing() -> Result<usize> {
                 installed += 1;
                 restart_pending += 1;
                 eprintln!("WARNING: {}", restart_required_message(target_dir, &reason));
+                restart_prompt.get_or_insert((pending_version, reason));
             }
             JetbrainsLocalInstallOutcome::StagedForRestart { reason } => {
                 installed += 1;
@@ -1633,6 +1765,7 @@ fn install_jetbrains_local_all_existing() -> Result<usize> {
                     "WARNING: {}",
                     staged_for_restart_message(target_dir, &reason)
                 );
+                restart_prompt.get_or_insert((pending_version, reason));
             }
             JetbrainsLocalInstallOutcome::Unchanged => {
                 unchanged += 1;
@@ -1651,6 +1784,9 @@ fn install_jetbrains_local_all_existing() -> Result<usize> {
         "{}",
         jetbrains_convergence_restart_summary(installed, hot_upgraded, restart_pending)
     );
+    if let Some((pending_version, reason)) = restart_prompt {
+        prompt_restart(&pending_version, &reason, false)?;
+    }
     Ok(hot_upgraded)
 }
 

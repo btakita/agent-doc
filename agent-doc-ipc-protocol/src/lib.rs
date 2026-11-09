@@ -36,6 +36,9 @@ pub enum EditorIntent {
     /// and re-register its CRDT replica.
     ResumeAfterExtract,
     RefreshVcs,
+    /// Ask a live editor host to put an actionable restart prompt in front of
+    /// the operator after an on-disk plugin generation replacement.
+    PromptRestart,
     ReloadLibrary,
 }
 
@@ -52,6 +55,7 @@ impl EditorIntent {
             Self::FreezeForExtract => "freeze_for_extract",
             Self::ResumeAfterExtract => "resume_after_extract",
             Self::RefreshVcs => "refresh_vcs",
+            Self::PromptRestart => "prompt_restart",
             Self::ReloadLibrary => "reload_library",
         }
     }
@@ -1209,6 +1213,15 @@ pub fn reload_lib_message(lib_version: &str) -> serde_json::Value {
     })
 }
 
+/// Build a process-scoped request for an editor-owned restart dialog.
+pub fn prompt_restart_message(pending_version: &str, reason: &str) -> serde_json::Value {
+    serde_json::json!({
+        "type": EditorIntent::PromptRestart.as_str(),
+        "pending_version": pending_version,
+        "reason": reason,
+    })
+}
+
 /// Build a VCS refresh probe payload.
 pub fn vcs_refresh_probe_message(file: &str, probe: &str) -> serde_json::Value {
     serde_json::json!({
@@ -1581,9 +1594,10 @@ mod tests {
         is_socket_receipt_timeout_error, is_socket_status_error, message_is_reload_library,
         message_requests_early_receipt, normalization_repair_patch_message,
         observe_lazily_current_message, patch_message, pending_callback_from_request,
-        persist_current_message, queue_convergence_message, refresh_content_message,
-        reload_lib_message, reposition_message, resume_after_extract_message, validate_ipc_hello,
-        validate_ipc_hello_ack, vcs_refresh_message, vcs_refresh_probe_message,
+        persist_current_message, prompt_restart_message, queue_convergence_message,
+        refresh_content_message, reload_lib_message, reposition_message,
+        resume_after_extract_message, validate_ipc_hello, validate_ipc_hello_ack,
+        vcs_refresh_message, vcs_refresh_probe_message,
     };
 
     #[test]
@@ -2184,6 +2198,18 @@ Summary line, rewritten.
         assert_eq!(message["lib_version"], "0.34.68");
         assert!(message.get("patch_id").is_none());
         assert!(message.get("patches").is_none());
+        assert!(message.get("content").is_none());
+        assert!(message.get("file").is_none());
+    }
+
+    #[test]
+    fn prompt_restart_message_is_typed_and_contains_only_ui_request_fields() {
+        let message = prompt_restart_message("0.2.963", "modular package is not dynamic");
+
+        assert_eq!(message["type"], "prompt_restart");
+        assert_eq!(message["pending_version"], "0.2.963");
+        assert_eq!(message["reason"], "modular package is not dynamic");
+        assert!(message.get("patch_id").is_none());
         assert!(message.get("content").is_none());
         assert!(message.get("file").is_none());
     }

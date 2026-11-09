@@ -5,6 +5,7 @@ import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.diagnostic.Logger
+import com.intellij.openapi.ui.Messages
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.concurrent.TimeUnit
@@ -123,7 +124,11 @@ internal fun pluginRestartRequiredVerdict(
 /** The balloon text: what is pending, why the IDE could not load it live, and the remedy. */
 internal fun pluginRestartRequiredMessage(verdict: PluginRestartRequired): String {
     val where =
-        if (verdict.source == "staged") "is staged for the next IDE start" else "is installed"
+        when (verdict.source) {
+            "staged" -> "is staged for the next IDE start"
+            "requested" -> "requires an IDE restart"
+            else -> "is installed"
+        }
     val reason = verdict.reason?.let { text ->
         val shortened =
             if (text.length > RESTART_REASON_DISPLAY_LIMIT) {
@@ -181,6 +186,25 @@ internal object PluginRestartRequiredNotifier {
             notification?.expire()
             notification = null
         }
+    }
+
+    /**
+     * Schedule an editor-owned modal prompt and acknowledge only after the
+     * request has been accepted by this live plugin generation. The terminal
+     * IPC receipt therefore proves that an IDE process owns the UI request;
+     * the operator's eventual Restart/Later choice deliberately remains local.
+     */
+    fun promptNow(pendingVersion: String, reason: String?): Boolean {
+        val application = ApplicationManager.getApplication() ?: return false
+        if (application.isUnitTestMode || PluginGeneration.retired) return false
+        val pending = pendingVersion.trim().takeIf { it.isNotEmpty() } ?: return false
+        val loaded = MarketplacePlatformBridge.pluginVersion(PLUGIN_ID)
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
+            ?: "unknown"
+        val verdict = PluginRestartRequired(loaded, pending, "requested", reason)
+        GenerationWork.invokeLater { showDialog(verdict) }
+        return true
     }
 
     private fun poll() {
@@ -242,6 +266,25 @@ internal object PluginRestartRequiredNotifier {
             created.notify(null)
         } catch (error: Throwable) {
             log.warn("[plugin-update] restart-required notification failed", error)
+        }
+    }
+
+    private fun showDialog(verdict: PluginRestartRequired) {
+        if (PluginGeneration.retired) return
+        try {
+            val choice = Messages.showYesNoDialog(
+                pluginRestartRequiredMessage(verdict),
+                "Agent Doc Restart Required",
+                "Restart IDE",
+                "Later",
+                Messages.getWarningIcon(),
+            )
+            if (choice == Messages.YES) {
+                ApplicationManager.getApplication().restart()
+            }
+        } catch (error: Throwable) {
+            log.warn("[plugin-update] restart-required dialog failed; falling back to notification", error)
+            show(verdict)
         }
     }
 }

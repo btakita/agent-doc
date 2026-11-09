@@ -17134,6 +17134,55 @@ pub struct ReloadLibraryEndpointFailure {
     pub reason: ReloadLibraryFailureReason,
 }
 
+/// Terminal evidence from a process-scoped restart-prompt fan-out.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RestartPromptFanoutReport {
+    pub projects: usize,
+    /// Live JetBrains processes selected for delivery (project sockets are
+    /// deduplicated by PID).
+    pub endpoints: usize,
+    /// PIDs whose editor listener returned the terminal applied receipt.
+    pub acknowledged_editor_pids: Vec<u64>,
+    pub failures: Vec<RestartPromptEndpointFailure>,
+}
+
+impl RestartPromptFanoutReport {
+    pub fn delivered(&self) -> usize {
+        self.acknowledged_editor_pids.len()
+    }
+
+    pub fn failed(&self) -> usize {
+        self.failures.len()
+    }
+}
+
+/// One live editor process that could not accept a restart prompt.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RestartPromptEndpointFailure {
+    pub project_root: PathBuf,
+    pub editor_pid: Option<u64>,
+    pub reason: String,
+}
+
+impl std::fmt::Display for RestartPromptEndpointFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.editor_pid {
+            Some(pid) => write!(
+                f,
+                "editor pid {pid} ({}): {}",
+                self.project_root.display(),
+                self.reason
+            ),
+            None => write!(
+                f,
+                "project {}: {}",
+                self.project_root.display(),
+                self.reason
+            ),
+        }
+    }
+}
+
 impl std::fmt::Display for ReloadLibraryEndpointFailure {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.editor_pid {
@@ -17565,6 +17614,114 @@ fn reload_library_processes(
         }
     }
     report
+}
+
+/// Deliver one restart prompt per JetBrains process, regardless of how many
+/// projects that IDE currently has open.
+fn prompt_restart_processes(
+    reload_report: ReloadLibraryFanoutReport,
+    processes: BTreeMap<u64, EditorNativeReloadProcess>,
+    pending_version: &str,
+    reason: &str,
+    is_listener_active: impl Fn(&Path, u64) -> bool,
+    send_prompt: impl Fn(&EditorNativeReloadEndpoint, u64) -> Result<bool>,
+) -> RestartPromptFanoutReport {
+    let mut report = RestartPromptFanoutReport {
+        projects: reload_report.projects,
+        failures: reload_report
+            .failures
+            .into_iter()
+            .map(|failure| RestartPromptEndpointFailure {
+                project_root: failure.project_root,
+                editor_pid: failure.editor_pid,
+                reason: failure.reason.to_string(),
+            })
+            .collect(),
+        ..RestartPromptFanoutReport::default()
+    };
+
+    for (pid, process) in processes {
+        let jetbrains_endpoints = process
+            .endpoints
+            .iter()
+            .filter(|endpoint| endpoint.editor_id.starts_with("jetbrains-"))
+            .cloned()
+            .collect::<Vec<_>>();
+        if jetbrains_endpoints.is_empty() {
+            continue;
+        }
+        report.endpoints += 1;
+        let active_endpoints = jetbrains_endpoints
+            .iter()
+            .filter(|endpoint| is_listener_active(&endpoint.project_root, pid))
+            .collect::<Vec<_>>();
+        let Some(endpoint) = active_endpoints.first().copied() else {
+            let first = &jetbrains_endpoints[0];
+            report.failures.push(RestartPromptEndpointFailure {
+                project_root: first.project_root.clone(),
+                editor_pid: Some(pid),
+                reason: format!(
+                    "endpoint unavailable: none of its {} project socket(s) accepted a connection",
+                    jetbrains_endpoints.len()
+                ),
+            });
+            continue;
+        };
+
+        match send_prompt(endpoint, pid) {
+            Ok(true) => report.acknowledged_editor_pids.push(pid),
+            outcome => {
+                let error = match outcome {
+                    Ok(false) => "editor did not acknowledge the prompt request".to_string(),
+                    Err(error) => format!("{error:#}").replace('\n', " "),
+                    Ok(true) => unreachable!(),
+                };
+                agent_doc_ops_log_io::log_op(
+                    &endpoint.project_root,
+                    &format!(
+                        "prompt_restart_process_refused editor_pid={pid} \
+                         pending_version={pending_version} reason={} error={}",
+                        agent_doc_secret_redact::redact(reason),
+                        agent_doc_secret_redact::redact(&error),
+                    ),
+                );
+                report.failures.push(RestartPromptEndpointFailure {
+                    project_root: endpoint.project_root.clone(),
+                    editor_pid: Some(pid),
+                    reason: format!("editor refused the restart-prompt intent ({error})"),
+                });
+            }
+        }
+    }
+    report.acknowledged_editor_pids.sort_unstable();
+    report
+}
+
+/// Ask every registered live JetBrains process to show an actionable Restart
+/// IDE / Later dialog. Success is reported only after each selected editor
+/// listener returns its terminal applied receipt.
+pub fn prompt_restart_all_projects(
+    pending_version: &str,
+    reason: &str,
+) -> RestartPromptFanoutReport {
+    let scope = native_reload_scope(None);
+    let (reload_report, processes) = plan_live_native_reload_process_scope(scope, pending_version);
+    prompt_restart_processes(
+        reload_report,
+        processes,
+        pending_version,
+        reason,
+        agent_doc_ipc_io::is_listener_active_for_pid,
+        |endpoint, pid| {
+            agent_doc_ipc_io::send_prompt_restart_to_editor(
+                &endpoint.project_root,
+                pid,
+                &endpoint.editor_id,
+                pending_version,
+                reason,
+            )
+        },
+    )
 }
 
 /// Send one PID-scoped `reload_library` intent to every live editor process
@@ -74221,6 +74378,109 @@ mod reload_library_failure_attribution_tests {
         assert_eq!(report.delivered, 2);
         assert_eq!(report.failed, 0);
         assert!(report.failures.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod restart_prompt_fanout_tests {
+    use super::*;
+    use std::cell::RefCell;
+
+    fn endpoint(root: &Path, pid: u64, editor_id: &str) -> EditorNativeReloadEndpoint {
+        EditorNativeReloadEndpoint {
+            project_root: root.to_path_buf(),
+            pid,
+            editor_id: editor_id.to_string(),
+            capabilities: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn one_acknowledged_prompt_is_sent_per_jetbrains_process() {
+        let dir = tempfile::tempdir().unwrap();
+        let first = dir.path().join("first");
+        let second = dir.path().join("second");
+        let mut process = EditorNativeReloadProcess::default();
+        process
+            .endpoints
+            .insert(endpoint(&first, 91, "jetbrains-first"));
+        process
+            .endpoints
+            .insert(endpoint(&second, 91, "jetbrains-second"));
+        let mut processes = BTreeMap::new();
+        processes.insert(91, process);
+        let sent = RefCell::new(Vec::new());
+
+        let report = prompt_restart_processes(
+            ReloadLibraryFanoutReport {
+                projects: 2,
+                ..ReloadLibraryFanoutReport::default()
+            },
+            processes,
+            "0.2.963",
+            "restart required",
+            |_, _| true,
+            |endpoint, pid| {
+                sent.borrow_mut().push((endpoint.project_root.clone(), pid));
+                Ok(true)
+            },
+        );
+
+        assert_eq!(report.projects, 2);
+        assert_eq!(report.endpoints, 1);
+        assert_eq!(report.acknowledged_editor_pids, vec![91]);
+        assert_eq!(report.failed(), 0);
+        assert_eq!(sent.borrow().len(), 1);
+    }
+
+    #[test]
+    fn non_jetbrains_processes_are_not_restart_prompt_endpoints() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut process = EditorNativeReloadProcess::default();
+        process
+            .endpoints
+            .insert(endpoint(dir.path(), 92, "vscode-test"));
+        let mut processes = BTreeMap::new();
+        processes.insert(92, process);
+
+        let report = prompt_restart_processes(
+            ReloadLibraryFanoutReport::default(),
+            processes,
+            "0.2.963",
+            "restart required",
+            |_, _| true,
+            |_, _| panic!("VS Code must not receive a JetBrains restart dialog request"),
+        );
+
+        assert_eq!(report.endpoints, 0);
+        assert_eq!(report.delivered(), 0);
+        assert_eq!(report.failed(), 0);
+    }
+
+    #[test]
+    fn unreachable_jetbrains_endpoint_has_pid_scoped_failure_evidence() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut process = EditorNativeReloadProcess::default();
+        process
+            .endpoints
+            .insert(endpoint(dir.path(), 93, "jetbrains-test"));
+        let mut processes = BTreeMap::new();
+        processes.insert(93, process);
+
+        let report = prompt_restart_processes(
+            ReloadLibraryFanoutReport::default(),
+            processes,
+            "0.2.963",
+            "restart required",
+            |_, _| false,
+            |_, _| panic!("unreachable endpoint must not receive a prompt"),
+        );
+
+        assert_eq!(report.endpoints, 1);
+        assert_eq!(report.delivered(), 0);
+        assert_eq!(report.failed(), 1);
+        assert_eq!(report.failures[0].editor_pid, Some(93));
+        assert!(report.failures[0].reason.contains("endpoint unavailable"));
     }
 }
 

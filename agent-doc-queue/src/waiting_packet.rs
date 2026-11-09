@@ -224,6 +224,9 @@ pub fn is_offered_choice(text: &str) -> bool {
 /// binary annotations (`[#id]`, `⟦effect:N⟧`).
 pub fn is_binary_follow_up(text: &str) -> bool {
     let work = agent_doc_element_queue::strip_attempt_projection_prefix(text).trim();
+    if work == "▫️" {
+        return true;
+    }
     BINARY_FOLLOW_UP_TEXTS.iter().any(|sentence| {
         work.strip_prefix(sentence)
             .is_some_and(only_binary_annotations)
@@ -267,6 +270,10 @@ pub fn operator_freeform_text(entries: &[QueueEntry], index: usize) -> Option<&s
     let first = line.lines().next()?;
     let body = first.trim_start().strip_prefix("- ")?.trim();
     if body.is_empty()
+        // A bare reply-marker glyph has no operator-authored payload. It can
+        // be left behind by a partially regenerated generated row, but must
+        // never select the waiting item as if the operator answered it.
+        || body == "▫️"
         || is_agent_doc_reply_entry(entries, index)
         || body.starts_with("**")
         || body.starts_with("%%")
@@ -703,6 +710,39 @@ mod tests {
             "the item's own projected attempt keeps its claim live"
         );
         assert!(!awaits_reconciliation(&parsed, gamma));
+    }
+
+    #[test]
+    fn a_bare_reply_marker_is_not_an_operator_answer() {
+        let parsed = entries(concat!(
+            "- ### Waiting on you <!-- agent-doc:waiting-on-you -->\n",
+            "  - [#pick] Pick a release channel. <!-- agent-doc:waiting-item -->\n",
+            "    - **Choices:** ▫️\n",
+            "      - **stable**: publish stable ▫️\n",
+            "        - ▫️\n",
+        ));
+        let head = parsed
+            .iter()
+            .position(is_waiting_item_head)
+            .expect("waiting item head");
+        let marker = parsed
+            .iter()
+            .position(|entry| {
+                matches!(entry, QueueEntry::Prompt(prompt) if prompt.text.trim() == "▫️")
+                    || matches!(entry, QueueEntry::Freeform(line) if line.trim() == "- ▫️")
+            })
+            .expect("bare marker row");
+
+        if matches!(parsed[marker], QueueEntry::Freeform(_)) {
+            assert_eq!(operator_freeform_text(&parsed, marker), None);
+        } else {
+            let QueueEntry::Prompt(prompt) = &parsed[marker] else {
+                unreachable!()
+            };
+            assert_eq!(classify_member(prompt), WaitingMember::BinaryFollowUp);
+        }
+        assert!(!has_operator_reply(&parsed, head));
+        assert!(!is_selected(&parsed, head));
     }
 
     #[test]

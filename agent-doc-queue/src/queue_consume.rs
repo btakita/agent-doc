@@ -3707,13 +3707,27 @@ pub fn annotate_newly_struck_queue_items_with_response_id_at(
                 .iter()
                 .any(|id| crate::answer_ack::cites_id(body, id))
         };
+        let targets_waiting_item = |body: &str| {
+            crate::queue_response::queue_head_answered_by_response(
+                after,
+                body,
+                &answer.waiting_item_text,
+            ) || crate::queue_response::response_explicitly_targets_queue_head(
+                body,
+                &answer.waiting_item_text,
+            )
+        };
         let matching = response_candidates
             .iter()
-            .filter(|candidate| cited(&candidate.body))
+            .filter(|candidate| cited(&candidate.body) || targets_waiting_item(&candidate.body))
             .collect::<Vec<_>>();
         let candidate = match matching.as_slice() {
             [one] => (*one).clone(),
-            _ if cited(&composite_candidate.body) => composite_candidate.clone(),
+            _ if cited(&composite_candidate.body)
+                || targets_waiting_item(&composite_candidate.body) =>
+            {
+                composite_candidate.clone()
+            }
             _ => continue,
         };
         answer_acks.push((answer.row, candidate));
@@ -6820,8 +6834,27 @@ mod tests {
     }
 
     #[test]
-    fn an_uncited_answer_stays_live() {
+    fn a_response_targeting_the_waiting_item_acknowledges_an_uncited_answer() {
         let response = ANSWERACK_RESPONSE.replace(" (`[#q-f09f08bcf721]`)", "");
+        let before = waiting_tree_document(ANSWERACK_QUEUE, ANSWERACK_TODO, "");
+        let after = waiting_tree_document(ANSWERACK_QUEUE, ANSWERACK_TODO, &response);
+        let annotated =
+            annotate_newly_struck_queue_items_with_response_id(&before, &after, &response).unwrap();
+        assert!(
+            annotated.contains("- ~~haiven-cli will be public + open source [#q-f09f08bcf721]~~"),
+            "the response receipt belongs to the selected parent even without a child citation:\n{annotated}"
+        );
+        assert!(annotated.contains("- **Consumed by:** [#r-"), "{annotated}");
+    }
+
+    #[test]
+    fn an_uncited_answer_stays_live_for_an_unrelated_response() {
+        let response = ANSWERACK_RESPONSE
+            .replace(" (`[#q-f09f08bcf721]`)", "")
+            .replace(
+                "> **Queue prompt:** [#tdclireleasedownloads] Decide how private haiven-cli serves release downloads",
+                "> **Queue prompt:** [#other] Process unrelated work",
+            );
         let before = waiting_tree_document(ANSWERACK_QUEUE, ANSWERACK_TODO, "");
         let after = waiting_tree_document(ANSWERACK_QUEUE, ANSWERACK_TODO, &response);
         let annotated =

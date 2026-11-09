@@ -3,8 +3,9 @@
 //!
 //! An operator answers a waiting item by typing a row inside its packet
 //! (`haiven-cli will be public + open source [#q-f09f08bcf721]`). A closeout
-//! that used that answer (it cites the answer's id, or it terminalized the row
-//! the answer sits under) used to leave the row exactly as typed, so the
+//! that used that answer (it cites the answer's id, explicitly targets the
+//! selected waiting-item head, or terminalized that head) used to leave the
+//! row exactly as typed, so the
 //! operator could not tell whether it had been read, and the tree it sat in
 //! never looked deletable.
 //!
@@ -62,6 +63,10 @@ pub struct AnswerRow {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LiveAnswer {
     pub row: AnswerRow,
+    /// The durable Waiting-on-you head this answer selects. A response that
+    /// explicitly targets this head has consumed the answer even when the
+    /// operator did not add a separate `q-...` citation to the child row.
+    pub waiting_item_text: String,
     /// Stable `q-…` ids the row carries (its identity for citation).
     pub ids: Vec<String>,
     /// Whether an attempt, response, or generated row already sits beneath it.
@@ -102,6 +107,17 @@ pub fn live_packet_answers(document: &str) -> Result<Vec<LiveAnswer>> {
             let Some(text) = live_answer_text(&entries, index) else {
                 continue;
             };
+            let Some(owner) = waiting_owner(&entries, index) else {
+                continue;
+            };
+            let waiting_item_text = match &entries[owner] {
+                QueueEntry::Prompt(prompt) | QueueEntry::Completed(prompt) => prompt
+                    .text
+                    .replace(crate::queue_consume::WAITING_ON_YOU_ITEM_MARKER, "")
+                    .trim()
+                    .to_string(),
+                _ => continue,
+            };
             let ids = document_queue::queue_prompt_reference_ids(text);
             if ids.iter().any(|id| is_reserved_operator_action_id(id)) {
                 continue;
@@ -111,6 +127,7 @@ pub fn live_packet_answers(document: &str) -> Result<Vec<LiveAnswer>> {
                     component,
                     entry: index,
                 },
+                waiting_item_text,
                 ids: ids.into_iter().filter(|id| id.starts_with("q-")).collect(),
                 picked_up: reply_picked_up(&entries, index),
             });

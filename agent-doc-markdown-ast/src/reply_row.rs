@@ -32,6 +32,9 @@
 //! claim is a line that reproduces a generated row's exact rendered shape in
 //! its rendered position, which is the reserved syntax this glyph names in the
 //! legend.
+//! A row whose entire body is only `▫️` still is not a binary-owned reply row,
+//! but it carries no decision payload; the waiting-packet classifier ignores
+//! that empty artifact instead of treating it as an operator answer.
 
 use crate::overlay::{split_struck_body, strip_bullet};
 

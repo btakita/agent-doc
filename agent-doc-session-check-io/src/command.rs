@@ -4460,6 +4460,7 @@ fn projected_open_closeout_message(
 
 pub const RETAINED_PENDING_NEEDS_OPERATOR_TOKEN: &str = "retained_pending_needs_operator=true";
 
+#[derive(Clone, Copy)]
 struct RetainedPendingWriteMessage<'a> {
     intent_id: &'a str,
     reason: &'a str,
@@ -4473,6 +4474,29 @@ fn retained_pending_write_message(
     file: &Path,
     pending: RetainedPendingWriteMessage<'_>,
     ownership: agent_doc_turn::write_ownership::RetainedWriteOwnership,
+) -> String {
+    let editor_live = agent_doc_crdt_relay_io::reliable_sync_editor_live_for_file(file);
+    let converged_but_unsettleable =
+        agent_doc_document_realtime_io::retained_write_is_stranded(file, "session_check_guidance");
+    retained_pending_write_message_from_observation(
+        file,
+        pending,
+        ownership,
+        editor_live,
+        converged_but_unsettleable,
+    )
+}
+
+/// Render one coherent retained-write observation.
+///
+/// Kept pure so the terminal classification for a reconnected editor can be
+/// pinned without constructing a live CRDT/controller topology in every test.
+fn retained_pending_write_message_from_observation(
+    file: &Path,
+    pending: RetainedPendingWriteMessage<'_>,
+    ownership: agent_doc_turn::write_ownership::RetainedWriteOwnership,
+    editor_live: bool,
+    converged_but_unsettleable: bool,
 ) -> String {
     let RetainedPendingWriteMessage {
         intent_id,
@@ -4528,7 +4552,6 @@ fn retained_pending_write_message(
     // before stopping. The capture is genuinely durable and force-disk is
     // genuinely wrong, so the fix is not to weaken the guard — it is to name the
     // precondition that is actually missing.
-    let editor_live = agent_doc_crdt_relay_io::reliable_sync_editor_live_for_file(file);
     // The same failure mode with the opposite precondition: the planes have
     // ALREADY converged and the intent still cannot settle, so there is no
     // pending delivery for a retry to observe. "Retry only session-check" then
@@ -4537,11 +4560,32 @@ fn retained_pending_write_message(
     // `autofix`, and the `write --commit` that `doctor` recommends (which
     // answers "empty response — nothing to write", because the body is already
     // in the working tree). Name the command that actually resolves it.
-    let converged_but_unsettleable =
-        agent_doc_document_realtime_io::retained_write_is_stranded(file, "session_check_guidance");
     let convergence_detail =
         retained_pending_guidance(editor_live, converged_but_unsettleable, captured_closeout);
     if captured_closeout {
+        if editor_live && converged_but_unsettleable {
+            // `#retainedcapturereplayterminal`: authority and disk have already
+            // converged without the captured payload. There is no delivery edge
+            // left for the status-only check to observe, and an editor reconnect
+            // has already supplied the missing replica. Calling this
+            // "automatic" made the hook prescribe session-check forever while
+            // the only replay effect remained deliberately disabled by
+            // `StatusOnlySessionCheckEffects`. Terminate the wait with the one
+            // capture-identity-fenced recovery command instead.
+            return format!(
+                "[session-check] INTERRUPTED: binary-owned response delivery `{}` is retained for `{}` (reason={}, source={}, target_hash={}); {} state=retained_captured_replay_stranded.{}{} Run `agent-doc repair {} --resume-capture` once to replay this exact durable capture through current editor authority, then rerun `agent-doc session-check {}`. Do not submit another replay/closeout payload, run `commit`, or force disk.",
+                intent_id,
+                file.display(),
+                reason,
+                source,
+                target_hash,
+                RETAINED_PENDING_NEEDS_OPERATOR_TOKEN,
+                resume_detail,
+                convergence_detail,
+                file.display(),
+                file.display(),
+            );
+        }
         format!(
             "[session-check] INTERRUPTED: binary-owned response delivery `{}` is retained for `{}` (reason={}, source={}, target_hash={}); the same capture will resume automatically after editor/controller delivery converges.{}{} Do not issue another closeout payload and do not force disk; retry only `agent-doc session-check {}`.",
             intent_id,
@@ -4602,10 +4646,10 @@ fn retained_pending_guidance(
         RetainedPendingGuidance::AwaitCapturedReplayProjection => {
             " NOTE: authority and disk currently agree on bytes that do NOT contain \
              the captured response, while the exact captured replay remains retained \
-             for editor delivery. `agent-doc commit` cannot succeed from this state \
-             because there is no response body in its staged snapshot. Do not run \
-             `commit`, submit another replay/closeout payload, or force disk; the \
-             existing replay must become visible in the editor projection first."
+             for editor delivery. No delivery is in flight, so another status-only \
+             check cannot change this state. `agent-doc commit` cannot succeed because \
+             there is no response body in its staged snapshot. The exact retained \
+             capture must be replayed through current editor authority."
         }
         RetainedPendingGuidance::CommitConvergedProjection => {
             " NOTE: authority and disk have ALREADY converged and still do not \
@@ -7323,8 +7367,41 @@ mod terminal_convergence_tests {
         let message = retained_pending_guidance(true, true, true);
         assert!(message.contains("do NOT contain the captured response"));
         assert!(message.contains("`agent-doc commit` cannot succeed"));
-        assert!(message.contains("existing replay"));
+        assert!(message.contains("exact retained capture"));
         assert!(!message.contains("Run `agent-doc commit <FILE>`"));
+    }
+
+    /// `#retainedcapturereplayterminal`: after a replica reconnect, exact
+    /// authority/disk equality without the captured payload is a fixed point,
+    /// not an in-flight delivery. The status-only CLI must terminate its wait
+    /// with the identity-fenced resume command instead of prescribing itself.
+    #[test]
+    fn reconnected_stranded_capture_requires_bounded_resume_instead_of_retry_loop() {
+        let file = Path::new("session.md");
+        let message = retained_pending_write_message_from_observation(
+            file,
+            RetainedPendingWriteMessage {
+                intent_id: "capture-1",
+                reason: "editor_projection_pending",
+                source: "start_resume_id_capture",
+                target_hash: "captured-target",
+                resume_reason: Some(
+                    "retained target has not reached exact canonical/disk convergence",
+                ),
+                captured_closeout: true,
+            },
+            agent_doc_turn::write_ownership::RetainedWriteOwnership::new(true, true)
+                .with_retained_projection(true),
+            true,
+            true,
+        );
+
+        assert!(message.contains(RETAINED_PENDING_NEEDS_OPERATOR_TOKEN));
+        assert!(message.contains("state=retained_captured_replay_stranded"));
+        assert!(message.contains("agent-doc repair session.md --resume-capture"));
+        assert!(message.contains("replay this exact durable capture"));
+        assert!(!message.contains("same capture will resume automatically"));
+        assert!(!message.contains("retry only `agent-doc session-check"));
     }
 
     #[test]

@@ -9,8 +9,8 @@ use std::path::{Path, PathBuf};
 
 use agent_doc_queue::queue_claim::{QueueClaimLedger, QueueClaimState};
 use agent_doc_queue::restart_recovery::{
-    ArtifactReference, MainAgentCheckpoint, MainAgentPhase, RestartJournal, RestartJournalLimits,
-    RestartRecoveryProjection, WorkerCheckpoint, WorkerPhase,
+    ArtifactReference, BOOT_ID_UNAVAILABLE, MainAgentCheckpoint, MainAgentPhase, RestartJournal,
+    RestartJournalLimits, RestartRecoveryProjection, WorkerCheckpoint, WorkerPhase,
 };
 use anyhow::{Context, Result, bail};
 
@@ -60,7 +60,7 @@ pub fn current_boot_id() -> String {
     // Non-Linux hosts cannot prove an OS boundary. The stable fallback makes
     // recovery fail closed as same-boot reattachment instead of guessing that
     // a worker died.
-    "boot-id-unavailable".to_string()
+    BOOT_ID_UNAVAILABLE.to_string()
 }
 
 fn state_identity(file: &Path) -> Result<Option<(PathBuf, String, String)>> {

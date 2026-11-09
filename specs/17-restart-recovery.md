@@ -36,12 +36,18 @@ reconciliation instead of copying its payload.
 | main, nonterminal | same boot | reattach to the existing session |
 | main, nonterminal | new boot and resume UUID | resume the exact main thread |
 | main, nonterminal | new boot without resume UUID | needs operator |
+| main, explicit `needs_operator` phase | any | preserve the operator gate; never auto-resume |
 | worker, dispatching/lost | new boot | generation-fenced redispatch |
 | worker, running | same boot | reattach to the existing worker |
 | worker, running | new boot plus durable artifact reference | integrate artifact through existing claim/lineage fences |
 | worker, running | new boot and no durable artifact | needs operator; never guess whether effects completed |
 | worker, reported/completed | durable receipt | preserve receipt; never replay work |
 | worker, quota blocked | any | needs operator |
+
+An unavailable host boot ID is unknown evidence, never same-boot proof. In that
+case the new-boot/fail-closed rows apply, so a platform without a stable boot ID
+cannot reattach to a worker merely because both processes emitted the same
+sentinel.
 
 The initial production slice automatically resumes the Codex main thread
 through the existing supervisor lineage. It durably discovers and classifies

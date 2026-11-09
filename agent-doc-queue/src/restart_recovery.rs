@@ -15,6 +15,7 @@ pub const DEFAULT_COMPACT_EVERY: usize = 16;
 pub const DEFAULT_TERMINAL_RETENTION_SECS: u64 = 6 * 60 * 60;
 pub const DEFAULT_DOCUMENT_BYTE_CAP: usize = 64 * 1024;
 pub const DEFAULT_GLOBAL_BYTE_CAP: usize = 8 * 1024 * 1024;
+pub const BOOT_ID_UNAVAILABLE: &str = "boot-id-unavailable";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RestartJournalLimits {
@@ -231,14 +232,15 @@ impl RestartJournal {
 
     pub fn reconcile(&self, current_boot_id: &str) -> RestartRecoveryProjection {
         let main = self.main.as_ref().map(|checkpoint| {
-            let action = if checkpoint.phase.terminal() {
-                RecoveryAction::None
-            } else if checkpoint.boot_id == current_boot_id {
-                RecoveryAction::Reattach
-            } else if checkpoint.resume_id.is_some() {
-                RecoveryAction::ResumeMain
-            } else {
-                RecoveryAction::NeedsOperator
+            let same_boot = boot_ids_prove_same(&checkpoint.boot_id, current_boot_id);
+            let action = match checkpoint.phase {
+                MainAgentPhase::Completed => RecoveryAction::None,
+                // This is an explicit operator gate, not merely a process phase.
+                // Restarting the harness must not turn it into automatic work.
+                MainAgentPhase::NeedsOperator => RecoveryAction::NeedsOperator,
+                _ if same_boot => RecoveryAction::Reattach,
+                _ if checkpoint.resume_id.is_some() => RecoveryAction::ResumeMain,
+                _ => RecoveryAction::NeedsOperator,
             };
             MainRecovery {
                 phase: checkpoint.phase,
@@ -250,16 +252,15 @@ impl RestartJournal {
             .workers
             .iter()
             .filter_map(|checkpoint| {
+                let same_boot = boot_ids_prove_same(&checkpoint.boot_id, current_boot_id);
                 let action = match checkpoint.phase {
                     WorkerPhase::Completed | WorkerPhase::Cancelled => {
                         RecoveryAction::PreserveReceipt
                     }
                     WorkerPhase::Reported => RecoveryAction::PreserveReceipt,
                     WorkerPhase::Lost => RecoveryAction::Redispatch,
-                    WorkerPhase::Dispatching if checkpoint.boot_id != current_boot_id => {
-                        RecoveryAction::Redispatch
-                    }
-                    WorkerPhase::Running if checkpoint.boot_id != current_boot_id => {
+                    WorkerPhase::Dispatching if !same_boot => RecoveryAction::Redispatch,
+                    WorkerPhase::Running if !same_boot => {
                         if checkpoint.artifact.is_some() {
                             RecoveryAction::IntegrateArtifacts
                         } else {
@@ -347,6 +348,12 @@ impl RestartJournal {
     }
 }
 
+/// Equality proves a live boot only when both adapters supplied a real boot ID.
+/// The cross-platform sentinel means "unknown", not "this is the same boot".
+fn boot_ids_prove_same(checkpoint: &str, current: &str) -> bool {
+    checkpoint != BOOT_ID_UNAVAILABLE && current != BOOT_ID_UNAVAILABLE && checkpoint == current
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MainRecovery {
     pub phase: MainAgentPhase,
@@ -431,6 +438,37 @@ mod tests {
         );
         assert_eq!(projection.workers[1].action, RecoveryAction::Redispatch);
         assert_eq!(projection.workers[2].action, RecoveryAction::NeedsOperator);
+    }
+
+    #[test]
+    fn operator_gate_and_unknown_boot_never_auto_reattach() {
+        let limits = RestartJournalLimits::default();
+        let mut journal = RestartJournal::default();
+        journal.record_main(
+            MainAgentCheckpoint {
+                harness: "codex".to_string(),
+                owner: "supervisor:1".to_string(),
+                resume_id: Some("thread-1".to_string()),
+                boot_id: "boot-a".to_string(),
+                phase: MainAgentPhase::NeedsOperator,
+                updated_at_secs: 1,
+            },
+            limits,
+        );
+        journal.record_worker(
+            WorkerCheckpoint {
+                boot_id: BOOT_ID_UNAVAILABLE.to_string(),
+                ..worker("running", 1, WorkerPhase::Running, 2)
+            },
+            limits,
+        );
+
+        let projection = journal.reconcile(BOOT_ID_UNAVAILABLE);
+        assert_eq!(
+            projection.main.as_ref().map(|main| main.action),
+            Some(RecoveryAction::NeedsOperator)
+        );
+        assert_eq!(projection.workers[0].action, RecoveryAction::NeedsOperator);
     }
 
     #[test]

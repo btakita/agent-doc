@@ -1146,6 +1146,16 @@ revision as separately dispatchable sibling work. Snapshot-authored duplicates,
 and live duplicates with no stale-revision evidence, keep the conservative
 duplicate-key path so an intentional repeated effect is not silently erased.
 
+Q-id admission is also identity promotion, not a second authored row
+(`#qidtypingcontinuation`). If the agent cut carries one newly admitted
+`[#q-…]` row while the live operator cut carries one progressive continuation
+of that row in the same stable-anchor gap, merge aligns both to one occurrence.
+The result keeps the live operator spelling and the admitted q-id/head
+projection. The relation is exact-prefix/continuation shaped, sufficiently long,
+and one-to-one on both sides; two live prefix-related prompts or any other
+ambiguous family remain distinct. This policy is shared by both the legacy
+component merge and the persisted document-cell merge.
+
 An id-backed queue head with a nonempty inline operator verdict, such as
 `complete [#push]: hold lifted; do the push`, is fresh executable authority even
 when the referenced item currently lives in `agent:review` and therefore has no

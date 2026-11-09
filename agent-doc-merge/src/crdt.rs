@@ -1147,6 +1147,15 @@ fn first_hash_id(s: &str) -> Option<String> {
 fn normalize_item_text(item: &str) -> String {
     let first = item.lines().next().unwrap_or("").trim();
     let mut s = first.strip_prefix("- ").unwrap_or(first).trim_start();
+    // The active queue head is rendered as a nested Markdown heading
+    // (`- ### …`). The heading token is binary navigation projection, not
+    // authored work identity, so a live pre-heading editor cut and its
+    // projected copy must key to the same row.
+    if let Some(rest) = s.strip_prefix("###")
+        && rest.chars().next().is_some_and(char::is_whitespace)
+    {
+        s = rest.trim_start();
+    }
     for cb in ["[ ]", "[x]", "[X]", "[/]"] {
         if let Some(r) = s.strip_prefix(cb) {
             s = r.trim_start();
@@ -1219,6 +1228,35 @@ pub(crate) fn generated_id_promotion_alias(item: &str) -> Option<String> {
     (stripped != item).then(|| list_item_key(&stripped))
 }
 
+/// A binary-admitted q-id row and the live editor continuation of that row are
+/// one occurrence even when the operator appended text after admission took
+/// its cut. This relation is deliberately narrow: one side must carry a
+/// generated q-id, the other must not, and their normalized work must be a
+/// progressive suffix edit rather than merely similar prose.
+pub(crate) fn generated_id_progressive_revision(promoted: &str, live: &str) -> bool {
+    if generated_id_promotion_alias(promoted).is_none()
+        || generated_id_promotion_alias(live).is_some()
+    {
+        return false;
+    }
+    let promoted = agent_doc_element_queue::strip_generated_queue_prompt_id_annotation(promoted);
+    let promoted = normalize_item_text(&promoted);
+    let live = normalize_item_text(live);
+    let (short, long) = if promoted.len() <= live.len() {
+        (promoted.as_str(), live.as_str())
+    } else {
+        (live.as_str(), promoted.as_str())
+    };
+    short.len() >= 24
+        && long.strip_prefix(short).is_some_and(|suffix| {
+            suffix.is_empty()
+                || suffix
+                    .chars()
+                    .next()
+                    .is_some_and(|ch| ch.is_whitespace() || ch.is_ascii_punctuation())
+        })
+}
+
 fn align_generated_id_promotions(base: &[KeyedChild], side: &mut [KeyedChild]) {
     let identity = |child: &KeyedChild| {
         generated_id_promotion_alias(&child.text).unwrap_or_else(|| child.key.clone())
@@ -1249,6 +1287,93 @@ fn align_generated_id_promotions(base: &[KeyedChild], side: &mut [KeyedChild]) {
         {
             child.key = base_keys[0].to_string();
         }
+    }
+}
+
+/// Align the unique live/operator continuation of a newly q-id-admitted row.
+/// Both rows must occupy the same stable-anchor gap; ambiguous repeats remain
+/// separate rather than risking deletion of authored work.
+fn align_generated_id_progressive_revisions(
+    ours: &[KeyedChild],
+    theirs: &mut [KeyedChild],
+) -> std::collections::HashSet<String> {
+    let ours_keys = ours
+        .iter()
+        .map(|child| child.key.as_str())
+        .collect::<std::collections::HashSet<_>>();
+    let theirs_keys = theirs
+        .iter()
+        .map(|child| child.key.as_str())
+        .collect::<std::collections::HashSet<_>>();
+    let shared_anchors = ours_keys
+        .intersection(&theirs_keys)
+        .copied()
+        .collect::<std::collections::HashSet<_>>();
+
+    let mut candidate_pairs = Vec::new();
+    for (ours_index, promoted) in ours.iter().enumerate() {
+        if generated_id_promotion_alias(&promoted.text).is_none() {
+            continue;
+        }
+        let ours_gap = child_anchor_gap(ours, ours_index, &shared_anchors);
+        let matches = theirs
+            .iter()
+            .enumerate()
+            .filter(|(theirs_index, live)| {
+                child_anchor_gap(theirs, *theirs_index, &shared_anchors) == ours_gap
+                    && generated_id_progressive_revision(&promoted.text, &live.text)
+            })
+            .map(|(index, _)| index)
+            .collect::<Vec<_>>();
+        if let [theirs_index] = matches.as_slice() {
+            candidate_pairs.push((ours_index, *theirs_index));
+        }
+    }
+    let mut live_counts = std::collections::HashMap::<usize, usize>::new();
+    for (_, theirs_index) in &candidate_pairs {
+        *live_counts.entry(*theirs_index).or_default() += 1;
+    }
+    let mut aligned = std::collections::HashSet::new();
+    for (ours_index, theirs_index) in candidate_pairs {
+        if live_counts.get(&theirs_index) != Some(&1) {
+            continue;
+        }
+        let key = ours[ours_index].key.clone();
+        theirs[theirs_index].key = key.clone();
+        aligned.insert(key);
+    }
+    aligned
+}
+
+/// Keep the live operator spelling while retaining the generated correlation
+/// id (and active-head heading) from the admitted projection.
+pub(crate) fn project_generated_id_onto_live(promoted: &str, live: &str) -> String {
+    let Some(id) = agent_doc_element_queue::queue_prompt_stable_id(promoted) else {
+        return live.to_string();
+    };
+    if agent_doc_element_queue::queue_prompt_stable_id(live).is_some() {
+        return live.to_string();
+    }
+    let (live_head, tail) = live
+        .split_once('\n')
+        .map_or((live, None), |(head, tail)| (head, Some(tail)));
+    let mut projected_head = live_head.to_string();
+    let promoted_head = promoted.lines().next().unwrap_or("").trim_start();
+    if promoted_head.starts_with("- ### ") {
+        let indent = projected_head.len() - projected_head.trim_start().len();
+        if projected_head[indent..].starts_with("- ")
+            && !projected_head[indent..].starts_with("- ### ")
+        {
+            projected_head.insert_str(indent + 2, "### ");
+        }
+    }
+    let without_report =
+        agent_doc_element_queue::strip_queue_report_state_annotation(&projected_head);
+    let insert_at = without_report.len();
+    projected_head.insert_str(insert_at, &format!(" [#{id}]"));
+    match tail {
+        Some(tail) => format!("{projected_head}\n{tail}"),
+        None => projected_head,
     }
 }
 
@@ -1639,9 +1764,12 @@ fn reconcile_component_body(
     // A generated q-id is identity promotion, not insertion of another row.
     // Align both cuts to the base key before choosing the operator order spine;
     // otherwise the stale pre-id key is unanchored and `order_union` prepends it.
+    let mut progressive_promotion_keys = std::collections::HashSet::new();
     if name != "exchange" {
         align_generated_id_promotions(&base_children, &mut ours_children);
         align_generated_id_promotions(&base_children, &mut theirs_children);
+        progressive_promotion_keys =
+            align_generated_id_progressive_revisions(&ours_children, &mut theirs_children);
     }
 
     // An id-less queue child's text is its fallback key. While the operator is
@@ -1777,6 +1905,11 @@ fn reconcile_component_body(
             (Some(o), Some(t)) => {
                 if o.text == t.text {
                     Some(o.text.clone())
+                } else if name == "queue" && progressive_promotion_keys.contains(key.as_str()) {
+                    // Admission projected the q-id while the operator continued
+                    // typing on the live cut. The live work text is authority;
+                    // retain only the binary correlation projection from ours.
+                    Some(project_generated_id_onto_live(&o.text, &t.text))
                 } else if name == "queue"
                     && o.key != PREAMBLE_KEY
                     && in_b.is_some_and(|base| {
@@ -5653,6 +5786,87 @@ Second answer line three.
         );
         assert_eq!(persisted.matches("#rebase").count(), 1);
         assert!(!persisted.contains(pre_id));
+    }
+
+    #[test]
+    fn generated_id_promotion_coalesces_continued_live_typing() {
+        let prompt = "Create a gh action that will be used on public repos...that fails if private repos are referenced";
+        let admitted = format!("- ### 📥 {prompt} [#q-7118ebcd6068]");
+        let edited = format!("- 📥 {prompt}.");
+        assert!(generated_id_progressive_revision(&admitted, &edited));
+        let expected = format!("- ### 📥 {prompt}. [#q-7118ebcd6068]");
+        for base_rows in [
+            "- do [#anchor]".to_string(),
+            format!("- do [#anchor]\n- 📥 {prompt}"),
+        ] {
+            let base = doc_with_exchange_queue("Q.", &base_rows);
+            let ours = doc_with_exchange_queue("Q.", &format!("- do [#anchor]\n{admitted}"));
+            let theirs = doc_with_exchange_queue("Q.", &format!("- do [#anchor]\n{edited}"));
+            let state = CrdtDoc::from_text(&base).encode_state();
+
+            let merged = merge_by_component(Some(&state), &ours, &theirs).unwrap();
+            let queue_body = body_of(&merged, "queue");
+            assert_eq!(queue_body.matches(prompt).count(), 1, "{queue_body}");
+            assert!(queue_body.contains(&expected), "{queue_body}");
+
+            let base_state = MultiNodeState::from_text(&base).unwrap();
+            let (persisted, _) = MultiNodeState::merge(Some(&base_state), &ours, &theirs).unwrap();
+            let queue_body = body_of(&persisted, "queue");
+            assert_eq!(queue_body.matches(prompt).count(), 1, "{queue_body}");
+            assert!(queue_body.contains(&expected), "{queue_body}");
+        }
+    }
+
+    #[test]
+    fn generated_id_promotion_never_collapses_ambiguous_operator_prompts() {
+        let stem = "Create a public repository reference check";
+        let admitted = format!("- ### 📥 {stem} [#q-7118ebcd6068]");
+        let first = format!("- 📥 {stem}.");
+        let second = format!("- 📥 {stem} for documentation.");
+        let base = doc_with_exchange_queue("Q.", "- do [#anchor]");
+        let ours = doc_with_exchange_queue("Q.", &format!("- do [#anchor]\n{admitted}"));
+        let theirs = doc_with_exchange_queue("Q.", &format!("- do [#anchor]\n{first}\n{second}"));
+        let state = CrdtDoc::from_text(&base).encode_state();
+
+        let merged = merge_by_component(Some(&state), &ours, &theirs).unwrap();
+        let queue_body = body_of(&merged, "queue");
+        assert!(queue_body.contains(&first), "{queue_body}");
+        assert!(queue_body.contains(&second), "{queue_body}");
+    }
+
+    #[test]
+    fn generated_id_promotion_pairs_distinct_prompts_by_anchor_gap() {
+        let stem = "Create a public repository reference check";
+        let first_admitted = format!("- ### 📥 {stem} [#q-111111111111]");
+        let second_admitted = format!("- ### 📥 {stem} [#q-222222222222]");
+        let edited = format!("- 📥 {stem}.");
+        let base_rows =
+            "- before [#anchor-before]\n- middle [#anchor-middle]\n- after [#anchor-after]";
+        let ours_rows = format!(
+            "- before [#anchor-before]\n{first_admitted}\n- middle [#anchor-middle]\n{second_admitted}\n- after [#anchor-after]"
+        );
+        let theirs_rows = format!(
+            "- before [#anchor-before]\n{edited}\n- middle [#anchor-middle]\n{edited}\n- after [#anchor-after]"
+        );
+        let base = doc_with_exchange_queue("Q.", base_rows);
+        let ours = doc_with_exchange_queue("Q.", &ours_rows);
+        let theirs = doc_with_exchange_queue("Q.", &theirs_rows);
+        let expected_first = format!("- ### 📥 {stem}. [#q-111111111111]");
+        let expected_second = format!("- ### 📥 {stem}. [#q-222222222222]");
+
+        let state = CrdtDoc::from_text(&base).encode_state();
+        let merged = merge_by_component(Some(&state), &ours, &theirs).unwrap();
+        let queue_body = body_of(&merged, "queue");
+        assert_eq!(queue_body.matches(stem).count(), 2, "{queue_body}");
+        assert!(queue_body.contains(&expected_first), "{queue_body}");
+        assert!(queue_body.contains(&expected_second), "{queue_body}");
+
+        let base_state = MultiNodeState::from_text(&base).unwrap();
+        let (persisted, _) = MultiNodeState::merge(Some(&base_state), &ours, &theirs).unwrap();
+        let queue_body = body_of(&persisted, "queue");
+        assert_eq!(queue_body.matches(stem).count(), 2, "{queue_body}");
+        assert!(queue_body.contains(&expected_first), "{queue_body}");
+        assert!(queue_body.contains(&expected_second), "{queue_body}");
     }
 
     #[test]

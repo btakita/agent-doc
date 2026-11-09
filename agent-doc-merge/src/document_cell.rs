@@ -965,6 +965,7 @@ fn align_operator_repeats(
     ComponentOccurrence,
     ComponentOccurrence,
     ComponentOccurrence,
+    std::collections::HashSet<String>,
 ) {
     let mut base_ids: Vec<String> = base
         .items
@@ -1044,6 +1045,72 @@ fn align_operator_repeats(
         };
     align_to_base(ours, &mut ours_ids, &ours_aliases);
     align_to_base(theirs, &mut theirs_ids, &theirs_aliases);
+
+    // A live editor may continue typing after admission has projected a q-id
+    // onto the same row. Align only a unique one-to-one progressive revision;
+    // ambiguous prefix-related siblings stay distinct operator-authored work.
+    let base_id_set = base_ids
+        .iter()
+        .map(String::as_str)
+        .collect::<std::collections::HashSet<_>>();
+    let ours_id_set = ours_ids
+        .iter()
+        .map(String::as_str)
+        .collect::<std::collections::HashSet<_>>();
+    let theirs_id_set = theirs_ids
+        .iter()
+        .map(String::as_str)
+        .collect::<std::collections::HashSet<_>>();
+    let shared_anchors = ours_id_set
+        .intersection(&theirs_id_set)
+        .copied()
+        .filter(|id| !id.contains(":txt:") || base_id_set.contains(id))
+        .collect::<std::collections::HashSet<_>>();
+    let anchor_gap = |ids: &[String], index: usize| {
+        let before = ids[..index]
+            .iter()
+            .rev()
+            .find(|id| shared_anchors.contains(id.as_str()))
+            .cloned();
+        let after = ids[index + 1..]
+            .iter()
+            .find(|id| shared_anchors.contains(id.as_str()))
+            .cloned();
+        (before, after)
+    };
+    let mut progressive_candidates = Vec::new();
+    for (ours_index, (_, promoted)) in ours.items.iter().enumerate() {
+        if crate::crdt::generated_id_promotion_alias(promoted).is_none() {
+            continue;
+        }
+        let ours_gap = anchor_gap(&ours_ids, ours_index);
+        let matches = theirs
+            .items
+            .iter()
+            .enumerate()
+            .filter(|(theirs_index, (_, live))| {
+                anchor_gap(&theirs_ids, *theirs_index) == ours_gap
+                    && crate::crdt::generated_id_progressive_revision(promoted, live)
+            })
+            .map(|(index, _)| index)
+            .collect::<Vec<_>>();
+        if let [theirs_index] = matches.as_slice() {
+            progressive_candidates.push((ours_index, *theirs_index));
+        }
+    }
+    let mut live_counts = std::collections::HashMap::<usize, usize>::new();
+    for (_, theirs_index) in &progressive_candidates {
+        *live_counts.entry(*theirs_index).or_default() += 1;
+    }
+    let mut progressive_promotion_keys = std::collections::HashSet::new();
+    for (ours_index, theirs_index) in progressive_candidates {
+        if live_counts.get(&theirs_index) != Some(&1) {
+            continue;
+        }
+        let key = ours_ids[ours_index].clone();
+        theirs_ids[theirs_index] = key.clone();
+        progressive_promotion_keys.insert(key);
+    }
     let mut primaries = Vec::new();
     let mut seen = std::collections::HashSet::new();
     for id in base_ids
@@ -1071,6 +1138,7 @@ fn align_operator_repeats(
         rewrite_occurrence(base, &base_ids),
         rewrite_occurrence(ours, &ours_ids),
         rewrite_occurrence(theirs, &theirs_ids),
+        progressive_promotion_keys,
     )
 }
 
@@ -1084,7 +1152,7 @@ fn diff_occurrence(old: &ComponentOccurrence, new: &ComponentOccurrence) -> Comp
         Some(align_operator_repeats(old, new, new))
     };
     let (old, new) = match &aligned {
-        Some((old, new, _)) => (old, new),
+        Some((old, new, _, _)) => (old, new),
         None => (old, new),
     };
     let ops = reconcile(&old.keyed_for_diff(), &new.keyed_for_diff());
@@ -1401,9 +1469,10 @@ fn compose_occurrence(
     } else {
         Some(align_operator_repeats(base, ours, theirs))
     };
-    let (base, ours, theirs) = match &aligned {
-        Some((base, ours, theirs)) => (base, ours, theirs),
-        None => (base, ours, theirs),
+    let no_progressive_promotion_keys = std::collections::HashSet::new();
+    let (base, ours, theirs, progressive_promotion_keys) = match &aligned {
+        Some((base, ours, theirs, progressive)) => (base, ours, theirs, progressive),
+        None => (base, ours, theirs, &no_progressive_promotion_keys),
     };
     // The two keyed op sets the cutover composes: base→ours and base→theirs,
     // each via the lazily LIS keyed `reconcile`. From each we read which item
@@ -1474,6 +1543,8 @@ fn compose_occurrence(
             (Some(o), Some(t)) => {
                 if o == t {
                     Some(o.clone())
+                } else if ours.component == "queue" && progressive_promotion_keys.contains(id) {
+                    Some(crate::crdt::project_generated_id_onto_live(o, t))
                 } else if ours.component == "queue"
                     && base_map.get(id).is_some_and(|base| {
                         crate::crdt::queue_instruction_text(t)

@@ -108,6 +108,9 @@ pub enum DocumentWriteSource {
     ForceDisk,
     /// Force-disk taken from the repair path.
     RepairForceDisk,
+    /// Identity-fenced continuation of a legacy captured-response transition.
+    /// This is a recovery transport, not a closeout stage.
+    ResumeRetainedWrite,
     /// Any value this build does not recognize, preserved verbatim.
     Unknown(String),
 }
@@ -130,6 +133,7 @@ impl DocumentWriteSource {
             Self::EditorReconnect => "editor_reconnect",
             Self::ForceDisk => "force_disk",
             Self::RepairForceDisk => "repair_force_disk",
+            Self::ResumeRetainedWrite => "resume_retained_write",
             Self::Unknown(token) => token,
         }
     }
@@ -152,6 +156,7 @@ impl DocumentWriteSource {
             | Self::EditorReconnect
             | Self::ForceDisk
             | Self::RepairForceDisk
+            | Self::ResumeRetainedWrite
             | Self::Unknown(_) => None,
         }
     }
@@ -237,6 +242,7 @@ impl From<&str> for DocumentWriteSource {
             "editor_reconnect" => Self::EditorReconnect,
             "force_disk" => Self::ForceDisk,
             "repair_force_disk" => Self::RepairForceDisk,
+            "resume_retained_write" => Self::ResumeRetainedWrite,
             token => Self::Unknown(token.to_string()),
         }
     }
@@ -296,6 +302,7 @@ mod tests {
             "editor_reconnect",
             "force_disk",
             "repair_force_disk",
+            "resume_retained_write",
         ] {
             let parsed = DocumentWriteSource::from(token);
             assert!(

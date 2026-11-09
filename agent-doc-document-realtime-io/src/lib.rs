@@ -5646,10 +5646,10 @@ pub fn pending_document_write(
         .clone()
 }
 
-/// Exact identity of a legacy retained Base -> Target transition whose capture
-/// continuation was not persisted. The full bytes remain durable in the
-/// document-write projection even when captured-finalize lookup cannot recover
-/// a response checkpoint.
+/// Exact identity of a legacy retained Base -> Target transition (or its
+/// identity-fenced recovery successor) whose capture continuation was not
+/// persisted. The full bytes remain durable in the document-write projection
+/// even when captured-finalize lookup cannot recover a response checkpoint.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RetainedWriteResumeKey {
     pub intent_id: String,
@@ -5663,23 +5663,61 @@ pub enum RetainedWriteResumeOutcome {
     Superseded,
 }
 
-pub fn retained_write_resume_key(file: &Path) -> Result<Option<RetainedWriteResumeKey>> {
-    let Some(pending) = pending_document_write(file) else {
-        return Ok(None);
-    };
-    let exact_legacy_capture_write = pending.continuation.is_none()
-        && pending.source.token() == "start_resume_id_capture"
+fn is_exact_retained_write_recovery_lineage(
+    pending: &agent_doc_state_backbone::DocumentWriteIntentProjection,
+) -> bool {
+    pending.continuation.is_none()
+        && matches!(
+            pending.source.token(),
+            "start_resume_id_capture" | "resume_retained_write"
+        )
         && pending.expected_content.as_deref().is_some_and(|expected| {
             agent_doc_hash::content_hash(expected).eq_ignore_ascii_case(&pending.expected_hash)
         })
         && agent_doc_hash::content_hash(&pending.target_content)
-            .eq_ignore_ascii_case(&pending.target_hash);
+            .eq_ignore_ascii_case(&pending.target_hash)
+}
+
+fn load_retained_pending_write(
+    file: &Path,
+) -> Result<Option<agent_doc_state_backbone::DocumentWriteIntentProjection>> {
+    Ok(agent_doc_cycle_state_io::load_document_projection(file)?
+        .and_then(|projection| projection.document.pending_write))
+}
+
+fn retained_write_projection_if_matches(
+    file: &Path,
+    expected: &RetainedWriteResumeKey,
+) -> Result<Option<agent_doc_state_backbone::DocumentWriteIntentProjection>> {
+    Ok(load_retained_pending_write(file)?.filter(|pending| {
+        is_exact_retained_write_recovery_lineage(pending)
+            && pending.intent_id == expected.intent_id
+            && pending
+                .target_hash
+                .eq_ignore_ascii_case(&expected.target_hash)
+    }))
+}
+
+pub fn retained_write_resume_key(file: &Path) -> Result<Option<RetainedWriteResumeKey>> {
+    let Some(pending) = load_retained_pending_write(file)? else {
+        return Ok(None);
+    };
     Ok(
-        exact_legacy_capture_write.then_some(RetainedWriteResumeKey {
+        is_exact_retained_write_recovery_lineage(&pending).then_some(RetainedWriteResumeKey {
             intent_id: pending.intent_id,
             target_hash: pending.target_hash,
         }),
     )
+}
+
+/// Return the exact target bytes for one identity-fenced retained transition.
+/// Export callers must use this snapshot instead of re-reading an unfenced
+/// pending projection after validating the key.
+pub fn retained_write_target_if_matches(
+    file: &Path,
+    expected: &RetainedWriteResumeKey,
+) -> Result<Option<String>> {
+    Ok(retained_write_projection_if_matches(file, expected)?.map(|pending| pending.target_content))
 }
 
 /// Reapply one exact durable retained Base -> Target transition through the
@@ -5689,10 +5727,9 @@ pub fn resume_retained_write_through_authority(
     file: &Path,
     expected: &RetainedWriteResumeKey,
 ) -> Result<RetainedWriteResumeOutcome> {
-    if retained_write_resume_key(file)?.as_ref() != Some(expected) {
+    let Some(pending) = retained_write_projection_if_matches(file, expected)? else {
         return Ok(RetainedWriteResumeOutcome::Superseded);
-    }
-    let pending = pending_document_write(file).context("retained write disappeared")?;
+    };
     let merge_base = pending
         .expected_content
         .as_deref()
@@ -5734,6 +5771,12 @@ pub fn resume_retained_write_through_authority(
     validate_canonical_document_target(file, &candidate, "resume_retained_write")?;
 
     if candidate != canonical {
+        // Recheck immediately before the editor mutation. A successor may be
+        // published after the initial snapshot; never replay its bytes under
+        // this operation's stale identity.
+        if retained_write_projection_if_matches(file, expected)?.is_none() {
+            return Ok(RetainedWriteResumeOutcome::Superseded);
+        }
         let Some(receipt) = apply_canonical_replace_if_attached(
             file,
             &canonical,
@@ -5760,18 +5803,20 @@ pub fn resume_retained_write_through_authority(
         return Ok(RetainedWriteResumeOutcome::WaitingForEditor);
     }
 
-    let Some(still_pending) = pending_document_write(file) else {
+    let Some(still_pending) = load_retained_pending_write(file)? else {
         return Ok(RetainedWriteResumeOutcome::Applied);
     };
-    if still_pending.intent_id != expected.intent_id
+    if !is_exact_retained_write_recovery_lineage(&still_pending)
+        || still_pending.intent_id != expected.intent_id
         || !still_pending
             .target_hash
             .eq_ignore_ascii_case(&expected.target_hash)
     {
         return Ok(RetainedWriteResumeOutcome::Superseded);
     }
-    clear_deferred_document_write_intent(
+    append_document_write_converged_event(
         file,
+        still_pending,
         &expected.target_hash,
         "resume_retained_write_settled",
     )?;
@@ -5796,11 +5841,12 @@ pub fn abandon_retained_write_if_matches(
     file: &Path,
     expected: &RetainedWriteResumeKey,
 ) -> Result<bool> {
-    if retained_write_resume_key(file)?.as_ref() != Some(expected) {
+    let Some(pending) = retained_write_projection_if_matches(file, expected)? else {
         return Ok(false);
-    }
-    clear_deferred_document_write_intent(
+    };
+    append_document_write_converged_event(
         file,
+        pending,
         &expected.target_hash,
         "operator_abandon_retained_write_accept_target_loss",
     )?;
@@ -20338,14 +20384,113 @@ scratch
             .expect("legacy retained bytes should be recoverable");
         assert_eq!(key.intent_id, intent_id);
         assert_eq!(key.target_hash, agent_doc_hash::content_hash(&target));
+        assert_eq!(
+            retained_write_target_if_matches(&file, &key).unwrap(),
+            Some(target.clone()),
+            "an export reads the target from the same identity-fenced snapshot",
+        );
 
         let wrong = RetainedWriteResumeKey {
             intent_id: key.intent_id.clone(),
             target_hash: "wrong-target".to_string(),
         };
+        assert_eq!(
+            retained_write_target_if_matches(&file, &wrong).unwrap(),
+            None,
+        );
         assert!(!abandon_retained_write_if_matches(&file, &wrong).unwrap());
         assert!(pending_document_write(&file).is_some());
         assert!(abandon_retained_write_if_matches(&file, &key).unwrap());
+        assert!(pending_document_write(&file).is_none());
+
+        let (_dir, unrelated_file, _) = temp_doc(base);
+        ensure_deferred_document_write_intent(
+            &unrelated_file,
+            base,
+            &target,
+            "queue_sync",
+            DocumentWriteDeferredReason::EditorProjectionPending,
+        )
+        .unwrap();
+        assert_eq!(
+            retained_write_resume_key(&unrelated_file).unwrap(),
+            None,
+            "only the legacy captured-response source is eligible",
+        );
+    }
+
+    #[test]
+    fn legacy_retained_write_recovery_rebases_over_operator_cut() {
+        let base = concat!(
+            "# Session\n\n",
+            "<!-- agent:queue -->\n- 📥 original item\n<!-- /agent:queue -->\n\n",
+            "<!-- agent:exchange -->\nPlease investigate.\n<!-- /agent:exchange -->\n",
+        );
+        let target = base.replace(
+            "<!-- /agent:exchange -->",
+            "\nRecovered response.\n<!-- /agent:exchange -->",
+        );
+        let operator_cut = base.replace(
+            "- 📥 original item\n",
+            "- 📥 original item\n- %% operator note stays in place %%\n",
+        );
+        let (_dir, file, _) = temp_doc(base);
+        let identity = "test-legacy-retained-write-operator-cut";
+        seed_reliable_sync_open(&file, identity);
+        let (client_id, _bootstrap) = test_support_register_replica_for_file(&file, identity)
+            .unwrap()
+            .expect("editor replica should attach");
+        agent_doc_crdt_relay_io::with_hub(&file, |hub| {
+            let current = hub.canonical_text();
+            hub.apply_local(client_id, 0, current.chars().count() as u32, &operator_cut)
+                .unwrap();
+        })
+        .unwrap();
+        std::fs::write(&file, &operator_cut).unwrap();
+
+        ensure_deferred_document_write_intent(
+            &file,
+            base,
+            &target,
+            "start_resume_id_capture",
+            DocumentWriteDeferredReason::EditorProjectionPending,
+        )
+        .unwrap();
+        let key = retained_write_resume_key(&file)
+            .unwrap()
+            .expect("the exact legacy transition should be eligible");
+
+        let ack = project_crdt_deliveries(file.clone(), identity, 1, std::time::Duration::ZERO);
+        assert_eq!(
+            resume_retained_write_through_authority(&file, &key).unwrap(),
+            RetainedWriteResumeOutcome::WaitingForEditor,
+            "the foreground repair does not invent a delivery/save receipt",
+        );
+        ack.join().unwrap();
+        assert_eq!(
+            resume_retained_write_through_authority(&file, &key).unwrap(),
+            RetainedWriteResumeOutcome::Superseded,
+            "the original key cannot authorize the rebased successor",
+        );
+        let rebased_key = retained_write_resume_key(&file)
+            .unwrap()
+            .expect("the identity-fenced recovery successor remains resumable");
+        assert_ne!(rebased_key.intent_id, key.intent_id);
+        assert_eq!(
+            resume_retained_write_through_authority(&file, &rebased_key).unwrap(),
+            RetainedWriteResumeOutcome::Applied,
+        );
+
+        let recovered = std::fs::read_to_string(&file).unwrap();
+        assert!(recovered.contains("%% operator note stays in place %%"));
+        assert!(
+            recovered.find("📥 original item").unwrap()
+                < recovered
+                    .find("%% operator note stays in place %%")
+                    .unwrap(),
+            "recovery preserves the operator's subitem order",
+        );
+        assert_eq!(recovered.matches("Recovered response.").count(), 1);
         assert!(pending_document_write(&file).is_none());
     }
 }

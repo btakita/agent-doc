@@ -3287,6 +3287,7 @@ enum Commands {
         /// `--target-hash`; refuses if either identity no longer matches.
         #[arg(
             long,
+            requires = "intent_id",
             conflicts_with_all = ["apply_recovery", "resume_capture", "requote_unlandable_capture", "session_check_heal", "export_retained_write", "abandon_retained_write"]
         )]
         resume_retained_write: bool,
@@ -3295,6 +3296,7 @@ enum Commands {
         #[arg(
             long,
             value_name = "PATH",
+            requires = "intent_id",
             conflicts_with_all = ["apply_recovery", "resume_capture", "requote_unlandable_capture", "session_check_heal", "resume_retained_write", "abandon_retained_write"]
         )]
         export_retained_write: Option<PathBuf>,
@@ -3303,6 +3305,7 @@ enum Commands {
         /// requires `--accept-retained-target-loss`.
         #[arg(
             long,
+            requires_all = ["intent_id", "accept_retained_target_loss"],
             conflicts_with_all = ["apply_recovery", "resume_capture", "requote_unlandable_capture", "session_check_heal", "resume_retained_write", "export_retained_write"]
         )]
         abandon_retained_write: bool,
@@ -6591,11 +6594,8 @@ fn run_export_retained_write(
     key: &agent_doc_document_realtime_io::RetainedWriteResumeKey,
     destination: &Path,
 ) -> anyhow::Result<()> {
-    if agent_doc_document_realtime_io::retained_write_resume_key(file)?.as_ref() != Some(key) {
-        anyhow::bail!("retained write identity no longer matches; nothing was exported");
-    }
-    let pending = agent_doc_document_realtime_io::pending_document_write(file)
-        .context("retained write disappeared before export")?;
+    let target = agent_doc_document_realtime_io::retained_write_target_if_matches(file, key)?
+        .context("retained write identity no longer matches; nothing was exported")?;
     use std::io::Write as _;
     let mut output = std::fs::OpenOptions::new()
         .write(true)
@@ -6608,7 +6608,7 @@ fn run_export_retained_write(
             )
         })?;
     output
-        .write_all(pending.target_content.as_bytes())
+        .write_all(target.as_bytes())
         .with_context(|| format!("write retained target to {}", destination.display()))?;
     output.sync_all()?;
     eprintln!(
@@ -11186,6 +11186,74 @@ mod recycle_force_tests {
             .expect("spawn parse thread")
             .join()
             .expect("parse thread")
+    }
+
+    #[test]
+    fn retained_write_repair_requires_exact_identity_and_explicit_loss_ack() {
+        let resume = parse(&[
+            "agent-doc",
+            "repair",
+            "tasks/session.md",
+            "--resume-retained-write",
+            "--intent-id",
+            "intent-1",
+            "--target-hash",
+            "hash-1",
+        ]);
+        assert!(matches!(
+            resume,
+            Commands::Repair {
+                resume_retained_write: true,
+                intent_id: Some(intent_id),
+                target_hash: Some(target_hash),
+                ..
+            } if intent_id == "intent-1" && target_hash == "hash-1"
+        ));
+
+        let rejected = |args: Vec<&'static str>| {
+            std::thread::Builder::new()
+                .stack_size(16 * 1024 * 1024)
+                .spawn(move || Cli::try_parse_from(args).is_err())
+                .expect("spawn parse thread")
+                .join()
+                .expect("parse thread")
+        };
+        assert!(rejected(vec![
+            "agent-doc",
+            "repair",
+            "tasks/session.md",
+            "--resume-retained-write",
+        ]));
+        assert!(rejected(vec![
+            "agent-doc",
+            "repair",
+            "tasks/session.md",
+            "--abandon-retained-write",
+            "--intent-id",
+            "intent-1",
+            "--target-hash",
+            "hash-1",
+        ]));
+
+        let abandon = parse(&[
+            "agent-doc",
+            "repair",
+            "tasks/session.md",
+            "--abandon-retained-write",
+            "--intent-id",
+            "intent-1",
+            "--target-hash",
+            "hash-1",
+            "--accept-retained-target-loss",
+        ]);
+        assert!(matches!(
+            abandon,
+            Commands::Repair {
+                abandon_retained_write: true,
+                accept_retained_target_loss: true,
+                ..
+            }
+        ));
     }
 
     #[test]

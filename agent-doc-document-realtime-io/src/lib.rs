@@ -5646,6 +5646,167 @@ pub fn pending_document_write(
         .clone()
 }
 
+/// Exact identity of a legacy retained Base -> Target transition whose capture
+/// continuation was not persisted. The full bytes remain durable in the
+/// document-write projection even when captured-finalize lookup cannot recover
+/// a response checkpoint.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RetainedWriteResumeKey {
+    pub intent_id: String,
+    pub target_hash: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RetainedWriteResumeOutcome {
+    Applied,
+    WaitingForEditor,
+    Superseded,
+}
+
+pub fn retained_write_resume_key(file: &Path) -> Result<Option<RetainedWriteResumeKey>> {
+    let Some(pending) = pending_document_write(file) else {
+        return Ok(None);
+    };
+    let exact_legacy_capture_write = pending.continuation.is_none()
+        && pending.source.token() == "start_resume_id_capture"
+        && pending.expected_content.as_deref().is_some_and(|expected| {
+            agent_doc_hash::content_hash(expected).eq_ignore_ascii_case(&pending.expected_hash)
+        })
+        && agent_doc_hash::content_hash(&pending.target_content)
+            .eq_ignore_ascii_case(&pending.target_hash);
+    Ok(
+        exact_legacy_capture_write.then_some(RetainedWriteResumeKey {
+            intent_id: pending.intent_id,
+            target_hash: pending.target_hash,
+        }),
+    )
+}
+
+/// Reapply one exact durable retained Base -> Target transition through the
+/// normal editor-authoritative three-way merge. The target is never written as
+/// a whole-document overwrite over a newer operator cut.
+pub fn resume_retained_write_through_authority(
+    file: &Path,
+    expected: &RetainedWriteResumeKey,
+) -> Result<RetainedWriteResumeOutcome> {
+    if retained_write_resume_key(file)?.as_ref() != Some(expected) {
+        return Ok(RetainedWriteResumeOutcome::Superseded);
+    }
+    let pending = pending_document_write(file).context("retained write disappeared")?;
+    let merge_base = pending
+        .expected_content
+        .as_deref()
+        .context("retained write has no content-bearing merge base")?;
+    let canonical = try_resolve_current_document_content(file, "resume_retained_write")?;
+    let candidate = if agent_doc_hash::content_hash(&canonical)
+        .eq_ignore_ascii_case(&pending.target_hash)
+    {
+        canonical.clone()
+    } else if agent_doc_hash::content_hash(&canonical).eq_ignore_ascii_case(&pending.expected_hash)
+    {
+        pending.target_content.clone()
+    } else {
+        let operator_cut = editor_operator_cut_for_agent_rebase(
+            file,
+            merge_base,
+            &canonical,
+            "resume_retained_write",
+        );
+        let rebased = rebase_agent_candidate_over_editor_cut(
+            file,
+            merge_base,
+            &pending.target_content,
+            &operator_cut,
+        )
+        .with_context(|| {
+            format!(
+                "failed to replay retained write {} over current editor authority",
+                pending.intent_id
+            )
+        })?;
+        canonicalize_and_validate_agent_rebase(
+            &rebased,
+            &pending.target_content,
+            file,
+            "resume_retained_write",
+        )?
+    };
+    validate_canonical_document_target(file, &candidate, "resume_retained_write")?;
+
+    if candidate != canonical {
+        let Some(receipt) = apply_canonical_replace_if_attached(
+            file,
+            &canonical,
+            &candidate,
+            "resume_retained_write",
+        )?
+        else {
+            return Ok(RetainedWriteResumeOutcome::WaitingForEditor);
+        };
+        if !receipt.delivery_converged {
+            return Ok(RetainedWriteResumeOutcome::WaitingForEditor);
+        }
+    }
+    let projected = try_resolve_current_document_content(file, "resume_retained_write")?;
+    if projected != candidate {
+        return Ok(RetainedWriteResumeOutcome::WaitingForEditor);
+    }
+    if resolve_disk_current_document_content(file, "resume_retained_write")? != projected
+        && !canonical_editor_projection_is_persisted(file, &projected, "resume_retained_write")?
+    {
+        return Ok(RetainedWriteResumeOutcome::WaitingForEditor);
+    }
+    if resolve_disk_current_document_content(file, "resume_retained_write")? != projected {
+        return Ok(RetainedWriteResumeOutcome::WaitingForEditor);
+    }
+
+    let Some(still_pending) = pending_document_write(file) else {
+        return Ok(RetainedWriteResumeOutcome::Applied);
+    };
+    if still_pending.intent_id != expected.intent_id
+        || !still_pending
+            .target_hash
+            .eq_ignore_ascii_case(&expected.target_hash)
+    {
+        return Ok(RetainedWriteResumeOutcome::Superseded);
+    }
+    clear_deferred_document_write_intent(
+        file,
+        &expected.target_hash,
+        "resume_retained_write_settled",
+    )?;
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "retained_write_resumed file={} intent_id={} target_hash={} projected_hash={} operator_cut_preserved={} authority=editor_crdt disk_exact=true",
+            file.display(),
+            expected.intent_id,
+            expected.target_hash,
+            agent_doc_hash::content_hash(&projected),
+            projected != pending.target_content,
+        ),
+    );
+    Ok(RetainedWriteResumeOutcome::Applied)
+}
+
+/// Retire one exact retained transition without applying its target. This is a
+/// data-loss primitive and intentionally requires the caller to present both
+/// durable identity fields and a separate explicit acknowledgement.
+pub fn abandon_retained_write_if_matches(
+    file: &Path,
+    expected: &RetainedWriteResumeKey,
+) -> Result<bool> {
+    if retained_write_resume_key(file)?.as_ref() != Some(expected) {
+        return Ok(false);
+    }
+    clear_deferred_document_write_intent(
+        file,
+        &expected.target_hash,
+        "operator_abandon_retained_write_accept_target_loss",
+    )?;
+    Ok(true)
+}
+
 /// The closeout stage that overtook `intent`, if its own successor converged
 /// after it (`#adwritesourceenum`).
 ///
@@ -20153,5 +20314,38 @@ scratch
             reg2.is_tracked("gone.md"),
             "cold miss records the recovered state"
         );
+    }
+
+    #[test]
+    fn legacy_retained_write_recovery_is_fenced_by_intent_and_target() {
+        let base = concat!(
+            "<!-- agent:exchange -->\n",
+            "- prompt\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let target = base.replace("- prompt\n", "- prompt\n\nRecovered response.\n");
+        let (_dir, file, _) = temp_doc(base);
+        let intent_id = ensure_deferred_document_write_intent(
+            &file,
+            base,
+            &target,
+            "start_resume_id_capture",
+            DocumentWriteDeferredReason::EditorProjectionPending,
+        )
+        .unwrap();
+        let key = retained_write_resume_key(&file)
+            .unwrap()
+            .expect("legacy retained bytes should be recoverable");
+        assert_eq!(key.intent_id, intent_id);
+        assert_eq!(key.target_hash, agent_doc_hash::content_hash(&target));
+
+        let wrong = RetainedWriteResumeKey {
+            intent_id: key.intent_id.clone(),
+            target_hash: "wrong-target".to_string(),
+        };
+        assert!(!abandon_retained_write_if_matches(&file, &wrong).unwrap());
+        assert!(pending_document_write(&file).is_some());
+        assert!(abandon_retained_write_if_matches(&file, &key).unwrap());
+        assert!(pending_document_write(&file).is_none());
     }
 }

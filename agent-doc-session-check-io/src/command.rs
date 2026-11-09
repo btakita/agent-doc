@@ -4469,6 +4469,7 @@ struct RetainedPendingWriteMessage<'a> {
     resume_reason: Option<&'a str>,
     captured_closeout: bool,
     capture_resume_available: bool,
+    retained_write_resume_available: bool,
 }
 
 fn retained_pending_write_message(
@@ -4507,6 +4508,7 @@ fn retained_pending_write_message_from_observation(
         resume_reason,
         captured_closeout,
         capture_resume_available,
+        retained_write_resume_available,
     } = pending;
     let resume_detail = resume_reason
         .map(|reason| {
@@ -4586,6 +4588,23 @@ fn retained_pending_write_message_from_observation(
                     resume_detail,
                     convergence_detail,
                     file.display(),
+                    file.display(),
+                );
+            }
+            if retained_write_resume_available {
+                return format!(
+                    "[session-check] INTERRUPTED: binary-owned response delivery `{}` is retained for `{}` (reason={}, source={}, target_hash={}); {} state=retained_capture_replay_metadata_missing.{}{} The exact retained Base -> Target bytes are still durable. Run `agent-doc repair {} --resume-retained-write --intent-id {} --target-hash {}` once; it identity-fences this transition and three-way merges it through current editor authority, then rerun `agent-doc session-check {}`. Do not submit another replay/closeout payload, run `commit`, or force disk.",
+                    intent_id,
+                    file.display(),
+                    reason,
+                    source,
+                    target_hash,
+                    RETAINED_PENDING_NEEDS_OPERATOR_TOKEN,
+                    resume_detail,
+                    convergence_detail,
+                    file.display(),
+                    intent_id,
+                    target_hash,
                     file.display(),
                 );
             }
@@ -4867,6 +4886,8 @@ fn inspect_core_profiled(
                     capture_resume_available:
                         agent_doc_cycle_state_io::load_projected_captured_finalize_resume(file)?
                             .is_some(),
+                    retained_write_resume_available:
+                        agent_doc_document_realtime_io::retained_write_resume_key(file)?.is_some(),
                 },
                 agent_doc_document_realtime_io::observed_retained_write_ownership(file),
             )
@@ -7294,6 +7315,7 @@ mod terminal_convergence_tests {
                 resume_reason: None,
                 captured_closeout: true,
                 capture_resume_available: false,
+                retained_write_resume_available: false,
             },
             agent_doc_turn::write_ownership::RetainedWriteOwnership::new(true, true)
                 .with_retained_projection(true),
@@ -7328,6 +7350,7 @@ mod terminal_convergence_tests {
                 resume_reason: None,
                 captured_closeout: false,
                 capture_resume_available: false,
+                retained_write_resume_available: false,
             },
             agent_doc_turn::write_ownership::RetainedWriteOwnership::UNOWNED
                 .with_retained_projection(true),
@@ -7354,6 +7377,7 @@ mod terminal_convergence_tests {
                 ),
                 captured_closeout: true,
                 capture_resume_available: false,
+                retained_write_resume_available: false,
             },
             agent_doc_turn::write_ownership::RetainedWriteOwnership::new(true, true)
                 .with_retained_projection(true)
@@ -7426,6 +7450,7 @@ mod terminal_convergence_tests {
                 ),
                 captured_closeout: true,
                 capture_resume_available: true,
+                retained_write_resume_available: true,
             },
             agent_doc_turn::write_ownership::RetainedWriteOwnership::new(true, true)
                 .with_retained_projection(true),
@@ -7454,6 +7479,7 @@ mod terminal_convergence_tests {
                 resume_reason: None,
                 captured_closeout: true,
                 capture_resume_available: false,
+                retained_write_resume_available: false,
             },
             agent_doc_turn::write_ownership::RetainedWriteOwnership::new(true, true)
                 .with_retained_projection(true),
@@ -7465,6 +7491,35 @@ mod terminal_convergence_tests {
         assert!(message.contains("--resume-capture` is not applicable"));
         assert!(message.contains("retained intent was not changed"));
         assert!(!message.contains("Run `agent-doc repair"));
+    }
+
+    #[test]
+    fn stranded_legacy_capture_prescribes_exact_retained_write_replay() {
+        let file = Path::new("session.md");
+        let message = retained_pending_write_message_from_observation(
+            file,
+            RetainedPendingWriteMessage {
+                intent_id: "legacy-intent",
+                reason: "editor_projection_pending",
+                source: "start_resume_id_capture",
+                target_hash: "exact-target",
+                resume_reason: None,
+                captured_closeout: true,
+                capture_resume_available: false,
+                retained_write_resume_available: true,
+            },
+            agent_doc_turn::write_ownership::RetainedWriteOwnership::new(true, true)
+                .with_retained_projection(true),
+            true,
+            true,
+        );
+
+        assert!(message.contains("exact retained Base -> Target bytes are still durable"));
+        assert!(message.contains(
+            "agent-doc repair session.md --resume-retained-write --intent-id legacy-intent --target-hash exact-target"
+        ));
+        assert!(message.contains("three-way merges it through current editor authority"));
+        assert!(!message.contains("--resume-capture` once"));
     }
 
     #[test]

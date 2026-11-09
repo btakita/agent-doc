@@ -3282,6 +3282,40 @@ enum Commands {
         /// response, and never a disk-authority fallback.
         #[arg(long, conflicts_with = "apply_recovery")]
         resume_capture: bool,
+        /// Replay an exact legacy retained Base -> Target transition through
+        /// editor-authoritative three-way merge. Requires `--intent-id` and
+        /// `--target-hash`; refuses if either identity no longer matches.
+        #[arg(
+            long,
+            conflicts_with_all = ["apply_recovery", "resume_capture", "requote_unlandable_capture", "session_check_heal", "export_retained_write", "abandon_retained_write"]
+        )]
+        resume_retained_write: bool,
+        /// Export the exact retained target bytes without changing session
+        /// state. The destination must not already exist.
+        #[arg(
+            long,
+            value_name = "PATH",
+            conflicts_with_all = ["apply_recovery", "resume_capture", "requote_unlandable_capture", "session_check_heal", "resume_retained_write", "abandon_retained_write"]
+        )]
+        export_retained_write: Option<PathBuf>,
+        /// Retire an exact retained write without applying its target. This can
+        /// permanently discard an undelivered response and additionally
+        /// requires `--accept-retained-target-loss`.
+        #[arg(
+            long,
+            conflicts_with_all = ["apply_recovery", "resume_capture", "requote_unlandable_capture", "session_check_heal", "resume_retained_write", "export_retained_write"]
+        )]
+        abandon_retained_write: bool,
+        /// Durable retained-write intent identity for the selected operation.
+        #[arg(long, requires = "target_hash")]
+        intent_id: Option<String>,
+        /// Durable retained-write target hash for the selected operation.
+        #[arg(long, requires = "intent_id")]
+        target_hash: Option<String>,
+        /// Explicit acknowledgement that abandonment discards the unapplied
+        /// retained target bytes from recovery state.
+        #[arg(long, requires = "abandon_retained_write")]
+        accept_retained_target_loss: bool,
         /// Re-capture a retained response that can never land (GH 90) — its
         /// bytes are refused by the replay guard or the structural gate, so
         /// every resume fails identically — with ONLY its component-marker
@@ -6514,6 +6548,78 @@ fn run_resume_capture(file: &Path) -> anyhow::Result<()> {
     )
 }
 
+fn run_resume_retained_write(
+    file: &Path,
+    key: &agent_doc_document_realtime_io::RetainedWriteResumeKey,
+) -> anyhow::Result<()> {
+    let outcome = agent_doc_document_realtime_io::resume_retained_write_through_authority(file, key)
+        .with_context(|| format!(
+            "retained write {} was not changed. If structural validation makes this target unreplayable, preserve its exact bytes first with `agent-doc repair {} --export-retained-write <NEW_PATH> --intent-id {} --target-hash {}`; abandonment is a separate explicit data-loss operation",
+            key.intent_id,
+            file.display(),
+            key.intent_id,
+            key.target_hash,
+        ))?;
+    match outcome {
+        agent_doc_document_realtime_io::RetainedWriteResumeOutcome::Applied => {
+            eprintln!(
+                "[repair] retained write {} replayed through editor authority for {}; rerun `agent-doc session-check {}`",
+                key.intent_id,
+                file.display(),
+                file.display(),
+            );
+            Ok(())
+        }
+        agent_doc_document_realtime_io::RetainedWriteResumeOutcome::WaitingForEditor => {
+            anyhow::bail!(
+                "retained write {} remains durable but editor delivery/save has not converged; do not re-send the response or force disk",
+                key.intent_id
+            )
+        }
+        agent_doc_document_realtime_io::RetainedWriteResumeOutcome::Superseded => {
+            anyhow::bail!(
+                "retained write identity {} / {} no longer matches; nothing was replayed",
+                key.intent_id,
+                key.target_hash,
+            )
+        }
+    }
+}
+
+fn run_export_retained_write(
+    file: &Path,
+    key: &agent_doc_document_realtime_io::RetainedWriteResumeKey,
+    destination: &Path,
+) -> anyhow::Result<()> {
+    if agent_doc_document_realtime_io::retained_write_resume_key(file)?.as_ref() != Some(key) {
+        anyhow::bail!("retained write identity no longer matches; nothing was exported");
+    }
+    let pending = agent_doc_document_realtime_io::pending_document_write(file)
+        .context("retained write disappeared before export")?;
+    use std::io::Write as _;
+    let mut output = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(destination)
+        .with_context(|| {
+            format!(
+                "create retained-write export {} (destination must not already exist)",
+                destination.display()
+            )
+        })?;
+    output
+        .write_all(pending.target_content.as_bytes())
+        .with_context(|| format!("write retained target to {}", destination.display()))?;
+    output.sync_all()?;
+    eprintln!(
+        "[repair] exported retained target {} / {} to {}; session state was not changed",
+        key.intent_id,
+        key.target_hash,
+        destination.display(),
+    );
+    Ok(())
+}
+
 fn report_resume_capture_outcome(
     file: &Path,
     outcome: agent_doc_repair_command_io::CapturedFinalizeResumeOutcome,
@@ -8174,9 +8280,60 @@ fn try_main() -> anyhow::Result<()> {
             file,
             apply_recovery,
             resume_capture,
+            resume_retained_write,
+            export_retained_write,
+            abandon_retained_write,
+            intent_id,
+            target_hash,
+            accept_retained_target_loss,
             requote_unlandable_capture,
             session_check_heal,
         } => {
+            let retained_write_key =
+                || -> anyhow::Result<agent_doc_document_realtime_io::RetainedWriteResumeKey> {
+                    Ok(agent_doc_document_realtime_io::RetainedWriteResumeKey {
+                        intent_id: intent_id
+                            .clone()
+                            .context("retained-write recovery requires --intent-id")?,
+                        target_hash: target_hash
+                            .clone()
+                            .context("retained-write recovery requires --target-hash")?,
+                    })
+                };
+            if resume_retained_write {
+                let key = retained_write_key()?;
+                return run_resume_retained_write(&file, &key);
+            }
+            if let Some(destination) = export_retained_write {
+                let key = retained_write_key()?;
+                return run_export_retained_write(&file, &key, &destination);
+            }
+            if abandon_retained_write {
+                if !accept_retained_target_loss {
+                    anyhow::bail!(
+                        "refusing to abandon retained write for {} without --accept-retained-target-loss; abandonment can permanently discard an undelivered response",
+                        file.display()
+                    );
+                }
+                let key = retained_write_key()?;
+                if !agent_doc_document_realtime_io::abandon_retained_write_if_matches(&file, &key)?
+                {
+                    anyhow::bail!(
+                        "retained write identity no longer matches; nothing was abandoned"
+                    );
+                }
+                eprintln!(
+                    "[repair] abandoned retained write {} for {}; target bytes were NOT applied and are no longer recoverable from the active retained-write projection",
+                    key.intent_id,
+                    file.display(),
+                );
+                return Ok(());
+            }
+            if intent_id.is_some() || target_hash.is_some() {
+                anyhow::bail!(
+                    "--intent-id/--target-hash require one of --resume-retained-write, --export-retained-write, or --abandon-retained-write"
+                );
+            }
             if session_check_heal {
                 return agent_doc_repair_command_io::run_session_check_heal(&file);
             }

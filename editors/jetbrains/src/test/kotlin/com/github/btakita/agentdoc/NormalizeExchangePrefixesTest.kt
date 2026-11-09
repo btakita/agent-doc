@@ -422,6 +422,41 @@ One.
     }
 
     @Test
+    fun `recap component maintenance preserves operator caret selection and viewport`() {
+        val patchWatcherPath = listOf(
+            Paths.get("src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt"),
+            Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt"),
+        ).first { Files.exists(it) }
+        val patchWatcher = Files.readString(patchWatcherPath)
+        val helper = patchWatcher
+            .substringAfter("private fun <T> preserveOperatorEditorViewState(")
+            .substringBefore("/**\n     * Handle a socket IPC message")
+        val apply = patchWatcher
+            .substringAfter("private fun applyComputedPatchOnEdt(")
+            .substringBefore("private fun patchConflictKey(")
+        val capture = patchWatcher
+            .substringAfter("private fun capturePatchApplyOnEdt(")
+            .substringBefore("private fun computePatchOnWorker(")
+
+        assertTrue(helper.contains("EditorFactory.getInstance().getEditors(document, project)"))
+        assertTrue(helper.contains("editor.caretModel.caretsAndSelections.toList()"))
+        assertTrue(helper.contains("editor.scrollingModel.horizontalScrollOffset"))
+        assertTrue(helper.contains("editor.scrollingModel.verticalScrollOffset"))
+        assertTrue(helper.contains("state.editor.caretModel.setCaretsAndSelections(state.caretsAndSelections)"))
+        assertTrue(helper.contains("state.editor.scrollingModel.scrollHorizontally(state.horizontalScrollOffset)"))
+        assertTrue(helper.contains("state.editor.scrollingModel.scrollVertically(state.verticalScrollOffset)"))
+        assertTrue(helper.indexOf("return try") < helper.indexOf("finally"))
+        assertTrue(
+            "component patches, including agent:recap, must preserve the operator view around the range edit",
+            apply.contains("preserveOperatorEditorViewState(document) {\n                    applyMinimalDocumentEditUtil"),
+        )
+        assertTrue(
+            "the clean-buffer reload that precedes recap application must preserve the same operator view",
+            capture.contains("preserveOperatorEditorViewState(document) {\n                fdm.reloadFromDisk(document)"),
+        )
+    }
+
+    @Test
     fun `cold opened markdown files refresh visual highlighters`() {
         val visualHighlighterPath = listOf(
             Paths.get("src/main/kotlin/com/github/btakita/agentdoc/VisualHighlighterManager.kt"),

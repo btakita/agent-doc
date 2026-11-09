@@ -5,7 +5,8 @@ import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.diagnostic.Logger
-import com.intellij.openapi.ui.Messages
+import com.intellij.openapi.project.Project
+import com.intellij.openapi.project.ProjectManager
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.concurrent.TimeUnit
@@ -189,10 +190,12 @@ internal object PluginRestartRequiredNotifier {
     }
 
     /**
-     * Schedule an editor-owned modal prompt and acknowledge only after the
-     * request has been accepted by this live plugin generation. The terminal
-     * IPC receipt therefore proves that an IDE process owns the UI request;
-     * the operator's eventual Restart/Later choice deliberately remains local.
+     * Schedule an editor-owned sticky notification and acknowledge only after the
+     * request has been accepted by this live plugin generation. Project-scoped
+     * notifications are anchored by JetBrains to the editor frame's bottom-right;
+     * they do not interrupt typing with a floating modal window. The terminal IPC
+     * receipt therefore proves that an IDE process owns the UI request; the
+     * operator's eventual Restart/Later choice deliberately remains local.
      */
     fun promptNow(pendingVersion: String, reason: String?): Boolean {
         val application = ApplicationManager.getApplication() ?: return false
@@ -203,7 +206,7 @@ internal object PluginRestartRequiredNotifier {
             ?.takeIf { it.isNotEmpty() }
             ?: "unknown"
         val verdict = PluginRestartRequired(loaded, pending, "requested", reason)
-        GenerationWork.invokeLater { showDialog(verdict) }
+        GenerationWork.invokeLater { show(verdict) }
         return true
     }
 
@@ -246,6 +249,10 @@ internal object PluginRestartRequiredNotifier {
     private fun readMarker(path: Path): String? =
         if (Files.isRegularFile(path)) Files.readString(path) else null
 
+    /** The project frame owns balloon placement; null is only for the welcome screen. */
+    private fun notificationProject(): Project? =
+        ProjectManager.getInstance().openProjects.firstOrNull { project -> !project.isDisposed }
+
     private fun show(verdict: PluginRestartRequired) {
         if (PluginGeneration.retired) return
         try {
@@ -263,28 +270,9 @@ internal object PluginRestartRequiredNotifier {
             })
             created.addAction(NotificationAction.createSimpleExpiring("Later") {})
             notification = created
-            created.notify(null)
+            created.notify(notificationProject())
         } catch (error: Throwable) {
             log.warn("[plugin-update] restart-required notification failed", error)
-        }
-    }
-
-    private fun showDialog(verdict: PluginRestartRequired) {
-        if (PluginGeneration.retired) return
-        try {
-            val choice = Messages.showYesNoDialog(
-                pluginRestartRequiredMessage(verdict),
-                "Agent Doc Restart Required",
-                "Restart IDE",
-                "Later",
-                Messages.getWarningIcon(),
-            )
-            if (choice == Messages.YES) {
-                ApplicationManager.getApplication().restart()
-            }
-        } catch (error: Throwable) {
-            log.warn("[plugin-update] restart-required dialog failed; falling back to notification", error)
-            show(verdict)
         }
     }
 }

@@ -2,13 +2,16 @@ package com.github.btakita.agentdoc;
 
 import com.intellij.ide.plugins.IdeaPluginDescriptor;
 import com.intellij.ide.plugins.PluginManagerCore;
+import com.intellij.notification.Notification;
+import com.intellij.notification.NotificationAction;
+import com.intellij.notification.NotificationGroupManager;
+import com.intellij.notification.NotificationType;
 import com.intellij.openapi.application.ApplicationInfo;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.extensions.PluginDescriptor;
 import com.intellij.openapi.extensions.PluginId;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.project.ProjectManager;
-import com.intellij.openapi.ui.Messages;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
@@ -29,6 +32,7 @@ import java.util.function.Supplier;
 public final class JetBrainsPluginUpgradeAction {
     public static final String RESTART_PROMPT_SENTINEL = "agent-doc:prompt-restart";
     private static final String PLUGIN_ID = "com.github.btakita.agent-doc";
+    private static final String PLUGIN_UPDATE_NOTIFICATION_GROUP = "Agent Doc Plugin Update";
     private static final String LIFECYCLE_CLASS =
         "com.github.btakita.agentdoc.PluginLifecycleListener";
     private static final String ASYNC_CLASSLOADER_AWAIT_STRATEGY =
@@ -89,33 +93,58 @@ public final class JetBrainsPluginUpgradeAction {
      * Compatibility bridge for an older loaded plugin that predates the
      * {@code prompt_restart} socket intent. The stable attach bootstrap loads
      * this action child-first from the newly installed package, so the live IDE
-     * can own the same Restart/Later dialog without replacing its plugin
-     * classloader or using an out-of-process GUI tool.
+     * can own the same project-attached Restart/Later notification without
+     * replacing its plugin classloader or using an out-of-process GUI tool.
      */
     static String scheduleRestartPrompt(String pendingVersion, String reason) {
         String pending = pendingVersion == null || pendingVersion.isBlank() ? "unknown" : pendingVersion.trim();
         String detail = reason == null || reason.isBlank()
             ? "The installed Agent Doc plugin generation requires an IDE restart."
             : reason.trim();
-        Runnable dialog = () -> {
-            int choice = Messages.showYesNoDialog(
-                "Agent Doc v" + pending + " is installed, but this IDE is still running the previous generation.\n"
-                    + detail + "\nRestart the IDE to load it.",
-                "Agent Doc Restart Required",
+        Runnable notification = () -> {
+            Notification created = NotificationGroupManager.getInstance()
+                .getNotificationGroup(PLUGIN_UPDATE_NOTIFICATION_GROUP)
+                .createNotification(
+                    "Agent Doc restart required",
+                    restartPromptHtml(
+                        "Agent Doc v" + pending
+                            + " is installed, but this IDE is still running the previous generation.\n"
+                            + detail + "\nRestart the IDE to load it."
+                    ),
+                    NotificationType.WARNING
+                );
+            created.setImportant(true);
+            created.addAction(NotificationAction.createSimpleExpiring(
                 "Restart IDE",
-                "Later",
-                Messages.getWarningIcon()
-            );
-            if (choice == Messages.YES) {
-                ApplicationManager.getApplication().restart();
-            }
+                () -> ApplicationManager.getApplication().restart()
+            ));
+            created.addAction(NotificationAction.createSimpleExpiring("Later", () -> {}));
+            created.notify(restartPromptProject());
         };
-        return scheduleRestartPrompt(pending, ApplicationManager.getApplication()::invokeLater, dialog);
+        return scheduleRestartPrompt(pending, ApplicationManager.getApplication()::invokeLater, notification);
     }
 
-    static String scheduleRestartPrompt(String pendingVersion, Consumer<Runnable> scheduler, Runnable dialog) {
-        scheduler.accept(dialog);
+    static String scheduleRestartPrompt(String pendingVersion, Consumer<Runnable> scheduler, Runnable notification) {
+        scheduler.accept(notification);
         return "ok:restart-prompt:" + pendingVersion;
+    }
+
+    private static Project restartPromptProject() {
+        for (Project project : ProjectManager.getInstance().getOpenProjects()) {
+            if (!project.isDisposed()) {
+                return project;
+            }
+        }
+        return null;
+    }
+
+    private static String restartPromptHtml(String plainText) {
+        return plainText
+            .replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+            .replace("\"", "&quot;")
+            .replace("\n", "<br>");
     }
 
     /**

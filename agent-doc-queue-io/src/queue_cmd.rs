@@ -1831,6 +1831,30 @@ pub fn plan_with_effects(effects: &impl QueueCommandEffects, file: &Path) -> Res
 pub fn sync_with_effects(effects: &impl QueueCommandEffects, file: &Path) -> Result<()> {
     let previous_content = agent_doc_snapshot_io::load_document_baseline(file)?;
     let mut content = effects.current_document_content(file, "queue_sync")?;
+    let normalized_completion_responses =
+        agent_doc_document::subagent_completion::normalize_completion_response_transport(&content)?;
+    let completion_transport_repaired = normalized_completion_responses != content;
+    if completion_transport_repaired {
+        effects.converge_document_or_disk(
+            file,
+            &normalized_completion_responses,
+            &content,
+            "queue_sync_completion_response_transport_repair",
+        )?;
+        content = effects.current_document_content(
+            file,
+            "queue_sync_after_completion_response_transport_repair",
+        )?;
+        if let Err(warning) = agent_doc_snapshot_io::checkpoint_document_baseline(
+            file,
+            &content,
+            agent_doc_ops_log_io::log_op,
+        ) {
+            eprintln!(
+                "[queue sync] warning: failed to update snapshot after completion-response transport repair: {warning}"
+            );
+        }
+    }
     // A torn realtime merge can place the binary completion cell underneath
     // the queue row it reports instead of in `agent:exchange`. That corrupts
     // the queue grammar and makes every later strike fail the conversation
@@ -1858,7 +1882,7 @@ pub fn sync_with_effects(effects: &impl QueueCommandEffects, file: &Path) -> Res
         }
         true
     } else {
-        false
+        completion_transport_repaired
     };
     // Captured-answer convergence may strike a response-proven free-text head,
     // and that write is guarded against conversation scaffolding in queue. Run
@@ -2595,6 +2619,61 @@ mod tests {
         );
 
         sync_with_effects(&effects, &doc).expect("the waiting repair should be idempotent");
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), repaired);
+    }
+
+    #[test]
+    fn sync_rebuilds_legacy_attested_completion_response_without_transport() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("s.md");
+        let legacy_response = concat!(
+            "**Summary**\n\n",
+            "<!-- patch:exchange -->\n",
+            "implemented the fix\n\n",
+            "**Verification**\n\n",
+            "focused tests passed\n",
+            "<!-- /patch:exchange -->\n",
+            "<!-- patch:recap -->\n",
+            "Parent-session recap only.\n",
+            "<!-- /patch:recap -->",
+        );
+        let mut body = String::from("> **Subagent response:**\n>");
+        for line in legacy_response.lines() {
+            body.push('\n');
+            body.push('>');
+            if !line.is_empty() {
+                body.push(' ');
+                body.push_str(line);
+            }
+        }
+        let digest = agent_doc_hash::content_hash(&body);
+        let cell = format!(
+            "{}\n{}{digest} -->\n{body}\n{}",
+            agent_doc_document::subagent_completion::heading("subagent:a", "finish a"),
+            agent_doc_document::subagent_completion::RESPONSE_DIGEST_PREFIX,
+            agent_doc_document::subagent_completion::marker("k1"),
+        );
+        let content = format!("<!-- agent:exchange -->\n{cell}\n<!-- /agent:exchange -->\n");
+        std::fs::write(&doc, &content).unwrap();
+        let effects = FakeEffects::with_current(&content);
+
+        sync_with_effects(&effects, &doc)
+            .expect("queue sync should re-attest the normalized completion response");
+
+        let repaired = std::fs::read_to_string(&doc).unwrap();
+        assert!(!repaired.contains("patch:exchange"), "{repaired}");
+        assert!(!repaired.contains("patch:recap"), "{repaired}");
+        assert!(!repaired.contains("Parent-session recap"), "{repaired}");
+        assert_eq!(
+            agent_doc_document::subagent_completion::completion_evidence(&repaired)[0].key,
+            "k1"
+        );
+        assert!(
+            agent_doc_document::subagent_completion::completion_response(&repaired, "k1").is_some()
+        );
+
+        sync_with_effects(&effects, &doc).expect("the attested repair should be idempotent");
         assert_eq!(std::fs::read_to_string(&doc).unwrap(), repaired);
     }
 

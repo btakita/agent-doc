@@ -310,6 +310,36 @@ pub fn completion_response(text: &str, expected_key: &str) -> Option<String> {
     None
 }
 
+/// Rebuild attested completion cells whose worker response contains a complete
+/// strict-template transport envelope, recomputing the response digest while
+/// preserving the completion key and queue-item lineage.
+pub fn normalize_completion_response_transport(text: &str) -> anyhow::Result<String> {
+    let evidence = completion_evidence(text);
+    let mut normalized = text.to_string();
+    for completion in evidence {
+        let Some(response) = completion_response(&normalized, &completion.key) else {
+            continue;
+        };
+        let cleaned = crate::worker_handback::response_text_without_template_transport(&response);
+        if cleaned == response {
+            continue;
+        }
+        let replacement = cell_with_response(
+            &completion.owner,
+            &completion.item,
+            &completion.key,
+            &cleaned,
+        )?;
+        let Some(updated) =
+            replace_attested_completion_cell(&normalized, &completion.key, &replacement)?
+        else {
+            continue;
+        };
+        normalized = updated;
+    }
+    Ok(normalized)
+}
+
 /// Replace one structurally attested completion cell by key.
 ///
 /// The caller supplies a complete replacement cell. Both the existing and
@@ -637,6 +667,29 @@ pub fn merge_missing_attested_completion_cells_matching(
 mod tests {
     use super::*;
 
+    fn legacy_cell_with_structured_response(
+        owner: &str,
+        item: &str,
+        key: &str,
+        response: &str,
+    ) -> String {
+        let mut body = String::from("> **Subagent response:**\n>");
+        for line in response.lines() {
+            body.push('\n');
+            body.push('>');
+            if !line.is_empty() {
+                body.push(' ');
+                body.push_str(line);
+            }
+        }
+        let digest = agent_doc_hash::content_hash(&body);
+        format!(
+            "{}\n{RESPONSE_DIGEST_PREFIX}{digest} -->\n{body}\n{}",
+            heading(owner, item),
+            marker(key),
+        )
+    }
+
     const LEGACY_FOUR: &str = concat!(
         "### Re: Subagent completed — agent-doc: `subagent:gh262` returned work for queue item “#gh-fix https://github.com/example/project/issues/262”; coordinator integration and closeout are pending.\n",
         "Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.\n",
@@ -717,6 +770,58 @@ mod tests {
         );
         assert!(completion_response(&edited, "k1").is_none());
         assert!(completion_response(&cell("subagent:a", "finish a", "k1"), "k1").is_none());
+    }
+
+    #[test]
+    fn current_cell_excludes_strict_template_transport_from_response_structure() {
+        let response = concat!(
+            "<!-- patch:exchange -->\n",
+            "**Summary:** implemented the fix\n",
+            "**Verification:** focused tests passed\n",
+            "<!-- /patch:exchange -->\n",
+            "<!-- patch:recap -->\n",
+            "Parent-session recap only.\n",
+            "<!-- /patch:recap -->\n",
+        );
+        let current = cell_with_response("subagent:a", "finish a", "k1", response).unwrap();
+        let recorded = completion_response(&current, "k1").unwrap();
+
+        assert!(recorded.contains("**Summary**\n\nimplemented the fix"));
+        assert!(!recorded.contains("patch:exchange"), "{recorded}");
+        assert!(!recorded.contains("patch:recap"), "{recorded}");
+        assert!(!recorded.contains("Parent-session recap"), "{recorded}");
+    }
+
+    #[test]
+    fn legacy_attested_cell_transport_normalizes_and_reattests() {
+        let legacy_response = concat!(
+            "**Summary**\n\n",
+            "<!-- patch:exchange -->\n",
+            "implemented the fix\n\n",
+            "**Verification**\n\n",
+            "focused tests passed\n",
+            "<!-- /patch:exchange -->\n",
+            "<!-- patch:recap -->\n",
+            "Parent-session recap only.\n",
+            "<!-- /patch:recap -->",
+        );
+        let legacy =
+            legacy_cell_with_structured_response("subagent:a", "finish a", "k1", legacy_response);
+        assert!(
+            legacy.contains("patch:recap"),
+            "fixture must reproduce legacy structure"
+        );
+
+        let normalized = normalize_completion_response_transport(&legacy).unwrap();
+        assert!(!normalized.contains("patch:exchange"), "{normalized}");
+        assert!(!normalized.contains("patch:recap"), "{normalized}");
+        assert!(!normalized.contains("Parent-session recap"), "{normalized}");
+        assert_eq!(completion_evidence(&normalized)[0].key, "k1");
+        assert!(completion_response(&normalized, "k1").is_some());
+        assert_eq!(
+            normalize_completion_response_transport(&normalized).unwrap(),
+            normalized
+        );
     }
 
     /// `#subagentcompletioncell`: refreshing a cell that an older binary glued

@@ -4308,29 +4308,7 @@ fn render_nested_response_content(content: &str) -> String {
 }
 
 fn response_body_without_exchange_transport(response: &str) -> &str {
-    const OPEN: &str = "<!-- patch:exchange -->";
-    const CLOSE: &str = "<!-- /patch:exchange -->";
-
-    let trimmed = response.trim();
-    let Some(after_open) = trimmed.strip_prefix(OPEN) else {
-        return response;
-    };
-    let Some(after_open) = after_open
-        .strip_prefix("\r\n")
-        .or_else(|| after_open.strip_prefix('\n'))
-    else {
-        return response;
-    };
-    let Some(before_close) = after_open.strip_suffix(CLOSE) else {
-        return response;
-    };
-    let Some(body) = before_close
-        .strip_suffix("\r\n")
-        .or_else(|| before_close.strip_suffix('\n'))
-    else {
-        return response;
-    };
-    body
+    agent_doc_document::worker_handback::response_without_template_transport(response)
 }
 
 fn response_details_child(response_body: &str, response_id: &str) -> Option<String> {
@@ -8639,7 +8617,7 @@ mod tests {
     }
 
     #[test]
-    fn completed_row_response_child_strips_exchange_transport_wrapper() {
+    fn completed_row_response_child_strips_strict_template_transport() {
         let head = "do [#subagent-response-exchange-gap]";
         let before = inline_response_queue_doc(&format!("- {head}\n"));
         let after = inline_response_queue_doc(&format!("- ~~{head}~~\n"));
@@ -8652,6 +8630,9 @@ mod tests {
             "- [ ] copied task-like row\n",
             "A literal %% pair remains balanced after child escaping.\n",
             "<!-- /patch:exchange -->\n",
+            "<!-- patch:recap -->\n",
+            "The recap is transport metadata, not response context.\n",
+            "<!-- /patch:recap -->\n",
         );
         let response_id =
             agent_doc_markdown_ast::exchange_tree::ResponseTurnCellPolicy::from_response(Some(
@@ -8680,6 +8661,12 @@ mod tests {
             !annotated.contains("<!-- /patch:exchange -->"),
             "{annotated}"
         );
+        assert!(!annotated.contains("<!-- patch:recap -->"), "{annotated}");
+        assert!(!annotated.contains("<!-- /patch:recap -->"), "{annotated}");
+        assert!(
+            !annotated.contains("The recap is transport metadata"),
+            "{annotated}"
+        );
         let queue = element::parse(&annotated)
             .unwrap()
             .into_iter()
@@ -8690,6 +8677,20 @@ mod tests {
             document_queue::prompts(&entries).is_empty(),
             "copied response scaffolding must never become another prompt:\n{annotated}"
         );
+    }
+
+    #[test]
+    fn malformed_strict_template_transport_is_not_partially_hidden() {
+        let response = concat!(
+            "<!-- patch:exchange -->\n",
+            "### Re: keep malformed transport visible — test\n\n",
+            "Response body.\n",
+            "<!-- /patch:exchange -->\n",
+            "<!-- patch:recap -->\n",
+            "Incomplete recap.\n",
+        );
+
+        assert_eq!(response_body_without_exchange_transport(response), response);
     }
 
     #[test]

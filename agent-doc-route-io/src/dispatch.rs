@@ -37,10 +37,15 @@ use agent_doc_turn::op_log::OpsLogEvent;
 use agent_doc_turn_executor_tmux::prompt::composer_text_without_ghost_suggestions;
 use tmux_router::Tmux;
 
+use crate::queue_dispatch::{
+    RouteQueueEffects, RouteQueueEnqueueOutcome, enqueue_route_dispatch_prompt,
+};
+
 #[derive(Debug, Clone, Copy)]
 pub struct RouteDispatchEffects {
     pub file_route_dispatch_bug_report: for<'a> fn(RouteDispatchBugReportFacts<'a>),
     pub emit_busy_route_queued_diagnostic: for<'a> fn(BusyRouteQueuedDiagnosticFacts<'a>),
+    pub queue_effects: RouteQueueEffects,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -167,7 +172,9 @@ pub fn dispatch_via_supervisor_ipc_with_mode(
         pane,
         &harness.binary,
     )?;
-    if let Some(proof) = guard_composer_before_typing(tmux, file, pane, file_path, harness)? {
+    if let Some(proof) =
+        guard_composer_before_typing(tmux, file, pane, file_path, harness, effects)?
+    {
         return Ok(proof);
     }
     let flash_msg = format!("⏳ {}", harness.trigger_command(&short_name));
@@ -832,9 +839,10 @@ fn guard_composer_before_typing(
     pane: &str,
     file_path: &str,
     harness: &HarnessConfig,
+    effects: RouteDispatchEffects,
 ) -> Result<Option<RoutedDispatchStartProof>> {
     if let Some(proof) =
-        try_pre_dispatch_stranded_draft_submit(tmux, file, pane, file_path, harness)?
+        try_pre_dispatch_stranded_draft_submit(tmux, file, pane, file_path, harness, effects)?
     {
         return Ok(Some(proof));
     }
@@ -850,6 +858,28 @@ fn guard_composer_before_typing(
             file.display(),
         ),
     }
+}
+
+fn foreign_draft_queued_message(
+    pane: &str,
+    draft_preview: &str,
+    queued: &RouteQueueEnqueueOutcome,
+) -> String {
+    format!(
+        "[route] pane {pane} composer holds an unrelated unsubmitted draft; preserved it \
+         without typing or submitting it and queued pending dispatch {:?} in active \
+         agent:queue (appended={}, already_present={}, superseded={}). The supervisor will \
+         dispatch Run Agent Doc after the composer and any turn it starts drain. Redacted \
+         draft preview: {:?}. {}",
+        queued.prompt_text,
+        queued.appended,
+        queued.already_present,
+        queued.superseded,
+        agent_doc_secret_redact::redact(draft_preview),
+        agent_doc_flow::outcome::user_outcome_fields(
+            agent_doc_flow::outcome::UserFacingOutcomeKind::QueuedBehindOwner,
+        ),
+    )
 }
 
 /// (`#strandeddraftresubmit`) Submit a trigger already stranded in the composer
@@ -869,6 +899,7 @@ fn try_pre_dispatch_stranded_draft_submit(
     pane: &str,
     file_path: &str,
     harness: &HarnessConfig,
+    effects: RouteDispatchEffects,
 ) -> Result<Option<RoutedDispatchStartProof>> {
     clear_non_operator_composer_residue(tmux, file, pane, harness)?;
     let trigger = harness.trigger_command(file_path);
@@ -880,30 +911,48 @@ fn try_pre_dispatch_stranded_draft_submit(
         // appended with no separator, and the harness submitted the single line
         // `agent-doc tasks/api.mdagent-doc /abs/.../tasks/api.md`. Preflight then
         // refused a document path that never existed. The draft is not ours to
-        // clear and appending to it can only produce a wrong path, so fail closed.
+        // clear and appending to it can only produce a wrong path. Preserve it and
+        // move this trigger into the durable document queue: the existing idle
+        // drain re-observes the composer and dispatches only after that draft (and
+        // any turn it starts) has cleared. Repeated Run Agent Doc actions coalesce
+        // through the queue instead of growing an in-memory retry list.
+        let queued = enqueue_route_dispatch_prompt(
+            file,
+            &trigger,
+            "foreign_composer_draft",
+            true,
+            effects.queue_effects,
+        )?;
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
-                "route_pre_dispatch_draft_observation file={} pane={} harness={} action={} draft_preview={:?} note=composer holds a different draft; injecting would concatenate it with this trigger",
+                "route_pre_dispatch_draft_observation file={} pane={} harness={} action={} draft_preview={:?} queued_prompt_hash={} appended={} already_present={} superseded={} note=composer holds a different draft; draft preserved and trigger queued without pane input",
                 file.display(),
                 pane,
                 harness.binary,
                 action.as_str(),
-                observation
-                    .draft_preview
-                    .as_deref()
-                    .unwrap_or("<unavailable>"),
+                agent_doc_secret_redact::redact(
+                    observation
+                        .draft_preview
+                        .as_deref()
+                        .unwrap_or("<unavailable>"),
+                ),
+                agent_doc_hash::content_hash(&queued.prompt_text),
+                queued.appended,
+                queued.already_present,
+                queued.superseded,
             ),
         );
         let preview = observation
             .draft_preview
             .as_deref()
             .unwrap_or("<unavailable>");
-        anyhow::bail!(
-            "pane {pane} composer already holds an unsubmitted draft that is not this trigger; \
-             injecting would concatenate the two into one line. Submit or clear that draft in the \
-             pane, then re-run the trigger. Redacted draft preview: {preview:?}."
-        );
+        let message = foreign_draft_queued_message(pane, preview, &queued);
+        eprintln!("{message}");
+        crate::invocation::record_route_deferral(message);
+        return Ok(Some(
+            RoutedDispatchStartProof::AcceptedQueuedBehindActiveTurn,
+        ));
     }
     if action != PreDispatchStrandedDraftAction::ResubmitStrandedDraft {
         // Only log the states that diverted or could not be observed; a clean
@@ -1016,7 +1065,9 @@ pub fn dispatch_routed_reopen_with_mode(
         &harness.binary,
     )?;
     if options.submit_policy == DirectPaneSubmitPolicy::PassThroughSingleSubmit {
-        if let Some(proof) = guard_composer_before_typing(tmux, file, pane, file_path, harness)? {
+        if let Some(proof) =
+            guard_composer_before_typing(tmux, file, pane, file_path, harness, effects)?
+        {
             return Ok(proof);
         }
         let submit_start = Instant::now();
@@ -1048,7 +1099,7 @@ pub fn dispatch_routed_reopen_with_mode(
     // be submitted, never have a second trigger appended to it. Anything else
     // falls through to `send_command_checked`, whose own composer read owns it.
     if let Some(proof) =
-        try_pre_dispatch_stranded_draft_submit(tmux, file, pane, file_path, harness)?
+        try_pre_dispatch_stranded_draft_submit(tmux, file, pane, file_path, harness, effects)?
     {
         return Ok(proof);
     }
@@ -1525,14 +1576,32 @@ mod tests {
     }
 
     #[test]
-    fn real_foreign_draft_remains_protected() {
+    fn build_anything_draft_queues_run_agent_doc_without_operator_cleanup() {
         let harness = HarnessConfig::claude();
-        let pane = claude_pane("❯\u{a0}do not overwrite this operator draft");
+        let pane = claude_pane("❯\u{a0}Build anything");
 
         assert_eq!(
             classify_pre_dispatch_stranded_draft_capture(Some(&pane), Some(2), &harness, TRIGGER,),
             PreDispatchStrandedDraftAction::DeferForeignDraft,
         );
+
+        let message = foreign_draft_queued_message(
+            "%10",
+            "Build anything",
+            &RouteQueueEnqueueOutcome {
+                prompt_text: TRIGGER.to_string(),
+                appended: true,
+                already_present: false,
+                superseded: false,
+                component_created: false,
+                activated: true,
+            },
+        );
+        assert!(message.contains("preserved it without typing or submitting it"));
+        assert!(message.contains(&format!("queued pending dispatch {TRIGGER:?}")));
+        assert!(message.contains("ui_outcome=queued_behind_owner"));
+        assert!(!message.contains("Submit or clear"));
+        assert!(!message.contains("re-run the trigger"));
     }
 
     #[test]

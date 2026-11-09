@@ -27,6 +27,7 @@ pub fn route_dispatch_effects() -> RouteDispatchEffects {
     RouteDispatchEffects {
         file_route_dispatch_bug_report: file_route_dispatch_bug_report_with_runtime_effects,
         emit_busy_route_queued_diagnostic: emit_busy_route_queued_diagnostic_from_facts,
+        queue_effects: route_queue_effects(),
     }
 }
 

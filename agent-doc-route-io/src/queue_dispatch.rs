@@ -9,7 +9,7 @@ use agent_doc_turn::prompt_bearing_route::PromptBearingRouteContext;
 pub type RouteWriteDocumentFn =
     fn(file: &Path, next_content: &str, previous_content: &str, reason: &str) -> Result<()>;
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub struct RouteQueueEffects {
     pub write_document: RouteWriteDocumentFn,
 }

@@ -6,7 +6,10 @@ import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.ReadAction
 import com.intellij.openapi.application.ex.ApplicationEx
 import com.intellij.openapi.command.WriteCommandAction
+import com.intellij.openapi.editor.CaretState
 import com.intellij.openapi.editor.Document
+import com.intellij.openapi.editor.Editor
+import com.intellij.openapi.editor.EditorFactory
 import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.project.Project
@@ -73,6 +76,13 @@ private enum class EditorIntent(val token: String) {
  * history instead of the currently open editor surface.
  */
 class PatchWatcher(private val project: Project) : Disposable {
+    private data class OperatorEditorViewState(
+        val editor: Editor,
+        val caretsAndSelections: List<CaretState>,
+        val horizontalScrollOffset: Int,
+        val verticalScrollOffset: Int,
+    )
+
     private data class RootState(
         val root: String,
         @Volatile var ipcCallback: AgentDocLib.IpcMessageCallback? = null,
@@ -441,6 +451,42 @@ class PatchWatcher(private val project: Project) : Disposable {
     private fun recordDocumentActivity(filePath: String, reason: String) {
         TurnStateBannerRefresher.getInstance(project).requestRefresh(filePath, reason)
         CrdtReplicaManager.requestRemoteDrain(project, filePath, reason)
+    }
+
+    /**
+     * Programmatic component maintenance must remain invisible to an operator who is
+     * reading or editing another part of the document. IntelliJ adjusts carets and may
+     * scroll an editor while reloading or replacing document text, so snapshot every
+     * project editor immediately around the synchronous EDT mutation and restore it in
+     * `finally` (including when the mutation fails).
+     */
+    private fun <T> preserveOperatorEditorViewState(document: Document, mutation: () -> T): T {
+        check(SwingUtilities.isEventDispatchThread()) {
+            "operator editor view state must be preserved on the IDEA event-dispatch thread"
+        }
+        val states = EditorFactory.getInstance().getEditors(document, project).map { editor ->
+            OperatorEditorViewState(
+                editor = editor,
+                caretsAndSelections = editor.caretModel.caretsAndSelections.toList(),
+                horizontalScrollOffset = editor.scrollingModel.horizontalScrollOffset,
+                verticalScrollOffset = editor.scrollingModel.verticalScrollOffset,
+            )
+        }
+        return try {
+            mutation()
+        } finally {
+            states.forEach { state ->
+                if (!state.editor.isDisposed) {
+                    try {
+                        state.editor.caretModel.setCaretsAndSelections(state.caretsAndSelections)
+                        state.editor.scrollingModel.scrollHorizontally(state.horizontalScrollOffset)
+                        state.editor.scrollingModel.scrollVertically(state.verticalScrollOffset)
+                    } catch (e: RuntimeException) {
+                        LOG.warn("[patch-watcher] Failed to restore operator editor view state", e)
+                    }
+                }
+            }
+        }
     }
 
     /**
@@ -1100,8 +1146,12 @@ class PatchWatcher(private val project: Project) : Disposable {
         // (and the unsaved branch deliberately does NOT reload from disk anyway), so
         // the refresh adds no value and only triggers the dialog. See
         // shouldRefreshVfsBeforeApplyUtil.
-        if (document == null || shouldRefreshVfsBeforeApplyUtil(fdm.isDocumentUnsaved(document))) {
+        if (document == null) {
             targetFile.refresh(false, false)
+        } else if (shouldRefreshVfsBeforeApplyUtil(fdm.isDocumentUnsaved(document))) {
+            preserveOperatorEditorViewState(document) {
+                targetFile.refresh(false, false)
+            }
         }
 
         if (document == null) {
@@ -1142,7 +1192,9 @@ class PatchWatcher(private val project: Project) : Disposable {
             // Document has unsaved changes — don't reload (preserve user edits)
         } else {
             // Reload from disk to pick up boundary changes from agent-doc boundary
-            fdm.reloadFromDisk(document)
+            preserveOperatorEditorViewState(document) {
+                fdm.reloadFromDisk(document)
+            }
         }
 
         // Compute the patched result OUTSIDE the write action to avoid
@@ -1363,7 +1415,9 @@ class PatchWatcher(private val project: Project) : Disposable {
                 patchId = patch.patchId,
                 postText = result,
             ) {
-                applyMinimalDocumentEditUtil(document, content, result)
+                preserveOperatorEditorViewState(document) {
+                    applyMinimalDocumentEditUtil(document, content, result)
+                }
             }
             wrote = true
             LOG.info("Patch applied to ${patch.file} (${result.length - content.length} chars changed)")

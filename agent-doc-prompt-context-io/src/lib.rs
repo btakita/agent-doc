@@ -170,4 +170,38 @@ mod tests {
         assert!(section.contains("The full document is now:"));
         assert!(!section.contains("<response_context"));
     }
+
+    #[test]
+    fn bounded_document_section_keeps_the_action_owning_a_nested_short_reply() {
+        let diff = concat!(
+            "--- snapshot\n",
+            "+++ document\n",
+            "@@ -1,4 +1,5 @@\n",
+            "       - **Question:** What decision should be recorded? ▫️\n",
+            "       - **Next actions:** ▫️\n",
+            "         - **Action:** Publish the telemetry annotation. ▫️\n",
+            "+          - do\n",
+        );
+        let doc = concat!(
+            "<!-- agent:run id=\"main\" -->\n",
+            "- [#publish] Publish the telemetry annotation.\n",
+            "  - **Next actions:** ▫️\n",
+            "    - **Action:** Publish the telemetry annotation. ▫️\n",
+            "      - do\n",
+            "<!-- /agent:run -->\n",
+            "<!-- agent:exchange -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        let section =
+            build_document_section(Path::new("session.md"), diff, doc, Some(&warn_report()));
+
+        assert!(section.contains("<response_context"), "{section}");
+        assert!(
+            section.contains(
+                "<prompt_target index=\"1\">\n- **Action:** Publish the telemetry annotation. ▫️\n  - do\n</prompt_target>"
+            ),
+            "{section}"
+        );
+    }
 }

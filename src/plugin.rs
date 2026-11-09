@@ -960,7 +960,7 @@ fn install_jetbrains_into(release: &Value, target_dir: &Path) -> Result<Jetbrain
     match &outcome {
         JetbrainsLocalInstallOutcome::RestartRequired { reason }
         | JetbrainsLocalInstallOutcome::StagedForRestart { reason } => {
-            prompt_restart(&expected_version, reason, false)?;
+            prompt_restart_with_package(&expected_version, reason, false, Some(tmp.path()))?;
         }
         _ => {}
     }
@@ -1474,6 +1474,15 @@ pub fn install(editor: &str) -> Result<()> {
 /// Ask every live JetBrains process to show its native Restart IDE / Later
 /// dialog, and fail unless at least one editor acknowledges the typed request.
 pub fn prompt_restart(pending_version: &str, reason: &str, json: bool) -> Result<()> {
+    prompt_restart_with_package(pending_version, reason, json, None)
+}
+
+fn prompt_restart_with_package(
+    pending_version: &str,
+    reason: &str,
+    json: bool,
+    package: Option<&Path>,
+) -> Result<()> {
     let pending_version = pending_version.trim();
     if pending_version.is_empty() {
         bail!("--version must not be empty");
@@ -1486,6 +1495,9 @@ pub fn prompt_restart(pending_version: &str, reason: &str, json: bool) -> Result
         pending_version,
         reason,
     );
+    let report = recover_rejected_restart_prompts(report, |pid| {
+        deliver_restart_prompt_bridge(pid, pending_version, reason, package)
+    });
     if json {
         println!(
             "{}",
@@ -1495,6 +1507,8 @@ pub fn prompt_restart(pending_version: &str, reason: &str, json: bool) -> Result
                 "endpoints": report.endpoints,
                 "delivered": report.delivered(),
                 "acknowledged_editor_pids": report.acknowledged_editor_pids,
+                "legacy_bridge_acknowledged_editor_pids": report.legacy_bridge_acknowledged_editor_pids,
+                "legacy_bridge_receipts": report.legacy_bridge_receipts,
                 "failed": report.failed(),
                 "failures": report.failures.iter().map(ToString::to_string).collect::<Vec<_>>(),
             })
@@ -1511,6 +1525,9 @@ pub fn prompt_restart(pending_version: &str, reason: &str, json: bool) -> Result
             report.delivered(),
             report.endpoints,
         );
+        for receipt in &report.legacy_bridge_receipts {
+            eprintln!("[plugin] restart prompt compatibility receipt: {receipt}");
+        }
     }
 
     restart_prompt_delivery_result(&report)
@@ -1543,9 +1560,183 @@ fn restart_prompt_delivery_result(
     Ok(())
 }
 
+fn recover_rejected_restart_prompts(
+    mut report: agent_doc_controller_io::project_controller::RestartPromptFanoutReport,
+    mut deliver_bridge: impl FnMut(u64) -> Result<String>,
+) -> agent_doc_controller_io::project_controller::RestartPromptFanoutReport {
+    let rejected = report
+        .failures
+        .iter()
+        .filter(|failure| failure.typed_request_rejected)
+        .filter_map(|failure| failure.editor_pid)
+        .collect::<BTreeSet<_>>();
+    for pid in rejected {
+        match deliver_bridge(pid) {
+            Ok(receipt) if receipt.starts_with("ok:restart-prompt:") => {
+                report
+                    .failures
+                    .retain(|failure| failure.editor_pid != Some(pid));
+                if !report.acknowledged_editor_pids.contains(&pid) {
+                    report.acknowledged_editor_pids.push(pid);
+                }
+                report.legacy_bridge_acknowledged_editor_pids.push(pid);
+                report.legacy_bridge_receipts.push(receipt);
+            }
+            outcome => {
+                let bridge_error = match outcome {
+                    Ok(receipt) => format!("unexpected bridge receipt {receipt:?}"),
+                    Err(error) => format!("{error:#}").replace('\n', " "),
+                };
+                if let Some(failure) = report
+                    .failures
+                    .iter_mut()
+                    .find(|failure| failure.editor_pid == Some(pid))
+                {
+                    failure.reason = format!(
+                        "{}; compatibility bridge failed ({bridge_error})",
+                        failure.reason
+                    );
+                }
+            }
+        }
+    }
+    report.acknowledged_editor_pids.sort_unstable();
+    report
+        .legacy_bridge_acknowledged_editor_pids
+        .sort_unstable();
+    report
+}
+
+#[cfg(not(test))]
+fn deliver_restart_prompt_bridge(
+    editor_pid: u64,
+    pending_version: &str,
+    reason: &str,
+    package: Option<&Path>,
+) -> Result<String> {
+    let pid = u32::try_from(editor_pid).context("JetBrains editor PID does not fit u32")?;
+    let launcher = restart_prompt_bridge_jar(package, pending_version)?;
+    let java = java_executable_for_ide(pid)?;
+    let output = Command::new(&java)
+        .args(["--add-modules", "jdk.attach", "-jar"])
+        .arg(launcher.path())
+        .arg(pid.to_string())
+        .arg("agent-doc:prompt-restart")
+        .arg(reason)
+        .arg(pending_version)
+        .output()
+        .with_context(|| {
+            format!(
+                "failed to launch the JetBrains restart-prompt bridge for pid {pid} with JVM {}",
+                java.display()
+            )
+        })?;
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if !output.status.success() {
+        bail!(
+            "JetBrains restart-prompt bridge failed for pid {pid}: {}{}",
+            stdout,
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    if !stdout.starts_with("ok:restart-prompt:") {
+        bail!("JetBrains restart-prompt bridge returned {stdout:?}");
+    }
+    Ok(stdout)
+}
+
+#[cfg(test)]
+fn deliver_restart_prompt_bridge(
+    _editor_pid: u64,
+    _pending_version: &str,
+    _reason: &str,
+    _package: Option<&Path>,
+) -> Result<String> {
+    bail!("live attach bridge is disabled in unit tests")
+}
+
+#[cfg(not(test))]
+fn restart_prompt_bridge_jar(
+    package: Option<&Path>,
+    pending_version: &str,
+) -> Result<tempfile::NamedTempFile> {
+    let mut launcher = tempfile::Builder::new()
+        .prefix("agent-doc-jb-restart-prompt-")
+        .suffix(".jar")
+        .tempfile()
+        .context("failed to create the restart-prompt bridge jar")?;
+    if let Some(package) = package {
+        let file = fs::File::open(package)
+            .with_context(|| format!("failed to open JetBrains package {}", package.display()))?;
+        let mut archive = zip::ZipArchive::new(file).context("failed to read JetBrains package")?;
+        let mut selected = None::<(usize, u8)>;
+        for index in 0..archive.len() {
+            let entry = archive.by_index(index)?;
+            let name = entry.name();
+            let priority = if name.ends_with("/lib/modules/agent.doc.backend.jar") {
+                2
+            } else if entry
+                .enclosed_name()
+                .and_then(|path| path.file_name().map(|name| name.to_owned()))
+                .and_then(|name| name.to_str().map(str::to_owned))
+                .is_some_and(|name| jetbrains_plugin_jar_version(&name).is_some())
+            {
+                1
+            } else {
+                0
+            };
+            if priority > selected.map_or(0, |(_, priority)| priority) {
+                selected = Some((index, priority));
+            }
+        }
+        let (index, _) = selected.context("JetBrains package has no restart-prompt bridge jar")?;
+        let mut entry = archive.by_index(index)?;
+        io::copy(&mut entry, &mut launcher)?;
+    } else {
+        let targets = existing_jetbrains_agent_doc_dirs(&jetbrains_plugin_dirs());
+        let mut candidates = Vec::new();
+        for target in targets {
+            let plugin_root = target.join(JETBRAINS_PLUGIN_DIR);
+            let backend = plugin_root.join("lib/modules/agent.doc.backend.jar");
+            if backend.is_file() {
+                candidates.push(backend);
+            }
+            let lib = plugin_root.join("lib");
+            let Ok(entries) = fs::read_dir(&lib) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                let version_matches = path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .and_then(jetbrains_plugin_jar_version)
+                    .is_some_and(|version| version == pending_version);
+                if version_matches {
+                    candidates.push(path);
+                }
+            }
+        }
+        let source = candidates
+            .into_iter()
+            .find(|path| jetbrains_restart_prompt_bridge_manifest(path).unwrap_or(false))
+            .context(
+                "no installed JetBrains package exposes the restart-prompt attach bridge; reinstall the current plugin package",
+            )?;
+        let mut input = fs::File::open(&source)
+            .with_context(|| format!("failed to open {}", source.display()))?;
+        io::copy(&mut input, &mut launcher)?;
+    }
+    launcher.flush()?;
+    if !jetbrains_restart_prompt_bridge_manifest(launcher.path())? {
+        bail!("JetBrains package bridge jar has no Main-Class/Agent-Class attach manifest");
+    }
+    Ok(launcher)
+}
+
 #[cfg(test)]
 mod restart_prompt_delivery_tests {
-    use super::restart_prompt_delivery_result;
+    use super::{recover_rejected_restart_prompts, restart_prompt_delivery_result};
     use agent_doc_controller_io::project_controller::{
         RestartPromptEndpointFailure, RestartPromptFanoutReport,
     };
@@ -1571,6 +1762,7 @@ mod restart_prompt_delivery_tests {
                 project_root: "/work/project".into(),
                 editor_pid: Some(12),
                 reason: "editor refused the restart-prompt intent".to_string(),
+                typed_request_rejected: false,
             }],
             ..RestartPromptFanoutReport::default()
         };
@@ -1582,6 +1774,40 @@ mod restart_prompt_delivery_tests {
             "{error}"
         );
         assert!(error.contains("editor pid 12"), "{error}");
+    }
+
+    #[test]
+    fn rejected_typed_request_falls_back_to_acknowledged_attach_bridge() {
+        let report = RestartPromptFanoutReport {
+            endpoints: 1,
+            failures: vec![RestartPromptEndpointFailure {
+                project_root: "/work/project".into(),
+                editor_pid: Some(757750),
+                reason: "editor refused the restart-prompt intent (IPC receipt rejected)"
+                    .to_string(),
+                typed_request_rejected: true,
+            }],
+            ..RestartPromptFanoutReport::default()
+        };
+        let mut invoked = Vec::new();
+
+        let recovered = recover_rejected_restart_prompts(report, |pid| {
+            invoked.push(pid);
+            Ok("ok:restart-prompt:0.2.966".to_string())
+        });
+
+        assert_eq!(invoked, vec![757750]);
+        assert_eq!(recovered.acknowledged_editor_pids, vec![757750]);
+        assert_eq!(
+            recovered.legacy_bridge_acknowledged_editor_pids,
+            vec![757750]
+        );
+        assert_eq!(
+            recovered.legacy_bridge_receipts,
+            vec!["ok:restart-prompt:0.2.966"]
+        );
+        assert!(recovered.failures.is_empty());
+        restart_prompt_delivery_result(&recovered).unwrap();
     }
 }
 
@@ -1691,7 +1917,7 @@ fn install_jetbrains_local(plugins_dir: Option<&Path>) -> Result<JetbrainsLocalI
     match &outcome {
         JetbrainsLocalInstallOutcome::RestartRequired { reason }
         | JetbrainsLocalInstallOutcome::StagedForRestart { reason } => {
-            prompt_restart(&pending_version, reason, false)?;
+            prompt_restart_with_package(&pending_version, reason, false, Some(&zip_path))?;
         }
         _ => {}
     }
@@ -1733,7 +1959,7 @@ fn install_jetbrains_local_all_existing() -> Result<usize> {
     let mut hot_upgraded = 0usize;
     let mut unchanged = 0usize;
     let mut restart_pending = 0usize;
-    let mut restart_prompt: Option<(String, String)> = None;
+    let mut restart_prompt: Option<(String, String, PathBuf)> = None;
     for (target_dir, zip_path) in &targets {
         let pending_version = local_jetbrains_zip_version(zip_path)?;
         match install_jetbrains_local_zip_into(zip_path, target_dir)? {
@@ -1756,7 +1982,7 @@ fn install_jetbrains_local_all_existing() -> Result<usize> {
                 installed += 1;
                 restart_pending += 1;
                 eprintln!("WARNING: {}", restart_required_message(target_dir, &reason));
-                restart_prompt.get_or_insert((pending_version, reason));
+                restart_prompt.get_or_insert((pending_version, reason, zip_path.clone()));
             }
             JetbrainsLocalInstallOutcome::StagedForRestart { reason } => {
                 installed += 1;
@@ -1765,7 +1991,7 @@ fn install_jetbrains_local_all_existing() -> Result<usize> {
                     "WARNING: {}",
                     staged_for_restart_message(target_dir, &reason)
                 );
-                restart_prompt.get_or_insert((pending_version, reason));
+                restart_prompt.get_or_insert((pending_version, reason, zip_path.clone()));
             }
             JetbrainsLocalInstallOutcome::Unchanged => {
                 unchanged += 1;
@@ -1784,8 +2010,8 @@ fn install_jetbrains_local_all_existing() -> Result<usize> {
         "{}",
         jetbrains_convergence_restart_summary(installed, hot_upgraded, restart_pending)
     );
-    if let Some((pending_version, reason)) = restart_prompt {
-        prompt_restart(&pending_version, &reason, false)?;
+    if let Some((pending_version, reason, zip_path)) = restart_prompt {
+        prompt_restart_with_package(&pending_version, &reason, false, Some(&zip_path))?;
     }
     Ok(hot_upgraded)
 }
@@ -2436,6 +2662,33 @@ fn jetbrains_upgrade_launcher_has_main_manifest(jar_path: &Path) -> Result<bool>
             name.eq_ignore_ascii_case("Main-Class") && !value.trim().is_empty()
         })
     }))
+}
+
+#[cfg(not(test))]
+fn jetbrains_restart_prompt_bridge_manifest(jar_path: &Path) -> Result<bool> {
+    let file = fs::File::open(jar_path).context("Failed to open JetBrains prompt bridge")?;
+    let mut archive =
+        zip::ZipArchive::new(file).context("Failed to read JetBrains prompt bridge as a JAR")?;
+    let mut manifest = match archive.by_name("META-INF/MANIFEST.MF") {
+        Ok(manifest) => manifest,
+        Err(zip::result::ZipError::FileNotFound) => return Ok(false),
+        Err(error) => return Err(error).context("Failed to inspect prompt bridge manifest"),
+    };
+    let mut content = String::new();
+    manifest
+        .read_to_string(&mut content)
+        .context("Failed to read prompt bridge manifest")?;
+    let fields = content
+        .lines()
+        .filter_map(|line| line.split_once(':'))
+        .map(|(name, value)| (name.trim().to_ascii_lowercase(), value.trim()))
+        .collect::<BTreeMap<_, _>>();
+    Ok(fields
+        .get("main-class")
+        .is_some_and(|value| !value.is_empty())
+        && fields
+            .get("agent-class")
+            .is_some_and(|value| !value.is_empty()))
 }
 
 /// GH #63: JVM candidates for attaching to `pid`, most specific first.

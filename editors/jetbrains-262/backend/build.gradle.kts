@@ -55,6 +55,21 @@ tasks.named<Jar>("jar") {
         include("io/github/lazily/**")
     }
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    manifest {
+        attributes(
+            "Main-Class" to "com.github.btakita.agentdoc.JetBrainsPluginUpgradeBootstrap",
+            "Agent-Class" to "com.github.btakita.agentdoc.JetBrainsPluginUpgradeBootstrap",
+        )
+    }
+}
+
+tasks.named<Jar>("composedJar") {
+    manifest {
+        attributes(
+            "Main-Class" to "com.github.btakita.agentdoc.JetBrainsPluginUpgradeBootstrap",
+            "Agent-Class" to "com.github.btakita.agentdoc.JetBrainsPluginUpgradeBootstrap",
+        )
+    }
 }
 
 sourceSets {

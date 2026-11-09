@@ -582,6 +582,7 @@ dependencies = [
  "agent-doc-harness",
  "agent-doc-hash",
  "agent-doc-ipc-io",
+ "agent-doc-ipc-protocol",
  "agent-doc-lease",
  "agent-doc-log-time",
  "agent-doc-merge",

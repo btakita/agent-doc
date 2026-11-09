@@ -10,10 +10,12 @@
 //! `Action items:` and the aliases in [`LABELS`] — is parsed into
 //! [`WorkerHandback`] and rendered in the canonical order
 //! Blocker, Summary, What changed, Verification, Action items, Open items,
-//! Notes, Next actions. Rendering
-//! never drops text: every body line is kept byte for byte (outer blank lines
-//! of a section are trimmed), an alias label survives as a sub-label inside
-//! its canonical section, and text before the first label leads the Summary.
+//! Notes, Next actions. Strict-template transport around a hand-back is
+//! removed before parsing; it belongs to the parent session closeout, not the
+//! worker response. Rendering never drops response text: every body line is
+//! kept byte for byte (outer blank lines of a section are trimmed), an alias
+//! label survives as a sub-label inside its canonical section, and text before
+//! the first label leads the Summary.
 //! A hand-back that does not structure itself, meaning fewer than two labels
 //! and no Blocker, Action items, or Open items label, is returned unchanged,
 //! so an unstructured response is still recorded verbatim. A plain `Label:`
@@ -270,26 +272,173 @@ impl WorkerHandback {
     }
 }
 
-/// The response text a completion cell records: the rendered structure when
-/// `response` labels its sections, else `response` unchanged.
+/// Return only the exchange body from one complete strict-template closeout.
+///
+/// The transport envelope is only the leading exchange patch. A required
+/// `patch:recap` (or any later sibling patch) follows that close marker, and
+/// neither its markers nor its body are part of a worker response or queue
+/// response context. Treating the close as a suffix of the whole payload left
+/// the recap inside the response-cell identity, so the queue minted `[#r-…]`
+/// while the exchange heading — which holds only the exchange patch — stayed
+/// plain (`#responseidemit`, agent-doc-bugs `r-4d8f118a0315`). Incomplete
+/// transport remains visible so recovery fails closed.
+pub fn response_without_template_transport(response: &str) -> &str {
+    const OPEN: &str = "<!-- patch:exchange -->";
+    const CLOSE: &str = "<!-- /patch:exchange -->";
+
+    let trimmed = response.trim();
+    let Some(after_open) = trimmed.strip_prefix(OPEN) else {
+        return response;
+    };
+    let Some(after_open) = after_open
+        .strip_prefix("\r\n")
+        .or_else(|| after_open.strip_prefix('\n'))
+    else {
+        return response;
+    };
+    let mut search_from = 0usize;
+    while let Some(relative) = after_open[search_from..].find(CLOSE) {
+        let close_at = search_from + relative;
+        let at_line_start =
+            close_at == 0 || after_open.as_bytes().get(close_at.saturating_sub(1)) == Some(&b'\n');
+        let remainder = &after_open[close_at + CLOSE.len()..];
+        if at_line_start && remainder_is_only_sibling_patches(remainder) {
+            return after_open[..close_at].trim_end_matches(['\n', '\r']);
+        }
+        // A close glued to the body (`Done.<!-- /patch:exchange -->`) is still
+        // the envelope when nothing but sibling patches follows it.
+        if !at_line_start && remainder_is_only_sibling_patches(remainder) {
+            return after_open[..close_at].trim_end_matches(['\n', '\r']);
+        }
+        search_from = close_at + CLOSE.len();
+        if search_from >= after_open.len() {
+            break;
+        }
+    }
+    response
+}
+
+/// `rest` is empty, or only complete `<!-- patch:name -->` sibling blocks.
+fn remainder_is_only_sibling_patches(rest: &str) -> bool {
+    let mut rest = rest.trim_start_matches(['\n', '\r']);
+    if rest.is_empty() {
+        return true;
+    }
+    if !rest.starts_with("<!-- patch:") {
+        return false;
+    }
+    while !rest.is_empty() {
+        let Some(after_open) = rest.strip_prefix("<!-- patch:") else {
+            return false;
+        };
+        let Some(marker_end) = after_open.find("-->") else {
+            return false;
+        };
+        let name = after_open[..marker_end]
+            .split_whitespace()
+            .next()
+            .unwrap_or("");
+        if name.is_empty() {
+            return false;
+        }
+        let close = format!("<!-- /patch:{name} -->");
+        let after_marker = after_open[marker_end + 3..].trim_start_matches(['\n', '\r']);
+        let Some(close_at) = line_anchored_find(after_marker, &close) else {
+            return false;
+        };
+        rest = after_marker[close_at + close.len()..].trim_start_matches(['\n', '\r']);
+    }
+    true
+}
+
+fn line_anchored_find(haystack: &str, needle: &str) -> Option<usize> {
+    let mut search_from = 0usize;
+    while let Some(relative) = haystack[search_from..].find(needle) {
+        let at = search_from + relative;
+        let at_line_start =
+            at == 0 || haystack.as_bytes().get(at.saturating_sub(1)) == Some(&b'\n');
+        if at_line_start {
+            return Some(at);
+        }
+        search_from = at + needle.len();
+        if search_from >= haystack.len() {
+            break;
+        }
+    }
+    None
+}
+
+/// Normalize transport that an older response-structure producer already
+/// moved inside labelled sections. A complete, unique marker sequence is
+/// required; otherwise the response is preserved byte-for-byte.
+pub fn response_text_without_template_transport(response: &str) -> String {
+    let outer = response_without_template_transport(response);
+    if outer != response {
+        return outer.to_string();
+    }
+
+    const EXCHANGE_OPEN: &str = "<!-- patch:exchange -->";
+    const EXCHANGE_CLOSE: &str = "<!-- /patch:exchange -->";
+    const RECAP_OPEN: &str = "<!-- patch:recap -->";
+    const RECAP_CLOSE: &str = "<!-- /patch:recap -->";
+    let lines = response.lines().collect::<Vec<_>>();
+    let positions = |marker: &str| {
+        lines
+            .iter()
+            .enumerate()
+            .filter_map(|(index, line)| (line.trim() == marker).then_some(index))
+            .collect::<Vec<_>>()
+    };
+    let exchange_open = positions(EXCHANGE_OPEN);
+    let exchange_close = positions(EXCHANGE_CLOSE);
+    let recap_open = positions(RECAP_OPEN);
+    let recap_close = positions(RECAP_CLOSE);
+    if exchange_open.len() != 1
+        || exchange_close.len() != 1
+        || recap_open.len() != 1
+        || recap_close.len() != 1
+        || !(exchange_open[0] < exchange_close[0]
+            && exchange_close[0] + 1 == recap_open[0]
+            && recap_open[0] < recap_close[0])
+    {
+        return response.to_string();
+    }
+
+    lines
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| {
+            *index != exchange_open[0]
+                && *index != exchange_close[0]
+                && !(*index >= recap_open[0] && *index <= recap_close[0])
+        })
+        .map(|(_, line)| *line)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// The response text a completion cell records: strict-template transport is
+/// removed, then labelled sections are rendered; unlabelled response text is
+/// otherwise unchanged.
 pub fn structure_response(response: &str) -> String {
-    match WorkerHandback::parse(response) {
+    let response = response_text_without_template_transport(response);
+    match WorkerHandback::parse(&response) {
         Some(handback) => handback.render(),
-        None => response.to_string(),
+        None => response,
     }
 }
 
 /// The action items of `response` (empty when it labels no Action items
 /// section).
 pub fn action_items(response: &str) -> Vec<String> {
-    WorkerHandback::parse(response)
+    WorkerHandback::parse(&response_text_without_template_transport(response))
         .map(|handback| handback.action_items())
         .unwrap_or_default()
 }
 
 /// The open items of `response` (empty when it labels no Open items section).
 pub fn open_items(response: &str) -> Vec<String> {
-    WorkerHandback::parse(response)
+    WorkerHandback::parse(&response_text_without_template_transport(response))
         .map(|handback| handback.open_items())
         .unwrap_or_default()
 }
@@ -608,6 +757,35 @@ mod tests {
         assert_eq!(WorkerHandback::parse(text), None);
         assert_eq!(structure_response(text), text);
         assert!(open_items(text).is_empty());
+    }
+
+    #[test]
+    fn strict_template_transport_is_not_worker_response_structure() {
+        let response = concat!(
+            "<!-- patch:exchange -->\n",
+            "**Summary:** fixed the response structure\n",
+            "**Verification:** focused tests passed\n",
+            "**Action items:** none\n",
+            "<!-- /patch:exchange -->\n",
+            "<!-- patch:recap -->\n",
+            "Parent-session recap only.\n",
+            "<!-- /patch:recap -->\n",
+        );
+
+        let structured = structure_response(response);
+        assert!(structured.contains("**Summary**\n\nfixed the response structure"));
+        assert!(structured.contains("**Verification**\n\nfocused tests passed"));
+        assert!(!structured.contains("patch:exchange"), "{structured}");
+        assert!(!structured.contains("patch:recap"), "{structured}");
+        assert!(!structured.contains("Parent-session recap"), "{structured}");
+        assert!(action_items(response).is_empty());
+
+        let incomplete = response.trim_end_matches("<!-- /patch:recap -->\n");
+        assert_eq!(response_without_template_transport(incomplete), incomplete);
+        assert_eq!(
+            response_text_without_template_transport(incomplete),
+            incomplete
+        );
     }
 
     /// A prose hand-back with one label-shaped line, or with plain alias

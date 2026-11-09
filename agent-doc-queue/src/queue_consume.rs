@@ -4498,95 +4498,7 @@ fn render_nested_response_content(content: &str) -> String {
 }
 
 fn response_body_without_exchange_transport(response: &str) -> &str {
-    const OPEN: &str = "<!-- patch:exchange -->";
-    const CLOSE: &str = "<!-- /patch:exchange -->";
-
-    // The transport envelope is only the leading exchange patch. A required
-    // `patch:recap` (or any later sibling patch) follows that close marker.
-    // Treating the close as a suffix of the whole payload left the recap inside
-    // the response-cell identity, so the queue minted `[#r-…]` while the
-    // exchange heading — which holds only the exchange patch — stayed plain
-    // (`#responseidemit`, agent-doc-bugs `r-4d8f118a0315`).
-    let trimmed = response.trim();
-    let Some(after_open) = trimmed.strip_prefix(OPEN) else {
-        return response;
-    };
-    let Some(after_open) = after_open
-        .strip_prefix("\r\n")
-        .or_else(|| after_open.strip_prefix('\n'))
-    else {
-        return response;
-    };
-    let mut search_from = 0usize;
-    while let Some(relative) = after_open[search_from..].find(CLOSE) {
-        let close_at = search_from + relative;
-        let at_line_start =
-            close_at == 0 || after_open.as_bytes().get(close_at.saturating_sub(1)) == Some(&b'\n');
-        let remainder = &after_open[close_at + CLOSE.len()..];
-        if at_line_start && remainder_is_only_sibling_patches(remainder) {
-            return after_open[..close_at].trim_end_matches(['\n', '\r']);
-        }
-        // A close glued to the body (`Done.<!-- /patch:exchange -->`) is still
-        // the envelope when nothing but sibling patches follows it.
-        if !at_line_start && remainder_is_only_sibling_patches(remainder) {
-            return after_open[..close_at].trim_end_matches(['\n', '\r']);
-        }
-        search_from = close_at + CLOSE.len();
-        if search_from >= after_open.len() {
-            break;
-        }
-    }
-    response
-}
-
-/// `rest` is empty, or only complete `<!-- patch:name -->` sibling blocks.
-fn remainder_is_only_sibling_patches(rest: &str) -> bool {
-    let mut rest = rest.trim_start_matches(['\n', '\r']);
-    if rest.is_empty() {
-        return true;
-    }
-    if !rest.starts_with("<!-- patch:") {
-        return false;
-    }
-    while !rest.is_empty() {
-        let Some(after_open) = rest.strip_prefix("<!-- patch:") else {
-            return false;
-        };
-        let Some(marker_end) = after_open.find("-->") else {
-            return false;
-        };
-        let name = after_open[..marker_end]
-            .split_whitespace()
-            .next()
-            .unwrap_or("");
-        if name.is_empty() {
-            return false;
-        }
-        let close = format!("<!-- /patch:{name} -->");
-        let after_marker = after_open[marker_end + 3..].trim_start_matches(['\n', '\r']);
-        let Some(close_at) = line_anchored_find(after_marker, &close) else {
-            return false;
-        };
-        rest = after_marker[close_at + close.len()..].trim_start_matches(['\n', '\r']);
-    }
-    true
-}
-
-fn line_anchored_find(haystack: &str, needle: &str) -> Option<usize> {
-    let mut search_from = 0usize;
-    while let Some(relative) = haystack[search_from..].find(needle) {
-        let at = search_from + relative;
-        let at_line_start =
-            at == 0 || haystack.as_bytes().get(at.saturating_sub(1)) == Some(&b'\n');
-        if at_line_start {
-            return Some(at);
-        }
-        search_from = at + needle.len();
-        if search_from >= haystack.len() {
-            break;
-        }
-    }
-    None
+    agent_doc_document::worker_handback::response_without_template_transport(response)
 }
 
 fn response_details_child(response_body: &str, response_id: &str) -> Option<String> {
@@ -10160,7 +10072,7 @@ mod tests {
     }
 
     #[test]
-    fn completed_row_response_child_strips_exchange_transport_wrapper() {
+    fn completed_row_response_child_strips_strict_template_transport() {
         let head = "do [#subagent-response-exchange-gap]";
         let before = inline_response_queue_doc(&format!("- {head}\n"));
         let after = inline_response_queue_doc(&format!("- ~~{head}~~\n"));
@@ -10173,6 +10085,9 @@ mod tests {
             "- [ ] copied task-like row\n",
             "A literal %% pair remains balanced after child escaping.\n",
             "<!-- /patch:exchange -->\n",
+            "<!-- patch:recap -->\n",
+            "The recap is transport metadata, not response context.\n",
+            "<!-- /patch:recap -->\n",
         );
         let response_id =
             agent_doc_markdown_ast::exchange_tree::ResponseTurnCellPolicy::from_response(Some(
@@ -10199,6 +10114,12 @@ mod tests {
         );
         assert!(
             !annotated.contains("<!-- /patch:exchange -->"),
+            "{annotated}"
+        );
+        assert!(!annotated.contains("<!-- patch:recap -->"), "{annotated}");
+        assert!(!annotated.contains("<!-- /patch:recap -->"), "{annotated}");
+        assert!(
+            !annotated.contains("The recap is transport metadata"),
             "{annotated}"
         );
         let queue = element::parse(&annotated)
@@ -10289,6 +10210,20 @@ mod tests {
             2,
             "the id is on the heading and the queue lookup, once each:\n{annotated}"
         );
+    }
+
+    #[test]
+    fn malformed_strict_template_transport_is_not_partially_hidden() {
+        let response = concat!(
+            "<!-- patch:exchange -->\n",
+            "### Re: keep malformed transport visible — test\n\n",
+            "Response body.\n",
+            "<!-- /patch:exchange -->\n",
+            "<!-- patch:recap -->\n",
+            "Incomplete recap.\n",
+        );
+
+        assert_eq!(response_body_without_exchange_transport(response), response);
     }
 
     #[test]

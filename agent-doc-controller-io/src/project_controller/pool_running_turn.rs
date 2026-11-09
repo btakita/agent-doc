@@ -183,8 +183,10 @@ fn paste_into_live_turn(pane: &str, harness_name: &str, text: &str) -> PasteOutc
         cursor_y,
     ) {
         agent_doc_harness::steering_delivery::RunningTurnFollowUpComposer::Empty => {}
-        agent_doc_harness::steering_delivery::RunningTurnFollowUpComposer::Draft => {
-            return PasteOutcome::NotProven("the composer holds an unsent draft".to_string());
+        agent_doc_harness::steering_delivery::RunningTurnFollowUpComposer::Draft { preview } => {
+            return PasteOutcome::NotProven(format!(
+                "the composer holds an unsent draft (redacted draft preview: {preview:?})"
+            ));
         }
         agent_doc_harness::steering_delivery::RunningTurnFollowUpComposer::Blocked { reason } => {
             return PasteOutcome::NotProven(reason);
@@ -224,7 +226,9 @@ fn prove_follow_up_left_the_composer(
                 agent_doc_harness::steering_delivery::RunningTurnFollowUpComposer::Empty => {
                     return Ok(());
                 }
-                agent_doc_harness::steering_delivery::RunningTurnFollowUpComposer::Draft => {
+                agent_doc_harness::steering_delivery::RunningTurnFollowUpComposer::Draft {
+                    ..
+                } => {
                     last = "the composer still holds the refill draft".to_string();
                 }
                 agent_doc_harness::steering_delivery::RunningTurnFollowUpComposer::Blocked {

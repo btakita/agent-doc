@@ -252,6 +252,13 @@ files-before-unload window from prompting. The prompt does not make the modular
 upgrade restart-free; it only replaces the operator having to notice the CLI
 warning or a later `plugin_bytes_superseded_advisory`.
 
+The explicit `agent-doc plugin prompt-restart` endpoint and its legacy
+attach-agent compatibility bridge use that same sticky notification surface.
+When a project is open, the notification is project-scoped so JetBrains anchors
+it to the editor frame's bottom-right; it must never use a modal/floating
+`Messages` dialog. The endpoint acknowledges once the live IDE has scheduled the
+notification. **Restart IDE** and **Later** remain local notification actions.
+
 #### Why a plugin-owned child loader is not the remaining hot-upgrade boundary (GH #333/#339)
 
 The remaining Kotlin orchestration cannot be made replaceable merely by moving

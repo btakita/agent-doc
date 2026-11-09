@@ -12,19 +12,19 @@ import static org.junit.Assert.assertTrue;
 
 public class JetBrainsRestartPromptBridgeTest {
     @Test
-    public void bridgeReturnsReceiptAfterTheIdeOwnsTheScheduledDialog() {
+    public void bridgeReturnsReceiptAfterTheIdeOwnsTheScheduledNotification() {
         AtomicReference<Runnable> scheduled = new AtomicReference<>();
         AtomicBoolean ran = new AtomicBoolean(false);
-        Runnable dialog = () -> ran.set(true);
+        Runnable notification = () -> ran.set(true);
 
         String receipt = JetBrainsPluginUpgradeAction.scheduleRestartPrompt(
             "0.2.966",
             scheduled::set,
-            dialog
+            notification
         );
 
         assertEquals("ok:restart-prompt:0.2.966", receipt);
-        assertSame(dialog, scheduled.get());
+        assertSame(notification, scheduled.get());
         assertFalse(ran.get());
         scheduled.get().run();
         assertTrue(ran.get());

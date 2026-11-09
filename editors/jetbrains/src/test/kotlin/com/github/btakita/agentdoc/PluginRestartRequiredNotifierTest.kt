@@ -1,9 +1,12 @@
 package com.github.btakita.agentdoc
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.nio.file.Files
+import java.nio.file.Paths
 
 class PluginRestartRequiredNotifierTest {
     /** The marker the 2026-10-26 v0.35.556 install left beside the IU-263.7307 plugin tree. */
@@ -112,5 +115,31 @@ class PluginRestartRequiredNotifierTest {
         assertTrue(message, message.startsWith("Agent Doc v0.2.963 requires an IDE restart"))
         assertTrue(message, message.contains("the modular package cannot be swapped dynamically"))
         assertTrue(message, message.endsWith("Restart the IDE to load it."))
+    }
+
+    @Test
+    fun `explicit restart prompts stay attached notifications instead of modal windows`() {
+        val notifier = Files.readString(
+            Paths.get("src/main/kotlin/com/github/btakita/agentdoc/PluginRestartRequiredNotifier.kt"),
+        )
+        val compatibilityBridge = Files.readString(
+            Paths.get("src/main/java/com/github/btakita/agentdoc/JetBrainsPluginUpgradeAction.java"),
+        )
+
+        for ((name, source) in mapOf("loaded plugin" to notifier, "compatibility bridge" to compatibilityBridge)) {
+            assertFalse("$name must not open a restart modal", source.contains("showYesNoDialog"))
+            assertFalse("$name must not depend on the modal Messages API", source.contains("openapi.ui.Messages"))
+            assertTrue("$name must use the sticky update notification group", source.contains("Agent Doc Plugin Update"))
+            assertTrue("$name must keep the Restart IDE action", source.contains("Restart IDE"))
+            assertTrue("$name must keep the Later action", source.contains("Later"))
+        }
+        assertTrue(
+            "the loaded plugin notification must be scoped to an editor project",
+            notifier.contains("created.notify(notificationProject())"),
+        )
+        assertTrue(
+            "the compatibility bridge notification must be scoped to an editor project",
+            compatibilityBridge.contains("created.notify(restartPromptProject())"),
+        )
     }
 }

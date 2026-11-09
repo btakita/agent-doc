@@ -163,8 +163,10 @@ internal object NativeReloadCoordinator {
                             log.info("[native] published native generation mtime=${outcome.mtime}")
                         is NativeReloadOutcome.RetainedOld ->
                             log.warn("[native] reload failed closed; retained old generation: ${outcome.reason}")
-                        is NativeReloadOutcome.RestartRequired ->
+                        is NativeReloadOutcome.RestartRequired -> {
                             log.warn("[native] reload requires IDE restart: ${outcome.reason}")
+                            PluginRestartRequiredNotifier.requestRestart(outcome.reason)
+                        }
                     }
                 } catch (error: Throwable) {
                     log.warn("[native] reload coordinator failed closed", error)

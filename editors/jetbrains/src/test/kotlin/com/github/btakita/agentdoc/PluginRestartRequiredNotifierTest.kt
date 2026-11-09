@@ -99,4 +99,13 @@ class PluginRestartRequiredNotifierTest {
         assertTrue(reasonLine, reasonLine.endsWith("..."))
         assertTrue(reasonLine, reasonLine.length < 320)
     }
+
+    @Test
+    fun `a terminal native reload verdict asks the operator to restart the editor`() {
+        val message = nativeReloadRestartRequiredMessage("the live native generation cannot be retired")
+
+        assertTrue(message, message.startsWith("Agent Doc could not safely replace its live editor integration."))
+        assertTrue(message, message.contains("the live native generation cannot be retired"))
+        assertTrue(message, message.endsWith("Restart the IDE to finish recovery."))
+    }
 }

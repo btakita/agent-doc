@@ -137,6 +137,18 @@ internal fun pluginRestartRequiredMessage(verdict: PluginRestartRequired): Strin
         "v${verdict.loadedVersion}.$reason\nRestart the IDE to load it."
 }
 
+/** The operator-facing prompt for a native reload that can only recover after an IDE restart. */
+internal fun nativeReloadRestartRequiredMessage(reason: String): String {
+    val shortened =
+        if (reason.length > RESTART_REASON_DISPLAY_LIMIT) {
+            reason.take(RESTART_REASON_DISPLAY_LIMIT).trimEnd() + "..."
+        } else {
+            reason
+        }
+    return "Agent Doc could not safely replace its live editor integration.\n" +
+        "$shortened\nRestart the IDE to finish recovery."
+}
+
 /**
  * Tells the operator, inside the IDE, when an agent-doc install left a plugin generation this
  * running IDE cannot load without a restart, and offers the IDE's own restart action.
@@ -181,6 +193,17 @@ internal object PluginRestartRequiredNotifier {
             notification?.expire()
             notification = null
         }
+    }
+
+    /**
+     * Surface a terminal native-reload verdict immediately. Logging this verdict alone strands the
+     * operator because the failing command already asked for an editor restart. Reuse the same
+     * important notification and IDE-owned restart action as package-update recovery.
+     */
+    fun requestRestart(reason: String) {
+        if (PluginGeneration.retired) return
+        log.warn("[plugin-update] native reload requested IDE restart: $reason")
+        GenerationWork.invokeLater { showNativeReloadRestart(reason) }
     }
 
     private fun poll() {
@@ -242,6 +265,29 @@ internal object PluginRestartRequiredNotifier {
             created.notify(null)
         } catch (error: Throwable) {
             log.warn("[plugin-update] restart-required notification failed", error)
+        }
+    }
+
+    private fun showNativeReloadRestart(reason: String) {
+        if (PluginGeneration.retired) return
+        try {
+            notification?.expire()
+            val created = NotificationGroupManager.getInstance()
+                .getNotificationGroup(NOTIFICATION_GROUP)
+                .createNotification(
+                    "Agent Doc editor restart required",
+                    TerminalUtil.notificationHtml(nativeReloadRestartRequiredMessage(reason)),
+                    NotificationType.WARNING,
+                )
+            created.isImportant = true
+            created.addAction(NotificationAction.createSimpleExpiring("Restart IDE") {
+                ApplicationManager.getApplication().restart()
+            })
+            created.addAction(NotificationAction.createSimpleExpiring("Later") {})
+            notification = created
+            created.notify(null)
+        } catch (error: Throwable) {
+            log.warn("[plugin-update] native-reload restart notification failed", error)
         }
     }
 }

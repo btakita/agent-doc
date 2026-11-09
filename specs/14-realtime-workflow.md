@@ -1665,9 +1665,13 @@ epoch re-delivering the same bytes; when the streak was keyed by epoch, every
 rebuild restarted the backoff at one second and re-armed the next rebuild, so the
 escalation fed itself at ~20 refused saves and four full-bootstrap
 re-registrations a minute. Invariant: for one refused content, the backoff only
-grows to its cap, at most two *delivered* rebuilds are requested (a signal that
-reached no replica is refunded), and after them the capped level-triggered save
-retry continues alone. A rebuild replaces the replica, never the visible buffer,
+grows to its cap, and at most two non-refunded rebuild requests are made.
+A live endpoint's explicit refusal spends the request even though its
+`notified` count is zero; only retryable transport misses are refunded, and at
+most three such misses are refunded before the remaining rebuild budget is
+spent. This bound guarantees the immutable content reaches the durable
+exhausted state instead of staying pending behind an absent or refusing editor.
+A rebuild replaces the replica, never the visible buffer,
 so a refusal that survives both rebuilds is the visible buffer diverging from
 the retained write; the controller logs
 `retained_persistence_replica_rebuild_exhausted ...

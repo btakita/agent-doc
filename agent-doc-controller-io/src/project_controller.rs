@@ -5707,6 +5707,12 @@ const RETAINED_PERSISTENCE_REBUILD_AFTER_REFUSALS: u32 = 3;
 /// ~15 s (2.4 MB per rebuild on a large document) and minted the new delivery
 /// epoch that restarted its own budget.
 const RETAINED_PERSISTENCE_MAX_REPLICA_REBUILDS: u32 = 2;
+/// Replica rebuild requests per refused content that may reach no editor
+/// replica before the rebuild frontier is spent. A transient IPC gap refunds
+/// the request, but an unbounded refund is another silent wait: the same
+/// immutable projection can otherwise rebuild/re-register forever without
+/// ever reaching the durable exhausted state.
+const RETAINED_PERSISTENCE_MAX_UNDELIVERED_REBUILDS: u32 = 3;
 /// `#jetbrainsreplicaloops`: delivered in-place visible roll-forward requests
 /// per refused content, sent on the same every-third-refusal cadence once the
 /// rebuild budget is spent. The first one is the recovery; the second covers a
@@ -5757,6 +5763,8 @@ struct RetainedPersistenceRefusalStreak {
     epoch: u64,
     refusals: u32,
     rebuilds: u32,
+    /// Refunded replica rebuild requests that reached no editor replica.
+    undelivered_rebuilds: u32,
     exhausted_reported: bool,
     roll_forwards: u32,
     /// `#retainedprojectionclobber`: refunded roll-forward requests that
@@ -5877,17 +5885,42 @@ fn retained_persistence_retry_step(
 }
 
 /// `#rebuildconverge`: a rebuild signal that reached no editor replica is not a
-/// rebuild attempt, so it does not spend the per-content budget.
+/// rebuild attempt, so a transient miss does not immediately spend the
+/// per-content budget. The refund is bounded, however: otherwise an absent or
+/// unreachable editor can keep the retained projection pending forever.
+/// Returns `true` when the undelivered bound is reached and the rebuild budget
+/// is spent at once.
 fn refund_undelivered_retained_persistence_rebuild(
     retries: &mut std::collections::HashMap<String, RetainedPersistenceRefusalStreak>,
     key: &str,
     content_hash: &str,
-) {
-    if let Some(entry) = retries.get_mut(key)
-        && entry.content_hash == content_hash
-    {
-        entry.rebuilds = entry.rebuilds.saturating_sub(1);
+) -> bool {
+    let Some(entry) = retries.get_mut(key) else {
+        return false;
+    };
+    if entry.content_hash != content_hash {
+        return false;
     }
+    entry.undelivered_rebuilds = entry.undelivered_rebuilds.saturating_add(1);
+    if entry.undelivered_rebuilds >= RETAINED_PERSISTENCE_MAX_UNDELIVERED_REBUILDS {
+        entry.rebuilds = RETAINED_PERSISTENCE_MAX_REPLICA_REBUILDS;
+        return true;
+    }
+    entry.rebuilds = entry.rebuilds.saturating_sub(1);
+    false
+}
+
+/// A live editor that answered and definitively refused the rebuild did receive
+/// the request. Treating `notified == 0` alone as non-delivery loses that fact
+/// and refunds the rebuild forever. Only retryable transport outcomes qualify
+/// for the bounded refund.
+fn retained_persistence_rebuild_signal_needs_refund(
+    outcome: &agent_doc_crdt_relay_io::ReplicaSignalOutcome,
+) -> bool {
+    matches!(
+        outcome.nonconverging_disposition(),
+        agent_doc_crdt_relay_io::NonconvergingReplicaDisposition::Retry
+    )
 }
 
 /// `#jetbrainsreplicaloops`: a roll-forward request that reached no editor
@@ -7377,7 +7410,7 @@ impl ControllerDocumentGraphs {
                         if let Some(retry) = retry {
                             let mut terminal_recovery = false;
                             if retry.request_replica_rebuild {
-                                let delivered = match agent_doc_crdt_relay_io::signal_crdt_replica_event_with_counts(
+                                let needs_refund = match agent_doc_crdt_relay_io::signal_crdt_replica_event_with_counts(
                                     &file,
                                     agent_doc_crdt_relay_io::CrdtReplicaEventReason::EditorReplicaReregister,
                                     1,
@@ -7399,7 +7432,7 @@ impl ControllerDocumentGraphs {
                                                 RETAINED_PERSISTENCE_MAX_REPLICA_REBUILDS,
                                             ),
                                         );
-                                        outcome.notified > 0
+                                        retained_persistence_rebuild_signal_needs_refund(&outcome)
                                     }
                                     Err(error) => {
                                         agent_doc_ops_log_io::log_op(
@@ -7412,18 +7445,34 @@ impl ControllerDocumentGraphs {
                                                 content_hash,
                                             ),
                                         );
-                                        false
+                                        true
                                     }
                                 };
-                                if !delivered
+                                if needs_refund
                                     && let Some(runtime) = worker_sink.runtime.upgrade()
                                 {
-                                    runtime
+                                    let terminal = runtime
                                         .document_graphs
                                         .refund_retained_persistence_rebuild(
                                             &document_hash,
                                             &content_hash,
                                         );
+                                    if terminal {
+                                        agent_doc_ops_log_io::log_op(
+                                            &file,
+                                            &format!(
+                                                "retained_persistence_replica_rebuild_undelivered_terminal document_hash={} generation={} epoch={} content_hash={} undelivered={} max_undelivered={} rebuilds={} max_rebuilds={}",
+                                                document_hash,
+                                                generation,
+                                                epoch,
+                                                content_hash,
+                                                RETAINED_PERSISTENCE_MAX_UNDELIVERED_REBUILDS,
+                                                RETAINED_PERSISTENCE_MAX_UNDELIVERED_REBUILDS,
+                                                RETAINED_PERSISTENCE_MAX_REPLICA_REBUILDS,
+                                                RETAINED_PERSISTENCE_MAX_REPLICA_REBUILDS,
+                                            ),
+                                        );
+                                    }
                                 }
                             }
                             if retry.report_rebuild_exhausted {
@@ -9133,12 +9182,13 @@ impl ControllerDocumentGraphs {
     }
 
     /// `#rebuildconverge`: return an undelivered rebuild to the content's budget.
-    fn refund_retained_persistence_rebuild(&self, document_hash: &str, content_hash: &str) {
+    /// `true` when the undelivered bound spends the remaining budget.
+    fn refund_retained_persistence_rebuild(&self, document_hash: &str, content_hash: &str) -> bool {
         refund_undelivered_retained_persistence_rebuild(
             &mut self.retained_persistence_retries.lock(),
             document_hash,
             content_hash,
-        );
+        )
     }
 
     /// `#jetbrainsreplicaloops`: return an undelivered roll-forward request.
@@ -30128,31 +30178,108 @@ mod retained_persistence_retry_tests {
     }
 
     #[test]
-    fn an_undelivered_rebuild_signal_does_not_spend_the_budget() {
+    fn undelivered_rebuild_signals_have_a_terminal_bound() {
         let mut retries = std::collections::HashMap::new();
-        let mut delivered = 0;
-        for _ in 0..60 {
+        let mut requested = 0;
+        let mut terminal_at = None;
+        for refusal in 0..120 {
             let decision =
                 retained_persistence_retry_step(&mut retries, "doc", 7, CONTENT, false, false)
                     .unwrap();
             if decision.request_replica_rebuild {
-                // The first three signals reach no editor replica.
-                if delivered < 3 {
-                    refund_undelivered_retained_persistence_rebuild(&mut retries, "doc", CONTENT.0);
+                requested += 1;
+                if refund_undelivered_retained_persistence_rebuild(&mut retries, "doc", CONTENT.0) {
+                    assert!(terminal_at.is_none(), "terminal is reported exactly once");
+                    terminal_at = Some(refusal);
                 }
-                delivered += 1;
             }
         }
         assert_eq!(
-            delivered,
-            3 + RETAINED_PERSISTENCE_MAX_REPLICA_REBUILDS,
-            "undelivered signals are re-armed; delivered ones are bounded"
+            requested, RETAINED_PERSISTENCE_MAX_UNDELIVERED_REBUILDS,
+            "transient misses are refunded only to the terminal bound"
+        );
+        assert!(terminal_at.is_some(), "the undelivered bound is terminal");
+        assert_eq!(
+            retries["doc"].rebuilds, RETAINED_PERSISTENCE_MAX_REPLICA_REBUILDS,
+            "the terminal miss spends the remaining rebuild budget"
         );
         // A refund for different content never touches this streak.
-        refund_undelivered_retained_persistence_rebuild(&mut retries, "doc", "other");
+        assert!(!refund_undelivered_retained_persistence_rebuild(
+            &mut retries,
+            "doc",
+            "other",
+        ));
         assert_eq!(
             retries["doc"].rebuilds,
             RETAINED_PERSISTENCE_MAX_REPLICA_REBUILDS
+        );
+
+        // A real new write starts its own bounded recovery frontier.
+        let next = ("new-content", 11usize);
+        for _ in 0..RETAINED_PERSISTENCE_REBUILD_AFTER_REFUSALS {
+            let decision =
+                retained_persistence_retry_step(&mut retries, "doc", 8, next, false, false)
+                    .unwrap();
+            if decision.request_replica_rebuild {
+                assert_eq!(decision.rebuilds, 1);
+                return;
+            }
+        }
+        panic!("new content must earn a fresh rebuild request");
+    }
+
+    #[test]
+    fn a_definitive_rebuild_refusal_spends_the_budget_instead_of_refunding_it() {
+        let definitive_refusal = agent_doc_crdt_relay_io::ReplicaSignalOutcome {
+            found: 1,
+            notified: 0,
+            build_mismatches: Vec::new(),
+            build_mismatch_refusals: Vec::new(),
+            generation_mismatches: 0,
+            definitive_refusals: 1,
+            dead_endpoints: Vec::new(),
+            endpoint_unregistered: false,
+        };
+        assert_eq!(
+            definitive_refusal.diagnosis(),
+            "definitively_refused_by_all:1"
+        );
+        assert!(
+            !retained_persistence_rebuild_signal_needs_refund(&definitive_refusal),
+            "an answered refusal is a spent request, despite notified=0"
+        );
+
+        let mut retries = std::collections::HashMap::new();
+        let mut rebuilds = Vec::new();
+        let mut exhausted_at = None;
+        for _ in 0..9 {
+            let decision =
+                retained_persistence_retry_step(&mut retries, "doc", 7, CONTENT, false, false)
+                    .unwrap();
+            if decision.request_replica_rebuild {
+                rebuilds.push(decision.rebuilds);
+                assert!(!retained_persistence_rebuild_signal_needs_refund(
+                    &definitive_refusal
+                ));
+            }
+            if decision.report_rebuild_exhausted {
+                exhausted_at = Some(decision.refusals);
+            }
+        }
+        assert_eq!(rebuilds, vec![1, 2]);
+        assert_eq!(
+            exhausted_at,
+            Some(3 * RETAINED_PERSISTENCE_REBUILD_AFTER_REFUSALS),
+            "definitive refusals reach the durable exhausted edge"
+        );
+
+        let transient_failure = agent_doc_crdt_relay_io::ReplicaSignalOutcome {
+            definitive_refusals: 0,
+            ..definitive_refusal
+        };
+        assert!(
+            retained_persistence_rebuild_signal_needs_refund(&transient_failure),
+            "an unanswered transport miss remains eligible for the bounded refund"
         );
     }
 

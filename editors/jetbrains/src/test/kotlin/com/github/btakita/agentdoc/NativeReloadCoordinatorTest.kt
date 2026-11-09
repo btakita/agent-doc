@@ -11,6 +11,27 @@ import java.util.concurrent.TimeUnit
 
 class NativeReloadCoordinatorTest {
     @Test
+    fun `terminal native reload verdict opens the restart prompt`() {
+        val coordinator = Files.readString(
+            listOf(
+                Paths.get("src/main/kotlin/com/github/btakita/agentdoc/NativeReloadCoordinator.kt"),
+                Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/NativeReloadCoordinator.kt"),
+            ).first { Files.exists(it) },
+        )
+        val restartBranch = coordinator.indexOf("is NativeReloadOutcome.RestartRequired ->")
+        val prompt = coordinator.indexOf(
+            "PluginRestartRequiredNotifier.requestRestart(outcome.reason)",
+            startIndex = restartBranch,
+        )
+        val catch = coordinator.indexOf("} catch (error: Throwable)", startIndex = restartBranch)
+
+        assertTrue(
+            "a requested editor restart must be an operator prompt, not a log-only outcome",
+            restartBranch >= 0 && prompt > restartBranch && catch > prompt,
+        )
+    }
+
+    @Test
     fun `reload gate coalesces handoffs and releases waiting actions`() {
         val gate = NativeReloadGate()
         val handoff = gate.begin()

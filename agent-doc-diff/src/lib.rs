@@ -1761,6 +1761,88 @@ pub fn classify_prompt_bearing_changes(diff: &str) -> Vec<PromptBearingChange> {
     suppress_answered_prompt_runs(classify_prompt_bearing_changes_raw(diff))
 }
 
+/// Add the nearest structural list parent to indented one-line prompt targets.
+///
+/// A reply typed below generated response metadata can be as small as `- do`.
+/// The diff classifier correctly recognizes that line as operator intent, but a
+/// bounded document projection otherwise presents only those two words to the
+/// agent. The unchanged parent row in the same hunk is the typed evidence that
+/// identifies which action the reply authorizes. Preserve it here, while the
+/// unified diff still owns both the exact insertion and its structural context.
+///
+/// Targets are matched to added lines in encounter order. That keeps two
+/// identical short replies attached to their respective parents instead of
+/// collapsing them onto the first occurrence.
+pub fn prompt_targets_with_list_parent_context(diff: &str, targets: &[String]) -> Vec<String> {
+    let lines = diff.lines().collect::<Vec<_>>();
+    let mut used_additions = std::collections::HashSet::new();
+
+    targets
+        .iter()
+        .map(|target| {
+            let trimmed = target.trim();
+            let mut non_blank = target.lines().filter(|line| !line.trim().is_empty());
+            let Some(target_line) = non_blank.next() else {
+                return String::new();
+            };
+            if non_blank.next().is_some() {
+                return trimmed.to_string();
+            }
+
+            let target_indent = leading_indent_columns(target_line);
+            if target_indent == 0 || !line_opens_list_item(target_line.trim_start()) {
+                return trimmed.to_string();
+            }
+
+            let Some(target_diff_index) = lines.iter().enumerate().find_map(|(index, line)| {
+                if used_additions.contains(&index) || line.starts_with("+++") {
+                    return None;
+                }
+                line.strip_prefix('+')
+                    .filter(|added| *added == target_line)
+                    .map(|_| index)
+            }) else {
+                return trimmed.to_string();
+            };
+            used_additions.insert(target_diff_index);
+
+            for line in lines[..target_diff_index].iter().rev() {
+                if line.starts_with("@@ ") {
+                    break;
+                }
+                if line.starts_with("--- ") || line.starts_with("+++ ") {
+                    continue;
+                }
+                let Some(content) = line
+                    .strip_prefix(' ')
+                    .or_else(|| line.strip_prefix('+').filter(|_| !line.starts_with("+++")))
+                else {
+                    // Removed rows are not live structural evidence.
+                    continue;
+                };
+                if content.trim().is_empty() {
+                    continue;
+                }
+                let parent_indent = leading_indent_columns(content);
+                if parent_indent >= target_indent {
+                    continue;
+                }
+                if !line_opens_list_item(content.trim_start()) {
+                    break;
+                }
+                return format!(
+                    "{}\n{}{}",
+                    content.trim(),
+                    " ".repeat(target_indent - parent_indent),
+                    target_line.trim_start()
+                );
+            }
+
+            trimmed.to_string()
+        })
+        .collect()
+}
+
 /// True when the change is entirely a managed-component state mutation:
 /// queue activity toggle, queue body item (add/strike), backlog item line,
 /// or done item line. These edits are routine session bookkeeping, not

@@ -73,8 +73,10 @@ pub fn prompt_targets_from_changes(changes: &[agent_doc_diff::PromptBearingChang
 }
 
 pub fn prompt_targets_from_diff(diff_text: &str) -> Vec<String> {
+    let classified = agent_doc_diff::classify_prompt_bearing_changes(diff_text);
+    let raw_targets = prompt_targets_from_changes(&classified);
     let mut targets: Vec<String> =
-        prompt_targets_from_changes(&agent_doc_diff::classify_prompt_bearing_changes(diff_text))
+        agent_doc_diff::prompt_targets_with_list_parent_context(diff_text, &raw_targets)
             .into_iter()
             .map(|text| text.trim().to_string())
             .filter(|text| !text.is_empty())
@@ -899,6 +901,46 @@ mod tests {
         assert_eq!(
             prompt_targets_from_diff(diff),
             vec!["run benchmarks".to_string()]
+        );
+    }
+
+    #[test]
+    fn prompt_targets_from_diff_keep_the_parent_of_a_nested_short_reply() {
+        let diff = concat!(
+            "--- snapshot\n",
+            "+++ document\n",
+            "@@ -1,4 +1,5 @@\n",
+            "       - **Question:** What decision should be recorded? ▫️\n",
+            "       - **Next actions:** ▫️\n",
+            "         - **Action:** Publish the telemetry annotation. ▫️\n",
+            "+          - do\n",
+        );
+
+        assert_eq!(
+            prompt_targets_from_diff(diff),
+            ["- **Action:** Publish the telemetry annotation. ▫️\n  - do"]
+        );
+    }
+
+    #[test]
+    fn prompt_targets_from_diff_pair_duplicate_short_replies_with_their_own_parents() {
+        let diff = concat!(
+            "--- snapshot\n",
+            "+++ document\n",
+            "@@ -1,2 +1,3 @@\n",
+            "     - **Action:** Publish alpha. ▫️\n",
+            "+      - do\n",
+            "@@ -9,2 +10,3 @@\n",
+            "     - **Action:** Publish beta. ▫️\n",
+            "+      - do\n",
+        );
+
+        assert_eq!(
+            prompt_targets_from_diff(diff),
+            [
+                "- **Action:** Publish alpha. ▫️\n  - do",
+                "- **Action:** Publish beta. ▫️\n  - do",
+            ]
         );
     }
 

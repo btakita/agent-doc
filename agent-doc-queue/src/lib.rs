@@ -57,6 +57,7 @@ pub mod queue_set;
 pub mod queue_sync_payload;
 pub mod queue_tree;
 pub mod reported_closeout;
+pub mod restart_recovery;
 pub mod route_dispatch;
 pub mod stale_completion_evidence;
 #[cfg(test)]

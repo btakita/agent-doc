@@ -160,6 +160,28 @@ fn run_with_tmux_in_for_pane(tmux: &Tmux, base_dir: &std::path::Path, pane_id: &
             "To re-establish the claim, run: /agent-doc claim {}",
             entry.file
         );
+        let file = std::path::Path::new(&entry.file);
+        let resolved = if file.is_absolute() {
+            file.to_path_buf()
+        } else {
+            base_dir.join(file)
+        };
+        match agent_doc_queue_io::restart_journal::reconcile(
+            &resolved,
+            agent_doc_queue_io::queue_claim::claim_clock_now_secs(),
+        ) {
+            Ok(projection) => {
+                if let Some(status) =
+                    agent_doc_queue_io::restart_journal::recovery_status_line(&projection)
+                {
+                    println!("Agent Doc recovery: {status}");
+                }
+            }
+            Err(error) => eprintln!(
+                "[autoclaim] restart recovery inspection failed for {}: {error:#}",
+                resolved.display()
+            ),
+        }
     }
 
     Ok(())

@@ -5720,6 +5720,15 @@ enum QueueAction {
         #[arg(long)]
         json: bool,
     },
+    /// Inspect the durable restart journal and print the main/worker recovery
+    /// actions that startup reconciliation will take (`#restartjournal`).
+    Recovery {
+        /// Path to the session document
+        file: PathBuf,
+        /// Print the typed projection as JSON
+        #[arg(long)]
+        json: bool,
+    },
     /// Repair the v0.34 rolling-upgrade completion notices whose binary marker
     /// was written directly beneath a bodyless `### Re:` heading. Rewrites
     /// only those exact heading+marker pairs; does not replay a response,
@@ -10262,6 +10271,22 @@ fn try_main() -> anyhow::Result<()> {
                         refill.render().unwrap_or_else(|| {
                             "[queue] no subagent work pool: no `subagents` queue and no dispatchable subagent head".to_string()
                         })
+                    );
+                }
+                Ok(())
+            }
+            QueueAction::Recovery { file, json } => {
+                let projection = agent_doc_queue_io::restart_journal::reconcile(
+                    &file,
+                    agent_doc_queue_io::queue_claim::claim_clock_now_secs(),
+                )?;
+                if json {
+                    println!("{}", serde_json::to_string(&projection)?);
+                } else {
+                    println!(
+                        "{}",
+                        agent_doc_queue_io::restart_journal::recovery_status_line(&projection)
+                            .unwrap_or_else(|| "[recovery] no resumable work".to_string())
                     );
                 }
                 Ok(())

@@ -1366,6 +1366,33 @@ pub fn run_with_reap_policy_resume_and_harness(
         }
     }
 
+    // `#restartjournal`: hydrate the previous process/boot projection before
+    // publishing this launch. For Codex, the existing session-lineage launch
+    // args perform the actual main-agent resume; the journal makes that edge
+    // visible and joins any worker claims/artifact receipts without replaying
+    // their effects.
+    let restart_now = agent_doc_queue_io::queue_claim::claim_clock_now_secs();
+    let restart_owner = format!("supervisor:{}", std::process::id());
+    let restart_projection =
+        agent_doc_queue_io::restart_journal::reconcile(&canonical, restart_now)?;
+    if let Some(status) =
+        agent_doc_queue_io::restart_journal::recovery_status_line(&restart_projection)
+    {
+        eprintln!("[recovery] {status}");
+        log_event(
+            &mut session_log,
+            &format!("restart_recovery {}", status.replace('\n', "\\n")),
+        );
+    }
+    agent_doc_queue_io::restart_journal::record_main_phase(
+        &canonical,
+        &harness.binary,
+        &restart_owner,
+        session_lineage.active_id(),
+        agent_doc_queue::restart_recovery::MainAgentPhase::Starting,
+        restart_now,
+    )?;
+
     // Query initial terminal size
     let initial_size = {
         #[cfg(unix)]
@@ -2283,6 +2310,18 @@ pub fn run_with_reap_policy_resume_and_harness(
             agent_doc_supervisor_process::pty::PtySession::spawn(cfg)
                 .with_context(|| format!("failed to spawn {}", harness.binary))?
         };
+
+        // A successful spawn/adoption is the durable phase edge. Fence it by
+        // this supervisor owner so an outgoing process cannot overwrite a
+        // replacement process that already published its own checkpoint.
+        let _ = agent_doc_queue_io::restart_journal::record_main_phase_if_owner(
+            &canonical,
+            &harness.binary,
+            &restart_owner,
+            session_lineage.active_id(),
+            agent_doc_queue::restart_recovery::MainAgentPhase::Running,
+            agent_doc_queue_io::queue_claim::claim_clock_now_secs(),
+        )?;
 
         // The selected child is now the actual transport authority. Persist that
         // fact after every successful spawn/adoption, including the initial child:
@@ -3229,6 +3268,14 @@ pub fn run_with_reap_policy_resume_and_harness(
         ),
     );
     log_event(&mut session_log, "session_end");
+    let _ = agent_doc_queue_io::restart_journal::record_main_phase_if_owner(
+        &canonical,
+        &harness.binary,
+        &restart_owner,
+        session_lineage.active_id(),
+        agent_doc_queue::restart_recovery::MainAgentPhase::Completed,
+        agent_doc_queue_io::queue_claim::claim_clock_now_secs(),
+    )?;
     start_console_status(
         &mut session_log,
         route_owned,

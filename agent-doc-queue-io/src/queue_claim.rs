@@ -307,13 +307,24 @@ fn mutate_ledger<T>(
                 &agent_doc_sqlite::state_store::QueueDocumentStateRecord {
                     document_hash: document_hash.clone(),
                     state_kind: QUEUE_CLAIMS_STATE_KIND.to_string(),
-                    canonical_path,
+                    canonical_path: canonical_path.clone(),
                     payload_json: serde_json::to_string(&ledger)
                         .context("serialize queue claim ledger")?,
                     updated_at_secs: now_secs(),
                 },
             )?;
         }
+        // `#restartjournal`: the compact restart projection is a durable sink
+        // written in the same transaction as its authoritative claim cut. It
+        // never arbitrates the live claim transition and cannot expose a newer
+        // claim paired with an older recovery checkpoint after a crash.
+        crate::restart_journal::sync_claims_with_conn(
+            &conn,
+            &document_hash,
+            &canonical_path,
+            &ledger,
+            now_secs(),
+        )?;
         Ok(value)
     })();
     match result {

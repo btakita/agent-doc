@@ -31267,6 +31267,9 @@ fn layout_sync_state_result(
         return (false, "pane_count_mismatch");
     }
     if expected_documents != actual_documents {
+        if foreign_document_columns(expected_documents, actual_documents) {
+            return (false, super::FOREIGN_DOCUMENT_OCCUPANT_REASON);
+        }
         return (false, "pane_order_mismatch");
     }
     if expected_panes.len() == expected_documents.len() && expected_panes != physical_panes {
@@ -31282,6 +31285,47 @@ fn layout_sync_state_result(
         return (false, "focus_pane_mismatch");
     }
     (true, "synced")
+}
+
+/// Same length, and some occupied slot names a document outside the expected
+/// set. A permutation of the same documents stays a reorder. An empty actual
+/// slot is unknown, not a foreign occupant.
+fn foreign_document_columns(expected: &[String], actual: &[String]) -> bool {
+    expected.len() == actual.len()
+        && expected
+            .iter()
+            .zip(actual)
+            .any(|(expected_doc, actual_doc)| {
+                !actual_doc.is_empty()
+                    && actual_doc != expected_doc
+                    && !expected.iter().any(|candidate| candidate == actual_doc)
+            })
+}
+
+fn foreign_document_occupant_reason(
+    reason: &str,
+    expected: &[String],
+    actual: &[String],
+) -> String {
+    if reason != super::FOREIGN_DOCUMENT_OCCUPANT_REASON {
+        return reason.to_string();
+    }
+    let Some((expected_doc, occupant)) =
+        expected
+            .iter()
+            .zip(actual)
+            .find(|(expected_doc, actual_doc)| {
+                !actual_doc.is_empty()
+                    && *actual_doc != *expected_doc
+                    && !expected.iter().any(|candidate| candidate == *actual_doc)
+            })
+    else {
+        return reason.to_string();
+    };
+    format!(
+        "{} expected={expected_doc} occupant={occupant}",
+        super::FOREIGN_DOCUMENT_OCCUPANT_REASON
+    )
 }
 
 fn layout_sync_state_expected_panes(
@@ -34555,6 +34599,7 @@ fn tmux_layout_sync_state_for_invocation_in_session(
         expected_focus_pane.as_deref(),
         active_pane.as_deref(),
     );
+    let reason = foreign_document_occupant_reason(reason, &expected_documents, &actual_documents);
     let mut report = layout_sync_state_report(
         synced,
         reason,
@@ -36958,6 +37003,40 @@ struct PaneLayoutFocusCoVisibility<'a, F: FnOnce(&str) -> Option<LivePaneWindow>
 /// A refusal keeps `applied: false`, so the caller neither converges nor counts
 /// it toward `observation=synced`; the structural reconcile runs and the retry
 /// focuses the pane once it is back in the layout window.
+/// None means the argv document is unknown and focus may still select.
+/// A different canonical document must not be selected: `select-pane` also
+/// runs `select-window` and pulls the operator onto that pane's window.
+fn foreign_focus_block_reason(
+    project_root: &Path,
+    focus: &str,
+    pane: &str,
+    occupant: Option<&str>,
+) -> Option<String> {
+    let occupant = occupant?;
+    let occupant_id = canonical_layout_document_id(project_root, occupant);
+    let focus_id = canonical_layout_document_id(project_root, focus);
+    if occupant_id.is_empty() || occupant_id == focus_id {
+        return None;
+    }
+    Some(format!(
+        "focus_foreign_document_occupant:{focus}:{pane}:expected={focus_id}:occupant={occupant_id}"
+    ))
+}
+
+#[cfg(test)]
+fn no_foreign_argv_document(_pane: &str) -> Option<String> {
+    None
+}
+
+fn layout_focus_argv_document(
+    tmux: &tmux_router::Tmux,
+    project_root: &Path,
+    pane: &str,
+) -> Option<String> {
+    live_pane_process_owner_document(tmux, pane, project_root)
+        .map(|path| path.to_string_lossy().into_owned())
+}
+
 #[allow(clippy::too_many_arguments)]
 fn apply_pane_layout_focus_effect(
     project_root: &Path,
@@ -36967,6 +37046,7 @@ fn apply_pane_layout_focus_effect(
     focus_suppressed: bool,
     file_panes: &[(String, String)],
     co_visibility: PaneLayoutFocusCoVisibility<'_, impl FnOnce(&str) -> Option<LivePaneWindow>>,
+    pane_argv_document: impl FnOnce(&str) -> Option<String>,
     select_pane: impl FnOnce(&str) -> Result<()>,
 ) -> PaneLayoutFocusEffectReceipt {
     let PaneLayoutFocusCoVisibility {
@@ -37061,6 +37141,19 @@ fn apply_pane_layout_focus_effect(
         };
     }
 
+    if let Some(reason) = foreign_focus_block_reason(
+        project_root,
+        focus,
+        pane,
+        pane_argv_document(pane).as_deref(),
+    ) {
+        return PaneLayoutFocusEffectReceipt {
+            required: true,
+            applied: false,
+            reason,
+        };
+    }
+
     let state = worker_state.lock();
     if state.is_superseded(generation) {
         return PaneLayoutFocusEffectReceipt {
@@ -37107,6 +37200,7 @@ fn apply_editor_route_fast_focus_effect(
     input: EditorRouteFastFocusInput<'_>,
     mut observe_pane_window: impl FnMut(&str) -> Option<LivePaneWindow>,
     promote_pane: impl FnOnce(&str) -> Result<bool>,
+    pane_argv_document: impl FnOnce(&str) -> Option<String>,
     select_pane: impl FnOnce(&str) -> Result<()>,
 ) -> (PaneLayoutFocusEffectReceipt, Vec<(String, String)>) {
     let EditorRouteFastFocusInput {
@@ -37147,6 +37241,21 @@ fn apply_editor_route_fast_focus_effect(
     };
     let file_panes = vec![(binding.document_path.clone(), binding.pane_id.clone())];
     let pane = binding.pane_id.as_str();
+    if let Some(reason) = foreign_focus_block_reason(
+        project_root,
+        focus,
+        pane,
+        pane_argv_document(pane).as_deref(),
+    ) {
+        return (
+            PaneLayoutFocusEffectReceipt {
+                required: true,
+                applied: false,
+                reason,
+            },
+            file_panes,
+        );
+    }
     let Some(layout_window) = layout_window
         .map(str::trim)
         .filter(|window| !window.is_empty())
@@ -37691,6 +37800,7 @@ fn pane_layout_effect_worker(
                 },
                 |pane| observe_pane_window_id(&tmux, pane),
                 |pane| runtime_effects()?.promote_pane_to_agent_doc_window(&tmux, pane),
+                |pane| layout_focus_argv_document(&tmux, &bootstrap.project_root, pane),
                 |pane| tmux.select_pane(pane),
             ))
         } else {
@@ -37749,6 +37859,7 @@ fn pane_layout_effect_worker(
                     layout_window: layout_window.as_deref(),
                     observe_pane_window: |pane| observe_pane_window_id(&tmux, pane),
                 },
+                |pane| layout_focus_argv_document(&tmux, &bootstrap.project_root, pane),
                 |pane| tmux.select_pane(pane),
             );
             // `#tmuxautosyncwedge`: a supersede must not short-circuit the
@@ -37769,89 +37880,134 @@ fn pane_layout_effect_worker(
                 &reusable.file_panes,
                 lane_observation_session.as_deref(),
             );
-            if let Ok(report) = fresh_report
-                && tmux_layout_effect_state_converged(
+            if let Ok(report) = fresh_report {
+                if report
+                    .reason
+                    .starts_with(super::FOREIGN_DOCUMENT_OCCUPANT_REASON)
+                {
+                    let focus_reason = focus_receipt.reason.clone();
+                    let observation_reason = report.reason.clone();
+                    graph.record_observation(PaneLayoutObservation {
+                        generation: desired.generation,
+                        actor_bindings: actor_bindings.clone(),
+                        report,
+                    });
+                    graph.record_receipt(PaneLayoutEffectReceipt {
+                        generation: desired.generation,
+                        actor_bindings: actor_bindings.clone(),
+                        attempt,
+                        phase: PaneLayoutEffectPhase::Refused,
+                        reason: format!("{observation_reason}; {focus_reason}"),
+                        file_panes: reusable.file_panes.clone(),
+                        focus_required,
+                        focus_applied: focus_receipt.applied,
+                    });
+                    publish_pane_layout_lane_status(&runtime, &lane);
+                    agent_doc_ops_log_io::log_op(
+                        &bootstrap.project_root,
+                        &format!(
+                            "tmux_layout_effect_state generation={} attempt={} {} phase=refused observation={} effect=focus_only focus={} caller_kind={}",
+                            desired.generation,
+                            attempt,
+                            tmux_layout_effect_state_provenance(&desired),
+                            observation_reason,
+                            focus_reason,
+                            desired.invocation.caller_kind,
+                        ),
+                    );
+                    match pane_layout_effect_worker_complete(
+                        &graph,
+                        &state,
+                        work_revision,
+                        desired.generation,
+                    ) {
+                        PaneLayoutAttemptCompletion::Retire => return,
+                        PaneLayoutAttemptCompletion::Superseded
+                        | PaneLayoutAttemptCompletion::RetryCurrent => continue,
+                    }
+                }
+                if tmux_layout_effect_state_converged(
                     report.synced,
                     focus_required,
                     observation_invocation.focus.is_some(),
                     focus_receipt.applied,
-                )
-            {
-                let focus_reason = focus_receipt.reason.clone();
-                let logged_expected_documents = report.expected_documents.clone();
-                let logged_actual_documents = report.actual_documents.clone();
-                let logged_panes = report.panes.clone();
-                let logged_expected_focus_pane = report.expected_focus_pane.clone();
-                let logged_active_pane = report.active_pane.clone();
-                let surface_tmux = tmux_layout_from_sync_report(&report, &desired);
-                graph.record_observation(PaneLayoutObservation {
-                    generation: desired.generation,
-                    actor_bindings: actor_bindings.clone(),
-                    report,
-                });
-                graph.record_receipt(PaneLayoutEffectReceipt {
-                    generation: desired.generation,
-                    actor_bindings: actor_bindings.clone(),
-                    attempt,
-                    phase: PaneLayoutEffectPhase::Converged,
-                    reason: format!("reused_structural_layout; {focus_reason}"),
-                    file_panes: reusable.file_panes,
-                    focus_required,
-                    focus_applied: focus_receipt.applied,
-                });
-                publish_pane_layout_lane_status(&runtime, &lane);
-                if let Some(layout) = surface_tmux {
-                    runtime.editor_surface_graph.observe_tmux_for_lane(
-                        &bootstrap.project_root,
-                        &lane,
-                        Some(layout),
-                    );
-                }
-                record_pane_layout_outcome_diagnostic(
-                    &bootstrap.project_root,
-                    desired.generation,
-                    attempt,
-                    "converged_focus_only",
-                    &logged_expected_documents,
-                    &logged_actual_documents,
-                );
-                agent_doc_ops_log_io::log_op(
-                    &bootstrap.project_root,
-                    &format!(
-                        "tmux_layout_effect_state generation={} attempt={} {} phase=converged observation=reused_structural_layout effect=focus_only focus={} expected={:?} actual={:?} panes={:?} expected_focus_pane={:?} active_pane={:?} caller_kind={} column_order={}",
-                        desired.generation,
-                        attempt,
-                        tmux_layout_effect_state_provenance(&desired),
-                        focus_reason,
-                        logged_expected_documents,
-                        logged_actual_documents,
-                        logged_panes,
-                        logged_expected_focus_pane,
-                        logged_active_pane,
-                        desired.invocation.caller_kind,
-                        desired.invocation.column_order,
-                    ),
-                );
-                match pane_layout_effect_worker_complete(
-                    &graph,
-                    &state,
-                    work_revision,
-                    desired.generation,
                 ) {
-                    PaneLayoutAttemptCompletion::Retire => return,
-                    PaneLayoutAttemptCompletion::Superseded => {}
-                    PaneLayoutAttemptCompletion::RetryCurrent => {
-                        let _superseded = pane_layout_effect_worker_wait_for_retry(
+                    let focus_reason = focus_receipt.reason.clone();
+                    let logged_expected_documents = report.expected_documents.clone();
+                    let logged_actual_documents = report.actual_documents.clone();
+                    let logged_panes = report.panes.clone();
+                    let logged_expected_focus_pane = report.expected_focus_pane.clone();
+                    let logged_active_pane = report.active_pane.clone();
+                    let surface_tmux = tmux_layout_from_sync_report(&report, &desired);
+                    graph.record_observation(PaneLayoutObservation {
+                        generation: desired.generation,
+                        actor_bindings: actor_bindings.clone(),
+                        report,
+                    });
+                    graph.record_receipt(PaneLayoutEffectReceipt {
+                        generation: desired.generation,
+                        actor_bindings: actor_bindings.clone(),
+                        attempt,
+                        phase: PaneLayoutEffectPhase::Converged,
+                        reason: format!("reused_structural_layout; {focus_reason}"),
+                        file_panes: reusable.file_panes,
+                        focus_required,
+                        focus_applied: focus_receipt.applied,
+                    });
+                    publish_pane_layout_lane_status(&runtime, &lane);
+                    if let Some(layout) = surface_tmux {
+                        runtime.editor_surface_graph.observe_tmux_for_lane(
                             &bootstrap.project_root,
-                            &state,
-                            &wake,
-                            work_revision,
-                            desired.generation,
-                            attempt,
+                            &lane,
+                            Some(layout),
                         );
                     }
+                    record_pane_layout_outcome_diagnostic(
+                        &bootstrap.project_root,
+                        desired.generation,
+                        attempt,
+                        "converged_focus_only",
+                        &logged_expected_documents,
+                        &logged_actual_documents,
+                    );
+                    agent_doc_ops_log_io::log_op(
+                        &bootstrap.project_root,
+                        &format!(
+                            "tmux_layout_effect_state generation={} attempt={} {} phase=converged observation=reused_structural_layout effect=focus_only focus={} expected={:?} actual={:?} panes={:?} expected_focus_pane={:?} active_pane={:?} caller_kind={} column_order={}",
+                            desired.generation,
+                            attempt,
+                            tmux_layout_effect_state_provenance(&desired),
+                            focus_reason,
+                            logged_expected_documents,
+                            logged_actual_documents,
+                            logged_panes,
+                            logged_expected_focus_pane,
+                            logged_active_pane,
+                            desired.invocation.caller_kind,
+                            desired.invocation.column_order,
+                        ),
+                    );
+                    match pane_layout_effect_worker_complete(
+                        &graph,
+                        &state,
+                        work_revision,
+                        desired.generation,
+                    ) {
+                        PaneLayoutAttemptCompletion::Retire => return,
+                        PaneLayoutAttemptCompletion::Superseded => {}
+                        PaneLayoutAttemptCompletion::RetryCurrent => {
+                            let _superseded = pane_layout_effect_worker_wait_for_retry(
+                                &bootstrap.project_root,
+                                &state,
+                                &wake,
+                                work_revision,
+                                desired.generation,
+                                attempt,
+                            );
+                        }
+                    }
+                    continue;
                 }
-                continue;
             }
         }
 
@@ -37956,6 +38112,7 @@ fn pane_layout_effect_worker(
                     layout_window: layout_window.as_deref(),
                     observe_pane_window: |pane| observe_pane_window_id(&tmux, pane),
                 },
+                |pane| layout_focus_argv_document(&tmux, &bootstrap.project_root, pane),
                 |pane| tmux.select_pane(pane),
             )
         } else {
@@ -38051,8 +38208,17 @@ fn pane_layout_effect_worker(
             observation_invocation.focus.is_some(),
             focus_receipt.applied,
         );
-        let effect_refused = !synced && terminal_effect_refusal;
         let observation_reason = report.reason.clone();
+        let phase = pane_layout_effect_phase_after_observation(
+            synced,
+            observation_reason.starts_with(super::FOREIGN_DOCUMENT_OCCUPANT_REASON),
+            terminal_effect_refusal,
+        );
+        let phase_label = match phase {
+            PaneLayoutEffectPhase::Converged => "converged",
+            PaneLayoutEffectPhase::Refused => "refused",
+            _ => "retry_pending",
+        };
         let focus_reason = focus_receipt.reason.clone();
         let logged_expected_documents = report.expected_documents.clone();
         let logged_actual_documents = report.actual_documents.clone();
@@ -38084,13 +38250,7 @@ fn pane_layout_effect_worker(
             generation: desired.generation,
             actor_bindings,
             attempt,
-            phase: if synced {
-                PaneLayoutEffectPhase::Converged
-            } else if effect_refused {
-                PaneLayoutEffectPhase::Refused
-            } else {
-                PaneLayoutEffectPhase::RetryPending
-            },
+            phase,
             reason: if synced {
                 format!("observed_layout_and_focus_convergence; {focus_reason}")
             } else {
@@ -38112,13 +38272,7 @@ fn pane_layout_effect_worker(
             &bootstrap.project_root,
             desired.generation,
             attempt,
-            if synced {
-                "converged"
-            } else if effect_refused {
-                "refused"
-            } else {
-                "retry_pending"
-            },
+            phase_label,
             &logged_expected_documents,
             &logged_actual_documents,
         );
@@ -38129,13 +38283,7 @@ fn pane_layout_effect_worker(
                 desired.generation,
                 attempt,
                 tmux_layout_effect_state_provenance(&desired),
-                if synced {
-                    "converged"
-                } else if effect_refused {
-                    "refused"
-                } else {
-                    "retry_pending"
-                },
+                phase_label,
                 observation_reason,
                 effect_reason,
                 focus_reason,
@@ -38308,6 +38456,20 @@ enum PaneLayoutAttemptCompletion {
     Retire,
     RetryCurrent,
     Superseded,
+}
+
+fn pane_layout_effect_phase_after_observation(
+    synced: bool,
+    foreign_occupant: bool,
+    terminal_effect_refusal: bool,
+) -> PaneLayoutEffectPhase {
+    if synced {
+        PaneLayoutEffectPhase::Converged
+    } else if foreign_occupant || terminal_effect_refusal {
+        PaneLayoutEffectPhase::Refused
+    } else {
+        PaneLayoutEffectPhase::RetryPending
+    }
 }
 
 fn pane_layout_attempt_completion(
@@ -39029,6 +39191,36 @@ fn process_tree_exactly_owns_document(
         &pane_pid.to_string(),
         &file.to_string_lossy(),
     )
+}
+
+/// Another document's live supervisor, after the GH #89 rename exception.
+/// A missing old argv path stays free so a renamed document can reuse its pane.
+/// An argv that still names a different existing file does not.
+#[cfg(not(any(test, feature = "test-support")))]
+fn pane_occupied_by_other_document(tmux: &tmux_router::Tmux, pane_id: &str, file: &Path) -> bool {
+    let Some(pane_pid) = agent_doc_tmux_io::pane_pid(tmux, pane_id) else {
+        return false;
+    };
+    let pane_pid = pane_pid.to_string();
+    if agent_doc_process_owner_io::process_tree_runs_unmanaged_harness_session(&pane_pid) {
+        return false;
+    }
+    let Some(other) =
+        agent_doc_process_owner_io::process_tree_owner_document_other_than(&pane_pid, file)
+    else {
+        return false;
+    };
+    let base_dir = agent_doc_session_registry_io::dispatch_registry::registry_base_dir_for_dispatch(
+        &file.to_string_lossy(),
+    );
+    match agent_doc_session_registry_io::dispatch_registry::load_registry_in(&base_dir) {
+        Ok(registry) => {
+            !agent_doc_session_registry_io::dispatch_registry::argv_owner_is_stale_spawn_identity(
+                &registry, pane_id, file, &other, &base_dir,
+            )
+        }
+        Err(_) => true,
+    }
 }
 
 fn session_log_owner_signals_prove_focus(
@@ -40709,25 +40901,33 @@ fn await_lane_sync_tmux_layout_effect(
             });
         }
         let effect_state = graph.await_generation(desired.generation, await_timeout);
-        let (applied, reason) = pane_layout_await_outcome(&effect_state, desired.generation);
+        let (await_applied, await_reason) =
+            pane_layout_await_outcome(&effect_state, desired.generation);
         let current = tmux_layout_effect_state_desired(&effect_state);
         let receipt_generation = current
             .map(|current| current.generation)
             .unwrap_or(desired.generation);
+        let closeout = pane_layout_command_receipt(
+            &graph,
+            receipt_generation,
+            await_applied,
+            await_reason,
+            invocation.window.clone(),
+        );
         Ok(ControllerTmuxLayoutSyncReceipt {
             gated_documents: Vec::new(),
-            applied,
-            reason: reason.to_string(),
+            applied: closeout.applied,
+            reason: closeout.reason,
             columns: invocation.columns,
             layout_generation: current.map(|current| current.generation),
             layout_publisher: current
                 .map(|current| current.provenance.publisher.label().to_string()),
-            window: invocation.window,
+            window: closeout.window,
             focus: invocation.focus,
             no_autostart: invocation.no_autostart,
             exact_visible: invocation.exact_visible,
             routes_created_panes,
-            file_panes: graph.effect_file_panes(receipt_generation),
+            file_panes: closeout.file_panes,
         })
     }
 }
@@ -40907,26 +41107,34 @@ fn await_sync_tmux_layout_effect_in_lane(
             ));
         }
         let effect_state = graph.await_generation(desired.generation, await_timeout);
-        let (applied, reason) = pane_layout_await_outcome(&effect_state, desired.generation);
+        let (await_applied, await_reason) =
+            pane_layout_await_outcome(&effect_state, desired.generation);
         let receipt_generation = tmux_layout_effect_state_desired(&effect_state)
             .map(|current| current.generation)
             .unwrap_or(desired.generation);
         let routes_created_panes = invocation.routes_created_panes();
+        let closeout = pane_layout_command_receipt(
+            &graph,
+            receipt_generation,
+            await_applied,
+            await_reason,
+            invocation.window.clone(),
+        );
         Ok(ControllerTmuxLayoutSyncReceipt {
             gated_documents: Vec::new(),
-            applied,
-            reason: reason.to_string(),
+            applied: closeout.applied,
+            reason: closeout.reason,
             columns: invocation.columns,
             layout_generation: tmux_layout_effect_state_desired(&effect_state)
                 .map(|current| current.generation),
             layout_publisher: tmux_layout_effect_state_desired(&effect_state)
                 .map(|current| current.provenance.publisher.label().to_string()),
-            window: invocation.window,
+            window: closeout.window,
             focus: invocation.focus,
             no_autostart: invocation.no_autostart,
             exact_visible: invocation.exact_visible,
             routes_created_panes,
-            file_panes: graph.effect_file_panes(receipt_generation),
+            file_panes: closeout.file_panes,
         })
     }
 }
@@ -41107,6 +41315,74 @@ fn pane_layout_route_await_outcome(
     }
 }
 
+#[cfg_attr(feature = "test-support", allow(dead_code))]
+struct PaneLayoutCommandCloseout {
+    applied: bool,
+    reason: String,
+    file_panes: Vec<(String, String)>,
+    window: Option<String>,
+}
+
+/// A foreign-occupant refusal is the command result even when actor-binding
+/// drift made the awaited effect state look like the effect never started.
+/// File panes and the observed window come from that refusal. Other outcomes
+/// keep the invocation window and the applicable pane list.
+#[cfg_attr(feature = "test-support", allow(dead_code))]
+fn pane_layout_command_closeout(
+    await_applied: bool,
+    await_reason: &str,
+    invocation_window: Option<String>,
+    applicable_file_panes: Vec<(String, String)>,
+    recorded_reason: Option<&str>,
+    recorded_file_panes: &[(String, String)],
+    observation_window: Option<String>,
+) -> PaneLayoutCommandCloseout {
+    let foreign = recorded_reason
+        .is_some_and(|reason| reason.contains(super::FOREIGN_DOCUMENT_OCCUPANT_REASON));
+    if !foreign {
+        return PaneLayoutCommandCloseout {
+            applied: await_applied,
+            reason: await_reason.to_string(),
+            file_panes: applicable_file_panes,
+            window: invocation_window,
+        };
+    }
+    let file_panes = if recorded_file_panes.is_empty() {
+        applicable_file_panes
+    } else {
+        recorded_file_panes.to_vec()
+    };
+    PaneLayoutCommandCloseout {
+        applied: false,
+        reason: recorded_reason.unwrap_or(await_reason).to_string(),
+        file_panes,
+        window: invocation_window.or(observation_window),
+    }
+}
+
+#[cfg(not(any(test, feature = "test-support")))]
+fn pane_layout_command_receipt(
+    graph: &ControllerPaneLayoutGraph,
+    generation: u64,
+    await_applied: bool,
+    await_reason: &str,
+    invocation_window: Option<String>,
+) -> PaneLayoutCommandCloseout {
+    let recorded = graph.recorded_effect_receipt(generation);
+    pane_layout_command_closeout(
+        await_applied,
+        await_reason,
+        invocation_window,
+        graph.effect_file_panes(generation),
+        recorded.as_ref().map(|receipt| receipt.reason.as_str()),
+        recorded
+            .as_ref()
+            .map(|receipt| receipt.file_panes.as_slice())
+            .unwrap_or(&[]),
+        graph.observation_window(generation),
+    )
+}
+
 #[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
 fn pane_layout_await_outcome(
     effect_state: &TmuxLayoutEffectState,
@@ -41160,6 +41436,52 @@ mod tmux_layout_effect_state_dispatch_tests {
             layout_authority: None,
             editor_column_authority: false,
         }
+    }
+
+    #[test]
+    fn foreign_occupant_closeout_keeps_the_mismatch_and_the_panes() {
+        let panes = vec![
+            (
+                "/repo/tasks/agent-doc-bugs.md".to_string(),
+                "%2".to_string(),
+            ),
+            ("/repo/tasks/sdk-dev.md".to_string(), "%11".to_string()),
+        ];
+        let reason = "foreign_document_occupant expected=/repo/tasks/agent-doc-bugs.md occupant=/repo/tasks/infra.md";
+        let closeout = pane_layout_command_closeout(
+            false,
+            "tmux_effect_not_started",
+            None,
+            Vec::new(),
+            Some(reason),
+            &panes,
+            Some("@2".to_string()),
+        );
+        assert!(!closeout.applied);
+        assert_eq!(closeout.reason, reason);
+        assert_eq!(closeout.file_panes, panes);
+        assert_eq!(closeout.window.as_deref(), Some("@2"));
+
+        let ordinary = pane_layout_command_closeout(
+            false,
+            "tmux_effect_not_started",
+            None,
+            Vec::new(),
+            Some("pane_order_mismatch"),
+            &panes,
+            Some("@2".to_string()),
+        );
+        assert_eq!(ordinary.reason, "tmux_effect_not_started");
+        assert!(ordinary.file_panes.is_empty());
+        assert!(ordinary.window.is_none());
+        assert_eq!(
+            pane_layout_effect_phase_after_observation(false, true, false),
+            PaneLayoutEffectPhase::Refused
+        );
+        assert_eq!(
+            pane_layout_effect_phase_after_observation(false, false, false),
+            PaneLayoutEffectPhase::RetryPending
+        );
     }
 
     #[test]
@@ -41365,6 +41687,7 @@ mod tmux_layout_effect_state_dispatch_tests {
                     )))
                 },
             },
+            no_foreign_argv_document,
             |pane| {
                 selected = Some(pane.to_string());
                 Ok(())
@@ -41403,12 +41726,90 @@ mod tmux_layout_effect_state_dispatch_tests {
                     )))
                 },
             },
+            no_foreign_argv_document,
             |pane| {
                 selected = Some(pane.to_string());
                 Ok(())
             },
         );
         (selected, receipt)
+    }
+
+    #[test]
+    fn focus_effect_does_not_select_a_pane_running_another_document() {
+        let state =
+            Mutex::new(agent_doc_controller::pane_layout::LatestTmuxEffectWorkerState::default());
+        assert!(state.lock().schedule(7));
+        let file_panes = vec![
+            (
+                "/project/tasks/agent-doc-bugs.md".to_string(),
+                "%2".to_string(),
+            ),
+            ("/project/tasks/sdk-dev.md".to_string(), "%11".to_string()),
+        ];
+        let co_visible = PaneLayoutFocusCoVisibility {
+            layout_window: Some("@2"),
+            observe_pane_window: |_| {
+                Some(LivePaneWindow::from((
+                    "@2".to_string(),
+                    "agent-doc".to_string(),
+                )))
+            },
+        };
+        let mut selected = None;
+        let receipt = apply_pane_layout_focus_effect(
+            Path::new("/project"),
+            &state,
+            7,
+            Some("/project/tasks/agent-doc-bugs.md"),
+            false,
+            &file_panes,
+            co_visible,
+            |_| Some("/project/tasks/infra.md".to_string()),
+            |pane| {
+                selected = Some(pane.to_string());
+                Ok(())
+            },
+        );
+        assert!(selected.is_none());
+        assert!(!receipt.applied);
+        assert!(
+            receipt
+                .reason
+                .contains("focus_foreign_document_occupant:/project/tasks/agent-doc-bugs.md:%2"),
+            "{}",
+            receipt.reason
+        );
+        assert!(receipt.reason.contains("occupant=/project/tasks/infra.md"));
+
+        let state =
+            Mutex::new(agent_doc_controller::pane_layout::LatestTmuxEffectWorkerState::default());
+        assert!(state.lock().schedule(7));
+        let mut selected = None;
+        let receipt = apply_pane_layout_focus_effect(
+            Path::new("/project"),
+            &state,
+            7,
+            Some("/project/tasks/agent-doc-bugs.md"),
+            false,
+            &file_panes,
+            PaneLayoutFocusCoVisibility {
+                layout_window: Some("@2"),
+                observe_pane_window: |_| {
+                    Some(LivePaneWindow::from((
+                        "@2".to_string(),
+                        "agent-doc".to_string(),
+                    )))
+                },
+            },
+            |_| Some("/project/tasks/agent-doc-bugs.md".to_string()),
+            |pane| {
+                selected = Some(pane.to_string());
+                Ok(())
+            },
+        );
+        assert_eq!(selected.as_deref(), Some("%2"));
+        assert!(receipt.applied);
     }
 
     /// `#focusmatchcanonical`: the focus effect matches a pane by canonical
@@ -41550,6 +41951,7 @@ mod tmux_layout_effect_state_dispatch_tests {
                 promoted.set(true);
                 Ok(true)
             },
+            no_foreign_argv_document,
             |pane| {
                 assert_eq!(pane, "%15");
                 selected.set(true);
@@ -41635,6 +42037,7 @@ mod tmux_layout_effect_state_dispatch_tests {
                     )))
                 },
             },
+            no_foreign_argv_document,
             |pane| {
                 selected = Some(pane.to_string());
                 Ok(())
@@ -41720,6 +42123,7 @@ mod tmux_layout_effect_state_dispatch_tests {
                         )))
                     },
                 },
+                no_foreign_argv_document,
                 |pane| {
                     selected = Some(pane.to_string());
                     Ok(())
@@ -41779,6 +42183,7 @@ mod tmux_layout_effect_state_dispatch_tests {
                         })
                     },
                 },
+                no_foreign_argv_document,
                 |pane| {
                     selected = Some(pane.to_string());
                     Ok(())
@@ -41863,6 +42268,7 @@ mod tmux_layout_effect_state_dispatch_tests {
                         )))
                     },
                 },
+                no_foreign_argv_document,
                 |pane| {
                     selected = Some(pane.to_string());
                     Ok(())
@@ -41905,6 +42311,7 @@ mod tmux_layout_effect_state_dispatch_tests {
                     )))
                 },
             },
+            no_foreign_argv_document,
             |pane| {
                 selected = Some(pane.to_string());
                 Ok(())
@@ -41953,6 +42360,7 @@ mod tmux_layout_effect_state_dispatch_tests {
                     layout_window,
                     observe_pane_window: |_| live_window.clone().map(LivePaneWindow::from),
                 },
+                no_foreign_argv_document,
                 |pane| {
                     selected = Some(pane.to_string());
                     Ok(())
@@ -42067,6 +42475,7 @@ mod tmux_layout_effect_state_dispatch_tests {
                     )))
                 },
             },
+            no_foreign_argv_document,
             |_| {
                 selected = true;
                 Ok(())
@@ -43171,6 +43580,7 @@ fn supervisor_replacement_pane_start_decision(
     current_command: Option<&str>,
     document_harness_binary: Option<&str>,
     process_tree_owns_document: bool,
+    occupied_by_other_document: bool,
 ) -> SupervisorReplacementPaneDecision {
     let current_command = current_command
         .map(str::trim)
@@ -43190,6 +43600,7 @@ fn supervisor_replacement_pane_start_decision(
             current_command_is_shell: current_command
                 .is_some_and(agent_doc_tmux::pane_current_command_is_bare_shell),
             runs_document_harness: runs_own_harness,
+            occupied_by_other_document,
         },
     )
 }
@@ -43986,12 +44397,15 @@ fn cold_start_supervisor_replacement(work: &SupervisorReplacementWork) -> Result
         } else {
             None
         };
+        let occupied_by_other_document =
+            pane_occupied_by_other_document(&tmux, &work.pane_id, &work.file);
         let initial_pane_decision = supervisor_replacement_pane_start_decision(
             intent,
             pane_alive,
             current_command.as_deref(),
             Some(document_harness.as_str()),
             process_tree_exactly_owns_document(&tmux, &work.pane_id, &work.file),
+            occupied_by_other_document,
         );
         if initial_pane_decision == SupervisorReplacementPaneDecision::PreserveLiveHarness {
             agent_doc_ops_log_io::log_op(
@@ -44054,6 +44468,7 @@ fn cold_start_supervisor_replacement(work: &SupervisorReplacementWork) -> Result
             agent_doc_tmux_io::target_current_command(&tmux, &work.pane_id).as_deref(),
             Some(document_harness.as_str()),
             process_tree_exactly_owns_document(&tmux, &work.pane_id, &work.file),
+            occupied_by_other_document,
         ) {
             SupervisorReplacementPaneDecision::PreserveExistingShell => {
                 if refuse_missing_resume {
@@ -44165,6 +44580,19 @@ fn cold_start_supervisor_replacement(work: &SupervisorReplacementWork) -> Result
                     "supervisor recovery for {} still observes its live {document_harness} session in pane {}; preserving it without starting another conversation",
                     work.file.display(),
                     work.pane_id
+                );
+            }
+            SupervisorReplacementPaneDecision::RelinquishForeignDocument => {
+                agent_doc_ops_log_io::log_op(
+                    &work.file,
+                    &format!(
+                        "controller_supervisor_replacement_foreign_pane_relinquished mode={} session={} pane={} generation={} receipt_id={} action=bind_free_pane",
+                        work.mode,
+                        work.session_id,
+                        work.pane_id,
+                        work.generation,
+                        work.operator_receipt_id,
+                    ),
                 );
             }
             SupervisorReplacementPaneDecision::AutoStartNew => {}
@@ -60603,6 +61031,32 @@ mod tests {
     }
 
     #[test]
+    fn tmux_layout_sync_state_result_names_a_foreign_document_occupant() {
+        let expected = vec![
+            "/repo/tasks/agent-doc-bugs.md".to_string(),
+            "/repo/tasks/sdk-dev.md".to_string(),
+        ];
+        let actual = vec![
+            "/repo/tasks/infra.md".to_string(),
+            "/repo/tasks/sdk-dev.md".to_string(),
+        ];
+        assert_eq!(
+            layout_sync_state_result(&expected, &actual, &[], &[], false, None, None),
+            (false, "foreign_document_occupant")
+        );
+        assert_eq!(
+            foreign_document_occupant_reason("foreign_document_occupant", &expected, &actual),
+            "foreign_document_occupant expected=/repo/tasks/agent-doc-bugs.md occupant=/repo/tasks/infra.md"
+        );
+        let unknown = vec![String::new(), expected[1].clone()];
+        assert_eq!(
+            layout_sync_state_result(&expected, &unknown, &[], &[], false, None, None),
+            (false, "pane_order_mismatch"),
+            "an empty actual slot is not a foreign occupant"
+        );
+    }
+
+    #[test]
     fn tmux_layout_sync_state_result_rejects_physically_reversed_model_panes() {
         let expected = vec![
             "/repo/tasks/left.md".to_string(),
@@ -66893,6 +67347,7 @@ mod tests {
                 None,
                 Some("claude"),
                 false,
+                false,
             ),
             SupervisorReplacementPaneDecision::AutoStartNew
         );
@@ -66903,6 +67358,7 @@ mod tests {
                     true,
                     Some(shell),
                     Some("claude"),
+                    false,
                     false,
                 ),
                 SupervisorReplacementPaneDecision::PreserveExistingShell,
@@ -66915,6 +67371,7 @@ mod tests {
                 true,
                 None,
                 Some("claude"),
+                false,
                 false,
             ),
             SupervisorReplacementPaneDecision::BlockLiveNonShell,
@@ -66934,6 +67391,7 @@ mod tests {
                     Some(harness),
                     Some(harness),
                     false,
+                    false,
                 ),
                 SupervisorReplacementPaneDecision::PreserveLiveHarness,
                 "{harness} continue-mode recovery must preserve the live child"
@@ -66944,6 +67402,7 @@ mod tests {
                     true,
                     Some(harness),
                     Some(harness),
+                    false,
                     false,
                 ),
                 SupervisorReplacementPaneDecision::RestartLiveHarness,
@@ -66975,6 +67434,7 @@ mod tests {
                     Some(foreign),
                     Some("claude"),
                     false,
+                    false,
                 ),
                 SupervisorReplacementPaneDecision::BlockLiveNonShell,
                 "{foreign:?} must not be quit or receive route-owned start text"
@@ -66987,6 +67447,7 @@ mod tests {
                 true,
                 Some("codex"),
                 Some("claude"),
+                false,
                 false,
             ),
             SupervisorReplacementPaneDecision::BlockLiveNonShell,
@@ -67001,6 +67462,7 @@ mod tests {
                 Some("node"),
                 Some("claude"),
                 false,
+                false,
             ),
             SupervisorReplacementPaneDecision::BlockLiveNonShell,
             "process_names substring matching must not be used here"
@@ -67012,6 +67474,7 @@ mod tests {
                 true,
                 Some("claude"),
                 None,
+                false,
                 false,
             ),
             SupervisorReplacementPaneDecision::BlockLiveNonShell,
@@ -67038,6 +67501,7 @@ mod tests {
                     Some(harness),
                     Some(harness),
                     false,
+                    false,
                 ),
                 SupervisorReplacementPaneDecision::RestartLiveHarness,
                 "{harness} Restart Agent must replace the live child, not preserve it"
@@ -67051,6 +67515,48 @@ mod tests {
                 true,
                 Some("vim"),
                 Some("claude"),
+                false,
+                false,
+            ),
+            SupervisorReplacementPaneDecision::BlockLiveNonShell,
+        );
+    }
+
+    #[test]
+    fn restart_agent_relinquishes_agent_doc_only_with_another_document() {
+        let restart_agent = SupervisorReplacementIntent {
+            mode: SupervisorReplacementMode::Continue,
+            restart_agent: true,
+        };
+        assert_eq!(
+            supervisor_replacement_pane_start_decision(
+                restart_agent,
+                true,
+                Some("agent-doc"),
+                Some("grok"),
+                false,
+                true,
+            ),
+            SupervisorReplacementPaneDecision::RelinquishForeignDocument,
+        );
+        assert_eq!(
+            supervisor_replacement_pane_start_decision(
+                restart_agent,
+                true,
+                Some("agent-doc"),
+                Some("grok"),
+                false,
+                false,
+            ),
+            SupervisorReplacementPaneDecision::BlockLiveNonShell,
+        );
+        assert_eq!(
+            supervisor_replacement_pane_start_decision(
+                restart_agent,
+                true,
+                Some("vim"),
+                Some("grok"),
+                false,
                 false,
             ),
             SupervisorReplacementPaneDecision::BlockLiveNonShell,
@@ -67066,6 +67572,7 @@ mod tests {
                 Some("node"),
                 Some("codex"),
                 true,
+                false,
             ),
             SupervisorReplacementPaneDecision::PreserveLiveHarness,
             "exact process-tree document ownership must preserve Codex even when tmux reports node",

@@ -60,6 +60,24 @@ enum ExistingStartupRegistrationDecision<'a> {
     None,
 }
 
+/// A proven owner wins. The actor pane is reused only when it is not another
+/// document's live supervisor; otherwise startup allocates a fresh pane and
+/// leaves that supervisor alone.
+fn startup_owner_pane<'a>(
+    proven_owner: Option<&'a str>,
+    actor_pane: Option<&'a str>,
+    actor_pane_runs_other_document: bool,
+) -> Option<&'a str> {
+    if let Some(owner) = proven_owner {
+        return Some(owner);
+    }
+    if actor_pane_runs_other_document {
+        None
+    } else {
+        actor_pane
+    }
+}
+
 fn decide_existing_startup_registration<'a>(
     existing_pane: Option<&'a str>,
     existing_alive: bool,
@@ -669,8 +687,28 @@ pub fn auto_start_in_session_with_lock_mode(
                 && tmux.pane_alive(&record.pane_id)
         })
         .map(|record| record.pane_id);
-    let live_owner = agent_doc_sync_io::sync::find_normal_path_owner_pane(tmux, file, session_id)
-        .or(actor_owner);
+    let proven_owner = agent_doc_sync_io::sync::find_normal_path_owner_pane(tmux, file, session_id);
+    let actor_pane_runs_other_document = actor_owner.as_deref().is_some_and(|pane| {
+        matches!(
+            agent_doc_sync_io::sync::pane_occupant_for_document(tmux, pane, file),
+            agent_doc_sync_io::sync::PaneOccupant::OtherDocument(_)
+        )
+    });
+    if actor_pane_runs_other_document {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "route_startup_foreign_document_pane_left_alone file={} pane={}",
+                file_path,
+                actor_owner.as_deref().unwrap_or(""),
+            ),
+        );
+    }
+    let live_owner = startup_owner_pane(
+        proven_owner.as_deref(),
+        actor_owner.as_deref(),
+        actor_pane_runs_other_document,
+    );
     match decide_existing_startup_registration(
         existing_registration.as_deref(),
         existing_alive,
@@ -1670,6 +1708,18 @@ mod tests {
             decide_existing_startup_registration(Some("%7"), true, None),
             ExistingStartupRegistrationDecision::IgnoreStale("%7")
         );
+    }
+
+    #[test]
+    fn startup_owner_pane_leaves_another_documents_actor_pane_alone() {
+        assert_eq!(
+            startup_owner_pane(Some("%9"), Some("%2"), true),
+            Some("%9"),
+            "a proven owner of this document still wins"
+        );
+        assert_eq!(startup_owner_pane(None, Some("%2"), true), None);
+        assert_eq!(startup_owner_pane(None, Some("%2"), false), Some("%2"));
+        assert_eq!(startup_owner_pane(None, None, true), None);
     }
 
     #[test]

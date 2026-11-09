@@ -7554,28 +7554,13 @@ pub fn argv_owner_is_stale_spawn_identity(
     argv_document: &str,
     root: &Path,
 ) -> bool {
-    use agent_doc_session_registry_io::dispatch_registry::{
-        canonical_dispatch_file, canonical_registered_file,
-    };
-    let claimed = canonical_dispatch_file(claimed_file);
-    let argv_path = Path::new(argv_document);
-    let argv_abs = if argv_path.is_absolute() {
-        argv_path.to_path_buf()
-    } else {
-        root.join(argv_path)
-    };
-    let argv = std::fs::canonicalize(&argv_abs).unwrap_or(argv_abs);
-    let mut binds_claimed = false;
-    for entry in registry.values().filter(|entry| entry.pane == pane) {
-        let bound = canonical_registered_file(entry);
-        if bound == argv || entry.file == argv_document {
-            return false;
-        }
-        if bound == claimed {
-            binds_claimed = true;
-        }
-    }
-    binds_claimed
+    agent_doc_session_registry_io::dispatch_registry::argv_owner_is_stale_spawn_identity(
+        registry,
+        pane,
+        claimed_file,
+        argv_document,
+        root,
+    )
 }
 
 #[cfg(test)]
@@ -7659,6 +7644,29 @@ mod stale_argv_identity_tests {
             "tasks/a.md",
             root,
         ));
+    }
+
+    /// A live `agent-doc start` of another file that still exists is that
+    /// document's supervisor. The registry binding the claimed document to the
+    /// pane does not make the argv a frozen rename (GH #89 only covers a path
+    /// that is gone).
+    #[test]
+    fn live_other_document_argv_is_not_a_stale_rename() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("tasks")).unwrap();
+        std::fs::write(root.join("tasks/agent-doc-bugs.md"), "x").unwrap();
+        std::fs::write(root.join("tasks/infra.md"), "x").unwrap();
+        let claimed = root.join("tasks/agent-doc-bugs.md");
+        let registry = std::collections::HashMap::from([(
+            "bugs".to_string(),
+            entry("%2", root, "tasks/agent-doc-bugs.md"),
+        )]);
+
+        assert!(
+            !argv_owner_is_stale_spawn_identity(&registry, "%2", &claimed, "tasks/infra.md", root,),
+            "an existing other document is not a GH #89 rename"
+        );
     }
 }
 

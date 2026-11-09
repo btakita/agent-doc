@@ -458,6 +458,18 @@ pub fn attempt_opencode_busy_interrupt_recovery(
     })
 }
 
+/// Another document's supervisor is not "this document is already running".
+/// A bare harness with no document, and a free shell, stay on the existing path.
+fn foreign_document_dispatch_block(
+    occupant: &agent_doc_sync_io::sync::PaneOccupant,
+) -> Option<&str> {
+    match occupant {
+        agent_doc_sync_io::sync::PaneOccupant::OtherDocument(document) => Some(document.as_str()),
+        agent_doc_sync_io::sync::PaneOccupant::Free
+        | agent_doc_sync_io::sync::PaneOccupant::ForeignHarness => None,
+    }
+}
+
 pub fn ensure_existing_pane_ready_for_dispatch(
     tmux: &Tmux,
     file: &Path,
@@ -465,6 +477,25 @@ pub fn ensure_existing_pane_ready_for_dispatch(
     harness: &HarnessConfig,
     prompt_bearing_marker: Option<&str>,
 ) -> Result<ExistingPaneDispatchReadiness> {
+    // `current_command=agent-doc` is the supervisor binary, not proof that THIS
+    // document is the one running. Another document's `agent-doc start` must
+    // not be focused or reported as already running.
+    if let Some(occupant) = foreign_document_dispatch_block(
+        &agent_doc_sync_io::sync::pane_occupant_for_document(tmux, pane, file),
+    ) {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "route_existing_pane_foreign_document file={} pane={} occupant={occupant}",
+                file.display(),
+                pane,
+            ),
+        );
+        anyhow::bail!(
+            "pane {pane} belongs to {occupant}, not {}; leaving that supervisor running",
+            file.display()
+        );
+    }
     // `#jbroutebusystall`: an active turn is proven busy — skip the ready-wait.
     //
     // This is the SAME policy `dispatch_only_busy_should_wait_for_ready` already
@@ -585,8 +616,25 @@ pub fn ensure_existing_pane_ready_for_dispatch(
 #[cfg(test)]
 mod tests {
     use super::{
-        existing_pane_blocker_requires_operator, pending_prompt_waits_behind_queueable_blocker,
+        existing_pane_blocker_requires_operator, foreign_document_dispatch_block,
+        pending_prompt_waits_behind_queueable_blocker,
     };
+    use agent_doc_sync_io::sync::PaneOccupant;
+
+    #[test]
+    fn another_documents_supervisor_is_not_this_document_already_running() {
+        assert_eq!(
+            foreign_document_dispatch_block(&PaneOccupant::OtherDocument(
+                "tasks/infra.md".to_string()
+            )),
+            Some("tasks/infra.md")
+        );
+        assert_eq!(foreign_document_dispatch_block(&PaneOccupant::Free), None);
+        assert_eq!(
+            foreign_document_dispatch_block(&PaneOccupant::ForeignHarness),
+            None
+        );
+    }
 
     #[test]
     fn conversation_lock_is_never_interrupted_in_an_existing_pane() {

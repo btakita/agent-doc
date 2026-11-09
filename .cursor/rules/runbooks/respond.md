@@ -399,16 +399,32 @@ and the pending granular-flags-only rule. This runbook carries the rest.
      and do not substitute `agent-doc orchestrate` while that tool is available.
      Collect completions with `get_command_or_subagent_output` and preserve the
      same generation fence through report-complete and closeout.
-  4. Treat `[#subagent-operator-request-<unique-id>] subagent operator request` as a
-     blocking handback, not worker completion. Copy the entire packet verbatim
+  4. First classify a `[#subagent-operator-request-<unique-id>] subagent operator
+     request` by who owns the missing input (`#agentownedproceduralchoice`). A
+     packet whose choices only control how agents continue or classify
+     already-authorized work is NOT an operator request. This includes
+     `leave-tracked` / `review` / `address`, queue/review/todo placement, which
+     worker continues, and whether incomplete work stays open. Resolve those
+     choices from the queue item, prompt tree, resolved presets, current
+     evidence, and completion state; resume the worker with that derived
+     disposition instead of adding a question to `agent:exchange` or
+     `agent:todo`. Continue the concrete authorized objective while actionable
+     work remains; use a genuine review/external gate only when execution is
+     complete; otherwise keep the item tracked with its concrete blocker.
+
+     A valid operator-owned packet changes product behavior or scope, needs an
+     external fact the agents cannot know, requests an outward action absent
+     from current authorization, or requires the harness permission UI. Treat
+     that packet as a blocking handback, not worker completion. Copy it verbatim
      into `agent:exchange` so the exact request, why it is needed, target/scope,
      risk or effect, and every offered choice remain visible. Present that same
      request from the coordinator's main harness session, then send the
      operator's answer verbatim to the same worker when continuation is
-     available. Do not infer an answer from the task, choose on the operator's
-     behalf, or convert a chat reply into a tool permission: a protected action
-     may be retried only after the harness permission system grants that exact
-     action. The closeout derives a same-packet-id todo and projects
+     available. For this operator-owned class, do not infer an answer from the
+     task, choose on the operator's behalf, or convert a chat reply into a tool
+     permission: a protected action may be retried only after the harness
+     permission system grants that exact action. The closeout derives a
+     same-packet-id todo and projects
      `🙋 [#request-id]` onto the originating `queue_item`. If supplying the todo
      explicitly, use `id=<request-id> ...`. When the operator's answer and the
      worker's result complete it, use `--todo-done <request-id>` in that

@@ -9,6 +9,44 @@ use agent_doc_state_backbone::pane_execution_authority::{
 };
 use anyhow::{Context, Result};
 
+const PANE_PROCESS_FORMAT: &str = "#{pane_id}\t#{pane_pid}";
+
+fn unique_pane_containing_process(
+    pane_rows: &str,
+    target_pid: u32,
+    mut process_tree_contains: impl FnMut(&str, u32) -> bool,
+) -> Option<String> {
+    let mut matching_pane: Option<String> = None;
+    for row in pane_rows.lines() {
+        let Some((pane_id, pane_pid)) = row.split_once('\t') else {
+            continue;
+        };
+        let pane_id = pane_id.trim();
+        let pane_pid = pane_pid.trim();
+        if pane_id.is_empty() || pane_pid.is_empty() || !process_tree_contains(pane_pid, target_pid)
+        {
+            continue;
+        }
+        match &matching_pane {
+            Some(existing) if existing != pane_id => return None,
+            Some(_) => {}
+            None => matching_pane = Some(pane_id.to_string()),
+        }
+    }
+    matching_pane
+}
+
+/// Recover an invocation pane when a host starts the MCP server without the
+/// pane environment. Process ancestry is positive actor evidence: the current
+/// process must occur beneath exactly one tmux pane root. Zero or ambiguous
+/// matches deliberately remain unavailable.
+fn invocation_pane_from_process_ancestry(tmux: &tmux_router::Tmux) -> Option<String> {
+    let pane_rows = agent_doc_tmux_io::list_panes_all(tmux, PANE_PROCESS_FORMAT).ok()?;
+    unique_pane_containing_process(&pane_rows, std::process::id(), |pane_pid, target_pid| {
+        agent_doc_process_owner_io::process_tree_contains_pid(pane_pid, target_pid)
+    })
+}
+
 fn owner_liveness(tmux: &tmux_router::Tmux, pane_id: &str, file: &Path) -> OwnerLiveness {
     if !tmux.pane_alive(pane_id) {
         return OwnerLiveness::Stale;
@@ -97,13 +135,15 @@ pub fn verdict_in(
     // A controller can be headless while executing on behalf of a tmux actor.
     // The thread-local override is explicit actor evidence and therefore takes
     // precedence over the controller process's missing ambient `TMUX` value.
+    // One bounded read graph gives owner liveness and invocation proof the same
+    // `/proc` cut, including the MCP process-ancestry fallback below. Splitting
+    // these observations across scopes can classify a pane as stale and
+    // exact-owner from two different process generations.
+    let _process_observations = agent_doc_process_owner_io::begin_process_observation_scope();
     let tmux = agent_doc_tmux_io::configured_tmux();
     let explicit_invocation_pane =
-        agent_doc_tmux_io::current_live_pane_id_from_env_or_override(&tmux);
-    // One bounded read graph gives owner liveness and invocation proof the same
-    // `/proc` cut. Splitting these observations across scopes can classify a
-    // pane as stale and exact-owner from two different process generations.
-    let _process_observations = agent_doc_process_owner_io::begin_process_observation_scope();
+        agent_doc_tmux_io::current_live_pane_id_from_env_or_override(&tmux)
+            .or_else(|| invocation_pane_from_process_ancestry(&tmux));
     let owner = observe_owner(file, &tmux)?;
     if !agent_doc_tmux_io::in_tmux() && explicit_invocation_pane.is_none() {
         authority.observe_owner(owner);
@@ -277,6 +317,37 @@ pub fn live_owner_mismatch_remedy(
 
 #[cfg(test)]
 mod tests {
+    use super::unique_pane_containing_process;
+
+    #[test]
+    fn process_ancestry_recovers_the_unique_invoking_pane() {
+        let rows = "malformed\n%11\t1100\n%12\t1200\n\t1300\n%13\t\n";
+
+        let pane = unique_pane_containing_process(rows, 4242, |root, target| {
+            target == 4242 && root == "1200"
+        });
+
+        assert_eq!(pane.as_deref(), Some("%12"));
+    }
+
+    #[test]
+    fn process_ancestry_fails_closed_when_multiple_panes_match() {
+        let rows = "%11\t1100\n%12\t1200\n";
+
+        let pane = unique_pane_containing_process(rows, 4242, |_, _| true);
+
+        assert_eq!(pane, None);
+    }
+
+    #[test]
+    fn process_ancestry_fails_closed_when_no_pane_matches() {
+        let rows = "%11\t1100\n%12\t1200\n";
+
+        let pane = unique_pane_containing_process(rows, 4242, |_, _| false);
+
+        assert_eq!(pane, None);
+    }
+
     #[test]
     fn headless_invocation_still_observes_the_registered_owner() {
         let source = include_str!("pane_execution_authority.rs");

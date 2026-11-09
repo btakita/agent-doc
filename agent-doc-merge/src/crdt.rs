@@ -1207,6 +1207,51 @@ fn list_item_key(item: &str) -> String {
     }
 }
 
+/// The pre-projection identity of a row whose binary-generated trailing q-id
+/// promoted its merge key from free text to `id:q-…`.
+///
+/// Queue admission may add the durable id concurrently with an editor cut. The
+/// id-bearing row and its pre-admission copy are the same row for that merge;
+/// treating them as two keys duplicates the generated row and can weave the
+/// stale copy ahead of operator-owned nested children.
+pub(crate) fn generated_id_promotion_alias(item: &str) -> Option<String> {
+    let stripped = agent_doc_element_queue::strip_generated_queue_prompt_id_annotation(item);
+    (stripped != item).then(|| list_item_key(&stripped))
+}
+
+fn align_generated_id_promotions(base: &[KeyedChild], side: &mut [KeyedChild]) {
+    let identity = |child: &KeyedChild| {
+        generated_id_promotion_alias(&child.text).unwrap_or_else(|| child.key.clone())
+    };
+    let mut base_by_alias = std::collections::HashMap::<String, Vec<&str>>::new();
+    for child in base {
+        base_by_alias
+            .entry(identity(child))
+            .or_default()
+            .push(child.key.as_str());
+    }
+    let mut side_alias_counts = std::collections::HashMap::<String, usize>::new();
+    for child in side.iter() {
+        *side_alias_counts.entry(identity(child)).or_default() += 1;
+    }
+    for child in side {
+        let alias = identity(child);
+        let Some(base_keys) = base_by_alias.get(&alias) else {
+            continue;
+        };
+        if base_keys.len() == 1
+            && side_alias_counts.get(&alias) == Some(&1)
+            && (generated_id_promotion_alias(&child.text).is_some()
+                || base.iter().any(|base_child| {
+                    base_child.key == base_keys[0]
+                        && generated_id_promotion_alias(&base_child.text).is_some()
+                }))
+        {
+            child.key = base_keys[0].to_string();
+        }
+    }
+}
+
 /// Durable key for an `### Re:` exchange block: its heading line minus the
 /// binary-owned ` (HEAD)` annotation and compact `[#r-…]` lookup id.
 ///
@@ -1590,6 +1635,14 @@ fn reconcile_component_body(
     let mut ours_children = split(ours_body)?;
     let mut theirs_children = split(theirs_body)?;
     let base_children = base_body.and_then(split).unwrap_or_default();
+
+    // A generated q-id is identity promotion, not insertion of another row.
+    // Align both cuts to the base key before choosing the operator order spine;
+    // otherwise the stale pre-id key is unanchored and `order_union` prepends it.
+    if name != "exchange" {
+        align_generated_id_promotions(&base_children, &mut ours_children);
+        align_generated_id_promotions(&base_children, &mut theirs_children);
+    }
 
     // An id-less queue child's text is its fallback key. While the operator is
     // progressively rewriting a newly-added line, a stale base can therefore
@@ -5466,6 +5519,58 @@ Second answer line three.
             merged.contains("operator note"),
             "item B operator edit lost:\n{merged}"
         );
+    }
+
+    #[test]
+    fn generated_id_promotion_does_not_prepend_a_stale_nested_row() {
+        let parent = "- ### https://github.com/haiven-dev/haiven-frontend/pull/671";
+        let operator_comment = "  - %% Add an SDK tab to the studio game dashboard %%";
+        let operator_note = "  - ~~Is this PR still relevant? If not, close it.~~";
+        let pre_id = "  - ☑️ [#subagent:fe671-rebase-conflicts#2] #rebase ⟦published⟧";
+        let admitted =
+            "  - ☑️ [#subagent:fe671-rebase-conflicts#2] #rebase [#q-be057febbdf8]⟦published⟧";
+        let queue = |rows: &[&str]| rows.join("\n");
+        let base_queue = queue(&[parent, operator_comment, operator_note, pre_id]);
+        let base = doc_with_exchange_queue("Q.", &base_queue);
+        let state = CrdtDoc::from_text(&base).encode_state();
+
+        // A stale agent cut projected the generated row first. The live cut
+        // keeps the operator order while admission adds the durable q-id.
+        let ours = doc_with_exchange_queue(
+            "Q.",
+            &queue(&[parent, pre_id, operator_comment, operator_note]),
+        );
+        let theirs = doc_with_exchange_queue(
+            "Q.",
+            &queue(&[parent, operator_comment, operator_note, admitted]),
+        );
+
+        let merged = merge_by_component(Some(&state), &ours, &theirs).unwrap();
+        let expected = queue(&[parent, operator_comment, operator_note, admitted]);
+        assert!(
+            merged.contains(&expected),
+            "operator child order changed:\n{merged}"
+        );
+        assert_eq!(
+            merged.matches("#rebase").count(),
+            1,
+            "stale row duplicated:\n{merged}"
+        );
+        assert!(
+            !merged.contains(pre_id),
+            "pre-id projection survived:\n{merged}"
+        );
+
+        // The persisted document-cell seam owns the default production path
+        // and must enforce the same ordering/identity invariant.
+        let base_state = MultiNodeState::from_text(&base).unwrap();
+        let (persisted, _) = MultiNodeState::merge(Some(&base_state), &ours, &theirs).unwrap();
+        assert!(
+            persisted.contains(&expected),
+            "persisted seam changed operator child order:\n{persisted}"
+        );
+        assert_eq!(persisted.matches("#rebase").count(), 1);
+        assert!(!persisted.contains(pre_id));
     }
 
     #[test]

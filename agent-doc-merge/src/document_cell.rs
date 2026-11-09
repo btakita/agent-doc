@@ -996,6 +996,54 @@ fn align_operator_repeats(
         .iter()
         .map(|(_, value)| crate::crdt::queue_instruction_text(value))
         .collect();
+
+    // Admission can concurrently promote a free-text row to a durable q-id.
+    // Match that projection back to its unique base row before repeat
+    // disambiguation, so the pre-id and id-bearing cuts stay one cell and the
+    // live/operator child position remains authoritative.
+    let promotion_aliases = |occ: &ComponentOccurrence| {
+        occ.items
+            .iter()
+            .map(|(key, value)| {
+                crate::crdt::generated_id_promotion_alias(value)
+                    .unwrap_or_else(|| node_key_identity(key).to_string())
+            })
+            .collect::<Vec<_>>()
+    };
+    let base_aliases = promotion_aliases(base);
+    let ours_aliases = promotion_aliases(ours);
+    let theirs_aliases = promotion_aliases(theirs);
+    let align_to_base =
+        |side: &ComponentOccurrence, side_ids: &mut [String], side_aliases: &[String]| {
+            let mut base_counts = std::collections::HashMap::<&str, usize>::new();
+            let mut side_counts = std::collections::HashMap::<&str, usize>::new();
+            for alias in &base_aliases {
+                *base_counts.entry(alias).or_default() += 1;
+            }
+            for alias in side_aliases {
+                *side_counts.entry(alias).or_default() += 1;
+            }
+            for (index, alias) in side_aliases.iter().enumerate() {
+                if base_counts.get(alias.as_str()) != Some(&1)
+                    || side_counts.get(alias.as_str()) != Some(&1)
+                {
+                    continue;
+                }
+                let base_index = base_aliases
+                    .iter()
+                    .position(|base_alias| base_alias == alias)
+                    .expect("unique base promotion alias exists");
+                let promotion_changed_key = side_ids[index] != base_ids[base_index]
+                    && (crate::crdt::generated_id_promotion_alias(&side.items[index].1).is_some()
+                        || crate::crdt::generated_id_promotion_alias(&base.items[base_index].1)
+                            .is_some());
+                if promotion_changed_key {
+                    side_ids[index] = base_ids[base_index].clone();
+                }
+            }
+        };
+    align_to_base(ours, &mut ours_ids, &ours_aliases);
+    align_to_base(theirs, &mut theirs_ids, &theirs_aliases);
     let mut primaries = Vec::new();
     let mut seen = std::collections::HashSet::new();
     for id in base_ids

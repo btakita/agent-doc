@@ -2449,9 +2449,46 @@ pub fn settle_retained_captured_projection_through_authority(
     captured_response: &str,
     source: &str,
 ) -> Result<bool> {
+    settle_retained_captured_projection_through_authority_inner(
+        path,
+        captured_response,
+        source,
+        None,
+    )
+}
+
+/// Identity-fenced form used when an old retained delivery has no embedded
+/// capture continuation. A newer retained intent must never inherit the replay
+/// merely because it happens to await the same document.
+pub fn settle_retained_captured_projection_through_authority_if_matches(
+    path: &Path,
+    captured_response: &str,
+    source: &str,
+    expected_intent_id: &str,
+    expected_target_hash: &str,
+) -> Result<bool> {
+    settle_retained_captured_projection_through_authority_inner(
+        path,
+        captured_response,
+        source,
+        Some((expected_intent_id, expected_target_hash)),
+    )
+}
+
+fn settle_retained_captured_projection_through_authority_inner(
+    path: &Path,
+    captured_response: &str,
+    source: &str,
+    expected_intent: Option<(&str, &str)>,
+) -> Result<bool> {
     let Some(pending) = pending_document_write(path) else {
         return Ok(false);
     };
+    if let Some((expected_intent_id, expected_target_hash)) = expected_intent
+        && (pending.intent_id != expected_intent_id || pending.target_hash != expected_target_hash)
+    {
+        return Ok(false);
+    }
     let retained_target_hash = agent_doc_hash::content_hash(&pending.target_content);
     if !pending
         .target_hash

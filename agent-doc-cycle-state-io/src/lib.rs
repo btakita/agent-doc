@@ -743,6 +743,33 @@ pub struct CapturedResponseCheckpoint {
     pub baseline_content: Option<String>,
 }
 
+/// The durable capture that `repair --resume-capture` can safely resume.
+///
+/// Most retained writes carry their capture continuation directly. Older
+/// `start_resume_id_capture` writes predate that field, so their identity must
+/// be reconstructed from the append-only response-capture ledger. The legacy
+/// variant is returned only when one unique checkpoint reproduces the exact
+/// retained Base -> Target transition; callers must fence any effect with the
+/// retained intent id and target hash as well as the capture identity.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProjectedCapturedFinalizeResume {
+    pub capture: ProjectedCapturedResponse,
+    pub origin: ProjectedCapturedFinalizeResumeOrigin,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProjectedCapturedFinalizeResumeOrigin {
+    RetainedContinuation {
+        intent_id: String,
+        target_hash: String,
+    },
+    CurrentCycle,
+    LegacyRetainedIntent {
+        intent_id: String,
+        target_hash: String,
+    },
+}
+
 /// Exact capture projection expected to precede a terminal closeout proof.
 ///
 /// Capture identity and response hash alone are not a version: recovery may
@@ -949,6 +976,122 @@ pub fn load_projected_retained_captured_response(
         .and_then(|document| document.document.pending_write)
         .and_then(|intent| intent.continuation)
         .map(ProjectedCapturedResponse::from))
+}
+
+const LEGACY_RETAINED_CAPTURE_SOURCE: &str = "start_resume_id_capture";
+const LEGACY_RETAINED_CAPTURE_HISTORY_LIMIT: usize = 32;
+
+/// Resolve the one capture operation that `repair --resume-capture` can safely
+/// drive. This is also the availability predicate used by `session-check`, so
+/// status output cannot prescribe a command whose resolver will reject it.
+pub fn load_projected_captured_finalize_resume(
+    file: &Path,
+) -> Result<Option<ProjectedCapturedFinalizeResume>> {
+    let pending =
+        load_document_projection(file)?.and_then(|document| document.document.pending_write);
+    if let Some(intent) = pending.as_ref()
+        && let Some(capture) = intent
+            .continuation
+            .clone()
+            .map(ProjectedCapturedResponse::from)
+        && !capture.response_body.trim().is_empty()
+    {
+        return Ok(Some(ProjectedCapturedFinalizeResume {
+            capture,
+            origin: ProjectedCapturedFinalizeResumeOrigin::RetainedContinuation {
+                intent_id: intent.intent_id.clone(),
+                target_hash: intent.target_hash.clone(),
+            },
+        }));
+    }
+
+    if pending.is_none()
+        && let Some(state) = load_with_closeout_projection(file)?
+        && matches!(
+            state.phase,
+            agent_doc_turn::CyclePhase::ResponseCaptured | agent_doc_turn::CyclePhase::WriteApplied
+        )
+        && let (Some(capture_id), Some(response_sha256)) = (
+            state.capture_id.as_deref(),
+            state.response_sha256.as_deref(),
+        )
+        && let Some(capture) = load_projected_captured_response(file, capture_id)?
+        && capture.cycle_id == state.cycle_id
+        && capture.response_sha256 == response_sha256
+        && !capture.response_body.trim().is_empty()
+    {
+        return Ok(Some(ProjectedCapturedFinalizeResume {
+            capture,
+            origin: ProjectedCapturedFinalizeResumeOrigin::CurrentCycle,
+        }));
+    }
+
+    let Some(intent) = pending else {
+        return Ok(None);
+    };
+    if intent.continuation.is_some()
+        || intent.source.token() != LEGACY_RETAINED_CAPTURE_SOURCE
+        || agent_doc_hash::content_hash(&intent.target_content) != intent.target_hash
+    {
+        return Ok(None);
+    }
+    let Some(expected_content) = intent.expected_content.as_deref() else {
+        return Ok(None);
+    };
+    if agent_doc_hash::content_hash(expected_content) != intent.expected_hash {
+        return Ok(None);
+    }
+
+    let mut matches =
+        load_recent_captured_response_checkpoints(file, LEGACY_RETAINED_CAPTURE_HISTORY_LIMIT)?
+            .into_iter()
+            .filter(|checkpoint| {
+                !checkpoint.response_body.trim().is_empty()
+                    && agent_doc_hash::content_hash(&checkpoint.response_body)
+                        == checkpoint.response_sha256
+                    && agent_doc_turn::response_replay::materialize_response_in_current_exchange(
+                        expected_content,
+                        &checkpoint.response_body,
+                    )
+                    .as_deref()
+                        == Some(intent.target_content.as_str())
+            })
+            .collect::<Vec<_>>();
+    matches.sort_by(|left, right| {
+        (&left.cycle_id, &left.capture_id, &left.response_sha256).cmp(&(
+            &right.cycle_id,
+            &right.capture_id,
+            &right.response_sha256,
+        ))
+    });
+    matches.dedup_by(|left, right| {
+        left.cycle_id == right.cycle_id
+            && left.capture_id == right.capture_id
+            && left.response_sha256 == right.response_sha256
+    });
+    let [checkpoint] = matches.as_slice() else {
+        // Zero candidates means the legacy ledger does not prove what bytes to
+        // replay. More than one means capture identity is ambiguous. Both fail
+        // closed and leave the retained transition untouched.
+        return Ok(None);
+    };
+    Ok(Some(ProjectedCapturedFinalizeResume {
+        capture: ProjectedCapturedResponse {
+            cycle_id: checkpoint.cycle_id.clone(),
+            capture_id: checkpoint.capture_id.clone(),
+            response_sha256: checkpoint.response_sha256.clone(),
+            response_body: checkpoint.response_body.clone(),
+            intent_body: None,
+            mutation_plan_json: None,
+            file_hash: checkpoint.file_hash.clone(),
+            snapshot_hash: checkpoint.snapshot_hash.clone(),
+            baseline_content: checkpoint.baseline_content.clone(),
+        },
+        origin: ProjectedCapturedFinalizeResumeOrigin::LegacyRetainedIntent {
+            intent_id: intent.intent_id,
+            target_hash: intent.target_hash,
+        },
+    }))
 }
 
 pub fn load_projected_response_draft(
@@ -5498,6 +5641,102 @@ mod tests {
         assert_eq!(history[0].baseline_content.as_deref(), Some("baseline-3"));
         assert_eq!(history[1].response_sha256, "response-2");
         assert!(history[0].sequence > history[1].sequence);
+    }
+
+    #[test]
+    fn legacy_start_resume_capture_resolves_unique_exact_retained_transition() {
+        let dir = setup_project();
+        let doc = dir.path().join("doc.md");
+        let expected = concat!(
+            "<!-- agent:exchange -->\n",
+            "- operator prompt\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let response = concat!(
+            "<!-- patch:exchange -->\n",
+            "### Re: operator prompt — gpt-5\n\n",
+            "Recovered response.\n",
+            "<!-- /patch:exchange -->\n",
+        );
+        let target = agent_doc_turn::response_replay::materialize_response_in_current_exchange(
+            expected, response,
+        )
+        .unwrap();
+        fs::write(&doc, expected).unwrap();
+        let document_hash = cycle_document_hash(&doc).unwrap().unwrap();
+        append_state_fact(
+            &doc,
+            "legacy-retained-write".to_string(),
+            agent_doc_state_backbone::StateFact::DocumentWriteDeferred {
+                document_hash: document_hash.clone(),
+                intent_id: "legacy-intent".to_string(),
+                expected_hash: agent_doc_hash::content_hash(expected),
+                expected_content: Some(expected.to_string()),
+                target_hash: agent_doc_hash::content_hash(&target),
+                target_content: target.clone(),
+                source: agent_doc_state_backbone::DocumentWriteSource::Unknown(
+                    "start_resume_id_capture".to_string(),
+                ),
+                reason:
+                    agent_doc_state_backbone::DocumentWriteDeferredReason::EditorProjectionPending,
+            },
+        )
+        .unwrap();
+        let response_sha = agent_doc_hash::content_hash(response);
+        let expected_hash = agent_doc_hash::content_hash(expected);
+        append_response_captured_body(
+            &doc,
+            CapturedResponseFactInput {
+                cycle_id: "old-cycle",
+                capture_id: "old-capture",
+                response_sha256: &response_sha,
+                response_body: response,
+                intent_body: None,
+                mutation_plan_json: None,
+                file_hash: Some(&expected_hash),
+                snapshot_hash: None,
+                baseline_content: Some(expected),
+            },
+        )
+        .unwrap();
+        // A later cycle owns the mutable closeout projection. Recovery must use
+        // the retained transition and bounded capture history instead.
+        start_preflight(&doc, Some(expected), Some(expected)).unwrap();
+
+        let resolved = load_projected_captured_finalize_resume(&doc)
+            .unwrap()
+            .expect("unique legacy capture should resolve");
+        assert_eq!(resolved.capture.capture_id, "old-capture");
+        assert_eq!(resolved.capture.response_sha256, response_sha);
+        assert_eq!(
+            resolved.origin,
+            ProjectedCapturedFinalizeResumeOrigin::LegacyRetainedIntent {
+                intent_id: "legacy-intent".to_string(),
+                target_hash: agent_doc_hash::content_hash(&target),
+            }
+        );
+
+        append_response_captured_body(
+            &doc,
+            CapturedResponseFactInput {
+                cycle_id: "other-old-cycle",
+                capture_id: "other-old-capture",
+                response_sha256: &response_sha,
+                response_body: response,
+                intent_body: None,
+                mutation_plan_json: None,
+                file_hash: Some(&expected_hash),
+                snapshot_hash: None,
+                baseline_content: Some(expected),
+            },
+        )
+        .unwrap();
+        assert!(
+            load_projected_captured_finalize_resume(&doc)
+                .unwrap()
+                .is_none(),
+            "two capture identities that reproduce the target must fail closed"
+        );
     }
 
     #[test]

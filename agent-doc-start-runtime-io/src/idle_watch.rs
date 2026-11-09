@@ -3161,6 +3161,18 @@ pub(super) fn spawn_idle_queue_watch_thread(
                             log_event(&mut session_log, &event);
                             agent_doc_ops_log_io::log_op(&path, &event);
                         }
+                agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::RetainedDeliverySettled => {
+                    captured_finalize_presence = CapturedFinalizePresence::Unknown;
+                    resume_key_refresh_pending = true;
+                    resume_retry = None;
+                    resume_triggers.observe_operation(None);
+                    let event = format!(
+                        "captured_finalize_retained_delivery_settled file={} cycle_id={} capture_id={} response_sha256={}",
+                        path.display(), key.cycle_id, key.capture_id, key.response_sha256,
+                    );
+                    log_event(&mut session_log, &event);
+                    agent_doc_ops_log_io::log_op(&path, &event);
+                }
                 agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::ClosedIgnoredPath => {
                     captured_finalize_presence = CapturedFinalizePresence::Unknown;
                     resume_key_refresh_pending = true;

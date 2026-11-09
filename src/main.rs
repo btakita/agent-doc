@@ -6497,11 +6497,10 @@ enum SkillCommands {
 /// than capturing a new response or electing a disk write.
 fn run_resume_capture(file: &Path) -> anyhow::Result<()> {
     let Some(key) = agent_doc_repair_command_io::captured_finalize_resume_key(file)? else {
-        eprintln!(
-            "[repair] {} has no retained captured-finalize operation to resume",
+        anyhow::bail!(
+            "{} has no identity-proven retained captured-finalize operation to resume; the retained intent was not changed. Do not retry this command, re-send the response, commit, or force disk",
             file.display()
         );
-        return Ok(());
     };
     eprintln!(
         "[repair] resuming captured finalize for {} (cycle={} capture={})",
@@ -6533,6 +6532,14 @@ fn report_resume_capture_outcome(
             eprintln!(
                 "[repair] captured finalize for {} closed without a git commit: the document is ignored by .gitignore (cycle closed as `commit_refused_ignored_path`)",
                 file.display()
+            );
+            Ok(())
+        }
+        agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::RetainedDeliverySettled => {
+            eprintln!(
+                "[repair] retained captured response delivery settled for {}; rerun `agent-doc session-check {}`",
+                file.display(),
+                file.display(),
             );
             Ok(())
         }

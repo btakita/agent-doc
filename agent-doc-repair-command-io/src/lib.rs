@@ -24,6 +24,10 @@ pub enum CapturedFinalizeResumeOutcome {
     /// response is on disk, nothing was (or ever will be) committed, and every
     /// retry surface must stop instead of awaiting a commit edge.
     ClosedIgnoredPath,
+    /// A pre-continuation retained response delivery was replayed from one
+    /// uniquely proven ledger checkpoint. The response cell is now projected
+    /// through editor authority; a fresh session check owns any later closeout.
+    RetainedDeliverySettled,
     /// The effect completed successfully enough to observe that a newer
     /// document-state edge is required. Do not put this on a timer.
     WaitingForSignal {
@@ -433,36 +437,10 @@ pub fn cancel_preflight_cycle_after_harness_turn_end(
 /// Return the stable operation key only when the durable cycle contains a
 /// non-empty captured response that is eligible for binary-owned closeout.
 pub fn captured_finalize_resume_key(file: &Path) -> Result<Option<CapturedFinalizeResumeKey>> {
-    if let Some(capture) =
-        agent_doc_cycle_state_io::load_projected_retained_captured_response(file)?
-        && let Some(key) = captured_finalize_resume_key_from_capture(&capture)
-    {
-        return Ok(Some(key));
-    }
-    let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
-        return Ok(None);
-    };
-    if !matches!(
-        state.phase,
-        agent_doc_turn::CyclePhase::ResponseCaptured | agent_doc_turn::CyclePhase::WriteApplied
-    ) {
-        return Ok(None);
-    }
-    let (Some(capture_id), Some(response_sha256)) = (
-        state.capture_id.as_deref(),
-        state.response_sha256.as_deref(),
-    ) else {
-        return Ok(None);
-    };
-    let Some(capture) =
-        agent_doc_cycle_state_io::load_projected_captured_response(file, capture_id)?
-    else {
-        return Ok(None);
-    };
-    if capture.cycle_id != state.cycle_id || capture.response_sha256 != response_sha256 {
-        return Ok(None);
-    }
-    Ok(captured_finalize_resume_key_from_capture(&capture))
+    Ok(
+        agent_doc_cycle_state_io::load_projected_captured_finalize_resume(file)?
+            .and_then(|resume| captured_finalize_resume_key_from_capture(&resume.capture)),
+    )
 }
 
 fn captured_finalize_resume_key_from_capture(
@@ -491,6 +469,18 @@ pub fn resume_captured_finalize(
     };
     if current.as_ref() != Some(expected) {
         return CapturedFinalizeResumeOutcome::Superseded;
+    }
+
+    let resolved = match agent_doc_cycle_state_io::load_projected_captured_finalize_resume(file) {
+        Ok(Some(resolved)) => resolved,
+        Ok(None) => return CapturedFinalizeResumeOutcome::Superseded,
+        Err(err) => return classify_captured_finalize_resume_error(&format!("{err:#}")),
+    };
+    if matches!(
+        resolved.origin,
+        agent_doc_cycle_state_io::ProjectedCapturedFinalizeResumeOrigin::LegacyRetainedIntent { .. }
+    ) {
+        return resume_legacy_retained_delivery(file, expected, resolved);
     }
 
     // GH 90: classify the captured bytes before any effect. A deterministic
@@ -581,6 +571,40 @@ pub fn resume_captured_finalize(
             }
         }
         Err(err) => classify_captured_finalize_resume_error(&format!("{err:#}")),
+    }
+}
+
+fn resume_legacy_retained_delivery(
+    file: &Path,
+    expected: &CapturedFinalizeResumeKey,
+    resolved: agent_doc_cycle_state_io::ProjectedCapturedFinalizeResume,
+) -> CapturedFinalizeResumeOutcome {
+    let agent_doc_cycle_state_io::ProjectedCapturedFinalizeResumeOrigin::LegacyRetainedIntent {
+        intent_id,
+        target_hash,
+    } = resolved.origin
+    else {
+        return CapturedFinalizeResumeOutcome::Superseded;
+    };
+    if captured_finalize_resume_key_from_capture(&resolved.capture).as_ref() != Some(expected) {
+        return CapturedFinalizeResumeOutcome::Superseded;
+    }
+    match agent_doc_document_realtime_io::settle_retained_captured_projection_through_authority_if_matches(
+        file,
+        &resolved.capture.response_body,
+        "repair_resume_legacy_retained_capture",
+        &intent_id,
+        &target_hash,
+    ) {
+        Ok(true) => CapturedFinalizeResumeOutcome::RetainedDeliverySettled,
+        Ok(false) => CapturedFinalizeResumeOutcome::WaitingForSignal {
+            reason: format!(
+                "legacy retained response delivery {intent_id} no longer has exact target {target_hash}, or editor authority has not acknowledged the replay"
+            ),
+        },
+        Err(err) => classify_captured_finalize_resume_error(&format!(
+            "legacy retained response delivery replay failed: {err:#}"
+        )),
     }
 }
 

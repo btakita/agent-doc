@@ -4468,6 +4468,7 @@ struct RetainedPendingWriteMessage<'a> {
     target_hash: &'a str,
     resume_reason: Option<&'a str>,
     captured_closeout: bool,
+    capture_resume_available: bool,
 }
 
 fn retained_pending_write_message(
@@ -4505,6 +4506,7 @@ fn retained_pending_write_message_from_observation(
         target_hash,
         resume_reason,
         captured_closeout,
+        capture_resume_available,
     } = pending;
     let resume_detail = resume_reason
         .map(|reason| {
@@ -4572,8 +4574,23 @@ fn retained_pending_write_message_from_observation(
             // the only replay effect remained deliberately disabled by
             // `StatusOnlySessionCheckEffects`. Terminate the wait with the one
             // capture-identity-fenced recovery command instead.
+            if capture_resume_available {
+                return format!(
+                    "[session-check] INTERRUPTED: binary-owned response delivery `{}` is retained for `{}` (reason={}, source={}, target_hash={}); {} state=retained_captured_replay_stranded.{}{} Run `agent-doc repair {} --resume-capture` once to replay this exact durable capture through current editor authority, then rerun `agent-doc session-check {}`. Do not submit another replay/closeout payload, run `commit`, or force disk.",
+                    intent_id,
+                    file.display(),
+                    reason,
+                    source,
+                    target_hash,
+                    RETAINED_PENDING_NEEDS_OPERATOR_TOKEN,
+                    resume_detail,
+                    convergence_detail,
+                    file.display(),
+                    file.display(),
+                );
+            }
             return format!(
-                "[session-check] INTERRUPTED: binary-owned response delivery `{}` is retained for `{}` (reason={}, source={}, target_hash={}); {} state=retained_captured_replay_stranded.{}{} Run `agent-doc repair {} --resume-capture` once to replay this exact durable capture through current editor authority, then rerun `agent-doc session-check {}`. Do not submit another replay/closeout payload, run `commit`, or force disk.",
+                "[session-check] INTERRUPTED: binary-owned response delivery `{}` is retained for `{}` (reason={}, source={}, target_hash={}); {} state=retained_capture_replay_metadata_missing.{}{} No unique capture continuation or legacy ledger checkpoint reproduces this retained transition, so `agent-doc repair {} --resume-capture` is not applicable and the retained intent was not changed. Do not retry that command, submit another replay/closeout payload, run `commit`, or force disk; report this intent id for operator recovery.",
                 intent_id,
                 file.display(),
                 reason,
@@ -4582,7 +4599,6 @@ fn retained_pending_write_message_from_observation(
                 RETAINED_PENDING_NEEDS_OPERATOR_TOKEN,
                 resume_detail,
                 convergence_detail,
-                file.display(),
                 file.display(),
             );
         }
@@ -4848,6 +4864,9 @@ fn inspect_core_profiled(
                     target_hash: &pending.target_hash,
                     resume_reason: captured_resume_reason.as_deref(),
                     captured_closeout,
+                    capture_resume_available:
+                        agent_doc_cycle_state_io::load_projected_captured_finalize_resume(file)?
+                            .is_some(),
                 },
                 agent_doc_document_realtime_io::observed_retained_write_ownership(file),
             )
@@ -7274,6 +7293,7 @@ mod terminal_convergence_tests {
                 target_hash: "new",
                 resume_reason: None,
                 captured_closeout: true,
+                capture_resume_available: false,
             },
             agent_doc_turn::write_ownership::RetainedWriteOwnership::new(true, true)
                 .with_retained_projection(true),
@@ -7307,6 +7327,7 @@ mod terminal_convergence_tests {
                 target_hash: "normalized",
                 resume_reason: None,
                 captured_closeout: false,
+                capture_resume_available: false,
             },
             agent_doc_turn::write_ownership::RetainedWriteOwnership::UNOWNED
                 .with_retained_projection(true),
@@ -7332,6 +7353,7 @@ mod terminal_convergence_tests {
                     "retained target has not reached exact canonical/disk convergence",
                 ),
                 captured_closeout: true,
+                capture_resume_available: false,
             },
             agent_doc_turn::write_ownership::RetainedWriteOwnership::new(true, true)
                 .with_retained_projection(true)
@@ -7403,6 +7425,7 @@ mod terminal_convergence_tests {
                     "retained target has not reached exact canonical/disk convergence",
                 ),
                 captured_closeout: true,
+                capture_resume_available: true,
             },
             agent_doc_turn::write_ownership::RetainedWriteOwnership::new(true, true)
                 .with_retained_projection(true),
@@ -7416,6 +7439,32 @@ mod terminal_convergence_tests {
         assert!(message.contains("replay this exact durable capture"));
         assert!(!message.contains("same capture will resume automatically"));
         assert!(!message.contains("retry only `agent-doc session-check"));
+    }
+
+    #[test]
+    fn stranded_capture_without_identity_proof_does_not_prescribe_resume() {
+        let file = Path::new("session.md");
+        let message = retained_pending_write_message_from_observation(
+            file,
+            RetainedPendingWriteMessage {
+                intent_id: "legacy-intent-without-proof",
+                reason: "editor_projection_pending",
+                source: "start_resume_id_capture",
+                target_hash: "captured-target",
+                resume_reason: None,
+                captured_closeout: true,
+                capture_resume_available: false,
+            },
+            agent_doc_turn::write_ownership::RetainedWriteOwnership::new(true, true)
+                .with_retained_projection(true),
+            true,
+            true,
+        );
+
+        assert!(message.contains("state=retained_capture_replay_metadata_missing"));
+        assert!(message.contains("--resume-capture` is not applicable"));
+        assert!(message.contains("retained intent was not changed"));
+        assert!(!message.contains("Run `agent-doc repair"));
     }
 
     #[test]

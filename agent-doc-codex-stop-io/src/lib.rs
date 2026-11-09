@@ -2676,6 +2676,9 @@ fn try_resume_captured_finalize_in_hook(file: &Path) -> CapturedFinalizeHookResu
                 );
                 return CapturedFinalizeHookResume::Closed;
             }
+            agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::RetainedDeliverySettled => {
+                return CapturedFinalizeHookResume::Pending;
+            }
             agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::Superseded => {
                 return if agent_doc_session_check_io::inspect(
                     file,

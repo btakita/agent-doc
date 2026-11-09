@@ -1204,6 +1204,10 @@ pub struct ControllerTmuxLayoutEffectStatus {
     pub attempt: u64,
 }
 
+/// Observation reason prefix when a layout column's live argv document is not
+/// a member of the expected set. Retries cannot repair it by selecting the pane.
+pub(crate) const FOREIGN_DOCUMENT_OCCUPANT_REASON: &str = "foreign_document_occupant";
+
 pub(crate) fn derive_tmux_layout_effect_state(
     desired: Option<PaneLayoutDesired>,
     actor_bindings: Vec<ControllerTmuxActorBinding>,
@@ -1213,6 +1217,16 @@ pub(crate) fn derive_tmux_layout_effect_state(
     let Some(desired) = desired else {
         return TmuxLayoutEffectState::Absent;
     };
+    // A foreign occupant cannot be repaired by another focus attempt. Actor
+    // binding churn must not project that refusal back to NeedsEffect, or a
+    // command await times out as `tmux_effect_not_started` after focus ran.
+    // Other refusals still require a current actor-binding match.
+    if receipt.generation == desired.generation
+        && receipt.phase == PaneLayoutEffectPhase::Refused
+        && receipt.reason.contains(FOREIGN_DOCUMENT_OCCUPANT_REASON)
+    {
+        return TmuxLayoutEffectState::Refused(desired);
+    }
     let receipt_is_current =
         receipt.generation == desired.generation && receipt.actor_bindings == actor_bindings;
     let observation_is_current = observed.as_ref().is_some_and(|observed| {
@@ -2595,11 +2609,32 @@ impl ControllerPaneLayoutGraph {
     }
 
     fn effect_file_panes(&self, generation: u64) -> Vec<(String, String)> {
-        self.ctx
+        let applicable = self
+            .ctx
             .get(&self.applicable_receipt)
             .filter(|receipt| receipt.generation == generation)
             .map(|receipt| receipt.file_panes)
+            .unwrap_or_default();
+        if !applicable.is_empty() {
+            return applicable;
+        }
+        self.recorded_effect_receipt(generation)
+            .map(|receipt| receipt.file_panes)
             .unwrap_or_default()
+    }
+
+    fn recorded_effect_receipt(&self, generation: u64) -> Option<PaneLayoutEffectReceipt> {
+        let receipt = self.ctx.get(&self.receipt);
+        (receipt.generation == generation).then_some(receipt)
+    }
+
+    #[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
+    fn observation_window(&self, generation: u64) -> Option<String> {
+        self.ctx.get(&self.observed).and_then(|observed| {
+            (observed.generation == generation)
+                .then_some(observed.report.window_id)
+                .flatten()
+        })
     }
 
     /// Inspect the file→pane mapping retained from the last structural effect.
@@ -17437,6 +17472,53 @@ mod tests {
                 },
             ),
             TmuxLayoutEffectState::Refused(desired.clone())
+        );
+        let drifted_bindings = vec![ControllerTmuxActorBinding {
+            document_path: "tasks/one.md".to_string(),
+            session_id: "session-drift".to_string(),
+            pane_id: "%2".to_string(),
+            generation: 4,
+        }];
+        assert_eq!(
+            derive_tmux_layout_effect_state(
+                Some(desired.clone()),
+                drifted_bindings.clone(),
+                Some(mismatched.clone()),
+                PaneLayoutEffectReceipt {
+                    generation: 7,
+                    actor_bindings: actor_bindings.clone(),
+                    attempt: 1,
+                    phase: PaneLayoutEffectPhase::Refused,
+                    reason: "duplicate_session_identity".to_string(),
+                    file_panes: Vec::new(),
+                    focus_required: true,
+                    focus_applied: false,
+                },
+            ),
+            TmuxLayoutEffectState::NeedsEffect(desired.clone()),
+            "a refusal other than a foreign occupant does not survive actor-binding drift"
+        );
+        assert_eq!(
+            derive_tmux_layout_effect_state(
+                Some(desired.clone()),
+                drifted_bindings,
+                Some(mismatched.clone()),
+                PaneLayoutEffectReceipt {
+                    generation: 7,
+                    actor_bindings: actor_bindings.clone(),
+                    attempt: 12,
+                    phase: PaneLayoutEffectPhase::Refused,
+                    reason: "foreign_document_occupant expected=/repo/tasks/agent-doc-bugs.md occupant=/repo/tasks/infra.md; applied; focus_foreign_document_occupant".to_string(),
+                    file_panes: vec![
+                        ("/repo/tasks/agent-doc-bugs.md".to_string(), "%2".to_string()),
+                        ("/repo/tasks/sdk-dev.md".to_string(), "%11".to_string()),
+                    ],
+                    focus_required: true,
+                    focus_applied: false,
+                },
+            ),
+            TmuxLayoutEffectState::Refused(desired.clone()),
+            "a foreign occupant refusal stays visible across actor-binding drift"
         );
         let dispatched_document = "tasks/lazily.md".to_string();
         let dispatch_actor_bindings = vec![

@@ -22,6 +22,47 @@ pub fn canonical_registered_file(entry: &tmux_router::RegistryEntry) -> PathBuf 
     std::fs::canonicalize(&resolved).unwrap_or(resolved)
 }
 
+/// GH #89: a pane's process argv is fixed when its supervisor starts, so a
+/// document rename leaves it naming the OLD path forever, while rename
+/// reconciliation moves the registry binding to the new one.
+///
+/// The argv document is a stale spawn-time identity only when it does not name
+/// a different file that still exists, the registry binds `claimed_file` to
+/// `pane`, and no registry entry still binds the argv document to that pane.
+/// A live `agent-doc start` of another existing document is that document's
+/// supervisor, not a frozen rename.
+pub fn argv_owner_is_stale_spawn_identity(
+    registry: &tmux_router::Registry,
+    pane: &str,
+    claimed_file: &Path,
+    argv_document: &str,
+    root: &Path,
+) -> bool {
+    let claimed = canonical_dispatch_file(claimed_file);
+    let argv_path = Path::new(argv_document);
+    let argv_abs = if argv_path.is_absolute() {
+        argv_path.to_path_buf()
+    } else {
+        root.join(argv_path)
+    };
+    let argv_on_disk = std::fs::canonicalize(&argv_abs).ok();
+    if argv_on_disk.as_ref().is_some_and(|argv| argv != &claimed) {
+        return false;
+    }
+    let argv = argv_on_disk.unwrap_or(argv_abs);
+    let mut binds_claimed = false;
+    for entry in registry.values().filter(|entry| entry.pane == pane) {
+        let bound = canonical_registered_file(entry);
+        if bound == argv || entry.file == argv_document {
+            return false;
+        }
+        if bound == claimed {
+            binds_claimed = true;
+        }
+    }
+    binds_claimed
+}
+
 pub fn registry_base_dir_for_dispatch(file_path: &str) -> PathBuf {
     let requested = canonical_dispatch_file(Path::new(file_path));
     agent_doc_fs::find_project_root(&requested)

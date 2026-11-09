@@ -276,6 +276,10 @@ pub enum SupervisorReplacementPaneDecision {
     /// Fresh-mode explicitly authorizes replacing this document's harness.
     RestartLiveHarness,
     BlockLiveNonShell,
+    /// The registry pane is another document's live supervisor. Leave that
+    /// pane untouched and cold-start this document in a free shell or a new
+    /// pane. `current_command=agent-doc` is not proof this document is running.
+    RelinquishForeignDocument,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -283,6 +287,8 @@ pub struct SupervisorReplacementPaneFacts {
     pub pane_alive: bool,
     pub current_command_is_shell: bool,
     pub runs_document_harness: bool,
+    /// Process argv names a different live document, not a frozen rename.
+    pub occupied_by_other_document: bool,
 }
 
 pub const fn decide_supervisor_replacement_pane(
@@ -291,6 +297,11 @@ pub const fn decide_supervisor_replacement_pane(
 ) -> SupervisorReplacementPaneDecision {
     if !facts.pane_alive {
         return SupervisorReplacementPaneDecision::AutoStartNew;
+    }
+    // Another document's `agent-doc start` outranks the harness binary and
+    // the shell check. Do not quit it and do not type a start command into it.
+    if facts.occupied_by_other_document {
+        return SupervisorReplacementPaneDecision::RelinquishForeignDocument;
     }
     if facts.current_command_is_shell {
         return SupervisorReplacementPaneDecision::PreserveExistingShell;
@@ -690,6 +701,7 @@ mod tests {
                     pane_alive: true,
                     current_command_is_shell: false,
                     runs_document_harness: true,
+                    occupied_by_other_document: false,
                 },
             ),
             SupervisorReplacementPaneDecision::PreserveLiveHarness
@@ -704,6 +716,7 @@ mod tests {
                     pane_alive: true,
                     current_command_is_shell: false,
                     runs_document_harness: true,
+                    occupied_by_other_document: false,
                 },
             ),
             SupervisorReplacementPaneDecision::RestartLiveHarness
@@ -772,6 +785,7 @@ mod tests {
             pane_alive: true,
             current_command_is_shell: false,
             runs_document_harness: true,
+            occupied_by_other_document: false,
         };
 
         assert_eq!(
@@ -783,6 +797,52 @@ mod tests {
                 facts,
             ),
             SupervisorReplacementPaneDecision::RestartLiveHarness
+        );
+    }
+
+    #[test]
+    fn restart_agent_relinquishes_another_documents_supervisor_without_quitting_it() {
+        let restart_agent = SupervisorReplacementIntent {
+            mode: SupervisorReplacementMode::Continue,
+            restart_agent: true,
+        };
+        assert_eq!(
+            decide_supervisor_replacement_pane(
+                restart_agent,
+                SupervisorReplacementPaneFacts {
+                    pane_alive: true,
+                    current_command_is_shell: false,
+                    runs_document_harness: false,
+                    occupied_by_other_document: true,
+                },
+            ),
+            SupervisorReplacementPaneDecision::RelinquishForeignDocument
+        );
+        assert_eq!(
+            decide_supervisor_replacement_pane(
+                restart_agent,
+                SupervisorReplacementPaneFacts {
+                    pane_alive: true,
+                    current_command_is_shell: false,
+                    runs_document_harness: true,
+                    occupied_by_other_document: true,
+                },
+            ),
+            SupervisorReplacementPaneDecision::RelinquishForeignDocument,
+            "another document outranks a harness-binary match; do not quit that pane"
+        );
+        assert_eq!(
+            decide_supervisor_replacement_pane(
+                restart_agent,
+                SupervisorReplacementPaneFacts {
+                    pane_alive: true,
+                    current_command_is_shell: false,
+                    runs_document_harness: false,
+                    occupied_by_other_document: false,
+                },
+            ),
+            SupervisorReplacementPaneDecision::BlockLiveNonShell,
+            "agent-doc with no other-document proof stays untouchable"
         );
     }
 
@@ -857,6 +917,7 @@ mod tests {
                     pane_alive: true,
                     current_command_is_shell: shell,
                     runs_document_harness: !shell,
+                    occupied_by_other_document: false,
                 },
             )
         }

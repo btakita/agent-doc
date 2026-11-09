@@ -4540,7 +4540,7 @@ fn retained_pending_write_message_from_observation(
     }
 
     // `#retainednoeditor`: "resumes automatically after editor/controller delivery
-    // converges" is only true while an editor replica can still project. When the
+    // converges" is only possible while an editor replica can still project. When the
     // editor is GONE (IDE closed or restarted), there is nothing to converge
     // with, and "retry only `agent-doc session-check`" becomes an instruction
     // that can never succeed — the operator retries forever against a precondition
@@ -4639,9 +4639,11 @@ fn retained_pending_guidance(
             " NOTE: zero live editor replicas are registered for this document, so \
              there is currently nothing for the delivery to converge WITH — it will \
              stay retained rather than drain on its own. Reopen the document in the \
-             editor so its replica re-registers; the retained capture then drains \
-             automatically. The capture is durable in CRDT/Lazily state, so it is not \
-             at risk while you do that."
+             editor so its replica re-registers, then rerun `agent-doc session-check \
+             <FILE>`. That check either observes the replay or returns the exact \
+             identity-fenced `repair --resume-capture` command; do not assume the \
+             reconnect created a replay edge. The capture is durable in CRDT/Lazily \
+             state, so it is not at risk while you do that."
         }
         RetainedPendingGuidance::AwaitCapturedReplayProjection => {
             " NOTE: authority and disk currently agree on bytes that do NOT contain \
@@ -7319,7 +7321,7 @@ mod terminal_convergence_tests {
     #[test]
     fn retained_pending_rejection_reports_operator_gate_instead_of_automatic_retry() {
         let file = Path::new("session.md");
-        let message = retained_pending_write_message(
+        let message = retained_pending_write_message_from_observation(
             file,
             RetainedPendingWriteMessage {
                 intent_id: "intent-refused",
@@ -7334,6 +7336,8 @@ mod terminal_convergence_tests {
             agent_doc_turn::write_ownership::RetainedWriteOwnership::new(true, true)
                 .with_retained_projection(true)
                 .with_delivery_rejected(true),
+            true,
+            false,
         );
 
         assert!(
@@ -7369,6 +7373,16 @@ mod terminal_convergence_tests {
         assert!(message.contains("`agent-doc commit` cannot succeed"));
         assert!(message.contains("exact retained capture"));
         assert!(!message.contains("Run `agent-doc commit <FILE>`"));
+    }
+
+    #[test]
+    fn zero_replica_guidance_never_promises_reconnect_will_replay() {
+        let message = retained_pending_guidance(false, false, true);
+        assert!(message.contains("zero live editor replicas"));
+        assert!(message.contains("rerun `agent-doc session-check <FILE>`"));
+        assert!(message.contains("identity-fenced `repair --resume-capture`"));
+        assert!(message.contains("do not assume the reconnect created a replay edge"));
+        assert!(!message.contains("capture then drains automatically"));
     }
 
     /// `#retainedcapturereplayterminal`: after a replica reconnect, exact

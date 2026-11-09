@@ -502,6 +502,13 @@ queue lines the strike itself added or removed, closeout logs
 publishes both cuts. An operator row the snapshot never held, and a snapshot
 whose queue body already matches the published live queue, stay quiet.
 
+Generated response structures append after the owning row's complete existing
+descendant subtree. Materialization must not insert a response immediately
+after the parent line and thereby move operator-authored children below it.
+During a concurrent rebase, live operator children remain the order spine and
+an agent-only `gen:` subtree is placed at the end of its enclosing live subtree;
+ordinary non-generated child weaving is unchanged.
+
 Operator list rows are not position-counted `:duplicate:N` identities
 (`#duplicateordinalshift`). A same-key row inserted ahead keeps the earlier rows
 on the identity they already had; the inserted row is the new one. A second

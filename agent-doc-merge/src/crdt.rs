@@ -1745,7 +1745,15 @@ fn reconcile_component_body(
     let order = if name == "exchange" {
         order_union(&ours_keys, &theirs_keys)
     } else {
-        order_union(&theirs_keys, &ours_keys)
+        let theirs_order = theirs_children
+            .iter()
+            .map(|child| (child.key.as_str(), child.text.as_str()))
+            .collect::<Vec<_>>();
+        let ours_order = ours_children
+            .iter()
+            .map(|child| (child.key.as_str(), child.text.as_str()))
+            .collect::<Vec<_>>();
+        order_list_children(&theirs_order, &ours_order)
     };
 
     // `exchange` is append-only committed history: a `### Re:` block present in
@@ -2264,6 +2272,80 @@ fn order_union(ours_keys: &[&str], theirs_keys: &[&str]) -> Vec<String> {
             }
         }
         result.insert(insert_pos, k.to_string());
+    }
+    result
+}
+
+/// Keep the live/operator list order as the spine while weaving agent-only
+/// children into it. Generated response rows are different from ordinary
+/// agent children: they are presentation metadata for an enclosing row and
+/// therefore append after that row's complete live descendant subtree.
+pub(crate) fn order_list_children(spine: &[(&str, &str)], weave: &[(&str, &str)]) -> Vec<String> {
+    let mut result = spine
+        .iter()
+        .map(|(key, _)| (*key).to_string())
+        .collect::<Vec<_>>();
+    let mut present = result
+        .iter()
+        .cloned()
+        .collect::<std::collections::HashSet<_>>();
+    let text_by_key = spine
+        .iter()
+        .chain(weave.iter())
+        .map(|(key, text)| (*key, *text))
+        .collect::<std::collections::HashMap<_, _>>();
+    let indent = |text: &str| text.len() - text.trim_start_matches([' ', '\t']).len();
+
+    for (index, &(key, text)) in weave.iter().enumerate() {
+        if present.contains(key) {
+            continue;
+        }
+
+        // The legacy component seam passes the raw `gen:` key; the persisted
+        // document-cell seam wraps it as `component:occurrence:gen:...`.
+        let generated = key.starts_with("gen:") || key.contains(":gen:");
+        let insert_pos = if generated {
+            let item_indent = indent(text);
+            let parent = (0..index)
+                .rev()
+                .find(|&prior| indent(weave[prior].1) < item_indent)
+                .map(|prior| weave[prior].0);
+            parent
+                .and_then(|parent_key| {
+                    result
+                        .iter()
+                        .position(|placed| placed == parent_key)
+                        .map(|parent_pos| {
+                            let parent_indent = text_by_key
+                                .get(parent_key)
+                                .map_or(0, |parent_text| indent(parent_text));
+                            let mut subtree_end = parent_pos + 1;
+                            while subtree_end < result.len() {
+                                let placed_indent = text_by_key
+                                    .get(result[subtree_end].as_str())
+                                    .map_or(0, |placed_text| indent(placed_text));
+                                if placed_indent <= parent_indent {
+                                    break;
+                                }
+                                subtree_end += 1;
+                            }
+                            subtree_end
+                        })
+                })
+                .unwrap_or(result.len())
+        } else {
+            let mut insert_pos = 0usize;
+            for prior in (0..index).rev() {
+                if let Some(placed) = result.iter().position(|item| item == weave[prior].0) {
+                    insert_pos = placed + 1;
+                    break;
+                }
+            }
+            insert_pos
+        };
+
+        result.insert(insert_pos, key.to_string());
+        present.insert(key.to_string());
     }
     result
 }
@@ -5571,6 +5653,60 @@ Second answer line three.
         );
         assert_eq!(persisted.matches("#rebase").count(), 1);
         assert!(!persisted.contains(pre_id));
+    }
+
+    #[test]
+    fn generated_response_appends_after_concurrent_operator_children() {
+        let parent = "- ### sample pull request [#q-0123456789ab]";
+        let operator_comment =
+            "  - %% fix(bossroom): let the SDK resume a room after the demo drops its client %%";
+        let response = "  - **Response [#r-0123456789ab]**";
+        let timestamp = "    - **Timestamp:** 2026-11-09T15:27:07.000Z";
+        let queue = |rows: &[&str]| rows.join("\n");
+        let base = doc_with_exchange_queue("Q.", &queue(&[parent]));
+        let state = CrdtDoc::from_text(&base).encode_state();
+
+        // The response projection and the operator comment are concurrent
+        // children of the same row. Generated metadata appends to the live
+        // operator subtree instead of taking the first slot after the parent.
+        let ours = doc_with_exchange_queue("Q.", &queue(&[parent, response, timestamp]));
+        let theirs = doc_with_exchange_queue("Q.", &queue(&[parent, operator_comment]));
+        let expected = queue(&[parent, operator_comment, response, timestamp]);
+
+        let ours_queue = queue_component_bodies(&ours);
+        let ours_children = split_list_children(ours_queue[0]).unwrap();
+        assert!(
+            ours_children
+                .iter()
+                .any(|child| child.key.starts_with("gen:")),
+            "response fixture must carry generated-row identity: {:?}",
+            ours_children
+                .iter()
+                .map(|child| child.key.as_str())
+                .collect::<Vec<_>>()
+        );
+        let base_queue = queue_component_bodies(&base);
+        let theirs_queue = queue_component_bodies(&theirs);
+        let reconciled =
+            reconcile_component_body("queue", Some(base_queue[0]), ours_queue[0], theirs_queue[0])
+                .unwrap();
+        assert!(
+            reconciled.contains(&expected),
+            "keyed component reconciliation prepended generated response metadata:\n{reconciled}"
+        );
+
+        let merged = merge_by_component(Some(&state), &ours, &theirs).unwrap();
+        assert!(
+            merged.contains(&expected),
+            "component merge prepended generated response metadata:\n{merged}"
+        );
+
+        let base_state = MultiNodeState::from_text(&base).unwrap();
+        let (persisted, _) = MultiNodeState::merge(Some(&base_state), &ours, &theirs).unwrap();
+        assert!(
+            persisted.contains(&expected),
+            "document-cell merge prepended generated response metadata:\n{persisted}"
+        );
     }
 
     #[test]

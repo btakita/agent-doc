@@ -1448,12 +1448,21 @@ fn compose_occurrence(
     // content-policy path.
     let lifecycle_governed = is_list_component(&ours.component);
     // Order spine: theirs (live) for list components, ours (history) for exchange.
-    let (spine, weave) = if is_exchange {
-        (identity_seq(ours), identity_seq(theirs))
+    let order = if is_exchange {
+        weave_order(&identity_seq(ours), &identity_seq(theirs))
     } else {
-        (identity_seq(theirs), identity_seq(ours))
+        let theirs_order = theirs
+            .items
+            .iter()
+            .map(|(key, value)| (node_key_identity(key), value.as_str()))
+            .collect::<Vec<_>>();
+        let ours_order = ours
+            .items
+            .iter()
+            .map(|(key, value)| (node_key_identity(key), value.as_str()))
+            .collect::<Vec<_>>();
+        crate::crdt::order_list_children(&theirs_order, &ours_order)
     };
-    let order = weave_order(&spine, &weave);
 
     let mut merged: Vec<(String, ItemValue)> = Vec::with_capacity(order.len());
     let mut conflicts = Vec::new();

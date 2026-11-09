@@ -4069,6 +4069,7 @@ pub fn annotate_newly_struck_queue_items_with_response_id_at(
         let indent = raw.len() - raw.trim_start_matches([' ', '\t']).len();
         let descendant_end = descendant_region_end(&after, node.item.end_byte, indent);
         let owned_scope_end = descendant_end.max(node.item.end_byte);
+        let child_insert_at = response_child_insert_at(&after, node.item.end_byte, owned_scope_end);
         let owned_scope = &after[node.item.start_byte..owned_scope_end];
         // The addressed-at timestamp is metadata for this response projection,
         // not part of its public identity. A detached replay can recompute the
@@ -4159,6 +4160,7 @@ pub fn annotate_newly_struck_queue_items_with_response_id_at(
             edits.push((
                 node.item.start_byte,
                 node.item.end_byte,
+                child_insert_at,
                 indent,
                 has_inline_id,
                 response_id.clone(),
@@ -4168,22 +4170,47 @@ pub fn annotate_newly_struck_queue_items_with_response_id_at(
     }
 
     let mut replacements = Vec::new();
-    for (start, end, indent, has_inline_id, response_id, children) in edits {
-        let mut replacement = if has_inline_id {
+    for (start, end, child_insert_at, indent, has_inline_id, response_id, children) in edits {
+        let parent_replacement = if has_inline_id {
             remove_inline_response_id(&after[start..end], &response_id)
         } else {
             after[start..end].to_string()
         };
-        if !children.is_empty() {
+        if children.is_empty() {
+            if has_inline_id {
+                replacements.push((start, end, parent_replacement));
+            }
+            continue;
+        }
+
+        let mut child_block = String::new();
+        let child_indent = " ".repeat(indent + 2);
+        for child in children {
+            child_block.push_str(&render_response_lookup_child(&child, &child_indent));
+        }
+
+        if child_insert_at == end {
+            let mut replacement = parent_replacement;
             if !replacement.ends_with('\n') {
                 replacement.push('\n');
             }
-            let child_indent = " ".repeat(indent + 2);
-            for child in children {
-                replacement.push_str(&render_response_lookup_child(&child, &child_indent));
+            replacement.push_str(&child_block);
+            replacements.push((start, end, replacement));
+        } else {
+            // Generated response metadata is the last child of its owning row.
+            // Inserting at the parent line used to move every operator-authored
+            // child below the response even though `owned_scope_end` had already
+            // identified the complete descendant subtree.
+            if has_inline_id {
+                replacements.push((start, end, parent_replacement));
             }
+            let mut rendered_children = String::new();
+            if !after[..child_insert_at].ends_with('\n') {
+                rendered_children.push('\n');
+            }
+            rendered_children.push_str(&child_block);
+            replacements.push((child_insert_at, child_insert_at, rendered_children));
         }
-        replacements.push((start, end, replacement));
     }
     replacements.extend(closed_by_rewrites);
     replacements.sort_by_key(|item| std::cmp::Reverse(item.0));
@@ -5512,6 +5539,20 @@ fn descendant_region_end(document: &str, item_end: usize, parent_indent: usize) 
         cursor += line.len();
     }
     document.len()
+}
+
+/// Place generated response children after real descendant content but before
+/// any blank-line padding that separates the owning subtree from its sibling.
+fn response_child_insert_at(document: &str, item_end: usize, scope_end: usize) -> usize {
+    let mut cursor = item_end;
+    let mut last_content_end = item_end;
+    for line in document[item_end..scope_end].split_inclusive('\n') {
+        cursor += line.len();
+        if !line.trim().is_empty() {
+            last_content_end = cursor;
+        }
+    }
+    last_content_end
 }
 
 fn remove_inline_response_id(line: &str, response_id: &str) -> String {
@@ -7664,6 +7705,30 @@ mod tests {
             annotated,
             "replaying the projection must not duplicate the response id"
         );
+    }
+
+    #[test]
+    fn generated_response_appends_after_existing_operator_children() {
+        let operator_comment =
+            "  - %% fix(bossroom): let the SDK resume a room after the demo drops its client %%\n";
+        let before = queue_doc(&format!("- do [#fresh]\n{operator_comment}"));
+        let after = queue_doc(&format!("- ~~do [#fresh]~~\n{operator_comment}"));
+        let response = "### Re: fresh — test\n\nCompleted the requested change.\n";
+
+        let annotated =
+            annotate_newly_struck_queue_items_with_response_id(&before, &after, response).unwrap();
+        let comment_pos = annotated
+            .find(operator_comment.trim_end())
+            .expect("operator comment stays present");
+        let response_pos = annotated
+            .find("  - **Response [#r-")
+            .expect("generated response is projected");
+
+        assert!(
+            comment_pos < response_pos,
+            "generated response must append after existing operator children:\n{annotated}"
+        );
+        assert_eq!(annotated.matches(operator_comment.trim_end()).count(), 1);
     }
 
     fn response_summary_of_row(annotated: &str, row: &str) -> String {

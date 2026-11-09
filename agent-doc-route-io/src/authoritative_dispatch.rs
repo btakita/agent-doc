@@ -465,7 +465,7 @@ fn running_turn_submission_observation(
         agent_doc_harness::steering_delivery::RunningTurnFollowUpComposer::Empty => {
             RunningTurnSubmissionObservation::Delivered
         }
-        agent_doc_harness::steering_delivery::RunningTurnFollowUpComposer::Draft => {
+        agent_doc_harness::steering_delivery::RunningTurnFollowUpComposer::Draft { .. } => {
             RunningTurnSubmissionObservation::Draft
         }
         agent_doc_harness::steering_delivery::RunningTurnFollowUpComposer::Blocked { reason } => {
@@ -530,6 +530,10 @@ fn route_sync_steering_not_delivered(file: &Path, reason: &str) -> String {
             agent_doc_flow::outcome::UserFacingOutcomeKind::DeferredForOperatorProof,
         ),
     )
+}
+
+fn route_sync_operator_draft_reason(preview: &str) -> String {
+    format!("the composer holds an unsent draft (redacted draft preview: {preview:?})")
 }
 
 fn one_line_error(err: &impl std::fmt::Display) -> String {
@@ -601,10 +605,17 @@ fn running_turn_steering_claim(
         &capture,
         agent_doc_tmux_io::pane_cursor_y(tmux, pane),
     ) {
-        agent_doc_harness::steering_delivery::RunningTurnFollowUpComposer::Draft => {
+        agent_doc_harness::steering_delivery::RunningTurnFollowUpComposer::Draft { preview } => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "route_sync_steering_not_delivered file={} pane={pane} harness={harness} reason=operator_draft draft_preview={preview:?} outcome=retained (#routesyncsteer)",
+                    file.display(),
+                ),
+            );
             return RunningTurnSteeringClaim::NotDelivered(route_sync_steering_not_delivered(
                 file,
-                "the composer holds an unsent draft",
+                &route_sync_operator_draft_reason(&preview),
             ));
         }
         agent_doc_harness::steering_delivery::RunningTurnFollowUpComposer::Blocked { reason } => {
@@ -2492,6 +2503,14 @@ mod tests {
             refused.contains("ui_outcome=deferred_for_operator_proof"),
             "{refused}"
         );
+
+        let draft_refused = route_sync_steering_not_delivered(
+            file,
+            &route_sync_operator_draft_reason("❯ keep this draft"),
+        );
+        assert!(draft_refused.contains("redacted draft preview"), "{draft_refused}");
+        assert!(draft_refused.contains("❯ keep this draft"), "{draft_refused}");
+        assert!(draft_refused.contains("steering_delivered=0"), "{draft_refused}");
 
         // Nothing pending: the existing deferral is unchanged.
         let deferred = closeout_wait_route_outcome(

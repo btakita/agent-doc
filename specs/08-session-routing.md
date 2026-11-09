@@ -727,6 +727,12 @@ A route that starts a route-owned pane, dispatches into it, or successfully hand
 
 When a real foreign draft blocks route, `route_pre_dispatch_draft_observation` and the refusal include the same bounded, secret-redacted draft preview used by composer projection. This makes false-positive draft classification diagnosable without logging raw operator input or credentials.
 
+The same proof requirement applies to an explicit send into an already-running
+owner. If its composer guard refuses the send, `route_sync_steering_not_delivered`
+records and returns the bounded, secret-redacted draft preview while leaving the
+explicit diff durable. A refusal that only says “unsent draft” is insufficient:
+it asks for operator proof after discarding the observation needed to provide it.
+
 The starting-actor wait decision is conjunctive: route continues through `starting`, through restart-bootstrap `busy`, and through `ready` without prompt proof; only `ready` plus dispatch-ready prompt proof plus dispatch eligibility may release the route. If that wait times out, the timeout is keyed by document, pane, and actor generation so repeated editor reroutes produce one `route_authoritative_actor_starting_not_ready` diagnostic for the stuck generation and only coalesced wait telemetry until the actor reaches `ready`, `closed`, or `blocked` or a different pane/generation becomes authoritative. A route-owned `starting_actor_timeout` block is recoverable only by direct dispatch-ready prompt proof on the same pane/generation. Because the timeout record is sticky (`wait_for_authoritative_actor_ready` short-circuits once it is set), route polls the blocked actor's live pane for that proof up to the harness recovery budget before failing closed, so a healthy but slow-starting harness — for example a heavy Codex model that takes several seconds to present its idle composer after a supervisor restart — recovers within the same reroute instead of dead-ending on a single capture. A busy pane never satisfies the dispatch-ready proof (the harness busy cue short-circuits it), so the bounded poll preserves the promote-only-proven-idle invariant. That proof clears the saved timeout and promotes the actor to `ready` before any reopen is submitted.
 
 `routed_reopen` is the FlowCore owner for these decisions. Route may keep tmux,

@@ -876,13 +876,13 @@ mod tests {
                 .as_deref(),
             Some("› fix the tests")
         );
-        assert_eq!(
+        assert!(matches!(
             agent_doc_harness::steering_delivery::running_turn_follow_up_composer_at_cursor(
                 "codex",
                 &format!("• Working (3s • esc to interrupt)\n\n{frame}"),
                 Some(2),
             ),
-            agent_doc_harness::steering_delivery::RunningTurnFollowUpComposer::Draft
-        );
+            agent_doc_harness::steering_delivery::RunningTurnFollowUpComposer::Draft { .. }
+        ));
     }
 }

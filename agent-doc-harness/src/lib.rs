@@ -1570,7 +1570,14 @@ fn protected_prompt_draft_preview_from_candidate(
     } else {
         std::borrow::Cow::Borrowed(stripped.trim())
     };
-    let redacted = agent_doc_secret_redact::redact(normalized.as_ref());
+    bounded_redacted_draft_preview(normalized.as_ref())
+}
+
+/// Bound and secret-redact composer text before it crosses a diagnostic or UI
+/// boundary. Composer projections retain the complete text for ownership
+/// decisions; callers must use this helper before surfacing that text.
+pub fn bounded_redacted_draft_preview(text: &str) -> Option<String> {
+    let redacted = agent_doc_secret_redact::redact(text);
     let preview = redacted.trim();
     if preview.is_empty() {
         return None;

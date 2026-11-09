@@ -79,7 +79,7 @@ pub enum RunningTurnFollowUpComposer {
     /// Unsent operator text in the composer. Before injection this protects the
     /// draft; after route has proved the composer empty and injected its own
     /// text, this proves Enter did not submit the follow-up.
-    Draft,
+    Draft { preview: String },
     Blocked { reason: String },
     Unreadable,
 }
@@ -99,7 +99,12 @@ pub fn running_turn_follow_up_composer_at_cursor(
     if adapter.harness == "grok" {
         return match crate::grok::follow_up_composer(output) {
             crate::grok::FollowUpComposer::Empty => RunningTurnFollowUpComposer::Empty,
-            crate::grok::FollowUpComposer::Draft { .. } => RunningTurnFollowUpComposer::Draft,
+            crate::grok::FollowUpComposer::Draft { preview } => {
+                RunningTurnFollowUpComposer::Draft {
+                    preview: crate::bounded_redacted_draft_preview(&preview)
+                        .unwrap_or_else(|| "<unavailable>".to_string()),
+                }
+            }
             crate::grok::FollowUpComposer::Unreadable => RunningTurnFollowUpComposer::Unreadable,
         };
     }
@@ -110,7 +115,12 @@ pub fn running_turn_follow_up_composer_at_cursor(
             reason.as_str(),
             "queued draft in composer" | "drafted prompt input"
         ) {
-            return RunningTurnFollowUpComposer::Draft;
+            return RunningTurnFollowUpComposer::Draft {
+                preview: crate::protected_prompt_draft_preview_at_cursor(
+                    &config, output, cursor_y,
+                )
+                .unwrap_or_else(|| "<unavailable>".to_string()),
+            };
         }
         return RunningTurnFollowUpComposer::Blocked { reason };
     }
@@ -118,7 +128,12 @@ pub fn running_turn_follow_up_composer_at_cursor(
         crate::PaneComposerProjection::ReadyEmpty { .. } | crate::PaneComposerProjection::Busy => {
             RunningTurnFollowUpComposer::Empty
         }
-        crate::PaneComposerProjection::OperatorDraft { .. } => RunningTurnFollowUpComposer::Draft,
+        crate::PaneComposerProjection::OperatorDraft { preview } => {
+            RunningTurnFollowUpComposer::Draft {
+                preview: crate::bounded_redacted_draft_preview(&preview)
+                    .unwrap_or_else(|| "<unavailable>".to_string()),
+            }
+        }
         crate::PaneComposerProjection::AgentAddressed { target } => {
             RunningTurnFollowUpComposer::Blocked {
                 reason: format!("the composer is addressed to subagent {target:?}"),
@@ -267,10 +282,10 @@ mod tests {
             RunningTurnFollowUpComposer::Empty
         );
         let codex_draft = "• Working (1m 34s • esc to interrupt)\n\n›\ntab to queue message\ngpt-5.4 high · ~/work/btakita/agent-loop · Context 54% used";
-        assert_eq!(
+        assert!(matches!(
             running_turn_follow_up_composer("codex", codex_draft),
-            RunningTurnFollowUpComposer::Draft
-        );
+            RunningTurnFollowUpComposer::Draft { .. }
+        ));
         assert_eq!(
             running_turn_follow_up_composer("codex", "no recognizable composer"),
             RunningTurnFollowUpComposer::Unreadable
@@ -298,12 +313,34 @@ mod tests {
             ),
         ];
         for (harness, capture) in cases {
-            assert_eq!(
-                running_turn_follow_up_composer(harness, capture),
-                RunningTurnFollowUpComposer::Draft,
+            assert!(
+                matches!(
+                    running_turn_follow_up_composer(harness, capture),
+                    RunningTurnFollowUpComposer::Draft { .. }
+                ),
                 "{harness}"
             );
         }
+    }
+
+    /// `#routesyncsteer`: a refusal that asks for operator proof must retain a
+    /// safe proof, including for Grok's dedicated boxed-composer projection.
+    #[test]
+    fn running_turn_draft_proof_is_redacted_and_bounded() {
+        let secret = format!("sk-proj-{}", "a".repeat(32));
+        let draft = format!("keep OPENAI_API_KEY={secret} {}", "continued ".repeat(40));
+        let capture = format!(
+            "Waiting for response… 1.0s [stop]\n╭────────────────────────╮\n│ ❯ {draft} │\n╰──── Grok 4.7 (high) ────╯\nCtrl+c:cancel │ Ctrl+x:shortcuts"
+        );
+        let RunningTurnFollowUpComposer::Draft { preview } =
+            running_turn_follow_up_composer("grok", &capture)
+        else {
+            panic!("Grok draft was not retained");
+        };
+        assert!(preview.contains("OPENAI_API_KEY=[REDACTED]"), "{preview}");
+        assert!(!preview.contains("sk-proj-"), "{preview}");
+        assert!(preview.ends_with("..."), "{preview}");
+        assert!(preview.chars().count() <= 163, "{preview}");
     }
 
     #[test]

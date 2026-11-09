@@ -17143,6 +17143,11 @@ pub struct RestartPromptFanoutReport {
     pub endpoints: usize,
     /// PIDs whose editor listener returned the terminal applied receipt.
     pub acknowledged_editor_pids: Vec<u64>,
+    /// Acknowledged PIDs whose loaded plugin rejected the new socket intent and
+    /// whose IDE then accepted the attach-agent compatibility bridge.
+    pub legacy_bridge_acknowledged_editor_pids: Vec<u64>,
+    /// Terminal one-line receipts returned by the attach compatibility bridge.
+    pub legacy_bridge_receipts: Vec<String>,
     pub failures: Vec<RestartPromptEndpointFailure>,
 }
 
@@ -17162,6 +17167,10 @@ pub struct RestartPromptEndpointFailure {
     pub project_root: PathBuf,
     pub editor_pid: Option<u64>,
     pub reason: String,
+    /// The listener was live and returned a terminal rejected receipt. This is
+    /// the rolling-upgrade signal that the loaded plugin predates
+    /// `prompt_restart` and is eligible for the attach-agent UI bridge.
+    pub typed_request_rejected: bool,
 }
 
 impl std::fmt::Display for RestartPromptEndpointFailure {
@@ -17635,6 +17644,7 @@ fn prompt_restart_processes(
                 project_root: failure.project_root,
                 editor_pid: failure.editor_pid,
                 reason: failure.reason.to_string(),
+                typed_request_rejected: false,
             })
             .collect(),
         ..RestartPromptFanoutReport::default()
@@ -17664,6 +17674,7 @@ fn prompt_restart_processes(
                     "endpoint unavailable: none of its {} project socket(s) accepted a connection",
                     jetbrains_endpoints.len()
                 ),
+                typed_request_rejected: false,
             });
             continue;
         };
@@ -17671,9 +17682,19 @@ fn prompt_restart_processes(
         match send_prompt(endpoint, pid) {
             Ok(true) => report.acknowledged_editor_pids.push(pid),
             outcome => {
-                let error = match outcome {
-                    Ok(false) => "editor did not acknowledge the prompt request".to_string(),
-                    Err(error) => format!("{error:#}").replace('\n', " "),
+                let (error, typed_request_rejected) = match outcome {
+                    Ok(false) => (
+                        "editor did not acknowledge the prompt request".to_string(),
+                        false,
+                    ),
+                    Err(error) => {
+                        let rendered = format!("{error:#}").replace('\n', " ");
+                        let rejected = matches!(
+                            agent_doc_ipc_protocol::classify_socket_delivery_failure(&rendered),
+                            Some(agent_doc_ipc_protocol::SocketDeliveryFailure::Rejected)
+                        );
+                        (rendered, rejected)
+                    }
                     Ok(true) => unreachable!(),
                 };
                 agent_doc_ops_log_io::log_op(
@@ -17689,6 +17710,7 @@ fn prompt_restart_processes(
                     project_root: endpoint.project_root.clone(),
                     editor_pid: Some(pid),
                     reason: format!("editor refused the restart-prompt intent ({error})"),
+                    typed_request_rejected,
                 });
             }
         }
@@ -74481,6 +74503,30 @@ mod restart_prompt_fanout_tests {
         assert_eq!(report.failed(), 1);
         assert_eq!(report.failures[0].editor_pid, Some(93));
         assert!(report.failures[0].reason.contains("endpoint unavailable"));
+    }
+
+    #[test]
+    fn terminal_rejection_is_marked_for_the_legacy_prompt_bridge() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut process = EditorNativeReloadProcess::default();
+        process
+            .endpoints
+            .insert(endpoint(dir.path(), 94, "jetbrains-old"));
+        let mut processes = BTreeMap::new();
+        processes.insert(94, process);
+
+        let report = prompt_restart_processes(
+            ReloadLibraryFanoutReport::default(),
+            processes,
+            "0.2.966",
+            "restart required",
+            |_, _| true,
+            |_, _| Err(anyhow::anyhow!("IPC receipt rejected: APPLY_FAILED")),
+        );
+
+        assert_eq!(report.failed(), 1);
+        assert_eq!(report.failures[0].editor_pid, Some(94));
+        assert!(report.failures[0].typed_request_rejected);
     }
 }
 

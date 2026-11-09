@@ -166,6 +166,17 @@ tasks {
                         .singleOrNull { it.name.endsWith("/lib/modules/$module.jar") }
                         ?: error("split distribution is missing exact module JAR $module.jar")
                     JarInputStream(archive.getInputStream(moduleJar)).use { jar ->
+                        if (module == "agent.doc.backend") {
+                            val attributes = jar.manifest?.mainAttributes
+                                ?: error("agent.doc.backend.jar is missing its attach-agent manifest")
+                            val bootstrap = "com.github.btakita.agentdoc.JetBrainsPluginUpgradeBootstrap"
+                            check(attributes.getValue("Main-Class") == bootstrap) {
+                                "agent.doc.backend.jar does not expose the restart-prompt launcher"
+                            }
+                            check(attributes.getValue("Agent-Class") == bootstrap) {
+                                "agent.doc.backend.jar does not expose the restart-prompt attach agent"
+                            }
+                        }
                         var content: String? = null
                         while (true) {
                             val entry = jar.nextJarEntry ?: break

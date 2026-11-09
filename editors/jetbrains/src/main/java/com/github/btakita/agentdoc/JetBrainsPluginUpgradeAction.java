@@ -8,6 +8,7 @@ import com.intellij.openapi.extensions.PluginDescriptor;
 import com.intellij.openapi.extensions.PluginId;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.project.ProjectManager;
+import com.intellij.openapi.ui.Messages;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
@@ -20,11 +21,13 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 import java.util.function.IntSupplier;
 import java.util.function.Supplier;
 
 /** Freshly loaded implementation of one JetBrains plugin package replacement. */
 public final class JetBrainsPluginUpgradeAction {
+    public static final String RESTART_PROMPT_SENTINEL = "agent-doc:prompt-restart";
     private static final String PLUGIN_ID = "com.github.btakita.agent-doc";
     private static final String LIFECYCLE_CLASS =
         "com.github.btakita.agentdoc.PluginLifecycleListener";
@@ -34,6 +37,9 @@ public final class JetBrainsPluginUpgradeAction {
     private JetBrainsPluginUpgradeAction() {}
 
     public static String run(String archiveValue, String pluginsDirValue, String expectedVersion) {
+        if (RESTART_PROMPT_SENTINEL.equals(archiveValue)) {
+            return scheduleRestartPrompt(expectedVersion, pluginsDirValue);
+        }
         AtomicReference<String> result = new AtomicReference<>();
         AtomicReference<Throwable> failure = new AtomicReference<>();
         AtomicReference<IdeaPluginDescriptor> replacement = new AtomicReference<>();
@@ -77,6 +83,39 @@ public final class JetBrainsPluginUpgradeAction {
             return result.get();
         }
         return result.get() + ":" + reattachOpenDocuments(loaded);
+    }
+
+    /**
+     * Compatibility bridge for an older loaded plugin that predates the
+     * {@code prompt_restart} socket intent. The stable attach bootstrap loads
+     * this action child-first from the newly installed package, so the live IDE
+     * can own the same Restart/Later dialog without replacing its plugin
+     * classloader or using an out-of-process GUI tool.
+     */
+    static String scheduleRestartPrompt(String pendingVersion, String reason) {
+        String pending = pendingVersion == null || pendingVersion.isBlank() ? "unknown" : pendingVersion.trim();
+        String detail = reason == null || reason.isBlank()
+            ? "The installed Agent Doc plugin generation requires an IDE restart."
+            : reason.trim();
+        Runnable dialog = () -> {
+            int choice = Messages.showYesNoDialog(
+                "Agent Doc v" + pending + " is installed, but this IDE is still running the previous generation.\n"
+                    + detail + "\nRestart the IDE to load it.",
+                "Agent Doc Restart Required",
+                "Restart IDE",
+                "Later",
+                Messages.getWarningIcon()
+            );
+            if (choice == Messages.YES) {
+                ApplicationManager.getApplication().restart();
+            }
+        };
+        return scheduleRestartPrompt(pending, ApplicationManager.getApplication()::invokeLater, dialog);
+    }
+
+    static String scheduleRestartPrompt(String pendingVersion, Consumer<Runnable> scheduler, Runnable dialog) {
+        scheduler.accept(dialog);
+        return "ok:restart-prompt:" + pendingVersion;
     }
 
     /**

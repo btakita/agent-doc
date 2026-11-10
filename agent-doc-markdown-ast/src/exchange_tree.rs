@@ -674,6 +674,61 @@ pub fn render_exchange_nodes(nodes: &[ExchangeNode]) -> String {
     nodes.iter().map(ExchangeNode::render).collect()
 }
 
+/// Copy compact `[#r-…]` heading ids from `annotated` onto the same response
+/// nodes in `inner` when those headings do not already carry one.
+///
+/// Identity ignores the id, so an operator-preserved heading and the agent
+/// heading that names the same response are one node. The id is lookup
+/// metadata and has to survive on the kept heading (`#responseidemit`).
+/// Returns `inner` unchanged when there is nothing to copy, so a clean
+/// exchange is never reformatted.
+pub fn apply_missing_response_heading_ids(inner: &str, annotated: &str) -> String {
+    let annotated_nodes = parse_exchange_nodes(annotated);
+    let mut nodes = parse_exchange_nodes(inner);
+    let mut changed = false;
+    for node in &mut nodes {
+        if !matches!(node.kind, ExchangeNodeKind::Response { .. }) {
+            continue;
+        }
+        let already = node
+            .lines
+            .iter()
+            .any(|line| response_id_from_heading(line.trim()).is_some());
+        if already {
+            continue;
+        }
+        let node_id = node.node_id();
+        let Some(response_id) = annotated_nodes
+            .iter()
+            .filter(|other| {
+                matches!(other.kind, ExchangeNodeKind::Response { .. })
+                    && other.node_id() == node_id
+            })
+            .find_map(|other| {
+                other
+                    .lines
+                    .iter()
+                    .find_map(|line| response_id_from_heading(line.trim()))
+            })
+        else {
+            continue;
+        };
+        let response_id = response_id.to_string();
+        if let Some(heading) = node
+            .lines
+            .iter_mut()
+            .find(|line| is_h3_heading(line.trim()))
+        {
+            *heading = annotate_response_heading(heading, &response_id);
+            changed = true;
+        }
+    }
+    if !changed {
+        return inner.to_string();
+    }
+    render_exchange_nodes(&nodes)
+}
+
 /// Add one compact public id to every heading in the matching response cell.
 /// Multi-section cells repeat the id in each subsection heading so every visible
 /// section retains its own durable attribution. The internal ordered node

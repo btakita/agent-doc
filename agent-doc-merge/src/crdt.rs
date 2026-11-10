@@ -1388,6 +1388,53 @@ fn exchange_heading_key(block: &str) -> String {
     response_heading_without_binary_annotations(block.lines().next().unwrap_or(""))
 }
 
+/// When two exchange blocks are the same response and differ only by the
+/// compact `[#r-…]` heading id, keep the block that carries the id.
+///
+/// A both-sides insert (the editor already has the plain heading, the agent
+/// cut has the lookup id) otherwise leaf-merges two full insertions from an
+/// empty base and can drop the id (`#responseidemit`).
+fn exchange_block_with_lookup_id(ours: &str, theirs: &str) -> Option<String> {
+    if without_response_heading_ids(ours) != without_response_heading_ids(theirs) {
+        return None;
+    }
+    let ours_id = first_response_heading_id(ours);
+    let theirs_id = first_response_heading_id(theirs);
+    match (ours_id, theirs_id) {
+        (Some(_), None) => Some(ours.to_string()),
+        (None, Some(_)) => Some(theirs.to_string()),
+        (Some(ours_id), Some(theirs_id)) if ours_id == theirs_id => Some(ours.to_string()),
+        _ => None,
+    }
+}
+
+fn without_response_heading_ids(text: &str) -> String {
+    text.split_inclusive('\n')
+        .map(|line| {
+            let content_end = line.trim_end_matches(['\n', '\r']).len();
+            let ending = &line[content_end..];
+            let body = &line[..content_end];
+            if agent_doc_markdown_ast::exchange_tree::response_id_from_heading(body.trim())
+                .is_some()
+            {
+                format!(
+                    "{}{ending}",
+                    agent_doc_markdown_ast::exchange_tree::strip_response_id_from_heading(body)
+                )
+            } else {
+                line.to_string()
+            }
+        })
+        .collect()
+}
+
+fn first_response_heading_id(text: &str) -> Option<String> {
+    text.lines().find_map(|line| {
+        agent_doc_markdown_ast::exchange_tree::response_id_from_heading(line.trim())
+            .map(str::to_string)
+    })
+}
+
 fn response_heading_without_binary_annotations(line: &str) -> String {
     let heading = line.trim();
     let heading = heading
@@ -1922,6 +1969,10 @@ fn reconcile_component_body(
                     // joining its lifecycle with the stale strike would discard
                     // the correction before the steering projection can see it.
                     Some(t.text.clone())
+                } else if name == "exchange"
+                    && let Some(kept) = exchange_block_with_lookup_id(&o.text, &t.text)
+                {
+                    Some(kept)
                 } else if lifecycle_governed {
                     // Drive the matched item to its lawful state via the per-item
                     // lifecycle lattice (`Live < Struck`), exactly as the
@@ -6467,6 +6518,41 @@ Second answer line three.
         assert_eq!(merged.matches("[#r-f8f3df8f44f1]").count(), 1, "{merged}");
         assert_eq!(merged.matches("Body.").count(), 1, "{merged}");
         assert!(merged.contains("- do [#two]"), "{merged}");
+    }
+
+    /// `#responseidemit`: base has not yet recorded the response. The editor
+    /// inserts the plain heading and the agent cut inserts the same response
+    /// with `[#r-…]`. One heading remains, and it carries the id.
+    #[test]
+    fn response_id_annotation_survives_when_both_sides_insert_the_response() {
+        let doc = |heading: &str, queue: &str| {
+            format!(
+                "<!-- agent:exchange patch=append -->\n### Re: earlier\n\nFirst.\n\n{heading}\n\nBody.\n\n> **Queue prompt:** do it\n<!-- agent:boundary:b1 -->\n<!-- /agent:exchange -->\n\n<!-- agent:queue -->\n{queue}<!-- /agent:queue -->\n"
+            )
+        };
+        let plain = "### Re: one decision \u{2014} opus-5-5";
+        let annotated = format!("{plain} [#r-4d8f118a0315]");
+        let base = "<!-- agent:exchange patch=append -->\n### Re: earlier\n\nFirst.\n<!-- /agent:exchange -->\n\n<!-- agent:queue -->\n- do [#one]\n<!-- /agent:queue -->\n";
+        let ours = doc(
+            &annotated,
+            "- ~~do [#one]~~\n  - **Response [#r-4d8f118a0315]**\n",
+        );
+        let theirs = doc(plain, "- ~~do [#one]~~\n");
+        let base_state = CrdtDoc::from_text(&base).encode_state();
+
+        let merged = merge_by_component(Some(&base_state), &ours, &theirs).unwrap();
+
+        assert_eq!(
+            merged.matches("### Re: one decision").count(),
+            1,
+            "{merged}"
+        );
+        assert_eq!(merged.matches("[#r-4d8f118a0315]").count(), 2, "{merged}");
+        assert_eq!(merged.matches("Body.").count(), 1, "{merged}");
+        assert!(
+            merged.contains("**Response [#r-4d8f118a0315]**"),
+            "{merged}"
+        );
     }
 
     #[test]

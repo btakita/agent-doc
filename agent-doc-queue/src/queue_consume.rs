@@ -4472,6 +4472,12 @@ fn response_body_without_exchange_transport(response: &str) -> &str {
     const OPEN: &str = "<!-- patch:exchange -->";
     const CLOSE: &str = "<!-- /patch:exchange -->";
 
+    // The transport envelope is only the leading exchange patch. A required
+    // `patch:recap` (or any later sibling patch) follows that close marker.
+    // Treating the close as a suffix of the whole payload left the recap inside
+    // the response-cell identity, so the queue minted `[#r-…]` while the
+    // exchange heading — which holds only the exchange patch — stayed plain
+    // (`#responseidemit`, agent-doc-bugs `r-4d8f118a0315`).
     let trimmed = response.trim();
     let Some(after_open) = trimmed.strip_prefix(OPEN) else {
         return response;
@@ -4482,16 +4488,76 @@ fn response_body_without_exchange_transport(response: &str) -> &str {
     else {
         return response;
     };
-    let Some(before_close) = after_open.strip_suffix(CLOSE) else {
-        return response;
-    };
-    let Some(body) = before_close
-        .strip_suffix("\r\n")
-        .or_else(|| before_close.strip_suffix('\n'))
-    else {
-        return response;
-    };
-    body
+    let mut search_from = 0usize;
+    while let Some(relative) = after_open[search_from..].find(CLOSE) {
+        let close_at = search_from + relative;
+        let at_line_start =
+            close_at == 0 || after_open.as_bytes().get(close_at.saturating_sub(1)) == Some(&b'\n');
+        let remainder = &after_open[close_at + CLOSE.len()..];
+        if at_line_start && remainder_is_only_sibling_patches(remainder) {
+            return after_open[..close_at].trim_end_matches(['\n', '\r']);
+        }
+        // A close glued to the body (`Done.<!-- /patch:exchange -->`) is still
+        // the envelope when nothing but sibling patches follows it.
+        if !at_line_start && remainder_is_only_sibling_patches(remainder) {
+            return after_open[..close_at].trim_end_matches(['\n', '\r']);
+        }
+        search_from = close_at + CLOSE.len();
+        if search_from >= after_open.len() {
+            break;
+        }
+    }
+    response
+}
+
+/// `rest` is empty, or only complete `<!-- patch:name -->` sibling blocks.
+fn remainder_is_only_sibling_patches(rest: &str) -> bool {
+    let mut rest = rest.trim_start_matches(['\n', '\r']);
+    if rest.is_empty() {
+        return true;
+    }
+    if !rest.starts_with("<!-- patch:") {
+        return false;
+    }
+    while !rest.is_empty() {
+        let Some(after_open) = rest.strip_prefix("<!-- patch:") else {
+            return false;
+        };
+        let Some(marker_end) = after_open.find("-->") else {
+            return false;
+        };
+        let name = after_open[..marker_end]
+            .split_whitespace()
+            .next()
+            .unwrap_or("");
+        if name.is_empty() {
+            return false;
+        }
+        let close = format!("<!-- /patch:{name} -->");
+        let after_marker = after_open[marker_end + 3..].trim_start_matches(['\n', '\r']);
+        let Some(close_at) = line_anchored_find(after_marker, &close) else {
+            return false;
+        };
+        rest = after_marker[close_at + close.len()..].trim_start_matches(['\n', '\r']);
+    }
+    true
+}
+
+fn line_anchored_find(haystack: &str, needle: &str) -> Option<usize> {
+    let mut search_from = 0usize;
+    while let Some(relative) = haystack[search_from..].find(needle) {
+        let at = search_from + relative;
+        let at_line_start =
+            at == 0 || haystack.as_bytes().get(at.saturating_sub(1)) == Some(&b'\n');
+        if at_line_start {
+            return Some(at);
+        }
+        search_from = at + needle.len();
+        if search_from >= haystack.len() {
+            break;
+        }
+    }
+    None
 }
 
 fn response_details_child(response_body: &str, response_id: &str) -> Option<String> {
@@ -9375,6 +9441,84 @@ mod tests {
         assert!(
             document_queue::prompts(&entries).is_empty(),
             "copied response scaffolding must never become another prompt:\n{annotated}"
+        );
+    }
+
+    /// `#responseidemit`: the closeout that recorded `[#r-4d8f118a0315]` on the
+    /// queue row shipped the exchange heading without it. The captured payload
+    /// was an exchange patch plus a recap patch, and the exchange cell already
+    /// held the plain response (including the boundary that follows it).
+    #[test]
+    fn response_id_is_emitted_on_the_exchange_heading_when_a_recap_patch_follows() {
+        let prompt = "report the sdk-dev deletion [#q-4d8f118a0315]";
+        let exchange = format!(
+            "### Re: sdk-dev row was rewritten — grok-4.7 · 2026-11-10T01:57-05:00\n\n> **Queue prompt:** {prompt}\n\nThat row is still in sdk-dev.md at line 208.\n\n%% response sdk-dev line 208 still present, struck by 87c64c56 %%\n"
+        );
+        let response = format!(
+            "<!-- patch:exchange -->\n{exchange}<!-- /patch:exchange -->\n<!-- patch:recap -->\nThe sdk-dev report is answered.\n<!-- /patch:recap -->\n"
+        );
+        assert_eq!(
+            response_body_without_exchange_transport(&response),
+            exchange.trim_end_matches('\n')
+        );
+        let glued = format!(
+            "<!-- patch:exchange -->\n{exchange}<!-- /patch:exchange -->\n<!-- patch:recap -->\nThe sdk-dev report is answered.\n<!-- /patch:recap -->\n",
+            exchange = exchange.trim_end_matches('\n')
+        );
+        assert_eq!(
+            response_body_without_exchange_transport(&glued),
+            exchange.trim_end_matches('\n')
+        );
+
+        let before = doc_with_queue_and_exchange(
+            &format!("- {prompt}\n"),
+            "### Re: earlier — grok\n\nPrior.\n\n",
+        );
+        let after = doc_with_queue_and_exchange(
+            &format!("- ~~{prompt}~~\n"),
+            &format!(
+                "### Re: earlier — grok\n\nPrior.\n\n{exchange}<!-- agent:boundary:d07dfdaf:agent-doc-bugs -->\n"
+            ),
+        );
+        let annotated = annotate_newly_struck_queue_items_with_response_id_at(
+            &before,
+            &after,
+            &response,
+            "2026-11-10T06:55:12.000Z",
+        )
+        .unwrap();
+        let queue_id = annotated
+            .lines()
+            .find_map(|line| {
+                let trimmed = line.trim();
+                trimmed
+                    .strip_prefix("- **Response ")
+                    .and_then(|rest| rest.strip_suffix("**"))
+                    .map(str::to_string)
+            })
+            .expect("queue response id");
+        assert!(
+            queue_id.starts_with("[#r-"),
+            "queue lookup id must be a compact response id: {queue_id}"
+        );
+        assert!(
+            annotated.contains(&format!(
+                "### Re: sdk-dev row was rewritten — grok-4.7 · 2026-11-10T01:57-05:00 {queue_id}"
+            )),
+            "the exchange heading must emit the same response id the queue recorded:\n{annotated}"
+        );
+        assert!(
+            annotated.contains("### Re: earlier — grok\n"),
+            "a prior response keeps its own heading:\n{annotated}"
+        );
+        assert!(
+            !annotated.contains(&format!("### Re: earlier — grok {queue_id}")),
+            "the id belongs to the addressed response only:\n{annotated}"
+        );
+        assert_eq!(
+            annotated.matches(queue_id.as_str()).count(),
+            2,
+            "the id is on the heading and the queue lookup, once each:\n{annotated}"
         );
     }
 

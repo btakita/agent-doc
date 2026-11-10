@@ -1338,11 +1338,18 @@ fn merge_exchange_inner(
     // is kept (`#identicalpromptdedupe`). Idempotent and byte-for-byte verbatim
     // when there is nothing to collapse. The kill-switch
     // (`document_cell_merge_enabled = false`) restores the prior pass-through behavior.
-    if crate::document_cell::document_cell_merge_enabled() {
+    let merged = if crate::document_cell::document_cell_merge_enabled() {
         crate::exchange_node_merge::dedup_exchange_nodes_by_identity(&out)
     } else {
         out
-    }
+    };
+    // The kept operator heading is the same response as the agent heading that
+    // carries `[#r-…]`. Identity ignores that id, so keeping theirs verbatim
+    // used to drop it while the queue row still linked to it (`#responseidemit`).
+    agent_doc_markdown_ast::exchange_tree::apply_missing_response_heading_ids(
+        &merged,
+        &ours_inner.concat(),
+    )
 }
 
 /// Join distinct exchange segments without allowing one Markdown node to absorb
@@ -3285,6 +3292,58 @@ Answer to X.
                 .any(|o| o.component == "exchange" && o.kind == OutcomeKind::AppliedAgentAdd),
             "no agent-add for the HEAD-annotated same turn: {:?}",
             m.outcomes
+        );
+    }
+
+    /// `#responseidemit`: the editor already holds the plain response while the
+    /// agent cut has added `[#r-…]` to that heading. The cells are one response,
+    /// and the merged exchange keeps the id once.
+    #[test]
+    fn exchange_response_id_survives_the_operator_plain_heading() {
+        let response_id = "[#r-4d8f118a0315]";
+        let plain = "### Re: sdk-dev row was rewritten — grok-4.7 · 2026-11-10T01:57-05:00";
+        let body = format!(
+            "{plain}\n\n> **Queue prompt:** report the sdk-dev deletion\n\nThat row is still in sdk-dev.md at line 208.\n"
+        );
+        let annotated = format!(
+            "### Re: sdk-dev row was rewritten — grok-4.7 · 2026-11-10T01:57-05:00 {response_id}\n\n> **Queue prompt:** report the sdk-dev deletion\n\nThat row is still in sdk-dev.md at line 208.\n"
+        );
+        let base = "\
+<!-- agent:exchange -->
+### Re: earlier — grok
+
+Prior.
+<!-- /agent:exchange -->
+
+<!-- agent:queue -->
+- report the sdk-dev deletion
+<!-- /agent:queue -->
+";
+        let theirs = format!(
+            "<!-- agent:exchange -->\n### Re: earlier — grok\n\nPrior.\n\n{body}<!-- agent:boundary:d07dfdaf:agent-doc-bugs -->\n<!-- /agent:exchange -->\n\n<!-- agent:queue -->\n- ~~report the sdk-dev deletion~~\n<!-- /agent:queue -->\n"
+        );
+        let ours = format!(
+            "<!-- agent:exchange -->\n### Re: earlier — grok\n\nPrior.\n\n{annotated}<!-- agent:boundary:d07dfdaf:agent-doc-bugs -->\n<!-- /agent:exchange -->\n\n<!-- agent:queue -->\n- ~~report the sdk-dev deletion~~\n  - **Response {response_id}**\n<!-- /agent:queue -->\n"
+        );
+        let merged = document_cell_merge(base, &ours, &theirs).merged_doc;
+
+        assert!(
+            merged.contains(&format!("{plain} {response_id}")),
+            "the operator heading must keep the response id:\n{merged}"
+        );
+        assert_eq!(
+            merged.matches("### Re: sdk-dev row was rewritten").count(),
+            1,
+            "the annotated heading must not be appended as a second response:\n{merged}"
+        );
+        assert_eq!(
+            merged.matches(response_id).count(),
+            1,
+            "the id stays on the kept heading:\n{merged}"
+        );
+        assert!(
+            merged.contains("<!-- agent:boundary:d07dfdaf:agent-doc-bugs -->"),
+            "{merged}"
         );
     }
 

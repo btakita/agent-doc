@@ -411,11 +411,74 @@ fn standalone_boundary_id(trimmed: &str) -> Option<String> {
     Some(id.to_string())
 }
 
+/// One corrupted close in a retained base (`<!-- /agent:22un -->` against
+/// `agent:run`) aborts [`reconcile_superseded_response_targets`] before the
+/// CRDT merge runs. When the agent target and the editor cut both already
+/// parse and both already use the opener's own close, rewrite that single
+/// base line so the three-text CRDT has a parseable ancestor. Any other
+/// parse failure is left untouched.
+fn heal_base_close_both_sides_already_corrected(
+    merge_base: &str,
+    agent_target: &str,
+    editor_cut: &str,
+) -> Option<String> {
+    let err = element::parse(merge_base).err()?;
+    let element::ComponentParseError::Mismatched {
+        open_name,
+        close_name,
+        close_line,
+        ..
+    } = err.downcast_ref::<element::ComponentParseError>()?
+    else {
+        return None;
+    };
+    let close_line = *close_line;
+    if element::parse(agent_target).is_err() || element::parse(editor_cut).is_err() {
+        return None;
+    }
+    let bad = format!("<!-- /agent:{close_name} -->");
+    let good = format!("<!-- /agent:{open_name} -->");
+    if agent_target.contains(&bad)
+        || editor_cut.contains(&bad)
+        || !agent_target.contains(&good)
+        || !editor_cut.contains(&good)
+    {
+        return None;
+    }
+    let mut healed = String::with_capacity(merge_base.len() + good.len());
+    let mut replaced = false;
+    for (index, line) in merge_base.split_inclusive('\n').enumerate() {
+        if index + 1 != close_line {
+            healed.push_str(line);
+            continue;
+        }
+        let newline = line.ends_with('\n');
+        let body = line.trim_end_matches(['\n', '\r']);
+        let leading = body.len() - body.trim_start().len();
+        if body.trim() != bad {
+            return None;
+        }
+        healed.push_str(&body[..leading]);
+        healed.push_str(&good);
+        if newline {
+            healed.push('\n');
+        }
+        replaced = true;
+    }
+    if !replaced || element::parse(&healed).is_err() {
+        return None;
+    }
+    Some(healed)
+}
+
 fn rebase_agent_candidate_over_editor_cut_reconciled(
     merge_base: &str,
     agent_target: &str,
     editor_cut: &str,
 ) -> Result<ReconciledRebase> {
+    let healed_base =
+        heal_base_close_both_sides_already_corrected(merge_base, agent_target, editor_cut);
+    let merge_base = healed_base.as_deref().unwrap_or(merge_base);
     // `typingdupe` (2): a component whose only change is an older snapshot of
     // the operator's still-advancing text is not the agent's op; the operator's
     // cut owns it.
@@ -5858,6 +5921,105 @@ Working.
         assert!(rebased.contains("Latest."), "{rebased}");
         assert!(rebased.contains("\u{276f} operator follow-up"), "{rebased}");
         assert_eq!(rebased.matches("**Queue prompt:**").count(), 1, "{rebased}");
+    }
+
+    /// A retained base whose `agent:run` close was corrupted to `/agent:22un`
+    /// must still CRDT-merge once both the agent target and the editor cut
+    /// already carry `/agent:run`. The operator's frontmatter and run row
+    /// stay. The agent's exchange reply lands because the operator left that
+    /// component alone.
+    #[test]
+    fn rebase_heals_one_agreed_corrupt_close_before_the_crdt_merge() {
+        let base = "\
+---
+agent: codex
+---
+
+## Exchange <!-- agent:exchange -->
+<!-- /agent:exchange -->
+
+## Run <!-- agent:run -->
+- base row
+<!-- /agent:22un -->
+
+## Todo <!-- agent:todo -->
+- keep
+<!-- /agent:todo -->
+";
+        let agent = "\
+---
+agent: codex
+---
+
+## Exchange <!-- agent:exchange -->
+### Re: landed reply
+
+The closeout text.
+<!-- /agent:exchange -->
+
+## Run <!-- agent:run -->
+- base row
+<!-- /agent:run -->
+
+## Todo <!-- agent:todo -->
+- keep
+<!-- /agent:todo -->
+";
+        let editor = "\
+---
+agent: grok
+---
+
+## Exchange <!-- agent:exchange -->
+<!-- /agent:exchange -->
+
+## Run <!-- agent:run -->
+- base row
+- editor row
+<!-- /agent:run -->
+
+## Todo <!-- agent:todo -->
+- keep
+<!-- /agent:todo -->
+";
+
+        let rebased = rebase_agent_candidate_over_editor_cut(base, agent, editor)
+            .expect("agreed close heal lets the CRDT merge run");
+
+        assert!(element::parse(&rebased).is_ok(), "{rebased}");
+        assert!(rebased.contains("agent: grok"), "{rebased}");
+        assert!(!rebased.contains("agent: codex"), "{rebased}");
+        assert!(rebased.contains("The closeout text."), "{rebased}");
+        assert!(rebased.contains("- editor row"), "{rebased}");
+        assert!(rebased.contains("- keep"), "{rebased}");
+        assert!(rebased.contains("<!-- /agent:run -->"), "{rebased}");
+        assert!(!rebased.contains("22un"), "{rebased}");
+    }
+
+    #[test]
+    fn rebase_leaves_a_corrupt_close_when_one_side_still_has_it() {
+        let base = "\
+## Run <!-- agent:run -->
+- base row
+<!-- /agent:22un -->
+";
+        let agent = "\
+## Run <!-- agent:run -->
+- base row
+<!-- /agent:run -->
+";
+        let editor = "\
+## Run <!-- agent:run -->
+- base row
+<!-- /agent:22un -->
+";
+
+        let error = rebase_agent_candidate_over_editor_cut(base, agent, editor)
+            .expect_err("a side that still has the bad close must not be rewritten");
+        assert!(
+            error.to_string().contains("mismatched component tags"),
+            "{error:#}"
+        );
     }
 
     /// `#responseanchornodeidentity`: the operator's edit to a section an earlier

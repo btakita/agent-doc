@@ -2421,6 +2421,18 @@ fn run_with_options_to_writer_in_pass(
                     "[preflight] #dispatchturnstartreceipt turn-start record failed (non-fatal): {error:#}"
                 ),
             }
+            // The cycle is open. Until this turn's recap is written, keep the
+            // previous turn and show that the turn is in progress. Non-fatal:
+            // a projection failure must not refuse a turn that is already open.
+            if let Err(error) =
+                agent_doc_session_check_io::midturn_steering::publish_in_progress_recap_status(
+                    file,
+                    &file_content,
+                    agent_doc_element::recap::IN_PROGRESS_TURN_STATUS,
+                )
+            {
+                eprintln!("[preflight] in-progress recap status skipped (non-fatal): {error:#}");
+            }
             // `#mirrorbinaryownedids`: queue maintenance ran before this cycle
             // opened, and the steering seed below is the PRE-maintenance cut, so
             // rows the backlog→queue mirror just materialized are absent from

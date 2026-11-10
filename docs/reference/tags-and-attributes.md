@@ -52,7 +52,7 @@ is the legacy alias for `backlog`.
 | `agent:icebox` | Granular tracked work parked outside the runnable backlog. |
 | `agent:done` | Completed-work archive, inline or redirected with `archive`. |
 | `agent:status` | Current status projection. It may contain ordinary status prose and protected binary-owned operational lines. |
-| `agent:recap` | This turn's recap. While the turn is in progress the previous turn's recap stays beside it; committing the turn removes the previous one. Content changes do not start a turn, and the text is never read as a prompt or a queue row. See [`agent:recap`](#agentrecap) below. |
+| `agent:recap` | This turn's recap. While the turn is in progress the previous turn's recap stays beside it, and until this turn's recap is written the current section shows the turn's status. Committing the turn removes the previous one; a status-only current section restores the previous recap. Content changes do not start a turn, and the text is never read as a prompt or a queue row. See [`agent:recap`](#agentrecap) below. |
 | `agent:active` | Binary-owned, read-only index of started, unclosed queue work rendered from the claim ledger, release receipts, and lineage (never from queue markers), grouped as **Running**, **Lost**, and **Needs integration** (with each entry's age); backlog/review/icebox locations of a listed item appear as sources. Preflight replaces its full body; do not author rows here. Legacy `agent:open-items` markers are migrated to this component. |
 | `agent:signals` | Realtime signal definitions/readings reconciled by the signal subsystem. |
 | `agent:todo` | Operator-owned informational checklist. It is not runnable work and is never promoted to the queue. |
@@ -83,7 +83,10 @@ The cycle is committed, and nothing you need to read changed.
 
 While the turn is in progress the previous turn stays first, labeled
 `Previous turn`, and this turn's recap is placed under it, labeled
-`Current turn`. Commit removes the previous turn and the labels. A `patch=`
+`Current turn`. Until this turn's recap is written, that current section shows
+the turn's status inside `<!-- recap-status -->`. Commit removes the previous
+turn and the labels. A current section that is still only turn status restores
+the previous recap instead of keeping the status. A `patch=`
 value on the marker or in project configuration cannot append a history of
 committed recaps. When a response has several `patch:recap` blocks, the last
 non-blank one wins. That block is this turn's recap.

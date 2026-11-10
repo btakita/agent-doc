@@ -175,8 +175,11 @@ RESPONSE
 
 Template responses require both `patch:exchange` markers and a non-blank
 `patch:recap` block. The recap is this turn's recap. While the turn is in
-progress, `agent:recap` also keeps the previous turn's recap; committing the
-turn removes that previous recap. Every harness writes the recap in the shared
+progress, `agent:recap` also keeps the previous turn's recap; until this
+turn's recap is written, the current section shows the turn's status beside
+that previous turn. Committing the turn removes that previous recap. A current
+section that is still only turn status is not kept: commit restores the
+previous recap. Every harness writes the recap in the shared
 format in [recap.md](recap.md). An agent-authored closeout with no recap, or
 with a blank one, is refused before capture. Format nits stay advisory. Grok
 passes the body as `recap` on `agent_doc_finalize` when it is not already in

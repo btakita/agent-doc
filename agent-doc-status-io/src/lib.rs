@@ -205,13 +205,29 @@ fn set_with_options_and_attribution<E: StatusWriteEffects + ?Sized>(
         effects.current_document_content(file, "status_set")
     }
     .context("failed to read document")?;
-    let new_doc =
+    let status_doc =
         agent_doc_document::status_projection::update_status_content(&full_content, text)?;
     // Phase 2 strangler shadow (#lzlosstree): compute the same projected status
     // body through a bounded lossless-tree mutation and log whether it is
-    // byte-identical to the legacy projection. Measurement only — `new_doc` stays
-    // the authority until parity is proven green on live writes.
-    log_status_tree_parity(effects, file, &full_content, &new_doc);
+    // byte-identical to the legacy projection. Measurement only — the landed
+    // document stays the authority until parity is proven green on live writes.
+    // Compare the status projection before the in-progress recap is added, so
+    // that informational recap is not a status-tree mismatch.
+    log_status_tree_parity(effects, file, &full_content, &status_doc);
+    let mut new_doc = status_doc;
+    if let Some(status) = turn_status_for_recap(text) {
+        match agent_doc_element::recap::project_in_progress_turn_status(&new_doc, &status) {
+            Ok(projected) => new_doc = projected,
+            Err(err) => effects.log_op(
+                file,
+                &format!(
+                    "in_progress_recap_status_skipped file={} error={} (#recappair)",
+                    file.display(),
+                    format!("{err:#}").replace('\n', " | ")
+                ),
+            ),
+        }
+    }
     land_status_projection(
         effects,
         file,
@@ -221,6 +237,15 @@ fn set_with_options_and_attribution<E: StatusWriteEffects + ?Sized>(
         attribute_baseline,
         "status_set",
     )
+}
+
+/// Plain status text can stand in for this turn's recap. A blank status, or a
+/// structured sync payload, is not copied into `agent:recap`.
+fn turn_status_for_recap(text: &str) -> Option<String> {
+    if text.trim().is_empty() || text.contains("<!--") || text.contains("-->") {
+        return None;
+    }
+    Some(agent_doc_element::recap::excerpt_turn_status(text))
 }
 
 /// Land a computed status projection through the editor-aware transport (or

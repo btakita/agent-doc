@@ -2,12 +2,16 @@
 //! the turn commits (`#agentrecap`, `#recappair`).
 //!
 //! # Spec
-//! - While a turn is in progress, a closeout that carries a recap keeps the
-//!   previous turn's recap and places this turn's recap under it. The previous
-//!   one is the last settled body, not an earlier in-progress draft.
+//! - While a turn is in progress, the previous turn's recap stays and this
+//!   turn is placed under it. Until this turn's recap is written, the current
+//!   section is the turn's status (`<!-- recap-status -->`). A closeout that
+//!   carries a recap replaces only that current section. The previous one is
+//!   the last settled body, not an earlier in-progress draft.
 //! - When the turn commits, [`settle_recap_in_document`] removes the previous
 //!   turn's recap. The completed document keeps only the current turn's recap,
-//!   so the component never accumulates history across committed turns.
+//!   so the component never accumulates history across committed turns. A
+//!   current section that is still only turn status is not a recap: commit
+//!   restores the previous recap instead of keeping the status.
 //! - A marker `patch=` value or project config cannot change that. The stored
 //!   current body is the patch text trimmed of surrounding whitespace plus one
 //!   trailing newline.
@@ -28,12 +32,17 @@
 //!
 //! # Agentic Contracts
 //! - [`replace_recap_in_document`] changes nothing outside the recap section.
+//! - [`project_in_progress_turn_status`] changes nothing outside the recap
+//!   section. A document with no settled recap is unchanged, and a current
+//!   section that is already this turn's recap stays.
 //! - [`settle_recap_in_document`] changes nothing outside the recap section, and
-//!   it is idempotent on a settled body.
+//!   it is idempotent on a settled body. A current section that is still only
+//!   turn status restores the previous recap.
 //! - [`normalize_recap_body`] is idempotent, so replaying a closeout is a no-op.
 //!
 //! # Evals
 //! - stage_keeps_the_previous_recap_until_settle
+//! - in_progress_status_stays_with_the_previous_turn_until_commit
 //! - replace_creates_the_section_below_status_and_nothing_else
 //! - format_findings_accept_the_full_shape_and_any_omitted_section
 //! - decision_recommendation_uses_the_rendered_marker
@@ -77,6 +86,12 @@ const CURRENT_OPEN: &str = "<!-- recap-current -->";
 const CURRENT_CLOSE: &str = "<!-- /recap-current -->";
 const PREVIOUS_OPEN: &str = "<!-- recap-previous -->";
 const PREVIOUS_CLOSE: &str = "<!-- /recap-previous -->";
+const STATUS_OPEN: &str = "<!-- recap-status -->";
+const STATUS_CLOSE: &str = "<!-- /recap-status -->";
+
+/// Status shown in the current section from admit until a later status write
+/// or this turn's recap replaces it.
+pub const IN_PROGRESS_TURN_STATUS: &str = "Turn in progress.";
 
 struct InProgressRecap {
     current: String,
@@ -100,6 +115,151 @@ fn reserved_recap_marker(text: &str) -> bool {
         || text.contains(CURRENT_CLOSE)
         || text.contains(PREVIOUS_OPEN)
         || text.contains(PREVIOUS_CLOSE)
+}
+
+fn status_marker(text: &str) -> bool {
+    text.contains(STATUS_OPEN) || text.contains(STATUS_CLOSE)
+}
+
+/// The current section is turn status, not this turn's recap. Commit must not
+/// keep it.
+fn is_turn_status_body(body: &str) -> bool {
+    let trimmed = body.trim();
+    trimmed.starts_with(STATUS_OPEN)
+        && trimmed.ends_with(STATUS_CLOSE)
+        && trimmed.matches(STATUS_OPEN).count() == 1
+        && trimmed.matches(STATUS_CLOSE).count() == 1
+}
+
+fn render_turn_status(status: &str) -> String {
+    format!("{STATUS_OPEN}\n{status}{STATUS_CLOSE}\n")
+}
+
+const TURN_STATUS_EXCERPT_CHARS: usize = 400;
+
+/// First prose paragraph of a response or plain status, capped for the current
+/// section. Headings, fences, and HTML comments are not status. Empty input
+/// becomes [`IN_PROGRESS_TURN_STATUS`].
+pub fn excerpt_turn_status(text: &str) -> String {
+    let paragraph = first_prose_paragraph(text);
+    if paragraph.is_empty() {
+        return IN_PROGRESS_TURN_STATUS.to_string();
+    }
+    truncate_status_excerpt(&paragraph, TURN_STATUS_EXCERPT_CHARS)
+}
+
+fn first_prose_paragraph(text: &str) -> String {
+    let mut in_fence = false;
+    let mut parts = Vec::new();
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
+            if !parts.is_empty() {
+                break;
+            }
+            in_fence = !in_fence;
+            continue;
+        }
+        if in_fence {
+            continue;
+        }
+        if trimmed.is_empty() {
+            if !parts.is_empty() {
+                break;
+            }
+            continue;
+        }
+        if is_non_prose_status_line(trimmed) {
+            if !parts.is_empty() {
+                break;
+            }
+            continue;
+        }
+        parts.push(trimmed);
+    }
+    parts.join(" ")
+}
+
+fn is_non_prose_status_line(trimmed: &str) -> bool {
+    trimmed.starts_with("<!--")
+        || trimmed.starts_with("-->")
+        || trimmed.starts_with("### Re:")
+        || is_status_heading(trimmed)
+}
+
+fn is_status_heading(trimmed: &str) -> bool {
+    let hashes = trimmed.bytes().take_while(|byte| *byte == b'#').count();
+    (1..=6).contains(&hashes) && trimmed[hashes..].starts_with(' ')
+}
+
+fn truncate_status_excerpt(text: &str, max_chars: usize) -> String {
+    if text.chars().count() <= max_chars {
+        return text.to_string();
+    }
+    let truncated: String = text.chars().take(max_chars).collect();
+    let cut = truncated
+        .rfind(char::is_whitespace)
+        .unwrap_or(truncated.len());
+    let mut out = truncated[..cut].trim_end().to_string();
+    if out.is_empty() {
+        out = truncated;
+    }
+    out.push('…');
+    out
+}
+
+/// Keep the previous turn and show `status` in the current section until this
+/// turn's recap replaces it.
+///
+/// A blank status, a status that contains a marker, or a document with no
+/// settled recap is unchanged. A current section that is already this turn's
+/// recap stays. Replaying the same status is byte-identical.
+pub fn project_in_progress_turn_status(doc: &str, status: &str) -> Result<String> {
+    let Some(status) = normalize_recap_body(status) else {
+        return Ok(doc.to_string());
+    };
+    if status_marker(&status) || reserved_recap_marker(&status) || status.contains("<!--") {
+        return Ok(doc.to_string());
+    }
+    let components = element::parse(doc).context("failed to parse components")?;
+    let Some(recap) = components
+        .iter()
+        .find(|component| component.name == RECAP_COMPONENT)
+    else {
+        return Ok(doc.to_string());
+    };
+    let existing = recap.content(doc);
+    let status_body = render_turn_status(&status);
+    let staged = if let Some(pair) = parse_in_progress_recap(existing) {
+        if !is_turn_status_body(&pair.current) {
+            return Ok(doc.to_string());
+        }
+        if reserved_recap_marker(&pair.previous) || is_turn_status_body(&pair.previous) {
+            return Ok(doc.to_string());
+        }
+        if pair.current == status_body && current_is_under_previous(existing) {
+            return Ok(doc.to_string());
+        }
+        render_in_progress_recap(&status_body, &pair.previous)
+    } else if is_turn_status_body(existing) {
+        if normalize_recap_body(existing).as_deref() == Some(status_body.as_str()) {
+            return Ok(doc.to_string());
+        }
+        status_body
+    } else {
+        match normalize_recap_body(existing) {
+            Some(previous)
+                if !reserved_recap_marker(&previous) && !is_turn_status_body(&previous) =>
+            {
+                render_in_progress_recap(&status_body, &previous)
+            }
+            _ => return Ok(doc.to_string()),
+        }
+    };
+    if staged == existing {
+        return Ok(doc.to_string());
+    }
+    Ok(recap.replace_content(doc, &staged))
 }
 
 fn marked_section(body: &str, open: &str, close: &str) -> Option<String> {
@@ -156,7 +316,11 @@ fn parse_in_progress_recap(body: &str) -> Option<InProgressRecap> {
 /// or a reserved marker that would make the pair unparsable, stores `current`
 /// alone.
 fn stage_recap_body(existing: &str, current: &str) -> String {
-    if reserved_recap_marker(current) {
+    if reserved_recap_marker(current) || status_marker(current) {
+        return current.to_string();
+    }
+    // Turn status is not a previous recap. This turn's recap replaces it.
+    if is_turn_status_body(existing) {
         return current.to_string();
     }
     if let Some(pair) = parse_in_progress_recap(existing) {
@@ -164,13 +328,17 @@ fn stage_recap_body(existing: &str, current: &str) -> String {
             // Exact replay of the canonical order stays byte-identical.
             return existing.to_string();
         }
-        if reserved_recap_marker(&pair.previous) {
+        if reserved_recap_marker(&pair.previous) || is_turn_status_body(&pair.previous) {
             return current.to_string();
         }
         return render_in_progress_recap(current, &pair.previous);
     }
     match normalize_recap_body(existing) {
-        Some(previous) if previous != current && !reserved_recap_marker(&previous) => {
+        Some(previous)
+            if previous != current
+                && !reserved_recap_marker(&previous)
+                && !is_turn_status_body(&previous) =>
+        {
             render_in_progress_recap(current, &previous)
         }
         _ => current.to_string(),
@@ -199,7 +367,8 @@ pub fn replace_recap_in_document(doc: &str, raw: &str) -> Result<String> {
 }
 
 /// Drop the previous turn's recap. A settled body, or a document with no recap,
-/// is unchanged. This is the completed-turn shape.
+/// is unchanged. A current section that is still only turn status is not kept:
+/// the previous recap is restored, and a lone status body is cleared.
 pub fn settle_recap_in_document(doc: &str) -> Result<String> {
     let components = element::parse(doc).context("failed to parse components")?;
     let Some(recap) = components
@@ -208,10 +377,22 @@ pub fn settle_recap_in_document(doc: &str) -> Result<String> {
     else {
         return Ok(doc.to_string());
     };
-    let Some(pair) = parse_in_progress_recap(recap.content(doc)) else {
-        return Ok(doc.to_string());
-    };
-    Ok(recap.replace_content(doc, &pair.current))
+    let content = recap.content(doc);
+    if let Some(pair) = parse_in_progress_recap(content) {
+        let settled = if is_turn_status_body(&pair.current) {
+            pair.previous
+        } else {
+            pair.current
+        };
+        if settled == content {
+            return Ok(doc.to_string());
+        }
+        return Ok(recap.replace_content(doc, &settled));
+    }
+    if is_turn_status_body(content) {
+        return Ok(recap.replace_content(doc, ""));
+    }
+    Ok(doc.to_string())
 }
 
 /// Insert an empty `agent:recap` section when the document has none.
@@ -650,6 +831,101 @@ mod tests {
         assert_eq!(
             replace_recap_in_document(&settled, "Third turn.\n").unwrap(),
             settled
+        );
+    }
+
+    /// Until this turn's recap is written, the previous turn stays and the
+    /// current section is turn status. Commit drops that pair. A status-only
+    /// current section is not the completed recap: commit restores the previous
+    /// turn.
+    #[test]
+    fn in_progress_status_stays_with_the_previous_turn_until_commit() {
+        let settled = replace_recap_in_document(&doc(), "First turn.").unwrap();
+        assert_eq!(recap_body(&settled), "First turn.\n");
+
+        let shown = project_in_progress_turn_status(&settled, IN_PROGRESS_TURN_STATUS).unwrap();
+        let status_body = format!("{STATUS_OPEN}\n{IN_PROGRESS_TURN_STATUS}\n{STATUS_CLOSE}\n");
+        assert_eq!(
+            recap_body(&shown),
+            render_in_progress_recap(&status_body, "First turn.\n")
+        );
+        let previous = shown.find("First turn.").unwrap();
+        let status = shown.find(IN_PROGRESS_TURN_STATUS).unwrap();
+        assert!(previous < status, "{shown}");
+        assert!(shown.find(PREVIOUS_OPEN).unwrap() < shown.find(CURRENT_OPEN).unwrap());
+        assert_eq!(
+            project_in_progress_turn_status(&shown, IN_PROGRESS_TURN_STATUS).unwrap(),
+            shown
+        );
+
+        let updated = project_in_progress_turn_status(&shown, "Still reading the queue.").unwrap();
+        assert!(updated.contains("Still reading the queue."));
+        assert!(!updated.contains(IN_PROGRESS_TURN_STATUS));
+        assert!(updated.contains("First turn."));
+        assert_eq!(
+            project_in_progress_turn_status(&updated, "Still reading the queue.").unwrap(),
+            updated
+        );
+
+        let with_recap = replace_recap_in_document(&updated, "Second turn.").unwrap();
+        assert_eq!(
+            recap_body(&with_recap),
+            render_in_progress_recap("Second turn.\n", "First turn.\n")
+        );
+        assert!(!with_recap.contains(STATUS_OPEN));
+        assert_eq!(
+            project_in_progress_turn_status(&with_recap, "A later status.").unwrap(),
+            with_recap,
+            "status must not replace a recap already written for this turn"
+        );
+
+        let committed = settle_recap_in_document(&with_recap).unwrap();
+        assert_eq!(recap_body(&committed), "Second turn.\n");
+        assert!(!committed.contains("First turn."));
+        assert!(!committed.contains("Previous turn"));
+
+        let again = project_in_progress_turn_status(&committed, "Checking the mirror.").unwrap();
+        assert!(again.contains("Second turn."));
+        assert!(again.contains("Checking the mirror."));
+        assert!(again.find("Second turn.").unwrap() < again.find("Checking the mirror.").unwrap());
+        let restored = settle_recap_in_document(&again).unwrap();
+        assert_eq!(recap_body(&restored), "Second turn.\n");
+        assert!(!restored.contains("Checking the mirror."));
+        assert!(!restored.contains(STATUS_OPEN));
+
+        let bare = doc();
+        assert_eq!(
+            project_in_progress_turn_status(&bare, IN_PROGRESS_TURN_STATUS).unwrap(),
+            bare
+        );
+        assert_eq!(
+            project_in_progress_turn_status(&settled, " \n").unwrap(),
+            settled
+        );
+        assert_eq!(
+            project_in_progress_turn_status(&settled, "see <!-- recap-current -->").unwrap(),
+            settled
+        );
+        assert_eq!(
+            project_in_progress_turn_status(&settled, "<!-- status:sync -->\nready\n").unwrap(),
+            settled
+        );
+
+        let empty = ensure_recap_component_in_document(&doc()).unwrap();
+        assert_eq!(
+            project_in_progress_turn_status(&empty, IN_PROGRESS_TURN_STATUS).unwrap(),
+            empty
+        );
+
+        let lone = settled.replacen(
+            "First turn.\n",
+            &format!("{STATUS_OPEN}\nWorking.\n{STATUS_CLOSE}\n"),
+            1,
+        );
+        assert_eq!(recap_body(&settle_recap_in_document(&lone).unwrap()), "");
+        assert_eq!(
+            excerpt_turn_status("### Re: topic\n\nThe mirror is unchecked.\n\nQueue rows:"),
+            "The mirror is unchecked."
         );
     }
 

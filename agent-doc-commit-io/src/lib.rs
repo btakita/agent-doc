@@ -919,6 +919,7 @@ impl agent_doc_git_io::pre_stage_repair::CommitPreStageRepairEffects
 /// `#recappair`: a turn that has published its recap and not yet committed shows
 /// that recap beside the previous turn. Committing is what completes the turn,
 /// so the snapshot and the worktree both drop the previous recap before staging.
+/// A current section that is still only turn status restores the previous recap.
 fn settle_in_progress_recap_for_commit(
     file: &Path,
     snapshot_content: &mut Option<String>,

@@ -323,25 +323,63 @@ pub fn admit_with_steering_seed(
         agent_doc_snapshot_io::load_document_baseline,
         agent_doc_ops_log_io::log_op,
     )?;
-    if let Some(baseline) = admitted_text.as_deref()
-        && let Err(err) = seed_for_cycle(file, &output.cycle_id, baseline, None, Vec::new())
-    {
-        eprintln!(
-            "[admit] warning: could not seed mid-turn steering for {} cycle {}: {err:#}",
-            file.display(),
-            output.cycle_id
-        );
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "midturn_steering_admit_seed_failed file={} cycle={} error={} (#routesyncsteer)",
+    if let Some(baseline) = admitted_text.as_deref() {
+        if let Err(err) = seed_for_cycle(file, &output.cycle_id, baseline, None, Vec::new()) {
+            eprintln!(
+                "[admit] warning: could not seed mid-turn steering for {} cycle {}: {err:#}",
                 file.display(),
-                output.cycle_id,
-                first_error_line(&format!("{err:#}"))
-            ),
-        );
+                output.cycle_id
+            );
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "midturn_steering_admit_seed_failed file={} cycle={} error={} (#routesyncsteer)",
+                    file.display(),
+                    output.cycle_id,
+                    first_error_line(&format!("{err:#}"))
+                ),
+            );
+        }
+        // Seed first, from the admitted text. The recap projection is
+        // informational and must not move that steering baseline.
+        if let Err(err) = publish_in_progress_recap_status(
+            file,
+            baseline,
+            agent_doc_element::recap::IN_PROGRESS_TURN_STATUS,
+        ) {
+            eprintln!(
+                "[admit] warning: could not show in-progress recap status for {}: {err:#}",
+                file.display()
+            );
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "in_progress_recap_status_skipped file={} cycle={} error={} (#recappair)",
+                    file.display(),
+                    output.cycle_id,
+                    first_error_line(&format!("{err:#}"))
+                ),
+            );
+        }
     }
     Ok(output)
+}
+
+/// Show `status` beside the previous recap until this turn's recap replaces it.
+///
+/// A document with no settled recap is left unchanged. The write goes through
+/// the same convergence path as other derived projections.
+pub fn publish_in_progress_recap_status(file: &Path, current: &str, status: &str) -> Result<()> {
+    let projected = agent_doc_element::recap::project_in_progress_turn_status(current, status)?;
+    if projected == current {
+        return Ok(());
+    }
+    agent_doc_document_realtime_io::converge_derived_projection(
+        file,
+        current,
+        &projected,
+        "in_progress_recap_status",
+    )
 }
 
 /// How long after an explicit send a document save still counts as part of

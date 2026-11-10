@@ -24,9 +24,16 @@ The block is this turn's recap. While the turn is in progress, `agent:recap`
 keeps the previous turn's recap and places this turn's recap under it. The
 body is `Previous turn`, then `<!-- recap-previous -->`, then `Current turn`,
 then `<!-- recap-current -->`. The previous recap remains; the new recap
-follows it and does not replace it. When the turn commits, the previous
-turn's recap is removed, so the completed document keeps only this turn's
-recap. Do not repeat earlier recaps or carry their text forward yourself.
+follows it and does not replace it. Until this turn's recap is written, the
+current section shows the turn's status inside `<!-- recap-status -->`, still
+under the previous turn. Admit and preflight start that status at
+`Turn in progress.` A plain status update or a response checkpoint replaces
+only that status. A status block that contains an HTML comment is not copied
+into the recap. When the turn commits, the previous turn's recap is removed,
+so the completed document keeps only this turn's recap. When the current
+section is still only that status, commit restores the previous recap instead
+of keeping the status. Do not repeat earlier recaps or carry their text
+forward yourself.
 Use it only in template documents, the ones whose preflight publishes a
 `response_contract`.
 

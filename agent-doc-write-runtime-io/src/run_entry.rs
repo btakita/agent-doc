@@ -562,6 +562,19 @@ fn materialize_response_cell_projection(file: &Path, content: &str) -> Result<St
     Ok(materialized)
 }
 
+/// Keep the previous recap and show this checkpoint's status until closeout
+/// writes this turn's recap. A document with no settled recap is unchanged.
+fn with_in_progress_recap_status(content: &str, source: &str) -> String {
+    let status = agent_doc_element::recap::excerpt_turn_status(source);
+    match agent_doc_element::recap::project_in_progress_turn_status(content, &status) {
+        Ok(projected) => projected,
+        Err(err) => {
+            eprintln!("[write] in-progress recap status skipped: {err:#}");
+            content.to_string()
+        }
+    }
+}
+
 fn response_cell_materialized_after_projection(response: &str, content: &str) -> bool {
     agent_doc_turn::response_replay::response_materialized_in_content(response, content)
 }
@@ -600,7 +613,8 @@ pub fn checkpoint_response(file: &Path, response: &str) -> Result<()> {
         );
     };
 
-    let materialized = materialize_response_cell_projection(file, &write.content)?;
+    let content = with_in_progress_recap_status(&write.content, &response);
+    let materialized = materialize_response_cell_projection(file, &content)?;
     anyhow::ensure!(
         response_cell_materialized_after_projection(&response, &materialized),
         "response checkpoint was not present after acknowledged materialization for {}",
@@ -666,7 +680,8 @@ pub fn checkpoint_salient_response(file: &Path, response: &str) -> Result<()> {
         );
     };
 
-    let materialized = materialize_response_cell_projection(file, &write.content)?;
+    let content = with_in_progress_recap_status(&write.content, &body);
+    let materialized = materialize_response_cell_projection(file, &content)?;
     anyhow::ensure!(
         agent_doc_merge::salient_response::salient_response_materialized(
             &materialized,

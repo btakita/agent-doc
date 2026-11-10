@@ -4307,6 +4307,11 @@ fn classify_safe_agent_doc_mutation(
                 }
                 saw_status = true;
             }
+            // `#recappair`: until commit, the current section may be turn
+            // status beside the previous recap. Settling that stand-in
+            // restores the snapshot recap, so it must not hide the closeout's
+            // status update from snapshot adoption.
+            "recap" if recap_difference_settles_away(snap_body, file_body) => {}
             _ => return None,
         }
     }
@@ -4328,6 +4333,23 @@ pub fn classify_safe_out_of_band_agent_doc_mutation(
     file_doc: &str,
 ) -> Option<&'static str> {
     classify_safe_agent_doc_mutation(snapshot_doc, file_doc, false)
+}
+
+/// The file's recap differs only by an in-progress status stand-in that
+/// commit drops, restoring the snapshot recap.
+fn recap_difference_settles_away(snapshot_doc: &str, file_doc: &str) -> bool {
+    let Ok(settled_file) = agent_doc_element::recap::settle_recap_in_document(file_doc) else {
+        return false;
+    };
+    recap_component_normalized(&settled_file) == recap_component_normalized(snapshot_doc)
+}
+
+fn recap_component_normalized(doc: &str) -> Option<String> {
+    let components = element::parse(doc).ok()?;
+    let recap = components
+        .iter()
+        .find(|component| component.name == "recap")?;
+    Some(normalize_component_content_for_absorb(recap.content(doc)))
 }
 
 pub fn classify_committed_historical_agent_doc_mutation(
@@ -6414,6 +6436,54 @@ agent: grok
         assert_eq!(
             classify_safe_out_of_band_agent_doc_mutation(snapshot, file),
             Some("status+exchange")
+        );
+    }
+
+    #[test]
+    fn classify_safe_out_of_band_keeps_status_when_recap_is_only_an_in_progress_stand_in() {
+        let snapshot = concat!(
+            "---\nagent_doc_session: test\n---\n\n",
+            "## Status\n\n",
+            "<!-- agent:status patch=replace -->\n",
+            "Waiting.\n",
+            "<!-- /agent:status -->\n\n",
+            "## Recap <!-- agent:recap patch=replace -->\n",
+            "Committed.\n",
+            "<!-- /agent:recap -->\n",
+        );
+        let file = agent_doc_element::recap::project_in_progress_turn_status(
+            &snapshot.replace(
+                "Waiting.\n",
+                "Added follow-ups. Top backlog item: #first.\n",
+            ),
+            "Added follow-ups. Top backlog item: #first.",
+        )
+        .expect("project status stand-in");
+        assert_ne!(snapshot, file);
+        assert!(file.contains("<!-- recap-status -->"));
+        assert_eq!(
+            classify_safe_out_of_band_agent_doc_mutation(snapshot, &file),
+            Some("status")
+        );
+    }
+
+    #[test]
+    fn classify_safe_out_of_band_rejects_a_real_recap_change_beside_status() {
+        let snapshot = concat!(
+            "---\nagent_doc_session: test\n---\n\n",
+            "<!-- agent:status patch=replace -->\n",
+            "Waiting.\n",
+            "<!-- /agent:status -->\n\n",
+            "<!-- agent:recap patch=replace -->\n",
+            "Committed.\n",
+            "<!-- /agent:recap -->\n",
+        );
+        let file = snapshot
+            .replace("Waiting.\n", "Added follow-ups.\n")
+            .replace("Committed.\n", "A different completed turn.\n");
+        assert_eq!(
+            classify_safe_out_of_band_agent_doc_mutation(snapshot, &file),
+            None
         );
     }
 

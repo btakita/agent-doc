@@ -1068,6 +1068,25 @@ impl agent_doc_cycle_state_io::pipeline_frontmatter::PipelineFrontmatterEffects
     }
 }
 
+/// Land a derived informational projection through editor convergence.
+///
+/// Detached documents fall through to disk. Callers that only publish when the
+/// projection changed still pass the pre-projection text as `current`.
+pub fn converge_derived_projection(
+    file: &Path,
+    current: &str,
+    target: &str,
+    source: &str,
+) -> Result<()> {
+    agent_doc_write_converge_io::converge_or_disk_write(
+        &RUNTIME_WRITE_CONVERGENCE_EFFECTS,
+        file,
+        current,
+        target,
+        source,
+    )
+}
+
 pub fn atomic_write_through_authority(path: &Path, content: &str) -> Result<()> {
     let visible_document = agent_doc_document_realtime::write_authority::is_visible_document(path);
     if visible_document && !agent_doc_document_realtime::write_authority::within_owner_scope() {

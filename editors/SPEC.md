@@ -12,6 +12,7 @@ Common behavior required of all `agent-doc` editor plugins.
 ## 1a. Typing / Live-Buffer Tracking
 
 - **Behavior:** On every markdown document change, plugins must apply the incremental edit to their CRDT replica and report typing/sync epochs through the shared FFI. The Lazily/CP CRDT is the only live-text authority; plugins must not create a full-buffer filesystem sidecar.
+- **Recap caret (`#recapcursor`):** Updating `agent:recap` must not move the caret or viewport onto the recap when the operator is reading another part of the document. A caret outside the replaced span stays on the same character: unchanged when it is before the span, and shifted by the replacement's length delta when it is after the span. The viewport follows that text instead of jumping to the recap.
 
 ## 1b. Start Agent Doc
 

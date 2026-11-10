@@ -77,11 +77,18 @@ private enum class EditorIntent(val token: String) {
  * history instead of the currently open editor surface.
  */
 class PatchWatcher(private val project: Project) : Disposable {
+    private data class OperatorCaretOffsets(
+        val caret: Int,
+        val selectionStart: Int,
+        val selectionEnd: Int,
+    )
+
     private data class OperatorEditorViewState(
         val editor: Editor,
-        val caretsAndSelections: List<CaretState>,
+        val carets: List<OperatorCaretOffsets>,
         val horizontalScrollOffset: Int,
         val verticalScrollOffset: Int,
+        val lineHeight: Int,
     )
 
     private data class RootState(
@@ -455,33 +462,98 @@ class PatchWatcher(private val project: Project) : Disposable {
     }
 
     /**
-     * Programmatic component maintenance must remain invisible to an operator who is
-     * reading or editing another part of the document. IntelliJ adjusts carets and may
-     * scroll an editor while reloading or replacing document text, so snapshot every
-     * project editor immediately around the synchronous EDT mutation and restore it in
-     * `finally` (including when the mutation fails).
+     * Programmatic component maintenance, including an `agent:recap` replacement,
+     * must leave an operator who is reading another part of the document on that
+     * same text. Snapshot caret offsets before the synchronous EDT mutation, then
+     * map them through the resulting replacement. Restoring the pre-edit logical
+     * line would drop the caret into a recap that grew above it.
      */
     private fun <T> preserveOperatorEditorViewState(document: Document, mutation: () -> T): T {
         check(SwingUtilities.isEventDispatchThread()) {
             "operator editor view state must be preserved on the IDEA event-dispatch thread"
         }
+        val before = document.text
         val states = EditorFactory.getInstance().getEditors(document, project).map { editor ->
             OperatorEditorViewState(
                 editor = editor,
-                caretsAndSelections = editor.caretModel.caretsAndSelections.toList(),
+                carets = editor.caretModel.allCarets.map { caret ->
+                    OperatorCaretOffsets(
+                        caret = caret.offset,
+                        selectionStart = caret.selectionStart,
+                        selectionEnd = caret.selectionEnd,
+                    )
+                },
                 horizontalScrollOffset = editor.scrollingModel.horizontalScrollOffset,
                 verticalScrollOffset = editor.scrollingModel.verticalScrollOffset,
+                lineHeight = editor.lineHeight,
             )
         }
         return try {
             mutation()
         } finally {
+            val after = try {
+                document.text
+            } catch (e: RuntimeException) {
+                LOG.warn("[patch-watcher] Failed to read document while restoring operator view", e)
+                before
+            }
+            val edit = minimalDocumentEditUtil(before, after)
+            val textLength = after.length
             states.forEach { state ->
                 if (!state.editor.isDisposed) {
                     try {
-                        state.editor.caretModel.setCaretsAndSelections(state.caretsAndSelections)
+                        val carets = state.carets.map { caret ->
+                            if (edit == null) {
+                                caret
+                            } else {
+                                OperatorCaretOffsets(
+                                    caret = mapOffsetThroughReplacement(
+                                        caret.caret,
+                                        edit.start,
+                                        edit.end,
+                                        edit.replacement.length,
+                                    ),
+                                    selectionStart = mapOffsetThroughReplacement(
+                                        caret.selectionStart,
+                                        edit.start,
+                                        edit.end,
+                                        edit.replacement.length,
+                                    ),
+                                    selectionEnd = mapOffsetThroughReplacement(
+                                        caret.selectionEnd,
+                                        edit.start,
+                                        edit.end,
+                                        edit.replacement.length,
+                                    ),
+                                )
+                            }
+                        }.map { caret ->
+                            OperatorCaretOffsets(
+                                caret = caret.caret.coerceIn(0, textLength),
+                                selectionStart = caret.selectionStart.coerceIn(0, textLength),
+                                selectionEnd = caret.selectionEnd.coerceIn(0, textLength),
+                            )
+                        }
+                        if (carets.isNotEmpty()) {
+                            state.editor.caretModel.setCaretsAndSelections(
+                                carets.map { caret ->
+                                    CaretState(
+                                        state.editor.offsetToLogicalPosition(caret.caret),
+                                        state.editor.offsetToLogicalPosition(caret.selectionStart),
+                                        state.editor.offsetToLogicalPosition(caret.selectionEnd),
+                                    )
+                                },
+                            )
+                        }
                         state.editor.scrollingModel.scrollHorizontally(state.horizontalScrollOffset)
-                        state.editor.scrollingModel.scrollVertically(state.verticalScrollOffset)
+                        state.editor.scrollingModel.scrollVertically(
+                            mapVerticalScrollThroughReplacement(
+                                verticalScrollOffset = state.verticalScrollOffset,
+                                lineHeight = state.lineHeight,
+                                before = before,
+                                edit = edit,
+                            ),
+                        )
                     } catch (e: RuntimeException) {
                         LOG.warn("[patch-watcher] Failed to restore operator editor view state", e)
                     }
@@ -2234,6 +2306,66 @@ internal fun minimalDocumentEditUtil(before: String, after: String): MinimalDocu
         end = before.length - suffixLen,
         replacement = after.substring(prefixLen, after.length - suffixLen),
     )
+}
+
+/**
+ * Keep a caret that sits outside `[start, end)` on the same character.
+ * A caret before [start] is unchanged. A caret at or after [end] shifts by the
+ * replacement's length delta, so a taller `agent:recap` above the operator
+ * cannot pull the caret up into the recap. A caret inside the span is not
+ * outside it; it stays at [start].
+ */
+internal fun mapOffsetThroughReplacement(
+    offset: Int,
+    start: Int,
+    end: Int,
+    replacementLength: Int,
+): Int {
+    val deleted = (end - start).coerceAtLeast(0)
+    val delta = replacementLength - deleted
+    return when {
+        offset < start -> offset
+        offset >= end -> offset + delta
+        else -> start
+    }
+}
+
+/** Line index of [offset] in [text], counting newlines before it. */
+internal fun lineIndexAt(text: String, offset: Int): Int {
+    val end = offset.coerceIn(0, text.length)
+    var lines = 0
+    for (index in 0 until end) {
+        if (text[index] == '\n') {
+            lines++
+        }
+    }
+    return lines
+}
+
+/**
+ * Pixel scroll after [edit]. When the replacement ends at or above the viewport,
+ * shift by its line-height delta so the text below a changed recap stays on
+ * screen. A viewport already above the edit, or one that contains it, stays put.
+ */
+internal fun mapVerticalScrollThroughReplacement(
+    verticalScrollOffset: Int,
+    lineHeight: Int,
+    before: String,
+    edit: MinimalDocumentEdit?,
+): Int {
+    if (edit == null || lineHeight <= 0) {
+        return verticalScrollOffset.coerceAtLeast(0)
+    }
+    val startLine = lineIndexAt(before, edit.start)
+    val endLine = lineIndexAt(before, edit.end)
+    val lineDelta = edit.replacement.count { it == '\n' } - (endLine - startLine)
+    val editBottom = endLine * lineHeight
+    val adjusted = if (editBottom <= verticalScrollOffset) {
+        verticalScrollOffset + lineDelta * lineHeight
+    } else {
+        verticalScrollOffset
+    }
+    return adjusted.coerceAtLeast(0)
 }
 
 internal fun applyMinimalDocumentEditUtil(

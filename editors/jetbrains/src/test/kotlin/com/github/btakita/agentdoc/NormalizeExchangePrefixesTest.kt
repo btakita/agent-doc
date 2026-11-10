@@ -439,12 +439,10 @@ One.
             .substringBefore("private fun computePatchOnWorker(")
 
         assertTrue(helper.contains("EditorFactory.getInstance().getEditors(document, project)"))
-        assertTrue(helper.contains("editor.caretModel.caretsAndSelections.toList()"))
-        assertTrue(helper.contains("editor.scrollingModel.horizontalScrollOffset"))
-        assertTrue(helper.contains("editor.scrollingModel.verticalScrollOffset"))
-        assertTrue(helper.contains("state.editor.caretModel.setCaretsAndSelections(state.caretsAndSelections)"))
-        assertTrue(helper.contains("state.editor.scrollingModel.scrollHorizontally(state.horizontalScrollOffset)"))
-        assertTrue(helper.contains("state.editor.scrollingModel.scrollVertically(state.verticalScrollOffset)"))
+        assertTrue(helper.contains("caret.offset"))
+        assertTrue(helper.contains("mapOffsetThroughReplacement("))
+        assertTrue(helper.contains("mapVerticalScrollThroughReplacement("))
+        assertFalse(helper.contains("caretsAndSelections.toList()"))
         assertTrue(helper.indexOf("return try") < helper.indexOf("finally"))
         assertTrue(
             "component patches, including agent:recap, must preserve the operator view around the range edit",
@@ -453,6 +451,74 @@ One.
         assertTrue(
             "the clean-buffer reload that precedes recap application must preserve the same operator view",
             capture.contains("preserveOperatorEditorViewState(document) {\n                fdm.reloadFromDisk(document)"),
+        )
+    }
+
+    @Test
+    fun `recap replacement leaves a caret outside the section on the same character`() {
+        val before = listOf(
+            "<!-- agent:status -->",
+            "ok",
+            "<!-- /agent:status -->",
+            "",
+            "<!-- agent:recap -->",
+            "old recap",
+            "<!-- /agent:recap -->",
+            "",
+            "<!-- agent:queue -->",
+            "operator is reading this",
+            "<!-- /agent:queue -->",
+            "",
+        ).joinToString("\n")
+        val after = before.replace("old recap", "new recap\nwith more lines")
+        val edit = minimalDocumentEditUtil(before, after)
+        assertNotNull(edit)
+        val replacement = edit!!
+        val outside = before.indexOf("operator is reading this")
+        assertTrue(outside > before.indexOf("<!-- /agent:recap -->"))
+        val mapped = mapOffsetThroughReplacement(
+            outside,
+            replacement.start,
+            replacement.end,
+            replacement.replacement.length,
+        )
+        assertEquals(
+            "operator is reading this",
+            after.substring(mapped, mapped + "operator is reading this".length),
+        )
+
+        val above = before.indexOf("ok")
+        assertTrue(above < before.indexOf("<!-- agent:recap -->"))
+        val mappedAbove = mapOffsetThroughReplacement(
+            above,
+            replacement.start,
+            replacement.end,
+            replacement.replacement.length,
+        )
+        assertEquals(above, mappedAbove)
+        assertEquals("ok", after.substring(mappedAbove, mappedAbove + 2))
+
+        val boundary = replacement.end
+        val mappedBoundary = mapOffsetThroughReplacement(
+            boundary,
+            replacement.start,
+            replacement.end,
+            replacement.replacement.length,
+        )
+        assertEquals(before[boundary], after[mappedBoundary])
+
+        val lineHeight = 22
+        val belowScroll = lineIndexAt(before, outside) * lineHeight
+        val lineDelta = replacement.replacement.count { it == '\n' } -
+            (lineIndexAt(before, replacement.end) - lineIndexAt(before, replacement.start))
+        assertTrue(lineDelta > 0)
+        assertEquals(
+            belowScroll + lineDelta * lineHeight,
+            mapVerticalScrollThroughReplacement(belowScroll, lineHeight, before, replacement),
+        )
+        assertEquals(
+            0,
+            mapVerticalScrollThroughReplacement(0, lineHeight, before, replacement),
         )
     }
 

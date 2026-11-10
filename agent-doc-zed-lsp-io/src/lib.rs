@@ -721,20 +721,21 @@ impl<W: Write, I: LspInput> Server<W, I> {
         // Registration bootstraps from the controller-owned canonical revision.
         // A divergent opening buffer is a downstream delivery target, never an
         // upstream whole-document replacement.
-        let opening_projection = (canonical != editor_text).then(|| {
-            document.pending_apply_target = Some(canonical.clone());
-            json!({
-                "edit": {
-                    "changes": {
-                        uri: [{
-                            "range": full_document_range(editor_text),
-                            "newText": canonical
-                        }]
-                    }
-                },
-                "label": "agent-doc canonical projection"
+        let opening_projection = if canonical != editor_text {
+            minimal_lsp_text_edit(editor_text, &canonical).map(|edit| {
+                document.pending_apply_target = Some(canonical.clone());
+                json!({
+                    "edit": {
+                        "changes": {
+                            uri: [edit]
+                        }
+                    },
+                    "label": "agent-doc canonical projection"
+                })
             })
-        });
+        } else {
+            None
+        };
         self.documents.insert(uri.to_string(), document);
         if let Some(edit) = opening_projection {
             let request_id = self.next_request_id;
@@ -837,14 +838,13 @@ impl<W: Write, I: LspInput> Server<W, I> {
                     if document.pending_apply_target.as_deref() == Some(&target) {
                         continue;
                     }
-                    let range = full_document_range(&document.shadow);
+                    let Some(change) = minimal_lsp_text_edit(&document.shadow, &target) else {
+                        continue;
+                    };
                     let edit = json!({
                         "edit": {
                             "changes": {
-                                document.uri.clone(): [{
-                                    "range": range,
-                                    "newText": target
-                                }]
+                                document.uri.clone(): [change]
                             }
                         },
                         "label": "agent-doc realtime update"
@@ -1051,6 +1051,58 @@ fn percent_decode(value: &str) -> Result<String> {
     String::from_utf8(decoded).context("file URI is not UTF-8")
 }
 
+/// LSP range of only the changed span. A full-document `workspace/applyEdit`
+/// moves the caret to the replacement and scrolls the buffer; a span that
+/// does not cover the caret leaves that caret and the viewport alone.
+fn minimal_lsp_text_edit(before: &str, after: &str) -> Option<Value> {
+    let delta = minimal_text_delta(before, after)?;
+    let start = delta.offset as usize;
+    let end = start + delta.delete_len as usize;
+    Some(json!({
+        "range": {
+            "start": lsp_position_at(before, start),
+            "end": lsp_position_at(before, end),
+        },
+        "newText": delta.insert,
+    }))
+}
+
+fn lsp_position_at(text: &str, char_offset: usize) -> Value {
+    let chars: Vec<char> = text.chars().collect();
+    let offset = char_offset.min(chars.len());
+    let mut line = 0u64;
+    let mut line_start = 0usize;
+    for (index, ch) in chars.iter().enumerate().take(offset) {
+        if *ch == '\n' {
+            line += 1;
+            line_start = index + 1;
+        }
+    }
+    let character = chars[line_start..offset]
+        .iter()
+        .collect::<String>()
+        .encode_utf16()
+        .count() as u64;
+    json!({ "line": line, "character": character })
+}
+
+/// Caret outside the delta stays on the same character. A caret inside the
+/// deleted span stays at the span start, not at the end of the agent write.
+#[cfg(test)]
+fn map_char_offset_through_delta(offset: usize, delta: &TextDelta) -> usize {
+    let start = delta.offset as usize;
+    let end = start + delta.delete_len as usize;
+    let inserted = delta.insert.chars().count();
+    if offset < start {
+        offset
+    } else if offset >= end {
+        offset + inserted - delta.delete_len as usize
+    } else {
+        start
+    }
+}
+
+#[cfg(test)]
 fn full_document_range(text: &str) -> Value {
     let mut lines = text.split('\n');
     let mut line = 0u64;
@@ -1501,6 +1553,46 @@ mod tests {
             file_uri_to_path("file:///tmp/agent%20doc/%E6%97%A5%E6%9C%AC.md").unwrap(),
             PathBuf::from("/tmp/agent doc/日本.md")
         );
+    }
+
+    #[test]
+    fn a_realtime_write_keeps_a_caret_outside_the_edit_on_the_same_character() {
+        let before = "<!-- agent:status -->\nok\n<!-- /agent:status -->\n\n<!-- agent:queue -->\noperator is reading this\n<!-- /agent:queue -->\n";
+        let after = before.replacen("ok", "ok\nupdated", 1);
+        let edit = minimal_lsp_text_edit(before, &after).expect("status write is a span");
+        assert_ne!(
+            edit["range"],
+            full_document_range(before),
+            "a full-document applyEdit moves the caret and scrolls"
+        );
+        let delta = minimal_text_delta(before, &after).expect("delta");
+        let caret = before.find("operator is reading this").unwrap();
+        let mapped = map_char_offset_through_delta(caret, &delta);
+        assert_eq!(
+            &after[mapped..mapped + "operator is reading this".len()],
+            "operator is reading this"
+        );
+        let edit_end_line = edit["range"]["end"]["line"].as_u64().unwrap();
+        let caret_line = before[..caret].chars().filter(|ch| *ch == '\n').count() as u64;
+        assert!(
+            edit_end_line < caret_line,
+            "the applied range must end above the operator caret"
+        );
+    }
+
+    #[test]
+    fn minimal_lsp_text_edit_counts_utf16_columns() {
+        let before = "first\n😀x";
+        let after = "first\n😀YZ";
+        let edit = minimal_lsp_text_edit(before, after).expect("emoji tail changes");
+        assert_eq!(
+            edit["range"],
+            json!({
+                "start": { "line": 1, "character": 2 },
+                "end": { "line": 1, "character": 3 }
+            })
+        );
+        assert_eq!(edit["newText"], "YZ");
     }
 
     #[test]

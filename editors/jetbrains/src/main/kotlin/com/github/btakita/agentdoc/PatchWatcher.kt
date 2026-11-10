@@ -19,6 +19,7 @@ import com.intellij.openapi.vfs.VirtualFile
 import java.io.File
 import java.security.MessageDigest
 import java.time.Instant
+import java.util.WeakHashMap
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
@@ -77,20 +78,6 @@ private enum class EditorIntent(val token: String) {
  * history instead of the currently open editor surface.
  */
 class PatchWatcher(private val project: Project) : Disposable {
-    private data class OperatorCaretOffsets(
-        val caret: Int,
-        val selectionStart: Int,
-        val selectionEnd: Int,
-    )
-
-    private data class OperatorEditorViewState(
-        val editor: Editor,
-        val carets: List<OperatorCaretOffsets>,
-        val horizontalScrollOffset: Int,
-        val verticalScrollOffset: Int,
-        val lineHeight: Int,
-    )
-
     private data class RootState(
         val root: String,
         @Volatile var ipcCallback: AgentDocLib.IpcMessageCallback? = null,
@@ -468,99 +455,8 @@ class PatchWatcher(private val project: Project) : Disposable {
      * map them through the resulting replacement. Restoring the pre-edit logical
      * line would drop the caret into a recap that grew above it.
      */
-    private fun <T> preserveOperatorEditorViewState(document: Document, mutation: () -> T): T {
-        check(SwingUtilities.isEventDispatchThread()) {
-            "operator editor view state must be preserved on the IDEA event-dispatch thread"
-        }
-        val before = document.text
-        val states = EditorFactory.getInstance().getEditors(document, project).map { editor ->
-            OperatorEditorViewState(
-                editor = editor,
-                carets = editor.caretModel.allCarets.map { caret ->
-                    OperatorCaretOffsets(
-                        caret = caret.offset,
-                        selectionStart = caret.selectionStart,
-                        selectionEnd = caret.selectionEnd,
-                    )
-                },
-                horizontalScrollOffset = editor.scrollingModel.horizontalScrollOffset,
-                verticalScrollOffset = editor.scrollingModel.verticalScrollOffset,
-                lineHeight = editor.lineHeight,
-            )
-        }
-        return try {
-            mutation()
-        } finally {
-            val after = try {
-                document.text
-            } catch (e: RuntimeException) {
-                LOG.warn("[patch-watcher] Failed to read document while restoring operator view", e)
-                before
-            }
-            val edit = minimalDocumentEditUtil(before, after)
-            val textLength = after.length
-            states.forEach { state ->
-                if (!state.editor.isDisposed) {
-                    try {
-                        val carets = state.carets.map { caret ->
-                            if (edit == null) {
-                                caret
-                            } else {
-                                OperatorCaretOffsets(
-                                    caret = mapOffsetThroughReplacement(
-                                        caret.caret,
-                                        edit.start,
-                                        edit.end,
-                                        edit.replacement.length,
-                                    ),
-                                    selectionStart = mapOffsetThroughReplacement(
-                                        caret.selectionStart,
-                                        edit.start,
-                                        edit.end,
-                                        edit.replacement.length,
-                                    ),
-                                    selectionEnd = mapOffsetThroughReplacement(
-                                        caret.selectionEnd,
-                                        edit.start,
-                                        edit.end,
-                                        edit.replacement.length,
-                                    ),
-                                )
-                            }
-                        }.map { caret ->
-                            OperatorCaretOffsets(
-                                caret = caret.caret.coerceIn(0, textLength),
-                                selectionStart = caret.selectionStart.coerceIn(0, textLength),
-                                selectionEnd = caret.selectionEnd.coerceIn(0, textLength),
-                            )
-                        }
-                        if (carets.isNotEmpty()) {
-                            state.editor.caretModel.setCaretsAndSelections(
-                                carets.map { caret ->
-                                    CaretState(
-                                        state.editor.offsetToLogicalPosition(caret.caret),
-                                        state.editor.offsetToLogicalPosition(caret.selectionStart),
-                                        state.editor.offsetToLogicalPosition(caret.selectionEnd),
-                                    )
-                                },
-                            )
-                        }
-                        state.editor.scrollingModel.scrollHorizontally(state.horizontalScrollOffset)
-                        state.editor.scrollingModel.scrollVertically(
-                            mapVerticalScrollThroughReplacement(
-                                verticalScrollOffset = state.verticalScrollOffset,
-                                lineHeight = state.lineHeight,
-                                before = before,
-                                edit = edit,
-                            ),
-                        )
-                    } catch (e: RuntimeException) {
-                        LOG.warn("[patch-watcher] Failed to restore operator editor view state", e)
-                    }
-                }
-            }
-        }
-    }
+    private fun <T> preserveOperatorEditorViewState(document: Document, mutation: () -> T): T =
+        preserveOperatorEditorViewStateUtil(project, document, mutation)
 
     /**
      * Handle a socket IPC message from the FFI listener.
@@ -926,7 +822,9 @@ class PatchWatcher(private val project: Project) : Disposable {
                 ?: return@invokeAndWait
             val manager = FileDocumentManager.getInstance()
             val document = manager.getDocument(file) ?: return@invokeAndWait
-            manager.reloadFromDisk(document)
+            preserveOperatorEditorViewState(document) {
+                manager.reloadFromDisk(document)
+            }
             reloaded = true
         }
         if (!reloaded) return false
@@ -974,7 +872,9 @@ class PatchWatcher(private val project: Project) : Disposable {
             // The range edit below replaces only the changed span in the proven-stale buffer.
             // See shouldRefreshVfsBeforeApplyUtil.
             if (shouldRefreshVfsBeforeApplyUtil(fdm.isDocumentUnsaved(document))) {
-                targetFile.refresh(false, false)
+                preserveOperatorEditorViewState(document) {
+                    targetFile.refresh(false, false)
+                }
             }
             val current = document.text
             if (current == content) {
@@ -1023,7 +923,9 @@ class PatchWatcher(private val project: Project) : Disposable {
                     )
                 }
                 CrdtReplicaManager.withAgentAppliedEditorMutation(filePath) {
-                    applyMinimalDocumentEditUtil(document, proof.content, content)
+                    preserveOperatorEditorViewState(document) {
+                        applyMinimalDocumentEditUtil(document, proof.content, content)
+                    }
                 }
                 applied = true
             })
@@ -1056,11 +958,15 @@ class PatchWatcher(private val project: Project) : Disposable {
             // a content-bearing refresh against an unsaved buffer arms the platform
             // File Cache Conflict dialog. See shouldRefreshVfsBeforeApplyUtil.
             if (shouldRefreshVfsBeforeApplyUtil(fdm.isDocumentUnsaved(document))) {
-                targetFile.refresh(false, false)
+                preserveOperatorEditorViewState(document) {
+                    targetFile.refresh(false, false)
+                }
             }
             val diskContent = String(targetFile.contentsToByteArray(), targetFile.charset)
             if (!fdm.isDocumentUnsaved(document)) {
-                fdm.reloadFromDisk(document)
+                preserveOperatorEditorViewState(document) {
+                    fdm.reloadFromDisk(document)
+                }
             }
             val content = document.text
             val proof = EditorApplyProof(content, document.modificationStamp)
@@ -1098,7 +1004,9 @@ class PatchWatcher(private val project: Project) : Disposable {
                                 )
                             }
                             CrdtReplicaManager.withAgentAppliedEditorMutation(filePath) {
-                                applyMinimalDocumentEditUtil(document, content, result)
+                                preserveOperatorEditorViewState(document) {
+                                    applyMinimalDocumentEditUtil(document, content, result)
+                                }
                             }
                         } else if (result != content) {
                             LOG.warn("[patch-watcher] stale editor generation during reposition for $filePath")
@@ -2366,6 +2274,165 @@ internal fun mapVerticalScrollThroughReplacement(
         verticalScrollOffset
     }
     return adjusted.coerceAtLeast(0)
+}
+
+private data class OperatorCaretOffsets(
+    val caret: Int,
+    val selectionStart: Int,
+    val selectionEnd: Int,
+)
+
+private data class OperatorEditorViewState(
+    val editor: Editor,
+    val carets: List<OperatorCaretOffsets>,
+    val horizontalScrollOffset: Int,
+    val verticalScrollOffset: Int,
+    val lineHeight: Int,
+)
+
+private data class OperatorViewScroll(
+    val editor: Editor,
+    val horizontal: Int,
+    val vertical: Int,
+)
+
+/**
+ * A later platform scroll-to-caret (command finish, or [CaretModel.setCaretsAndSelections])
+ * must not beat the viewport restored for this document. A newer write wins.
+ */
+private val operatorViewRestoreGenerations =
+    java.util.Collections.synchronizedMap(WeakHashMap<Document, AtomicInteger>())
+
+private val operatorViewLog =
+    com.intellij.openapi.diagnostic.Logger.getInstance(PatchWatcher::class.java)
+
+/**
+ * Respond, finalize, queue consume, status, refresh, reposition, and CRDT
+ * projection all mutate through this helper. The caret stays on the same
+ * character outside the replacement, and the viewport stays on the same text.
+ * Restoring carets does not publish the system selection or request focus.
+ */
+internal fun <T> preserveOperatorEditorViewStateUtil(
+    project: Project,
+    document: Document,
+    mutation: () -> T,
+): T {
+    check(SwingUtilities.isEventDispatchThread()) {
+        "operator editor view state must be preserved on the IDEA event-dispatch thread"
+    }
+    val before = document.text
+    val states = EditorFactory.getInstance().getEditors(document, project).map { editor ->
+        OperatorEditorViewState(
+            editor = editor,
+            carets = editor.caretModel.allCarets.map { caret ->
+                OperatorCaretOffsets(
+                    caret = caret.offset,
+                    selectionStart = caret.selectionStart,
+                    selectionEnd = caret.selectionEnd,
+                )
+            },
+            horizontalScrollOffset = editor.scrollingModel.horizontalScrollOffset,
+            verticalScrollOffset = editor.scrollingModel.verticalScrollOffset,
+            lineHeight = editor.lineHeight,
+        )
+    }
+    return try {
+        mutation()
+    } finally {
+        val after = try {
+            document.text
+        } catch (e: RuntimeException) {
+            operatorViewLog.warn("[patch-watcher] Failed to read document while restoring operator view", e)
+            before
+        }
+        val edit = minimalDocumentEditUtil(before, after)
+        val textLength = after.length
+        val generation = operatorViewRestoreGenerations
+            .computeIfAbsent(document) { AtomicInteger() }
+            .incrementAndGet()
+        val restorations = mutableListOf<OperatorViewScroll>()
+        states.forEach { state ->
+            if (!state.editor.isDisposed) {
+                try {
+                    val carets = state.carets.map { caret ->
+                        if (edit == null) {
+                            caret
+                        } else {
+                            OperatorCaretOffsets(
+                                caret = mapOffsetThroughReplacement(
+                                    caret.caret,
+                                    edit.start,
+                                    edit.end,
+                                    edit.replacement.length,
+                                ),
+                                selectionStart = mapOffsetThroughReplacement(
+                                    caret.selectionStart,
+                                    edit.start,
+                                    edit.end,
+                                    edit.replacement.length,
+                                ),
+                                selectionEnd = mapOffsetThroughReplacement(
+                                    caret.selectionEnd,
+                                    edit.start,
+                                    edit.end,
+                                    edit.replacement.length,
+                                ),
+                            )
+                        }
+                    }.map { caret ->
+                        OperatorCaretOffsets(
+                            caret = caret.caret.coerceIn(0, textLength),
+                            selectionStart = caret.selectionStart.coerceIn(0, textLength),
+                            selectionEnd = caret.selectionEnd.coerceIn(0, textLength),
+                        )
+                    }
+                    if (carets.isNotEmpty()) {
+                        // false: do not publish the system selection. That call
+                        // takes X11 primary selection and can pull keyboard focus.
+                        state.editor.caretModel.setCaretsAndSelections(
+                            carets.map { caret ->
+                                CaretState(
+                                    state.editor.offsetToLogicalPosition(caret.caret),
+                                    state.editor.offsetToLogicalPosition(caret.selectionStart),
+                                    state.editor.offsetToLogicalPosition(caret.selectionEnd),
+                                )
+                            },
+                            false,
+                        )
+                    }
+                    val horizontal = state.horizontalScrollOffset
+                    val vertical = mapVerticalScrollThroughReplacement(
+                        verticalScrollOffset = state.verticalScrollOffset,
+                        lineHeight = state.lineHeight,
+                        before = before,
+                        edit = edit,
+                    )
+                    state.editor.scrollingModel.disableAnimation()
+                    state.editor.scrollingModel.scrollHorizontally(horizontal)
+                    state.editor.scrollingModel.scrollVertically(vertical)
+                    restorations.add(OperatorViewScroll(state.editor, horizontal, vertical))
+                } catch (e: RuntimeException) {
+                    operatorViewLog.warn("[patch-watcher] Failed to restore operator editor view state", e)
+                }
+            }
+        }
+        if (restorations.isNotEmpty()) {
+            GenerationWork.invokeLater {
+                if (operatorViewRestoreGenerations[document]?.get() != generation) return@invokeLater
+                restorations.forEach { restoration ->
+                    if (!restoration.editor.isDisposed) {
+                        try {
+                            restoration.editor.scrollingModel.disableAnimation()
+                            restoration.editor.scrollingModel.scrollHorizontally(restoration.horizontal)
+                            restoration.editor.scrollingModel.scrollVertically(restoration.vertical)
+                        } catch (e: RuntimeException) {
+                            operatorViewLog.warn("[patch-watcher] Failed to reapply operator viewport", e)
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 internal fun applyMinimalDocumentEditUtil(

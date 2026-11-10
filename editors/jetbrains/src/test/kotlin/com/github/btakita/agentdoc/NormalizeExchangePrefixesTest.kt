@@ -429,8 +429,8 @@ One.
         ).first { Files.exists(it) }
         val patchWatcher = Files.readString(patchWatcherPath)
         val helper = patchWatcher
-            .substringAfter("private fun <T> preserveOperatorEditorViewState(")
-            .substringBefore("/**\n     * Handle a socket IPC message")
+            .substringAfter("internal fun <T> preserveOperatorEditorViewStateUtil(")
+            .substringBefore("internal fun applyMinimalDocumentEditUtil(")
         val apply = patchWatcher
             .substringAfter("private fun applyComputedPatchOnEdt(")
             .substringBefore("private fun patchConflictKey(")
@@ -442,8 +442,17 @@ One.
         assertTrue(helper.contains("caret.offset"))
         assertTrue(helper.contains("mapOffsetThroughReplacement("))
         assertTrue(helper.contains("mapVerticalScrollThroughReplacement("))
+        assertTrue(helper.contains("setCaretsAndSelections("))
+        assertTrue(helper.contains("false,"))
+        assertFalse(helper.contains("requestFocus"))
         assertFalse(helper.contains("caretsAndSelections.toList()"))
+        assertTrue(helper.contains("invokeLater"))
         assertTrue(helper.indexOf("return try") < helper.indexOf("finally"))
+        assertTrue(
+            patchWatcher.contains(
+                "preserveOperatorEditorViewStateUtil(project, document, mutation)",
+            ),
+        )
         assertTrue(
             "component patches, including agent:recap, must preserve the operator view around the range edit",
             apply.contains("preserveOperatorEditorViewState(document) {\n                    applyMinimalDocumentEditUtil"),
@@ -520,6 +529,69 @@ One.
             0,
             mapVerticalScrollThroughReplacement(0, lineHeight, before, replacement),
         )
+        val jumpedToEdit = lineIndexAt(before, replacement.start) * lineHeight
+        assertTrue(
+            "a write above the viewport must not scroll the caret to the edit",
+            mapVerticalScrollThroughReplacement(belowScroll, lineHeight, before, replacement) != jumpedToEdit,
+        )
+    }
+
+    @Test
+    fun `respond finalize queue status and crdt writes preserve caret and viewport`() {
+        val patchWatcher = Files.readString(
+            listOf(
+                Paths.get("src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt"),
+                Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt"),
+            ).first { Files.exists(it) },
+        )
+        val refresh = patchWatcher
+            .substringAfter("private fun refreshContentViaDocument")
+            .substringBefore("private fun repositionBoundaryViaDocument")
+        val reposition = patchWatcher
+            .substringAfter("private fun repositionBoundaryViaDocument")
+            .substringBefore("private fun scheduleRepositionRetry")
+        val resume = patchWatcher
+            .substringAfter("private fun resumeAfterExtract(")
+            .substringBefore("private fun refreshContentViaDocument(")
+        assertTrue(callPreservesView(refresh, "applyMinimalDocumentEditUtil("))
+        assertTrue(callPreservesView(refresh, "targetFile.refresh(false, false)"))
+        assertTrue(callPreservesView(reposition, "applyMinimalDocumentEditUtil("))
+        assertTrue(callPreservesView(reposition, "fdm.reloadFromDisk(document)"))
+        assertTrue(callPreservesView(reposition, "targetFile.refresh(false, false)"))
+        assertTrue(callPreservesView(resume, "manager.reloadFromDisk(document)"))
+
+        val manager = Files.readString(
+            listOf(
+                Paths.get("src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"),
+                Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"),
+            ).first { Files.exists(it) },
+        )
+        val replace = manager
+            .substringAfter("private fun applyReplaceDelivery(")
+            .substringBefore("private fun queueRemoteTextApply(")
+        val remote = manager
+            .substringAfter("private fun applyRemoteTextOnEdt(")
+            .substringBefore("private fun readRawDiskText(")
+        val reconcile = manager
+            .substringAfter("private fun reconcileRemotePersistence(")
+            .substringBefore("private fun completeRemoteEditorApply(")
+        val cleanRefresh = manager
+            .substringAfter("private fun refreshCleanDocumentBeforeRemoteApply(")
+            .substringBefore("private fun persistRemoteCrdtTextIfSafe(")
+        assertTrue(callPreservesView(replace, "applyMinimalDocumentEditUtil("))
+        assertTrue(callPreservesView(remote, "applyMinimalDocumentEditUtil("))
+        assertTrue(callPreservesView(reconcile, "applyMinimalDocumentEditUtil("))
+        assertTrue(callPreservesView(reconcile, "reloadFromDisk(document)"))
+        assertTrue(callPreservesView(cleanRefresh, "targetFile.refresh(false, false)"))
+        assertFalse(replace.contains("requestFocus"))
+        assertFalse(remote.contains("requestFocus"))
+    }
+
+    private fun callPreservesView(body: String, call: String): Boolean {
+        val at = body.indexOf(call)
+        if (at < 0) return false
+        val preserve = body.lastIndexOf("preserveOperatorEditorViewState", at)
+        return preserve >= 0 && preserve < at
     }
 
     @Test

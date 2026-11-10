@@ -2969,7 +2969,9 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                     applyingRemote.add(filePath)
                     try {
                         runUndoableRemoteUpdateCommand(document) {
-                            applyMinimalDocumentEditUtil(document, before, canonical)
+                            preserveOperatorEditorViewStateUtil(project, document) {
+                                applyMinimalDocumentEditUtil(document, before, canonical)
+                            }
                         }
                         shadows[filePath] = canonical
                         installed = persistRemoteCrdtTextIfSafe(
@@ -3394,7 +3396,9 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 applyingRemote.add(pending.filePath)
                 try {
                     runUndoableRemoteUpdateCommand(document) {
-                        applyMinimalDocumentEditUtil(document, before, pending.targetText)
+                        preserveOperatorEditorViewStateUtil(project, document) {
+                            applyMinimalDocumentEditUtil(document, before, pending.targetText)
+                        }
                         shadows[pending.filePath] = pending.targetText
                     }
                     if (projectionMode == RemoteCrdtProjectionMode.Persist) {
@@ -3457,7 +3461,9 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             log.debug("[crdt-replica] remote apply deferred before VFS refresh because the editor is unsaved for $filePath")
             return false
         }
-        targetFile.refresh(false, false)
+        preserveOperatorEditorViewStateUtil(project, document) {
+            targetFile.refresh(false, false)
+        }
         if (fileDocumentManager.isDocumentUnsaved(document)) {
             log.warn("[crdt-replica] remote apply deferred because the editor became unsaved during the clean VFS refresh for $filePath")
             return false
@@ -3723,12 +3729,16 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 )
                 if (document.text == targetText) {
                     runUndoableRemoteUpdateCommand(document) {
-                        applyMinimalDocumentEditUtil(document, targetText, beforeText)
+                        preserveOperatorEditorViewStateUtil(project, document) {
+                            applyMinimalDocumentEditUtil(document, targetText, beforeText)
+                        }
                     }
                 }
                 shadows[filePath] = beforeText
                 if (document.text == beforeText && diskAfterSave == beforeText) {
-                    FileDocumentManager.getInstance().reloadFromDisk(document)
+                    preserveOperatorEditorViewStateUtil(project, document) {
+                        FileDocumentManager.getInstance().reloadFromDisk(document)
+                    }
                 }
                 RemotePersistOutcome(false, beforeText)
             }

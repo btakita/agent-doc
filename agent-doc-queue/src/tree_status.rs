@@ -22,7 +22,9 @@
 //! editor actions (through the FFI), and the document form, where preflight
 //! replaces a `status?` query with binary-owned Status reply rows
 //! ([`answer_status_queries`]). Only `status? deep` queues an agent turn, and
-//! only when some row needs agent review.
+//! only when some row needs agent review. A `deletable?` child asks only
+//! whether that prompt item tree is deletable; the answer is one Status row,
+//! and the still-open query is not itself a reason to keep the tree open.
 //!
 //! This module is pure: it reads a document string and returns a new one.
 
@@ -702,7 +704,7 @@ pub fn reply_rows(status: &TreeStatus, indent: usize, kind: StatusQueryKind) -> 
     let pad = " ".repeat(indent);
     let child = " ".repeat(indent + 2);
     let deep = match kind {
-        StatusQueryKind::Plain => String::new(),
+        StatusQueryKind::Plain | StatusQueryKind::Deletable => String::new(),
         StatusQueryKind::Deep if status.needs_review.is_empty() => {
             " · deep: no row needs agent review, so no agent turn was queued".to_string()
         }
@@ -856,6 +858,50 @@ fn remove_old_status_rows(
     preceding
 }
 
+/// One `**Status:**` row answering `deletable?`.
+fn deletable_reply_row(verdict: &str, sentence: &str, indent: usize) -> String {
+    format!(
+        "{}- {TREE_STATUS_ROW_LABEL} {verdict} — {sentence} {AGENT_DOC_REPLY_GLYPH}",
+        " ".repeat(indent)
+    )
+}
+
+/// Whether the prompt item on `target_line` (or the whole queue, when that
+/// line is the queue marker) is safe to delete. The `deletable?` row is
+/// already gone, and a still-open query is not a queue-tree node, so it
+/// cannot be the named open row.
+fn deletable_answer_sentence(document: &str, target_line: usize) -> Result<String> {
+    let tree = queue_tree::queue_tree(document, &QueueTreeOptions::default())?;
+    if let Some(index) = queue_tree::node_at_line(&tree, target_line) {
+        let open = queue_tree::row_closure(&tree, index).and_then(|closure| {
+            closure.first_open_nested.or_else(|| {
+                queue_tree::row_keeps_tree_alive(&tree, index)
+                    .then(|| queue_tree::RowRef::of(&tree.nodes[index]))
+            })
+        });
+        return Ok(match open {
+            None => {
+                "Safe to delete this prompt item and every row under it; all of them are struck."
+                    .to_string()
+            }
+            Some(open) => format!("Keep this prompt item: {} is still open.", open.label()),
+        });
+    }
+    let views = component_views(document)?;
+    let view = views.iter().find(|view| view.contains_line(target_line));
+    let open = tree.nodes.iter().enumerate().find(|(index, node)| {
+        view.is_none_or(|view| view.contains_line(node.line))
+            && queue_tree::row_keeps_tree_alive(&tree, *index)
+    });
+    Ok(match open {
+        None => "Safe to delete this queue; every prompt item in it is struck.".to_string(),
+        Some((_, node)) => format!(
+            "Keep this queue: {} is still open.",
+            queue_tree::RowRef::of(node).label()
+        ),
+    })
+}
+
 fn answer_query(document: &str, query: Query) -> Result<(String, AnsweredStatusQuery)> {
     let views = component_views(document)?;
     let view = views
@@ -915,14 +961,30 @@ fn answer_query(document: &str, query: Query) -> Result<(String, AnsweredStatusQ
     };
     let cleaned = lines.concat();
     let status = tree_status(&cleaned, target_line)?;
-    let mut rows = reply_rows(&status, status_indent, query.kind);
-    let queued_agent_turn = query.kind == StatusQueryKind::Deep && !status.needs_review.is_empty();
-    if queued_agent_turn {
-        rows.push(format!(
-            "{}- {DEEP_REVIEW_PROMPT}",
-            " ".repeat(status_indent)
-        ));
-    }
+    let (rows, counts, queued_agent_turn) = if query.kind == StatusQueryKind::Deletable {
+        let sentence = deletable_answer_sentence(&cleaned, target_line)?;
+        let verdict = if sentence.starts_with("Safe to delete") {
+            "deletable"
+        } else {
+            "not deletable"
+        };
+        (
+            vec![deletable_reply_row(verdict, &sentence, status_indent)],
+            verdict.to_string(),
+            false,
+        )
+    } else {
+        let mut rows = reply_rows(&status, status_indent, query.kind);
+        let queued_agent_turn =
+            query.kind == StatusQueryKind::Deep && !status.needs_review.is_empty();
+        if queued_agent_turn {
+            rows.push(format!(
+                "{}- {DEEP_REVIEW_PROMPT}",
+                " ".repeat(status_indent)
+            ));
+        }
+        (rows, status.counts_line(), queued_agent_turn)
+    };
     // A document without a trailing newline keeps that shape: the inserted
     // rows always end in one, and the row before them gains one if needed.
     if insert_at > 0
@@ -939,7 +1001,7 @@ fn answer_query(document: &str, query: Query) -> Result<(String, AnsweredStatusQ
         queue: status.queue.clone(),
         target: status.text.clone(),
         kind: query.kind,
-        counts: status.counts_line(),
+        counts,
         queued_agent_turn,
     };
     Ok((lines.concat(), answered))
@@ -963,7 +1025,8 @@ pub fn answer_status_queries_settled(
     document: &str,
     allow: &dyn Fn(&str) -> bool,
 ) -> Result<Option<StatusQueryAnswers>> {
-    if !document.to_ascii_lowercase().contains(syntax::STATUS_QUERY) {
+    let lower = document.to_ascii_lowercase();
+    if !lower.contains(syntax::STATUS_QUERY) && !lower.contains(syntax::DELETABLE_QUERY) {
         return Ok(None);
     }
     let mut content = document.to_string();

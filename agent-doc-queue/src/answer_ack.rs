@@ -455,4 +455,58 @@ mod tests {
             "{acked}"
         );
     }
+
+    /// A still-open `deletable?` child asks whether the tree can go. It is not
+    /// the open row a keep recommendation names.
+    #[test]
+    fn an_open_deletable_query_is_not_why_the_waiting_item_stays() {
+        let closed = concat!(
+            "## Todo <!-- agent:todo -->\n",
+            "- [x] [#dl] Decide how private haiven-cli serves release downloads\n",
+            "<!-- /agent:todo -->\n",
+            "\n",
+            "## Main <!-- agent:queue id=\"main\" -->\n",
+            "- ### 📥 Waiting on you — answer by adding a child line under an item [#q-4775b8697412]\n",
+            "  - ~~[#dl] Decide how private haiven-cli serves release downloads <!-- agent-doc:waiting-item -->~~\n",
+            "    - **Response:** Decide how private haiven-cli serves release downloads <!-- agent-doc:waiting-metadata -->\n",
+            "      - **Next actions:** <!-- agent-doc:waiting-metadata -->\n",
+            "        - **Action:** Decide how private haiven-cli serves release downloads <!-- agent-doc:waiting-metadata -->\n",
+            "          - haiven-cli will be public + open source [#q-f09f08bcf721]\n",
+            "    - deletable?\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let answers = live_packet_answers(closed).unwrap();
+        assert_eq!(answers.len(), 1, "{answers:#?}");
+        let acked = apply_answer_acknowledgements(
+            closed,
+            &[(answers[0].row, "[#r-0123456789ab]".to_string())],
+        )
+        .unwrap();
+        assert!(
+            acked.contains(
+                "Safe to delete this waiting item and every row under it; all of them are struck."
+            ),
+            "{acked}"
+        );
+        assert!(!acked.contains("`deletable?` is still open"), "{acked}");
+        assert!(acked.contains("    - deletable?\n"), "{acked}");
+
+        let open = closed
+            .replace("- [x] [#dl]", "- [ ] [#dl]")
+            .replace(
+                "  - ~~[#dl] Decide how private haiven-cli serves release downloads <!-- agent-doc:waiting-item -->~~\n",
+                "  - [#dl] Decide how private haiven-cli serves release downloads <!-- agent-doc:waiting-item -->\n",
+            );
+        let answers = live_packet_answers(&open).unwrap();
+        let acked = apply_answer_acknowledgements(
+            &open,
+            &[(answers[0].row, "[#r-0123456789ab]".to_string())],
+        )
+        .unwrap();
+        assert!(
+            acked.contains("Keep this waiting item: [#dl] is still open."),
+            "{acked}"
+        );
+        assert!(!acked.contains("`deletable?` is still open"), "{acked}");
+    }
 }

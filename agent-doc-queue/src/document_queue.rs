@@ -15067,6 +15067,30 @@ mod tests {
     }
 
     #[test]
+    fn an_open_deletable_query_does_not_keep_a_struck_prompt_tree() {
+        let entries = parse(concat!(
+            "- Release train\n",
+            "  - ~~Publish the release.~~\n",
+            "  - deletable?\n",
+        ))
+        .unwrap();
+        assert!(
+            prompts(&entries).is_empty(),
+            "the query is not a live leaf: {entries:#?}"
+        );
+        let settled = settle_inert_group_parents(&entries, &std::collections::HashSet::new())
+            .expect("a deletable? child does not keep the prompt tree open");
+        assert_eq!(
+            render(&settled),
+            concat!(
+                "- ~~Release train~~\n",
+                "  - ~~Publish the release.~~\n",
+                "  - deletable?\n",
+            )
+        );
+    }
+
+    #[test]
     fn inert_blocked_group_moves_the_blocker_to_an_actionable_child() {
         let entries = parse(concat!(
             "- ⛔ ⟦blocked by editor-api⟧ Parent still needs editor verification.\n",

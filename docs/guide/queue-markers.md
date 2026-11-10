@@ -412,6 +412,12 @@ them. A row the binary cannot classify (a skipped row, a response with
 follow-up actions of unknown owner) is listed under **Needs agent review**;
 ask `status? deep` instead to have one agent turn look at those rows.
 
+To ask only whether one prompt item tree is deletable, add a child line
+`deletable?` (or put `[deletable?]` on the row). Preflight replaces it with
+one Status row, `deletable — Safe to delete…` or `not deletable — Keep this
+prompt item: … is still open.`, naming some other open row. The question
+itself is not a reason to keep the tree open, and it never becomes a prompt.
+
 `agent-doc queue tree-status FILE --line N [--json]` prints the same answer for
 the row on line N; editors read it through the `agent_doc_queue_tree_status_json`
 FFI export.

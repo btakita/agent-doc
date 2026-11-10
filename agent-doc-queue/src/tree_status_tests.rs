@@ -432,3 +432,106 @@ fn a_query_the_typing_gate_holds_waits() {
         only_token.content
     );
 }
+
+#[test]
+fn a_deletable_query_is_inert_and_does_not_keep_its_prompt_tree() {
+    let document = queue_doc("- ~~do [#alpha]~~\n  - ~~step~~\n  - deletable?\n- do [#beta]\n");
+    assert_eq!(prompts(&document), vec!["do [#beta]".to_string()]);
+    assert!(!crate::free_text_admission::free_text_prompt_is_backlog_task("deletable?"));
+    assert!(crate::free_text_admission::free_text_prompt_is_backlog_task("is this deletable?"));
+    let tree = queue_tree::queue_tree(&document, &QueueTreeOptions::default()).unwrap();
+    assert!(
+        tree.nodes.iter().all(|node| node.text != "deletable?"),
+        "{tree:#?}"
+    );
+    let alpha = tree
+        .nodes
+        .iter()
+        .position(|node| node.id.as_deref() == Some("alpha"))
+        .unwrap();
+    let closure = queue_tree::row_closure(&tree, alpha).unwrap();
+    assert!(
+        closure.subtree_closed() && closure.tree_closed(),
+        "the open query is not remaining work: {closure:?}"
+    );
+    let beta = tree
+        .nodes
+        .iter()
+        .find(|node| node.id.as_deref() == Some("beta"))
+        .unwrap();
+    assert!(
+        queue_tree::row_keeps_tree_alive(
+            &tree,
+            tree.nodes
+                .iter()
+                .position(|node| node.id.as_deref() == Some("beta"))
+                .unwrap()
+        ),
+        "a real open sibling still keeps its own tree: {beta:?}"
+    );
+}
+
+#[test]
+fn a_deletable_query_is_answered_and_names_other_open_work() {
+    let struck = queue_doc("- ~~Release train~~\n  - ~~Publish the release.~~\n  - deletable?\n");
+    let answered = answer_status_queries(&struck).unwrap().unwrap();
+    assert_eq!(answered.answered[0].counts, "deletable");
+    assert!(!answered.answered[0].queued_agent_turn);
+    assert_eq!(
+        answered.content,
+        queue_doc(concat!(
+            "- ~~Release train~~\n",
+            "  - ~~Publish the release.~~\n",
+            "  - **Status:** deletable — Safe to delete this prompt item and every row under it; all of them are struck. ▫️\n",
+        ))
+    );
+    assert_eq!(prompts(&answered.content), Vec::<String>::new());
+    assert!(answer_status_queries(&answered.content).unwrap().is_none());
+
+    let live = queue_doc("- ~~Release train~~\n  - do [#publish]\n  - deletable?\n");
+    let answered = answer_status_queries(&live).unwrap().unwrap();
+    assert_eq!(answered.answered[0].counts, "not deletable");
+    assert!(
+        answered.content.contains(
+            "  - **Status:** not deletable — Keep this prompt item: [#publish] is still open. ▫️\n"
+        ),
+        "{}",
+        answered.content
+    );
+    assert!(
+        !answered.content.contains("deletable?"),
+        "the query is replaced, not cited: {}",
+        answered.content
+    );
+    assert_eq!(
+        prompts(&answered.content),
+        vec!["do [#publish]".to_string()]
+    );
+
+    let token = queue_doc("- ~~do [#alpha]~~ [deletable?]\n");
+    let answered = answer_status_queries(&token).unwrap().unwrap().content;
+    assert!(
+        answered.contains("- ~~do [#alpha]~~\n  - **Status:** deletable —"),
+        "{answered}"
+    );
+    assert!(!answered.contains("[deletable?]"), "{answered}");
+
+    let whole = queue_doc("- ~~do [#alpha]~~\n- deletable?\n");
+    let answered = answer_status_queries(&whole).unwrap().unwrap();
+    assert_eq!(answered.answered[0].target, "queue main");
+    assert!(
+        answered.content.contains(
+            "- **Status:** deletable — Safe to delete this queue; every prompt item in it is struck. ▫️\n"
+        ),
+        "{}",
+        answered.content
+    );
+    let open = queue_doc("- do [#alpha]\n- deletable?\n");
+    let answered = answer_status_queries(&open).unwrap().unwrap().content;
+    assert!(
+        answered.contains(
+            "- **Status:** not deletable — Keep this queue: [#alpha] is still open. ▫️\n"
+        ),
+        "{answered}"
+    );
+}

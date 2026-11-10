@@ -5,7 +5,9 @@
 //! queue tree without a model turn:
 //!
 //! - a child line `- status?` under the node (or `- status? deep`);
-//! - a `[status?]` (or `[status? deep]`) token on the node's own line.
+//! - a `[status?]` (or `[status? deep]`) token on the node's own line;
+//! - a child line `- deletable?` (or a `[deletable?]` token) asking only
+//!   whether that prompt item tree is deletable.
 //!
 //! Preflight replaces the query with a binary-owned **Status** reply block at
 //! the node's first child position:
@@ -36,6 +38,8 @@ pub const STATUS_QUERY_DEEP: &str = "status? deep";
 pub const STATUS_QUERY_TOKEN: &str = "[status?]";
 /// The deep status query token on the node's own line.
 pub const STATUS_QUERY_DEEP_TOKEN: &str = "[status? deep]";
+/// The deletability query: is this prompt item tree deletable?
+pub const DELETABLE_QUERY: &str = "deletable?";
 
 /// Label of the Status reply row.
 pub const TREE_STATUS_ROW_LABEL: &str = "**Status:**";
@@ -55,6 +59,9 @@ pub enum StatusQueryKind {
     /// `status? deep`: answered by the binary, plus one agent turn for the
     /// rows it could not classify.
     Deep,
+    /// `deletable?`: answered by the binary with whether this prompt item
+    /// tree is safe to delete. Never a reason to keep that tree open.
+    Deletable,
 }
 
 /// `text` without the `### ` navigation heading a top-level queue row may
@@ -79,6 +86,7 @@ pub fn status_query_kind(item_content: &str) -> Option<StatusQueryKind> {
     match normalized(item_content).as_str() {
         STATUS_QUERY => Some(StatusQueryKind::Plain),
         STATUS_QUERY_DEEP => Some(StatusQueryKind::Deep),
+        DELETABLE_QUERY => Some(StatusQueryKind::Deletable),
         _ => None,
     }
 }
@@ -204,6 +212,24 @@ mod tests {
         );
         assert_eq!(status_query_kind("status? of the release"), None);
         assert_eq!(status_query_kind("what is the status?"), None);
+        assert_eq!(
+            status_query_kind("deletable?"),
+            Some(StatusQueryKind::Deletable)
+        );
+        assert_eq!(
+            status_query_kind(" Deletable? "),
+            Some(StatusQueryKind::Deletable)
+        );
+        assert_eq!(status_query_kind("is this deletable?"), None);
+        assert_eq!(
+            status_query_line_kind("    - deletable?"),
+            Some(StatusQueryKind::Deletable)
+        );
+        let (stripped, kind) = strip_status_query_token("do [#alpha] [deletable?]").unwrap();
+        assert_eq!(
+            (stripped.as_str(), kind),
+            ("do [#alpha]", StatusQueryKind::Deletable)
+        );
         assert_eq!(
             status_query_line_kind("    - status?"),
             Some(StatusQueryKind::Plain)

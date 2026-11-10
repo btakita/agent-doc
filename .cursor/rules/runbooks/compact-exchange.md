@@ -49,6 +49,7 @@ Steps to compact an agent-doc exchange component when it grows too large.
    - The queue head and any remaining queued prompts when present
    - Iceboxed work that still affects future routing or context
    - **Unanswered user input** — if the exchange contains uncommitted questions or instructions that haven't been responded to, note them as open items in the summary (don't silently drop them)
+   - Blocker reasons (`**Blocker**`, `- **Blocker:**`, and a prior `Blocked:` digest line) stay in the summary across a later compact and are not folded into the truncated topic list
    - Use frontmatter `prompt_presets` only as optional policy knobs for how much state to mention (for example "include the top 3 backlog items"), not as the source of substantive context
    - Discard verbose back-and-forth, code snippets already committed, exploratory dead-ends
 

@@ -135,6 +135,102 @@ pub fn pool_refill_quota_block<'a>(
         .map(|(claim, _)| claim)
 }
 
+/// The response a quota block writes. The blocker sentence is one line and
+/// leads both the exchange cell and the live row (`#blockerfront`). Stderr
+/// keeps [`quota_blocked_next_step`]; this does not replace that sentence.
+pub fn quota_blocked_row_response(
+    document: &str,
+    claim: &QueueClaim,
+) -> agent_doc_document::blocked_response::BlockedRowResponse {
+    let blocker = collapse_line(&quota_blocked_blocker_sentence(claim));
+    let partial = claim
+        .quota_block
+        .as_ref()
+        .and_then(WorkerQuotaBlock::partial_work);
+    let summary = match partial {
+        Some(work) => {
+            format!("Recorded as blocked by quota, not lost. Its partial work is on {work}.")
+        }
+        None => "Recorded as blocked by quota, not lost.".to_string(),
+    };
+    let harness = claim
+        .quota_block
+        .as_ref()
+        .map_or("that harness", WorkerQuotaBlock::harness_label);
+    let timestamp = agent_doc_document::blocked_response::format_utc_timestamp(
+        claim
+            .quota_block
+            .as_ref()
+            .map(|block| block.blocked_at_secs)
+            .unwrap_or(0),
+    );
+    agent_doc_document::blocked_response::BlockedRowResponse {
+        response_id: agent_doc_document::blocked_response::blocked_response_id(
+            &claim.owner,
+            claim.generation,
+            &blocker,
+        ),
+        item: claim.item_text.clone(),
+        blocker,
+        summary,
+        state: "Blocked by quota.".to_string(),
+        guidance: format!(
+            "Resume the same worker after the reset, or requeue the row onto another harness. Do not dispatch another worker on {harness} until the limit resets."
+        ),
+        next_actions: vec![
+            resume_blocked_attempt_action(document, claim),
+            requeue_blocked_attempt_action(document, claim),
+        ],
+        timestamp,
+    }
+}
+
+fn quota_blocked_blocker_sentence(claim: &QueueClaim) -> String {
+    let generation = claim.generation;
+    let item = claim.item_text.as_str();
+    let Some(block) = claim.quota_block.as_ref() else {
+        return format!(
+            "Attempt generation {generation} of {item:?} stopped on a harness usage limit."
+        );
+    };
+    let reset = block
+        .reset_hint
+        .as_deref()
+        .map(|hint| format!(", {hint}"))
+        .unwrap_or_default();
+    format!(
+        "Attempt generation {generation} of {item:?} stopped on the {} of {} (`{}`{reset}).",
+        block.limit,
+        block.harness_label(),
+        block.evidence,
+    )
+}
+
+fn resume_blocked_attempt_action(document: &str, claim: &QueueClaim) -> String {
+    let item = claim.item_text.as_str();
+    let generation = claim.generation;
+    match claim.worker.as_ref() {
+        Some(worker) => format!(
+            "After the reset, resume the same worker `{}` with `agent-doc queue start {document} --item {item:?} --generation {generation} --worker {}`.",
+            worker.worker_id, worker.worker_id,
+        ),
+        None => format!(
+            "After the reset, dispatch a worker and run `agent-doc queue start {document} --item {item:?} --generation {generation} --worker <worker-id>`."
+        ),
+    }
+}
+
+fn requeue_blocked_attempt_action(document: &str, claim: &QueueClaim) -> String {
+    format!(
+        "To move on now, run `agent-doc queue release {document} --item {:?} --generation {} --requeue` and dispatch the row on another harness.",
+        claim.item_text, claim.generation,
+    )
+}
+
+fn collapse_line(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
 /// The exact next step for a quota-blocked attempt, for every surface that
 /// reports it: name the cause, what to keep, and the two ways forward.
 pub fn quota_blocked_next_step(document: &str, claim: &QueueClaim) -> String {
@@ -518,6 +614,75 @@ mod tests {
             .start("do [#a]", "subagent:a", "worker-1", NOW + 2, TTL, Some(1))
             .expect("resume");
         assert!(pool_refill_quota_block(&ledger.claims, Some("claude")).is_none());
+    }
+
+    #[test]
+    fn the_blocked_response_leads_with_the_reason_and_is_not_a_queue_prompt() {
+        let ledger = blocked_ledger(Some("claude"));
+        let response = quota_blocked_row_response("tasks/a.md", &ledger.claims[0]);
+        assert!(!response.blocker.contains('\n'));
+        assert!(
+            response
+                .blocker
+                .contains("You've hit your session limit · resets 9pm")
+        );
+        assert!(
+            response
+                .blocker
+                .starts_with("Attempt generation 1 of \"do [#a]\"")
+        );
+        assert!(response.response_id.starts_with("[#r-"));
+        assert!(
+            response
+                .response_id
+                .trim_start_matches("[#r-")
+                .trim_end_matches(']')
+                .len()
+                >= 12
+        );
+        let doc = concat!(
+            "<!-- agent:exchange -->\n",
+            "<!-- agent:boundary:keep -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "- ⛔ [#subagent:a#1] do [#a]\n",
+            "<!-- /agent:queue -->\n",
+        )
+        .to_string();
+        let updated =
+            agent_doc_document::blocked_response::project_blocked_row_response(&doc, &response)
+                .unwrap();
+        let exchange_blocker = updated.find("**Blocker**").unwrap();
+        let exchange_summary = updated.find("**Summary**").unwrap();
+        assert!(exchange_blocker < exchange_summary);
+        let queue = agent_doc_element::element::parse(&updated)
+            .unwrap()
+            .into_iter()
+            .find(|component| component.name == "queue")
+            .unwrap();
+        let entries = crate::document_queue::parse(queue.content(&updated)).unwrap();
+        assert!(
+            entries.iter().any(|entry| matches!(
+                entry,
+                crate::document_queue::QueueEntry::Freeform(text) if text.contains("**Blocker:**")
+            )),
+            "blocker row was not reserved metadata: {entries:?}"
+        );
+        assert!(
+            !entries.iter().any(|entry| matches!(
+                entry,
+                crate::document_queue::QueueEntry::Prompt(prompt) if prompt.text.contains("**Blocker:**")
+            )),
+            "blocker row was admitted as queue work: {entries:?}"
+        );
+        let row_blocker = updated.find("**Blocker:**").unwrap();
+        let row_summary = updated.find("**Summary:**").unwrap();
+        assert!(row_blocker < row_summary);
+        let heads = crate::document_queue::prompts(&entries);
+        assert!(
+            heads.iter().any(|prompt| prompt.text.contains("do [#a]")),
+            "the blocked row stays a live head: {heads:?}"
+        );
     }
 
     #[test]

@@ -9,15 +9,18 @@
 //! A hand-back that labels its sections — `**Summary**`, `## Verification`,
 //! `Action items:` and the aliases in [`LABELS`] — is parsed into
 //! [`WorkerHandback`] and rendered in the canonical order
-//! Summary, What changed, Verification, Action items, Open items, Notes,
-//! Next actions. Rendering
+//! Blocker, Summary, What changed, Verification, Action items, Open items,
+//! Notes, Next actions. Rendering
 //! never drops text: every body line is kept byte for byte (outer blank lines
 //! of a section are trimmed), an alias label survives as a sub-label inside
 //! its canonical section, and text before the first label leads the Summary.
 //! A hand-back that does not structure itself, meaning fewer than two labels
-//! and no Action items or Open items label, is returned unchanged, so an
-//! unstructured response is still recorded verbatim. A plain `Label:` line
-//! counts only for a canonical heading; `Tests:` is ordinary prose.
+//! and no Blocker, Action items, or Open items label, is returned unchanged,
+//! so an unstructured response is still recorded verbatim. A plain `Label:`
+//! line counts only for a canonical heading; `Tests:` is ordinary prose.
+//! `#blockerfront`: a Blocker section renders first even when the worker
+//! wrote it last, and a Blocker label alone is structure so the reason is
+//! never left buried in verbatim prose.
 //!
 //! `#handbackopenitemstriage`: the section a bullet sits in is the only signal
 //! of what it asks for, because guessing from its prose is not reliable.
@@ -31,6 +34,8 @@
 /// One canonical section of the response structure, in render order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum SectionKind {
+    /// Why the work stopped. Rendered first so a block is not buried (`#blockerfront`).
+    Blocker,
     Summary,
     WhatChanged,
     Verification,
@@ -44,7 +49,8 @@ pub enum SectionKind {
 }
 
 impl SectionKind {
-    pub const ALL: [SectionKind; 7] = [
+    pub const ALL: [SectionKind; 8] = [
+        SectionKind::Blocker,
         SectionKind::Summary,
         SectionKind::WhatChanged,
         SectionKind::Verification,
@@ -57,6 +63,7 @@ impl SectionKind {
     /// The rendered section heading.
     pub fn heading(self) -> &'static str {
         match self {
+            SectionKind::Blocker => "Blocker",
             SectionKind::Summary => "Summary",
             SectionKind::WhatChanged => "What changed",
             SectionKind::Verification => "Verification",
@@ -72,6 +79,8 @@ impl SectionKind {
 /// belongs to. A label that is not the canonical heading survives as a
 /// sub-label inside its section.
 pub const LABELS: &[(&str, SectionKind)] = &[
+    ("blocker", SectionKind::Blocker),
+    ("blockers", SectionKind::Blocker),
     ("summary", SectionKind::Summary),
     ("what changed", SectionKind::WhatChanged),
     ("changes", SectionKind::WhatChanged),
@@ -170,12 +179,12 @@ impl WorkerHandback {
             }
         }
         // One stray label in prose (`Tests: 12 passed.`) is not a structure.
-        // An Action items or Open items label alone still is: those sections
-        // must not be buried.
+        // A Blocker, Action items, or Open items label alone still is: those
+        // sections must not be buried.
         let has_item_section = sections.iter().any(|section| {
             matches!(
                 section.kind,
-                SectionKind::ActionItems | SectionKind::OpenItems
+                SectionKind::Blocker | SectionKind::ActionItems | SectionKind::OpenItems
             )
         });
         if sections.len() < 2 && !has_item_section {
@@ -615,6 +624,39 @@ mod tests {
             assert_eq!(structure_response(text), text, "{text:?}");
             assert!(open_items(text).is_empty(), "{text:?}");
         }
+    }
+
+    /// `#blockerfront`: the blocker is the first section of the response
+    /// structure even when the hand-back wrote Summary above it.
+    #[test]
+    fn a_blocker_section_renders_before_summary() {
+        let text = concat!(
+            "**Summary**\n\nThe row is blocked.\n\n",
+            "**Blocker**\n\nThe harness usage limit stopped the worker.\n",
+        );
+        let rendered = structure_response(text);
+        let blocker = rendered.find("**Blocker**").expect("blocker section");
+        let summary = rendered.find("**Summary**").expect("summary section");
+        assert!(blocker < summary, "{rendered}");
+        assert!(rendered.contains("The harness usage limit stopped the worker."));
+        assert_no_text_lost(text, &rendered);
+    }
+
+    /// A lone Blocker is structure. Preamble becomes Summary after it, so the
+    /// reason stays in front instead of being recorded as verbatim prose.
+    #[test]
+    fn a_lone_blocker_keeps_the_preamble_as_summary_after_it() {
+        let text = "Context before the label.\n\n**Blocker**\n\nquota exhausted\n";
+        let rendered = structure_response(text);
+        assert!(
+            rendered.starts_with("**Blocker**\n\nquota exhausted"),
+            "{rendered}"
+        );
+        let summary = rendered.find("**Summary**").expect("summary");
+        assert!(
+            rendered[summary..].contains("Context before the label."),
+            "{rendered}"
+        );
     }
 
     #[test]

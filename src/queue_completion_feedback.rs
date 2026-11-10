@@ -1237,6 +1237,39 @@ fn publish_document_update(file: &Path, current: &str, updated: &str) -> Result<
     }
 }
 
+/// Write the blocker-first response for a quota-blocked attempt
+/// (`#blockerfront`). This is not a completion report: the attempt stays
+/// `QuotaBlocked`, and the raw harness notice is not the exchange body.
+pub(crate) fn publish_quota_blocked_response(file: &Path, claim: &QueueClaim) -> Result<()> {
+    let _lock = acquire_completion_lock(
+        file,
+        "record a quota-blocked response",
+        COMPLETION_FEEDBACK_LOCK_WAIT,
+    )?;
+    let current =
+        agent_doc_document_realtime_io::try_resolve_current_document_content(file, SOURCE)?;
+    let response = agent_doc_queue::worker_quota::quota_blocked_row_response(
+        &file.display().to_string(),
+        claim,
+    );
+    let updated =
+        agent_doc_document::blocked_response::project_blocked_row_response(&current, &response)?;
+    if updated == current {
+        return Ok(());
+    }
+    let scope = changed_component_scope(&current, &updated)
+        .context("quota-blocked response must change only agent:exchange and agent:queue")?;
+    if scope
+        .to_pairs()
+        .iter()
+        .any(|(name, _)| name != "exchange" && name != "queue")
+    {
+        bail!("quota-blocked response escaped agent:exchange and agent:queue");
+    }
+    publish_exchange_update(file, &current, &updated, scope)?;
+    Ok(())
+}
+
 fn publish_exchange_update(
     file: &Path,
     current: &str,

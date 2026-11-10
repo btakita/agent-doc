@@ -156,8 +156,26 @@ fn a_limit_notice_hand_back_blocks_the_attempt_instead_of_reporting_it() {
         "row must not read running: {rendered}"
     );
     assert!(
-        !rendered.contains("You've hit your session limit"),
-        "a limit notice is not worker output for the exchange: {rendered}"
+        !rendered.contains("I finished the detector"),
+        "the raw hand-back is not the exchange body: {rendered}"
+    );
+    let exchange_blocker = rendered
+        .find("**Blocker**")
+        .expect("exchange blocker section");
+    let exchange_summary = rendered.find("**Summary**").expect("exchange summary");
+    assert!(
+        exchange_blocker < exchange_summary,
+        "blocker must lead the exchange response: {rendered}"
+    );
+    let row_blocker = rendered.find("**Blocker:**").expect("queue blocker row");
+    let row_summary = rendered.find("**Summary:**").expect("queue summary row");
+    assert!(
+        row_blocker < row_summary,
+        "blocker must lead the row response: {rendered}"
+    );
+    assert!(
+        rendered.contains("You've hit your session limit"),
+        "the blocker reason must name the limit evidence: {rendered}"
     );
 
     let claims = claims(dir.path(), &doc);

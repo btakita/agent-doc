@@ -1177,15 +1177,19 @@ fn finish_structured_inline_response(
 ///
 /// ```text
 /// - **Response [#r-…]**
+///   - **Blocker:** …
 ///   - **Timestamp:** …
 ///   - **Summary:** …
 /// ```
 ///
 /// The timestamp is deliberately not response identity. Only one non-empty,
-/// direct `Summary` child proves content. The binary's later structured
-/// metadata (`State`, `Guidance`, integration coordinates, decision fields,
-/// choices, and next actions) may follow that summary without changing its
-/// identity. Identical copies in several prompt trees collapse to one value;
+/// direct `Summary` child proves content. A `Blocker` child may lead the
+/// structure (`#blockerfront`); it is the reason the row stopped, not a second
+/// summary and not a reason to reject the projection. The binary's later
+/// structured metadata (`State`, `Guidance`, integration coordinates, decision
+/// fields, choices, and next actions) may follow that summary without changing
+/// its identity. Identical copies in several prompt trees collapse to one
+/// value;
 /// conflicting summaries remain multiple values and are rejected by the
 /// caller's exact-one compatibility gate.
 fn structured_inline_response_summaries(content: &str, response_id: &str) -> BTreeSet<String> {
@@ -1240,7 +1244,11 @@ fn structured_inline_response_summaries(content: &str, response_id: &str) -> BTr
             } else if let Some(item) = item {
                 if indent == active.indent + 2 {
                     active.nested_metadata_allowed = false;
-                    if let Some(summary) = item.strip_prefix("**Summary:**") {
+                    if let Some(blocker) = item.strip_prefix("**Blocker:**") {
+                        if blocker.trim().is_empty() {
+                            active.invalid = true;
+                        }
+                    } else if let Some(summary) = item.strip_prefix("**Summary:**") {
                         let summary = summary.trim();
                         if !active.timestamp_seen || summary.is_empty() || active.summary.is_some()
                         {
@@ -2274,6 +2282,15 @@ mod tests {
                 "malformed projection was accepted:\n{content}"
             );
         }
+
+        let leading_blocker = format!(
+            "- **Response {RESPONSE_ID}**\n  - **Blocker:** session limit stopped the worker\n  - **Timestamp:** now\n  - **Summary:** kept\n"
+        );
+        assert_eq!(
+            inline_response_summaries(&leading_blocker, RESPONSE_ID),
+            ["kept".to_string()],
+            "a leading blocker must not invalidate the summary"
+        );
 
         let legacy = format!("- **Response {RESPONSE_ID}:** legacy summary\n");
         assert_eq!(

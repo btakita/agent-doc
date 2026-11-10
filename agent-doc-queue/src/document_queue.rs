@@ -4304,6 +4304,20 @@ pub fn entry_is_group_parent(entries: &[QueueEntry], idx: usize) -> bool {
             }
             return false;
         }
+        // `#blockerfront`: a row that carries a `**Blocker:**` response stays
+        // claimable after the ⛔ marker clears (resume, requeue). On every
+        // other row, generated response metadata is still nested structure, so
+        // an operator-gated origin stays inert. A real prompt under the
+        // blocker response still makes that row a group.
+        if let Some(indent) = response_metadata_row_indent(later) {
+            if indent > own_indent {
+                if subtree_has_blocker_response(entries, idx) {
+                    continue;
+                }
+                return true;
+            }
+            return false;
+        }
         match entry_indent(later) {
             // Deeper than us before we returned to our own depth: we are a parent.
             Some(indent) if indent > own_indent => return true,
@@ -4387,6 +4401,31 @@ pub fn entry_has_nested_parked_comment(entries: &[QueueEntry], idx: usize) -> bo
                 }
             }
             _ => {}
+        }
+    }
+    false
+}
+
+/// Whether `idx` is a live prompt whose subtree records a blocker reason.
+///
+/// The reason stays under the row after resume and requeue. It is evidence,
+/// not a nested work tree. A completed row and a choice-only response do not
+/// qualify: those keep the ordinary group rule.
+fn subtree_has_blocker_response(entries: &[QueueEntry], idx: usize) -> bool {
+    let Some(QueueEntry::Prompt(prompt)) = entries.get(idx) else {
+        return false;
+    };
+    let own_indent = prompt.indent;
+    for later in entries.iter().skip(idx + 1) {
+        if let Some(indent) = entry_indent(later)
+            && indent <= own_indent
+        {
+            break;
+        }
+        if let QueueEntry::Freeform(raw) = later
+            && raw.contains("**Blocker:**")
+        {
+            return true;
         }
     }
     false
@@ -12737,6 +12776,95 @@ mod tests {
         assert_eq!(
             packet.selection.unwrap().kind,
             agent_doc_prompt_context::lineage::PromptSelectionKind::Action
+        );
+    }
+
+    /// `#blockerfront`: the blocker leads the row, and the response tree does
+    /// not turn that row into a group label. A real prompt under the same
+    /// metadata still does.
+    #[test]
+    fn blocker_response_keeps_the_row_a_live_head() {
+        let body = concat!(
+            "- ⛔ [#subagent:sdk#1] finish sdk\n",
+            "  - **Response [#r-0123456789ab]**\n",
+            "    - **Blocker:** Attempt stopped on the session limit of claude.\n",
+            "    - **Timestamp:** 2026-11-10T20:53:49.000Z\n",
+            "    - **Summary:** Recorded as blocked by quota, not lost.\n",
+            "    - **State:** Blocked by quota.\n",
+            "    - **Guidance:** Resume the same worker.\n",
+            "    - **Next actions:**\n",
+            "      - **Action:** Resume with queue start.\n",
+            "- finish dev\n",
+        );
+        let entries = parse(body).unwrap();
+        assert!(
+            !entry_is_group_parent(&entries, 0),
+            "response metadata must not make the blocked row a group: {entries:#?}"
+        );
+        assert_eq!(
+            prompts(&entries)
+                .iter()
+                .map(|prompt| prompt.text.as_str())
+                .collect::<Vec<_>>(),
+            vec!["⛔ [#subagent:sdk#1] finish sdk", "finish dev",]
+        );
+
+        let resumed = concat!(
+            "- 🚧 [#subagent:sdk#1] finish sdk\n",
+            "  - **Response [#r-0123456789ab]**\n",
+            "    - **Blocker:** Attempt stopped on the session limit.\n",
+            "    - **Next actions:**\n",
+            "      - **Action:** Resume with queue start.\n",
+            "- finish dev\n",
+        );
+        let resumed_entries = parse(resumed).unwrap();
+        assert!(
+            !entry_is_group_parent(&resumed_entries, 0),
+            "the blocker response keeps the row claimable after ⛔ clears"
+        );
+        assert_eq!(
+            prompts(&resumed_entries)
+                .iter()
+                .map(|prompt| prompt.text.as_str())
+                .collect::<Vec<_>>(),
+            vec!["🚧 [#subagent:sdk#1] finish sdk", "finish dev"]
+        );
+
+        let with_child = concat!(
+            "- finish sdk\n",
+            "  - **Response [#r-0123456789ab]**\n",
+            "    - **Blocker:** Attempt stopped on the session limit.\n",
+            "    - **Next actions:**\n",
+            "      - **Action:** Resume.\n",
+            "  - operator follow-up\n",
+        );
+        let nested = parse(with_child).unwrap();
+        assert!(
+            entry_is_group_parent(&nested, 0),
+            "a real prompt under the blocker response is still nested work"
+        );
+        assert_eq!(
+            prompts(&nested)
+                .iter()
+                .map(|prompt| prompt.text.as_str())
+                .collect::<Vec<_>>(),
+            vec!["operator follow-up"]
+        );
+
+        let choices = concat!(
+            "- 🚧 [#subagent:publisher#1] publish release\n",
+            "  - **Response [#r-0123456789ab]:** Which target?\n",
+            "    - **Choices:**\n",
+            "      - **staging**: Publish to staging.\n",
+        );
+        let gated = parse(choices).unwrap();
+        assert!(
+            entry_is_group_parent(&gated, 0),
+            "choice metadata still nests a row that is not blocked"
+        );
+        assert!(
+            prompts(&gated).is_empty(),
+            "an operator choice origin stays inert: {gated:#?}"
         );
     }
 

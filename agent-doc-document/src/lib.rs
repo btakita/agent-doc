@@ -5,6 +5,7 @@
 
 pub mod admission_divergence;
 pub mod authority_hashes;
+pub mod blocked_response;
 pub mod claim_scaffold;
 pub mod commit_integrity;
 pub mod commit_normalization;

@@ -7014,6 +7014,10 @@ fn print_worker_quota_blocked(
         &claim.item_text,
         false,
     )?;
+    // `#blockerfront`: the ⛔ row is not the response. Write the blocker first
+    // into the exchange and under the row after the marker is on the document
+    // the projection just published.
+    queue_completion_feedback::publish_quota_blocked_response(file, claim)?;
     eprintln!(
         "[queue] worker {} ({}) {}",
         claim.owner,

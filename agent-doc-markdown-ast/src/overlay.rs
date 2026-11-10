@@ -574,6 +574,7 @@ fn response_state_metadata_child_end(
     item_indent: usize,
 ) -> Option<usize> {
     [
+        "**Blocker:** ",
         "**State:** ",
         "**Guidance:** ",
         "**Worktree:** ",
@@ -760,7 +761,10 @@ fn response_next_action_decision_child_end(
 /// Labels the binary renders only as response-structure rows beneath a
 /// `**Response [#r-…]**` parent (`#responserowqueuehead`). Labels that take a
 /// value end with a space; the container labels stand alone.
-const GENERATED_RESPONSE_STRUCTURE_VALUE_LABELS: [&str; 5] = [
+const GENERATED_RESPONSE_STRUCTURE_VALUE_LABELS: [&str; 6] = [
+    // `#blockerfront`: the blocker reason leads the response structure and is
+    // never itself a queue prompt, with or without its Response parent.
+    "**Blocker:** ",
     "**Timestamp:** ",
     "**Summary:** ",
     "**State:** ",
@@ -772,8 +776,9 @@ const GENERATED_RESPONSE_STRUCTURE_CONTAINER_LABELS: [&str; 2] =
     ["**Choices:**", "**Next actions:**"];
 
 /// Whether a list item's content is a generated response-structure row
-/// (`**Summary:** …`, `**State:** …`, `**Guidance:** …`, `**Timestamp:** …`,
-/// `**Choices:**`, `**Next actions:**`, `**Disregard:** …`), whatever its
+/// (`**Blocker:** …`, `**Summary:** …`, `**State:** …`, `**Guidance:** …`,
+/// `**Timestamp:** …`, `**Choices:**`, `**Next actions:**`, `**Disregard:** …`),
+/// whatever its
 /// parent is.
 ///
 /// `#responserowqueuehead`: on 2026-11-05 a closeout's response tree lost its

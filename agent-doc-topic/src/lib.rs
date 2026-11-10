@@ -83,10 +83,14 @@ pub fn parse_topic_sections_with_tail(content: &str) -> TopicSections {
 
 const COMPACT_SUMMARY_ITEM_LIMIT: usize = 3;
 const COMPACT_SUMMARY_TEXT_LIMIT: usize = 120;
+/// A blocker reason stays whole. The topic list's 120-character cap is what
+/// used to drop it (`#blockerfront`).
+const BLOCKER_REASON_LIMIT: usize = 480;
 
 pub fn summarize_compacted_exchange(exchange: &str) -> Vec<String> {
+    let blockers = collect_blocked_reasons(exchange);
     let parsed = parse_topic_sections_with_tail(exchange);
-    let mut summary = Vec::new();
+    let mut rest = Vec::new();
 
     let topics: Vec<String> = parsed
         .sections
@@ -103,25 +107,124 @@ pub fn summarize_compacted_exchange(exchange: &str) -> Vec<String> {
         if topics.len() > limit {
             item.push_str(&format!("; {} more", topics.len() - limit));
         }
-        summary.push(item);
+        rest.push(item);
     }
 
     if let Some(preamble) = summarize_prior_preamble_context(&parsed.preamble) {
-        summary.push(format!("Prior summary/context: {preamble}"));
+        rest.push(format!("Prior summary/context: {preamble}"));
     }
 
     let trailing = parsed.trailing.trim();
     if !trailing.is_empty() {
-        summary.push(format!(
+        rest.push(format!(
             "Trailing prompt/context: {}",
             truncate_with_ellipsis(&collapse_whitespace(trailing), COMPACT_SUMMARY_TEXT_LIMIT)
         ));
     }
 
-    if summary.is_empty() {
-        summarize_freeform_component(exchange.trim())
-    } else {
-        summary
+    if rest.is_empty() {
+        if blockers.is_empty() {
+            return summarize_freeform_component(exchange.trim());
+        }
+        return blockers;
+    }
+    let mut summary = blockers;
+    for item in rest {
+        if !summary.iter().any(|seen| seen == &item) {
+            summary.push(item);
+        }
+    }
+    summary
+}
+
+/// Blocker reasons from a response section, a queue row, or an earlier compact
+/// digest. Each one is kept in front of the topic list and is not folded into
+/// the 120-character prior-summary line.
+fn collect_blocked_reasons(exchange: &str) -> Vec<String> {
+    let lines: Vec<&str> = exchange.lines().collect();
+    let mut reasons = Vec::new();
+    let mut fence = false;
+    let mut index = 0;
+    while index < lines.len() {
+        let trimmed = lines[index].trim();
+        if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
+            fence = !fence;
+            index += 1;
+            continue;
+        }
+        if fence {
+            index += 1;
+            continue;
+        }
+        if is_blocker_section_heading(trimmed) {
+            index += 1;
+            let mut body = Vec::new();
+            while index < lines.len() {
+                let next = lines[index].trim();
+                if next.starts_with("```")
+                    || next.starts_with("~~~")
+                    || next.starts_with('#')
+                    || is_bold_section_heading(next)
+                {
+                    break;
+                }
+                body.push(next);
+                index += 1;
+            }
+            push_blocked_reason(&mut reasons, &body.join(" "));
+            continue;
+        }
+        if let Some(reason) = inline_blocker_reason(trimmed) {
+            push_blocked_reason(&mut reasons, reason);
+        }
+        index += 1;
+    }
+    reasons
+        .into_iter()
+        .map(|reason| format!("Blocked: {reason}"))
+        .collect()
+}
+
+fn is_blocker_section_heading(trimmed: &str) -> bool {
+    matches!(trimmed, "**Blocker**" | "**Blockers**")
+}
+
+fn is_bold_section_heading(trimmed: &str) -> bool {
+    let Some(inner) = trimmed.strip_prefix("**") else {
+        return false;
+    };
+    let Some(label) = inner.strip_suffix("**") else {
+        return false;
+    };
+    let label = label.trim().trim_end_matches(':').trim();
+    !label.is_empty() && !label.contains("**")
+}
+
+fn inline_blocker_reason(trimmed: &str) -> Option<&str> {
+    let rest = trimmed
+        .strip_prefix("- ")
+        .or_else(|| trimmed.strip_prefix("* "))
+        .unwrap_or(trimmed)
+        .trim();
+    let reason = rest
+        .strip_prefix("**Blocker:**")
+        .or_else(|| rest.strip_prefix("**Blockers:**"))
+        .or_else(|| rest.strip_prefix("Blocked:"))?;
+    let reason = reason.trim();
+    (!reason.is_empty()).then_some(reason)
+}
+
+fn push_blocked_reason(reasons: &mut Vec<String>, raw: &str) {
+    let mut reason = collapse_whitespace(raw);
+    if let Some(rest) = reason.strip_prefix("Blocked:") {
+        reason = collapse_whitespace(rest);
+    }
+    if reason.is_empty() {
+        return;
+    }
+    let reason = truncate_with_ellipsis(&reason, BLOCKER_REASON_LIMIT);
+    if !reasons.iter().any(|seen| seen == &reason) {
+        reasons.push(reason);
     }
 }
 
@@ -184,6 +287,10 @@ fn summarize_prior_preamble_context(preamble: &str) -> Option<String> {
             || trimmed.starts_with("*Compacted. Content archived to `")
             || trimmed.starts_with("- Prior summary/context:")
             || trimmed.starts_with("- Trailing prompt/context:")
+            || trimmed
+                .trim_start_matches("- ")
+                .trim()
+                .starts_with("Blocked:")
             || is_partial_compact_archive_pointer(trimmed)
             || is_markdown_ordered_item(trimmed)
             || (is_session_summary && trimmed.starts_with("- "))
@@ -227,6 +334,9 @@ fn summarize_prior_compact_summary(preamble: &str) -> Option<String> {
         let Some(item) = trimmed.strip_prefix("- ").map(str::trim) else {
             continue;
         };
+        if item.starts_with("Blocked:") {
+            continue;
+        }
         if item.starts_with("Prior summary/context:")
             || item.starts_with("Trailing prompt/context:")
         {
@@ -425,6 +535,53 @@ mod tests {
                 "Archived 1 response topic(s): last topic",
                 "Trailing prompt/context: Continue with the remaining implementation."
             ]
+        );
+    }
+
+    /// `#blockerfront`: four topics would otherwise fill the summary, and a
+    /// later compact would fold the first digest into 120 characters. The
+    /// blocker reason stays whole and first both times.
+    #[test]
+    fn compact_summary_keeps_a_blocker_reason_in_front_and_across_recompact() {
+        let reason = concat!(
+            "Attempt generation 1 of \"finish sdk\" stopped on the session limit of Claude Code ",
+            "(`You've hit your session limit · resets 7:30pm`) before the cross-platform ",
+            "source plus binary release workflow received a response structure."
+        );
+        assert!(reason.chars().count() > COMPACT_SUMMARY_TEXT_LIMIT);
+        let exchange = format!(
+            concat!(
+                "### Re: topic one\nbody\n",
+                "### Re: topic two\nbody\n",
+                "### Re: topic three\nbody\n",
+                "### Re: topic four\n\n",
+                "**Blocker**\n\n{reason}\n\n",
+                "**Summary**\n\nRecorded as blocked by quota, not lost.\n",
+            ),
+            reason = reason
+        );
+        let summary = summarize_compacted_exchange(&exchange);
+        assert!(
+            summary[0].contains(reason),
+            "blocker was truncated or dropped: {summary:?}"
+        );
+        assert!(
+            summary
+                .iter()
+                .any(|item| item.contains("Archived 4 response topic"))
+        );
+        let digest = format!(
+            "### Session Summary\n\n*Compacted. Content archived to `.agent-doc/archives/a.md`*\n\nCompacted content:\n{}\n",
+            summary
+                .iter()
+                .map(|item| format!("- {item}"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
+        let again = summarize_compacted_exchange(&digest);
+        assert!(
+            again[0].contains(reason),
+            "recompact dropped the blocker reason: {again:?}"
         );
     }
 

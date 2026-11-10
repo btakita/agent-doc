@@ -9,6 +9,7 @@ pub mod decision_registry_graph;
 pub mod derivation_store;
 pub mod gc;
 pub mod layout;
+pub mod moot_decision;
 pub mod premise_rederive;
 pub mod sweep;
 pub mod tree_status_query;

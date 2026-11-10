@@ -4152,6 +4152,20 @@ fn run_command_inner_within_pass(
         if let Err(err) = ledger {
             eprintln!("[write] answer ledger: not applied this closeout: {err:#}");
         }
+        // `#mootdecision`: chat turns may never run preflight. Drop a
+        // reported-closeout decision that no longer needs the operator before
+        // the id-less-todo invariant reads the published document. Best-effort.
+        let moot = if options.force_disk {
+            agent_doc_preflight_io::moot_decision::run_moot_decision_maintenance_force_disk(
+                file,
+                &agent_doc_preflight_runtime_io::PREFLIGHT_MAINTENANCE_WRITE_EFFECTS,
+            )
+        } else {
+            agent_doc_preflight_io::moot_decision::run_moot_decision_maintenance(file)
+        };
+        if let Err(err) = moot {
+            eprintln!("[write] moot decision: not applied this closeout: {err:#}");
+        }
         let before_todo = current_content
             .as_deref()
             .or(baseline.as_deref())

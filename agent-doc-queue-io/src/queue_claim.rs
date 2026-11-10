@@ -16,6 +16,7 @@
 //! Read-modify-write runs inside `BEGIN IMMEDIATE`, so two subagents claiming
 //! different heads at once cannot lose either claim.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -2222,6 +2223,43 @@ fn lineage_for_reported(
         .any(|claim| claim.state == agent_doc_queue::queue_claim::QueueClaimState::Reported)
         .then(|| load_lineage_for_closeout(file))
         .flatten()
+}
+
+/// Reported-closeout requests that still need an operator answer (`#mootdecision`).
+///
+/// A request stays live only while some stored `Reported` claim's closeout
+/// [`requires_operator`](agent_doc_queue::reported_closeout::ReportedClaimCloseout::requires_operator).
+/// An unreadable claim ledger, or an unreadable lineage ledger while any
+/// attempt is still `Reported`, is an error: the caller prunes nothing.
+/// An empty claim set means every reported-closeout request in the document
+/// is moot.
+pub fn live_reported_closeout_operator_request_ids(file: &Path) -> Result<HashSet<String>> {
+    let ledger = load_ledger(file)?;
+    let reported: Vec<&QueueClaim> = ledger
+        .claims
+        .iter()
+        .filter(|claim| claim.state == agent_doc_queue::queue_claim::QueueClaimState::Reported)
+        .collect();
+    if reported.is_empty() {
+        return Ok(HashSet::new());
+    }
+    let lineage = crate::queue_lineage::load(file)
+        .context("queue lineage unreadable; moot reported-closeout decisions were not pruned")?;
+    let mut live = HashSet::new();
+    for claim in reported {
+        let evidence = crate::queue_lineage::reported_claim_evidence_in(&lineage, claim);
+        let Some(closeout) = agent_doc_queue::reported_closeout::reported_claim_closeout(
+            &file.display().to_string(),
+            claim,
+            &evidence,
+        ) else {
+            continue;
+        };
+        if closeout.requires_operator() {
+            live.insert(closeout.operator_request_id.to_ascii_lowercase());
+        }
+    }
+    Ok(live)
 }
 
 /// Every live `Reported` attempt with its closeout, in ledger order.

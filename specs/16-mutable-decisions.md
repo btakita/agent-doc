@@ -131,6 +131,20 @@ binds the remaining bare citations and reports every still-open decision
 that cites a closed upstream as moot. A decision that does not cite it
 stays. Work items are not decisions and are not mooted.
 
+**Moot reported closeout** (`#mootdecision`). A
+`subagent-operator-request-reportedcloseout-` decision is the operator
+question on a `Reported` attempt. It stays in the document while that
+attempt's closeout still `requires_operator`. Once no stored `Reported`
+claim still asks the operator for that id, preflight and strict closeout
+remove the open todo, the queue-row request annotation, the `**Request**`
+row, and a generated waiting item that holds no operator text, and strike
+the packet opener so a later closeout cannot record the question again. A
+decision that still needs an answer stays. Any other operator request, a
+local answer (`[#id]: …`), a checked todo, operator text under a waiting
+item, and the underlying work item stay. An unreadable claim ledger, or an
+unreadable lineage ledger while an attempt is still `Reported`, removes
+nothing.
+
 **Impact walk** (`DecisionGraph::impact`). Dependents of a decision are its
 copies, items tied to it or its copies by `applies_to` in either direction,
 and decisions or items that `depends_on` it, transitively (each row names the

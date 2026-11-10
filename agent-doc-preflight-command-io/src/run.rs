@@ -1322,6 +1322,13 @@ fn run_with_options_to_writer_in_pass(
             Ok(report) => answer_ledger_report = report,
             Err(err) => eprintln!("[preflight] answer ledger: not applied this pass: {err:#}"),
         }
+        // `#mootdecision`: a reported-closeout request whose attempt no longer
+        // needs the operator is removed before queue maintenance rebuilds the
+        // waiting tree from the remaining open todos. Best-effort.
+        if let Err(err) = agent_doc_preflight_io::moot_decision::run_moot_decision_maintenance(file)
+        {
+            eprintln!("[preflight] moot decision: not applied this pass: {err:#}");
+        }
         match run_queue_maintenance_with_coin_gate_and_snapshot(
             file,
             diff_result.as_deref(),

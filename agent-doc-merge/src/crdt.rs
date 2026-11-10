@@ -6538,7 +6538,7 @@ Second answer line three.
             "- ~~do [#one]~~\n  - **Response [#r-4d8f118a0315]**\n",
         );
         let theirs = doc(plain, "- ~~do [#one]~~\n");
-        let base_state = CrdtDoc::from_text(&base).encode_state();
+        let base_state = CrdtDoc::from_text(base).encode_state();
 
         let merged = merge_by_component(Some(&base_state), &ours, &theirs).unwrap();
 

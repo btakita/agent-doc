@@ -5872,6 +5872,10 @@ fn project_waiting_items_from_todos(
         .as_ref()
         .map(|location| choice_response_waiting_segments(projected_document, location))
         .unwrap_or_default();
+    let waiting_segments = location
+        .as_ref()
+        .map(|location| waiting_child_segments(projected_document, location))
+        .unwrap_or_default();
     let existing_has_reply = |id: &str| {
         existing
             .get(id)
@@ -5897,15 +5901,25 @@ fn project_waiting_items_from_todos(
         // `#waitingoperatortext`: keep an existing child that holds operator
         // text, and never downgrade an existing packet to the generic stub
         // when no fresher operator packet is available to regenerate from.
-        // `#dupchoicestruct`: a segment that already owns the choice response
-        // is that item, including when a generic sibling would otherwise be
-        // kept or rebuilt. The sibling's action restates the first choice.
+        // `#nosibling`: a choice segment is the only response structure for
+        // that item. Do not render a generic stub beside it, and do not keep
+        // a stub that is already nested in the segment or sitting next to it.
+        // An operator line inside the choice segment stays.
         let id_key = todo.id.to_ascii_lowercase();
-        if !existing_has_reply(&todo.id)
-            && let Some((source, marked)) = choice_responses.get(&id_key)
-        {
+        if let Some((source, marked)) = choice_responses.get(&id_key) {
             kept_raws.insert(source.clone());
-            let child = normalize_agent_doc_reply_rows(marked)?;
+            let (stripped, mut preserved) = strip_nested_generic_responses(marked);
+            for segment in waiting_segments.iter().filter(|segment| {
+                segment.id.as_deref() == Some(id_key.as_str()) && &segment.raw != source
+            }) {
+                if !segment_is_generic_sibling(&segment.raw) {
+                    continue;
+                }
+                kept_raws.insert(segment.raw.clone());
+                preserved.extend(operator_lines_below_head(&segment.raw));
+            }
+            let marked = append_operator_lines(&stripped, &preserved);
+            let child = normalize_agent_doc_reply_rows(&marked)?;
             children.push(ensure_waiting_response_timestamp(&child, timestamp));
             continue;
         }
@@ -6085,6 +6099,172 @@ fn choice_response_waiting_segments(
 
 fn raw_has_choice_response(raw: &str) -> bool {
     (raw.contains("**Response:**") || raw.contains("**Response [#")) && raw.contains("**Choices:**")
+}
+
+/// Placeholder question on a waiting stub that has no choice packet.
+const GENERIC_WAITING_QUESTION: &str = "What decision or completion result should be recorded?";
+
+fn waiting_child_segments(
+    document: &str,
+    location: &WaitingTreeLocation,
+) -> Vec<crate::waiting_archive::WaitingSegment> {
+    if location.start == location.end {
+        return Vec::new();
+    }
+    let tree = &document[location.start..location.end];
+    let root_line = tree.lines().next().unwrap_or_default();
+    let root_indent = root_line.len() - root_line.trim_start_matches([' ', '\t']).len();
+    crate::waiting_archive::waiting_tree_segments(tree, root_indent)
+}
+
+fn list_line_indent(line: &str) -> Option<usize> {
+    let trimmed = line.trim_start_matches([' ', '\t']);
+    (trimmed.starts_with("- ") || trimmed.starts_with("* ") || trimmed.starts_with("+ "))
+        .then(|| line.len() - trimmed.len())
+}
+
+fn is_plain_response_line(line: &str) -> bool {
+    let body = line.trim_start();
+    let Some(body) = body
+        .strip_prefix("- ")
+        .or_else(|| body.strip_prefix("* "))
+        .or_else(|| body.strip_prefix("+ "))
+    else {
+        return false;
+    };
+    body.trim_start().starts_with("**Response:**")
+}
+
+/// A separate child whose response is only the generic stub.
+fn segment_is_generic_sibling(raw: &str) -> bool {
+    raw.contains("**Response:**")
+        && raw.contains(GENERIC_WAITING_QUESTION)
+        && !raw.contains("**Choices:**")
+}
+
+fn is_operator_list_line(lines: &[&str], index: usize) -> bool {
+    let Some(text) = lines[index].trim_start().strip_prefix("- ") else {
+        return false;
+    };
+    let text = text.trim();
+    if text.is_empty() || agent_doc_markdown_ast::reply_row::is_agent_doc_reply_row_at(lines, index)
+    {
+        return false;
+    }
+    let work = agent_doc_element_queue::struck_work_text(text);
+    let binary_attempt = agent_doc_document::queue_projection::lifecycle_marker(work.trim())
+        .is_some()
+        && agent_doc_document::queue_projection::owner_projection(work.trim()).is_some();
+    !binary_attempt
+}
+
+/// Operator list rows in `lines[start..end]`, including rows nested under them.
+fn operator_clusters(lines: &[&str], start: usize, end: usize) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut index = start;
+    while index < end {
+        if !is_operator_list_line(lines, index) {
+            index += 1;
+            continue;
+        }
+        let indent = list_line_indent(lines[index]).unwrap_or(0);
+        let cluster_start = index;
+        index += 1;
+        while index < end && list_line_indent(lines[index]).is_none_or(|next| next > indent) {
+            index += 1;
+        }
+        out.extend(
+            lines[cluster_start..index]
+                .iter()
+                .map(|line| (*line).to_string()),
+        );
+    }
+    out
+}
+
+fn operator_lines_below_head(raw: &str) -> Vec<String> {
+    let lines = raw.split_inclusive('\n').collect::<Vec<_>>();
+    if lines.len() < 2 {
+        return Vec::new();
+    }
+    operator_clusters(&lines, 1, lines.len())
+}
+
+/// Drop a generic `**Response:**` nested in a choice segment. Operator lines
+/// that sat inside that stub are returned so the caller can keep them.
+fn strip_nested_generic_responses(raw: &str) -> (String, Vec<String>) {
+    if !raw_has_choice_response(raw) {
+        return (raw.to_string(), Vec::new());
+    }
+    let lines = raw.split_inclusive('\n').collect::<Vec<_>>();
+    let mut ranges = Vec::new();
+    let mut index = 0;
+    while index < lines.len() {
+        let Some(indent) = list_line_indent(lines[index]) else {
+            index += 1;
+            continue;
+        };
+        if !is_plain_response_line(lines[index]) {
+            index += 1;
+            continue;
+        }
+        let mut end = index + 1;
+        while end < lines.len() && list_line_indent(lines[end]).is_none_or(|next| next > indent) {
+            end += 1;
+        }
+        let block = lines[index..end].concat();
+        if block.contains(GENERIC_WAITING_QUESTION) && !block.contains("**Choices:**") {
+            ranges.push((index, end));
+        }
+        index = end;
+    }
+    if ranges.is_empty() {
+        return (raw.to_string(), Vec::new());
+    }
+    let mut operator_lines = Vec::new();
+    let mut out = String::new();
+    let mut cursor = 0;
+    for (start, end) in ranges {
+        out.push_str(&lines[cursor..start].concat());
+        operator_lines.extend(operator_clusters(&lines, start + 1, end));
+        cursor = end;
+    }
+    out.push_str(&lines[cursor..].concat());
+    (out, operator_lines)
+}
+
+fn append_operator_lines(segment: &str, lines: &[String]) -> String {
+    if lines.is_empty() {
+        return segment.to_string();
+    }
+    let response_indent = segment
+        .lines()
+        .find_map(|line| {
+            is_plain_response_line(line)
+                .then(|| list_line_indent(line))
+                .flatten()
+        })
+        .unwrap_or(4);
+    let base = lines
+        .iter()
+        .find_map(|line| list_line_indent(line))
+        .unwrap_or(response_indent);
+    let mut out = segment.to_string();
+    if !out.ends_with('\n') {
+        out.push('\n');
+    }
+    for line in lines {
+        let core = line.trim_end_matches(['\n', '\r']);
+        if core.trim().is_empty() {
+            continue;
+        }
+        let indent = list_line_indent(core).unwrap_or(base);
+        let relative = indent.saturating_sub(base);
+        out.push_str(&" ".repeat(response_indent + relative));
+        out.push_str(core.trim_start());
+        out.push('\n');
+    }
+    out
 }
 
 /// What a rebuild does with one existing child segment it does not keep.
@@ -7361,10 +7541,11 @@ mod tests {
         );
     }
 
-    /// One tracked item already owns a choice response. A later projection must
-    /// not emit a second structure whose text restates that choice: neither by
-    /// splicing metadata onto the origin row, nor by rebuilding a stub beside
-    /// a struck copy of the same item.
+    /// One tracked item already owns a choice response. A projection must not
+    /// emit a second structure whose text restates that choice: not on the
+    /// origin row, not as a new stub beside a struck copy, and not by keeping
+    /// a generic sibling that is already nested in the choice segment or
+    /// sitting next to it. An operator line inside that segment stays.
     #[test]
     fn one_tracked_item_keeps_a_single_choice_response_structure() {
         let id = "subagent-operator-request-gh013";
@@ -7422,9 +7603,43 @@ mod tests {
             response,
         );
         assert_single_choice_response(&both);
+
+        let operator = "Create a comprehensive script for Dillon.";
+        let nested = waiting_tree_document(
+            &format!(
+                "- ### {WAITING_ON_YOU_ROOT_TEXT} {WAITING_ON_YOU_ROOT_MARKER}\n  - ~~[#{id}] {choice} {WAITING_ON_YOU_ITEM_MARKER}~~\n{}    - **Response:** {referring} {reply}\n      - **Timestamp:** 2026-11-09T22:30-06:00 {reply}\n      - **Question:** What decision or completion result should be recorded? {reply}\n      - **Next actions:** {reply}\n        - **Action:** {referring} {reply}\n        - {operator}\n",
+                packet_at(4)
+            ),
+            &format!("- [ ] [#{id}] {referring}\n"),
+            response,
+        );
+        let nested = assert_single_choice_response(&nested);
+        assert!(
+            nested.contains(operator),
+            "an operator line inside the choice segment stays:\n{nested}"
+        );
+
+        let beside = waiting_tree_document(
+            &format!(
+                "- ### {WAITING_ON_YOU_ROOT_TEXT} {WAITING_ON_YOU_ROOT_MARKER}\n  - ~~[#{id}] {choice} {WAITING_ON_YOU_ITEM_MARKER}~~\n{}  - [#{id}] {referring} {WAITING_ON_YOU_ITEM_MARKER}\n    - **Response:** {referring} {reply}\n      - **Timestamp:** 2026-11-09T22:30-06:00 {reply}\n      - **Question:** What decision or completion result should be recorded? {reply}\n      - **Next actions:** {reply}\n        - **Action:** {referring} {reply}\n        - {operator}\n",
+                packet_at(4)
+            ),
+            &format!("- [ ] [#{id}] {referring}\n"),
+            response,
+        );
+        let beside = assert_single_choice_response(&beside);
+        assert!(
+            beside.contains(operator),
+            "an operator line on the generic sibling moves into the choice segment:\n{beside}"
+        );
+        assert_eq!(
+            beside.matches(operator).count(),
+            1,
+            "the operator line is kept once:\n{beside}"
+        );
     }
 
-    fn assert_single_choice_response(document: &str) {
+    fn assert_single_choice_response(document: &str) -> String {
         let projected = project_waiting_on_you_tree(document, "")
             .unwrap()
             .unwrap_or_else(|| document.to_string());
@@ -7464,6 +7679,7 @@ mod tests {
             None,
             "one choice response is a fixed point:\n{projected}"
         );
+        projected
     }
 
     #[test]

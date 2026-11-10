@@ -57647,7 +57647,7 @@ mod tests {
             "{}{}",
             "\"tmux_layout_effect_state generation={} attempt={} ", "phase="
         );
-        assert_eq!(source.matches(&attributed).count(), 3);
+        assert_eq!(source.matches(&attributed).count(), 4);
         assert_eq!(source.matches(&unattributed).count(), 0);
     }
 

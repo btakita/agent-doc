@@ -567,7 +567,10 @@ operator-authored occurrences of the same normalized text, the binary appends a
 visible `⟦effect:N⟧` suffix to each live occurrence that needs a distinct
 identity. A nested bare `#preset` is contextual work under its parent, not a
 durable top-level `#id` reference, so repeating `#review` beneath the same PR
-receives a new effect id.
+receives a new effect id. The occurrence family is that parent nest vector:
+a struck `#review` under one pull request does not delete `  - #review` under
+another, and the surviving leaf stays the executable head
+(`<pull-request url>: #review`).
 The positive integer is an occurrence identity, not operator prose. It remains
 part of exact claim, worker, completion, and receipt identity;
 lifecycle/priority markers remain cosmetic. Completed nested-command rows

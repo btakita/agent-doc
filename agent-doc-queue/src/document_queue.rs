@@ -6614,11 +6614,12 @@ pub fn annotate_duplicate_queue_effects(entries: &[QueueEntry]) -> Option<Vec<Qu
         if !live && !prompt.is_nested() {
             continue;
         }
-        let identity = queue_effect_family_identity(prompt);
         // A nested bare `#preset` is contextual work under its parent, not the
         // durable top-level `#id` reference that `from_prompt` sees in
-        // isolation. It therefore needs the same occurrence identity as prose
-        // when the operator runs it again under that parent.
+        // isolation. The family key is that parent nest vector, so `#review`
+        // under one pull request does not renumber `#review` under another.
+        let identity = nested_bare_preset_identity(entries, index)
+            .unwrap_or_else(|| queue_effect_family_identity(prompt));
         if matches!(identity, QueueItemIdentity::FreeText(_)) || prompt.is_nested() {
             families.entry(identity).or_default().push((index, live));
         }
@@ -6741,15 +6742,59 @@ pub fn generated_prompt_alias_identity(
     ))
 }
 
+/// Parent-scoped lifecycle identity of a nested bare `#preset`.
+///
+/// `QueueItemIdentity::from_prompt("#review")` is the durable id `review`.
+/// Under a pull-request parent that tag is the leaf's own work, so a struck
+/// `#review` under one request must not retire `#review` under another. The
+/// key is the effect-stripped nest vector. A tracked `do [#id]` / `[#id]`, a
+/// preset with arguments, a top-level row, and a parentless leaf stay on the
+/// row-local identity.
+fn nested_bare_preset_identity(
+    entries: &[QueueEntry],
+    index: usize,
+) -> Option<agent_doc_element_queue::QueueItemIdentity> {
+    let prompt = prompt_of(entries.get(index)?)?;
+    if !prompt.is_nested() || prompt.multiline {
+        return None;
+    }
+    let work = nest_row_work_text(&prompt.text);
+    if work.trim().is_empty() || row_is_tracked_directive(&work) {
+        return None;
+    }
+    let head = agent_doc_element_queue::subprompts::head_without_subprompts(&work);
+    let first = head.lines().next().unwrap_or("").trim();
+    bare_id_reference_key(&QueuePrompt {
+        text: first.to_string(),
+        multiline: false,
+        indent: 0,
+        ordered_marker: None,
+    })?;
+    let lineage = nest_vector_at(entries, index, &prompt.text)?;
+    Some(agent_doc_element_queue::QueueItemIdentity::FreeText(
+        agent_doc_element_queue::normalize_multiline_dedup_text(&lineage),
+    ))
+}
+
+fn queue_lifecycle_identity_at(
+    entries: &[QueueEntry],
+    index: usize,
+) -> Option<agent_doc_element_queue::QueueItemIdentity> {
+    nested_bare_preset_identity(entries, index).or_else(|| queue_item_identity(entries.get(index)?))
+}
+
 /// Full convergence key: durable identity, head shape, and visible lifecycle.
 ///
 /// - **Identity** is exactly [`QueueItemIdentity::from_prompt`] (id-backed heads
 ///   collapse every pin/prefix variant onto the durable id; free-text keys on
 ///   normalized text) — the single dedup key the four historical ad-hoc passes
-///   each re-derived a partial version of.
+///   each re-derived a partial version of. A nested bare `#preset` is the
+///   exception: its identity is the parent nest vector
+///   ([`nested_bare_preset_identity`]), not the bare tag.
 /// - **Shape** keeps each head shape's collapse rule independent, matching the
 ///   original pass separation (directive twins are intentional; bare references
-///   and free-text re-emits collapse).
+///   and free-text re-emits collapse). A parent-scoped `#preset` converges as
+///   free text.
 /// - **Lifecycle** partitions live vs struck so a genuine "in progress" + "done"
 ///   pair of the same work survives, while snapshot/current struck evidence still
 ///   dominates stale live re-emits for the same identity.
@@ -6762,12 +6807,16 @@ type ConvergenceKey = (
     QueueItemLifecycle,
 );
 
-fn convergence_identity(entry: &QueueEntry) -> Option<ConvergenceKey> {
+fn convergence_identity_at(entries: &[QueueEntry], index: usize) -> Option<ConvergenceKey> {
+    let entry = entries.get(index)?;
     let prompt = match entry {
         QueueEntry::Prompt(p) | QueueEntry::Completed(p) => p,
         _ => return None,
     };
     let lifecycle = entry_lifecycle(entry)?;
+    if let Some(identity) = nested_bare_preset_identity(entries, index) {
+        return Some((identity, HeadShape::FreeText, lifecycle));
+    }
     // Effect ids distinguish exact claim/receipt targets but not authored
     // multiplicity. Otherwise a replay could append a fresh id and evade the
     // snapshot allowance that guards intentional duplicates.
@@ -6810,11 +6859,11 @@ fn snapshot_struck_representatives(
     snapshot_entries: &[QueueEntry],
 ) -> std::collections::HashMap<agent_doc_element_queue::QueueItemIdentity, QueueEntry> {
     let mut struck = std::collections::HashMap::new();
-    for entry in snapshot_entries {
+    for (index, entry) in snapshot_entries.iter().enumerate() {
         if !matches!(entry, QueueEntry::Completed(_)) {
             continue;
         }
-        if let Some(identity) = queue_item_identity(entry) {
+        if let Some(identity) = queue_lifecycle_identity_at(snapshot_entries, index) {
             struck.entry(identity).or_insert_with(|| entry.clone());
         }
     }
@@ -6826,8 +6875,9 @@ fn current_struck_identities(
 ) -> std::collections::HashSet<agent_doc_element_queue::QueueItemIdentity> {
     entries
         .iter()
-        .filter(|entry| matches!(entry, QueueEntry::Completed(_)))
-        .filter_map(queue_item_identity)
+        .enumerate()
+        .filter(|(_, entry)| matches!(entry, QueueEntry::Completed(_)))
+        .filter_map(|(index, _)| queue_lifecycle_identity_at(entries, index))
         .collect()
 }
 
@@ -6954,8 +7004,9 @@ pub fn operator_rearmed_queue_identities(
     let snapshot_struck = snapshot_struck_representatives(snapshot_entries);
     operator_entries
         .iter()
-        .filter(|entry| matches!(entry, QueueEntry::Prompt(_)))
-        .filter_map(queue_item_identity)
+        .enumerate()
+        .filter(|(_, entry)| matches!(entry, QueueEntry::Prompt(_)))
+        .filter_map(|(index, _)| queue_lifecycle_identity_at(operator_entries, index))
         .filter(|identity| snapshot_struck.contains_key(identity))
         .collect()
 }
@@ -6980,10 +7031,68 @@ pub fn live_snapshot_struck_identities(
     }
     entries
         .iter()
-        .filter(|entry| matches!(entry, QueueEntry::Prompt(_)))
-        .filter_map(queue_item_identity)
+        .enumerate()
+        .filter(|(_, entry)| matches!(entry, QueueEntry::Prompt(_)))
+        .filter_map(|(index, _)| queue_lifecycle_identity_at(entries, index))
         .filter(|identity| snapshot_struck.contains_key(identity))
         .collect()
+}
+
+enum SnapshotLifecycleMatch {
+    Absent,
+    Unique(agent_doc_element_queue::QueueItemIdentity),
+    Ambiguous,
+}
+
+/// Map a parentless inserted fragment onto the one snapshot row whose row-local
+/// identity matches. A nested bare `#preset` fragment has no ancestor of its
+/// own, so the snapshot parent supplies the lifecycle identity. Several
+/// different parents are not evidence for any of them.
+fn matching_snapshot_lifecycle_identity(
+    snapshot_entries: &[QueueEntry],
+    local: &agent_doc_element_queue::QueueItemIdentity,
+    completed: bool,
+) -> SnapshotLifecycleMatch {
+    let mut matched = None;
+    for (index, entry) in snapshot_entries.iter().enumerate() {
+        let kind_ok = if completed {
+            matches!(entry, QueueEntry::Completed(_))
+        } else {
+            matches!(entry, QueueEntry::Prompt(_))
+        };
+        if !kind_ok || queue_item_identity(entry).as_ref() != Some(local) {
+            continue;
+        }
+        let Some(lifecycle) = queue_lifecycle_identity_at(snapshot_entries, index) else {
+            continue;
+        };
+        match &matched {
+            None => matched = Some(lifecycle),
+            Some(existing) if existing == &lifecycle => {}
+            Some(_) => return SnapshotLifecycleMatch::Ambiguous,
+        }
+    }
+    match matched {
+        Some(identity) => SnapshotLifecycleMatch::Unique(identity),
+        None => SnapshotLifecycleMatch::Absent,
+    }
+}
+
+fn operator_fragment_lifecycle_identity(
+    snapshot_entries: &[QueueEntry],
+    fragment_entries: &[QueueEntry],
+    index: usize,
+    completed: bool,
+) -> Option<agent_doc_element_queue::QueueItemIdentity> {
+    if let Some(identity) = nested_bare_preset_identity(fragment_entries, index) {
+        return Some(identity);
+    }
+    let local = queue_item_identity(fragment_entries.get(index)?)?;
+    match matching_snapshot_lifecycle_identity(snapshot_entries, &local, completed) {
+        SnapshotLifecycleMatch::Unique(identity) => Some(identity),
+        SnapshotLifecycleMatch::Absent => Some(local),
+        SnapshotLifecycleMatch::Ambiguous => None,
+    }
 }
 
 /// Snapshot-struck identities the operator RE-TYPED as a fresh live line
@@ -7016,9 +7125,14 @@ pub fn operator_retyped_queue_identities(
             let Ok(entries) = parse_fragment(line) else {
                 continue;
             };
-            for entry in &entries {
+            for (index, entry) in entries.iter().enumerate() {
                 if let QueueEntry::Prompt(_) = entry
-                    && let Some(identity) = queue_item_identity(entry)
+                    && let Some(identity) = operator_fragment_lifecycle_identity(
+                        snapshot_entries,
+                        &entries,
+                        index,
+                        true,
+                    )
                     && snapshot_struck.contains_key(&identity)
                 {
                     retyped.insert(identity);
@@ -7045,8 +7159,9 @@ pub fn operator_repeated_queue_identity_allowances(
 ) -> std::collections::HashMap<agent_doc_element_queue::QueueItemIdentity, usize> {
     let snapshot_live = snapshot_entries
         .iter()
-        .filter(|entry| operator_repeat_authorship_eligible(entry))
-        .filter_map(queue_item_identity)
+        .enumerate()
+        .filter(|(_, entry)| operator_repeat_authorship_eligible(entry))
+        .filter_map(|(index, _)| queue_lifecycle_identity_at(snapshot_entries, index))
         .collect::<std::collections::HashSet<_>>();
     if snapshot_live.is_empty() {
         return std::collections::HashMap::new();
@@ -7062,9 +7177,14 @@ pub fn operator_repeated_queue_identity_allowances(
             let Ok(entries) = parse_fragment(line) else {
                 continue;
             };
-            for entry in &entries {
+            for (index, entry) in entries.iter().enumerate() {
                 if operator_repeat_authorship_eligible(entry)
-                    && let Some(identity) = queue_item_identity(entry)
+                    && let Some(identity) = operator_fragment_lifecycle_identity(
+                        snapshot_entries,
+                        &entries,
+                        index,
+                        false,
+                    )
                     && snapshot_live.contains(&identity)
                 {
                     *allowances.entry(identity).or_insert(0) += 1;
@@ -7084,9 +7204,9 @@ pub fn live_snapshot_multiplicity_excess_identities(
 ) -> std::collections::HashSet<agent_doc_element_queue::QueueItemIdentity> {
     let counts = |source: &[QueueEntry]| {
         let mut counts = std::collections::HashMap::<ConvergenceKey, usize>::new();
-        for entry in source {
+        for (index, entry) in source.iter().enumerate() {
             if operator_repeat_authorship_eligible(entry)
-                && let Some(key) = convergence_identity(entry)
+                && let Some(key) = convergence_identity_at(source, index)
                 && key.2 == QueueItemLifecycle::Live
             {
                 *counts.entry(key).or_insert(0) += 1;
@@ -7155,16 +7275,16 @@ pub fn converge_queue_via_lifecycle_with_operator_evidence(
     // again"), not stale re-emits of the struck one.
     let mut snapshot_live_allowance =
         std::collections::HashMap::<agent_doc_element_queue::QueueItemIdentity, usize>::new();
-    for entry in snapshot_entries {
+    for (index, entry) in snapshot_entries.iter().enumerate() {
         if let QueueEntry::Prompt(_) = entry
-            && let Some(identity) = queue_item_identity(entry)
+            && let Some(identity) = queue_lifecycle_identity_at(snapshot_entries, index)
         {
             *snapshot_live_allowance.entry(identity).or_insert(0) += 1;
         }
     }
     let mut lifecycle_changed = false;
     let mut entries_for_convergence = Vec::with_capacity(entries.len());
-    for entry in entries {
+    for (index, entry) in entries.iter().enumerate() {
         // `#qstruckbaredup`: a concurrent editor/closeout merge can preserve the
         // operator's just-typed bare queue line as tolerant `Freeform` while the
         // queue projection inserts and later strikes the actionable `- ...`
@@ -7185,7 +7305,7 @@ pub fn converge_queue_via_lifecycle_with_operator_evidence(
             }
         }
         if let QueueEntry::Prompt(_) = entry
-            && let Some(identity) = queue_item_identity(entry)
+            && let Some(identity) = queue_lifecycle_identity_at(entries, index)
             && let Some(struck_entry) = snapshot_struck.get(&identity)
         {
             let represented =
@@ -7220,8 +7340,8 @@ pub fn converge_queue_via_lifecycle_with_operator_evidence(
     // This is exactly `dedup_free_text_heads`'s snapshot-authored-count guard,
     // now applied uniformly to every identity shape.
     let mut authored: std::collections::HashMap<_, usize> = std::collections::HashMap::new();
-    for entry in snapshot_entries {
-        if let Some(key) = convergence_identity(entry) {
+    for (index, _) in snapshot_entries.iter().enumerate() {
+        if let Some(key) = convergence_identity_at(snapshot_entries, index) {
             *authored.entry(key).or_insert(0) += 1;
         }
     }
@@ -7303,7 +7423,7 @@ pub fn converge_queue_via_lifecycle_with_operator_evidence(
     let mut changed = lifecycle_changed;
 
     for (idx, entry) in entries.iter().enumerate() {
-        let Some(key) = convergence_identity(entry) else {
+        let Some(key) = convergence_identity_at(&entries, idx) else {
             // Non-prompt entry (fence / preset / dispatch / freeform): position-
             // and content-stable, never a convergence target.
             converged.push(entry.clone());
@@ -12913,6 +13033,74 @@ mod tests {
         assert!(
             converge_queue_via_lifecycle(&converged, &entries, &Default::default()).is_none(),
             "the surrogate effect id is stable on later maintenance passes"
+        );
+    }
+
+    /// A nested `  - #review` is the pull request's review, not the document-wide
+    /// id `review`. A struck `#review` under another request must not delete it,
+    /// renumber it, or leave the URL itself as the executable head.
+    #[test]
+    fn converge_keeps_nested_review_under_a_different_pull_request() {
+        let snapshot_body = concat!(
+            "- ### https://github.com/haiven-dev/haiven-api/pull/853\n",
+            "  - %% author: someone %%\n",
+            "- ### https://github.com/haiven-dev/haiven-contracts/pull/197\n",
+            "  - ~~#review~~\n",
+            "- ### https://github.com/haiven-dev/haiven-api/pull/840\n",
+        );
+        let current_body = concat!(
+            "- ### https://github.com/haiven-dev/haiven-api/pull/853\n",
+            "  - %% author: someone %%\n",
+            "  - #review\n",
+            "- ### https://github.com/haiven-dev/haiven-contracts/pull/197\n",
+            "  - ~~#review~~\n",
+            "- ### https://github.com/haiven-dev/haiven-api/pull/840\n",
+            "  - #review\n",
+        );
+        let snapshot = parse(snapshot_body).unwrap();
+        let current = parse(current_body).unwrap();
+        assert!(
+            converge_queue_via_lifecycle(&current, &snapshot, &Default::default()).is_none(),
+            "each pull request's #review is its own effect:\n{}",
+            render(&converge(&current, &snapshot))
+        );
+
+        let live_reviews: Vec<_> = current
+            .iter()
+            .filter_map(|entry| match entry {
+                QueueEntry::Prompt(prompt) if prompt.text == "#review" => {
+                    Some(prompt.text.as_str())
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(live_reviews, vec!["#review", "#review"]);
+        assert!(
+            current.iter().any(|entry| {
+                matches!(entry, QueueEntry::Completed(prompt) if prompt.text == "#review")
+            }),
+            "the struck review under the other pull request stays"
+        );
+        assert_eq!(
+            first_prompt(&current).map(|prompt| prompt.text.as_str()),
+            Some("#review")
+        );
+        let executable = executable_prompt_indexes(&current);
+        let executable_texts: Vec<_> = executable
+            .iter()
+            .map(|&index| match &current[index] {
+                QueueEntry::Prompt(prompt) => prompt.text.as_str(),
+                _ => panic!("executable index {index} is not a prompt"),
+            })
+            .collect();
+        assert_eq!(executable_texts, vec!["#review", "#review"]);
+        assert_eq!(
+            lineage_claim_text(&current, executable[0]).as_deref(),
+            Some("https://github.com/haiven-dev/haiven-api/pull/853: #review")
+        );
+        assert_eq!(
+            lineage_claim_text(&current, executable[1]).as_deref(),
+            Some("https://github.com/haiven-dev/haiven-api/pull/840: #review")
         );
     }
 

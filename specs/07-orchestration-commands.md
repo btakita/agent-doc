@@ -701,6 +701,10 @@ same operator-authored work text, but they MUST NOT inherit one shared claim,
 lifecycle marker, report receipt, or closeout merely because that text
 normalizes equally. Conversely, an annotation MUST NOT increase the snapshot-
 authored multiplicity and thereby turn a replay artifact into new work.
+A nested bare `#preset` family is its parent nest vector, not the bare tag.
+`#review` under two pull requests is two families: a struck leaf under one
+does not delete or renumber the leaf under the other, and that leaf stays
+the executable head.
 
 The pure policy owner is
 `document_queue::annotate_duplicate_queue_effects`, invoked by the existing

@@ -2239,7 +2239,19 @@ pub fn set_prompt_runtime_projections_with(
                             target
                         });
                     if let Some(target) = target {
-                        if !crate::queue_command::is_slash_command(&next.text) {
+                        // `#commentonlyoutbox`: the pending marker is the
+                        // claimable outbox. A row whose only children are
+                        // ordinary comments is not claimable, so a pending
+                        // target must not paint `📥` and an existing one is
+                        // left stripped. `%% parked %%` is a hold, not a note:
+                        // the row stays unclaimable, and claim projection still
+                        // paints `📥` so a stale running glyph clears.
+                        let comment_only_pending = target.marker
+                            == agent_doc_document::queue_projection::QueueLifecycleMarker::Pending
+                            && entry_has_only_comment_children(entries, index)
+                            && !entry_has_nested_parked_comment(entries, index);
+                        if !comment_only_pending && !crate::queue_command::is_slash_command(&next.text)
+                        {
                             let publication_state = target
                                 .text
                                 .lines()
@@ -4191,11 +4203,13 @@ pub fn executable_prompt_indexes(entries: &[QueueEntry]) -> Vec<usize> {
             }
             // `#queuenest` / `#f1s3`: leaf-only execution. A parent item is the
             // epic/group LABEL and is never executable, so it must not surface
-            // as a runnable head.
+            // as a runnable head. A row whose only children are comments is
+            // not a group label, but it is not claimable either
+            // (`#commentonlyoutbox`).
             QueueEntry::Prompt(_)
                 if !entry_is_group_parent(entries, idx)
                     && !entry_has_nested_parked_comment(entries, idx)
-                    && !entry_is_comment_only_pull_request(entries, idx) =>
+                    && !entry_has_only_comment_children(entries, idx) =>
             {
                 Some(idx)
             }
@@ -4276,10 +4290,12 @@ pub fn entry_is_group_parent(entries: &[QueueEntry], idx: usize) -> bool {
     for later in entries.iter().skip(idx + 1) {
         // A deeper list comment or reference row is annotation, not an
         // executable descendant. Keep scanning through it so a real child
-        // below it still makes this prompt row a group parent, while an
-        // annotation-only child leaves its prompt parent runnable. At this
-        // depth or shallower it is a sibling that heads its own rows, so it
-        // ends the subtree (`#queuelineageparent`, `#commentsiblingclose`).
+        // below it still makes this prompt row a group parent. Comment-only
+        // children do not: that row stays out of the claimable heads
+        // (`entry_has_only_comment_children`). A reference-only child leaves
+        // its prompt parent runnable. At this depth or shallower the row is a
+        // sibling that heads its own rows, so it ends the subtree
+        // (`#queuelineageparent`, `#commentsiblingclose`).
         if let Some((indent, _)) =
             list_comment_context_row(later).or_else(|| reference_context_row(later))
         {
@@ -4301,15 +4317,15 @@ pub fn entry_is_group_parent(entries: &[QueueEntry], idx: usize) -> bool {
     false
 }
 
-/// Whether an executable row has a deeper list-comment annotation in its tree.
+/// Whether a row has a deeper list-comment annotation in its tree.
 ///
-/// Ordinary comment-only children deliberately do not make the row a
-/// context-only group: the parent remains dispatchable. The reserved
+/// Comment-only children keep the row out of the claimable heads
+/// (`entry_has_only_comment_children`) without making it a context group, so
+/// settlement does not strike it or synthesize a follow-up. The reserved
 /// `%% parked %%` child is handled separately by
 /// `entry_has_nested_parked_comment`. Comments still carry operator context
 /// that a heuristic completion matcher cannot prove resolved. Callers that
-/// perform semantic auto-strike use this predicate to fail closed while normal
-/// explicit queue consumption keeps its existing runnable-parent semantics.
+/// perform semantic auto-strike use this predicate to fail closed.
 pub fn entry_has_nested_list_comment(entries: &[QueueEntry], idx: usize) -> bool {
     let Some(own_indent) = entries.get(idx).and_then(entry_indent) else {
         return false;
@@ -4342,10 +4358,9 @@ pub fn entry_has_nested_list_comment(entries: &[QueueEntry], idx: usize) -> bool
 
 /// Whether a live row is explicitly held by a nested `%% parked %%` comment.
 ///
-/// Ordinary list comments annotate a runnable parent. The exact `parked`
-/// sentinel is different: it is an operator-authored pause control that keeps
-/// the parent out of every executable-head projection until the comment is
-/// removed. Keeping this separate from `entry_is_group_parent` also prevents
+/// The exact `parked` sentinel holds the parent out of every executable-head
+/// projection until the comment is removed, including when a real prompt child
+/// is also present. Keeping this separate from `entry_is_group_parent` prevents
 /// inert-group settlement from striking a deliberately parked row.
 pub fn entry_has_nested_parked_comment(entries: &[QueueEntry], idx: usize) -> bool {
     let Some(own_indent) = entries.get(idx).and_then(entry_indent) else {
@@ -4385,26 +4400,26 @@ fn is_parked_list_comment(content: &str) -> bool {
         .is_some_and(|body| body.trim() == "parked")
 }
 
-/// A GitHub pull-request URL whose only descendants are list comments
-/// (`#prurlcommentnote`).
+/// Whether `idx` has at least one descendant and every descendant is a list
+/// comment (`#commentonlyoutbox`).
 ///
-/// The comments are notes. They are not completion of the pull request and
-/// not a prompt to act on it, so the row is not executable, not admitted a
-/// queue id, and not struck. A real prompt child, or a pull-request URL with
-/// no children, keeps the ordinary leaf and group rules.
-fn entry_is_comment_only_pull_request(entries: &[QueueEntry], idx: usize) -> bool {
-    let Some(entry) = entries.get(idx) else {
+/// The comments are notes, not work. The row stays in the document and is not
+/// settled as a context group, but it is not a claimable head and it does not
+/// take the pending outbox marker. A nested `%% parked %%` comment is also a
+/// hold: the row stays unclaimable through `entry_has_nested_parked_comment`,
+/// while claim projection may still paint `📥` so a stale running glyph
+/// clears. A real prompt child, any other non-comment descendant, or a row
+/// with no children keeps the ordinary leaf and group rules.
+pub fn entry_has_only_comment_children(entries: &[QueueEntry], idx: usize) -> bool {
+    let Some(own_indent) = entries.get(idx).and_then(entry_indent) else {
         return false;
     };
-    let Some(text) = queue_entry_prompt_text(entry) else {
-        return false;
-    };
-    if !is_bare_pull_request_url(text) {
+    if !matches!(
+        entries.get(idx),
+        Some(QueueEntry::Prompt(_) | QueueEntry::Completed(_))
+    ) {
         return false;
     }
-    let Some(own_indent) = entry_indent(entry) else {
-        return false;
-    };
     let mut saw_comment = false;
     for later in entries.iter().skip(idx + 1) {
         if let Some((indent, _)) = list_comment_context_row(later) {
@@ -4425,6 +4440,23 @@ fn entry_is_comment_only_pull_request(entries: &[QueueEntry], idx: usize) -> boo
         }
     }
     saw_comment
+}
+
+/// A GitHub pull-request URL whose only descendants are list comments
+/// (`#prurlcommentnote`).
+///
+/// The comments are notes. They are not completion of the pull request and
+/// not a prompt to act on it, so the row is not executable, not admitted a
+/// queue id, and not struck. A real prompt child, or a pull-request URL with
+/// no children, keeps the ordinary leaf and group rules. Production admission
+/// and strike use [`comment_only_pull_request_at`]; claimability of every
+/// comment-only row, including this one, is [`entry_has_only_comment_children`].
+#[cfg(test)]
+fn entry_is_comment_only_pull_request(entries: &[QueueEntry], idx: usize) -> bool {
+    let Some(text) = entries.get(idx).and_then(queue_entry_prompt_text) else {
+        return false;
+    };
+    is_bare_pull_request_url(text) && entry_has_only_comment_children(entries, idx)
 }
 
 fn freeform_has_deeper_content(entry: &QueueEntry, own_indent: usize) -> bool {
@@ -12809,7 +12841,7 @@ mod tests {
     }
 
     #[test]
-    fn parent_with_only_non_parked_comment_children_remains_runnable() {
+    fn parent_with_only_comment_children_is_not_claimable() {
         for body in [
             "- parent task\n  - %%one note%%\n",
             concat!(
@@ -12819,20 +12851,133 @@ mod tests {
             ),
         ] {
             let entries = parse(body).unwrap();
-            assert_eq!(
-                prompts(&entries)
-                    .iter()
-                    .map(|prompt| prompt.text.as_str())
-                    .collect::<Vec<_>>(),
-                vec!["parent task"],
-                "comment-only children must not turn their runnable parent into an inert group"
+            assert!(
+                prompts(&entries).is_empty(),
+                "comment-only children must not leave a claimable parent: {body}"
+            );
+            assert!(entry_has_only_comment_children(&entries, 0));
+            assert!(
+                !entry_is_group_parent(&entries, 0),
+                "comment-only notes are not a context group to settle"
             );
             assert_eq!(render(&entries), body);
             assert!(
                 entry_has_nested_list_comment(&entries, 0),
-                "the runnable parent still exposes its unresolved annotation to heuristic consumers"
+                "the row still exposes its unresolved annotation to heuristic consumers"
             );
         }
+    }
+
+    /// `#commentonlyoutbox`: the live sdk-dev row
+    /// `- 📥 https://github.com/haiven-dev/haiven-sdk-unity/pull/8` has only a
+    /// comment child. It must not be claimable, and a pending projection must
+    /// not keep or add the outbox marker. A childless row and a real prompt
+    /// child stay in the outbox.
+    #[test]
+    fn comment_only_children_drop_the_pending_outbox() {
+        use agent_doc_document::queue_projection::QueueLifecycleMarker;
+        let body = concat!(
+            "- 📥 https://github.com/haiven-dev/haiven-sdk-unity/pull/8\n",
+            "  - %% docs: add a release-quality README %%\n",
+            "- 📥 parent task\n",
+            "  - %%one note%%\n",
+            "- still work\n",
+            "- 📥 https://github.com/haiven-dev/haiven-sdk-unity/pull/9\n",
+            "  - %% fix: remove private repository paths %%\n",
+            "  - #review\n",
+        );
+        let entries = parse(body).unwrap();
+        assert!(entry_has_only_comment_children(&entries, 0));
+        assert!(entry_is_comment_only_pull_request(&entries, 0));
+        assert!(entry_has_only_comment_children(&entries, 2));
+        let claimable = prompts(&entries)
+            .iter()
+            .map(|prompt| {
+                agent_doc_document::queue_projection::strip_in_progress_marker(prompt.text.trim())
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            claimable,
+            vec!["still work".to_string(), "#review".to_string(),],
+            "comment-only rows are not claimable: {claimable:?}"
+        );
+
+        let targets = entries
+            .iter()
+            .filter_map(|entry| match entry {
+                QueueEntry::Prompt(prompt) => Some(QueueRowProjection {
+                    text: prompt.text.clone(),
+                    marker: QueueLifecycleMarker::Pending,
+                    owner: None,
+                    blockers: Vec::new(),
+                }),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let projected = project_prompt_runtime_projections(body, &targets)
+            .unwrap()
+            .expect("the claimable rows gain an outbox and the comment-only rows lose one")
+            .0;
+        assert!(
+            !projected.contains("📥 https://github.com/haiven-dev/haiven-sdk-unity/pull/8"),
+            "pull/8 has only a comment child, so it has no outbox:\n{projected}"
+        );
+        assert!(
+            !projected.contains("📥 parent task"),
+            "a non-url row with only comment children has no outbox:\n{projected}"
+        );
+        assert!(
+            projected.contains("- https://github.com/haiven-dev/haiven-sdk-unity/pull/8\n"),
+            "{projected}"
+        );
+        assert!(projected.contains("- parent task\n"), "{projected}");
+        assert!(
+            projected.contains("- 📥 still work\n"),
+            "a childless row stays in the outbox:\n{projected}"
+        );
+        assert!(
+            projected.contains("  - 📥 #review\n"),
+            "a real prompt child stays in the outbox:\n{projected}"
+        );
+        assert!(
+            !projected.contains("📥 https://github.com/haiven-dev/haiven-sdk-unity/pull/9"),
+            "the pull/9 parent is a group label, not an outbox row:\n{projected}"
+        );
+    }
+
+    /// A `%% parked %%` child holds the parent out of the claimable heads, but
+    /// claim projection still replaces a stale running glyph with `📥`.
+    #[test]
+    fn parked_parent_keeps_the_pending_marker() {
+        use agent_doc_document::queue_projection::QueueLifecycleMarker;
+        let body = "- 🚧 https://github.com/haiven-dev/haiven-cli/pull/7\n  - %% parked %%\n";
+        let entries = parse(body).unwrap();
+        assert!(prompts(&entries).is_empty());
+        assert!(entry_has_nested_parked_comment(&entries, 0));
+        assert!(entry_has_only_comment_children(&entries, 0));
+        let targets = entries
+            .iter()
+            .filter_map(|entry| match entry {
+                QueueEntry::Prompt(prompt) => Some(QueueRowProjection {
+                    text: prompt.text.clone(),
+                    marker: QueueLifecycleMarker::Pending,
+                    owner: None,
+                    blockers: Vec::new(),
+                }),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let projected = project_prompt_runtime_projections(body, &targets)
+            .unwrap()
+            .expect("the stale running glyph clears to the pending marker")
+            .0;
+        assert!(
+            projected.contains(
+                "- 📥 https://github.com/haiven-dev/haiven-cli/pull/7\n  - %% parked %%\n"
+            ),
+            "{projected}"
+        );
+        assert!(!projected.contains('🚧'), "{projected}");
     }
 
     #[test]

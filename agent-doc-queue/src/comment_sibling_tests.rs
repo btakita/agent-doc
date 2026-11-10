@@ -94,8 +94,9 @@ fn deeper_comment_still_lets_a_real_child_make_a_group() {
 }
 
 #[test]
-fn deeper_comment_alone_leaves_its_parent_runnable() {
+fn deeper_comment_alone_leaves_its_parent_unclaimable() {
     let entries = parsed("- do [#alpha]\n  - %% note %%\n- do [#gamma]\n");
     assert!(!entry_is_group_parent(&entries, 0));
-    assert_eq!(prompt_texts(&entries), vec!["do [#alpha]", "do [#gamma]"]);
+    assert!(entry_has_only_comment_children(&entries, 0));
+    assert_eq!(prompt_texts(&entries), vec!["do [#gamma]"]);
 }

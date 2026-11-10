@@ -1686,7 +1686,7 @@ queue: go
     }
 
     #[test]
-    fn queue_attr_dispatches_parent_with_only_comment_children() {
+    fn queue_attr_does_not_dispatch_a_parent_with_only_comment_children() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let file = dir.path().join("task.md");
@@ -1704,14 +1704,15 @@ queue: go
             "- https://github.com/haiven-dev/haiven-api/pull/840\n",
             "  - %% author: tmstorm %%\n",
             "  - #review\n",
+            "- ship this\n",
             "<!-- /agent:run -->\n"
         );
         std::fs::write(&file, content).unwrap();
 
         assert_eq!(
             pending_subagent_dispatch_for_content(&file, content).unwrap(),
-            vec!["ship the notes".to_string(), "#review".to_string()],
-            "ordinary comment-only parents stay runnable, a pull-request url with only comments is not dispatched, and a real prompt child still is"
+            vec!["#review".to_string(), "ship this".to_string()],
+            "a queue item whose only children are comments is not claimable; a real prompt child and a childless row still dispatch"
         );
     }
 

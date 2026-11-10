@@ -1,6 +1,20 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
-import { appendPatchAlreadyPresent, calculateMinimalReplacement, isFullDocumentReplacement, isPureRepositionSignal } from './patchPlan.js';
+import {
+    appendPatchAlreadyPresent,
+    calculateMinimalReplacement,
+    isFullDocumentReplacement,
+    isPureRepositionSignal,
+    lineIndexAt,
+    mapOffsetThroughReplacement,
+    mapVisibleLineThroughReplacement,
+} from './patchPlan.js';
+import * as fs from 'fs';
+import * as path from 'path';
+import { fileURLToPath } from 'node:url';
+
+// ESM has no `__dirname`; derive it from the module URL.
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 describe('isPureRepositionSignal', () => {
     it('treats a bare reposition payload as pure reposition', () => {
@@ -129,5 +143,50 @@ describe('calculateMinimalReplacement', () => {
         assert.strictEqual(isFullDocumentReplacement('alpha beta gamma', middleReplacement), false);
         assert.ok(emptyInsertion);
         assert.strictEqual(isFullDocumentReplacement('', emptyInsertion), false);
+    });
+
+    it('keeps a caret and viewport outside an agent write instead of jumping to it', () => {
+        const before = [
+            '<!-- agent:status -->',
+            'ok',
+            '<!-- /agent:status -->',
+            '',
+            '<!-- agent:queue -->',
+            'operator is reading this',
+            '<!-- /agent:queue -->',
+            '',
+        ].join('\n');
+        const after = before.replace('ok', 'ok\nupdated');
+        const edit = calculateMinimalReplacement(before, after);
+        assert.ok(edit);
+        const caret = before.indexOf('operator is reading this');
+        const mapped = mapOffsetThroughReplacement(
+            caret,
+            edit.start,
+            edit.start + edit.deleteLength,
+            edit.text.length,
+        );
+        assert.strictEqual(after.slice(mapped, mapped + 'operator is reading this'.length), 'operator is reading this');
+        const visibleLine = lineIndexAt(before, caret);
+        const kept = mapVisibleLineThroughReplacement(visibleLine, before, edit);
+        assert.notStrictEqual(kept, lineIndexAt(before, edit.start));
+        assert.ok(kept > lineIndexAt(before, edit.start));
+        assert.strictEqual(mapVisibleLineThroughReplacement(0, before, edit), 0);
+    });
+
+    it('applyMinimalTextEdit restores the caret and viewport and does not focus the document', () => {
+        const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'extension.ts'), 'utf8');
+        const start = source.indexOf('private async applyMinimalTextEdit(');
+        const end = source.indexOf('private async applyCrdtReplicaText(', start);
+        assert.ok(start >= 0 && end > start);
+        const body = source.slice(start, end);
+        const edit = body.indexOf('workspace.applyEdit(edit)');
+        const restoreCaret = body.indexOf('mapOffsetThroughReplacement(');
+        const restoreScroll = body.indexOf('mapVisibleLineThroughReplacement(');
+        assert.ok(edit >= 0);
+        assert.ok(restoreCaret > edit);
+        assert.ok(restoreScroll > edit);
+        assert.strictEqual(body.includes('showTextDocument'), false);
+        assert.strictEqual(body.includes('requestFocus'), false);
     });
 });

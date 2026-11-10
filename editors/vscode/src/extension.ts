@@ -21,7 +21,13 @@ import {
     isFullContentExpectedBufferCurrent,
 } from './patchGuard.js';
 import { EditorIntent } from './editorIntent.js';
-import { appendPatchAlreadyPresent, calculateMinimalReplacement, isFullDocumentReplacement } from './patchPlan.js';
+import {
+    appendPatchAlreadyPresent,
+    calculateMinimalReplacement,
+    isFullDocumentReplacement,
+    mapOffsetThroughReplacement,
+    mapVisibleLineThroughReplacement,
+} from './patchPlan.js';
 import {
     buildCrossSessionClaimArgs,
     parseCrossSessionReject,
@@ -3357,6 +3363,20 @@ class PatchWatcher implements vscode.Disposable {
             this.outputChannel.appendLine(`PatchWatcher: full-document WorkspaceEdit replacement is disabled for ${document.uri.fsPath}`);
             return false;
         }
+        // Snapshot before the edit. applyEdit follows a caret that lands inside
+        // the replacement and scrolls that caret into view. Restore afterwards
+        // and do not show or focus the document.
+        const editors = vscode.window.visibleTextEditors.filter(
+            (editor) => editor.document.uri.toString() === document.uri.toString(),
+        );
+        const anchors = editors.map((editor) => ({
+            editor,
+            selections: editor.selections.map((selection) => ({
+                anchor: document.offsetAt(selection.anchor),
+                active: document.offsetAt(selection.active),
+            })),
+            visibleLine: editor.visibleRanges[0]?.start.line ?? 0,
+        }));
         const range = new vscode.Range(
             document.positionAt(replacement.start),
             document.positionAt(replacement.start + replacement.deleteLength),
@@ -3364,7 +3384,29 @@ class PatchWatcher implements vscode.Disposable {
         const edit = new vscode.WorkspaceEdit();
         edit.replace(document.uri, range, replacement.text);
         const applied = await vscode.workspace.applyEdit(edit);
-        return applied && document.getText() === targetContent;
+        if (!applied || document.getText() !== targetContent) {
+            return false;
+        }
+        const end = replacement.start + replacement.deleteLength;
+        for (const anchor of anchors) {
+            if (anchor.editor.document.isClosed) continue;
+            const mapOffset = (offset: number) => {
+                const mapped = mapOffsetThroughReplacement(offset, replacement.start, end, replacement.text.length);
+                return Math.max(0, Math.min(mapped, document.getText().length));
+            };
+            anchor.editor.selections = anchor.selections.map((selection) => new vscode.Selection(
+                document.positionAt(mapOffset(selection.anchor)),
+                document.positionAt(mapOffset(selection.active)),
+            ));
+            const visibleLine = mapVisibleLineThroughReplacement(anchor.visibleLine, before, replacement);
+            const currentLine = anchor.editor.visibleRanges[0]?.start.line;
+            if (currentLine !== visibleLine) {
+                const line = Math.max(0, Math.min(visibleLine, Math.max(0, document.lineCount - 1)));
+                const reveal = new vscode.Position(line, 0);
+                anchor.editor.revealRange(new vscode.Range(reveal, reveal), vscode.TextEditorRevealType.AtTop);
+            }
+        }
+        return true;
     }
 
     private async applyCrdtReplicaText(filePath: string, targetContent: string, expectedContent: string): Promise<boolean> {

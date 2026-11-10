@@ -13,6 +13,56 @@ export interface MinimalReplacement {
     text: string;
 }
 
+/** Caret outside `[start, end)` stays on the same character. A caret inside the span stays at [start]. */
+export function mapOffsetThroughReplacement(
+    offset: number,
+    start: number,
+    end: number,
+    replacementLength: number,
+): number {
+    const deleted = Math.max(0, end - start);
+    const delta = replacementLength - deleted;
+    if (offset < start) return offset;
+    if (offset >= end) return offset + delta;
+    return start;
+}
+
+export function lineIndexAt(text: string, offset: number): number {
+    const end = Math.max(0, Math.min(offset, text.length));
+    let lines = 0;
+    for (let index = 0; index < end; index += 1) {
+        if (text.charCodeAt(index) === 10) lines += 1;
+    }
+    return lines;
+}
+
+function countNewlines(text: string): number {
+    let count = 0;
+    for (let index = 0; index < text.length; index += 1) {
+        if (text.charCodeAt(index) === 10) count += 1;
+    }
+    return count;
+}
+
+/**
+ * Viewport line after [edit]. An edit that ends at or above the first visible
+ * line shifts that line by the inserted-line delta so the same text stays on
+ * screen. A viewport already above the edit, or one that contains it, stays put.
+ */
+export function mapVisibleLineThroughReplacement(
+    visibleLine: number,
+    before: string,
+    edit: MinimalReplacement | null,
+): number {
+    if (!edit) return Math.max(0, visibleLine);
+    const end = edit.start + edit.deleteLength;
+    const startLine = lineIndexAt(before, edit.start);
+    const endLine = lineIndexAt(before, end);
+    const lineDelta = countNewlines(edit.text) - (endLine - startLine);
+    if (endLine <= visibleLine) return Math.max(0, visibleLine + lineDelta);
+    return Math.max(0, visibleLine);
+}
+
 export function calculateMinimalReplacement(before: string, after: string): MinimalReplacement | null {
     if (before === after) {
         return null;

@@ -5865,6 +5865,13 @@ fn project_waiting_items_from_todos(
         .as_ref()
         .map(|location| adoptable_waiting_segments(projected_document, location))
         .unwrap_or_default();
+    // A struck (or otherwise unindexed) child that already holds the choice
+    // response. Regenerating the open Todo beside it emitted a second
+    // structure whose text restates that choice.
+    let choice_responses = location
+        .as_ref()
+        .map(|location| choice_response_waiting_segments(projected_document, location))
+        .unwrap_or_default();
     let existing_has_reply = |id: &str| {
         existing
             .get(id)
@@ -5890,8 +5897,22 @@ fn project_waiting_items_from_todos(
         // `#waitingoperatortext`: keep an existing child that holds operator
         // text, and never downgrade an existing packet to the generic stub
         // when no fresher operator packet is available to regenerate from.
+        // `#dupchoicestruct`: an unindexed segment that already owns the
+        // choice response is that item. A new child would be a second
+        // structure whose action restates the first choice.
+        let id_key = todo.id.to_ascii_lowercase();
+        if !existing.contains_key(&id_key)
+            && let Some((source, marked)) = adoptable
+                .get(&id_key)
+                .or_else(|| choice_responses.get(&id_key))
+        {
+            kept_raws.insert(source.clone());
+            let child = normalize_agent_doc_reply_rows(marked)?;
+            children.push(ensure_waiting_response_timestamp(&child, timestamp));
+            continue;
+        }
         if !existing_has_reply(&todo.id)
-            && let Some((source, marked)) = adoptable.get(&todo.id.to_ascii_lowercase())
+            && let Some((source, marked)) = adoptable.get(&id_key)
         {
             kept_raws.insert(source.clone());
             let child = normalize_agent_doc_reply_rows(marked)?;
@@ -6024,6 +6045,42 @@ fn adoptable_waiting_segments(
     out
 }
 
+/// Child segments that already carry a choice response (`**Response:**` plus
+/// `**Choices:**`), including a struck head `existing_waiting_children` skips.
+/// The first segment for an id wins.
+fn choice_response_waiting_segments(
+    document: &str,
+    location: &WaitingTreeLocation,
+) -> HashMap<String, (String, String)> {
+    let mut out = HashMap::new();
+    if location.start == location.end {
+        return out;
+    }
+    let tree = &document[location.start..location.end];
+    let root_line = tree.lines().next().unwrap_or_default();
+    let root_indent = root_line.len() - root_line.trim_start_matches([' ', '\t']).len();
+    for segment in crate::waiting_archive::waiting_tree_segments(tree, root_indent) {
+        let Some(id) = segment.id.clone() else {
+            continue;
+        };
+        if !raw_has_choice_response(&segment.raw) {
+            continue;
+        }
+        let head = segment.raw.lines().next().unwrap_or_default();
+        let marked = if head.contains(WAITING_ON_YOU_ITEM_MARKER) {
+            segment.raw.clone()
+        } else {
+            with_waiting_item_marker(&segment.raw)
+        };
+        out.entry(id).or_insert((segment.raw, marked));
+    }
+    out
+}
+
+fn raw_has_choice_response(raw: &str) -> bool {
+    (raw.contains("**Response:**") || raw.contains("**Response [#")) && raw.contains("**Choices:**")
+}
+
 /// What a rebuild does with one existing child segment it does not keep.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum SegmentDisposition {
@@ -6148,6 +6205,7 @@ fn project_external_waiting_items(
             agent_doc_markdown_ast::overlay::response_row_child_ranges(body);
         let mut updated = entries.clone();
         let mut insertions = Vec::new();
+        let mut changed = false;
 
         for index in 0..entries.len() {
             let QueueEntry::Prompt(prompt) = &entries[index] else {
@@ -6195,6 +6253,13 @@ fn project_external_waiting_items(
                 unreachable!("source and projected queue entry shapes are identical")
             };
             adopted.text = format!("{} {}", adopted.text.trim_end(), WAITING_ON_YOU_ITEM_MARKER);
+            changed = true;
+            // `#dupchoicestruct`: the row already owns the choice response.
+            // Another metadata block is a second structure, and its action is
+            // the open todo text, which restates that same choice.
+            if subtree_has_choice_response(&entries, index, subtree_end) {
+                continue;
+            }
             let packet = packets.get(&request_id);
             let response_timestamp = packet
                 .and_then(|packet| packet.response_timestamp.as_deref())
@@ -6205,7 +6270,7 @@ fn project_external_waiting_items(
             insertions.push((subtree_end, document_queue::parse_fragment(&metadata)?));
         }
 
-        if insertions.is_empty() {
+        if !changed {
             continue;
         }
         for (at, metadata) in insertions.into_iter().rev() {
@@ -6226,6 +6291,33 @@ fn project_external_waiting_items(
         out.replace_range(start..end, &body);
     }
     Ok(Some(out))
+}
+
+fn queue_entry_text(entry: &QueueEntry) -> Option<&str> {
+    match entry {
+        QueueEntry::Prompt(prompt) | QueueEntry::Completed(prompt) => Some(prompt.text.as_str()),
+        QueueEntry::Freeform(text) => Some(text.as_str()),
+        _ => None,
+    }
+}
+
+/// Whether the subtree already holds one choice response: a `**Response:**`
+/// (or `**Response [#…]**`) packet together with `**Choices:**`.
+fn subtree_has_choice_response(entries: &[QueueEntry], start: usize, end: usize) -> bool {
+    let mut response = false;
+    let mut choices = false;
+    for entry in &entries[start + 1..end] {
+        let Some(text) = queue_entry_text(entry) else {
+            continue;
+        };
+        if text.contains("**Response:**") || text.contains("**Response [#") {
+            response = true;
+        }
+        if text.contains("**Choices:**") {
+            choices = true;
+        }
+    }
+    response && choices
 }
 
 /// Migrate legacy generated reply rows without touching operator-authored
@@ -7260,6 +7352,100 @@ mod tests {
         assert!(
             !projected.contains("**Summary:**"),
             "a free-text Response is already its own summary: {projected}"
+        );
+    }
+
+    /// One tracked item already owns a choice response. A later projection must
+    /// not emit a second structure whose text restates that choice: neither by
+    /// splicing metadata onto the origin row, nor by rebuilding a stub beside
+    /// a struck copy of the same item.
+    #[test]
+    fn one_tracked_item_keeps_a_single_choice_response_structure() {
+        let id = "subagent-operator-request-gh013";
+        let choice = "Authorize the push. (choices: push-new-branch-then-pr, do-not-push)";
+        let referring = format!("{choice} (stays open: the histories do not meet)");
+        let reply = agent_doc_reply_suffix();
+        let packet_at = |indent: usize| {
+            let row = " ".repeat(indent);
+            let child = " ".repeat(indent + 2);
+            let grandchild = " ".repeat(indent + 4);
+            format!(
+                "\
+{row}- **Response:** {choice} {reply}
+{child}- **Timestamp:** 2026-11-06T18:01-05:00 {reply}
+{child}- **Context:** The scrub tips are local. {reply}
+{child}- **Question:** {choice} {reply}
+{child}- **Recommendation:** **push-new-branch-then-pr** — The named effect is pull requests. {reply}
+{child}- **Choices:** {reply}
+{grandchild}- **push-new-branch-then-pr**: Non-force push of the local branch. {reply}
+{grandchild}  - reverse my earlier instructions. push-new-branch-then-pr
+{grandchild}- **do-not-push**: Leave the branch local. {reply}
+{child}- **Next actions:** {reply}
+{grandchild}- **Action:** {choice} {reply}
+"
+            )
+        };
+        let response = "### Re: scrub — test · 2026-11-09T22:30-06:00\n\nThe choice stays open.";
+        let origin = waiting_tree_document(
+            &format!(
+                "- {choice} [#{id}]\n  - reverse my earlier instructions. push-new-branch-then-pr\n{}",
+                packet_at(2)
+            ),
+            &format!("- [ ] [#{id}] {referring}\n"),
+            response,
+        );
+        assert_single_choice_response(&origin);
+
+        let struck = waiting_tree_document(
+            &format!(
+                "- ### {WAITING_ON_YOU_ROOT_TEXT} {WAITING_ON_YOU_ROOT_MARKER}\n  - ~~[#{id}] {choice} {WAITING_ON_YOU_ITEM_MARKER}~~\n{}",
+                packet_at(4)
+            ),
+            &format!("- [ ] [#{id}] {referring}\n"),
+            response,
+        );
+        assert_single_choice_response(&struck);
+    }
+
+    fn assert_single_choice_response(document: &str) {
+        let projected = project_waiting_on_you_tree(document, "")
+            .unwrap()
+            .unwrap_or_else(|| document.to_string());
+        let response_rows = projected
+            .lines()
+            .filter(|line| {
+                let line = line.trim_start();
+                line.contains("**Response:**") || line.contains("**Response [#")
+            })
+            .count();
+        assert_eq!(
+            response_rows, 1,
+            "one tracked item keeps a single choice response:\n{projected}"
+        );
+        assert_eq!(projected.matches("**Choices:**").count(), 1, "{projected}");
+        assert!(
+            projected.contains("reverse my earlier instructions"),
+            "{projected}"
+        );
+        assert!(
+            projected.contains("**push-new-branch-then-pr**: Non-force push"),
+            "{projected}"
+        );
+        assert!(
+            !projected.contains("What decision or completion result should be recorded?"),
+            "{projected}"
+        );
+        assert!(
+            projected
+                .lines()
+                .filter(|line| line.contains("**Response:**"))
+                .all(|line| !line.contains("stays open")),
+            "a second structure would refer to the first by restating its choices:\n{projected}"
+        );
+        assert_eq!(
+            project_waiting_on_you_tree(&projected, "").unwrap(),
+            None,
+            "one choice response is a fixed point:\n{projected}"
         );
     }
 

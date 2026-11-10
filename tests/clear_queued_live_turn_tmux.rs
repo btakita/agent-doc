@@ -1806,8 +1806,9 @@ impl LiveClearScenario {
 
 /// `#managedipcdraftguard`: `agent-doc route` reaches an idle actor through
 /// supervisor IPC. The trigger must not be typed onto text the operator has not
-/// sent, and once the draft is gone the same route must get through: a refusal
-/// that left a dispatch receipt behind would swallow the rerun.
+/// sent. An unrelated draft is queued behind the owner and the route exits 0.
+/// Once the draft is gone the same route must get through: a refusal that left
+/// a dispatch receipt behind would swallow the rerun.
 #[test]
 #[ignore = "live tmux integration test; run `make tmux-ci`"]
 fn a_managed_route_types_nothing_onto_a_draft_and_the_rerun_delivers() {
@@ -1832,7 +1833,11 @@ fn a_managed_route_types_nothing_onto_a_draft_and_the_rerun_delivers() {
         scenario.composer_holds("fix the widget tests"),
         "{diagnostics}"
     );
-    assert!(!routed.status.success(), "{diagnostics}");
+    assert!(routed.status.success(), "{diagnostics}");
+    assert!(
+        stderr(&routed).contains("ui_outcome=queued_behind_owner"),
+        "{diagnostics}"
+    );
     assert!(
         stderr(&routed).contains("fix the widget tests"),
         "{diagnostics}"
@@ -1882,7 +1887,11 @@ fn a_managed_route_types_nothing_onto_a_wrapped_draft() {
         "{diagnostics}"
     );
     assert!(scenario.composer_holds(draft), "{diagnostics}");
-    assert!(!routed.status.success(), "{diagnostics}");
+    assert!(routed.status.success(), "{diagnostics}");
+    assert!(
+        stderr(&routed).contains("ui_outcome=queued_behind_owner"),
+        "{diagnostics}"
+    );
 }
 
 /// `#managedipcdraftguard`: the same route on Codex, under a status line no row
@@ -1910,7 +1919,11 @@ fn a_managed_codex_route_types_nothing_onto_a_draft_above_a_custom_status_line()
         Vec::<String>::new(),
         "{diagnostics}"
     );
-    assert!(!routed.status.success(), "{diagnostics}");
+    assert!(routed.status.success(), "{diagnostics}");
+    assert!(
+        stderr(&routed).contains("ui_outcome=queued_behind_owner"),
+        "{diagnostics}"
+    );
 }
 
 impl LiveClearScenario {
@@ -1989,7 +2002,11 @@ fn an_idle_plain_trigger_types_nothing_onto_a_wrapped_draft() {
         "{diagnostics}"
     );
     assert!(scenario.composer_holds(draft), "{diagnostics}");
-    assert!(!routed.status.success(), "{diagnostics}");
+    assert!(routed.status.success(), "{diagnostics}");
+    assert!(
+        stderr(&routed).contains("ui_outcome=queued_behind_owner"),
+        "{diagnostics}"
+    );
 }
 
 /// `#managedipcdraftguard`: supervisor IPC inherits the stranded-trigger repair

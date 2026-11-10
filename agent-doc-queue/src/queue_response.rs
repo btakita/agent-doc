@@ -2227,6 +2227,8 @@ pub fn response_defers_queue_head(content: &str, response_body: &str, head_text:
         return true;
     }
     latest_echo_cell_lacks_goal_final_state(content, response_body, head_text)
+        || crate::prompt_pressure::review_blocks_prompt(content, head_text)
+        || latest_echo_cell_needs_prompt_pressure(content, response_body, head_text)
 }
 
 /// `#goalpresetterminal`: true when `head_text` resolves to a `/goal` preset
@@ -2288,6 +2290,11 @@ fn block_opens_response_cell(block: &str) -> bool {
 /// The later of the two echoes is the current statement. An older deferral does
 /// not outrank a later answer, and a later vector deferral keeps the leaf queued.
 pub fn latest_queue_head_echo_is_deferral(content: &str, text: &str, head_text: &str) -> bool {
+    if crate::prompt_pressure::review_blocks_prompt(content, head_text)
+        || latest_echo_cell_needs_prompt_pressure(content, text, head_text)
+    {
+        return true;
+    }
     let text = direct_response_text(text);
     let mut heads = vec![head_text.to_string()];
     if let Some(vector) = nest_vector_in_document(content, head_text)
@@ -2305,6 +2312,44 @@ pub fn latest_queue_head_echo_is_deferral(content: &str, text: &str, head_text: 
     };
     deferral_scope_has_marker(&blocks, index)
         || latest_echo_cell_lacks_goal_final_state(content, &text, head_text)
+}
+
+/// `#promptpressure`: the latest echo of `head_text` is a prose blocker with no
+/// execution evidence, so striking the head would mark unfinished work done.
+/// A response that never echoes the head still defers when it is itself that
+/// prose blocker and carries no later response cell. A review structure and
+/// the one-line exchange pointer are not prose blockers; an open review item
+/// defers through [`crate::prompt_pressure::review_blocks_prompt`].
+fn latest_echo_cell_needs_prompt_pressure(content: &str, text: &str, head_text: &str) -> bool {
+    let text = direct_response_text(text);
+    let mut heads = vec![head_text.to_string()];
+    if let Some(vector) = nest_vector_in_document(content, head_text)
+        && nest_row_work_differs(&vector, head_text)
+    {
+        heads.push(vector);
+    }
+    let blocks: Vec<&str> = text.split("\n\n").collect();
+    if let Some(index) = blocks.iter().rposition(|block| {
+        heads
+            .iter()
+            .any(|head| block_quotes_free_text_head(block, head))
+    }) {
+        let mut cell = String::new();
+        for (offset, block) in blocks.iter().enumerate().skip(index) {
+            if offset != index && block_opens_response_cell(block) {
+                break;
+            }
+            if !cell.is_empty() {
+                cell.push_str("\n\n");
+            }
+            cell.push_str(block);
+        }
+        return crate::prompt_pressure::prose_blocker_needs_pressure(&cell);
+    }
+    if !text.contains("### Re:") && !text.contains("> **Queue prompt:**") {
+        return crate::prompt_pressure::prose_blocker_needs_pressure(&text);
+    }
+    false
 }
 
 fn nest_row_work_differs(vector: &str, head_text: &str) -> bool {
@@ -2549,6 +2594,28 @@ mod tests {
         "> - My free-text queue items are not immediately struck as if they are addressed.\n\n",
         "Triaged both.\n",
     );
+
+    #[test]
+    fn prompt_pressure_defers_a_prose_blocker_and_an_open_review() {
+        let head = "finish the widget";
+        let doc = active_queue_doc(head);
+        assert!(response_defers_queue_head(
+            &doc,
+            "Blocked. The widget export is unfinished.",
+            head,
+        ));
+        let evidence = "### Re: done\n\nFinished the widget.\n\nVerification:\n- `cargo test -p agent-doc-queue`\n";
+        assert!(!response_defers_queue_head(&doc, evidence, head));
+        let review = format!(
+            "{doc}<!-- agent:review -->\n<!-- agent-doc:prompt-blocker -->\n- [/] [#prompt-blocker-widget] unfinished\n  - **Complete by:** land the export\n  - **Prompt:** {head}\n<!-- /agent-doc:prompt-blocker -->\n<!-- /agent:review -->\n"
+        );
+        assert!(response_defers_queue_head(&review, evidence, head));
+        assert!(!response_defers_queue_head(
+            &review,
+            evidence,
+            "do the other thing",
+        ));
+    }
 
     fn active_queue_doc(head: &str) -> String {
         format!(

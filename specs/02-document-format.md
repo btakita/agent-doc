@@ -1113,7 +1113,9 @@ canonical managed components in this order: `agent:status`, `agent:worktrees`, `
 `agent:active`, `agent:run`,
 `agent:review`, `agent:todo`, `agent:backlog`, `agent:icebox`, `agent:notes`,
 `agent:done`, `agent:exchange`. The queue stays near status and the exchange is
-the final managed component. `agent:todo` carries bare `priority` by default.
+the final managed component. A prompt blocker (`#promptpressure`) is inserted at
+the front of `agent:review`, so the incomplete work and how to finish it sit
+ahead of `agent:exchange`. `agent:todo` carries bare `priority` by default.
 This order governs newly generated scaffolds and missing-component insertion
 when a command already has to repair structure. It never silently reorders an
 established, structurally valid document merely because that document uses the
@@ -1142,8 +1144,11 @@ cycle. If the item cannot complete, the response must communicate current
 evidence, the exact missing condition, the actor or system that must satisfy it,
 and the next action, while preserving or reclassifying the unfinished item.
 Claimed, dispatched, reported, status-only, and gated states are intermediate,
-not completion. This intent does not activate parked icebox work, reorder a
-queue, expand authorization, or bypass an operator gate.
+not completion. When the unfinished work is a prompt the worker cannot
+complete, the blocker is an open `agent:review` item in the `#promptpressure`
+structure, not a paragraph in `agent:exchange`. This intent does not activate
+parked icebox work, reorder a queue, expand authorization, or bypass an
+operator gate.
 
 **Operator-todo advisory.** When a closeout opens a human gate in
 `agent:review` (`--review-add`, `--backlog-add-gated`, or `--backlog-gate`) and

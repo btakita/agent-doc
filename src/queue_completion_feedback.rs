@@ -81,6 +81,115 @@ pub(crate) fn requeue_nonterminal_goal_hand_back(
     )
 }
 
+/// A prompt hand-back `queue report-complete` requeued instead of reporting
+/// (`#promptpressure`).
+#[derive(Debug)]
+pub(crate) struct PromptPressureRequeue {
+    pub claim: QueueClaim,
+    pub kind: agent_doc_queue::goal_preset_terminal::PromptPressureKind,
+    /// Set when the hand-back was a review structure.
+    pub review_id: Option<String>,
+    pub incomplete: String,
+    pub complete_by: String,
+}
+
+/// `#promptpressure`: before reporting, requeue a hand-back that does not
+/// finish the prompt. A review structure is hoisted to the front of
+/// `agent:review` first; the essay is not written into `agent:exchange`.
+/// `Ok(None)` means the ordinary report path applies: no live subagent claim,
+/// a goal hand-back that already opens on a declared final state, execution
+/// evidence, or a prose blocker that also delivered a repository result.
+pub(crate) fn requeue_prompt_pressure_hand_back(
+    file: &Path,
+    item: &str,
+    generation: Option<u64>,
+    response: &str,
+    delivered: bool,
+) -> Result<Option<PromptPressureRequeue>> {
+    let _lock = acquire_completion_lock(
+        file,
+        "report subagent completion",
+        COMPLETION_FEEDBACK_LOCK_WAIT,
+    )?;
+    let resolved =
+        agent_doc_document_realtime_io::try_resolve_current_document_content(file, SOURCE)?;
+    let current =
+        agent_doc_document_realtime_io::deferred_document_write_reconnect_content(file, &resolved)?
+            .unwrap_or(resolved);
+    let ledger = agent_doc_queue_io::queue_claim::load_ledger_following(file, &current)?;
+    let Some(claim) = ledger.resolve_selector(item)?.cloned() else {
+        return Ok(None);
+    };
+    if !claim.owner.starts_with("subagent:") {
+        return Ok(None);
+    }
+    let generation = generation.unwrap_or(claim.generation);
+    if generation != claim.generation {
+        anyhow::bail!(
+            "stale queue claim generation {generation}; current generation is {}",
+            claim.generation
+        );
+    }
+    let presets =
+        agent_doc_frontmatter_io::session::effective_prompt_presets_for_drain(&current, file);
+    let final_states = agent_doc_queue::goal_preset_terminal::head_final_states_with_presets(
+        &claim.item_text,
+        &presets,
+    );
+    if agent_doc_queue::goal_preset_terminal::hand_back_begins_with_final_state(
+        response,
+        &final_states,
+    ) {
+        return Ok(None);
+    }
+    if let Some(blocker) = agent_doc_queue::prompt_pressure::parse_prompt_blocker(response) {
+        let updated = agent_doc_queue::prompt_pressure::hoist_prompt_blocker(&current, &blocker);
+        if !updated.contains(&format!("[#{}]", blocker.id)) {
+            anyhow::bail!(
+                "prompt-blocker review #{} was not written into agent:review (#promptpressure)",
+                blocker.id
+            );
+        }
+        if updated != current {
+            publish_document_update(file, &current, &updated)?;
+        }
+        let pointer = agent_doc_queue::prompt_pressure::exchange_pointer(&blocker);
+        let claim = agent_doc_queue_io::goal_loop_handoff::requeue_with_prompt_pressure(
+            file,
+            &updated,
+            &claim,
+            Some(generation),
+            &pointer,
+            agent_doc_queue::goal_preset_terminal::PromptPressureKind::Review,
+        )?;
+        return Ok(Some(PromptPressureRequeue {
+            claim,
+            kind: agent_doc_queue::goal_preset_terminal::PromptPressureKind::Review,
+            review_id: Some(blocker.id),
+            incomplete: blocker.incomplete,
+            complete_by: blocker.complete_by,
+        }));
+    }
+    if delivered || !agent_doc_queue::prompt_pressure::prose_blocker_needs_pressure(response) {
+        return Ok(None);
+    }
+    let claim = agent_doc_queue_io::goal_loop_handoff::requeue_with_prompt_pressure(
+        file,
+        &current,
+        &claim,
+        Some(generation),
+        response,
+        agent_doc_queue::goal_preset_terminal::PromptPressureKind::Prose,
+    )?;
+    Ok(Some(PromptPressureRequeue {
+        claim,
+        kind: agent_doc_queue::goal_preset_terminal::PromptPressureKind::Prose,
+        review_id: None,
+        incomplete: String::new(),
+        complete_by: String::new(),
+    }))
+}
+
 /// `#harnessquotaexhausted`: record a worker that ran out of usage. The
 /// harness is the explicit one, else the one the notice names, else the
 /// claiming coordinator's: workers run on their coordinator's harness unless
@@ -1102,6 +1211,32 @@ pub(crate) fn print_stale_completion_scan(root: &Path) {
     );
 }
 
+fn publish_document_update(file: &Path, current: &str, updated: &str) -> Result<Option<String>> {
+    match changed_component_scope(current, updated) {
+        Some(scope) => publish_exchange_update(file, current, updated, scope),
+        None => {
+            // A new `agent:review` changes the component count, so the write
+            // is not a body edit. Keep the unscoped path.
+            if agent_doc_crdt_relay_io::crdt_authority_for_file(file).editor_attached() {
+                Ok(Some(
+                    agent_doc_document_realtime_io::retain_deferred_document_write_target(
+                        file,
+                        current,
+                        updated,
+                        SOURCE,
+                        agent_doc_document_realtime_io::DocumentWriteDeferredReason::EditorProjectionPending,
+                    )?,
+                ))
+            } else {
+                agent_doc_document_realtime_io::atomic_write_rebased_through_authority(
+                    file, current, updated, SOURCE,
+                )?;
+                Ok(None)
+            }
+        }
+    }
+}
+
 fn publish_exchange_update(
     file: &Path,
     current: &str,
@@ -1535,6 +1670,231 @@ mod tests {
         let reported = report_complete(&doc, ROW, Some(generation), None, None, clean)
             .expect("the final-state hand-back is reported normally");
         assert!(reported.appended);
+    }
+
+    fn start_subagent(doc: &Path, row: &str, owner: &str) {
+        agent_doc_queue_io::queue_claim::claim(doc, row, owner, 600).unwrap();
+        agent_doc_queue_io::queue_claim::start_attempt(
+            doc,
+            row,
+            owner,
+            &format!("worker:{owner}"),
+            600,
+            1,
+        )
+        .unwrap();
+    }
+
+    /// `#promptpressure`: a prose blocker is not a completion. The same row
+    /// stays open, no exchange essay is written, and the next brief quotes the
+    /// hand-back as data.
+    #[test]
+    fn prose_blocker_hand_back_requeues_without_an_exchange_essay() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("work.md");
+        fs::write(
+            &doc,
+            concat!(
+                "---\nagent_doc_session: sample-work\nagent_doc_format: template\n---\n\n",
+                "<!-- agent:queue -->\n",
+                "- finish the widget\n",
+                "<!-- /agent:queue -->\n\n",
+                "<!-- agent:exchange patch=append -->\n",
+                "### Re: prior — gpt-5\n\nDone.\n",
+                "<!-- agent:boundary:keep -->\n",
+                "<!-- /agent:exchange -->\n",
+            ),
+        )
+        .unwrap();
+        const ROW: &str = "finish the widget";
+        start_subagent(&doc, ROW, "subagent:widget");
+        let blocked = "Blocked. The widget export is unfinished because the signing key is absent.";
+        let pressure = requeue_prompt_pressure_hand_back(&doc, ROW, Some(1), blocked, false)
+            .unwrap()
+            .expect("a prose blocker does not complete the prompt");
+        assert_eq!(
+            pressure.kind,
+            agent_doc_queue::goal_preset_terminal::PromptPressureKind::Prose
+        );
+        let content = fs::read_to_string(&doc).unwrap();
+        assert!(!content.contains("signing key"), "{content}");
+        assert!(!content.contains("### Re: Subagent completed"), "{content}");
+        assert!(!content.contains("~~"), "{content}");
+        assert_eq!(
+            content.matches("- finish the widget").count(),
+            1,
+            "{content}"
+        );
+        let (outcome, _) =
+            agent_doc_queue_io::queue_claim::claim(&doc, ROW, "subagent:widget-2", 600)
+                .expect("the requeued row is dispatchable again");
+        assert_eq!(
+            outcome,
+            agent_doc_queue::queue_claim::ClaimOutcome::Reassigned
+        );
+        let brief =
+            agent_doc_queue_io::subagent_dispatch::subagent_authorization_for_item(&doc, ROW)
+                .unwrap();
+        assert!(
+            brief
+                .subagent_prompt_preamble
+                .contains("Prior prompt attempt")
+        );
+        assert!(
+            brief
+                .subagent_prompt_preamble
+                .contains("> Blocked. The widget export is unfinished")
+        );
+        assert!(brief.subagent_prompt_preamble.contains("#promptpressure"));
+    }
+
+    /// A repository delivery is an ordinary report even when the prose leads
+    /// with Blocked. A goal `BLOCKED` line is a final state, not prompt pressure.
+    #[test]
+    fn prompt_pressure_leaves_a_delivery_and_a_goal_final_state_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        fs::write(
+            dir.path().join(".agent-doc/project.md"),
+            concat!(
+                "---\npresets:\n",
+                "  '#adversarial-pr': >-\n",
+                "    /goal Bring the pull request to an independently review-clean exact\n",
+                "    remote head.\n\n",
+                "    Final states. Your final message must begin with exactly one of these\n",
+                "    lines:\n",
+                "    - `REVIEW-CLEAN <final review URL> base=<sha> head=<sha> cycles=<n>`.\n",
+                "    - `BLOCKED <single operator action> base=<sha> head=<sha> cycles=<n>`.\n",
+                "---\n",
+            ),
+        )
+        .unwrap();
+        let doc = dir.path().join("prs.md");
+        const ROW: &str = "https://github.com/sample-org/sample-repo/pull/12: #adversarial-pr";
+        fs::write(
+            &doc,
+            format!(
+                "---\nagent_doc_session: sample-prs\nagent_doc_format: template\n---\n\n<!-- agent:queue -->\n- {ROW}\n<!-- /agent:queue -->\n"
+            ),
+        )
+        .unwrap();
+        start_subagent(&doc, ROW, "subagent:pr12");
+        let blocked = "BLOCKED the signing key is absent base=aaaa111 head=bbbb222 cycles=1";
+        assert!(
+            requeue_prompt_pressure_hand_back(&doc, ROW, Some(1), blocked, false)
+                .unwrap()
+                .is_none(),
+            "a goal BLOCKED line is a final state"
+        );
+        let prose = "Blocked. The export is unfinished because the signing key is absent.";
+        assert!(
+            requeue_prompt_pressure_hand_back(&doc, ROW, Some(1), prose, true)
+                .unwrap()
+                .is_none(),
+            "a delivered repository result stays on the ordinary report path"
+        );
+        let ledger = agent_doc_queue_io::queue_claim::load_ledger(&doc).unwrap();
+        assert!(
+            ledger
+                .claims
+                .iter()
+                .any(|claim| claim.owner == "subagent:pr12" && claim.state.blocks_dispatch()),
+            "{ledger:?}"
+        );
+    }
+
+    /// `#promptpressure`: the review structure is hoisted to the front of
+    /// `agent:review`. The essay stays out of exchange, and claim refuses the
+    /// named row until that review is resolved.
+    #[test]
+    fn review_structure_hand_back_is_hoisted_and_blocks_claim() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("work.md");
+        fs::write(
+            &doc,
+            concat!(
+                "---\nagent_doc_session: sample-work\nagent_doc_format: template\n---\n\n",
+                "<!-- agent:queue -->\n",
+                "- finish the widget\n",
+                "- ship the other crate\n",
+                "<!-- /agent:queue -->\n\n",
+                "<!-- agent:review -->\n",
+                "- [/] [#other] Keep me\n",
+                "<!-- /agent:review -->\n\n",
+                "<!-- agent:exchange patch=append -->\n",
+                "### Re: prior — gpt-5\n\nDone.\n",
+                "<!-- agent:boundary:keep -->\n",
+                "<!-- /agent:exchange -->\n",
+            ),
+        )
+        .unwrap();
+        const ROW: &str = "finish the widget";
+        start_subagent(&doc, ROW, "subagent:widget");
+        let response = concat!(
+            "The export cannot land until the signing key is present.\n\n",
+            "<!-- agent-doc:prompt-blocker -->\n",
+            "- [/] [#prompt-blocker-widget] The widget export is unfinished\n",
+            "  - **Complete by:** land the export commit on fix/widget\n",
+            "  - **Prompt:** finish the widget\n",
+            "<!-- /agent-doc:prompt-blocker -->\n",
+        );
+        let pressure = requeue_prompt_pressure_hand_back(&doc, ROW, Some(1), response, true)
+            .unwrap()
+            .expect("a review structure is hoisted even when a repository result was delivered");
+        assert_eq!(
+            pressure.kind,
+            agent_doc_queue::goal_preset_terminal::PromptPressureKind::Review
+        );
+        assert_eq!(pressure.review_id.as_deref(), Some("prompt-blocker-widget"));
+        let content = fs::read_to_string(&doc).unwrap();
+        assert!(
+            content.contains("<!-- agent-doc:prompt-blocker -->"),
+            "{content}"
+        );
+        assert!(
+            content.find("[#prompt-blocker-widget]").unwrap() < content.find("[#other]").unwrap(),
+            "{content}"
+        );
+        assert!(
+            content.find("<!-- agent:review -->").unwrap()
+                < content.find("<!-- agent:exchange").unwrap(),
+            "{content}"
+        );
+        assert!(!content.contains("signing key"), "{content}");
+        assert!(!content.contains("### Re: Subagent completed"), "{content}");
+        assert!(!content.contains("~~"), "{content}");
+        assert_eq!(
+            content.matches("- finish the widget\n").count(),
+            1,
+            "{content}"
+        );
+        let refused = agent_doc_queue_io::queue_claim::claim(&doc, ROW, "subagent:widget-2", 600)
+            .expect_err("the open review blocks the claim");
+        let refused = refused.to_string();
+        assert!(refused.contains("#promptpressure"), "{refused}");
+        assert!(refused.contains("prompt-blocker-widget"), "{refused}");
+        assert!(
+            refused.contains("land the export commit on fix/widget"),
+            "{refused}"
+        );
+        agent_doc_queue_io::queue_claim::claim(&doc, "ship the other crate", "subagent:other", 600)
+            .expect("a different row stays claimable");
+        let brief =
+            agent_doc_queue_io::subagent_dispatch::subagent_authorization_for_item(&doc, ROW)
+                .unwrap();
+        assert!(
+            brief
+                .subagent_prompt_preamble
+                .contains("Prior prompt attempt")
+        );
+        assert!(
+            brief
+                .subagent_prompt_preamble
+                .contains("review #prompt-blocker-widget")
+        );
+        assert!(!brief.subagent_prompt_preamble.contains("signing key"));
     }
 
     /// `#handbackrefusedcommandexact`: the report line's refused-placement

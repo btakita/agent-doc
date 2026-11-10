@@ -10310,6 +10310,46 @@ fn try_main() -> anyhow::Result<()> {
                         agent_doc_queue::subagent_pool::PoolRefillTrigger::Release,
                     );
                     Ok(())
+                } else if let Some(pressure) =
+                    queue_completion_feedback::requeue_prompt_pressure_hand_back(
+                        &file, &item, generation, &response, delivered,
+                    )?
+                {
+                    let queue_effects = CliQueueCommandEffects;
+                    agent_doc_queue_io::queue_cmd::project_claim_runtime_state_with_effects(
+                        &queue_effects,
+                        &file,
+                        Some(pressure.claim.item_text.as_str()),
+                    )?;
+                    if pressure.kind
+                        == agent_doc_queue::goal_preset_terminal::PromptPressureKind::Review
+                    {
+                        eprintln!(
+                            "[queue] prompt hand-back for {:?} (owner {}, generation {}) returned review #{} and was hoisted to the front of agent:review (#promptpressure). The incomplete work is: {}. Complete by: {}. The row stays open and is not dispatchable until that review is resolved. Do not dispatch this row.",
+                            pressure.claim.item_text,
+                            pressure.claim.owner,
+                            pressure.claim.generation,
+                            pressure.review_id.as_deref().unwrap_or(""),
+                            pressure.incomplete,
+                            pressure.complete_by,
+                        );
+                    } else {
+                        eprintln!(
+                            "[queue] prompt hand-back for {:?} (owner {}, generation {}) does not complete the prompt; the row stays open and the attempt was requeued, so it is dispatchable again (#promptpressure). Next: {} and dispatch the same row. Finish the prompt, or return only the review structure. A prose blocker in agent:exchange does not complete the prompt.",
+                            pressure.claim.item_text,
+                            pressure.claim.owner,
+                            pressure.claim.generation,
+                            agent_doc_queue_io::subagent_dispatch::claim_command(
+                                &file.display().to_string(),
+                                &pressure.claim.item_text,
+                            ),
+                        );
+                    }
+                    emit_subagent_pool_refill(
+                        &file,
+                        agent_doc_queue::subagent_pool::PoolRefillTrigger::Release,
+                    );
+                    Ok(())
                 } else {
                     let has_repository_result = publication_state.is_some()
                         || source_repo.is_some()

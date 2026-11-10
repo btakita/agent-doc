@@ -720,6 +720,7 @@ fn claim_next_shared_leaf(
     let now = now_secs();
     let owner_session_for_claim = owner_session.clone();
     let worker_harness = worker_harness.map(str::to_string);
+    let review_text = claim_view_text(file)?;
     let result = mutate_ledger(file, |ledger| {
         let chosen = prepared
             .iter()
@@ -730,6 +731,12 @@ fn claim_next_shared_leaf(
                     .any(|claim| claim.identity == item.identity && claim.blocks_dispatch(now))
             })
             .unwrap_or(&prepared[0]);
+        if let Some(blocker) = agent_doc_queue::prompt_pressure::open_review_blocking_prompt(
+            &review_text,
+            &chosen.target,
+        ) {
+            refuse_open_prompt_review(&chosen.target, &blocker)?;
+        }
         refuse_claim_on_exhausted_harness(
             file,
             ledger,
@@ -771,6 +778,33 @@ fn claim_next_shared_leaf(
         .filter(|head| claim_identity(head) == result.1.identity)
         .count();
     persist_claim_result(file, result, occurrences)
+}
+
+/// The claim view: the editor cut when one is attached, otherwise disk.
+fn claim_view_text(file: &Path) -> Result<String> {
+    if let Some(text) = editor_authority_text(file, "queue_claim") {
+        return Ok(text);
+    }
+    std::fs::read_to_string(file)
+        .with_context(|| format!("read {} to check an open prompt review", file.display()))
+}
+
+/// `#promptpressure`: an open review item whose `**Prompt:**` line is `target`
+/// is incomplete work. Claiming it would dispatch the row the review is holding.
+fn refuse_open_prompt_review(
+    target: &str,
+    blocker: &agent_doc_queue::prompt_pressure::PromptBlocker,
+) -> Result<()> {
+    let complete_by = if blocker.complete_by.trim().is_empty() {
+        format!("resolve review #{} and finish the prompt", blocker.id)
+    } else {
+        blocker.complete_by.clone()
+    };
+    bail!(
+        "queue claim refused: {target:?} is blocked by open review #{}: {}. Complete by: {complete_by}. Do not dispatch this row until that review is resolved (#promptpressure).",
+        blocker.id,
+        blocker.incomplete
+    )
 }
 
 /// `#harnessquotaexhausted`: every subagent dispatch passes through a claim,
@@ -1025,6 +1059,15 @@ pub fn claim_with_session_for_worker_harness(
     // never a bare string: the CLI reports it as-is instead of wrapping it in
     // the generic turn-failure notice.
     let (target, heads) = resolve_live_claim_target(file, item, "queue_claim")?;
+    // `#promptpressure`: refuse before the ledger write. An open review item
+    // naming this head is the operator-facing blocker, so the row stays
+    // unclaimed until that review is resolved.
+    let review_text = claim_view_text(file)?;
+    if let Some(blocker) =
+        agent_doc_queue::prompt_pressure::open_review_blocking_prompt(&review_text, &target)
+    {
+        refuse_open_prompt_review(&target, &blocker)?;
+    }
     // The nest vector stored as `item_text` has no sub-prompt block. Keep the
     // expanded row, children included, so later siblings still split
     // (`#nestedclaimsteer`, `#nestlistlineage`).

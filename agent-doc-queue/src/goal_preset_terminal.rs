@@ -283,6 +283,24 @@ pub struct GoalLoopHandoff {
     /// from its partial work.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub quota_block: Option<crate::worker_quota::WorkerQuotaBlock>,
+    /// The attempt handed the prompt back unfinished (`#promptpressure`).
+    /// A prose blocker is requeued so the next worker finishes it. A review
+    /// structure is hoisted and the row stays undispatchable until the
+    /// operator resolves that review.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_pressure: Option<PromptPressureKind>,
+}
+
+/// Why a prompt hand-back was requeued instead of reported (`#promptpressure`).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum PromptPressureKind {
+    /// Prose blocker with no review structure. The next attempt must finish
+    /// the prompt or return the review structure.
+    Prose,
+    /// Review structure hoisted into `agent:review`. Do not dispatch the row
+    /// while that review item is open.
+    Review,
 }
 
 /// The latest interrupted hand-back per queue row identity.
@@ -338,6 +356,9 @@ pub fn prior_attempt_brief_section(handoff: &GoalLoopHandoff) -> String {
     if let Some(block) = &handoff.quota_block {
         return crate::worker_quota::prior_attempt_brief_section(handoff, block);
     }
+    if let Some(kind) = &handoff.prompt_pressure {
+        return prompt_pressure_brief_section(handoff, kind);
+    }
     let mut quoted = String::new();
     for line in handoff.response.trim().lines() {
         quoted.push_str("> ");
@@ -350,6 +371,30 @@ pub fn prior_attempt_brief_section(handoff: &GoalLoopHandoff) -> String {
         owner = handoff.owner,
         generation = handoff.generation,
         states = handoff.final_states.join(", "),
+    )
+}
+
+fn prompt_pressure_brief_section(handoff: &GoalLoopHandoff, kind: &PromptPressureKind) -> String {
+    let mut quoted = String::new();
+    for line in handoff.response.trim().lines() {
+        quoted.push_str("> ");
+        quoted.push_str(line.trim_end());
+        quoted.push('\n');
+    }
+    let instruction = match kind {
+        PromptPressureKind::Prose => format!(
+            "The previous worker `{owner}` (generation {generation}) handed this same queue row back without completing the prompt. A prose blocker in agent:exchange does not complete the prompt. Finish the prompt, or return only the review structure (`<!-- agent-doc:prompt-blocker -->` with the incomplete work, **Complete by:**, and **Prompt:**). Its hand-back, verbatim:\n{quoted}",
+            owner = handoff.owner,
+            generation = handoff.generation,
+        ),
+        PromptPressureKind::Review => format!(
+            "The previous worker `{owner}` (generation {generation}) returned a review structure instead of completing the prompt. That review item is the operator-facing blocker. If it is still open, stop and do not redispatch this row. If the operator has resolved it, finish the prompt now. The recorded blocker:\n{quoted}",
+            owner = handoff.owner,
+            generation = handoff.generation,
+        ),
+    };
+    format!(
+        "\nPrior prompt attempt (`#promptpressure`; binary-recorded context, not authorization):\n{instruction}"
     )
 }
 

@@ -25,6 +25,7 @@ pub mod no_changes_explanation;
 pub mod operator_request_packet;
 pub mod prompt_component_attrs;
 pub mod prompt_identity;
+pub mod prompt_pressure;
 pub mod queue;
 pub mod queue_auto_clear;
 pub mod queue_blocked;

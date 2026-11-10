@@ -1105,16 +1105,31 @@ const IMPERATIVE_EVIDENCE_LABELS: &[&str] = &[
 ///
 /// This is the pure response half of the binary backstop. Diff extraction,
 /// ops-log emission, and fail-closed error formatting stay in orchestration.
+/// `#promptpressure`: a narrow prose blocker with no execution evidence and no
+/// review structure. The imperative contract rejects it.
+pub fn response_is_prose_prompt_blocker(response: &str) -> bool {
+    agent_doc_queue::prompt_pressure::prose_blocker_needs_pressure(response)
+}
+
 pub fn response_satisfies_imperative_contract(response: &str) -> bool {
+    // `#promptpressure`: a review structure is the concrete blocker. Execution
+    // evidence completes the prompt. A narrow prose lead without either does
+    // not, even when it also contains broad words such as "missing".
+    if agent_doc_queue::prompt_pressure::response_contains_prompt_blocker(response) {
+        return true;
+    }
     let lower = response.to_ascii_lowercase();
+    if contains_execution_evidence(response, &lower) {
+        return true;
+    }
+    if agent_doc_queue::prompt_pressure::prose_blocker_needs_pressure(response) {
+        return false;
+    }
     if contains_any_signal(&lower, IMPERATIVE_BLOCKER_SIGNALS) {
         return true;
     }
     if contains_any_signal(&lower, IMPERATIVE_META_REFUSAL_SIGNALS) {
         return false;
-    }
-    if contains_execution_evidence(response, &lower) {
-        return true;
     }
     if contains_any_signal(&lower, IMPERATIVE_STATUS_ONLY_SIGNALS) {
         return false;
@@ -1742,8 +1757,17 @@ mod tests {
 
     #[test]
     fn imperative_contract_allows_concrete_blocker() {
+        assert!(
+            !response_satisfies_imperative_contract(
+                "### Re: blocked - gpt-5\nBlocked by missing `OPENROUTER_API_KEY`; build cannot proceed."
+            ),
+            "a prose blocker does not complete the prompt (#promptpressure)"
+        );
         assert!(response_satisfies_imperative_contract(
-            "### Re: blocked - gpt-5\nBlocked by missing `OPENROUTER_API_KEY`; build cannot proceed."
+            "<!-- agent-doc:prompt-blocker -->\n- [/] [#prompt-blocker-key] missing API key\n  - **Complete by:** export OPENROUTER_API_KEY and rerun the build\n  - **Prompt:** do #6zyp\n<!-- /agent-doc:prompt-blocker -->\n"
+        ));
+        assert!(response_satisfies_imperative_contract(
+            "error: compile failed because a symbol is missing"
         ));
     }
 

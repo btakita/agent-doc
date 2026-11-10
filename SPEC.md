@@ -1,6 +1,7 @@
 # agent-doc Functional Specification
 
 - Subagent build concurrency is binary-owned (`#buildconcurrencygate`): workers run heavy verification through `agent-doc build-slot -- <command...>` (machine-wide flock slots, one per 8 cores, fewer under load), and every worker brief names that command. See [Core Commands: build-slot](specs/07-core-commands.md#build-slot).
+- An unfinished prompt is not completion (`#promptpressure`). A prose blocker is requeued the way an unfinished `/goal` hand-back is. A real blocker is the `agent:review` structure naming the incomplete work, **Complete by:**, and **Prompt:**, kept ahead of `agent:exchange`. While that review item is open the prompt is not dispatched. See [Orchestration](specs/07-orchestration-commands.md).
 - Agent-doc worktree setup uses the paired layout (`#worktreetmuxrouterskew`). A checkout placed directly under `~/worktrees` resolves `path = "../tmux-router"` (and a nested crate's `../../tmux-router`) to the shared `~/worktrees/tmux-router` checkout. Setup places `<parent>/<label>/agent-doc` beside a private `<parent>/<label>/tmux-router` instead, and does not refresh or move the shared checkout. `self-install` refuses a build worktree that would resolve that shared path. See [Orchestration](specs/07-orchestration-commands.md).
 - Queue identity and lifecycle maintenance is structurally in-place
   (`#queue-tree-structure-invariant`). Replacing free text with a backlog id,

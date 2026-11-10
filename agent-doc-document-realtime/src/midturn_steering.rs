@@ -2733,6 +2733,9 @@ pub fn queue_component_subagent_heads_with_facts(
             agent_doc_document::queue_projection::operator_action_ids(&item.raw).is_empty()
         })
         .filter(|item| !facts.blockers.blocks_row(&item.norm))
+        // `#promptpressure`: a free-text head held by an open review item is
+        // not a worker head until the operator resolves that review.
+        .filter(|item| !agent_doc_queue::prompt_pressure::review_blocks_prompt(content, &item.raw))
         // `#queueoperatoranswer`: an operator answer row goes to the worker that asked.
         .filter(|item| !facts.answer_rows.holds_from_dispatch(&item.raw))
         .map(|item| item.head.clone())

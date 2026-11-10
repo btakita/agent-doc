@@ -83,6 +83,12 @@ pub fn enforce_imperative_response_contract_for_diff(
             trigger
         ),
     );
+    if agent_doc_turn::response_text::response_is_prose_prompt_blocker(response) {
+        anyhow::bail!(
+            "imperative document directive requires concrete execution evidence or a concrete blocker; rejected status-only/meta response for `{}`. Finish the prompt, or return only the review structure (`<!-- agent-doc:prompt-blocker -->` with the incomplete work, **Complete by:**, and **Prompt:**). A prose blocker in agent:exchange does not complete the prompt (#promptpressure).",
+            trigger
+        );
+    }
     anyhow::bail!(
         "imperative document directive requires concrete execution evidence or a concrete blocker; rejected status-only/meta response for `{}`",
         trigger
@@ -195,12 +201,25 @@ mod imperative_contract_tests {
     fn imperative_contract_allows_concrete_blocker() {
         let file = Path::new("session.md");
         let diff = "--- snapshot\n+++ document\n@@ -1 +1,2 @@\n ctx\n+do #6zyp. run tests. build + install. commit + push\n";
-        enforce_imperative_response_contract_for_diff(
+        let err = enforce_imperative_response_contract_for_diff(
             file,
             diff,
             "### Re: blocked — gpt-5\nBlocked by missing `OPENROUTER_API_KEY`; build cannot proceed.",
         )
-        .expect("blocker response should be accepted");
+        .expect_err("a prose blocker does not complete the prompt");
+        assert!(
+            err.to_string().contains(
+                "imperative document directive requires concrete execution evidence or a concrete blocker"
+            ),
+            "{err}"
+        );
+        assert!(err.to_string().contains("#promptpressure"), "{err}");
+        enforce_imperative_response_contract_for_diff(
+            file,
+            diff,
+            "<!-- agent-doc:prompt-blocker -->\n- [/] [#prompt-blocker-key] missing API key\n  - **Complete by:** export OPENROUTER_API_KEY and rerun the build\n  - **Prompt:** do #6zyp\n<!-- /agent-doc:prompt-blocker -->\n",
+        )
+        .expect("a review structure is the concrete blocker");
     }
 
     #[test]

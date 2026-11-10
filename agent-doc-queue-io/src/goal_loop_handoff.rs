@@ -197,6 +197,7 @@ pub fn requeue_nonterminal_hand_back(
         response: response.trim().to_string(),
         recorded_at_secs: now_secs(),
         quota_block: None,
+        prompt_pressure: None,
     };
     mutate(file, |ledger| {
         if let Some(live) = live.as_ref() {
@@ -228,6 +229,63 @@ pub fn requeue_nonterminal_hand_back(
     }))
 }
 
+/// `#promptpressure`: record an unfinished prompt hand-back and requeue the
+/// exact attempt. `stored_response` is what the next brief quotes: the prose
+/// hand-back, or the one-line review pointer. No completion cell is written.
+pub fn requeue_with_prompt_pressure(
+    file: &Path,
+    content: &str,
+    claim: &QueueClaim,
+    generation: Option<u64>,
+    stored_response: &str,
+    kind: agent_doc_queue::goal_preset_terminal::PromptPressureKind,
+) -> Result<QueueClaim> {
+    let generation = generation.unwrap_or(claim.generation);
+    if generation != claim.generation {
+        anyhow::bail!(
+            "stale queue claim generation {generation}; current generation is {}",
+            claim.generation
+        );
+    }
+    let live = agent_doc_queue::queue_continuation::live_queue_head_identities(content);
+    let handoff = GoalLoopHandoff {
+        identity: claim.identity.clone(),
+        item_text: claim.item_text.clone(),
+        owner: claim.owner.clone(),
+        worker_id: claim.worker.as_ref().map(|worker| worker.worker_id.clone()),
+        generation: claim.generation,
+        final_states: Vec::new(),
+        response: stored_response.trim().to_string(),
+        recorded_at_secs: now_secs(),
+        quota_block: None,
+        prompt_pressure: Some(kind.clone()),
+    };
+    mutate(file, |ledger| {
+        if let Some(live) = live.as_ref() {
+            ledger.retain_live(live);
+        }
+        ledger.record(handoff);
+    })?;
+    let requeued = crate::claim_release_receipt::release_attempt(
+        file,
+        &claim.item_text,
+        crate::claim_release_receipt::ReleaseKind::Requeue,
+        Some(claim.generation),
+    )?
+    .unwrap_or_else(|| claim.clone());
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "queue_prompt_pressure_requeued owner={} generation={} kind={kind:?} response_bytes={} item_bytes={} (#promptpressure)",
+            requeued.owner,
+            requeued.generation,
+            stored_response.trim().len(),
+            requeued.item_text.trim().len(),
+        ),
+    );
+    Ok(requeued)
+}
+
 /// Record an explicitly requeued quota-blocked attempt, so the next worker's
 /// brief names its partial branch and worktree (`#harnessquotaexhausted`).
 pub fn record_quota_requeue(file: &Path, claim: &QueueClaim) -> Result<()> {
@@ -244,6 +302,7 @@ pub fn record_quota_requeue(file: &Path, claim: &QueueClaim) -> Result<()> {
         response: block.evidence.clone(),
         recorded_at_secs: now_secs(),
         quota_block: Some(block),
+        prompt_pressure: None,
     };
     mutate(file, |ledger| ledger.record(handoff))
 }

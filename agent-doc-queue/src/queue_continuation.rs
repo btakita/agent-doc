@@ -902,6 +902,7 @@ fn eligible_head_prompt_from_entries(
 ) -> Option<QueuePrompt> {
     let open_backlog = open_backlog_ids_from_content(content);
     let deferred_ids = deferred_backlog_ids_split(content, scope);
+    let review_blocked = crate::prompt_pressure::review_blocked_prompts(content);
     first_drainable_head(
         entries,
         open_backlog.as_ref(),
@@ -910,6 +911,7 @@ fn eligible_head_prompt_from_entries(
         preset_only,
         preset_supplies_directive,
         scope,
+        &review_blocked,
     )
     .cloned()
 }
@@ -1318,6 +1320,7 @@ pub fn drainable_head_count_for_owner(
     let deferred_ids = deferred_backlog_ids_split(content, DrainScope::InSessionLoop);
     let after_deps = after_deps_from_content(content);
     let preset_only = preset_only_identity_ids_with_presets(content, presets);
+    let review_blocked = crate::prompt_pressure::review_blocked_prompts(content);
     let entries = &activation.entries_after;
     document_queue::executable_prompt_indexes(entries)
         .into_iter()
@@ -1335,6 +1338,7 @@ pub fn drainable_head_count_for_owner(
                 &preset_only,
                 queue_facts.preset_supplies_directive,
                 DrainScope::InSessionLoop,
+                &review_blocked,
             )
         })
         .count()
@@ -1707,6 +1711,7 @@ fn active_queue_for_supervisor_start_excluding_claimed(
     Some((queue_facts, activation))
 }
 
+#[allow(clippy::too_many_arguments)] // the review-blocked set is precomputed once per document
 fn first_drainable_head<'a>(
     entries_after: &'a [QueueEntry],
     open_backlog_ids: Option<&HashSet<String>>,
@@ -1715,6 +1720,7 @@ fn first_drainable_head<'a>(
     preset_only_ids: &HashSet<String>,
     preset_supplies_directive: bool,
     scope: DrainScope,
+    review_blocked: &HashSet<String>,
 ) -> Option<&'a QueuePrompt> {
     document_queue::prompts(entries_after)
         .into_iter()
@@ -1727,10 +1733,12 @@ fn first_drainable_head<'a>(
                 preset_only_ids,
                 preset_supplies_directive,
                 scope,
+                review_blocked,
             )
         })
 }
 
+#[allow(clippy::too_many_arguments)] // the review-blocked set is precomputed once per document
 fn head_is_drainable(
     text: &str,
     open_backlog_ids: Option<&HashSet<String>>,
@@ -1739,6 +1747,7 @@ fn head_is_drainable(
     preset_only_ids: &HashSet<String>,
     preset_supplies_directive: bool,
     scope: DrainScope,
+    review_blocked: &HashSet<String>,
 ) -> bool {
     // Stable `[#q-…]` prompt ids identify free-text queue nodes; they are not
     // tracked-work ids and must not change the prompt's execution semantics.
@@ -1746,6 +1755,12 @@ fn head_is_drainable(
     // stripping helper.
     let text = agent_doc_element_queue::strip_queue_prompt_stable_id_annotation(text);
     let text = text.as_str();
+    // `#promptpressure`: an open review item whose **Prompt:** line is this
+    // head is incomplete work. It stays visible and undrainable until the
+    // operator resolves that review.
+    if review_blocked.contains(&crate::prompt_pressure::normalize_prompt_text(text)) {
+        return false;
+    }
     // `🙋 [#id]` is an orthogonal local projection of an open operator todo.
     // The row remains visible in place, but no agent drain scope may dispatch
     // it until completing that same-id todo clears the annotation.
@@ -2380,6 +2395,25 @@ mod tests {
                 &claim(&["do [#a]", "do [#b]"])
             ),
             None
+        );
+    }
+
+    /// `#promptpressure`: an open review item holds its **Prompt:** head out of
+    /// the drain. Marking that item done releases the head.
+    #[test]
+    fn open_prompt_review_keeps_the_matching_head_undrainable() {
+        let open = "<!-- agent:queue -->\n- finish the widget\n- do the other thing\n<!-- /agent:queue -->\n\
+            <!-- agent:review -->\n<!-- agent-doc:prompt-blocker -->\n- [/] [#prompt-blocker-widget] unfinished\n  \
+            - **Complete by:** land the export\n  - **Prompt:** finish the widget\n\
+            <!-- /agent-doc:prompt-blocker -->\n<!-- /agent:review -->\n";
+        assert_eq!(
+            pending_head_prompt_text(open, DrainScope::InSessionLoop).as_deref(),
+            Some("do the other thing")
+        );
+        let resolved = open.replace("[/]", "[x]");
+        assert_eq!(
+            pending_head_prompt_text(&resolved, DrainScope::InSessionLoop).as_deref(),
+            Some("finish the widget")
         );
     }
 

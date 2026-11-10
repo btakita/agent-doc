@@ -873,6 +873,26 @@ tokens and enforces them; this replaces steps 2–3 above for that row:
    as "looks clean" keeps the row live. `**Deferred:**` and the other deferral
    guards still veto a final-state line.
 
+**An unfinished prompt stays open (`#promptpressure`).** A hand-back that does
+not finish the prompt is not done. A prose blocker in `agent:exchange` does not
+complete it: `queue report-complete` requeues the same row, and the next worker
+must finish the prompt or return only the review structure. A real blocker is
+that structure, hoisted to the front of `agent:review`, which the default
+template places ahead of `agent:exchange`:
+
+```
+<!-- agent-doc:prompt-blocker -->
+- [/] [#<id>] <incomplete work, one line>
+  - **Complete by:** <exact step that finishes the work>
+  - **Prompt:** <exact one-line queue prompt>
+<!-- /agent-doc:prompt-blocker -->
+```
+
+The incomplete work and how to finish it are the review item. Do not bury them
+in exchange prose. While the item is open the row stays visible and is not
+dispatched; claim refuses it. Mark the review item done to release the row,
+then finish the prompt.
+
 An in-progress marker on a free-text head records selection, not completion
 (`#bugautostruck`). It never replaces the exact `> **Queue prompt:**` evidence.
 If the response does not actually quote and answer that head, closeout must leave

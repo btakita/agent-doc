@@ -551,6 +551,7 @@ mod tests {
             response: String::new(),
             recorded_at_secs: NOW,
             quota_block: Some(block(Some("claude"))),
+            prompt_pressure: None,
         };
         let section = crate::goal_preset_terminal::prior_attempt_brief_section(&handoff);
         assert!(section.contains("branch `fix/partial`"), "{section}");

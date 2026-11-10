@@ -77,7 +77,10 @@ pub fn merge_exchange_nodes(_base: &str, ours: &str, theirs: &str) -> String {
         .collect();
 
     if agent_new.is_empty() {
-        return render_exchange_nodes(&theirs_nodes);
+        return agent_doc_markdown_ast::exchange_tree::apply_missing_response_heading_ids(
+            &render_exchange_nodes(&theirs_nodes),
+            ours,
+        );
     }
 
     // Insert appended turns before a trailing boundary marker carried by theirs'
@@ -100,7 +103,7 @@ pub fn merge_exchange_nodes(_base: &str, ours: &str, theirs: &str) -> String {
 
     let mut out = render_exchange_nodes(&out_nodes);
     out.push_str(&trailing_boundary.concat());
-    out
+    agent_doc_markdown_ast::exchange_tree::apply_missing_response_heading_ids(&out, ours)
 }
 
 /// `#exchangeconverge` — collapse repeated identities. A repeated response cell

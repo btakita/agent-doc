@@ -14,7 +14,8 @@ use crate::authoritative_actor::{
     route_dispatch_deduped_pane,
 };
 use crate::authoritative_dispatch::{
-    RouteAuthoritativeActorEffects, route_via_authoritative_actor,
+    RouteAuthoritativeActorEffects, finish_operator_live_turn_steering,
+    route_via_authoritative_actor,
 };
 use crate::busy_pane::{
     BusyPaneInterruptRecoveryOutcome, ExistingPaneDispatchReadiness,
@@ -707,6 +708,16 @@ pub fn resolve_or_create_pane_dispatch_only(
                         dispatch_pane.clone(),
                         &detail,
                     ));
+                }
+                RouteDispatchAuthorization::LiveTurnSteering { coalesced } => {
+                    return finish_operator_live_turn_steering(
+                        tmux,
+                        file,
+                        &dispatch_pane,
+                        harness,
+                        actor.record.generation,
+                        coalesced,
+                    );
                 }
                 RouteDispatchAuthorization::Authorized => {}
             }

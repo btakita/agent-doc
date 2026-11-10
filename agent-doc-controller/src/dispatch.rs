@@ -4383,6 +4383,56 @@ pub fn dispatch_command_kind_is_operator_reopen(command_kind: &str) -> bool {
     matches!(command_kind, "managed_reopen" | "dispatch_only_reopen")
 }
 
+/// Accepted-stage of the one open steering request a live-turn Run Agent Doc
+/// records (`#steercoalesce`). It is not an injection receipt.
+pub const DISPATCH_OPERATOR_STEERING_STAGE: &str = "operator_steering";
+
+/// Accepted-stage returned when another operator reopen folds into that
+/// pending steering request. The audit row itself uses
+/// [`DISPATCH_STEERING_COALESCED_FAILED_STAGE`] so it does not become a second
+/// pending request.
+pub const DISPATCH_OPERATOR_STEERING_COALESCED_STAGE: &str = "operator_steering_coalesced";
+
+pub const DISPATCH_STEERING_COALESCED_FAILED_STAGE: &str = "steering_coalesced";
+
+/// A pane blocker that means the owner turn is running, not a permission
+/// prompt, dialog, or draft. Only these cues may become steering.
+pub fn dispatch_blocker_is_live_owner_turn(reason: &str) -> bool {
+    let lower = reason.to_ascii_lowercase();
+    lower.contains("active") && lower.contains("turn") && !lower.contains("permission")
+}
+
+/// What an operator Run Agent Doc does when dispatch admission sees the owner
+/// pane (`#steercoalesce`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LiveTurnOperatorDispatch {
+    /// Not an operator reopen against a live owner turn. The existing
+    /// admission applies, including `actor_turn_busy` for automated callers
+    /// and for non-turn blockers.
+    Continue,
+    /// First operator reopen while that turn is live. Accept it as steering
+    /// and do not authorize a trigger.
+    AcceptSteering,
+    /// A steering request is already the latest unfailed dispatch. Fold this
+    /// reopen into it instead of failing or authorizing another trigger.
+    CoalescePendingSteering,
+}
+
+pub fn classify_live_turn_operator_dispatch(
+    live_owner_turn: bool,
+    operator_reopen: bool,
+    pending_steering: bool,
+) -> LiveTurnOperatorDispatch {
+    if !(live_owner_turn && operator_reopen) {
+        return LiveTurnOperatorDispatch::Continue;
+    }
+    if pending_steering {
+        LiveTurnOperatorDispatch::CoalescePendingSteering
+    } else {
+        LiveTurnOperatorDispatch::AcceptSteering
+    }
+}
+
 pub fn dispatch_error_stale_generation_redirect_target(message: &str) -> Option<u64> {
     if !message.contains(DISPATCH_STALE_GENERATION_REDIRECT_MARKER) {
         return None;
@@ -9153,6 +9203,44 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
         assert!(!dispatch_error_is_coalesced(
             "dispatch blocked for x: failed_stage=queue_paused"
         ));
+    }
+
+    /// Run Agent Doc during a live Grok turn is steering. A second one
+    /// coalesces. A permission prompt and an automated continuation do not.
+    #[test]
+    fn live_turn_operator_reopen_is_steering_and_pending_requests_coalesce() {
+        let grok = "active Grok Build turn";
+        assert!(dispatch_blocker_is_live_owner_turn(grok));
+        assert!(dispatch_blocker_is_live_owner_turn("active claude turn"));
+        assert!(dispatch_blocker_is_live_owner_turn("active codex turn"));
+        assert!(dispatch_blocker_is_live_owner_turn("opencode active turn"));
+        assert!(!dispatch_blocker_is_live_owner_turn(
+            "active permission prompt"
+        ));
+        assert!(!dispatch_blocker_is_live_owner_turn(
+            "codex authentication screen"
+        ));
+        assert!(!dispatch_blocker_is_live_owner_turn(
+            "queued draft in composer"
+        ));
+
+        assert_eq!(
+            classify_live_turn_operator_dispatch(true, true, false),
+            LiveTurnOperatorDispatch::AcceptSteering
+        );
+        assert_eq!(
+            classify_live_turn_operator_dispatch(true, true, true),
+            LiveTurnOperatorDispatch::CoalescePendingSteering
+        );
+        assert_eq!(
+            classify_live_turn_operator_dispatch(true, false, false),
+            LiveTurnOperatorDispatch::Continue,
+            "an automated continuation stays on the actor_turn_busy refusal"
+        );
+        assert_eq!(
+            classify_live_turn_operator_dispatch(false, true, true),
+            LiveTurnOperatorDispatch::Continue
+        );
     }
 
     #[test]

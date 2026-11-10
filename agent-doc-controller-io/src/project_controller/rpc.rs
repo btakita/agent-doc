@@ -29361,10 +29361,30 @@ fn classify_controller_dispatch_pane_evidence(
     }
 }
 
+#[cfg(test)]
+thread_local! {
+    static DISPATCH_PANE_OBSERVATION_OVERRIDE: std::cell::RefCell<
+        Option<ControllerDispatchPaneObservation>,
+    > = const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(test)]
+fn set_dispatch_pane_observation_override(observation: Option<ControllerDispatchPaneObservation>) {
+    DISPATCH_PANE_OBSERVATION_OVERRIDE.with(|slot| *slot.borrow_mut() = observation);
+}
+
 fn controller_dispatch_pane_evidence(
     file: &Path,
     record: &agent_doc_controller::actor::ActorRecord,
 ) -> ControllerDispatchPaneEvidence {
+    #[cfg(test)]
+    if let Some(observation) = DISPATCH_PANE_OBSERVATION_OVERRIDE.with(|slot| slot.borrow().clone())
+    {
+        return ControllerDispatchPaneEvidence {
+            observation,
+            ready_prompt: false,
+        };
+    }
     if record.pane_id.is_empty() {
         return ControllerDispatchPaneEvidence {
             observation: ControllerDispatchPaneObservation::Unavailable(
@@ -29766,6 +29786,94 @@ pub(crate) fn handle_dispatch(
         )?
     {
         queue_control = None;
+    }
+    // `#steercoalesce`: Run Agent Doc while the owner turn is live is steering,
+    // not a failed dispatch. A second reopen coalesces into that pending
+    // request. Automated callers and non-turn blockers keep `actor_turn_busy`.
+    if let ControllerDispatchPaneObservation::Blocked(reason) = &pane_observation
+        && agent_doc_controller::dispatch::dispatch_blocker_is_live_owner_turn(reason)
+        && dispatch_command_kind_is_operator_reopen(&command_kind)
+        && record.session_id == session_id
+        && record.pane_id == pane_id
+        && record.generation == generation
+    {
+        let conn = open_state_db(&bootstrap.project_root)?;
+        let pending_steering = state_store::latest_unfailed_dispatch_accepted_stage(
+            &conn,
+            &document_id,
+            record.generation,
+        )?
+        .as_deref()
+            == Some(agent_doc_controller::dispatch::DISPATCH_OPERATOR_STEERING_STAGE);
+        let decision = agent_doc_controller::dispatch::classify_live_turn_operator_dispatch(
+            true,
+            true,
+            pending_steering,
+        );
+        let (accepted_stage, failed_stage, result_status, coalesced) = match decision {
+            agent_doc_controller::dispatch::LiveTurnOperatorDispatch::CoalescePendingSteering => (
+                agent_doc_controller::dispatch::DISPATCH_OPERATOR_STEERING_COALESCED_STAGE,
+                Some(agent_doc_controller::dispatch::DISPATCH_STEERING_COALESCED_FAILED_STAGE),
+                ControllerDispatchResultStatus::Blocked,
+                true,
+            ),
+            agent_doc_controller::dispatch::LiveTurnOperatorDispatch::AcceptSteering => (
+                agent_doc_controller::dispatch::DISPATCH_OPERATOR_STEERING_STAGE,
+                None,
+                ControllerDispatchResultStatus::Completed,
+                false,
+            ),
+            agent_doc_controller::dispatch::LiveTurnOperatorDispatch::Continue => {
+                unreachable!("operator live-turn facts were classified above")
+            }
+        };
+        // The accept row is `completed` so it does not pin in-flight trigger
+        // backpressure. The coalesce row is failed so the accept row stays the
+        // latest unfailed steering receipt.
+        let receipt = insert_dispatch_attempt_record(
+            &bootstrap.project_root,
+            ControllerDispatchReceiptInsert {
+                document_id: &document_id,
+                generation: record.generation,
+                command_kind: &command_kind,
+                accepted_stage: if coalesced {
+                    None
+                } else {
+                    Some(accepted_stage)
+                },
+                failed_stage,
+                diagnostic_payload: &diagnostic_payload,
+                result_status,
+                proof_scope: ControllerDispatchProofScope::AcceptedOnly,
+                dispatch_start_proven: false,
+            },
+        )?;
+        agent_doc_ops_log_io::log_op(
+            &file,
+            &format!(
+                "dispatch_operator_live_turn_steering file={} pane={} generation={} kind={} coalesced={coalesced} reason={reason:?} receipt_id={} (#steercoalesce)",
+                file.display(),
+                record.pane_id,
+                record.generation,
+                command_kind,
+                receipt.receipt_id,
+            ),
+        );
+        let authorization = DispatchAuthorization {
+            record: record.clone(),
+            accepted_stage: accepted_stage.to_string(),
+            receipt,
+        };
+        if let Some(key) = request_key.as_deref() {
+            let conn = open_state_db(&bootstrap.project_root)?;
+            state_store::record_dispatch_request_outcome(
+                &conn,
+                &document_id,
+                key,
+                &serde_json::to_string(&authorization)?,
+            )?;
+        }
+        return Ok(authorization);
     }
     let queue_block_stage = match &pane_observation {
         ControllerDispatchPaneObservation::Blocked(_) => Some("actor_turn_busy"),
@@ -45123,6 +45231,164 @@ mod tests {
             !steady_path.contains("reap_stale_duplicate_controllers("),
             "no-transition adoption must not rescan every process"
         );
+    }
+
+    /// Run Agent Doc while Grok is in a turn used to bail
+    /// `failed_stage=actor_turn_busy` / `unblocker=resume_or_clear_queue_control`.
+    /// That reopen is one steering request. A later one coalesces. A permission
+    /// prompt and an idle continuation still fail closed (`#steercoalesce`).
+    #[test]
+    fn operator_reopen_during_live_grok_turn_is_steering_and_coalesces() {
+        struct Guard;
+        impl Drop for Guard {
+            fn drop(&mut self) {
+                set_dispatch_pane_observation_override(None);
+            }
+        }
+
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        let doc = root.join("tasks/agent-doc/agent-doc-bugs.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: session-steer\nagent: grok\n---\nBody\n",
+        )
+        .unwrap();
+        agent_doc_session_actor_io::record_session_start_direct(
+            &doc,
+            "session-steer",
+            "%2442",
+            "@1",
+            1,
+        )
+        .unwrap();
+        agent_doc_session_actor_io::transition_state_direct(
+            &doc,
+            "session-steer",
+            "%2442",
+            Some(1),
+            agent_doc_controller::actor::ActorState::Ready,
+            "supervisor",
+            "prompt_ready",
+        )
+        .unwrap();
+        let bootstrap = ControllerBootstrap {
+            project_root: root.to_path_buf(),
+            socket_path: socket_path(root),
+            launch_mode: LaunchMode::Lazy,
+            bootstrap_epoch: 0,
+            pid: std::process::id(),
+            controller_binary: Some(current_binary_identity().unwrap()),
+            controller_generation: 1,
+            handoff_state: ControllerHandoffState::Stable,
+            handoff_started_at: None,
+            previous_controller_pid: None,
+        };
+        let request = |kind: &str, payload: &str| ControllerRequest {
+            command: "dispatch".to_string(),
+            file: Some(doc.clone()),
+            session_id: Some("session-steer".to_string()),
+            pane_id: Some("%2442".to_string()),
+            window_id: None,
+            generation: Some(1),
+            state: None,
+            caller: None,
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: Some(kind.to_string()),
+            diagnostic_payload: Some(payload.to_string()),
+            sequence: None,
+        };
+        let count = |stage_column: &str, stage: &str| -> i64 {
+            let sql = format!("SELECT COUNT(*) FROM dispatch_attempts WHERE {stage_column} = ?1");
+            open_state_db(root)
+                .unwrap()
+                .query_row(&sql, [stage], |row| row.get(0))
+                .unwrap()
+        };
+        let _guard = Guard;
+        set_dispatch_pane_observation_override(Some(ControllerDispatchPaneObservation::Blocked(
+            "active Grok Build turn".to_string(),
+        )));
+
+        let accept_key = agent_doc_controller::dispatch::with_dispatch_request_key(
+            "submit=supervisor_ipc harness=grok",
+            "dr-steer-accept",
+        );
+        let first = handle_dispatch(&bootstrap, None, request("managed_reopen", &accept_key))
+            .expect("the live-turn reopen is steering, not actor_turn_busy");
+        assert_eq!(
+            first.accepted_stage,
+            agent_doc_controller::dispatch::DISPATCH_OPERATOR_STEERING_STAGE
+        );
+        assert_eq!(
+            first.receipt.status,
+            ControllerDispatchResultStatus::Completed
+        );
+        assert!(!first.receipt.dispatch_start_proven);
+        assert!(first.receipt.failed_stage.is_none());
+        let replay = handle_dispatch(&bootstrap, None, request("managed_reopen", &accept_key))
+            .expect("a lost ACK answers the original steering receipt");
+        assert_eq!(replay.receipt.receipt_id, first.receipt.receipt_id);
+        assert_eq!(count("accepted_stage", "operator_steering"), 1);
+
+        let coalesce_key = agent_doc_controller::dispatch::with_dispatch_request_key(
+            "submit=supervisor_ipc harness=grok",
+            "dr-steer-coalesce",
+        );
+        let second = handle_dispatch(
+            &bootstrap,
+            None,
+            request("dispatch_only_reopen", &coalesce_key),
+        )
+        .expect("a pending steering request coalesces instead of failing");
+        assert_eq!(
+            second.accepted_stage,
+            agent_doc_controller::dispatch::DISPATCH_OPERATOR_STEERING_COALESCED_STAGE
+        );
+        assert_eq!(
+            second.receipt.failed_stage.as_deref(),
+            Some(agent_doc_controller::dispatch::DISPATCH_STEERING_COALESCED_FAILED_STAGE)
+        );
+        assert_ne!(second.receipt.receipt_id, first.receipt.receipt_id);
+        assert_eq!(count("accepted_stage", "operator_steering"), 1);
+        assert_eq!(count("failed_stage", "steering_coalesced"), 1);
+        assert_eq!(count("failed_stage", "actor_turn_busy"), 0);
+
+        let auto = handle_dispatch(&bootstrap, None, request("idle_queue_continuation", "auto"))
+            .expect_err("an automated dispatch must still refuse the live turn");
+        let auto = format!("{auto:#}");
+        assert!(auto.contains("failed_stage=actor_turn_busy"), "{auto}");
+        assert!(auto.contains("reason=active Grok Build turn"), "{auto}");
+        assert!(
+            auto.contains("unblocker=resume_or_clear_queue_control"),
+            "{auto}"
+        );
+        assert_eq!(count("failed_stage", "actor_turn_busy"), 1);
+        assert_eq!(
+            count("accepted_stage", "operator_steering"),
+            1,
+            "the refusal must not replace the pending steering request"
+        );
+
+        set_dispatch_pane_observation_override(Some(ControllerDispatchPaneObservation::Blocked(
+            "active permission prompt".to_string(),
+        )));
+        let permission = handle_dispatch(&bootstrap, None, request("managed_reopen", "permission"))
+            .expect_err("a permission prompt is not a live turn to steer");
+        let permission = format!("{permission:#}");
+        assert!(
+            permission.contains("failed_stage=actor_turn_busy"),
+            "{permission}"
+        );
+        assert!(
+            permission.contains("reason=active permission prompt"),
+            "{permission}"
+        );
+        assert_eq!(count("accepted_stage", "operator_steering"), 1);
     }
 
     /// `#netadv5` R8 / `#netadv4` SIM-F3: a dispatch request whose ACK was lost

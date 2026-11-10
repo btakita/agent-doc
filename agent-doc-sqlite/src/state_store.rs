@@ -5399,6 +5399,35 @@ pub fn has_open_in_flight_dispatch(
     Ok(count > 0)
 }
 
+/// Latest unfailed dispatch's `accepted_stage` for this document generation.
+///
+/// `#steercoalesce` uses this to see whether a live-turn operator reopen is
+/// already pending as steering. Failed rows (including a coalesced audit row)
+/// do not hide that receipt, and a later real dispatch replaces it.
+pub fn latest_unfailed_dispatch_accepted_stage(
+    conn: &Connection,
+    document_id: &str,
+    generation: u64,
+) -> Result<Option<String>> {
+    Ok(conn
+        .query_row(
+            r#"
+            SELECT accepted_stage
+            FROM dispatch_attempts
+            WHERE document_id = ?1
+              AND generation = ?2
+              AND failed_stage IS NULL
+            ORDER BY id DESC
+            LIMIT 1
+            "#,
+            params![document_id, generation as i64],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .optional()
+        .context("read latest unfailed dispatch accepted stage")?
+        .flatten())
+}
+
 /// How long an unproven dispatch may pin the controller's idle self-recycle gate
 /// (`#dispatchgateleak`).
 ///

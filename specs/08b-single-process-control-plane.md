@@ -1190,6 +1190,18 @@ the dispatch actor and produce receipts.
   it safe. This controller-owned fence is the final check before route input,
   so a stale `Ready` projection cannot inject into a long-running turn even if a
   route-side probe raced it.
+- An explicit operator reopen (`managed_reopen` or `dispatch_only_reopen`,
+  Run Agent Doc) that meets a live owner-turn cue is the exception
+  (`#steercoalesce`). The controller accepts that invocation as one steering
+  request (`accepted_stage=operator_steering`, `result_status=completed`, no
+  trigger) instead of `actor_turn_busy`. A later operator reopen, while that
+  receipt is still the latest unfailed dispatch for the generation, coalesces:
+  the RPC succeeds with `accepted_stage=operator_steering_coalesced` and an
+  audit row `failed_stage=steering_coalesced`, and route must not type a second
+  trigger. Permission prompts and any other non-turn blocker stay
+  `actor_turn_busy`. Automated command kinds stay `actor_turn_busy` too. The
+  steering row is `completed`, so it does not pin in-flight trigger
+  backpressure after the pane is idle.
 - When the session document records `dispatch=actor_turn_busy` in `<!-- agent-doc:blocker-disregard ... -->` (`#blockerdisregard`) and the pane reason does not contain a permission prompt, a live `actor_turn_busy` cue still returns `Blocked` and still does not inject, but its user-facing outcome is `queued_behind_owner` / `wait_for_owner_turn_to_drain` (the same fields as `actor_busy_draining`) instead of `resume_or_clear_queue_control`. A permission-prompt reason, a deliberate `queue_paused` pause, and `actor_turn_observation_unavailable` keep their existing outcomes.
 - That pane observation is bounded and load-aware (`#recoverableautoretry`,
   `#ctlprobeloadbudget`). Only a tmux *timeout* is re-read (any other capture
@@ -1224,7 +1236,9 @@ the dispatch actor and produce receipts.
   (it carries the stable `failed_stage=coalesced_in_flight` marker across the IPC
   boundary), skip the re-send, and report deduped-success on the already-running
   dispatch pane rather than surfacing an exit-1 to the operator (`#qflood2`). An
-  explicit operator dispatch is never coalesced.
+  explicit operator dispatch is never coalesced with an in-flight trigger
+  receipt. Pending live-turn steering is the separate `#steercoalesce` fold
+  above, not this in-flight dedup.
 
 ## Migration gates
 

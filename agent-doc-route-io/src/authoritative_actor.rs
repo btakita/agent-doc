@@ -934,7 +934,29 @@ pub fn current_pane_ready_prompt_proven(
 /// can never surface as an exit-1 to the operator.
 pub enum RouteDispatchAuthorization {
     Authorized,
-    CoalescedDeduped { detail: String },
+    CoalescedDeduped {
+        detail: String,
+    },
+    /// Operator Run Agent Doc met a live owner turn (`#steercoalesce`).
+    /// `coalesced` means a steering request was already pending. Either way
+    /// the route must not inject a reopen trigger.
+    LiveTurnSteering {
+        coalesced: bool,
+    },
+}
+
+fn route_authorization_from_controller(
+    authorization: agent_doc_controller_io::project_controller::DispatchAuthorization,
+) -> RouteDispatchAuthorization {
+    match authorization.accepted_stage.as_str() {
+        agent_doc_controller::dispatch::DISPATCH_OPERATOR_STEERING_STAGE => {
+            RouteDispatchAuthorization::LiveTurnSteering { coalesced: false }
+        }
+        agent_doc_controller::dispatch::DISPATCH_OPERATOR_STEERING_COALESCED_STAGE => {
+            RouteDispatchAuthorization::LiveTurnSteering { coalesced: true }
+        }
+        _ => RouteDispatchAuthorization::Authorized,
+    }
 }
 
 pub fn authorize_controller_dispatch(
@@ -959,7 +981,7 @@ pub fn authorize_controller_dispatch(
         &base_dir,
         dispatch_request(),
     ) {
-        Ok(_authorization) => Ok(RouteDispatchAuthorization::Authorized),
+        Ok(authorization) => Ok(route_authorization_from_controller(authorization)),
         Err(err)
             if agent_doc_controller::dispatch::dispatch_error_is_coalesced(&err.to_string()) =>
         {
@@ -1049,7 +1071,7 @@ fn recover_dispatch_via_supervisor_restart(
         base_dir,
         dispatch_request(),
     ) {
-        Ok(_authorization) => Ok(RouteDispatchAuthorization::Authorized),
+        Ok(authorization) => Ok(route_authorization_from_controller(authorization)),
         Err(err)
             if agent_doc_controller::dispatch::dispatch_error_is_coalesced(&err.to_string()) =>
         {

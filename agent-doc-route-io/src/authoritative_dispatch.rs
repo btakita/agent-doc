@@ -710,6 +710,64 @@ fn running_turn_steering_claim(
     RunningTurnSteeringClaim::Count(prepared.pending_items.max(1))
 }
 
+/// `#steercoalesce`: the controller accepted this Run Agent Doc as steering
+/// for the turn already running. Deliver the pending diff once. A coalesced
+/// reopen does not paste again and does not fail the route.
+pub fn finish_operator_live_turn_steering(
+    tmux: &Tmux,
+    file: &Path,
+    dispatch_pane: &str,
+    harness: &HarnessConfig,
+    generation: u64,
+    coalesced: bool,
+) -> Result<String> {
+    let delivered = if coalesced {
+        None
+    } else {
+        claimed_running_turn_steering(
+            tmux,
+            file,
+            dispatch_pane,
+            &harness.binary,
+            true,
+            "route_live_turn_steering_target_not_visible",
+        )
+    };
+    if !coalesced && delivered.is_none() {
+        return Ok(dispatch_pane.to_string());
+    }
+    let delivered = delivered.unwrap_or(0);
+    let fields = agent_doc_flow::outcome::user_outcome_fields(
+        agent_doc_flow::outcome::UserFacingOutcomeKind::SteeringDeliveredToOwner,
+    );
+    let verb = if coalesced {
+        "coalesced into the steering already pending for"
+    } else {
+        "accepted as steering for"
+    };
+    let message = format!(
+        "[route] Run Agent Doc for {} was {verb} the turn already running; no second trigger was sent. steering_delivered={delivered} sent=explicit {fields}",
+        file.display(),
+    );
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "route_operator_live_turn_steering file={} pane={dispatch_pane} harness={} generation={generation} coalesced={coalesced} steering_delivered={delivered} (#steercoalesce)",
+            file.display(),
+            harness.binary,
+        ),
+    );
+    eprintln!("{message}");
+    crate::invocation::record_route_steering_delivery(message);
+    crate::invocation::report_pane_if_not_visible(
+        tmux,
+        file,
+        dispatch_pane,
+        "route_live_turn_steering_target_not_visible",
+    );
+    Ok(dispatch_pane.to_string())
+}
+
 /// `None` when the diff was not handed to the running turn. The caller records
 /// the deferral and must not also report `steering_delivered_to_owner`.
 fn claimed_running_turn_steering(
@@ -2149,6 +2207,16 @@ pub fn route_via_authoritative_actor(
                         &detail,
                     ));
                 }
+                RouteDispatchAuthorization::LiveTurnSteering { coalesced } => {
+                    return finish_operator_live_turn_steering(
+                        tmux,
+                        file,
+                        &dispatch_pane,
+                        harness,
+                        actor.record.generation,
+                        coalesced,
+                    );
+                }
                 RouteDispatchAuthorization::Authorized => {}
             }
             let dispatch_start = dispatch_via_supervisor_ipc(
@@ -2258,6 +2326,16 @@ pub fn route_via_authoritative_actor(
                         &detail,
                     ));
                 }
+                RouteDispatchAuthorization::LiveTurnSteering { coalesced } => {
+                    return finish_operator_live_turn_steering(
+                        tmux,
+                        file,
+                        &dispatch_pane,
+                        harness,
+                        actor.record.generation,
+                        coalesced,
+                    );
+                }
                 RouteDispatchAuthorization::Authorized => {}
             }
             dispatch_only_send_reopen(
@@ -2325,6 +2403,16 @@ pub fn route_via_authoritative_actor(
                         dispatch_pane.clone(),
                         &detail,
                     ));
+                }
+                RouteDispatchAuthorization::LiveTurnSteering { coalesced } => {
+                    return finish_operator_live_turn_steering(
+                        tmux,
+                        file,
+                        &dispatch_pane,
+                        harness,
+                        actor.record.generation,
+                        coalesced,
+                    );
                 }
                 RouteDispatchAuthorization::Authorized => {}
             }

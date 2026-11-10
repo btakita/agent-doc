@@ -3577,6 +3577,18 @@ pub trait ProjectControllerRuntimeEffects: Send + Sync + 'static {
         Ok(None)
     }
 
+    /// `#subagentworkpool`: claim/start text for heads added while `harness`'s
+    /// owner turn is running. `None` when the pool has nothing to dispatch.
+    /// `harness` is the owner pane, not this process.
+    fn subagent_pool_running_turn_refill(
+        &self,
+        _file: &Path,
+        _content: &str,
+        _harness: &str,
+    ) -> Result<Option<agent_doc_queue::subagent_pool::PoolRunningTurnRefill>> {
+        Ok(None)
+    }
+
     /// Perform the git commit for `file` from inside the controller process, where
     /// the converged relay canonical IS the authority. `authoritative_compaction`
     /// selects the compaction-aware commit entry (guard stand-down). The binary

@@ -38,7 +38,7 @@ fn pool_heartbeat_receipt_key(document_hash: &str) -> String {
 
 /// The document's authoritative text, or `None` while an attached editor's
 /// replica is not readable. Disk is consulted only when no editor owns it.
-fn pool_heartbeat_document_text(file: &Path) -> Result<Option<String>> {
+pub(super) fn pool_heartbeat_document_text(file: &Path) -> Result<Option<String>> {
     match agent_doc_crdt_relay_io::current_text_for_file_nonblocking(file)? {
         agent_doc_crdt_relay_io::CurrentText::Current { text, .. } => Ok(Some(text)),
         agent_doc_crdt_relay_io::CurrentText::Detached => Ok(Some(

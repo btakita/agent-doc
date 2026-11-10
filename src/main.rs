@@ -457,6 +457,19 @@ impl agent_doc_controller_io::project_controller::ProjectControllerRuntimeEffect
         agent_doc_queue_io::subagent_pool::pool_heartbeat_wake_for_content(file, content)
     }
 
+    fn subagent_pool_running_turn_refill(
+        &self,
+        file: &std::path::Path,
+        content: &str,
+        harness: &str,
+    ) -> anyhow::Result<Option<agent_doc_queue::subagent_pool::PoolRunningTurnRefill>> {
+        let harness = harness.trim();
+        let harness = (!harness.is_empty()).then_some(harness);
+        agent_doc_queue_io::subagent_pool::pool_running_turn_refill_for_content(
+            file, content, harness,
+        )
+    }
+
     fn project_answered_free_text_strike(
         &self,
         invocation: agent_doc_controller_io::project_controller::ControllerAnsweredFreeTextStrikeInvocation,

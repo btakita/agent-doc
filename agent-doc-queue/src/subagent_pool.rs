@@ -438,6 +438,10 @@ pub enum PoolRefillTrigger {
     QuotaBlocked,
     /// A planning boundary (preflight, `plan`, steering, `queue pool`).
     Plan,
+    /// Heads were added, or claims are still unstarted, while the owner turn
+    /// is running. Hookless harnesses receive this as a composer follow-up
+    /// (`#subagentworkpool`).
+    RunningTurn,
 }
 
 impl PoolRefillTrigger {
@@ -449,6 +453,7 @@ impl PoolRefillTrigger {
             Self::Frozen => "frozen",
             Self::QuotaBlocked => "quota_blocked",
             Self::Plan => "plan",
+            Self::RunningTurn => "running_turn",
         }
     }
 }
@@ -523,6 +528,16 @@ pub struct PoolStatus {
     pub occupancy: PoolOccupancy,
 }
 
+/// The claim/start text a live hookless turn is pasted.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PoolRunningTurnRefill {
+    /// Unstarted claims and next heads only. A heartbeat change is not a new paste.
+    pub fingerprint: String,
+    pub text: String,
+    pub next_heads: usize,
+    pub unstarted: usize,
+}
+
 /// Everything a refill trigger hands the coordinator.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PoolRefill {
@@ -550,6 +565,33 @@ pub struct PoolRefill {
 }
 
 impl PoolRefill {
+    /// Identity of the dispatch debt a running-turn paste must not repeat.
+    pub fn dispatch_fingerprint(&self) -> String {
+        let mut parts = Vec::new();
+        for entry in &self.unstarted {
+            parts.push(format!("u:{}:{}", entry.generation, entry.item));
+        }
+        for head in &self.next_heads {
+            parts.push(format!("n:{}", head.item));
+        }
+        agent_doc_hash::content_hash(&parts.join("\n"))
+    }
+
+    /// Claim/start steps for a turn that is already running, when this refill
+    /// has dispatch debt. Heartbeats and quota refusals stay on their own paths.
+    pub fn running_turn_refill(&self) -> Option<PoolRunningTurnRefill> {
+        if self.unstarted.is_empty() && self.next_heads.is_empty() {
+            return None;
+        }
+        let text = self.render()?;
+        Some(PoolRunningTurnRefill {
+            fingerprint: self.dispatch_fingerprint(),
+            next_heads: self.next_heads.len(),
+            unstarted: self.unstarted.len(),
+            text,
+        })
+    }
+
     /// Whether the coordinator has pool work to do now. A quota refusal is
     /// actionable so the reason is surfaced, not only the heads it removed.
     pub fn is_actionable(&self) -> bool {

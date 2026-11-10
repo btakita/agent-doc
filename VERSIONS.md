@@ -2,6 +2,19 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.573
+
+- **Publish `c8dee5ac8b0fa327b3d055a21d8718cd7cd61b59` as `0.35.573`.** Tag `v0.35.572` remains `cb1ef066307bbe15183313a98b47ab4e670d3d51`. That tip is 33 commits after the previous tag. Package manifests, internal constraints, `Cargo.lock`, `pyproject.toml`, and the bundled skill sources move to `0.35.573`. JetBrains plugin generations stay classic `0.2.973`, IDE 262 `0.2.975`, and IDE 263 `0.2.974`. `pluginReleaseVersion` moves to `0.35.573`. VS Code stays `0.2.99`. Zed stays `0.1.7`.
+- **The release gate accepts `startup_owner_pane`** (`c8dee5ac8b`). The registration call passes `live_owner` directly; `as_deref()` was a needless lint denial on Rust 1.99.
+- **Pool heads added during a live turn are dispatched in that turn** (`c58c2bb3c1`). A hookless harness gets one paste into the capture-proven live composer.
+- **A keep queue leaves its top-level item unstruck** when every nested child is complete (`d18d454258`). A queue without keep, and a loop queue, still strike the parent.
+- **A replaced recap leaves the caret outside the replacement** (`033bf5c39e`). The JetBrains generation for that fix is recorded at `f3176740f8`.
+- **A nested `#review` stays under its pull request** (`7377ffa9b8`). A comment-only pull-request URL stays bare (`01dd7db133`).
+- **Restart recovery is bounded and fenced.** A restart journal (`5ff14ae5f5`), identity-fenced retained writes (`a1cf562809`), legacy retained captures (`61c245932d`), and unknown or operator-gated states (`89a13f0416`) survive. Reconnect recovery is explicit (`9e43a6df13`) and a stranded capture replay wait ends (`691a921931`). Retained write continuations stay fenced (`f7cab3ece2`).
+- **Merge and layout stay on the operator's text.** One agreed corrupt close heals before the CRDT rebase (`f58a388c3b`). Continued typing coalesces q-id rows (`e0748fb414`). Another document's supervisor pane is left alone (`a3e924300a`).
+- **Responses and replies keep operator order.** Response projections append after operator children (`5a2c70f62d`). Nested operator child order is preserved (`bd20acc305`). Processed waiting replies are acknowledged (`c476eaab07`). Nested reply action context is retained (`97cade73d4`). Procedural choices stay agent-owned (`d70ca3f44a`). Queue triggers still fire behind foreign drafts (`889a022e4e`).
+- **JetBrains restart prompts go through editor IPC** (`7297df72b2`), including older plugins (`2c080e092a`), and the prompt stays anchored in the editor (`f6b6a11b24`). Component updates preserve the editor view (`203a883595`).
+
 ## 0.35.570
 
 - **Publish `abc7d9aa68e7754b5c6637d6623ccd33e0a90e7a` as `0.35.570`.** Tag `v0.35.569` remains `88fef765af30590129f92acdaa457586d413c48b`. Package manifests, internal constraints, `Cargo.lock`, `pyproject.toml`, and the bundled skill sources move to `0.35.570`. JetBrains plugin generations stay `0.2.946`, `0.2.948`, and `0.2.947`. VS Code stays `0.2.99`. Zed stays `0.1.7`.

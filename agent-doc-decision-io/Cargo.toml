@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-decision-io"
-version = "0.35.572"
+version = "0.35.573"
 edition = "2024"
 license = "Apache-2.0"
 description = "Mutable Markdown decision registry for agent-doc"
@@ -8,9 +8,9 @@ repository = "https://github.com/btakita/agent-doc"
 publish = false
 
 [dependencies]
-agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.572" }
-agent-doc-log-time = { path = "../agent-doc-log-time", version = "0.35.572" }
-agent-doc-markdown-ast = { path = "../agent-doc-markdown-ast", version = "0.35.572" }
+agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.573" }
+agent-doc-log-time = { path = "../agent-doc-log-time", version = "0.35.573" }
+agent-doc-markdown-ast = { path = "../agent-doc-markdown-ast", version = "0.35.573" }
 anyhow = "1"
 fs2 = "0.4"
 serde = { version = "1", features = ["derive"] }

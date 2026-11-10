@@ -570,7 +570,11 @@ durable top-level `#id` reference, so repeating `#review` beneath the same PR
 receives a new effect id. The occurrence family is that parent nest vector:
 a struck `#review` under one pull request does not delete `  - #review` under
 another, and the surviving leaf stays the executable head
-(`<pull-request url>: #review`).
+(`<pull-request url>: #review`). The same leaf typed under a struck
+pull-request heading is kept. A parentless inserted `  - #review` is
+ambiguous when several requests already hold a struck `#review`; the live
+queue's single contested parent is the re-arm, so closeout does not drop that
+child or rewrite it onto another request.
 The positive integer is an occurrence identity, not operator prose. It remains
 part of exact claim, worker, completion, and receipt identity;
 lifecycle/priority markers remain cosmetic. Completed nested-command rows

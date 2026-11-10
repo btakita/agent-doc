@@ -7176,6 +7176,11 @@ fn operator_fragment_lifecycle_identity(
 /// for the same work (`release + publish` again), not a stale re-emit: a stale
 /// editor flush is never recorded as operator keystrokes. Struck (`~~`) lines
 /// and partial lines typed into existing text are not evidence.
+///
+/// A nested bare `#preset` run has no parent of its own. When several snapshot
+/// parents share that tag, this function returns nothing for it;
+/// [`operator_retyped_queue_identities_with_live`] uses the live queue to name
+/// the one contested parent.
 pub fn operator_retyped_queue_identities(
     snapshot_entries: &[QueueEntry],
     inserted_runs: &[String],
@@ -7204,6 +7209,97 @@ pub fn operator_retyped_queue_identities(
                     )
                     && snapshot_struck.contains_key(&identity)
                 {
+                    retyped.insert(identity);
+                }
+            }
+        }
+    }
+    retyped
+}
+
+/// [`operator_retyped_queue_identities`] plus a live-queue placement for a
+/// parentless nested `#preset` (`#retypestruck`).
+///
+/// The inserted run is only `  - #review`. Several struck copies make that
+/// fragment ambiguous, so the parentless pass refuses every parent and
+/// snapshot-struck dominance then deletes the new live child or rewrites it to
+/// a struck representative. The live queue names the parent: re-arm the one
+/// snapshot-struck identity that is live there. Several contested parents are
+/// still not evidence — a stale buffer must not resurrect every struck
+/// `#review`. An indented run is required so a top-level `- #review` cannot
+/// re-arm a nested row.
+pub fn operator_retyped_queue_identities_with_live(
+    snapshot_entries: &[QueueEntry],
+    live_entries: &[QueueEntry],
+    inserted_runs: &[String],
+) -> std::collections::HashSet<agent_doc_element_queue::QueueItemIdentity> {
+    let mut retyped = operator_retyped_queue_identities(snapshot_entries, inserted_runs);
+    if live_entries.is_empty() {
+        return retyped;
+    }
+    let snapshot_struck = snapshot_struck_representatives(snapshot_entries);
+    if snapshot_struck.is_empty() {
+        return retyped;
+    }
+    let live_struck = current_struck_identities(live_entries);
+    for run in inserted_runs {
+        for line in run.lines() {
+            let nested_insert = line.starts_with(' ') || line.starts_with('\t');
+            let line = line.trim();
+            if !nested_insert || line.is_empty() || line.contains("~~") {
+                continue;
+            }
+            let Ok(entries) = parse_fragment(line) else {
+                continue;
+            };
+            for entry in &entries {
+                let QueueEntry::Prompt(prompt) = entry else {
+                    continue;
+                };
+                if prompt.multiline
+                    || row_is_tracked_directive(&prompt.text)
+                    || bare_id_reference_key(prompt).is_none()
+                {
+                    continue;
+                }
+                let Some(local) = queue_item_identity(entry) else {
+                    continue;
+                };
+                if !matches!(
+                    matching_snapshot_lifecycle_identity(snapshot_entries, &local, true),
+                    SnapshotLifecycleMatch::Ambiguous
+                ) {
+                    continue;
+                }
+                let mut contested = Vec::new();
+                for (live_index, live) in live_entries.iter().enumerate() {
+                    if !matches!(live, QueueEntry::Prompt(_))
+                        || queue_item_identity(live).as_ref() != Some(&local)
+                    {
+                        continue;
+                    }
+                    let Some(identity) = queue_lifecycle_identity_at(live_entries, live_index)
+                    else {
+                        continue;
+                    };
+                    if snapshot_struck.contains_key(&identity) && !contested.contains(&identity) {
+                        contested.push(identity);
+                    }
+                }
+                let chosen = if contested.len() == 1 {
+                    contested.pop()
+                } else {
+                    let mut added_beside_strike = contested
+                        .into_iter()
+                        .filter(|identity| live_struck.contains(identity))
+                        .collect::<Vec<_>>();
+                    if added_beside_strike.len() == 1 {
+                        added_beside_strike.pop()
+                    } else {
+                        None
+                    }
+                };
+                if let Some(identity) = chosen {
                     retyped.insert(identity);
                 }
             }
@@ -13234,6 +13330,157 @@ mod tests {
         assert_eq!(
             lineage_claim_text(&current, executable[1]).as_deref(),
             Some("https://github.com/haiven-dev/haiven-api/pull/840: #review")
+        );
+    }
+
+    /// A struck pull-request heading is still the parent of an operator-typed
+    /// `  - #review`. Another request's struck `#review` must not delete it.
+    /// When this request already holds a struck `#review`, the parentless
+    /// inserted run is ambiguous and the live queue is what names the parent.
+    #[test]
+    fn converge_keeps_operator_review_under_a_struck_pull_request() {
+        let parent = concat!(
+            "- ### ~~https://github.com/haiven-dev/haiven-api/pull/845 [#q-62ea184e8c7d]~~\n",
+            "  - %% feat(auth): let the mobile app finish SSO sign-in %%\n",
+        );
+        let other = concat!(
+            "- ### ~~https://github.com/haiven-dev/haiven-contracts/pull/197~~\n",
+            "  - ~~#review~~\n",
+        );
+        let live_reviews = |entries: &[QueueEntry]| -> Vec<String> {
+            entries
+                .iter()
+                .enumerate()
+                .filter_map(|(index, entry)| match entry {
+                    QueueEntry::Prompt(prompt) if prompt.text.starts_with("#review") => {
+                        lineage_claim_text(entries, index)
+                    }
+                    _ => None,
+                })
+                .collect()
+        };
+
+        let snapshot = parse(&format!("{parent}{other}")).unwrap();
+        let current = parse(&format!("{parent}  - #review\n{other}")).unwrap();
+        let kept = converge(&current, &snapshot);
+        let lineages = live_reviews(&kept);
+        assert_eq!(
+            lineages,
+            vec![
+                "https://github.com/haiven-dev/haiven-api/pull/845 [#q-62ea184e8c7d]: #review"
+                    .to_string()
+            ],
+            "a first review under a struck heading stays executable:\n{}",
+            render(&kept)
+        );
+        assert!(
+            kept.iter().any(|entry| {
+                matches!(entry, QueueEntry::Completed(prompt) if prompt.text == "#review")
+            }),
+            "the other request's struck review stays"
+        );
+        assert_eq!(
+            first_prompt(&kept).map(|prompt| prompt.text.as_str()),
+            Some("#review")
+        );
+
+        let snapshot_repeat = parse(&format!("{parent}  - ~~#review~~\n{other}")).unwrap();
+        let added_sibling =
+            parse(&format!("{parent}  - ~~#review~~\n  - #review\n{other}")).unwrap();
+        let replaced = parse(&format!("{parent}  - #review\n{other}")).unwrap();
+        let inserted = vec!["\n  - #review\n".to_string()];
+        assert!(
+            operator_retyped_queue_identities(&snapshot_repeat, &inserted).is_empty(),
+            "a parentless #review names no parent when several are struck"
+        );
+        assert!(
+            operator_retyped_queue_identities_with_live(
+                &snapshot_repeat,
+                &added_sibling,
+                &["\n- #review\n".to_string()],
+            )
+            .is_empty(),
+            "a top-level #review insert must not re-arm a nested row"
+        );
+        for (label, live) in [
+            ("added sibling", &added_sibling),
+            ("replaced strike", &replaced),
+        ] {
+            let without = converge(live, &snapshot_repeat);
+            assert!(
+                live_reviews(&without).is_empty(),
+                "{label}: without re-arm evidence the new review is dropped or re-struck:\n{}",
+                render(&without)
+            );
+            let retyped =
+                operator_retyped_queue_identities_with_live(&snapshot_repeat, live, &inserted);
+            assert_eq!(retyped.len(), 1, "{label}: {retyped:?}");
+            let kept = converge_queue_via_lifecycle_with_operator_rearmed(
+                live,
+                &snapshot_repeat,
+                &Default::default(),
+                &retyped,
+            )
+            .unwrap_or_else(|| live.clone());
+            let lineages = live_reviews(&kept);
+            assert_eq!(lineages.len(), 1, "{label}:\n{}", render(&kept));
+            assert!(
+                lineages[0].starts_with(
+                    "https://github.com/haiven-dev/haiven-api/pull/845 [#q-62ea184e8c7d]: #review"
+                ),
+                "{label}: {lineages:?}\n{}",
+                render(&kept)
+            );
+            assert!(
+                !lineages[0].contains("pull/197"),
+                "{label}: review moved onto the other request: {lineages:?}"
+            );
+            assert!(
+                kept.iter().any(|entry| {
+                    matches!(entry, QueueEntry::Completed(prompt) if prompt.text == "#review")
+                }),
+                "{label}: the other request's struck review stays:\n{}",
+                render(&kept)
+            );
+        }
+
+        let both = parse(&format!(
+            "{parent}  - ~~#review~~\n  - #review\n- ### ~~https://github.com/haiven-dev/haiven-contracts/pull/197~~\n  - ~~#review~~\n  - #review\n"
+        ))
+        .unwrap();
+        assert!(
+            operator_retyped_queue_identities_with_live(&snapshot_repeat, &both, &inserted)
+                .is_empty(),
+            "one inserted line cannot re-arm every struck review"
+        );
+
+        // The new review sits beside the struck copy. A stale unstrike under
+        // the other request is not that insert.
+        let beside_one_strike = parse(&format!(
+            "{parent}  - ~~#review~~\n  - #review\n- ### ~~https://github.com/haiven-dev/haiven-contracts/pull/197~~\n  - #review\n"
+        ))
+        .unwrap();
+        let retyped = operator_retyped_queue_identities_with_live(
+            &snapshot_repeat,
+            &beside_one_strike,
+            &inserted,
+        );
+        assert_eq!(retyped.len(), 1, "{retyped:?}");
+        let kept = converge_queue_via_lifecycle_with_operator_rearmed(
+            &beside_one_strike,
+            &snapshot_repeat,
+            &Default::default(),
+            &retyped,
+        )
+        .unwrap_or_else(|| beside_one_strike.clone());
+        let lineages = live_reviews(&kept);
+        assert_eq!(lineages.len(), 1, "{}", render(&kept));
+        assert!(
+            lineages[0].starts_with(
+                "https://github.com/haiven-dev/haiven-api/pull/845 [#q-62ea184e8c7d]: #review"
+            ),
+            "{lineages:?}\n{}",
+            render(&kept)
         );
     }
 

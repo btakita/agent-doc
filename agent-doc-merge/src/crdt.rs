@@ -6250,6 +6250,43 @@ Second answer line three.
         assert_eq!(first_hash_id("- free text no id"), None);
     }
 
+    /// An operator-typed `  - #review` under a struck pull request stays in the
+    /// queue when another request already holds `~~#review~~`. Those rows share
+    /// a text key; the merge must not drop the new child while resolving that.
+    #[test]
+    fn reconcile_keeps_operator_review_under_a_struck_pull_request() {
+        let base_queue = concat!(
+            "- ### ~~https://github.com/haiven-dev/haiven-api/pull/845 [#q-62ea184e8c7d]~~\n",
+            "  - %% feat(auth): let the mobile app finish SSO sign-in %%\n",
+            "- ### ~~https://github.com/haiven-dev/haiven-contracts/pull/197~~\n",
+            "  - ~~#review~~\n",
+        );
+        let theirs_queue = concat!(
+            "- ### ~~https://github.com/haiven-dev/haiven-api/pull/845 [#q-62ea184e8c7d]~~\n",
+            "  - %% feat(auth): let the mobile app finish SSO sign-in %%\n",
+            "  - #review\n",
+            "- ### ~~https://github.com/haiven-dev/haiven-contracts/pull/197~~\n",
+            "  - ~~#review~~\n",
+        );
+        let base = doc_with_exchange_queue("Q.", base_queue);
+        let base_state = CrdtDoc::from_text(&base).encode_state();
+        let theirs = doc_with_exchange_queue("Q.", theirs_queue);
+        let merged = merge_by_component(Some(&base_state), &base, &theirs).unwrap();
+        let queue = body_of(&merged, "queue");
+        assert!(
+            queue.contains("  - #review\n"),
+            "operator #review under the struck pull request was dropped:\n{queue}"
+        );
+        assert!(
+            queue.contains("https://github.com/haiven-dev/haiven-api/pull/845"),
+            "{queue}"
+        );
+        assert!(
+            queue.contains("  - ~~#review~~\n"),
+            "the other request's struck review was lost:\n{queue}"
+        );
+    }
+
     #[test]
     fn list_item_key_stable_across_strike_and_glyphs() {
         // A struck or pin-glyphed item keys the same as its plain form, so a

@@ -5157,6 +5157,7 @@ fn operator_rearmed_queue_identities(
     file: &Path,
     snapshot_text: &str,
     snapshot_queue_entries: &[agent_doc_queue::document_queue::QueueEntry],
+    live_entries: &[agent_doc_queue::document_queue::QueueEntry],
 ) -> Result<std::collections::HashSet<agent_doc_element_queue::QueueItemIdentity>> {
     #[cfg(test)]
     rearm_evidence_fault::take()?;
@@ -5173,8 +5174,9 @@ fn operator_rearmed_queue_identities(
     // re-arm too. This evidence is base-independent, so it survives the common
     // case where the active epoch's base is not the committed snapshot and the
     // exact-base replay above has nothing to offer.
-    let retyped = agent_doc_queue::document_queue::operator_retyped_queue_identities(
+    let retyped = agent_doc_queue::document_queue::operator_retyped_queue_identities_with_live(
         snapshot_queue_entries,
+        live_entries,
         &agent_doc_op_capture_io::active_operator_inserted_runs(file)
             .context("read the active editor-op epoch's inserted runs")?,
     );
@@ -5234,7 +5236,12 @@ fn operator_rearm_evidence_for_maintenance(
     let attempts = queue_authority_attempts();
     let mut attempt = 1;
     loop {
-        match operator_rearmed_queue_identities(file, snapshot_text, snapshot_queue_entries) {
+        match operator_rearmed_queue_identities(
+            file,
+            snapshot_text,
+            snapshot_queue_entries,
+            live_entries,
+        ) {
             Ok(rearmed) => return Ok(rearmed),
             Err(err) => {
                 let admission = if attempt < attempts {

@@ -37,6 +37,17 @@ pub fn build_project_queue_sync_payload(
     let mut payload = QueueSyncPayload::default();
     let now_secs = crate::queue_claim::claim_clock_now_secs();
     for document in documents {
+        // `#lostrunningcontinue`: continue before this scan projects the row.
+        // An in-progress turn is recorded by the mid-turn hook and the idle
+        // watch; this scan still runs the attempt when those have not yet.
+        if let Err(error) =
+            crate::lost_running::recover_lost_running_automatically(&document, false)
+        {
+            agent_doc_ops_log_io::log_op(
+                &document,
+                &format!("lost_running_recovery_skipped error={error:#} (#lostrunningcontinue)"),
+            );
+        }
         let key = canonical_key(&document);
         let is_current = key == current_key;
         let scope = if is_current {

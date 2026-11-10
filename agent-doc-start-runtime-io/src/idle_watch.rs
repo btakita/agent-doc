@@ -2854,6 +2854,13 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 // A tick cannot span two turns, so the scope is exact rather
                 // than a TTL guess, and it drops at the end of each iteration.
                 let _turn_attribution = agent_doc_ops_log_io::begin_turn_attribution_scope();
+                // `#lostrunningcontinue`: continue a lost running claim on every
+                // tick, including while this pane's turn is in progress. The
+                // flag records that fact and must not suppress recovery. This
+                // is a claim-ledger read, not a cycle-state load.
+                let _ = agent_doc_queue_io::lost_running::recover_lost_running_automatically(
+                    &path, true,
+                );
                 // `#fixthrashingbackground`: the scope opens every tick, but the
                 // attribution is resolved lazily — a quiescent tick that logs
                 // nothing must not read the document projection at all. Priming

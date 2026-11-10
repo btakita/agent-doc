@@ -16,7 +16,7 @@ use crate::queue_claim::{QueueClaim, QueueClaimState, claim_identity_at};
 use crate::queue_graph::QueueGraph;
 
 /// Main-agent instructions paired with a non-empty sync payload.
-pub const QUEUE_SYNC_GUIDANCE: &str = "Beginning-of-turn queue reconciliation found incomplete work. Handle every entry before treating the turn as terminal. The main agent owns document convergence, claims, dispatch/start acknowledgement, steering, waiting, integration, and closeout. For `subagent_dispatch`, the only authorized native-spawn path is claim successfully, observe the durable claimed projection, spawn, then immediately persist the worker-bound start receipt; an absent or failed claim forbids spawn, and an absent start receipt is nonterminal dispatch debt. For `main_inline`, native spawn is forbidden: execute inline and reconcile the row. Running work must be waited on or steered; reported/checkmark work must be integrated and closed; lost work must be recovered or requeued. Every reported or `lost_reported` / `⚠️☑️` row is urgent nonterminal coordinator debt: compare its durable outbox/report receipt and exact retained agent-history response with the root-authored exchange response. A worker report, side-worktree commit, or published side branch is completion evidence, not integration proof. Before striking the row, move the exact result into the queue item's designated sink (for example the named integration/main branch or the PR branch), verify the authorized delivery boundary and commit reachability there, and then strike it immediately in this turn. If the result cannot be integrated, keep the row live and record the exact integration command, conflict, or external blocker as its next action; never call it done. An abbreviated receipt is valid completion evidence but is not proof that the full worker result reached exchange. Materialize every `recovered_response` in the root response exactly once, integrate effects, close, and strike in this turn. `consolidated_exchange` means that exact result is already present outside binary completion cells and must not be replayed. If response history is missing, ambiguous, or unsupported, keep the row open, surface `missing_response_debt` as the concrete blocker, and never redispatch or silently strike it. Reconcile/unknown, unresolved backlog queue placement, and scan errors must be investigated; operator-gated work must remain explicitly gated. Workers never self-claim or self-close.";
+pub const QUEUE_SYNC_GUIDANCE: &str = "Beginning-of-turn queue reconciliation found incomplete work. Handle every entry before treating the turn as terminal. The main agent owns document convergence, claims, dispatch/start acknowledgement, steering, waiting, integration, and closeout. For `subagent_dispatch`, the only authorized native-spawn path is claim successfully, observe the durable claimed projection, spawn, then immediately persist the worker-bound start receipt; an absent or failed claim forbids spawn, and an absent start receipt is nonterminal dispatch debt. For `main_inline`, native spawn is forbidden: execute inline and reconcile the row. Running work must be waited on or steered; reported/checkmark work must be integrated and closed; lost work must be recovered or requeued. A `lost_running` attempt is continued automatically, including during a turn; if continue fails, retry it. Every reported or `lost_reported` / `⚠️☑️` row is urgent nonterminal coordinator debt: compare its durable outbox/report receipt and exact retained agent-history response with the root-authored exchange response. A worker report, side-worktree commit, or published side branch is completion evidence, not integration proof. Before striking the row, move the exact result into the queue item's designated sink (for example the named integration/main branch or the PR branch), verify the authorized delivery boundary and commit reachability there, and then strike it immediately in this turn. If the result cannot be integrated, keep the row live and record the exact integration command, conflict, or external blocker as its next action; never call it done. An abbreviated receipt is valid completion evidence but is not proof that the full worker result reached exchange. Materialize every `recovered_response` in the root response exactly once, integrate effects, close, and strike in this turn. `consolidated_exchange` means that exact result is already present outside binary completion cells and must not be replayed. If response history is missing, ambiguous, or unsupported, keep the row open, surface `missing_response_debt` as the concrete blocker, and never redispatch or silently strike it. Reconcile/unknown, unresolved backlog queue placement, and scan errors must be investigated; operator-gated work must remain explicitly gated. Workers never self-claim or self-close.";
 
 /// Normalize TTL expiry before projection. The caller supplies one clock cut so
 /// every document in an aggregate scan uses the same notion of "now".
@@ -90,6 +90,10 @@ pub enum QueueSyncOperation {
     Wait,
     IntegrateClose,
     RecoverRequeue,
+    /// Resume the same lost-running generation (`#lostrunningcontinue`).
+    Continue,
+    /// Continue of a lost-running attempt failed; dispatch a new generation.
+    Retry,
     Reconcile,
     OperatorGate,
 }
@@ -565,6 +569,8 @@ pub fn project_document_queue_sync(
                             claim.expect("running lifecycle has a claim"),
                         ) {
                         QueueSyncOperation::ForwardSteering
+                    } else if let Some(recovery) = claim.and_then(lost_running_sync_operation) {
+                        recovery
                     } else {
                         operation_for(lifecycle, execution_mode)
                     };
@@ -759,6 +765,15 @@ fn classify_lifecycle(item: &str, claim: Option<&QueueClaim>) -> QueueSyncLifecy
     }
 }
 
+fn lost_running_sync_operation(claim: &QueueClaim) -> Option<QueueSyncOperation> {
+    match crate::lost_running_recovery::recovery_action(claim)? {
+        crate::lost_running_recovery::LostRunningAction::Continue => {
+            Some(QueueSyncOperation::Continue)
+        }
+        crate::lost_running_recovery::LostRunningAction::Retry => Some(QueueSyncOperation::Retry),
+    }
+}
+
 fn operation_for(
     lifecycle: QueueSyncLifecycle,
     execution_mode: QueueExecutionMode,
@@ -796,7 +811,10 @@ fn execution_evidence(claim: Option<&QueueClaim>) -> QueueSyncExecutionEvidence 
 
 /// Merge exact-attempt lineage evidence into one projected item. A lost item
 /// becomes redispatchable only when the caller proved `NeverStarted` from a
-/// durable lineage record; all other outcomes fail closed.
+/// durable lineage record, or when lost-running continue already failed
+/// (`#lostrunningcontinue`). All other outcomes fail closed. Continue and
+/// retry are preserved: started-loss evidence must not rewrite them back to
+/// reconcile.
 pub fn apply_attempt_evidence(
     item: &mut QueueSyncItem,
     execution: QueueSyncExecutionEvidence,
@@ -804,6 +822,13 @@ pub fn apply_attempt_evidence(
 ) {
     item.execution_evidence = execution;
     item.recovered_effects = effects;
+    if matches!(
+        item.operation,
+        QueueSyncOperation::Continue | QueueSyncOperation::Retry
+    ) {
+        item.retry_safe = item.operation == QueueSyncOperation::Retry;
+        return;
+    }
     item.retry_safe = item.lifecycle == QueueSyncLifecycle::Lost
         && execution == QueueSyncExecutionEvidence::NeverStarted;
     if item.lifecycle == QueueSyncLifecycle::Lost {
@@ -1084,7 +1109,7 @@ mod tests {
             .iter()
             .find(|item| item.item.contains("started") && !item.item.contains("unstarted"))
             .unwrap();
-        assert_eq!(started.operation, QueueSyncOperation::Reconcile);
+        assert_eq!(started.operation, QueueSyncOperation::Continue);
         assert_eq!(
             started.execution_evidence,
             QueueSyncExecutionEvidence::Started
@@ -1116,6 +1141,38 @@ mod tests {
             QueueSyncExecutionEvidence::Unknown
         );
         assert!(!orphan.retry_safe);
+    }
+
+    #[test]
+    fn lost_running_continue_failure_stays_retry_safe_after_started_evidence() {
+        let content =
+            "<!-- agent:run id=main subagents -->\n- ⚠️🚧 started-failed\n<!-- /agent:run -->\n";
+        let mut started = claim(
+            "started-failed",
+            QueueClaimState::Lost,
+            Some("worker-started"),
+        );
+        started.lost_from = Some(QueueClaimState::Running);
+        started.lost_continue = Some(crate::queue_claim::LostContinueRecord {
+            attempted_at_secs: 50,
+            failed: true,
+            reason: "heartbeat stale".to_string(),
+            during_turn: true,
+        });
+        let mut payload = project_document_queue_sync(
+            "/tmp/session.md",
+            QueueSyncDocumentScope::Current,
+            content,
+            None,
+            &[started],
+        )
+        .unwrap();
+        let item = payload.lost.iter_mut().next().unwrap();
+        assert_eq!(item.operation, QueueSyncOperation::Retry);
+        apply_attempt_evidence(item, QueueSyncExecutionEvidence::Started, Vec::new());
+        assert_eq!(item.operation, QueueSyncOperation::Retry);
+        assert!(item.retry_safe);
+        assert_eq!(item.execution_evidence, QueueSyncExecutionEvidence::Started);
     }
 
     #[test]

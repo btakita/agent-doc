@@ -269,7 +269,7 @@ pub(crate) fn store_ledger_for_test(file: &Path, ledger: &QueueClaimLedger) -> R
 }
 
 /// Apply `mutate` to the document's ledger in one immediate transaction.
-fn mutate_ledger<T>(
+pub(crate) fn mutate_ledger<T>(
     file: &Path,
     mutate: impl FnOnce(&mut QueueClaimLedger) -> Result<T>,
 ) -> Result<T> {

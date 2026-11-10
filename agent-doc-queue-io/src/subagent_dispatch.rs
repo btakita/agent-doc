@@ -119,6 +119,16 @@ fn lineage_hold_for_head(keys: &[(String, String)], head: &str) -> String {
 /// Live, unclaimed queue lines with subagent intent that are new since the
 /// previous cycle's seed, in queue order.
 fn subagent_dispatch_candidates_for_content(file: &Path, content: &str) -> Result<Vec<String>> {
+    // `#lostrunningcontinue`: continue a lost running claim before this read
+    // decides what may be offered. A failed continue is what makes the row
+    // dispatchable. The flag is unknown here; mid-turn and idle observation
+    // record an in-progress turn themselves.
+    if let Err(error) = crate::lost_running::recover_lost_running_automatically(file, false) {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!("lost_running_recovery_skipped error={error:#} (#lostrunningcontinue)"),
+        );
+    }
     let _guard = crate::queue_claim::steer_guard_for(file, content);
     let prompt_presets =
         agent_doc_frontmatter_io::session::effective_prompt_presets_for_file(content, file)?;
@@ -156,9 +166,17 @@ fn subagent_dispatch_candidates_for_content(file: &Path, content: &str) -> Resul
     // A harness freeze keeps blocking dispatch after the TTL
     // (`QueueClaim::retains_frozen_worker_claim`); this filter is only the
     // unconfirmed slot, which a freeze does not hold.
+    let retrying = |claim: &agent_doc_queue::queue_claim::QueueClaim| {
+        agent_doc_queue::lost_running_recovery::retry_authorized(claim)
+    };
+    let retry_identities = lost
+        .iter()
+        .filter(|claim| retrying(claim))
+        .map(|claim| claim.identity.clone())
+        .collect::<Vec<_>>();
     let unconfirmed = lost
         .iter()
-        .filter(|claim| claim.worker.is_some() && claim.frozen.is_none())
+        .filter(|claim| claim.worker.is_some() && claim.frozen.is_none() && !retrying(claim))
         .map(|claim| claim.identity.clone())
         .collect::<Vec<_>>();
     let lineage = crate::queue_lineage::load(file)?;
@@ -167,6 +185,7 @@ fn subagent_dispatch_candidates_for_content(file: &Path, content: &str) -> Resul
         .filter(|claim| crate::queue_lineage::attempt_never_started(&lineage, claim))
         .map(|claim| claim.identity)
         .chain(crate::queue_lineage::latest_unstarted_identities(&lineage))
+        .chain(retry_identities)
         .collect::<Vec<_>>();
     if fresh_identities.is_empty() && lost_identities.is_empty() {
         return Ok(Vec::new());
@@ -433,9 +452,10 @@ fn queue_attr_subagent_plan_with_pools(
     let unsafe_lost = lost
         .into_iter()
         .filter(|claim| {
-            !lineage
-                .as_ref()
-                .is_some_and(|lineage| crate::queue_lineage::attempt_never_started(lineage, claim))
+            !agent_doc_queue::lost_running_recovery::retry_authorized(claim)
+                && !lineage.as_ref().is_some_and(|lineage| {
+                    crate::queue_lineage::attempt_never_started(lineage, claim)
+                })
         })
         .map(|claim| claim.item_text)
         .collect::<Vec<_>>();

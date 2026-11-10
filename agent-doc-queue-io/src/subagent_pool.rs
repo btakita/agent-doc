@@ -119,6 +119,18 @@ fn pool_refill_for_content_at_for_harness(
     now_secs: u64,
     harness: Option<&str>,
 ) -> Result<PoolRefill> {
+    // `#lostrunningcontinue`: continue before this refill classifies the slot.
+    // A failed continue is what frees the row for retry. The flag records a
+    // running-turn refill and does not suppress the attempt.
+    let turn_in_progress = trigger == PoolRefillTrigger::RunningTurn;
+    if let Err(error) =
+        crate::lost_running::recover_lost_running_automatically(file, turn_in_progress)
+    {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!("lost_running_recovery_skipped error={error:#} (#lostrunningcontinue)"),
+        );
+    }
     let document = file.display().to_string();
     let (plan, pools) =
         crate::subagent_dispatch::queue_attr_subagent_plan_and_pools(file, content)?;
@@ -413,7 +425,9 @@ mod tests {
         );
     }
 
-    /// A stale heartbeat freezes a running worker without any harness report.
+    /// A heartbeat past the frozen bound fails continue. The same task is
+    /// retried into the freed slot (`#lostrunningcontinue`); the following
+    /// head waits. A harness freeze is a different case and stays claimed.
     #[test]
     fn a_stale_heartbeat_frees_the_slot() {
         let dir = tempfile::tempdir().unwrap();
@@ -431,26 +445,46 @@ mod tests {
         let stale = clock + agent_doc_queue::subagent_pool::DEFAULT_WORKER_FROZEN_SECS + 1;
         let _pin = crate::queue_claim::pin_claim_clock_for_current_thread(stale);
         let refill = pool_refill_for_content(&file, &content, PoolRefillTrigger::Plan).unwrap();
-        assert_eq!(refill.frozen.len(), 1, "{refill:#?}");
-        assert!(matches!(
-            refill.frozen[0].frozen,
-            agent_doc_queue::subagent_pool::WorkerFrozen::HeartbeatStale { .. }
-        ));
+        assert!(
+            refill.frozen.is_empty(),
+            "a failed continue retries the row instead of keeping it frozen: {refill:#?}"
+        );
         assert_eq!(
             refill
                 .next_heads
                 .iter()
                 .map(|head| head.item.as_str())
                 .collect::<Vec<_>>(),
-            ["do [#b]"]
+            ["do [#a]"],
+            "{refill:#?}"
         );
+        let claim = crate::queue_claim::claim_states_for_content(&file, &content)
+            .unwrap()
+            .into_iter()
+            .find(|claim| claim.item_text == "do [#a]")
+            .expect("retried attempt");
+        assert_eq!(
+            claim.state,
+            agent_doc_queue::queue_claim::QueueClaimState::Lost
+        );
+        assert!(
+            claim
+                .lost_continue
+                .as_ref()
+                .is_some_and(|record| record.failed),
+            "{claim:#?}"
+        );
+        assert!(agent_doc_queue::lost_running_recovery::retry_authorized(
+            &claim
+        ));
     }
 
     /// `#subagentworkpool`, the Claude Code miss (2026-11-05): a working
     /// worker's claim expires because nothing refreshed it. A heartbeat is
-    /// due well before expiry; after expiry the attempt holds its slot, its
-    /// row is not offered again, and the exact refresh revives the same
-    /// attempt instead of forcing a duplicate generation.
+    /// due well before expiry. After expiry, while the heartbeat is still
+    /// inside the frozen bound, the same attempt is continued automatically
+    /// (`#lostrunningcontinue`): it holds its slot, its row is not offered,
+    /// and a later refresh keeps that generation.
     #[test]
     fn an_expired_bound_attempt_is_refreshed_not_redispatched() {
         let dir = tempfile::tempdir().unwrap();
@@ -478,20 +512,38 @@ mod tests {
         let refill = pool_refill_for_content(&file, &content, PoolRefillTrigger::Lost).unwrap();
         assert!(
             refill.next_heads.is_empty(),
-            "no duplicate and no refill: {refill:#?}"
+            "a still-plausible heartbeat is continued, not offered: {refill:#?}"
         );
         assert!(
             refill.frozen.is_empty(),
             "expiry alone is not frozen: {refill:#?}"
         );
-        assert_eq!(refill.pools[0].occupancy.unconfirmed, 1, "{refill:#?}");
+        assert_eq!(refill.pools[0].occupancy.running, 1, "{refill:#?}");
+        assert_eq!(refill.pools[0].occupancy.unconfirmed, 0, "{refill:#?}");
         assert_eq!(refill.pools[0].occupancy.free, 0, "{refill:#?}");
-        assert!(refill.refresh_due[0].expired, "{refill:#?}");
+        let continued = crate::queue_claim::claim_states_for_content(&file, &content)
+            .unwrap()
+            .into_iter()
+            .find(|claim| claim.item_text == "do [#a]")
+            .expect("continued attempt");
+        assert_eq!(
+            continued.state,
+            agent_doc_queue::queue_claim::QueueClaimState::Running
+        );
+        assert_eq!(continued.generation, 1);
         assert!(
-            refill.refresh_due[0]
-                .refresh_command
-                .contains("--refresh --generation 1"),
-            "{refill:#?}"
+            continued
+                .lost_continue
+                .as_ref()
+                .is_some_and(|record| !record.failed),
+            "{continued:#?}"
+        );
+        assert!(
+            refill
+                .refresh_due
+                .iter()
+                .any(|due| due.item == "do [#a]" && !due.expired),
+            "continue does not invent a heartbeat: {refill:#?}"
         );
         assert!(
             crate::subagent_dispatch::pending_subagent_dispatch_for_content(&file, &content)
@@ -585,7 +637,9 @@ mod tests {
 
     /// `#poolidleheartbeat`, through the real ledger: nothing before the batch
     /// has had its coalesce window, one wake identity while the due set stands,
-    /// nothing once the coordinator refreshed, and a new identity at expiry.
+    /// and nothing once the coordinator refreshed. Expiry inside the frozen
+    /// bound continues those workers (`#lostrunningcontinue`) instead of
+    /// opening a second expired wake.
     #[test]
     fn a_heartbeat_wake_follows_the_real_due_set() {
         let dir = tempfile::tempdir().unwrap();
@@ -615,9 +669,21 @@ mod tests {
             "a later tick over the same set is the same wake"
         );
 
-        let expired = wake_at(clock + 7_300).expect("expiry wakes again");
-        assert_eq!(expired.expired, 2);
-        assert_ne!(expired.fingerprint, due.fingerprint);
+        assert_eq!(
+            wake_at(clock + 7_300),
+            None,
+            "continue restores the claim; the new due set is still inside coalesce"
+        );
+        let continued = crate::queue_claim::claim_states_for_content(&file, &content).unwrap();
+        assert_eq!(continued.len(), 2, "{continued:#?}");
+        assert!(continued.iter().all(|claim| {
+            claim.state == agent_doc_queue::queue_claim::QueueClaimState::Running
+                && claim.generation == 1
+                && claim
+                    .lost_continue
+                    .as_ref()
+                    .is_some_and(|record| !record.failed)
+        }));
 
         let refreshed = clock + 7_300;
         {

@@ -116,20 +116,23 @@ pool's running, dispatching, frozen, and free counts.
   distinct set of due heartbeats (`#poolidleheartbeat`). When a turn opens with
   nothing new but `queue_subagent_pool.refresh_due` set, run each listed refresh
   for a worker you have no evidence stopped, then end quietly and keep waiting.
-- An attempt that expires with its worker still bound is unconfirmed, not
-  freed: it holds its slot and its row is not offered again. That same refresh
-  revives the attempt (same owner, generation, and worker), so never claim a
-  new generation for a worker that may still be running.
-- Frozen means evidence the worker stopped: the harness reported it ended
-  without a result (`agent-doc queue freeze <FILE> --item <item> --generation
-  <N> --reason '<what was reported>'`), or there was no heartbeat for
-  `AGENT_DOC_SUBAGENT_FROZEN_SECS` (default 1.5 times the claim TTL, so expiry
-  alone is never frozen). Freezing frees the slot but keeps the claim; a later
-  report from that worker is still accepted. `queue claim --refresh` with that
-  attempt's owner and generation clears the freeze, including after the claim
-  TTL, so a worker resumed through its transcript keeps the same attempt.
-  Expiry does not turn a harness freeze into lost and does not make its head
-  eligible for dispatch. Only `queue release --requeue` abandons it.
+- An attempt that expires with its worker still bound and a heartbeat inside
+  the frozen bound is continued automatically, including during a turn
+  (`#lostrunningcontinue`). Continue restores the same generation and worker,
+  holds the slot, and does not offer the row. It does not invent a heartbeat;
+  the exact refresh is still how that worker proves it is alive. Never claim a
+  new generation for a worker whose continue succeeded.
+- A harness freeze means the harness reported the worker ended without a
+  result (`agent-doc queue freeze <FILE> --item <item> --generation <N>
+  --reason '<what was reported>'`). It frees the slot but keeps the claim; a
+  later report from that worker is still accepted. `queue claim --refresh`
+  with that attempt's owner and generation clears the freeze, including after
+  the claim TTL, so a worker resumed through its transcript keeps the same
+  attempt. Expiry does not turn a harness freeze into lost and does not make
+  its head eligible for dispatch. Only `queue release --requeue` abandons it.
+- No heartbeat for `AGENT_DOC_SUBAGENT_FROZEN_SECS` (default 1.5 times the
+  claim TTL, so expiry alone is never this case) fails continue. The same task
+  is retried into the freed slot. Do not leave that row for a later prompt.
 - `agent-doc queue pool <FILE> [--json]` prints the current refill at any time.
 
 Never wait for another operator prompt to dispatch heads that are waiting for a

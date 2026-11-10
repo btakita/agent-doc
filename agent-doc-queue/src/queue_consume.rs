@@ -1458,6 +1458,13 @@ pub fn answered_free_text_strike_decision(
         if mutation_node_is_group_parent(content, &nodes, node_index) {
             continue;
         }
+        // Comment children are omitted from mutation nodes, so this row looks
+        // like a leaf. Notes under a pull-request URL are not an answer and
+        // not a prompt to strike the URL (`#prurlcommentnote`).
+        if crate::document_queue::comment_only_pull_request_at(content, node.item.start_byte, text)
+        {
+            continue;
+        }
         if text.is_empty() || !crate::queue_response::queue_prompt_text_is_free_text(content, &head)
         {
             continue;
@@ -12803,6 +12810,85 @@ Old.
                 .unwrap()
                 .is_none(),
             "the visible marker and exact echo are insufficient without durable selection"
+        );
+    }
+
+    #[test]
+    fn comment_only_pull_request_url_is_not_auto_struck() {
+        let url = "https://github.com/haiven-dev/haiven-api/pull/840";
+        let response = format!(
+            "### Re: pull 840 — grok\n\n> **Queue prompt:** {url}\n\nOPEN. This row is safe to delete.\n"
+        );
+        let document = format!(
+            concat!(
+                "---\nqueue_active: true\n---\n\n",
+                "<!-- agent:exchange -->\n{response}<!-- /agent:exchange -->\n\n",
+                "<!-- agent:run id=api-prs subagents go -->\n",
+                "- {url}\n",
+                "  - %% fix(media): skip recording a scan attempt when the caller cancelled %%\n",
+                "  - %% author: tmstorm %%\n",
+                "<!-- /agent:run -->\n",
+            ),
+            response = response,
+            url = url,
+        );
+        assert!(
+            project_answered_free_text_strike(&document, &response, Some(&document))
+                .unwrap()
+                .is_none(),
+            "comment notes are not completion and not a prompt to strike the pull request"
+        );
+
+        let child = "review the pull request";
+        let child_response =
+            format!("### Re: review — grok\n\n> **Queue prompt:** {child}\n\nReviewed.\n");
+        let with_child = format!(
+            concat!(
+                "---\nqueue_active: true\n---\n\n",
+                "<!-- agent:exchange -->\n{response}<!-- /agent:exchange -->\n\n",
+                "<!-- agent:run id=api-prs subagents go -->\n",
+                "- {url}\n",
+                "  - %% author: tmstorm %%\n",
+                "  - {child}\n",
+                "<!-- /agent:run -->\n",
+            ),
+            response = child_response,
+            url = url,
+            child = child,
+        );
+        let projected =
+            project_answered_free_text_strike(&with_child, &child_response, Some(&with_child))
+                .unwrap()
+                .expect("a real prompt child is still answered");
+        let target = projected.target_content.as_str();
+        assert!(target.contains("~~review the pull request~~"), "{target}");
+        assert!(
+            !target.contains(&format!("~~{url}~~")),
+            "the pull-request parent stays unstruck: {target}"
+        );
+
+        let bare = format!(
+            concat!(
+                "---\nqueue_active: true\n---\n\n",
+                "<!-- agent:exchange -->\n{response}<!-- /agent:exchange -->\n\n",
+                "<!-- agent:run id=api-prs subagents go -->\n",
+                "- {url}\n",
+                "<!-- /agent:run -->\n",
+            ),
+            response = response,
+            url = url,
+        );
+        let bare_projected = project_answered_free_text_strike(&bare, &response, Some(&bare))
+            .unwrap()
+            .expect("a pull-request url with no children remains work");
+        let bare_target = bare_projected.target_content.as_str();
+        let run = bare_target
+            .split_once("<!-- agent:run")
+            .map(|(_, rest)| rest)
+            .unwrap_or(bare_target);
+        assert!(
+            !run.contains(&format!("- {url}\n")) && !run.contains(&format!("- ### {url}\n")),
+            "a bare pull-request url is still answered, by strike or by removal: {bare_target}"
         );
     }
 

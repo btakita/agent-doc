@@ -1694,22 +1694,24 @@ queue: go
             "---\nsession: sid\nagent_doc_format: template\n---\n\n",
             "## API PRs\n\n",
             "<!-- agent:run id=api-prs subagents presets=\"#push: #auth\" priority go -->\n",
+            "- ship the notes\n",
+            "  - %%waiting for review%%\n",
             "- https://github.com/haiven-dev/haiven-api/pull/717\n",
             "  - %%waiting for review%%\n",
             "- https://github.com/haiven-dev/haiven-api/pull/758\n",
             "  - %%one note%%\n",
             "  - [//]: # (another note)\n",
+            "- https://github.com/haiven-dev/haiven-api/pull/840\n",
+            "  - %% author: tmstorm %%\n",
+            "  - #review\n",
             "<!-- /agent:run -->\n"
         );
         std::fs::write(&file, content).unwrap();
 
         assert_eq!(
             pending_subagent_dispatch_for_content(&file, content).unwrap(),
-            vec![
-                "https://github.com/haiven-dev/haiven-api/pull/717".to_string(),
-                "https://github.com/haiven-dev/haiven-api/pull/758".to_string(),
-            ],
-            "comment children are inert annotations, not descendants that make the parent a group label"
+            vec!["ship the notes".to_string(), "#review".to_string()],
+            "ordinary comment-only parents stay runnable, a pull-request url with only comments is not dispatched, and a real prompt child still is"
         );
     }
 

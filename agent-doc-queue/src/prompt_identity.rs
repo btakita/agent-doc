@@ -277,6 +277,16 @@ fn executable_queue_nodes(content: &str) -> Vec<MutationItemNode> {
             {
                 return false;
             }
+            // List comments are not item nodes, so a pull-request URL annotated
+            // only with comments looks like a leaf. It is a catalog heading,
+            // not work (`#prurlcommentnote`).
+            if crate::document_queue::comment_only_pull_request_at(
+                content,
+                node.item.start_byte,
+                node.item.text.trim(),
+            ) {
+                return false;
+            }
             let indent = source_indent(content, node.item.start_byte);
             !nodes.get(index + 1).is_some_and(|next| {
                 same_component_occurrence(node, next)
@@ -516,6 +526,46 @@ fn diag(code: &str, message: String) -> QueueRelationDiagnostic {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn comment_only_pull_request_url_is_not_admitted_a_queue_id() {
+        let content = concat!(
+            "<!-- agent:run id=api-prs -->\n",
+            "- https://github.com/haiven-dev/haiven-api/pull/840\n",
+            "  - %% fix(media): skip recording a scan attempt when the caller cancelled %%\n",
+            "  - %% author: tmstorm %%\n",
+            "- https://github.com/haiven-dev/haiven-api/pull/841\n",
+            "  - %% author: tmstorm %%\n",
+            "  - review the pull request\n",
+            "- https://github.com/haiven-dev/haiven-api/pull/842\n",
+            "<!-- /agent:run -->\n",
+        );
+        let projected = project(content, "api-md").content;
+        assert!(
+            projected.contains("- https://github.com/haiven-dev/haiven-api/pull/840\n"),
+            "{projected}"
+        );
+        assert!(
+            !projected.contains("pull/840 [#q-"),
+            "a comment-only pull request must stay bare: {projected}"
+        );
+        assert!(
+            !projected.contains("~~"),
+            "admission must not strike the catalog row: {projected}"
+        );
+        assert!(
+            projected.contains("review the pull request [#q-"),
+            "a real prompt child is still admitted: {projected}"
+        );
+        assert!(
+            projected.contains("pull/842 [#q-"),
+            "a pull-request url with no children remains work: {projected}"
+        );
+        assert!(
+            !projected.contains("pull/841 [#q-"),
+            "the parent url is context, not a second id: {projected}"
+        );
+    }
 
     #[test]
     fn assigns_distinct_stable_ids_to_same_text_siblings_and_is_idempotent() {

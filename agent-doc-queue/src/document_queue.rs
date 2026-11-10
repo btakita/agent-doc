@@ -4125,7 +4125,8 @@ pub fn executable_prompt_indexes(entries: &[QueueEntry]) -> Vec<usize> {
             // as a runnable head.
             QueueEntry::Prompt(_)
                 if !entry_is_group_parent(entries, idx)
-                    && !entry_has_nested_parked_comment(entries, idx) =>
+                    && !entry_has_nested_parked_comment(entries, idx)
+                    && !entry_is_comment_only_pull_request(entries, idx) =>
             {
                 Some(idx)
             }
@@ -4313,6 +4314,169 @@ fn is_parked_list_comment(content: &str) -> bool {
         .strip_prefix("%%")
         .and_then(|body| body.strip_suffix("%%"))
         .is_some_and(|body| body.trim() == "parked")
+}
+
+/// A GitHub pull-request URL whose only descendants are list comments
+/// (`#prurlcommentnote`).
+///
+/// The comments are notes. They are not completion of the pull request and
+/// not a prompt to act on it, so the row is not executable, not admitted a
+/// queue id, and not struck. A real prompt child, or a pull-request URL with
+/// no children, keeps the ordinary leaf and group rules.
+fn entry_is_comment_only_pull_request(entries: &[QueueEntry], idx: usize) -> bool {
+    let Some(entry) = entries.get(idx) else {
+        return false;
+    };
+    let Some(text) = queue_entry_prompt_text(entry) else {
+        return false;
+    };
+    if !is_bare_pull_request_url(text) {
+        return false;
+    }
+    let Some(own_indent) = entry_indent(entry) else {
+        return false;
+    };
+    let mut saw_comment = false;
+    for later in entries.iter().skip(idx + 1) {
+        if let Some((indent, _)) = list_comment_context_row(later) {
+            if indent <= own_indent {
+                break;
+            }
+            saw_comment = true;
+            continue;
+        }
+        match entry_indent(later) {
+            Some(indent) if indent > own_indent => return false,
+            Some(_) => break,
+            None => {
+                if freeform_has_deeper_content(later, own_indent) {
+                    return false;
+                }
+            }
+        }
+    }
+    saw_comment
+}
+
+fn freeform_has_deeper_content(entry: &QueueEntry, own_indent: usize) -> bool {
+    let QueueEntry::Freeform(raw) = entry else {
+        return false;
+    };
+    raw.lines().any(|line| {
+        let indent = line.len() - line.trim_start_matches(' ').len();
+        indent > own_indent && !line.trim().is_empty()
+    })
+}
+
+/// Source form of [`entry_is_comment_only_pull_request`] for callers that see
+/// mutation nodes, which omit list comments and would otherwise treat the URL
+/// as a leaf.
+pub(crate) fn comment_only_pull_request_at(
+    content: &str,
+    item_start_byte: usize,
+    work_text: &str,
+) -> bool {
+    if item_start_byte > content.len() || !is_bare_pull_request_url(work_text) {
+        return false;
+    }
+    let line_end = content[item_start_byte..]
+        .find('\n')
+        .map_or(content.len(), |relative| item_start_byte + relative);
+    let line = &content[item_start_byte..line_end];
+    let own_indent = line.len() - line.trim_start_matches(' ').len();
+    let after = content.get(line_end + 1..).unwrap_or("");
+    following_lines_are_only_comments(after, own_indent)
+}
+
+fn following_lines_are_only_comments(after: &str, own_indent: usize) -> bool {
+    let lines: Vec<&str> = after.lines().collect();
+    let mut index = 0usize;
+    let mut saw_comment = false;
+    while index < lines.len() {
+        let line = lines[index];
+        if line.trim().is_empty() {
+            index += 1;
+            continue;
+        }
+        let Some((indent, _, rest)) = split_list_item(line) else {
+            let indent = line.len() - line.trim_start_matches(' ').len();
+            if indent > own_indent {
+                return false;
+            }
+            break;
+        };
+        if indent <= own_indent {
+            break;
+        }
+        if let Some(end) =
+            agent_doc_markdown_ast::overlay::multiline_list_comment_end(&lines, index, indent)
+        {
+            saw_comment = true;
+            index = end;
+            continue;
+        }
+        if agent_doc_markdown_ast::overlay::is_ignored_list_comment(rest) {
+            saw_comment = true;
+            index += 1;
+            continue;
+        }
+        return false;
+    }
+    saw_comment
+}
+
+fn is_bare_pull_request_url(text: &str) -> bool {
+    let mut work = text.trim().to_string();
+    for _ in 0..4 {
+        let trimmed = work.trim();
+        let without_heading = strip_top_level_queue_heading(trimmed).trim();
+        let unstruck = unwrap_nest_strike(without_heading).trim();
+        let without_projection =
+            agent_doc_element_queue::strip_attempt_projection_prefix(unstruck).trim();
+        let next =
+            agent_doc_element_queue::strip_generated_queue_prompt_id_annotation(without_projection);
+        let next = next.trim().to_string();
+        if next == work {
+            break;
+        }
+        work = next;
+    }
+    let work = work.trim();
+    work.split_whitespace().count() == 1 && github_pull_request_url(work)
+}
+
+fn github_pull_request_url(token: &str) -> bool {
+    let token = token.strip_suffix('/').unwrap_or(token);
+    let rest = token
+        .strip_prefix("https://github.com/")
+        .or_else(|| token.strip_prefix("http://github.com/"))
+        .or_else(|| token.strip_prefix("https://www.github.com/"))
+        .or_else(|| token.strip_prefix("http://www.github.com/"));
+    let Some(rest) = rest else {
+        return false;
+    };
+    let mut parts = rest.split('/');
+    let (Some(owner), Some(repo), Some(kind), Some(number)) =
+        (parts.next(), parts.next(), parts.next(), parts.next())
+    else {
+        return false;
+    };
+    parts.next().is_none()
+        && kind == "pull"
+        && github_slug(owner)
+        && github_slug(repo)
+        && !number.is_empty()
+        && number.bytes().all(|byte| byte.is_ascii_digit())
+}
+
+fn github_slug(part: &str) -> bool {
+    let mut chars = part.chars();
+    chars.next().is_some_and(|ch| ch.is_ascii_alphanumeric())
+        && part
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.'))
+        && !part.ends_with('.')
+        && !part.contains("..")
 }
 
 /// Work text of a queue row for nest-vector display and identity compare.
@@ -12340,6 +12504,13 @@ mod tests {
 
         let unparked = "- https://github.com/haiven-dev/haiven-docs/pull/39\n  - %% resumed %%\n";
         let entries = parse(unparked).unwrap();
+        assert!(
+            prompts(&entries).is_empty(),
+            "another comment is still a note, not a prompt to process the pull request"
+        );
+        assert!(!entry_has_nested_parked_comment(&entries, 0));
+        let released = "- https://github.com/haiven-dev/haiven-docs/pull/39\n";
+        let entries = parse(released).unwrap();
         assert_eq!(
             prompts(&entries)
                 .iter()
@@ -12347,7 +12518,86 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["https://github.com/haiven-dev/haiven-docs/pull/39"]
         );
-        assert!(!entry_has_nested_parked_comment(&entries, 0));
+    }
+
+    /// `#prurlcommentnote`: notes under a pull-request URL are not work and
+    /// not completion. The heading stays bare. A real prompt child is unchanged.
+    #[test]
+    fn comment_only_pull_request_url_stays_a_bare_heading() {
+        let body = concat!(
+            "- https://github.com/haiven-dev/haiven-api/pull/840\n",
+            "  - %% fix(media): skip recording a scan attempt when the caller cancelled %%\n",
+            "  - %% author: tmstorm %%\n",
+            "  - %% feat(auth): let the mobile app finish SSO sign-in %%\n",
+            "  - %% author: LovesWorking %%\n",
+        );
+        let entries = parse(body).unwrap();
+        assert!(
+            prompts(&entries).is_empty(),
+            "comment notes must not make the pull request executable"
+        );
+        assert!(entry_is_comment_only_pull_request(&entries, 0));
+        // The test-module `render` strips the navigation heading. The document
+        // surface keeps `- ### <url>` and must not strike it or attach a queue id.
+        let rendered = super::render(&entries);
+        assert_eq!(
+            rendered,
+            concat!(
+                "- ### https://github.com/haiven-dev/haiven-api/pull/840\n",
+                "  - %% fix(media): skip recording a scan attempt when the caller cancelled %%\n",
+                "  - %% author: tmstorm %%\n",
+                "  - %% feat(auth): let the mobile app finish SSO sign-in %%\n",
+                "  - %% author: LovesWorking %%\n",
+            )
+        );
+        assert!(!rendered.contains("~~"), "{rendered}");
+        assert!(!rendered.contains("[#q-"), "{rendered}");
+
+        let headed = concat!(
+            "- ### https://github.com/haiven-dev/haiven-api/pull/840\n",
+            "  - %% author: tmstorm %%\n",
+            "  - [//]: # (markdown note)\n",
+        );
+        let headed_entries = parse(headed).unwrap();
+        assert!(prompts(&headed_entries).is_empty());
+        assert_eq!(super::render(&headed_entries), headed);
+
+        let with_child = concat!(
+            "- https://github.com/haiven-dev/haiven-api/pull/840\n",
+            "  - %% author: tmstorm %%\n",
+            "  - #review\n",
+        );
+        let with_child_entries = parse(with_child).unwrap();
+        assert_eq!(
+            prompts(&with_child_entries)
+                .iter()
+                .map(|prompt| prompt.text.as_str())
+                .collect::<Vec<_>>(),
+            vec!["#review"],
+            "a real prompt child stays executable"
+        );
+        let with_child_rendered = super::render(&with_child_entries);
+        assert!(
+            with_child_rendered
+                .starts_with("- ### https://github.com/haiven-dev/haiven-api/pull/840\n"),
+            "{with_child_rendered}"
+        );
+        assert!(!with_child_rendered.contains("~~"), "{with_child_rendered}");
+        assert!(
+            with_child_rendered.contains("  - #review\n"),
+            "{with_child_rendered}"
+        );
+
+        let bare = "- https://github.com/haiven-dev/haiven-api/pull/840\n";
+        let bare_entries = parse(bare).unwrap();
+        assert_eq!(
+            prompts(&bare_entries)
+                .iter()
+                .map(|prompt| prompt.text.as_str())
+                .collect::<Vec<_>>(),
+            vec!["https://github.com/haiven-dev/haiven-api/pull/840"],
+            "a pull-request url with no children remains work"
+        );
     }
 
     /// The plan's hard constraint: render must be byte-preserving. `#queueatcreate`

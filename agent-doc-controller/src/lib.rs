@@ -19,6 +19,7 @@ pub mod orphan_drain;
 pub mod pane_layout;
 pub mod paths;
 pub mod pool_heartbeat;
+pub mod pool_running_turn;
 pub mod recycle;
 pub mod sequence;
 pub mod status;

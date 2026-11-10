@@ -2512,9 +2512,11 @@ fn subagent_pool_checkpoint(file: &Path, observed_at_ms: u64) -> Result<Option<S
     let Some(cycle) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
         return Ok(None);
     };
-    if !cycle_accepts_steering(&cycle, &cycle.cycle_id) {
-        return Ok(None);
-    }
+    // A captured cycle no longer accepts steering, but the harness turn can
+    // still be waiting on workers. New heads added then used to stay silent
+    // until the next report-complete (infra.md, 2026-11-10). Dispatch debt is
+    // surfaced anyway. Heartbeat-only refills stay on the idle wake.
+    let accepts = cycle_accepts_steering(&cycle, &cycle.cycle_id);
     let content = crate::resolve_current_document_content(file, "subagent_pool_checkpoint")?;
     if !agent_doc_queue_io::subagent_dispatch::queue_subagent_dispatch_enabled_for_content(
         file, &content,
@@ -2524,11 +2526,17 @@ fn subagent_pool_checkpoint(file: &Path, observed_at_ms: u64) -> Result<Option<S
     let Some(root) = project_root(file) else {
         return Ok(None);
     };
-    let refill = agent_doc_queue_io::subagent_pool::pool_refill_for_content(
-        file,
-        &content,
-        agent_doc_queue::subagent_pool::PoolRefillTrigger::Plan,
-    )?;
+    let trigger = if accepts {
+        agent_doc_queue::subagent_pool::PoolRefillTrigger::Plan
+    } else {
+        agent_doc_queue::subagent_pool::PoolRefillTrigger::RunningTurn
+    };
+    let refill =
+        agent_doc_queue_io::subagent_pool::pool_refill_for_content(file, &content, trigger)?;
+    let dispatch_now = !refill.unstarted.is_empty() || !refill.next_heads.is_empty();
+    if !accepts && !dispatch_now {
+        return Ok(None);
+    }
     let key = format!(
         "{SUBAGENT_POOL_REFILL_KEY_PREFIX}:{}",
         agent_doc_hash::content_hash(&canonical_document(file)?)
@@ -2794,6 +2802,66 @@ mod tests {
             .expect("changed refill");
         assert!(!second.contains("URGENT"), "{second}");
         assert!(second.contains("do [#b]"), "{second}");
+    }
+
+    /// The owner turn is still the harness turn after the cycle captured its
+    /// response. Two heads added beside one running worker must be claim/start
+    /// now, not silence until the next report-complete (`#subagentworkpool`).
+    #[test]
+    fn pool_checkpoint_dispatches_heads_added_after_the_cycle_stops_accepting_steering() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        let running = "---\nsession: sid\nagent_doc_format: template\n---\n\n<!-- agent:queue subagents=4 go -->\n- do [#running]\n<!-- /agent:queue -->\n";
+        std::fs::write(&file, running).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&file, Some(running), Some(running)).unwrap();
+        let clock = agent_doc_queue_io::queue_claim::claim_clock_now_secs();
+        let _pin = agent_doc_queue_io::queue_claim::pin_claim_clock_for_current_thread(clock);
+        let (_, claim) = agent_doc_queue_io::queue_claim::claim(
+            &file,
+            "do [#running]",
+            "subagent:running",
+            7200,
+        )
+        .unwrap();
+        agent_doc_queue_io::queue_claim::start_attempt(
+            &file,
+            "do [#running]",
+            "subagent:running",
+            "worker:running",
+            7200,
+            claim.generation,
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::mark_response_captured(
+            &file,
+            "response_captured",
+            Some(running),
+            Some(running),
+            "abc123",
+            None,
+        )
+        .unwrap();
+        let closed = agent_doc_cycle_state_io::load_with_closeout_projection(&file)
+            .unwrap()
+            .expect("cycle");
+        assert!(
+            closed.capture_id.is_some() && closed.response_sha256.is_some(),
+            "the cycle must have stopped accepting steering: {closed:?}"
+        );
+
+        let added = "---\nsession: sid\nagent_doc_format: template\n---\n\n<!-- agent:queue subagents=4 go -->\n- do [#running]\n- do [#added-1]\n- do [#added-2]\n<!-- /agent:queue -->\n";
+        std::fs::write(&file, added).unwrap();
+        let surfaced = subagent_pool_checkpoint(&file, 4_000)
+            .unwrap()
+            .expect("the two new heads are dispatched into the live turn");
+        assert!(surfaced.contains("do [#added-1]"), "{surfaced}");
+        assert!(surfaced.contains("do [#added-2]"), "{surfaced}");
+        assert!(surfaced.contains("Refill a free pool slot"), "{surfaced}");
+        assert!(
+            !surfaced.contains("do [#running]"),
+            "the running worker is not a new head: {surfaced}"
+        );
     }
 
     #[test]

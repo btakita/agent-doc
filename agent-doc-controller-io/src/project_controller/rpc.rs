@@ -20653,6 +20653,7 @@ impl ControllerBackgroundMaintenance {
                 let mut halt_notified = std::collections::HashSet::<String>::new();
                 let mut binding_skip_notified = std::collections::HashSet::<String>::new();
                 let mut pool_heartbeat_tick = pool_heartbeat::PoolHeartbeatTick::default();
+                let mut pool_running_turn_tick = pool_running_turn::PoolRunningTurnTick::default();
                 while due.recv().is_ok() {
                     let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                         #[cfg(test)]
@@ -20668,6 +20669,10 @@ impl ControllerBackgroundMaintenance {
                         // `#poolidleheartbeat`: reach a coordinator parked on
                         // background work, which no tool call will reach.
                         pool_heartbeat_tick.run_if_due(&runtime, Instant::now());
+                        // `#subagentworkpool`: heads added while a hookless turn
+                        // is running are pasted into that turn, not held for the
+                        // next report-complete.
+                        pool_running_turn_tick.run_if_due(&runtime, Instant::now());
                     }));
                     if outcome.is_err() {
                         eprintln!(
@@ -20899,6 +20904,8 @@ fn drain_predecessor_after_promotion(
 
 #[path = "pool_heartbeat.rs"]
 mod pool_heartbeat;
+#[path = "pool_running_turn.rs"]
+mod pool_running_turn;
 
 const ORPHAN_DRAIN_BACKOFF_SCOPE: &str = "queue_orphan_drain_backoff";
 const ORPHAN_DRAIN_BACKOFF_HOLDER: &str = "controller_orphan_drain";

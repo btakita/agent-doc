@@ -86,6 +86,25 @@ pub fn pool_refill_for_content_at(
     pool_refill_for_content_at_for_harness(file, content, trigger, now_secs, harness.as_deref())
 }
 
+/// Refill to paste into a turn that is already running on `harness`.
+///
+/// `None` when nothing is unstarted and no free slot has a head. `harness` is
+/// the owner pane's harness, so the quota gate does not guess from this process.
+pub fn pool_running_turn_refill_for_content(
+    file: &Path,
+    content: &str,
+    harness: Option<&str>,
+) -> Result<Option<agent_doc_queue::subagent_pool::PoolRunningTurnRefill>> {
+    let refill = pool_refill_for_content_at_for_harness(
+        file,
+        content,
+        PoolRefillTrigger::RunningTurn,
+        crate::queue_claim::claim_clock_now_secs(),
+        harness,
+    )?;
+    Ok(refill.running_turn_refill())
+}
+
 /// Harness a new worker would run on: this process's coordinator session.
 /// `None` outside a known harness, which the refill gate refuses.
 fn pool_refill_session_harness() -> Option<String> {
@@ -298,6 +317,42 @@ mod tests {
             claim.generation,
         )
         .unwrap();
+    }
+
+    /// One worker is running and the operator adds two heads. Free slots must
+    /// name both as claim/start now (`#subagentworkpool`, infra.md 2026-11-10).
+    #[test]
+    fn heads_added_while_a_worker_is_running_fill_the_free_slots() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("task.md");
+        let content = pool_doc(
+            "subagents=4",
+            &["do [#running]", "do [#added-1]", "do [#added-2]"],
+        );
+        std::fs::write(&file, &content).unwrap();
+        let clock = crate::queue_claim::claim_clock_now_secs();
+        let _pin = crate::queue_claim::pin_claim_clock_for_current_thread(clock);
+        start(&file, "do [#running]", "subagent:running");
+
+        let refill = pool_running_turn_refill_for_content(&file, &content, Some("grok"))
+            .unwrap()
+            .expect("free slots take the two new heads");
+        assert_eq!(refill.next_heads, 2, "{refill:?}");
+        assert_eq!(refill.unstarted, 0);
+        assert!(refill.text.contains("do [#added-1]"), "{}", refill.text);
+        assert!(refill.text.contains("do [#added-2]"), "{}", refill.text);
+        assert!(refill.text.contains("queue claim"), "{}", refill.text);
+        assert!(
+            refill.text.contains("trigger=running_turn"),
+            "{}",
+            refill.text
+        );
+        assert!(
+            !refill.text.contains("do [#running]"),
+            "the running worker is not offered again: {}",
+            refill.text
+        );
     }
 
     /// A frozen worker frees its slot but keeps its claim: the next head is

@@ -5897,14 +5897,20 @@ fn project_waiting_items_from_todos(
         // `#waitingoperatortext`: keep an existing child that holds operator
         // text, and never downgrade an existing packet to the generic stub
         // when no fresher operator packet is available to regenerate from.
-        // `#dupchoicestruct`: an unindexed segment that already owns the
-        // choice response is that item. A new child would be a second
-        // structure whose action restates the first choice.
+        // `#dupchoicestruct`: a segment that already owns the choice response
+        // is that item, including when a generic sibling would otherwise be
+        // kept or rebuilt. The sibling's action restates the first choice.
         let id_key = todo.id.to_ascii_lowercase();
+        if !existing_has_reply(&todo.id)
+            && let Some((source, marked)) = choice_responses.get(&id_key)
+        {
+            kept_raws.insert(source.clone());
+            let child = normalize_agent_doc_reply_rows(marked)?;
+            children.push(ensure_waiting_response_timestamp(&child, timestamp));
+            continue;
+        }
         if !existing.contains_key(&id_key)
-            && let Some((source, marked)) = adoptable
-                .get(&id_key)
-                .or_else(|| choice_responses.get(&id_key))
+            && let Some((source, marked)) = adoptable.get(&id_key)
         {
             kept_raws.insert(source.clone());
             let child = normalize_agent_doc_reply_rows(marked)?;
@@ -7405,6 +7411,17 @@ mod tests {
             response,
         );
         assert_single_choice_response(&struck);
+
+        let reply = agent_doc_reply_suffix();
+        let both = waiting_tree_document(
+            &format!(
+                "- ### {WAITING_ON_YOU_ROOT_TEXT} {WAITING_ON_YOU_ROOT_MARKER}\n  - ~~[#{id}] {choice} {WAITING_ON_YOU_ITEM_MARKER}~~\n{}  - [#{id}] {referring} {WAITING_ON_YOU_ITEM_MARKER}\n    - **Response:** {referring} {reply}\n      - **Timestamp:** 2026-11-09T22:30-06:00 {reply}\n      - **Question:** What decision or completion result should be recorded? {reply}\n      - **Next actions:** {reply}\n        - **Action:** {referring} {reply}\n",
+                packet_at(4)
+            ),
+            &format!("- [ ] [#{id}] {referring}\n"),
+            response,
+        );
+        assert_single_choice_response(&both);
     }
 
     fn assert_single_choice_response(document: &str) {

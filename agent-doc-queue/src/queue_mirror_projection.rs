@@ -70,8 +70,13 @@ pub fn project_runtime_projections_across_queues(
             continue;
         }
         let body = block.component.content(content);
+        let policy = document_queue::RuntimeProjectionPolicy {
+            keep_top_level_unstruck: crate::queue_schedule::queue_keeps_top_level_unstruck(
+                &block.component.attrs,
+            ),
+        };
         if let Some((new_body, _)) =
-            document_queue::project_prompt_runtime_projections(body, &targets)?
+            document_queue::project_prompt_runtime_projections_with(body, &targets, policy)?
         {
             projected = block.component.replace_content(&projected, &new_body);
             changed = true;

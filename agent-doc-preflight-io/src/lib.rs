@@ -7740,19 +7740,25 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
     // the pass ran each item. Blanking a loop here (in the same write as the
     // residue strike) left the item neither live nor struck, so the pass
     // completed with `restore_items=0` and lost its program.
-    let selected_queue_retains_struck = agent_doc_element::element::parse(&current_content)
-        .ok()
-        .and_then(|comps| {
-            agent_doc_queue::queue_set::component_for_id(
-                &current_content,
-                &comps,
-                &selected_queue_id,
-            )
+    let (selected_queue_retains_struck, selected_queue_keeps_top_level) =
+        agent_doc_element::element::parse(&current_content)
             .ok()
-            .flatten()
-            .map(|q| agent_doc_queue::queue_schedule::queue_retains_struck_heads(&q.attrs))
-        })
-        .unwrap_or(false);
+            .and_then(|comps| {
+                agent_doc_queue::queue_set::component_for_id(
+                    &current_content,
+                    &comps,
+                    &selected_queue_id,
+                )
+                .ok()
+                .flatten()
+                .map(|q| {
+                    (
+                        agent_doc_queue::queue_schedule::queue_retains_struck_heads(&q.attrs),
+                        agent_doc_queue::queue_schedule::queue_keeps_top_level_unstruck(&q.attrs),
+                    )
+                })
+            })
+            .unwrap_or((false, false));
     let need_clear_drained_body = drained_body_clearable && !selected_queue_retains_struck;
     // `#queuestopretire`: a DRAIN — no live prompt left, not a `stop`-marker
     // halt, nothing held back from the backlog — clears the control on both
@@ -8353,9 +8359,12 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
         })
         .collect::<Vec<_>>();
     if let Some((new_body, marked_entries)) =
-        agent_doc_queue::document_queue::project_prompt_runtime_projections(
+        agent_doc_queue::document_queue::project_prompt_runtime_projections_with(
             &marker_body,
             &lifecycle_targets,
+            agent_doc_queue::document_queue::RuntimeProjectionPolicy {
+                keep_top_level_unstruck: selected_queue_keeps_top_level,
+            },
         )?
     {
         current_content = {
@@ -9505,9 +9514,27 @@ fn reproject_marker_only_queue_over_live_head(
     else {
         return Ok(rebased.to_string());
     };
+    let keep_top_level_unstruck = agent_doc_element::element::parse(current)
+        .ok()
+        .and_then(|comps| {
+            comps
+                .iter()
+                .find(|component| component.name == "queue")
+                .map(|component| {
+                    agent_doc_queue::queue_schedule::queue_keeps_top_level_unstruck(
+                        &component.attrs,
+                    )
+                })
+        })
+        .unwrap_or(false);
     let projected_live_body =
-        match agent_doc_queue::document_queue::project_prompts_in_progress(current_body, &targets)?
-        {
+        match agent_doc_queue::document_queue::project_prompts_in_progress_with(
+            current_body,
+            &targets,
+            agent_doc_queue::document_queue::RuntimeProjectionPolicy {
+                keep_top_level_unstruck,
+            },
+        )? {
             Some((body, _)) => body,
             None => current_body.to_string(),
         };
@@ -18795,26 +18822,97 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
             .unwrap();
         for (label, text) in [("document", &updated), ("snapshot", &snap)] {
             assert!(
-                text.contains("- ### ~~Track pull request~~\n"),
-                "{label}: all terminal leaves lazily close the context parent: {text}"
+                text.contains("Track pull request"),
+                "{label}: keep retains the top-level item: {text}"
+            );
+            assert!(
+                !text.contains("~~Track pull request~~"),
+                "{label}: keep leaves the top-level item unstruck when its children complete: {text}"
             );
             assert!(
                 agent_doc_queue::queue_schedule::live_heads_for_queue(text, "history")
                     .unwrap()
                     .is_empty(),
-                "{label}: retained rows are completed: {text}"
+                "{label}: the unstruck parent is context, not a live head: {text}"
             );
             assert_eq!(
                 agent_doc_queue::queue_schedule::completed_heads_for_queue(text, "history")
                     .unwrap(),
-                vec![
-                    "Track pull request".to_string(),
-                    "do [#alpha]".to_string(),
-                    "do [#beta]".to_string(),
-                ],
-                "{label}: keep retains derived parent and completed leaves: {text}"
+                vec!["do [#alpha]".to_string(), "do [#beta]".to_string()],
+                "{label}: keep retains the completed leaves and not a struck parent: {text}"
             );
         }
+    }
+
+    /// Operator shape from infra.md and sdk-dev.md: `subagents keep` on the
+    /// queue, top-level pull-request rows, and nested rows that are all
+    /// complete. Those top-level rows stay unstruck, including one an earlier
+    /// pass already struck. A queue without `keep` still strikes its top-level
+    /// row when its children are complete.
+    #[test]
+    fn queue_maintenance_keep_leaves_top_level_unstruck_when_children_complete() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue_active: true\n",
+            "---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\n",
+            "Done.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "## haiven-infra PRs <!-- agent:run id=\"haiven-infra-prs\" subagents keep -->\n",
+            "- ~~https://github.com/haiven-dev/haiven-infra/pull/304~~\n",
+            "  - ~~#rebase~~\n",
+            "  - ~~#review~~\n",
+            "- https://github.com/haiven-dev/haiven-sdk/pull/223\n",
+            "  - ~~#review~~\n",
+            "<!-- /agent:run -->\n\n",
+            "## Main <!-- agent:run id=\"main\" auto subagents go -->\n",
+            "- https://github.com/haiven-dev/haiven-infra/pull/316\n",
+            "  - ~~#adversarial-pr~~\n",
+            "- do [#stay]\n",
+            "<!-- /agent:run -->\n"
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        run_queue_maintenance(&doc, None).unwrap();
+
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            !updated.contains("~~https://github.com/haiven-dev/haiven-infra/pull/304~~"),
+            "keep reopens the struck top-level row: {updated}"
+        );
+        assert!(
+            !updated.contains("~~https://github.com/haiven-dev/haiven-sdk/pull/223~~"),
+            "keep leaves the live top-level row unstruck: {updated}"
+        );
+        assert!(
+            updated.contains("https://github.com/haiven-dev/haiven-infra/pull/304"),
+            "the keep parent stays in the queue: {updated}"
+        );
+        assert!(
+            updated.contains("https://github.com/haiven-dev/haiven-sdk/pull/223"),
+            "the keep parent stays in the queue: {updated}"
+        );
+        assert!(
+            updated.contains("~~https://github.com/haiven-dev/haiven-infra/pull/316~~"),
+            "without keep the top-level row still strikes: {updated}"
+        );
+        assert!(
+            updated.contains("do [#stay]"),
+            "a live sibling stays: {updated}"
+        );
     }
 
     #[test]

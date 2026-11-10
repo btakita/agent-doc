@@ -1896,7 +1896,25 @@ pub fn set_prompts_in_progress(
             )
         })
         .collect::<Vec<_>>();
-    set_prompt_lifecycle_markers(entries, &targets)
+    set_prompt_lifecycle_markers_with(entries, &targets, RuntimeProjectionPolicy::default())
+}
+
+pub(crate) fn set_prompts_in_progress_with(
+    entries: &[QueueEntry],
+    target_texts: &[String],
+    policy: RuntimeProjectionPolicy,
+) -> Option<Vec<QueueEntry>> {
+    let targets = target_texts
+        .iter()
+        .cloned()
+        .map(|text| {
+            (
+                text,
+                agent_doc_document::queue_projection::QueueLifecycleMarker::Running,
+            )
+        })
+        .collect::<Vec<_>>();
+    set_prompt_lifecycle_markers_with(entries, &targets, policy)
 }
 
 /// Project one binary-owned lifecycle marker per selected queue occurrence.
@@ -1908,6 +1926,17 @@ pub fn set_prompt_lifecycle_markers(
         agent_doc_document::queue_projection::QueueLifecycleMarker,
     )],
 ) -> Option<Vec<QueueEntry>> {
+    set_prompt_lifecycle_markers_with(entries, targets, RuntimeProjectionPolicy::default())
+}
+
+fn set_prompt_lifecycle_markers_with(
+    entries: &[QueueEntry],
+    targets: &[(
+        String,
+        agent_doc_document::queue_projection::QueueLifecycleMarker,
+    )],
+    policy: RuntimeProjectionPolicy,
+) -> Option<Vec<QueueEntry>> {
     let targets = targets
         .iter()
         .map(|(text, marker)| QueueRowProjection {
@@ -1917,7 +1946,7 @@ pub fn set_prompt_lifecycle_markers(
             blockers: Vec::new(),
         })
         .collect::<Vec<_>>();
-    set_prompt_runtime_projections(entries, &targets)
+    set_prompt_runtime_projections_with(entries, &targets, policy)
 }
 
 /// Complete visible projection for one queue occurrence. `owner` names only a
@@ -1935,6 +1964,14 @@ pub struct QueueRowProjection {
     pub blockers: Vec<String>,
 }
 
+/// How runtime projection closes structural parents (`#keepunstrike`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct RuntimeProjectionPolicy {
+    /// A `keep` queue that is not a `loop` leaves its top-level group parent
+    /// unstruck when every nested child is complete. Nested parents still close.
+    pub keep_top_level_unstruck: bool,
+}
+
 /// Derive every projected prefix from an exact live occurrence target.
 ///
 /// Executable leaves own durable lifecycle state. A strike is terminal
@@ -1943,10 +1980,20 @@ pub struct QueueRowProjection {
 /// record backs repaints it, and it is kept only while no record says
 /// otherwise. Context parents own no attempt state. Their presentation is derived
 /// lazily from their leaves: all leaves struck closes the parent; any live or
-/// reported leaf keeps/reopens the parent as plain context.
+/// reported leaf keeps/reopens the parent as plain context. A `keep` queue
+/// ([`RuntimeProjectionPolicy::keep_top_level_unstruck`]) does not close the
+/// top-level parent (`#keepunstrike`).
 pub fn set_prompt_runtime_projections(
     entries: &[QueueEntry],
     targets: &[QueueRowProjection],
+) -> Option<Vec<QueueEntry>> {
+    set_prompt_runtime_projections_with(entries, targets, RuntimeProjectionPolicy::default())
+}
+
+pub fn set_prompt_runtime_projections_with(
+    entries: &[QueueEntry],
+    targets: &[QueueRowProjection],
+    policy: RuntimeProjectionPolicy,
 ) -> Option<Vec<QueueEntry>> {
     // `#nestedsubprompts`: children never carry their own projection, so a
     // legacy child marker is neither part of the match key nor kept.
@@ -2090,7 +2137,12 @@ pub fn set_prompt_runtime_projections(
                     struck_work_text(&parent.text),
                     None,
                 );
-                let derived = if all_leaves_struck {
+                // `#keepunstrike`: the top-level row is the container the
+                // operator marked `keep`. Completing its children does not
+                // strike it. A nested group still closes.
+                let close_parent = all_leaves_struck
+                    && !(policy.keep_top_level_unstruck && entry_indent(entry).unwrap_or(0) == 0);
+                let derived = if close_parent {
                     QueueEntry::Completed(parent)
                 } else {
                     QueueEntry::Prompt(parent)
@@ -2402,12 +2454,20 @@ pub fn project_prompts_in_progress(
     body: &str,
     target_texts: &[String],
 ) -> Result<Option<(String, Vec<QueueEntry>)>> {
+    project_prompts_in_progress_with(body, target_texts, RuntimeProjectionPolicy::default())
+}
+
+pub fn project_prompts_in_progress_with(
+    body: &str,
+    target_texts: &[String],
+    policy: RuntimeProjectionPolicy,
+) -> Result<Option<(String, Vec<QueueEntry>)>> {
     let spans = parse_spans(body)?;
     let entries = spans
         .iter()
         .map(|(entry, _)| entry.clone())
         .collect::<Vec<_>>();
-    let Some(marked_entries) = set_prompts_in_progress(&entries, target_texts) else {
+    let Some(marked_entries) = set_prompts_in_progress_with(&entries, target_texts, policy) else {
         return Ok(None);
     };
     validate_in_progress_marker_projection(&entries, &marked_entries)?;
@@ -2468,12 +2528,21 @@ pub fn project_prompt_runtime_projections(
     body: &str,
     targets: &[QueueRowProjection],
 ) -> Result<Option<(String, Vec<QueueEntry>)>> {
+    project_prompt_runtime_projections_with(body, targets, RuntimeProjectionPolicy::default())
+}
+
+pub fn project_prompt_runtime_projections_with(
+    body: &str,
+    targets: &[QueueRowProjection],
+    policy: RuntimeProjectionPolicy,
+) -> Result<Option<(String, Vec<QueueEntry>)>> {
     let spans = parse_spans(body)?;
     let entries = spans
         .iter()
         .map(|(entry, _)| entry.clone())
         .collect::<Vec<_>>();
-    let Some(marked_entries) = set_prompt_runtime_projections(&entries, targets) else {
+    let Some(marked_entries) = set_prompt_runtime_projections_with(&entries, targets, policy)
+    else {
         return Ok(None);
     };
     validate_in_progress_marker_projection(&entries, &marked_entries)?;
@@ -12004,6 +12073,70 @@ mod tests {
             reopened,
             "- ### parent\n  - child group\n    - ~~one~~\n    - ~~two~~\n    - three\n"
         );
+    }
+
+    /// `#keepunstrike`: infra.md and sdk-dev.md mark the queue `subagents keep`.
+    /// Completing every nested row must leave the top-level pull-request row
+    /// unstruck, including one an earlier pass already struck. A nested group
+    /// still closes. Without `keep`, the top-level row still strikes.
+    #[test]
+    fn keep_leaves_the_top_level_queue_item_unstruck_when_children_complete() {
+        let policy = RuntimeProjectionPolicy {
+            keep_top_level_unstruck: true,
+        };
+        let body = concat!(
+            "- https://github.com/haiven-dev/haiven-infra/pull/304\n",
+            "  - ~~#rebase~~\n",
+            "  - ~~#review~~\n",
+            "  - child group\n",
+            "    - ~~one~~\n",
+            "    - ~~two~~\n",
+        );
+        let kept = project_prompt_runtime_projections_with(body, &[], policy)
+            .unwrap()
+            .expect("the nested group still closes")
+            .0;
+        assert_eq!(
+            kept,
+            concat!(
+                "- https://github.com/haiven-dev/haiven-infra/pull/304\n",
+                "  - ~~#rebase~~\n",
+                "  - ~~#review~~\n",
+                "  - ~~child group~~\n",
+                "    - ~~one~~\n",
+                "    - ~~two~~\n",
+            )
+        );
+        assert!(
+            !kept.contains("~~https://github.com/haiven-dev/haiven-infra/pull/304~~"),
+            "{kept}"
+        );
+
+        let already_struck = concat!(
+            "- ~~https://github.com/haiven-dev/haiven-sdk/pull/223~~\n",
+            "  - ~~#review~~\n",
+        );
+        let reopened = project_prompt_runtime_projections_with(already_struck, &[], policy)
+            .unwrap()
+            .expect("keep reopens a derived top-level strike")
+            .0;
+        assert_eq!(
+            reopened,
+            concat!(
+                "- ### https://github.com/haiven-dev/haiven-sdk/pull/223\n",
+                "  - ~~#review~~\n",
+            )
+        );
+
+        let closed = project_prompt_runtime_projections(body, &[])
+            .unwrap()
+            .expect("without keep the top-level row still strikes")
+            .0;
+        assert!(
+            closed.contains("- ### ~~https://github.com/haiven-dev/haiven-infra/pull/304~~\n"),
+            "{closed}"
+        );
+        assert!(closed.contains("  - ~~child group~~\n"), "{closed}");
     }
 
     #[test]

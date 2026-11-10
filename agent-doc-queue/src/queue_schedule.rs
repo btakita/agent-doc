@@ -23,7 +23,10 @@
 //!   without `interval`/`time` starts the next pass
 //!   [`MIN_SCHEDULE_INTERVAL_SECS`] after the previous one completed.
 //! - `keep` — completed rows remain struck in the queue as history; unlike
-//!   `loop`, this does not schedule or restore them.
+//!   `loop`, this does not schedule or restore them. A top-level group parent
+//!   stays unstruck when every nested item is complete (`#keepunstrike`).
+//!   `loop` still strikes that parent: the struck row is the pass roster the
+//!   restore unstrikes.
 //!
 //! # Anti-thrash contract
 //!
@@ -336,6 +339,17 @@ pub fn queue_schedule_spec_for_attrs(
 /// direction.
 pub fn queue_retains_struck_heads(attrs: &HashMap<String, String>) -> bool {
     attrs.contains_key(QUEUE_KEEP_ATTR) || attrs.contains_key(QUEUE_LOOP_ATTR)
+}
+
+/// Whether a `keep` queue must leave its top-level group parent unstruck when
+/// every nested child is complete (`#keepunstrike`).
+///
+/// `loop` implies `keep` so the pass roster survives a drain, but the restore
+/// unstrikes those rows itself. A loop queue still closes the parent. A bare
+/// `keep` (including `subagents keep`) does not: the parent is the container
+/// the operator left in the queue, not a completed head.
+pub fn queue_keeps_top_level_unstruck(attrs: &HashMap<String, String>) -> bool {
+    attrs.contains_key(QUEUE_KEEP_ATTR) && !attrs.contains_key(QUEUE_LOOP_ATTR)
 }
 
 fn declares_schedule(attrs: &HashMap<String, String>) -> bool {
@@ -1821,6 +1835,17 @@ mod tests {
         ])));
         assert!(!queue_retains_struck_heads(&attrs(&[("interval", "1h")])));
         assert!(!queue_retains_struck_heads(&attrs(&[])));
+        assert!(queue_keeps_top_level_unstruck(&attrs(&[("keep", "")])));
+        assert!(queue_keeps_top_level_unstruck(&attrs(&[
+            ("subagents", ""),
+            ("keep", "")
+        ])));
+        assert!(!queue_keeps_top_level_unstruck(&attrs(&[
+            ("keep", ""),
+            ("loop", "")
+        ])));
+        assert!(!queue_keeps_top_level_unstruck(&attrs(&[("loop", "")])));
+        assert!(!queue_keeps_top_level_unstruck(&attrs(&[])));
     }
 
     #[test]

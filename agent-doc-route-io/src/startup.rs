@@ -712,7 +712,7 @@ pub fn auto_start_in_session_with_lock_mode(
     match decide_existing_startup_registration(
         existing_registration.as_deref(),
         existing_alive,
-        live_owner.as_deref(),
+        live_owner,
     ) {
         ExistingStartupRegistrationDecision::Reuse(existing) => {
             eprintln!(

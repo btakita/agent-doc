@@ -371,4 +371,24 @@ mod tests {
             IntentionalExitDecision::StaleMarker
         );
     }
+
+    #[test]
+    fn a_pidless_grace_marker_holds_only_this_pane_and_generation() {
+        let grace = agent_doc_supervisor::intentional_exit::shell_start_grace_marker(
+            3, "%7", "session", 1_000,
+        );
+        assert_eq!(grace.supervisor_pid, 0);
+        assert_eq!(
+            shell_start_exit_hold(Some(&grace), "%7", 3, 1_000),
+            IntentionalExitDecision::ReplacementColdStartPending
+        );
+        assert_eq!(
+            shell_start_exit_hold(Some(&grace), "%8", 3, 1_000),
+            IntentionalExitDecision::StaleMarker
+        );
+        assert_eq!(
+            shell_start_exit_hold(Some(&grace), "%7", 4, 1_000),
+            IntentionalExitDecision::StaleMarker
+        );
+    }
 }

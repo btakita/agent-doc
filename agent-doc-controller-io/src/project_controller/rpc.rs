@@ -44655,6 +44655,53 @@ fn quit_live_harness_pane_to_shell(
     false
 }
 
+/// `#shellstart`: a claiming-shell launch with no supervisor pid still needs a
+/// grace marker, or the next watchdog tick starts again. A marker already
+/// written for a real pid is left in place.
+#[cfg(not(any(test, feature = "test-support")))]
+fn record_shell_start_grace_if_unmarked(work: &SupervisorReplacementWork) -> Result<()> {
+    let document_id = agent_doc_session_actor_io::canonical_document_id_in(
+        &work.project_root,
+        &work.file.to_string_lossy(),
+    );
+    let conn = open_state_db(&work.project_root)?;
+    if agent_doc_supervisor_io::intentional_exit::load_intentional_exit_from_db(
+        &conn,
+        &document_id,
+    )?
+    .is_some()
+    {
+        return Ok(());
+    }
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or(0);
+    let marker = agent_doc_supervisor::intentional_exit::shell_start_grace_marker(
+        work.generation,
+        &work.pane_id,
+        &work.session_id,
+        now_ms,
+    );
+    agent_doc_supervisor_io::intentional_exit::record_intentional_exit_in_db(
+        &conn,
+        &document_id,
+        &marker,
+    )?;
+    agent_doc_ops_log_io::log_op(
+        &work.file,
+        &format!(
+            "controller_supervisor_replacement_shell_start_grace session={} pane={} generation={} receipt_id={} outcome=pending pid=none grace_ms={}",
+            work.session_id,
+            work.pane_id,
+            work.generation,
+            work.operator_receipt_id,
+            agent_doc_supervisor::intentional_exit::REPLACEMENT_COLD_START_GRACE_MS,
+        ),
+    );
+    Ok(())
+}
+
 #[cfg(not(any(test, feature = "test-support")))]
 fn cold_start_supervisor_replacement(work: &SupervisorReplacementWork) -> Result<String> {
     let tmux = agent_doc_tmux_io::configured_tmux();
@@ -44886,7 +44933,9 @@ fn cold_start_supervisor_replacement(work: &SupervisorReplacementWork) -> Result
                         work.pane_id,
                     ),
                 );
-                agent_doc_tmux_io::input_diag::log_text_submit(
+                // `#shellstart`: respawn the pane process. Typing the start line
+                // into a fresh shell drops the bytes when its rc reads stdin.
+                agent_doc_tmux_io::input_diag::log_pane_launch(
                     agent_doc_tmux_io::input_diag::InputDiagSink::new(
                         Some(&work.file),
                         agent_doc_ops_log_io::log_op,
@@ -44895,25 +44944,21 @@ fn cold_start_supervisor_replacement(work: &SupervisorReplacementWork) -> Result
                     &format!("pane:{}", work.pane_id),
                     &start_cmd,
                     None,
-                    "route_owned_start_enter",
-                    "Enter",
+                    "route_owned_start_launch",
                 );
-                agent_doc_tmux_io::send_submitted_text_logged(
-                    &tmux,
-                    &work.pane_id,
-                    &start_cmd,
-                    agent_doc_tmux_io::input_diag::InputDiagSink::new(
-                        None,
-                        agent_doc_ops_log_io::log_op,
-                    ),
-                    "sessions.send_submitted_text",
-                )
-                .with_context(|| {
-                    format!(
-                        "failed to submit replacement supervisor start command into pane {}",
-                        work.pane_id
-                    )
-                })?;
+                agent_doc_tmux_io::launch_command_in_pane(&tmux, &work.pane_id, &start_cmd)
+                    .with_context(|| {
+                        format!(
+                            "failed to launch replacement supervisor start command in pane {}",
+                            work.pane_id
+                        )
+                    })?;
+                if let Err(err) = record_shell_start_grace_if_unmarked(work) {
+                    eprintln!(
+                        "[controller] supervisor replacement: shell-start grace marker failed for {}: {err:#}",
+                        work.file.display()
+                    );
+                }
                 return Ok(work.pane_id.clone());
             }
             SupervisorReplacementPaneDecision::BlockLiveNonShell => {

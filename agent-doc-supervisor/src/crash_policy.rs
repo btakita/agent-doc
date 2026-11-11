@@ -379,23 +379,33 @@ pub struct DeadPaneActorGcFacts {
 /// the bindings the watchdog would act on: a dead supervisor that was not
 /// stopped by the operator, a live visible pane, and an open session — and a
 /// claiming bare shell with no `agent-doc start`, even after that session log
-/// closes (`#shellstart`). A deliberate stop, a stashed or unresolved pane, a
-/// gone pane, a closed session that is not that shell, a paused queue (the
-/// watchdog is fenced too), or a live/unknown supervisor still closes as before.
+/// closes (`#shellstart`). A pending replacement cold start stays open the
+/// same way, including after the launch has left the bare shell, so a failed
+/// start can be tried again once the grace ends. A deliberate stop, a stashed
+/// or unresolved pane, a gone pane, a closed session that is not that shell
+/// and not an in-grace cold start, a paused queue (the watchdog is fenced
+/// too), or a live supervisor still closes as before.
 pub fn dead_pane_actor_gc_decision(facts: DeadPaneActorGcFacts) -> DeadPaneActorGcDecision {
     // `#shellstart`: a claiming shell with no start is the watchdog's even when
-    // the session log already closed. Operator stop, cold-start grace, stash,
-    // and pause still close, matching the watchdog holds.
+    // the session log already closed, and even when the lease pid is gone.
+    // An in-grace cold start is owed too: the pane may already be the new
+    // process, so it is no longer a bare shell, and closing it here drops the
+    // actor before the grace can expire into another try. Operator stop,
+    // stash, and pause still close.
+    let pending_cold_start =
+        facts.exit == crate::intentional_exit::IntentionalExitDecision::ReplacementColdStartPending;
     let shell_owed = facts.claiming_shell_needs_start
-        && facts.exit.allows_restart()
         && facts.binding.allows_restart()
-        && !facts.watchdog_paused;
+        && !facts.watchdog_paused
+        && (facts.exit.allows_restart() || pending_cold_start);
+    let cold_start_owed =
+        pending_cold_start && facts.binding.allows_restart() && !facts.watchdog_paused;
     let owed = facts.supervisor_dead
         && facts.exit != crate::intentional_exit::IntentionalExitDecision::Intentional
         && facts.binding.allows_restart()
         && facts.session_open
         && !facts.watchdog_paused;
-    if shell_owed || owed {
+    if shell_owed || cold_start_owed || owed {
         DeadPaneActorGcDecision::DeferToWatchdog
     } else {
         DeadPaneActorGcDecision::Close
@@ -752,6 +762,49 @@ mod tests {
         assert_eq!(
             dead_pane_actor_gc_decision(DeadPaneActorGcFacts {
                 binding: WatchdogBindingDecision::PaneStashed,
+                ..shell
+            }),
+            DeadPaneActorGcDecision::Close
+        );
+        // A leaseless pane that is not that shell still closes. An in-grace
+        // cold start stays open after the launch leaves the shell, and a
+        // paused or stashed grace still closes.
+        assert_eq!(
+            dead_pane_actor_gc_decision(DeadPaneActorGcFacts {
+                claiming_shell_needs_start: false,
+                ..shell
+            }),
+            DeadPaneActorGcDecision::Close
+        );
+        assert_eq!(
+            dead_pane_actor_gc_decision(DeadPaneActorGcFacts {
+                exit: Exit::ReplacementColdStartPending,
+                ..shell
+            }),
+            DeadPaneActorGcDecision::DeferToWatchdog
+        );
+        assert_eq!(
+            dead_pane_actor_gc_decision(DeadPaneActorGcFacts {
+                exit: Exit::ReplacementColdStartPending,
+                claiming_shell_needs_start: false,
+                ..shell
+            }),
+            DeadPaneActorGcDecision::DeferToWatchdog
+        );
+        assert_eq!(
+            dead_pane_actor_gc_decision(DeadPaneActorGcFacts {
+                exit: Exit::ReplacementColdStartPending,
+                claiming_shell_needs_start: false,
+                binding: WatchdogBindingDecision::PaneStashed,
+                ..shell
+            }),
+            DeadPaneActorGcDecision::Close
+        );
+        assert_eq!(
+            dead_pane_actor_gc_decision(DeadPaneActorGcFacts {
+                exit: Exit::ReplacementColdStartPending,
+                claiming_shell_needs_start: false,
+                watchdog_paused: true,
                 ..shell
             }),
             DeadPaneActorGcDecision::Close

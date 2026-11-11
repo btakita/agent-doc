@@ -14292,9 +14292,11 @@ where
 /// dead-pane actor and decide whether the GC must leave it to the watchdog.
 ///
 /// Gates run cheapest-first and fail toward `Close` (the pre-fix behaviour):
-/// no recorded supervisor pid, a live pid, or an operator stop never touch
-/// tmux. Only a proven-dead supervisor that was not stopped on purpose reads
-/// the session log and the pane binding.
+/// a live pid or an operator stop of a recorded pid never touch tmux. A
+/// missing lease still observes the claiming shell (`#shellstart`): a live
+/// bare shell with no serving start is deferred, and every other leaseless
+/// pane closes. A document that is not in the session registry closes before
+/// tmux, because the shell cannot be proven.
 fn dead_pane_actor_gc_decision_for_record(
     project_root: &Path,
     record: &agent_doc_controller::actor::ActorRecord,
@@ -14306,26 +14308,43 @@ fn dead_pane_actor_gc_decision_for_record(
     let Ok(conn) = open_state_db(project_root) else {
         return DeadPaneActorGcDecision::Close;
     };
-    let Some(supervisor_pid) =
+    let supervisor_pid =
         load_supervisor_lease_from_db(&conn, &record.document_id, record.generation)
             .ok()
             .flatten()
-            .and_then(|lease| lease.supervisor_pid)
-    else {
-        return DeadPaneActorGcDecision::Close;
+            .and_then(|lease| lease.supervisor_pid);
+    let exit = if let Some(supervisor_pid) = supervisor_pid {
+        if supervisor_pid == std::process::id() || process_is_alive(supervisor_pid) {
+            return DeadPaneActorGcDecision::Close;
+        }
+        let exit = rpc::supervisor_watchdog_intentional_exit_decision(
+            &conn,
+            &record.document_id,
+            supervisor_pid,
+            record.generation,
+        );
+        if exit == agent_doc_supervisor::intentional_exit::IntentionalExitDecision::Intentional {
+            return DeadPaneActorGcDecision::Close;
+        }
+        exit
+    } else {
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_millis() as u64)
+            .unwrap_or(0);
+        let marker = agent_doc_supervisor_io::intentional_exit::load_intentional_exit_from_db(
+            &conn,
+            &record.document_id,
+        )
+        .ok()
+        .flatten();
+        agent_doc_controller::shell_start::shell_start_exit_hold(
+            marker.as_ref(),
+            &record.pane_id,
+            record.generation,
+            now_ms,
+        )
     };
-    if supervisor_pid == std::process::id() || process_is_alive(supervisor_pid) {
-        return DeadPaneActorGcDecision::Close;
-    }
-    let exit = rpc::supervisor_watchdog_intentional_exit_decision(
-        &conn,
-        &record.document_id,
-        supervisor_pid,
-        record.generation,
-    );
-    if exit == agent_doc_supervisor::intentional_exit::IntentionalExitDecision::Intentional {
-        return DeadPaneActorGcDecision::Close;
-    }
     let Some(file) = agent_doc_session_registry_io::load_in(project_root)
         .ok()
         .and_then(|registry| {
@@ -14367,13 +14386,19 @@ fn dead_pane_actor_gc_decision_for_record(
         start_running,
     )
         == agent_doc_controller::shell_start::ClaimingShellStartDecision::StartAgentDoc;
-    // A closed session with no claiming shell still closes without further
-    // policy. `#shellstart` keeps the actor when that shell has no start.
-    if !session_open && !claiming_shell_needs_start {
+    let pending_cold_start = exit
+        == agent_doc_supervisor::intentional_exit::IntentionalExitDecision::ReplacementColdStartPending;
+    // A leaseless pane that is not a claiming shell, and is not an in-grace
+    // cold start, closes. A dead lease with a closed session does the same
+    // unless that shell or grace still owes a start.
+    if !claiming_shell_needs_start
+        && !pending_cold_start
+        && (supervisor_pid.is_none() || !session_open)
+    {
         return DeadPaneActorGcDecision::Close;
     }
     dead_pane_actor_gc_decision(DeadPaneActorGcFacts {
-        supervisor_dead: true,
+        supervisor_dead: supervisor_pid.is_some(),
         exit,
         binding: watchdog_binding_decision(
             pane_alive,
@@ -19100,10 +19125,12 @@ mod tests {
         );
     }
 
-    /// Without a recorded supervisor lease there is nothing for the watchdog to
-    /// recover, so the production observation closes without consulting tmux.
+    /// A leaseless actor whose document is not in the session registry cannot
+    /// be proven to be a claiming shell. It still closes, and the decision
+    /// does not call tmux. A registered live shell with no start is deferred
+    /// by [`agent_doc_supervisor::crash_policy::dead_pane_actor_gc_decision`].
     #[test]
-    fn dead_pane_gc_closes_without_a_supervisor_lease() {
+    fn dead_pane_gc_closes_a_leaseless_actor_with_no_registry_document() {
         let dir = tempfile::TempDir::new().unwrap();
         let doc = dir.path().join("tasks/no-lease.md");
         std::fs::create_dir_all(doc.parent().unwrap()).unwrap();

@@ -11,6 +11,10 @@
 //! and the pane capture proves the owner turn is live, hand that refill to the
 //! turn already running. An idle pane is not typed into — a submit there would
 //! start a second turn. A harness whose hook already injects is left alone.
+//! The paste itself refuses a Grok composer whose status says Enter would
+//! cancel a blocked wait (`#blockedwaitentercancels`): that Enter drops the
+//! turn the worker is bound to, which is what an editor switch back onto the
+//! restored pane was doing.
 
 /// Why a running turn is not handed a pool refill.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -23,6 +23,27 @@ pub fn blocker(output: &str) -> Option<String> {
     None
 }
 
+/// Plain Enter while this hint is up cancels the blocked wait and runs the
+/// typed text as the next turn (`#blockedwaitentercancels`).
+///
+/// Grok prints it on the status line when the turn is inside
+/// `get_command_or_subagent_output` (a background command, a subagent, or a
+/// sleep). A pool refill must not press Enter then: that is the editor-switch
+/// loss, where restoring the stashed pane submits the refill and the worker
+/// bound to the turn disappears. A still-running count without this phrase
+/// only queues, so it is not a hold.
+pub fn enter_cancels_blocked_wait(output: &str) -> bool {
+    output
+        .lines()
+        .rev()
+        .take(32)
+        .map(agent_doc_turn_executor_tmux::prompt::strip_ansi)
+        .any(|line| {
+            line.to_ascii_lowercase()
+                .contains("send a message to interrupt")
+        })
+}
+
 fn is_idle_footer_line(line: &str) -> bool {
     let line = line.trim();
     if line.is_empty() || line == "[stable]" || line == "[alpha]" {
@@ -262,6 +283,23 @@ mod tests {
             project_pane_composer(&format!("Waiting for response… 1.0s [stop]\n{IDLE}"), &h),
             PaneComposerProjection::Busy
         );
+    }
+
+    /// `#blockedwaitentercancels`: Enter on the interrupt hint cancels the
+    /// wait. A still-running count without that hint only queues.
+    #[test]
+    fn blocked_wait_enter_cancels_and_a_still_running_count_does_not() {
+        let busy = IDLE.replace("Ctrl+x", "Ctrl+c:cancel │ Ctrl+x");
+        assert!(!enter_cancels_blocked_wait(&busy));
+        assert!(!enter_cancels_blocked_wait(&format!(
+            "◎  1 subagent still running\n{busy}"
+        )));
+        assert!(enter_cancels_blocked_wait(&format!(
+            "◎  1 subagent still running · send a message to interrupt\n{busy}"
+        )));
+        assert!(enter_cancels_blocked_wait(&format!(
+            "{busy}\n◎  waiting · send a message to interrupt\n"
+        )));
     }
 
     /// `#managedipcdraftguard`: a running turn does not hide a draft, as it does

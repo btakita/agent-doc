@@ -2227,6 +2227,7 @@ pub fn response_defers_queue_head(content: &str, response_body: &str, head_text:
         return true;
     }
     latest_echo_cell_lacks_goal_final_state(content, response_body, head_text)
+        || latest_echo_cell_omits_address_fix(content, response_body, head_text)
         || crate::prompt_pressure::review_blocks_prompt(content, head_text)
         || latest_echo_cell_needs_prompt_pressure(content, response_body, head_text)
 }
@@ -2294,6 +2295,54 @@ pub fn latest_echo_cell_lacks_goal_final_state(content: &str, text: &str, head_t
     !cell_states_final
 }
 
+/// `#reviewfixonhead`: the latest echo of an `#address` head does not show
+/// the review's written fix on the current head.
+///
+/// A response that never echoes the head is not this deferral. Returning
+/// `true` only prevents a strike.
+pub fn latest_echo_cell_omits_address_fix(content: &str, text: &str, head_text: &str) -> bool {
+    let presets = crate::goal_preset_terminal::effective_presets_for_content(content);
+    if !crate::address_fix_on_head::head_is_address_run(head_text, &presets) {
+        return false;
+    }
+    let Some(cell) = latest_echo_cell(content, text, head_text) else {
+        return false;
+    };
+    let answer: String = cell
+        .lines()
+        .filter(|line| !line.trim_start().starts_with('>'))
+        .collect::<Vec<_>>()
+        .join("\n");
+    !crate::address_fix_on_head::address_run_lands_written_fix(&answer)
+}
+
+fn latest_echo_cell(content: &str, text: &str, head_text: &str) -> Option<String> {
+    let text = direct_response_text(text);
+    let mut heads = vec![head_text.to_string()];
+    if let Some(vector) = nest_vector_in_document(content, head_text)
+        && nest_row_work_differs(&vector, head_text)
+    {
+        heads.push(vector);
+    }
+    let blocks: Vec<&str> = text.split("\n\n").collect();
+    let index = blocks.iter().rposition(|block| {
+        heads
+            .iter()
+            .any(|head| block_quotes_free_text_head(block, head))
+    })?;
+    let mut cell = String::new();
+    for (offset, block) in blocks.iter().enumerate().skip(index) {
+        if offset != index && block_opens_response_cell(block) {
+            break;
+        }
+        if !cell.is_empty() {
+            cell.push_str("\n\n");
+        }
+        cell.push_str(block);
+    }
+    Some(cell)
+}
+
 /// True when `block` starts another response cell: a `### Re:` heading or a
 /// `> **Queue prompt:**` echo.
 fn block_opens_response_cell(block: &str) -> bool {
@@ -2310,6 +2359,7 @@ fn block_opens_response_cell(block: &str) -> bool {
 pub fn latest_queue_head_echo_is_deferral(content: &str, text: &str, head_text: &str) -> bool {
     if crate::prompt_pressure::review_blocks_prompt(content, head_text)
         || latest_echo_cell_needs_prompt_pressure(content, text, head_text)
+        || latest_echo_cell_omits_address_fix(content, text, head_text)
     {
         return true;
     }
@@ -2633,6 +2683,24 @@ mod tests {
             evidence,
             "do the other thing",
         ));
+    }
+
+    #[test]
+    fn address_echo_without_the_written_fix_stays_open() {
+        let head = "https://github.com/sample-org/sample-repo/pull/12: #address";
+        let doc = format!(
+            "---\nqueue_active: true\nprompt_presets:\n  '#address': 'Address every actionable review item on the exact current head.'\n---\n\n<!-- agent:queue auto -->\n- {head}\n<!-- /agent:queue -->\n"
+        );
+        let missing = format!(
+            "### Re: address\n\n> **Queue prompt:** {head}\n\nEvery actionable item is already fixed. No new commit. Earlier reviews were superseded and were not reopened.\n"
+        );
+        assert!(latest_echo_cell_omits_address_fix(&doc, &missing, head));
+        assert!(response_defers_queue_head(&doc, &missing, head));
+        let landed = format!(
+            "### Re: address\n\n> **Queue prompt:** {head}\n\nThe retry applies under shadow so the stored state is allowed.\nFIX-ON-HEAD https://github.com/sample-org/sample-repo/pull/12#pullrequestreview-5837752992 head=fa3a3f449986d565f21aeb6e0f792323bc8d1d58\n"
+        );
+        assert!(!latest_echo_cell_omits_address_fix(&doc, &landed, head));
+        assert!(!response_defers_queue_head(&doc, &landed, head));
     }
 
     fn active_queue_doc(head: &str) -> String {

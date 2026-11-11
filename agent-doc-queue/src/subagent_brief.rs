@@ -934,6 +934,16 @@ fn render_preamble(
         out.push_str(crate::goal_preset_terminal::OPERATOR_ORDER_CLOSE_RULE);
         out.push('\n');
     }
+    if auth
+        .presets
+        .iter()
+        .any(|preset| preset.name.eq_ignore_ascii_case("#address"))
+        || crate::address_fix_on_head::item_mentions_address_preset(&auth.item)
+    {
+        out.push_str("- ");
+        out.push_str(crate::address_fix_on_head::ADDRESS_FIX_ON_HEAD_RULE);
+        out.push('\n');
+    }
     out.push('\n');
     out.push_str(SUBAGENT_PROCEDURAL_CHOICE_RULE);
     out.push('\n');
@@ -1029,6 +1039,32 @@ mod tests {
         assert!(p.contains("does not post another human review"));
         assert!(p.contains("still write the response on the pull request"));
         assert!(p.contains("says why the work is not progressing"));
+    }
+
+    #[test]
+    fn address_run_brief_requires_the_written_fix_on_the_head() {
+        let frontmatter = concat!(
+            "prompt_presets:\n",
+            "  '#address': 'Address every actionable review item on the exact current head.'\n",
+        );
+        let item = "https://github.com/sample-org/sample-repo/pull/12: #address";
+        let content = doc(frontmatter, "subagents", &[item], &[]);
+        let preamble = subagent_authorization("prs.md", &content, item).subagent_prompt_preamble;
+        assert!(preamble.contains("(#reviewfixonhead)"), "{preamble}");
+        assert!(preamble.contains("FIX-ON-HEAD <review-url> head=<sha>"));
+        assert!(preamble.contains("written fix is the code on the exact current head"));
+
+        let other = doc(
+            frontmatter,
+            "subagents",
+            &["do [#abc]"],
+            &["[ ] [#abc] something else"],
+        );
+        assert!(
+            !subagent_authorization("prs.md", &other, "do [#abc]")
+                .subagent_prompt_preamble
+                .contains("(#reviewfixonhead)")
+        );
     }
 
     #[test]

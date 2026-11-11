@@ -717,6 +717,7 @@ mod tests {
             recorded_at_secs: NOW,
             quota_block: Some(block(Some("claude"))),
             prompt_pressure: None,
+            address_fix_pending: false,
         };
         let section = crate::goal_preset_terminal::prior_attempt_brief_section(&handoff);
         assert!(section.contains("branch `fix/partial`"), "{section}");

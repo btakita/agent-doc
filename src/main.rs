@@ -10298,7 +10298,22 @@ fn try_main() -> anyhow::Result<()> {
                         &file,
                         Some(requeue.claim.item_text.as_str()),
                     )?;
-                    if requeue.answered_blocked_review {
+                    if requeue.address_fix_pending {
+                        eprintln!(
+                            "[queue] address hand-back for {:?} (owner {}, generation {}) does not land the review's written fix on the current head; the row stays open and the attempt was requeued (#reviewfixonhead). Next: {} and dispatch the same row; its brief carries this hand-back. Land the written fix, then finish with `FIX-ON-HEAD <review-url> head=<sha>`. A later review does not replace that fix.",
+                            requeue.claim.item_text,
+                            requeue.claim.owner,
+                            requeue.claim.generation,
+                            agent_doc_queue_io::subagent_dispatch::claim_command(
+                                &file.display().to_string(),
+                                &requeue.claim.item_text,
+                            ),
+                        );
+                        emit_subagent_pool_refill(
+                            &file,
+                            agent_doc_queue::subagent_pool::PoolRefillTrigger::Release,
+                        );
+                    } else if requeue.answered_blocked_review {
                         if requeue.suppress_immediate_refill {
                             eprintln!(
                                 "[queue] operator order {:?} (owner {}, generation {}) handed back BLOCKED on a human review the preset already answers (#operatororderclosed). The row stays open. It is not an operator question. Address the review and resolve its threads. Do not dismiss it. Do not post another human review when the current head already has one. The pull-request response that says why the work is not progressing is already written; do not post it again.",

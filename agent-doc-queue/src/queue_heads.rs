@@ -223,6 +223,12 @@ pub fn queue_skip_diagnostic_for_response(content: &str, response: &str) -> Resu
             states.join(", ")
         ));
     }
+    if crate::queue_response::latest_echo_cell_omits_inline_threads(content, response, &queue_head)
+    {
+        return Ok(format!(
+            "[queue] kept head `{queue_head_display}` live because #address and #adversarial-pr load every inline pull-request discussion comment, not only the review body (#addressinline). Query `gh api repos/<owner>/<repo>/pulls/<number>/comments`. A root comment has no in_reply_to_id and its html_url contains `#discussion_r`. A later reply does not load the root. Do not dismiss a thread. The row stays open until every root thread's written fix is the code on the exact current head and the hand-back has `THREAD-FIX-ON-HEAD <discussion-url> head=<sha> resolved` for each root thread, or `INLINE-THREADS-LOADED 0 head=<sha>` when the comments query returned no root comments."
+        ));
+    }
     if crate::queue_response::response_defers_queue_head(content, response, &queue_head) {
         return Ok(format!(
             "[queue] kept free-text head `{queue_head_display}` pending because the response explicitly defers that quoted head. Next: resolve the blocker named in `**Deferred:**`, then run `agent-doc <FILE>` again; an active `go` queue schedules that retry automatically. Remove the adjacent deferral marker only after the work is complete."
@@ -1183,6 +1189,44 @@ mod tests {
         assert!(message.contains("run `agent-doc <FILE>` again"));
         assert!(message.contains("active `go` queue schedules that retry automatically"));
         assert!(!message.contains("supplied neither an exact"));
+    }
+
+    #[test]
+    fn inline_thread_omission_is_named_after_a_missing_final_state() {
+        let head = "https://github.com/sample-org/sample-repo/pull/12: #adversarial-pr";
+        let content = format!(
+            "---\nqueue_active: true\n---\n\n<!-- agent:queue go -->\n- {head}\n<!-- /agent:queue -->\n"
+        );
+        let posted =
+            format!("> **Queue prompt:** {head}\n\nPosted one review. The fixer has not run.\n");
+        let message = queue_skip_diagnostic_for_response(&content, &posted).unwrap();
+        assert!(message.contains("(#addressinline)"), "{message}");
+        assert!(!message.contains("(#goalpresetterminal)"), "{message}");
+
+        let _guard = crate::goal_preset_terminal::InheritedPresetsGuard::install_resolved(vec![(
+            "#adversarial-pr".to_string(),
+            "/goal Bring the pull request to a review-clean head.\n\n\
+             Final states. Your final message must begin with exactly one of these lines:\n\
+             - `REVIEW-CLEAN head=<sha>`.\n\
+             - `BLOCKED <action> head=<sha>`.\n"
+                .to_string(),
+        )]);
+        let missing = queue_skip_diagnostic_for_response(&content, &posted).unwrap();
+        assert!(missing.contains("(#goalpresetterminal)"), "{missing}");
+        assert!(!missing.contains("(#addressinline)"), "{missing}");
+
+        let clean = format!(
+            "> **Queue prompt:** {head}\n\nREVIEW-CLEAN https://github.com/sample-org/sample-repo/pull/12#pullrequestreview-1 head=bbbb222 cycles=1\n"
+        );
+        let clean_message = queue_skip_diagnostic_for_response(&content, &clean).unwrap();
+        assert!(
+            clean_message.contains("(#addressinline)"),
+            "{clean_message}"
+        );
+        assert!(
+            !clean_message.contains("(#goalpresetterminal)"),
+            "{clean_message}"
+        );
     }
 
     /// `#agentrecap`: a recap names queue work, and that text is never a row.

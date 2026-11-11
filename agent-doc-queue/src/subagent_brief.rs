@@ -944,6 +944,15 @@ fn render_preamble(
         out.push_str(crate::address_fix_on_head::ADDRESS_FIX_ON_HEAD_RULE);
         out.push('\n');
     }
+    if crate::inline_discussion::item_mentions_inline_discussion_goal(&auth.item)
+        || auth.presets.iter().any(|preset| {
+            crate::inline_discussion::preset_name_loads_inline_discussions(&preset.name)
+        })
+    {
+        out.push_str("- ");
+        out.push_str(crate::inline_discussion::INLINE_DISCUSSION_RULE);
+        out.push('\n');
+    }
     out.push('\n');
     out.push_str(SUBAGENT_PROCEDURAL_CHOICE_RULE);
     out.push('\n');
@@ -1039,6 +1048,44 @@ mod tests {
         assert!(p.contains("does not post another human review"));
         assert!(p.contains("still write the response on the pull request"));
         assert!(p.contains("says why the work is not progressing"));
+        assert!(p.contains("(#addressinline)"), "{p}");
+        assert!(p.contains("gh api repos/<owner>/<repo>/pulls/<number>/comments"));
+        assert!(p.contains("THREAD-FIX-ON-HEAD"));
+    }
+
+    #[test]
+    fn address_and_adversarial_briefs_require_inline_discussion_comments() {
+        let frontmatter = concat!(
+            "prompt_presets:\n",
+            "  '#address': 'Address every actionable review item on the exact current head.'\n",
+            "  '#adversarial-pr': >-\n",
+            "    /goal Bring the pull request to a review-clean head.\n",
+            "    Final states. Your final message must begin with exactly one of these lines:\n",
+            "    - `REVIEW-CLEAN head=<sha>`.\n",
+            "    - `BLOCKED <action> head=<sha>`.\n",
+        );
+        for item in [
+            "https://github.com/haiven-dev/haiven-api/pull/869: #address",
+            "https://github.com/haiven-dev/haiven-api/pull/869: #adversarial-pr",
+        ] {
+            let content = doc(frontmatter, "subagents", &[item], &[]);
+            let auth = subagent_authorization("prs.md", &content, item);
+            let preamble = &auth.subagent_prompt_preamble;
+            assert!(preamble.contains("(#addressinline)"), "{item}\n{preamble}");
+            assert!(
+                preamble.contains("gh api repos/<owner>/<repo>/pulls/<number>/comments"),
+                "{preamble}"
+            );
+            assert!(preamble.contains("THREAD-FIX-ON-HEAD"), "{preamble}");
+            assert!(preamble.contains("INLINE-THREADS-LOADED 0"), "{preamble}");
+        }
+        let other = doc("", "subagents", &["do [#abc]"], &[]);
+        let auth = subagent_authorization("prs.md", &other, "do [#abc]");
+        assert!(
+            !auth.subagent_prompt_preamble.contains("(#addressinline)"),
+            "{}",
+            auth.subagent_prompt_preamble
+        );
     }
 
     #[test]

@@ -11043,10 +11043,24 @@ mod tests {
              The review effect is published.",
         );
 
-        // Without the project presets installed the row reads as plain free
-        // text, which is exactly how the paraphrased review struck it.
+        // The `#adversarial-pr` token itself keeps an unsettled hand-back open.
+        // Once that hand-back shows the comments query returned no root threads,
+        // the row is plain free text: the deny-list misses this paraphrase,
+        // which is how the review used to strike it before the goal gate.
         assert!(
-            goal_loop_row_strikes(&content, &review_with_p2),
+            !goal_loop_row_strikes(&content, &review_with_p2),
+            "an unsettled #adversarial-pr hand-back stays open without project presets"
+        );
+        let review_with_p2_loaded = goal_loop_response(
+            "Posted one plain COMMENTED review at \
+             https://github.com/sample-org/sample-repo/pull/12#pullrequestreview-1000000001 \
+             against exact head `aaaa111`.\n\n\
+             Verdict: changes needed. One P2 finding: reconnect drops the retained outbox.\n\n\
+             The review effect is published.\n\
+             INLINE-THREADS-LOADED 0 head=aaaa111",
+        );
+        assert!(
+            goal_loop_row_strikes(&content, &review_with_p2_loaded),
             "precondition: the deny-list alone misses the paraphrased P2"
         );
 
@@ -11056,6 +11070,10 @@ mod tests {
 
         // 1. A posted review with an actionable finding does not strike the row.
         assert!(!goal_loop_row_strikes(&content, &review_with_p2));
+        assert!(
+            !goal_loop_row_strikes(&content, &review_with_p2_loaded),
+            "a settled comments query is not a declared final state"
+        );
         assert!(crate::queue_response::response_defers_queue_head(
             &content,
             &review_with_p2,
@@ -11105,7 +11123,8 @@ mod tests {
         let review_clean = goal_loop_response(
             "REVIEW-CLEAN https://github.com/sample-org/sample-repo/pull/12#pullrequestreview-1000000002 \
              base=cccc333 head=bbbb222 cycles=2\n\n\
-             A fresh independent review of the unchanged head has zero surviving findings.",
+             A fresh independent review of the unchanged head has zero surviving findings.\n\
+             INLINE-THREADS-LOADED 0 head=bbbb222",
         );
         assert!(goal_loop_row_strikes(&content, &review_clean));
         assert!(!crate::queue_response::latest_queue_head_echo_is_deferral(
@@ -11115,7 +11134,8 @@ mod tests {
         ));
         let blocked = goal_loop_response(
             "`BLOCKED restore the hosted runner budget base=cccc333 head=bbbb222 cycles=2`\n\n\
-             Review URLs: https://github.com/sample-org/sample-repo/pull/12#pullrequestreview-1000000002",
+             Review URLs: https://github.com/sample-org/sample-repo/pull/12#pullrequestreview-1000000002\n\
+             INLINE-THREADS-LOADED 0 head=bbbb222",
         );
         assert!(goal_loop_row_strikes(&content, &blocked));
         let answered_blocked = goal_loop_response(
@@ -11190,7 +11210,9 @@ mod tests {
         let _project = crate::goal_preset_terminal::InheritedPresetsGuard::install(
             &goal_loop_project_presets(),
         );
-        let response = goal_loop_response(STOPPED_BLOCKED);
+        let response = goal_loop_response(&format!(
+            "{STOPPED_BLOCKED}\nINLINE-THREADS-LOADED 0 head=4b1ec50"
+        ));
         let claims = vec![
             "https://github.com/sample-org/sample-repo/pull/12: #adversarial-pr".to_string(),
             "#adversarial-pr".to_string(),
@@ -12000,11 +12022,11 @@ mod tests {
             .collect::<Vec<_>>();
         let response = concat!(
             "> **Queue prompt:** https://github.com/haiven-dev/haiven-cli/pull/10: #adversarial-pr\n\n",
-            "REVIEW-CLEAN https://github.com/haiven-dev/haiven-cli/pull/10#pullrequestreview-10 base=aaaa head=bbbb cycles=1\n\n",
+            "REVIEW-CLEAN https://github.com/haiven-dev/haiven-cli/pull/10#pullrequestreview-10 base=aaaa head=bbbb cycles=1\nINLINE-THREADS-LOADED 0 head=bbbb222\n\n",
             "> **Queue prompt:** https://github.com/haiven-dev/haiven-cli/pull/11: #adversarial-pr\n\n",
-            "REVIEW-CLEAN https://github.com/haiven-dev/haiven-cli/pull/11#pullrequestreview-11 base=aaaa head=bbbb cycles=1\n\n",
+            "REVIEW-CLEAN https://github.com/haiven-dev/haiven-cli/pull/11#pullrequestreview-11 base=aaaa head=bbbb cycles=1\nINLINE-THREADS-LOADED 0 head=bbbb222\n\n",
             "> **Queue prompt:** https://github.com/haiven-dev/haiven-cli/pull/12: #adversarial-pr\n\n",
-            "REVIEW-CLEAN https://github.com/haiven-dev/haiven-cli/pull/12#pullrequestreview-12 base=aaaa head=bbbb cycles=1\n\n",
+            "REVIEW-CLEAN https://github.com/haiven-dev/haiven-cli/pull/12#pullrequestreview-12 base=aaaa head=bbbb cycles=1\nINLINE-THREADS-LOADED 0 head=bbbb222\n\n",
             "> **Queue prompt:** https://github.com/haiven-dev/haiven-cli/pull/8: #adversarial-pr\n\n",
             "**Deferred:** pull 8 changed after review.\n\n",
             "> **Queue prompt:** https://github.com/haiven-dev/haiven-cli/pull/9: #adversarial-pr\n\n",
@@ -13337,6 +13359,7 @@ Old.
         let response = concat!(
             "> **Queue prompt:** https://github.com/haiven-dev/haiven-api/pull/823: #adversarial-pr\n\n",
             "Completed the adversarial review for pull request 823.\n",
+            "INLINE-THREADS-LOADED 0 head=bbbb222\n",
         );
 
         let vector = "https://github.com/haiven-dev/haiven-api/pull/823: #adversarial-pr";
@@ -13397,6 +13420,7 @@ Old.
             "**Deferred:** Its child remains queued.\n\n",
             "> **Queue prompt:** https://github.com/haiven-dev/haiven-api/pull/823: #adversarial-pr\n\n",
             "Reviewed pull request 823.\n",
+            "INLINE-THREADS-LOADED 0 head=bbbb222\n",
             "<!-- /patch:exchange -->\n",
             "<!-- patch:recap -->\n",
             "Done.\n",

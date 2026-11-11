@@ -10337,6 +10337,21 @@ fn try_main() -> anyhow::Result<()> {
                                 agent_doc_queue::subagent_pool::PoolRefillTrigger::Release,
                             );
                         }
+                    } else if requeue.inline_threads_pending {
+                        eprintln!(
+                            "[queue] hand-back for {:?} (owner {}, generation {}) left a root inline discussion thread off the current head; the row stays open and the attempt was requeued (#addressinline). Query `gh api repos/<owner>/<repo>/pulls/<number>/comments`. Land each root thread's written fix on the exact current head, address the thread, and resolve it. Do not dismiss a thread. Finish with `THREAD-FIX-ON-HEAD <discussion-url> head=<sha> resolved` for every root thread, or `INLINE-THREADS-LOADED 0 head=<sha>` when that query returned no root comments. Next: {} and dispatch the same row; its brief carries this hand-back.",
+                            requeue.claim.item_text,
+                            requeue.claim.owner,
+                            requeue.claim.generation,
+                            agent_doc_queue_io::subagent_dispatch::claim_command(
+                                &file.display().to_string(),
+                                &requeue.claim.item_text,
+                            ),
+                        );
+                        emit_subagent_pool_refill(
+                            &file,
+                            agent_doc_queue::subagent_pool::PoolRefillTrigger::Release,
+                        );
                     } else {
                         eprintln!(
                             "[queue] goal-loop hand-back for {:?} (owner {}, generation {}) does not begin with a declared final state ({}); the row stays open and the attempt was requeued, so it is dispatchable again (#goalpresetterminal). Next: {} and dispatch the same row; its brief carries this hand-back. Do not close the row until a response line begins with a declared final state.",

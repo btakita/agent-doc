@@ -21,6 +21,7 @@ pub mod document_queue;
 pub mod free_text_admission;
 pub mod goal_preset_terminal;
 pub mod idle_drain;
+pub mod inline_discussion;
 pub mod moot_decision;
 pub mod nested_claim_steer;
 pub mod no_changes_explanation;

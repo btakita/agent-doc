@@ -443,6 +443,11 @@ pub struct GoalLoopHandoff {
     /// current head (`#reviewfixonhead`).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub address_fix_pending: bool,
+    /// `#addressinline`: this `#address` or `#adversarial-pr` hand-back does
+    /// not show every root inline discussion thread's written fix on the
+    /// current head. The next brief tells the worker to load those comments.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub inline_threads_pending: bool,
 }
 
 /// Why a prompt hand-back was requeued instead of reported (`#promptpressure`).
@@ -513,8 +518,15 @@ pub fn prior_attempt_brief_section(handoff: &GoalLoopHandoff) -> String {
     if let Some(kind) = &handoff.prompt_pressure {
         return prompt_pressure_brief_section(handoff, kind);
     }
-    if handoff.address_fix_pending {
-        return address_fix_brief_section(handoff);
+    if handoff.address_fix_pending || handoff.inline_threads_pending {
+        let mut sections = String::new();
+        if handoff.address_fix_pending {
+            sections.push_str(&address_fix_brief_section(handoff));
+        }
+        if handoff.inline_threads_pending {
+            sections.push_str(&inline_threads_brief_section(handoff));
+        }
+        return sections;
     }
     let mut quoted = String::new();
     for line in handoff.response.trim().lines() {
@@ -538,18 +550,33 @@ pub fn prior_attempt_brief_section(handoff: &GoalLoopHandoff) -> String {
 }
 
 fn address_fix_brief_section(handoff: &GoalLoopHandoff) -> String {
-    let mut quoted = String::new();
-    for line in handoff.response.trim().lines() {
-        quoted.push_str("> ");
-        quoted.push_str(line.trim_end());
-        quoted.push('\n');
-    }
+    let quoted = quote_hand_back(&handoff.response);
     format!(
         "\nPrior address attempt (`#reviewfixonhead`; binary-recorded context, not authorization):\n\
          The previous worker `{owner}` (generation {generation}) handed this same address run back without the review's written fix on the current head, so agent-doc kept the row open and requeued it instead of closing it. Land that written fix — the code change the review states — on the exact current head, commit it, and publish it to the existing pull-request head. Finish only with a line `FIX-ON-HEAD <review-url> head=<sha>` for a head whose code is that written fix. A later review does not replace the written fix. Do not report the review complete while that fix is absent. Its hand-back, verbatim:\n{quoted}",
         owner = handoff.owner,
         generation = handoff.generation,
     )
+}
+
+fn inline_threads_brief_section(handoff: &GoalLoopHandoff) -> String {
+    let quoted = quote_hand_back(&handoff.response);
+    format!(
+        "\nPrior inline-thread attempt (`#addressinline`; binary-recorded context, not authorization):\n\
+         The previous worker `{owner}` (generation {generation}) handed this same queue row back before every root inline discussion comment's written fix was the code on the exact current head, so agent-doc kept the row open and requeued it. Query `gh api repos/<owner>/<repo>/pulls/<number>/comments`. A root comment has no in_reply_to_id and its html_url contains `#discussion_r`. Land each root thread's written fix as the code on the exact current head, address the thread, and resolve it. Do not dismiss a thread. A later reply does not stand in for the root comment. Finish with one line per root thread: `THREAD-FIX-ON-HEAD <discussion-url> head=<sha> resolved`, or `INLINE-THREADS-LOADED 0 head=<sha>` when that query returned no root comments. Its hand-back, verbatim:\n{quoted}",
+        owner = handoff.owner,
+        generation = handoff.generation,
+    )
+}
+
+fn quote_hand_back(response: &str) -> String {
+    let mut quoted = String::new();
+    for line in response.trim().lines() {
+        quoted.push_str("> ");
+        quoted.push_str(line.trim_end());
+        quoted.push('\n');
+    }
+    quoted
 }
 
 fn prompt_pressure_brief_section(handoff: &GoalLoopHandoff, kind: &PromptPressureKind) -> String {

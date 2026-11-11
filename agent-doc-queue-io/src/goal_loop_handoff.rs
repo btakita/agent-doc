@@ -143,6 +143,9 @@ pub struct GoalLoopRequeue {
     /// `#reviewfixonhead`: the hand-back did not land the review's written fix
     /// on the current head.
     pub address_fix_pending: bool,
+    /// `#addressinline`: an `#address` or `#adversarial-pr` hand-back whose
+    /// root inline discussion threads are not shown on the current head.
+    pub inline_threads_pending: bool,
 }
 
 /// `#goalpresetterminal`: decide `queue report-complete` for a goal-loop row.
@@ -172,36 +175,48 @@ pub fn requeue_nonterminal_hand_back(
     }
     let presets =
         agent_doc_frontmatter_io::session::effective_prompt_presets_for_drain(content, file);
-    let final_states = agent_doc_queue::goal_preset_terminal::head_final_states_with_presets(
+    let preset_pairs = agent_doc_queue::goal_preset_terminal::resolved_presets(&presets);
+    let final_states = agent_doc_queue::goal_preset_terminal::head_final_states_in(
         &claim.item_text,
-        &presets,
+        &preset_pairs,
     );
-    let preset_pairs: Vec<(String, String)> = presets
-        .iter()
-        .map(|(name, body)| (name.clone(), body.clone()))
-        .collect();
     let address_run =
         agent_doc_queue::address_fix_on_head::head_is_address_run(&claim.item_text, &preset_pairs);
     let address_lands = address_run
         && agent_doc_queue::address_fix_on_head::address_run_lands_written_fix(response);
     let address_pending = address_run && !address_lands;
-    let bodies = agent_doc_queue::goal_preset_terminal::head_goal_preset_bodies_with_presets(
+    // `#addressinline`: `#address` declares no final states, so the empty-state
+    // return must not skip a row whose inline discussion threads are unsettled.
+    let inline_goal = agent_doc_queue::inline_discussion::head_requires_inline_discussions(
         &claim.item_text,
-        &presets,
+        &preset_pairs,
+    );
+    let inline_pending =
+        inline_goal && !agent_doc_queue::inline_discussion::inline_threads_settled(response);
+    let bodies = agent_doc_queue::goal_preset_terminal::head_goal_preset_bodies_in(
+        &claim.item_text,
+        &preset_pairs,
     );
     // `#operatororderclosed`: an already-answered human-review BLOCKED does not
     // complete. `#reviewfixonhead`: an address run stays open until the written
-    // fix is on the current head, even when the hand-back calls the review complete.
+    // fix is on the current head. `#addressinline`: an inline goal stays open
+    // until every root thread's written fix is on that head.
     let completes_order = !address_pending
+        && !inline_pending
+        && !final_states.is_empty()
         && agent_doc_queue::goal_preset_terminal::hand_back_completes_goal_loop(
             response,
             &final_states,
             &bodies,
         );
+    let ordinary_empty = !address_run && !inline_goal && final_states.is_empty();
+    let settled_inline_without_states =
+        inline_goal && !inline_pending && !address_pending && final_states.is_empty();
     if !address_pending
-        && ((!address_run && final_states.is_empty()) || completes_order || address_lands)
+        && !inline_pending
+        && (ordinary_empty || settled_inline_without_states || completes_order || address_lands)
     {
-        if completes_order || address_lands {
+        if completes_order || address_lands || settled_inline_without_states {
             let identity = claim.identity.clone();
             let live = agent_doc_queue::queue_continuation::live_queue_head_identities(content);
             mutate(file, |ledger| {
@@ -233,6 +248,7 @@ pub fn requeue_nonterminal_hand_back(
         quota_block: None,
         prompt_pressure: None,
         address_fix_pending: address_pending,
+        inline_threads_pending: inline_pending,
     };
     mutate(file, |ledger| {
         if let Some(live) = live.as_ref() {
@@ -249,6 +265,8 @@ pub fn requeue_nonterminal_hand_back(
     .unwrap_or(claim);
     let tag = if address_pending {
         "#reviewfixonhead"
+    } else if inline_pending {
+        "#addressinline"
     } else {
         "#goalpresetterminal"
     };
@@ -277,6 +295,7 @@ pub fn requeue_nonterminal_hand_back(
         suppress_immediate_refill,
         answered_blocked_review,
         address_fix_pending: address_pending,
+        inline_threads_pending: inline_pending,
     }))
 }
 
@@ -311,6 +330,7 @@ pub fn requeue_with_prompt_pressure(
         quota_block: None,
         prompt_pressure: Some(kind.clone()),
         address_fix_pending: false,
+        inline_threads_pending: false,
     };
     mutate(file, |ledger| {
         if let Some(live) = live.as_ref() {
@@ -356,6 +376,7 @@ pub fn record_quota_requeue(file: &Path, claim: &QueueClaim) -> Result<()> {
         quota_block: Some(block),
         prompt_pressure: None,
         address_fix_pending: false,
+        inline_threads_pending: false,
     };
     mutate(file, |ledger| ledger.record(handoff))
 }

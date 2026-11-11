@@ -2228,8 +2228,52 @@ pub fn response_defers_queue_head(content: &str, response_body: &str, head_text:
     }
     latest_echo_cell_lacks_goal_final_state(content, response_body, head_text)
         || latest_echo_cell_omits_address_fix(content, response_body, head_text)
+        || latest_echo_cell_omits_inline_threads(content, response_body, head_text)
         || crate::prompt_pressure::review_blocks_prompt(content, head_text)
         || latest_echo_cell_needs_prompt_pressure(content, response_body, head_text)
+}
+
+/// `#addressinline`: true when `head_text` is `#address` or `#adversarial-pr`
+/// and the latest echo of that head does not show every root inline discussion
+/// thread's written fix on the current head.
+///
+/// Quote lines are the echo of the queue prompt, not the hand-back. A response
+/// that never echoes the head is unanswered, not this deferral. Returning
+/// `true` only ever prevents a strike.
+pub fn latest_echo_cell_omits_inline_threads(content: &str, text: &str, head_text: &str) -> bool {
+    let presets = crate::goal_preset_terminal::effective_presets_for_content(content);
+    if !crate::inline_discussion::head_requires_inline_discussions(head_text, &presets) {
+        return false;
+    }
+    let text = direct_response_text(text);
+    let mut heads = vec![head_text.to_string()];
+    if let Some(vector) = nest_vector_in_document(content, head_text)
+        && nest_row_work_differs(&vector, head_text)
+    {
+        heads.push(vector);
+    }
+    let blocks: Vec<&str> = text.split("\n\n").collect();
+    let Some(index) = blocks.iter().rposition(|block| {
+        heads
+            .iter()
+            .any(|head| block_quotes_free_text_head(block, head))
+    }) else {
+        return false;
+    };
+    let cell_end = blocks
+        .iter()
+        .enumerate()
+        .skip(index + 1)
+        .find(|(_, block)| block_opens_response_cell(block))
+        .map(|(offset, _)| offset)
+        .unwrap_or(blocks.len());
+    let prose: String = blocks[index..cell_end]
+        .join("\n\n")
+        .lines()
+        .filter(|line| !line.trim_start().starts_with('>'))
+        .collect::<Vec<_>>()
+        .join("\n");
+    !crate::inline_discussion::inline_threads_settled(&prose)
 }
 
 /// `#goalpresetterminal`: true when `head_text` resolves to a `/goal` preset
@@ -2380,6 +2424,7 @@ pub fn latest_queue_head_echo_is_deferral(content: &str, text: &str, head_text: 
     };
     deferral_scope_has_marker(&blocks, index)
         || latest_echo_cell_lacks_goal_final_state(content, &text, head_text)
+        || latest_echo_cell_omits_inline_threads(content, &text, head_text)
 }
 
 /// `#promptpressure`: the latest echo of `head_text` is a prose blocker with no
@@ -2697,10 +2742,44 @@ mod tests {
         assert!(latest_echo_cell_omits_address_fix(&doc, &missing, head));
         assert!(response_defers_queue_head(&doc, &missing, head));
         let landed = format!(
-            "### Re: address\n\n> **Queue prompt:** {head}\n\nThe retry applies under shadow so the stored state is allowed.\nFIX-ON-HEAD https://github.com/sample-org/sample-repo/pull/12#pullrequestreview-5837752992 head=fa3a3f449986d565f21aeb6e0f792323bc8d1d58\n"
+            "### Re: address\n\n> **Queue prompt:** {head}\n\nThe retry applies under shadow so the stored state is allowed.\nFIX-ON-HEAD https://github.com/sample-org/sample-repo/pull/12#pullrequestreview-5837752992 head=fa3a3f449986d565f21aeb6e0f792323bc8d1d58\nINLINE-THREADS-LOADED 0 head=fa3a3f449986d565f21aeb6e0f792323bc8d1d58\n"
         );
         assert!(!latest_echo_cell_omits_address_fix(&doc, &landed, head));
+        assert!(!latest_echo_cell_omits_inline_threads(&doc, &landed, head));
         assert!(!response_defers_queue_head(&doc, &landed, head));
+    }
+
+    #[test]
+    fn inline_discussion_goal_defers_until_root_threads_are_on_the_head() {
+        let head = "https://github.com/haiven-dev/haiven-api/pull/869: #address";
+        let doc = active_queue_doc(head);
+        let review_body = format!(
+            "> **Queue prompt:** {head}\n\nREVIEW-CLEAN the review body is the only text that was read.\n"
+        );
+        assert!(response_defers_queue_head(&doc, &review_body, head));
+        assert!(latest_queue_head_echo_is_deferral(&doc, &review_body, head));
+        let later = format!(
+            "> **Queue prompt:** {head}\n\nLater replies on https://github.com/haiven-dev/haiven-api/pull/869#discussion_r4532159601 and https://github.com/haiven-dev/haiven-api/pull/869#discussion_r4532069052 are marked resolved.\n"
+        );
+        assert!(response_defers_queue_head(&doc, &later, head));
+        let settled = format!(
+            "> **Queue prompt:** {head}\n\n\
+             FIX-ON-HEAD https://github.com/haiven-dev/haiven-api/pull/869#pullrequestreview-5837752992 head=87afcacde5eaed85bc87372fad897903afdebacf\n\
+             THREAD-FIX-ON-HEAD https://github.com/haiven-dev/haiven-api/pull/869#discussion_r4532159601 head=87afcacde5eaed85bc87372fad897903afdebacf resolved\n\
+             THREAD-FIX-ON-HEAD https://github.com/haiven-dev/haiven-api/pull/869#discussion_r4532069052 head=87afcacde5eaed85bc87372fad897903afdebacf resolved\n"
+        );
+        assert!(!response_defers_queue_head(&doc, &settled, head));
+        assert!(!latest_queue_head_echo_is_deferral(&doc, &settled, head));
+        assert!(
+            !response_defers_queue_head(&doc, "No echo of the head.", head),
+            "an unanswered head is not this deferral"
+        );
+        let other = active_queue_doc("do [#abc]");
+        assert!(!latest_echo_cell_omits_inline_threads(
+            &other,
+            "> **Queue prompt:** do [#abc]\n\nDone.\n",
+            "do [#abc]",
+        ));
     }
 
     fn active_queue_doc(head: &str) -> String {

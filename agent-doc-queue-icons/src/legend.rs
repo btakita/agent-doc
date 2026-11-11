@@ -37,7 +37,8 @@ pub const QUEUE_TERMINAL_MEANING: &str = "Integrated, terminal queue history. A 
 /// mark: older documents also carried a hidden `<!-- agent-doc:reply -->`
 /// comment, which the next refresh drops. The glyph counts only as the last
 /// token of a row in the rendered packet position, so an operator line that
-/// merely contains it stays operator text.
+/// merely contains it stays operator text. Nothing is written after it
+/// (`#responserowclaim`).
 pub const AGENT_DOC_REPLY_GLYPH: &str = "▫️";
 /// Legend entry for [`AGENT_DOC_REPLY_GLYPH`].
 pub const QUEUE_REPLY_LEGEND_ENTRY: &str = "▫️ generated row";

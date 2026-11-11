@@ -63,6 +63,12 @@ fn head_work(line: &str) -> &str {
 
 fn segment_head_id(line: &str) -> Option<String> {
     let work = crate::waiting_status::without_status_token(head_work(line));
+    // `#responserowclaim`: a generated reply row is not a waiting item. Its
+    // first `#id` may be evidence inside the sentence (`moot#1`) or a
+    // `[#q-…]` appended after the glyph. Neither names the segment.
+    if agent_doc_markdown_ast::reply_row::is_generated_reply_label_body(&work) {
+        return None;
+    }
     let work = work.trim().trim_start_matches("~~");
     let work = agent_doc_element_queue::strip_attempt_projection_prefix(work);
     crate::document_queue::queue_prompt_reference_ids(work)
@@ -380,6 +386,20 @@ mod tests {
             append_to_done("no components here\n", &[entry]).unwrap(),
             None
         );
+    }
+
+    #[test]
+    fn a_generated_reply_head_is_not_the_segments_id() {
+        let tree = "\
+- ### Waiting on you <!-- agent-doc:waiting-on-you -->
+    - 📥 **Next:** you — answer: record subagent:tcoreproof-moot#1 ▫️ [#q-bfc40eeaae02]
+    - **Question:** Which port? ▫️ [#q-095ecb037967]
+      - use 8080
+";
+        let segments = waiting_tree_segments(tree, 0);
+        assert_eq!(segments.len(), 1, "{segments:#?}");
+        assert_eq!(segments[0].id, None);
+        assert!(segment_has_operator_rows(&segments[0].raw));
     }
 
     #[test]

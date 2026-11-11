@@ -268,6 +268,15 @@ fn executable_queue_nodes(content: &str) -> Vec<MutationItemNode> {
             {
                 return false;
             }
+            // `#responserowclaim`: never append a `[#q-…]` after the reply
+            // glyph. A generated Next, Question, Response, or Action row is
+            // not a queue head, even when it is still an item node because
+            // its waiting-item parent is missing.
+            if agent_doc_markdown_ast::reply_row::is_generated_reply_label_body(
+                node.item.work_text(),
+            ) {
+                return false;
+            }
             // Harness/supervisor slash controls are queue handoffs, not
             // executable agent prompts. Their exact bytes are the command
             // protocol, so correlation metadata must not be appended.

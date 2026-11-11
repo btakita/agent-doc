@@ -25,6 +25,9 @@ pub enum PoolRunningTurnFollowUpSkip {
     HookInjects,
     /// The pane is not in a turn. Submitting would start a new one.
     TurnNotLive,
+    /// Grok's blocked-wait status: Enter cancels that turn and workers still
+    /// bound to other rows (`#blockedwaitentercancels`).
+    EnterWouldCancel,
 }
 
 impl PoolRunningTurnFollowUpSkip {
@@ -35,6 +38,7 @@ impl PoolRunningTurnFollowUpSkip {
             Self::QueuePaused => "queue_paused",
             Self::HookInjects => "hook_injects",
             Self::TurnNotLive => "turn_not_live",
+            Self::EnterWouldCancel => "enter_would_cancel",
         }
     }
 }
@@ -56,6 +60,8 @@ pub struct PoolRunningTurnFollowUpObservation {
     pub queue_paused: bool,
     pub hook_injects: bool,
     pub turn_live: bool,
+    /// Pane capture shows `send a message to interrupt`. False before capture.
+    pub enter_would_cancel: bool,
 }
 
 pub fn pool_running_turn_follow_up_decision(
@@ -78,6 +84,9 @@ pub fn pool_running_turn_follow_up_decision(
     if !observation.turn_live {
         return Skip(TurnNotLive);
     }
+    if observation.enter_would_cancel {
+        return Skip(EnterWouldCancel);
+    }
     PoolRunningTurnFollowUpDecision::FollowUp
 }
 
@@ -93,6 +102,7 @@ mod tests {
             queue_paused: false,
             hook_injects: false,
             turn_live: true,
+            enter_would_cancel: false,
         }
     }
 
@@ -139,6 +149,23 @@ mod tests {
     #[test]
     fn an_idle_pane_is_not_given_a_second_turn() {
         let mut observation = live_grok(2);
+        observation.turn_live = false;
+        assert_eq!(
+            pool_running_turn_follow_up_decision(observation),
+            PoolRunningTurnFollowUpDecision::Skip(PoolRunningTurnFollowUpSkip::TurnNotLive)
+        );
+    }
+
+    /// `#blockedwaitentercancels`: a live Grok turn that is blocked waiting
+    /// is not given Enter. An idle pane stays `TurnNotLive` ahead of this.
+    #[test]
+    fn a_blocked_wait_does_not_submit_enter() {
+        let mut observation = live_grok(2);
+        observation.enter_would_cancel = true;
+        assert_eq!(
+            pool_running_turn_follow_up_decision(observation),
+            PoolRunningTurnFollowUpDecision::Skip(PoolRunningTurnFollowUpSkip::EnterWouldCancel)
+        );
         observation.turn_live = false;
         assert_eq!(
             pool_running_turn_follow_up_decision(observation),

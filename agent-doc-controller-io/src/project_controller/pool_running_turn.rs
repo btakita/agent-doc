@@ -89,8 +89,10 @@ pub(super) fn pool_running_turn_obligation(
         queue_paused: queue_paused(conn, project_root, file)?,
         hook_injects: hook_injects(harness),
         // Capture is the caller's next step. Asking with the turn live reports
-        // whether a paste is still owed; `TurnNotLive` is decided after capture.
+        // whether a paste is still owed; `TurnNotLive` and `EnterWouldCancel`
+        // are decided after capture.
         turn_live: true,
+        enter_would_cancel: false,
     };
     Ok(match pool_running_turn_follow_up_decision(observation) {
         PoolRunningTurnFollowUpDecision::FollowUp => {
@@ -109,7 +111,12 @@ pub(super) enum PoolRunningTurnObligation {
 enum PasteOutcome {
     Delivered,
     TurnNotLive,
+    EnterWouldCancel,
     NotProven(String),
+}
+
+fn enter_would_cancel(reason: &str) -> bool {
+    reason.contains("#blockedwaitentercancels")
 }
 
 fn paste_into_live_turn(pane: &str, harness_name: &str, text: &str) -> PasteOutcome {
@@ -134,6 +141,11 @@ fn paste_into_live_turn(pane: &str, harness_name: &str, text: &str) -> PasteOutc
         agent_doc_harness::steering_delivery::RunningTurnFollowUpComposer::Empty => {}
         agent_doc_harness::steering_delivery::RunningTurnFollowUpComposer::Draft => {
             return PasteOutcome::NotProven("the composer holds an unsent draft".to_string());
+        }
+        agent_doc_harness::steering_delivery::RunningTurnFollowUpComposer::Blocked { reason }
+            if enter_would_cancel(&reason) =>
+        {
+            return PasteOutcome::EnterWouldCancel;
         }
         agent_doc_harness::steering_delivery::RunningTurnFollowUpComposer::Blocked { reason } => {
             return PasteOutcome::NotProven(reason);
@@ -199,6 +211,20 @@ pub(super) struct PoolRunningTurnTick {
 }
 
 impl PoolRunningTurnTick {
+    fn hold(&mut self, file: &Path, skip: PoolRunningTurnFollowUpSkip, next_heads: usize) {
+        if self.held.insert(file.to_path_buf(), skip) != Some(skip) {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "subagent_pool_running_turn_refill_held file={} reason={} next_heads={} (#subagentworkpool)",
+                    file.display(),
+                    skip.as_str(),
+                    next_heads,
+                ),
+            );
+        }
+    }
+
     pub(super) fn run_if_due(&mut self, runtime: &Arc<ControllerRuntime>, now: Instant) {
         if self.last_run.is_some_and(|last| {
             now.saturating_duration_since(last) < POOL_RUNNING_TURN_TICK_INTERVAL
@@ -290,20 +316,18 @@ impl PoolRunningTurnTick {
                     agent_doc_ops_log_io::log_op(&file, &outcome);
                 }
                 PasteOutcome::TurnNotLive => {
-                    if self
-                        .held
-                        .insert(file.clone(), PoolRunningTurnFollowUpSkip::TurnNotLive)
-                        != Some(PoolRunningTurnFollowUpSkip::TurnNotLive)
-                    {
-                        agent_doc_ops_log_io::log_op(
-                            &file,
-                            &format!(
-                                "subagent_pool_running_turn_refill_held file={} reason=turn_not_live next_heads={} (#subagentworkpool)",
-                                file.display(),
-                                refill.next_heads,
-                            ),
-                        );
-                    }
+                    self.hold(
+                        &file,
+                        PoolRunningTurnFollowUpSkip::TurnNotLive,
+                        refill.next_heads,
+                    );
+                }
+                PasteOutcome::EnterWouldCancel => {
+                    self.hold(
+                        &file,
+                        PoolRunningTurnFollowUpSkip::EnterWouldCancel,
+                        refill.next_heads,
+                    );
                 }
                 PasteOutcome::NotProven(reason) => {
                     agent_doc_ops_log_io::log_op(

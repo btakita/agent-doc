@@ -155,6 +155,14 @@ pub enum FollowUpComposer {
     Draft { preview: String },
     /// The box could not be read. Do not type.
     Unreadable,
+    /// Status line `send a message to interrupt`. Enter cancels the blocked
+    /// turn and the workers it is waiting on (`#blockedwaitentercancels`).
+    EnterCancels,
+}
+
+fn enter_cancels_blocked_wait(line: &str) -> bool {
+    line.to_ascii_lowercase()
+        .contains("send a message to interrupt")
 }
 
 pub fn follow_up_composer(output: &str) -> FollowUpComposer {
@@ -162,12 +170,20 @@ pub fn follow_up_composer(output: &str) -> FollowUpComposer {
         return FollowUpComposer::Unreadable;
     };
     if !parsed.draft.is_empty() && !parsed.ghost {
-        FollowUpComposer::Draft {
+        return FollowUpComposer::Draft {
             preview: parsed.draft,
-        }
-    } else {
-        FollowUpComposer::Empty
+        };
     }
+    // Checked after a real draft so an unsent note stays protected, and
+    // before Empty: this status is not a composer that can take Enter.
+    if parsed
+        .lines
+        .iter()
+        .any(|line| enter_cancels_blocked_wait(line))
+    {
+        return FollowUpComposer::EnterCancels;
+    }
+    FollowUpComposer::Empty
 }
 
 #[cfg(test)]
@@ -257,6 +273,21 @@ mod tests {
         assert_eq!(
             follow_up_composer(LIVE_GROK_47_IDLE_GHOST),
             FollowUpComposer::Empty
+        );
+        let interrupt = format!("{busy}1 command still running · send a message to interrupt\n");
+        assert_eq!(
+            follow_up_composer(&interrupt),
+            FollowUpComposer::EnterCancels
+        );
+        assert_eq!(
+            project_pane_composer(&interrupt, &h),
+            PaneComposerProjection::Busy
+        );
+        assert_eq!(
+            follow_up_composer(&interrupt.replace("│ ❯ ", "│ ❯ unfinished note ")),
+            FollowUpComposer::Draft {
+                preview: "unfinished note".to_string(),
+            }
         );
         assert_eq!(
             project_pane_composer(&format!("Waiting for response… 1.0s [stop]\n{IDLE}"), &h),

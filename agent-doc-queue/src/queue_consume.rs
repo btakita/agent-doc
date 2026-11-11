@@ -2297,6 +2297,18 @@ fn project_free_text_strike_of_node_keys(
         )?,
         None => annotated,
     };
+    // A completion cell still in the document can be the only stop explanation
+    // (`#stoppedstruckqueue`). Attach it before retirement strips the cell.
+    let annotated = attach_stopped_row_responses(
+        content,
+        &annotated,
+        "",
+        if addressed_at.trim().is_empty() {
+            FALLBACK_RESPONSE_TIMESTAMP
+        } else {
+            addressed_at
+        },
+    )?;
     // `#queueworkevidence`: the answered-head strike is a terminal closeout
     // boundary just like queue consume. Retire its completion cell in the same
     // derived target so stale evidence cannot attach to a later same-text row.
@@ -3593,15 +3605,30 @@ pub fn annotate_newly_struck_queue_items_with_response_id_at(
             })
         })
         .count();
+    let parsed_policy =
+        agent_doc_markdown_ast::exchange_tree::ResponseTurnCellPolicy::from_response(Some(
+            response_body,
+        ));
+    // `#stoppedstruckqueue`: a headingless hand-back (a `BLOCKED` line, a
+    // Blocker section) is still the stop explanation. Give it a body-derived
+    // id so the ordinary summary child can land. With no stop explanation,
+    // scan the document instead of copying an unmaterialized capture.
+    let composite_policy = if parsed_policy.response_id().is_empty()
+        && stopped_row_reason(response_body).is_some()
+    {
+        agent_doc_markdown_ast::exchange_tree::ResponseTurnCellPolicy::from_body_without_heading(
+            response_body,
+        )
+    } else {
+        parsed_policy
+    };
     let composite_candidate = ResponseCandidate {
         body: response_body.to_string(),
-        policy: agent_doc_markdown_ast::exchange_tree::ResponseTurnCellPolicy::from_response(Some(
-            response_body,
-        )),
+        policy: composite_policy,
         binding_key: usize::MAX,
     };
     if composite_candidate.policy.response_id().is_empty() {
-        return Ok(after.to_string());
+        return attach_stopped_row_responses(before, after, "", addressed_at);
     }
 
     let before_nodes = agent_doc_markdown_ast::mutations::item_nodes_all(before, "queue")
@@ -4730,10 +4757,11 @@ fn response_summary_row_child(
         "{marker}\n- **Timestamp:** {}\n- **Summary:** {summary}",
         addressed_at.trim()
     );
+    let stopped = summary_is_blocked_stop(&summary);
     child.push_str("\n- **State:** ");
     child.push_str(if has_unpublished_work {
         RESPONSE_STATE_UNPUBLISHED
-    } else if has_blocking_request {
+    } else if has_blocking_request || stopped {
         RESPONSE_STATE_WAITING_ON_OPERATOR
     } else if !next_actions.is_empty() {
         RESPONSE_STATE_FOLLOW_UP
@@ -4762,6 +4790,10 @@ fn response_summary_row_child(
         }));
     } else if has_blocking_request {
         child.push_str("More work remains. Keep this tree and answer the operator request below.");
+    } else if stopped {
+        child.push_str(
+            "The row stopped. Keep this tree until the blocker in the summary is cleared.",
+        );
     } else if !next_actions.is_empty() {
         child.push_str("More work remains. Keep this tree and follow the next actions below.");
     } else {
@@ -5255,8 +5287,9 @@ fn response_summary_is_deferral(summary: &str) -> bool {
 }
 
 fn response_summary_lead_among(response_body: &str, eligible: impl Fn(&str) -> bool) -> String {
-    let mut prose = response_body.to_string();
-    for packet in crate::operator_request_packet::blocking_operator_request_blocks(response_body) {
+    let response_body = response_summary_source(response_body);
+    let mut prose = response_body.clone();
+    for packet in crate::operator_request_packet::blocking_operator_request_blocks(&response_body) {
         prose = prose.replacen(packet, "", 1);
     }
 
@@ -5354,8 +5387,9 @@ fn response_summary_for_queue_item(response_body: &str, queue_item: &str) -> Opt
             .is_some_and(|quoted| lower.contains(quoted))
     };
 
+    let response_body = response_summary_source(response_body);
     let mut prose = response_body.to_string();
-    for packet in crate::operator_request_packet::blocking_operator_request_blocks(response_body) {
+    for packet in crate::operator_request_packet::blocking_operator_request_blocks(&response_body) {
         prose = prose.replacen(packet, "", 1);
     }
     response_summary_units(&prose)
@@ -5432,6 +5466,9 @@ fn response_summary_units(prose: &str) -> Vec<String> {
 fn response_summary_structural_line(line: &str) -> bool {
     line.starts_with('#')
         || line.starts_with('>')
+        || line.starts_with("**Queue prompt:**")
+        || line.starts_with("**Queue prompts:**")
+        || line.starts_with("**Subagent response:**")
         || line.starts_with("<!--")
         || line.starts_with("```")
         || line.starts_with("~~~")
@@ -5626,6 +5663,369 @@ fn response_child_insert_at(document: &str, item_end: usize, scope_end: usize) -
         }
     }
     last_content_end
+}
+
+/// Unwrap one blockquote level when a body has quotes and no other prose.
+///
+/// A worker completion cell quotes the whole hand-back. Those `>` lines are
+/// structural, so the summary collapsed to `Response.` (`#stoppedstruckqueue`).
+fn response_summary_source(response_body: &str) -> String {
+    let nonempty = response_body
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>();
+    let quoted = nonempty.iter().any(|line| line.starts_with('>'));
+    let prose = nonempty
+        .iter()
+        .any(|line| !response_summary_structural_line(line));
+    if !quoted || prose {
+        return response_body.to_string();
+    }
+    response_body
+        .lines()
+        .map(|line| {
+            let trimmed = line.trim();
+            trimmed
+                .strip_prefix('>')
+                .map(|rest| rest.strip_prefix(' ').unwrap_or(rest))
+                .unwrap_or(line)
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn unwrap_wrapping_backticks(text: &str) -> &str {
+    text.strip_prefix('`')
+        .and_then(|rest| rest.strip_suffix('`'))
+        .unwrap_or(text)
+        .trim()
+}
+
+fn summary_is_goal_terminal(summary: &str) -> bool {
+    let summary = unwrap_wrapping_backticks(summary.trim());
+    summary.starts_with("BLOCKED ")
+        || summary.starts_with("REVIEW-CLEAN ")
+        || summary == "BLOCKED"
+        || summary == "REVIEW-CLEAN"
+}
+
+fn summary_is_blocked_stop(summary: &str) -> bool {
+    let summary = unwrap_wrapping_backticks(summary.trim());
+    let lower = summary.to_ascii_lowercase();
+    summary.starts_with("BLOCKED ")
+        || summary == "BLOCKED"
+        || lower.starts_with("**blocker:**")
+        || lower.starts_with("**blocked:**")
+}
+
+fn collapse_ws(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn first_goal_stop_line(text: &str) -> Option<String> {
+    text.lines().find_map(|line| {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || response_summary_structural_line(trimmed) {
+            return None;
+        }
+        let collapsed = collapse_ws(trimmed);
+        summary_is_goal_terminal(&collapsed).then_some(collapsed)
+    })
+}
+
+/// The row-specific stop explanation in `text`, if it has one.
+///
+/// A `BLOCKED` / `REVIEW-CLEAN` line, or a Blocker section. Anything else is
+/// not a reason to invent a response child (`#stoppedstruckqueue`).
+fn stopped_row_reason(text: &str) -> Option<String> {
+    let source = response_summary_source(text);
+    if let Some(line) = first_goal_stop_line(&source) {
+        return Some(line);
+    }
+    let handback = agent_doc_document::worker_handback::WorkerHandback::parse(&source)?;
+    let section = handback.sections.iter().find(|section| {
+        section.kind == agent_doc_document::worker_handback::SectionKind::Blocker
+    })?;
+    let body = collapse_ws(&section.lines.join(" "));
+    if body.is_empty() {
+        return None;
+    }
+    Some(format!("**Blocker:** {body}"))
+}
+
+fn row_work_heading(row_text: &str) -> String {
+    let work = struck_work_text(row_text).trim();
+    let work = work
+        .strip_prefix("~~")
+        .and_then(|inner| inner.strip_suffix("~~"))
+        .unwrap_or(work);
+    agent_doc_document::subagent_completion::heading_item_text(work)
+}
+
+fn completion_cell_matches_row(document: &str, cell_item: &str, row_text: &str) -> bool {
+    if crate::queue_claim::completion_evidence_matches_row(cell_item, row_text) {
+        return true;
+    }
+    let cell = agent_doc_document::subagent_completion::heading_item_text(cell_item);
+    let work = row_work_heading(row_text);
+    if work.is_empty() {
+        return false;
+    }
+    if cell == work {
+        return true;
+    }
+    if cell.rsplit_once(": ").is_some_and(|(_, leaf)| {
+        agent_doc_document::subagent_completion::heading_item_text(leaf) == work
+    }) {
+        return true;
+    }
+    let vector = crate::queue_response::nest_vector_in_document(document, row_text).or_else(|| {
+        crate::queue_response::nest_vector_in_document(document, &row_work_heading(row_text))
+    });
+    vector.is_some_and(|vector| {
+        cell == agent_doc_document::subagent_completion::heading_item_text(&vector)
+    })
+}
+
+fn quoted_queue_prompts(cell: &str) -> Vec<String> {
+    let lines = cell.lines().collect::<Vec<_>>();
+    let mut prompts = Vec::new();
+    let mut index = 0usize;
+    while index < lines.len() {
+        let quoted = lines[index].trim().strip_prefix('>').map(str::trim_start);
+        let Some(quoted) = quoted else {
+            index += 1;
+            continue;
+        };
+        let inline = quoted
+            .strip_prefix("**Queue prompts:**")
+            .or_else(|| quoted.strip_prefix("**Queue prompt:**"));
+        let Some(inline) = inline else {
+            index += 1;
+            continue;
+        };
+        let mut parts = Vec::new();
+        let inline = inline.trim();
+        if !inline.is_empty() {
+            parts.push(inline.to_string());
+        }
+        index += 1;
+        while index < lines.len() {
+            let Some(next) = lines[index].trim().strip_prefix('>').map(str::trim) else {
+                break;
+            };
+            if next.is_empty() {
+                index += 1;
+                continue;
+            }
+            if next.starts_with("**") {
+                break;
+            }
+            parts.push(next.to_string());
+            index += 1;
+        }
+        let joined = collapse_ws(&parts.join(" "));
+        if !joined.is_empty() {
+            prompts.push(joined);
+        }
+    }
+    prompts
+}
+
+fn prompt_names_work(prompt: &str, work: &str) -> bool {
+    !work.is_empty() && (prompt == work || prompt.ends_with(&format!(": {work}")))
+}
+
+fn echo_cell_names_row(document: &str, cell: &str, row_text: &str) -> bool {
+    let work = row_work_heading(row_text);
+    if quoted_queue_prompts(cell)
+        .iter()
+        .any(|prompt| prompt_names_work(prompt, &work))
+    {
+        return true;
+    }
+    let heads = [
+        row_text.to_string(),
+        struck_work_text(row_text).trim().to_string(),
+        work.clone(),
+    ];
+    heads.iter().any(|head| {
+        !head.is_empty()
+            && (crate::queue_response::queue_head_answered_by_response(document, cell, head)
+                || crate::queue_response::response_explicitly_targets_queue_head(cell, head)
+                || crate::queue_response::free_text_head_has_explicit_answer_evidence(cell, head))
+    })
+}
+
+fn unique_strings(mut values: Vec<String>) -> Option<String> {
+    values.retain(|value| !value.is_empty());
+    let mut unique = Vec::new();
+    for value in values {
+        if !unique.iter().any(|have: &String| have == &value) {
+            unique.push(value);
+        }
+    }
+    if unique.len() == 1 {
+        unique.pop()
+    } else {
+        None
+    }
+}
+
+fn completion_stop_reasons(document: &str, text: &str, row_text: &str) -> Vec<String> {
+    agent_doc_document::subagent_completion::completion_evidence(text)
+        .into_iter()
+        .filter(|evidence| completion_cell_matches_row(document, &evidence.item, row_text))
+        .filter_map(|evidence| {
+            let body =
+                agent_doc_document::subagent_completion::completion_response(text, &evidence.key)?;
+            stopped_row_reason(&body)
+        })
+        .collect()
+}
+
+fn echo_stop_reasons(document: &str, text: &str, row_text: &str) -> Vec<String> {
+    queue_addressed_response_cells(text)
+        .into_iter()
+        .filter(|cell| echo_cell_names_row(document, &cell.body, row_text))
+        .filter_map(|cell| stopped_row_reason(&cell.body))
+        .collect()
+}
+
+fn stopped_reason_for_row(document: &str, response_body: &str, row_text: &str) -> Option<String> {
+    if let Some(reason) = unique_strings(completion_stop_reasons(document, document, row_text)) {
+        return Some(reason);
+    }
+    if !response_body.trim().is_empty()
+        && let Some(reason) =
+            unique_strings(completion_stop_reasons(document, response_body, row_text))
+    {
+        return Some(reason);
+    }
+    let mut echoes = Vec::new();
+    if let Ok(components) = element::parse(document) {
+        for component in components
+            .into_iter()
+            .filter(|component| component.name == "exchange")
+        {
+            echoes.extend(echo_stop_reasons(
+                document,
+                component.content(document),
+                row_text,
+            ));
+        }
+    }
+    if !response_body.trim().is_empty() {
+        echoes.extend(echo_stop_reasons(document, response_body, row_text));
+    }
+    unique_strings(echoes)
+}
+
+fn row_has_response_child(document: &str, item_end: usize, scope_end: usize) -> bool {
+    let scope = document.get(item_end..scope_end).unwrap_or("");
+    scope.contains("**Response [#r-") || scope.contains("**Closed by:**")
+}
+
+fn stopped_response_id(row_text: &str, summary: &str) -> String {
+    let hash = agent_doc_hash::content_hash(&format!(
+        "stopped-row\n{}\n{summary}",
+        row_work_heading(row_text)
+    ));
+    format!("[#r-{}]", &hash[..12])
+}
+
+/// Attach a response child to each newly struck row whose stop explanation is
+/// already in `after` or in a row-specific completion cell (`#stoppedstruckqueue`).
+///
+/// Rows already struck in `before`, rows that already have a response child,
+/// and rows with no `BLOCKED` / `REVIEW-CLEAN` / Blocker explanation are left
+/// unchanged. `response_body` is scanned only when it is non-empty; callers
+/// that hold an unmaterialized capture pass `""` so that capture is not copied
+/// onto the row.
+pub fn attach_stopped_row_responses(
+    before: &str,
+    after: &str,
+    response_body: &str,
+    addressed_at: &str,
+) -> anyhow::Result<String> {
+    let addressed_at = if addressed_at.trim().is_empty() {
+        FALLBACK_RESPONSE_TIMESTAMP
+    } else {
+        addressed_at
+    };
+    let struck_before = agent_doc_markdown_ast::mutations::item_nodes_all(before, "queue")
+        .map(|nodes| {
+            nodes
+                .into_iter()
+                .filter(|node| node.item.struck)
+                .map(|node| node.node_key)
+                .collect::<HashSet<_>>()
+        })
+        .unwrap_or_default();
+    let nodes = match agent_doc_markdown_ast::mutations::item_nodes_all(after, "queue") {
+        Ok(nodes) => nodes,
+        Err(_) => return Ok(after.to_string()),
+    };
+    let mut inserts = Vec::<(usize, String)>::new();
+    let mut rendered_choice_packet_ids = HashSet::new();
+    for node in &nodes {
+        if !node.item.struck
+            || struck_before.contains(&node.node_key)
+            || node.item.surface == agent_doc_markdown_ast::overlay::ItemSurface::MultilinePrompt
+        {
+            continue;
+        }
+        let raw = after
+            .get(node.item.start_byte..node.item.end_byte)
+            .unwrap_or("");
+        let indent = raw.len() - raw.trim_start_matches([' ', '\t']).len();
+        let scope_end = descendant_region_end(after, node.item.end_byte, indent);
+        if row_has_response_child(after, node.item.end_byte, scope_end) {
+            continue;
+        }
+        let Some(reason) = stopped_reason_for_row(after, response_body, &node.item.text) else {
+            continue;
+        };
+        let response_id = stopped_response_id(&node.item.text, &reason);
+        let Some(child) = response_summary_row_child(
+            &ResponseLookupContext {
+                source_document: before,
+                queue_item: &node.item.text,
+                response_body: &reason,
+                turn_body: &reason,
+                response_id: &response_id,
+                addressed_at,
+                shared_batch: false,
+                closure: None,
+            },
+            &reason,
+            &mut rendered_choice_packet_ids,
+        ) else {
+            continue;
+        };
+        let child_indent = " ".repeat(indent + 2);
+        let rendered = render_response_lookup_child(&child, &child_indent);
+        let insert_at = response_child_insert_at(after, node.item.end_byte, scope_end);
+        inserts.push((insert_at, rendered));
+    }
+    if inserts.is_empty() {
+        return Ok(after.to_string());
+    }
+    inserts.sort_by_key(|insert| std::cmp::Reverse(insert.0));
+    let mut out = after.to_string();
+    for (insert_at, rendered) in inserts {
+        let mut block = String::new();
+        if !out
+            .get(..insert_at)
+            .is_some_and(|prefix| prefix.ends_with('\n'))
+        {
+            block.push('\n');
+        }
+        block.push_str(&rendered);
+        out.insert_str(insert_at, &block);
+    }
+    Ok(out)
 }
 
 fn remove_inline_response_id(line: &str, response_id: &str) -> String {
@@ -10733,6 +11133,206 @@ mod tests {
             &accumulated,
             LEAF
         ));
+    }
+
+    const STOPPED_BLOCKED: &str = "BLOCKED tmstorm clears or replaces review 5847621418 against the current head base=a9465a587b4c2fa751260d769e1b44963b326de0 head=4b1ec5002f2c7c90d24c19799196eeb654d0137e cycles=4";
+    const STOPPED_AT: &str = "2026-11-10T22:30:57.000Z";
+
+    fn stopped_run(row: &str, exchange: &str) -> String {
+        format!(
+            "---\nqueue_active: true\n---\n\n\
+             <!-- agent:exchange -->\n{exchange}\n<!-- /agent:exchange -->\n\n\
+             <!-- agent:run id=\"api-prs\" subagents -->\n\
+             - ### https://github.com/haiven-dev/haiven-api/pull/869\n\
+             \x20 - {row}\n\
+             <!-- /agent:run -->\n"
+        )
+    }
+
+    fn assert_stopped_child(document: &str, row: &str) {
+        let summary = response_summary_of_row(document, row);
+        assert!(
+            summary.contains(STOPPED_BLOCKED),
+            "summary lost the stop explanation:\n{summary}\n{document}"
+        );
+        assert_ne!(summary, "Response.");
+        let start = document.find(row).expect("row");
+        let tree = &document[start..];
+        assert!(
+            tree.contains("**State:** Waiting on operator input."),
+            "{tree}"
+        );
+        assert!(
+            tree.contains(
+                "The row stopped. Keep this tree until the blocker in the summary is cleared."
+            ),
+            "{tree}"
+        );
+    }
+
+    /// `#stoppedstruckqueue`: a `/goal` row closed by an unquoted `BLOCKED`
+    /// line keeps that line under the struck row, and the state stays waiting.
+    #[test]
+    fn stopped_goal_row_strike_keeps_the_blocked_explanation() {
+        let content = goal_loop_session("🚧 [#subagent:pr12-review1#1] #adversarial-pr");
+        let _project = crate::goal_preset_terminal::InheritedPresetsGuard::install(
+            &goal_loop_project_presets(),
+        );
+        let response = goal_loop_response(STOPPED_BLOCKED);
+        let claims = vec![
+            "https://github.com/sample-org/sample-repo/pull/12: #adversarial-pr".to_string(),
+            "#adversarial-pr".to_string(),
+        ];
+        let (projected, _) = project_answered_free_text_strike_with_dispatch_at(
+            &content,
+            &response,
+            Some(&content),
+            &claims,
+            &claims,
+            &[],
+            STOPPED_AT,
+        )
+        .unwrap();
+        let projected = projected.expect("the BLOCKED hand-back strikes the goal row");
+        let target = projected.target_content;
+        assert!(target.contains("~~#adversarial-pr~~"), "{target}");
+        assert_stopped_child(&target, "~~#adversarial-pr~~");
+        assert!(
+            target.contains("- 🚧 [#subagent:pr13-review1#1] #adversarial-pr\n"),
+            "the sibling pull request stays live:\n{target}"
+        );
+    }
+
+    /// A blockquoted completion cell is the only copy of the stop explanation.
+    /// Its summary is the `BLOCKED` line, including when the capture itself is
+    /// not passed in and the cell is only in the document.
+    #[test]
+    fn stopped_completion_cell_becomes_the_struck_row_response() {
+        let live = "☑️ [#subagent:api-adversarial-dc757#1] #adversarial-pr [#q-dc757b50f1d9]";
+        let struck = "~~#adversarial-pr [#q-dc757b50f1d9]~~";
+        let handback = format!(
+            "{STOPPED_BLOCKED}\n\n**Summary**\n\nThe published head is unchanged.\n\n**Action items**\n\nnone\n"
+        );
+        let cell = agent_doc_document::subagent_completion::cell_with_response(
+            "subagent:api-adversarial-dc757",
+            "https://github.com/haiven-dev/haiven-api/pull/869: #adversarial-pr [#q-dc757b50f1d9]",
+            "attemptkey",
+            &handback,
+        )
+        .unwrap();
+        let before = stopped_run(live, &cell);
+        let after = stopped_run(struck, &cell);
+
+        let from_capture = annotate_newly_struck_queue_items_with_response_id_at(
+            &before, &after, &cell, STOPPED_AT,
+        )
+        .unwrap();
+        assert_stopped_child(&from_capture, struck);
+
+        let from_document = attach_stopped_row_responses(&before, &after, "", STOPPED_AT).unwrap();
+        assert_stopped_child(&from_document, struck);
+        assert_eq!(
+            attach_stopped_row_responses(&before, &from_document, "", STOPPED_AT).unwrap(),
+            from_document,
+            "replaying the attachment must not duplicate the response"
+        );
+    }
+
+    /// A headingless hand-back still produces a response id and child.
+    #[test]
+    fn headingless_blocked_handback_still_projects_a_response() {
+        let before = queue_doc("- #adversarial-pr\n");
+        let after = queue_doc("- ~~#adversarial-pr~~\n");
+        let response = format!(
+            "{STOPPED_BLOCKED}\n\n**Summary**\n\nThe published head is unchanged.\n\n**Action items**\n\nnone\n"
+        );
+        let annotated = annotate_newly_struck_queue_items_with_response_id_at(
+            &before, &after, &response, STOPPED_AT,
+        )
+        .unwrap();
+        assert_stopped_child(&annotated, "~~#adversarial-pr~~");
+        assert!(
+            annotated.contains("**Response [#r-"),
+            "a headingless body still gets a public response id:\n{annotated}"
+        );
+    }
+
+    /// An already-struck sibling inserted in the same cut does not inherit the
+    /// adversarial row's `BLOCKED` sentence.
+    #[test]
+    fn inserted_stopped_row_keeps_its_own_explanation() {
+        let pinned = "agent-doc /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/api.md";
+        let response = format!(
+            "### Re: PR 869 commit and review response — grok-4.7\n\n\
+             > **Queue prompt:** https://github.com/haiven-dev/haiven-api/pull/869: #adversarial-pr\n\n\
+             {STOPPED_BLOCKED}\n\n\
+             The published head is unchanged. This leaf is safe to delete.\n\n\
+             > **Queue prompt:** {pinned}\n\n\
+             Closed the pinned session row after the adversarial leaf stopped.\n"
+        );
+        let document = |leaves: &str| {
+            format!(
+                "---\nqueue_active: true\n---\n\n\
+                 <!-- agent:exchange -->\n{response}\n<!-- /agent:exchange -->\n\n\
+                 <!-- agent:run id=\"api-prs\" -->\n\
+                 - ### https://github.com/haiven-dev/haiven-api/pull/869\n\
+                 {leaves}\
+                 <!-- /agent:run -->\n"
+            )
+        };
+        let before = document("  - ~~#address [#q-e41a2f57cc1f]~~\n");
+        let after = document(&format!(
+            "  - ~~#address [#q-e41a2f57cc1f]~~\n  - ~~#adversarial-pr~~\n- ~~{pinned}~~\n"
+        ));
+        for projected in [
+            annotate_newly_struck_queue_items_with_response_id_at(
+                &before, &after, &response, STOPPED_AT,
+            )
+            .unwrap(),
+            attach_stopped_row_responses(&before, &after, "", STOPPED_AT).unwrap(),
+        ] {
+            let adversarial = projected
+                .find("~~#adversarial-pr~~")
+                .expect("adversarial row");
+            let pinned_at = projected
+                .find(&format!("~~{pinned}~~"))
+                .expect("pinned row");
+            assert!(adversarial < pinned_at, "{projected}");
+            let adversarial_tree = &projected[adversarial..pinned_at];
+            assert!(
+                adversarial_tree.contains(STOPPED_BLOCKED),
+                "{adversarial_tree}"
+            );
+            assert!(
+                adversarial_tree.contains("**State:** Waiting on operator input."),
+                "{adversarial_tree}"
+            );
+            assert!(
+                !projected[pinned_at..].contains(STOPPED_BLOCKED),
+                "the unrelated struck row must not inherit the adversarial blocker:\n{projected}"
+            );
+        }
+    }
+
+    /// A row that was already struck is not given a new response, and a strike
+    /// with no stop explanation stays bare.
+    #[test]
+    fn already_struck_row_and_plain_completion_stay_bare() {
+        let response =
+            format!("### Re: PR 869\n\n> **Queue prompt:** #adversarial-pr\n\n{STOPPED_BLOCKED}\n");
+        let struck = stopped_run("~~#adversarial-pr~~", &response);
+        assert_eq!(
+            attach_stopped_row_responses(&struck, &struck, &response, STOPPED_AT).unwrap(),
+            struck
+        );
+
+        let before = queue_doc("- do [#plain]\n");
+        let after = queue_doc("- ~~do [#plain]~~\n");
+        let plain = "### Re: plain\n\nCompleted the work.\n";
+        assert_eq!(
+            attach_stopped_row_responses(&before, &after, plain, STOPPED_AT).unwrap(),
+            after
+        );
     }
 
     #[test]

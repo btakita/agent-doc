@@ -306,6 +306,27 @@ impl ResponseTurnCellPolicy {
         Self::from_response_nodes(&nodes)
     }
 
+    /// Identity for a stop explanation that has no `### Re:` heading.
+    ///
+    /// A worker hand-back can begin with `BLOCKED ...` and labelled sections
+    /// and still be the only record of why a row was struck
+    /// (`#stoppedstruckqueue`). The public id is derived from the body so the
+    /// queue row can carry a response structure without inventing an exchange
+    /// heading.
+    pub fn from_body_without_heading(body: &str) -> Self {
+        let body = body.trim();
+        if body.is_empty() {
+            return Self::from_response_nodes(&[]);
+        }
+        let cell_id = format!("stopped-response:{}", content_hash(body));
+        Self {
+            cell_id: cell_id.clone(),
+            response_id: compact_response_id(&cell_id, 12),
+            node_ids: Vec::new(),
+            order_signature_lines: HashSet::new(),
+        }
+    }
+
     pub fn from_response_nodes(nodes: &[ExchangeNode]) -> Self {
         let response_nodes = nodes
             .iter()

@@ -860,6 +860,7 @@ pub fn acknowledge_paused_free_text_queue_head_with_selector_and_outcome(
         }
         let node_keys = vec![row.node_key.clone()];
         let mut target = consume_queue_nodes_by_key(&content, &node_keys)?;
+        target = attach_stopped_row_responses_for_file(file, &content, target)?;
         let remaining = addressable_executable_rows(&target)?.len();
         let response_first_line = projected_capture_response_body(file)
             .and_then(|body| first_nonempty_line(&body).map(str::to_string));
@@ -1027,6 +1028,7 @@ pub fn acknowledge_paused_free_text_queue_head_with_selector_and_outcome(
         };
         (node_ops, remaining, target)
     };
+    target = attach_stopped_row_responses_for_file(file, &content, target)?;
     let response_first_line = projected_capture_response_body(file)
         .and_then(|body| first_nonempty_line(&body).map(str::to_string));
     target = embed_consumed_prompt_in_response(
@@ -1796,17 +1798,27 @@ pub fn annotate_newly_completed_queue_prompts_with_response_id(
     } else {
         effects.current_document_content(file, "queue_response_backlink")?
     };
-    if !agent_doc_turn::response_replay::response_materialized_in_content(response_body, &current) {
-        return Ok(0);
-    }
     let addressed_at = addressed_at_for_current_cycle(file);
-    let target =
+    let materialized =
+        agent_doc_turn::response_replay::response_materialized_in_content(response_body, &current);
+    let linked = if materialized {
         agent_doc_queue::queue_consume::annotate_newly_struck_queue_items_with_response_id_at(
             before,
             &current,
             response_body,
             &addressed_at,
-        )?;
+        )?
+    } else {
+        current.clone()
+    };
+    // An unmaterialized capture is not copied. A stop explanation already in
+    // the document (a completion cell, a landed echo) still backs the row.
+    let target = agent_doc_queue::queue_consume::attach_stopped_row_responses(
+        before,
+        &linked,
+        "",
+        &addressed_at,
+    )?;
     if target == current {
         return Ok(0);
     }
@@ -1856,10 +1868,29 @@ pub fn annotate_newly_completed_queue_prompts_with_response_id(
     }
 
     if let Some(snapshot) = load_snapshot_recovery_only(file, "queue response backlink snapshot") {
-        match agent_doc_queue::queue_consume::annotate_newly_struck_queue_items_with_response_id_at(
-            before,
-            &snapshot,
+        let linked = if agent_doc_turn::response_replay::response_materialized_in_content(
             response_body,
+            &snapshot,
+        ) {
+            match agent_doc_queue::queue_consume::annotate_newly_struck_queue_items_with_response_id_at(
+                before,
+                &snapshot,
+                response_body,
+                &addressed_at,
+            ) {
+                Ok(updated) => updated,
+                Err(error) => {
+                    log_snapshot_recovery_warning(file, "queue response backlink snapshot", error);
+                    snapshot.clone()
+                }
+            }
+        } else {
+            snapshot.clone()
+        };
+        match agent_doc_queue::queue_consume::attach_stopped_row_responses(
+            before,
+            &linked,
+            "",
             &addressed_at,
         ) {
             Ok(updated) if updated != snapshot => {
@@ -1927,22 +1958,31 @@ pub fn project_closeout_strike_with_response_backlink(
     let Some(response_body) = response_body.filter(|body| !body.trim().is_empty()) else {
         return Ok(struck);
     };
-    if struck == before
-        || !agent_doc_turn::response_replay::response_materialized_in_content(
-            response_body,
-            &struck,
-        )
-    {
+    if struck == before {
         return Ok(struck);
     }
     let addressed_at = addressed_at_for_current_cycle(file);
-    agent_doc_queue::queue_consume::annotate_newly_struck_queue_items_with_response_id_at(
-        before,
-        &struck,
+    let linked = if agent_doc_turn::response_replay::response_materialized_in_content(
         response_body,
-        &addressed_at,
-    )
-    .context("queue strike: refusing to land a strike without its response backlink (#atomicstrikeresponse)")
+        &struck,
+    ) {
+        agent_doc_queue::queue_consume::annotate_newly_struck_queue_items_with_response_id_at(
+            before,
+            &struck,
+            response_body,
+            &addressed_at,
+        )
+        .context(
+            "queue strike: refusing to land a strike without its response backlink (#atomicstrikeresponse)",
+        )?
+    } else {
+        // The capture is not in the document, so it is not copied onto the row.
+        struck
+    };
+    agent_doc_queue::queue_consume::attach_stopped_row_responses(before, &linked, "", &addressed_at)
+        .context(
+            "queue strike: refusing to land a strike without its response backlink (#atomicstrikeresponse)",
+        )
 }
 
 /// Snapshot-recovery twin of [`project_closeout_strike_with_response_backlink`]:
@@ -1958,16 +1998,43 @@ fn project_closeout_snapshot_strike_with_response_backlink(
         return struck_snapshot;
     };
     let addressed_at = addressed_at_for_current_cycle(file);
-    match agent_doc_queue::queue_consume::annotate_newly_struck_queue_items_with_response_id_at(
-        before,
-        &struck_snapshot,
+    let linked = if agent_doc_turn::response_replay::response_materialized_in_content(
         response_body,
+        &struck_snapshot,
+    ) {
+        match agent_doc_queue::queue_consume::annotate_newly_struck_queue_items_with_response_id_at(
+            before,
+            &struck_snapshot,
+            response_body,
+            &addressed_at,
+        ) {
+            Ok(updated) => updated,
+            Err(error) => {
+                log_snapshot_recovery_warning(
+                    file,
+                    "queue strike response backlink snapshot",
+                    error,
+                );
+                struck_snapshot
+            }
+        }
+    } else {
+        struck_snapshot
+    };
+    match agent_doc_queue::queue_consume::attach_stopped_row_responses(
+        before,
+        &linked,
+        "",
         &addressed_at,
     ) {
         Ok(updated) => updated,
         Err(error) => {
-            log_snapshot_recovery_warning(file, "queue strike response backlink snapshot", error);
-            struck_snapshot
+            log_snapshot_recovery_warning(
+                file,
+                "queue strike stopped-row response snapshot",
+                error,
+            );
+            linked
         }
     }
 }
@@ -2063,6 +2130,15 @@ mod response_projection_id_tests {
             ]
         );
     }
+}
+
+fn attach_stopped_row_responses_for_file(
+    file: &Path,
+    before: &str,
+    after: String,
+) -> Result<String> {
+    let addressed_at = addressed_at_for_current_cycle(file);
+    agent_doc_queue::queue_consume::attach_stopped_row_responses(before, &after, "", &addressed_at)
 }
 
 /// The turn start is a stable, durable timestamp source for every recomputation
@@ -3264,6 +3340,9 @@ fn converge_id_backed_head_strike(
             note,
         );
     }
+    // `#stoppedstruckqueue`: the reported-row strike used to drop the worker's
+    // completion cell without copying its stop explanation under the row.
+    new_document = attach_stopped_row_responses_for_file(file, &content, new_document)?;
     // `#strikeretires`: the orphan strike closes the row's finished work like
     // any other strike. Its completion cell (and, after the write, its
     // reported-release receipt) ends with the strike, so a later operator
@@ -3295,6 +3374,18 @@ fn converge_id_backed_head_strike(
                         &snap, &consumed, &snap_keys, note,
                     );
                 }
+                consumed =
+                    match attach_stopped_row_responses_for_file(file, &snap, consumed.clone()) {
+                        Ok(linked) => linked,
+                        Err(error) => {
+                            log_snapshot_recovery_warning(
+                                file,
+                                "orphan id head stopped-row response",
+                                error,
+                            );
+                            consumed
+                        }
+                    };
                 let mut retired =
                     agent_doc_queue::queue_consume::retire_consumed_completion_feedback(
                         &consumed,

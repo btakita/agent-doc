@@ -1573,13 +1573,25 @@ pub(crate) fn project_generated_id_onto_live(promoted: &str, live: &str) -> Stri
     // A prefix continuation already carries its own marker. A mid-clause
     // steering edit is the pre-admission line, so the admission's lifecycle
     // marker has to move onto the operator's words with the q-id.
-    let live_owned = if !generated_id_progressive_revision(promoted, live)
-        && let Some(projection) = attempt_projection_tokens(promoted)
-    {
-        paint_attempt_projection(live, &projection)
-    } else {
-        live.to_string()
-    };
+    // `#promptseen`: `👀` is the interval before that emit. When it is the
+    // live row's only projection and the admitted row carries `📥`, this
+    // path replaces `👀` with `📥` for an identical spelling and for a
+    // steering reword. `🚧`, `🟡`, and `☑️` stay.
+    let live_owned =
+        if live_projection_is_only_seen(live) && promoted_projection_is_pending(promoted) {
+            let pending = attempt_projection_tokens(promoted).unwrap_or_else(|| {
+                agent_doc_document::queue_projection::QueueLifecycleMarker::Pending
+                    .default_prefix()
+                    .to_string()
+            });
+            paint_attempt_projection(&strip_leading_attempt_projection(live), &pending)
+        } else if !generated_id_progressive_revision(promoted, live)
+            && let Some(projection) = attempt_projection_tokens(promoted)
+        {
+            paint_attempt_projection(live, &projection)
+        } else {
+            live.to_string()
+        };
     let live = live_owned.as_str();
     let (live_head, tail) = live
         .split_once('\n')
@@ -2664,6 +2676,54 @@ pub(crate) fn attempt_projection_tokens(text: &str) -> Option<String> {
         None
     } else {
         Some(projection.to_string())
+    }
+}
+
+/// True when the row's only attempt projection is the seen glyph `👀`.
+fn live_projection_is_only_seen(text: &str) -> bool {
+    projection_is_only(
+        text,
+        agent_doc_document::queue_projection::QueueLifecycleMarker::Seen,
+    )
+}
+
+/// True when the admitted row's only attempt projection is pending `📥`.
+fn promoted_projection_is_pending(text: &str) -> bool {
+    projection_is_only(
+        text,
+        agent_doc_document::queue_projection::QueueLifecycleMarker::Pending,
+    )
+}
+
+fn projection_is_only(
+    text: &str,
+    marker: agent_doc_document::queue_projection::QueueLifecycleMarker,
+) -> bool {
+    let Some(projection) = attempt_projection_tokens(text) else {
+        return false;
+    };
+    projection == marker.prefix() || projection == marker.default_prefix()
+}
+
+/// First line with its leading attempt projection removed. The operator's
+/// words stay. Used when `👀` has to give way to the admission's `📥`.
+fn strip_leading_attempt_projection(text: &str) -> String {
+    let (first, newline_rest) = match text.split_once('\n') {
+        Some((first, rest)) => (first, Some(rest)),
+        None => (text, None),
+    };
+    let indent_len = first.len() - first.trim_start().len();
+    let (indent, content) = first.split_at(indent_len);
+    let stripped_content = if let Some(rest) = content.strip_prefix("- ") {
+        let work = agent_doc_element_queue::strip_attempt_projection_prefix(rest.trim_start());
+        format!("- {work}")
+    } else {
+        agent_doc_element_queue::strip_attempt_projection_prefix(content).to_string()
+    };
+    let stripped = format!("{indent}{stripped_content}");
+    match newline_rest {
+        Some(rest) => format!("{stripped}\n{rest}"),
+        None => stripped,
     }
 }
 
@@ -6834,6 +6894,173 @@ Second answer line three.
             "{body}"
         );
         assert!(body.contains(earlier_ending), "{body}");
+    }
+
+    /// `#promptseen`: a live row whose only attempt projection is `👀` is the
+    /// interval before prepare emits the prompt. Q-id admission replaces `👀`
+    /// with `📥` for an identical spelling and for a mid-clause reword. A
+    /// later merge whose live cut still has no q-id does it again. `🚧`,
+    /// `🟡`, and `☑️` stay on that same projection path.
+    #[test]
+    fn seen_live_row_takes_pending_when_qid_admission_projects() {
+        let parent = "- ### https://example.test/sample-app/pull/41";
+        let words = "Since sample-app uses the release bot, should we close the open pull request? If yes, close it with a superceded by the release bot reason.";
+        let steered_words = "Since sample-app uses the release bot, should we close the open pull request? If yes, close it with a reason superceeded by the release bot + https://example.test/sample-app/pull/42.";
+        let earlier = format!("  - {words}");
+        let seen_same = format!("  - 👀 {words}");
+        let seen_steered = format!("  - 👀 {steered_words}");
+        let admitted = format!("  - 📥 {words} [#q-0123456789ab]");
+        let expected_same = admitted.clone();
+        let expected_steered = format!("  - 📥 {steered_words} [#q-0123456789ab]");
+        assert!(generated_id_progressive_revision(&admitted, &seen_same));
+        assert!(generated_id_steering_revision(&admitted, &seen_steered));
+        assert!(!generated_id_progressive_revision(&admitted, &seen_steered));
+        assert_eq!(
+            project_generated_id_onto_live(&admitted, &seen_same),
+            expected_same
+        );
+        assert_eq!(
+            project_generated_id_onto_live(&admitted, &seen_steered),
+            expected_steered
+        );
+        // The promoted cut already carries `📥` and the q-id. The live cut is
+        // still only `👀` and still has no q-id, so the same projection runs.
+        assert_eq!(
+            project_generated_id_onto_live(&expected_same, &seen_same),
+            expected_same
+        );
+        assert_eq!(
+            project_generated_id_onto_live(&expected_steered, &seen_steered),
+            expected_steered
+        );
+
+        let queue = |rows: &[&str]| rows.join("\n");
+        let assert_rows = |base_rows: &str,
+                           ours_rows: &str,
+                           theirs_rows: &str,
+                           present: &str,
+                           absent: &[&str]| {
+            let check = |body: &str, seam: &str| {
+                assert!(
+                    body.contains(present),
+                    "{seam} lost the surviving row:\n{body}"
+                );
+                assert_eq!(
+                    body.matches(present).count(),
+                    1,
+                    "{seam} duplicated the surviving row:\n{body}"
+                );
+                assert_eq!(
+                    body.matches("[#q-0123456789ab]").count(),
+                    1,
+                    "{seam} duplicated the q-id:\n{body}"
+                );
+                for needle in absent {
+                    assert!(!body.contains(needle), "{seam} kept `{needle}`:\n{body}");
+                }
+            };
+            let base = doc_with_exchange_queue("Q.", base_rows);
+            let ours = doc_with_exchange_queue("Q.", ours_rows);
+            let theirs = doc_with_exchange_queue("Q.", theirs_rows);
+            let state = CrdtDoc::from_text(&base).encode_state();
+            let merged = merge_by_component(Some(&state), &ours, &theirs).unwrap();
+            check(body_of(&merged, "queue"), "merge_by_component");
+            let base_state = MultiNodeState::from_text(&base).unwrap();
+            let (persisted, _) = MultiNodeState::merge(Some(&base_state), &ours, &theirs).unwrap();
+            check(body_of(&persisted, "queue"), "MultiNodeState::merge");
+            let reconciled =
+                reconcile_component_body("queue", Some(base_rows), ours_rows, theirs_rows, false)
+                    .unwrap();
+            check(&reconciled, "reconcile_component_body");
+        };
+
+        let base_rows = queue(&[parent, earlier.as_str()]);
+        let admitted_rows = queue(&[parent, admitted.as_str()]);
+        let seen_same_rows = queue(&[parent, seen_same.as_str()]);
+        let seen_steered_rows = queue(&[parent, seen_steered.as_str()]);
+        // Identical spelling. `👀` and `📥` normalize to one progressive pair.
+        assert_rows(
+            &base_rows,
+            &admitted_rows,
+            &seen_same_rows,
+            &expected_same,
+            &["👀"],
+        );
+        assert_rows(
+            parent,
+            &admitted_rows,
+            &seen_same_rows,
+            &expected_same,
+            &["👀"],
+        );
+        // Mid-clause reword that leaves `👀` on the live cut.
+        let earlier_ending = "superceded by the release bot reason.";
+        assert_rows(
+            &base_rows,
+            &admitted_rows,
+            &seen_steered_rows,
+            &expected_steered,
+            &["👀", earlier_ending],
+        );
+        assert_rows(
+            parent,
+            &admitted_rows,
+            &seen_steered_rows,
+            &expected_steered,
+            &["👀", earlier_ending],
+        );
+
+        // Second merge. The persisted cut already has `📥` and the q-id. The
+        // live cut is still the seen row and still has no q-id.
+        let persisted_same = queue(&[parent, expected_same.as_str()]);
+        let persisted_steered = queue(&[parent, expected_steered.as_str()]);
+        assert_rows(
+            &persisted_same,
+            &persisted_same,
+            &seen_same_rows,
+            &expected_same,
+            &["👀"],
+        );
+        assert_rows(
+            &persisted_steered,
+            &persisted_steered,
+            &seen_steered_rows,
+            &expected_steered,
+            &["👀"],
+        );
+        assert_rows(
+            &base_rows,
+            &persisted_steered,
+            &seen_steered_rows,
+            &expected_steered,
+            &["👀", earlier_ending],
+        );
+
+        for marker in ["🚧", "🟡", "☑️"] {
+            let live = format!("  - {marker} {words}");
+            let expected = format!("  - {marker} {words} [#q-0123456789ab]");
+            assert_eq!(project_generated_id_onto_live(&admitted, &live), expected);
+            assert_rows(
+                &base_rows,
+                &admitted_rows,
+                &queue(&[parent, live.as_str()]),
+                &expected,
+                &["📥", "👀"],
+            );
+        }
+        let live_running = format!("  - 🚧 {steered_words}");
+        let expected_running = format!("  - 🚧 {steered_words} [#q-0123456789ab]");
+        assert_eq!(
+            project_generated_id_onto_live(&admitted, &live_running),
+            expected_running
+        );
+        assert_rows(
+            &base_rows,
+            &admitted_rows,
+            &queue(&[parent, live_running.as_str()]),
+            &expected_running,
+            &["📥", "👀", earlier_ending],
+        );
     }
 
     #[test]

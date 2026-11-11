@@ -1195,7 +1195,11 @@ the prompt it emits. A line still being typed, or absent from the settled
 observation, stays unmarked. A background pass paints `👀` on a structurally
 finished bare row and does not replace it with `📥`. An explicit sync still
 paints `📥`. The one-row steering survivor (`#editsteer`) is already an emitted
-prompt and keeps `📥`.
+prompt and keeps `📥`. When that survivor's live cut shows only the seen
+glyph `👀` and the admitted row carries `📥`, the q-id projection replaces
+`👀` with `📥` before it keeps the q-id. An identical spelling and a
+mid-clause reword both do this, and a later merge whose live cut still has
+no q-id does it again. A live `🚧`, `🟡`, or `☑️` stays.
 
 An id-backed queue head with a nonempty inline operator verdict, such as
 `complete [#push]: hold lifted; do the push`, is fresh executable authority even

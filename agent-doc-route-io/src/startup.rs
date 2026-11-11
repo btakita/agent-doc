@@ -223,7 +223,7 @@ fn registry_pane_owner_document_path(
 /// to [`agent_doc_turn::wait_machine::GLOBAL_HANG_CEILING`] (10s). The underlying
 /// `wait_for_agent_ready` poll loop keeps its existing fast-fail-on-dead-pane and
 /// blocker-streak semantics; only the ceiling changes.
-const FRESH_ROUTE_AGENT_READY_TIMEOUT: Duration =
+pub(crate) const FRESH_ROUTE_AGENT_READY_TIMEOUT: Duration =
     agent_doc_turn::wait_machine::clamp_to_ceiling(Duration::from_secs(30));
 
 /// Editor-origin provisioning creates an interactive document session, not a
@@ -232,7 +232,7 @@ const FRESH_ROUTE_AGENT_READY_TIMEOUT: Duration =
 /// harness boots; direct Run Agent Doc requests carry the controller's
 /// editor-route attempt id. Controller/watchdog recovery has none of those
 /// signals and retains auto-reap.
-fn route_owned_reap_policy_for_start(
+pub(crate) fn route_owned_reap_policy_for_start(
     skip_wait: bool,
     dispatch_only: bool,
     editor_route_attempt_id: Option<&str>,
@@ -1382,7 +1382,7 @@ pub fn auto_start_in_session_with_lock_mode(
 /// rewritten against. Logged as `transform=route_owned_start_launch key=launch`
 /// (the command's length and hash only); it replaces the typed path's
 /// `route_owned_start_enter` text + `Enter` events.
-fn launch_route_owned_start(
+pub(crate) fn launch_route_owned_start(
     tmux: &Tmux,
     file: &Path,
     pane: &str,

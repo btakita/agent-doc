@@ -23,6 +23,7 @@ pub mod pool_heartbeat;
 pub mod pool_running_turn;
 pub mod recycle;
 pub mod sequence;
+pub mod shell_start;
 pub mod status;
 pub mod supervisor_replacement;
 pub mod timeout;

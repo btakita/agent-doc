@@ -364,6 +364,11 @@ pub struct DeadPaneActorGcFacts {
     /// Effective queue control is paused: operator authority that also fences
     /// the watchdog, so nothing would ever recover a deferred binding.
     pub watchdog_paused: bool,
+    /// `#shellstart`: the claiming pane is an alive bare shell and no
+    /// `agent-doc start` is serving the document. The watchdog starts that
+    /// pane even when the session log has already closed, so GC must not hide
+    /// the actor first.
+    pub claiming_shell_needs_start: bool,
 }
 
 /// `#gcdefercrash` (2026-10-20 `agent-doc-bugs.md`): the dead-pane actor GC
@@ -372,17 +377,25 @@ pub struct DeadPaneActorGcFacts {
 /// editor layout event) and closed the actor, and the watchdog skips closed
 /// actors, so a crash it existed to recover was never even seen. Defer exactly
 /// the bindings the watchdog would act on: a dead supervisor that was not
-/// stopped by the operator, a live visible pane, and an open session. A
-/// deliberate stop, a stashed or unresolved pane, a gone pane, a closed
-/// session, a paused queue (the watchdog is fenced too), or a live/unknown
-/// supervisor still closes as before.
+/// stopped by the operator, a live visible pane, and an open session — and a
+/// claiming bare shell with no `agent-doc start`, even after that session log
+/// closes (`#shellstart`). A deliberate stop, a stashed or unresolved pane, a
+/// gone pane, a closed session that is not that shell, a paused queue (the
+/// watchdog is fenced too), or a live/unknown supervisor still closes as before.
 pub fn dead_pane_actor_gc_decision(facts: DeadPaneActorGcFacts) -> DeadPaneActorGcDecision {
+    // `#shellstart`: a claiming shell with no start is the watchdog's even when
+    // the session log already closed. Operator stop, cold-start grace, stash,
+    // and pause still close, matching the watchdog holds.
+    let shell_owed = facts.claiming_shell_needs_start
+        && facts.exit.allows_restart()
+        && facts.binding.allows_restart()
+        && !facts.watchdog_paused;
     let owed = facts.supervisor_dead
         && facts.exit != crate::intentional_exit::IntentionalExitDecision::Intentional
         && facts.binding.allows_restart()
         && facts.session_open
         && !facts.watchdog_paused;
-    if owed {
+    if shell_owed || owed {
         DeadPaneActorGcDecision::DeferToWatchdog
     } else {
         DeadPaneActorGcDecision::Close
@@ -645,6 +658,7 @@ mod tests {
                     binding: WatchdogBindingDecision::Live,
                     session_open: true,
                     watchdog_paused: false,
+                    claiming_shell_needs_start: false,
                 }),
                 DeadPaneActorGcDecision::DeferToWatchdog,
                 "{exit:?}"
@@ -664,6 +678,7 @@ mod tests {
             binding: WatchdogBindingDecision::Live,
             session_open: true,
             watchdog_paused: false,
+            claiming_shell_needs_start: false,
         };
         for facts in [
             DeadPaneActorGcFacts {
@@ -701,6 +716,46 @@ mod tests {
                 "{facts:?}"
             );
         }
+    }
+
+    /// `#shellstart`: a closed session log used to hide the actor before the
+    /// watchdog could start `agent-doc` in the claiming shell.
+    #[test]
+    fn dead_pane_gc_defers_a_claiming_shell_with_no_start_after_the_session_closes() {
+        use crate::intentional_exit::IntentionalExitDecision as Exit;
+        let shell = DeadPaneActorGcFacts {
+            supervisor_dead: false,
+            exit: Exit::NoMarker,
+            binding: WatchdogBindingDecision::Live,
+            session_open: false,
+            watchdog_paused: false,
+            claiming_shell_needs_start: true,
+        };
+        assert_eq!(
+            dead_pane_actor_gc_decision(shell),
+            DeadPaneActorGcDecision::DeferToWatchdog
+        );
+        assert_eq!(
+            dead_pane_actor_gc_decision(DeadPaneActorGcFacts {
+                exit: Exit::Intentional,
+                ..shell
+            }),
+            DeadPaneActorGcDecision::Close
+        );
+        assert_eq!(
+            dead_pane_actor_gc_decision(DeadPaneActorGcFacts {
+                watchdog_paused: true,
+                ..shell
+            }),
+            DeadPaneActorGcDecision::Close
+        );
+        assert_eq!(
+            dead_pane_actor_gc_decision(DeadPaneActorGcFacts {
+                binding: WatchdogBindingDecision::PaneStashed,
+                ..shell
+            }),
+            DeadPaneActorGcDecision::Close
+        );
     }
 
     /// Create an Instant offset by `secs` from a base.

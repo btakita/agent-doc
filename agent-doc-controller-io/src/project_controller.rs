@@ -14342,9 +14342,6 @@ fn dead_pane_actor_gc_decision_for_record(
             .ok()
             .flatten()
             .is_some_and(|status| status.latest_session_open());
-    if !session_open {
-        return DeadPaneActorGcDecision::Close;
-    }
     // The watchdog skips a paused document, so deferring to it would leave the
     // binding open with nothing to recover it. An unreadable control row
     // fails toward `Close` like every other gate here.
@@ -14356,15 +14353,35 @@ fn dead_pane_actor_gc_decision_for_record(
     .map(|control| rpc::supervisor_watchdog_blocked_by_queue_control(control.as_ref()))
     .unwrap_or(true);
     let tmux = agent_doc_tmux_io::configured_tmux();
+    let pane_alive = tmux.pane_alive(&record.pane_id);
+    let bare_shell = pane_alive
+        && agent_doc_tmux_io::target_current_command(&tmux, &record.pane_id)
+            .as_deref()
+            .map(str::trim)
+            .is_some_and(agent_doc_tmux::pane_current_command_is_bare_shell);
+    let start_running =
+        agent_doc_supervisor_io::process::serving_supervisor_pid_for_doc(&file).is_some();
+    let claiming_shell_needs_start = agent_doc_controller::shell_start::decide_claiming_shell_start(
+        pane_alive,
+        bare_shell,
+        start_running,
+    )
+        == agent_doc_controller::shell_start::ClaimingShellStartDecision::StartAgentDoc;
+    // A closed session with no claiming shell still closes without further
+    // policy. `#shellstart` keeps the actor when that shell has no start.
+    if !session_open && !claiming_shell_needs_start {
+        return DeadPaneActorGcDecision::Close;
+    }
     dead_pane_actor_gc_decision(DeadPaneActorGcFacts {
         supervisor_dead: true,
         exit,
         binding: watchdog_binding_decision(
-            tmux.pane_alive(&record.pane_id),
+            pane_alive,
             rpc::supervisor_watchdog_pane_stashed(&tmux, &record.pane_id),
         ),
         session_open,
         watchdog_paused,
+        claiming_shell_needs_start,
     })
 }
 

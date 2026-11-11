@@ -359,6 +359,8 @@ and the pending granular-flags-only rule. This runbook carries the rest.
      `authorization.status` is `unresolved_preset`, the queue names a preset
      frontmatter does not define; the preamble already tells the subagent that
      no authorization beyond the item text was resolved, so do not add any.
+     `conflicting_preset_attrs` means the marker's `preset=` and `presets=`
+     disagree: neither spelling is authorization, so do not pick one.
      `agent-doc queue brief <FILE> --item <...>` (or the entry's
      `brief_command`; `--json` for the whole object) re-prints the same text.
   3. Dispatch one background subagent per item. When it touches a repo, give it
@@ -661,10 +663,16 @@ and the pending granular-flags-only rule. This runbook carries the rest.
   dispatch items. If neither path exists, leave them queued and record
   `**Deferred:** no subagent available`; never silently change delegated work
   into inline work. Only after the project-wide sync view shows no eligible
-  pending, claimed-but-unstarted, lost, reported, or unknown row, end the turn
-  quietly. Running or explicitly dependency/cap-held rows may wait (the Stop hook
-  logs `state=waiting_on_claims`), and subagent completion notifications resume
-  the loop without polling or a scheduled re-entry.
+  pending, claimed-but-unstarted, lost, reported, or unknown row, and no live
+  transient queue row (`📥` `🟡` `🚧` `☑️` `⚠️` `⚠️🟡` `⚠️🚧` `⚠️☑️` `🔄` `❔`),
+  end the turn quietly. A visible `🚧` or `⚠️🚧` row is not a quiet wait: finish
+  the running worker, or continue the lost generation and retry it in this turn
+  if continue fails. A frozen `🚧` whose continue already failed authorizes a
+  new generation in the same turn (`#transientcloseout`). The Stop hook blocks
+  a genuine turn end until those rows leave the transient set. Explicitly
+  dependency/cap-held rows that are not in that set may wait, and subagent
+  completion notifications resume the loop without polling or a scheduled
+  re-entry.
 - If session-accretion supplies bounded context, use the included `### Re:`
   blocks as prompt-position anchors, not proof that older turns are absent.
 - Execute from the planning record. If `execution_scope=plan_backlog_only`, stay
@@ -1064,6 +1072,14 @@ remains. This is proactive reconciliation: do not wait for the operator to
 check the box or mention the stale item, and do not limit the audit to
 `linked_work_resolved` / `cited_work_resolved` signals. When evidence is
 uncertain, preserve the open item rather than guessing.
+
+**Annotate the pull request that closes the item (`#prannotate`).** When you
+open a pull request for an open `agent:todo` or `agent:backlog` item, or you
+add that item while the pull request already exists, put the pull request URL
+on the item in the same closeout (`--todo-edit` or `--backlog-edit`). Do not
+wait for the operator to ask, and do not check the item off only because the
+pull request exists. Preflight repeats a `closing_pull_request` signal, naming
+the item and the URL, until the item text cites that URL.
 
 Record it with the closeout flag `--todo-add "<action>"` (repeatable), for
 example `agent-doc write --commit <FILE> --todo-add "Verify [#gate1] in a live pane"`.

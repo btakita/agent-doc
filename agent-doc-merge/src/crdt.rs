@@ -1290,6 +1290,222 @@ fn align_generated_id_promotions(base: &[KeyedChild], side: &mut [KeyedChild]) {
     }
 }
 
+/// Character-diff floor for a mid-clause reword of an in-flight q-id admission.
+///
+/// The same floor queue-head edit pairing uses: at or above it, the live row is
+/// steering of the admitted row; below it, the replacement is new work.
+const ADMISSION_STEERING_SIMILARITY: f32 = 0.5;
+
+/// Work-text length floor for a non-prefix steering match. Strict prefix
+/// continuation keeps the floor inside [`generated_id_progressive_revision`].
+const ADMISSION_STEERING_MIN_CHARS: usize = 24;
+
+fn is_free_text_row_key(key: &str) -> bool {
+    key.starts_with("txt:") || key.contains(":txt:")
+}
+
+fn generated_row_qid(text: &str) -> Option<String> {
+    agent_doc_element_queue::queue_prompt_stable_id(text).filter(|id| id.starts_with("q-"))
+}
+
+/// Queue work used to compare an admitted row with the live editor cut.
+pub(crate) fn admitted_queue_work(text: &str) -> String {
+    normalize_item_text(&agent_doc_element_queue::strip_generated_queue_prompt_id_annotation(text))
+}
+
+/// A live free-text row is a steering edit of an in-flight q-id admission when
+/// the work texts are long enough and either contain one another or their
+/// character-diff ratio reaches [`ADMISSION_STEERING_SIMILARITY`].
+///
+/// Strict prefix continuation stays on [`generated_id_progressive_revision`].
+pub(crate) fn generated_id_steering_revision(promoted: &str, live: &str) -> bool {
+    if generated_id_promotion_alias(promoted).is_none()
+        || generated_id_promotion_alias(live).is_some()
+        || generated_id_progressive_revision(promoted, live)
+    {
+        return false;
+    }
+    let promoted_work = admitted_queue_work(promoted);
+    let live_work = admitted_queue_work(live);
+    if promoted_work.chars().count() < ADMISSION_STEERING_MIN_CHARS
+        || live_work.chars().count() < ADMISSION_STEERING_MIN_CHARS
+    {
+        return false;
+    }
+    if live_work.contains(promoted_work.as_str()) || promoted_work.contains(live_work.as_str()) {
+        return true;
+    }
+    similar::TextDiff::from_chars(promoted_work.as_str(), live_work.as_str()).ratio()
+        >= ADMISSION_STEERING_SIMILARITY
+}
+
+/// One in-flight q-id admission aligned onto the operator's steering edit, plus
+/// agent-only copies that must not be reinserted.
+pub(crate) struct AdmissionSteeringPlan {
+    /// `(theirs_index, ours_key)`. The live row adopts the admitted row's key.
+    pub align_theirs: Vec<(usize, String)>,
+    /// Ours indexes that are stale copies of a row the operator's cut kept.
+    pub drop_ours: Vec<usize>,
+}
+
+/// `#editsteer`: prepare projected `[#q-…]` onto an earlier spelling while the
+/// operator rewrote that same row. A unique same-gap steering edit becomes that
+/// admission. A low-similarity replacement of a base row does not take the
+/// q-id, and the removed spelling is not put back. Two settled rows, two live
+/// candidates, and a row the operator still has beside a new sibling stay
+/// distinct.
+pub(crate) fn admission_steering_plan(
+    base: &[(String, String)],
+    ours: &[(String, String)],
+    theirs: &[(String, String)],
+) -> AdmissionSteeringPlan {
+    let base_keys: std::collections::HashSet<&str> =
+        base.iter().map(|(key, _)| key.as_str()).collect();
+    let ours_keys: std::collections::HashSet<&str> =
+        ours.iter().map(|(key, _)| key.as_str()).collect();
+    let theirs_keys: std::collections::HashSet<&str> =
+        theirs.iter().map(|(key, _)| key.as_str()).collect();
+    let base_qids: std::collections::HashSet<String> = base
+        .iter()
+        .filter_map(|(_, text)| generated_row_qid(text))
+        .collect();
+    let shared_anchors: std::collections::HashSet<&str> = ours_keys
+        .intersection(&theirs_keys)
+        .copied()
+        .filter(|key| !is_free_text_row_key(key) || base_keys.contains(key))
+        .collect();
+    let gap = |rows: &[(String, String)], index: usize| {
+        let before = rows[..index]
+            .iter()
+            .rev()
+            .find(|(key, _)| shared_anchors.contains(key.as_str()))
+            .map(|(key, _)| key.clone());
+        let after = rows[index + 1..]
+            .iter()
+            .find(|(key, _)| shared_anchors.contains(key.as_str()))
+            .map(|(key, _)| key.clone());
+        (before, after)
+    };
+    let operator_has_work = |work: &str| {
+        theirs
+            .iter()
+            .any(|(_, text)| admitted_queue_work(text) == work)
+    };
+
+    let mut pairs = Vec::new();
+    for (ours_index, (ours_key, promoted)) in ours.iter().enumerate() {
+        if generated_id_promotion_alias(promoted).is_none() {
+            continue;
+        }
+        if generated_row_qid(promoted).is_some_and(|qid| base_qids.contains(&qid)) {
+            continue;
+        }
+        if theirs_keys.contains(ours_key.as_str())
+            || operator_has_work(&admitted_queue_work(promoted))
+        {
+            continue;
+        }
+        let ours_gap = gap(ours, ours_index);
+        let matches = theirs
+            .iter()
+            .enumerate()
+            .filter(|(theirs_index, (live_key, live))| {
+                if !is_free_text_row_key(live_key) || generated_id_promotion_alias(live).is_some() {
+                    return false;
+                }
+                if gap(theirs, *theirs_index) != ours_gap {
+                    return false;
+                }
+                // Two rows already in the base are settled. Deleting one is an
+                // ordinary operator delete, not a fresh steering alignment.
+                if base_keys.contains(live_key.as_str()) && base_keys.contains(ours_key.as_str()) {
+                    return false;
+                }
+                generated_id_steering_revision(promoted, live)
+            })
+            .map(|(index, _)| index)
+            .collect::<Vec<_>>();
+        if let [theirs_index] = matches.as_slice() {
+            pairs.push((ours_index, *theirs_index));
+        }
+    }
+    let mut live_counts = std::collections::HashMap::<usize, usize>::new();
+    for (_, theirs_index) in &pairs {
+        *live_counts.entry(*theirs_index).or_default() += 1;
+    }
+    let mut align_theirs = Vec::new();
+    let mut aligned_ours = std::collections::HashSet::new();
+    for (ours_index, theirs_index) in pairs {
+        if live_counts.get(&theirs_index) != Some(&1) {
+            continue;
+        }
+        align_theirs.push((theirs_index, ours[ours_index].0.clone()));
+        aligned_ours.insert(ours_index);
+    }
+
+    let mut effective_theirs_keys: Vec<&str> = theirs.iter().map(|(key, _)| key.as_str()).collect();
+    for (theirs_index, key) in &align_theirs {
+        effective_theirs_keys[*theirs_index] = key.as_str();
+    }
+    let effective_theirs_set: std::collections::HashSet<&str> =
+        effective_theirs_keys.iter().copied().collect();
+
+    let mut drop_ours = Vec::new();
+    for (ours_index, (ours_key, text)) in ours.iter().enumerate() {
+        if aligned_ours.contains(&ours_index)
+            || effective_theirs_set.contains(ours_key.as_str())
+            || base_keys.contains(ours_key.as_str())
+        {
+            continue;
+        }
+        let work = admitted_queue_work(text);
+        let ours_gap = gap(ours, ours_index);
+        if generated_id_promotion_alias(text).is_some() {
+            if generated_row_qid(text).is_some_and(|qid| base_qids.contains(&qid))
+                || operator_has_work(&work)
+            {
+                continue;
+            }
+            let base_matches = base
+                .iter()
+                .filter(|(_, base_text)| admitted_queue_work(base_text) == work)
+                .count();
+            if base_matches != 1 {
+                continue;
+            }
+            let new_live = theirs
+                .iter()
+                .enumerate()
+                .filter(|(theirs_index, (key, _))| {
+                    is_free_text_row_key(key)
+                        && !base_keys.contains(key.as_str())
+                        && gap(theirs, *theirs_index) == ours_gap
+                })
+                .count();
+            // Zero new rows: the operator deleted the admitted spelling.
+            // One new row that did not align: it is below the steering floor.
+            // Two or more: ambiguous siblings stay, including this admission.
+            if new_live <= 1 {
+                drop_ours.push(ours_index);
+            }
+            continue;
+        }
+        if !is_free_text_row_key(ours_key) {
+            continue;
+        }
+        let kept_same_work = theirs.iter().enumerate().any(|(theirs_index, (_, live))| {
+            gap(theirs, theirs_index) == ours_gap && admitted_queue_work(live) == work
+        });
+        if kept_same_work {
+            drop_ours.push(ours_index);
+        }
+    }
+    AdmissionSteeringPlan {
+        align_theirs,
+        drop_ours,
+    }
+}
+
 /// Align the unique live/operator continuation of a newly q-id-admitted row.
 /// Both rows must occupy the same stable-anchor gap; ambiguous repeats remain
 /// separate rather than risking deletion of authored work.
@@ -1354,6 +1570,17 @@ pub(crate) fn project_generated_id_onto_live(promoted: &str, live: &str) -> Stri
     if agent_doc_element_queue::queue_prompt_stable_id(live).is_some() {
         return live.to_string();
     }
+    // A prefix continuation already carries its own marker. A mid-clause
+    // steering edit is the pre-admission line, so the admission's lifecycle
+    // marker has to move onto the operator's words with the q-id.
+    let live_owned = if !generated_id_progressive_revision(promoted, live)
+        && let Some(projection) = attempt_projection_tokens(promoted)
+    {
+        paint_attempt_projection(live, &projection)
+    } else {
+        live.to_string()
+    };
+    let live = live_owned.as_str();
     let (live_head, tail) = live
         .split_once('\n')
         .map_or((live, None), |(head, tail)| (head, Some(tail)));
@@ -2011,6 +2238,36 @@ fn reconcile_component_body(
         align_generated_id_promotions(&base_children, &mut theirs_children);
         progressive_promotion_keys =
             align_generated_id_progressive_revisions(&ours_children, &mut theirs_children);
+        if name == "queue" {
+            let rows = |children: &[KeyedChild]| {
+                children
+                    .iter()
+                    .map(|child| (child.key.clone(), child.text.clone()))
+                    .collect::<Vec<_>>()
+            };
+            let steering = admission_steering_plan(
+                &rows(&base_children),
+                &rows(&ours_children),
+                &rows(&theirs_children),
+            );
+            for (theirs_index, key) in steering.align_theirs {
+                theirs_children[theirs_index].key = key.clone();
+                progressive_promotion_keys.insert(key);
+            }
+            if !steering.drop_ours.is_empty() {
+                let drop = steering
+                    .drop_ours
+                    .iter()
+                    .copied()
+                    .collect::<std::collections::HashSet<_>>();
+                let mut index = 0usize;
+                ours_children.retain(|_| {
+                    let keep = !drop.contains(&index);
+                    index += 1;
+                    keep
+                });
+            }
+        }
     }
 
     // An id-less queue child's text is its fallback key. While the operator is
@@ -6448,6 +6705,220 @@ Second answer line three.
             assert_eq!(queue_body.matches(prompt).count(), 1, "{queue_body}");
             assert!(queue_body.contains(&expected), "{queue_body}");
         }
+    }
+
+    /// Prepare projected a q-id onto an earlier free-text spelling while the
+    /// operator rewrote that nested row. The reword is not a prefix. One row
+    /// keeps the operator's words, the q-id, and the lifecycle marker. A copy
+    /// the operator removed stays removed.
+    #[test]
+    fn steering_edit_during_qid_admission_stays_one_row_and_a_deleted_copy_stays_deleted() {
+        let parent = "- ### https://example.test/sample-app/pull/41";
+        let earlier = "  - Since sample-app uses the release bot, should we close the open pull request? If yes, close it with a superceded by the release bot reason.";
+        let steered = "  - Since sample-app uses the release bot, should we close the open pull request? If yes, close it with a reason superceeded by the release bot + https://example.test/sample-app/pull/42.";
+        let admitted = "  - 📥 Since sample-app uses the release bot, should we close the open pull request? If yes, close it with a superceded by the release bot reason. [#q-0123456789ab]";
+        let expected = "  - 📥 Since sample-app uses the release bot, should we close the open pull request? If yes, close it with a reason superceeded by the release bot + https://example.test/sample-app/pull/42. [#q-0123456789ab]";
+        assert!(generated_id_steering_revision(admitted, steered));
+        assert!(!generated_id_progressive_revision(admitted, steered));
+
+        let queue = |rows: &[&str]| rows.join("\n");
+        let assert_rows = |base_rows: &str,
+                           ours_rows: &str,
+                           theirs_rows: &str,
+                           present: &str,
+                           absent: &[&str]| {
+            let check = |body: &str, seam: &str| {
+                assert!(
+                    body.contains(present),
+                    "{seam} lost the surviving row:\n{body}"
+                );
+                assert_eq!(
+                    body.matches(present).count(),
+                    1,
+                    "{seam} duplicated the surviving row:\n{body}"
+                );
+                for needle in absent {
+                    assert!(
+                        !body.contains(needle),
+                        "{seam} resurrected `{needle}`:\n{body}"
+                    );
+                }
+                if present.contains("pull/42") {
+                    assert_eq!(
+                        body.matches("pull/42").count(),
+                        1,
+                        "{seam} kept a second copy of the steered row:\n{body}"
+                    );
+                }
+            };
+            let base = doc_with_exchange_queue("Q.", base_rows);
+            let ours = doc_with_exchange_queue("Q.", ours_rows);
+            let theirs = doc_with_exchange_queue("Q.", theirs_rows);
+            let state = CrdtDoc::from_text(&base).encode_state();
+            let merged = merge_by_component(Some(&state), &ours, &theirs).unwrap();
+            check(body_of(&merged, "queue"), "merge_by_component");
+            let base_state = MultiNodeState::from_text(&base).unwrap();
+            let (persisted, _) = MultiNodeState::merge(Some(&base_state), &ours, &theirs).unwrap();
+            check(body_of(&persisted, "queue"), "MultiNodeState::merge");
+            let reconciled =
+                reconcile_component_body("queue", Some(base_rows), ours_rows, theirs_rows, false)
+                    .unwrap();
+            check(&reconciled, "reconcile_component_body");
+        };
+
+        let earlier_ending = "superceded by the release bot reason.";
+        // The base still has the earlier spelling. Admission and the reword race.
+        assert_rows(
+            &queue(&[parent, earlier]),
+            &queue(&[parent, admitted]),
+            &queue(&[parent, steered]),
+            expected,
+            &[earlier_ending],
+        );
+        // The earlier spelling was not in the base snapshot yet.
+        assert_rows(
+            parent,
+            &queue(&[parent, admitted]),
+            &queue(&[parent, steered]),
+            expected,
+            &[earlier_ending],
+        );
+        // The agent cut kept both the stale admission and the bare reword.
+        assert_rows(
+            parent,
+            &queue(&[parent, admitted, steered]),
+            &queue(&[parent, steered]),
+            expected,
+            &[earlier_ending],
+        );
+
+        let both = queue(&[parent, admitted, steered]);
+        // Both copies are settled. Deleting the bare reword stays deleted.
+        assert_rows(
+            &both,
+            &both,
+            &queue(&[parent, admitted]),
+            admitted,
+            &["https://example.test/sample-app/pull/42"],
+        );
+        // Deleting the admitted row stays deleted. The q-id is not transferred
+        // onto the bare row that was already in the base.
+        assert_rows(
+            &both,
+            &both,
+            &queue(&[parent, steered]),
+            steered,
+            &["[#q-0123456789ab]", earlier_ending],
+        );
+
+        // The operator kept the earlier spelling and added a similar sibling.
+        let kept_original = queue(&[parent, earlier, steered]);
+        assert_rows(
+            &queue(&[parent, earlier]),
+            &queue(&[parent, admitted]),
+            &kept_original,
+            steered,
+            &[],
+        );
+        let base = doc_with_exchange_queue("Q.", &queue(&[parent, earlier]));
+        let ours = doc_with_exchange_queue("Q.", &queue(&[parent, admitted]));
+        let theirs = doc_with_exchange_queue("Q.", &kept_original);
+        let state = CrdtDoc::from_text(&base).encode_state();
+        let merged = merge_by_component(Some(&state), &ours, &theirs).unwrap();
+        let body = body_of(&merged, "queue");
+        assert_eq!(body.matches("[#q-0123456789ab]").count(), 1, "{body}");
+        assert!(
+            !body
+                .lines()
+                .any(|line| line.contains("pull/42") && line.contains("[#q-0123456789ab]")),
+            "{body}"
+        );
+        assert!(body.contains(earlier_ending), "{body}");
+    }
+
+    #[test]
+    fn low_similarity_replacement_does_not_inherit_a_qid_or_resurrect_the_removed_row() {
+        let parent = "- ### https://example.test/sample-app/pull/41";
+        let earlier =
+            "  - Rename the sample-app release workflow and document how versions are bumped.";
+        let unrelated = "  - Investigate the flaky widget snapshot in the example project suite.";
+        let admitted = "  - 📥 Rename the sample-app release workflow and document how versions are bumped. [#q-0123456789ab]";
+        assert!(!generated_id_steering_revision(admitted, unrelated));
+        assert!(!generated_id_progressive_revision(admitted, unrelated));
+
+        let queue = |rows: &[&str]| rows.join("\n");
+        let base = doc_with_exchange_queue("Q.", &queue(&[parent, earlier]));
+        let ours = doc_with_exchange_queue("Q.", &queue(&[parent, admitted]));
+        let theirs = doc_with_exchange_queue("Q.", &queue(&[parent, unrelated]));
+        let state = CrdtDoc::from_text(&base).encode_state();
+        let merged = merge_by_component(Some(&state), &ours, &theirs).unwrap();
+        let body = body_of(&merged, "queue");
+        assert!(body.contains(unrelated), "{body}");
+        assert!(!body.contains("[#q-0123456789ab]"), "{body}");
+        assert!(!body.contains("versions are bumped"), "{body}");
+        let base_state = MultiNodeState::from_text(&base).unwrap();
+        let (persisted, _) = MultiNodeState::merge(Some(&base_state), &ours, &theirs).unwrap();
+        let body = body_of(&persisted, "queue");
+        assert!(body.contains(unrelated), "{body}");
+        assert!(!body.contains("[#q-0123456789ab]"), "{body}");
+        assert!(!body.contains("versions are bumped"), "{body}");
+
+        // Two different additions over a base that lacks both stay distinct.
+        let base = doc_with_exchange_queue("Q.", parent);
+        let state = CrdtDoc::from_text(&base).encode_state();
+        let merged = merge_by_component(Some(&state), &ours, &theirs).unwrap();
+        let body = body_of(&merged, "queue");
+        assert!(body.contains(unrelated), "{body}");
+        assert!(body.contains("[#q-0123456789ab]"), "{body}");
+        assert!(body.contains("versions are bumped"), "{body}");
+        assert_eq!(body.matches("[#q-0123456789ab]").count(), 1, "{body}");
+        assert!(
+            !body
+                .lines()
+                .any(|line| line.contains("flaky widget") && line.contains("[#q-0123456789ab]")),
+            "{body}"
+        );
+    }
+
+    #[test]
+    fn two_steering_candidates_do_not_take_one_admitted_qid() {
+        let parent = "- ### https://example.test/sample-app/pull/41";
+        let earlier = "  - Since sample-app uses the release bot, should we close the open pull request? If yes, close it with a superceded by the release bot reason.";
+        let first = "  - Since sample-app uses the release bot, should we close the open pull request? If yes, close it with a note that the release bot superceded it.";
+        let second = "  - Since sample-app uses the release bot, should we close the open pull request? If yes, close it with the release bot reason and a follow-up link.";
+        let admitted = "  - 📥 Since sample-app uses the release bot, should we close the open pull request? If yes, close it with a superceded by the release bot reason. [#q-0123456789ab]";
+        assert!(generated_id_steering_revision(admitted, first));
+        assert!(generated_id_steering_revision(admitted, second));
+
+        let queue = |rows: &[&str]| rows.join("\n");
+        let base = doc_with_exchange_queue("Q.", &queue(&[parent, earlier]));
+        let ours = doc_with_exchange_queue("Q.", &queue(&[parent, admitted]));
+        let theirs = doc_with_exchange_queue("Q.", &queue(&[parent, first, second]));
+        let state = CrdtDoc::from_text(&base).encode_state();
+        let merged = merge_by_component(Some(&state), &ours, &theirs).unwrap();
+        let body = body_of(&merged, "queue");
+        assert!(body.contains("a note that the release bot"), "{body}");
+        assert!(body.contains("a follow-up link"), "{body}");
+        assert_eq!(body.matches("[#q-0123456789ab]").count(), 1, "{body}");
+        assert!(
+            !body.lines().any(|line| {
+                (line.contains("a note that the release bot") || line.contains("a follow-up link"))
+                    && line.contains("[#q-0123456789ab]")
+            }),
+            "{body}"
+        );
+        let base_state = MultiNodeState::from_text(&base).unwrap();
+        let (persisted, _) = MultiNodeState::merge(Some(&base_state), &ours, &theirs).unwrap();
+        let body = body_of(&persisted, "queue");
+        assert!(body.contains("a note that the release bot"), "{body}");
+        assert!(body.contains("a follow-up link"), "{body}");
+        assert!(
+            !body.lines().any(|line| {
+                (line.contains("a note that the release bot") || line.contains("a follow-up link"))
+                    && line.contains("[#q-0123456789ab]")
+            }),
+            "{body}"
+        );
     }
 
     #[test]

@@ -946,11 +946,16 @@ fn align_repeat_primary(
     }
 }
 
-fn rewrite_occurrence(occ: &ComponentOccurrence, ids: &[String]) -> ComponentOccurrence {
+fn rewrite_occurrence(
+    occ: &ComponentOccurrence,
+    ids: &[String],
+    skip: &std::collections::HashSet<usize>,
+) -> ComponentOccurrence {
     let items = occ
         .items
         .iter()
         .enumerate()
+        .filter(|(index, _)| !skip.contains(index))
         .map(|(index, (key, value))| {
             if node_key_identity(key) == ids[index] {
                 (key.clone(), value.clone())
@@ -1123,6 +1128,27 @@ fn align_operator_repeats(
         theirs_ids[theirs_index] = key.clone();
         progressive_promotion_keys.insert(key);
     }
+    // `#editsteer`: a mid-clause reword of the admitted row is the same
+    // occurrence. A copy the operator's cut does not have is not reinserted.
+    let mut drop_ours = std::collections::HashSet::new();
+    if ours.component == "queue" {
+        let rows = |ids: &[String], items: &[(NodeKey, ItemValue)]| {
+            ids.iter()
+                .zip(items.iter())
+                .map(|(id, (_, text))| (id.clone(), text.clone()))
+                .collect::<Vec<_>>()
+        };
+        let steering = crate::crdt::admission_steering_plan(
+            &rows(&base_ids, &base.items),
+            &rows(&ours_ids, &ours.items),
+            &rows(&theirs_ids, &theirs.items),
+        );
+        for (theirs_index, key) in steering.align_theirs {
+            theirs_ids[theirs_index] = key.clone();
+            progressive_promotion_keys.insert(key);
+        }
+        drop_ours.extend(steering.drop_ours);
+    }
     let mut primaries = Vec::new();
     let mut seen = std::collections::HashSet::new();
     for id in base_ids
@@ -1147,9 +1173,9 @@ fn align_operator_repeats(
         );
     }
     (
-        rewrite_occurrence(base, &base_ids),
-        rewrite_occurrence(ours, &ours_ids),
-        rewrite_occurrence(theirs, &theirs_ids),
+        rewrite_occurrence(base, &base_ids, &std::collections::HashSet::new()),
+        rewrite_occurrence(ours, &ours_ids, &drop_ours),
+        rewrite_occurrence(theirs, &theirs_ids, &std::collections::HashSet::new()),
         progressive_promotion_keys,
     )
 }

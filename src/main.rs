@@ -10041,6 +10041,13 @@ fn try_main() -> anyhow::Result<()> {
                         ttl_secs,
                         harness.as_deref(),
                     )?;
+                if outcome == agent_doc_queue::queue_claim::ClaimOutcome::Kept {
+                    eprintln!(
+                        "[queue] kept completion {:?} for {} generation {} stays reported; queue claim did not start a dispatch. Consume it after its one lineage receipt, or run `queue release --requeue` to dispatch again.",
+                        claim.item_text, claim.owner, claim.generation
+                    );
+                    return Ok(());
+                }
                 let on_harness = claim
                     .dispatch_policy
                     .as_ref()

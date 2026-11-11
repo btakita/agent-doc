@@ -103,6 +103,11 @@ pub fn running_turn_follow_up_composer_at_cursor(
             crate::grok::FollowUpComposer::Empty => RunningTurnFollowUpComposer::Empty,
             crate::grok::FollowUpComposer::Draft { .. } => RunningTurnFollowUpComposer::Draft,
             crate::grok::FollowUpComposer::Unreadable => RunningTurnFollowUpComposer::Unreadable,
+            // `#blockedwaitentercancels`: route and the pool already refuse
+            // to paste a Blocked composer, so this Enter is never sent.
+            crate::grok::FollowUpComposer::EnterCancels => RunningTurnFollowUpComposer::Blocked {
+                reason: "#blockedwaitentercancels: Enter cancels the blocked Grok turn and workers still bound to other rows. Steering stays pending for this turn.".to_string(),
+            },
         };
     }
 
@@ -276,6 +281,56 @@ mod tests {
         assert_eq!(
             running_turn_follow_up_composer("codex", "no recognizable composer"),
             RunningTurnFollowUpComposer::Unreadable
+        );
+    }
+
+    /// `#blockedwaitentercancels`: Grok's blocked-wait status says Enter
+    /// cancels that turn. An empty composer beside that line is not a safe
+    /// follow-up, even when the footer still shows a busy cue.
+    #[test]
+    fn grok_blocked_wait_enter_is_not_an_empty_follow_up() {
+        let blocked = concat!(
+            "1 command still running · send a message to interrupt\n",
+            "╭────────────────────────╮\n",
+            "│ ❯                      │\n",
+            "╰──── Grok 4.6 (high) ───╯\n",
+            "Shift+Tab:mode  │  Ctrl+c:cancel │ Ctrl+x:shortcuts\n",
+        );
+        match running_turn_follow_up_composer("grok", blocked) {
+            RunningTurnFollowUpComposer::Blocked { reason } => {
+                assert!(reason.contains("#blockedwaitentercancels"), "{reason}");
+            }
+            other => panic!("blocked-wait Enter must not submit, got {other:?}"),
+        }
+
+        let stop_hint = concat!(
+            "agent idle ~ waiting on your edit [stop]\n",
+            "send a message to interrupt\n",
+            "╭────────────────────────╮\n",
+            "│ ❯                      │\n",
+            "╰──── Grok 4.6 (high) ───╯\n",
+            "Shift+Tab:mode  │  Ctrl+x:shortcuts\n",
+        );
+        match running_turn_follow_up_composer("grok", stop_hint) {
+            RunningTurnFollowUpComposer::Blocked { reason } => {
+                assert!(reason.contains("#blockedwaitentercancels"), "{reason}");
+            }
+            other => panic!("[stop] plus the interrupt hint must not submit, got {other:?}"),
+        }
+    }
+
+    /// The same busy footer without the interrupt hint still accepts a follow-up.
+    #[test]
+    fn grok_busy_footer_without_the_interrupt_hint_stays_an_empty_follow_up() {
+        let busy = concat!(
+            "╭────────────────────────╮\n",
+            "│ ❯                      │\n",
+            "╰──── Grok 4.6 (high) ───╯\n",
+            "Shift+Tab:mode  │  Ctrl+c:cancel │ Ctrl+x:shortcuts\n",
+        );
+        assert_eq!(
+            running_turn_follow_up_composer("grok", busy),
+            RunningTurnFollowUpComposer::Empty
         );
     }
 

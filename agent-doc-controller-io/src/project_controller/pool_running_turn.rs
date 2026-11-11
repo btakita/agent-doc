@@ -92,8 +92,10 @@ pub(super) fn pool_running_turn_obligation(
         queue_paused: queue_paused(conn, project_root, file)?,
         hook_injects: hook_injects(harness),
         // Capture is the caller's next step. Asking with the turn live reports
-        // whether a paste is still owed; `TurnNotLive` is decided after capture.
+        // whether a paste is still owed; `TurnNotLive` and `EnterWouldCancel`
+        // are decided after capture.
         turn_live: true,
+        enter_would_cancel: false,
     };
     Ok(match pool_running_turn_follow_up_decision(observation) {
         PoolRunningTurnFollowUpDecision::FollowUp => {

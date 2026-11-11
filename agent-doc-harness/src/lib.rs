@@ -1777,9 +1777,9 @@ pub fn project_pane_composer(content: &str, harness: &HarnessConfig) -> PaneComp
             grok::FollowUpComposer::Draft { preview } => {
                 PaneComposerProjection::OperatorDraft { preview }
             }
-            grok::FollowUpComposer::Empty | grok::FollowUpComposer::Unreadable => {
-                PaneComposerProjection::Busy
-            }
+            grok::FollowUpComposer::Empty
+            | grok::FollowUpComposer::Unreadable
+            | grok::FollowUpComposer::EnterCancels => PaneComposerProjection::Busy,
         };
     }
     // OpenCode renders its composer as a box instead of a standalone prompt

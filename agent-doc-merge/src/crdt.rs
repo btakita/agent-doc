@@ -2307,8 +2307,9 @@ fn strict_typed_prefix(shorter: &str, longer: &str) -> bool {
         .is_some_and(|rest| rest.starts_with(char::is_whitespace))
 }
 
-/// Keep-masks for one queue merge. A strict typed prefix of another free-text
-/// row in the union is dropped, unless both already coexisted in `base`. When a
+/// Keep-masks for one queue merge. A strict typed prefix is dropped only when
+/// that shorter work is absent from `base`. A settled base row stays when a
+/// longer sibling, nested step, or lost-row continuation appears. When a
 /// fragment is dropped, extra copies of the longer work collapse to one row,
 /// preferring the copy that carries an attempt projection. Identical repeats
 /// with no prefix fragment stay.
@@ -2328,11 +2329,13 @@ pub(crate) fn typing_fragment_keep_masks(
     let base_works: Vec<&str> = base_free.iter().flatten().map(String::as_str).collect();
     let mut dropped = std::collections::HashSet::<&str>::new();
     for shorter in &union {
-        let continued = union.iter().any(|longer| {
-            strict_typed_prefix(shorter, longer)
-                && !(base_works.iter().any(|work| work == shorter)
-                    && base_works.iter().any(|work| work == longer))
-        });
+        // Settled work already in the base is not an in-progress fragment.
+        if base_works.contains(shorter) {
+            continue;
+        }
+        let continued = union
+            .iter()
+            .any(|longer| strict_typed_prefix(shorter, longer));
         if continued {
             dropped.insert(*shorter);
         }
@@ -2388,6 +2391,134 @@ fn typing_fragment_keep_mask(
     keep
 }
 
+/// Leading attempt-projection tokens on a row (`🚧 [#subagent:…#N]`), without
+/// the work text that follows them.
+pub(crate) fn attempt_projection_tokens(text: &str) -> Option<String> {
+    let first = text.lines().next().unwrap_or("");
+    let mut content = first.trim().strip_prefix("- ").unwrap_or(first.trim());
+    if let Some(rest) = content.strip_prefix("###")
+        && rest.chars().next().is_some_and(char::is_whitespace)
+    {
+        content = rest.trim_start();
+    }
+    let stripped = agent_doc_element_queue::strip_attempt_projection_prefix(content);
+    let projection = content.trim_start().strip_suffix(stripped)?.trim();
+    if projection.is_empty() {
+        None
+    } else {
+        Some(projection.to_string())
+    }
+}
+
+/// Insert `projection` after the list marker on the first line. A row that
+/// already carries an attempt projection is left unchanged, and the rest of
+/// the line (the operator's longer words) stays in place.
+pub(crate) fn paint_attempt_projection(text: &str, projection: &str) -> String {
+    if projection.is_empty() || line_carries_attempt_projection(text) {
+        return text.to_string();
+    }
+    let (first, newline_rest) = match text.split_once('\n') {
+        Some((first, rest)) => (first, Some(rest)),
+        None => (text, None),
+    };
+    let indent_len = first.len() - first.trim_start().len();
+    let (indent, content) = first.split_at(indent_len);
+    let painted_content = if let Some(rest) = content.strip_prefix("- ") {
+        format!("- {projection} {rest}")
+    } else {
+        format!("{projection} {content}")
+    };
+    let painted = format!("{indent}{painted_content}");
+    match newline_rest {
+        Some(rest) => format!("{painted}\n{rest}"),
+        None => painted,
+    }
+}
+
+/// Projection to copy onto `survivor_work`. The dropped marked row must be the
+/// only marked source, and exactly one longer continuation may survive.
+pub(crate) fn continuation_attempt_projection(
+    survivor_work: &str,
+    dropped_marked: &[(String, String)],
+    surviving_works: &[String],
+) -> Option<String> {
+    let mut sources: Vec<&(String, String)> = dropped_marked
+        .iter()
+        .filter(|(work, _)| strict_typed_prefix(work, survivor_work))
+        .collect();
+    sources.sort();
+    sources.dedup();
+    let [(work, projection)] = sources.as_slice() else {
+        return None;
+    };
+    let mut longers: Vec<&str> = surviving_works
+        .iter()
+        .map(String::as_str)
+        .filter(|longer| strict_typed_prefix(work, longer))
+        .collect();
+    longers.sort_unstable();
+    longers.dedup();
+    (longers.len() == 1 && longers[0] == survivor_work).then(|| (*projection).clone())
+}
+
+pub(crate) fn typing_projection_state(
+    ours_free: &[Option<String>],
+    theirs_free: &[Option<String>],
+    ours_keep: &[bool],
+    theirs_keep: &[bool],
+    ours_projection: &[Option<String>],
+    theirs_projection: &[Option<String>],
+) -> (Vec<(String, String)>, Vec<String>) {
+    let mut dropped_marked = Vec::new();
+    let mut surviving = Vec::new();
+    for (free, keep, projection) in [
+        (ours_free, ours_keep, ours_projection),
+        (theirs_free, theirs_keep, theirs_projection),
+    ] {
+        for (index, work) in free.iter().enumerate() {
+            let Some(work) = work else {
+                continue;
+            };
+            let kept = keep.get(index).copied().unwrap_or(true);
+            if kept {
+                if !surviving.iter().any(|seen: &String| seen == work) {
+                    surviving.push(work.clone());
+                }
+                continue;
+            }
+            if let Some(projection) = projection.get(index).and_then(Option::as_ref) {
+                let pair = (work.clone(), projection.clone());
+                if !dropped_marked.contains(&pair) {
+                    dropped_marked.push(pair);
+                }
+            }
+        }
+    }
+    (dropped_marked, surviving)
+}
+
+pub(crate) fn continuation_paints(
+    free: &[Option<String>],
+    keep: &[bool],
+    marked: &[bool],
+    dropped_marked: &[(String, String)],
+    surviving: &[String],
+) -> Vec<Option<String>> {
+    free.iter()
+        .enumerate()
+        .map(|(index, work)| {
+            if !keep.get(index).copied().unwrap_or(true) {
+                return None;
+            }
+            if marked.get(index).copied().unwrap_or(false) {
+                return None;
+            }
+            let work = work.as_deref()?;
+            continuation_attempt_projection(work, dropped_marked, surviving)
+        })
+        .collect()
+}
+
 fn collapse_queue_typing_fragments(
     base: &[KeyedChild],
     ours: &mut Vec<KeyedChild>,
@@ -2405,13 +2536,66 @@ fn collapse_queue_typing_fragments(
             .map(|child| line_carries_attempt_projection(&child.text))
             .collect::<Vec<_>>()
     };
+    let projection = |children: &[KeyedChild], marked: &[bool]| {
+        children
+            .iter()
+            .enumerate()
+            .map(|(index, child)| {
+                marked
+                    .get(index)
+                    .copied()
+                    .unwrap_or(false)
+                    .then(|| attempt_projection_tokens(&child.text))
+                    .flatten()
+            })
+            .collect::<Vec<_>>()
+    };
+    let base_free = free(base);
+    let ours_free = free(ours);
+    let theirs_free = free(theirs);
+    let ours_marked = marked(ours);
+    let theirs_marked = marked(theirs);
+    let ours_projection = projection(ours, &ours_marked);
+    let theirs_projection = projection(theirs, &theirs_marked);
     let (ours_keep, theirs_keep) = typing_fragment_keep_masks(
-        &free(base),
-        &free(ours),
-        &free(theirs),
-        &marked(ours),
-        &marked(theirs),
+        &base_free,
+        &ours_free,
+        &theirs_free,
+        &ours_marked,
+        &theirs_marked,
     );
+    let (dropped_marked, surviving) = typing_projection_state(
+        &ours_free,
+        &theirs_free,
+        &ours_keep,
+        &theirs_keep,
+        &ours_projection,
+        &theirs_projection,
+    );
+    let ours_paint = continuation_paints(
+        &ours_free,
+        &ours_keep,
+        &ours_marked,
+        &dropped_marked,
+        &surviving,
+    );
+    let theirs_paint = continuation_paints(
+        &theirs_free,
+        &theirs_keep,
+        &theirs_marked,
+        &dropped_marked,
+        &surviving,
+    );
+    for (child, paint) in ours.iter_mut().zip(&ours_paint) {
+        if let Some(projection) = paint {
+            child.text = paint_attempt_projection(&child.text, projection);
+        }
+    }
+    for (child, paint) in theirs.iter_mut().zip(&theirs_paint) {
+        if let Some(projection) = paint {
+            child.text = paint_attempt_projection(&child.text, projection);
+        }
+    }
     retain_indexed(ours, &ours_keep);
     retain_indexed(theirs, &theirs_keep);
 }
@@ -6603,7 +6787,8 @@ Second answer line three.
         assert_one_logical_row(&merged_while_typing);
 
         // The operator has only the prefix so far. The claim side already
-        // holds the finished marked row from the same line.
+        // holds the finished marked row from the same line, so the unchanged
+        // prefix is that claim's replacement and is not a settled sibling.
         let base_prefix = doc(&format!("{lost}\n{unrelated}\n{live_prefix}"));
         let base_prefix_state = CrdtDoc::from_text(&base_prefix).encode_state();
         let ours_shell = doc(&format!("{lost}\n{unrelated}\n{claimed_shell}"));
@@ -6670,6 +6855,123 @@ Second answer line three.
         assert!(
             merged_raced.contains("an unrelated prompt that must survive"),
             "{merged_raced}"
+        );
+    }
+
+    #[test]
+    fn settled_free_text_prefix_stays_when_a_longer_sibling_is_added() {
+        let doc =
+            |rows: &str| format!("<!-- agent:run id=\"main\" -->\n{rows}\n<!-- /agent:run -->\n");
+        let short = "- update the docs for the queue";
+        let long = "- update the docs for the queue and write the release note";
+        let base = doc(short);
+        let base_state = CrdtDoc::from_text(&base).encode_state();
+        let unchanged = doc(short);
+        let added = doc(&format!("{short}\n{long}"));
+        for (ours, theirs) in [(unchanged.clone(), added.clone()), (added, unchanged)] {
+            let merged = merge_by_component(Some(&base_state), &ours, &theirs).unwrap();
+            assert!(merged.lines().any(|line| line.trim() == short), "{merged}");
+            assert!(merged.lines().any(|line| line.trim() == long), "{merged}");
+        }
+    }
+
+    #[test]
+    fn settled_lost_prefix_stays_when_a_longer_sibling_is_added() {
+        let doc =
+            |rows: &str| format!("<!-- agent:run id=\"main\" -->\n{rows}\n<!-- /agent:run -->\n");
+        let lost = "- 📫 [#subagent:keptlost#1] update the docs for the queue";
+        let long = "- update the docs for the queue and write the release note";
+        let base = doc(lost);
+        let base_state = CrdtDoc::from_text(&base).encode_state();
+        let merged = merge_by_component(
+            Some(&base_state),
+            &doc(lost),
+            &doc(&format!("{lost}\n{long}")),
+        )
+        .unwrap();
+        assert!(
+            merged
+                .lines()
+                .any(|line| line.contains("[#subagent:keptlost#1]") && line.contains('📫')),
+            "{merged}"
+        );
+        assert!(merged.lines().any(|line| line.trim() == long), "{merged}");
+        assert!(
+            !merged
+                .lines()
+                .any(|line| line.trim() == long && line.contains('📫')),
+            "{merged}"
+        );
+    }
+
+    #[test]
+    fn settled_parent_prefix_stays_when_a_longer_nested_step_is_added() {
+        let doc =
+            |rows: &str| format!("<!-- agent:run id=\"main\" -->\n{rows}\n<!-- /agent:run -->\n");
+        let parent = "- ship the queue";
+        let nested = "  - ship the queue after the docs are updated";
+        let base = doc(parent);
+        let base_state = CrdtDoc::from_text(&base).encode_state();
+        let merged = merge_by_component(
+            Some(&base_state),
+            &doc(parent),
+            &doc(&format!("{parent}\n{nested}")),
+        )
+        .unwrap();
+        assert!(merged.lines().any(|line| line.trim() == parent), "{merged}");
+        assert!(
+            merged.lines().any(|line| line.trim() == nested.trim()),
+            "{merged}"
+        );
+    }
+
+    #[test]
+    fn claim_on_unbacked_prefix_projects_onto_one_longer_continuation() {
+        let doc =
+            |rows: &str| format!("<!-- agent:run id=\"main\" -->\n{rows}\n<!-- /agent:run -->\n");
+        let anchor = "- do [#anchor]";
+        let claimed =
+            "- 🚧 [#subagent:shellstart#1] If the claiming tmux pane for a document is in shell";
+        let longer = "- If the claiming tmux pane for a document is in shell and the supervisor should run agent-doc start";
+        let expected = "- 🚧 [#subagent:shellstart#1] If the claiming tmux pane for a document is in shell and the supervisor should run agent-doc start";
+        let base = doc(anchor);
+        let base_state = CrdtDoc::from_text(&base).encode_state();
+        let ours = doc(&format!("{anchor}\n{claimed}"));
+        let theirs = doc(&format!("{anchor}\n{longer}"));
+        let merged = merge_by_component(Some(&base_state), &ours, &theirs).unwrap();
+        assert!(
+            merged.lines().any(|line| line.trim() == expected),
+            "{merged}"
+        );
+        assert_eq!(
+            merged.matches("[#subagent:shellstart#1]").count(),
+            1,
+            "{merged}"
+        );
+        assert!(
+            !merged.lines().any(|line| line.trim() == claimed),
+            "{merged}"
+        );
+
+        let longer_b =
+            "- If the claiming tmux pane for a document is in shell then report the socket failure";
+        let merged_two = merge_by_component(
+            Some(&base_state),
+            &ours,
+            &doc(&format!("{anchor}\n{longer}\n{longer_b}")),
+        )
+        .unwrap();
+        assert!(
+            !merged_two.contains("[#subagent:shellstart#1]"),
+            "{merged_two}"
+        );
+        assert!(
+            merged_two.lines().any(|line| line.trim() == longer),
+            "{merged_two}"
+        );
+        assert!(
+            merged_two.lines().any(|line| line.trim() == longer_b),
+            "{merged_two}"
         );
     }
 

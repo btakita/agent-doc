@@ -1505,24 +1505,69 @@ fn collapse_queue_typing_copies(
             .map(|(_, text)| crate::crdt::line_carries_attempt_projection(text))
             .collect::<Vec<_>>()
     };
+    let base_free = free(base);
+    let ours_free = free(ours);
+    let theirs_free = free(theirs);
+    let ours_marked = marked(ours);
+    let theirs_marked = marked(theirs);
+    let projection = |occ: &ComponentOccurrence, marked: &[bool]| {
+        occ.items
+            .iter()
+            .enumerate()
+            .map(|(index, (_, text))| {
+                marked
+                    .get(index)
+                    .copied()
+                    .unwrap_or(false)
+                    .then(|| crate::crdt::attempt_projection_tokens(text))
+                    .flatten()
+            })
+            .collect::<Vec<_>>()
+    };
+    let ours_projection = projection(ours, &ours_marked);
+    let theirs_projection = projection(theirs, &theirs_marked);
     let (ours_keep, theirs_keep) = crate::crdt::typing_fragment_keep_masks(
-        &free(base),
-        &free(ours),
-        &free(theirs),
-        &marked(ours),
-        &marked(theirs),
+        &base_free,
+        &ours_free,
+        &theirs_free,
+        &ours_marked,
+        &theirs_marked,
     );
-    let filter = |occ: &ComponentOccurrence, keep: &[bool]| {
-        let mut index = 0usize;
+    let (dropped_marked, surviving) = crate::crdt::typing_projection_state(
+        &ours_free,
+        &theirs_free,
+        &ours_keep,
+        &theirs_keep,
+        &ours_projection,
+        &theirs_projection,
+    );
+    let ours_paint = crate::crdt::continuation_paints(
+        &ours_free,
+        &ours_keep,
+        &ours_marked,
+        &dropped_marked,
+        &surviving,
+    );
+    let theirs_paint = crate::crdt::continuation_paints(
+        &theirs_free,
+        &theirs_keep,
+        &theirs_marked,
+        &dropped_marked,
+        &surviving,
+    );
+    let filter = |occ: &ComponentOccurrence, keep: &[bool], paint: &[Option<String>]| {
         let items = occ
             .items
             .iter()
-            .filter(|_| {
-                let kept = keep.get(index).copied().unwrap_or(true);
-                index += 1;
-                kept
+            .enumerate()
+            .filter(|(index, _)| keep.get(*index).copied().unwrap_or(true))
+            .map(|(index, (key, text))| {
+                let painted = match paint.get(index).and_then(Option::as_ref) {
+                    Some(projection) => crate::crdt::paint_attempt_projection(text, projection),
+                    None => text.clone(),
+                };
+                (key.clone(), painted)
             })
-            .cloned()
             .collect();
         ComponentOccurrence {
             component: occ.component.clone(),
@@ -1532,8 +1577,8 @@ fn collapse_queue_typing_copies(
     };
     (
         base.clone(),
-        filter(ours, &ours_keep),
-        filter(theirs, &theirs_keep),
+        filter(ours, &ours_keep, &ours_paint),
+        filter(theirs, &theirs_keep, &theirs_paint),
     )
 }
 

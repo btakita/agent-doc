@@ -1576,7 +1576,8 @@ pub(crate) fn project_generated_id_onto_live(promoted: &str, live: &str) -> Stri
     // `#promptseen`: `👀` is the interval before that emit. When it is the
     // live row's only projection and the admitted row carries `📥`, this
     // path replaces `👀` with `📥` for an identical spelling and for a
-    // steering reword. `🚧`, `🟡`, and `☑️` stay.
+    // steering reword. `🚧`, `🟡`, and `☑️` stay. A top-level head keeps
+    // its `### ` ahead of the glyph (`- ### 📥 <words>`).
     let live_owned =
         if live_projection_is_only_seen(live) && promoted_projection_is_pending(promoted) {
             let pending = attempt_projection_tokens(promoted).unwrap_or_else(|| {
@@ -2705,8 +2706,31 @@ fn projection_is_only(
     projection == marker.prefix() || projection == marker.default_prefix()
 }
 
+/// List marker and active-head `### `, then the projection or work that follows.
+///
+/// `### ` is navigation on a top-level queue head, not work text. Strip and
+/// paint have to leave it in front of the lifecycle glyph. A nested row has
+/// no heading token, so its prefix stays `- `.
+fn split_list_heading(content: &str) -> (&str, &str) {
+    let (marker, after_marker) = if let Some(rest) = content.strip_prefix("- ") {
+        ("- ", rest)
+    } else {
+        ("", content)
+    };
+    let trimmed = after_marker.trim_start();
+    if let Some(rest) = trimmed.strip_prefix("###")
+        && rest.chars().next().is_some_and(char::is_whitespace)
+    {
+        let prefix = if marker.is_empty() { "### " } else { "- ### " };
+        (prefix, rest.trim_start())
+    } else {
+        (marker, after_marker)
+    }
+}
+
 /// First line with its leading attempt projection removed. The operator's
 /// words stay. Used when `👀` has to give way to the admission's `📥`.
+/// A leading `### ` stays, so the heading token is not left in the work.
 fn strip_leading_attempt_projection(text: &str) -> String {
     let (first, newline_rest) = match text.split_once('\n') {
         Some((first, rest)) => (first, Some(rest)),
@@ -2714,11 +2738,12 @@ fn strip_leading_attempt_projection(text: &str) -> String {
     };
     let indent_len = first.len() - first.trim_start().len();
     let (indent, content) = first.split_at(indent_len);
-    let stripped_content = if let Some(rest) = content.strip_prefix("- ") {
-        let work = agent_doc_element_queue::strip_attempt_projection_prefix(rest.trim_start());
-        format!("- {work}")
+    let (prefix, work_source) = split_list_heading(content);
+    let work = agent_doc_element_queue::strip_attempt_projection_prefix(work_source);
+    let stripped_content = if prefix.is_empty() {
+        work.to_string()
     } else {
-        agent_doc_element_queue::strip_attempt_projection_prefix(content).to_string()
+        format!("{prefix}{work}")
     };
     let stripped = format!("{indent}{stripped_content}");
     match newline_rest {
@@ -2729,7 +2754,9 @@ fn strip_leading_attempt_projection(text: &str) -> String {
 
 /// Insert `projection` after the list marker on the first line. A row that
 /// already carries an attempt projection is left unchanged, and the rest of
-/// the line (the operator's longer words) stays in place.
+/// the line (the operator's longer words) stays in place. A leading `### `
+/// stays ahead of the projection. Painting the glyph first would make the
+/// heading token work text (`- 📥 ### <words>`).
 pub(crate) fn paint_attempt_projection(text: &str, projection: &str) -> String {
     if projection.is_empty() || line_carries_attempt_projection(text) {
         return text.to_string();
@@ -2740,10 +2767,11 @@ pub(crate) fn paint_attempt_projection(text: &str, projection: &str) -> String {
     };
     let indent_len = first.len() - first.trim_start().len();
     let (indent, content) = first.split_at(indent_len);
-    let painted_content = if let Some(rest) = content.strip_prefix("- ") {
-        format!("- {projection} {rest}")
-    } else {
+    let (prefix, work) = split_list_heading(content);
+    let painted_content = if prefix.is_empty() {
         format!("{projection} {content}")
+    } else {
+        format!("{prefix}{projection} {work}")
     };
     let painted = format!("{indent}{painted_content}");
     match newline_rest {
@@ -7061,6 +7089,174 @@ Second answer line three.
             &expected_running,
             &["📥", "👀", earlier_ending],
         );
+    }
+
+    /// A top-level queue head is `- ### 👀 <words>`. Q-id admission skips that
+    /// heading token and replaces `👀` with `📥`, so the line is
+    /// `- ### 📥 <words> [#q-…]`. The heading token stays ahead of the glyph.
+    /// An identical spelling, a mid-clause reword, and a later merge whose
+    /// live cut still has no q-id all do this. `🚧`, `🟡`, and `☑️` stay,
+    /// including after `### `.
+    #[test]
+    fn seen_heading_row_takes_pending_when_qid_admission_projects() {
+        let anchor = "- do [#anchor]";
+        let words = "Since sample-app uses the release bot, should we close the open pull request? If yes, close it with a superceded by the release bot reason.";
+        let steered_words = "Since sample-app uses the release bot, should we close the open pull request? If yes, close it with a reason superceeded by the release bot + https://example.test/sample-app/pull/42.";
+        let earlier = format!("- ### {words}");
+        let seen_same = format!("- ### 👀 {words}");
+        let seen_steered = format!("- ### 👀 {steered_words}");
+        let admitted = format!("- ### 📥 {words} [#q-0123456789ab]");
+        let expected_same = admitted.clone();
+        let expected_steered = format!("- ### 📥 {steered_words} [#q-0123456789ab]");
+        assert_eq!(
+            strip_leading_attempt_projection(&seen_same),
+            format!("- ### {words}")
+        );
+        assert_eq!(
+            paint_attempt_projection(&format!("- ### {words}"), "📥"),
+            format!("- ### 📥 {words}")
+        );
+        assert!(generated_id_progressive_revision(&admitted, &seen_same));
+        assert!(generated_id_steering_revision(&admitted, &seen_steered));
+        assert!(!generated_id_progressive_revision(&admitted, &seen_steered));
+        for (live, expected) in [
+            (seen_same.as_str(), expected_same.as_str()),
+            (seen_steered.as_str(), expected_steered.as_str()),
+        ] {
+            let projected = project_generated_id_onto_live(&admitted, live);
+            assert_eq!(projected, expected);
+            assert!(!projected.contains("📥 ###"), "{projected}");
+            assert!(!projected.contains('👀'), "{projected}");
+        }
+        assert_eq!(
+            project_generated_id_onto_live(&expected_same, &seen_same),
+            expected_same
+        );
+        assert_eq!(
+            project_generated_id_onto_live(&expected_steered, &seen_steered),
+            expected_steered
+        );
+
+        let queue = |rows: &[&str]| rows.join("\n");
+        let assert_rows = |base_rows: &str,
+                           ours_rows: &str,
+                           theirs_rows: &str,
+                           present: &str,
+                           absent: &[&str]| {
+            let check = |body: &str, seam: &str| {
+                assert!(
+                    body.contains(present),
+                    "{seam} lost the surviving row:\n{body}"
+                );
+                assert_eq!(
+                    body.matches(present).count(),
+                    1,
+                    "{seam} duplicated the surviving row:\n{body}"
+                );
+                assert_eq!(
+                    body.matches("[#q-0123456789ab]").count(),
+                    1,
+                    "{seam} duplicated the q-id:\n{body}"
+                );
+                assert!(
+                    !body.contains("📥 ###"),
+                    "{seam} painted the glyph ahead of the heading:\n{body}"
+                );
+                for needle in absent {
+                    assert!(!body.contains(needle), "{seam} kept `{needle}`:\n{body}");
+                }
+            };
+            let base = doc_with_exchange_queue("Q.", base_rows);
+            let ours = doc_with_exchange_queue("Q.", ours_rows);
+            let theirs = doc_with_exchange_queue("Q.", theirs_rows);
+            let state = CrdtDoc::from_text(&base).encode_state();
+            let merged = merge_by_component(Some(&state), &ours, &theirs).unwrap();
+            check(body_of(&merged, "queue"), "merge_by_component");
+            let base_state = MultiNodeState::from_text(&base).unwrap();
+            let (persisted, _) = MultiNodeState::merge(Some(&base_state), &ours, &theirs).unwrap();
+            check(body_of(&persisted, "queue"), "MultiNodeState::merge");
+            let reconciled =
+                reconcile_component_body("queue", Some(base_rows), ours_rows, theirs_rows, false)
+                    .unwrap();
+            check(&reconciled, "reconcile_component_body");
+        };
+
+        let base_rows = queue(&[anchor, earlier.as_str()]);
+        let admitted_rows = queue(&[anchor, admitted.as_str()]);
+        let seen_same_rows = queue(&[anchor, seen_same.as_str()]);
+        let seen_steered_rows = queue(&[anchor, seen_steered.as_str()]);
+        assert_rows(
+            &base_rows,
+            &admitted_rows,
+            &seen_same_rows,
+            &expected_same,
+            &["👀"],
+        );
+        assert_rows(
+            anchor,
+            &admitted_rows,
+            &seen_same_rows,
+            &expected_same,
+            &["👀"],
+        );
+        let earlier_ending = "superceded by the release bot reason.";
+        assert_rows(
+            &base_rows,
+            &admitted_rows,
+            &seen_steered_rows,
+            &expected_steered,
+            &["👀", earlier_ending],
+        );
+        assert_rows(
+            anchor,
+            &admitted_rows,
+            &seen_steered_rows,
+            &expected_steered,
+            &["👀", earlier_ending],
+        );
+
+        let persisted_same = queue(&[anchor, expected_same.as_str()]);
+        let persisted_steered = queue(&[anchor, expected_steered.as_str()]);
+        assert_rows(
+            &persisted_same,
+            &persisted_same,
+            &seen_same_rows,
+            &expected_same,
+            &["👀"],
+        );
+        assert_rows(
+            &persisted_steered,
+            &persisted_steered,
+            &seen_steered_rows,
+            &expected_steered,
+            &["👀"],
+        );
+        assert_rows(
+            &base_rows,
+            &persisted_steered,
+            &seen_steered_rows,
+            &expected_steered,
+            &["👀", earlier_ending],
+        );
+
+        for marker in ["🚧", "🟡", "☑️"] {
+            let live = format!("- ### {marker} {words}");
+            let expected = format!("- ### {marker} {words} [#q-0123456789ab]");
+            assert_eq!(project_generated_id_onto_live(&admitted, &live), expected);
+            assert_rows(
+                &base_rows,
+                &admitted_rows,
+                &queue(&[anchor, live.as_str()]),
+                &expected,
+                &["📥", "👀"],
+            );
+            let steered = format!("- ### {marker} {steered_words}");
+            let expected_marker = format!("- ### {marker} {steered_words} [#q-0123456789ab]");
+            assert_eq!(
+                project_generated_id_onto_live(&admitted, &steered),
+                expected_marker
+            );
+        }
     }
 
     #[test]

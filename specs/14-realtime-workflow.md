@@ -1199,7 +1199,14 @@ prompt and keeps `📥`. When that survivor's live cut shows only the seen
 glyph `👀` and the admitted row carries `📥`, the q-id projection replaces
 `👀` with `📥` before it keeps the q-id. An identical spelling and a
 mid-clause reword both do this, and a later merge whose live cut still has
-no q-id does it again. A live `🚧`, `🟡`, or `☑️` stays.
+no q-id does it again. A top-level head is that same row with a heading
+token in front (`- ### 👀 <words>`). The projection skips that leading
+`### `, the same way it already skips `###` when it reads the glyph, and
+the admitted line is `- ### 📥 <words> [#q-…]`. The heading token stays
+ahead of the glyph. Painting `📥` before `###` would make the heading
+token work text. A nested `  - 👀` row has no heading token and uses the
+same replacement. A live `🚧`, `🟡`, or `☑️` stays, including when it
+sits after `### `.
 
 An id-backed queue head with a nonempty inline operator verdict, such as
 `complete [#push]: hold lifted; do the push`, is fresh executable authority even

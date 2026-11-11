@@ -1039,6 +1039,139 @@ pub fn claim_with_session(
     claim_with_session_for_worker_harness(file, item, owner, ttl_secs, owner_session, None)
 }
 
+/// A visible `☑️` row whose work identity is `target`.
+fn visible_kept_reported_row(file: &Path, target: &str) -> Result<bool> {
+    let content = claim_view_text(file)?;
+    let identity = claim_identity(target);
+    let Some(rows) = agent_doc_queue::queue_continuation::live_queue_head_rows(&content) else {
+        return Ok(false);
+    };
+    Ok(rows.iter().any(|row| {
+        agent_doc_document::queue_projection::lifecycle_marker(row)
+            == Some(agent_doc_document::queue_projection::QueueLifecycleMarker::Reported)
+            && claim_identity(row) == identity
+    }))
+}
+
+fn restored_reported_claim(
+    target: &str,
+    attempt: &crate::queue_lineage::QueueLineageAttempt,
+    now: u64,
+    ttl_secs: u64,
+    owner_session: Option<ClaimOwnerSession>,
+) -> QueueClaim {
+    let worker = attempt.events.iter().rev().find_map(|event| {
+        let id = event.worker_id.as_ref()?.trim();
+        if id.is_empty() {
+            None
+        } else {
+            Some(agent_doc_queue::queue_claim::QueueWorkerBinding {
+                worker_id: id.to_string(),
+                started_at_secs: event.at_secs,
+            })
+        }
+    });
+    let item_text = target.trim().to_string();
+    let mut followed_from = Vec::new();
+    if attempt.item_text != item_text {
+        followed_from.push(attempt.item_text.clone());
+    }
+    for text in &attempt.item_text_history {
+        if text != &item_text && !followed_from.contains(text) {
+            followed_from.push(text.clone());
+        }
+    }
+    QueueClaim {
+        identity: claim_identity(&item_text),
+        item_text,
+        owner: attempt.owner.clone(),
+        generation: attempt.generation,
+        state: agent_doc_queue::queue_claim::QueueClaimState::Reported,
+        lost_from: None,
+        completion_recovered_after_loss: false,
+        publication_state: None,
+        worker,
+        dispatch_policy: None,
+        tracked_item_aliases: Vec::new(),
+        claimed_at_secs: now,
+        expires_at_secs: now.saturating_add(ttl_secs.max(1)),
+        owner_session,
+        anchor: None,
+        followed_from,
+        followed_generation: attempt.generation,
+        claim_time_row: None,
+        reported_at_secs: Some(now),
+        heartbeat_at_secs: None,
+        frozen: None,
+        quota_block: None,
+    }
+}
+
+/// Join a kept `☑️` row to its one receipt as `Reported` (`#keptlineage`).
+///
+/// `Ok(None)` is a stale `☑️` with no lineage attempt. That row is not a kept
+/// completion, so the caller admits a fresh claim. Several attempts that do
+/// not name one receipt are an error: claim must not start a dispatch it
+/// cannot join. The caller's owner is not a new attempt. `queue release
+/// --requeue` is the explicit redispatch; this path never inserts `Claimed`.
+fn reattach_kept_completion(
+    file: &Path,
+    target: &str,
+    heads: &ClaimQueueView,
+    ttl_secs: u64,
+    owner_session: Option<ClaimOwnerSession>,
+) -> Result<Option<(ClaimOutcome, QueueClaim)>> {
+    let Some(attempt) = crate::queue_lineage::kept_completion_attempt(file, target)? else {
+        return Ok(None);
+    };
+    if attempt.generation == 0 {
+        bail!(
+            "queue head {target:?} is a kept completion whose lineage generation is unset; queue claim will not start a dispatch"
+        );
+    }
+    let now = now_secs();
+    let restored = restored_reported_claim(target, &attempt, now, ttl_secs, owner_session);
+    let identity = restored.identity.clone();
+    let result = mutate_ledger(file, |ledger| {
+        if let Some(existing) = ledger.claims.iter().find(|claim| claim.identity == identity) {
+            if existing.blocks_dispatch(now)
+                && existing.state != agent_doc_queue::queue_claim::QueueClaimState::Reported
+            {
+                return Ok((ClaimOutcome::HeldByOther, existing.clone()));
+            }
+            if existing.state == agent_doc_queue::queue_claim::QueueClaimState::Reported
+                && existing.generation == restored.generation
+                && existing.owner == restored.owner
+            {
+                return Ok((ClaimOutcome::Kept, existing.clone()));
+            }
+        }
+        if let Some(index) = ledger
+            .claims
+            .iter()
+            .position(|claim| claim.identity == identity)
+        {
+            ledger.claims[index] = restored.clone();
+        } else {
+            ledger.claims.push(restored.clone());
+        }
+        log_followed(file, &ledger.follow_edits_in_view(now, heads));
+        let stored = ledger
+            .claims
+            .iter()
+            .find(|claim| claim.identity == identity)
+            .cloned()
+            .context("kept completion claim missing after restore")?;
+        Ok((ClaimOutcome::Kept, stored))
+    })?;
+    let occurrences = heads
+        .claim_keys()
+        .iter()
+        .filter(|head| claim_identity(head) == identity)
+        .count();
+    persist_claim_result(file, result, occurrences).map(Some)
+}
+
 /// [`claim_with_session`] that names the worker harness (`#claimworkerharness`).
 pub fn claim_with_session_for_worker_harness(
     file: &Path,
@@ -1086,6 +1219,17 @@ pub fn claim_with_session_for_worker_harness(
         agent_doc_queue::prompt_pressure::open_review_blocking_prompt(&review_text, &target)
     {
         refuse_open_prompt_review(&target, &blocker)?;
+    }
+    if visible_kept_reported_row(file, &target)? {
+        if let Some(restored) = reattach_kept_completion(
+            file,
+            &target,
+            &heads,
+            ttl_secs,
+            owner_session.clone(),
+        )? {
+            return Ok(restored);
+        }
     }
     let same_work =
         agent_doc_queue::queue_claim::user_prompt_backlog_identity_classes(&review_text);
@@ -3007,6 +3151,113 @@ mod tests {
         )
         .unwrap();
         doc
+    }
+
+    fn subagents_doc(root: &Path, prompts: &[&str]) -> PathBuf {
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        let doc = root.join("task.md");
+        let queue: String = prompts.iter().map(|prompt| format!("- {prompt}\n")).collect();
+        std::fs::write(
+            &doc,
+            format!(
+                "---\nsession: sid\nagent_doc_format: template\n---\n\n\
+## Queue\n\n<!-- agent:queue subagents go -->\n{queue}<!-- /agent:queue -->\n"
+            ),
+        )
+        .unwrap();
+        doc
+    }
+
+    /// `#keptlineage`: claiming a kept `☑️` row restores the existing receipt
+    /// as Reported and does not offer a new dispatch.
+    #[test]
+    fn claim_on_kept_reported_row_restores_receipt_without_dispatch() {
+        let dir = tempfile::tempdir().unwrap();
+        let live = "do [#q-aaaaaaaaaaaa]";
+        let prose = "deploy without exposing the sdk [#q-aaaaaaaaaaaa]";
+        let doc = subagents_doc(
+            dir.path(),
+            &["☑️ [#subagent:stg#1] do [#q-aaaaaaaaaaaa]"],
+        );
+        let before = std::fs::read_to_string(&doc).unwrap();
+        let seeded = {
+            let floor = crate::queue_lineage::max_generation(&doc, prose).unwrap();
+            let mut claims = agent_doc_queue::queue_claim::QueueClaimLedger::default();
+            claims.claim_in_session_with_generation_floor(prose, "subagent:stg", 10, 100, None, floor);
+            let mut claim = claims.claims.remove(0);
+            claim.state = agent_doc_queue::queue_claim::QueueClaimState::Running;
+            claim.worker = Some(agent_doc_queue::queue_claim::QueueWorkerBinding {
+                worker_id: "worker-stg".to_string(),
+                started_at_secs: 11,
+            });
+            claim
+        };
+        crate::queue_lineage::record_started(&doc, &seeded).unwrap();
+        let offered_before =
+            crate::subagent_dispatch::pending_subagent_dispatch_for_content(&doc, &before).unwrap();
+        assert!(
+            offered_before.iter().any(|head| head.contains("q-aaaaaaaaaaaa")),
+            "an unclaimed kept row is still a dispatch head: {offered_before:?}"
+        );
+
+        let (outcome, restored) = claim(&doc, live, "subagent:other", 600).unwrap();
+        assert_eq!(outcome, ClaimOutcome::Kept);
+        assert_eq!(
+            restored.state,
+            agent_doc_queue::queue_claim::QueueClaimState::Reported
+        );
+        assert_eq!(restored.generation, 1);
+        assert_eq!(restored.owner, "subagent:stg");
+        assert_eq!(
+            restored
+                .worker
+                .as_ref()
+                .map(|worker| worker.worker_id.as_str()),
+            Some("worker-stg")
+        );
+        assert!(!agent_doc_queue::queue_claim::dispatch_evidence_missing(
+            &restored,
+            claim_clock_now_secs(),
+            0
+        ));
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), before);
+        assert_eq!(crate::queue_lineage::load(&doc).unwrap().attempts.len(), 1);
+        let content = std::fs::read_to_string(&doc).unwrap();
+        assert!(!in_flight_claimed_items_for_content(&doc, &content).claims(live));
+        let offered =
+            crate::subagent_dispatch::pending_subagent_dispatch_for_content(&doc, &content)
+                .unwrap();
+        assert!(
+            offered.iter().all(|head| !head.contains("q-aaaaaaaaaaaa")),
+            "{offered:?}"
+        );
+        let started = start_attempt(&doc, live, "subagent:stg", "worker-new", 600, 1);
+        assert!(started.is_err(), "{started:?}");
+
+        let (again, again_claim) = claim(&doc, "#q-aaaaaaaaaaaa", "subagent:other", 600).unwrap();
+        assert_eq!(again, ClaimOutcome::Kept);
+        assert_eq!(again_claim.generation, 1);
+        assert_eq!(again_claim.state, agent_doc_queue::queue_claim::QueueClaimState::Reported);
+        assert_eq!(crate::queue_lineage::load(&doc).unwrap().attempts.len(), 1);
+    }
+
+    /// A stale `☑️` with no lineage attempt is not a kept completion. Claim
+    /// admits a fresh dispatch. Only a row that already has a receipt is
+    /// restored instead of spawned (`#keptlineage`).
+    #[test]
+    fn claim_on_reported_row_without_a_receipt_admits_a_fresh_claim() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = subagents_doc(dir.path(), &["☑️ [#subagent:stg#1] do [#q-aaaaaaaaaaaa]"]);
+        let (outcome, admitted) =
+            claim(&doc, "do [#q-aaaaaaaaaaaa]", "subagent:other", 600).unwrap();
+        assert_eq!(outcome, ClaimOutcome::Created);
+        assert_eq!(
+            admitted.state,
+            agent_doc_queue::queue_claim::QueueClaimState::Claimed
+        );
+        assert_eq!(admitted.generation, 1);
+        assert_eq!(admitted.owner, "subagent:other");
+        assert!(admitted.worker.is_none());
     }
 
     /// `#claimworkerharness`: a coordinator session on an exhausted harness can

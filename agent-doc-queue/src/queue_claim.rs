@@ -956,6 +956,11 @@ pub enum ClaimOutcome {
     /// (`#harnessquotaexhausted`). No mutation occurred: it is resumed or
     /// requeued explicitly, never replaced by a plain claim.
     QuotaBlocked,
+    /// A kept `☑️` completion was joined back to its existing receipt
+    /// (`#keptlineage`). The claim is `Reported` at that receipt's generation.
+    /// It is not a new dispatch: `queue start` refuses it, and `queue release
+    /// --requeue` is the explicit way to dispatch the row again.
+    Kept,
 }
 
 /// A stale or invalid attempt-scoped lifecycle transition.

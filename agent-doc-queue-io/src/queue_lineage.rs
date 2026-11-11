@@ -51,6 +51,12 @@ pub struct QueueLineageAttempt {
 
 impl QueueLineageAttempt {
     fn matches_identity(&self, identity: &QueueItemIdentity) -> bool {
+        std::iter::once(&self.identity)
+            .chain(self.identity_history.iter())
+            .any(|old| identities_correlate(old, identity))
+    }
+
+    fn exact_identity(&self, identity: &QueueItemIdentity) -> bool {
         &self.identity == identity || self.identity_history.iter().any(|old| old == identity)
     }
 
@@ -609,6 +615,147 @@ pub fn admission_refused_identities(
         .collect()
 }
 
+/// `Id("q-…")` and `FreeText("queue-id:q-…")` name one admitted prompt
+/// (`#keptlineage`). A rewritten row (`prose [#q-X]` to `do [#q-X]`) keeps
+/// that receipt. A different q-id, including `#address [#q-child]` under a
+/// parent `do [#q-parent]`, stays a different attempt.
+fn generated_prompt_key(identity: &QueueItemIdentity) -> Option<String> {
+    let raw = match identity {
+        QueueItemIdentity::Id(id) => id.as_str(),
+        QueueItemIdentity::FreeText(key) => key.strip_prefix("queue-id:")?,
+    };
+    if raw.len() > 2
+        && raw.starts_with("q-")
+        && raw[2..].chars().all(|ch| ch.is_ascii_alphanumeric())
+    {
+        Some(raw.to_ascii_lowercase())
+    } else {
+        None
+    }
+}
+
+fn identities_correlate(left: &QueueItemIdentity, right: &QueueItemIdentity) -> bool {
+    if left == right {
+        return true;
+    }
+    match (generated_prompt_key(left), generated_prompt_key(right)) {
+        (Some(left), Some(right)) => left == right,
+        _ => false,
+    }
+}
+
+fn text_names_generated_id(text: &str, id: &str) -> bool {
+    if generated_prompt_key(&claim_identity(text)).as_deref() == Some(id) {
+        return true;
+    }
+    let needle = format!("[#{id}]");
+    text.to_ascii_lowercase().contains(&needle)
+}
+
+fn attempt_names_generated_id(attempt: &QueueLineageAttempt, id: &str) -> bool {
+    std::iter::once(&attempt.identity)
+        .chain(attempt.identity_history.iter())
+        .any(|identity| generated_prompt_key(identity).as_deref() == Some(id))
+        || std::iter::once(&attempt.item_text)
+            .chain(attempt.item_text_history.iter())
+            .any(|text| text_names_generated_id(text, id))
+}
+
+/// How several lineage matches relate to the prompt id `item` names.
+enum PromptOccurrence<'a> {
+    /// Exactly one attempt is that prompt, or every match is that prompt and
+    /// they share one worker and at most one repository receipt.
+    One(&'a QueueLineageAttempt),
+    /// Two workers, or two repository receipts, on that same prompt.
+    Ambiguous,
+    /// `item` names no generated prompt id, so the caller keeps its own rule.
+    Keep,
+}
+
+fn one_correlated_occurrence<'a>(
+    attempts: &[&'a QueueLineageAttempt],
+) -> Option<&'a QueueLineageAttempt> {
+    let owner = attempts.first()?.owner.as_str();
+    if attempts.iter().any(|attempt| attempt.owner != owner) {
+        return None;
+    }
+    let mut workers = BTreeSet::new();
+    for attempt in attempts {
+        if let Some(worker) = attempt_worker_id(attempt) {
+            workers.insert(worker.to_string());
+        }
+    }
+    if workers.len() > 1 {
+        return None;
+    }
+    if attempts
+        .iter()
+        .filter(|attempt| attempt_carries_repo_work(attempt))
+        .count()
+        > 1
+    {
+        return None;
+    }
+    let mut prose = attempts
+        .iter()
+        .copied()
+        .filter(|attempt| attempt_declares_prose_only(attempt));
+    if let Some(only) = prose.next()
+        && prose.next().is_none()
+    {
+        return Some(only);
+    }
+    attempts
+        .iter()
+        .copied()
+        .find(|attempt| attempt_worker_id(attempt).is_some())
+        .or_else(|| attempts.first().copied())
+}
+
+fn prompt_occurrence<'a>(
+    item: &str,
+    attempts: &[&'a QueueLineageAttempt],
+) -> PromptOccurrence<'a> {
+    if attempts.len() <= 1 {
+        return PromptOccurrence::Keep;
+    }
+    let Some(id) = generated_prompt_key(&claim_identity(item)) else {
+        return PromptOccurrence::Keep;
+    };
+    let named = attempts
+        .iter()
+        .copied()
+        .filter(|attempt| attempt_names_generated_id(attempt, &id))
+        .collect::<Vec<_>>();
+    if named.is_empty() {
+        return PromptOccurrence::Keep;
+    }
+    if named.len() == 1 {
+        return PromptOccurrence::One(named[0]);
+    }
+    match one_correlated_occurrence(&named) {
+        Some(one) => PromptOccurrence::One(one),
+        None => PromptOccurrence::Ambiguous,
+    }
+}
+
+/// True when a prose-only fold would merge one prompt's split, not a sibling
+/// that only shares an owner and generation.
+fn same_prompt_fold(item: &str, attempts: &[&QueueLineageAttempt]) -> bool {
+    match prompt_occurrence(item, attempts) {
+        PromptOccurrence::Ambiguous => false,
+        PromptOccurrence::Keep => true,
+        PromptOccurrence::One(_) => {
+            let Some(id) = generated_prompt_key(&claim_identity(item)) else {
+                return true;
+            };
+            attempts
+                .iter()
+                .all(|attempt| attempt_names_generated_id(attempt, &id))
+        }
+    }
+}
+
 fn attempt_worker_id(attempt: &QueueLineageAttempt) -> Option<&str> {
     attempt
         .events
@@ -946,6 +1093,44 @@ pub fn record_cancelled_claim(
     )
 }
 
+/// Exact identity wins. A rewritten `do [#q-…]` / `#q-…` row otherwise joins
+/// the single `queue-id:q-…` attempt. Two correlated attempts are not a guess.
+fn record_attempt_index(
+    ledger: &QueueLineageLedger,
+    item: &str,
+    identity: &QueueItemIdentity,
+    generation: u64,
+) -> Result<usize> {
+    let matches = ledger
+        .attempts
+        .iter()
+        .enumerate()
+        .filter(|(_, attempt)| {
+            attempt.generation == generation && attempt.matches_identity(identity)
+        })
+        .map(|(index, _)| index)
+        .collect::<Vec<_>>();
+    let exact = matches
+        .iter()
+        .copied()
+        .filter(|index| ledger.attempts[*index].exact_identity(identity))
+        .collect::<Vec<_>>();
+    if !exact.is_empty() {
+        return Ok(exact[0]);
+    }
+    if matches.len() == 1 {
+        return Ok(matches[0]);
+    }
+    if matches.is_empty() {
+        bail!(
+            "no queue lineage attempt for {item:?} generation {generation}; run `queue claim` first"
+        );
+    }
+    bail!(
+        "ambiguous queue lineage attempts for {item:?} generation {generation}; cancel the extra attempt before recording"
+    )
+}
+
 pub fn record(
     file: &Path,
     item: &str,
@@ -961,17 +1146,8 @@ pub fn record(
             .map(|attempt| attempt.generation)
             .max()
             .unwrap_or(0);
-        let attempt = ledger
-            .attempts
-            .iter_mut()
-            .find(|attempt| {
-                attempt.generation == generation && attempt.matches_identity(&identity)
-            })
-            .with_context(|| {
-                format!(
-                    "no queue lineage attempt for {item:?} generation {generation}; run `queue claim` first"
-                )
-            })?;
+        let index = record_attempt_index(ledger, item, &identity, generation)?;
+        let attempt = &mut ledger.attempts[index];
         let event = event_from_request(request)?;
         if attempt.events.contains(&event) {
             return Ok(attempt.clone());
@@ -1791,6 +1967,33 @@ impl<'a> ClaimAliases<'a> {
     }
 }
 
+/// The non-terminal receipt a kept `☑️` row can restore (`#keptlineage`).
+///
+/// `None` when nothing correlates. An error when more than one worker (or
+/// more than one repository receipt) claims that prompt, so the caller does
+/// not pick a receipt and dispatch.
+pub fn kept_completion_attempt(file: &Path, item: &str) -> Result<Option<QueueLineageAttempt>> {
+    let ledger = load(file)?;
+    let identity = claim_identity(item);
+    let attempts = ledger
+        .attempts
+        .iter()
+        .filter(|attempt| attempt.terminal_kind().is_none() && attempt.matches_identity(&identity))
+        .collect::<Vec<_>>();
+    if attempts.is_empty() {
+        return Ok(None);
+    }
+    if attempts.len() == 1 {
+        return Ok(Some(attempts[0].clone()));
+    }
+    match prompt_occurrence(item, &attempts) {
+        PromptOccurrence::One(attempt) => Ok(Some(attempt.clone())),
+        PromptOccurrence::Ambiguous | PromptOccurrence::Keep => bail!(
+            "ambiguous queue lineage attempts for kept completion {item:?}; cancel the attempt that is not the report before restoring it"
+        ),
+    }
+}
+
 /// The lineage attempt a reported `(item, generation)` names.
 enum ResolvedReportedAttempt<'a> {
     Missing,
@@ -1934,6 +2137,11 @@ fn resolve_reported_attempt<'a>(
     if attempts.len() == 1 {
         return ResolvedReportedAttempt::One(attempts[0]);
     }
+    match prompt_occurrence(item, &attempts) {
+        PromptOccurrence::One(one) => return ResolvedReportedAttempt::One(one),
+        PromptOccurrence::Ambiguous => return ResolvedReportedAttempt::Ambiguous(attempts),
+        PromptOccurrence::Keep => {}
+    }
     if let Some(one) = unify_same_owner_norepo_prose_split(&attempts) {
         return ResolvedReportedAttempt::One(one);
     }
@@ -1989,7 +2197,10 @@ fn repair_unifiable_norepo_split(
         .iter()
         .map(|index| &ledger.attempts[*index])
         .collect::<Vec<_>>();
-    if attempts.len() < 2 || unify_same_owner_norepo_prose_split(&attempts).is_none() {
+    if attempts.len() < 2
+        || !same_prompt_fold(item, &attempts)
+        || unify_same_owner_norepo_prose_split(&attempts).is_none()
+    {
         return Ok(());
     }
     mutate(file, |ledger| {
@@ -2003,7 +2214,9 @@ fn repair_unifiable_norepo_split(
                 .iter()
                 .map(|index| &ledger.attempts[*index])
                 .collect::<Vec<_>>();
-            attempts.len() >= 2 && unify_same_owner_norepo_prose_split(&attempts).is_some()
+            attempts.len() >= 2
+                && same_prompt_fold(item, &attempts)
+                && unify_same_owner_norepo_prose_split(&attempts).is_some()
         };
         if should_fold {
             fold_norepo_attempts(ledger, &indexes, None);
@@ -2808,6 +3021,121 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(refusal.contains("is not integrated"), "{refusal}");
+    }
+
+    /// `#keptlineage`: `do [#q-…]` and `#q-…` are the prose row's `queue-id`.
+    /// Recording prose-only on the rewritten text joins that one attempt.
+    #[test]
+    fn rewritten_q_id_row_joins_its_queue_id_receipt() {
+        let fixture = RepoFixture::new();
+        let prose = "deploy without exposing the sdk [#q-aaaaaaaaaaaa]";
+        let live = "do [#q-aaaaaaaaaaaa]";
+        let bare = "#q-aaaaaaaaaaaa";
+        let claim = make_claim(&fixture.doc, prose, "subagent:stg", Some("worker-stg"));
+        record_started(&fixture.doc, &claim).unwrap();
+        assert_ne!(claim_identity(prose), claim_identity(live));
+        assert_eq!(max_generation(&fixture.doc, live).unwrap(), 1);
+        assert_eq!(query(&fixture.doc, Some(live), Some(1)).unwrap().attempts.len(), 1);
+        assert_eq!(query(&fixture.doc, Some(bare), Some(1)).unwrap().attempts.len(), 1);
+        assert!(
+            require_integrated_repo_work(&fixture.doc, live, 1).is_err(),
+            "attached with no prose-only declaration stays undeclared"
+        );
+        record(
+            &fixture.doc,
+            live,
+            1,
+            RecordRequest {
+                kind: QueueLineageEventKind::ProseOnly,
+                detail: Some("prose analysis".to_string()),
+                ..RecordRequest::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(load(&fixture.doc).unwrap().attempts.len(), 1);
+        require_integrated_repo_work(&fixture.doc, live, 1).unwrap();
+        require_integrated_repo_work(&fixture.doc, bare, 1).unwrap();
+        require_integrated_repo_work(&fixture.doc, prose, 1).unwrap();
+        let address = "#address [#q-bbbbbbbbbbbb]";
+        assert!(
+            query(&fixture.doc, Some(address), Some(1))
+                .unwrap()
+                .attempts
+                .is_empty()
+        );
+        assert_eq!(
+            reported_repo_evidence(&fixture.doc, address, 1).unwrap(),
+            ReportedRepoEvidence::LineageMissing
+        );
+    }
+
+    /// A same-owner generation sibling on another q-id does not take this
+    /// receipt. Two workers on the same q-id stay ambiguous.
+    #[test]
+    fn q_id_receipt_is_not_stolen_and_two_workers_stay_ambiguous() {
+        let fixture = RepoFixture::new();
+        let prose = "deploy without exposing the sdk [#q-aaaaaaaaaaaa]";
+        let live = "do [#q-aaaaaaaaaaaa]";
+        let other = "unrelated notes [#q-bbbbbbbbbbbb]";
+        let claim = make_claim(&fixture.doc, prose, "subagent:stg", Some("worker-stg"));
+        record_started(&fixture.doc, &claim).unwrap();
+        let other_claim = make_claim(&fixture.doc, other, "subagent:stg", Some("worker-other"));
+        record_started(&fixture.doc, &other_claim).unwrap();
+        record(
+            &fixture.doc,
+            other,
+            1,
+            RecordRequest {
+                kind: QueueLineageEventKind::ProseOnly,
+                detail: Some("other row".to_string()),
+                ..RecordRequest::default()
+            },
+        )
+        .unwrap();
+        let mut followed = claim.clone();
+        followed.item_text = live.to_string();
+        followed.identity = claim_identity(live);
+        followed.followed_from = vec![prose.to_string(), other.to_string()];
+        followed.state = QueueClaimState::Reported;
+        let evidence = reported_claim_evidence_in(&load(&fixture.doc).unwrap(), &followed);
+        assert!(
+            matches!(evidence, ReportedRepoEvidence::Undeclared),
+            "{evidence:?}"
+        );
+
+        mutate(&fixture.doc, |ledger| {
+            ledger.attempts.push(QueueLineageAttempt {
+                identity: claim_identity(live),
+                identity_history: Vec::new(),
+                item_text: live.to_string(),
+                item_text_history: Vec::new(),
+                generation: 1,
+                owner: "subagent:stg".to_string(),
+                events: vec![
+                    QueueLineageEvent {
+                        kind: QueueLineageEventKind::Created,
+                        at_secs: 20,
+                        detail: Some("owner=subagent:stg".to_string()),
+                        ..QueueLineageEvent::default()
+                    },
+                    QueueLineageEvent {
+                        kind: QueueLineageEventKind::Attached,
+                        at_secs: 21,
+                        worker_id: Some("worker-second".to_string()),
+                        ..QueueLineageEvent::default()
+                    },
+                ],
+            });
+            Ok(())
+        })
+        .unwrap();
+        assert!(
+            matches!(
+                reported_repo_evidence(&fixture.doc, "#q-aaaaaaaaaaaa", 1).unwrap(),
+                ReportedRepoEvidence::LineageAmbiguous { .. }
+            ),
+            "two workers on one q-id stay ambiguous"
+        );
     }
 
     /// Two `#address [#q-…]` leaves under one parent, plus generation 1 of the

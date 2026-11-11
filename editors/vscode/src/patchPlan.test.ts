@@ -174,6 +174,43 @@ describe('calculateMinimalReplacement', () => {
         assert.strictEqual(mapVisibleLineThroughReplacement(0, before, edit), 0);
     });
 
+    it('shifts a visible line inside the recap when the caret is below it', () => {
+        const before = [
+            '<!-- agent:status -->',
+            'ok',
+            '<!-- /agent:status -->',
+            '',
+            '<!-- agent:recap -->',
+            'old recap',
+            'second line',
+            '<!-- /agent:recap -->',
+            '',
+            '<!-- agent:queue -->',
+            'operator is reading this',
+            '<!-- /agent:queue -->',
+            '',
+        ].join('\n');
+        const after = before.replace(
+            'old recap\nsecond line',
+            'new recap\nwith more lines\nthird',
+        );
+        const edit = calculateMinimalReplacement(before, after);
+        assert.ok(edit);
+        const caret = before.indexOf('operator is reading this');
+        const visibleInside = lineIndexAt(before, before.indexOf('old recap'));
+        const startLine = lineIndexAt(before, edit.start);
+        const endLine = lineIndexAt(before, edit.start + edit.deleteLength);
+        assert.ok(visibleInside >= startLine && visibleInside < endLine);
+        const lineDelta = edit.text.split('\n').length - 1 - (endLine - startLine);
+        assert.ok(lineDelta > 0);
+        assert.strictEqual(
+            mapVisibleLineThroughReplacement(visibleInside, before, edit, caret),
+            visibleInside + lineDelta,
+        );
+        assert.strictEqual(mapVisibleLineThroughReplacement(0, before, edit, caret), 0);
+        assert.strictEqual(mapVisibleLineThroughReplacement(visibleInside, before, edit), visibleInside);
+    });
+
     it('applyMinimalTextEdit restores the caret and viewport and does not focus the document', () => {
         const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'extension.ts'), 'utf8');
         const start = source.indexOf('private async applyMinimalTextEdit(');
@@ -186,6 +223,7 @@ describe('calculateMinimalReplacement', () => {
         assert.ok(edit >= 0);
         assert.ok(restoreCaret > edit);
         assert.ok(restoreScroll > edit);
+        assert.ok(body.includes('anchor.selections[0]?.active'));
         assert.strictEqual(body.includes('showTextDocument'), false);
         assert.strictEqual(body.includes('requestFocus'), false);
     });

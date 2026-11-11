@@ -2659,7 +2659,11 @@ pub fn visible_claim_projection(
     observed: &[(agent_doc_element_queue::QueueItemIdentity, String)],
     claim: &QueueClaim,
 ) -> VisibleClaimProjection {
-    let expected_visible_marker = claim.state.projection_marker().prefix().to_string();
+    // The row projector uses `QueueClaim::projection_marker`, which keeps
+    // `⚠️🚧` when `lost_from` is Running. The state alone is only `⚠️`.
+    // Comparing those two reported a drift that repair could not clear
+    // (`#transientcloseout`).
+    let expected_visible_marker = claim.projection_marker().prefix().to_string();
     let observed_visible_markers = observed
         .iter()
         .filter(|(identity, _)| identity == &claim.identity)
@@ -3162,6 +3166,36 @@ pub fn retire_exact_reported_attempt_for_identity(
 mod tests {
     use super::*;
     use agent_doc_queue::queue_continuation::live_queue_head_rows;
+
+    #[test]
+    fn an_abandoned_lost_running_claim_expects_the_lost_running_glyph() {
+        use agent_doc_queue::queue_claim::{
+            ABANDONED_REQUEUE_REASON, QueueClaimLedger, QueueClaimState, QueueWorkerBinding,
+            QueueWorkerFreeze,
+        };
+        let mut ledger = QueueClaimLedger::default();
+        ledger.claim("adversarial review", "subagent:lostretry", 1_000, 3_600);
+        let claim = &mut ledger.claims[0];
+        claim.state = QueueClaimState::Running;
+        claim.worker = Some(QueueWorkerBinding {
+            worker_id: "01a1c758".to_string(),
+            started_at_secs: 1_000,
+        });
+        claim.frozen = Some(QueueWorkerFreeze {
+            frozen_at_secs: 1_100,
+            reason: ABANDONED_REQUEUE_REASON.to_string(),
+            abandoned: true,
+        });
+        claim.mark_lost();
+        let observed = vec![(claim.identity.clone(), "⚠️🚧".to_string())];
+        let visible = visible_claim_projection(&observed, claim);
+        assert_eq!(visible.expected_visible_marker, "⚠️🚧");
+        assert!(visible.synchronized);
+        assert_ne!(
+            claim.state.projection_marker().prefix(),
+            visible.expected_visible_marker
+        );
+    }
 
     fn write_doc(root: &Path, prompts: &[&str]) -> PathBuf {
         std::fs::create_dir_all(root.join(".agent-doc")).unwrap();

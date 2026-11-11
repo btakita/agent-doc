@@ -1406,7 +1406,9 @@ fn durable_queue_attempt_projection(file: &Path, current: &str) -> Result<String
                     let marker = if state_degraded {
                         agent_doc_document::queue_projection::QueueLifecycleMarker::Unknown
                     } else if let Some(claim) = claim {
-                        claim.state.projection_marker()
+                        // Composite lost glyphs (`⚠️🚧`, `⚠️🟡`, `⚠️☑️`) come
+                        // from the attempt, not from `Lost` alone.
+                        claim.projection_marker()
                     } else if receipt.is_some() {
                         agent_doc_document::queue_projection::QueueLifecycleMarker::Reported
                     } else if completion_evidence.iter().any(|item| {

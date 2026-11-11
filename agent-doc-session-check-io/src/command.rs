@@ -3729,13 +3729,43 @@ fn steering_survives_steering_carried_drift(
     report
 }
 
+/// `#transientcloseout`: a successful closeout status is refused while any
+/// live queue row is still transient. Crash recovery (a recovered commit
+/// boundary) uses the same debts and must not report them as success. The
+/// document is not rewritten here; the next turn finishes the transitions.
+fn refuse_transient_queue_closeout(
+    file: &Path,
+    status: SessionCheckStatus,
+) -> Result<SessionCheckStatus> {
+    let SessionCheckStatus::Ok(message) = &status else {
+        return Ok(status);
+    };
+    let content = match crate::resolve_current_document_content(file, "transient_closeout") {
+        Ok(content) => content,
+        Err(error) => {
+            return Ok(SessionCheckStatus::Interrupted(format!(
+                "[session-check] INTERRUPTED: could not read {} to prove live queue rows are resting, so this is not a successful closeout (#transientcloseout): {error:#}",
+                file.display()
+            )));
+        }
+    };
+    match agent_doc_queue::transient_closeout::closeout_failure_for_success_message(
+        message, &content,
+    )? {
+        Some(failure) => Ok(SessionCheckStatus::Interrupted(format!(
+            "[session-check] INTERRUPTED: {failure}"
+        ))),
+        None => Ok(status),
+    }
+}
+
 fn inspect_with_warnings_sweep(
     file: &Path,
     effects: &impl SessionCheckEffects,
     steering_message: &mut Option<String>,
 ) -> Result<SessionCheckReport> {
     let mut report = SessionCheckReport {
-        status: inspect_core(file, effects)?,
+        status: refuse_transient_queue_closeout(file, inspect_core(file, effects)?)?,
         warnings: Vec::new(),
     };
     report.status = retained_write_gate_status(
@@ -5539,6 +5569,70 @@ mod terminal_convergence_tests {
                 panic!("retained write incorrectly preserved clean status: {message}")
             }
         }
+    }
+
+    /// `#transientcloseout`: Ok is not a successful closeout while a live row
+    /// is still transient. Resting rows and pending steering stay as they are.
+    #[test]
+    fn transient_queue_rows_refuse_a_successful_closeout() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("task.md");
+        std::fs::write(
+            &file,
+            "<!-- agent:queue -->\n- 🚧 still running\n- ⛔ blocked on other open work\n<!-- /agent:queue -->\n",
+        )
+        .unwrap();
+        let running = refuse_transient_queue_closeout(
+            &file,
+            SessionCheckStatus::Ok("[session-check] OK".to_string()),
+        )
+        .unwrap();
+        match running {
+            SessionCheckStatus::Interrupted(message) => {
+                assert!(message.contains("normal closeout refused"));
+                assert!(message.contains("🚧 still running"));
+                assert!(
+                    message
+                        .contains("finish the running worker without converting the claim to Lost")
+                );
+                assert!(!message.contains("blocked on other open work"));
+            }
+            other => panic!("expected a refused closeout, got {other:?}"),
+        }
+
+        let crash = refuse_transient_queue_closeout(
+            &file,
+            SessionCheckStatus::Ok(
+                "[session-check] ok — recovered the missing commit boundary from head".to_string(),
+            ),
+        )
+        .unwrap();
+        match crash {
+            SessionCheckStatus::Interrupted(message) => {
+                assert!(message.contains("crash recovery refused a successful closeout"));
+                assert!(message.contains("🚧 still running"));
+                assert!(!message.contains("normal closeout refused"));
+            }
+            other => panic!("expected a crash-recovery refusal, got {other:?}"),
+        }
+
+        std::fs::write(
+            &file,
+            "<!-- agent:queue -->\n- ~~integrated history~~\n- ⏳ awaiting operator\n- 🙋 operator action\n<!-- /agent:queue -->\n",
+        )
+        .unwrap();
+        let resting = refuse_transient_queue_closeout(
+            &file,
+            SessionCheckStatus::Ok("[session-check] OK".to_string()),
+        )
+        .unwrap();
+        assert!(matches!(resting, SessionCheckStatus::Ok(_)), "{resting:?}");
+        let steering = refuse_transient_queue_closeout(
+            &file,
+            SessionCheckStatus::SteeringPending("pending".to_string()),
+        )
+        .unwrap();
+        assert!(matches!(steering, SessionCheckStatus::SteeringPending(_)));
     }
 
     /// `#steerinterruptexit`: a guard finding whose recovery IS the pending

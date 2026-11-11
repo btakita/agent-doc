@@ -3493,13 +3493,28 @@ fn contextualize_yaml_parse_error(
     yaml: &str,
     err: serde_yaml::Error,
 ) -> anyhow::Error {
-    let excerpt = err
-        .location()
-        .and_then(|location| render_frontmatter_excerpt(yaml, location.line(), location.column()));
-    let mut message = format!("invalid YAML frontmatter in {}: {}", file_display, err);
+    let err_text = err.to_string();
+    // The scan error stays `found character that cannot start any token`. Name
+    // the rejected character beside it when a tab or other invisible character
+    // is what the scanner refused. A space is ordinary indentation and is not
+    // named. Strict parsing is unchanged: a tab is still not YAML indentation.
+    let name_rejected_invisible = err_text.contains("found character that cannot start any token");
+    let excerpt = err.location().and_then(|location| {
+        render_frontmatter_excerpt(
+            yaml,
+            location.line(),
+            location.column(),
+            name_rejected_invisible,
+        )
+    });
+    let mut message = format!("invalid YAML frontmatter in {file_display}: {err_text}");
     if let Some(excerpt) = excerpt {
+        if let Some(rejected) = &excerpt.rejected_invisible {
+            message.push_str("\n\n");
+            message.push_str(rejected);
+        }
         message.push_str("\n\nFrontmatter excerpt:\n");
-        message.push_str(&excerpt);
+        message.push_str(&excerpt.text);
     }
     message.push_str(
         "\n\nFix the frontmatter between the opening and closing --- markers, then rerun the command.",
@@ -3512,7 +3527,19 @@ fn contextualize_yaml_parse_error(
     anyhow::anyhow!(message)
 }
 
-fn render_frontmatter_excerpt(yaml: &str, line: usize, column: usize) -> Option<String> {
+struct RenderedFrontmatterExcerpt {
+    text: String,
+    /// `tab at line N column M`, or `U+XXXX at line N column M` for another
+    /// invisible character the scanner refused. Absent for ordinary characters.
+    rejected_invisible: Option<String>,
+}
+
+fn render_frontmatter_excerpt(
+    yaml: &str,
+    line: usize,
+    column: usize,
+    name_rejected_invisible: bool,
+) -> Option<RenderedFrontmatterExcerpt> {
     let lines: Vec<&str> = yaml.lines().collect();
     if line == 0 || lines.is_empty() {
         return None;
@@ -3526,6 +3553,15 @@ fn render_frontmatter_excerpt(yaml: &str, line: usize, column: usize) -> Option<
         (line, column)
     };
 
+    let rejected_invisible = if name_rejected_invisible {
+        lines
+            .get(line - 1)
+            .and_then(|source| source.chars().nth(column.saturating_sub(1)))
+            .and_then(|ch| invisible_blocker_phrase(ch, line, column))
+    } else {
+        None
+    };
+
     let start = line.saturating_sub(1).max(1);
     let end = (line + 1).min(lines.len());
     let width = end.to_string().len();
@@ -3533,24 +3569,110 @@ fn render_frontmatter_excerpt(yaml: &str, line: usize, column: usize) -> Option<
 
     for current in start..=end {
         let marker = if current == line { '>' } else { ' ' };
+        let source = lines[current - 1];
         rendered.push(format!(
             "{} {:>width$} | {}",
             marker,
             current,
-            lines[current - 1],
+            render_excerpt_source_line(source),
             width = width
         ));
         if current == line {
-            rendered.push(format!(
+            let mut caret = format!(
                 "  {:>width$} | {}^",
                 "",
-                " ".repeat(column.saturating_sub(1)),
+                " ".repeat(excerpt_caret_indent(source, column)),
                 width = width
-            ));
+            );
+            if let Some(rejected) = &rejected_invisible {
+                caret.push(' ');
+                caret.push_str(rejected);
+            }
+            rendered.push(caret);
         }
     }
 
-    Some(rendered.join("\n"))
+    Some(RenderedFrontmatterExcerpt {
+        text: rendered.join("\n"),
+        rejected_invisible,
+    })
+}
+
+/// A tab paints as a blank column, so the excerpt shows a literal `\t`. Any
+/// other invisible character that cannot start a token is shown as `\u{XXXX}`.
+/// An ordinary space is indentation and is left unchanged.
+fn render_excerpt_source_line(line: &str) -> String {
+    let mut rendered = String::with_capacity(line.len());
+    for ch in line.chars() {
+        if let Some(marker) = invisible_excerpt_marker(ch) {
+            rendered.push_str(&marker);
+        } else {
+            rendered.push(ch);
+        }
+    }
+    rendered
+}
+
+fn excerpt_caret_indent(line: &str, column: usize) -> usize {
+    let target = column.saturating_sub(1);
+    let mut indent = 0usize;
+    let mut seen = 0usize;
+    for ch in line.chars() {
+        if seen >= target {
+            return indent;
+        }
+        indent += invisible_excerpt_marker(ch)
+            .map(|marker| marker.chars().count())
+            .unwrap_or(1);
+        seen += 1;
+    }
+    indent + target.saturating_sub(seen)
+}
+
+fn invisible_blocker_phrase(ch: char, line: usize, column: usize) -> Option<String> {
+    let name = if ch == '\t' {
+        "tab".to_string()
+    } else if is_invisible_non_space(ch) {
+        format!("U+{:04X}", ch as u32)
+    } else {
+        return None;
+    };
+    Some(format!("{name} at line {line} column {column}"))
+}
+
+fn invisible_excerpt_marker(ch: char) -> Option<String> {
+    if ch == '\t' {
+        Some("\\t".to_string())
+    } else if is_invisible_non_space(ch) {
+        Some(format!("\\u{{{:04X}}}", ch as u32))
+    } else {
+        None
+    }
+}
+
+fn is_invisible_non_space(ch: char) -> bool {
+    if ch == ' ' {
+        return false;
+    }
+    ch.is_control() || ch.is_whitespace() || is_format_invisible(ch)
+}
+
+/// Format characters that occupy no column. They are not YAML indentation and,
+/// when the scanner rejects one, the excerpt names the code point.
+fn is_format_invisible(ch: char) -> bool {
+    matches!(
+        ch,
+        '\u{00AD}'
+            | '\u{034F}'
+            | '\u{061C}'
+            | '\u{180E}'
+            | '\u{200B}'..='\u{200F}'
+            | '\u{202A}'..='\u{202E}'
+            | '\u{2060}'..='\u{2064}'
+            | '\u{2066}'..='\u{2069}'
+            | '\u{FEFF}'
+            | '\u{FFF9}'..='\u{FFFB}'
+    )
 }
 
 #[cfg(test)]
@@ -5102,6 +5224,99 @@ mod tests {
                 .contains("#first -> #second -> #third -> #first"),
             "{err:#}"
         );
+    }
+
+    /// A tab-only line between `presets:` and the next map entry is not YAML
+    /// indentation. The scan error stays `found character that cannot start any
+    /// token`, and both the error text and the excerpt name the tab at the
+    /// reported line and column instead of painting a blank line.
+    #[test]
+    fn tab_only_line_between_presets_and_the_next_map_entry_names_the_tab() {
+        let content = "\
+---
+agent_doc_session: sample
+agent: grok
+queue: stop
+model: haiku
+presets:
+\t
+  '#a': stay
+---
+body
+";
+        assert!(
+            parse(content).is_err(),
+            "a tab is not legal YAML indentation"
+        );
+        let spaced = content.replacen('\t', "  ", 1);
+        assert!(
+            parse(&spaced).is_ok(),
+            "a space remains ordinary indentation: {spaced:?}"
+        );
+        match parse_for_startup("doc.md", content) {
+            StartupFrontmatter::Repaired { repaired_yaml, .. } => {
+                assert!(
+                    !repaired_yaml.contains('\t'),
+                    "startup recovery still rewrites a leading tab: {repaired_yaml:?}"
+                );
+            }
+            other => panic!("startup recovery must still repair a leading tab, got {other:?}"),
+        }
+
+        let project = crate::project_config::ProjectConfig::default();
+        let ctx = SshResolverContext {
+            project: &project,
+            doc_relative: "",
+            file_display: "doc.md",
+        };
+        let message = parse_with_ssh_resolver(content, &ctx)
+            .unwrap_err()
+            .to_string();
+        let (error_text, excerpt) = message
+            .split_once("Frontmatter excerpt:\n")
+            .unwrap_or_else(|| panic!("missing excerpt:\n{message}"));
+        assert!(
+            error_text.contains("found character that cannot start any token"),
+            "{message}"
+        );
+        assert!(error_text.contains("tab at line 6 column 1"), "{message}");
+        assert!(excerpt.contains("> 6 | \\t"), "{message}");
+        assert!(excerpt.contains("tab at line 6 column 1"), "{message}");
+        assert!(
+            message.contains("add `--force-disk` when no editor has the document open"),
+            "{message}"
+        );
+        assert!(
+            !excerpt.lines().any(|line| line.trim_end() == "> 6 |"),
+            "{message}"
+        );
+    }
+
+    /// Another invisible character the scanner refuses is named by its code
+    /// point. A space on a neighboring line stays ordinary indentation.
+    #[test]
+    fn excerpt_names_a_non_tab_invisible_character_by_code_point() {
+        let yaml = "presets:\n\u{000C}\n  '#a': stay\n";
+        let excerpt = render_frontmatter_excerpt(yaml, 2, 1, true).unwrap();
+        assert!(excerpt.text.contains("> 2 | \\u{000C}"), "{}", excerpt.text);
+        assert_eq!(
+            excerpt.rejected_invisible.as_deref(),
+            Some("U+000C at line 2 column 1")
+        );
+        assert!(
+            excerpt.text.contains("U+000C at line 2 column 1"),
+            "{}",
+            excerpt.text
+        );
+
+        let spaced = render_frontmatter_excerpt("presets:\n  '#a': stay\n", 2, 3, true).unwrap();
+        assert!(
+            spaced.text.contains("> 2 |   '#a': stay"),
+            "{}",
+            spaced.text
+        );
+        assert!(spaced.rejected_invisible.is_none(), "{}", spaced.text);
+        assert!(!spaced.text.contains('\\'), "{}", spaced.text);
     }
 
     /// `#resetclosedactor` (GH #69 §2): the invalid-frontmatter error names the

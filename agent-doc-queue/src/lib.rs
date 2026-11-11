@@ -5,6 +5,7 @@
 //! read documents, submit commands, or mutate files.
 
 pub mod ack_stays_open;
+pub mod address_fix_on_head;
 pub mod answer_ack;
 pub mod backlog_sync;
 pub mod blocker_disregard;

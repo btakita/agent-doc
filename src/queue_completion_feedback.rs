@@ -1705,6 +1705,111 @@ mod tests {
         assert!(reported.appended);
     }
 
+    /// `#reviewfixonhead`: an address hand-back that leaves the review's written
+    /// fix off the head is not completion. The same row stays open, and a later
+    /// hand-back that names the head containing the written fix reports normally.
+    #[test]
+    fn address_hand_back_without_the_written_fix_requeues_the_same_row() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        fs::write(
+            dir.path().join(".agent-doc/project.md"),
+            concat!(
+                "---\npresets:\n",
+                "  '#address': 'Address every actionable review item on the exact current head.'\n",
+                "---\n",
+            ),
+        )
+        .unwrap();
+        let doc = dir.path().join("prs.md");
+        const ROW: &str = "https://github.com/sample-org/sample-repo/pull/12: #address";
+        fs::write(
+            &doc,
+            format!(
+                "---\nagent_doc_session: sample-prs\nagent_doc_format: template\n---\n\n\
+                 <!-- agent:exchange patch=append -->\n\
+                 ### Re: prior — gpt-5\n\nDone.\n\
+                 <!-- agent:boundary:keep -->\n\
+                 <!-- /agent:exchange -->\n\n\
+                 <!-- agent:queue subagents -->\n\
+                 - {ROW}\n\
+                 <!-- /agent:queue -->\n"
+            ),
+        )
+        .unwrap();
+        agent_doc_queue_io::queue_claim::claim(&doc, ROW, "subagent:pr12-address", 600).unwrap();
+        agent_doc_queue_io::queue_claim::start_attempt(
+            &doc,
+            ROW,
+            "subagent:pr12-address",
+            "worker:pr12-address",
+            600,
+            1,
+        )
+        .unwrap();
+        let skipped = concat!(
+            "Every actionable item is already fixed on head 2a507fba. No new commit.\n\n",
+            "Earlier reviews that asked for the shadow apply were superseded and were not reopened.",
+        );
+        let requeue = requeue_nonterminal_goal_hand_back(&doc, ROW, Some(1), skipped)
+            .unwrap()
+            .expect("an address run without the written fix stays open");
+        assert!(requeue.address_fix_pending);
+        assert_eq!(requeue.claim.generation, 1);
+        let content = fs::read_to_string(&doc).unwrap();
+        assert_eq!(content.matches(ROW).count(), 1, "{content}");
+        assert!(!content.contains("### Re: Subagent completed"), "{content}");
+
+        let (outcome, _) =
+            agent_doc_queue_io::queue_claim::claim(&doc, ROW, "subagent:pr12-address2", 600)
+                .expect("the requeued address row is dispatchable again");
+        assert_eq!(
+            outcome,
+            agent_doc_queue::queue_claim::ClaimOutcome::Reassigned,
+        );
+        let brief =
+            agent_doc_queue_io::subagent_dispatch::subagent_authorization_for_item(&doc, ROW)
+                .unwrap();
+        assert!(
+            brief
+                .subagent_prompt_preamble
+                .contains("(#reviewfixonhead)")
+        );
+        assert!(
+            brief
+                .subagent_prompt_preamble
+                .contains("were superseded and were not reopened")
+        );
+        let generation = agent_doc_queue_io::queue_claim::load_ledger(&doc)
+            .unwrap()
+            .claims
+            .iter()
+            .find(|claim| claim.owner == "subagent:pr12-address2")
+            .map(|claim| claim.generation)
+            .unwrap();
+        agent_doc_queue_io::queue_claim::start_attempt(
+            &doc,
+            ROW,
+            "subagent:pr12-address2",
+            "worker:pr12-address2",
+            600,
+            generation,
+        )
+        .unwrap();
+        let landed = concat!(
+            "The retry applies under shadow. The stored state, the audit applied_state, and the acknowledgement are allowed.\n",
+            "FIX-ON-HEAD https://github.com/sample-org/sample-repo/pull/12#pullrequestreview-5837752992 head=fa3a3f449986d565f21aeb6e0f792323bc8d1d58\n",
+        );
+        assert!(
+            requeue_nonterminal_goal_hand_back(&doc, ROW, Some(generation), landed)
+                .unwrap()
+                .is_none()
+        );
+        let reported = report_complete(&doc, ROW, Some(generation), None, None, landed)
+            .expect("the written fix on the head completes the address run");
+        assert!(reported.appended);
+    }
+
     fn start_subagent(doc: &Path, row: &str, owner: &str) {
         agent_doc_queue_io::queue_claim::claim(doc, row, owner, 600).unwrap();
         agent_doc_queue_io::queue_claim::start_attempt(

@@ -201,6 +201,11 @@ pub fn queue_skip_diagnostic_for_response(content: &str, response: &str) -> Resu
         return queue_skip_diagnostic_for_content(content);
     };
     let queue_head_display = display_queue_prompt_text(&queue_head);
+    if crate::queue_response::latest_echo_cell_omits_address_fix(content, response, &queue_head) {
+        return Ok(format!(
+            "[queue] kept address head `{queue_head_display}` open. The response does not land the review's written fix on the current head (#reviewfixonhead). A later review or a different behavior does not address it. Next: land that written fix on the exact current head and finish with `FIX-ON-HEAD <review-url> head=<sha>`."
+        ));
+    }
     if crate::queue_response::latest_echo_cell_lacks_goal_final_state(
         content,
         response,
@@ -538,6 +543,20 @@ fn leads_with_bare_id_directive(lower: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn address_head_without_the_written_fix_names_the_gate() {
+        let head = "https://github.com/sample-org/sample-repo/pull/12: #address";
+        let doc = format!(
+            "---\nqueue_active: true\nprompt_presets:\n  '#address': 'Address every actionable review item on the exact current head.'\n---\n\n<!-- agent:queue auto -->\n- {head}\n<!-- /agent:queue -->\n"
+        );
+        let response = format!(
+            "### Re: address\n\n> **Queue prompt:** {head}\n\nEvery actionable item is already fixed. No new commit.\n"
+        );
+        let diagnostic = super::queue_skip_diagnostic_for_response(&doc, &response).unwrap();
+        assert!(diagnostic.contains("(#reviewfixonhead)"), "{diagnostic}");
+        assert!(diagnostic.contains("FIX-ON-HEAD"));
+    }
+
     /// `#managedlistnodrift` regression: the waiting-item roll-up token
     /// (`#waitingitemstatus`) precedes the head's `[#id]`. Read as content it
     /// turned an id-backed operator-request head into a FREE-TEXT head, so

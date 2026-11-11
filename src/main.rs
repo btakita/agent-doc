@@ -10298,17 +10298,30 @@ fn try_main() -> anyhow::Result<()> {
                         &file,
                         Some(requeue.claim.item_text.as_str()),
                     )?;
-                    eprintln!(
-                        "[queue] goal-loop hand-back for {:?} (owner {}, generation {}) does not begin with a declared final state ({}); the row stays open and the attempt was requeued, so it is dispatchable again (#goalpresetterminal). Next: {} and dispatch the same row; its brief carries this hand-back. Do not close the row until a response line begins with a declared final state.",
-                        requeue.claim.item_text,
-                        requeue.claim.owner,
-                        requeue.claim.generation,
-                        requeue.final_states.join(", "),
-                        agent_doc_queue_io::subagent_dispatch::claim_command(
-                            &file.display().to_string(),
-                            &requeue.claim.item_text,
-                        ),
-                    );
+                    if requeue.address_fix_pending {
+                        eprintln!(
+                            "[queue] address hand-back for {:?} (owner {}, generation {}) does not land the review's written fix on the current head; the row stays open and the attempt was requeued (#reviewfixonhead). Next: {} and dispatch the same row; its brief carries this hand-back. Land the written fix, then finish with `FIX-ON-HEAD <review-url> head=<sha>`. A later review does not replace that fix.",
+                            requeue.claim.item_text,
+                            requeue.claim.owner,
+                            requeue.claim.generation,
+                            agent_doc_queue_io::subagent_dispatch::claim_command(
+                                &file.display().to_string(),
+                                &requeue.claim.item_text,
+                            ),
+                        );
+                    } else {
+                        eprintln!(
+                            "[queue] goal-loop hand-back for {:?} (owner {}, generation {}) does not begin with a declared final state ({}); the row stays open and the attempt was requeued, so it is dispatchable again (#goalpresetterminal). Next: {} and dispatch the same row; its brief carries this hand-back. Do not close the row until a response line begins with a declared final state.",
+                            requeue.claim.item_text,
+                            requeue.claim.owner,
+                            requeue.claim.generation,
+                            requeue.final_states.join(", "),
+                            agent_doc_queue_io::subagent_dispatch::claim_command(
+                                &file.display().to_string(),
+                                &requeue.claim.item_text,
+                            ),
+                        );
+                    }
                     emit_subagent_pool_refill(
                         &file,
                         agent_doc_queue::subagent_pool::PoolRefillTrigger::Release,

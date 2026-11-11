@@ -132,6 +132,9 @@ pub struct GoalLoopRequeue {
     pub claim: QueueClaim,
     /// The final states the row's preset declares.
     pub final_states: Vec<String>,
+    /// `#reviewfixonhead`: the hand-back did not land the review's written fix
+    /// on the current head.
+    pub address_fix_pending: bool,
 }
 
 /// `#goalpresetterminal`: decide `queue report-complete` for a goal-loop row.
@@ -163,23 +166,38 @@ pub fn requeue_nonterminal_hand_back(
         &claim.item_text,
         &presets,
     );
-    if final_states.is_empty() {
+    let preset_pairs: Vec<(String, String)> = presets
+        .iter()
+        .map(|(name, body)| (name.clone(), body.clone()))
+        .collect();
+    let address_run =
+        agent_doc_queue::address_fix_on_head::head_is_address_run(&claim.item_text, &preset_pairs);
+    let address_lands = address_run
+        && agent_doc_queue::address_fix_on_head::address_run_lands_written_fix(response);
+    let address_pending = address_run && !address_lands;
+    let completes_goal = !final_states.is_empty()
+        && agent_doc_queue::goal_preset_terminal::hand_back_begins_with_final_state(
+            response,
+            &final_states,
+        );
+    // `#reviewfixonhead`: an address run stays open until the written fix is
+    // on the current head, even when the hand-back calls the review complete.
+    if !address_pending
+        && ((!address_run && final_states.is_empty()) || completes_goal || address_lands)
+    {
+        if completes_goal || address_lands {
+            let identity = claim.identity.clone();
+            let live = agent_doc_queue::queue_continuation::live_queue_head_identities(content);
+            mutate(file, |ledger| {
+                ledger.forget(&identity);
+                if let Some(live) = live.as_ref() {
+                    ledger.retain_live(live);
+                }
+            })?;
+        }
         return Ok(None);
     }
     let live = agent_doc_queue::queue_continuation::live_queue_head_identities(content);
-    if agent_doc_queue::goal_preset_terminal::hand_back_begins_with_final_state(
-        response,
-        &final_states,
-    ) {
-        let identity = claim.identity.clone();
-        mutate(file, |ledger| {
-            ledger.forget(&identity);
-            if let Some(live) = live.as_ref() {
-                ledger.retain_live(live);
-            }
-        })?;
-        return Ok(None);
-    }
     let generation = generation.unwrap_or(claim.generation);
     if generation != claim.generation {
         anyhow::bail!(
@@ -198,6 +216,7 @@ pub fn requeue_nonterminal_hand_back(
         recorded_at_secs: now_secs(),
         quota_block: None,
         prompt_pressure: None,
+        address_fix_pending: address_pending,
     };
     mutate(file, |ledger| {
         if let Some(live) = live.as_ref() {
@@ -212,10 +231,15 @@ pub fn requeue_nonterminal_hand_back(
         Some(claim.generation),
     )?
     .unwrap_or(claim);
+    let tag = if address_pending {
+        "#reviewfixonhead"
+    } else {
+        "#goalpresetterminal"
+    };
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "queue_goal_loop_hand_back_requeued owner={} generation={} final_states={} response_bytes={} item_bytes={} (#goalpresetterminal)",
+            "queue_goal_loop_hand_back_requeued owner={} generation={} final_states={} response_bytes={} item_bytes={} ({tag})",
             requeued.owner,
             requeued.generation,
             final_states.join(","),
@@ -226,6 +250,7 @@ pub fn requeue_nonterminal_hand_back(
     Ok(Some(GoalLoopRequeue {
         claim: requeued,
         final_states,
+        address_fix_pending: address_pending,
     }))
 }
 
@@ -259,6 +284,7 @@ pub fn requeue_with_prompt_pressure(
         recorded_at_secs: now_secs(),
         quota_block: None,
         prompt_pressure: Some(kind.clone()),
+        address_fix_pending: false,
     };
     mutate(file, |ledger| {
         if let Some(live) = live.as_ref() {
@@ -303,6 +329,7 @@ pub fn record_quota_requeue(file: &Path, claim: &QueueClaim) -> Result<()> {
         recorded_at_secs: now_secs(),
         quota_block: Some(block),
         prompt_pressure: None,
+        address_fix_pending: false,
     };
     mutate(file, |ledger| ledger.record(handoff))
 }

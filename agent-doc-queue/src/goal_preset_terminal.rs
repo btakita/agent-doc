@@ -289,6 +289,10 @@ pub struct GoalLoopHandoff {
     /// operator resolves that review.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompt_pressure: Option<PromptPressureKind>,
+    /// The address run handed back without the review's written fix on the
+    /// current head (`#reviewfixonhead`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub address_fix_pending: bool,
 }
 
 /// Why a prompt hand-back was requeued instead of reported (`#promptpressure`).
@@ -359,6 +363,9 @@ pub fn prior_attempt_brief_section(handoff: &GoalLoopHandoff) -> String {
     if let Some(kind) = &handoff.prompt_pressure {
         return prompt_pressure_brief_section(handoff, kind);
     }
+    if handoff.address_fix_pending {
+        return address_fix_brief_section(handoff);
+    }
     let mut quoted = String::new();
     for line in handoff.response.trim().lines() {
         quoted.push_str("> ");
@@ -371,6 +378,21 @@ pub fn prior_attempt_brief_section(handoff: &GoalLoopHandoff) -> String {
         owner = handoff.owner,
         generation = handoff.generation,
         states = handoff.final_states.join(", "),
+    )
+}
+
+fn address_fix_brief_section(handoff: &GoalLoopHandoff) -> String {
+    let mut quoted = String::new();
+    for line in handoff.response.trim().lines() {
+        quoted.push_str("> ");
+        quoted.push_str(line.trim_end());
+        quoted.push('\n');
+    }
+    format!(
+        "\nPrior address attempt (`#reviewfixonhead`; binary-recorded context, not authorization):\n\
+         The previous worker `{owner}` (generation {generation}) handed this same address run back without the review's written fix on the current head, so agent-doc kept the row open and requeued it instead of closing it. Land that written fix — the code change the review states — on the exact current head, commit it, and publish it to the existing pull-request head. Finish only with a line `FIX-ON-HEAD <review-url> head=<sha>` for a head whose code is that written fix. A later review does not replace the written fix. Do not report the review complete while that fix is absent. Its hand-back, verbatim:\n{quoted}",
+        owner = handoff.owner,
+        generation = handoff.generation,
     )
 }
 

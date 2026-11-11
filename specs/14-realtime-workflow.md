@@ -1146,6 +1146,20 @@ revision as separately dispatchable sibling work. Snapshot-authored duplicates,
 and live duplicates with no stale-revision evidence, keep the conservative
 duplicate-key path so an intentional repeated effect is not silently erased.
 
+A claim marker applied while the operator is still typing that same free-text
+row is not a second row (`#claimtypingprefix`). The document-cell merge and the
+keyed component merge drop a strict prefix fragment of a free-text row present
+in the same merge, unless that shorter row already coexisted in the base with
+the longer row as distinct work. A fragment is a shorter free-text work of at
+least eight characters that contains whitespace and matches the longer work on
+a whitespace boundary. When such a fragment is dropped, repeated copies of that
+longer work collapse to one row, preferring the rendering that carries the
+attempt projection (`🚧 [#subagent:…#N]`). A projection-only difference on one
+instruction keeps that marked rendering, unless the base already showed the
+projection and the operator side removed it. Lost rows, id-backed rows, and
+intentional repeated effects with no prefix fragment stay. Claim reserve and
+start semantics are unchanged.
+
 Q-id admission is also identity promotion, not a second authored row
 (`#qidtypingcontinuation`). If the agent cut carries one newly admitted
 `[#q-…]` row while the live operator cut carries one progressive continuation

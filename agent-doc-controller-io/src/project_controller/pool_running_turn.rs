@@ -3,6 +3,9 @@
 //! The pure decision is [`agent_doc_controller::pool_running_turn`]. This module
 //! is the controller tick: one capture when dispatch debt exists, and a paste
 //! only while the pane proves a live turn. An idle composer is left untouched.
+//! A Grok status line that says Enter would interrupt a blocked wait is left
+//! untouched too (`#blockedwaitentercancels`): that Enter cancels the turn the
+//! worker is bound to. The refill stays owed until the wait ends.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -109,7 +112,22 @@ pub(super) enum PoolRunningTurnObligation {
 enum PasteOutcome {
     Delivered,
     TurnNotLive,
+    /// Grok would cancel the blocked wait on Enter. The worker stays bound.
+    BlockedWait,
     NotProven(String),
+}
+
+/// Why a capture-proven live turn must not receive Enter.
+///
+/// `None` means the paste may proceed. Only Grok's blocked-wait hint is a
+/// hold: other harnesses queue or hook-inject, and a Grok turn that is merely
+/// busy queues the follow-up.
+fn running_turn_refill_enter_hold(harness_name: &str, capture: &str) -> Option<&'static str> {
+    if steering_delivery_adapter(harness_name).harness != "grok" {
+        return None;
+    }
+    agent_doc_harness::grok_enter_cancels_blocked_wait(capture)
+        .then_some("blocked_wait_enter_cancels")
 }
 
 fn paste_into_live_turn(pane: &str, harness_name: &str, text: &str) -> PasteOutcome {
@@ -124,6 +142,9 @@ fn paste_into_live_turn(pane: &str, harness_name: &str, text: &str) -> PasteOutc
         };
     if !harness.has_busy_cue(&capture) {
         return PasteOutcome::TurnNotLive;
+    }
+    if running_turn_refill_enter_hold(harness_name, &capture).is_some() {
+        return PasteOutcome::BlockedWait;
     }
     let cursor_y = agent_doc_tmux_io::pane_cursor_y(&tmux, pane);
     match agent_doc_harness::steering_delivery::running_turn_follow_up_composer_at_cursor(
@@ -192,13 +213,32 @@ fn prove_follow_up_left_the_composer(
     Err(last)
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum RefillHold {
+    TurnNotLive,
+    BlockedWaitEnterCancels,
+}
+
 #[derive(Default)]
 pub(super) struct PoolRunningTurnTick {
     last_run: Option<Instant>,
-    held: HashMap<PathBuf, PoolRunningTurnFollowUpSkip>,
+    held: HashMap<PathBuf, RefillHold>,
 }
 
 impl PoolRunningTurnTick {
+    fn hold(&mut self, file: &Path, hold: RefillHold, reason: &str, next_heads: usize) {
+        if self.held.insert(file.to_path_buf(), hold) == Some(hold) {
+            return;
+        }
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "subagent_pool_running_turn_refill_held file={} reason={reason} next_heads={next_heads} (#subagentworkpool)",
+                file.display(),
+            ),
+        );
+    }
+
     pub(super) fn run_if_due(&mut self, runtime: &Arc<ControllerRuntime>, now: Instant) {
         if self.last_run.is_some_and(|last| {
             now.saturating_duration_since(last) < POOL_RUNNING_TURN_TICK_INTERVAL
@@ -290,20 +330,20 @@ impl PoolRunningTurnTick {
                     agent_doc_ops_log_io::log_op(&file, &outcome);
                 }
                 PasteOutcome::TurnNotLive => {
-                    if self
-                        .held
-                        .insert(file.clone(), PoolRunningTurnFollowUpSkip::TurnNotLive)
-                        != Some(PoolRunningTurnFollowUpSkip::TurnNotLive)
-                    {
-                        agent_doc_ops_log_io::log_op(
-                            &file,
-                            &format!(
-                                "subagent_pool_running_turn_refill_held file={} reason=turn_not_live next_heads={} (#subagentworkpool)",
-                                file.display(),
-                                refill.next_heads,
-                            ),
-                        );
-                    }
+                    self.hold(
+                        &file,
+                        RefillHold::TurnNotLive,
+                        "turn_not_live",
+                        refill.next_heads,
+                    );
+                }
+                PasteOutcome::BlockedWait => {
+                    self.hold(
+                        &file,
+                        RefillHold::BlockedWaitEnterCancels,
+                        "blocked_wait_enter_cancels",
+                        refill.next_heads,
+                    );
                 }
                 PasteOutcome::NotProven(reason) => {
                     agent_doc_ops_log_io::log_op(
@@ -355,6 +395,38 @@ mod tests {
             file,
             conn,
         }
+    }
+
+    /// Restoring a stashed Grok pane must not press Enter while the turn is
+    /// blocked on its worker. The hint is the status line Grok prints for that
+    /// wait; a still-running count without it still queues.
+    #[test]
+    fn a_blocked_wait_holds_the_grok_refill_and_a_busy_turn_does_not() {
+        let busy = "╭──╮\n│ ❯ │\n╰──╯\nCtrl+c:cancel │ Ctrl+x:shortcuts\n";
+        assert_eq!(
+            running_turn_refill_enter_hold("grok", busy),
+            None,
+            "a generating turn queues the refill"
+        );
+        assert_eq!(
+            running_turn_refill_enter_hold("grok", &format!("◎  1 subagent still running\n{busy}"),),
+            None
+        );
+        assert_eq!(
+            running_turn_refill_enter_hold(
+                "grok",
+                &format!("◎  1 subagent still running · send a message to interrupt\n{busy}"),
+            ),
+            Some("blocked_wait_enter_cancels")
+        );
+        assert_eq!(
+            running_turn_refill_enter_hold(
+                "claude",
+                "◎  waiting · send a message to interrupt\nesc to interrupt\n",
+            ),
+            None,
+            "claude injects through its hook and never takes this paste"
+        );
     }
 
     /// The stuck pool: Grok, two new heads, nothing delivered yet. The tick

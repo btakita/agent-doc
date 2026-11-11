@@ -45,7 +45,9 @@ pub const CODEX_UPDATE_AVAILABLE_BLOCKER: &str = "codex update-available dialog"
 mod grok;
 
 pub use grok::{
-    FollowUpComposer as GrokFollowUpComposer, follow_up_composer as grok_follow_up_composer,
+    FollowUpComposer as GrokFollowUpComposer,
+    enter_cancels_blocked_wait as grok_enter_cancels_blocked_wait,
+    follow_up_composer as grok_follow_up_composer,
 };
 pub mod managed_capability;
 pub mod prompt_source;

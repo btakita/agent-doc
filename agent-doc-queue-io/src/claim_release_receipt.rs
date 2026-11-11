@@ -556,7 +556,9 @@ pub fn reported_items_for_content(file: &Path, content: &str) -> ClaimedQueueIte
     }
     let live = live_queue_head_identities(content);
     let claimed = crate::queue_claim::ledger_claimed_items_for_content(file, content);
-    ledger.reported_items(now_secs(), live.as_ref(), &claimed)
+    ledger
+        .reported_items(now_secs(), live.as_ref(), &claimed)
+        .with_user_prompt_backlog_same_work(content)
 }
 
 /// Lines whose durable release receipt proves the exact started claim

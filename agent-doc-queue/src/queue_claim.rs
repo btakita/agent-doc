@@ -2922,6 +2922,139 @@ pub fn claim_identity_at(
     crate::document_queue::lineage_claim_text(entries, index).map(|text| claim_identity(&text))
 }
 
+/// `#userpromptbacklog`: open backlog item text equals a live user-prompt
+/// row's own work sentence. The prompt's lineage identity and `do [#id]`
+/// are one work class. One claim holds every identity in the class.
+///
+/// The prompt key stays its nest vector. The directive stays its id. Equality
+/// is the row's own sentence after attempt-projection stripping, not a guess
+/// from stored claim text. A done backlog item does not link. The first open
+/// item wins when two items share a sentence.
+pub fn user_prompt_backlog_identity_classes(content: &str) -> Vec<HashSet<QueueItemIdentity>> {
+    let Ok(components) = agent_doc_element::element::parse(content) else {
+        return Vec::new();
+    };
+    let Ok(graph) = crate::queue_set::QueueSet::parse(content, &components) else {
+        return Vec::new();
+    };
+    let mut rows: Vec<(QueueItemIdentity, String)> = Vec::new();
+    for block in graph.blocks() {
+        let entries = crate::nested_claim_steer::expand_slice_if_installed(&block.entries);
+        for index in crate::document_queue::executable_prompt_indexes(entries.as_ref()) {
+            if crate::free_text_admission::entry_is_operator_reply_slot(entries.as_ref(), index) {
+                continue;
+            }
+            let Some(identity) = claim_identity_at(entries.as_ref(), index) else {
+                continue;
+            };
+            let crate::document_queue::QueueEntry::Prompt(prompt) = &entries[index] else {
+                continue;
+            };
+            let sentence = crate::queue_response::normalize_for_answer_match(
+                &crate::free_text_admission::admitted_prompt_text(prompt),
+            );
+            rows.push((identity, sentence));
+        }
+    }
+    if rows.is_empty() {
+        return Vec::new();
+    }
+    let mut seen_sentences = HashSet::new();
+    let mut classes = Vec::new();
+    for component in &components {
+        if !agent_doc_element::element::is_backlog_component(&component.name) {
+            continue;
+        }
+        let (_, items, _) =
+            agent_doc_element_backlog::backlog::parse_items(component.content(content));
+        for item in items {
+            if item.state == agent_doc_element_backlog::backlog::PendingState::Done {
+                continue;
+            }
+            let sentence = crate::queue_response::normalize_for_answer_match(&item.text);
+            if sentence.is_empty() || item.id.is_empty() || !seen_sentences.insert(sentence.clone())
+            {
+                continue;
+            }
+            let directive = claim_identity(&format!("do [#{}]", item.id));
+            let mut class = HashSet::new();
+            for (identity, row_sentence) in &rows {
+                let same_sentence = !identity.is_id_backed()
+                    && !row_sentence.is_empty()
+                    && row_sentence == &sentence;
+                if identity == &directive || same_sentence {
+                    class.insert(identity.clone());
+                }
+            }
+            if class.len() >= 2 {
+                classes.push(class);
+            }
+        }
+    }
+    classes
+}
+
+/// A live claim that already holds `identity`'s user-prompt / backlog class
+/// (`#userpromptbacklog`). The same identity is not a holder: that refresh
+/// stays on [`QueueClaimLedger::claim_in_session_with_generation_floor`].
+/// A lost attempt does not hold the class.
+pub fn user_prompt_backlog_dispatch_holder<'a>(
+    claims: &'a [QueueClaim],
+    identity: &QueueItemIdentity,
+    classes: &[HashSet<QueueItemIdentity>],
+    now_secs: u64,
+) -> Option<&'a QueueClaim> {
+    if classes.is_empty() {
+        return None;
+    }
+    claims.iter().find(|claim| {
+        &claim.identity != identity
+            && claim.blocks_dispatch(now_secs)
+            && classes
+                .iter()
+                .any(|class| class.contains(identity) && class.contains(&claim.identity))
+    })
+}
+
+/// Keep the first head of each [`user_prompt_backlog_identity_classes`] class.
+/// Heads in no class pass through, in order.
+pub fn one_user_prompt_backlog_head(content: &str, heads: &[String]) -> Vec<String> {
+    filter_user_prompt_backlog_heads(&user_prompt_backlog_identity_classes(content), heads)
+}
+
+/// [`one_user_prompt_backlog_head`] for classes the caller already computed.
+pub fn filter_user_prompt_backlog_heads(
+    classes: &[HashSet<QueueItemIdentity>],
+    heads: &[String],
+) -> Vec<String> {
+    if classes.is_empty() || heads.len() < 2 {
+        return heads.to_vec();
+    }
+    let mut seen = vec![false; classes.len()];
+    let mut out = Vec::with_capacity(heads.len());
+    for head in heads {
+        let identity = claim_identity(head);
+        let mut membership = Vec::new();
+        for (index, class) in classes.iter().enumerate() {
+            if class.contains(&identity) {
+                membership.push(index);
+            }
+        }
+        if membership.is_empty() {
+            out.push(head.clone());
+            continue;
+        }
+        if membership.iter().any(|index| seen[*index]) {
+            continue;
+        }
+        for index in membership {
+            seen[index] = true;
+        }
+        out.push(head.clone());
+    }
+    out
+}
+
 /// Whether completion cell item `cell_item` is queue row `row_text`'s own work
 /// (`#queueworkevidence`).
 ///
@@ -3582,6 +3715,21 @@ impl ClaimedQueueItems {
     /// These claims plus every identity in `other`.
     pub fn with_claimed(mut self, other: &ClaimedQueueItems) -> Self {
         self.0.extend(other.0.iter().cloned());
+        self
+    }
+
+    /// When one identity of a user-prompt / backlog class is already held,
+    /// hold the whole class (`#userpromptbacklog`). An empty set does not
+    /// parse `content`.
+    pub fn with_user_prompt_backlog_same_work(mut self, content: &str) -> Self {
+        if self.0.is_empty() {
+            return self;
+        }
+        for class in user_prompt_backlog_identity_classes(content) {
+            if class.iter().any(|identity| self.0.contains(identity)) {
+                self.0.extend(class);
+            }
+        }
         self
     }
 
@@ -6400,5 +6548,184 @@ Add new issues into the backlog + queue except issue #40 + #45.";
                 .is_ok()
         );
         assert_eq!(ledger.claims[0].state, QueueClaimState::Reported);
+    }
+
+    /// `#userpromptbacklog`: the nested sentence "Add cost model update" and
+    /// `do [#costmodelupdate]` are one class because the open backlog item
+    /// is that sentence. A done item, a different sentence, and an operator
+    /// reply do not join it.
+    #[test]
+    fn user_prompt_and_matching_backlog_do_share_one_claim_class() {
+        let doc = r#"
+## haiven-infra PRs
+
+<!-- agent:run id="haiven-infra-prs" subagents keep priority -->
+- https://github.com/haiven-dev/haiven-infra/pull/296
+  - %% feat(observability): add zero-downtime Grafana cutover %%
+  - 🚧 [#subagent:pr296-cost-model#1] Add cost model update
+  - ☑️ [#subagent:pr296-costmodelupdate#1] do [#costmodelupdate]
+  - Fix the other alert
+  - **Choices:**
+    - Add cost model update
+<!-- /agent:run -->
+
+<!-- agent:run id="side" -->
+- Ship the gated note
+- do [#gated]
+- Add a standalone note
+- do [#standalone]
+- Retire the old cost note
+- do [#retired]
+- do [#other]
+<!-- /agent:run -->
+
+## Backlog
+
+<!-- agent:backlog priority queue=haiven-infra-prs -->
+- [ ] [#costmodelupdate] Add cost model update
+- [ ] [#costmodelupdatecopy] Add cost model update
+- [ ] [#other] Document the other alert
+- [/] [#gated] Ship the gated note
+- [ ] [#standalone] Add a standalone note
+- [x] [#retired] Retire the old cost note
+<!-- /agent:backlog -->
+"#;
+        let classes = user_prompt_backlog_identity_classes(doc);
+        let cost = classes
+            .iter()
+            .find(|class| class.contains(&claim_identity("do [#costmodelupdate]")))
+            .expect("cost class");
+        let components = agent_doc_element::element::parse(doc).unwrap();
+        let graph = crate::queue_set::QueueSet::parse(doc, &components).unwrap();
+        let mut prose = None;
+        let mut reply = None;
+        let mut other_alert = None;
+        let mut heads = Vec::new();
+        for block in graph.blocks() {
+            let entries = crate::nested_claim_steer::expand_slice_if_installed(&block.entries);
+            for index in crate::document_queue::executable_prompt_indexes(entries.as_ref()) {
+                let Some(identity) = claim_identity_at(entries.as_ref(), index) else {
+                    continue;
+                };
+                let crate::document_queue::QueueEntry::Prompt(prompt) = &entries[index] else {
+                    continue;
+                };
+                if let Some(lineage) =
+                    crate::document_queue::lineage_claim_text(entries.as_ref(), index)
+                {
+                    heads.push(lineage);
+                }
+                let sentence = crate::queue_response::normalize_for_answer_match(
+                    &crate::free_text_admission::admitted_prompt_text(prompt),
+                );
+                if sentence == "fix the other alert" {
+                    other_alert = Some(identity.clone());
+                }
+                if sentence != "add cost model update" || identity.is_id_backed() {
+                    continue;
+                }
+                if crate::free_text_admission::entry_is_operator_reply_slot(entries.as_ref(), index)
+                {
+                    reply = Some(identity);
+                } else if prose.is_none() {
+                    prose = Some(identity);
+                }
+            }
+        }
+        let prose = prose.expect("nested cost prompt");
+        match &prose {
+            QueueItemIdentity::FreeText(text) => {
+                assert!(
+                    text.contains("haiven-infra/pull/296"),
+                    "the prompt claim key stays the nest vector: {text}"
+                );
+                assert!(text.contains("add cost model update"), "{text}");
+            }
+            other => panic!("nested prompt must stay free-text, got {other:?}"),
+        }
+        assert!(cost.contains(&prose));
+        assert!(cost.contains(&QueueItemIdentity::Id("costmodelupdate".to_string())));
+        assert_eq!(cost.len(), 2, "only the prompt and its directive: {cost:?}");
+        let reply = reply.expect("choices child is a reply slot");
+        assert!(
+            !cost.contains(&reply),
+            "an operator reply is not the prompt"
+        );
+        assert!(
+            classes
+                .iter()
+                .all(|class| !class.contains(&reply)
+                    && !class.contains(&claim_identity("do [#other]"))),
+            "a reply and a different backlog sentence stay out: {classes:?}"
+        );
+        let other_alert = other_alert.expect("other alert");
+        assert!(
+            classes.iter().all(|class| !class.contains(&other_alert)),
+            "{classes:?}"
+        );
+        assert!(classes.iter().all(|class| {
+            !class.contains(&claim_identity("do [#retired]"))
+                && !class.contains(&claim_identity("do [#costmodelupdatecopy]"))
+        }));
+        assert!(classes.iter().any(|class| {
+            class.contains(&claim_identity("do [#gated]"))
+                && class.iter().any(|identity| !identity.is_id_backed())
+        }));
+        assert!(classes.iter().any(|class| {
+            class.contains(&claim_identity("do [#standalone]")) && class.len() >= 2
+        }));
+
+        let kept = filter_user_prompt_backlog_heads(&classes, &heads);
+        assert!(kept.iter().any(|head| claim_identity(head) == prose));
+        assert!(
+            kept.iter()
+                .all(|head| claim_identity(head) != claim_identity("do [#costmodelupdate]"))
+        );
+        assert!(kept.iter().any(|head| head.contains("Fix the other alert")));
+        assert!(kept.iter().any(|head| head.contains("do [#other]")));
+        assert!(kept.iter().any(|head| head.contains("do [#retired]")));
+        let gated: Vec<_> = kept
+            .iter()
+            .filter(|head| head.contains("Ship the gated note") || head.contains("do [#gated]"))
+            .collect();
+        assert_eq!(gated.len(), 1, "{gated:?}");
+        assert!(gated[0].contains("Ship the gated note"));
+
+        let mut ledger = QueueClaimLedger::default();
+        ledger.claim(
+            "do [#costmodelupdate]",
+            "subagent:pr296-costmodelupdate",
+            10,
+            600,
+        );
+        ledger.claims[0].mark_lost();
+        assert!(
+            user_prompt_backlog_dispatch_holder(&ledger.claims, &prose, &classes, 20).is_none(),
+            "a lost attempt does not hold the sibling"
+        );
+        ledger.claims[0].state = QueueClaimState::Claimed;
+        ledger.claims[0].expires_at_secs = 610;
+        let holder =
+            user_prompt_backlog_dispatch_holder(&ledger.claims, &prose, &classes, 20).unwrap();
+        assert_eq!(holder.owner, "subagent:pr296-costmodelupdate");
+        assert!(
+            user_prompt_backlog_dispatch_holder(
+                &ledger.claims,
+                &claim_identity("do [#costmodelupdate]"),
+                &classes,
+                20,
+            )
+            .is_none(),
+            "the same identity still refreshes"
+        );
+        let expanded = ClaimedQueueItems::from_identities([prose.clone()])
+            .with_user_prompt_backlog_same_work(doc);
+        assert!(expanded.claims("do [#costmodelupdate]"));
+        assert!(!expanded.claims("do [#other]"));
+        assert!(
+            ClaimedQueueItems::none()
+                .with_user_prompt_backlog_same_work(doc)
+                .is_empty()
+        );
     }
 }

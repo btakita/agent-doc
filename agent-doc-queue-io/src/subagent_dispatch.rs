@@ -184,10 +184,14 @@ fn subagent_dispatch_candidates_for_content(file: &Path, content: &str) -> Resul
                     || lost_identities.iter().any(|lost| lost == &identity))
         });
     let claimed = crate::queue_claim::claimed_items_for_content(file, content);
-    Ok(heads
+    let heads: Vec<String> = heads
         .filter(|head| {
             !claimed.claims(head) && !reported.claims(head) && !refused.holds(file, head)
         })
+        .collect();
+    let heads = agent_doc_queue::queue_claim::one_user_prompt_backlog_head(content, &heads);
+    Ok(heads
+        .into_iter()
         .map(|head| visible_dispatch_head(&keys, &head))
         .collect())
 }
@@ -487,6 +491,7 @@ fn queue_attr_subagent_plan_with_pools(
     let mut document_facts: Option<core::QueueDispatchDocumentFacts> = None;
     let mut combined = agent_doc_queue::subagent_intent::QueueSubagentPlan::default();
     let mut saw_attr = false;
+    let same_work = agent_doc_queue::queue_claim::user_prompt_backlog_identity_classes(content);
     for block in graph.blocks() {
         agent_doc_queue::subagent_intent::validate_queue_subagents_attrs(&block.component.attrs)
             .map_err(anyhow::Error::msg)
@@ -562,6 +567,8 @@ fn queue_attr_subagent_plan_with_pools(
                 ),
             });
         }
+        let eligible =
+            agent_doc_queue::queue_claim::filter_user_prompt_backlog_heads(&same_work, &eligible);
         let plan = agent_doc_queue::subagent_intent::plan_queue_subagent_dispatch(
             mode,
             &eligible,
@@ -1714,6 +1721,143 @@ queue: go
             vec!["#review".to_string(), "ship this".to_string()],
             "a queue item whose only children are comments is not claimable; a real prompt child and a childless row still dispatch"
         );
+    }
+
+    fn cost_prompt(head: &str) -> bool {
+        head.contains("Add cost model update") && !head.contains("do [#costmodelupdate]")
+    }
+
+    /// `#userpromptbacklog`: a nested user prompt and `do [#id]` for the open
+    /// backlog item with that sentence are one dispatch and one claim.
+    #[test]
+    fn user_prompt_and_backlog_do_are_not_both_dispatched_or_claimed() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("task.md");
+        let content = concat!(
+            "---\nsession: sid\nagent_doc_format: template\n---\n\n",
+            "## haiven-infra PRs\n\n",
+            "<!-- agent:run id=haiven-infra-prs subagents go -->\n",
+            "- https://github.com/haiven-dev/haiven-infra/pull/296\n",
+            "  - %% feat(observability): add zero-downtime Grafana cutover %%\n",
+            "  - Add cost model update\n",
+            "  - do [#costmodelupdate]\n",
+            "  - Fix the other alert\n",
+            "- do [#other]\n",
+            "<!-- /agent:run -->\n\n",
+            "## Backlog\n\n",
+            "<!-- agent:backlog priority queue=haiven-infra-prs -->\n",
+            "- [ ] [#costmodelupdate] Add cost model update\n",
+            "- [ ] [#other] Document the other alert\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&file, content).unwrap();
+
+        let listed = pending_subagent_dispatch_for_content(&file, content).unwrap();
+        let prompts: Vec<_> = listed.iter().filter(|head| cost_prompt(head)).collect();
+        assert_eq!(prompts.len(), 1, "one of the pair dispatches: {listed:?}");
+        assert!(
+            listed
+                .iter()
+                .all(|head| !head.contains("do [#costmodelupdate]")),
+            "the backlog directive is the same work: {listed:?}"
+        );
+        assert!(
+            listed
+                .iter()
+                .any(|head| head.contains("Fix the other alert")),
+            "a different sentence still dispatches: {listed:?}"
+        );
+        assert!(
+            listed.iter().any(|head| head.contains("do [#other]")),
+            "an unrelated directive still dispatches: {listed:?}"
+        );
+
+        crate::queue_claim::claim(&file, prompts[0], "subagent:pr296-cost-model", 600).unwrap();
+        let held = crate::queue_claim::claim(
+            &file,
+            "do [#costmodelupdate]",
+            "subagent:pr296-costmodelupdate",
+            600,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(held.contains("already held"), "{held}");
+        assert!(held.contains("subagent:pr296-cost-model"), "{held}");
+        let after = pending_subagent_dispatch_for_content(&file, content).unwrap();
+        assert!(
+            after.iter().all(|head| !cost_prompt(head)),
+            "the claimed prompt stays off the list: {after:?}"
+        );
+        assert!(
+            after
+                .iter()
+                .all(|head| !head.contains("do [#costmodelupdate]")),
+            "the directive stays off the list: {after:?}"
+        );
+        assert!(
+            after.iter().any(|head| head.contains("do [#other]")),
+            "{after:?}"
+        );
+    }
+
+    /// Claiming `do [#id]` first holds the matching user prompt, including a
+    /// second claim by the same owner.
+    #[test]
+    fn backlog_do_claim_holds_the_matching_user_prompt() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("task.md");
+        let content = concat!(
+            "---\nsession: sid\nagent_doc_format: template\n---\n\n",
+            "## haiven-infra PRs\n\n",
+            "<!-- agent:run id=haiven-infra-prs subagents go -->\n",
+            "- https://github.com/haiven-dev/haiven-infra/pull/296\n",
+            "  - %% feat(observability): add zero-downtime Grafana cutover %%\n",
+            "  - Add cost model update\n",
+            "  - do [#costmodelupdate]\n",
+            "  - Fix the other alert\n",
+            "- do [#other]\n",
+            "<!-- /agent:run -->\n\n",
+            "## Backlog\n\n",
+            "<!-- agent:backlog priority queue=haiven-infra-prs -->\n",
+            "- [ ] [#costmodelupdate] Add cost model update\n",
+            "- [ ] [#other] Document the other alert\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&file, content).unwrap();
+        crate::queue_claim::claim(
+            &file,
+            "do [#costmodelupdate]",
+            "subagent:pr296-costmodelupdate",
+            600,
+        )
+        .unwrap();
+        let listed = pending_subagent_dispatch_for_content(&file, content).unwrap();
+        assert!(
+            listed.iter().all(|head| !cost_prompt(head)),
+            "the prompt is held by the directive claim: {listed:?}"
+        );
+        assert!(
+            listed
+                .iter()
+                .all(|head| !head.contains("do [#costmodelupdate]"))
+        );
+        assert!(
+            listed
+                .iter()
+                .any(|head| head.contains("Fix the other alert"))
+        );
+        let held = crate::queue_claim::claim(
+            &file,
+            "Add cost model update",
+            "subagent:pr296-costmodelupdate",
+            600,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(held.contains("already held"), "{held}");
+        crate::queue_claim::claim(&file, "do [#other]", "subagent:other", 600).unwrap();
     }
 
     #[test]

@@ -2915,11 +2915,62 @@ fn nest_vector_claim_identity(text: &str) -> Option<QueueItemIdentity> {
 /// A nested executable leaf that is not a tracked directive keys as its nest
 /// vector. Every other row keys as [`claim_identity`] of its marker-stripped
 /// text. `None` when `index` is not a prompt row.
+///
+/// A completed row beside a live prompt of that same identity is not the live
+/// claim (`#nostuckidentity`). Strike unwrapping would otherwise make
+/// `~~#adversarial-pr~~` and `📥 #adversarial-pr` one key, so admission sees
+/// `bare` and `🟡` together, rolls the claim back, and holds dispatch. The
+/// live row keeps the work identity. The struck copy takes a residue identity
+/// that is not a queue head. A struck row with no live sibling keeps the work
+/// identity, so retirement and missing-row repair still see it and do not
+/// insert another row.
 pub fn claim_identity_at(
     entries: &[crate::document_queue::QueueEntry],
     index: usize,
 ) -> Option<QueueItemIdentity> {
-    crate::document_queue::lineage_claim_text(entries, index).map(|text| claim_identity(&text))
+    let text = crate::document_queue::lineage_claim_text(entries, index)?;
+    let identity = claim_identity(&text);
+    if struck_beside_live_sibling(entries, index, &identity) {
+        return Some(struck_beside_live_residue(&identity));
+    }
+    Some(identity)
+}
+
+/// `true` when `index` is a completed row and another prompt in this same
+/// queue body has `identity` as its base claim key.
+///
+/// The sibling is keyed with [`claim_identity`] of its lineage, never
+/// [`claim_identity_at`], so this cannot recurse and a residue cannot count as
+/// the live work.
+fn struck_beside_live_sibling(
+    entries: &[crate::document_queue::QueueEntry],
+    index: usize,
+    identity: &QueueItemIdentity,
+) -> bool {
+    if !matches!(
+        entries.get(index),
+        Some(crate::document_queue::QueueEntry::Completed(_))
+    ) {
+        return false;
+    }
+    entries.iter().enumerate().any(|(other, entry)| {
+        other != index
+            && matches!(entry, crate::document_queue::QueueEntry::Prompt(_))
+            && crate::document_queue::lineage_claim_text(entries, other)
+                .is_some_and(|text| claim_identity(&text) == *identity)
+    })
+}
+
+/// Residue key for a struck row that shares its work text with a live sibling.
+///
+/// Built directly, not through [`claim_identity`], so normalization cannot
+/// fold it back onto the live claim.
+fn struck_beside_live_residue(identity: &QueueItemIdentity) -> QueueItemIdentity {
+    let key = match identity {
+        QueueItemIdentity::Id(id) => format!("struck-beside-live:id:{id}"),
+        QueueItemIdentity::FreeText(text) => format!("struck-beside-live:text:{text}"),
+    };
+    QueueItemIdentity::FreeText(key)
 }
 
 /// Whether completion cell item `cell_item` is queue row `row_text`'s own work
@@ -3925,6 +3976,175 @@ mod tests {
         assert!(!claimed.claims("#choicetermcheck: pick"));
         assert!(!claimed.claims("#duplicateordinalshift: pick"));
         assert!(!claimed.claims("pick"));
+    }
+
+    /// `#nostuckidentity`: haiven-api pull 869 kept `~~#adversarial-pr~~` and a
+    /// new `📥 #adversarial-pr` under one parent. Strike unwrapping made them
+    /// one claim, so admission saw `bare` and `🟡` and rolled the claim back.
+    /// The live instruction keeps the nest vector. The struck copy takes a
+    /// residue identity. A struck-only copy, including the same leaf under
+    /// another parent, keeps the work identity so repair does not insert a row.
+    #[test]
+    fn struck_row_beside_a_live_sibling_does_not_share_its_claim_identity() {
+        use agent_doc_element_queue::QueueItemIdentity;
+
+        let parent = "https://github.com/haiven-dev/haiven-api/pull/869";
+        let other = "https://github.com/haiven-dev/haiven-api/pull/870";
+        let body = format!(
+            "\
+- ### {parent}
+  - %% fix(chat): retry a failed fpe evaluation in shadow mode %%
+  - ~~#address [#q-e41a2f57cc1f]~~
+  - ~~#adversarial-pr~~
+  - 📥 #adversarial-pr
+- ### {other}
+  - ~~#adversarial-pr~~
+- ~~do [#requeue-me]~~
+- 📥 do [#requeue-me]
+- ~~do [#struck-only]~~
+"
+        );
+        let entries = crate::document_queue::parse(&body).unwrap();
+        fn row_text(entry: &crate::document_queue::QueueEntry) -> Option<&str> {
+            match entry {
+                crate::document_queue::QueueEntry::Prompt(prompt)
+                | crate::document_queue::QueueEntry::Completed(prompt) => {
+                    Some(prompt.text.as_str())
+                }
+                _ => None,
+            }
+        }
+        let lineage_at = |needle: &str, completed: bool| {
+            entries.iter().enumerate().find_map(|(index, entry)| {
+                let is_completed = matches!(entry, crate::document_queue::QueueEntry::Completed(_));
+                (is_completed == completed
+                    && row_text(entry).is_some_and(|text| text.contains(needle)))
+                .then_some(index)
+            })
+        };
+        let struck = lineage_at("#adversarial-pr", true).expect("struck adversarial row");
+        let live = lineage_at("#adversarial-pr", false).expect("live adversarial row");
+        let struck_only_other = entries
+            .iter()
+            .enumerate()
+            .find_map(|(index, entry)| {
+                (matches!(entry, crate::document_queue::QueueEntry::Completed(_))
+                    && row_text(entry) == Some("#adversarial-pr")
+                    && crate::document_queue::lineage_claim_text(&entries, index)
+                        .is_some_and(|text| text.starts_with(other)))
+                .then_some(index)
+            })
+            .expect("struck-only adversarial row under the other parent");
+        let live_lineage = crate::document_queue::lineage_claim_text(&entries, live).unwrap();
+        let struck_lineage = crate::document_queue::lineage_claim_text(&entries, struck).unwrap();
+        let live_identity = claim_identity_at(&entries, live).unwrap();
+        let struck_identity = claim_identity_at(&entries, struck).unwrap();
+        assert_eq!(live_lineage, format!("{parent}: #adversarial-pr"));
+        assert_eq!(struck_lineage, live_lineage);
+        assert_eq!(live_identity, claim_identity(&live_lineage));
+        assert_ne!(struck_identity, live_identity);
+        assert_eq!(
+            struck_identity,
+            QueueItemIdentity::FreeText(format!("struck-beside-live:text:{live_lineage}"))
+        );
+        let other_lineage =
+            crate::document_queue::lineage_claim_text(&entries, struck_only_other).unwrap();
+        assert_eq!(
+            claim_identity_at(&entries, struck_only_other).unwrap(),
+            claim_identity(&other_lineage),
+            "a struck row with no live sibling keeps the work identity"
+        );
+        let claimed = ClaimedQueueItems::from_identities([live_identity.clone()]);
+        assert!(claimed.claims_at(&entries, live));
+        assert!(!claimed.claims_at(&entries, struck));
+        assert!(!claimed.claims_at(&entries, struck_only_other));
+
+        let requeue_struck = lineage_at("do [#requeue-me]", true).unwrap();
+        let requeue_live = lineage_at("do [#requeue-me]", false).unwrap();
+        let requeue_live_identity = claim_identity_at(&entries, requeue_live).unwrap();
+        assert_eq!(
+            requeue_live_identity,
+            QueueItemIdentity::Id("requeue-me".to_string())
+        );
+        assert_eq!(
+            claim_identity_at(&entries, requeue_struck).unwrap(),
+            QueueItemIdentity::FreeText("struck-beside-live:id:requeue-me".to_string())
+        );
+        let struck_only = lineage_at("do [#struck-only]", true).unwrap();
+        assert_eq!(
+            claim_identity_at(&entries, struck_only).unwrap(),
+            QueueItemIdentity::Id("struck-only".to_string())
+        );
+
+        let annotated = format!(
+            "\
+- {parent}
+  - ~~#adversarial-pr~~
+  - #adversarial-pr ⟦effect:2⟧
+"
+        );
+        let annotated_entries = crate::document_queue::parse(&annotated).unwrap();
+        let annotated_row = |completed: bool| {
+            annotated_entries
+                .iter()
+                .enumerate()
+                .find_map(|(index, entry)| {
+                    let is_completed =
+                        matches!(entry, crate::document_queue::QueueEntry::Completed(_));
+                    (is_completed == completed
+                        && row_text(entry).is_some_and(|text| text.contains("#adversarial-pr")))
+                    .then_some(index)
+                })
+        };
+        let annotated_struck = annotated_row(true).unwrap();
+        let annotated_live = annotated_row(false).unwrap();
+        let annotated_struck_lineage =
+            crate::document_queue::lineage_claim_text(&annotated_entries, annotated_struck)
+                .unwrap();
+        assert_eq!(
+            claim_identity_at(&annotated_entries, annotated_struck).unwrap(),
+            claim_identity(&annotated_struck_lineage),
+            "an effect-annotated live sibling is already a different claim"
+        );
+        assert_ne!(
+            claim_identity_at(&annotated_entries, annotated_live).unwrap(),
+            claim_identity(&annotated_struck_lineage)
+        );
+    }
+
+    /// `#nostuckidentity`: once the live row is claimed, later effect
+    /// annotation of that same row carries the claim onto the annotated live
+    /// copy. The struck predecessor is not the successor.
+    #[test]
+    fn effect_annotation_of_a_live_sibling_keeps_the_claim_off_the_struck_row() {
+        let parent = "https://github.com/haiven-dev/haiven-api/pull/869";
+        let leaf = format!("{parent}: #adversarial-pr");
+        let mut ledger = QueueClaimLedger::default();
+        ledger.claim(&leaf, "subagent:nostuck", 100, 3600);
+        let before = format!(
+            "<!-- agent:queue go -->\n- ### {parent}\n  - ~~#adversarial-pr~~\n  - 🟡 [#subagent:nostuck#1] #adversarial-pr\n<!-- /agent:queue -->\n"
+        );
+        let before_view = ClaimQueueView::from_content(&before).unwrap();
+        let stayed = ledger.follow_edits_in_view(100, &before_view);
+        assert!(stayed.followed.is_empty(), "{stayed:?}");
+        assert!(stayed.unfollowed_struck.is_empty(), "{stayed:?}");
+        assert_eq!(ledger.claims[0].identity, claim_identity(&leaf));
+        assert_eq!(ledger.claims[0].item_text, leaf);
+
+        let annotated_leaf = format!("{leaf} ⟦effect:2⟧");
+        let after = format!(
+            "<!-- agent:queue go -->\n- ### {parent}\n  - ~~#adversarial-pr~~\n  - 🟡 [#subagent:nostuck#1] #adversarial-pr ⟦effect:2⟧\n<!-- /agent:queue -->\n"
+        );
+        let followed =
+            ledger.follow_edits_in_view(101, &ClaimQueueView::from_content(&after).unwrap());
+        assert_eq!(
+            followed.followed,
+            vec![(leaf.clone(), annotated_leaf.clone())]
+        );
+        assert!(followed.unfollowed_struck.is_empty(), "{followed:?}");
+        assert_eq!(ledger.claims[0].identity, claim_identity(&annotated_leaf));
+        assert_eq!(ledger.claims[0].item_text, annotated_leaf);
+        assert_ne!(ledger.claims[0].identity, claim_identity("#adversarial-pr"));
     }
 
     /// `#queueeffectidentity`: duplicate nested commands retain their effect

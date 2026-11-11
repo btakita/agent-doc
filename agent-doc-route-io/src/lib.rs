@@ -9,6 +9,7 @@ pub mod admission_projection;
 pub mod authoritative_actor;
 pub mod authoritative_dispatch;
 pub mod busy_pane;
+pub mod claiming_shell;
 pub mod closeout_drain;
 pub mod command;
 pub mod diagnostics;

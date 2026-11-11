@@ -911,6 +911,43 @@ pub fn resolve_or_create_pane_dispatch_only(
                     false,
                 );
             }
+            if crate::claiming_shell::sole_live_claiming_shell_pane(tmux, file, winner, redundant) {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "route_dispatch_only_claiming_shell file={} pane={} sources={}",
+                        file_path,
+                        winner.pane_id,
+                        winner.source_summary()
+                    ),
+                );
+                bind_running_dispatch_target(tmux, session_id, &winner.pane_id, file_path)?;
+                rescue_target(&winner.pane_id);
+                return dispatch_only_reopen_existing_pane(
+                    tmux,
+                    file,
+                    pane,
+                    col_args,
+                    session_id,
+                    file_path,
+                    target_session,
+                    harness,
+                    created_panes,
+                    pending_prompt_context
+                        .as_ref()
+                        .map(|context| context.marker.as_str()),
+                    pending_prompt_context
+                        .as_ref()
+                        .map(|context| context.prompt_text.as_str()),
+                    true,
+                    true,
+                    false,
+                    &winner.pane_id,
+                    DispatchOnlyReopenDelivery::DirectPaneSubmit,
+                    dispatch_only_effects,
+                    true,
+                );
+            }
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
@@ -1403,24 +1440,54 @@ pub fn resolve_or_create_pane_with_auto_fix_retry(
                         );
                     }
                     SupervisorHealth::Unreachable | SupervisorHealth::NoSocket => {
-                        let provenance = pane_route_provenance(tmux, registered_pane);
-                        eprintln!(
-                            "[route] registered pane {} is alive but no actor/registered owner for {} was proven and supervisor is unavailable — deregistering stale entry and continuing recovery",
-                            registered_pane, file_path
-                        );
-                        agent_doc_ops_log_io::log_op(
+                        // `#shellstart`: keep the claiming shell. The dispatch
+                        // below launches `agent-doc start` in it. A pane that is
+                        // not that shell still drops the stale registration.
+                        if crate::claiming_shell::claiming_shell_needs_start(
+                            tmux,
                             file,
-                            &format!(
-                                "route_registered_pane_deregistered_no_live_owner file={} {}",
-                                file_path, provenance
-                            ),
-                        );
-                        let _ = deregister_dispatch_registration(file_path, session_id)?;
-                        stale_registration_cleared = true;
+                            registered_pane,
+                        ) {
+                            agent_doc_ops_log_io::log_op(
+                                file,
+                                &format!(
+                                    "route_registered_pane_claiming_shell file={} pane={} health={}",
+                                    file_path,
+                                    registered_pane,
+                                    supervisor_health.label(),
+                                ),
+                            );
+                        } else {
+                            let provenance = pane_route_provenance(tmux, registered_pane);
+                            eprintln!(
+                                "[route] registered pane {} is alive but no actor/registered owner for {} was proven and supervisor is unavailable — deregistering stale entry and continuing recovery",
+                                registered_pane, file_path
+                            );
+                            agent_doc_ops_log_io::log_op(
+                                file,
+                                &format!(
+                                    "route_registered_pane_deregistered_no_live_owner file={} {}",
+                                    file_path, provenance
+                                ),
+                            );
+                            let _ = deregister_dispatch_registration(file_path, session_id)?;
+                            stale_registration_cleared = true;
+                        }
                     }
                 },
             }
             if !stale_registration_cleared {
+                // `#shellstart`: launch before the ready probe. A bare shell is
+                // not busy and not ready, and the probe used to return without
+                // starting `agent-doc`.
+                crate::claiming_shell::ensure_claiming_shell_session(
+                    tmux,
+                    file,
+                    registered_pane,
+                    file_path,
+                    harness,
+                    false,
+                )?;
                 rescue_from_stash(
                     tmux,
                     registered_pane,
@@ -1575,6 +1642,44 @@ pub fn resolve_or_create_pane_with_auto_fix_retry(
     if let agent_doc_tmux::AssociatedPaneResolution::Selected { winner, redundant } =
         &associated_resolution
     {
+        if crate::claiming_shell::sole_live_claiming_shell_pane(tmux, file, winner, redundant) {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "route_associated_pane_claiming_shell file={} pane={} sources={}",
+                    file_path,
+                    winner.pane_id,
+                    winner.source_summary()
+                ),
+            );
+            bind_running_dispatch_target(tmux, session_id, &winner.pane_id, file_path)?;
+            let dispatch_start = dispatch_existing_managed_reopen(
+                tmux,
+                file,
+                session_id,
+                &winner.pane_id,
+                file_path,
+                harness,
+                effects.route_dispatch_effects,
+            )?;
+            let admission_pane = require_routed_admission_projection(
+                tmux,
+                file,
+                &winner.pane_id,
+                session_id,
+                file_path,
+                harness,
+                cycle_baseline.as_ref(),
+                pending_prompt_context
+                    .as_ref()
+                    .map(|context| context.marker.as_str()),
+                false,
+                dispatch_start,
+                crate::invocation::wait_for_ready_override(),
+                effects.route_admission_effects,
+            )?;
+            return Ok(admission_pane.unwrap_or_else(|| winner.pane_id.clone()));
+        }
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
@@ -1707,6 +1812,44 @@ pub fn resolve_or_create_pane_with_auto_fix_retry(
     if let agent_doc_tmux::AssociatedPaneResolution::Selected { winner, redundant } =
         &late_associated_resolution
     {
+        if crate::claiming_shell::sole_live_claiming_shell_pane(tmux, file, winner, redundant) {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "route_associated_pane_claiming_shell_late file={} pane={} sources={}",
+                    file_path,
+                    winner.pane_id,
+                    winner.source_summary()
+                ),
+            );
+            bind_running_dispatch_target(tmux, session_id, &winner.pane_id, file_path)?;
+            let dispatch_start = dispatch_existing_managed_reopen(
+                tmux,
+                file,
+                session_id,
+                &winner.pane_id,
+                file_path,
+                harness,
+                effects.route_dispatch_effects,
+            )?;
+            let admission_pane = require_routed_admission_projection(
+                tmux,
+                file,
+                &winner.pane_id,
+                session_id,
+                file_path,
+                harness,
+                cycle_baseline.as_ref(),
+                pending_prompt_context
+                    .as_ref()
+                    .map(|context| context.marker.as_str()),
+                false,
+                dispatch_start,
+                crate::invocation::wait_for_ready_override(),
+                effects.route_admission_effects,
+            )?;
+            return Ok(admission_pane.unwrap_or_else(|| winner.pane_id.clone()));
+        }
         agent_doc_ops_log_io::log_op(
             file,
             &format!(

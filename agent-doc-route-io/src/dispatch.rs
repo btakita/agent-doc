@@ -485,6 +485,12 @@ pub fn dispatch_existing_managed_reopen(
     harness: &HarnessConfig,
     effects: RouteDispatchEffects,
 ) -> Result<RoutedDispatchStartProof> {
+    // `#shellstart`: a deleted supervisor socket used to bail with "run
+    // agent-doc start" while the claiming pane sat at a shell. Start it here
+    // when no session is already running, then dispatch.
+    crate::claiming_shell::ensure_claiming_shell_session(
+        tmux, file, pane, file_path, harness, false,
+    )?;
     dispatch_via_supervisor_ipc(tmux, file, pane, session_id, file_path, harness, effects)
 }
 

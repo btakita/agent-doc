@@ -1133,7 +1133,10 @@ portable agent-doc fallback:
   reported receipt remains, a leftover cell, whether in committed exchange
   history or a retained outbox target, is stale residue for
   `queue repair-stale-completion`, and the binary-owned prune of that struck
-  row is cleanup, never an operator deletion of owned work. Live 2026-10-28: a
+  row is cleanup, never an operator deletion of owned work. This cleanup does
+  not apply to a queue marked `keep` (or `loop`, which retains for the same
+  reason): agent-doc may strike a completed row there and must not delete it;
+  only the operator may (`#keepqueueitems`). Live 2026-10-28: a
   closeout whose `queue_consume` write timed out at the editor delivery barrier
   (`queue_write_retained_delivery_awaited landed=false`) still settled as
   committed; the committed document carried the queue strike but not the cell

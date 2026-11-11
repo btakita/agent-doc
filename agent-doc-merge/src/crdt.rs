@@ -1694,17 +1694,10 @@ fn reconcile_component(
     let (theirs_open, theirs_body, theirs_close) = component_framing(theirs_text)?;
     let base_framing = base_text.and_then(component_framing);
     let base_body = base_framing.map(|(_, b, _)| b);
-
-    let merged_body = reconcile_component_body(name, base_body, ours_body, theirs_body)?;
-    // `#qmarkerauth`: the component marker (`<!-- agent:name attrs -->` and its
-    // closing counterpart) carries OPERATOR-authored configuration — priority /
-    // preset / `go` / queue activation and any custom attributes. It is
-    // operator-owned, so reconcile it operator-authoritatively: an operator
-    // attribute edit on `theirs` (the live editor / disk side) must never be
-    // reverted to `ours`' marker. Previously this unconditionally re-framed with
-    // `ours_open`/`ours_close`, so adding an attribute to `agent:queue` was silently
-    // deleted on the next merge. Mirrors frontmatter field-wise authority
-    // (`#fmreset`) and the list-order theirs-spine (`#qauthorder`).
+    // `#qmarkerauth` / `#keepqueueitems`: the marker is operator-owned, and a
+    // `keep` or `loop` marker means the operator's rows are not agent-deletable.
+    // Resolve the marker before the body so an empty agent body cannot flat-merge
+    // those rows away.
     let merged_open = reconcile_marker_operator_authoritative(
         base_framing.map(|(o, _, _)| o),
         ours_open,
@@ -1715,7 +1708,207 @@ fn reconcile_component(
         ours_close,
         theirs_close,
     );
+    let retain_operator_items = name == "queue" && marker_retains_queue_items(merged_open);
+    if retain_operator_items && split_list_children(ours_body).is_none() {
+        // An empty agent body does not split, so the flat merge would treat the
+        // omission as a deletion. Rebuild from the operator body instead.
+        let body = project_retained_operator_body(base_body, theirs_body);
+        return Some(format!("{merged_open}{body}{merged_close}"));
+    }
+
+    let merged_body = reconcile_component_body(
+        name,
+        base_body,
+        ours_body,
+        theirs_body,
+        retain_operator_items,
+    )?;
     Some(format!("{merged_open}{merged_body}{merged_close}"))
+}
+
+/// Whether this queue marker forbids agent-doc from deleting rows
+/// (`#keepqueueitems`).
+///
+/// Same presence rule as
+/// [`agent_doc_queue::queue_schedule::queue_retains_struck_heads`]: bare `keep`
+/// or `loop`, including `keep=true`. `keeps` is not `keep`. `marker_or_attrs`
+/// may be a full opener (a heading-anchored `<!-- agent:run … -->` line
+/// included) or the attribute blob alone.
+pub(crate) fn marker_retains_queue_items(marker_or_attrs: &str) -> bool {
+    let attrs = agent_doc_element::element::parse_attrs(marker_attr_text(marker_or_attrs));
+    if attrs.contains_key("keep") || attrs.contains_key("loop") {
+        return true;
+    }
+    // `<!-- agent:loop -->` retains by its component spelling. The overlay
+    // injects a `loop` attribute; the raw opener often has none. `keeps` is
+    // not `keep` and is not this name.
+    marker_component_name(marker_or_attrs) == Some("loop")
+}
+
+fn marker_attr_text(marker_or_attrs: &str) -> &str {
+    let line = marker_or_attrs.lines().next().unwrap_or(marker_or_attrs);
+    let comment = line
+        .find("<!--")
+        .map(|start| &line[start..])
+        .unwrap_or(line);
+    let comment = comment.trim();
+    let Some(inner) = comment
+        .strip_prefix("<!--")
+        .and_then(|rest| rest.trim().strip_suffix("-->"))
+    else {
+        return line.trim();
+    };
+    let rest = inner.trim().strip_prefix("agent:").unwrap_or(inner.trim());
+    rest.split_once(char::is_whitespace)
+        .map(|(_, attrs)| attrs.trim())
+        .unwrap_or("")
+}
+
+fn marker_component_name(marker_or_attrs: &str) -> Option<&str> {
+    let line = marker_or_attrs.lines().next().unwrap_or(marker_or_attrs);
+    let comment = line
+        .find("<!--")
+        .map(|start| &line[start..])
+        .unwrap_or(line);
+    let inner = comment
+        .trim()
+        .strip_prefix("<!--")?
+        .trim()
+        .strip_suffix("-->")?
+        .trim();
+    let rest = inner.strip_prefix("agent:")?.trim();
+    let name = rest
+        .split_once(char::is_whitespace)
+        .map(|(name, _)| name)
+        .unwrap_or(rest);
+    let name = name.strip_prefix('/').unwrap_or(name);
+    (!name.is_empty()).then_some(name)
+}
+
+/// Text to keep when the agent omitted a queue row on a `keep` or `loop` queue.
+///
+/// Byte-identical operator text is the row. A stale lifecycle projection of a
+/// struck base row is not an operator delete: the struck base row stays. A bare
+/// unstrike and a decoration-only re-key (GH #74) return `None` so the ordinary
+/// rules still apply. Only the operator may delete a kept row.
+pub(crate) fn retained_queue_row_after_agent_omission<'a>(
+    base: &'a str,
+    theirs: &'a str,
+) -> Option<&'a str> {
+    if theirs == base {
+        return Some(theirs);
+    }
+    if stale_lifecycle_projection_of_struck_row(theirs, base) {
+        return Some(base);
+    }
+    None
+}
+
+/// Whether `theirs` is an unstruck lifecycle projection of the struck row `base`
+/// (`#queuerowworkidentity`). A bare unstrike has no projection prefix and does
+/// not match, so a real operator revive stays an operator edit.
+fn stale_lifecycle_projection_of_struck_row(theirs: &str, base: &str) -> bool {
+    let base_lines: Vec<&str> = base.lines().collect();
+    let theirs_lines: Vec<&str> = theirs.lines().collect();
+    let (Some(base_line), Some(theirs_line)) = (base_lines.first(), theirs_lines.first()) else {
+        return false;
+    };
+    if base_lines.get(1..) != theirs_lines.get(1..) {
+        return false;
+    }
+    let base_payload = list_payload(base_line);
+    let theirs_payload = list_payload(theirs_line);
+    let base_body = strip_queue_heading_token(base_payload);
+    let (base_struck, base_inner) = split_strike_wrapper(base_body);
+    if !base_struck {
+        return false;
+    }
+    let base_inner = strip_queue_heading_token(base_inner);
+    let theirs_body = strip_queue_heading_token(theirs_payload);
+    let (theirs_struck, _) = split_strike_wrapper(theirs_body);
+    if theirs_struck {
+        return false;
+    }
+    let theirs_work = agent_doc_element_queue::strip_attempt_projection_prefix(theirs_body);
+    if theirs_work == theirs_body.trim() {
+        return false;
+    }
+    let base_work = agent_doc_element_queue::strip_attempt_projection_prefix(base_inner.trim());
+    theirs_work.trim() == base_work.trim()
+}
+
+fn list_payload(line: &str) -> &str {
+    let trimmed = line.trim();
+    trimmed
+        .strip_prefix("- ")
+        .or_else(|| trimmed.strip_prefix("* "))
+        .unwrap_or(trimmed)
+        .trim()
+}
+
+fn strip_queue_heading_token(body: &str) -> &str {
+    let body = body.trim();
+    match body.strip_prefix("###") {
+        Some(rest) if rest.chars().next().is_some_and(char::is_whitespace) => rest.trim(),
+        _ => body,
+    }
+}
+
+/// `(struck, inner)` for a bare `~~text~~` row or an annotated
+/// `~~text~~ — auto-struck: …` row. Heading tokens are stripped by the caller.
+fn split_strike_wrapper(body: &str) -> (bool, &str) {
+    let Some(inner_with_tail) = body.strip_prefix("~~") else {
+        return (false, body);
+    };
+    if let Some(inner) = inner_with_tail.strip_suffix("~~")
+        && !inner.is_empty()
+    {
+        return (true, inner.trim());
+    }
+    let needle = format!(
+        "~~{}",
+        agent_doc_markdown_ast::overlay::STRUCK_ANNOTATION_SEPARATOR
+    );
+    if let Some(close) = inner_with_tail.find(&needle) {
+        let inner = inner_with_tail[..close].trim();
+        if !inner.is_empty() {
+            return (true, inner);
+        }
+    }
+    (false, body)
+}
+
+/// Operator body to keep when the agent side does not split into list rows.
+///
+/// Each operator row the base still has is kept when
+/// [`retained_queue_row_after_agent_omission`] says so (byte-identical, or the
+/// struck base under a stale unstrike). A real operator edit or add is kept as
+/// the operator wrote it. A row the operator removed is absent here, so it stays
+/// deleted.
+fn project_retained_operator_body(base_body: Option<&str>, theirs_body: &str) -> String {
+    let Some(theirs_children) = split_list_children(theirs_body) else {
+        return theirs_body.to_string();
+    };
+    let base_children = base_body.and_then(split_list_children).unwrap_or_default();
+    if !keys_unique(&theirs_children) || !keys_unique(&base_children) {
+        return theirs_body.to_string();
+    }
+    let base_by_key: std::collections::HashMap<&str, &str> = base_children
+        .iter()
+        .map(|child| (child.key.as_str(), child.text.as_str()))
+        .collect();
+    let mut out = String::new();
+    for child in &theirs_children {
+        match base_by_key.get(child.key.as_str()) {
+            Some(base) => {
+                let kept = retained_queue_row_after_agent_omission(base, &child.text)
+                    .unwrap_or(&child.text);
+                out.push_str(kept);
+            }
+            None => out.push_str(&child.text),
+        }
+    }
+    out
 }
 
 /// Merge one aligned component (`ours`/`theirs` are the full framed slices).
@@ -1796,6 +1989,7 @@ fn reconcile_component_body(
     base_body: Option<&str>,
     ours_body: &str,
     theirs_body: &str,
+    retain_operator_items: bool,
 ) -> Option<String> {
     let split = |b: &str| -> Option<Vec<KeyedChild>> {
         if name == "exchange" {
@@ -2001,13 +2195,23 @@ fn reconcile_component_body(
             // Present only in theirs: insert by theirs, or delete by ours.
             (None, Some(t)) => match in_b {
                 None => Some(t.text.clone()),
+                // `#keepqueueitems`: the operator still has this row. An agent
+                // omission is not a deletion on a `keep` or `loop` queue.
+                Some(b)
+                    if retain_operator_items
+                        && let Some(kept) =
+                            retained_queue_row_after_agent_omission(&b.text, &t.text) =>
+                {
+                    Some(kept.to_string())
+                }
                 // GH #74: a list child whose theirs-side change is decoration
                 // only (a priority/pin marker or strike, same instruction text)
                 // carries no operator content, so it cannot veto ours' delete.
                 // An operator edit of an agent-annotated free-text item re-keys
                 // it (delete-old + insert-new on the side carrying the edit);
                 // resurrecting the decorated old child forked the item into two
-                // divergent copies.
+                // divergent copies. A byte-identical kept row is handled above
+                // and is not this re-key.
                 Some(b)
                     if lifecycle_governed
                         && queue_instruction_text(&t.text) == queue_instruction_text(&b.text) =>
@@ -5952,9 +6156,14 @@ Second answer line three.
         );
         let base_queue = queue_component_bodies(&base);
         let theirs_queue = queue_component_bodies(&theirs);
-        let reconciled =
-            reconcile_component_body("queue", Some(base_queue[0]), ours_queue[0], theirs_queue[0])
-                .unwrap();
+        let reconciled = reconcile_component_body(
+            "queue",
+            Some(base_queue[0]),
+            ours_queue[0],
+            theirs_queue[0],
+            false,
+        )
+        .unwrap();
         assert!(
             reconciled.contains(&expected),
             "keyed component reconciliation prepended generated response metadata:\n{reconciled}"
@@ -6168,8 +6377,9 @@ Second answer line three.
         let body_base = "\n- do [#left]\n- do [#right]\n";
         let body_ours = "\n- do [#left]\n- agent note\n- do [#right]\n";
         let body_theirs = "\n- do [#left]\n- do [#right]\n- operator note\n";
-        let merged = reconcile_component_body("queue", Some(body_base), body_ours, body_theirs)
-            .expect("queue should reconcile");
+        let merged =
+            reconcile_component_body("queue", Some(body_base), body_ours, body_theirs, false)
+                .expect("queue should reconcile");
         assert!(merged.contains("agent note"), "{merged}");
         assert!(merged.contains("operator note"), "{merged}");
     }
@@ -6684,7 +6894,7 @@ Second answer line three.
         let base = "- 🚧 review it. verify it.\n";
         let ours = "- 🚧 review it. verify it. Edit the review.\n";
         let theirs = "- review it. verify it.\n";
-        let merged = reconcile_component_body("queue", Some(base), ours, theirs).unwrap();
+        let merged = reconcile_component_body("queue", Some(base), ours, theirs, false).unwrap();
         assert_eq!(merged, "- 🚧 review it. verify it. Edit the review.\n");
     }
 

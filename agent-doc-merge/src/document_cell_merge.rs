@@ -28,6 +28,7 @@
 //! | present | edited | edited (diff text) | [`OutcomeKind::OperatorWonConflict`] + advisory |
 //! | present | edited/struck | deleted | [`OutcomeKind::DeletionKept`] + advisory |
 //! | present | deleted (struck/absent) | edited | [`OutcomeKind::OperatorRevived`] + advisory |
+//! | present, `keep`/`loop` queue | deleted | unchanged | [`OutcomeKind::Keep`] (`#keepqueueitems`; only the operator may delete) |
 //! | absent | added | absent | [`OutcomeKind::AppliedAgentAdd`] |
 //! | absent | absent | added | [`OutcomeKind::AppliedOperatorAdd`] |
 //! | absent | added | added (diff ids) | [`OutcomeKind::AppliedBothAdd`] |
@@ -36,7 +37,10 @@
 //! "edited" means the item's `text` **or** any of its `struck` / `pinned` /
 //! `agent_pinned` flags differ from base. A `struck:true` node is *present-but-
 //! struck* (a flag edit), **not** deleted; a DELETE means the id is gone entirely
-//! from that side's component.
+//! from that side's component. On a queue marked `keep` or `loop`
+//! (`#keepqueueitems`), an agent deletion of a row the operator left unchanged
+//! does not apply: the operator row stays, and a stale unstrike projection of a
+//! struck base row keeps that struck row. An operator deletion still stands.
 //!
 //! ## Frontmatter
 //!
@@ -719,6 +723,15 @@ fn find_item<'a>(comp: Option<&'a Component>, id: &str) -> Option<&'a Item> {
     comp?.items.iter().find(|i| i.id == id)
 }
 
+/// Whether this queue forbids agent-doc from deleting rows (`#keepqueueitems`).
+///
+/// Same presence rule as
+/// [`agent_doc_queue::queue_schedule::queue_retains_struck_heads`]: bare `keep`
+/// or `loop`, including the `agent:loop` spelling. `keeps` is not `keep`.
+fn component_retains_queue_items(comp: &Component) -> bool {
+    comp.name == "queue" && crate::crdt::marker_retains_queue_items(&comp.attrs)
+}
+
 /// The identity a component is paired by across `base`, `ours`, and `theirs`.
 ///
 /// A component is the same component on two sides when its projected overlay
@@ -941,6 +954,7 @@ fn merge_component_item_slots(
     advisories: &mut Vec<MergeConflictAdvisory>,
 ) -> Vec<(Option<usize>, String)> {
     let mut lines: Vec<(Option<usize>, String)> = Vec::new();
+    let retain_operator_items = component_retains_queue_items(theirs_comp);
 
     // 1. Walk operator items in operator order — they are the layout skeleton.
     for (t_index, t_item) in theirs_comp.items.iter().enumerate() {
@@ -963,7 +977,16 @@ fn merge_component_item_slots(
             continue;
         }
         if o_item.is_none() && b_item.is_some_and(|b| stale_projection_of_struck_row(t_item, b)) {
-            record(outcomes, name, id, OutcomeKind::AppliedAgentEdit);
+            if retain_operator_items {
+                // The editor's unstrike is a stale projection, not an operator
+                // delete. On a keep queue the struck base row is history.
+                if let Some(b) = b_item {
+                    lines.push((Some(t_index), item_line(b)));
+                    record(outcomes, name, id, OutcomeKind::Keep);
+                }
+            } else {
+                record(outcomes, name, id, OutcomeKind::AppliedAgentEdit);
+            }
             continue;
         }
 
@@ -1027,6 +1050,13 @@ fn merge_component_item_slots(
                             "{name} `{id}`: agent removed it but operator edited it — operator's version kept (revived)"
                         ),
                     });
+                } else if retain_operator_items {
+                    // `#keepqueueitems`: the operator still has this row. An
+                    // agent omission is not a deletion. Only the operator may
+                    // delete it.
+                    let _ = b;
+                    lines.push((Some(t_index), item_line(t_item)));
+                    record(outcomes, name, id, OutcomeKind::Keep);
                 } else {
                     // Agent deleted, operator unchanged → honor the deletion.
                     // Omit the line; record as an applied agent edit (deletion).

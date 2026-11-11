@@ -1370,8 +1370,19 @@ fn apply_claude_stop_with_drain_readiness(
     // consulted: looping a retained write re-answers an answered head.
     let cycle = agent_doc_cycle_state_io::load(&file)?;
     if cycle.as_ref().is_some_and(|cycle| cycle.is_open()) {
-        if let Some(continuation) = transient_turn_end_continuation(&file)? {
-            return Ok(Some(continuation));
+        // `#transientcloseout` on an open cycle consults the disk only before
+        // a response exists. `PreflightStarted` has no captured response, so a
+        // visible `🚧` is live work. `ResponseCaptured` is the retained write:
+        // preflight's `🚧` is still on the head, and refusing here blocks the
+        // agent from reporting the failed closeout (`#stopneedsclosedcycle`).
+        // A later open phase has landed the write or is still this same allow.
+        if cycle
+            .as_ref()
+            .is_some_and(|cycle| cycle.phase == agent_doc_turn::CyclePhase::PreflightStarted)
+        {
+            if let Some(continuation) = transient_turn_end_continuation(&file)? {
+                return Ok(Some(continuation));
+            }
         }
         agent_doc_ops_log_io::log_op(
             &file,
@@ -1387,13 +1398,12 @@ fn apply_claude_stop_with_drain_readiness(
     // `cycle-1790898286195` with no response, the operator's trigger was refused,
     // and this hook still forbade the final answer and ordered a `/loop` that
     // could only hit the same refusal. The operator must hear the refusal.
+    // This path stays an allow. A transient glyph on the disk mirror is not a
+    // reason to withhold that report.
     if cycle
         .as_ref()
         .is_some_and(|cycle| cycle.response_sha256.is_none())
     {
-        if let Some(continuation) = transient_turn_end_continuation(&file)? {
-            return Ok(Some(continuation));
-        }
         agent_doc_ops_log_io::log_op(
             &file,
             "claude_stop_queue_continuation_skipped reason=run_captured_no_response action=allow_final_answer",
@@ -10837,6 +10847,64 @@ agent: grok
             .unwrap()
             .is_none(),
             "a retained write is a failed closeout: the agent must be free to report it"
+        );
+    }
+
+    /// `#stopneedsclosedcycle`: the same retained write with preflight's `🚧`
+    /// still on the head. The glyph is the disk mirror the write has not
+    /// updated. Refusing it would hide the failed closeout. `PreflightStarted`
+    /// still refuses, and a later Stop on the captured cycle still allows.
+    #[test]
+    fn claude_stop_retained_write_with_running_glyph_still_allows_the_report() {
+        let dir = setup_project();
+        let doc = write_auto_queue_doc(&dir, &["🚧 fix the next queue item"]);
+        init_git_repo(dir.path(), &doc);
+        track_doc(&dir, &doc, "");
+        agent_doc_queue_io::queue_continuation::reconcile_marker(&doc, "session-check")
+            .expect("continuation required");
+
+        let original = std::fs::read_to_string(&doc).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(&original), Some(&original)).unwrap();
+        let input = ClaudeStopInput {
+            session_id: "codex-session".to_string(),
+            cwd: dir.path().display().to_string(),
+            stop_hook_active: false,
+            transcript_path: None,
+            reason: None,
+            subagent_type: None,
+        };
+        let preflight = apply_claude_stop(&input)
+            .unwrap()
+            .expect("PreflightStarted with a visible 🚧 keeps the turn open");
+        assert!(
+            preflight.reason.contains("normal closeout refused"),
+            "{}",
+            preflight.reason
+        );
+        assert!(
+            preflight.reason.contains("🚧 fix the next queue item"),
+            "{}",
+            preflight.reason
+        );
+
+        agent_doc_cycle_state_io::mark_response_captured(
+            &doc,
+            "response_captured",
+            Some(&original),
+            Some(&original),
+            "response-sha",
+            None,
+        )
+        .unwrap();
+        assert!(
+            apply_claude_stop(&input).unwrap().is_none(),
+            "a retained write with a 🚧 head must let the agent report the failed closeout"
+        );
+        let mut recursive = input;
+        recursive.stop_hook_active = true;
+        assert!(
+            apply_claude_stop(&recursive).unwrap().is_none(),
+            "a later Stop on the same retained write must still allow the report"
         );
     }
 

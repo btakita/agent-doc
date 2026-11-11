@@ -667,10 +667,12 @@ and the pending granular-flags-only rule. This runbook carries the rest.
   transient queue row (`📥` `🟡` `🚧` `☑️` `⚠️` `⚠️🟡` `⚠️🚧` `⚠️☑️` `🔄` `❔`),
   end the turn quietly. A visible `🚧` or `⚠️🚧` row is not a quiet wait: finish
   the running worker, or continue the lost generation and retry it in this turn
-  if continue fails (`#transientcloseout`). The Stop hook blocks a genuine turn
-  end until those rows leave the transient set. Explicitly dependency/cap-held
-  rows that are not in that set may wait, and subagent completion notifications
-  resume the loop without polling or a scheduled re-entry.
+  if continue fails. A frozen `🚧` whose continue already failed authorizes a
+  new generation in the same turn (`#transientcloseout`). The Stop hook blocks
+  a genuine turn end until those rows leave the transient set. Explicitly
+  dependency/cap-held rows that are not in that set may wait, and subagent
+  completion notifications resume the loop without polling or a scheduled
+  re-entry.
 - If session-accretion supplies bounded context, use the included `### Re:`
   blocks as prompt-position anchors, not proof that older turns are absent.
 - Execute from the planning record. If `execution_scope=plan_backlog_only`, stay

@@ -57,7 +57,7 @@ pub fn owed_closeout_transition(marker: QueueLifecycleMarker) -> Option<&'static
             "start the claimed worker or otherwise leave claimed; a head that is only claimed means the turn is not over"
         }
         QueueLifecycleMarker::Running => {
-            "finish the running worker without converting the claim to Lost; a worker that is still running means the turn is not over"
+            "finish the running worker without converting the claim to Lost; a worker that is still running means the turn is not over; a frozen 🚧 whose continue already failed authorizes a new generation in the same turn"
         }
         QueueLifecycleMarker::Reported => {
             "integrate the report or otherwise leave the reported-but-open state"
@@ -203,6 +203,9 @@ mod tests {
         }
         assert!(failure.contains("finish the running worker without converting the claim to Lost"));
         assert!(failure.contains(
+            "a frozen 🚧 whose continue already failed authorizes a new generation in the same turn"
+        ));
+        assert!(failure.contains(
             "continue the same generation and worker; if continue fails, retry a new generation in this turn so the row leaves Lost"
         ));
         assert!(
@@ -289,6 +292,9 @@ mod tests {
             "{failure}"
         );
         assert!(failure.contains("finish the running worker without converting the claim to Lost"));
+        assert!(failure.contains(
+            "a frozen 🚧 whose continue already failed authorizes a new generation in the same turn"
+        ));
         assert!(failure.contains(
             "continue the same generation and worker; if continue fails, retry a new generation in this turn so the row leaves Lost"
         ));

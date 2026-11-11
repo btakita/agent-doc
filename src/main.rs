@@ -10298,21 +10298,47 @@ fn try_main() -> anyhow::Result<()> {
                         &file,
                         Some(requeue.claim.item_text.as_str()),
                     )?;
-                    eprintln!(
-                        "[queue] goal-loop hand-back for {:?} (owner {}, generation {}) does not begin with a declared final state ({}); the row stays open and the attempt was requeued, so it is dispatchable again (#goalpresetterminal). Next: {} and dispatch the same row; its brief carries this hand-back. Do not close the row until a response line begins with a declared final state.",
-                        requeue.claim.item_text,
-                        requeue.claim.owner,
-                        requeue.claim.generation,
-                        requeue.final_states.join(", "),
-                        agent_doc_queue_io::subagent_dispatch::claim_command(
-                            &file.display().to_string(),
-                            &requeue.claim.item_text,
-                        ),
-                    );
-                    emit_subagent_pool_refill(
-                        &file,
-                        agent_doc_queue::subagent_pool::PoolRefillTrigger::Release,
-                    );
+                    if requeue.answered_blocked_review {
+                        if requeue.suppress_immediate_refill {
+                            eprintln!(
+                                "[queue] operator order {:?} (owner {}, generation {}) handed back BLOCKED on a human review the preset already answers (#operatororderclosed). The row stays open. It is not an operator question. Address the review and resolve its threads. Do not dismiss it. Do not post another human review when the current head already has one. The pull-request response that says why the work is not progressing is already written; do not post it again.",
+                                requeue.claim.item_text,
+                                requeue.claim.owner,
+                                requeue.claim.generation,
+                            );
+                        } else {
+                            eprintln!(
+                                "[queue] operator order {:?} (owner {}, generation {}) handed back BLOCKED on a human review the preset already answers (#operatororderclosed). The row stays open. It is not an operator question. Address the review and resolve its threads. Do not dismiss it. Do not post another human review when the current head already has one. Still write the response on the pull request, and that response says why the work is not progressing. Next: {} and dispatch the same row.",
+                                requeue.claim.item_text,
+                                requeue.claim.owner,
+                                requeue.claim.generation,
+                                agent_doc_queue_io::subagent_dispatch::claim_command(
+                                    &file.display().to_string(),
+                                    &requeue.claim.item_text,
+                                ),
+                            );
+                            emit_subagent_pool_refill(
+                                &file,
+                                agent_doc_queue::subagent_pool::PoolRefillTrigger::Release,
+                            );
+                        }
+                    } else {
+                        eprintln!(
+                            "[queue] goal-loop hand-back for {:?} (owner {}, generation {}) does not begin with a declared final state ({}); the row stays open and the attempt was requeued, so it is dispatchable again (#goalpresetterminal). Next: {} and dispatch the same row; its brief carries this hand-back. Do not close the row until a response line begins with a declared final state.",
+                            requeue.claim.item_text,
+                            requeue.claim.owner,
+                            requeue.claim.generation,
+                            requeue.final_states.join(", "),
+                            agent_doc_queue_io::subagent_dispatch::claim_command(
+                                &file.display().to_string(),
+                                &requeue.claim.item_text,
+                            ),
+                        );
+                        emit_subagent_pool_refill(
+                            &file,
+                            agent_doc_queue::subagent_pool::PoolRefillTrigger::Release,
+                        );
+                    }
                     Ok(())
                 } else if let Some(pressure) =
                     queue_completion_feedback::requeue_prompt_pressure_hand_back(

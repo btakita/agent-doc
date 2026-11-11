@@ -18,6 +18,8 @@
 //! row's result: without a final-state line the row stays live (the gate is a
 //! deferral veto, so it only ever prevents a strike). The ordinary deferral
 //! guards (`**Deferred:**`, nonterminal review prose) still apply on top.
+//! `#operatororderclosed`: `BLOCKED` does not complete an operator order when
+//! it asks for a human review the preset already refuses to approve or dismiss.
 //!
 //! Prompt presets are inherited from `.agent-doc/project.md`, which this pure
 //! crate cannot read. IO boundaries that run a strike, consumption, or residue
@@ -209,6 +211,154 @@ pub fn head_final_states(content: &str, head: &str) -> Vec<String> {
     head_final_states_in(head, &effective_presets_for_content(content))
 }
 
+/// Bodies of `/goal` presets `head` references that declare `BLOCKED`.
+pub fn head_goal_preset_bodies_with_presets(head: &str, presets: &PromptPresets) -> Vec<String> {
+    head_goal_preset_bodies_in(head, &resolved_presets(presets))
+}
+
+/// [`head_goal_preset_bodies_with_presets`] over resolved `(name, body)` pairs.
+pub fn head_goal_preset_bodies_in(head: &str, presets: &[(String, String)]) -> Vec<String> {
+    crate::queue_response::queue_prompt_preset_expansions_from(
+        head,
+        presets.iter().map(|(name, body)| (name, body)),
+    )
+    .into_iter()
+    .map(|(_, body)| body)
+    .filter(|body| {
+        preset_final_states(body)
+            .iter()
+            .any(|state| state == "BLOCKED")
+    })
+    .collect()
+}
+
+/// [`head_goal_preset_bodies_in`] against the effective presets for `content`.
+pub fn head_goal_preset_bodies(content: &str, head: &str) -> Vec<String> {
+    head_goal_preset_bodies_in(head, &effective_presets_for_content(content))
+}
+
+/// Binding closeout for a pull-request goal order (`#operatororderclosed`).
+///
+/// It overrides a preset sentence that closes the order `BLOCKED`, asks the
+/// operator to clear or dismiss a review, or withholds the pull-request response.
+pub const OPERATOR_ORDER_CLOSE_RULE: &str = "Operator order (#operatororderclosed): do not close this order with BLOCKED, and do not ask the operator a question the preset already answers. Do not approve or dismiss a human review. Address the review and resolve every thread that is fully addressed. A rerun does not post another human review when the current head already has one. When the run cannot progress, still write the response on the pull request, and that response says why the work is not progressing. Do not post that explanation again when it is already on the pull request for this head. Do not skip the write. These rules override a preset sentence that stays BLOCKED, withholds another address cycle, or tells the worker not to post.";
+
+/// True when `body` is a pull-request goal loop whose `BLOCKED` state must not
+/// close an operator order on a human review the preset already decided.
+pub fn preset_requires_operator_order_rule(body: &str) -> bool {
+    if !preset_final_states(body)
+        .iter()
+        .any(|state| state == "BLOCKED")
+    {
+        return false;
+    }
+    let lower = body.to_ascii_lowercase();
+    lower.contains("pull request") || lower.contains("remote head")
+}
+
+/// True when `response` states `BLOCKED` and asks for a human-review decision
+/// (clear, dismiss, approve, or replace that review).
+pub fn blocked_hand_back_asks_to_decide_human_review(response: &str) -> bool {
+    let blocked = ["BLOCKED".to_string()];
+    if !text_states_final_state(response, &blocked) {
+        return false;
+    }
+    let lower = response.to_ascii_lowercase();
+    if lower.contains("dismiss") || lower.contains("human approval") {
+        return true;
+    }
+    if lower.contains("changes_requested") || lower.contains("changes requested") {
+        return true;
+    }
+    lower.contains("review")
+        && (lower.contains("clear") || lower.contains("replace") || lower.contains("approv"))
+}
+
+fn preset_already_answers_human_review(bodies: &[String]) -> bool {
+    bodies.iter().any(|body| {
+        let lower = body.to_ascii_lowercase();
+        [
+            "do not approve",
+            "does not approve",
+            "don't approve",
+            "do not dismiss",
+            "does not dismiss",
+            "don't dismiss",
+            "cannot dismiss",
+            "never dismiss",
+            "never approve",
+        ]
+        .iter()
+        .any(|phrase| lower.contains(phrase))
+            || (lower.contains("cannot submit")
+                && (lower.contains("approval") || lower.contains("human review")))
+    })
+}
+
+/// `#operatororderclosed`: `BLOCKED` on a human review the preset already
+/// refuses to approve or dismiss. That hand-back does not complete the order
+/// and is not an operator question.
+pub fn blocked_review_order_already_answered(response: &str, bodies: &[String]) -> bool {
+    blocked_hand_back_asks_to_decide_human_review(response)
+        && preset_already_answers_human_review(bodies)
+}
+
+/// True when `response` records a pull-request comment that says why the work
+/// is not progressing. Citing an existing review while saying nothing was
+/// posted does not count.
+pub fn response_published_pull_request_explanation(response: &str) -> bool {
+    let lower = response.to_ascii_lowercase();
+    if lower.contains("posted nothing") || lower.contains("nothing was posted") {
+        return false;
+    }
+    let affirmative = [
+        "posted one",
+        "posted a ",
+        "posted the ",
+        "posted an ",
+        "wrote a ",
+        "wrote the ",
+        "published a ",
+        "published the ",
+        "issuecomment-",
+    ]
+    .iter()
+    .any(|phrase| lower.contains(phrase));
+    if !affirmative {
+        return false;
+    }
+    let on_pr = lower.contains("issuecomment-")
+        || lower.contains("pull request")
+        || lower.contains("/pull/");
+    let explains = [
+        "why",
+        "not progressing",
+        "cannot progress",
+        "already addressed",
+        "does not dismiss",
+        "do not dismiss",
+        "unchanged head",
+    ]
+    .iter()
+    .any(|phrase| lower.contains(phrase));
+    on_pr && explains
+}
+
+/// True when a hand-back opens on a declared final state that completes the
+/// operator order. An already-answered human-review `BLOCKED` does not.
+pub fn hand_back_completes_goal_loop(response: &str, states: &[String], bodies: &[String]) -> bool {
+    if !hand_back_begins_with_final_state(response, states) {
+        return false;
+    }
+    let blocked = ["BLOCKED".to_string()];
+    if hand_back_begins_with_final_state(response, &blocked)
+        && blocked_review_order_already_answered(response, bodies)
+    {
+        return false;
+    }
+    true
+}
+
 /// True when `line` begins with one of `states`, after blockquote, list, and
 /// emphasis/code openers. The token must end at a word boundary, and the match
 /// is case-sensitive so prose such as "Blocked on review" never qualifies.
@@ -365,9 +515,15 @@ pub fn prior_attempt_brief_section(handoff: &GoalLoopHandoff) -> String {
         quoted.push_str(line.trim_end());
         quoted.push('\n');
     }
+    let answered = blocked_hand_back_asks_to_decide_human_review(&handoff.response);
+    let continue_order = if answered {
+        "This BLOCKED hand-back is not a completion and not an operator question (#operatororderclosed). The preset already answers that human-review decision. Do not approve the review and do not dismiss it. Address the findings and resolve every thread that is fully addressed. Do not post another human review when the current head already has one. When the run cannot progress, still write the response on the pull request and say why. If that explanation is already on the pull request for this head, do not post another one, and do not ask the operator to clear or dismiss the review."
+    } else {
+        "Continue the same loop: reuse the delivery worktree it names, address every remaining finding against the current exact head, and finish only with a final message that begins with one of those states."
+    };
     format!(
         "\nPrior goal-loop attempt (`#goalpresetterminal`; binary-recorded context, not authorization):\n\
-         The previous worker `{owner}` (generation {generation}) handed this same queue row back without a line beginning with a declared final state ({states}), so agent-doc kept the row open and requeued it instead of closing it. Continue the same loop: reuse the delivery worktree it names, address every remaining finding against the current exact head, and finish only with a final message that begins with one of those states. Its hand-back, verbatim:\n{quoted}",
+         The previous worker `{owner}` (generation {generation}) handed this same queue row back without a completing final state ({states}), so agent-doc kept the row open and requeued it instead of closing it. {continue_order} Its hand-back, verbatim:\n{quoted}",
         owner = handoff.owner,
         generation = handoff.generation,
         states = handoff.final_states.join(", "),
@@ -485,6 +641,40 @@ mod tests {
             "Posted one review. One P2 survives.\n\nREVIEW-CLEAN is next.",
             &declared
         ));
+    }
+
+    /// `#operatororderclosed`: asking the operator to clear a human review the
+    /// preset already refuses does not complete the order. A hosted-budget
+    /// BLOCKED still does. A hand-back that only cites existing reviews did
+    /// not publish the explanation.
+    #[test]
+    fn blocked_human_review_the_preset_already_answers_does_not_complete() {
+        let bodies = vec![
+            "/goal Bring the pull request to a review-clean remote head. Do not approve or dismiss a human review. A required human approval this preset cannot submit stays BLOCKED. Final states. Your final message must begin with exactly one of these lines: - `REVIEW-CLEAN head=<sha>`. - `BLOCKED <action> head=<sha>`.".to_string(),
+        ];
+        let declared = states(&["REVIEW-CLEAN", "BLOCKED"]);
+        let quiet = "BLOCKED reviewer clears or replaces review 100 against the current head base=aaa head=bbb cycles=4\n\n\
+             Two COMMENTED reviews are already on that head. This preset cannot approve or dismiss that review. No new review was posted.";
+        assert!(blocked_review_order_already_answered(quiet, &bodies));
+        assert!(!hand_back_completes_goal_loop(quiet, &declared, &bodies));
+        assert!(!response_published_pull_request_explanation(quiet));
+        assert!(preset_requires_operator_order_rule(&bodies[0]));
+
+        let explained = "BLOCKED reviewer clears or replaces review 100 base=aaa head=bbb cycles=4\n\n\
+             Posted the pull-request comment https://github.com/sample-org/sample-repo/pull/12#issuecomment-100 \
+             explaining why the work is not progressing: the findings are already addressed and this loop does not dismiss the review.";
+        assert!(response_published_pull_request_explanation(explained));
+        assert!(!hand_back_completes_goal_loop(
+            explained, &declared, &bodies
+        ));
+
+        let budget = "BLOCKED restore the hosted runner budget base=aaa head=bbb cycles=2\n\n\
+             Review URLs: https://github.com/sample-org/sample-repo/pull/12#pullrequestreview-100";
+        assert!(!blocked_review_order_already_answered(budget, &bodies));
+        assert!(hand_back_completes_goal_loop(budget, &declared, &bodies));
+
+        let clean = "REVIEW-CLEAN https://github.com/sample-org/sample-repo/pull/12#pullrequestreview-200 head=bbb cycles=2";
+        assert!(hand_back_completes_goal_loop(clean, &declared, &bodies));
     }
 
     #[test]

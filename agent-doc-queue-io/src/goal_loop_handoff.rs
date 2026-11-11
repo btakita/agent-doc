@@ -2,8 +2,9 @@
 //!
 //! A queue row whose resolved `/goal` preset declares final states
 //! (`REVIEW-CLEAN ...`, `BLOCKED ...`) owns a whole review → fix → fresh-review
-//! loop. When its worker hands back without opening on a declared final state,
-//! the hand-back is an interrupted loop, not a completion. `queue
+//! loop. When its worker hands back without a completing final state, the
+//! hand-back is an interrupted loop, not a completion. An already-answered
+//! human-review `BLOCKED` does not complete (`#operatororderclosed`). `queue
 //! report-complete` then:
 //!
 //! 1. records the hand-back (the worker's delivery worktree and remaining
@@ -132,14 +133,23 @@ pub struct GoalLoopRequeue {
     pub claim: QueueClaim,
     /// The final states the row's preset declares.
     pub final_states: Vec<String>,
+    /// `#operatororderclosed`: skip the immediate pool refill. True only when
+    /// the hand-back is an already-answered human-review `BLOCKED` and the
+    /// pull-request response that says why is already written for this head.
+    pub suppress_immediate_refill: bool,
+    /// `#operatororderclosed`: the hand-back is `BLOCKED` on a human review the
+    /// preset already refuses to approve or dismiss.
+    pub answered_blocked_review: bool,
 }
 
 /// `#goalpresetterminal`: decide `queue report-complete` for a goal-loop row.
 ///
 /// Returns `Ok(None)` when the ordinary report path applies: `item` has no
 /// live subagent claim, its preset declares no final states, or `response`
-/// opens on a declared final state (which also retires the row's recorded
-/// hand-off). Otherwise the hand-back is an interrupted loop: it is recorded,
+/// opens on a declared final state that completes the order (which also
+/// retires the row's recorded hand-off). An already-answered human-review
+/// `BLOCKED` does not complete (`#operatororderclosed`). Otherwise the
+/// hand-back is an interrupted loop: it is recorded,
 /// the exact attempt is requeued so the same row is dispatchable again, and
 /// the requeued claim is returned. The caller reprojects the claim marker.
 pub fn requeue_nonterminal_hand_back(
@@ -166,10 +176,16 @@ pub fn requeue_nonterminal_hand_back(
     if final_states.is_empty() {
         return Ok(None);
     }
+    let bodies = agent_doc_queue::goal_preset_terminal::head_goal_preset_bodies_with_presets(
+        &claim.item_text,
+        &presets,
+    );
     let live = agent_doc_queue::queue_continuation::live_queue_head_identities(content);
-    if agent_doc_queue::goal_preset_terminal::hand_back_begins_with_final_state(
+    // `#operatororderclosed`: BLOCKED on a review the preset already answers stays open.
+    if agent_doc_queue::goal_preset_terminal::hand_back_completes_goal_loop(
         response,
         &final_states,
+        &bodies,
     ) {
         let identity = claim.identity.clone();
         mutate(file, |ledger| {
@@ -223,9 +239,19 @@ pub fn requeue_nonterminal_hand_back(
             requeued.item_text.trim().len(),
         ),
     );
+    let answered_blocked_review =
+        agent_doc_queue::goal_preset_terminal::blocked_review_order_already_answered(
+            response, &bodies,
+        );
+    let suppress_immediate_refill = answered_blocked_review
+        && agent_doc_queue::goal_preset_terminal::response_published_pull_request_explanation(
+            response,
+        );
     Ok(Some(GoalLoopRequeue {
         claim: requeued,
         final_states,
+        suppress_immediate_refill,
+        answered_blocked_review,
     }))
 }
 

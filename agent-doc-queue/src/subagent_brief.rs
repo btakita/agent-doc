@@ -924,6 +924,16 @@ fn render_preamble(
          scope, never broaden it, and route any harness-native permission through the request protocol.\n",
     );
     out.push_str(concat!("- ", subagent_handback_shape_rule!(), "\n"));
+    if auth.presets.iter().any(|preset| {
+        preset
+            .body
+            .as_deref()
+            .is_some_and(crate::goal_preset_terminal::preset_requires_operator_order_rule)
+    }) {
+        out.push_str("- ");
+        out.push_str(crate::goal_preset_terminal::OPERATOR_ORDER_CLOSE_RULE);
+        out.push('\n');
+    }
     out.push('\n');
     out.push_str(SUBAGENT_PROCEDURAL_CHOICE_RULE);
     out.push('\n');
@@ -992,6 +1002,33 @@ mod tests {
         assert!(p.contains("without asking the operator to repeat those words"));
         assert!(p.contains("does not itself grant a harness-native tool permission"));
         assert!(!p.contains(UNRESOLVED_AUTHORIZATION_MARKER));
+        assert!(
+            !p.contains("(#operatororderclosed)"),
+            "a non-goal preset must not carry the operator-order close rule"
+        );
+    }
+
+    #[test]
+    fn adversarial_order_brief_forbids_closing_blocked_on_a_human_review() {
+        let frontmatter = concat!(
+            "prompt_presets:\n",
+            "  '#adversarial-pr': >-\n",
+            "    /goal Bring the pull request to an independently review-clean remote head.\n",
+            "    Do not approve or dismiss a human review. A required human approval\n",
+            "    this preset cannot submit stays BLOCKED.\n",
+            "    Final states. Your final message must begin with exactly one of these lines:\n",
+            "    - `REVIEW-CLEAN head=<sha>`.\n",
+            "    - `BLOCKED <action> head=<sha>`.\n",
+        );
+        let item = "https://github.com/sample-org/sample-repo/pull/12: #adversarial-pr";
+        let content = doc(frontmatter, "subagents", &[item], &[]);
+        let auth = subagent_authorization("prs.md", &content, item);
+        let p = &auth.subagent_prompt_preamble;
+        assert!(p.contains("(#operatororderclosed)"), "{p}");
+        assert!(p.contains("Do not approve or dismiss a human review."));
+        assert!(p.contains("does not post another human review"));
+        assert!(p.contains("still write the response on the pull request"));
+        assert!(p.contains("says why the work is not progressing"));
     }
 
     #[test]

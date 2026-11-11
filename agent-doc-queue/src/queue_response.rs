@@ -2238,6 +2238,8 @@ pub fn response_defers_queue_head(content: &str, response_body: &str, head_text:
 /// A goal-like preset owns the whole review → fix → fresh-review loop. A
 /// posted review, a pushed fix, or any other phase result is a step, so only a
 /// declared final state (`REVIEW-CLEAN ...`, `BLOCKED ...`) lets the row close.
+/// `#operatororderclosed`: a `BLOCKED` line that asks for a human review the
+/// preset already refuses to approve or dismiss does not close the order.
 /// The cell runs from the echo to the next `### Re:` heading or queue-prompt
 /// echo. A text that never echoes the head is not a deferral of it (the head is
 /// simply unanswered). Returning `true` only ever prevents a strike.
@@ -2261,16 +2263,32 @@ pub fn latest_echo_cell_lacks_goal_final_state(content: &str, text: &str, head_t
     }) else {
         return false;
     };
-    let cell_states_final = blocks
+    let cell_end = blocks
         .iter()
         .enumerate()
-        .skip(index)
-        .take_while(|(offset, block)| *offset == index || !block_opens_response_cell(block))
-        .any(|(offset, block)| {
+        .skip(index + 1)
+        .find(|(_, block)| block_opens_response_cell(block))
+        .map(|(offset, _)| offset)
+        .unwrap_or(blocks.len());
+    let cell = blocks[index..cell_end].join("\n\n");
+    let bodies = crate::goal_preset_terminal::head_goal_preset_bodies(content, head_text);
+    let answered =
+        crate::goal_preset_terminal::blocked_review_order_already_answered(&cell, &bodies);
+    let blocked = ["BLOCKED".to_string()];
+    let cell_states_final = blocks[index..cell_end]
+        .iter()
+        .enumerate()
+        .any(|(delta, block)| {
             block.lines().any(|line| {
                 // The echo's own quote lines restate the head, not its result.
-                (offset != index || !line.trim_start().starts_with('>'))
-                    && crate::goal_preset_terminal::line_states_final_state(line, &states)
+                let states_line = (delta != 0 || !line.trim_start().starts_with('>'))
+                    && crate::goal_preset_terminal::line_states_final_state(line, &states);
+                if !states_line {
+                    return false;
+                }
+                // A BLOCKED human-review ask the preset already answers is not
+                // a completion. REVIEW-CLEAN in the same cell still is.
+                !(answered && crate::goal_preset_terminal::line_states_final_state(line, &blocked))
             })
         });
     !cell_states_final

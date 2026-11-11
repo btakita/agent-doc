@@ -207,6 +207,12 @@ pub fn queue_skip_diagnostic_for_response(content: &str, response: &str) -> Resu
         &queue_head,
     ) {
         let states = crate::goal_preset_terminal::head_final_states(content, &queue_head);
+        let bodies = crate::goal_preset_terminal::head_goal_preset_bodies(content, &queue_head);
+        if crate::goal_preset_terminal::blocked_review_order_already_answered(response, &bodies) {
+            return Ok(format!(
+                "[queue] kept operator order `{queue_head_display}` open. Its BLOCKED hand-back asks for a human review the preset already refuses to approve or dismiss, so the order is not closed and it is not an operator question (#operatororderclosed). Address the review and resolve its threads. Do not dismiss it. Do not post another human review when the current head already has one. Write the pull-request response that says why the work is not progressing."
+            ));
+        }
         return Ok(format!(
             "[queue] kept goal-loop head `{queue_head_display}` live because its preset declares final states ({}) and the response cell for its echo has no line that begins with one (#goalpresetterminal). A posted review or pushed fix is a step, not the row's result. Next: `agent-doc queue report-complete` requeues an interrupted worker attempt; redispatch the same row to continue the loop, and close it only with a response line that begins with a declared final state.",
             states.join(", ")

@@ -136,9 +136,15 @@ pub(crate) fn requeue_prompt_pressure_hand_back(
         &claim.item_text,
         &presets,
     );
-    if agent_doc_queue::goal_preset_terminal::hand_back_begins_with_final_state(
+    let bodies = agent_doc_queue::goal_preset_terminal::head_goal_preset_bodies_with_presets(
+        &claim.item_text,
+        &presets,
+    );
+    // `#operatororderclosed`: an already-answered human-review BLOCKED is not final.
+    if agent_doc_queue::goal_preset_terminal::hand_back_completes_goal_loop(
         response,
         &final_states,
+        &bodies,
     ) {
         return Ok(None);
     }
@@ -1613,6 +1619,8 @@ mod tests {
             .expect("a hand-back without a final state is an interrupted loop");
         assert_eq!(requeue.final_states, vec!["REVIEW-CLEAN", "BLOCKED"]);
         assert_eq!(requeue.claim.generation, 1);
+        assert!(!requeue.answered_blocked_review);
+        assert!(!requeue.suppress_immediate_refill);
 
         // The same row is open, undisturbed, and not duplicated; no completion
         // cell claims the loop finished.
@@ -1703,6 +1711,172 @@ mod tests {
         let reported = report_complete(&doc, ROW, Some(generation), None, None, clean)
             .expect("the final-state hand-back is reported normally");
         assert!(reported.appended);
+    }
+
+    /// `#operatororderclosed`: BLOCKED on a human review the preset already
+    /// refuses to approve or dismiss stays the same open row. It is not an
+    /// operator question, and it does not post another review. A later
+    /// hand-back that already wrote the pull-request explanation suppresses
+    /// the immediate refill. A runner-budget BLOCKED and REVIEW-CLEAN still
+    /// take the ordinary report path.
+    #[test]
+    fn blocked_human_review_the_preset_already_answers_stays_open() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        fs::write(
+            dir.path().join(".agent-doc/project.md"),
+            concat!(
+                "---\npresets:\n",
+                "  '#adversarial-pr': >-\n",
+                "    /goal Bring the pull request to an independently review-clean exact\n",
+                "    remote head. Do not approve or dismiss a human review. A required\n",
+                "    human approval this preset cannot submit stays BLOCKED and does not\n",
+                "    start another address cycle.\n\n",
+                "    Final states. Your final message must begin with exactly one of these\n",
+                "    lines:\n",
+                "    - `REVIEW-CLEAN <final review URL> base=<sha> head=<sha> cycles=<n>`.\n",
+                "    - `BLOCKED <single operator action> base=<sha> head=<sha> cycles=<n>`.\n",
+                "---\n",
+            ),
+        )
+        .unwrap();
+        let doc = dir.path().join("prs.md");
+        fs::write(
+            &doc,
+            concat!(
+                "---\nagent_doc_session: sample-prs\nagent_doc_format: template\n---\n\n",
+                "<!-- agent:exchange patch=append -->\n",
+                "### Re: prior — gpt-5\n\nDone.\n",
+                "<!-- agent:boundary:keep -->\n",
+                "<!-- /agent:exchange -->\n\n",
+                "<!-- agent:queue subagents -->\n",
+                "- https://github.com/sample-org/sample-repo/pull/12: #adversarial-pr\n",
+                "<!-- /agent:queue -->\n",
+            ),
+        )
+        .unwrap();
+        const ROW: &str = "https://github.com/sample-org/sample-repo/pull/12: #adversarial-pr";
+        start_subagent(&doc, ROW, "subagent:pr12-review1");
+        let quiet = concat!(
+            "BLOCKED reviewer clears or replaces review 1000000001 against the current head ",
+            "base=cccc333 head=bbbb222 cycles=2\n\n",
+            "Two COMMENTED reviews are already on head bbbb222. This preset cannot approve ",
+            "or dismiss that review. No new review was posted.",
+        );
+        let requeue = requeue_nonterminal_goal_hand_back(&doc, ROW, Some(1), quiet)
+            .unwrap()
+            .expect("an already-answered human-review BLOCKED stays open");
+        assert!(requeue.answered_blocked_review);
+        assert!(!requeue.suppress_immediate_refill);
+        assert_eq!(requeue.claim.generation, 1);
+        let content = fs::read_to_string(&doc).unwrap();
+        assert_eq!(
+            content.matches("pull/12: #adversarial-pr").count(),
+            1,
+            "{content}"
+        );
+        assert!(!content.contains("~~"), "{content}");
+        assert!(!content.contains("### Re: Subagent completed"), "{content}");
+
+        let (outcome, _) =
+            agent_doc_queue_io::queue_claim::claim(&doc, ROW, "subagent:pr12-review2", 600)
+                .expect("the requeued order is dispatchable again");
+        assert_eq!(
+            outcome,
+            agent_doc_queue::queue_claim::ClaimOutcome::Reassigned
+        );
+        let brief =
+            agent_doc_queue_io::subagent_dispatch::subagent_authorization_for_item(&doc, ROW)
+                .unwrap();
+        let preamble = brief.subagent_prompt_preamble.to_ascii_lowercase();
+        assert!(
+            preamble.contains("(#operatororderclosed)"),
+            "{}",
+            brief.subagent_prompt_preamble
+        );
+        assert!(
+            preamble.contains("do not dismiss"),
+            "{}",
+            brief.subagent_prompt_preamble
+        );
+
+        let generation = agent_doc_queue_io::queue_claim::load_ledger(&doc)
+            .unwrap()
+            .claims
+            .iter()
+            .find(|claim| claim.owner == "subagent:pr12-review2")
+            .map(|claim| claim.generation)
+            .unwrap();
+        agent_doc_queue_io::queue_claim::start_attempt(
+            &doc,
+            ROW,
+            "subagent:pr12-review2",
+            "worker:pr12-review2",
+            600,
+            generation,
+        )
+        .unwrap();
+        let explained = concat!(
+            "BLOCKED reviewer clears or replaces review 1000000001 ",
+            "base=cccc333 head=bbbb222 cycles=2\n\n",
+            "Posted the pull-request comment ",
+            "https://github.com/sample-org/sample-repo/pull/12#issuecomment-100 ",
+            "explaining why the work is not progressing. The findings are already ",
+            "addressed and this loop does not dismiss the review.",
+        );
+        let explained_requeue =
+            requeue_nonterminal_goal_hand_back(&doc, ROW, Some(generation), explained)
+                .unwrap()
+                .expect("the explained hand-back still does not close the order");
+        assert!(explained_requeue.answered_blocked_review);
+        assert!(explained_requeue.suppress_immediate_refill);
+        let content = fs::read_to_string(&doc).unwrap();
+        assert!(!content.contains("~~"), "{content}");
+        assert!(!content.contains("### Re: Subagent completed"), "{content}");
+
+        let (outcome, _) =
+            agent_doc_queue_io::queue_claim::claim(&doc, ROW, "subagent:pr12-review3", 600)
+                .unwrap();
+        assert_eq!(
+            outcome,
+            agent_doc_queue::queue_claim::ClaimOutcome::Reassigned
+        );
+        let generation = agent_doc_queue_io::queue_claim::load_ledger(&doc)
+            .unwrap()
+            .claims
+            .iter()
+            .find(|claim| claim.owner == "subagent:pr12-review3")
+            .map(|claim| claim.generation)
+            .unwrap();
+        agent_doc_queue_io::queue_claim::start_attempt(
+            &doc,
+            ROW,
+            "subagent:pr12-review3",
+            "worker:pr12-review3",
+            600,
+            generation,
+        )
+        .unwrap();
+        let budget = concat!(
+            "BLOCKED restore the hosted runner budget base=cccc333 head=bbbb222 cycles=2\n\n",
+            "Review URLs: https://github.com/sample-org/sample-repo/pull/12#pullrequestreview-100",
+        );
+        assert!(
+            requeue_nonterminal_goal_hand_back(&doc, ROW, Some(generation), budget)
+                .unwrap()
+                .is_none(),
+            "a runner-budget BLOCKED still completes"
+        );
+        let clean = concat!(
+            "REVIEW-CLEAN https://github.com/sample-org/sample-repo/pull/12#pullrequestreview-200 ",
+            "base=cccc333 head=bbbb222 cycles=3",
+        );
+        assert!(
+            requeue_nonterminal_goal_hand_back(&doc, ROW, Some(generation), clean)
+                .unwrap()
+                .is_none(),
+            "REVIEW-CLEAN still completes"
+        );
     }
 
     fn start_subagent(doc: &Path, row: &str, owner: &str) {

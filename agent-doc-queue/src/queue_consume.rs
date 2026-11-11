@@ -10555,7 +10555,9 @@ mod tests {
         "    independently review-clean exact remote head. Each cycle: 1. Review.\n",
         "    Start a fresh independent reviewer against the exact current head.\n",
         "    2. Decide. 3. Address. Start a separate fixer using #address.\n",
-        "    4. Fetch the newly published remote head and start the next cycle.\n\n",
+        "    4. Fetch the newly published remote head and start the next cycle.\n",
+        "    Do not approve or dismiss a human review. A required human approval\n",
+        "    this preset cannot submit is already answered.\n\n",
         "    Final states. Your final message must begin with exactly one of these\n",
         "    lines:\n",
         "    - `REVIEW-CLEAN <final review URL> base=<sha> head=<sha> cycles=<n>`.\n",
@@ -10716,6 +10718,16 @@ mod tests {
              Review URLs: https://github.com/sample-org/sample-repo/pull/12#pullrequestreview-1000000002",
         );
         assert!(goal_loop_row_strikes(&content, &blocked));
+        let answered_blocked = goal_loop_response(
+            "BLOCKED reviewer clears or replaces review 1000000001 against the current head \
+             base=cccc333 head=bbbb222 cycles=2\n\n\
+             Two COMMENTED reviews are already on head bbbb222. This preset cannot approve or \
+             dismiss that review. No new review was posted.",
+        );
+        assert!(
+            !goal_loop_row_strikes(&content, &answered_blocked),
+            "an already-answered human-review BLOCKED does not close the order"
+        );
 
         // The ordinary deferral guards still veto a final-state line.
         let deferred_clean = goal_loop_response(

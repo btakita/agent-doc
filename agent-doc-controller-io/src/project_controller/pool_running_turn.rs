@@ -11,6 +11,11 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
+use crate::live_turn_follow_up::{
+    current_steering_cycle_id, mark_live_turn_follow_up_queued,
+    refresh_outstanding_live_turn_follow_up, stage_live_turn_follow_up,
+};
+use agent_doc_controller::live_turn_follow_up::LiveTurnFollowUpSlot;
 use agent_doc_controller::pool_running_turn::{
     PoolRunningTurnFollowUpDecision, PoolRunningTurnFollowUpObservation,
     PoolRunningTurnFollowUpSkip, pool_running_turn_follow_up_decision,
@@ -36,6 +41,29 @@ fn hook_injects(harness: &str) -> bool {
 
 fn receipt_key(document_hash: &str) -> String {
     format!("{POOL_RUNNING_TURN_RECEIPT_KEY_PREFIX}:{document_hash}")
+}
+
+fn record_coalesced_refill(
+    file: &Path,
+    project_root: &Path,
+    pane: &str,
+    refill: &PoolRunningTurnRefill,
+) {
+    let recorded = record_receipt(file, project_root, &refill.fingerprint);
+    let fingerprint = refill.fingerprint.get(..12).unwrap_or(&refill.fingerprint);
+    let outcome = match recorded {
+        Ok(()) => format!(
+            "subagent_pool_running_turn_refill_coalesced file={} pane={pane} fingerprint={fingerprint} next_heads={} unstarted={} (#steercoalesce)",
+            file.display(),
+            refill.next_heads,
+            refill.unstarted,
+        ),
+        Err(err) => format!(
+            "subagent_pool_running_turn_refill_receipt_failed file={} fingerprint={fingerprint} error={err:#} (#subagentworkpool)",
+            file.display(),
+        ),
+    };
+    agent_doc_ops_log_io::log_op(file, &outcome);
 }
 
 fn queue_paused(conn: &state_store::Connection, project_root: &Path, file: &Path) -> Result<bool> {
@@ -275,6 +303,18 @@ impl PoolRunningTurnTick {
             else {
                 continue;
             };
+            // A quiet gap longer than the compact-token ceiling must not mint
+            // a second queue row for the cycle that is still running.
+            let now_ms = controller_model_pressure_now_secs().saturating_mul(1000);
+            if let Err(err) = refresh_outstanding_live_turn_follow_up(&file, now_ms) {
+                agent_doc_ops_log_io::log_op(
+                    &file,
+                    &format!(
+                        "live_turn_follow_up_refresh_failed file={} error={err:#} (#steercoalesce)",
+                        file.display(),
+                    ),
+                );
+            }
             let step = (|| -> Result<PoolRunningTurnObligation> {
                 let Some(content) = pool_heartbeat_document_text(&file)? else {
                     return Ok(PoolRunningTurnObligation::Skip(
@@ -311,9 +351,67 @@ impl PoolRunningTurnTick {
                 }
                 continue;
             };
-            match paste_into_live_turn(&record.pane_id, &record.harness, &refill.text) {
+            let cycle = match current_steering_cycle_id(&file) {
+                Ok(cycle) => cycle.filter(|cycle| !cycle.trim().is_empty()),
+                Err(err) => {
+                    agent_doc_ops_log_io::log_op(
+                        &file,
+                        &format!(
+                            "subagent_pool_running_turn_refill_not_delivered file={} reason=cycle_unreadable error={err:#} (#steercoalesce)",
+                            file.display(),
+                        ),
+                    );
+                    continue;
+                }
+            };
+            // No steering cycle: paste the refill itself, as before this
+            // follow-up existed. With a cycle, the first Enter is the compact
+            // reference and every later snapshot updates that payload.
+            let queued_notice = if let Some(cycle) = cycle.as_deref() {
+                match stage_live_turn_follow_up(
+                    &file,
+                    cycle,
+                    LiveTurnFollowUpSlot::Pool,
+                    &refill.text,
+                    now_ms,
+                ) {
+                    Ok(staged) if staged.needs_queue_paste => Some(staged.notice),
+                    Ok(_) => {
+                        self.held.remove(&file);
+                        record_coalesced_refill(&file, &project_root, &record.pane_id, &refill);
+                        continue;
+                    }
+                    Err(err) => {
+                        agent_doc_ops_log_io::log_op(
+                            &file,
+                            &format!(
+                                "subagent_pool_running_turn_refill_not_delivered file={} reason=stage_failed error={err:#} (#steercoalesce)",
+                                file.display(),
+                            ),
+                        );
+                        continue;
+                    }
+                }
+            } else {
+                Some(refill.text.clone())
+            };
+            let Some(text) = queued_notice else {
+                continue;
+            };
+            match paste_into_live_turn(&record.pane_id, &record.harness, &text) {
                 PasteOutcome::Delivered => {
                     self.held.remove(&file);
+                    if let Some(cycle) = cycle.as_deref()
+                        && let Err(err) = mark_live_turn_follow_up_queued(&file, cycle)
+                    {
+                        agent_doc_ops_log_io::log_op(
+                            &file,
+                            &format!(
+                                "live_turn_follow_up_mark_failed file={} cycle={cycle} error={err:#} (#steercoalesce)",
+                                file.display(),
+                            ),
+                        );
+                    }
                     let recorded = record_receipt(&file, &project_root, &refill.fingerprint);
                     let fingerprint = refill.fingerprint.get(..12).unwrap_or(&refill.fingerprint);
                     let outcome = match recorded {

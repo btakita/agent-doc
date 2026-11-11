@@ -1202,6 +1202,12 @@ the dispatch actor and produce receipts.
   `actor_turn_busy`. Automated command kinds stay `actor_turn_busy` too. The
   steering row is `completed`, so it does not pin in-flight trigger
   backpressure after the pane is idle.
+- Agent-prompt items for that same running turn (a hookless pool refill
+  paste) and the steering prompt are one follow-up (`#steercoalesce`). The
+  first composer submit is the compact steering reference. A later pool
+  snapshot or steering diff updates that reference's payload and does not
+  Enter another queue row while the reference is unconsumed. Claimed-row
+  cancellation is unchanged.
 - When the session document records `dispatch=actor_turn_busy` in `<!-- agent-doc:blocker-disregard ... -->` (`#blockerdisregard`) and the pane reason does not contain a permission prompt, a live `actor_turn_busy` cue still returns `Blocked` and still does not inject, but its user-facing outcome is `queued_behind_owner` / `wait_for_owner_turn_to_drain` (the same fields as `actor_busy_draining`) instead of `resume_or_clear_queue_control`. A permission-prompt reason, a deliberate `queue_paused` pause, and `actor_turn_observation_unavailable` keep their existing outcomes.
 - That pane observation is bounded and load-aware (`#recoverableautoretry`,
   `#ctlprobeloadbudget`). Only a tmux *timeout* is re-read (any other capture

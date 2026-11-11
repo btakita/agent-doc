@@ -1463,6 +1463,7 @@ fn compose_occurrence(
     ours: &ComponentOccurrence,
     theirs: &ComponentOccurrence,
     policy: ConflictPolicy,
+    retain_operator_items: bool,
 ) -> Option<ComposedOccurrence> {
     let aligned = if ours.component == "exchange" {
         None
@@ -1627,7 +1628,15 @@ fn compose_occurrence(
                     && !in_b
                     && duplicate_primary_identity(id)
                         .is_some_and(|primary| theirs_map.contains_key(primary));
-                if (theirs_removed.contains(id) && authoritative_theirs_delete && !is_exchange)
+                // The unsplittable agent body is one placeholder cell. Restoring
+                // the operator's list rows must not weave that placeholder back.
+                let agent_body_placeholder = retain_operator_items
+                    && id
+                        .rsplit_once(':')
+                        .is_some_and(|(_, item_id)| item_id == "body")
+                    && o.trim().is_empty();
+                if agent_body_placeholder
+                    || (theirs_removed.contains(id) && authoritative_theirs_delete && !is_exchange)
                     || replayed_duplicate_omitted_by_operator
                 {
                     None
@@ -1637,21 +1646,32 @@ fn compose_occurrence(
             }
             // Present only in theirs: symmetric.
             (None, Some(t)) => {
-                // GH #74: a decoration-only theirs update (marker / strike, same
-                // instruction text) carries no operator content and cannot veto
-                // ours' delete — mirrors `crdt::reconcile_component_body`.
-                let theirs_update_is_decoration_only = lifecycle_governed
-                    && base_map.get(id).is_some_and(|base| {
-                        crate::crdt::queue_instruction_text(t)
-                            == crate::crdt::queue_instruction_text(base)
-                    });
-                if ours_removed.contains(id)
-                    && (!theirs_updated.contains(id) || theirs_update_is_decoration_only)
-                    && !is_exchange
-                {
-                    None
+                // `#keepqueueitems`: a byte-identical operator row, or the struck
+                // base under a stale unstrike, stays. GH #74 still drops a
+                // decoration-only re-key when this returns nothing.
+                let retained = retain_operator_items
+                    .then(|| base_map.get(id))
+                    .flatten()
+                    .and_then(|base| crate::crdt::retained_queue_row_after_agent_omission(base, t));
+                if let Some(kept) = retained {
+                    Some(kept.to_string())
                 } else {
-                    Some(t.clone())
+                    // GH #74: a decoration-only theirs update (marker / strike, same
+                    // instruction text) carries no operator content and cannot veto
+                    // ours' delete — mirrors `crdt::reconcile_component_body`.
+                    let theirs_update_is_decoration_only = lifecycle_governed
+                        && base_map.get(id).is_some_and(|base| {
+                            crate::crdt::queue_instruction_text(t)
+                                == crate::crdt::queue_instruction_text(base)
+                        });
+                    if ours_removed.contains(id)
+                        && (!theirs_updated.contains(id) || theirs_update_is_decoration_only)
+                        && !is_exchange
+                    {
+                        None
+                    } else {
+                        Some(t.clone())
+                    }
                 }
             }
             (None, None) => None,
@@ -2027,6 +2047,21 @@ pub fn merge_3way(base_doc: &str, ours_doc: &str, theirs_doc: &str) -> CellMerge
                 let base_framing = base_framing_by_key
                     .get(&(o_occ.component.clone(), o_occ.occurrence))
                     .copied();
+                // `#qmarkerauth` / `#keepqueueitems`: the marker is operator-owned.
+                // Resolve it before the body so a `keep` or `loop` queue can refuse
+                // an agent deletion of rows the operator still has.
+                let open = reconcile_marker_operator_authoritative(
+                    base_framing.map(|f| f.open.as_str()),
+                    &o_framing.open,
+                    &t_framing.open,
+                );
+                let close = reconcile_marker_operator_authoritative(
+                    base_framing.map(|f| f.close.as_str()),
+                    &o_framing.close,
+                    &t_framing.close,
+                );
+                let retain_operator_items =
+                    o_occ.component == "queue" && crate::crdt::marker_retains_queue_items(open);
                 // Keyed reconciliation is only sound when ours AND theirs agree on
                 // component splittability. A response append commonly makes OURS'
                 // exchange keyed while the live editor cut still has one body-only
@@ -2042,7 +2077,13 @@ pub fn merge_3way(base_doc: &str, ours_doc: &str, theirs_doc: &str) -> CellMerge
                         .items
                         .iter()
                         .any(|(_, value)| !value.trim().is_empty());
-                    if body_only_has_content {
+                    // An emptied agent body is body-only with no content, so the
+                    // keyed compose below would read every operator row as removed.
+                    // A `keep` or `loop` queue delegates that shape to the legacy
+                    // component merge, which restores the operator rows.
+                    let agent_emptied_kept_queue =
+                        retain_operator_items && is_body_only(o_occ) && !body_only_has_content;
+                    if body_only_has_content || agent_emptied_kept_queue {
                         let ours_component = render_occurrence(o_framing, o_occ);
                         let theirs_component = render_occurrence(t_framing, t_occ);
                         let base_component = base_occ
@@ -2130,11 +2171,16 @@ pub fn merge_3way(base_doc: &str, ours_doc: &str, theirs_doc: &str) -> CellMerge
                 // surfaced as suspicious), superseding the legacy #qcellconflict
                 // ours-wins+marker behavior.
                 let comp_policy = component_conflict_policy(&o_occ.component);
-                let (mut merged_items, conflicts) =
-                    match compose_occurrence(base_ref, o_occ, t_occ, comp_policy) {
-                        Some(r) => r,
-                        None => return CellMergeOutcome::fallback(),
-                    };
+                let (mut merged_items, conflicts) = match compose_occurrence(
+                    base_ref,
+                    o_occ,
+                    t_occ,
+                    comp_policy,
+                    retain_operator_items,
+                ) {
+                    Some(r) => r,
+                    None => return CellMergeOutcome::fallback(),
+                };
                 // In-band conflict markers are OFF by default (#provauth1/#provauth4):
                 // the owner already won cleanly above, so surfacing a `<<<<<<<`
                 // marker would re-expose an operator action as a suspicious
@@ -2151,16 +2197,6 @@ pub fn merge_3way(base_doc: &str, ours_doc: &str, theirs_doc: &str) -> CellMerge
                 // an operator change (theirs ≠ base) wins; an agent change wins only
                 // when the operator left the marker at base.
                 let body: String = merged_items.iter().map(|(_, v)| v.as_str()).collect();
-                let open = reconcile_marker_operator_authoritative(
-                    base_framing.map(|f| f.open.as_str()),
-                    &o_framing.open,
-                    &t_framing.open,
-                );
-                let close = reconcile_marker_operator_authoritative(
-                    base_framing.map(|f| f.close.as_str()),
-                    &o_framing.close,
-                    &t_framing.close,
-                );
                 out.push_str(open);
                 out.push_str(&body);
                 out.push_str(close);
@@ -3150,6 +3186,176 @@ agent_doc_format: template
         );
         assert!(outcome.merged_text.contains("[#alpha]"));
         assert!(outcome.merged_text.contains("[#gamma]"));
+    }
+
+    /// `#keepqueueitems`: agent-doc must not delete a queue row the operator
+    /// still has when the queue is marked `keep` or `loop`. Striking a
+    /// completed row stays allowed. Only the operator may delete the row.
+    #[test]
+    fn keep_queue_agent_omission_does_not_delete_operator_rows() {
+        let struck = "\
+- ### ~~https://github.com/example/repo/pull/845 [#q-62ea184e8c7d]~~
+  - %% feat(auth): let the mobile app finish SSO sign-in %%
+- ### ~~#review https://github.com/example/repo/pull/845~~
+";
+        let live = "- still running [#q-live]\n";
+        let run = |attrs: &str, body: &str| {
+            format!(
+                "## haiven-api-prs <!-- agent:run id=\"haiven-api-prs\" {attrs} -->\n{body}<!-- /agent:run -->\n"
+            )
+        };
+        let history = [
+            "~~https://github.com/example/repo/pull/845 [#q-62ea184e8c7d]~~",
+            "%% feat(auth): let the mobile app finish SSO sign-in %%",
+            "~~#review https://github.com/example/repo/pull/845~~",
+        ];
+
+        let base = run("subagents keep", struck);
+        let ours = run("subagents keep", "");
+        let theirs = run("subagents presets=\"#push\" keep", struck);
+        let mut emptied = history.to_vec();
+        emptied.push("presets=\"#push\"");
+        assert_queue_rows("emptied keep queue", &base, &ours, &theirs, &emptied, &[]);
+
+        let base = run("subagents keep", &format!("{struck}{live}"));
+        let ours = run("subagents keep", live);
+        let theirs = run(
+            "subagents presets=\"#push\" keep",
+            &format!("{struck}{live}"),
+        );
+        let mut partial = history.to_vec();
+        partial.push("[#q-live]");
+        partial.push("presets=\"#push\"");
+        assert_queue_rows("partial omission", &base, &ours, &theirs, &partial, &[]);
+
+        let kept_only = "\
+- ### ~~https://github.com/example/repo/pull/845 [#q-62ea184e8c7d]~~
+  - %% feat(auth): let the mobile app finish SSO sign-in %%
+";
+        let base = run("subagents keep", struck);
+        let ours = base.clone();
+        let theirs = run("subagents keep", kept_only);
+        assert_queue_rows(
+            "operator delete",
+            &base,
+            &ours,
+            &theirs,
+            &[
+                "~~https://github.com/example/repo/pull/845 [#q-62ea184e8c7d]~~",
+                "%% feat(auth): let the mobile app finish SSO sign-in %%",
+            ],
+            &["~~#review https://github.com/example/repo/pull/845~~"],
+        );
+
+        let base = run("subagents", struck);
+        let ours = run("subagents", "");
+        let theirs = base.clone();
+        assert_queue_rows(
+            "no keep",
+            &base,
+            &ours,
+            &theirs,
+            &[],
+            &["[#q-62ea184e8c7d]", "#review"],
+        );
+
+        let base = run("subagents keeps", struck);
+        let ours = run("subagents keeps", "");
+        let theirs = base.clone();
+        assert_queue_rows(
+            "keeps typo",
+            &base,
+            &ours,
+            &theirs,
+            &[],
+            &["[#q-62ea184e8c7d]"],
+        );
+
+        let base = run("keep=true", struck);
+        let ours = run("keep=true", "");
+        let theirs = base.clone();
+        assert_queue_rows(
+            "keep=true",
+            &base,
+            &ours,
+            &theirs,
+            &[
+                "~~https://github.com/example/repo/pull/845 [#q-62ea184e8c7d]~~",
+                "%% feat(auth): let the mobile app finish SSO sign-in %%",
+            ],
+            &[],
+        );
+
+        let loop_doc = |body: &str| {
+            format!("<!-- agent:loop id=\"nightly\" -->\n{body}<!-- /agent:loop -->\n")
+        };
+        let base = loop_doc(struck);
+        let ours = loop_doc("");
+        let theirs = base.clone();
+        assert_queue_rows(
+            "agent:loop",
+            &base,
+            &ours,
+            &theirs,
+            &[
+                "[#q-62ea184e8c7d]",
+                "~~#review https://github.com/example/repo/pull/845~~",
+            ],
+            &[],
+        );
+
+        let base = "<!-- agent:queue keep -->\n- ~~do [#foo]~~\n<!-- /agent:queue -->\n";
+        let ours = "<!-- agent:queue keep -->\n<!-- /agent:queue -->\n";
+        let theirs =
+            "<!-- agent:queue keep -->\n- 📥 [#subagent:x#1] do [#foo]\n<!-- /agent:queue -->\n";
+        assert_queue_rows(
+            "stale unstrike",
+            base,
+            ours,
+            theirs,
+            &["~~do [#foo]~~"],
+            &["📥"],
+        );
+    }
+
+    fn assert_queue_rows(
+        label: &str,
+        base: &str,
+        ours: &str,
+        theirs: &str,
+        present: &[&str],
+        absent: &[&str],
+    ) {
+        let cell = merge_3way(base, ours, theirs);
+        assert!(
+            !cell.fell_back,
+            "{label} cell fell back:\n{}",
+            cell.merged_text
+        );
+        expect_rows(label, "cell", &cell.merged_text, present, absent);
+
+        let semantic = crate::document_cell_merge::document_cell_merge(base, ours, theirs);
+        expect_rows(label, "semantic", &semantic.merged_doc, present, absent);
+
+        let base_state = crate::crdt::CrdtDoc::from_text(base).encode_state();
+        let legacy = crate::crdt::merge_by_component(Some(&base_state), ours, theirs)
+            .unwrap_or_else(|err| panic!("{label} legacy merge failed: {err}"));
+        expect_rows(label, "legacy", &legacy, present, absent);
+    }
+
+    fn expect_rows(label: &str, engine: &str, merged: &str, present: &[&str], absent: &[&str]) {
+        for needle in present {
+            assert!(
+                merged.contains(needle),
+                "{label} {engine} missing {needle}:\n{merged}"
+            );
+        }
+        for needle in absent {
+            assert!(
+                !merged.contains(needle),
+                "{label} {engine} still has {needle}:\n{merged}"
+            );
+        }
     }
 
     #[test]

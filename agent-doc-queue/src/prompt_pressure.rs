@@ -79,6 +79,326 @@ pub fn prose_blocker_needs_pressure(text: &str) -> bool {
     }
 }
 
+/// `#closepressure`: `head` requires a pull request this turn creates.
+///
+/// True when the work text, after lifecycle markers, a `[#q-…]` id, and an
+/// optional leading `repo:` label, asks to open or create a pull request, or
+/// starts with `Setup` / `Set up` and names a workflow, a pull request, or a
+/// merge. A question is not that requirement.
+pub fn head_requires_created_pull_request(head: &str) -> bool {
+    let prose = task_prose(head);
+    if prose.is_empty() || task_prose_is_question(&prose) {
+        return false;
+    }
+    let lower = prose.to_ascii_lowercase();
+    if EXPLICIT_PULL_REQUEST_REQUESTS
+        .iter()
+        .any(|phrase| contains_ascii_phrase(&lower, phrase))
+    {
+        return true;
+    }
+    let starts_setup = lower.starts_with("setup ") || lower.starts_with("set up ");
+    starts_setup
+        && (contains_ascii_word(&lower, "workflow")
+            || contains_ascii_phrase(&lower, "pull request")
+            || contains_ascii_word(&lower, "merge"))
+}
+
+/// `#closepressure`: `text` shows a pull request this turn opened.
+///
+/// A URL described as already existing, or a verb that is not immediately
+/// before the URL (`that workflow opened is https://…`), is a citation of
+/// another pull request, not this receipt.
+pub fn response_shows_created_pull_request(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    creation_verb_then_pull_url(&lower)
+        || labeled_pull_request_receipt(&lower)
+        || gh_pr_create_receipt(&lower)
+}
+
+const EXPLICIT_PULL_REQUEST_REQUESTS: &[&str] = &[
+    "open a pull request",
+    "open one pull request",
+    "create a pull request",
+    "create one pull request",
+    "create a pr",
+    "open a pr",
+    "open one pr",
+    "create one pr",
+];
+
+const QUESTION_LEADS: &[&str] = &[
+    "do we ",
+    "do i ",
+    "should we ",
+    "should i ",
+    "is this ",
+    "can we ",
+    "can i ",
+    "why ",
+];
+
+fn task_prose(head: &str) -> String {
+    let stripped = strip_generated_q_id(head);
+    let bare = agent_doc_document::queue_projection::strip_priority_markers(&stripped);
+    let bare = strip_leading_repo_label(bare.trim());
+    bare.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn task_prose_is_question(prose: &str) -> bool {
+    let trimmed = prose.trim().trim_end_matches(['"', '\'', ' ']);
+    if trimmed.ends_with('?') {
+        return true;
+    }
+    let lower = prose.to_ascii_lowercase();
+    QUESTION_LEADS.iter().any(|lead| lower.starts_with(lead))
+}
+
+fn strip_generated_q_id(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let bytes = text.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index..].starts_with(b"[#q-")
+            && let Some(end) = text[index..].find(']')
+        {
+            let id = &text[index + 4..index + end];
+            if !id.is_empty() && id.chars().all(|ch| ch.is_ascii_alphanumeric()) {
+                index += end + 1;
+                continue;
+            }
+        }
+        let ch = text[index..].chars().next().unwrap_or(' ');
+        out.push(ch);
+        index += ch.len_utf8();
+    }
+    out
+}
+
+fn strip_leading_repo_label(text: &str) -> String {
+    let Some((label, rest)) = text.split_once(':') else {
+        return text.to_string();
+    };
+    let rest = rest.trim();
+    let label_is_repo = !label.is_empty()
+        && !label.contains(char::is_whitespace)
+        && label
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '-' | '_'));
+    if label_is_repo
+        && rest
+            .chars()
+            .next()
+            .is_some_and(|ch| ch.is_ascii_alphabetic())
+    {
+        rest.to_string()
+    } else {
+        text.to_string()
+    }
+}
+
+fn contains_ascii_word(text: &str, word: &str) -> bool {
+    contains_ascii_phrase(text, word)
+}
+
+fn contains_ascii_phrase(text: &str, phrase: &str) -> bool {
+    let mut rest = text;
+    while let Some(index) = rest.find(phrase) {
+        let before_ok = index == 0 || !rest.as_bytes()[index - 1].is_ascii_alphanumeric();
+        let after = index + phrase.len();
+        let after_ok = rest
+            .as_bytes()
+            .get(after)
+            .is_none_or(|byte| !byte.is_ascii_alphanumeric());
+        if before_ok && after_ok {
+            return true;
+        }
+        let step = rest[index..]
+            .chars()
+            .next()
+            .map(|ch| ch.len_utf8())
+            .unwrap_or(1);
+        rest = &rest[index + step..];
+    }
+    false
+}
+
+fn creation_verb_then_pull_url(lower: &str) -> bool {
+    let mut index = 0;
+    while index < lower.len() {
+        if let Some(verb_end) = creation_verb_end(lower, index) {
+            let mut cursor = skip_ascii_ws(lower, verb_end);
+            if let Some(after) =
+                skip_word(lower, cursor, "a").or_else(|| skip_word(lower, cursor, "one"))
+            {
+                cursor = skip_ascii_ws(lower, after);
+            }
+            if let Some(after) = skip_phrase(lower, cursor, "pull request") {
+                cursor = skip_ascii_ws(lower, after);
+            } else if let Some(after) = skip_word(lower, cursor, "pr") {
+                cursor = skip_ascii_ws(lower, after);
+            }
+            if github_pull_url_end(lower, cursor).is_some() {
+                return true;
+            }
+        }
+        index += lower[index..]
+            .chars()
+            .next()
+            .map(|ch| ch.len_utf8())
+            .unwrap_or(1);
+    }
+    false
+}
+
+fn creation_verb_end(text: &str, index: usize) -> Option<usize> {
+    let rest = text.get(index..)?;
+    let verb = if rest.starts_with("opened") {
+        "opened"
+    } else if rest.starts_with("created") {
+        "created"
+    } else {
+        return None;
+    };
+    let before_ok = index == 0 || !text.as_bytes()[index - 1].is_ascii_alphanumeric();
+    let after = index + verb.len();
+    let after_ok = text
+        .as_bytes()
+        .get(after)
+        .is_none_or(|byte| !byte.is_ascii_alphanumeric());
+    (before_ok && after_ok).then_some(after)
+}
+
+fn skip_ascii_ws(text: &str, index: usize) -> usize {
+    text.get(index..)
+        .and_then(|rest| {
+            rest.char_indices()
+                .find(|(_, ch)| !ch.is_ascii_whitespace())
+                .map(|(offset, _)| index + offset)
+        })
+        .unwrap_or(text.len())
+}
+
+fn skip_word(text: &str, index: usize, word: &str) -> Option<usize> {
+    skip_phrase(text, index, word)
+}
+
+fn skip_phrase(text: &str, index: usize, phrase: &str) -> Option<usize> {
+    let rest = text.get(index..)?;
+    if !rest.starts_with(phrase) {
+        return None;
+    }
+    let after = index + phrase.len();
+    let boundary_ok = text
+        .as_bytes()
+        .get(after)
+        .is_none_or(|byte| !byte.is_ascii_alphanumeric());
+    boundary_ok.then_some(after)
+}
+
+fn labeled_pull_request_receipt(lower: &str) -> bool {
+    lower.lines().any(|line| {
+        if line_cites_existing_pull_request(line) {
+            return false;
+        }
+        let rest = line.trim().trim_start_matches(['-', '*', ' ']);
+        let Some(after_label) = rest.strip_prefix("pull request") else {
+            return false;
+        };
+        let after_label = after_label.trim_start_matches('*').trim_start();
+        let Some(after_colon) = after_label.strip_prefix(':') else {
+            return false;
+        };
+        let url = after_colon.trim_start_matches(['*', ' ']);
+        github_pull_url_end(url, 0).is_some()
+    })
+}
+
+fn line_cites_existing_pull_request(line: &str) -> bool {
+    [
+        "already",
+        "existing",
+        "existed",
+        "merged",
+        "pre-existing",
+        "preexisting",
+        "conflicting",
+    ]
+    .iter()
+    .any(|word| contains_ascii_word(line, word))
+}
+
+fn gh_pr_create_receipt(lower: &str) -> bool {
+    let mut ran_create = false;
+    for line in lower.lines() {
+        if !line_runs_gh_pr_create(line) {
+            continue;
+        }
+        ran_create = true;
+        if github_pull_url_end(line.trim(), 0).is_some() || creation_verb_then_pull_url(line) {
+            return true;
+        }
+    }
+    ran_create && lower.lines().any(line_is_only_pull_url)
+}
+
+fn line_runs_gh_pr_create(lower: &str) -> bool {
+    if lower.contains(" not ")
+        || lower.contains("n't")
+        || lower.starts_with("not ")
+        || lower.contains("without ")
+    {
+        return false;
+    }
+    contains_ascii_phrase(lower, "gh pr create")
+}
+
+fn line_is_only_pull_url(line: &str) -> bool {
+    let trimmed = line.trim().trim_matches('`');
+    match github_pull_url_end(trimmed, 0) {
+        Some(end) => trimmed[end..]
+            .chars()
+            .all(|ch| matches!(ch, '.' | ')' | ']')),
+        None => false,
+    }
+}
+
+fn github_pull_url_end(text: &str, index: usize) -> Option<usize> {
+    const PREFIX: &str = "https://github.com/";
+    let rest = text.get(index..)?;
+    if !rest.starts_with(PREFIX) {
+        return None;
+    }
+    let mut cursor = index + PREFIX.len();
+    let owner_end = take_while(text, cursor, |ch| ch != '/' && !ch.is_ascii_whitespace());
+    if owner_end == cursor || text.as_bytes().get(owner_end) != Some(&b'/') {
+        return None;
+    }
+    cursor = owner_end + 1;
+    let repo_end = take_while(text, cursor, |ch| ch != '/' && !ch.is_ascii_whitespace());
+    if repo_end == cursor || text.as_bytes().get(repo_end) != Some(&b'/') {
+        return None;
+    }
+    cursor = repo_end + 1;
+    let pull = text.get(cursor..)?;
+    if !pull.starts_with("pull/") {
+        return None;
+    }
+    cursor += "pull/".len();
+    let digits_end = take_while(text, cursor, |ch| ch.is_ascii_digit());
+    (digits_end > cursor).then_some(digits_end)
+}
+
+fn take_while(text: &str, index: usize, mut pred: impl FnMut(char) -> bool) -> usize {
+    text.get(index..)
+        .and_then(|rest| {
+            rest.char_indices()
+                .find(|(_, ch)| !pred(*ch))
+                .map(|(offset, _)| index + offset)
+        })
+        .unwrap_or(text.len())
+}
+
 /// Normalized prompt identity used to tie a review item to a queue head.
 pub fn normalize_prompt_text(text: &str) -> String {
     let stripped = agent_doc_element_queue::strip_queue_prompt_stable_id_annotation(text);
@@ -521,5 +841,54 @@ mod tests {
     fn a_resolved_review_item_releases_the_prompt() {
         let content = "<!-- agent:review -->\n- [x] [#prompt-blocker-widget] done\n  - **Complete by:** land it\n  - **Prompt:** finish the widget\n<!-- /agent:review -->\n";
         assert!(!review_blocks_prompt(content, "finish the widget"));
+    }
+
+    #[test]
+    fn closepressure_setup_head_requires_a_pull_request_this_turn_created() {
+        let head = "📥 haiven-sdk: Setup Release Please workflow to merge sdk-dev into main [#q-bac390dcf354]";
+        assert!(head_requires_created_pull_request(head));
+        assert!(head_requires_created_pull_request(
+            "open a pull request for the release workflow"
+        ));
+        assert!(head_requires_created_pull_request(
+            "haiven-api: Set up the merge workflow"
+        ));
+        assert!(!head_requires_created_pull_request(
+            "Do we need to create a pull request for the release?"
+        ));
+        assert!(!head_requires_created_pull_request(
+            "Should we open a PR before the freeze?"
+        ));
+        assert!(!head_requires_created_pull_request(
+            "Setup the PR status app for the sdk-reviews channel."
+        ));
+        assert!(!head_requires_created_pull_request(
+            "https://github.com/sample-org/sample-repo/pull/12: #address"
+        ));
+
+        let cited = "The setup pull request is the merged https://github.com/haiven-dev/haiven-sdk/pull/228. \
+             The promotion that workflow opened is https://github.com/haiven-dev/haiven-sdk/pull/227, and that pull stays OPEN and CONFLICTING.";
+        assert!(
+            !response_shows_created_pull_request(cited),
+            "an already-merged URL and a workflow that opened another URL are not this turn's receipt"
+        );
+        assert!(response_shows_created_pull_request(
+            "Opened https://github.com/haiven-dev/haiven-sdk/pull/229"
+        ));
+        assert!(response_shows_created_pull_request(
+            "I created a pull request https://github.com/haiven-dev/haiven-sdk/pull/229"
+        ));
+        assert!(response_shows_created_pull_request(
+            "**Pull request:** https://github.com/haiven-dev/haiven-sdk/pull/229"
+        ));
+        assert!(!response_shows_created_pull_request(
+            "Pull request: https://github.com/haiven-dev/haiven-sdk/pull/228 (already merged)"
+        ));
+        assert!(response_shows_created_pull_request(
+            "gh pr create --title 'setup'\nhttps://github.com/haiven-dev/haiven-sdk/pull/229\n"
+        ));
+        assert!(!response_shows_created_pull_request(
+            "do not run gh pr create\nhttps://github.com/haiven-dev/haiven-sdk/pull/228\n"
+        ));
     }
 }

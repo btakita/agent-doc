@@ -587,11 +587,21 @@ fn prompt_pressure_brief_section(handoff: &GoalLoopHandoff, kind: &PromptPressur
         quoted.push('\n');
     }
     let instruction = match kind {
-        PromptPressureKind::Prose => format!(
-            "The previous worker `{owner}` (generation {generation}) handed this same queue row back without completing the prompt. A prose blocker in agent:exchange does not complete the prompt. Finish the prompt, or return only the review structure (`<!-- agent-doc:prompt-blocker -->` with the incomplete work, **Complete by:**, and **Prompt:**). Its hand-back, verbatim:\n{quoted}",
-            owner = handoff.owner,
-            generation = handoff.generation,
-        ),
+        PromptPressureKind::Prose => {
+            let pull_request = if crate::prompt_pressure::head_requires_created_pull_request(
+                &handoff.item_text,
+            ) {
+                " This row requires a pull request created this turn (#closepressure). Citing a pull request that already existed does not complete it. Open the pull request and include its URL as the effect this turn opened."
+            } else {
+                ""
+            };
+            format!(
+                "The previous worker `{owner}` (generation {generation}) handed this same queue row back without completing the prompt. A prose blocker in agent:exchange does not complete the prompt. Finish the prompt, or return only the review structure (`<!-- agent-doc:prompt-blocker -->` with the incomplete work, **Complete by:**, and **Prompt:**).{pull_request} Its hand-back, verbatim:\n{quoted}",
+                owner = handoff.owner,
+                generation = handoff.generation,
+                pull_request = pull_request,
+            )
+        }
         PromptPressureKind::Review => format!(
             "The previous worker `{owner}` (generation {generation}) returned a review structure instead of completing the prompt. That review item is the operator-facing blocker. If it is still open, stop and do not redispatch this row. If the operator has resolved it, finish the prompt now. The recorded blocker:\n{quoted}",
             owner = handoff.owner,

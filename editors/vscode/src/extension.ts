@@ -3398,7 +3398,12 @@ class PatchWatcher implements vscode.Disposable {
                 document.positionAt(mapOffset(selection.anchor)),
                 document.positionAt(mapOffset(selection.active)),
             ));
-            const visibleLine = mapVisibleLineThroughReplacement(anchor.visibleLine, before, replacement);
+            const visibleLine = mapVisibleLineThroughReplacement(
+                anchor.visibleLine,
+                before,
+                replacement,
+                anchor.selections[0]?.active,
+            );
             const currentLine = anchor.editor.visibleRanges[0]?.start.line;
             if (currentLine !== visibleLine) {
                 const line = Math.max(0, Math.min(visibleLine, Math.max(0, document.lineCount - 1)));

@@ -16,6 +16,7 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.vcs.changes.VcsDirtyScopeManager
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VirtualFile
+import java.awt.Point
 import java.io.File
 import java.security.MessageDigest
 import java.time.Instant
@@ -451,9 +452,11 @@ class PatchWatcher(private val project: Project) : Disposable {
     /**
      * Programmatic component maintenance, including an `agent:recap` replacement,
      * must leave an operator who is reading another part of the document on that
-     * same text. Snapshot caret offsets before the synchronous EDT mutation, then
-     * map them through the resulting replacement. Restoring the pre-edit logical
-     * line would drop the caret into a recap that grew above it.
+     * same text. Snapshot caret offsets and the visual Y of the reading position
+     * before the synchronous EDT mutation, map the carets through the replacement,
+     * and shift scroll by that Y delta. Restoring the pre-edit logical line, or
+     * the pre-edit pixel offset while the viewport also shows the recap, drops
+     * the caret into a recap that grew above it.
      */
     private fun <T> preserveOperatorEditorViewState(document: Document, mutation: () -> T): T =
         preserveOperatorEditorViewStateUtil(project, document, mutation)
@@ -2238,43 +2241,40 @@ internal fun mapOffsetThroughReplacement(
     }
 }
 
-/** Line index of [offset] in [text], counting newlines before it. */
-internal fun lineIndexAt(text: String, offset: Int): Int {
-    val end = offset.coerceIn(0, text.length)
-    var lines = 0
-    for (index in 0 until end) {
-        if (text[index] == '\n') {
-            lines++
-        }
-    }
-    return lines
+/**
+ * Which unchanged text keeps its screen position after a replacement.
+ * A caret already on screen and outside the span wins. Otherwise the unchanged
+ * text at the top of the viewport, then the bottom. A point inside the span is
+ * not an anchor: following it would scroll to the start of a recap the viewport
+ * merely contained.
+ */
+internal enum class OperatorViewportAnchor {
+    Caret,
+    TopLeft,
+    Bottom,
+    Unchanged,
 }
 
-/**
- * Pixel scroll after [edit]. When the replacement ends at or above the viewport,
- * shift by its line-height delta so the text below a changed recap stays on
- * screen. A viewport already above the edit, or one that contains it, stays put.
- */
-internal fun mapVerticalScrollThroughReplacement(
-    verticalScrollOffset: Int,
-    lineHeight: Int,
-    before: String,
-    edit: MinimalDocumentEdit?,
-): Int {
-    if (edit == null || lineHeight <= 0) {
-        return verticalScrollOffset.coerceAtLeast(0)
+internal fun operatorViewportAnchor(
+    caretOffset: Int,
+    caretInViewport: Boolean,
+    topLeftOffset: Int,
+    bottomOffset: Int,
+    editStart: Int,
+    editEnd: Int,
+): OperatorViewportAnchor {
+    fun outside(offset: Int): Boolean = offset < editStart || offset >= editEnd
+    return when {
+        caretInViewport && outside(caretOffset) -> OperatorViewportAnchor.Caret
+        outside(topLeftOffset) -> OperatorViewportAnchor.TopLeft
+        outside(bottomOffset) -> OperatorViewportAnchor.Bottom
+        else -> OperatorViewportAnchor.Unchanged
     }
-    val startLine = lineIndexAt(before, edit.start)
-    val endLine = lineIndexAt(before, edit.end)
-    val lineDelta = edit.replacement.count { it == '\n' } - (endLine - startLine)
-    val editBottom = endLine * lineHeight
-    val adjusted = if (editBottom <= verticalScrollOffset) {
-        verticalScrollOffset + lineDelta * lineHeight
-    } else {
-        verticalScrollOffset
-    }
-    return adjusted.coerceAtLeast(0)
 }
+
+/** Scroll offset that keeps an anchor's document Y at the same screen position. */
+internal fun mapScrollByAnchorDelta(oldScroll: Int, oldY: Int, newY: Int): Int =
+    (oldScroll + (newY - oldY)).coerceAtLeast(0)
 
 private data class OperatorCaretOffsets(
     val caret: Int,
@@ -2287,7 +2287,13 @@ private data class OperatorEditorViewState(
     val carets: List<OperatorCaretOffsets>,
     val horizontalScrollOffset: Int,
     val verticalScrollOffset: Int,
-    val lineHeight: Int,
+    val primaryCaretOffset: Int,
+    val primaryCaretY: Int,
+    val caretInViewport: Boolean,
+    val topLeftOffset: Int,
+    val topLeftY: Int,
+    val bottomOffset: Int,
+    val bottomY: Int,
 )
 
 private data class OperatorViewScroll(
@@ -2309,8 +2315,9 @@ private val operatorViewLog =
 /**
  * Respond, finalize, queue consume, status, refresh, reposition, and CRDT
  * projection all mutate through this helper. The caret stays on the same
- * character outside the replacement, and the viewport stays on the same text.
- * Restoring carets does not publish the system selection or request focus.
+ * character outside the replacement, and the viewport stays on that text's
+ * visual Y even when the viewport also contains the replacement. Restoring
+ * carets does not publish the system selection or request focus.
  */
 internal fun <T> preserveOperatorEditorViewStateUtil(
     project: Project,
@@ -2321,20 +2328,44 @@ internal fun <T> preserveOperatorEditorViewStateUtil(
         "operator editor view state must be preserved on the IDEA event-dispatch thread"
     }
     val before = document.text
-    val states = EditorFactory.getInstance().getEditors(document, project).map { editor ->
-        OperatorEditorViewState(
-            editor = editor,
-            carets = editor.caretModel.allCarets.map { caret ->
-                OperatorCaretOffsets(
-                    caret = caret.offset,
-                    selectionStart = caret.selectionStart,
-                    selectionEnd = caret.selectionEnd,
-                )
-            },
-            horizontalScrollOffset = editor.scrollingModel.horizontalScrollOffset,
-            verticalScrollOffset = editor.scrollingModel.verticalScrollOffset,
-            lineHeight = editor.lineHeight,
-        )
+    val states = EditorFactory.getInstance().getEditors(document, project).mapNotNull { editor ->
+        try {
+            val scrolling = editor.scrollingModel
+            val visible = scrolling.visibleArea
+            val primary = editor.caretModel.primaryCaret
+            val caretY = editor.visualLineToY(primary.visualPosition.line)
+            val textLengthBefore = document.textLength
+            val topLeftOffset = editor.logicalPositionToOffset(
+                editor.xyToLogicalPosition(Point(visible.x, visible.y)),
+            ).coerceIn(0, textLengthBefore)
+            val bottomEdge = visible.y + (visible.height - 1).coerceAtLeast(0)
+            val bottomOffset = editor.logicalPositionToOffset(
+                editor.xyToLogicalPosition(Point(visible.x, bottomEdge)),
+            ).coerceIn(0, textLengthBefore)
+            OperatorEditorViewState(
+                editor = editor,
+                carets = editor.caretModel.allCarets.map { caret ->
+                    OperatorCaretOffsets(
+                        caret = caret.offset,
+                        selectionStart = caret.selectionStart,
+                        selectionEnd = caret.selectionEnd,
+                    )
+                },
+                horizontalScrollOffset = scrolling.horizontalScrollOffset,
+                verticalScrollOffset = scrolling.verticalScrollOffset,
+                primaryCaretOffset = primary.offset,
+                primaryCaretY = caretY,
+                caretInViewport = visible.height <= 0 ||
+                    (caretY + editor.lineHeight > visible.y && caretY < visible.y + visible.height),
+                topLeftOffset = topLeftOffset,
+                topLeftY = editor.offsetToXY(topLeftOffset).y,
+                bottomOffset = bottomOffset,
+                bottomY = editor.offsetToXY(bottomOffset).y,
+            )
+        } catch (e: RuntimeException) {
+            operatorViewLog.warn("[patch-watcher] Failed to snapshot operator editor view", e)
+            null
+        }
     }
     return try {
         mutation()
@@ -2386,6 +2417,9 @@ internal fun <T> preserveOperatorEditorViewStateUtil(
                             selectionEnd = caret.selectionEnd.coerceIn(0, textLength),
                         )
                     }
+                    // Stop an animated scroll before the caret move. setCaretsAndSelections
+                    // does not itself scroll; the pixels below are the whole restore.
+                    state.editor.scrollingModel.disableAnimation()
                     if (carets.isNotEmpty()) {
                         // false: do not publish the system selection. That call
                         // takes X11 primary selection and can pull keyboard focus.
@@ -2401,13 +2435,48 @@ internal fun <T> preserveOperatorEditorViewStateUtil(
                         )
                     }
                     val horizontal = state.horizontalScrollOffset
-                    val vertical = mapVerticalScrollThroughReplacement(
-                        verticalScrollOffset = state.verticalScrollOffset,
-                        lineHeight = state.lineHeight,
-                        before = before,
-                        edit = edit,
-                    )
-                    state.editor.scrollingModel.disableAnimation()
+                    // Measure the anchor after the caret restore. reloadFromDisk may
+                    // have cleared the scrollbar; the target is the pre-edit scroll
+                    // plus the anchor's visual-Y delta, not the post-edit scrollbar.
+                    val vertical = if (edit == null) {
+                        state.verticalScrollOffset.coerceAtLeast(0)
+                    } else {
+                        val anchor = operatorViewportAnchor(
+                            caretOffset = state.primaryCaretOffset,
+                            caretInViewport = state.caretInViewport,
+                            topLeftOffset = state.topLeftOffset,
+                            bottomOffset = state.bottomOffset,
+                            editStart = edit.start,
+                            editEnd = edit.end,
+                        )
+                        val (oldY, newY) = when (anchor) {
+                            OperatorViewportAnchor.Caret -> {
+                                val line = state.editor.caretModel.primaryCaret.visualPosition.line
+                                state.primaryCaretY to state.editor.visualLineToY(line)
+                            }
+                            OperatorViewportAnchor.TopLeft -> {
+                                val mapped = mapOffsetThroughReplacement(
+                                    state.topLeftOffset,
+                                    edit.start,
+                                    edit.end,
+                                    edit.replacement.length,
+                                ).coerceIn(0, textLength)
+                                state.topLeftY to state.editor.offsetToXY(mapped).y
+                            }
+                            OperatorViewportAnchor.Bottom -> {
+                                val mapped = mapOffsetThroughReplacement(
+                                    state.bottomOffset,
+                                    edit.start,
+                                    edit.end,
+                                    edit.replacement.length,
+                                ).coerceIn(0, textLength)
+                                state.bottomY to state.editor.offsetToXY(mapped).y
+                            }
+                            OperatorViewportAnchor.Unchanged ->
+                                state.verticalScrollOffset to state.verticalScrollOffset
+                        }
+                        mapScrollByAnchorDelta(state.verticalScrollOffset, oldY, newY)
+                    }
                     state.editor.scrollingModel.scrollHorizontally(horizontal)
                     state.editor.scrollingModel.scrollVertically(vertical)
                     restorations.add(OperatorViewScroll(state.editor, horizontal, vertical))

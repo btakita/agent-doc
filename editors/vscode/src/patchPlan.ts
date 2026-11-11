@@ -46,20 +46,28 @@ function countNewlines(text: string): number {
 
 /**
  * Viewport line after [edit]. An edit that ends at or above the first visible
- * line shifts that line by the inserted-line delta so the same text stays on
- * screen. A viewport already above the edit, or one that contains it, stays put.
+ * line shifts that line so the same text stays on screen. A caret below the
+ * edit also shifts a first visible line that sits inside the edit: a tall
+ * window often shows the recap and the reading position together, and leaving
+ * that line put scrolls the caret up onto the recap. A visible line above the
+ * edit stays put, including when the caret itself is below the edit.
  */
 export function mapVisibleLineThroughReplacement(
     visibleLine: number,
     before: string,
     edit: MinimalReplacement | null,
+    caretOffset?: number,
 ): number {
     if (!edit) return Math.max(0, visibleLine);
     const end = edit.start + edit.deleteLength;
     const startLine = lineIndexAt(before, edit.start);
     const endLine = lineIndexAt(before, end);
     const lineDelta = countNewlines(edit.text) - (endLine - startLine);
-    if (endLine <= visibleLine) return Math.max(0, visibleLine + lineDelta);
+    const caretBelow = caretOffset != null && caretOffset >= end;
+    const visibleInsideEdit = visibleLine >= startLine && visibleLine < endLine;
+    if (endLine <= visibleLine || (caretBelow && visibleInsideEdit)) {
+        return Math.max(0, visibleLine + lineDelta);
+    }
     return Math.max(0, visibleLine);
 }
 

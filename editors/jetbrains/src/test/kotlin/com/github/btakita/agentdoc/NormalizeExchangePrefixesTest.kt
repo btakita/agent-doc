@@ -441,7 +441,14 @@ One.
         assertTrue(helper.contains("EditorFactory.getInstance().getEditors(document, project)"))
         assertTrue(helper.contains("caret.offset"))
         assertTrue(helper.contains("mapOffsetThroughReplacement("))
-        assertTrue(helper.contains("mapVerticalScrollThroughReplacement("))
+        assertTrue(helper.contains("operatorViewportAnchor("))
+        assertTrue(helper.contains("mapScrollByAnchorDelta("))
+        assertFalse(helper.contains("mapVerticalScrollThroughReplacement("))
+        assertTrue(helper.contains("visualLineToY("))
+        assertTrue(helper.contains("offsetToXY("))
+        val animation = helper.indexOf("scrollingModel.disableAnimation()")
+        val restoreCarets = helper.indexOf("setCaretsAndSelections(")
+        assertTrue(animation >= 0 && restoreCarets >= 0 && animation < restoreCarets)
         assertTrue(helper.contains("setCaretsAndSelections("))
         assertTrue(helper.contains("false,"))
         assertFalse(helper.contains("requestFocus"))
@@ -516,24 +523,57 @@ One.
         )
         assertEquals(before[boundary], after[mappedBoundary])
 
-        val lineHeight = 22
-        val belowScroll = lineIndexAt(before, outside) * lineHeight
-        val lineDelta = replacement.replacement.count { it == '\n' } -
-            (lineIndexAt(before, replacement.end) - lineIndexAt(before, replacement.start))
-        assertTrue(lineDelta > 0)
         assertEquals(
-            belowScroll + lineDelta * lineHeight,
-            mapVerticalScrollThroughReplacement(belowScroll, lineHeight, before, replacement),
+            "a caret on screen below the recap anchors scroll even when the viewport also contains the recap",
+            OperatorViewportAnchor.Caret,
+            operatorViewportAnchor(
+                caretOffset = outside,
+                caretInViewport = true,
+                topLeftOffset = replacement.start,
+                bottomOffset = outside,
+                editStart = replacement.start,
+                editEnd = replacement.end,
+            ),
         )
         assertEquals(
-            0,
-            mapVerticalScrollThroughReplacement(0, lineHeight, before, replacement),
+            "a caret above the edit that is off screen leaves the viewport anchored on its own text",
+            OperatorViewportAnchor.TopLeft,
+            operatorViewportAnchor(
+                caretOffset = above,
+                caretInViewport = false,
+                topLeftOffset = outside,
+                bottomOffset = before.length,
+                editStart = replacement.start,
+                editEnd = replacement.end,
+            ),
         )
-        val jumpedToEdit = lineIndexAt(before, replacement.start) * lineHeight
-        assertTrue(
-            "a write above the viewport must not scroll the caret to the edit",
-            mapVerticalScrollThroughReplacement(belowScroll, lineHeight, before, replacement) != jumpedToEdit,
+        assertEquals(
+            "a viewport whose top is inside the recap keeps the unchanged text at the bottom",
+            OperatorViewportAnchor.Bottom,
+            operatorViewportAnchor(
+                caretOffset = outside,
+                caretInViewport = false,
+                topLeftOffset = replacement.start,
+                bottomOffset = outside,
+                editStart = replacement.start,
+                editEnd = replacement.end,
+            ),
         )
+        assertEquals(
+            "visible text that is the replacement itself is not followed to the span start",
+            OperatorViewportAnchor.Unchanged,
+            operatorViewportAnchor(
+                caretOffset = replacement.start,
+                caretInViewport = true,
+                topLeftOffset = replacement.start,
+                bottomOffset = replacement.start,
+                editStart = replacement.start,
+                editEnd = replacement.end,
+            ),
+        )
+        assertEquals(1200, mapScrollByAnchorDelta(800, 1000, 1400))
+        assertEquals(400, mapScrollByAnchorDelta(400, 80, 80))
+        assertEquals(0, mapScrollByAnchorDelta(10, 50, 0))
     }
 
     @Test

@@ -5579,27 +5579,43 @@ mod terminal_convergence_tests {
         let file = dir.path().join("task.md");
         std::fs::write(
             &file,
-            "<!-- agent:queue -->\n- 🚧 still running\n- ⛔ blocked on other open work\n<!-- /agent:queue -->\n",
+            "<!-- agent:queue -->\n- 🚧 still running\n- ☑️ reported but open\n- ⛔ blocked on other open work\n<!-- /agent:queue -->\n",
         )
         .unwrap();
-        let running = refuse_transient_queue_closeout(
+        let in_flight = refuse_transient_queue_closeout(
             &file,
             SessionCheckStatus::Ok("[session-check] OK".to_string()),
         )
         .unwrap();
-        match running {
+        assert!(
+            matches!(in_flight, SessionCheckStatus::Ok(_)),
+            "a committed response may leave a worker in flight or a report unintegrated: {in_flight:?}"
+        );
+
+        std::fs::write(
+            &file,
+            "<!-- agent:queue -->\n- 🟡 only claimed\n- ⛔ blocked on other open work\n<!-- /agent:queue -->\n",
+        )
+        .unwrap();
+        let claimed = refuse_transient_queue_closeout(
+            &file,
+            SessionCheckStatus::Ok("[session-check] OK".to_string()),
+        )
+        .unwrap();
+        match claimed {
             SessionCheckStatus::Interrupted(message) => {
                 assert!(message.contains("normal closeout refused"));
-                assert!(message.contains("🚧 still running"));
-                assert!(
-                    message
-                        .contains("finish the running worker without converting the claim to Lost")
-                );
+                assert!(message.contains("🟡 only claimed"));
                 assert!(!message.contains("blocked on other open work"));
             }
             other => panic!("expected a refused closeout, got {other:?}"),
         }
 
+        std::fs::write(
+            &file,
+            "<!-- agent:queue -->\n- 🚧 still running\n<!-- /agent:queue -->\n",
+        )
+        .unwrap();
         let crash = refuse_transient_queue_closeout(
             &file,
             SessionCheckStatus::Ok(

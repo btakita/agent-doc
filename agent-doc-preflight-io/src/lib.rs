@@ -8340,6 +8340,13 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
                 // `#inboxdup`: the typing gate still holds this bare row. A
                 // pending paint would rewrite it while the operator is typing.
                 return None;
+            } else if matches!(
+                &identity,
+                agent_doc_element_queue::QueueItemIdentity::Id(id)
+                    if awaiting_operator_ids.contains(&id.to_ascii_lowercase())
+            ) {
+                // `#queueawaitop`: resting, not this turn's `📥` debt.
+                agent_doc_document::queue_projection::QueueLifecycleMarker::AwaitingOperator
             } else {
                 agent_doc_document::queue_projection::QueueLifecycleMarker::Pending
             };

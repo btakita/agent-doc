@@ -518,6 +518,11 @@ fn derive_runtime_projection_scoped(
     // `#queueblocked`: a row whose tracked item waits on open blockers paints
     // `⛔ ⟦blocked by ...⟧`, outranking a stale `⏭️`/`⏳` it may still carry.
     let blockers = agent_doc_queue::queue_blocked::queue_blockers(current);
+    // `#queueawaitop`: computed once for every queue this projection paints.
+    // A sibling of the selected queue does not go through the selected
+    // queue's `⏳` stamp, so the pending default below has to know the set.
+    let awaiting_operator =
+        agent_doc_queue::queue_continuation::awaiting_operator_head_ids(current);
     let (skip_queue_id, selected) = match scope {
         ClaimProjectionScope::Document => (
             None,
@@ -691,6 +696,16 @@ fn derive_runtime_projection_scoped(
                     {
                         // `#inboxdup`: leave the bare, still-typing row unmarked.
                         return None;
+                    } else if matches!(
+                        &identity,
+                        agent_doc_element_queue::QueueItemIdentity::Id(id)
+                            if awaiting_operator.contains(&id.to_ascii_lowercase())
+                    ) {
+                        // `#queueawaitop`: `[operator-verify]` and a gated
+                        // review wait on the operator in every queue that
+                        // shows the head, including a sibling of the selected
+                        // queue. `⏳` is the resting glyph for that wait.
+                        agent_doc_document::queue_projection::QueueLifecycleMarker::AwaitingOperator
                     } else {
                         agent_doc_document::queue_projection::QueueLifecycleMarker::Pending
                     };
@@ -2269,6 +2284,44 @@ mod tests {
 
         let closed = content.replace(&format!("- {item}\n"), &format!("- ~~{item}~~\n"));
         assert!(crate::queue_claim::completion_evidence_head_texts(&closed).is_empty());
+    }
+
+    /// `#queueawaitop`: a heading-anchored run beside a loop is not the
+    /// selected queue's stamp target. Its `[operator-verify]` head still
+    /// projects `⏳`; a plain sibling stays `📥`.
+    #[test]
+    fn operator_verify_sibling_of_a_loop_projects_awaiting_not_pending() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\nqueue: start\n---\n\n",
+            "## Issues <!-- agent:loop id=issues interval=1h -->\n",
+            "- poll issues\n",
+            "<!-- /agent:loop -->\n\n",
+            "## Work <!-- agent:run priority subagents clear go -->\n",
+            "- do [#head]\n",
+            "- do [#plain]\n",
+            "<!-- /agent:run -->\n\n",
+            "## Backlog <!-- agent:backlog priority queue -->\n",
+            "- [ ] [#head] [operator-verify] current queue head\n",
+            "- [ ] [#plain] ordinary work\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+
+        let projection = derive_claim_runtime_projection(&doc, content, None).unwrap();
+        assert!(
+            projection.target_content.contains("- ⏳ do [#head]\n"),
+            "{}",
+            projection.target_content
+        );
+        assert!(
+            projection.target_content.contains("- 📥 do [#plain]\n"),
+            "{}",
+            projection.target_content
+        );
+        assert!(!projection.target_content.contains("📥 do [#head]"));
     }
 
     /// A completion cell recorded as `do [#id] - <child>` shares the parent's

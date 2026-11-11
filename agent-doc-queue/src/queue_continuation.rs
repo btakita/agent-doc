@@ -783,23 +783,47 @@ pub fn deferred_head_count(content: &str) -> usize {
 /// selection already projects `🚧`. Before this, a subagent that finished,
 /// tagged its item `[operator-verify]` and released its claim left the head as
 /// a bare `do [#id]` that read as unstarted.
+///
+/// Every queue component is scanned, not only the scheduler-selected queue.
+/// A heading-anchored `agent:run` beside an `agent:loop` still names its
+/// `[operator-verify]` head, so that sibling projects `⏳` instead of `📥`
+/// (`#queueawaitop`). Ids that are not prompts of the selected queue are a
+/// no-op for the selected queue's skip stamp.
 pub fn awaiting_operator_head_ids(content: &str) -> HashSet<String> {
-    let Some((_, entries)) = queue_component_entries(content) else {
+    let Ok(components) = element::parse(content) else {
         return HashSet::new();
     };
     let operator_verify = deferred_backlog_ids_split(content, DrainScope::Supervisor);
     let gated_review = gated_review_ids(content);
-    document_queue::prompts(&entries)
-        .into_iter()
-        .filter(|prompt| !head_carries_operator_verdict(&prompt.text))
-        .filter_map(|prompt| extract_head_id(&prompt.text))
-        .map(|id| id.to_ascii_lowercase())
-        // `#queueblocked`: a blocked head shows `⛔`, never `⏳`. Its agent
-        // work cannot start until the blockers close, so it is not waiting on
-        // an operator verdict yet.
-        .filter(|id| !operator_verify.blocked.contains(id))
-        .filter(|id| operator_verify.all.contains(id) || gated_review.contains(id))
-        .collect()
+    let mut ids = HashSet::new();
+    for component in components
+        .iter()
+        .filter(|component| component.name == "queue")
+    {
+        let Ok(entries) = document_queue::parse(component.content(content)) else {
+            continue;
+        };
+        let entries = crate::nested_claim_steer::expand_if_installed(entries);
+        for prompt in document_queue::prompts(&entries) {
+            if head_carries_operator_verdict(&prompt.text) {
+                continue;
+            }
+            let Some(id) = extract_head_id(&prompt.text) else {
+                continue;
+            };
+            let id = id.to_ascii_lowercase();
+            // `#queueblocked`: a blocked head shows `⛔`, never `⏳`. Its agent
+            // work cannot start until the blockers close, so it is not waiting
+            // on an operator verdict yet.
+            if operator_verify.blocked.contains(&id) {
+                continue;
+            }
+            if operator_verify.all.contains(&id) || gated_review.contains(&id) {
+                ids.insert(id);
+            }
+        }
+    }
+    ids
 }
 
 /// Active queue continuation head, without drainability filtering.
@@ -3084,6 +3108,29 @@ mod tests {
         let mut ids = ids.into_iter().collect::<Vec<_>>();
         ids.sort();
         assert_eq!(ids, vec!["gate", "quirkbigint", "quirkinventory"]);
+    }
+
+    /// `#queueawaitop`: the selected queue may be the loop. The operator-verify
+    /// head on the sibling run is still awaiting; a focused-cycle sibling is not.
+    #[test]
+    fn awaiting_operator_head_ids_includes_a_sibling_of_the_selected_queue() {
+        let content = concat!(
+            "---\nqueue: start\n---\n\n",
+            "## Issues <!-- agent:loop id=issues interval=1h -->\n",
+            "- poll issues\n",
+            "<!-- /agent:loop -->\n\n",
+            "## Work <!-- agent:run go -->\n",
+            "- do [#head]\n",
+            "- do [#focused]\n",
+            "<!-- /agent:run -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#head] [operator-verify] current queue head\n",
+            "- [ ] [#focused] [focused-cycle] dedicated turn\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        let ids = awaiting_operator_head_ids(content);
+        assert!(ids.contains("head"));
+        assert!(!ids.contains("focused"));
     }
 
     #[test]

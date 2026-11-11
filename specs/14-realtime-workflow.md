@@ -1045,9 +1045,10 @@ change selected head identity. The canonical marker vocabulary is:
   worker holds a live claim on. `[focused-cycle]` is not awaiting the operator
   and gets no marker. Like `⏭️` it is re-derived every maintenance pass,
   stripped for identity, and clears once the head is consumed, claimed again, or
-  stops waiting on the operator. It exists because a subagent that finished,
-  tagged its item `[operator-verify]` and released its claim otherwise left a
-  bare `do [#id]` that read as unstarted. An awaiting-operator head is never
+  stops waiting on the operator. Every queue that shows the head, including a
+  sibling of the selected queue, projects `⏳` rather than `📥`. It exists
+  because a subagent that finished, tagged its item `[operator-verify]` and
+  released its claim otherwise left a bare `do [#id]` that read as unstarted. An awaiting-operator head is never
   agent work (`#regressionawaitingoperat`): it is never listed under
   `queue_subagent_dispatch` (neither through an item `#subagents` tag nor the
   queue-level `subagents` attribute), and it is never the head preflight

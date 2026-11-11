@@ -5314,6 +5314,30 @@ mod unique_child_vector_regression_tests {
     }
 }
 
+/// Whether `entry` is still inside a subtree rooted at `parent_indent`.
+///
+/// Every deeper list row counts, including `%%` comments and generated
+/// response lines. A non-list entry closes the subtree.
+fn list_row_remains_in_subtree(entry: &QueueEntry, parent_indent: usize) -> bool {
+    list_row_indent(entry).is_some_and(|indent| indent > parent_indent)
+}
+
+fn list_row_indent(entry: &QueueEntry) -> Option<usize> {
+    if let Some(prompt) = prompt_of(entry) {
+        return Some(prompt.indent);
+    }
+    let QueueEntry::Freeform(raw) = entry else {
+        return None;
+    };
+    for line in raw.lines() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        return split_list_item(line).map(|(indent, _, _)| indent);
+    }
+    None
+}
+
 /// Restore one nested executable row from the durable claim that was created
 /// while that row still existed (`#adnestedidenticalchildprojection`).
 ///
@@ -5391,12 +5415,11 @@ pub fn restore_missing_nested_claim_row(
         return Ok(None);
     };
 
+    // Freeform comment and response rows are not prompts. Treating the first
+    // of them as the subtree end inserted the restored row ahead of operator
+    // comments that were already the parent's first subitems.
     let insertion_index = (*parent_index + 1..entries.len())
-        .find(|index| {
-            prompt_of(&entries[*index])
-                .map(|prompt| prompt.indent <= *parent_indent)
-                .unwrap_or(true)
-        })
+        .find(|index| !list_row_remains_in_subtree(&entries[*index], *parent_indent))
         .unwrap_or(entries.len());
     let insertion_byte = spans
         .get(insertion_index)
@@ -8013,6 +8036,115 @@ mod tests {
         assert_eq!(
             restore_missing_nested_claim_row(&body, &claim).unwrap(),
             None
+        );
+    }
+
+    /// Operator `%%` comments authored first under a parent stay first when a
+    /// missing nested claim is restored. Stopping the subtree at the first
+    /// freeform row inserted the restored work ahead of those comments.
+    #[test]
+    fn restoring_a_nested_claim_keeps_leading_operator_comments_in_order() {
+        let parent = "https://github.com/haiven-dev/haiven-sdk-unreal-lyra/pull/7";
+        let first = "%% ci(release): dispatch sdk-dev promotion from main %%";
+        let second = "%% ready for review %%";
+        let child = "#address https://github.com/haiven-dev/haiven-sdk/pull/228 review";
+        let body = format!("- {parent}\n  - {first}\n  - {second}\n");
+        let item_text = format!("{parent}: {child}");
+        let claim: crate::queue_claim::QueueClaim = serde_json::from_value(serde_json::json!({
+            "identity": crate::queue_claim::claim_identity(&item_text),
+            "item_text": item_text,
+            "owner": "subagent:lyra7",
+            "claimed_at_secs": 1,
+            "expires_at_secs": 2,
+            "claim_time_row": child,
+        }))
+        .unwrap();
+
+        let repaired = restore_missing_nested_claim_row(&body, &claim)
+            .unwrap()
+            .expect("the missing nested row is restored");
+        assert_eq!(
+            repaired,
+            format!("- {parent}\n  - {first}\n  - {second}\n  - {child}\n"),
+            "comment subitems the operator added first stay in that order"
+        );
+    }
+
+    /// A response tree under an existing child is still that child's subtree.
+    /// The restored sibling lands after the tree, not between the child and
+    /// its `**Response**` rows, and not ahead of the leading comments.
+    #[test]
+    fn restoring_a_nested_claim_appends_after_response_structure() {
+        let parent = "https://github.com/haiven-dev/haiven-sdk-unreal/pull/11";
+        let comment = "%% ci(release): dispatch sdk-dev promotion from main %%";
+        let existing = "~~#adversarial-pr [#q-6bfeebcb4834]~~";
+        let restored = "#address https://github.com/haiven-dev/haiven-sdk/pull/228 review";
+        let body = format!(
+            "- {parent}\n  - {comment}\n  - {existing}\n    - **Response [#r-920aa71c29e0]**\n      - **Timestamp:** 2026-11-11T01:41:12.000Z\n      - **Summary:** REVIEW-CLEAN example\n      - **State:** Complete.\n      - **Guidance:** This row is complete.\n"
+        );
+        let item_text = format!("{parent}: {restored}");
+        let claim: crate::queue_claim::QueueClaim = serde_json::from_value(serde_json::json!({
+            "identity": crate::queue_claim::claim_identity(&item_text),
+            "item_text": item_text,
+            "owner": "subagent:unreal11",
+            "claimed_at_secs": 1,
+            "expires_at_secs": 2,
+            "claim_time_row": restored,
+        }))
+        .unwrap();
+        let repaired = restore_missing_nested_claim_row(&body, &claim)
+            .unwrap()
+            .expect("missing address row is restored");
+        let comment_at = repaired.find(comment).expect("comment");
+        let response_at = repaired
+            .find("**Response [#r-920aa71c29e0]**")
+            .expect("response");
+        let restored_at = repaired.find(restored).expect("restored row");
+        assert!(
+            comment_at < response_at && response_at < restored_at,
+            "{repaired}"
+        );
+    }
+
+    /// Response metadata makes the nested row a group parent, so
+    /// `lineage_claim_text` drops the parent prefix. The physical row still
+    /// identifies the claim. Restoring it would insert a duplicate ahead of
+    /// the operator's leading comments.
+    #[test]
+    fn response_structure_does_not_restore_a_nested_row_ahead_of_comments() {
+        let parent = "https://github.com/haiven-dev/haiven-sdk-unreal-chat/pull/8";
+        let comment = "%% ci(release): dispatch sdk-dev promotion from main %%";
+        let child_work = "#address https://github.com/haiven-dev/haiven-sdk/pull/228 review";
+        let child = format!("{child_work} [#q-7a1478e1aaa0]");
+        let body = format!(
+            "- {parent}\n  - {comment}\n  - {child}\n    - **Response [#r-e4903c671b12]**\n      - **Timestamp:** 2026-11-10T21:17:05.000Z\n      - **Summary:** BLOCKED squash-only merge\n      - **State:** Waiting on operator input.\n      - **Guidance:** The row stopped.\n"
+        );
+        let entries = parse(&body).unwrap();
+        let child_index = entries
+            .iter()
+            .position(|entry| {
+                prompt_of(entry).is_some_and(|prompt| prompt.text.contains("#address"))
+            })
+            .expect("nested address row");
+        let group = entry_is_group_parent(&entries, child_index);
+        let lineage = lineage_claim_text(&entries, child_index);
+        // Claimed before preflight assigned the q-id. The live row keeps that
+        // id and now carries the response structure.
+        let item_text = format!("{parent}: {child_work}");
+        let claim: crate::queue_claim::QueueClaim = serde_json::from_value(serde_json::json!({
+            "identity": crate::queue_claim::claim_identity(&item_text),
+            "item_text": item_text,
+            "owner": "subagent:chat8",
+            "claimed_at_secs": 1,
+            "expires_at_secs": 2,
+            "claim_time_row": child_work,
+        }))
+        .unwrap();
+
+        assert_eq!(
+            restore_missing_nested_claim_row(&body, &claim).unwrap(),
+            None,
+            "group={group} lineage={lineage:?}"
         );
     }
 

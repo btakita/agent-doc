@@ -139,11 +139,44 @@ fn upsert_queue_rows(body: &str, response: &BlockedRowResponse) -> String {
             && same_queue_work(&work, &response.item)
             && !descendants_contain(&lines, index, leading_spaces(bare), &needle)
         {
-            out.push_str(&render_queue_children(leading_spaces(bare), response));
+            let row_indent = leading_spaces(bare);
+            let insert_at = response_descendant_end(&lines, index, row_indent);
+            index += 1;
+            while index < insert_at {
+                out.push_str(&lines[index]);
+                index += 1;
+            }
+            // Operator comment subitems already under the row stay first.
+            // The response structure appends after that descendant content.
+            out.push_str(&render_queue_children(row_indent, response));
+            continue;
         }
         index += 1;
     }
     out
+}
+
+/// Line index immediately after the row's existing descendant content.
+///
+/// Blank padding between this subtree and the next sibling stays after the
+/// generated response. Comment lines are descendants: inserting at the parent
+/// line moved them below the response structure.
+fn response_descendant_end(lines: &[String], row: usize, row_indent: usize) -> usize {
+    let mut index = row + 1;
+    let mut last_content = row + 1;
+    while index < lines.len() {
+        let bare = lines[index].trim_end_matches(['\n', '\r']);
+        if bare.trim().is_empty() {
+            index += 1;
+            continue;
+        }
+        if leading_spaces(bare) <= row_indent {
+            break;
+        }
+        index += 1;
+        last_content = index;
+    }
+    last_content
 }
 
 fn descendants_contain(lines: &[String], row: usize, row_indent: usize, needle: &str) -> bool {
@@ -358,6 +391,34 @@ mod tests {
         assert!(queue.contains(reason), "{queue}");
         assert!(queue.contains(&format!("**Response {}**", response.response_id)));
         assert!(queue.contains("- finish dev\n"), "the sibling row stays");
+    }
+
+    #[test]
+    fn blocked_response_appends_after_leading_operator_comments() {
+        let reason = "the harness session limit stopped this attempt";
+        let response = response(reason);
+        let doc = concat!(
+            "<!-- agent:queue -->\n",
+            "- ⛔ [#subagent:sdk#1] finish sdk\n",
+            "  - %% ci(release): dispatch sdk-dev promotion from main %%\n",
+            "  - %% ready for review %%\n",
+            "- finish dev\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let projected = project_blocked_row_response(doc, &response).unwrap();
+        let queue = component_body(&projected, "queue");
+        let first = queue
+            .find("%% ci(release): dispatch sdk-dev promotion from main %%")
+            .expect("first comment");
+        let second = queue
+            .find("%% ready for review %%")
+            .expect("second comment");
+        let blocker = queue.find("**Blocker:**").expect("blocker");
+        let sibling = queue.find("- finish dev\n").expect("sibling");
+        assert!(
+            first < second && second < blocker && blocker < sibling,
+            "{queue}"
+        );
     }
 
     fn component_body<'a>(doc: &'a str, name: &str) -> &'a str {

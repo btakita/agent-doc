@@ -310,6 +310,40 @@ impl FreeTextCoinGate {
     pub fn allows_coining(&self, text: &str) -> bool {
         self.decision(text).deliver()
     }
+
+    /// `#inboxdup`: whether maintenance may prefix a cosmetic `📥` onto a bare
+    /// row. With no live observation, a saved document still receives the
+    /// marker. While the operator-edit wait has an observation, the row follows
+    /// the same settle decision as coining, so a line still being typed is not
+    /// rewritten. A navigation heading or a stable `[#q-…]` identity added
+    /// during this pass is presentation, not a new edit.
+    pub fn allows_cosmetic_pending(&self, text: &str) -> bool {
+        if self.observed.is_none() {
+            return true;
+        }
+        let text = text.trim().strip_prefix("### ").unwrap_or(text.trim());
+        self.allows_coining(without_trailing_prompt_identity(text))
+    }
+}
+
+/// Drop one trailing stable prompt id (` [#q-…]`) so a marker decision sees
+/// the operator's line rather than the identity maintenance just admitted.
+fn without_trailing_prompt_identity(text: &str) -> &str {
+    let end = text.trim_end().len();
+    let head = &text[..end];
+    let Some(start) = head.rfind(" [#q-") else {
+        return head;
+    };
+    let token = &head[start + 1..];
+    if token.starts_with("[#q-")
+        && token.ends_with(']')
+        && token
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'#' | b'-' | b'[' | b']'))
+    {
+        return head[..start].trim_end();
+    }
+    head
 }
 
 /// True when every line of `text` already stood as a whole line (modulo list
@@ -2389,6 +2423,19 @@ mod tests {
             debounce_ms: 2_000,
             max_hold_ms: agent_doc_debounce::edit_settle::DEFAULT_MAX_HOLD_MS,
         };
+
+        // `#inboxdup`: a line absent from the settled observation is still being
+        // typed, so maintenance must not prefix `📥`. A saved document with no
+        // observation still may. A line present and quiet still may.
+        let held_gate = gate(String::new(), 2_500);
+        assert!(!held_gate.allows_cosmetic_pending(line));
+        assert!(FreeTextCoinGate::structural_only().allows_cosmetic_pending(line));
+        assert!(FreeTextCoinGate::structural_only().allows_cosmetic_pending("Add a ``"));
+        let quiet_gate = gate(content.clone(), 2_500);
+        assert!(quiet_gate.allows_cosmetic_pending(line));
+        assert!(quiet_gate.allows_cosmetic_pending(&format!("### {line}")));
+        assert!(quiet_gate.allows_cosmetic_pending(&format!("{line} [#q-513d940fcac2]")));
+        assert!(!held_gate.allows_cosmetic_pending(&format!("{line} [#q-513d940fcac2]")));
 
         // The wait settled on the half-typed draft; the operator kept typing.
         let typed_after_settle = gate(

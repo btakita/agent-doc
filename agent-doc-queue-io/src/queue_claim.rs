@@ -219,6 +219,7 @@ impl QueueClaimSnapshot {
         let live = live_queue_head_identities(content);
         let claimed = ledger.claimed_items(self.observed_at_secs, live.as_ref());
         claimed_items_with_non_ledger_holds(file, content, claimed)
+            .with_user_prompt_backlog_same_work(content)
     }
 }
 
@@ -722,6 +723,8 @@ fn claim_next_shared_leaf(
     let owner_session_for_claim = owner_session.clone();
     let worker_harness = worker_harness.map(str::to_string);
     let review_text = claim_view_text(file)?;
+    let same_work =
+        agent_doc_queue::queue_claim::user_prompt_backlog_identity_classes(&review_text);
     let result = mutate_ledger(file, |ledger| {
         let chosen = prepared
             .iter()
@@ -730,6 +733,13 @@ fn claim_next_shared_leaf(
                     .claims
                     .iter()
                     .any(|claim| claim.identity == item.identity && claim.blocks_dispatch(now))
+                    && agent_doc_queue::queue_claim::user_prompt_backlog_dispatch_holder(
+                        &ledger.claims,
+                        &item.identity,
+                        &same_work,
+                        now,
+                    )
+                    .is_none()
             })
             .unwrap_or(&prepared[0]);
         if let Some(blocker) = agent_doc_queue::prompt_pressure::open_review_blocking_prompt(
@@ -746,6 +756,14 @@ fn claim_next_shared_leaf(
             owner_session_for_claim.as_ref(),
             worker_harness.as_deref(),
         )?;
+        if let Some(holder) = agent_doc_queue::queue_claim::user_prompt_backlog_dispatch_holder(
+            &ledger.claims,
+            &chosen.identity,
+            &same_work,
+            now,
+        ) {
+            return Ok((ClaimOutcome::HeldByOther, holder.clone()));
+        }
         let outcome = ledger.claim_in_session_with_generation_floor(
             &chosen.target,
             owner,
@@ -1069,6 +1087,8 @@ pub fn claim_with_session_for_worker_harness(
     {
         refuse_open_prompt_review(&target, &blocker)?;
     }
+    let same_work =
+        agent_doc_queue::queue_claim::user_prompt_backlog_identity_classes(&review_text);
     // The nest vector stored as `item_text` has no sub-prompt block. Keep the
     // expanded row, children included, so later siblings still split
     // (`#nestedclaimsteer`, `#nestlistlineage`).
@@ -1114,6 +1134,14 @@ pub fn claim_with_session_for_worker_harness(
             owner_session.as_ref(),
             worker_harness.as_deref(),
         )?;
+        if let Some(holder) = agent_doc_queue::queue_claim::user_prompt_backlog_dispatch_holder(
+            &ledger.claims,
+            &identity,
+            &same_work,
+            now,
+        ) {
+            return Ok((ClaimOutcome::HeldByOther, holder.clone()));
+        }
         let outcome = ledger.claim_in_session_with_generation_floor(
             &target,
             owner,
@@ -2589,6 +2617,7 @@ pub fn in_flight_claimed_items_for_content(file: &Path, content: &str) -> Claime
         }
     };
     claimed_items_with_queue_holds(file, content, in_flight)
+        .with_user_prompt_backlog_same_work(content)
 }
 
 fn claimed_items_with_non_ledger_holds(
@@ -2787,7 +2816,9 @@ pub fn ledger_claimed_items_for_content(file: &Path, content: &str) -> ClaimedQu
         Ok(ledger) => {
             let _guard = steer_guard(snapshots_from_ledger(&ledger));
             let live = live_queue_head_identities(content);
-            ledger.claimed_items(now_secs(), live.as_ref())
+            ledger
+                .claimed_items(now_secs(), live.as_ref())
+                .with_user_prompt_backlog_same_work(content)
         }
         Err(err) => {
             eprintln!(

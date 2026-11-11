@@ -58,7 +58,7 @@ pub fn queue_prompt_projection_rows(content: &str, entries: &[QueueEntry]) -> Ve
                 .iter()
                 .find(|component| component.name == "queue")
                 .map(|component| {
-                    crate::prompt_component_attrs::component_preset(&component.attrs).is_some()
+                    crate::prompt_component_attrs::preset_attr_declared(&component.attrs)
                 })
         })
         .unwrap_or(false);

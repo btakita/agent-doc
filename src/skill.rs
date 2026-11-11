@@ -5358,6 +5358,7 @@ mod tests {
             "end the turn\n  quietly",
             "`authorization.subagent_prompt_preamble` VERBATIM",
             "`unresolved_preset`",
+            "`conflicting_preset_attrs`",
             "agent-doc queue brief <FILE> --item <...>",
         ] {
             assert!(respond.contains(needle), "respond.md missing {needle:?}");

@@ -265,10 +265,19 @@ pub struct ComponentAttrWarning {
     pub issues: Vec<String>,
     pub has_fatal_schedule_issue: bool,
     pub compatibility_migration_count: usize,
+    /// `preset=` and `presets=` disagree on at least one marker. Neither value
+    /// is applied. The message must not describe that as an ignored typo.
+    pub has_preset_attr_conflict: bool,
 }
 
 impl ComponentAttrWarning {
     pub fn message_body(&self) -> String {
+        if self.has_preset_attr_conflict {
+            return format!(
+                "{}. Neither spelling is applied; remove one or make the values identical.",
+                self.issues.join("; ")
+            );
+        }
         if self.has_fatal_schedule_issue {
             return format!(
                 "{}. Invalid schedule syntax is fail-closed: only the affected queue is held until corrected; sibling queues remain independent. Other invalid attributes are ignored (no mutation).",
@@ -299,7 +308,23 @@ pub fn component_attr_warning(content: &str) -> Option<ComponentAttrWarning> {
     let mut issues: Vec<String> = Vec::new();
     let mut has_fatal_schedule_issue = false;
     let mut compatibility_migration_count = 0;
+    let mut has_preset_attr_conflict = false;
     for component in &components {
+        if let Some(conflict) =
+            crate::prompt_component_attrs::preset_attr_conflict(&component.attrs)
+        {
+            has_preset_attr_conflict = true;
+            let raw_name = content
+                .get(component.open_start..component.open_end)
+                .and_then(|marker| marker.split_once("agent:"))
+                .and_then(|(_, rest)| rest.split_whitespace().next())
+                .filter(|name| !name.is_empty())
+                .unwrap_or(component.name.as_str());
+            issues.push(format!(
+                "`preset=\"{}\"` and `presets=\"{}\"` on `agent:{raw_name}` disagree; they alias one attribute, so neither value is applied",
+                conflict.preset, conflict.presets
+            ));
+        }
         for issue in hash_prefixed_id_reference_issues(content, component) {
             issues.push(issue);
             compatibility_migration_count += 1;
@@ -432,6 +457,7 @@ pub fn component_attr_warning(content: &str) -> Option<ComponentAttrWarning> {
         issues,
         has_fatal_schedule_issue,
         compatibility_migration_count,
+        has_preset_attr_conflict,
     })
 }
 
@@ -861,6 +887,39 @@ mod tests {
             assert!(
                 component_attr_warning(&content).is_none(),
                 "valid exchange prompt attrs must not warn: {marker}"
+            );
+        }
+    }
+
+    /// Same value is one preset. Different values fail closed on every marker
+    /// that accepts `preset=`, including the queue spellings and exchange.
+    #[test]
+    fn presets_alias_conflict_fails_closed_on_queue_run_loop_and_exchange() {
+        for marker in ["queue", "run", "loop", "exchange"] {
+            let conflict = format!(
+                "<!-- agent:{marker} preset=\"#auth\" presets=\"#ship\" -->\n- a\n<!-- /agent:{marker} -->\n"
+            );
+            let warning = component_attr_warning(&conflict).expect(marker);
+            assert!(warning.has_preset_attr_conflict, "{marker}");
+            let body = warning.message_body();
+            assert!(body.contains("disagree"), "{marker}: {body}");
+            assert!(
+                body.contains("neither value is applied"),
+                "{marker}: {body}"
+            );
+            assert!(
+                body.contains("make the values identical"),
+                "{marker}: {body}"
+            );
+            assert!(!body.contains("attribute is ignored"), "{marker}: {body}");
+
+            let same = format!(
+                "<!-- agent:{marker} preset=\"#auth\" presets=\"#auth\" -->\n- a\n<!-- /agent:{marker} -->\n"
+            );
+            assert!(
+                component_attr_warning(&same).is_none(),
+                "{marker}: {:?}",
+                component_attr_warning(&same)
             );
         }
     }

@@ -35,6 +35,9 @@ pub enum AuthorizationStatus {
     /// A preset the queue declares has no frontmatter definition. Fail
     /// closed: nothing beyond the verbatim item text is authorized.
     UnresolvedPreset,
+    /// The selected queue's `preset=` and `presets=` carry different nonempty
+    /// values. Fail closed: neither spelling is authorization.
+    ConflictingPresetAttrs,
 }
 
 /// Where a preset applied to the item came from.
@@ -105,6 +108,10 @@ pub struct SubagentAuthorization {
     /// Presets that apply to the item (queue-scoped first, then item tokens).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub presets: Vec<PresetAuthorization>,
+    /// Set when the selected queue's `preset=` and `presets=` disagree. The
+    /// marker values are not in [`Self::presets`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preset_attr_conflict: Option<String>,
     /// Resolved harness model override for this dispatch.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
@@ -314,8 +321,12 @@ pub fn subagent_authorization_with_presets(
     // `#runpresetunresolved`: an inline `preset="#name: body"` definition on
     // the selected queue resolves exactly like a frontmatter entry, for the
     // queue attribute and for item/lineage tokens naming it alike.
-    let overlaid =
-        selected_queue_prompt_attrs(content, components).overlay_inline_presets(presets_map);
+    let queue_prompt_attrs = selected_queue_prompt_attrs(content, components);
+    let preset_attr_conflict = queue_prompt_attrs
+        .preset_conflict
+        .as_ref()
+        .map(ToString::to_string);
+    let overlaid = queue_prompt_attrs.overlay_inline_presets(presets_map);
     let presets_map = &overlaid;
     let mut presets: Vec<PresetAuthorization> = Vec::new();
     let mut push_preset = |requested: &str, source: PresetSource| {
@@ -396,7 +407,9 @@ pub fn subagent_authorization_with_presets(
         }
     }
 
-    let status = if presets.iter().any(|p| !p.resolved) {
+    let status = if preset_attr_conflict.is_some() {
+        AuthorizationStatus::ConflictingPresetAttrs
+    } else if presets.iter().any(|p| !p.resolved) {
         AuthorizationStatus::UnresolvedPreset
     } else if presets.is_empty() {
         AuthorizationStatus::ItemTextOnly
@@ -448,6 +461,7 @@ pub fn subagent_authorization_with_presets(
         tracked_items,
         unresolved_ids,
         presets,
+        preset_attr_conflict,
         model,
         effort,
         prompt_context: None,
@@ -850,11 +864,27 @@ fn render_preamble(
             "Pass these values to the harness subagent launch: Claude Code Agent `model` / `effort`, or Codex `spawn_agent` `model` / `reasoning_effort`. Omit any value not listed here.\n",
         );
     }
-    if auth.status != AuthorizationStatus::UnresolvedPreset {
+    if !matches!(
+        auth.status,
+        AuthorizationStatus::UnresolvedPreset | AuthorizationStatus::ConflictingPresetAttrs
+    ) {
         out.push('\n');
         out.push_str(SUBAGENT_RESOLVED_AUTHORIZATION_RULE);
     }
     match auth.status {
+        AuthorizationStatus::ConflictingPresetAttrs => {
+            let detail = auth
+                .preset_attr_conflict
+                .as_deref()
+                .unwrap_or("`preset` and `presets` disagree");
+            out.push_str(&format!(
+                "\n{UNRESOLVED_AUTHORIZATION_MARKER}: {detail}. \
+                 They alias one attribute, not two preset lists. Neither value is operator \
+                 authorization. Do not commit, push, install, release, publish, or take any other \
+                 outward action on the strength of either spelling. Do the in-worktree work the \
+                 item text itself names. Operator fix: keep one spelling, or give both the same value.\n"
+            ));
+        }
         AuthorizationStatus::UnresolvedPreset => {
             let missing: Vec<String> = auth
                 .presets
@@ -1682,6 +1712,85 @@ agent_doc_format: template
         json.as_object_mut().unwrap().remove("prompt_context");
         let old: SubagentAuthorization = serde_json::from_value(json).unwrap();
         assert_eq!(old.prompt_context, None);
+    }
+
+    #[test]
+    fn presets_alias_on_the_queue_resolves_like_preset() {
+        let content = doc(
+            PRESETS,
+            "subagents presets=\"#spec-test-build-install-commit-push\"",
+            &["do [#abc]"],
+            &["[ ] [#abc] Add a way to post authorization"],
+        );
+        let auth = subagent_authorization("doc.md", &content, "do [#abc]");
+        assert_eq!(auth.status, AuthorizationStatus::Resolved);
+        assert!(auth.preset_attr_conflict.is_none());
+        assert_eq!(auth.presets.len(), 1);
+        assert_eq!(
+            auth.presets[0].body.as_deref(),
+            Some("update spec + tests. build + install for local testing. commit + push")
+        );
+    }
+
+    #[test]
+    fn identical_preset_and_presets_are_one_preset() {
+        let fm = "prompt_presets:\n  \"#auth\": \"I authorize push\"\n";
+        let content = doc(
+            fm,
+            "subagents preset=\"#auth\" presets=\"#auth\"",
+            &["publish the release"],
+            &[],
+        );
+        let auth = subagent_authorization("doc.md", &content, "publish the release");
+        assert_eq!(auth.status, AuthorizationStatus::Resolved);
+        assert_eq!(auth.presets.len(), 1);
+        assert_eq!(auth.presets[0].name, "#auth");
+        assert_eq!(auth.presets[0].body.as_deref(), Some("I authorize push"));
+        assert!(auth.preset_attr_conflict.is_none());
+    }
+
+    #[test]
+    fn conflicting_preset_attrs_fail_closed_without_either_body() {
+        let fm =
+            "prompt_presets:\n  \"#auth\": \"I authorize push\"\n  \"#ship\": \"commit + push\"\n";
+        for marker in ["queue", "run", "loop"] {
+            let content = format!(
+                "---\nagent_doc_session: s\nagent_doc_format: template\n{fm}---\n\n\
+                 <!-- agent:{marker} subagents preset=\"#auth\" presets=\"#ship\" go -->\n\
+                 - publish the release\n\
+                 <!-- /agent:{marker} -->\n"
+            );
+            let auth = subagent_authorization("doc.md", &content, "publish the release");
+            assert_eq!(
+                auth.status,
+                AuthorizationStatus::ConflictingPresetAttrs,
+                "{marker}: {auth:?}"
+            );
+            assert!(auth.presets.is_empty(), "{marker}: {:?}", auth.presets);
+            let preamble = &auth.subagent_prompt_preamble;
+            assert!(
+                preamble.contains(UNRESOLVED_AUTHORIZATION_MARKER),
+                "{marker}: {preamble}"
+            );
+            assert!(
+                preamble.contains("#auth") && preamble.contains("#ship"),
+                "{preamble}"
+            );
+            assert!(!preamble.contains("I authorize push"), "{preamble}");
+            assert!(!preamble.contains("commit + push"), "{preamble}");
+            assert!(!preamble.contains("No queue preset applies"), "{preamble}");
+            assert!(
+                !preamble.contains(SUBAGENT_RESOLVED_AUTHORIZATION_RULE),
+                "{preamble}"
+            );
+            assert_eq!(
+                auth.preset_attr_conflict.as_deref(),
+                Some(
+                    "`preset=\"#auth\"` and `presets=\"#ship\"` disagree; they alias one attribute, so neither value is applied"
+                ),
+                "{marker}"
+            );
+        }
     }
 
     #[test]

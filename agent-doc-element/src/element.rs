@@ -749,7 +749,7 @@ fn normalize_queue_tag_token(token: &str) -> String {
     if is_queue_boolean_attr(key) && value.eq_ignore_ascii_case("true") {
         return key.to_string();
     }
-    if key == "preset"
+    if matches!(key, "preset" | "presets")
         && let Some(stripped) = strip_malformed_true_suffix(value)
     {
         return format!("{key}={stripped}");
@@ -5199,6 +5199,26 @@ Fix applied to skip non-agent <!-- sequences.
                 "<!-- agent:queue priority keep preset=\"#spec-test-build-install-commit-push\" go -->\n",
                 "- do [#x]\n",
                 "<!-- /agent:queue -->\n",
+            )
+        );
+    }
+
+    /// `presets=` is the same attribute as `preset=`, including the malformed
+    /// `=true` suffix a queue-tag rewrite strips off boolean flags.
+    #[test]
+    fn converge_queue_auto_normalizes_presets_alias_true_suffix() {
+        let doc = concat!(
+            "<!-- agent:run presets=\"#spec\"=true go=true -->\n",
+            "- do [#x]\n",
+            "<!-- /agent:run -->\n",
+        );
+        let result = converge_queue_auto(doc, false).expect("tag normalized");
+        assert_eq!(
+            result,
+            concat!(
+                "<!-- agent:run presets=\"#spec\" go -->\n",
+                "- do [#x]\n",
+                "<!-- /agent:run -->\n",
             )
         );
     }

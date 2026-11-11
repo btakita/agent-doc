@@ -3004,7 +3004,7 @@ pub fn noise_queue_head_node_keys(content: &str) -> Result<Vec<String>> {
             comps
                 .iter()
                 .find(|c| c.name == "queue")
-                .map(|c| crate::prompt_component_attrs::component_preset(&c.attrs).is_some())
+                .map(|c| crate::prompt_component_attrs::preset_attr_declared(&c.attrs))
         })
         .unwrap_or(false);
     let nodes = agent_doc_markdown_ast::mutations::item_nodes_all(content, "queue")
@@ -3086,7 +3086,7 @@ pub fn strike_all_noise_queue_heads(content: &str) -> Result<(String, usize)> {
         return Ok((content.to_string(), 0));
     };
     let preset_supplies_directive =
-        crate::prompt_component_attrs::component_preset(&queue.attrs).is_some();
+        crate::prompt_component_attrs::preset_attr_declared(&queue.attrs);
     let body_start = queue.open_end;
     let body = &content[body_start..queue.close_start];
 

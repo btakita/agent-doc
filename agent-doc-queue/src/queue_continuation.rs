@@ -1637,10 +1637,9 @@ fn queue_component_entries_from(
         QueueFacts {
             has_auto: document_queue::has_auto_attr(&queue_component.attrs),
             attrs: queue_component.attrs.clone(),
-            preset_supplies_directive: crate::prompt_component_attrs::component_preset(
+            preset_supplies_directive: crate::prompt_component_attrs::preset_attr_declared(
                 &queue_component.attrs,
-            )
-            .is_some(),
+            ),
         },
         entries,
     ))

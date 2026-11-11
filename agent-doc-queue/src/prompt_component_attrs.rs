@@ -1,9 +1,10 @@
 //! Component-scoped prompt policy shared by preflight and realtime steering.
 //!
-//! `agent:queue` and `agent:exchange` may both declare a default `preset`
-//! (`presets` is a compatibility alias) and subagent dispatch intent on their
-//! opening marker. The policy is parsed from structural components, so
-//! marker-like text in Markdown code ranges is never treated as configuration.
+//! `agent:queue` / `agent:run` / `agent:loop` and `agent:exchange` may declare
+//! one default `preset` (`presets` is an alias of that same attribute, not a
+//! second list) and subagent dispatch intent on their opening marker. The
+//! policy is parsed from structural components, so marker-like text in
+//! Markdown code ranges is never treated as configuration.
 
 use agent_doc_element::element;
 
@@ -11,9 +12,13 @@ use agent_doc_element::element;
 pub struct PromptComponentAttrs {
     /// The trimmed `preset=` value exactly as parsed from the marker. Consumers
     /// must use [`Self::preset_names`] so a quoted value may carry more than one
-    /// whitespace-separated preset reference.
+    /// whitespace-separated preset reference. `None` when the attribute is
+    /// absent and when [`Self::preset_conflict`] is set.
     pub preset: Option<String>,
     pub subagents: bool,
+    /// `preset=` and `presets=` both carried different nonempty values. Neither
+    /// value is in [`Self::preset`].
+    pub preset_conflict: Option<PresetAttrConflict>,
 }
 
 impl PromptComponentAttrs {
@@ -198,22 +203,79 @@ fn inline_definition_name(token: &str) -> Option<&str> {
     (!bare.is_empty() && !bare.contains([':', '#'])).then_some(name)
 }
 
-/// The component's `preset` value, or `None` when there is no preset.
+/// `preset=` and `presets=` named different nonempty values on one marker.
 ///
-/// `presets=` is a compatibility alias for the easy-to-make plural spelling.
-/// When both keys carry values, canonical `preset=` wins. The structural
-/// parser omits empty attributes, so `preset="" presets="#alias"` resolves the
-/// nonempty alias just as if the empty key were absent.
-///
-/// GH #227: `preset=""` is the operator's explicit "no preset" and is preserved
-/// byte for byte in the document. Every resolver must read it as no preset, so
-/// an empty (or whitespace-only) value is `None` exactly like an absent key.
-pub fn component_preset(attrs: &std::collections::HashMap<String, String>) -> Option<&str> {
+/// The two spellings are one attribute. Callers must not prefer either value.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PresetAttrConflict {
+    /// Trimmed `preset=` value.
+    pub preset: String,
+    /// Trimmed `presets=` value.
+    pub presets: String,
+}
+
+impl std::fmt::Display for PresetAttrConflict {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "`preset=\"{}\"` and `presets=\"{}\"` disagree; they alias one attribute, so neither value is applied",
+            self.preset, self.presets
+        )
+    }
+}
+
+fn nonempty_preset_attr<'a>(
+    attrs: &'a std::collections::HashMap<String, String>,
+    key: &str,
+) -> Option<&'a str> {
     attrs
-        .get("preset")
-        .or_else(|| attrs.get("presets"))
-        .map(|value| value.trim())
+        .get(key)
+        .map(String::as_str)
+        .map(str::trim)
         .filter(|value| !value.is_empty())
+}
+
+/// Disagreement between `preset=` and `presets=`, if both are nonempty and
+/// their trimmed values differ.
+pub fn preset_attr_conflict(
+    attrs: &std::collections::HashMap<String, String>,
+) -> Option<PresetAttrConflict> {
+    let preset = nonempty_preset_attr(attrs, "preset")?;
+    let presets = nonempty_preset_attr(attrs, "presets")?;
+    (preset != presets).then(|| PresetAttrConflict {
+        preset: preset.to_string(),
+        presets: presets.to_string(),
+    })
+}
+
+/// Whether the marker declares either spelling, including a conflict.
+///
+/// Noise classification uses this so a disagreement does not reclassify
+/// prompt lines as if the queue had no preset. Authorization still fails
+/// closed and grants neither value; see [`preset_attr_conflict`].
+pub fn preset_attr_declared(attrs: &std::collections::HashMap<String, String>) -> bool {
+    nonempty_preset_attr(attrs, "preset").is_some()
+        || nonempty_preset_attr(attrs, "presets").is_some()
+}
+
+/// The component's single `preset` value, or `None` when there is no preset.
+///
+/// `presets=` is an alias of `preset=` (the same grammar, not a second list).
+/// The same trimmed value on both spellings is that one preset. Different
+/// nonempty values are a conflict: this returns `None` and
+/// [`preset_attr_conflict`] reports it, rather than preferring either spelling.
+/// The structural parser omits empty attributes, so `preset="" presets="#alias"`
+/// resolves the nonempty alias just as if the empty key were absent.
+///
+/// GH #227: `preset=""` (and `presets=""`) is the operator's explicit "no
+/// preset" and is preserved byte for byte in the document. Every resolver must
+/// read it as no preset, so an empty (or whitespace-only) value is `None`
+/// exactly like an absent key.
+pub fn component_preset(attrs: &std::collections::HashMap<String, String>) -> Option<&str> {
+    if preset_attr_conflict(attrs).is_some() {
+        return None;
+    }
+    nonempty_preset_attr(attrs, "preset").or_else(|| nonempty_preset_attr(attrs, "presets"))
 }
 
 /// Read prompt defaults from the first structural component named `name`.
@@ -248,6 +310,7 @@ pub fn prompt_component_attrs_for(
     PromptComponentAttrs {
         preset: component_preset(&component.attrs).map(str::to_string),
         subagents,
+        preset_conflict: preset_attr_conflict(&component.attrs),
     }
 }
 
@@ -268,6 +331,7 @@ mod tests {
             PromptComponentAttrs {
                 preset: Some("#review".to_string()),
                 subagents: true,
+                preset_conflict: None,
             }
         );
     }
@@ -392,29 +456,67 @@ mod tests {
         assert!(unresolved_component_presets(content, |_| true).is_empty());
     }
 
+    /// `presets=` is `preset=` on every marker that already accepts it: the
+    /// same reference grammar, one value when the spellings match, and no
+    /// value when they disagree.
     #[test]
-    fn plural_presets_attribute_is_an_alias_with_singular_precedence() {
-        let plural = concat!(
-            "<!-- agent:queue presets=\"#push #auth\" -->\n",
+    fn presets_alias_matches_preset_grammar_on_queue_run_loop_and_exchange() {
+        for marker in ["queue", "run", "loop", "exchange"] {
+            let name = if marker == "exchange" {
+                "exchange"
+            } else {
+                "queue"
+            };
+            let plural = format!(
+                "<!-- agent:{marker} presets=\"#push #auth\" -->\n- release\n<!-- /agent:{marker} -->\n"
+            );
+            let attrs = prompt_component_attrs(&plural, name);
+            assert!(attrs.preset_conflict.is_none(), "{marker}");
+            assert_eq!(
+                attrs.preset_names().collect::<Vec<_>>(),
+                vec!["#push", "#auth"],
+                "{marker}"
+            );
+
+            let inline = format!(
+                "<!-- agent:{marker} presets=\"#ship: approve all commit\" -->\n- release\n<!-- /agent:{marker} -->\n"
+            );
+            assert_eq!(
+                prompt_component_attrs(&inline, name).preset_refs(),
+                vec![PresetRef::Inline {
+                    name: "#ship",
+                    body: "approve all commit",
+                }],
+                "{marker}"
+            );
+        }
+
+        let same = concat!(
+            "<!-- agent:run preset=\"#auth\" presets=\" #auth \" -->\n",
             "- release\n",
-            "<!-- /agent:queue -->\n",
+            "<!-- /agent:run -->\n",
         );
-        assert_eq!(
-            prompt_component_attrs(plural, "queue")
-                .preset_names()
-                .collect::<Vec<_>>(),
-            vec!["#push", "#auth"]
-        );
+        let same_attrs = prompt_component_attrs(same, "queue");
+        assert_eq!(same_attrs.preset.as_deref(), Some("#auth"));
+        assert!(same_attrs.preset_conflict.is_none());
+        assert_eq!(same_attrs.preset_names().collect::<Vec<_>>(), vec!["#auth"]);
 
         let both = concat!(
-            "<!-- agent:queue preset=\"#canonical\" presets=\"#alias\" -->\n",
+            "<!-- agent:loop preset=\"#canonical\" presets=\"#alias\" -->\n",
             "- release\n",
-            "<!-- /agent:queue -->\n",
+            "<!-- /agent:loop -->\n",
         );
+        let conflicted = prompt_component_attrs(both, "queue");
+        assert_eq!(conflicted.preset, None);
+        assert!(conflicted.preset_names().next().is_none());
         assert_eq!(
-            prompt_component_attrs(both, "queue").preset.as_deref(),
-            Some("#canonical")
+            conflicted.preset_conflict,
+            Some(PresetAttrConflict {
+                preset: "#canonical".to_string(),
+                presets: "#alias".to_string(),
+            })
         );
+        assert!(unresolved_component_presets(both, |_| false).is_empty());
 
         let empty_canonical = concat!(
             "<!-- agent:queue preset=\"\" presets=\"#alias\" -->\n",
@@ -426,6 +528,19 @@ mod tests {
                 .preset
                 .as_deref(),
             Some("#alias")
+        );
+
+        let mut attrs = std::collections::HashMap::new();
+        attrs.insert("preset".to_string(), "  ".to_string());
+        attrs.insert("presets".to_string(), "#alias".to_string());
+        assert_eq!(component_preset(&attrs), Some("#alias"));
+        assert!(preset_attr_conflict(&attrs).is_none());
+        attrs.insert("preset".to_string(), "#auth".to_string());
+        assert_eq!(component_preset(&attrs), None);
+        assert!(preset_attr_declared(&attrs));
+        assert_eq!(
+            preset_attr_conflict(&attrs).map(|conflict| conflict.preset),
+            Some("#auth".to_string())
         );
     }
 
@@ -439,6 +554,7 @@ mod tests {
             PromptComponentAttrs {
                 preset: None,
                 subagents: true,
+                preset_conflict: None,
             }
         );
         let exchange = "<!-- agent:exchange preset=\"\" -->\nfix it\n<!-- /agent:exchange -->\n";

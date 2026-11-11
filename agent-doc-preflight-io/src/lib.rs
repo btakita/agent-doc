@@ -1230,7 +1230,7 @@ any other coordinator work; this binary acknowledgement changes \
 `authorization.subagent_prompt_preamble` VERBATIM at the top of \
 the subagent prompt (`#waypostauthorization`): it quotes the operator's authorization (item, \
 backlog text, preset body) and the coordinator rules; never paraphrase it, and when its \
-`authorization.status` is `unresolved_preset` do not add authorization it lacks. \
+`authorization.status` is `unresolved_preset` or `conflicting_preset_attrs` (`preset=` and `presets=` disagree, so neither body is authorization) do not add authorization it lacks. \
 Pass an entry's optional `model` and `effort` to the harness subagent launch (Claude Code Agent \
 `model` / `effort`; Codex `spawn_agent` `model` / `reasoning_effort`). Omitted fields inherit the \
 harness defaults. When an entry carries `recovery`, this is a replacement for the named prior \

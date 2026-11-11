@@ -641,7 +641,8 @@ fn is_agent_doc_known_attr_finding(finding: &LintFinding) -> bool {
 /// preset resolver sees no preset; the lint gate must agree instead of blocking
 /// compact/write on operator text agent-doc deliberately preserves.
 ///
-/// Only `preset` gets this meaning. Every other empty value stays an error:
+/// Only `preset` (and its `presets` alias) gets this meaning. Every other
+/// empty value stays an error:
 /// `patch=`, `archive=`, and backlog `queue=` need a value to mean anything, and
 /// an empty `subagents=` / `fan-out=` is ambiguous (the bare flag means "all
 /// eligible heads", while the parser drops the empty pair, i.e. "off").
@@ -656,7 +657,7 @@ fn is_explicit_no_preset_finding(finding: &LintFinding) -> bool {
     let Some(component) = quoted.nth(1) else {
         return false;
     };
-    attribute.trim_end_matches('=') == "preset"
+    matches!(attribute.trim_end_matches('='), "preset" | "presets")
         && (agent_doc_queue::component_attrs::is_queue_marker_component(component)
             || component == "agent:exchange")
 }
@@ -1320,6 +1321,63 @@ operator-owned scratch state\n\
         let message = format!("{error:#}");
         assert!(message.contains("agent-doc/malformed-attr"), "{message}");
         assert!(message.contains("attribute `priority`"), "{message}");
+    }
+
+    /// `presets=` is the same attribute as `preset=`: a value passes on queue,
+    /// run, and loop, a bare flag is still malformed, and `presets=""` is the
+    /// same explicit no-preset as `preset=""`.
+    #[test]
+    fn presets_alias_matches_preset_lint_on_queue_run_and_loop() {
+        let dir = TempDir::new().unwrap();
+        for (name, marker) in [
+            ("queue", "agent:queue"),
+            ("run", "agent:run"),
+            ("loop", "agent:loop"),
+        ] {
+            let doc = format!(
+                "---\nagent_doc_session: test\n---\n\n\
+                 <!-- agent:exchange -->\n\
+                 prompt\n\
+                 <!-- /agent:exchange -->\n\n\
+                 <!-- {marker} presets=\"#build\" priority go -->\n\
+                 - do [#a]\n\
+                 <!-- /{marker} -->\n"
+            );
+            let file = write_doc(&dir, &format!("presets-alias-{name}.md"), &doc);
+            run(&file, None)
+                .unwrap_or_else(|error| panic!("`presets=` on {marker} must pass lint: {error:#}"));
+            run(&file, Some(LintCliMode::Strict)).unwrap_or_else(|error| {
+                panic!("`presets=` on {marker} must pass strict lint: {error:#}")
+            });
+
+            let empty = format!(
+                "---\nagent_doc_session: test\n---\n\n\
+                 <!-- agent:exchange -->\n\
+                 prompt\n\
+                 <!-- /agent:exchange -->\n\n\
+                 <!-- {marker} presets=\"\" priority go -->\n\
+                 - do [#a]\n\
+                 <!-- /{marker} -->\n"
+            );
+            let empty_file = write_doc(&dir, &format!("presets-empty-{name}.md"), &empty);
+            run(&empty_file, Some(LintCliMode::Strict)).unwrap_or_else(|error| {
+                panic!("`presets=\"\"` on {marker} must pass strict lint: {error:#}")
+            });
+        }
+
+        let bare = "---\nagent_doc_session: test\n---\n\n\
+            <!-- agent:exchange -->\n\
+            prompt\n\
+            <!-- /agent:exchange -->\n\n\
+            <!-- agent:queue presets priority go -->\n\
+            - do [#a]\n\
+            <!-- /agent:queue -->\n";
+        let file = write_doc(&dir, "bare-presets.md", bare);
+        let error = run(&file, None).expect_err("bare presets must remain invalid");
+        let message = format!("{error:#}");
+        assert!(message.contains("agent-doc/malformed-attr"), "{message}");
+        assert!(message.contains("attribute `presets`"), "{message}");
+        assert!(message.contains("missing `=value`"), "{message}");
     }
 
     #[test]

@@ -359,6 +359,8 @@ and the pending granular-flags-only rule. This runbook carries the rest.
      `authorization.status` is `unresolved_preset`, the queue names a preset
      frontmatter does not define; the preamble already tells the subagent that
      no authorization beyond the item text was resolved, so do not add any.
+     `conflicting_preset_attrs` means the marker's `preset=` and `presets=`
+     disagree: neither spelling is authorization, so do not pick one.
      `agent-doc queue brief <FILE> --item <...>` (or the entry's
      `brief_command`; `--json` for the whole object) re-prints the same text.
   3. Dispatch one background subagent per item. When it touches a repo, give it

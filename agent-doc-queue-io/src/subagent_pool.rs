@@ -574,12 +574,13 @@ mod tests {
         assert!(!live.is_actionable(), "{live:#?}");
     }
 
-    /// `#frozenclaimrefreshrevive`: a harness freeze that expires with its
-    /// worker still bound stays that attempt. Refresh revives it; the refusal
-    /// for any other heartbeat does not call the head dispatchable, and the
-    /// row is not offered again.
+    /// A stopped harness freeze with no handback stays `Running`. Continue
+    /// fails, the slot frees, and the row is offered for a new generation.
+    /// An exact heartbeat proves that same worker is alive: the failed
+    /// continue is cleared and the generation is kept
+    /// (`#lostrunningcontinue`, `#frozenclaimrefreshrevive`).
     #[test]
-    fn an_expired_frozen_attempt_is_revived_not_redispatched() {
+    fn a_stopped_harness_freeze_is_offered_and_a_heartbeat_keeps_its_generation() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let file = dir.path().join("task.md");
@@ -607,13 +608,38 @@ mod tests {
         assert!(frozen_claim.frozen.is_some());
         assert!(frozen_claim.blocks_dispatch(expired));
         let refill = pool_refill_for_content(&file, &content, PoolRefillTrigger::Frozen).unwrap();
-        assert!(
-            refill.next_heads.iter().all(|head| head.item != "do [#a]"),
-            "the frozen row is not redispatched: {refill:#?}"
+        assert_eq!(
+            refill
+                .next_heads
+                .iter()
+                .map(|head| head.item.as_str())
+                .collect::<Vec<_>>(),
+            ["do [#a]"],
+            "a stopped freeze is offered for a new generation: {refill:#?}"
         );
-        assert_eq!(refill.frozen.len(), 1, "{refill:#?}");
+        assert!(
+            refill.frozen.is_empty(),
+            "retry frees the slot: {refill:#?}"
+        );
+        assert_eq!(refill.pools[0].occupancy.free, 1, "{refill:#?}");
+        let offered = crate::queue_claim::claim_states_for_content(&file, &content)
+            .unwrap()
+            .into_iter()
+            .find(|claim| claim.item_text == "do [#a]")
+            .expect("stopped freeze");
+        assert_eq!(
+            offered.state,
+            agent_doc_queue::queue_claim::QueueClaimState::Running,
+            "continue failure must not mark the freeze Lost"
+        );
+        assert!(offered.lost_from.is_none());
+        assert_eq!(offered.generation, 1);
+        assert!(agent_doc_queue::lost_running_recovery::retry_authorized(
+            &offered
+        ));
+        assert!(!offered.blocks_dispatch(expired));
         let text = refill.render().unwrap();
-        assert!(text.contains("not eligible for dispatch"), "{text}");
+        assert!(text.contains("queue claim"), "{text}");
         let wrong =
             crate::queue_claim::refresh_attempt(&file, "do [#a]", "subagent:a", 7200, Some(2))
                 .unwrap_err();
@@ -631,8 +657,21 @@ mod tests {
             agent_doc_queue::queue_claim::QueueClaimState::Running
         );
         assert!(revived.frozen.is_none(), "the heartbeat clears the freeze");
+        assert!(
+            revived.lost_continue.is_none(),
+            "proof of life drops the failed continue"
+        );
         assert_eq!(revived.generation, 1);
         assert_eq!(revived.heartbeat_at_secs, Some(expired));
+        assert!(!agent_doc_queue::lost_running_recovery::retry_authorized(
+            &revived
+        ));
+        let held = pool_refill_for_content(&file, &content, PoolRefillTrigger::Plan).unwrap();
+        assert!(
+            held.next_heads.iter().all(|head| head.item != "do [#a]"),
+            "a live heartbeat does not authorize a second generation: {held:#?}"
+        );
+        assert_eq!(held.pools[0].occupancy.running, 1, "{held:#?}");
     }
 
     /// `#poolidleheartbeat`, through the real ledger: nothing before the batch

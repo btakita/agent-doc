@@ -1609,6 +1609,9 @@ impl QueueClaimLedger {
         }
         let resumes_quota_block = self.claims[index].state == QueueClaimState::QuotaBlocked;
         if already_bound && !resumes_quota_block && !resumes_frozen {
+            // The same bound worker acknowledged again. A failed continue from
+            // a stopped freeze must not survive that proof of life.
+            self.claims[index].lost_continue = None;
             return Ok(self.claims[index].clone());
         }
         let claim = &mut self.claims[index];
@@ -1624,6 +1627,7 @@ impl QueueClaimLedger {
         claim.state = QueueClaimState::Running;
         claim.lost_from = None;
         claim.frozen = None;
+        claim.lost_continue = None;
         claim.heartbeat_at_secs = Some(now_secs);
         claim.expires_at_secs = now_secs.saturating_add(ttl_secs.max(1));
         Ok(claim.clone())
@@ -1807,9 +1811,13 @@ impl QueueClaimLedger {
         }
         existing.expires_at_secs = now_secs.saturating_add(ttl_secs.max(1));
         // `#subagentworkpool`: a refresh is the coordinator's heartbeat for
-        // this worker; it is fresh again and occupies its pool slot.
+        // this worker; it is fresh again and occupies its pool slot. That
+        // proof of life drops a failed continue, so the next expiry continues
+        // this generation instead of authorizing a second one
+        // (`#lostrunningcontinue`).
         existing.heartbeat_at_secs = Some(now_secs);
         existing.frozen = None;
+        existing.lost_continue = None;
         if owner_session.is_some() {
             existing.owner_session = owner_session;
         }

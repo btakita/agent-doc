@@ -474,6 +474,71 @@ mod tests {
     }
 
     #[test]
+    fn a_heartbeat_after_a_stopped_freeze_continues_the_same_generation_later() {
+        let mut ledger = QueueClaimLedger::default();
+        ledger.claim("annocorrupt", "subagent:annocorrupt", 1_000, 60);
+        ledger
+            .start(
+                "annocorrupt",
+                "subagent:annocorrupt",
+                "worker-annocorrupt",
+                1_000,
+                60,
+                Some(1),
+            )
+            .unwrap();
+        ledger
+            .freeze_attempt(
+                "annocorrupt",
+                Some(1),
+                1_100,
+                "harness reported the worker ended",
+            )
+            .unwrap();
+        let mut claims = vec![ledger.claims[0].clone()];
+        let applied = recover_claims(&mut claims, 9_000, 60, true, &mut |claim| {
+            default_continue_attempt(claim, 9_000)
+        });
+        assert_eq!(applied[0].action, LostRunningAction::Retry);
+        ledger.claims[0] = claims[0].clone();
+        let revived = ledger
+            .refresh_or_revive_attempt_in_session(
+                "annocorrupt",
+                "subagent:annocorrupt",
+                9_000,
+                3_600,
+                None,
+                Some(1),
+            )
+            .unwrap();
+        assert_eq!(revived.generation, 1);
+        assert_eq!(revived.state, QueueClaimState::Running);
+        assert!(revived.frozen.is_none());
+        assert!(revived.lost_continue.is_none());
+        assert!(!retry_authorized(&revived));
+        assert!(revived.blocks_dispatch(9_000));
+
+        let expired_at = revived.expires_at_secs;
+        let mut later = vec![revived];
+        let applied = recover_claims(&mut later, expired_at, 3_600, true, &mut |claim| {
+            default_continue_attempt(claim, expired_at)
+        });
+        assert_eq!(applied.len(), 1);
+        assert_eq!(applied[0].action, LostRunningAction::Continue);
+        assert_eq!(later[0].generation, 1);
+        assert_eq!(later[0].state, QueueClaimState::Running);
+        assert!(later[0].lost_from.is_none());
+        assert!(!retry_authorized(&later[0]));
+        assert_eq!(
+            later[0]
+                .worker
+                .as_ref()
+                .map(|worker| worker.worker_id.as_str()),
+            Some("worker-annocorrupt")
+        );
+    }
+
+    #[test]
     fn a_live_running_worker_does_not_authorize_a_second_generation() {
         let mut ledger = QueueClaimLedger::default();
         ledger.claim("keeprows", "subagent:keeprows", 1_000, 3_600);

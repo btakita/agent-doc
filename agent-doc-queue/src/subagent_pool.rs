@@ -29,9 +29,12 @@
 //!   records it as a heartbeat (`queue claim --refresh`). If the wrapper exits
 //!   with that notice as its handback, the subagent-end hook freezes the ended
 //!   wrapper and a continuation wrapper rebinds the same generation with
-//!   `queue start`. A harness freeze that then passes its claim TTL still keeps
-//!   the claim: it is not `Lost`, its row is not offered, and the exact refresh
-//!   or continuation rebind revives it (`#frozenclaimrefreshrevive`). A lost-running
+//!   `queue start`. A harness freeze with no handback stays `Running` and is not
+//!   marked `Lost`. Continue refuses because that worker is gone, which frees the
+//!   slot and offers the row for a new generation (`#lostrunningcontinue`). An
+//!   exact refresh or continuation rebind proves the same worker is still alive,
+//!   clears that failed continue, and keeps the generation
+//!   (`#frozenclaimrefreshrevive`). A lost-running
 //!   attempt is continued first. A heartbeat already past the frozen bound
 //!   fails that continue, and the same task is retried into the freed slot
 //!   (`#lostrunningcontinue`). Only `queue release --requeue` abandons it;

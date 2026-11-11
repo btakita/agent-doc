@@ -1463,7 +1463,28 @@ pub fn dispatch_only_reopen_existing_pane(
     let dispatch_pane = reapply_codex_launch_contract_before_reuse(
         tmux, file, pane_id, session_id, file_path, harness, false, false,
     )?;
-    if !skip_capability_proof {
+    // `#shellstart`: Run Agent Doc starts `agent-doc` when this pane is a shell
+    // and no session is running, then dispatches. The trigger is not typed into
+    // the shell. A serving start is left on the existing path.
+    let launched_claiming_shell = crate::claiming_shell::ensure_claiming_shell_session(
+        tmux,
+        file,
+        &dispatch_pane,
+        file_path,
+        harness,
+        true,
+    )?;
+    if launched_claiming_shell {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "route_dispatch_only_skip_capability_proof file={} pane={} harness={} reason=claiming_shell_start",
+                file.display(),
+                dispatch_pane,
+                harness.binary
+            ),
+        );
+    } else if !skip_capability_proof {
         // `#capproofbg`: a still-`Pending` proof no longer blocks the dispatch-only
         // reopen. Read status without polling for it to settle; a pending proof lets
         // the reopen dispatch proceed while the proof runs in the background, and a

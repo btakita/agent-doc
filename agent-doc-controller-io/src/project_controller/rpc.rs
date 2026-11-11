@@ -22291,6 +22291,214 @@ pub(super) fn supervisor_watchdog_blocked_by_queue_control(
     control.is_some_and(|control| control.state == "paused")
 }
 
+/// `#shellstart`: when `record`'s pane is a bare shell and no `agent-doc start`
+/// is serving the document, dispatch the same supervisor replacement the crash
+/// watchdog uses. Returns true when this recovery owned the record (it started
+/// `agent-doc`, or a hold told it not to fall through).
+#[allow(clippy::too_many_arguments)]
+fn recover_claiming_shell_supervisor(
+    runtime: &Arc<ControllerRuntime>,
+    conn: &state_store::Connection,
+    tmux: &tmux_router::Tmux,
+    file: &Path,
+    record: &agent_doc_controller::actor::ActorRecord,
+    halt_notified: &mut std::collections::HashSet<String>,
+    binding_skip_notified: &mut std::collections::HashSet<String>,
+    window_secs: u64,
+) -> bool {
+    let document_id = record.document_id.as_str();
+    let pane_alive = tmux.pane_alive(&record.pane_id);
+    let bare_shell = pane_alive
+        && agent_doc_tmux_io::target_current_command(tmux, &record.pane_id)
+            .as_deref()
+            .map(str::trim)
+            .is_some_and(agent_doc_tmux::pane_current_command_is_bare_shell);
+    let start_running =
+        agent_doc_supervisor_io::process::serving_supervisor_pid_for_doc(file).is_some();
+    let shell = agent_doc_controller::shell_start::decide_claiming_shell_start(
+        pane_alive,
+        bare_shell,
+        start_running,
+    );
+    if shell != agent_doc_controller::shell_start::ClaimingShellStartDecision::StartAgentDoc {
+        return false;
+    }
+    let binding = agent_doc_supervisor::crash_policy::watchdog_binding_decision(
+        pane_alive,
+        supervisor_watchdog_pane_stashed(tmux, &record.pane_id),
+    );
+    let lease_pid = load_supervisor_lease_from_db(conn, document_id, record.generation)
+        .ok()
+        .flatten()
+        .and_then(|lease| lease.supervisor_pid)
+        .filter(|pid| *pid != std::process::id());
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or(0);
+    let exit = if let Some(pid) = lease_pid {
+        supervisor_watchdog_intentional_exit_decision(conn, document_id, pid, record.generation)
+    } else {
+        let marker = agent_doc_supervisor_io::intentional_exit::load_intentional_exit_from_db(
+            conn,
+            document_id,
+        )
+        .ok()
+        .flatten();
+        agent_doc_controller::shell_start::shell_start_exit_hold(
+            marker.as_ref(),
+            &record.pane_id,
+            record.generation,
+            now_ms,
+        )
+    };
+    let prior_restarts =
+        match agent_doc_supervisor_io::startup_miss::count_recent_session_loss_events(
+            file,
+            &record.session_id,
+            window_secs,
+        ) {
+            Ok(count) => count,
+            Err(err) => {
+                eprintln!(
+                    "[controller] supervisor watchdog: failed to read restart budget for {}: {err}",
+                    file.display()
+                );
+                return true;
+            }
+        };
+    let dead_pid = lease_pid
+        .map(|pid| pid.to_string())
+        .unwrap_or_else(|| "none".to_string());
+    match agent_doc_controller::shell_start::claiming_shell_watchdog_action(
+        agent_doc_controller::shell_start::ClaimingShellWatchdogFacts {
+            queue_paused: false,
+            binding,
+            shell,
+            exit,
+            prior_restarts_in_window: prior_restarts,
+            restart_cap: agent_doc_supervisor::crash_policy::WATCHDOG_RESTART_CAP,
+        },
+    ) {
+        agent_doc_controller::shell_start::ClaimingShellWatchdogAction::DeferToCrashWatchdog => {
+            false
+        }
+        agent_doc_controller::shell_start::ClaimingShellWatchdogAction::Skip { reason } => {
+            if binding_skip_notified.insert(format!("{document_id}:{dead_pid}:{reason}")) {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "controller_supervisor_watchdog_shell_skip document={document_id} session={} pane={} generation={} dead_pid={dead_pid} reason={reason}",
+                        record.session_id, record.pane_id, record.generation,
+                    ),
+                );
+            }
+            true
+        }
+        agent_doc_controller::shell_start::ClaimingShellWatchdogAction::Halt {
+            restarts_in_window,
+        } => {
+            if halt_notified.insert(document_id.to_string()) {
+                let message = format!(
+                    "controller_supervisor_watchdog_halted document={document_id} session={} pane={} generation={} dead_pid={dead_pid} restarts_in_window={restarts_in_window} cap={} window_secs={window_secs} reason=restart_budget_exhausted recovery=claiming_shell",
+                    record.session_id,
+                    record.pane_id,
+                    record.generation,
+                    agent_doc_supervisor::crash_policy::WATCHDOG_RESTART_CAP,
+                );
+                agent_doc_ops_log_io::log_op(file, &message);
+                eprintln!(
+                    "[controller] supervisor watchdog: STOP restarting {} — {} restarts within {}s exhausted the budget (cap={}); inspect the crash and run `agent-doc start {}` manually to recover",
+                    file.display(),
+                    restarts_in_window,
+                    window_secs,
+                    agent_doc_supervisor::crash_policy::WATCHDOG_RESTART_CAP,
+                    file.display(),
+                );
+            }
+            true
+        }
+        agent_doc_controller::shell_start::ClaimingShellWatchdogAction::StartAgentDoc {
+            attempt,
+        } => {
+            if let Err(err) = agent_doc_supervisor_io::startup_miss::record_session_loss(
+                file,
+                &record.session_id,
+                &record.pane_id,
+                "watchdog_claiming_shell",
+                Some(record.window_id.as_str()),
+            ) {
+                eprintln!(
+                    "[controller] supervisor watchdog: failed to record session loss for {}: {err}",
+                    file.display()
+                );
+            }
+            halt_notified.remove(document_id);
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "controller_supervisor_watchdog_shell_start document={document_id} session={} pane={} generation={} dead_pid={dead_pid} attempt={attempt} cap={} window_secs={window_secs}",
+                    record.session_id,
+                    record.pane_id,
+                    record.generation,
+                    agent_doc_supervisor::crash_policy::WATCHDOG_RESTART_CAP,
+                ),
+            );
+            let diagnostic_payload = serde_json::json!({
+                "force": false,
+                "mode": "continue",
+                "caller": "controller_supervisor_watchdog",
+                "dead_pid": lease_pid,
+                "attempt": attempt,
+                "recovery": "claiming_shell",
+            })
+            .to_string();
+            let request = ControllerRequest {
+                command: "supervisor_replacement".to_string(),
+                file: Some(file.to_path_buf()),
+                session_id: None,
+                pane_id: None,
+                window_id: None,
+                generation: None,
+                state: Some("continue".to_string()),
+                caller: Some("controller_supervisor_watchdog".to_string()),
+                reason: Some("watchdog_claiming_shell".to_string()),
+                supervisor_pid: None,
+                supervisor_socket: None,
+                command_kind: None,
+                diagnostic_payload: Some(diagnostic_payload),
+                sequence: None,
+            };
+            let bootstrap = match runtime.bootstrap_snapshot() {
+                Ok(bootstrap) => bootstrap,
+                Err(err) => {
+                    eprintln!(
+                        "[controller] supervisor watchdog: bootstrap snapshot unavailable for {}: {err}",
+                        file.display()
+                    );
+                    return true;
+                }
+            };
+            if let Err(err) =
+                handle_supervisor_replacement(&bootstrap, Some(runtime.as_ref()), request)
+            {
+                eprintln!(
+                    "[controller] supervisor watchdog: shell start failed for {}: {err:#}",
+                    file.display()
+                );
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "controller_supervisor_watchdog_shell_start_failed document={document_id} session={} dead_pid={dead_pid} error={err}",
+                        record.session_id,
+                    ),
+                );
+            }
+            true
+        }
+    }
+}
+
 /// #supresilience Part B — autonomous route-owned supervisor watchdog.
 ///
 /// The project-controller daemon detects a route-owned supervisor that died and
@@ -22300,7 +22508,13 @@ pub(super) fn supervisor_watchdog_blocked_by_queue_control(
 /// the same path `session restart-supervisor` / `admin recycle --force` drive. No
 /// parallel spawn logic.
 ///
-/// A supervisor is restarted ONLY when ALL hold:
+/// A claiming pane that is a bare shell with no `agent-doc start` is started
+/// in all of those cases (`#shellstart`), including a missing lease pid, a
+/// closed session log, and a missing resume id. That path still honours queue
+/// pause, an operator stop, replacement cold-start grace, a stashed pane, and
+/// the restart budget.
+///
+/// A supervisor is otherwise restarted ONLY when ALL hold:
 /// - its recorded `supervisor_pid` is dead ([`process_is_alive`] is false),
 /// - the document's actor session is not `Closed`,
 /// - effective queue control is not paused,
@@ -22409,6 +22623,21 @@ fn controller_supervisor_watchdog_tick(
         };
         if supervisor_watchdog_blocked_by_queue_control(queue_control.as_ref()) {
             halt_notified.remove(&document_id);
+            continue;
+        }
+        // `#shellstart`: a claiming shell with no `agent-doc start` is started
+        // even when the lease pid or the session log is gone. Operator stop,
+        // cold-start grace, stash, and the restart budget still hold.
+        if recover_claiming_shell_supervisor(
+            runtime,
+            &conn,
+            &tmux,
+            &file,
+            record,
+            halt_notified,
+            binding_skip_notified,
+            window_secs,
+        ) {
             continue;
         }
         // Recorded supervisor pid for the authoritative generation.
@@ -44426,6 +44655,53 @@ fn quit_live_harness_pane_to_shell(
     false
 }
 
+/// `#shellstart`: a claiming-shell launch with no supervisor pid still needs a
+/// grace marker, or the next watchdog tick starts again. A marker already
+/// written for a real pid is left in place.
+#[cfg(not(any(test, feature = "test-support")))]
+fn record_shell_start_grace_if_unmarked(work: &SupervisorReplacementWork) -> Result<()> {
+    let document_id = agent_doc_session_actor_io::canonical_document_id_in(
+        &work.project_root,
+        &work.file.to_string_lossy(),
+    );
+    let conn = open_state_db(&work.project_root)?;
+    if agent_doc_supervisor_io::intentional_exit::load_intentional_exit_from_db(
+        &conn,
+        &document_id,
+    )?
+    .is_some()
+    {
+        return Ok(());
+    }
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or(0);
+    let marker = agent_doc_supervisor::intentional_exit::shell_start_grace_marker(
+        work.generation,
+        &work.pane_id,
+        &work.session_id,
+        now_ms,
+    );
+    agent_doc_supervisor_io::intentional_exit::record_intentional_exit_in_db(
+        &conn,
+        &document_id,
+        &marker,
+    )?;
+    agent_doc_ops_log_io::log_op(
+        &work.file,
+        &format!(
+            "controller_supervisor_replacement_shell_start_grace session={} pane={} generation={} receipt_id={} outcome=pending pid=none grace_ms={}",
+            work.session_id,
+            work.pane_id,
+            work.generation,
+            work.operator_receipt_id,
+            agent_doc_supervisor::intentional_exit::REPLACEMENT_COLD_START_GRACE_MS,
+        ),
+    );
+    Ok(())
+}
+
 #[cfg(not(any(test, feature = "test-support")))]
 fn cold_start_supervisor_replacement(work: &SupervisorReplacementWork) -> Result<String> {
     let tmux = agent_doc_tmux_io::configured_tmux();
@@ -44586,11 +44862,49 @@ fn cold_start_supervisor_replacement(work: &SupervisorReplacementWork) -> Result
             occupied_by_other_document,
         ) {
             SupervisorReplacementPaneDecision::PreserveExistingShell => {
-                if refuse_missing_resume {
-                    anyhow::bail!(
-                        "cannot cold-start supervisor recovery for {} in continue mode: the editor-authoritative document records no exact `resume:` conversation id; the existing pane was preserved and no fresh session was started",
-                        work.file.display()
-                    );
+                // `#shellstart`: the claiming pane is a shell. A missing resume id
+                // starts fresh instead of leaving the shell for the operator. A
+                // serving `agent-doc start` does not get a second session.
+                let start_running =
+                    agent_doc_supervisor_io::process::serving_supervisor_pid_for_doc(&work.file)
+                        .is_some();
+                match agent_doc_controller::shell_start::shell_cold_start_submit(
+                    true,
+                    true,
+                    start_running,
+                    resume.is_some(),
+                ) {
+                    agent_doc_controller::shell_start::ShellColdStartSubmit::DoNotSubmit => {
+                        agent_doc_ops_log_io::log_op(
+                            &work.file,
+                            &format!(
+                                "controller_supervisor_replacement_shell_already_in_session mode={} session={} pane={} action=do_not_start_another",
+                                work.mode, work.session_id, work.pane_id,
+                            ),
+                        );
+                        return Ok(work.pane_id.clone());
+                    }
+                    agent_doc_controller::shell_start::ShellColdStartSubmit::Submit {
+                        with_resume,
+                    } => {
+                        if !with_resume && mode == SupervisorReplacementMode::Continue {
+                            agent_doc_ops_log_io::log_op(
+                                &work.file,
+                                &format!(
+                                    "controller_supervisor_replacement_shell_start_without_resume mode={} harness={} session={} pane={} resume=missing_id action=start_fresh",
+                                    work.mode, document_harness, work.session_id, work.pane_id,
+                                ),
+                            );
+                        }
+                    }
+                    agent_doc_controller::shell_start::ShellColdStartSubmit::NotThisPane => {
+                        if refuse_missing_resume {
+                            anyhow::bail!(
+                                "cannot cold-start supervisor recovery for {} in continue mode: the editor-authoritative document records no exact `resume:` conversation id; the existing pane was preserved and no fresh session was started",
+                                work.file.display()
+                            );
+                        }
+                    }
                 }
                 let agent_doc_bin = agent_doc_supervisor_process::agent_doc_start_bin();
                 let start_cmd =
@@ -44619,7 +44933,9 @@ fn cold_start_supervisor_replacement(work: &SupervisorReplacementWork) -> Result
                         work.pane_id,
                     ),
                 );
-                agent_doc_tmux_io::input_diag::log_text_submit(
+                // `#shellstart`: respawn the pane process. Typing the start line
+                // into a fresh shell drops the bytes when its rc reads stdin.
+                agent_doc_tmux_io::input_diag::log_pane_launch(
                     agent_doc_tmux_io::input_diag::InputDiagSink::new(
                         Some(&work.file),
                         agent_doc_ops_log_io::log_op,
@@ -44628,25 +44944,21 @@ fn cold_start_supervisor_replacement(work: &SupervisorReplacementWork) -> Result
                     &format!("pane:{}", work.pane_id),
                     &start_cmd,
                     None,
-                    "route_owned_start_enter",
-                    "Enter",
+                    "route_owned_start_launch",
                 );
-                agent_doc_tmux_io::send_submitted_text_logged(
-                    &tmux,
-                    &work.pane_id,
-                    &start_cmd,
-                    agent_doc_tmux_io::input_diag::InputDiagSink::new(
-                        None,
-                        agent_doc_ops_log_io::log_op,
-                    ),
-                    "sessions.send_submitted_text",
-                )
-                .with_context(|| {
-                    format!(
-                        "failed to submit replacement supervisor start command into pane {}",
-                        work.pane_id
-                    )
-                })?;
+                agent_doc_tmux_io::launch_command_in_pane(&tmux, &work.pane_id, &start_cmd)
+                    .with_context(|| {
+                        format!(
+                            "failed to launch replacement supervisor start command in pane {}",
+                            work.pane_id
+                        )
+                    })?;
+                if let Err(err) = record_shell_start_grace_if_unmarked(work) {
+                    eprintln!(
+                        "[controller] supervisor replacement: shell-start grace marker failed for {}: {err:#}",
+                        work.file.display()
+                    );
+                }
                 return Ok(work.pane_id.clone());
             }
             SupervisorReplacementPaneDecision::BlockLiveNonShell => {

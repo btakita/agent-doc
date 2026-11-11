@@ -15423,6 +15423,127 @@ mod tests {
         assert_eq!(render(&entries), body, "every byte survives parse/render");
     }
 
+    /// `#responserowclaim`: a generated Next, Question, Response, or Action
+    /// row under the Waiting-on-you root is not a queue head. Text after the
+    /// glyph, including a minted `[#q-…]`, does not make it claimable, and
+    /// admission does not append anything further.
+    #[test]
+    fn generated_reply_rows_under_the_waiting_root_are_not_queue_heads() {
+        let body = concat!(
+            "- ### Waiting on you <!-- agent-doc:waiting-on-you -->\n",
+            "    - 📥 **Next:** you — answer: Which port? (evidence: subagent:tcoreproof-moot#1) ▫️ [#q-bfc40eeaae02]\n",
+            "    - 📥 **Question:** Which port? ▫️ [#q-095ecb037967]\n",
+            "    - **Response:** Pick a port. ▫️ [#q-aaaaaaaaaaaa]\n",
+            "      - **Next actions:** ▫️\n",
+            "        - 📥 **Action:** Pick a port. ▫️\n",
+            "          - use 8080\n",
+            "- fix the flaky test ▫️\n",
+            "- **Response:** an operator note ▫️\n",
+        );
+        let entries = parse(body).unwrap();
+        for needle in [
+            "**Next:**",
+            "**Question:**",
+            "**Response:** Pick",
+            "**Action:**",
+        ] {
+            let index = entries
+                .iter()
+                .position(|entry| render(std::slice::from_ref(entry)).contains(needle))
+                .unwrap_or_else(|| panic!("missing {needle}"));
+            assert!(
+                matches!(entries[index], QueueEntry::Freeform(_)),
+                "{needle} stays inert: {:?}",
+                entries[index]
+            );
+            assert!(crate::waiting_packet::is_agent_doc_reply_entry(
+                &entries, index
+            ));
+        }
+        let runnable = executable_prompt_indexes(&entries)
+            .into_iter()
+            .filter_map(|index| prompt_of(&entries[index]))
+            .map(|prompt| prompt.text.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            runnable,
+            vec![
+                "use 8080",
+                "fix the flaky test ▫️",
+                "**Response:** an operator note ▫️"
+            ],
+            "{runnable:#?}"
+        );
+
+        let doc = format!("<!-- agent:queue id=\"main\" -->\n{body}<!-- /agent:queue -->\n");
+        let heads = crate::queue_continuation::live_queue_head_texts(&doc).expect("queue");
+        assert!(
+            heads.iter().all(|head| !head.contains("**Next:**")
+                && !head.contains("**Question:**")
+                && !head.contains("**Action:**")
+                && !head.contains("Pick a port")),
+            "queue claim must not offer generated rows: {heads:#?}"
+        );
+        let all_heads = crate::queue_continuation::all_queue_head_texts(&doc).expect("queues");
+        assert_eq!(all_heads, heads);
+
+        let projected = crate::prompt_identity::project(&doc, "fixture");
+        let admitted = projected
+            .assignments
+            .iter()
+            .map(|assignment| assignment.source_text.as_str())
+            .collect::<Vec<_>>();
+        assert!(
+            admitted.iter().all(|text| !text.contains("**Next:**")
+                && !text.contains("**Question:**")
+                && !text.contains("**Action:**")
+                && !text.contains("Pick a port")),
+            "admission must not mint a generated row: {admitted:#?}"
+        );
+        for needle in [
+            "**Next:** you — answer: Which port? (evidence: subagent:tcoreproof-moot#1) ▫️ [#q-bfc40eeaae02]",
+            "**Question:** Which port? ▫️ [#q-095ecb037967]",
+            "**Response:** Pick a port. ▫️ [#q-aaaaaaaaaaaa]",
+            "**Action:** Pick a port. ▫️",
+        ] {
+            assert!(
+                projected.content.contains(needle),
+                "project must not append after the glyph: {needle}\n{}",
+                projected.content
+            );
+        }
+
+        let cleaned = agent_doc_markdown_ast::overlay::normalize_agent_doc_reply_rows(
+            &agent_doc_markdown_ast::overlay::normalize_generated_response_lifecycle_markers(
+                &projected.content,
+            ),
+        );
+        for label in [
+            "**Next:**",
+            "**Question:**",
+            "**Response:** Pick",
+            "**Action:**",
+        ] {
+            let row = cleaned
+                .lines()
+                .find(|line| line.contains(label))
+                .unwrap_or_else(|| panic!("missing {label}"));
+            assert!(row.trim_end().ends_with("▫️"), "{row}");
+            assert!(!row.contains('📥'), "{row}");
+            assert!(!row.contains("[#q-"), "{row}");
+        }
+        assert!(cleaned.contains("- use 8080\n") || cleaned.contains("use 8080 [#q-"));
+        assert!(cleaned.contains("fix the flaky test ▫️"));
+        let operator = cleaned
+            .lines()
+            .find(|line| line.contains("an operator note"))
+            .unwrap();
+        assert!(
+            operator.contains("**Response:** an operator note ▫️"),
+            "a top-level operator row is not rewritten as a packet row: {operator}"
+        );
+    }
+
     #[test]
     fn canonical_reply_marker_is_inert_but_operator_glyph_row_remains_runnable() {
         let body = concat!(

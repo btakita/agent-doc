@@ -18,20 +18,26 @@
 //! binary-owned reply row when **all** of these hold:
 //!
 //! 1. the glyph is the row's last whitespace-separated token, with content
-//!    before it (a leading or mid-line `▫️` is ordinary text);
+//!    before it (a leading or mid-line `▫️` is ordinary text). A generated
+//!    `[#q-…]` written after the glyph does not move that end: readers still
+//!    see the glyph, and the next refresh strips the annotation
+//!    (`#responserowclaim`);
 //! 2. its parent row is a binary-owned packet row: the `<!-- agent-doc:waiting-item -->`
-//!    item itself, or another reply row (recursively, by this same rule);
+//!    item, the Waiting-on-you root (`<!-- agent-doc:waiting-on-you -->`), or
+//!    another reply row (recursively, by this same rule);
 //! 3. its content starts with one of the generated labels in
 //!    [`REPLY_ROW_LABELS`], unless its parent is the generated `**Choices:**`
 //!    row, whose children are free-text offered choices.
 //!
-//! Anywhere else (top-level queue rows, rows outside a waiting item, an
-//! unlabeled line typed under an item, a choice, or a `**Response:**` row) a
+//! Anywhere else (top-level queue rows, rows outside the Waiting-on-you tree,
+//! an unlabeled line typed under an item, a choice, or a `**Response:**` row) a
 //! trailing `▫️` is operator text and stays operator text, so it can never be
 //! regenerated away by a packet refresh. The only operator text the rule can
 //! claim is a line that reproduces a generated row's exact rendered shape in
 //! its rendered position, which is the reserved syntax this glyph names in the
-//! legend.
+//! legend. Nothing is appended after the glyph. A generated Next, Question,
+//! Response, or Action row is never queue work, including when its item head
+//! is missing and the row sits under the root.
 //! A row whose entire body is only `▫️` still is not a binary-owned reply row,
 //! but it carries no decision payload; the waiting-packet classifier ignores
 //! that empty artifact instead of treating it as an operator answer.
@@ -46,6 +52,9 @@ pub const LEGACY_REPLY_MARKER: &str = "<!-- agent-doc:reply -->";
 pub const LEGACY_WAITING_METADATA_MARKER: &str = "<!-- agent-doc:waiting-metadata -->";
 /// Marker on the head row of a generated Waiting-on-you item.
 pub const WAITING_ITEM_MARKER: &str = "<!-- agent-doc:waiting-item -->";
+/// Marker on the Waiting-on-you root. Packet rows whose item head is missing
+/// still belong to this root (`#responserowclaim`).
+pub const WAITING_ON_YOU_ROOT_MARKER: &str = "<!-- agent-doc:waiting-on-you -->";
 
 /// Labels that open a generated (non-choice) packet row.
 pub const REPLY_ROW_LABELS: [&str; 11] = [
@@ -113,13 +122,14 @@ pub fn has_legacy_reply_marker(text: &str) -> bool {
 }
 
 /// The row's visible content with every ownership mark removed: legacy
-/// comments and the trailing glyph. Used to read a generated row's value.
+/// comments, a trailing generated `[#q-…]`, and the trailing glyph. Used to
+/// read a generated row's value.
 pub fn reply_row_text(body: &str) -> String {
     let (_, inner) = split_struck_body(body.trim());
     let without_comments = inner
         .replace(LEGACY_REPLY_MARKER, "")
         .replace(LEGACY_WAITING_METADATA_MARKER, "");
-    let trimmed = without_comments.trim();
+    let trimmed = without_trailing_generated_qid(without_comments.trim());
     trimmed
         .strip_suffix(AGENT_DOC_REPLY_GLYPH)
         .unwrap_or(trimmed)
@@ -134,15 +144,82 @@ pub fn bare_reply_row_body(body: &str) -> String {
 }
 
 /// Content before a trailing glyph token, when the glyph is in the rendered
-/// position (last token, preceded by whitespace and some content).
+/// position (last token, preceded by whitespace and some content). A generated
+/// `[#q-…]` after the glyph is ignored (`#responserowclaim`).
 fn trailing_glyph_content(body: &str) -> Option<&str> {
     let (_, inner) = split_struck_body(body.trim());
-    let before = inner.trim_end().strip_suffix(AGENT_DOC_REPLY_GLYPH)?;
+    let before_glyph = without_trailing_generated_qid(inner.trim_end());
+    let before = before_glyph.strip_suffix(AGENT_DOC_REPLY_GLYPH)?;
     if !before.ends_with(char::is_whitespace) {
         return None;
     }
     let content = before.trim_end();
     (!content.is_empty()).then_some(content)
+}
+
+/// Whether `body` has the generated reply-label shape, ignoring its parent.
+///
+/// Stable-id admission uses this so it never writes a `[#q-…]` after the
+/// glyph. Parent position still decides whether the row is binary-owned.
+pub fn is_generated_reply_label_body(body: &str) -> bool {
+    let Some(content) = trailing_glyph_content(body) else {
+        return false;
+    };
+    starts_with_reply_label(content)
+}
+
+fn without_trailing_generated_qid(text: &str) -> &str {
+    let mut current = text;
+    while let Some(stripped) = strip_one_trailing_generated_qid(current) {
+        current = stripped;
+    }
+    current
+}
+
+fn strip_one_trailing_generated_qid(text: &str) -> Option<&str> {
+    let (work, annotation) = text.rsplit_once(" [#")?;
+    let id = annotation.strip_suffix(']')?;
+    if !is_generated_qid(id) || !work.ends_with(AGENT_DOC_REPLY_GLYPH) {
+        return None;
+    }
+    Some(work)
+}
+
+fn is_generated_qid(id: &str) -> bool {
+    let Some(rest) = id.strip_prefix("q-") else {
+        return false;
+    };
+    !rest.is_empty()
+        && rest
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_'))
+}
+
+/// Drop a trailing generated `[#q-…]` from one source line when it sits
+/// immediately after the reply glyph, leaving the line's newline in place.
+pub fn strip_generated_reply_qid_line(line: &str) -> String {
+    let core_end = line.trim_end_matches(['\n', '\r']).len();
+    let core = &line[..core_end];
+    let newline = &line[core_end..];
+    match strip_generated_reply_qid_core(core) {
+        Some(stripped) => format!("{stripped}{newline}"),
+        None => line.to_string(),
+    }
+}
+
+fn strip_generated_reply_qid_core(core: &str) -> Option<String> {
+    let (head, closer) = if let Some(head) = core.strip_suffix("~~") {
+        (head, "~~")
+    } else {
+        (core, "")
+    };
+    let head = head.trim_end();
+    let (work, annotation) = head.rsplit_once(" [#")?;
+    let id = annotation.strip_suffix(']')?;
+    if !is_generated_qid(id) || !work.ends_with(AGENT_DOC_REPLY_GLYPH) {
+        return None;
+    }
+    Some(format!("{work}{closer}"))
 }
 
 /// Generated content with any lifecycle projection accidentally painted onto
@@ -177,7 +254,7 @@ fn parent_of<R: ReplyRows + ?Sized>(rows: &R, index: usize, indent: usize) -> Pa
             }
             ReplyRow::Other { .. } => return Parent::Other,
             ReplyRow::Item { body, .. } => {
-                if body.contains(WAITING_ITEM_MARKER) {
+                if body.contains(WAITING_ITEM_MARKER) || body.contains(WAITING_ON_YOU_ROOT_MARKER) {
                     return Parent::WaitingItem;
                 }
                 if is_agent_doc_reply_row_in(rows, candidate) {
@@ -245,6 +322,23 @@ pub fn normalize_reply_rows(source: &str) -> String {
                 "{prefix}{} {LEGACY_REPLY_MARKER}{newline}",
                 bare_reply_row_body(body)
             );
+        }
+    }
+    // `#responserowclaim`: a generated `[#q-…]` after the glyph is not the
+    // row's id. Strip it only where the row is still a reply row, so an
+    // operator prompt that happens to end in the glyph keeps its own id.
+    for index in 0..lines.len() {
+        if !is_agent_doc_reply_row_in(lines.as_slice(), index) {
+            continue;
+        }
+        let original = lines[index].clone();
+        let stripped = strip_generated_reply_qid_line(&original);
+        if stripped == original {
+            continue;
+        }
+        lines[index] = stripped;
+        if !is_agent_doc_reply_row_in(lines.as_slice(), index) {
+            lines[index] = original;
         }
     }
     lines.concat()
@@ -398,5 +492,79 @@ mod tests {
             reply_row_text("~~**Question:** Who? <!-- agent-doc:waiting-metadata -->~~"),
             "**Question:** Who?"
         );
+        assert_eq!(
+            reply_row_text("**Question:** Who? ▫️ [#q-095ecb037967]"),
+            "**Question:** Who?"
+        );
+    }
+
+    #[test]
+    fn a_trailing_generated_qid_does_not_end_ownership_under_the_root() {
+        let source = concat!(
+            "- ### Waiting on you <!-- agent-doc:waiting-on-you -->\n",
+            "    - 📥 **Next:** you — answer: Which port? (evidence: subagent:tcoreproof-moot#1) ▫️ [#q-bfc40eeaae02]\n",
+            "    - 📥 **Question:** Which port? ▫️ [#q-095ecb037967]\n",
+            "    - **Response:** Pick a port. ▫️ [#q-aaaaaaaaaaaa]\n",
+            "    - **Next actions:** ▫️\n",
+            "      - 📥 **Action:** Pick a port. ▫️\n",
+            "    - **Choices:** ▫️\n",
+            "      - **8080 (Recommended)**: Default. ▫️ [#q-bbbbbbbbbbbb]\n",
+            "      - Commit only ▫️ [#q-cccccccccccc]\n",
+            "      - use 8080\n",
+            "- **Response:** an operator note ▫️\n",
+            "- fix the flaky test ▫️ [#q-dddddddddddd]\n",
+        );
+        let flags = reply_flags(source);
+        let rows = lines(source);
+        let owned_flags = [
+            false, true, true, true, true, true, true, true, true, false, false, false,
+        ];
+        assert_eq!(flags.len(), owned_flags.len(), "{rows:#?}");
+        for (index, owned) in owned_flags.into_iter().enumerate() {
+            assert_eq!(
+                flags[index], owned,
+                "row {index} ({}) owned={owned} flags={flags:?}",
+                rows[index]
+            );
+        }
+        assert!(is_generated_reply_label_body(
+            "📥 **Action:** Pick a port. ▫️ [#q-eeeeeeeeeeee]"
+        ));
+        assert!(!is_generated_reply_label_body(
+            "use 8080 ▫️ [#q-dddddddddddd]"
+        ));
+        assert!(!is_generated_reply_label_body(
+            "**Response:** an operator note ▫️ extra"
+        ));
+
+        let normalized = normalize_reply_rows(source);
+        for label in [
+            "**Next:**",
+            "**Question:**",
+            "**Response:** Pick",
+            "**Action:**",
+            "**8080 (Recommended)**",
+            "Commit only",
+        ] {
+            let row = normalized
+                .lines()
+                .find(|line| line.contains(label))
+                .unwrap_or_else(|| panic!("missing {label} in {normalized}"));
+            assert!(
+                row.trim_end().ends_with(AGENT_DOC_REPLY_GLYPH),
+                "row must end at the glyph: {row}"
+            );
+            assert!(!row.contains("[#q-"), "{row}");
+        }
+        assert!(normalized.contains("      - use 8080\n"), "{normalized}");
+        assert!(
+            normalized.contains("- fix the flaky test ▫️ [#q-dddddddddddd]\n"),
+            "an unlabeled operator id stays: {normalized}"
+        );
+        assert!(
+            normalized.contains("- **Response:** an operator note ▫️\n"),
+            "{normalized}"
+        );
+        assert_eq!(normalize_reply_rows(&normalized), normalized);
     }
 }

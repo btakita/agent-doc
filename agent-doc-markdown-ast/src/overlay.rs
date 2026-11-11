@@ -916,8 +916,9 @@ pub fn normalize_generated_response_lifecycle_markers(source: &str) -> String {
     for (index, original) in lines.iter().enumerate() {
         let line = normalized_lines[index];
         let item_indent = line.len() - line.trim_start_matches([' ', '\t']).len();
-        let generated = response_details_child_end(&normalized_lines, index, item_indent).is_some()
-            || agent_doc_reply_child_end(&normalized_lines, index, item_indent).is_some()
+        let reply = agent_doc_reply_child_end(&normalized_lines, index, item_indent).is_some();
+        let generated = reply
+            || response_details_child_end(&normalized_lines, index, item_indent).is_some()
             || response_row_child_end(&normalized_lines, index, item_indent).is_some()
             || response_back_reference_child_end(&normalized_lines, index, item_indent).is_some()
             || response_timestamp_child_end(&normalized_lines, index, item_indent).is_some()
@@ -934,7 +935,14 @@ pub fn normalize_generated_response_lifecycle_markers(source: &str) -> String {
             || response_action_child_end(&normalized_lines, index, item_indent).is_some()
             || related_row_child_end(&normalized_lines, index, item_indent).is_some();
         if generated {
-            out.push_str(line);
+            // `#responserowclaim`: the pending prefix is already gone on
+            // `line`. A generated `[#q-…]` after the glyph goes with it, and
+            // only on a reply row, so an operator prompt keeps its own id.
+            if reply {
+                out.push_str(&crate::reply_row::strip_generated_reply_qid_line(line));
+            } else {
+                out.push_str(line);
+            }
         } else {
             out.push_str(original);
         }

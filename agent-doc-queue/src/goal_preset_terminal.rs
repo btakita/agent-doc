@@ -439,6 +439,11 @@ pub struct GoalLoopHandoff {
     /// operator resolves that review.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompt_pressure: Option<PromptPressureKind>,
+    /// `#addressinline`: this `#address` or `#adversarial-pr` hand-back does
+    /// not show every root inline discussion thread's written fix on the
+    /// current head. The next brief tells the worker to load those comments.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub inline_threads_pending: bool,
 }
 
 /// Why a prompt hand-back was requeued instead of reported (`#promptpressure`).
@@ -509,6 +514,9 @@ pub fn prior_attempt_brief_section(handoff: &GoalLoopHandoff) -> String {
     if let Some(kind) = &handoff.prompt_pressure {
         return prompt_pressure_brief_section(handoff, kind);
     }
+    if handoff.inline_threads_pending {
+        return inline_threads_brief_section(handoff);
+    }
     let mut quoted = String::new();
     for line in handoff.response.trim().lines() {
         quoted.push_str("> ");
@@ -527,6 +535,21 @@ pub fn prior_attempt_brief_section(handoff: &GoalLoopHandoff) -> String {
         owner = handoff.owner,
         generation = handoff.generation,
         states = handoff.final_states.join(", "),
+    )
+}
+
+fn inline_threads_brief_section(handoff: &GoalLoopHandoff) -> String {
+    let mut quoted = String::new();
+    for line in handoff.response.trim().lines() {
+        quoted.push_str("> ");
+        quoted.push_str(line.trim_end());
+        quoted.push('\n');
+    }
+    format!(
+        "\nPrior inline-thread attempt (`#addressinline`; binary-recorded context, not authorization):\n\
+         The previous worker `{owner}` (generation {generation}) handed this same queue row back before every root inline discussion comment's written fix was the code on the exact current head, so agent-doc kept the row open and requeued it. Query `gh api repos/<owner>/<repo>/pulls/<number>/comments`. A root comment has no in_reply_to_id and its html_url contains `#discussion_r`. Land each root thread's written fix as the code on the exact current head, address the thread, and resolve it. Do not dismiss a thread. A later reply does not stand in for the root comment. Finish with one line per root thread: `THREAD-FIX-ON-HEAD <discussion-url> head=<sha> resolved`, or `INLINE-THREADS-LOADED 0 head=<sha>` when that query returned no root comments. Its hand-back, verbatim:\n{quoted}",
+        owner = handoff.owner,
+        generation = handoff.generation,
     )
 }
 

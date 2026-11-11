@@ -140,6 +140,9 @@ pub struct GoalLoopRequeue {
     /// `#operatororderclosed`: the hand-back is `BLOCKED` on a human review the
     /// preset already refuses to approve or dismiss.
     pub answered_blocked_review: bool,
+    /// `#addressinline`: an `#address` or `#adversarial-pr` hand-back whose
+    /// root inline discussion threads are not shown on the current head.
+    pub inline_threads_pending: bool,
 }
 
 /// `#goalpresetterminal`: decide `queue report-complete` for a goal-loop row.
@@ -169,24 +172,37 @@ pub fn requeue_nonterminal_hand_back(
     }
     let presets =
         agent_doc_frontmatter_io::session::effective_prompt_presets_for_drain(content, file);
-    let final_states = agent_doc_queue::goal_preset_terminal::head_final_states_with_presets(
+    let preset_pairs = agent_doc_queue::goal_preset_terminal::resolved_presets(&presets);
+    let final_states = agent_doc_queue::goal_preset_terminal::head_final_states_in(
         &claim.item_text,
-        &presets,
+        &preset_pairs,
     );
-    if final_states.is_empty() {
+    // `#addressinline`: `#address` declares no final states, so the empty-state
+    // return must not skip a row whose inline discussion threads are unsettled.
+    let inline_goal = agent_doc_queue::inline_discussion::head_requires_inline_discussions(
+        &claim.item_text,
+        &preset_pairs,
+    );
+    let inline_pending =
+        inline_goal && !agent_doc_queue::inline_discussion::inline_threads_settled(response);
+    if final_states.is_empty() && !inline_goal {
         return Ok(None);
     }
-    let bodies = agent_doc_queue::goal_preset_terminal::head_goal_preset_bodies_with_presets(
+    let bodies = agent_doc_queue::goal_preset_terminal::head_goal_preset_bodies_in(
         &claim.item_text,
-        &presets,
+        &preset_pairs,
     );
     let live = agent_doc_queue::queue_continuation::live_queue_head_identities(content);
-    // `#operatororderclosed`: BLOCKED on a review the preset already answers stays open.
-    if agent_doc_queue::goal_preset_terminal::hand_back_completes_goal_loop(
-        response,
-        &final_states,
-        &bodies,
-    ) {
+    let completes = !final_states.is_empty()
+        && agent_doc_queue::goal_preset_terminal::hand_back_completes_goal_loop(
+            response,
+            &final_states,
+            &bodies,
+        );
+    // A settled `#address` row, and a settled `REVIEW-CLEAN` or `BLOCKED` line,
+    // take the ordinary report path. An already-answered human-review `BLOCKED`
+    // does not complete (`#operatororderclosed`).
+    if !inline_pending && (final_states.is_empty() || completes) {
         let identity = claim.identity.clone();
         mutate(file, |ledger| {
             ledger.forget(&identity);
@@ -214,6 +230,7 @@ pub fn requeue_nonterminal_hand_back(
         recorded_at_secs: now_secs(),
         quota_block: None,
         prompt_pressure: None,
+        inline_threads_pending: inline_pending,
     };
     mutate(file, |ledger| {
         if let Some(live) = live.as_ref() {
@@ -231,12 +248,17 @@ pub fn requeue_nonterminal_hand_back(
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "queue_goal_loop_hand_back_requeued owner={} generation={} final_states={} response_bytes={} item_bytes={} (#goalpresetterminal)",
+            "queue_goal_loop_hand_back_requeued owner={} generation={} final_states={} response_bytes={} item_bytes={} ({})",
             requeued.owner,
             requeued.generation,
             final_states.join(","),
             response.trim().len(),
             requeued.item_text.trim().len(),
+            if inline_pending {
+                "#addressinline"
+            } else {
+                "#goalpresetterminal"
+            },
         ),
     );
     let answered_blocked_review =
@@ -252,6 +274,7 @@ pub fn requeue_nonterminal_hand_back(
         final_states,
         suppress_immediate_refill,
         answered_blocked_review,
+        inline_threads_pending: inline_pending,
     }))
 }
 
@@ -285,6 +308,7 @@ pub fn requeue_with_prompt_pressure(
         recorded_at_secs: now_secs(),
         quota_block: None,
         prompt_pressure: Some(kind.clone()),
+        inline_threads_pending: false,
     };
     mutate(file, |ledger| {
         if let Some(live) = live.as_ref() {
@@ -329,6 +353,7 @@ pub fn record_quota_requeue(file: &Path, claim: &QueueClaim) -> Result<()> {
         recorded_at_secs: now_secs(),
         quota_block: Some(block),
         prompt_pressure: None,
+        inline_threads_pending: false,
     };
     mutate(file, |ledger| ledger.record(handoff))
 }

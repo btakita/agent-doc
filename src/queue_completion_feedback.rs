@@ -1612,7 +1612,8 @@ mod tests {
             "https://github.com/sample-org/sample-repo/pull/12#pullrequestreview-1000000001 ",
             "against head aaaa111.\n\n",
             "Verdict: changes needed. One P2 finding remains: reconnect drops the retained outbox.\n",
-            "Delivery worktree: /work/sample-repo/pr12-loop",
+            "Delivery worktree: /work/sample-repo/pr12-loop\n",
+            "INLINE-THREADS-LOADED 0 head=aaaa111\n",
         );
         let requeue = requeue_nonterminal_goal_hand_back(&doc, ROW, Some(1), interrupted)
             .unwrap()
@@ -1695,7 +1696,8 @@ mod tests {
         .unwrap();
         let clean = concat!(
             "REVIEW-CLEAN https://github.com/sample-org/sample-repo/pull/12#pullrequestreview-1000000002 ",
-            "base=cccc333 head=bbbb222 cycles=2\n\nFresh independent review: zero surviving findings.",
+            "base=cccc333 head=bbbb222 cycles=2\n\nFresh independent review: zero surviving findings.\n",
+            "INLINE-THREADS-LOADED 0 head=bbbb222\n",
         );
         assert!(
             requeue_nonterminal_goal_hand_back(&doc, ROW, Some(generation), clean)
@@ -1761,7 +1763,8 @@ mod tests {
             "BLOCKED reviewer clears or replaces review 1000000001 against the current head ",
             "base=cccc333 head=bbbb222 cycles=2\n\n",
             "Two COMMENTED reviews are already on head bbbb222. This preset cannot approve ",
-            "or dismiss that review. No new review was posted.",
+            "or dismiss that review. No new review was posted.\n",
+            "INLINE-THREADS-LOADED 0 head=bbbb222\n",
         );
         let requeue = requeue_nonterminal_goal_hand_back(&doc, ROW, Some(1), quiet)
             .unwrap()
@@ -1822,7 +1825,8 @@ mod tests {
             "Posted the pull-request comment ",
             "https://github.com/sample-org/sample-repo/pull/12#issuecomment-100 ",
             "explaining why the work is not progressing. The findings are already ",
-            "addressed and this loop does not dismiss the review.",
+            "addressed and this loop does not dismiss the review.\n",
+            "INLINE-THREADS-LOADED 0 head=bbbb222\n",
         );
         let explained_requeue =
             requeue_nonterminal_goal_hand_back(&doc, ROW, Some(generation), explained)
@@ -1859,7 +1863,8 @@ mod tests {
         .unwrap();
         let budget = concat!(
             "BLOCKED restore the hosted runner budget base=cccc333 head=bbbb222 cycles=2\n\n",
-            "Review URLs: https://github.com/sample-org/sample-repo/pull/12#pullrequestreview-100",
+            "Review URLs: https://github.com/sample-org/sample-repo/pull/12#pullrequestreview-100\n",
+            "INLINE-THREADS-LOADED 0 head=bbbb222\n",
         );
         assert!(
             requeue_nonterminal_goal_hand_back(&doc, ROW, Some(generation), budget)
@@ -1869,13 +1874,215 @@ mod tests {
         );
         let clean = concat!(
             "REVIEW-CLEAN https://github.com/sample-org/sample-repo/pull/12#pullrequestreview-200 ",
-            "base=cccc333 head=bbbb222 cycles=3",
+            "base=cccc333 head=bbbb222 cycles=3\n",
+            "INLINE-THREADS-LOADED 0 head=bbbb222\n",
         );
         assert!(
             requeue_nonterminal_goal_hand_back(&doc, ROW, Some(generation), clean)
                 .unwrap()
                 .is_none(),
             "REVIEW-CLEAN still completes"
+        );
+    }
+
+    const INLINE_MUST: &str =
+        "https://github.com/haiven-dev/haiven-api/pull/869#discussion_r4532159601";
+    const INLINE_SHOULD: &str =
+        "https://github.com/haiven-dev/haiven-api/pull/869#discussion_r4532069052";
+    const INLINE_HEAD: &str = "87afcacde5eaed85bc87372fad897903afdebacf";
+
+    fn inline_project(dir: &Path) {
+        fs::create_dir_all(dir.join(".agent-doc")).unwrap();
+        fs::write(
+            dir.join(".agent-doc/project.md"),
+            concat!(
+                "---\npresets:\n",
+                "  '#address': 'Address every actionable review item on the exact current head.'\n",
+                "  '#adversarial-pr': >-\n",
+                "    /goal Bring the pull request to an independently review-clean exact\n",
+                "    remote head. Start a separate fixer using #address.\n\n",
+                "    Final states. Your final message must begin with exactly one of these\n",
+                "    lines:\n",
+                "    - `REVIEW-CLEAN <final review URL> base=<sha> head=<sha> cycles=<n>`.\n",
+                "    - `BLOCKED <single operator action> base=<sha> head=<sha> cycles=<n>`.\n",
+                "---\n",
+            ),
+        )
+        .unwrap();
+    }
+
+    fn inline_doc(dir: &Path, row: &str) -> std::path::PathBuf {
+        let doc = dir.join("prs.md");
+        fs::write(
+            &doc,
+            format!(
+                "---\nagent_doc_session: sample-prs\nagent_doc_format: template\n---\n\n\
+                 <!-- agent:exchange patch=append -->\n### Re: prior — gpt-5\n\nDone.\n\
+                 <!-- agent:boundary:keep -->\n<!-- /agent:exchange -->\n\n\
+                 <!-- agent:queue subagents -->\n- {row}\n<!-- /agent:queue -->\n"
+            ),
+        )
+        .unwrap();
+        doc
+    }
+
+    fn restart_subagent(doc: &Path, row: &str, owner: &str) -> u64 {
+        let (outcome, _) = agent_doc_queue_io::queue_claim::claim(doc, row, owner, 600).unwrap();
+        assert_eq!(
+            outcome,
+            agent_doc_queue::queue_claim::ClaimOutcome::Reassigned
+        );
+        let generation = agent_doc_queue_io::queue_claim::load_ledger(doc)
+            .unwrap()
+            .claims
+            .iter()
+            .find(|claim| claim.owner == owner)
+            .map(|claim| claim.generation)
+            .unwrap();
+        agent_doc_queue_io::queue_claim::start_attempt(
+            doc,
+            row,
+            owner,
+            &format!("worker:{owner}"),
+            600,
+            generation,
+        )
+        .unwrap();
+        generation
+    }
+
+    /// `#addressinline`: an `#address` run that only reads the review body, or
+    /// that cites a later reply, stays the same open row. Receipts for every
+    /// named root thread take the ordinary report path. Dismissing a thread
+    /// does not.
+    #[test]
+    fn address_hand_back_without_inline_threads_requeues_the_same_row() {
+        let dir = tempfile::tempdir().unwrap();
+        inline_project(dir.path());
+        const ROW: &str = "https://github.com/haiven-dev/haiven-api/pull/869: #address";
+        let doc = inline_doc(dir.path(), ROW);
+        start_subagent(&doc, ROW, "subagent:address1");
+        let review_body = concat!(
+            "Addressed the review body at ",
+            "https://github.com/haiven-dev/haiven-api/pull/869#pullrequestreview-5837752992.",
+        );
+        let requeue = requeue_nonterminal_goal_hand_back(&doc, ROW, Some(1), review_body)
+            .unwrap()
+            .expect("a review body does not load inline discussion comments");
+        assert!(requeue.inline_threads_pending);
+        assert!(requeue.final_states.is_empty());
+        assert!(!requeue.answered_blocked_review);
+        let content = fs::read_to_string(&doc).unwrap();
+        assert_eq!(content.matches(ROW).count(), 1, "{content}");
+        assert!(!content.contains("~~"), "{content}");
+        assert!(!content.contains("### Re: Subagent completed"), "{content}");
+
+        let generation = restart_subagent(&doc, ROW, "subagent:address2");
+        let brief =
+            agent_doc_queue_io::subagent_dispatch::subagent_authorization_for_item(&doc, ROW)
+                .unwrap();
+        let preamble = &brief.subagent_prompt_preamble;
+        assert!(preamble.contains("(#addressinline)"), "{preamble}");
+        assert!(
+            preamble.contains("gh api repos/<owner>/<repo>/pulls/<number>/comments"),
+            "{preamble}"
+        );
+        assert!(
+            preamble.contains("Prior inline-thread attempt"),
+            "{preamble}"
+        );
+        assert!(
+            preamble.contains("> Addressed the review body at "),
+            "{preamble}"
+        );
+
+        let later =
+            format!("Later replies on {INLINE_MUST} and {INLINE_SHOULD} are marked resolved.");
+        let later_requeue = requeue_nonterminal_goal_hand_back(&doc, ROW, Some(generation), &later)
+            .unwrap()
+            .expect("a later reply does not load the root comment");
+        assert!(later_requeue.inline_threads_pending);
+
+        let generation = restart_subagent(&doc, ROW, "subagent:address3");
+        let dismissed = format!(
+            "THREAD-FIX-ON-HEAD {INLINE_MUST} head={INLINE_HEAD} resolved\n\
+             THREAD-FIX-ON-HEAD {INLINE_SHOULD} head={INLINE_HEAD} resolved\n\
+             I dismissed the thread.\n"
+        );
+        let dismissed_requeue =
+            requeue_nonterminal_goal_hand_back(&doc, ROW, Some(generation), &dismissed)
+                .unwrap()
+                .expect("dismissing a thread does not finish the run");
+        assert!(dismissed_requeue.inline_threads_pending);
+
+        let generation = restart_subagent(&doc, ROW, "subagent:address4");
+        let settled = format!(
+            "THREAD-FIX-ON-HEAD {INLINE_MUST} head={INLINE_HEAD} resolved\n\
+             THREAD-FIX-ON-HEAD {INLINE_SHOULD} head={INLINE_HEAD} resolved\n"
+        );
+        assert!(
+            requeue_nonterminal_goal_hand_back(&doc, ROW, Some(generation), &settled)
+                .unwrap()
+                .is_none(),
+            "receipts for every named root thread take the ordinary report path"
+        );
+    }
+
+    /// `#addressinline`: `REVIEW-CLEAN` does not finish `#adversarial-pr` while
+    /// a root thread's written fix is absent from the hand-back. Receipts, or
+    /// an explicit zero-comment query, do.
+    #[test]
+    fn adversarial_review_clean_without_inline_threads_stays_open() {
+        let dir = tempfile::tempdir().unwrap();
+        inline_project(dir.path());
+        const ROW: &str = "https://github.com/haiven-dev/haiven-api/pull/869: #adversarial-pr";
+        let doc = inline_doc(dir.path(), ROW);
+        start_subagent(&doc, ROW, "subagent:adversarial1");
+        let clean = format!(
+            "REVIEW-CLEAN https://github.com/haiven-dev/haiven-api/pull/869#pullrequestreview-5837752992 \
+             base=cccc333 head={INLINE_HEAD} cycles=1\n\nThe review body is clean."
+        );
+        let requeue = requeue_nonterminal_goal_hand_back(&doc, ROW, Some(1), &clean)
+            .unwrap()
+            .expect("REVIEW-CLEAN without inline threads stays open");
+        assert!(requeue.inline_threads_pending);
+        assert_eq!(requeue.final_states, vec!["REVIEW-CLEAN", "BLOCKED"]);
+        assert!(!requeue.answered_blocked_review);
+        let content = fs::read_to_string(&doc).unwrap();
+        assert!(!content.contains("### Re: Subagent completed"), "{content}");
+        assert!(!content.contains("~~"), "{content}");
+
+        let generation = restart_subagent(&doc, ROW, "subagent:adversarial2");
+        let brief =
+            agent_doc_queue_io::subagent_dispatch::subagent_authorization_for_item(&doc, ROW)
+                .unwrap();
+        assert!(brief.subagent_prompt_preamble.contains("(#addressinline)"));
+        assert!(
+            brief
+                .subagent_prompt_preamble
+                .contains("Prior inline-thread attempt")
+        );
+        let with_receipts = format!(
+            "{clean}\n\
+             THREAD-FIX-ON-HEAD {INLINE_MUST} head={INLINE_HEAD} resolved\n\
+             THREAD-FIX-ON-HEAD {INLINE_SHOULD} head={INLINE_HEAD} resolved\n"
+        );
+        assert!(
+            requeue_nonterminal_goal_hand_back(&doc, ROW, Some(generation), &with_receipts)
+                .unwrap()
+                .is_none(),
+            "REVIEW-CLEAN plus a receipt for every named thread completes"
+        );
+        let zero = format!(
+            "REVIEW-CLEAN https://github.com/haiven-dev/haiven-api/pull/869#pullrequestreview-5837752992 \
+             base=cccc333 head={INLINE_HEAD} cycles=1\n\
+             INLINE-THREADS-LOADED 0 head={INLINE_HEAD}\nQueried pulls/869/comments.\n"
+        );
+        assert!(
+            requeue_nonterminal_goal_hand_back(&doc, ROW, Some(generation), &zero)
+                .unwrap()
+                .is_none(),
+            "REVIEW-CLEAN plus an explicit empty comments query completes"
         );
     }
 

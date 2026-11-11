@@ -260,4 +260,41 @@ mod tests {
         let content = "<!-- agent:exchange -->\n### Re: note\n\nDone.\n<!-- /agent:exchange -->\n";
         assert!(normal_closeout_failure(content).unwrap().is_none());
     }
+
+    /// sdk-dev.md, 2026-11-11: a heading-level running leaf and a nested
+    /// lost-running leaf under an `agent:run` pull-request parent both stayed
+    /// live when the turn ended. Both are transient debt.
+    #[test]
+    fn sdk_dev_heading_and_nested_run_rows_are_transient_debt() {
+        let content = "\
+<!-- agent:run id=\"haiven-sdk-prs\" subagents -->
+- ### https://github.com/haiven-dev/haiven-sdk/pull/228
+  - %% ci(release): dispatch sdk-dev promotion from main %%
+  - ⚠️🚧 [#subagent:pr228seventeen#17] #adversarial-pr [#q-abf0adec8270]
+- ### 🚧 [#subagent:rpversionpr#1] Do we need to create a PR to make Release Please reliably update the version [#q-3a7937eee419]
+<!-- /agent:run -->
+";
+        let failure = normal_closeout_failure(content)
+            .unwrap()
+            .expect("both sdk-dev rows refuse closeout");
+        assert!(
+            failure.contains(
+                "🚧 [#subagent:rpversionpr#1] Do we need to create a PR to make Release Please reliably update the version [#q-3a7937eee419]"
+            ),
+            "{failure}"
+        );
+        assert!(
+            failure
+                .contains("⚠️🚧 [#subagent:pr228seventeen#17] #adversarial-pr [#q-abf0adec8270]"),
+            "{failure}"
+        );
+        assert!(failure.contains("finish the running worker without converting the claim to Lost"));
+        assert!(failure.contains(
+            "continue the same generation and worker; if continue fails, retry a new generation in this turn so the row leaves Lost"
+        ));
+        assert!(
+            !failure.contains("ci(release)"),
+            "a comment child is not a transient row: {failure}"
+        );
+    }
 }

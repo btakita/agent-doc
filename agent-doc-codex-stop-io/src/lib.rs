@@ -1370,6 +1370,9 @@ fn apply_claude_stop_with_drain_readiness(
     // consulted: looping a retained write re-answers an answered head.
     let cycle = agent_doc_cycle_state_io::load(&file)?;
     if cycle.as_ref().is_some_and(|cycle| cycle.is_open()) {
+        if let Some(continuation) = transient_turn_end_continuation(&file)? {
+            return Ok(Some(continuation));
+        }
         agent_doc_ops_log_io::log_op(
             &file,
             "claude_stop_queue_continuation_skipped reason=cycle_open action=allow_final_answer",
@@ -1388,6 +1391,9 @@ fn apply_claude_stop_with_drain_readiness(
         .as_ref()
         .is_some_and(|cycle| cycle.response_sha256.is_none())
     {
+        if let Some(continuation) = transient_turn_end_continuation(&file)? {
+            return Ok(Some(continuation));
+        }
         agent_doc_ops_log_io::log_op(
             &file,
             "claude_stop_queue_continuation_skipped reason=run_captured_no_response action=allow_final_answer",
@@ -1412,10 +1418,54 @@ fn apply_claude_stop_with_drain_readiness(
     if let Some(continuation) = claude_reported_writeback_continuation(input, &file) {
         return Ok(Some(continuation));
     }
-    Ok(
-        final_status_sync_continuation(&file, input.stop_hook_active)?
-            .map(|reason| ClaudeStopContinuation { reason }),
-    )
+    if let Some(reason) = final_status_sync_continuation(&file, input.stop_hook_active)? {
+        return Ok(Some(ClaudeStopContinuation { reason }));
+    }
+    // `#transientcloseout`: session-check already refuses a successful closeout.
+    // Grok ends the turn through this Claude-format Stop hook and never reaches
+    // that inspect. A visible `🚧` or `⚠️🚧` row used to be a quiet
+    // `waiting_on_claims` exit (sdk-dev.md, `subagent:rpversionpr` and
+    // `subagent:pr228seventeen`, 2026-11-11). A genuine turn end stays open
+    // until every live transient row leaves that set. Observe-only stops return
+    // above and do not consult this gate.
+    transient_turn_end_continuation(&file)
+}
+
+/// Refusal for a genuine turn end while live queue rows are still transient.
+///
+/// `None` when every live row is resting, struck, or unmarked. An unreadable
+/// document is not proof that the rows are resting, so the turn stays open.
+fn transient_turn_end_continuation(file: &Path) -> Result<Option<ClaudeStopContinuation>> {
+    let content = match current_document_content(file, "claude_stop_transient_closeout") {
+        Ok(content) => content,
+        Err(err) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "claude_stop_transient_closeout_unreadable error={err:#} action=block_final_answer (#transientcloseout)"
+                ),
+            );
+            return Ok(Some(ClaudeStopContinuation {
+                reason: format!(
+                    "agent-doc cannot end this turn because {} could not be read to prove live queue rows are resting (#transientcloseout): {err:#}. Do not send the final answer yet.",
+                    file.display()
+                ),
+            }));
+        }
+    };
+    let Some(failure) = agent_doc_queue::transient_closeout::normal_closeout_failure(&content)?
+    else {
+        return Ok(None);
+    };
+    agent_doc_ops_log_io::log_op(
+        file,
+        "claude_stop_transient_closeout action=block_final_answer (#transientcloseout)",
+    );
+    Ok(Some(ClaudeStopContinuation {
+        reason: format!(
+            "{failure}\nDo not send the final answer yet. Finish each owed transition in this turn."
+        ),
+    }))
 }
 
 /// The queue half of [`apply_claude_stop_with_drain_readiness`]: a durably
@@ -9751,6 +9801,62 @@ Reviewed the gated items.\n\
             .expect("continuation context");
         assert!(context.contains("fix the next queue item"), "{context}");
         assert!(response.get("decision").is_none(), "{response}");
+    }
+
+    /// `#transientcloseout`: Grok's genuine `end_turn` uses this hook. A
+    /// heading-level `🚧` leaf and a nested `⚠️🚧` leaf are not a quiet
+    /// in-flight wait. Observe-only session end still allows the stop.
+    #[test]
+    fn grok_end_turn_refuses_sdk_dev_transient_rows() {
+        let dir = setup_project();
+        let doc = dir.path().join("sdk-dev.md");
+        let content = "\
+---
+agent_doc_session: sid
+agent_doc_format: template
+agent: grok
+---
+
+## haiven-sdk-prs <!-- agent:run id=\"haiven-sdk-prs\" subagents -->
+- ### https://github.com/haiven-dev/haiven-sdk/pull/228
+  - %% ci(release): dispatch sdk-dev promotion from main %%
+  - ⚠️🚧 [#subagent:pr228seventeen#17] #adversarial-pr [#q-abf0adec8270]
+- ### 🚧 [#subagent:rpversionpr#1] Do we need to create a PR to make Release Please reliably update the version [#q-3a7937eee419]
+<!-- /agent:run -->
+";
+        fs::write(&doc, content).unwrap();
+        init_git_repo(dir.path(), &doc);
+        track_doc(&dir, &doc, "");
+        complete_run(&doc);
+
+        let ended =
+            claude_stop_response(Some(&grok_stop_payload(dir.path(), "end_turn", None))).unwrap();
+        let context = ended["hookSpecificOutput"]["additionalContext"]
+            .as_str()
+            .expect("transient rows must keep the turn open");
+        assert!(context.contains("normal closeout refused"), "{context}");
+        assert!(
+            context.contains("🚧 [#subagent:rpversionpr#1]"),
+            "{context}"
+        );
+        assert!(
+            context.contains("⚠️🚧 [#subagent:pr228seventeen#17]"),
+            "{context}"
+        );
+        assert!(
+            context.contains("Do not send the final answer yet"),
+            "{context}"
+        );
+        assert!(ended.get("decision").is_none(), "{ended}");
+
+        let observed =
+            claude_stop_response(Some(&grok_stop_payload(dir.path(), "channel_closed", None)))
+                .unwrap();
+        assert_eq!(
+            observed,
+            serde_json::json!({}),
+            "an observe-only session end does not consult transient rows: {observed}"
+        );
     }
 
     #[test]

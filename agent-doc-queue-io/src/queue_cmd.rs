@@ -334,12 +334,42 @@ pub enum ClaimProjectionScope<'a> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RuntimeProjectionRows {
     All,
+    /// Background self-heal (`#inboxdup`). Same document repair as [`Self::All`],
+    /// except a new cosmetic `📥` is introduced only when the row is
+    /// structurally complete. A short pause mid-sentence must not rewrite the
+    /// line: the glyph stays in the prose and the next paint prefixes a second
+    /// one. Rows that already carry a lifecycle marker, and rows with durable
+    /// evidence, still repaint.
+    BackgroundComplete,
     /// A claim-ledger transition must not take ownership of a newly typed,
     /// unrelated bare row merely to add the cosmetic pending marker. The
     /// transition still repaints rows with durable/runtime evidence and rows
     /// that already carry a lifecycle marker.
     LifecycleEvidence,
     BlockedOrPreviouslyBlocked,
+}
+
+/// Document sync and background self-heal both own every queue row's repair
+/// (completion evidence, terminal todos). They differ only in whether a bare
+/// row may gain a new cosmetic `📥`.
+fn runtime_projection_repairs_every_row(rows: RuntimeProjectionRows) -> bool {
+    matches!(
+        rows,
+        RuntimeProjectionRows::All | RuntimeProjectionRows::BackgroundComplete
+    )
+}
+
+/// `#inboxdup`: a background repair may prefix `📥` onto a bare row only when
+/// that row's head is structurally finished. An inconclusive or unfinished
+/// head is still being typed; explicit sync ([`RuntimeProjectionRows::All`])
+/// and a later preflight paint the settled row.
+fn background_cosmetic_pending_admitted(rows: RuntimeProjectionRows, text: &str) -> bool {
+    if rows != RuntimeProjectionRows::BackgroundComplete {
+        return true;
+    }
+    let head = text.lines().next().unwrap_or(text);
+    agent_doc_debounce::edit_settle::completion_signal(head)
+        == agent_doc_debounce::edit_settle::CompletionSignal::Complete
 }
 
 pub fn derive_claim_runtime_projection(
@@ -656,6 +686,11 @@ fn derive_runtime_projection_scoped(
                         )
                     ) {
                         observed.expect("matched Some lifecycle marker")
+                    } else if observed.is_none()
+                        && !background_cosmetic_pending_admitted(rows, &prompt.text)
+                    {
+                        // `#inboxdup`: leave the bare, still-typing row unmarked.
+                        return None;
                     } else {
                         agent_doc_document::queue_projection::QueueLifecycleMarker::Pending
                     };
@@ -1022,14 +1057,16 @@ pub fn project_all_queue_runtime_state_with_effects(
     )
 }
 
-/// One CAS attempt for a background projection repair.
+/// One CAS attempt for a projection repair that paints every unmarked row.
 ///
 /// Foreground claim admission may retry because its caller owns a concrete
-/// lifecycle transition and waits for the corresponding marker. Background
-/// self-heal has no such right to contend with operator edits: a changed editor
+/// lifecycle transition and waits for the corresponding marker. A one-shot
+/// repair has no such right to contend with operator edits: a changed editor
 /// revision supersedes its snapshot and schedules a later repair edge. One
 /// attempt keeps operator typing authoritative and prevents eight full-document
-/// retries from multiplying controller pressure.
+/// retries from multiplying controller pressure. The idle watch calls
+/// [`project_background_self_heal_runtime_state_once_for_generation_with_effects`]
+/// instead, so a row still being typed does not gain a cosmetic `📥`.
 pub fn project_all_queue_runtime_state_once_with_effects(
     effects: &(impl QueueRuntimeProjectionEffects + ?Sized),
     file: &Path,
@@ -1062,15 +1099,39 @@ pub fn project_all_queue_runtime_state_once_for_generation_with_effects(
     file: &Path,
     generation: u64,
 ) -> Result<QueueRuntimeProjectionOnceOutcome> {
-    match project_runtime_state_with_effects(
+    project_queue_runtime_state_once_for_generation_with_effects(
         effects,
         file,
-        None,
-        RuntimeProjectionRows::All,
-        None,
-        1,
         generation,
-    ) {
+        RuntimeProjectionRows::All,
+    )
+}
+
+/// `#inboxdup`: the idle self-heal's one CAS. A new cosmetic `📥` is admitted
+/// only on a structurally complete head, so a pause mid-sentence does not
+/// rewrite the row. Rows that already carry a marker, and rows with durable
+/// evidence, still repaint. Explicit sync and clean-slate stay on
+/// [`project_all_queue_runtime_state_once_for_generation_with_effects`].
+pub fn project_background_self_heal_runtime_state_once_for_generation_with_effects(
+    effects: &(impl QueueRuntimeProjectionEffects + ?Sized),
+    file: &Path,
+    generation: u64,
+) -> Result<QueueRuntimeProjectionOnceOutcome> {
+    project_queue_runtime_state_once_for_generation_with_effects(
+        effects,
+        file,
+        generation,
+        RuntimeProjectionRows::BackgroundComplete,
+    )
+}
+
+fn project_queue_runtime_state_once_for_generation_with_effects(
+    effects: &(impl QueueRuntimeProjectionEffects + ?Sized),
+    file: &Path,
+    generation: u64,
+    rows: RuntimeProjectionRows,
+) -> Result<QueueRuntimeProjectionOnceOutcome> {
+    match project_runtime_state_with_effects(effects, file, None, rows, None, 1, generation) {
         Ok(changed) => Ok(QueueRuntimeProjectionOnceOutcome::Settled { changed }),
         Err(error)
             if error
@@ -1487,20 +1548,20 @@ fn project_runtime_state_with_effects(
         // into the ledger before deriving claim markers, including after
         // restart. Blocker-only refresh is a document projection and must not
         // acquire that ledger side effect.
-        if rows == RuntimeProjectionRows::All {
+        if runtime_projection_repairs_every_row(rows) {
             crate::queue_claim::reconcile_completion_evidence(file, &current)?;
         }
         let projection = match rows {
-            RuntimeProjectionRows::All | RuntimeProjectionRows::LifecycleEvidence => {
-                derive_runtime_projection_scoped(
-                    file,
-                    &current,
-                    cleared_item,
-                    ClaimProjectionScope::Document,
-                    rows,
-                    only_identity,
-                )?
-            }
+            RuntimeProjectionRows::All
+            | RuntimeProjectionRows::BackgroundComplete
+            | RuntimeProjectionRows::LifecycleEvidence => derive_runtime_projection_scoped(
+                file,
+                &current,
+                cleared_item,
+                ClaimProjectionScope::Document,
+                rows,
+                only_identity,
+            )?,
             RuntimeProjectionRows::BlockedOrPreviouslyBlocked => {
                 derive_blocker_runtime_projection(file, &current)?
             }
@@ -1517,15 +1578,16 @@ fn project_runtime_state_with_effects(
         // owns every queue row, so fold the same proof-complete reconciliation
         // into its CAS successor. The pure helper refuses cited ids and refuses
         // when any duplicate row is still live.
-        let target_content = if rows == RuntimeProjectionRows::All && only_identity.is_none() {
-            agent_doc_queue::queue_consume::reconcile_terminal_operator_request_todos(
-                &target_content,
-                &[],
-            )?
-            .content
-        } else {
-            target_content
-        };
+        let target_content =
+            if runtime_projection_repairs_every_row(rows) && only_identity.is_none() {
+                agent_doc_queue::queue_consume::reconcile_terminal_operator_request_todos(
+                    &target_content,
+                    &[],
+                )?
+                .content
+            } else {
+                target_content
+            };
         if target_content != current {
             if queue_repair_generation(file)? != repair_generation {
                 return Err(QueueRuntimeProjectionSuperseded.into());
@@ -1577,16 +1639,16 @@ fn project_runtime_state_with_effects(
         let authoritative =
             effects.current_document_content(file, "queue_claim_runtime_projection_verify")?;
         let settled = match rows {
-            RuntimeProjectionRows::All | RuntimeProjectionRows::LifecycleEvidence => {
-                derive_runtime_projection_scoped(
-                    file,
-                    &authoritative,
-                    cleared_item,
-                    ClaimProjectionScope::Document,
-                    rows,
-                    only_identity,
-                )?
-            }
+            RuntimeProjectionRows::All
+            | RuntimeProjectionRows::BackgroundComplete
+            | RuntimeProjectionRows::LifecycleEvidence => derive_runtime_projection_scoped(
+                file,
+                &authoritative,
+                cleared_item,
+                ClaimProjectionScope::Document,
+                rows,
+                only_identity,
+            )?,
             RuntimeProjectionRows::BlockedOrPreviouslyBlocked => {
                 derive_blocker_runtime_projection(file, &authoritative)?
             }
@@ -1594,7 +1656,7 @@ fn project_runtime_state_with_effects(
         let active_settled =
             agent_doc_work_projection::reconcile_managed_active_items_for(file, &authoritative)?
                 .is_none();
-        let terminal_todos_settled = rows != RuntimeProjectionRows::All
+        let terminal_todos_settled = !runtime_projection_repairs_every_row(rows)
             || only_identity.is_some()
             || agent_doc_queue::queue_consume::reconcile_terminal_operator_request_todos(
                 &authoritative,
@@ -3924,6 +3986,108 @@ mod tests {
         assert!(projected.contains("- IS this \n"), "{projected}");
         assert!(!projected.contains("- 📥 IS this \n"), "{projected}");
         assert_eq!(projected.matches("IS this").count(), 1, "{projected}");
+    }
+
+    /// `#inboxdup`: self-heal painted `📥` onto a row the operator was still
+    /// typing (`subite`, then `The first 📥 subitems … get reordered`). The
+    /// glyph stayed in the prose and the next paint prefixed a second one.
+    /// A structurally finished row, including one whose prose already contains
+    /// `📥`, still receives exactly one leading marker. A stale `🚧` still
+    /// clears, and a claim still projects.
+    #[test]
+    fn background_self_heal_does_not_prefix_inbox_onto_an_in_progress_row() {
+        let dir = tempfile::tempdir().unwrap();
+        let composing = "The first 📥 subitems that the operator adds as comments to the parent item get reordered";
+        let half_typed = "zzhalf";
+        let settled_body =
+            "release + publish: Include fixes for Issue 378-379 and the current 📥 items.";
+        let settled_plain = "Release the sample.";
+        let stale = "fix the login bug";
+        let claimed = "dispatched worker work";
+        let doc = write_claim_projection_doc(
+            dir.path(),
+            &format!(
+                "- {composing}\n- {half_typed}\n- {settled_body}\n- {settled_plain}\n- 🚧 {stale}\n- {claimed}\n"
+            ),
+        );
+        crate::queue_claim::claim(&doc, claimed, "subagent:worker", 600).unwrap();
+        let current = std::fs::read_to_string(&doc).unwrap();
+        let effects = FakeEffects::with_current(current);
+        let generation = queue_repair_generation(&doc).unwrap();
+
+        assert_eq!(
+            project_background_self_heal_runtime_state_once_for_generation_with_effects(
+                &effects, &doc, generation,
+            )
+            .unwrap(),
+            QueueRuntimeProjectionOnceOutcome::Settled { changed: true }
+        );
+        let projected = effects.current.borrow().clone().unwrap();
+        let line = |needle: &str| {
+            projected
+                .lines()
+                .find(|line| line.contains(needle))
+                .unwrap_or_else(|| panic!("missing {needle} in {projected}"))
+                .to_string()
+        };
+
+        let composing_line = line("The first");
+        assert_eq!(
+            composing_line.matches('📥').count(),
+            1,
+            "in-progress row keeps its content inbox and gains no leading one: {composing_line}"
+        );
+        assert!(
+            composing_line.contains(&format!("- {composing}"))
+                || composing_line.contains(&format!("- ### {composing}")),
+            "{composing_line}"
+        );
+        assert!(
+            !composing_line.contains("📥 The first 📥"),
+            "{composing_line}"
+        );
+
+        let half = line(half_typed);
+        assert_eq!(half.matches('📥').count(), 0, "{half}");
+
+        let body = line("current 📥 items.");
+        assert_eq!(body.matches('📥').count(), 2, "{body}");
+        assert!(
+            body.contains("📥 release + publish:") && body.contains("current 📥 items."),
+            "{body}"
+        );
+        assert!(!body.contains("📥 📥"), "{body}");
+
+        let plain = line(settled_plain);
+        assert_eq!(plain.matches('📥').count(), 1, "{plain}");
+        assert!(plain.contains(&format!("📥 {settled_plain}")), "{plain}");
+
+        let cleared = line(stale);
+        assert!(cleared.contains(&format!("📥 {stale}")), "{cleared}");
+        assert!(!cleared.contains('🚧'), "{cleared}");
+
+        let claim_line = line(claimed);
+        assert!(
+            claim_line.contains("🟡") && claim_line.contains("[#subagent:worker#1]"),
+            "{claim_line}"
+        );
+
+        let synced = derive_claim_runtime_projection(&doc, &projected, None).unwrap();
+        let synced_composing = synced
+            .target_content
+            .lines()
+            .find(|line| line.contains("The first"))
+            .unwrap()
+            .to_string();
+        assert_eq!(
+            synced_composing.matches('📥').count(),
+            2,
+            "explicit sync of a saved row still adds one leading inbox: {synced_composing}"
+        );
+        assert!(
+            synced_composing.contains("📥 The first 📥 subitems"),
+            "{synced_composing}"
+        );
     }
 
     #[test]

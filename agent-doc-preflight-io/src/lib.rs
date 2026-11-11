@@ -8331,6 +8331,12 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
                 // `#queueblocked`: held out of drain and dispatch; names the
                 // open ids it waits on.
                 agent_doc_document::queue_projection::QueueLifecycleMarker::Blocked
+            } else if agent_doc_document::queue_projection::lifecycle_marker(&prompt.text).is_none()
+                && !coin_gate.allows_cosmetic_pending(&prompt.text)
+            {
+                // `#inboxdup`: the typing gate still holds this bare row. A
+                // pending paint would rewrite it while the operator is typing.
+                return None;
             } else {
                 agent_doc_document::queue_projection::QueueLifecycleMarker::Pending
             };
@@ -10695,6 +10701,106 @@ mod tests {
         std::fs::write(dir.path().join("tasks/a/target.done.md"), GH325_ARCHIVE).unwrap();
         advise_misplaced_legacy_done_archive(&doc, &content);
         assert!(!dir.path().join(".agent-doc/advisories").exists());
+    }
+
+    /// `#inboxdup`: queue maintenance must not prefix `📥` onto a bare row the
+    /// typing gate still holds. A quiet settled row in the same pass still
+    /// receives one leading marker. With no live observation, a saved row whose
+    /// prose already contains `📥` receives exactly one leading marker too.
+    #[test]
+    fn run_queue_maintenance_does_not_duplicate_inbox_on_a_held_row() {
+        let composing = "The first 📥 subitems that the operator adds as comments to the parent item get reordered";
+        let settled = "Release the sample.";
+        let content = format!(
+            concat!(
+                "---\n",
+                "agent_doc_session: test\n",
+                "agent_doc_format: template\n",
+                "queue_active: true\n",
+                "---\n\n",
+                "<!-- agent:queue go -->\n",
+                "- {composing}\n",
+                "- {settled}\n",
+                "<!-- /agent:queue -->\n",
+            ),
+            composing = composing,
+            settled = settled,
+        );
+        let write_doc = |dir: &std::path::Path| {
+            let doc = dir.join("session.md");
+            std::fs::write(&doc, &content).unwrap();
+            agent_doc_snapshot_io::checkpoint_document_baseline(
+                &doc,
+                &content,
+                agent_doc_ops_log_io::log_op,
+            )
+            .unwrap();
+            doc
+        };
+        let line_with = |document: &str, needle: &str| {
+            document
+                .lines()
+                .find(|line| line.contains(needle))
+                .unwrap_or_else(|| panic!("missing {needle} in {document}"))
+                .to_string()
+        };
+
+        let held_dir = setup_project();
+        let held_doc = write_doc(held_dir.path());
+        let gate = FreeTextCoinGate {
+            observed: Some(
+                agent_doc_queue::free_text_admission::FreeTextCoinObservation {
+                    settled_text: format!("- {settled}\n"),
+                    quiet_for_ms: 2_500,
+                },
+            ),
+            debounce_ms: 2_000,
+            max_hold_ms: agent_doc_debounce::edit_settle::DEFAULT_MAX_HOLD_MS,
+        };
+        run_queue_maintenance_with_coin_gate(&held_doc, None, &gate).unwrap();
+        let held = std::fs::read_to_string(&held_doc).unwrap();
+        let held_composing = line_with(&held, "The first");
+        assert_eq!(
+            held_composing.matches('📥').count(),
+            1,
+            "held row keeps the content inbox only: {held_composing}"
+        );
+        assert!(
+            !held_composing.contains("📥 The first 📥"),
+            "{held_composing}"
+        );
+        let held_settled = line_with(&held, settled);
+        assert_eq!(held_settled.matches('📥').count(), 1, "{held_settled}");
+        assert!(
+            held_settled.contains(&format!("📥 {settled}")),
+            "{held_settled}"
+        );
+
+        let saved_dir = setup_project();
+        let saved_doc = write_doc(saved_dir.path());
+        run_queue_maintenance(&saved_doc, None).unwrap();
+        let saved = std::fs::read_to_string(&saved_doc).unwrap();
+        let saved_composing = line_with(&saved, "The first");
+        assert_eq!(
+            saved_composing.matches('📥').count(),
+            1,
+            "the go-queue head keeps the content inbox and takes the running marker: {saved_composing}"
+        );
+        assert!(saved_composing.contains('🚧'), "{saved_composing}");
+        assert!(
+            saved_composing.contains("The first 📥 subitems"),
+            "{saved_composing}"
+        );
+        assert!(
+            !saved_composing.contains("📥 The first 📥"),
+            "{saved_composing}"
+        );
+        let saved_settled = line_with(&saved, settled);
+        assert_eq!(saved_settled.matches('📥').count(), 1, "{saved_settled}");
+        assert!(
+            saved_settled.contains(&format!("📥 {settled}")),
+            "{saved_settled}"
+        );
     }
 
     /// GH #161: a prompt preset is a reusable command. An archived done row

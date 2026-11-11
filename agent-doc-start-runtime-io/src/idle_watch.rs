@@ -856,7 +856,7 @@ fn spawn_queue_projection_self_heal_worker(
         .spawn(move || {
             let projection_cancel = Arc::clone(&worker_cancel);
             let run =
-                agent_doc_queue_io::queue_cmd::project_all_queue_runtime_state_once_for_generation_with_effects(
+                agent_doc_queue_io::queue_cmd::project_background_self_heal_runtime_state_once_for_generation_with_effects(
                     &IdleQueueProjectionSelfHealEffects {
                         cancel: worker_cancel,
                     },

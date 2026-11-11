@@ -24,13 +24,16 @@
 //!   went `lost` at the two-hour TTL because nothing refreshed them);
 //! * a frozen worker frees its slot but keeps its claim. Frozen means evidence
 //!   the worker stopped: a recorded stop (`queue freeze`), or no heartbeat past
-//!   [`DEFAULT_WORKER_FROZEN_SECS`]. A harness notification that a worker is
-//!   waiting on its own background work is proof of life, so the coordinator
-//!   records it as a heartbeat (`queue claim --refresh`), never as a freeze.
-//!   A harness freeze that then passes its claim TTL still keeps the claim:
-//!   it is not `Lost`, its row is not offered, and the exact refresh revives
-//!   it when that worker resumes through its transcript
-//!   (`#frozenclaimrefreshrevive`). Only `queue release --requeue` abandons it;
+//!   [`DEFAULT_WORKER_FROZEN_SECS`] on an attempt this recovery does not own.
+//!   A harness notification that a worker is waiting on its own background
+//!   work is proof of life, so the coordinator records it as a heartbeat
+//!   (`queue claim --refresh`), never as a freeze. A harness freeze that then
+//!   passes its claim TTL still keeps the claim: it is not `Lost`, its row is
+//!   not offered, and the exact refresh revives it when that worker resumes
+//!   through its transcript (`#frozenclaimrefreshrevive`). A lost-running
+//!   attempt is continued first. A heartbeat already past the frozen bound
+//!   fails that continue, and the same task is retried into the freed slot
+//!   (`#lostrunningcontinue`). Only `queue release --requeue` abandons it;
 //! * `Reported` attempts, unbound lapsed attempts, and attempts abandoned with
 //!   `queue release --requeue` hold no slot.
 //!
@@ -238,6 +241,11 @@ pub fn classify_attempt(claim: &QueueClaim, now_secs: u64, frozen_secs: u64) -> 
         claim.state,
         QueueClaimState::Reported | QueueClaimState::QuotaBlocked
     ) {
+        return AttemptSlot::Free;
+    }
+    // A lost running attempt whose continue failed no longer holds a slot:
+    // the replacement generation has to be able to start (`#lostrunningcontinue`).
+    if crate::lost_running_recovery::retry_authorized(claim) {
         return AttemptSlot::Free;
     }
     let lapsed = claim.state == QueueClaimState::Lost || claim.is_expired(now_secs);
@@ -776,6 +784,7 @@ mod tests {
             heartbeat_at_secs: None,
             frozen: None,
             quota_block: None,
+            lost_continue: None,
         }
     }
 

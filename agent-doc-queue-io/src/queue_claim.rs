@@ -271,7 +271,7 @@ pub(crate) fn store_ledger_for_test(file: &Path, ledger: &QueueClaimLedger) -> R
 }
 
 /// Apply `mutate` to the document's ledger in one immediate transaction.
-fn mutate_ledger<T>(
+pub(crate) fn mutate_ledger<T>(
     file: &Path,
     mutate: impl FnOnce(&mut QueueClaimLedger) -> Result<T>,
 ) -> Result<T> {
@@ -1104,6 +1104,7 @@ fn restored_reported_claim(
         heartbeat_at_secs: None,
         frozen: None,
         quota_block: None,
+        lost_continue: None,
     }
 }
 
@@ -1133,7 +1134,11 @@ fn reattach_kept_completion(
     let restored = restored_reported_claim(target, &attempt, now, ttl_secs, owner_session);
     let identity = restored.identity.clone();
     let result = mutate_ledger(file, |ledger| {
-        if let Some(existing) = ledger.claims.iter().find(|claim| claim.identity == identity) {
+        if let Some(existing) = ledger
+            .claims
+            .iter()
+            .find(|claim| claim.identity == identity)
+        {
             if existing.blocks_dispatch(now)
                 && existing.state != agent_doc_queue::queue_claim::QueueClaimState::Reported
             {
@@ -1221,13 +1226,9 @@ pub fn claim_with_session_for_worker_harness(
         refuse_open_prompt_review(&target, &blocker)?;
     }
     if visible_kept_reported_row(file, &target)? {
-        if let Some(restored) = reattach_kept_completion(
-            file,
-            &target,
-            &heads,
-            ttl_secs,
-            owner_session.clone(),
-        )? {
+        if let Some(restored) =
+            reattach_kept_completion(file, &target, &heads, ttl_secs, owner_session.clone())?
+        {
             return Ok(restored);
         }
     }
@@ -3156,7 +3157,10 @@ mod tests {
     fn subagents_doc(root: &Path, prompts: &[&str]) -> PathBuf {
         std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
         let doc = root.join("task.md");
-        let queue: String = prompts.iter().map(|prompt| format!("- {prompt}\n")).collect();
+        let queue: String = prompts
+            .iter()
+            .map(|prompt| format!("- {prompt}\n"))
+            .collect();
         std::fs::write(
             &doc,
             format!(
@@ -3175,15 +3179,19 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let live = "do [#q-aaaaaaaaaaaa]";
         let prose = "deploy without exposing the sdk [#q-aaaaaaaaaaaa]";
-        let doc = subagents_doc(
-            dir.path(),
-            &["☑️ [#subagent:stg#1] do [#q-aaaaaaaaaaaa]"],
-        );
+        let doc = subagents_doc(dir.path(), &["☑️ [#subagent:stg#1] do [#q-aaaaaaaaaaaa]"]);
         let before = std::fs::read_to_string(&doc).unwrap();
         let seeded = {
             let floor = crate::queue_lineage::max_generation(&doc, prose).unwrap();
             let mut claims = agent_doc_queue::queue_claim::QueueClaimLedger::default();
-            claims.claim_in_session_with_generation_floor(prose, "subagent:stg", 10, 100, None, floor);
+            claims.claim_in_session_with_generation_floor(
+                prose,
+                "subagent:stg",
+                10,
+                100,
+                None,
+                floor,
+            );
             let mut claim = claims.claims.remove(0);
             claim.state = agent_doc_queue::queue_claim::QueueClaimState::Running;
             claim.worker = Some(agent_doc_queue::queue_claim::QueueWorkerBinding {
@@ -3196,7 +3204,9 @@ mod tests {
         let offered_before =
             crate::subagent_dispatch::pending_subagent_dispatch_for_content(&doc, &before).unwrap();
         assert!(
-            offered_before.iter().any(|head| head.contains("q-aaaaaaaaaaaa")),
+            offered_before
+                .iter()
+                .any(|head| head.contains("q-aaaaaaaaaaaa")),
             "an unclaimed kept row is still a dispatch head: {offered_before:?}"
         );
 
@@ -3237,7 +3247,10 @@ mod tests {
         let (again, again_claim) = claim(&doc, "#q-aaaaaaaaaaaa", "subagent:other", 600).unwrap();
         assert_eq!(again, ClaimOutcome::Kept);
         assert_eq!(again_claim.generation, 1);
-        assert_eq!(again_claim.state, agent_doc_queue::queue_claim::QueueClaimState::Reported);
+        assert_eq!(
+            again_claim.state,
+            agent_doc_queue::queue_claim::QueueClaimState::Reported
+        );
         assert_eq!(crate::queue_lineage::load(&doc).unwrap().attempts.len(), 1);
     }
 

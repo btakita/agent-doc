@@ -168,7 +168,7 @@ agent-doc prefixes each row in an `agent:run` section with its state:
 | `☑️` | keep the row: the worker reported back, but the coordinator still has to integrate and close it |
 | `⚠️` | lost: retry only when durable evidence proves this exact attempt never started; otherwise reconcile it |
 | `⚠️🟡` | lost while claimed for dispatch; retain that prior phase until durable evidence resolves whether it started |
-| `⚠️🚧` | lost after a concrete worker started; reconcile its effects and response before retrying |
+| `⚠️🚧` | lost after a concrete worker started; continue that same task automatically, including during a turn, and retry it if continue fails |
 | `⚠️☑️` | urgent lost + worker-done debt: recover response/effects, integrate and close; never silently delete or retry |
 | `🔄` | needs reconcile: there is finished-work evidence but no current claim; it is not dispatched again |
 | `❔` | unknown: the state is unreadable or contradicts the row |

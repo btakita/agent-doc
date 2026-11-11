@@ -589,6 +589,7 @@ fn route_claimed_items(
                 heartbeat_at_secs: None,
                 frozen: None,
                 quota_block: None,
+                lost_continue: None,
             }
         });
     }
@@ -1188,6 +1189,20 @@ fn prepare_with_gate_at(
     } else {
         agent_doc_cycle_state_io::load_with_closeout_projection(file)?
     };
+    // `#lostrunningcontinue`: a lost running claim is continued on every
+    // observation, including this in-progress turn. Hook policy does not load
+    // the cycle; the hook itself is the during-turn path. The flag is recorded
+    // and does not suppress recovery.
+    let turn_in_progress =
+        policy == ClosedCyclePolicy::Hook || cycle.as_ref().is_some_and(|cycle| cycle.is_open());
+    if let Err(error) =
+        agent_doc_queue_io::lost_running::recover_lost_running_automatically(file, turn_in_progress)
+    {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!("lost_running_recovery_skipped error={error:#} (#lostrunningcontinue)"),
+        );
+    }
     // The boundary report speaks for a committed turn; a closeout that
     // deferred (cycle still open) reports at the later session-check.
     if policy == ClosedCyclePolicy::ForceBoundary && cycle.as_ref().is_some_and(|c| c.is_open()) {

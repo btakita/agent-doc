@@ -3445,7 +3445,9 @@ fn report_coordinator_action_required(
     let inline = operation_count(QueueSyncOperation::InlineExecuteThenReconcile);
     let forward = operation_count(QueueSyncOperation::ForwardSteering);
     let integrate = operation_count(QueueSyncOperation::IntegrateClose);
-    let recover = operation_count(QueueSyncOperation::RecoverRequeue);
+    let recover = operation_count(QueueSyncOperation::RecoverRequeue)
+        + operation_count(QueueSyncOperation::Continue)
+        + operation_count(QueueSyncOperation::Retry);
     let reconcile = operation_count(QueueSyncOperation::Reconcile);
     let recovered_response_delivery_debt = action_items
         .iter()

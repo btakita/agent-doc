@@ -12,6 +12,7 @@ pub mod continuation_request;
 pub mod controller_pause;
 pub mod drain_owner;
 pub mod goal_loop_handoff;
+pub mod lost_running;
 pub mod one_shot_sync;
 pub mod queue_add;
 pub mod queue_attr;

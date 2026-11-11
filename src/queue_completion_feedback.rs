@@ -1374,6 +1374,7 @@ mod tests {
             heartbeat_at_secs: None,
             frozen: None,
             quota_block: None,
+            lost_continue: None,
         }
     }
 

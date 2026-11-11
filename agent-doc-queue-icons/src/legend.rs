@@ -163,7 +163,7 @@ impl QueueMarker {
                     "The attempt was lost while reserved for dispatch; the claimed state remains visible until durable evidence proves whether it started."
                 }
                 QueueLifecycleMarker::LostRunning => {
-                    "The attempt was lost after a worker was bound; reconcile its effects and response before retrying."
+                    "The attempt was lost after a worker was bound. Continue that same task automatically, including while a turn is in progress; if continue fails, retry it."
                 }
                 QueueLifecycleMarker::LostReported => {
                     "Urgent nonterminal debt: the attempt was lost, then exact completion evidence was recovered. Recover the response and effects, integrate and close it in this turn; never silently delete or retry it. Keep it open with explicit missing-response or integration debt when blocked."

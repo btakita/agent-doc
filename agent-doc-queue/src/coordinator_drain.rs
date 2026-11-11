@@ -54,6 +54,8 @@ fn operation_requires_action(operation: QueueSyncOperation) -> bool {
             | QueueSyncOperation::ForwardSteering
             | QueueSyncOperation::IntegrateClose
             | QueueSyncOperation::RecoverRequeue
+            | QueueSyncOperation::Continue
+            | QueueSyncOperation::Retry
             | QueueSyncOperation::Reconcile
     )
 }
@@ -328,6 +330,8 @@ mod tests {
                 QueueSyncOperation::IntegrateClose,
             ),
             (QueueSyncLifecycle::Lost, QueueSyncOperation::RecoverRequeue),
+            (QueueSyncLifecycle::Lost, QueueSyncOperation::Continue),
+            (QueueSyncLifecycle::Lost, QueueSyncOperation::Retry),
             (
                 QueueSyncLifecycle::ReconcileUnknown,
                 QueueSyncOperation::Reconcile,

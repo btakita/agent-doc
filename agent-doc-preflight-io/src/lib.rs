@@ -18214,35 +18214,33 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
         let state = run_queue_maintenance(&doc, None).unwrap();
         assert_eq!(state.selected_queue_prompts, vec!["do [#a]".to_string()]);
         let updated = std::fs::read_to_string(&doc).unwrap();
+        // The TTL was moved into the past, but the worker's heartbeat is still
+        // inside the frozen bound. Maintenance continues that same attempt
+        // (`#lostrunningcontinue`) instead of leaving `⚠️🚧` for a new generation.
         assert!(updated.contains(
-            "- ### 🚧 do [#a]\n- ### 📥 do [#b]\n- ### ☑️ [#subagent:c#1] do [#c]\n- ### ⚠️🚧 [#subagent:d#1] do [#d]"
+            "- ### 🚧 do [#a]\n- ### 📥 do [#b]\n- ### ☑️ [#subagent:c#1] do [#c]\n- ### 🚧 [#subagent:d#1] do [#d]"
         ));
         assert_eq!(
             queue_line(&updated, "d"),
-            "- ### ⚠️🚧 [#subagent:d#1] do [#d]",
-            "the queue row carries attempt lifecycle, not a second GFM checkbox:\n{updated}"
+            "- ### 🚧 [#subagent:d#1] do [#d]",
+            "a still-plausible lost worker is continued on the same generation:\n{updated}"
         );
         assert!(updated.contains("- [ ] [#c] worker two"));
         assert!(updated.contains("- [ ] [#d] later work"));
 
-        let (_, replacement) =
-            agent_doc_queue_io::queue_claim::claim(&doc, "#d", "subagent:d2", 3600).unwrap();
-        assert_eq!(replacement.generation, 2);
-        agent_doc_queue_io::queue_claim::start_attempt(
-            &doc,
-            "#d",
-            "subagent:d2",
-            "worker:d2",
-            3600,
-            replacement.generation,
-        )
-        .unwrap();
+        let held = agent_doc_queue_io::queue_claim::claim(&doc, "#d", "subagent:d2", 3600)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            held.contains("already held"),
+            "continue keeps the row; a second owner does not start generation 2: {held}"
+        );
         run_queue_maintenance(&doc, None).unwrap();
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert_eq!(
             queue_line(&updated, "d"),
-            "- ### 🚧 [#subagent:d2#2] do [#d]",
-            "only the replacement generation becomes running:\n{updated}"
+            "- ### 🚧 [#subagent:d#1] do [#d]",
+            "the continued generation stays running:\n{updated}"
         );
         assert!(updated.contains("- [ ] [#d] later work"));
     }

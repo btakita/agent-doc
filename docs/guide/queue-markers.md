@@ -55,7 +55,7 @@ start` binds the replacement worker.
 | ☑️ | `reported` | keep: worker done | Keep this live row: the worker reported back (`queue report-complete`), but the coordinator still has to integrate, verify, and close it. Do not delete it yet. |
 | ⚠️ | `lost` | lost | The claim expired or was abandoned; retry only when durable evidence proves this exact attempt never started, otherwise reconcile it. |
 | ⚠️🟡 | `lost_claimed` | lost + claimed | The attempt was lost while reserved for dispatch; the claimed state remains visible until durable evidence proves whether it started. |
-| ⚠️🚧 | `lost_running` | lost + running | The attempt was lost after a worker was bound; reconcile its effects and response before retrying. |
+| ⚠️🚧 | `lost_running` | lost + running | The attempt was lost after a worker was bound. Continue that same task automatically, including while a turn is in progress; if continue fails, retry it. |
 | ⚠️☑️ | `lost_reported` | lost + worker done | Urgent nonterminal debt: the attempt was lost, then exact completion evidence was recovered. Recover the response and effects, integrate and close it in this turn; never silently delete or retry it. Keep it open with explicit missing-response or integration debt when blocked. |
 | 🔄 | `reconciling` | needs reconcile | A binary completion cell whose recorded item is this row's own work is in the document, but no current claim or report receipt owns it. A longer line that only shares the tracked id is not this row. The row is held out of dispatch until the coordinator closes it (striking retires the cell) or reconciles it. |
 | ❔ | `unknown` | unknown | Durable queue state is unreadable or contradicts the row (for example a struck row with a live claim); diagnose it, do not redispatch. |

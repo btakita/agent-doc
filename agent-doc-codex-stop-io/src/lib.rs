@@ -4115,7 +4115,9 @@ fn auto_queue_continuation_response(
         let inline = describe(QueueSyncOperation::InlineExecuteThenReconcile);
         let forward = describe(QueueSyncOperation::ForwardSteering);
         let integrate = describe(QueueSyncOperation::IntegrateClose);
-        let recover = describe(QueueSyncOperation::RecoverRequeue);
+        let mut recover = describe(QueueSyncOperation::RecoverRequeue);
+        recover.extend(describe(QueueSyncOperation::Continue));
+        recover.extend(describe(QueueSyncOperation::Retry));
         let reconcile = describe(QueueSyncOperation::Reconcile);
         let mut component_counts = std::collections::BTreeMap::<String, usize>::new();
         for item in &stop_action_items {
@@ -13770,6 +13772,7 @@ mod closeout_guidance_agreement_tests {
             heartbeat_at_secs: None,
             frozen: None,
             quota_block: None,
+            lost_continue: None,
             claimed_at_secs: 1,
             expires_at_secs: 100,
             owner_session: None,

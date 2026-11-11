@@ -231,6 +231,27 @@ pub struct QueueClaim {
     /// [`QueueClaimState::QuotaBlocked`] (`#harnessquotaexhausted`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub quota_block: Option<crate::worker_quota::WorkerQuotaBlock>,
+    /// Automatic continue of a lost running attempt (`#lostrunningcontinue`).
+    /// `failed` authorizes a new generation. Absent on attempts stored before
+    /// the field existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lost_continue: Option<LostContinueRecord>,
+}
+
+/// One automatic continue of a lost running attempt (`#lostrunningcontinue`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LostContinueRecord {
+    pub attempted_at_secs: u64,
+    /// Continue could not resume this generation. The row may be retried.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub failed: bool,
+    /// Why continue failed. Empty when it restored the same worker.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub reason: String,
+    /// The observation that ran continue happened while a turn was in progress.
+    /// Recorded only; it does not gate the attempt.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub during_turn: bool,
 }
 
 /// Reason recorded by `queue release --requeue`. A harness `queue freeze`
@@ -1362,6 +1383,7 @@ impl QueueClaimLedger {
             heartbeat_at_secs: None,
             frozen: None,
             quota_block: None,
+            lost_continue: None,
         };
         match self
             .claims
@@ -4955,6 +4977,7 @@ mod tests {
                     heartbeat_at_secs: None,
                     frozen: None,
                     quota_block: None,
+                    lost_continue: None,
                 },
                 QueueClaim {
                     identity: QueueItemIdentity::FreeText(format!("#gh-fix {url}")),
@@ -4979,6 +5002,7 @@ mod tests {
                     heartbeat_at_secs: None,
                     frozen: None,
                     quota_block: None,
+                    lost_continue: None,
                 },
             ],
             cancellations: Vec::new(),

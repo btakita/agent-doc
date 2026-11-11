@@ -12,8 +12,12 @@
 //! `Running` and is not marked Lost. Continue fails because that worker is
 //! gone, and the failure authorizes a new generation in the same pass
 //! (`#transientcloseout`). A worker that is still running is not this case.
-//! A frozen handback that was not report-completed, quota exhaustion, and
-//! lost-reported closeout stay outside this recovery.
+//! A Lost attempt that already recorded `lost_continue.failed` is not held by
+//! a non-abandon freeze: the owed action is a new generation. A Lost or
+//! Running freeze whose continue has not failed stays undispatchable, and
+//! `queue claim --refresh` revives that same generation. A frozen handback
+//! that was not report-completed, quota exhaustion, and lost-reported
+//! closeout stay outside this recovery.
 
 use crate::queue_claim::{LostContinueRecord, QueueClaim, QueueClaimState};
 use crate::subagent_pool::{DEFAULT_WORKER_FROZEN_SECS, last_heartbeat_secs};
@@ -54,14 +58,18 @@ pub fn is_lost_running_candidate(claim: &QueueClaim) -> bool {
     {
         return false;
     }
-    // A harness freeze stays `Running` and is not this `⚠️🚧` candidate, so
-    // this path never marks it Lost. A stopped freeze is
-    // [`is_stopped_harness_freeze`] instead. A frozen handback that was never
-    // report-completed is not this loss either. An explicit requeue abandon
-    // still fails continue below; it is a candidate so that failure can
-    // authorize a new generation while the row shows `⚠️🚧`
-    // (`#transientcloseout`).
-    if claim.retains_frozen_worker_claim() || frozen_unreported_handback(claim) {
+    // A non-abandon freeze keeps a Lost or Running attempt undispatchable
+    // until continue has failed. `queue claim --refresh` still revives that
+    // generation. Once `lost_continue.failed` is set, the freeze must not
+    // hide the owed new generation. A Running freeze is
+    // [`is_stopped_harness_freeze`] and this path does not mark it Lost. A
+    // frozen handback that was never report-completed is not this loss
+    // either. An explicit requeue abandon still fails continue below; it is
+    // a candidate so that failure can authorize a new generation while the
+    // row shows `⚠️🚧` (`#transientcloseout`).
+    let freeze_holds_generation =
+        claim.retains_frozen_worker_claim() && !continue_already_failed(claim);
+    if freeze_holds_generation || frozen_unreported_handback(claim) {
         return false;
     }
     claim.projection_marker()
@@ -97,6 +105,13 @@ fn is_continue_retry_candidate(claim: &QueueClaim) -> bool {
     is_lost_running_candidate(claim) || is_stopped_harness_freeze(claim)
 }
 
+fn continue_already_failed(claim: &QueueClaim) -> bool {
+    claim
+        .lost_continue
+        .as_ref()
+        .is_some_and(|record| record.failed)
+}
+
 fn frozen_unreported_handback(claim: &QueueClaim) -> bool {
     claim.frozen.is_some()
         && claim.publication_state.is_some()
@@ -111,11 +126,7 @@ pub fn recovery_action(claim: &QueueClaim) -> Option<LostRunningAction> {
     if !is_continue_retry_candidate(claim) {
         return None;
     }
-    if claim
-        .lost_continue
-        .as_ref()
-        .is_some_and(|record| record.failed)
-    {
+    if continue_already_failed(claim) {
         Some(LostRunningAction::Retry)
     } else {
         Some(LostRunningAction::Continue)
@@ -252,7 +263,7 @@ pub fn recover_claims(
 mod tests {
     use super::*;
     use crate::queue_claim::{
-        ClaimOutcome, QueueClaimLedger, QueueWorkerBinding, QueueWorkerFreeze,
+        ClaimOutcome, LostContinueRecord, QueueClaimLedger, QueueWorkerBinding, QueueWorkerFreeze,
     };
 
     fn lost_running(item: &str, started_at_secs: u64) -> QueueClaim {
@@ -577,5 +588,115 @@ mod tests {
         );
         assert_eq!(ledger.claims[0].generation, 1);
         assert_eq!(ledger.claims[0].state, QueueClaimState::Running);
+    }
+
+    fn frozen_running_ledger() -> QueueClaimLedger {
+        let mut ledger = QueueClaimLedger::default();
+        ledger.claim("lostmarker", "subagent:lostmarker", 1_000, 60);
+        ledger
+            .start(
+                "lostmarker",
+                "subagent:lostmarker",
+                "worker-lostmarker",
+                1_000,
+                60,
+                Some(1),
+            )
+            .unwrap();
+        ledger
+            .freeze_attempt(
+                "lostmarker",
+                Some(1),
+                1_100,
+                "subagent ended before coordinator integration",
+            )
+            .unwrap();
+        ledger
+    }
+
+    #[test]
+    fn a_lost_non_abandon_freeze_stays_undispatchable_until_continue_has_failed() {
+        let mut running = frozen_running_ledger();
+        let running_claim = &running.claims[0];
+        assert_eq!(running_claim.state, QueueClaimState::Running);
+        assert!(running_claim.lost_from.is_none());
+        assert!(running_claim.retains_frozen_worker_claim());
+        assert!(!retry_authorized(running_claim));
+        assert!(running_claim.blocks_dispatch(9_000));
+        running.claims[0].project_expiry(9_000);
+        assert_eq!(
+            running.claims[0].state,
+            QueueClaimState::Running,
+            "a stopped Running freeze is not marked Lost"
+        );
+
+        let mut ledger = frozen_running_ledger();
+        ledger.claims[0].mark_lost();
+        let claim = &ledger.claims[0];
+        assert_eq!(claim.state, QueueClaimState::Lost);
+        assert_eq!(claim.lost_from, Some(QueueClaimState::Running));
+        assert!(claim.retains_frozen_worker_claim());
+        assert!(!is_lost_running_candidate(claim));
+        assert!(recovery_action(claim).is_none());
+        assert!(!retry_authorized(claim));
+        assert!(claim.blocks_dispatch(9_000));
+
+        let revived = ledger
+            .refresh_or_revive_attempt_in_session(
+                "lostmarker",
+                "subagent:lostmarker",
+                9_000,
+                3_600,
+                None,
+                Some(1),
+            )
+            .unwrap();
+        assert_eq!(revived.generation, 1);
+        assert_eq!(revived.state, QueueClaimState::Running);
+        assert!(revived.frozen.is_none());
+        assert!(revived.lost_continue.is_none());
+        assert_eq!(ledger.claims.len(), 1);
+        assert_eq!(ledger.claims[0].generation, 1);
+
+        let mut failed = frozen_running_ledger();
+        failed.claims[0].mark_lost();
+        failed.claims[0].lost_continue = Some(LostContinueRecord {
+            attempted_at_secs: 2_000,
+            failed: true,
+            reason: "harness freeze worker is gone; continue refused".to_string(),
+            during_turn: true,
+        });
+        let claim = &failed.claims[0];
+        assert_eq!(claim.state, QueueClaimState::Lost);
+        assert!(is_lost_running_candidate(claim));
+        assert_eq!(recovery_action(claim), Some(LostRunningAction::Retry));
+        assert!(retry_authorized(claim));
+        assert!(
+            !claim.blocks_dispatch(9_000),
+            "a failed continue owes a new generation"
+        );
+
+        let mut claims = vec![claim.clone()];
+        let mut calls = 0;
+        let applied = recover_claims(&mut claims, 9_000, 60, true, &mut |_| {
+            calls += 1;
+            Ok(())
+        });
+        assert_eq!(calls, 0, "a failed continue is not attempted again");
+        assert_eq!(applied[0].action, LostRunningAction::Retry);
+        assert_eq!(claims[0].state, QueueClaimState::Lost);
+        assert_eq!(claims[0].lost_from, Some(QueueClaimState::Running));
+        assert_eq!(claims[0].generation, 1);
+        assert!(claims[0].frozen.is_some());
+
+        failed.claims[0] = claims[0].clone();
+        assert_eq!(
+            failed.claim("lostmarker", "subagent:lostmarker", 9_000, 60),
+            ClaimOutcome::Reassigned
+        );
+        assert_eq!(failed.claims[0].generation, 2);
+        assert_eq!(failed.claims[0].state, QueueClaimState::Claimed);
+        assert!(failed.claims[0].frozen.is_none());
+        assert!(failed.claims[0].lost_continue.is_none());
     }
 }

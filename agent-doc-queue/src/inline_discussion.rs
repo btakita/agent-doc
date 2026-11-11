@@ -53,8 +53,17 @@ pub fn item_mentions_inline_discussion_goal(item: &str) -> bool {
         .any(preset_name_loads_inline_discussions)
 }
 
-/// True when `head` is an `#address` or `#adversarial-pr` run under `presets`.
+/// True when `head` is an `#address` or `#adversarial-pr` run under `presets`
+/// and it contains a GitHub pull request URL
+/// (`https://github.com/<owner>/<repo>/pull/<number>`).
+///
+/// A quoted goal token, or a bare issue URL, is not that run: there is no
+/// pull request whose root inline threads can be loaded. Balanced inline-code
+/// masking still hides a goal token that has a matching closer.
 pub fn head_requires_inline_discussions(head: &str, presets: &[(String, String)]) -> bool {
+    if !contains_github_pull_request_url(head) {
+        return false;
+    }
     if item_mentions_inline_discussion_goal(head) {
         return true;
     }
@@ -64,6 +73,56 @@ pub fn head_requires_inline_discussions(head: &str, presets: &[(String, String)]
     )
     .iter()
     .any(|(name, _)| preset_name_loads_inline_discussions(name))
+}
+
+/// True when `text` contains `https://github.com/<owner>/<repo>/pull/<number>`.
+///
+/// The scan uses the same balanced inline-code mask as goal-token detection.
+/// An issue URL (`/issues/<number>`) or the API collection (`/pulls/<number>`)
+/// is not a pull request URL.
+fn contains_github_pull_request_url(text: &str) -> bool {
+    let text = strip_priority_markers(text);
+    let text = crate::queue_continuation::mask_inline_code(&text);
+    const PREFIX: &str = "https://github.com/";
+    let mut rest = text.as_str();
+    while let Some(offset) = rest.find(PREFIX) {
+        let after = &rest[offset + PREFIX.len()..];
+        if github_pull_request_path(after) {
+            return true;
+        }
+        rest = &rest[offset + PREFIX.len()..];
+    }
+    false
+}
+
+fn github_pull_request_path(rest: &str) -> bool {
+    let mut parts = rest.split('/');
+    let (Some(owner), Some(repo), Some(kind), Some(number)) =
+        (parts.next(), parts.next(), parts.next(), parts.next())
+    else {
+        return false;
+    };
+    if kind != "pull" || !github_slug(owner) || !github_slug(repo) {
+        return false;
+    }
+    let digits = number.chars().take_while(|ch| ch.is_ascii_digit()).count();
+    if digits == 0 {
+        return false;
+    }
+    match number[digits..].chars().next() {
+        Some(ch) if ch.is_ascii_alphanumeric() => false,
+        _ => true,
+    }
+}
+
+fn github_slug(part: &str) -> bool {
+    let mut chars = part.chars();
+    chars.next().is_some_and(|ch| ch.is_ascii_alphanumeric())
+        && part
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.'))
+        && !part.ends_with('.')
+        && !part.contains("..")
 }
 
 /// True when `response` shows every named root thread's written fix on a head,
@@ -244,8 +303,8 @@ mod tests {
             &presets,
         ));
         assert!(head_requires_inline_discussions(
-            "#adversarial-pr",
-            &presets
+            "https://github.com/haiven-dev/haiven-api/pull/869: #adversarial-pr",
+            &presets,
         ));
         assert!(!head_requires_inline_discussions(
             "https://github.com/haiven-dev/haiven-api/pull/869: #review",
@@ -253,6 +312,37 @@ mod tests {
         ));
         assert!(item_mentions_inline_discussion_goal("#address [#q-1]"));
         assert!(!item_mentions_inline_discussion_goal("#review"));
+    }
+
+    #[test]
+    fn a_goal_token_without_a_pull_request_url_is_not_an_inline_discussion_run() {
+        let presets = presets();
+        assert!(!head_requires_inline_discussions(
+            "#adversarial-pr",
+            &presets
+        ));
+        assert!(!head_requires_inline_discussions("#address", &presets));
+        assert!(!head_requires_inline_discussions(
+            "https://github.com/haiven-dev/haiven-api/issues/869: #address",
+            &presets,
+        ));
+        assert!(!head_requires_inline_discussions(
+            "https://github.com/haiven-dev/haiven-api/pulls/869: #adversarial-pr",
+            &presets,
+        ));
+        let quoted = "The proposal quotes `#adversarial-pr` and also mentions `#adversarial-pr without a closer.";
+        assert!(
+            item_mentions_inline_discussion_goal(quoted),
+            "an unbalanced backtick does not hide the goal token"
+        );
+        assert!(!head_requires_inline_discussions(quoted, &presets));
+        let balanced = "The proposal only quotes `#adversarial-pr`.";
+        assert!(!item_mentions_inline_discussion_goal(balanced));
+        assert!(!head_requires_inline_discussions(balanced, &presets));
+        assert!(head_requires_inline_discussions(
+            "https://github.com/haiven-dev/haiven-api/pull/869#discussion_r4532159601: #address",
+            &presets,
+        ));
     }
 
     #[test]

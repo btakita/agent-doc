@@ -516,7 +516,7 @@ pub fn handle_stop() -> Result<Option<SubagentQuotaBlockApplied>> {
     let quota = match &read {
         Ok(payload) => subagent_quota::observe_payload(payload).unwrap_or_else(|err| {
             eprintln!(
-                "[agent-doc] subagent-end quota autodetect failed: {err:#}. The stop is still allowed."
+                "[agent-doc] subagent-end claim preservation failed: {err:#}. The stop is still allowed."
             );
             None
         }),
@@ -588,11 +588,12 @@ fn claude_stop_response(payload: Option<&str>) -> Result<serde_json::Value> {
     claude_stop_response_with_quota(payload).map(|(response, _)| response)
 }
 
-/// The JSON the Claude Stop hook prints, plus a worker quota block recorded
-/// from this same payload when it is a subagent end (`#workerquotaautodetect`).
+/// The JSON the Claude Stop hook prints, plus a worker quota block or exact
+/// generation freeze recorded from this same payload when it is a subagent
+/// end (`#workerquotaautodetect`).
 ///
 /// Grok remaps a Stop hook to `SubagentStop` inside a subagent, so this path
-/// records the block before the observe-only return. It does not change a
+/// records the claim preservation before the observe-only return. It does not change a
 /// parent turn's continuation decision, and it never answers `decision: "block"`.
 fn claude_stop_response_with_quota(
     payload: Option<&str>,
@@ -609,7 +610,7 @@ fn claude_stop_response_with_quota(
     };
     let quota = subagent_quota::observe_value(&envelope).unwrap_or_else(|err| {
         eprintln!(
-            "[agent-doc] subagent-end quota autodetect failed: {err:#}. The stop is still allowed."
+            "[agent-doc] subagent-end claim preservation failed: {err:#}. The stop is still allowed."
         );
         None
     });

@@ -942,7 +942,12 @@ fn render_preamble(
          the single `make install` after integrating.\n\
          - Never edit, write, or commit the agent-doc session document or its queue, and never run \
          `agent-doc` write/respond/queue commands against it; the coordinator owns the claim and \
-         closes the item.\n",
+         closes the item.\n\
+         - Do not hand back while a nested child task is still running. A wrapper response such as \
+         `Task <id> is still running. Use /codex:status before continuing it.` is not a result or a \
+         blocker: poll or resume that same task until it reaches a terminal state, then include its \
+         completed result in your handback. Never return the still-running wrapper text as your \
+         final response.\n",
     );
     out.push_str(concat!("- ", subagent_scratch_isolation_rule!(), "\n"));
     out.push_str(concat!("- ", subagent_tmux_isolation_rule!(), "\n"));
@@ -2013,6 +2018,11 @@ agent_doc_format: template
                 &std::path::PathBuf::from("/home/brian/worktrees/agent-doc-flat")
             )
         );
+        assert!(SUBAGENT_WORKTREE_LAYOUT_RULE.contains("verify the selected parent is writable"));
+        assert!(
+            SUBAGENT_WORKTREE_LAYOUT_RULE.contains("/tmp/agent-doc-worktrees/<label>/agent-doc")
+        );
+        assert!(SUBAGENT_WORKTREE_LAYOUT_RULE.contains("do not exit merely"));
     }
 
     /// `#tmuxkittyterminal`: every preamble tells the worker that `$TMUX`
@@ -2110,6 +2120,8 @@ agent_doc_format: template
                 "{p}"
             );
             assert!(!p.contains("- Report back: branch, commit SHA"), "{p}");
+            assert!(p.contains("Do not hand back while a nested child task is still running"));
+            assert!(p.contains("poll or resume that same task until it reaches a terminal state"));
         }
         for label in [
             "**Summary**",

@@ -215,16 +215,17 @@ pub struct QueueClaim {
     /// frozen worker: it frees its pool slot but keeps the claim.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub heartbeat_at_secs: Option<u64>,
-    /// Recorded evidence that this exact worker stopped (`#subagentworkpool`):
-    /// `queue freeze` after the harness reported the worker ended without a
-    /// result, or `queue release --requeue` abandoning the attempt. A harness
-    /// "waiting on its own background work" notice is proof of life, never
-    /// this record. A frozen worker frees its pool slot so the coordinator
-    /// refills it, while the claim, generation, and worker binding stay
-    /// intact: a later report from the same worker is still accepted, and
-    /// `queue claim --refresh` with the exact owner and generation clears the
-    /// freeze, including after the claim TTL. Expiry does not turn a harness
-    /// freeze into `Lost`. An explicit abandon does.
+    /// Recorded evidence that this exact worker wrapper stopped
+    /// (`#subagentworkpool`): the subagent-end hook or `queue freeze` records
+    /// the end, while `queue release --requeue` abandons the attempt. A live
+    /// wrapper waiting on its own background work is a heartbeat. The same
+    /// notice delivered as the wrapper's terminal handback freezes the ended
+    /// wrapper while preserving its still-running child task. A frozen worker
+    /// frees its pool slot while the claim and generation stay intact. A later
+    /// report from the old worker remains accepted; `queue start` rebinds the
+    /// same generation to a continuation wrapper, and `queue claim --refresh`
+    /// revives the same binding. Expiry does not turn a harness freeze into
+    /// `Lost`. An explicit abandon does.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub frozen: Option<QueueWorkerFreeze>,
     /// What stopped the attempt, while `state` is
@@ -776,7 +777,8 @@ impl QueueClaim {
 
     /// A harness freeze whose worker is still bound. Expiry and a projected
     /// `Lost` do not drop it: the same attempt is revived by `queue claim
-    /// --refresh`. An explicit requeue abandon does not hold the row.
+    /// --refresh`, or rebound to a continuation wrapper by `queue start`. An
+    /// explicit requeue abandon does not hold the row.
     pub fn retains_frozen_worker_claim(&self) -> bool {
         self.worker.is_some()
             && self
@@ -1501,7 +1503,8 @@ impl QueueClaimLedger {
     ///   legacy `Running` row to `Claimed`;
     /// * `worker(a) = worker(b) => a = b` (injective binding);
     /// * only `Claimed -> Running` is permitted, apart from an idempotent
-    ///   replay carrying the same `(owner, generation, worker)` tuple;
+    ///   replay carrying the same `(owner, generation, worker)` tuple and a
+    ///   frozen attempt rebinding to its continuation wrapper;
     /// * a stale generation can never acknowledge a replacement attempt.
     pub fn start(
         &mut self,
@@ -1525,7 +1528,8 @@ impl QueueClaimLedger {
             return Err(QueueClaimStartRefused::Missing);
         };
         let claim = &self.claims[index];
-        if claim.is_expired(now_secs) || claim.state == QueueClaimState::Lost {
+        let resumes_frozen = claim.retains_frozen_worker_claim();
+        if (claim.is_expired(now_secs) || claim.state == QueueClaimState::Lost) && !resumes_frozen {
             return Err(QueueClaimStartRefused::Expired {
                 holder: claim.owner.clone(),
                 expired_at_secs: claim.expires_at_secs,
@@ -1541,10 +1545,9 @@ impl QueueClaimLedger {
                 detail: reason.to_string(),
             }
         })?;
-        if matches!(
-            claim.state,
-            QueueClaimState::Reported | QueueClaimState::Lost
-        ) {
+        if claim.state == QueueClaimState::Reported
+            || (claim.state == QueueClaimState::Lost && !resumes_frozen)
+        {
             return Err(QueueClaimStartRefused::Terminal {
                 generation: claim.generation,
                 state: claim.state,
@@ -1553,6 +1556,8 @@ impl QueueClaimLedger {
         let already_bound = if let Some(binding) = &claim.worker {
             if binding.worker_id == worker_id {
                 true
+            } else if resumes_frozen {
+                false
             } else {
                 return Err(QueueClaimStartRefused::AttemptAlreadyBound {
                     worker_id: binding.worker_id.clone(),
@@ -1597,7 +1602,7 @@ impl QueueClaimLedger {
             }
         }
         let resumes_quota_block = self.claims[index].state == QueueClaimState::QuotaBlocked;
-        if already_bound && !resumes_quota_block {
+        if already_bound && !resumes_quota_block && !resumes_frozen {
             return Ok(self.claims[index].clone());
         }
         let claim = &mut self.claims[index];
@@ -1611,6 +1616,9 @@ impl QueueClaimLedger {
             });
         }
         claim.state = QueueClaimState::Running;
+        claim.lost_from = None;
+        claim.frozen = None;
+        claim.heartbeat_at_secs = Some(now_secs);
         claim.expires_at_secs = now_secs.saturating_add(ttl_secs.max(1));
         Ok(claim.clone())
     }
@@ -5573,6 +5581,47 @@ mod tests {
         assert_eq!(replacement.generation, 2);
         assert_eq!(replacement.state, QueueClaimState::Claimed);
         assert!(replacement.worker.is_none());
+    }
+
+    #[test]
+    fn a_frozen_attempt_rebinds_to_its_continuation_wrapper() {
+        let mut ledger = QueueClaimLedger::default();
+        assert_eq!(
+            ledger.claim("work", "subagent:a", 100, 10),
+            ClaimOutcome::Created
+        );
+        ledger
+            .start("work", "subagent:a", "wrapper:one", 101, 10, Some(1))
+            .unwrap();
+
+        assert!(matches!(
+            ledger.start("work", "subagent:a", "wrapper:two", 102, 10, Some(1)),
+            Err(QueueClaimStartRefused::AttemptAlreadyBound { .. })
+        ));
+        ledger
+            .freeze_attempt(
+                "work",
+                Some(1),
+                103,
+                "wrapper exited while its child task was still running",
+            )
+            .unwrap();
+
+        let rebound = ledger
+            .start("work", "subagent:a", "wrapper:two", 120, 10, Some(1))
+            .unwrap();
+        assert_eq!(rebound.generation, 1);
+        assert_eq!(rebound.state, QueueClaimState::Running);
+        assert_eq!(
+            rebound
+                .worker
+                .as_ref()
+                .map(|binding| binding.worker_id.as_str()),
+            Some("wrapper:two")
+        );
+        assert!(rebound.frozen.is_none());
+        assert_eq!(rebound.heartbeat_at_secs, Some(120));
+        assert_eq!(rebound.expires_at_secs, 130);
     }
 
     #[test]

@@ -1510,6 +1510,31 @@ pub fn freeze_attempt(
             .freeze_attempt(&target, generation, now, reason)
             .map_err(anyhow::Error::from)
     })?;
+    log_frozen(file, &claim);
+    Ok(claim)
+}
+
+/// Freeze an attempt already resolved from the durable worker binding.
+///
+/// Harness end hooks can arrive after the queue line left the live document,
+/// so they must not re-resolve the item through the current queue projection.
+pub(crate) fn freeze_bound_attempt(
+    file: &Path,
+    item: &str,
+    generation: Option<u64>,
+    reason: &str,
+) -> Result<QueueClaim> {
+    let now = now_secs();
+    let claim = mutate_ledger(file, |ledger| {
+        ledger
+            .freeze_attempt(item, generation, now, reason)
+            .map_err(anyhow::Error::from)
+    })?;
+    log_frozen(file, &claim);
+    Ok(claim)
+}
+
+fn log_frozen(file: &Path, claim: &QueueClaim) {
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
@@ -1519,7 +1544,6 @@ pub fn freeze_attempt(
             claim.item_text.len()
         ),
     );
-    Ok(claim)
 }
 
 /// Mark one exact worker attempt as reported/awaiting integration.

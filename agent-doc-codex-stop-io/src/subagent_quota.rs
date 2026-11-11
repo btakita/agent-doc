@@ -1,9 +1,10 @@
-//! Side effect of a harness subagent-end (`#workerquotaautodetect`).
+//! Side effects of a harness subagent-end (`#workerquotaautodetect`).
 //!
 //! The ledger write is the effect the parent sees on its next read. Hook JSON
 //! never uses `decision: "block"`: that would make the exhausted subagent keep
-//! going. A second identical block is quiet, so Grok firing both the remapped
-//! Stop hook and `SubagentStop` does not announce twice.
+//! going. Quota ends become quota-blocked; every other bound worker end freezes
+//! that exact generation until the coordinator integrates, resumes, or
+//! explicitly abandons it. A repeated Grok Stop plus `SubagentStop` is quiet.
 
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
@@ -15,7 +16,8 @@ use agent_doc_harness::usage_limit::HarnessUsageLimit;
 use agent_doc_queue::worker_quota::{WorkerQuotaBlock, quota_blocked_next_step};
 pub use agent_doc_queue_io::worker_quota_autodetect::SubagentQuotaBlockApplied;
 use agent_doc_queue_io::worker_quota_autodetect::{
-    SubagentQuotaAutodetect, apply_subagent_quota_autodetect,
+    SubagentFreezeAutodetect, SubagentQuotaAutodetect, apply_subagent_freeze_autodetect,
+    apply_subagent_quota_autodetect,
 };
 use anyhow::Result;
 use serde_json::{Value, json};
@@ -42,13 +44,15 @@ pub(crate) fn observe_value(value: &Value) -> Result<Option<SubagentQuotaBlockAp
         .transcript_path
         .as_deref()
         .and_then(|path| read_transcript_tail(Path::new(path)));
-    let Some(limit) = usage_limit_from_end(
+    let limit = usage_limit_from_end(
         signal.last_message.as_deref(),
         tail.as_deref(),
         signal.structured_reason.as_deref(),
-    ) else {
-        return Ok(None);
-    };
+    );
+    if limit.is_none() {
+        return observe_normal_end(&signal);
+    }
+    let limit = limit.expect("checked above");
     let block = worker_block(&signal, &limit);
     let scan_paths = scan_paths(&signal);
     let preferred = preferred_session_doc(&signal, &scan_paths);
@@ -67,6 +71,46 @@ pub(crate) fn observe_value(value: &Value) -> Result<Option<SubagentQuotaBlockAp
             );
             Ok(None)
         }
+    }
+}
+
+fn observe_normal_end(signal: &SubagentEnd) -> Result<Option<SubagentQuotaBlockApplied>> {
+    let scan_paths = scan_paths(signal);
+    let preferred = preferred_session_doc(signal, &scan_paths);
+    let reason = normal_end_reason(signal);
+    match apply_subagent_freeze_autodetect(
+        &scan_paths,
+        preferred.as_deref(),
+        &signal.worker_id,
+        &reason,
+    )? {
+        SubagentFreezeAutodetect::Applied(applied) if applied.announce => {
+            eprintln!(
+                "[agent-doc] froze generation {} for ended worker `{}`; the coordinator may report its handback, resume it, or explicitly abandon it.",
+                applied.claim.generation, signal.worker_id
+            );
+        }
+        SubagentFreezeAutodetect::Applied(_) | SubagentFreezeAutodetect::NoMatch => {}
+        SubagentFreezeAutodetect::Ambiguous => eprintln!(
+            "[agent-doc] subagent-end freeze matched worker `{}` on more than one claim with the same start; no claim was changed.",
+            signal.worker_id
+        ),
+    }
+    Ok(None)
+}
+
+fn normal_end_reason(signal: &SubagentEnd) -> String {
+    let message = signal
+        .last_message
+        .as_deref()
+        .or(signal.structured_reason.as_deref())
+        .unwrap_or("no terminal handback was captured");
+    let message = message.split_whitespace().collect::<Vec<_>>().join(" ");
+    let message = message.chars().take(240).collect::<String>();
+    if message.contains(" is still running") {
+        format!("wrapper exited while a child task was still running: {message}")
+    } else {
+        format!("subagent ended before coordinator integration: {message}")
     }
 }
 
@@ -105,7 +149,7 @@ pub fn handle_subagent_stop() -> Result<Option<SubagentQuotaBlockApplied>> {
         Ok(result) => result,
         Err(err) => {
             eprintln!(
-                "[agent-doc] subagent-end quota autodetect failed: {err:#}. Allowing the stop."
+                "[agent-doc] subagent-end claim preservation failed: {err:#}. Allowing the stop."
             );
             (json!({}), None)
         }
@@ -196,7 +240,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_dual_spelling_payload_without_a_limit_allows_the_stop() {
+    fn a_dual_spelling_payload_without_a_bound_claim_allows_the_stop() {
         let payload = r#"{
             "hookEventName": "subagent_stop",
             "hook_event_name": "SubagentStop",
@@ -210,6 +254,84 @@ mod tests {
         assert!(applied.is_none());
         assert_eq!(output, json!({}));
         assert!(output.get("decision").is_none());
+    }
+
+    #[test]
+    fn a_still_running_child_is_recorded_as_a_nonterminal_wrapper_exit() {
+        let signal = parse_subagent_end(&json!({
+            "hook_event_name": "SubagentStop",
+            "agent_id": "worker-sdk",
+            "last_assistant_message": "Task task-mwbqehs0-m7oon3 is still running. Use /codex:status before continuing it."
+        }))
+        .unwrap();
+        assert_eq!(
+            normal_end_reason(&signal),
+            "wrapper exited while a child task was still running: Task task-mwbqehs0-m7oon3 is still running. Use /codex:status before continuing it."
+        );
+    }
+
+    #[test]
+    fn a_subagent_end_freezes_the_bound_claim_before_the_parent_sees_the_handback() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("task.md");
+        std::fs::write(
+            &doc,
+            "# task\n\n<!-- agent:queue -->\n- finish sdk\n<!-- /agent:queue -->\n",
+        )
+        .unwrap();
+        let (_, claim) =
+            agent_doc_queue_io::queue_claim::claim(&doc, "finish sdk", "subagent:sdk", 600)
+                .unwrap();
+        agent_doc_queue_io::queue_claim::start_attempt(
+            &doc,
+            "finish sdk",
+            "subagent:sdk",
+            "worker-sdk",
+            600,
+            claim.generation,
+        )
+        .unwrap();
+
+        let payload = json!({
+            "hook_event_name": "SubagentStop",
+            "agent_id": "worker-sdk",
+            "last_assistant_message": "Task task-mwbqehs0-m7oon3 is still running. Use /codex:status before continuing it.",
+            "cwd": dir.path(),
+        })
+        .to_string();
+        let (output, quota) = subagent_stop_from_payload(&payload).unwrap();
+        assert_eq!(output, json!({}));
+        assert!(quota.is_none());
+
+        let stored = agent_doc_queue_io::queue_claim::load_ledger(&doc).unwrap();
+        let claim = &stored.claims[0];
+        assert_eq!(claim.generation, 1);
+        assert_eq!(claim.worker.as_ref().unwrap().worker_id, "worker-sdk");
+        assert!(
+            claim
+                .frozen
+                .as_ref()
+                .unwrap()
+                .reason
+                .contains("child task was still running")
+        );
+
+        let rebound = agent_doc_queue_io::queue_claim::start_attempt(
+            &doc,
+            "finish sdk",
+            "subagent:sdk",
+            "worker-sdk-resume",
+            600,
+            claim.generation,
+        )
+        .unwrap();
+        assert_eq!(rebound.generation, claim.generation);
+        assert_eq!(
+            rebound.worker.as_ref().unwrap().worker_id,
+            "worker-sdk-resume"
+        );
+        assert!(rebound.frozen.is_none());
     }
 
     #[test]

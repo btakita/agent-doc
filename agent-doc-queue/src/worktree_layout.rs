@@ -38,7 +38,7 @@ pub const SHARED_WORKTREES_DIR_NAME: &str = "worktrees";
 #[macro_export]
 macro_rules! subagent_worktree_layout_rule {
     () => {
-        "Worktree setup (`#worktreetmuxrouterskew`): agent-doc depends on tmux-router by `path = \"../tmux-router\"`, and a nested crate's `../../tmux-router` is that same sibling. Never place the agent-doc worktree directly under `~/worktrees`: that resolves `../tmux-router` to the shared `~/worktrees/tmux-router` checkout, which is stale against main and must not be refreshed or moved. Use the paired layout `<parent>/<label>/agent-doc` beside a private detached `<parent>/<label>/tmux-router` at the tmux-router revision this agent-doc tree builds against, so `../tmux-router` is that private sibling and never the shared checkout."
+        "Worktree setup (`#worktreetmuxrouterskew`): agent-doc depends on tmux-router by `path = \"../tmux-router\"`, and a nested crate's `../../tmux-router` is that same sibling. Never place the agent-doc worktree directly under `~/worktrees`: that resolves `../tmux-router` to the shared `~/worktrees/tmux-router` checkout, which is stale against main and must not be refreshed or moved. Use the paired layout `<parent>/<label>/agent-doc` beside a private detached `<parent>/<label>/tmux-router` at the tmux-router revision this agent-doc tree builds against, so `../tmux-router` is that private sibling and never the shared checkout. Before expensive setup, verify the selected parent is writable. If the requested parent is read-only in the subagent sandbox, continue in a unique `/tmp/agent-doc-worktrees/<label>/agent-doc` with its private sibling and report the actual path; do not exit merely because the requested parent is read-only."
     };
 }
 

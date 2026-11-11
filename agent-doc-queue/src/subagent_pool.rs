@@ -25,12 +25,13 @@
 //! * a frozen worker frees its slot but keeps its claim. Frozen means evidence
 //!   the worker stopped: a recorded stop (`queue freeze`), or no heartbeat past
 //!   [`DEFAULT_WORKER_FROZEN_SECS`] on an attempt this recovery does not own.
-//!   A harness notification that a worker is waiting on its own background
-//!   work is proof of life, so the coordinator records it as a heartbeat
-//!   (`queue claim --refresh`), never as a freeze. A harness freeze that then
-//!   passes its claim TTL still keeps the claim: it is not `Lost`, its row is
-//!   not offered, and the exact refresh revives it when that worker resumes
-//!   through its transcript (`#frozenclaimrefreshrevive`). A lost-running
+//!   work is proof of life while that wrapper remains open, so the coordinator
+//!   records it as a heartbeat (`queue claim --refresh`). If the wrapper exits
+//!   with that notice as its handback, the subagent-end hook freezes the ended
+//!   wrapper and a continuation wrapper rebinds the same generation with
+//!   `queue start`. A harness freeze that then passes its claim TTL still keeps
+//!   the claim: it is not `Lost`, its row is not offered, and the exact refresh
+//!   or continuation rebind revives it (`#frozenclaimrefreshrevive`). A lost-running
 //!   attempt is continued first. A heartbeat already past the frozen bound
 //!   fails that continue, and the same task is retried into the freed slot
 //!   (`#lostrunningcontinue`). Only `queue release --requeue` abandons it;

@@ -18,7 +18,9 @@ use agent_doc_queue::queue_claim::{
 use agent_doc_queue::worker_quota::{QuotaAutodetectChoice, WorkerQuotaBlock};
 use anyhow::Result;
 
-use crate::queue_claim::{block_attempt_on_quota, claim_clock_now_secs, load_ledger};
+use crate::queue_claim::{
+    block_attempt_on_quota, claim_clock_now_secs, freeze_bound_attempt, load_ledger,
+};
 
 /// A claim this scan moved to, or refreshed as, quota-blocked.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -40,6 +42,26 @@ pub enum SubagentQuotaAutodetect {
     Ambiguous,
 }
 
+/// A non-quota subagent end this scan recorded on the bound attempt.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SubagentFreezeApplied {
+    pub file: PathBuf,
+    pub claim: QueueClaim,
+    /// `false` when this exact attempt was already frozen. Duplicate Stop and
+    /// SubagentStop hooks must remain quiet and idempotent.
+    pub announce: bool,
+}
+
+/// What a non-quota subagent-end scan did with one worker id.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SubagentFreezeAutodetect {
+    Applied(Box<SubagentFreezeApplied>),
+    /// No Running or Lost attempt is bound to this worker.
+    NoMatch,
+    /// Two eligible attempts of the same rank started together. Nothing was written.
+    Ambiguous,
+}
+
 #[derive(Clone)]
 struct Hit {
     file: PathBuf,
@@ -50,6 +72,7 @@ struct Hit {
     owner_harness: Option<String>,
     prior_evidence: Option<String>,
     prior_harness: Option<String>,
+    prior_frozen: bool,
 }
 
 /// Mark the attempt bound to `worker_id` quota-blocked.
@@ -91,6 +114,62 @@ pub fn apply_subagent_quota_autodetect(
         QuotaAutodetectChoice::Ambiguous => Ok(SubagentQuotaAutodetect::Ambiguous),
         QuotaAutodetectChoice::None => Ok(SubagentQuotaAutodetect::NoMatch),
     }
+}
+
+/// Freeze the Running or Lost attempt bound to a normally-ended subagent.
+///
+/// A harness stop is only evidence that the wrapper ended, not that its work
+/// was integrated or even that a nested child task reached a terminal state.
+/// Freezing preserves the exact generation and worker binding until the
+/// coordinator reports its handback, resumes it, or explicitly abandons it.
+pub fn apply_subagent_freeze_autodetect(
+    scan_paths: &[PathBuf],
+    preferred_doc: Option<&Path>,
+    worker_id: &str,
+    reason: &str,
+) -> Result<SubagentFreezeAutodetect> {
+    let worker_id = worker_id.trim();
+    if worker_id.is_empty() {
+        return Ok(SubagentFreezeAutodetect::NoMatch);
+    }
+    let mut hits = collect_hits(&quota_scan_roots(scan_paths), worker_id);
+    if let Some(doc) = preferred_doc {
+        consider_document(&mut hits, doc, worker_id);
+        let preferred =
+            freeze_candidates(hits.iter().filter(|hit| same_file(&hit.file, doc)).cloned());
+        match choose(&preferred) {
+            QuotaAutodetectChoice::Selected(index) => {
+                return apply_freeze_hit(&preferred[index], reason);
+            }
+            QuotaAutodetectChoice::Ambiguous => {
+                return Ok(SubagentFreezeAutodetect::Ambiguous);
+            }
+            QuotaAutodetectChoice::None => {}
+        }
+    }
+    let hits = freeze_candidates(hits.into_iter());
+    match choose(&hits) {
+        QuotaAutodetectChoice::Selected(index) => apply_freeze_hit(&hits[index], reason),
+        QuotaAutodetectChoice::Ambiguous => Ok(SubagentFreezeAutodetect::Ambiguous),
+        QuotaAutodetectChoice::None => Ok(SubagentFreezeAutodetect::NoMatch),
+    }
+}
+
+fn freeze_candidates(hits: impl Iterator<Item = Hit>) -> Vec<Hit> {
+    hits.filter(|hit| matches!(hit.state, QueueClaimState::Running | QueueClaimState::Lost))
+        .collect()
+}
+
+fn apply_freeze_hit(hit: &Hit, reason: &str) -> Result<SubagentFreezeAutodetect> {
+    let announce = !hit.prior_frozen;
+    let claim = freeze_bound_attempt(&hit.file, &hit.item_text, Some(hit.generation), reason)?;
+    Ok(SubagentFreezeAutodetect::Applied(Box::new(
+        SubagentFreezeApplied {
+            file: hit.file.clone(),
+            claim,
+            announce,
+        },
+    )))
 }
 
 fn choose(hits: &[Hit]) -> QuotaAutodetectChoice {
@@ -209,6 +288,7 @@ fn push_hits(hits: &mut Vec<Hit>, file: &Path, ledger: &QueueClaimLedger, worker
                 .and_then(|session| session.harness.clone()),
             prior_evidence: block.map(|block| block.evidence.clone()),
             prior_harness: block.and_then(|block| block.harness.clone()),
+            prior_frozen: claim.frozen.is_some(),
         });
     }
 }
@@ -318,7 +398,11 @@ mod tests {
     fn project(root: &Path) -> PathBuf {
         std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
         let doc = root.join("task.md");
-        std::fs::write(&doc, "# task\n").unwrap();
+        std::fs::write(
+            &doc,
+            "# task\n\n<!-- agent:queue -->\n- finish sdk\n<!-- /agent:queue -->\n",
+        )
+        .unwrap();
         doc
     }
 
@@ -383,6 +467,78 @@ mod tests {
                 .worktree
                 .is_none()
         );
+    }
+
+    #[test]
+    fn a_normally_ended_worker_is_frozen_without_a_coordinator_report() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = project(dir.path());
+        store_ledger_for_test(&doc, &running("finish sdk", "worker-sdk")).unwrap();
+        let first = match apply_subagent_freeze_autodetect(
+            &[dir.path().to_path_buf()],
+            None,
+            "worker-sdk",
+            "wrapper exited while a child task was still running",
+        )
+        .unwrap()
+        {
+            SubagentFreezeAutodetect::Applied(applied) => applied,
+            other => panic!("expected a freeze, got {other:?}"),
+        };
+        assert!(first.announce);
+        assert_eq!(first.claim.state, QueueClaimState::Running);
+        assert_eq!(
+            first
+                .claim
+                .frozen
+                .as_ref()
+                .map(|freeze| freeze.reason.as_str()),
+            Some("wrapper exited while a child task was still running")
+        );
+        assert_eq!(first.claim.worker.as_ref().unwrap().worker_id, "worker-sdk");
+
+        let second = match apply_subagent_freeze_autodetect(
+            &[dir.path().to_path_buf()],
+            None,
+            "worker-sdk",
+            "duplicate stop",
+        )
+        .unwrap()
+        {
+            SubagentFreezeAutodetect::Applied(applied) => applied,
+            other => panic!("expected an idempotent freeze, got {other:?}"),
+        };
+        assert!(!second.announce);
+        assert_eq!(
+            second
+                .claim
+                .frozen
+                .as_ref()
+                .map(|freeze| freeze.reason.as_str()),
+            Some("wrapper exited while a child task was still running")
+        );
+    }
+
+    #[test]
+    fn a_reported_worker_end_is_not_frozen() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = project(dir.path());
+        let mut ledger = running("finish sdk", "worker-sdk");
+        ledger.report("finish sdk", Some(1)).unwrap();
+        store_ledger_for_test(&doc, &ledger).unwrap();
+        assert_eq!(
+            apply_subagent_freeze_autodetect(
+                &[dir.path().to_path_buf()],
+                None,
+                "worker-sdk",
+                "normal end"
+            )
+            .unwrap(),
+            SubagentFreezeAutodetect::NoMatch
+        );
+        let claim = &load_ledger(&doc).unwrap().claims[0];
+        assert_eq!(claim.state, QueueClaimState::Reported);
+        assert!(claim.frozen.is_none());
     }
 
     #[test]

@@ -51,6 +51,7 @@ pub fn queue_prompt_projection_rows(content: &str, entries: &[QueueEntry]) -> Ve
         content,
         crate::queue_continuation::DrainScope::InSessionLoop,
     );
+    let executable_indexes = document_queue::executable_prompt_indexes(entries);
     let preset_supplies_directive = agent_doc_element::element::parse(content)
         .ok()
         .and_then(|components| {
@@ -64,21 +65,24 @@ pub fn queue_prompt_projection_rows(content: &str, entries: &[QueueEntry]) -> Ve
         .unwrap_or(false);
     entries
         .iter()
-        .filter_map(|entry| match entry {
+        .enumerate()
+        .filter_map(|(index, entry)| match entry {
             QueueEntry::Prompt(prompt) => {
                 let text = strip_in_progress_marker(&prompt.text);
                 let id = crate::queue_response::queue_prompt_done_id(&text);
-                let projectable_default = !crate::queue_continuation::is_noise_queue_head(
-                    &text,
-                    preset_supplies_directive,
-                ) && !id.as_ref().is_some_and(|id| {
-                    // `#opverifyanswered`: an answered operator-verify head is
-                    // live work again, so it stays projectable.
-                    deferred_ids.defers(
-                        id,
-                        crate::queue_continuation::head_carries_operator_verdict(&text),
+                let projectable_default = executable_indexes.binary_search(&index).is_ok()
+                    && !crate::queue_continuation::is_noise_queue_head(
+                        &text,
+                        preset_supplies_directive,
                     )
-                });
+                    && !id.as_ref().is_some_and(|id| {
+                        // `#opverifyanswered`: an answered operator-verify head is
+                        // live work again, so it stays projectable.
+                        deferred_ids.defers(
+                            id,
+                            crate::queue_continuation::head_carries_operator_verdict(&text),
+                        )
+                    });
                 Some(QueuePromptRow::new(
                     prompt.text.clone(),
                     id,
@@ -396,6 +400,35 @@ mod tests {
             &entries,
             &std::collections::HashSet::new()
         ));
+    }
+
+    #[test]
+    fn active_projection_selects_two_space_indented_child() {
+        let body = concat!(
+            "- Inspect the Unity SDK version.\n",
+            "  - What is the current version of haiven-sdk-unity?\n",
+        );
+        let content = format!("<!-- agent:queue -->\n{body}<!-- /agent:queue -->\n");
+        let entries = parse(body).unwrap();
+
+        assert!(entries.iter().any(|entry| matches!(
+            entry,
+            QueueEntry::Prompt(prompt)
+                if prompt.indent == 2
+                    && prompt.text == "What is the current version of haiven-sdk-unity?"
+        )));
+
+        let projection = active_queue_prompt_projection(
+            &content,
+            &entries,
+            &HashMap::new(),
+            false,
+            &std::collections::HashSet::new(),
+        );
+        assert_eq!(
+            projection.prompts,
+            vec!["What is the current version of haiven-sdk-unity?"]
+        );
     }
 
     #[test]

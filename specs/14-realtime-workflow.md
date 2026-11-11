@@ -1188,6 +1188,15 @@ parent row, and an id-backed `do [#id]` stay distinct. This is the same
 one-to-one gap rule as `#qidtypingcontinuation`, not a fuzzy dedup of settled
 queue items.
 
+The interval after agent-doc first sees a prompt and before prepare emits that
+prompt is its own lifecycle state (`#promptseen`). The prefix is the seen glyph
+`👀`. Prepare's queue-maintenance emit replaces `👀` with `📥` once the row is
+the prompt it emits. A line still being typed, or absent from the settled
+observation, stays unmarked. A background pass paints `👀` on a structurally
+finished bare row and does not replace it with `📥`. An explicit sync still
+paints `📥`. The one-row steering survivor (`#editsteer`) is already an emitted
+prompt and keeps `📥`.
+
 An id-backed queue head with a nonempty inline operator verdict, such as
 `complete [#push]: hold lifted; do the push`, is fresh executable authority even
 when the referenced item currently lives in `agent:review` and therefore has no

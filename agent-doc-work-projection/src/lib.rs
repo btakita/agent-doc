@@ -93,6 +93,7 @@ fn lifecycle_state(
 ) -> &'static str {
     use agent_doc_document::queue_projection::QueueLifecycleMarker::*;
     match marker {
+        Seen => "seen",
         Pending => "pending",
         Blocked => "blocked",
         Claimed => "claimed",
@@ -113,7 +114,7 @@ fn is_started_and_unclosed(
     marker: agent_doc_document::queue_projection::QueueLifecycleMarker,
 ) -> bool {
     use agent_doc_document::queue_projection::QueueLifecycleMarker::*;
-    !matches!(marker, Pending | Blocked | Skipped)
+    !matches!(marker, Pending | Blocked | Skipped | Seen)
 }
 
 /// Collect work that has started and has not closed from its authoritative source.

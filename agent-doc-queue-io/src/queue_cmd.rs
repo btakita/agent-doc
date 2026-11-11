@@ -686,6 +686,18 @@ fn derive_runtime_projection_scoped(
                         )
                     ) {
                         observed.expect("matched Some lifecycle marker")
+                    } else if rows == RuntimeProjectionRows::BackgroundComplete
+                        && matches!(
+                            observed,
+                            None | Some(
+                                agent_doc_document::queue_projection::QueueLifecycleMarker::Seen
+                            )
+                        )
+                        && background_cosmetic_pending_admitted(rows, &prompt.text)
+                    {
+                        // `#promptseen`: a finished prompt the background pass
+                        // has seen, before prepare emits it. The prefix is `👀`.
+                        agent_doc_document::queue_projection::QueueLifecycleMarker::Seen
                     } else if observed.is_none()
                         && !background_cosmetic_pending_admitted(rows, &prompt.text)
                     {
@@ -749,7 +761,8 @@ fn derive_runtime_projection_scoped(
                 .filter(|target| {
                     !matches!(
                         target.marker,
-                        agent_doc_document::queue_projection::QueueLifecycleMarker::Pending
+                        agent_doc_document::queue_projection::QueueLifecycleMarker::Seen
+                            | agent_doc_document::queue_projection::QueueLifecycleMarker::Pending
                             | agent_doc_document::queue_projection::QueueLifecycleMarker::Blocked
                             | agent_doc_document::queue_projection::QueueLifecycleMarker::Unknown
                     )
@@ -3992,8 +4005,8 @@ mod tests {
     /// typing (`subite`, then `The first 📥 subitems … get reordered`). The
     /// glyph stayed in the prose and the next paint prefixed a second one.
     /// A structurally finished row, including one whose prose already contains
-    /// `📥`, still receives exactly one leading marker. A stale `🚧` still
-    /// clears, and a claim still projects.
+    /// `📥`, receives exactly one leading seen glyph `👀` and no leading `📥`.
+    /// A stale `🚧` still clears to `📥`, and a claim still projects.
     #[test]
     fn background_self_heal_does_not_prefix_inbox_onto_an_in_progress_row() {
         let dir = tempfile::tempdir().unwrap();
@@ -4038,6 +4051,10 @@ mod tests {
             "in-progress row keeps its content inbox and gains no leading one: {composing_line}"
         );
         assert!(
+            !composing_line.contains('👀'),
+            "an unfinished row stays unmarked, with no seen glyph `👀`: {composing_line}"
+        );
+        assert!(
             composing_line.contains(&format!("- {composing}"))
                 || composing_line.contains(&format!("- ### {composing}")),
             "{composing_line}"
@@ -4049,18 +4066,28 @@ mod tests {
 
         let half = line(half_typed);
         assert_eq!(half.matches('📥').count(), 0, "{half}");
+        assert!(
+            !half.contains('👀'),
+            "half-typed row gains no seen glyph `👀`: {half}"
+        );
 
         let body = line("current 📥 items.");
-        assert_eq!(body.matches('📥').count(), 2, "{body}");
+        assert_eq!(body.matches('📥').count(), 1, "{body}");
+        assert_eq!(body.matches('👀').count(), 1, "{body}");
         assert!(
-            body.contains("📥 release + publish:") && body.contains("current 📥 items."),
-            "{body}"
+            body.contains("👀 release + publish:") && body.contains("current 📥 items."),
+            "the seen glyph `👀` marks a finished prompt before prepare emits it: {body}"
         );
-        assert!(!body.contains("📥 📥"), "{body}");
+        assert!(!body.contains("📥 release"), "{body}");
+        assert!(!body.contains("👀 👀"), "{body}");
 
         let plain = line(settled_plain);
-        assert_eq!(plain.matches('📥').count(), 1, "{plain}");
-        assert!(plain.contains(&format!("📥 {settled_plain}")), "{plain}");
+        assert_eq!(plain.matches('📥').count(), 0, "{plain}");
+        assert_eq!(plain.matches('👀').count(), 1, "{plain}");
+        assert!(
+            plain.contains(&format!("👀 {settled_plain}")),
+            "the seen glyph `👀` marks a finished prompt before prepare emits it: {plain}"
+        );
 
         let cleared = line(stale);
         assert!(cleared.contains(&format!("📥 {stale}")), "{cleared}");

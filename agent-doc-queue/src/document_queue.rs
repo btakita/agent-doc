@@ -2053,8 +2053,11 @@ pub fn set_prompt_runtime_projections_with(
                         target.clone()
                     })
                     .filter(|target| {
-                        target.marker
-                            != agent_doc_document::queue_projection::QueueLifecycleMarker::Pending
+                        !matches!(
+                            target.marker,
+                            agent_doc_document::queue_projection::QueueLifecycleMarker::Pending
+                                | agent_doc_document::queue_projection::QueueLifecycleMarker::Seen
+                        )
                     });
                 next.text = match target {
                     Some(target) if !crate::queue_command::is_slash_command(&next.text) => {
@@ -2246,9 +2249,11 @@ pub fn set_prompt_runtime_projections_with(
                         // left stripped. `%% parked %%` is a hold, not a note:
                         // the row stays unclaimable, and claim projection still
                         // paints `📥` so a stale running glyph clears.
-                        let comment_only_pending = target.marker
-                            == agent_doc_document::queue_projection::QueueLifecycleMarker::Pending
-                            && entry_has_only_comment_children(entries, index)
+                        let comment_only_pending = matches!(
+                            target.marker,
+                            agent_doc_document::queue_projection::QueueLifecycleMarker::Pending
+                                | agent_doc_document::queue_projection::QueueLifecycleMarker::Seen
+                        ) && entry_has_only_comment_children(entries, index)
                             && !entry_has_nested_parked_comment(entries, index);
                         if !comment_only_pending && !crate::queue_command::is_slash_command(&next.text)
                         {
@@ -2297,7 +2302,7 @@ pub fn set_prompt_runtime_projections_with(
 }
 
 /// `#managedlistnodrift`: a lifecycle marker only a durable record (claim,
-/// release receipt, or completion evidence) can produce. `Pending`,
+/// release receipt, or completion evidence) can produce. `Seen`, `Pending`,
 /// `Blocked`, `Unknown`, `Skipped`, and `AwaitingOperator` targets carry no
 /// such record.
 pub fn durable_backed_marker(
@@ -3117,7 +3122,7 @@ pub fn settle_inert_group_parents(
                 Some(QueueLifecycleMarker::AwaitingOperator) => {
                     "Resolve the operator decision needed to complete the parent item."
                 }
-                Some(QueueLifecycleMarker::Pending) | None => {
+                Some(QueueLifecycleMarker::Pending | QueueLifecycleMarker::Seen) | None => {
                     "Complete the remaining work for the parent item."
                 }
             }

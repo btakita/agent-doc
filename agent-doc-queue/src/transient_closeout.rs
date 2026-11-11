@@ -74,7 +74,8 @@ pub fn owed_closeout_transition(marker: QueueLifecycleMarker) -> Option<&'static
         QueueLifecycleMarker::Unknown => "diagnose the contradiction and clear it",
         QueueLifecycleMarker::Blocked
         | QueueLifecycleMarker::AwaitingOperator
-        | QueueLifecycleMarker::Skipped => return None,
+        | QueueLifecycleMarker::Skipped
+        | QueueLifecycleMarker::Seen => return None,
     })
 }
 

@@ -490,6 +490,7 @@ fn strip_projection_token(trimmed: &str) -> Option<&str> {
         icons.agent_prioritized.as_str(),
         icons.claimed.as_str(),
         icons.running.as_str(),
+        icons.seen.as_str(),
         icons.pending.as_str(),
         icons.blocked.as_str(),
         icons.reported.as_str(),
@@ -516,6 +517,8 @@ fn strip_projection_token(trimmed: &str) -> Option<&str> {
         // Fenced subagent-attempt lifecycle projections.
         "🟡",
         "🚧",
+        // `#promptseen`: seen glyph, before prepare emits the prompt.
+        "👀",
         "📥",
         // `#queueblocked`: blocked lifecycle projection.
         "⛔",
@@ -688,6 +691,7 @@ fn strip_lifecycle_token(trimmed: &str) -> Option<&str> {
     let configured = [
         icons.claimed.as_str(),
         icons.running.as_str(),
+        icons.seen.as_str(),
         icons.pending.as_str(),
         icons.blocked.as_str(),
         icons.reported.as_str(),
@@ -700,6 +704,7 @@ fn strip_lifecycle_token(trimmed: &str) -> Option<&str> {
     let defaults = [
         "🟡",
         "🚧",
+        "👀",
         "📥",
         "⛔",
         "☑️",

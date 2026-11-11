@@ -13,6 +13,8 @@ use std::sync::OnceLock;
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct QueueIconConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seen: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pending: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub blocked: Option<String>,
@@ -49,6 +51,7 @@ pub struct QueueIconConfig {
 /// Effective process-wide queue prefix palette.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct QueueIconSet {
+    pub seen: String,
     pub pending: String,
     pub blocked: String,
     pub claimed: String,
@@ -93,9 +96,13 @@ pub enum QueueLifecycleMarker {
     Unknown,
     Skipped,
     AwaitingOperator,
+    /// `#promptseen`: agent-doc has seen this prompt and the prepare step has
+    /// not emitted it yet. The prefix is `👀`.
+    Seen,
 }
 
-pub const ALL_LIFECYCLE_STATES: [QueueLifecycleMarker; 13] = [
+pub const ALL_LIFECYCLE_STATES: [QueueLifecycleMarker; 14] = [
+    QueueLifecycleMarker::Seen,
     QueueLifecycleMarker::Pending,
     QueueLifecycleMarker::Blocked,
     QueueLifecycleMarker::Claimed,
@@ -115,6 +122,7 @@ impl QueueLifecycleMarker {
     pub fn prefix(self) -> &'static str {
         let icons = queue_icons();
         match self {
+            Self::Seen => &icons.seen,
             Self::Pending => &icons.pending,
             Self::Blocked => &icons.blocked,
             Self::Claimed => &icons.claimed,
@@ -133,6 +141,7 @@ impl QueueLifecycleMarker {
 
     pub const fn default_prefix(self) -> &'static str {
         match self {
+            Self::Seen => "👀",
             Self::Pending => "📥",
             Self::Blocked => "⛔",
             Self::Claimed => "🟡",
@@ -155,6 +164,7 @@ impl QueueLifecycleMarker {
     /// vocabulary for the state, never queue work text (`#lifecyclewordfusion`).
     pub const fn state_words(self) -> &'static [&'static str] {
         match self {
+            Self::Seen => &["seen"],
             Self::Pending => &["pending"],
             Self::Blocked => &["blocked"],
             Self::Claimed => &["claimed"],
@@ -233,6 +243,7 @@ pub fn fused_lifecycle_word_token(text: &str) -> Option<(QueueLifecycleMarker, u
 impl Default for QueueIconSet {
     fn default() -> Self {
         Self {
+            seen: "👀".into(),
             pending: "📥".into(),
             blocked: "⛔".into(),
             claimed: "🟡".into(),
@@ -257,6 +268,7 @@ impl QueueIconSet {
     pub fn from_config(config: &QueueIconConfig) -> Result<Self> {
         let defaults = Self::default();
         let resolved = Self {
+            seen: config.seen.clone().unwrap_or(defaults.seen),
             pending: config.pending.clone().unwrap_or(defaults.pending),
             blocked: config.blocked.clone().unwrap_or(defaults.blocked),
             claimed: config.claimed.clone().unwrap_or(defaults.claimed),
@@ -294,8 +306,9 @@ impl QueueIconSet {
     /// Validation and the marker legend both read this one list, so a palette
     /// field cannot be validated without also being documented
     /// (`#queuemarkerlegend`).
-    pub fn entries(&self) -> [(&'static str, &str); 16] {
+    pub fn entries(&self) -> [(&'static str, &str); 17] {
         [
+            ("seen", self.seen.as_str()),
             ("pending", self.pending.as_str()),
             ("blocked", self.blocked.as_str()),
             ("claimed", self.claimed.as_str()),
@@ -328,6 +341,7 @@ impl QueueIconSet {
                 bail!("queue_icons prefixes must be distinct; duplicate value {value:?}");
             }
             for (built_in_name, built_in_value) in [
+                ("seen", "👀"),
                 ("pending", "📥"),
                 ("blocked", "⛔"),
                 ("claimed", "🟡"),

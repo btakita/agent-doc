@@ -8,9 +8,12 @@
 //! attempt was abandoned for requeue. That failure authorizes a new generation
 //! in the same pass (`#transientcloseout`). An explicit requeue must not resume
 //! the abandoned worker, and it must not leave the row stuck on `⚠️🚧`. A
-//! harness freeze that still holds its claim stays `Running` and is not marked
-//! Lost here. A frozen handback that was not report-completed, quota
-//! exhaustion, and lost-reported closeout stay outside this recovery.
+//! harness freeze whose worker has already stopped, with no handback, stays
+//! `Running` and is not marked Lost. Continue fails because that worker is
+//! gone, and the failure authorizes a new generation in the same pass
+//! (`#transientcloseout`). A worker that is still running is not this case.
+//! A frozen handback that was not report-completed, quota exhaustion, and
+//! lost-reported closeout stay outside this recovery.
 
 use crate::queue_claim::{LostContinueRecord, QueueClaim, QueueClaimState};
 use crate::subagent_pool::{DEFAULT_WORKER_FROZEN_SECS, last_heartbeat_secs};
@@ -51,17 +54,47 @@ pub fn is_lost_running_candidate(claim: &QueueClaim) -> bool {
     {
         return false;
     }
-    // A harness freeze whose worker is still bound stays `Running` and is
-    // revived by the exact heartbeat, not replaced from here and not marked
-    // Lost. A frozen handback that was never report-completed is not this
-    // loss either. An explicit requeue abandon still fails continue below;
-    // it is a candidate so that failure can authorize a new generation while
-    // the row shows `⚠️🚧` (`#transientcloseout`).
+    // A harness freeze stays `Running` and is not this `⚠️🚧` candidate, so
+    // this path never marks it Lost. A stopped freeze is
+    // [`is_stopped_harness_freeze`] instead. A frozen handback that was never
+    // report-completed is not this loss either. An explicit requeue abandon
+    // still fails continue below; it is a candidate so that failure can
+    // authorize a new generation while the row shows `⚠️🚧`
+    // (`#transientcloseout`).
     if claim.retains_frozen_worker_claim() || frozen_unreported_handback(claim) {
         return false;
     }
     claim.projection_marker()
         == agent_doc_document::queue_projection::QueueLifecycleMarker::LostRunning
+}
+
+/// A harness freeze whose worker has stopped and that has no handback.
+///
+/// The attempt stays [`QueueClaimState::Running`]. It is not Lost. Continue
+/// cannot resume the stopped worker, so the failure authorizes a new
+/// generation. A freeze that already carries a handback is not this case.
+pub fn is_stopped_harness_freeze(claim: &QueueClaim) -> bool {
+    if claim.state == QueueClaimState::QuotaBlocked
+        || claim.quota_block.is_some()
+        || claim.lost_from == Some(QueueClaimState::QuotaBlocked)
+        || frozen_unreported_handback(claim)
+    {
+        return false;
+    }
+    claim.state == QueueClaimState::Running
+        && claim
+            .worker
+            .as_ref()
+            .is_some_and(|worker| !worker.worker_id.trim().is_empty())
+        && claim
+            .frozen
+            .as_ref()
+            .is_some_and(|freeze| !freeze.is_abandon())
+        && claim.publication_state.is_none()
+}
+
+fn is_continue_retry_candidate(claim: &QueueClaim) -> bool {
+    is_lost_running_candidate(claim) || is_stopped_harness_freeze(claim)
 }
 
 fn frozen_unreported_handback(claim: &QueueClaim) -> bool {
@@ -72,9 +105,10 @@ fn frozen_unreported_handback(claim: &QueueClaim) -> bool {
 }
 
 /// Continue, or retry when a previous continue failed. `None` for every other
-/// claim. Callers project TTL expiry first; a still-`Running` row is not lost.
+/// claim. Callers project TTL expiry first. A stopped harness freeze stays
+/// `Running`; a worker that is still running is not a candidate.
 pub fn recovery_action(claim: &QueueClaim) -> Option<LostRunningAction> {
-    if !is_lost_running_candidate(claim) {
+    if !is_continue_retry_candidate(claim) {
         return None;
     }
     if claim
@@ -121,6 +155,12 @@ pub fn default_continue_attempt(claim: &QueueClaim, now_secs: u64) -> Result<(),
         .is_some_and(|freeze| freeze.is_abandon())
     {
         return Err("lost running claim was abandoned for requeue".to_string());
+    }
+    // The freeze is the harness report that this worker already stopped.
+    // A fresh heartbeat must not resume it or authorize a second generation
+    // for a worker that is actually still running (`#transientcloseout`).
+    if is_stopped_harness_freeze(claim) {
+        return Err("harness freeze worker is gone; continue refused".to_string());
     }
     let last = last_heartbeat_secs(claim).unwrap_or(0);
     let stale_for = now_secs.saturating_sub(last);
@@ -211,7 +251,9 @@ pub fn recover_claims(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::queue_claim::{QueueClaimLedger, QueueWorkerBinding, QueueWorkerFreeze};
+    use crate::queue_claim::{
+        ClaimOutcome, QueueClaimLedger, QueueWorkerBinding, QueueWorkerFreeze,
+    };
 
     fn lost_running(item: &str, started_at_secs: u64) -> QueueClaim {
         let mut ledger = QueueClaimLedger::default();
@@ -362,26 +404,113 @@ mod tests {
     }
 
     #[test]
-    fn a_harness_freeze_stays_running_and_is_not_retried_as_lost() {
+    fn a_stopped_harness_freeze_authorizes_retry_without_becoming_lost() {
         let mut ledger = QueueClaimLedger::default();
         ledger.claim("annocorrupt", "subagent:annocorrupt", 1_000, 60);
+        ledger
+            .start(
+                "annocorrupt",
+                "subagent:annocorrupt",
+                "worker-annocorrupt",
+                1_000,
+                60,
+                Some(1),
+            )
+            .unwrap();
+        ledger
+            .freeze_attempt(
+                "annocorrupt",
+                Some(1),
+                1_100,
+                "harness reported the worker ended",
+            )
+            .unwrap();
         let claim = &mut ledger.claims[0];
-        claim.state = QueueClaimState::Running;
-        claim.worker = Some(QueueWorkerBinding {
-            worker_id: "worker-annocorrupt".to_string(),
-            started_at_secs: 1_000,
-        });
-        claim.heartbeat_at_secs = Some(1_000);
-        claim.expires_at_secs = 1_060;
-        claim.frozen = Some(QueueWorkerFreeze {
-            frozen_at_secs: 1_100,
-            reason: "harness reported the worker ended".to_string(),
-            abandoned: false,
-        });
         claim.project_expiry(9_000);
         assert_eq!(claim.state, QueueClaimState::Running);
         assert!(claim.lost_from.is_none());
-        assert!(recovery_action(claim).is_none());
+        assert!(claim.publication_state.is_none());
+        assert_eq!(
+            claim.projection_marker(),
+            agent_doc_document::queue_projection::QueueLifecycleMarker::Running
+        );
+        assert_eq!(
+            recovery_action(claim),
+            Some(LostRunningAction::Continue),
+            "continue is attempted before the stopped worker authorizes retry"
+        );
         assert!(!retry_authorized(claim));
+
+        let mut claims = vec![claim.clone()];
+        let applied = recover_claims(&mut claims, 9_000, 60, true, &mut |claim| {
+            default_continue_attempt(claim, 9_000)
+        });
+        assert_eq!(applied.len(), 1);
+        assert_eq!(applied[0].action, LostRunningAction::Retry);
+        assert!(applied[0].during_turn);
+        assert_eq!(claims[0].state, QueueClaimState::Running);
+        assert!(claims[0].lost_from.is_none());
+        assert_eq!(claims[0].generation, 1);
+        assert!(retry_authorized(&claims[0]));
+        assert!(
+            !claims[0].blocks_dispatch(9_000),
+            "the stopped freeze must be claimable"
+        );
+        assert!(
+            claims[0].lost_continue.as_ref().is_some_and(|record| {
+                record.failed && record.reason.contains("worker is gone")
+            })
+        );
+
+        ledger.claims[0] = claims[0].clone();
+        assert_eq!(
+            ledger.claim("annocorrupt", "subagent:annocorrupt", 9_000, 60),
+            ClaimOutcome::Reassigned
+        );
+        assert_eq!(ledger.claims[0].generation, 2);
+        assert_eq!(ledger.claims[0].state, QueueClaimState::Claimed);
+        assert!(ledger.claims[0].frozen.is_none());
+        assert!(ledger.claims[0].lost_from.is_none());
+    }
+
+    #[test]
+    fn a_live_running_worker_does_not_authorize_a_second_generation() {
+        let mut ledger = QueueClaimLedger::default();
+        ledger.claim("keeprows", "subagent:keeprows", 1_000, 3_600);
+        ledger
+            .start(
+                "keeprows",
+                "subagent:keeprows",
+                "worker-keeprows",
+                1_000,
+                3_600,
+                Some(1),
+            )
+            .unwrap();
+        let claim = &ledger.claims[0];
+        assert!(claim.frozen.is_none());
+        assert_eq!(claim.heartbeat_at_secs, Some(1_000));
+        let mut projected = claim.clone();
+        projected.project_expiry(1_500);
+        assert_eq!(projected.state, QueueClaimState::Running);
+        assert!(recovery_action(&projected).is_none());
+        assert!(!retry_authorized(&projected));
+        assert!(default_continue_attempt(&projected, 1_500).is_ok());
+
+        let mut claims = vec![projected];
+        let applied = recover_claims(&mut claims, 1_500, 3_600, true, &mut |claim| {
+            default_continue_attempt(claim, 1_500)
+        });
+        assert!(applied.is_empty());
+        assert_eq!(claims[0].state, QueueClaimState::Running);
+        assert_eq!(claims[0].generation, 1);
+        assert!(claims[0].lost_continue.is_none());
+        assert!(claims[0].blocks_dispatch(1_500));
+        assert_eq!(
+            ledger.claim("keeprows", "subagent:keeprows", 1_500, 3_600),
+            ClaimOutcome::Refreshed
+        );
+        assert_eq!(ledger.claims[0].generation, 1);
+        assert_eq!(ledger.claims[0].state, QueueClaimState::Running);
     }
 }

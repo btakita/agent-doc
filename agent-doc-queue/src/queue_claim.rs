@@ -769,6 +769,12 @@ impl QueueClaim {
     }
 
     pub fn blocks_dispatch(&self, now_secs: u64) -> bool {
+        // A failed continue authorized a replacement generation. That includes
+        // a stopped harness freeze that is still `Running`: the row has to be
+        // claimable, and the attempt is not marked Lost (`#transientcloseout`).
+        if crate::lost_running_recovery::retry_authorized(self) {
+            return false;
+        }
         if self.retains_frozen_worker_claim() {
             return true;
         }

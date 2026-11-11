@@ -157,19 +157,21 @@ fn subagent_dispatch_candidates_for_content(file: &Path, content: &str) -> Resul
         .iter()
         .map(|head| agent_doc_queue::queue_claim::claim_identity(head))
         .collect::<Vec<_>>();
-    let lost = crate::queue_claim::claim_states_for_content(file, content)?
-        .into_iter()
+    let claims = crate::queue_claim::claim_states_for_content(file, content)?;
+    let lost = claims
+        .iter()
         .filter(|claim| claim.state == agent_doc_queue::queue_claim::QueueClaimState::Lost)
+        .cloned()
         .collect::<Vec<_>>();
     // `#subagentworkpool`: an attempt that expired with its worker still bound
     // and was not abandoned may still be working, so its row is never offered.
-    // A harness freeze keeps blocking dispatch after the TTL
-    // (`QueueClaim::retains_frozen_worker_claim`); this filter is only the
-    // unconfirmed slot, which a freeze does not hold.
+    // A stopped harness freeze stays `Running`. Once continue fails, the same
+    // retry offer claims a new generation (`#transientcloseout`). This filter
+    // is only the unconfirmed slot, which a freeze does not hold.
     let retrying = |claim: &agent_doc_queue::queue_claim::QueueClaim| {
         agent_doc_queue::lost_running_recovery::retry_authorized(claim)
     };
-    let retry_identities = lost
+    let retry_identities = claims
         .iter()
         .filter(|claim| retrying(claim))
         .map(|claim| claim.identity.clone())

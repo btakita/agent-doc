@@ -176,4 +176,47 @@ mod tests {
             "stale lost-running worker is retried during a turn, got {offered:?}"
         );
     }
+
+    #[test]
+    fn a_stopped_harness_freeze_is_offered_without_becoming_lost() {
+        let item = "#subagents annocorrupt stopped without a handback";
+        let (_dir, file, content) = project(item);
+        let pinned = 3_000_000;
+        let _clock = crate::queue_claim::pin_claim_clock_for_current_thread(pinned);
+        let (_, claimed) =
+            crate::queue_claim::claim(&file, item, "subagent:annocorrupt", 60).unwrap();
+        crate::queue_claim::start_attempt(
+            &file,
+            item,
+            "subagent:annocorrupt",
+            "worker-annocorrupt",
+            60,
+            claimed.generation,
+        )
+        .unwrap();
+        crate::queue_claim::freeze_attempt(
+            &file,
+            item,
+            Some(claimed.generation),
+            "harness reported the worker ended",
+        )
+        .unwrap();
+        let _later = crate::queue_claim::pin_claim_clock_for_current_thread(pinned + 10_000);
+        let applied = recover_lost_running_automatically(&file, true).unwrap();
+        assert_eq!(applied[0].action, LostRunningAction::Retry);
+        let stored = crate::queue_claim::load_ledger(&file).unwrap();
+        assert_eq!(stored.claims[0].state, QueueClaimState::Running);
+        assert!(stored.claims[0].lost_from.is_none());
+        assert_eq!(stored.claims[0].generation, claimed.generation);
+        assert!(agent_doc_queue::lost_running_recovery::retry_authorized(
+            &stored.claims[0]
+        ));
+        let offered =
+            crate::subagent_dispatch::pending_subagent_dispatch_for_content(&file, &content)
+                .unwrap();
+        assert!(
+            offered.iter().any(|head| head.contains(item)),
+            "stopped harness freeze is offered for a new generation, got {offered:?}"
+        );
+    }
 }

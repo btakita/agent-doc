@@ -20,6 +20,7 @@ agent-doc-process-owner-io = { path = "../agent-doc-process-owner-io", version =
 agent-doc-tmux = { path = "../agent-doc-tmux", version = "0.35.573" }
 agent-doc-tmux-commands = { path = "../agent-doc-tmux-commands", version = "0.35.573" }
 anyhow = "1"
+fs2 = "0.4"
 serde = { version = "1", features = ["derive"] }
 lazily = "0.61.1"
 libc = "0.2"

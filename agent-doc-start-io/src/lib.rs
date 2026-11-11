@@ -533,6 +533,7 @@ pub fn start_in_tmux_pane_for_client(
 ) -> Result<TmuxEnsureOutcome> {
     report_progress_phase("document_admission");
     prepare_start_document_for_tmux_bootstrap(file)?;
+    restore_missing_ambient_tmux_socket()?;
     let tmux = tmux_for_environment();
     let target = match start_bootstrap_target(&tmux, file, force, client_id)? {
         StartBootstrap::Reuse(outcome) => {
@@ -705,6 +706,13 @@ fn prepare_start_document_for_tmux_bootstrap(file: &Path) -> Result<()> {
 
 fn tmux_for_environment() -> tmux_router::Tmux {
     agent_doc_tmux_io::configured_tmux()
+}
+
+/// Recreate `$TMUX`'s socket when that server is alive but the path does not connect.
+/// Unset `$TMUX` is success: an outside-tmux start provisions its own session.
+fn restore_missing_ambient_tmux_socket() -> Result<()> {
+    agent_doc_tmux_io::restore_ambient_tmux_socket()?;
+    Ok(())
 }
 
 /// True when a non-closed actor still names a tmux pane. A missing server
@@ -1646,6 +1654,7 @@ fn prepare_start_runtime_with_admission(
             reason,
         );
     }
+    restore_missing_ambient_tmux_socket()?;
     let admission_tmux = agent_doc_tmux_io::configured_tmux();
     if disk_document_allows_pre_admission_pane_guard(file)
         && let Some(pane_id) = current_pane_id_from_env()

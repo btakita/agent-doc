@@ -27,6 +27,34 @@ pub fn start(file: &Path, client_id: Option<&str>) -> Result<()> {
     Ok(())
 }
 
+/// `agent-doc tmux restore-socket`. Same recovery `agent-doc start` runs
+/// before it talks to tmux. Run it from a shell inside the affected session.
+pub fn restore_socket() -> Result<()> {
+    match agent_doc_tmux_io::restore_ambient_tmux_socket()? {
+        agent_doc_tmux_io::AmbientSocketRestore::NotInTmux => {
+            anyhow::bail!(
+                "$TMUX is unset. Run this from a shell inside the tmux session whose socket was removed."
+            );
+        }
+        agent_doc_tmux_io::AmbientSocketRestore::AlreadyConnectable { socket, pid } => {
+            println!(
+                "socket {} is connectable (tmux pid {pid})",
+                socket.display()
+            );
+        }
+        agent_doc_tmux_io::AmbientSocketRestore::Recreated { socket, pid } => {
+            println!(
+                "recreated {} with SIGUSR1 to tmux pid {pid}",
+                socket.display()
+            );
+        }
+        agent_doc_tmux_io::AmbientSocketRestore::SkippedSocketOverride => {
+            println!("AGENT_DOC_TMUX_SOCKET is set, so the $TMUX socket was left unchanged");
+        }
+    }
+    Ok(())
+}
+
 pub fn ensure(
     file: &Path,
     session: Option<&str>,

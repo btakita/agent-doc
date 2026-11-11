@@ -14626,14 +14626,24 @@ fn actor_last_activity_timestamp(record: &agent_doc_controller::actor::ActorReco
     record.last_transition.timestamp.max(document_modified)
 }
 
-pub fn close_stale_dead_pane_actors_with_tmux_for_caller(
+/// Close dead-pane actors only after a successful tmux liveness sample.
+///
+/// A missing socket (`error connecting to ... No such file or directory`) is
+/// not evidence that every bound pane died. Closing those actors hides them
+/// from crash recovery and is the session crash observed when `/tmp/tmux-*/default`
+/// disappears. The sample error skips the sweep and leaves every record in place.
+pub fn close_stale_dead_pane_actors_unless_tmux_unavailable<F>(
     project_root: &Path,
+    liveness: std::result::Result<(), String>,
+    pane_alive: F,
     dry_run: bool,
     caller: &str,
     reason: &str,
-) -> Result<(usize, usize)> {
-    let tmux = agent_doc_tmux_io::configured_tmux();
-    if let Err(err) = agent_doc_tmux_io::list_panes(&tmux, None, "#{pane_id}") {
+) -> Result<(usize, usize)>
+where
+    F: FnMut(&str) -> bool,
+{
+    if let Err(err) = liveness {
         agent_doc_ops_log_io::log_op(
             project_root,
             &format!(
@@ -14642,8 +14652,22 @@ pub fn close_stale_dead_pane_actors_with_tmux_for_caller(
         );
         return Ok((0, 0));
     }
-    close_stale_dead_pane_actors_for_caller(
+    close_stale_dead_pane_actors_for_caller(project_root, pane_alive, dry_run, caller, reason)
+}
+
+pub fn close_stale_dead_pane_actors_with_tmux_for_caller(
+    project_root: &Path,
+    dry_run: bool,
+    caller: &str,
+    reason: &str,
+) -> Result<(usize, usize)> {
+    let tmux = agent_doc_tmux_io::configured_tmux();
+    let liveness = agent_doc_tmux_io::list_panes(&tmux, None, "#{pane_id}")
+        .map(|_| ())
+        .map_err(|err| err.to_string());
+    close_stale_dead_pane_actors_unless_tmux_unavailable(
         project_root,
+        liveness,
         // `#adsessreap1`: reap a record whose pane degraded `claude → zsh`. A
         // bare-shell pane is alive but no longer owns the agent, so it must
         // transition the actor to `Closed`, not be kept as false-alive.
@@ -18883,6 +18907,70 @@ mod tests {
                 .unwrap()
                 .is_some(),
             "dry-run must NOT delete the record"
+        );
+    }
+
+    #[test]
+    fn dead_pane_gc_keeps_open_actors_when_the_tmux_socket_is_unavailable() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let doc = dir.path().join("tasks/socket-down.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(&doc, "body").unwrap();
+        let document_id = doc.to_string_lossy().to_string();
+        let mut record = actor_record(&document_id, "%24", "@1");
+        record.state = agent_doc_controller::actor::ActorState::Ready;
+        store_actor_record(dir.path(), Some(0), &record).unwrap();
+
+        let (closed, kept) = close_stale_dead_pane_actors_unless_tmux_unavailable(
+            dir.path(),
+            Err(
+                "error connecting to /tmp/tmux-1000/default (No such file or directory)"
+                    .to_string(),
+            ),
+            |_| false,
+            false,
+            "sync",
+            "stale_dead_pane_actor",
+        )
+        .unwrap();
+        assert_eq!((closed, kept), (0, 0));
+        let current = load_actor_record(dir.path(), &document_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            current.state,
+            agent_doc_controller::actor::ActorState::Ready
+        );
+        assert_eq!(current.pane_id, "%24");
+    }
+
+    #[test]
+    fn dead_pane_gc_still_closes_when_the_tmux_sample_succeeds() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let doc = dir.path().join("tasks/socket-up.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(&doc, "body").unwrap();
+        let document_id = doc.to_string_lossy().to_string();
+        let mut record = actor_record(&document_id, "%24", "@1");
+        record.state = agent_doc_controller::actor::ActorState::Ready;
+        store_actor_record(dir.path(), Some(0), &record).unwrap();
+
+        let (closed, kept) = close_stale_dead_pane_actors_unless_tmux_unavailable(
+            dir.path(),
+            Ok(()),
+            |_| false,
+            false,
+            "sync",
+            "stale_dead_pane_actor",
+        )
+        .unwrap();
+        assert_eq!((closed, kept), (1, 0));
+        assert_eq!(
+            load_actor_record(dir.path(), &document_id)
+                .unwrap()
+                .unwrap()
+                .state,
+            agent_doc_controller::actor::ActorState::Closed
         );
     }
 

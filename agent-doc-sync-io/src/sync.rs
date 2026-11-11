@@ -3620,8 +3620,15 @@ fn run_with_options_internal_at_root_with_column_authority(
             Err(e) => eprintln!("[sync] actor gc warning: {}", e),
         }
         if !matches!(auto_start_mode, AutoStartMode::SafePassive) {
-            match agent_doc_controller_io::project_controller::close_stale_dead_pane_actors_for_caller(
+            // `pane_alive` collapses a connect failure to "dead". Sample first
+            // so a missing tmux socket cannot close every open session.
+            let liveness = tmux
+                .try_alive_pane_ids()
+                .map(|_| ())
+                .map_err(|err| err.to_string());
+            match agent_doc_controller_io::project_controller::close_stale_dead_pane_actors_unless_tmux_unavailable(
                 &scope_root,
+                liveness,
                 |pane| {
                     agent_doc_supervisor_process::session_liveness::pane_owns_live_agent(
                         tmux, pane,

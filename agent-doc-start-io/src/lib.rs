@@ -289,6 +289,18 @@ fn ensure_tmux_session_with_ide_client(
             session_name
         );
     }
+    // A missing server socket is not a fresh project. `new-session` would
+    // start a replacement server whose first window is the login shell, and
+    // the IDE then attaches that broken link. Open actors stay bound until
+    // the original server can be sampled again.
+    if !session_exists
+        && !report.classification.tmux_server_running
+        && open_bound_actor_panes(&project_root)
+    {
+        anyhow::bail!(
+            "tmux server is unavailable and open agent-doc sessions are still bound to it; not creating a replacement session or IDE terminal"
+        );
+    }
     let mut created = false;
     let pane_id = if session_exists {
         first_session_pane(tmux, &session_name)?
@@ -521,6 +533,7 @@ pub fn start_in_tmux_pane_for_client(
 ) -> Result<TmuxEnsureOutcome> {
     report_progress_phase("document_admission");
     prepare_start_document_for_tmux_bootstrap(file)?;
+    restore_missing_ambient_tmux_socket()?;
     let tmux = tmux_for_environment();
     let target = match start_bootstrap_target(&tmux, file, force, client_id)? {
         StartBootstrap::Reuse(outcome) => {
@@ -693,6 +706,26 @@ fn prepare_start_document_for_tmux_bootstrap(file: &Path) -> Result<()> {
 
 fn tmux_for_environment() -> tmux_router::Tmux {
     agent_doc_tmux_io::configured_tmux()
+}
+
+/// Recreate `$TMUX`'s socket when that server is alive but the path does not connect.
+/// Unset `$TMUX` is success: an outside-tmux start provisions its own session.
+fn restore_missing_ambient_tmux_socket() -> Result<()> {
+    agent_doc_tmux_io::restore_ambient_tmux_socket()?;
+    Ok(())
+}
+
+/// True when a non-closed actor still names a tmux pane. A missing server
+/// socket must not be replaced out from under those bindings.
+fn open_bound_actor_panes(project_root: &Path) -> bool {
+    let Ok(store) = agent_doc_controller_io::project_controller::load_actor_store(project_root)
+    else {
+        return false;
+    };
+    store.values().any(|record| {
+        record.state != agent_doc_controller::actor::ActorState::Closed
+            && !record.pane_id.is_empty()
+    })
 }
 
 fn terminal_host_report(tmux_installed: bool, tmux_server_running: bool) -> TerminalHostReport {
@@ -1621,6 +1654,7 @@ fn prepare_start_runtime_with_admission(
             reason,
         );
     }
+    restore_missing_ambient_tmux_socket()?;
     let admission_tmux = agent_doc_tmux_io::configured_tmux();
     if disk_document_allows_pre_admission_pane_guard(file)
         && let Some(pane_id) = current_pane_id_from_env()
@@ -3563,6 +3597,65 @@ mod tests {
             ("0".to_string(), "default")
         );
         assert!(resolve_tmux_session_name(Some("  "), None).is_err());
+    }
+
+    /// A dead tmux socket must not be replaced while sessions are still bound
+    /// to it. Replacing it is what opened the IDE terminal onto a login-shell
+    /// window (`window_name=zsh`) after `/tmp/tmux-1000/default` disappeared.
+    #[test]
+    fn ensure_refuses_a_replacement_server_while_actors_stay_bound() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("session.md");
+        std::fs::write(&file, "---\nagent_doc_session: socket-down\n---\n").unwrap();
+        std::fs::write(
+            dir.path().join(".agent-doc/config.toml"),
+            "tmux_session = \"0\"\n",
+        )
+        .unwrap();
+        let document_id = file.to_string_lossy().to_string();
+        let record = agent_doc_controller::actor::ActorRecord {
+            document_id: document_id.clone(),
+            session_id: "session-1".to_string(),
+            generation: 1,
+            pane_id: "%24".to_string(),
+            window_id: "@1".to_string(),
+            harness: "codex".to_string(),
+            state: agent_doc_controller::actor::ActorState::Ready,
+            last_transition: agent_doc_controller::actor::ActorLastTransition {
+                caller: "start".to_string(),
+                reason: "session_start".to_string(),
+                timestamp: 10,
+                prior_generation: 0,
+                new_generation: 1,
+            },
+        };
+        agent_doc_controller_io::project_controller::store_actor_record(
+            dir.path(),
+            Some(0),
+            &record,
+        )
+        .unwrap();
+        let tmux = agent_doc_tmux_io::isolated_test_tmux("agent-doc-socket-down");
+        let error = ensure_tmux_session_for_ide_client_with(&tmux, &file, None, None)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("not creating a replacement session or IDE terminal"),
+            "{error}"
+        );
+        assert!(
+            !tmux.running(),
+            "refusing the replacement must not start a tmux server"
+        );
+        let kept = agent_doc_controller_io::project_controller::load_actor_record(
+            dir.path(),
+            &document_id,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(kept.state, agent_doc_controller::actor::ActorState::Ready);
+        assert_eq!(kept.pane_id, "%24");
     }
 
     /// `#ideriderindependentnav` P3: an IDE terminal ensure on behalf of an

@@ -14292,9 +14292,11 @@ where
 /// dead-pane actor and decide whether the GC must leave it to the watchdog.
 ///
 /// Gates run cheapest-first and fail toward `Close` (the pre-fix behaviour):
-/// no recorded supervisor pid, a live pid, or an operator stop never touch
-/// tmux. Only a proven-dead supervisor that was not stopped on purpose reads
-/// the session log and the pane binding.
+/// a live pid or an operator stop of a recorded pid never touch tmux. A
+/// missing lease still observes the claiming shell (`#shellstart`): a live
+/// bare shell with no serving start is deferred, and every other leaseless
+/// pane closes. A document that is not in the session registry closes before
+/// tmux, because the shell cannot be proven.
 fn dead_pane_actor_gc_decision_for_record(
     project_root: &Path,
     record: &agent_doc_controller::actor::ActorRecord,
@@ -14306,26 +14308,43 @@ fn dead_pane_actor_gc_decision_for_record(
     let Ok(conn) = open_state_db(project_root) else {
         return DeadPaneActorGcDecision::Close;
     };
-    let Some(supervisor_pid) =
+    let supervisor_pid =
         load_supervisor_lease_from_db(&conn, &record.document_id, record.generation)
             .ok()
             .flatten()
-            .and_then(|lease| lease.supervisor_pid)
-    else {
-        return DeadPaneActorGcDecision::Close;
+            .and_then(|lease| lease.supervisor_pid);
+    let exit = if let Some(supervisor_pid) = supervisor_pid {
+        if supervisor_pid == std::process::id() || process_is_alive(supervisor_pid) {
+            return DeadPaneActorGcDecision::Close;
+        }
+        let exit = rpc::supervisor_watchdog_intentional_exit_decision(
+            &conn,
+            &record.document_id,
+            supervisor_pid,
+            record.generation,
+        );
+        if exit == agent_doc_supervisor::intentional_exit::IntentionalExitDecision::Intentional {
+            return DeadPaneActorGcDecision::Close;
+        }
+        exit
+    } else {
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_millis() as u64)
+            .unwrap_or(0);
+        let marker = agent_doc_supervisor_io::intentional_exit::load_intentional_exit_from_db(
+            &conn,
+            &record.document_id,
+        )
+        .ok()
+        .flatten();
+        agent_doc_controller::shell_start::shell_start_exit_hold(
+            marker.as_ref(),
+            &record.pane_id,
+            record.generation,
+            now_ms,
+        )
     };
-    if supervisor_pid == std::process::id() || process_is_alive(supervisor_pid) {
-        return DeadPaneActorGcDecision::Close;
-    }
-    let exit = rpc::supervisor_watchdog_intentional_exit_decision(
-        &conn,
-        &record.document_id,
-        supervisor_pid,
-        record.generation,
-    );
-    if exit == agent_doc_supervisor::intentional_exit::IntentionalExitDecision::Intentional {
-        return DeadPaneActorGcDecision::Close;
-    }
     let Some(file) = agent_doc_session_registry_io::load_in(project_root)
         .ok()
         .and_then(|registry| {
@@ -14342,9 +14361,6 @@ fn dead_pane_actor_gc_decision_for_record(
             .ok()
             .flatten()
             .is_some_and(|status| status.latest_session_open());
-    if !session_open {
-        return DeadPaneActorGcDecision::Close;
-    }
     // The watchdog skips a paused document, so deferring to it would leave the
     // binding open with nothing to recover it. An unreadable control row
     // fails toward `Close` like every other gate here.
@@ -14356,15 +14372,41 @@ fn dead_pane_actor_gc_decision_for_record(
     .map(|control| rpc::supervisor_watchdog_blocked_by_queue_control(control.as_ref()))
     .unwrap_or(true);
     let tmux = agent_doc_tmux_io::configured_tmux();
+    let pane_alive = tmux.pane_alive(&record.pane_id);
+    let bare_shell = pane_alive
+        && agent_doc_tmux_io::target_current_command(&tmux, &record.pane_id)
+            .as_deref()
+            .map(str::trim)
+            .is_some_and(agent_doc_tmux::pane_current_command_is_bare_shell);
+    let start_running =
+        agent_doc_supervisor_io::process::serving_supervisor_pid_for_doc(&file).is_some();
+    let claiming_shell_needs_start = agent_doc_controller::shell_start::decide_claiming_shell_start(
+        pane_alive,
+        bare_shell,
+        start_running,
+    )
+        == agent_doc_controller::shell_start::ClaimingShellStartDecision::StartAgentDoc;
+    let pending_cold_start = exit
+        == agent_doc_supervisor::intentional_exit::IntentionalExitDecision::ReplacementColdStartPending;
+    // A leaseless pane that is not a claiming shell, and is not an in-grace
+    // cold start, closes. A dead lease with a closed session does the same
+    // unless that shell or grace still owes a start.
+    if !claiming_shell_needs_start
+        && !pending_cold_start
+        && (supervisor_pid.is_none() || !session_open)
+    {
+        return DeadPaneActorGcDecision::Close;
+    }
     dead_pane_actor_gc_decision(DeadPaneActorGcFacts {
-        supervisor_dead: true,
+        supervisor_dead: supervisor_pid.is_some(),
         exit,
         binding: watchdog_binding_decision(
-            tmux.pane_alive(&record.pane_id),
+            pane_alive,
             rpc::supervisor_watchdog_pane_stashed(&tmux, &record.pane_id),
         ),
         session_open,
         watchdog_paused,
+        claiming_shell_needs_start,
     })
 }
 
@@ -14626,14 +14668,24 @@ fn actor_last_activity_timestamp(record: &agent_doc_controller::actor::ActorReco
     record.last_transition.timestamp.max(document_modified)
 }
 
-pub fn close_stale_dead_pane_actors_with_tmux_for_caller(
+/// Close dead-pane actors only after a successful tmux liveness sample.
+///
+/// A missing socket (`error connecting to ... No such file or directory`) is
+/// not evidence that every bound pane died. Closing those actors hides them
+/// from crash recovery and is the session crash observed when `/tmp/tmux-*/default`
+/// disappears. The sample error skips the sweep and leaves every record in place.
+pub fn close_stale_dead_pane_actors_unless_tmux_unavailable<F>(
     project_root: &Path,
+    liveness: std::result::Result<(), String>,
+    pane_alive: F,
     dry_run: bool,
     caller: &str,
     reason: &str,
-) -> Result<(usize, usize)> {
-    let tmux = agent_doc_tmux_io::configured_tmux();
-    if let Err(err) = agent_doc_tmux_io::list_panes(&tmux, None, "#{pane_id}") {
+) -> Result<(usize, usize)>
+where
+    F: FnMut(&str) -> bool,
+{
+    if let Err(err) = liveness {
         agent_doc_ops_log_io::log_op(
             project_root,
             &format!(
@@ -14642,8 +14694,22 @@ pub fn close_stale_dead_pane_actors_with_tmux_for_caller(
         );
         return Ok((0, 0));
     }
-    close_stale_dead_pane_actors_for_caller(
+    close_stale_dead_pane_actors_for_caller(project_root, pane_alive, dry_run, caller, reason)
+}
+
+pub fn close_stale_dead_pane_actors_with_tmux_for_caller(
+    project_root: &Path,
+    dry_run: bool,
+    caller: &str,
+    reason: &str,
+) -> Result<(usize, usize)> {
+    let tmux = agent_doc_tmux_io::configured_tmux();
+    let liveness = agent_doc_tmux_io::list_panes(&tmux, None, "#{pane_id}")
+        .map(|_| ())
+        .map_err(|err| err.to_string());
+    close_stale_dead_pane_actors_unless_tmux_unavailable(
         project_root,
+        liveness,
         // `#adsessreap1`: reap a record whose pane degraded `claude → zsh`. A
         // bare-shell pane is alive but no longer owns the agent, so it must
         // transition the actor to `Closed`, not be kept as false-alive.
@@ -18887,6 +18953,70 @@ mod tests {
     }
 
     #[test]
+    fn dead_pane_gc_keeps_open_actors_when_the_tmux_socket_is_unavailable() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let doc = dir.path().join("tasks/socket-down.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(&doc, "body").unwrap();
+        let document_id = doc.to_string_lossy().to_string();
+        let mut record = actor_record(&document_id, "%24", "@1");
+        record.state = agent_doc_controller::actor::ActorState::Ready;
+        store_actor_record(dir.path(), Some(0), &record).unwrap();
+
+        let (closed, kept) = close_stale_dead_pane_actors_unless_tmux_unavailable(
+            dir.path(),
+            Err(
+                "error connecting to /tmp/tmux-1000/default (No such file or directory)"
+                    .to_string(),
+            ),
+            |_| false,
+            false,
+            "sync",
+            "stale_dead_pane_actor",
+        )
+        .unwrap();
+        assert_eq!((closed, kept), (0, 0));
+        let current = load_actor_record(dir.path(), &document_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            current.state,
+            agent_doc_controller::actor::ActorState::Ready
+        );
+        assert_eq!(current.pane_id, "%24");
+    }
+
+    #[test]
+    fn dead_pane_gc_still_closes_when_the_tmux_sample_succeeds() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let doc = dir.path().join("tasks/socket-up.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(&doc, "body").unwrap();
+        let document_id = doc.to_string_lossy().to_string();
+        let mut record = actor_record(&document_id, "%24", "@1");
+        record.state = agent_doc_controller::actor::ActorState::Ready;
+        store_actor_record(dir.path(), Some(0), &record).unwrap();
+
+        let (closed, kept) = close_stale_dead_pane_actors_unless_tmux_unavailable(
+            dir.path(),
+            Ok(()),
+            |_| false,
+            false,
+            "sync",
+            "stale_dead_pane_actor",
+        )
+        .unwrap();
+        assert_eq!((closed, kept), (1, 0));
+        assert_eq!(
+            load_actor_record(dir.path(), &document_id)
+                .unwrap()
+                .unwrap()
+                .state,
+            agent_doc_controller::actor::ActorState::Closed
+        );
+    }
+
+    #[test]
     fn close_stale_dead_pane_actors_closes_and_clears_dead_binding() {
         let dir = tempfile::TempDir::new().unwrap();
         let dead_doc = dir.path().join("tasks/dead-pane.md");
@@ -18995,10 +19125,12 @@ mod tests {
         );
     }
 
-    /// Without a recorded supervisor lease there is nothing for the watchdog to
-    /// recover, so the production observation closes without consulting tmux.
+    /// A leaseless actor whose document is not in the session registry cannot
+    /// be proven to be a claiming shell. It still closes, and the decision
+    /// does not call tmux. A registered live shell with no start is deferred
+    /// by [`agent_doc_supervisor::crash_policy::dead_pane_actor_gc_decision`].
     #[test]
-    fn dead_pane_gc_closes_without_a_supervisor_lease() {
+    fn dead_pane_gc_closes_a_leaseless_actor_with_no_registry_document() {
         let dir = tempfile::TempDir::new().unwrap();
         let doc = dir.path().join("tasks/no-lease.md");
         std::fs::create_dir_all(doc.parent().unwrap()).unwrap();

@@ -1370,6 +1370,20 @@ fn apply_claude_stop_with_drain_readiness(
     // consulted: looping a retained write re-answers an answered head.
     let cycle = agent_doc_cycle_state_io::load(&file)?;
     if cycle.as_ref().is_some_and(|cycle| cycle.is_open()) {
+        // `#transientcloseout` on an open cycle consults the disk only before
+        // a response exists. `PreflightStarted` has no captured response, so a
+        // visible `🚧` is live work. `ResponseCaptured` is the retained write:
+        // preflight's `🚧` is still on the head, and refusing here blocks the
+        // agent from reporting the failed closeout (`#stopneedsclosedcycle`).
+        // A later open phase has landed the write or is still this same allow.
+        if cycle
+            .as_ref()
+            .is_some_and(|cycle| cycle.phase == agent_doc_turn::CyclePhase::PreflightStarted)
+        {
+            if let Some(continuation) = transient_turn_end_continuation(&file)? {
+                return Ok(Some(continuation));
+            }
+        }
         agent_doc_ops_log_io::log_op(
             &file,
             "claude_stop_queue_continuation_skipped reason=cycle_open action=allow_final_answer",
@@ -1384,6 +1398,8 @@ fn apply_claude_stop_with_drain_readiness(
     // `cycle-1790898286195` with no response, the operator's trigger was refused,
     // and this hook still forbade the final answer and ordered a `/loop` that
     // could only hit the same refusal. The operator must hear the refusal.
+    // This path stays an allow. A transient glyph on the disk mirror is not a
+    // reason to withhold that report.
     if cycle
         .as_ref()
         .is_some_and(|cycle| cycle.response_sha256.is_none())
@@ -1412,10 +1428,54 @@ fn apply_claude_stop_with_drain_readiness(
     if let Some(continuation) = claude_reported_writeback_continuation(input, &file) {
         return Ok(Some(continuation));
     }
-    Ok(
-        final_status_sync_continuation(&file, input.stop_hook_active)?
-            .map(|reason| ClaudeStopContinuation { reason }),
-    )
+    if let Some(reason) = final_status_sync_continuation(&file, input.stop_hook_active)? {
+        return Ok(Some(ClaudeStopContinuation { reason }));
+    }
+    // `#transientcloseout`: session-check already refuses a successful closeout.
+    // Grok ends the turn through this Claude-format Stop hook and never reaches
+    // that inspect. A visible `🚧` or `⚠️🚧` row used to be a quiet
+    // `waiting_on_claims` exit (sdk-dev.md, `subagent:rpversionpr` and
+    // `subagent:pr228seventeen`, 2026-11-11). A genuine turn end stays open
+    // until every live transient row leaves that set. Observe-only stops return
+    // above and do not consult this gate.
+    transient_turn_end_continuation(&file)
+}
+
+/// Refusal for a genuine turn end while live queue rows are still transient.
+///
+/// `None` when every live row is resting, struck, or unmarked. An unreadable
+/// document is not proof that the rows are resting, so the turn stays open.
+fn transient_turn_end_continuation(file: &Path) -> Result<Option<ClaudeStopContinuation>> {
+    let content = match current_document_content(file, "claude_stop_transient_closeout") {
+        Ok(content) => content,
+        Err(err) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "claude_stop_transient_closeout_unreadable error={err:#} action=block_final_answer (#transientcloseout)"
+                ),
+            );
+            return Ok(Some(ClaudeStopContinuation {
+                reason: format!(
+                    "agent-doc cannot end this turn because {} could not be read to prove live queue rows are resting (#transientcloseout): {err:#}. Do not send the final answer yet.",
+                    file.display()
+                ),
+            }));
+        }
+    };
+    let Some(failure) = agent_doc_queue::transient_closeout::normal_closeout_failure(&content)?
+    else {
+        return Ok(None);
+    };
+    agent_doc_ops_log_io::log_op(
+        file,
+        "claude_stop_transient_closeout action=block_final_answer (#transientcloseout)",
+    );
+    Ok(Some(ClaudeStopContinuation {
+        reason: format!(
+            "{failure}\nDo not send the final answer yet. Finish each owed transition in this turn."
+        ),
+    }))
 }
 
 /// The queue half of [`apply_claude_stop_with_drain_readiness`]: a durably
@@ -9753,6 +9813,62 @@ Reviewed the gated items.\n\
         assert!(response.get("decision").is_none(), "{response}");
     }
 
+    /// `#transientcloseout`: Grok's genuine `end_turn` uses this hook. A
+    /// heading-level `🚧` leaf and a nested `⚠️🚧` leaf are not a quiet
+    /// in-flight wait. Observe-only session end still allows the stop.
+    #[test]
+    fn grok_end_turn_refuses_sdk_dev_transient_rows() {
+        let dir = setup_project();
+        let doc = dir.path().join("sdk-dev.md");
+        let content = "\
+---
+agent_doc_session: sid
+agent_doc_format: template
+agent: grok
+---
+
+## haiven-sdk-prs <!-- agent:run id=\"haiven-sdk-prs\" subagents -->
+- ### https://github.com/haiven-dev/haiven-sdk/pull/228
+  - %% ci(release): dispatch sdk-dev promotion from main %%
+  - ⚠️🚧 [#subagent:pr228seventeen#17] #adversarial-pr [#q-abf0adec8270]
+- ### 🚧 [#subagent:rpversionpr#1] Do we need to create a PR to make Release Please reliably update the version [#q-3a7937eee419]
+<!-- /agent:run -->
+";
+        fs::write(&doc, content).unwrap();
+        init_git_repo(dir.path(), &doc);
+        track_doc(&dir, &doc, "");
+        complete_run(&doc);
+
+        let ended =
+            claude_stop_response(Some(&grok_stop_payload(dir.path(), "end_turn", None))).unwrap();
+        let context = ended["hookSpecificOutput"]["additionalContext"]
+            .as_str()
+            .expect("transient rows must keep the turn open");
+        assert!(context.contains("normal closeout refused"), "{context}");
+        assert!(
+            context.contains("🚧 [#subagent:rpversionpr#1]"),
+            "{context}"
+        );
+        assert!(
+            context.contains("⚠️🚧 [#subagent:pr228seventeen#17]"),
+            "{context}"
+        );
+        assert!(
+            context.contains("Do not send the final answer yet"),
+            "{context}"
+        );
+        assert!(ended.get("decision").is_none(), "{ended}");
+
+        let observed =
+            claude_stop_response(Some(&grok_stop_payload(dir.path(), "channel_closed", None)))
+                .unwrap();
+        assert_eq!(
+            observed,
+            serde_json::json!({}),
+            "an observe-only session end does not consult transient rows: {observed}"
+        );
+    }
+
     #[test]
     fn claude_stop_rechecks_status_sync_once_at_the_final_boundary() {
         let dir = setup_project();
@@ -10731,6 +10847,64 @@ Reviewed the gated items.\n\
             .unwrap()
             .is_none(),
             "a retained write is a failed closeout: the agent must be free to report it"
+        );
+    }
+
+    /// `#stopneedsclosedcycle`: the same retained write with preflight's `🚧`
+    /// still on the head. The glyph is the disk mirror the write has not
+    /// updated. Refusing it would hide the failed closeout. `PreflightStarted`
+    /// still refuses, and a later Stop on the captured cycle still allows.
+    #[test]
+    fn claude_stop_retained_write_with_running_glyph_still_allows_the_report() {
+        let dir = setup_project();
+        let doc = write_auto_queue_doc(&dir, &["🚧 fix the next queue item"]);
+        init_git_repo(dir.path(), &doc);
+        track_doc(&dir, &doc, "");
+        agent_doc_queue_io::queue_continuation::reconcile_marker(&doc, "session-check")
+            .expect("continuation required");
+
+        let original = std::fs::read_to_string(&doc).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(&original), Some(&original)).unwrap();
+        let input = ClaudeStopInput {
+            session_id: "codex-session".to_string(),
+            cwd: dir.path().display().to_string(),
+            stop_hook_active: false,
+            transcript_path: None,
+            reason: None,
+            subagent_type: None,
+        };
+        let preflight = apply_claude_stop(&input)
+            .unwrap()
+            .expect("PreflightStarted with a visible 🚧 keeps the turn open");
+        assert!(
+            preflight.reason.contains("normal closeout refused"),
+            "{}",
+            preflight.reason
+        );
+        assert!(
+            preflight.reason.contains("🚧 fix the next queue item"),
+            "{}",
+            preflight.reason
+        );
+
+        agent_doc_cycle_state_io::mark_response_captured(
+            &doc,
+            "response_captured",
+            Some(&original),
+            Some(&original),
+            "response-sha",
+            None,
+        )
+        .unwrap();
+        assert!(
+            apply_claude_stop(&input).unwrap().is_none(),
+            "a retained write with a 🚧 head must let the agent report the failed closeout"
+        );
+        let mut recursive = input;
+        recursive.stop_hook_active = true;
+        assert!(
+            apply_claude_stop(&recursive).unwrap().is_none(),
+            "a later Stop on the same retained write must still allow the report"
         );
     }
 

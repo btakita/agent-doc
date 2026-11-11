@@ -1470,6 +1470,118 @@ type ComposedOccurrence = (Vec<(String, ItemValue)>, Vec<CellConflict>);
 /// the order spine; `exchange` uses `ours` (append-only committed history) as
 /// the spine. Items present on only one side weave in after their nearest placed
 /// predecessor.
+fn list_item_id_from_node_key(key: &str) -> &str {
+    let identity = repeat_disambiguator_primary(node_key_identity(key));
+    let Some((_, rest)) = identity.split_once(':') else {
+        return identity;
+    };
+    rest.split_once(':')
+        .map(|(_, item_id)| item_id)
+        .unwrap_or(rest)
+}
+
+/// `#claimtypingprefix`: drop a strict prefix fragment, and extra copies of the
+/// row it continues, before repeat alignment gives those copies stable ids.
+fn collapse_queue_typing_copies(
+    base: &ComponentOccurrence,
+    ours: &ComponentOccurrence,
+    theirs: &ComponentOccurrence,
+) -> (
+    ComponentOccurrence,
+    ComponentOccurrence,
+    ComponentOccurrence,
+) {
+    let free = |occ: &ComponentOccurrence| {
+        occ.items
+            .iter()
+            .map(|(key, text)| {
+                crate::crdt::free_text_instruction(list_item_id_from_node_key(key), text)
+            })
+            .collect::<Vec<_>>()
+    };
+    let marked = |occ: &ComponentOccurrence| {
+        occ.items
+            .iter()
+            .map(|(_, text)| crate::crdt::line_carries_attempt_projection(text))
+            .collect::<Vec<_>>()
+    };
+    let base_free = free(base);
+    let ours_free = free(ours);
+    let theirs_free = free(theirs);
+    let ours_marked = marked(ours);
+    let theirs_marked = marked(theirs);
+    let projection = |occ: &ComponentOccurrence, marked: &[bool]| {
+        occ.items
+            .iter()
+            .enumerate()
+            .map(|(index, (_, text))| {
+                marked
+                    .get(index)
+                    .copied()
+                    .unwrap_or(false)
+                    .then(|| crate::crdt::attempt_projection_tokens(text))
+                    .flatten()
+            })
+            .collect::<Vec<_>>()
+    };
+    let ours_projection = projection(ours, &ours_marked);
+    let theirs_projection = projection(theirs, &theirs_marked);
+    let (ours_keep, theirs_keep) = crate::crdt::typing_fragment_keep_masks(
+        &base_free,
+        &ours_free,
+        &theirs_free,
+        &ours_marked,
+        &theirs_marked,
+    );
+    let (dropped_marked, surviving) = crate::crdt::typing_projection_state(
+        &ours_free,
+        &theirs_free,
+        &ours_keep,
+        &theirs_keep,
+        &ours_projection,
+        &theirs_projection,
+    );
+    let ours_paint = crate::crdt::continuation_paints(
+        &ours_free,
+        &ours_keep,
+        &ours_marked,
+        &dropped_marked,
+        &surviving,
+    );
+    let theirs_paint = crate::crdt::continuation_paints(
+        &theirs_free,
+        &theirs_keep,
+        &theirs_marked,
+        &dropped_marked,
+        &surviving,
+    );
+    let filter = |occ: &ComponentOccurrence, keep: &[bool], paint: &[Option<String>]| {
+        let items = occ
+            .items
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| keep.get(*index).copied().unwrap_or(true))
+            .map(|(index, (key, text))| {
+                let painted = match paint.get(index).and_then(Option::as_ref) {
+                    Some(projection) => crate::crdt::paint_attempt_projection(text, projection),
+                    None => text.clone(),
+                };
+                (key.clone(), painted)
+            })
+            .collect();
+        ComponentOccurrence {
+            component: occ.component.clone(),
+            occurrence: occ.occurrence,
+            items,
+        }
+    };
+    (
+        base.clone(),
+        filter(ours, &ours_keep, &ours_paint),
+        filter(theirs, &theirs_keep, &theirs_paint),
+    )
+}
+
 fn compose_occurrence(
     base: &ComponentOccurrence,
     ours: &ComponentOccurrence,
@@ -1477,6 +1589,14 @@ fn compose_occurrence(
     policy: ConflictPolicy,
     retain_operator_items: bool,
 ) -> Option<ComposedOccurrence> {
+    let collapsed =
+        (ours.component == "queue").then(|| collapse_queue_typing_copies(base, ours, theirs));
+    let base = collapsed.as_ref().map(|(base, _, _)| base).unwrap_or(base);
+    let ours = collapsed.as_ref().map(|(_, ours, _)| ours).unwrap_or(ours);
+    let theirs = collapsed
+        .as_ref()
+        .map(|(_, _, theirs)| theirs)
+        .unwrap_or(theirs);
     let aligned = if ours.component == "exchange" {
         None
     } else {
@@ -1729,6 +1849,12 @@ fn resolve_content_divergence(
         // explicitly OFF (the legacy behavior), every both-changed cell is a REAL
         // content conflict resolved by the deterministic policy.
         (true, true) => {
+            if occ.component == "queue"
+                && let Some(kept) =
+                    crate::crdt::projection_only_queue_line(o, t, base_value.map(String::as_str))
+            {
+                return kept.to_string();
+            }
             if cell_merge_opcapture_enabled()
                 && let Some(base) = base_value
                 && let Some(merged) = op_level_merge(base, o, t)

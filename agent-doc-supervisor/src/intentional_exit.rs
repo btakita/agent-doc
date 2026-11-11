@@ -89,6 +89,26 @@ pub fn replacement_cold_start_marker(
     })
 }
 
+/// `#shellstart`: grace marker for a claiming-shell start that has no supervisor
+/// pid to name. The shell hold matches pane and generation, so `supervisor_pid`
+/// is 0. A later tick with a real lease pid sees this row as stale and is not
+/// shielded by it.
+pub fn shell_start_grace_marker(
+    generation: u64,
+    pane_id: &str,
+    session_id: &str,
+    now_ms: u64,
+) -> IntentionalExitMarker {
+    IntentionalExitMarker {
+        supervisor_pid: 0,
+        generation,
+        pane_id: pane_id.to_string(),
+        session_id: session_id.to_string(),
+        signal: REPLACEMENT_COLD_START_SIGNAL.to_string(),
+        recorded_at_ms: now_ms,
+    }
+}
+
 /// What the crash watchdog should make of a dead supervisor given the marker
 /// row (if any) for its document.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

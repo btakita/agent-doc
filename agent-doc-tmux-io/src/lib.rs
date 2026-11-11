@@ -9,6 +9,9 @@ pub mod editor_view;
 pub mod isolated_test_server;
 pub mod observation_cache;
 pub mod pane_order;
+pub mod socket_restore;
+
+pub use socket_restore::{AmbientSocketRestore, RestoreError, restore_ambient_tmux_socket};
 
 #[cfg(all(test, unix))]
 mod pane_launch_live_tests;

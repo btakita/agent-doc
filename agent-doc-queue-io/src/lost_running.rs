@@ -219,4 +219,72 @@ mod tests {
             "stopped harness freeze is offered for a new generation, got {offered:?}"
         );
     }
+
+    #[test]
+    fn a_lost_non_abandon_freeze_is_retried_during_a_turn() {
+        let item = "#subagents lostretry stayed lost after the harness freeze";
+        let (_dir, file, content) = project(item);
+        let pinned = 4_000_000;
+        let _clock = crate::queue_claim::pin_claim_clock_for_current_thread(pinned);
+        let (_, claimed) =
+            crate::queue_claim::claim(&file, item, "subagent:lostretry", 60).unwrap();
+        crate::queue_claim::start_attempt(
+            &file,
+            item,
+            "subagent:lostretry",
+            "lostretry",
+            60,
+            claimed.generation,
+        )
+        .unwrap();
+        crate::queue_claim::freeze_attempt(
+            &file,
+            item,
+            Some(claimed.generation),
+            "harness reported the worker ended",
+        )
+        .unwrap();
+        let abandoned = crate::queue_claim::abandon_attempt(&file, item, Some(claimed.generation))
+            .unwrap()
+            .expect("frozen attempt is retained as lost");
+        assert_eq!(abandoned.state, QueueClaimState::Lost);
+        assert!(
+            abandoned
+                .frozen
+                .as_ref()
+                .is_some_and(|freeze| !freeze.is_abandon()),
+            "an existing harness freeze is not rewritten into an abandon"
+        );
+        assert!(!agent_doc_queue::lost_running_recovery::retry_authorized(
+            &abandoned
+        ));
+
+        let applied = recover_lost_running_automatically(&file, true).unwrap();
+        assert_eq!(applied.len(), 1);
+        assert_eq!(applied[0].action, LostRunningAction::Retry);
+        assert!(applied[0].during_turn);
+        let stored = crate::queue_claim::load_ledger(&file).unwrap();
+        assert_eq!(stored.claims[0].state, QueueClaimState::Lost);
+        assert_eq!(stored.claims[0].lost_from, Some(QueueClaimState::Running));
+        assert_eq!(stored.claims[0].generation, claimed.generation);
+        assert!(stored.claims[0].frozen.is_some());
+        assert!(agent_doc_queue::lost_running_recovery::retry_authorized(
+            &stored.claims[0]
+        ));
+        assert!(
+            stored.claims[0]
+                .lost_continue
+                .as_ref()
+                .is_some_and(|record| record.failed
+                    && record.during_turn
+                    && record.reason.contains("worker is gone"))
+        );
+        let offered =
+            crate::subagent_dispatch::pending_subagent_dispatch_for_content(&file, &content)
+                .unwrap();
+        assert!(
+            offered.iter().any(|head| head.contains(item)),
+            "lost harness freeze is retried during a turn, got {offered:?}"
+        );
+    }
 }

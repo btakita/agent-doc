@@ -4099,6 +4099,8 @@ enum TmuxAction {
         #[arg(long, requires = "ide_terminal")]
         client_id: Option<String>,
     },
+    /// Recreate the tmux socket named by `$TMUX` when that server is still alive
+    RestoreSocket,
 }
 
 #[derive(Subcommand)]
@@ -7310,6 +7312,7 @@ fn try_main() -> anyhow::Result<()> {
                 ide_terminal,
                 client_id.as_deref(),
             ),
+            TmuxAction::RestoreSocket => tmux_cmd::restore_socket(),
         },
         Commands::Run {
             file,

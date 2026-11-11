@@ -566,6 +566,28 @@ fn pending_explicit_send_count(file: &Path) -> usize {
     }
 }
 
+fn record_route_sync_baseline(
+    file: &Path,
+    prepared: &agent_doc_session_check_io::midturn_steering::RouteSyncSteering,
+) {
+    if let Err(err) =
+        agent_doc_session_check_io::midturn_steering::record_route_sync_steering_delivered(
+            file,
+            &prepared.cycle_id,
+            &prepared.content,
+        )
+    {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "route_sync_steering_baseline_record_failed file={} error={} (#routesyncsteer)",
+                file.display(),
+                one_line_error(&err)
+            ),
+        );
+    }
+}
+
 /// Count, and for a busy route-owned composer submit, the explicit send.
 ///
 /// `submit` is false when the caller has already proved the pane idle: typing
@@ -637,6 +659,23 @@ fn running_turn_steering_claim(
     let Some(prepared) = prepared else {
         return RunningTurnSteeringClaim::Count(0);
     };
+    // A pool refill or an earlier steering paste already queued this turn's
+    // one reference. Folding the diff into that payload is the delivery.
+    if !prepared.needs_queue_paste {
+        record_route_sync_baseline(file, &prepared);
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "route_sync_steering_coalesced file={} pane={pane} harness={} items={} bytes={} cycle={} (#steercoalesce)",
+                file.display(),
+                harness_cfg.binary,
+                prepared.pending_items,
+                prepared.instructions.len(),
+                prepared.cycle_id,
+            ),
+        );
+        return RunningTurnSteeringClaim::Count(prepared.pending_items.max(1));
+    }
     if let Err(err) = agent_doc_tmux_io::paste_bracketed_text_and_submit(
         tmux,
         pane,
@@ -680,22 +719,21 @@ fn running_turn_steering_claim(
             ));
         }
     };
-    if let Err(err) =
-        agent_doc_session_check_io::midturn_steering::record_route_sync_steering_delivered(
-            file,
-            &prepared.cycle_id,
-            &prepared.content,
-        )
-    {
+    if let Err(err) = agent_doc_controller_io::live_turn_follow_up::mark_live_turn_follow_up_queued(
+        file,
+        &prepared.cycle_id,
+    ) {
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
-                "route_sync_steering_baseline_record_failed file={} error={} (#routesyncsteer)",
+                "live_turn_follow_up_mark_failed file={} cycle={} error={} (#steercoalesce)",
                 file.display(),
+                prepared.cycle_id,
                 one_line_error(&err)
             ),
         );
     }
+    record_route_sync_baseline(file, &prepared);
     agent_doc_ops_log_io::log_op(
         file,
         &format!(

@@ -47,7 +47,7 @@ pub const STATUS_SYNC_CHECKPOINT_MARKER: &str = "[agent-doc] status-sync checkpo
 /// A compact steering reference is intentionally short-lived. The active
 /// cycle check normally expires it first; this wall-clock ceiling also bounds
 /// abandoned records when a composer paste never reaches the agent.
-pub const STEERING_SURROGATE_TTL_MS: u64 = 5 * 60 * 1_000;
+pub use agent_doc_controller_io::live_turn_follow_up::STEERING_SURROGATE_TTL_MS;
 
 const STEERING_SURROGATE_KEY_PREFIX: &str = "steering-surrogate:";
 
@@ -101,10 +101,6 @@ impl SteeringReport {
     }
 }
 
-fn shell_single_quote(text: &str) -> String {
-    format!("'{}'", text.replace('\'', "'\\''"))
-}
-
 fn steering_surrogate_key(token: &str) -> String {
     format!("{STEERING_SURROGATE_KEY_PREFIX}{token}")
 }
@@ -117,56 +113,23 @@ fn canonical_document(file: &Path) -> Result<String> {
         .to_string())
 }
 
-fn gc_expired_steering_surrogates(
-    conn: &agent_doc_sqlite::state_store::Connection,
-    observed_at_ms: u64,
-) -> Result<()> {
-    for (key, raw, _) in agent_doc_sqlite::state_store::list_project_runtime_state_from_db(
-        conn,
-        STEERING_SURROGATE_KEY_PREFIX,
-    )? {
-        let expired = serde_json::from_str::<SteeringSurrogate>(&raw)
-            .map(|record| record.expires_at_ms <= observed_at_ms)
-            .unwrap_or(true);
-        if expired {
-            agent_doc_sqlite::state_store::clear_project_runtime_state_in_db(conn, &key)?;
-        }
-    }
-    Ok(())
-}
-
 fn issue_steering_surrogate_at(
     file: &Path,
     cycle_id: &str,
     payload: &str,
     issued_at_ms: u64,
 ) -> Result<String> {
-    anyhow::ensure!(
-        !cycle_id.trim().is_empty(),
-        "cannot issue compact steering without an active cycle"
-    );
-    let root = project_root(file).context("steering document is outside a project")?;
-    let document = canonical_document(file)?;
-    let token = uuid::Uuid::new_v4().simple().to_string();
-    let record = SteeringSurrogate {
-        document: document.clone(),
-        cycle_id: cycle_id.to_string(),
-        payload: payload.to_string(),
-        expires_at_ms: issued_at_ms.saturating_add(STEERING_SURROGATE_TTL_MS),
-    };
-    let conn = agent_doc_sqlite::state_store::open_state_db(&root)?;
-    gc_expired_steering_surrogates(&conn, issued_at_ms)?;
-    agent_doc_sqlite::state_store::upsert_project_runtime_state_in_db(
-        &conn,
-        &steering_surrogate_key(&token),
-        &serde_json::to_string(&record)?,
+    // The hook reads this notice. It does not mark the reference queued:
+    // only a proven composer paste does, so a hookless harness still gets
+    // one Enter for the same token.
+    agent_doc_controller_io::live_turn_follow_up::stage_live_turn_follow_up(
+        file,
+        cycle_id,
+        agent_doc_controller::live_turn_follow_up::LiveTurnFollowUpSlot::Steering,
+        payload,
         issued_at_ms,
-    )?;
-    Ok(format!(
-        "[agent-doc] operator steering: run `agent-doc steering {} --token {}` or call MCP tool `agent_doc_steering` with the same file/token within 5m (one use)",
-        shell_single_quote(&document),
-        shell_single_quote(&token),
-    ))
+    )
+    .map(|staged| staged.notice)
 }
 
 fn take_steering_surrogate_at(file: &Path, token: &str, observed_at_ms: u64) -> Result<String> {
@@ -1873,6 +1836,9 @@ pub struct RouteSyncSteering {
     pub cycle_id: String,
     /// Authoritative document to record after the pane accepts the paste.
     pub content: String,
+    /// False when this diff was folded into a reference already queued for
+    /// the running turn. The caller records the baseline and does not Enter.
+    pub needs_queue_paste: bool,
 }
 
 fn route_sync_baseline_key(file: &Path) -> String {
@@ -1949,9 +1915,16 @@ pub fn prepare_route_sync_steering(file: &Path) -> Result<Option<RouteSyncSteeri
     let Some(full_instructions) = full_instructions else {
         return Ok(None);
     };
-    let instructions = issue_steering_surrogate_at(file, &cycle_id, &full_instructions, now_ms())?;
+    let staged = agent_doc_controller_io::live_turn_follow_up::stage_live_turn_follow_up(
+        file,
+        &cycle_id,
+        agent_doc_controller::live_turn_follow_up::LiveTurnFollowUpSlot::Steering,
+        &full_instructions,
+        now_ms(),
+    )?;
     Ok(Some(RouteSyncSteering {
-        instructions,
+        instructions: staged.notice,
+        needs_queue_paste: staged.needs_queue_paste,
         pending_items: items.len(),
         cycle_id,
         content,
@@ -3288,6 +3261,58 @@ mod tests {
                 .unwrap_err()
                 .to_string()
                 .contains("stale session cycle")
+        );
+    }
+
+    /// Pool refill pastes and a steering diff are one queued reference.
+    #[test]
+    fn one_running_turn_coalesces_pool_refill_and_steering() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        let baseline = "# S\n\n<!-- agent:queue -->\n<!-- /agent:queue -->\n";
+        std::fs::write(&file, baseline).unwrap();
+        seed_for_cycle(&file, "cycle-1", baseline, None, Vec::new()).unwrap();
+        assert_eq!(
+            agent_doc_controller_io::live_turn_follow_up::current_steering_cycle_id(&file)
+                .unwrap()
+                .as_deref(),
+            Some("cycle-1")
+        );
+
+        let first = issue_steering_surrogate_at(&file, "cycle-1", "steer body", 1_000).unwrap();
+        let token = compact_token(&first).to_string();
+        let pooled = agent_doc_controller_io::live_turn_follow_up::stage_live_turn_follow_up(
+            &file,
+            "cycle-1",
+            agent_doc_controller::live_turn_follow_up::LiveTurnFollowUpSlot::Pool,
+            "pool body",
+            2_000,
+        )
+        .unwrap();
+        assert_eq!(compact_token(&pooled.notice), token);
+        assert!(
+            pooled.needs_queue_paste,
+            "the first reference still has to be queued"
+        );
+        agent_doc_controller_io::live_turn_follow_up::mark_live_turn_follow_up_queued(
+            &file, "cycle-1",
+        )
+        .unwrap();
+
+        let second = issue_steering_surrogate_at(&file, "cycle-1", "steer delta", 3_000).unwrap();
+        assert_eq!(compact_token(&second), token);
+        let payload = take_steering_surrogate_at(&file, &token, 3_100).unwrap();
+        assert!(
+            payload.contains(agent_doc_controller::live_turn_follow_up::LIVE_TURN_FOLLOW_UP_MARKER),
+            "{payload}"
+        );
+        assert!(payload.contains("steer body"), "{payload}");
+        assert!(payload.contains("steer delta"), "{payload}");
+        assert!(payload.contains("pool body"), "{payload}");
+        assert!(
+            payload.find("steer body").unwrap() < payload.find("pool body").unwrap(),
+            "{payload}"
         );
     }
 

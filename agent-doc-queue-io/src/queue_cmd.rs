@@ -1888,6 +1888,48 @@ pub fn consume(effects: &impl QueueCommandEffects, file: &Path, count: usize) ->
     consume_with_options(effects, file, count, ConsumeOptions::default())
 }
 
+/// `agent-doc queue prune-duplicates <FILE> [--apply]` — collapse live rows
+/// that are already duplicated inside one queue (`#pruneduplicates`).
+///
+/// Identical work text (binary-owned lifecycle prefixes and `[#owner#generation]`
+/// markers stripped) keeps one row, preferring the row that carries the live
+/// claim marker. A live row whose entire remaining text is a truncated prefix
+/// of another live row in that queue is removed. Struck history stays. The
+/// default is a dry report; `--apply` writes. The keeper's claim is not released.
+pub fn prune_duplicates(
+    effects: &impl QueueCommandEffects,
+    file: &Path,
+    apply: bool,
+) -> Result<()> {
+    if apply {
+        // Same single-writer lease as `prune-noise`: idle-watch and preflight
+        // defer while the duplicate rows are excised.
+        let _queue_edit_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file);
+    }
+    let content = effects.current_document_content(file, "queue_prune_duplicates")?;
+    let plan = agent_doc_queue::prune_duplicates::plan(&content)
+        .with_context(|| format!("{}: queue duplicate prune refused to parse", file.display()))?;
+    if plan.drops.is_empty() || !apply {
+        print!("{}", plan.report(&file.display().to_string(), false));
+        return Ok(());
+    }
+    effects
+        .converge_document_or_disk(file, &plan.document, &content, "queue_prune_duplicates")
+        .context("duplicate prune: failed to write document")?;
+    let base_hash = agent_doc_hash::content_hash(&content);
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "queue_prune_duplicates file={} removed={} base_hash={} source_component=queue operation=prune_duplicates proof=identical_live_head_or_truncated_prefix",
+            file.display(),
+            plan.drops.len(),
+            base_hash
+        ),
+    );
+    print!("{}", plan.report(&file.display().to_string(), true));
+    Ok(())
+}
+
 /// `agent-doc queue prune-noise <FILE>` — strike every non-drainable noise queue
 /// head at any position (`#goqstall2`), clearing pasted console output / agent
 /// response fragments that session-check surfaces as
@@ -6117,5 +6159,102 @@ mod waiting_item_claim_projection_tests {
             1,
             "only `retry_crdt_merge` refusals earn a retry"
         );
+    }
+}
+
+#[cfg(test)]
+mod prune_duplicates_cmd_tests {
+    use super::*;
+    use std::cell::Cell;
+    use std::path::Path;
+
+    struct Mem {
+        content: std::cell::RefCell<String>,
+        writes: Cell<usize>,
+    }
+
+    impl QueueCommandEffects for Mem {
+        fn current_document_content(&self, _file: &Path, _source: &str) -> Result<String> {
+            Ok(self.content.borrow().clone())
+        }
+
+        fn converge_document_or_disk(
+            &self,
+            _file: &Path,
+            target_content: &str,
+            source_content: &str,
+            _reason: &str,
+        ) -> Result<()> {
+            assert_eq!(source_content, self.content.borrow().as_str());
+            *self.content.borrow_mut() = target_content.to_string();
+            self.writes.set(self.writes.get() + 1);
+            Ok(())
+        }
+
+        fn consume_free_text_queue_prompts_force_disk(
+            &self,
+            _file: &Path,
+            _count: usize,
+        ) -> Result<Option<QueueCommandConsumeOutcome>> {
+            Ok(None)
+        }
+
+        fn consume_free_text_queue_prompts_with_outcome(
+            &self,
+            _file: &Path,
+            _count: usize,
+        ) -> Result<Option<QueueCommandConsumeOutcome>> {
+            Ok(None)
+        }
+
+        fn strike_orphan_id_backed_queue_head(&self, _file: &Path, _id: &str) -> Result<bool> {
+            Ok(false)
+        }
+
+        fn acknowledge_open_id_backed_queue_head(&self, _file: &Path, _id: &str) -> Result<bool> {
+            Ok(false)
+        }
+
+        fn acknowledge_paused_free_text_queue_head(
+            &self,
+            _file: &Path,
+            _expected_head: &str,
+        ) -> Result<Option<QueueCommandConsumeOutcome>> {
+            Ok(None)
+        }
+
+        fn prune_noise_queue_heads(&self, _file: &Path) -> Result<usize> {
+            Ok(0)
+        }
+    }
+
+    #[test]
+    fn prune_duplicates_dry_run_writes_nothing_and_apply_keeps_the_claim() {
+        let source = "\
+<!-- agent:run id=\"main\" -->
+- 🚧 [#subagent:shell#1] If the claiming tmux pane for a document is in shell, start agent-doc.
+- If the claiming
+- 🚧 [#subagent:shell#1] If the claiming tmux pane for a document is in shell, start agent-doc.
+<!-- /agent:run -->
+";
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("session.md");
+        let effects = Mem {
+            content: std::cell::RefCell::new(source.to_string()),
+            writes: Cell::new(0),
+        };
+        prune_duplicates(&effects, &file, false).unwrap();
+        assert_eq!(effects.writes.get(), 0);
+        assert_eq!(effects.content.borrow().as_str(), source);
+        prune_duplicates(&effects, &file, true).unwrap();
+        assert_eq!(effects.writes.get(), 1);
+        let written = effects.content.borrow().clone();
+        assert!(written.contains("[#subagent:shell#1]"));
+        assert!(!written.contains("- If the claiming\n"));
+        assert_eq!(written.matches("[#subagent:shell#1]").count(), 1);
+        prune_duplicates(&effects, &file, true).unwrap();
+        assert_eq!(effects.writes.get(), 1, "a second apply is a no-op");
+        assert_eq!(effects.content.borrow().as_str(), written);
     }
 }

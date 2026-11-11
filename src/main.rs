@@ -6230,6 +6230,23 @@ enum QueueAction {
         /// Path to the session document
         file: PathBuf,
     },
+    /// Remove live queue rows that are already duplicated (`#pruneduplicates`).
+    ///
+    /// Collapses live rows in one queue whose work text is identical after
+    /// binary-owned markers (`[#subagent:…]`, lifecycle prefixes) are stripped,
+    /// keeping the row that carries the live claim. Also removes a live row
+    /// whose entire remaining text is a truncated prefix of another live row
+    /// in that queue. Struck history stays. Identical directive heads that
+    /// `prune-noise` keeps are in scope here. Dry run unless `--apply`.
+    /// Does not release a claim.
+    #[command(name = "prune-duplicates")]
+    PruneDuplicates {
+        /// Path to the session document
+        file: PathBuf,
+        /// Remove the duplicate rows (default: report only)
+        #[arg(long)]
+        apply: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -10897,6 +10914,10 @@ fn try_main() -> anyhow::Result<()> {
             QueueAction::PruneNoise { file } => {
                 let queue_effects = CliQueueCommandEffects;
                 agent_doc_queue_io::queue_cmd::prune_noise(&queue_effects, &file)
+            }
+            QueueAction::PruneDuplicates { file, apply } => {
+                let queue_effects = CliQueueCommandEffects;
+                agent_doc_queue_io::queue_cmd::prune_duplicates(&queue_effects, &file, apply)
             }
         },
         Commands::ResolveGateCmd { gate_type, scope } => {

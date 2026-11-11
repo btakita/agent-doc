@@ -48,6 +48,9 @@ pub fn restore_socket() -> Result<()> {
                 socket.display()
             );
         }
+        agent_doc_tmux_io::AmbientSocketRestore::SkippedSocketOverride => {
+            println!("AGENT_DOC_TMUX_SOCKET is set, so the $TMUX socket was left unchanged");
+        }
     }
     Ok(())
 }

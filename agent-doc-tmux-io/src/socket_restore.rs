@@ -31,6 +31,8 @@ pub enum AmbientSocketRestore {
     AlreadyConnectable { socket: PathBuf, pid: u32 },
     /// `SIGUSR1` made the live server bind a new socket at this path.
     Recreated { socket: PathBuf, pid: u32 },
+    /// `AGENT_DOC_TMUX_SOCKET` is the socket this process uses, so `$TMUX` was left alone.
+    SkippedSocketOverride,
 }
 
 #[derive(Debug)]
@@ -111,8 +113,15 @@ pub fn parse_tmux_endpoint(value: &str) -> Option<(PathBuf, u32)> {
 /// Restore the socket named by `$TMUX` when that server is still alive.
 ///
 /// A connectable socket is left untouched. Parallel callers take an exclusive
-/// lock, recheck, and send `SIGUSR1` at most once.
+/// lock, recheck, and send `SIGUSR1` at most once. `AGENT_DOC_TMUX_SOCKET`
+/// selects a different server, so that process skips this restore.
 pub fn restore_ambient_tmux_socket() -> Result<AmbientSocketRestore, RestoreError> {
+    if std::env::var(crate::AGENT_DOC_TMUX_SOCKET_ENV)
+        .ok()
+        .is_some_and(|socket| !socket.trim().is_empty())
+    {
+        return Ok(AmbientSocketRestore::SkippedSocketOverride);
+    }
     let Some(value) = std::env::var_os("TMUX") else {
         return Ok(AmbientSocketRestore::NotInTmux);
     };
@@ -166,6 +175,7 @@ pub(crate) fn restore_locked(
     })?;
     let lock = OpenOptions::new()
         .create(true)
+        .truncate(false)
         .read(true)
         .write(true)
         .open(parent.join(".agent-doc-socket-restore.lock"))
@@ -207,17 +217,63 @@ pub(crate) fn restore_locked(
     }
 }
 
+/// The socket parent must be a real directory owned by this user, with no
+/// other-access bits. `lstat` does not follow a final symlink, so a planted
+/// link is not treated as that directory. A missing parent is created mode
+/// 0700 and checked again. Anything else fails before the lock and the signal.
 fn ensure_private_parent(dir: &Path) -> io::Result<()> {
-    if dir.is_dir() {
-        return Ok(());
+    match private_socket_parent(dir) {
+        Ok(()) => return Ok(()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
     }
-    std::fs::create_dir_all(dir)?;
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))?;
+        use std::os::unix::fs::DirBuilderExt;
+        let mut builder = std::fs::DirBuilder::new();
+        builder.mode(0o700);
+        builder.recursive(true);
+        builder.create(dir)?;
+    }
+    #[cfg(not(unix))]
+    {
+        std::fs::create_dir_all(dir)?;
+    }
+    private_socket_parent(dir)
+}
+
+fn private_socket_parent(dir: &Path) -> io::Result<()> {
+    let meta = std::fs::symlink_metadata(dir)?;
+    if !meta.file_type().is_dir() {
+        return Err(io::Error::other(format!(
+            "{} is not a real directory",
+            dir.display()
+        )));
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+        if meta.uid() != current_euid() {
+            return Err(io::Error::other(format!(
+                "{} is not owned by the current user",
+                dir.display()
+            )));
+        }
+        let mode = meta.permissions().mode();
+        if mode & 0o007 != 0 {
+            return Err(io::Error::other(format!(
+                "{} is accessible by other users (mode {:o})",
+                dir.display(),
+                mode & 0o777
+            )));
+        }
     }
     Ok(())
+}
+
+#[cfg(unix)]
+fn current_euid() -> u32 {
+    unsafe { libc::geteuid() }
 }
 
 fn socket_connectable(path: &Path) -> bool {
@@ -341,6 +397,11 @@ mod tests {
     #[test]
     fn parallel_callers_signal_once() {
         let dir = tempfile::tempdir().unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+        }
         let socket = dir.path().join("default");
         let hits = Arc::new(AtomicUsize::new(0));
         let ready = Arc::new(AtomicBool::new(false));
@@ -374,8 +435,59 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let parent = dir.path().join("tmux-1000");
         ensure_private_parent(&parent).unwrap();
-        let mode = std::fs::metadata(&parent).unwrap().permissions().mode() & 0o777;
-        assert_eq!(mode, 0o700);
+        let meta = std::fs::symlink_metadata(&parent).unwrap();
+        assert!(meta.file_type().is_dir());
+        assert_eq!(meta.permissions().mode() & 0o777, 0o700);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlink_parent_is_not_signaled() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let real = dir.path().join("real");
+        std::fs::create_dir(&real).unwrap();
+        std::fs::set_permissions(&real, std::fs::Permissions::from_mode(0o777)).unwrap();
+        let parent = dir.path().join("tmux-1000");
+        std::os::unix::fs::symlink(&real, &parent).unwrap();
+        let socket = parent.join("default");
+        let hits = AtomicUsize::new(0);
+        let error = restore_locked(
+            &socket,
+            7,
+            |_| false,
+            |_| {
+                hits.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            },
+        )
+        .unwrap_err();
+        assert!(matches!(error, RestoreError::Parent { .. }), "{error}");
+        assert_eq!(hits.load(Ordering::SeqCst), 0);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_world_accessible_parent_is_not_signaled() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let parent = dir.path().join("tmux-1000");
+        std::fs::create_dir(&parent).unwrap();
+        std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o777)).unwrap();
+        let socket = parent.join("default");
+        let hits = AtomicUsize::new(0);
+        let error = restore_locked(
+            &socket,
+            7,
+            |_| false,
+            |_| {
+                hits.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            },
+        )
+        .unwrap_err();
+        assert!(matches!(error, RestoreError::Parent { .. }), "{error}");
+        assert_eq!(hits.load(Ordering::SeqCst), 0);
     }
 
     #[cfg(unix)]

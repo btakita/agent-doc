@@ -2925,6 +2925,7 @@ dependencies = [
  "agent-doc-tmux",
  "agent-doc-tmux-commands",
  "anyhow",
+ "fs2",
  "lazily 0.61.1",
  "libc",
  "serde",

@@ -512,7 +512,19 @@ fn apply_document_cell_mutation_to_items(
                     identity: identity.clone(),
                 });
             };
-            *existing = value.clone();
+            let mut replacement = value.clone();
+            // The source cell owns the separator before its neighbour. A
+            // focused annotation update may carry only the visible row bytes;
+            // retain that separator so composing cells cannot glue the next
+            // prompt's lifecycle markers onto this one.
+            if existing.ends_with('\n') && !replacement.ends_with('\n') {
+                replacement.push_str(if existing.ends_with("\r\n") {
+                    "\r\n"
+                } else {
+                    "\n"
+                });
+            }
+            *existing = replacement;
         }
         DocumentCellMutation::Insert {
             identity,
@@ -3187,6 +3199,39 @@ agent_doc_format: template
             }),
             "sibling items must be untouched: {:?}",
             q.ops
+        );
+    }
+
+    #[test]
+    fn prompt_item_annotation_update_preserves_neighbor_boundaries() {
+        let doc = concat!(
+            "<!-- agent:queue -->\n",
+            "  - ⚠️🚧 [#subagent:lyraglue#1] The Release Please version should match the haiven-sdk-unreal-lyra version. [#q-bfd03d83022f]\n",
+            "  - 📥 verify the release branch [#q-inbox]\n",
+            "  - ⚠️ investigate the warning [#q-warning]\n",
+            "  - ☑️ #address then #adversarial-pr ⟦effect:2⟧ [#q-1b7647b9a119]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let updated = apply_document_cell_mutation(
+            doc,
+            &DocumentCellMutation::Set {
+                component: "queue".into(),
+                occurrence: 0,
+                identity: "queue:0:id:q-bfd03d83022f".into(),
+                // Annotation-only callers may provide the updated row without
+                // the source cell's trailing line boundary.
+                value: "  - ⚠️🚧 [#subagent:lyraglue#2] The Release Please version should match the haiven-sdk-unreal-lyra version. [#q-bfd03d83022f]".into(),
+            },
+        )
+        .unwrap();
+
+        assert!(
+            updated.contains("[#q-bfd03d83022f]\n  - 📥"),
+            "the inbox row was concatenated onto the annotated row:\n{updated}"
+        );
+        assert!(
+            updated.contains("[#q-inbox]\n  - ⚠️") && updated.contains("[#q-warning]\n  - ☑️"),
+            "neighboring lifecycle-marker rows lost their boundaries:\n{updated}"
         );
     }
 

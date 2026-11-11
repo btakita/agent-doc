@@ -2553,17 +2553,24 @@ pub fn project_prompt_runtime_projections_with(
         .iter()
         .map(|(entry, _)| entry.clone())
         .collect::<Vec<_>>();
-    let Some(marked_entries) = set_prompt_runtime_projections_with(&entries, targets, policy)
-    else {
+    let marked_entries = set_prompt_runtime_projections_with(&entries, targets, policy)
+        .unwrap_or_else(|| entries.clone());
+    let has_group_heading_change = spans.iter().enumerate().any(|(index, (_, range))| {
+        rendered_top_level_group_parent(&marked_entries, index)
+            .is_some_and(|rendered| rendered != body[range.clone()])
+    });
+    if marked_entries == entries && !has_group_heading_change {
         return Ok(None);
-    };
+    }
     validate_in_progress_marker_projection(&entries, &marked_entries)?;
 
     let mut projected = body.to_string();
-    for ((before, range), after) in spans.iter().zip(&marked_entries).rev() {
-        if before != after {
-            let source = &body[range.clone()];
-            let replacement = match (before, after) {
+    for (index, ((before, range), after)) in spans.iter().zip(&marked_entries).enumerate().rev() {
+        let source = &body[range.clone()];
+        let canonical_group_parent = rendered_top_level_group_parent(&marked_entries, index)
+            .filter(|rendered| rendered != source);
+        if before != after || canonical_group_parent.is_some() {
+            let replacement = canonical_group_parent.unwrap_or_else(|| match (before, after) {
                 // `#nestedsubprompts`: a list row with sub-prompts renders
                 // byte-for-byte (its text holds the raw child lines), and the
                 // projection also retires legacy child markers below line 1.
@@ -2600,7 +2607,7 @@ pub fn project_prompt_runtime_projections_with(
                         .unwrap_or_else(|| render(std::slice::from_ref(after)))
                 }
                 _ => render(std::slice::from_ref(after)),
-            };
+            });
             projected.replace_range(range.clone(), &replacement);
         }
     }
@@ -2611,6 +2618,15 @@ pub fn project_prompt_runtime_projections_with(
         "queue runtime projection changed non-marker row structure"
     );
     Ok(Some((projected, reparsed)))
+}
+
+/// Runtime projection is lossless for untouched rows, so an unchanged context
+/// parent otherwise bypasses [`render`] and retains a legacy bare list line.
+/// Canonicalize only depth-zero structural parents here; nested rows are not
+/// navigation headings and leaf presentation remains outside this projection.
+fn rendered_top_level_group_parent(entries: &[QueueEntry], index: usize) -> Option<String> {
+    (entry_indent(entries.get(index)?) == Some(0) && entry_is_group_parent(entries, index))
+        .then(|| render(std::slice::from_ref(&entries[index])))
 }
 
 /// Project request-linked operator actions (`🙋 ... [#id]`) without changing queue
@@ -12398,7 +12414,7 @@ mod tests {
         assert_eq!(
             kept,
             concat!(
-                "- https://github.com/haiven-dev/haiven-infra/pull/304\n",
+                "- ### https://github.com/haiven-dev/haiven-infra/pull/304\n",
                 "  - ~~#rebase~~\n",
                 "  - ~~#review~~\n",
                 "  - ~~child group~~\n",
@@ -12439,6 +12455,43 @@ mod tests {
     }
 
     #[test]
+    fn runtime_projection_heads_an_unchanged_kept_parent_with_children() {
+        let body = concat!(
+            "- https://github.com/haiven-dev/haiven-sdk-unreal/pull/9\n",
+            "  - %% fix: remove private repository paths %%\n",
+            "  - ~~#rebase ⟦published⟧~~\n",
+        );
+        let policy = RuntimeProjectionPolicy {
+            keep_top_level_unstruck: true,
+        };
+        let projected = project_prompt_runtime_projections_with(body, &[], policy)
+            .unwrap()
+            .expect("the missing parent navigation heading is a projection change")
+            .0;
+
+        assert_eq!(
+            projected,
+            concat!(
+                "- ### https://github.com/haiven-dev/haiven-sdk-unreal/pull/9\n",
+                "  - %% fix: remove private repository paths %%\n",
+                "  - ~~#rebase ⟦published⟧~~\n",
+            )
+        );
+        assert!(
+            project_prompt_runtime_projections_with(&projected, &[], policy)
+                .unwrap()
+                .is_none(),
+            "the canonical heading is idempotent"
+        );
+        assert!(
+            project_prompt_runtime_projections_with("- standalone leaf\n", &[], policy)
+                .unwrap()
+                .is_none(),
+            "a top-level leaf stays outside this projection"
+        );
+    }
+
+    #[test]
     fn erroneous_parent_report_is_removed_without_downgrading_reported_leaf() {
         let body = concat!(
             "- ☑️ [#subagent:parent#2] parent ⟦published⟧\n",
@@ -12452,7 +12505,7 @@ mod tests {
         assert_eq!(
             projected,
             concat!(
-                "- parent\n",
+                "- ### parent\n",
                 "  - ~~integrated leaf~~\n",
                 "  - ☑️ [#subagent:leaf#3] reported leaf ⟦published⟧\n",
             )
@@ -12481,13 +12534,13 @@ mod tests {
             .unwrap()
             .expect("the equal-text leaf receives its own target")
             .0;
-        assert_eq!(projected, "- same\n  - ☑️ same\n");
+        assert_eq!(projected, "- ### same\n  - ☑️ same\n");
 
         let leaf_only = project_prompt_runtime_projections(body, &targets[1..])
             .unwrap()
             .expect("an absent parent target leaves the equal-text leaf target aligned")
             .0;
-        assert_eq!(leaf_only, "- same\n  - ☑️ same\n");
+        assert_eq!(leaf_only, "- ### same\n  - ☑️ same\n");
     }
 
     /// A subtree that contains tracked work is a `#f1s3` group, not one
@@ -12536,7 +12589,7 @@ mod tests {
         )
         .unwrap()
         .expect("the running leaf receives a marker");
-        assert_eq!(projected, format!("- {PARENT}\n  - 🚧 {LEAF}\n"));
+        assert_eq!(projected, format!("- ### {PARENT}\n  - 🚧 {LEAF}\n"));
     }
 
     /// Lifecycle markers project onto executable leaves only; a stale marker on
@@ -12563,7 +12616,7 @@ mod tests {
         assert_eq!(
             projected,
             concat!(
-                "- Sync PR and Jira state into this document.\n",
+                "- ### Sync PR and Jira state into this document.\n",
                 "  - 🚧 So this is the first subtask.\n",
                 "  - This is the second subtask.\n",
             )
@@ -12593,7 +12646,7 @@ mod tests {
         assert_eq!(
             projected,
             concat!(
-                "- https://example.test/pull/164\n",
+                "- ### https://example.test/pull/164\n",
                 "  - 📥 https://example.test/pull/164 #review\n",
             )
         );
@@ -12639,7 +12692,7 @@ mod tests {
         assert_eq!(
             projected,
             concat!(
-                "- https://example.test/pull/717\n",
+                "- ### https://example.test/pull/717\n",
                 "  - 📥 #rebase\n",
                 "  - ☑️ [#subagent:fix#1] #fix-ci\n",
             )
@@ -12657,7 +12710,7 @@ mod tests {
         assert_eq!(
             projected,
             concat!(
-                "- https://example.test/pull/717\n",
+                "- ### https://example.test/pull/717\n",
                 "  - 📥 #rebase\n",
                 "  - ☑️ [#subagent:fix#1] #fix-ci\n",
             )
@@ -16214,7 +16267,7 @@ mod tests {
         assert_eq!(after.len(), 4, "{projected}");
         assert!(
             projected.ends_with(&format!(
-                "- [#{REQUEST}]\n  - 📥 I want sync to use the latest state.\n"
+                "- ### [#{REQUEST}]\n  - 📥 I want sync to use the latest state.\n"
             )),
             "the marker lands on the executable answer leaf, never its parent:\n{projected}"
         );

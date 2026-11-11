@@ -512,7 +512,10 @@ nothing ran until the operator retyped the prompt at 05:01:15Z. The Grok
 classifier above retires that lease once the cancel settles and leaves an
 `interrupt` receipt newer than the cycle, so the second route's
 `HarnessTurnEnded` reclaim cancels the orphaned preflight and dispatches a
-fresh trigger.
+fresh trigger. While that cancel has not yet settled, the lease still reads
+live: Run Agent Doc enqueues any steering for the starting turn (`#runsteer`
+in [Closeout Commands](07-closeout-commands.md)) and does not claim
+`steering_delivered_to_owner` or ask for `session cancel-turn`.
 
 ### Cancelled-before-persist prompts (`#sdkclearwedge`)
 

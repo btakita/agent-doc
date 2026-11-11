@@ -577,6 +577,153 @@ One.
     }
 
     @Test
+    fun `separated agent active and prompt edits keep the caret between them`() {
+        val patchWatcher = Files.readString(
+            listOf(
+                Paths.get("src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt"),
+                Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt"),
+            ).first { Files.exists(it) },
+        )
+        val helper = patchWatcher
+            .substringAfter("internal fun <T> preserveOperatorEditorViewStateUtil(")
+            .substringBefore("internal fun applyMinimalDocumentEditUtil(")
+        assertTrue(helper.contains("documentChangeHunksUtil("))
+        assertTrue(helper.contains("mapOffsetThroughReplacement("))
+        assertTrue(helper.contains("offsetOutsideDocumentHunks("))
+        assertTrue(helper.contains("operatorViewportAnchor("))
+        assertFalse(helper.contains("mapVerticalScrollThroughReplacement("))
+
+        val before = listOf(
+            "<!-- agent:active -->",
+            "old item",
+            "<!-- /agent:active -->",
+            "",
+            "middle reading",
+            "",
+            "prompt one",
+            "",
+            "",
+            "prompt two",
+            "",
+        ).joinToString("\n")
+        val after = listOf(
+            "<!-- agent:active -->",
+            "new item",
+            "another line",
+            "<!-- /agent:active -->",
+            "",
+            "middle reading",
+            "",
+            "❯ prompt one",
+            "",
+            "",
+            "❯ prompt two",
+            "",
+        ).joinToString("\n")
+        val hunks = documentChangeHunksUtil(before, after)
+        assertEquals(after, applyDocumentHunks(before, hunks))
+        assertTrue("separated edits must stay separate regions", hunks.size >= 2)
+
+        val middle = before.indexOf("middle reading")
+        val mappedMiddle = mapOffsetThroughReplacement(middle, hunks)
+        assertEquals("middle reading", after.substring(mappedMiddle, mappedMiddle + "middle reading".length))
+        val collapsed = minimalDocumentEditUtil(before, after)
+        assertNotNull(collapsed)
+        val snapped = mapOffsetThroughReplacement(
+            middle,
+            collapsed!!.start,
+            collapsed.end,
+            collapsed.replacement.length,
+        )
+        assertTrue(snapped < middle)
+        assertNotEquals(snapped, mappedMiddle)
+
+        val onSecondPrompt = before.indexOf("prompt two")
+        val mappedPrompt = mapOffsetThroughReplacement(onSecondPrompt, hunks)
+        assertEquals("prompt two", after.substring(mappedPrompt, mappedPrompt + "prompt two".length))
+        val insidePrompt = before.indexOf("rompt two")
+        val mappedInsidePrompt = mapOffsetThroughReplacement(insidePrompt, hunks)
+        assertEquals("rompt two", after.substring(mappedInsidePrompt, mappedInsidePrompt + "rompt two".length))
+
+        val betweenPrompts = before.indexOf("\n\n\nprompt two") + 1
+        val mappedBetween = mapOffsetThroughReplacement(betweenPrompts, hunks)
+        assertTrue(after.substring(mappedBetween).startsWith("\n\n❯ prompt two"))
+
+        val insideActive = before.indexOf("old item") + 1
+        assertFalse(offsetOutsideDocumentHunks(insideActive, hunks))
+        assertEquals(before.indexOf("old item"), mapOffsetThroughReplacement(insideActive, hunks))
+        assertTrue(offsetOutsideDocumentHunks(middle, hunks))
+        assertEquals(
+            OperatorViewportAnchor.Caret,
+            operatorViewportAnchor(
+                caretOffset = middle,
+                caretInViewport = true,
+                topLeftOffset = before.indexOf("old item"),
+                bottomOffset = middle,
+            ) { offset -> offsetOutsideDocumentHunks(offset, hunks) },
+        )
+        assertEquals(
+            OperatorViewportAnchor.Bottom,
+            operatorViewportAnchor(
+                caretOffset = middle,
+                caretInViewport = false,
+                topLeftOffset = before.indexOf("old item"),
+                bottomOffset = middle,
+            ) { offset -> offsetOutsideDocumentHunks(offset, hunks) },
+        )
+    }
+
+    @Test
+    fun `one replaced region still parks an inside caret at that region's start`() {
+        val before = listOf(
+            "<!-- agent:status -->",
+            "ok",
+            "<!-- /agent:status -->",
+            "",
+            "<!-- agent:recap -->",
+            "old recap",
+            "<!-- /agent:recap -->",
+            "",
+            "<!-- agent:queue -->",
+            "operator is reading this",
+            "<!-- /agent:queue -->",
+            "",
+        ).joinToString("\n")
+        val after = before.replace("old recap", "new recap\nwith more lines")
+        val edit = minimalDocumentEditUtil(before, after)
+        assertNotNull(edit)
+        val replacement = edit!!
+        val hunks = documentChangeHunksUtil(before, after)
+        assertEquals(after, applyDocumentHunks(before, hunks))
+        val inside = before.indexOf("old recap") + 2
+        val outside = before.indexOf("operator is reading this")
+        val above = before.indexOf("ok")
+        assertEquals(
+            mapOffsetThroughReplacement(inside, replacement.start, replacement.end, replacement.replacement.length),
+            mapOffsetThroughReplacement(inside, hunks),
+        )
+        assertEquals(
+            mapOffsetThroughReplacement(outside, replacement.start, replacement.end, replacement.replacement.length),
+            mapOffsetThroughReplacement(outside, hunks),
+        )
+        assertEquals(
+            mapOffsetThroughReplacement(above, replacement.start, replacement.end, replacement.replacement.length),
+            mapOffsetThroughReplacement(above, hunks),
+        )
+        assertEquals(
+            mapOffsetThroughReplacement(
+                replacement.end,
+                replacement.start,
+                replacement.end,
+                replacement.replacement.length,
+            ),
+            mapOffsetThroughReplacement(replacement.end, hunks),
+        )
+        assertFalse(offsetOutsideDocumentHunks(inside, hunks))
+        assertTrue(offsetOutsideDocumentHunks(outside, hunks))
+    }
+
+    @Test
     fun `respond finalize queue status and crdt writes preserve caret and viewport`() {
         val patchWatcher = Files.readString(
             listOf(

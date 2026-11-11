@@ -2262,8 +2262,20 @@ internal fun operatorViewportAnchor(
     bottomOffset: Int,
     editStart: Int,
     editEnd: Int,
+): OperatorViewportAnchor = operatorViewportAnchor(
+    caretOffset,
+    caretInViewport,
+    topLeftOffset,
+    bottomOffset,
+) { offset -> offset < editStart || offset >= editEnd }
+
+internal fun operatorViewportAnchor(
+    caretOffset: Int,
+    caretInViewport: Boolean,
+    topLeftOffset: Int,
+    bottomOffset: Int,
+    outside: (Int) -> Boolean,
 ): OperatorViewportAnchor {
-    fun outside(offset: Int): Boolean = offset < editStart || offset >= editEnd
     return when {
         caretInViewport && outside(caretOffset) -> OperatorViewportAnchor.Caret
         outside(topLeftOffset) -> OperatorViewportAnchor.TopLeft
@@ -2275,6 +2287,464 @@ internal fun operatorViewportAnchor(
 /** Scroll offset that keeps an anchor's document Y at the same screen position. */
 internal fun mapScrollByAnchorDelta(oldScroll: Int, oldY: Int, newY: Int): Int =
     (oldScroll + (newY - oldY)).coerceAtLeast(0)
+
+/**
+ * One changed region inside a document that also changed somewhere else.
+ * [start, end) is the replaced slice of the text from before the write.
+ */
+internal data class DocumentHunk(
+    val start: Int,
+    val end: Int,
+    val replacement: String,
+)
+
+/**
+ * Regions of [before] that differ from [after].
+ *
+ * An `agent:active` update and a later prompt-prefix repair land in one write.
+ * One prefix/suffix span treats the caret between them as inside the edit and
+ * snaps it to the first change. Each region maps on its own. A caret inside one
+ * region still uses [mapOffsetThroughReplacement]'s single-span rule. The
+ * document text is still applied as one [minimalDocumentEditUtil] replacement.
+ */
+internal fun documentChangeHunksUtil(before: String, after: String): List<DocumentHunk> {
+    if (before == after) return emptyList()
+    val beforeLines = lineSpans(before)
+    val afterLines = lineSpans(after)
+    val matches = patienceLineMatches(before, after, beforeLines, afterLines)
+    val raw = mutableListOf<DocumentHunk>()
+    var beforeCursor = 0
+    var afterCursor = 0
+    for (match in matches) {
+        raw.addAll(
+            lineGapHunks(
+                before,
+                after,
+                beforeLines,
+                beforeCursor,
+                match.beforeStart,
+                afterLines,
+                afterCursor,
+                match.afterStart,
+            ),
+        )
+        beforeCursor = match.beforeEnd
+        afterCursor = match.afterEnd
+    }
+    raw.addAll(
+        lineGapHunks(
+            before,
+            after,
+            beforeLines,
+            beforeCursor,
+            beforeLines.size,
+            afterLines,
+            afterCursor,
+            afterLines.size,
+        ),
+    )
+    val tightened = tightenDocumentHunks(before, raw)
+    if (tightened.isNotEmpty() && applyDocumentHunks(before, tightened) == after) {
+        return tightened
+    }
+    val single = minimalDocumentEditUtil(before, after) ?: return emptyList()
+    return listOf(DocumentHunk(single.start, single.end, single.replacement))
+}
+
+/** Apply [hunks] to [before]. A malformed list does not reconstruct [before]. */
+internal fun applyDocumentHunks(before: String, hunks: List<DocumentHunk>): String {
+    val out = StringBuilder(before.length)
+    var cursor = 0
+    for (hunk in hunks) {
+        if (hunk.start < cursor || hunk.end < hunk.start || hunk.end > before.length) {
+            return before + "\u0000"
+        }
+        out.append(before, cursor, hunk.start)
+        out.append(hunk.replacement)
+        cursor = hunk.end
+    }
+    out.append(before, cursor, before.length)
+    return out.toString()
+}
+
+/**
+ * Map [offset] through [hunks] that are already character-tight.
+ * A caret before a hunk is unchanged by it. A caret at or after a hunk shifts
+ * by that hunk's length delta. A caret inside a hunk stays at that hunk's start.
+ */
+internal fun mapOffsetThroughReplacement(offset: Int, hunks: List<DocumentHunk>): Int {
+    var shift = 0
+    for (hunk in hunks) {
+        if (offset < hunk.start) return offset + shift
+        val deleted = (hunk.end - hunk.start).coerceAtLeast(0)
+        if (offset >= hunk.end) {
+            shift += hunk.replacement.length - deleted
+            continue
+        }
+        return hunk.start + shift
+    }
+    return offset + shift
+}
+
+/** True when [offset] is outside every changed region, including a pure insertion point. */
+internal fun offsetOutsideDocumentHunks(offset: Int, hunks: List<DocumentHunk>): Boolean {
+    for (hunk in hunks) {
+        if (offset < hunk.start) return true
+        if (offset < hunk.end) return false
+    }
+    return true
+}
+
+private data class LineSpan(val start: Int, val endExclusive: Int)
+
+private data class LineMatchRange(
+    val beforeStart: Int,
+    val beforeEnd: Int,
+    val afterStart: Int,
+    val afterEnd: Int,
+)
+
+private const val LINE_DIFF_SIDE_LIMIT = 600
+private const val LINE_DIFF_CELL_LIMIT = 250_000L
+
+private fun lineSpans(text: String): List<LineSpan> {
+    if (text.isEmpty()) return emptyList()
+    val spans = mutableListOf<LineSpan>()
+    var start = 0
+    while (start < text.length) {
+        val newline = text.indexOf('\n', start)
+        val end = if (newline < 0) text.length else newline + 1
+        spans.add(LineSpan(start, end))
+        start = end
+    }
+    return spans
+}
+
+private fun lineEquals(before: String, beforeLine: LineSpan, after: String, afterLine: LineSpan): Boolean {
+    val length = beforeLine.endExclusive - beforeLine.start
+    if (length != afterLine.endExclusive - afterLine.start) return false
+    return before.regionMatches(beforeLine.start, after, afterLine.start, length)
+}
+
+private fun patienceLineMatches(
+    before: String,
+    after: String,
+    beforeLines: List<LineSpan>,
+    afterLines: List<LineSpan>,
+): List<LineMatchRange> {
+    val anchors = patienceAnchors(before, after, beforeLines, afterLines)
+    if (anchors.isEmpty()) return emptyList()
+    return expandLineAnchors(before, after, beforeLines, afterLines, anchors)
+}
+
+private fun patienceAnchors(
+    before: String,
+    after: String,
+    beforeLines: List<LineSpan>,
+    afterLines: List<LineSpan>,
+): List<Pair<Int, Int>> {
+    val beforeUnique = uniqueLineIndexes(before, beforeLines)
+    val afterUnique = uniqueLineIndexes(after, afterLines)
+    val pairs = mutableListOf<Pair<Int, Int>>()
+    for ((text, beforeIndex) in beforeUnique) {
+        val afterIndex = afterUnique[text] ?: continue
+        pairs.add(beforeIndex to afterIndex)
+    }
+    if (pairs.isEmpty()) return emptyList()
+    pairs.sortBy { it.first }
+    return longestIncreasingAfterIndex(pairs)
+}
+
+private fun uniqueLineIndexes(text: String, lines: List<LineSpan>): Map<String, Int> {
+    val counts = mutableMapOf<String, Int>()
+    val texts = mutableListOf<String>()
+    for (line in lines) {
+        val value = text.substring(line.start, line.endExclusive)
+        texts.add(value)
+        counts[value] = (counts[value] ?: 0) + 1
+    }
+    val unique = mutableMapOf<String, Int>()
+    texts.forEachIndexed { index, value ->
+        if (counts[value] == 1) unique[value] = index
+    }
+    return unique
+}
+
+private fun longestIncreasingAfterIndex(pairs: List<Pair<Int, Int>>): List<Pair<Int, Int>> {
+    val count = pairs.size
+    val tails = IntArray(count)
+    val predecessors = IntArray(count) { -1 }
+    var length = 0
+    for (index in pairs.indices) {
+        val afterIndex = pairs[index].second
+        var low = 0
+        var high = length
+        while (low < high) {
+            val mid = (low + high) ushr 1
+            if (pairs[tails[mid]].second < afterIndex) low = mid + 1 else high = mid
+        }
+        predecessors[index] = if (low == 0) -1 else tails[low - 1]
+        tails[low] = index
+        if (low == length) length++
+    }
+    val chosen = mutableListOf<Pair<Int, Int>>()
+    var cursor = if (length == 0) -1 else tails[length - 1]
+    while (cursor >= 0) {
+        chosen.add(pairs[cursor])
+        cursor = predecessors[cursor]
+    }
+    chosen.reverse()
+    return chosen
+}
+
+private fun expandLineAnchors(
+    before: String,
+    after: String,
+    beforeLines: List<LineSpan>,
+    afterLines: List<LineSpan>,
+    anchors: List<Pair<Int, Int>>,
+): List<LineMatchRange> {
+    val ranges = anchors.map { (beforeIndex, afterIndex) ->
+        intArrayOf(beforeIndex, beforeIndex + 1, afterIndex, afterIndex + 1)
+    }
+    for (index in ranges.indices) {
+        val range = ranges[index]
+        val previousBeforeEnd = if (index == 0) 0 else ranges[index - 1][1]
+        val previousAfterEnd = if (index == 0) 0 else ranges[index - 1][3]
+        while (
+            range[0] > previousBeforeEnd &&
+            range[2] > previousAfterEnd &&
+            lineEquals(before, beforeLines[range[0] - 1], after, afterLines[range[2] - 1])
+        ) {
+            range[0]--
+            range[2]--
+        }
+        val nextBeforeStart = if (index + 1 < ranges.size) ranges[index + 1][0] else beforeLines.size
+        val nextAfterStart = if (index + 1 < ranges.size) ranges[index + 1][2] else afterLines.size
+        while (
+            range[1] < nextBeforeStart &&
+            range[3] < nextAfterStart &&
+            lineEquals(before, beforeLines[range[1]], after, afterLines[range[3]])
+        ) {
+            range[1]++
+            range[3]++
+        }
+    }
+    return ranges.map { LineMatchRange(it[0], it[1], it[2], it[3]) }
+}
+
+private fun lineGapHunks(
+    before: String,
+    after: String,
+    beforeLines: List<LineSpan>,
+    beforeFrom: Int,
+    beforeTo: Int,
+    afterLines: List<LineSpan>,
+    afterFrom: Int,
+    afterTo: Int,
+): List<DocumentHunk> {
+    if (beforeFrom == beforeTo && afterFrom == afterTo) return emptyList()
+    val beforeCount = beforeTo - beforeFrom
+    val afterCount = afterTo - afterFrom
+    if (
+        beforeCount <= LINE_DIFF_SIDE_LIMIT &&
+        afterCount <= LINE_DIFF_SIDE_LIMIT &&
+        beforeCount.toLong() * afterCount.toLong() <= LINE_DIFF_CELL_LIMIT
+    ) {
+        return lcsLineHunks(
+            before,
+            after,
+            beforeLines,
+            beforeFrom,
+            beforeTo,
+            afterLines,
+            afterFrom,
+            afterTo,
+        )
+    }
+    return emitAlignedHunks(
+        before,
+        after,
+        beforeLines,
+        beforeFrom,
+        beforeTo,
+        afterLines,
+        afterFrom,
+        afterTo,
+    )
+}
+
+private fun lcsLineHunks(
+    before: String,
+    after: String,
+    beforeLines: List<LineSpan>,
+    beforeFrom: Int,
+    beforeTo: Int,
+    afterLines: List<LineSpan>,
+    afterFrom: Int,
+    afterTo: Int,
+): List<DocumentHunk> {
+    val beforeCount = beforeTo - beforeFrom
+    val afterCount = afterTo - afterFrom
+    val lcs = Array(beforeCount + 1) { IntArray(afterCount + 1) }
+    for (beforeIndex in beforeCount - 1 downTo 0) {
+        for (afterIndex in afterCount - 1 downTo 0) {
+            lcs[beforeIndex][afterIndex] = if (
+                lineEquals(
+                    before,
+                    beforeLines[beforeFrom + beforeIndex],
+                    after,
+                    afterLines[afterFrom + afterIndex],
+                )
+            ) {
+                lcs[beforeIndex + 1][afterIndex + 1] + 1
+            } else {
+                maxOf(lcs[beforeIndex + 1][afterIndex], lcs[beforeIndex][afterIndex + 1])
+            }
+        }
+    }
+    val hunks = mutableListOf<DocumentHunk>()
+    var beforeIndex = 0
+    var afterIndex = 0
+    var hunkBeforeStart = -1
+    var hunkAfterStart = -1
+    fun close(nextBefore: Int, nextAfter: Int) {
+        if (hunkBeforeStart < 0) return
+        hunks.addAll(
+            emitAlignedHunks(
+                before,
+                after,
+                beforeLines,
+                beforeFrom + hunkBeforeStart,
+                beforeFrom + nextBefore,
+                afterLines,
+                afterFrom + hunkAfterStart,
+                afterFrom + nextAfter,
+            ),
+        )
+        hunkBeforeStart = -1
+    }
+    while (beforeIndex < beforeCount && afterIndex < afterCount) {
+        if (
+            lineEquals(
+                before,
+                beforeLines[beforeFrom + beforeIndex],
+                after,
+                afterLines[afterFrom + afterIndex],
+            )
+        ) {
+            close(beforeIndex, afterIndex)
+            beforeIndex++
+            afterIndex++
+        } else if (lcs[beforeIndex + 1][afterIndex] >= lcs[beforeIndex][afterIndex + 1]) {
+            if (hunkBeforeStart < 0) {
+                hunkBeforeStart = beforeIndex
+                hunkAfterStart = afterIndex
+            }
+            beforeIndex++
+        } else {
+            if (hunkBeforeStart < 0) {
+                hunkBeforeStart = beforeIndex
+                hunkAfterStart = afterIndex
+            }
+            afterIndex++
+        }
+    }
+    if (beforeIndex < beforeCount || afterIndex < afterCount) {
+        if (hunkBeforeStart < 0) {
+            hunkBeforeStart = beforeIndex
+            hunkAfterStart = afterIndex
+        }
+        close(beforeCount, afterCount)
+    } else {
+        close(beforeIndex, afterIndex)
+    }
+    return hunks
+}
+
+private fun emitAlignedHunks(
+    before: String,
+    after: String,
+    beforeLines: List<LineSpan>,
+    beforeFrom: Int,
+    beforeTo: Int,
+    afterLines: List<LineSpan>,
+    afterFrom: Int,
+    afterTo: Int,
+): List<DocumentHunk> {
+    val beforeCount = beforeTo - beforeFrom
+    val afterCount = afterTo - afterFrom
+    if (beforeCount > 1 && beforeCount == afterCount) {
+        val hunks = mutableListOf<DocumentHunk>()
+        for (step in 0 until beforeCount) {
+            val hunk = regionDocumentHunk(
+                before,
+                after,
+                beforeLines,
+                beforeFrom + step,
+                beforeFrom + step + 1,
+                afterLines,
+                afterFrom + step,
+                afterFrom + step + 1,
+            )
+            if (hunk != null) hunks.add(hunk)
+        }
+        return hunks
+    }
+    val hunk = regionDocumentHunk(
+        before,
+        after,
+        beforeLines,
+        beforeFrom,
+        beforeTo,
+        afterLines,
+        afterFrom,
+        afterTo,
+    )
+    return if (hunk == null) emptyList() else listOf(hunk)
+}
+
+private fun regionDocumentHunk(
+    before: String,
+    after: String,
+    beforeLines: List<LineSpan>,
+    beforeFrom: Int,
+    beforeTo: Int,
+    afterLines: List<LineSpan>,
+    afterFrom: Int,
+    afterTo: Int,
+): DocumentHunk? {
+    val start = boundedLineOffset(before.length, beforeLines, beforeFrom)
+    val end = boundedLineOffset(before.length, beforeLines, beforeTo)
+    val replacementStart = boundedLineOffset(after.length, afterLines, afterFrom)
+    val replacementEnd = boundedLineOffset(after.length, afterLines, afterTo)
+    if (start == end && replacementStart == replacementEnd) return null
+    if (start > end || replacementStart > replacementEnd) return null
+    return DocumentHunk(start, end, after.substring(replacementStart, replacementEnd))
+}
+
+private fun boundedLineOffset(textLength: Int, lines: List<LineSpan>, index: Int): Int {
+    if (lines.isEmpty()) return if (index <= 0) 0 else textLength
+    if (index <= 0) return lines.first().start
+    if (index >= lines.size) return lines.last().endExclusive
+    return lines[index].start
+}
+
+private fun tightenDocumentHunks(before: String, hunks: List<DocumentHunk>): List<DocumentHunk> {
+    val tight = mutableListOf<DocumentHunk>()
+    for (hunk in hunks) {
+        if (hunk.start < 0 || hunk.end < hunk.start || hunk.end > before.length) return emptyList()
+        val inner = minimalDocumentEditUtil(before.substring(hunk.start, hunk.end), hunk.replacement) ?: continue
+        tight.add(
+            DocumentHunk(
+                start = hunk.start + inner.start,
+                end = hunk.start + inner.end,
+                replacement = inner.replacement,
+            ),
+        )
+    }
+    return tight
+}
 
 private data class OperatorCaretOffsets(
     val caret: Int,
@@ -2314,10 +2784,11 @@ private val operatorViewLog =
 
 /**
  * Respond, finalize, queue consume, status, refresh, reposition, and CRDT
- * projection all mutate through this helper. The caret stays on the same
- * character outside the replacement, and the viewport stays on that text's
- * visual Y even when the viewport also contains the replacement. Restoring
- * carets does not publish the system selection or request focus.
+ * projection all mutate through this helper. Separated edits, including an
+ * `agent:active` update beside a later prompt prefix, map as separate regions.
+ * The caret stays on the same character outside each region, and the viewport
+ * stays on that text's visual Y even when the viewport also contains a region.
+ * Restoring carets does not publish the system selection or request focus.
  */
 internal fun <T> preserveOperatorEditorViewStateUtil(
     project: Project,
@@ -2376,7 +2847,7 @@ internal fun <T> preserveOperatorEditorViewStateUtil(
             operatorViewLog.warn("[patch-watcher] Failed to read document while restoring operator view", e)
             before
         }
-        val edit = minimalDocumentEditUtil(before, after)
+        val hunks = documentChangeHunksUtil(before, after)
         val textLength = after.length
         val generation = operatorViewRestoreGenerations
             .computeIfAbsent(document) { AtomicInteger() }
@@ -2386,30 +2857,11 @@ internal fun <T> preserveOperatorEditorViewStateUtil(
             if (!state.editor.isDisposed) {
                 try {
                     val carets = state.carets.map { caret ->
-                        if (edit == null) {
-                            caret
-                        } else {
-                            OperatorCaretOffsets(
-                                caret = mapOffsetThroughReplacement(
-                                    caret.caret,
-                                    edit.start,
-                                    edit.end,
-                                    edit.replacement.length,
-                                ),
-                                selectionStart = mapOffsetThroughReplacement(
-                                    caret.selectionStart,
-                                    edit.start,
-                                    edit.end,
-                                    edit.replacement.length,
-                                ),
-                                selectionEnd = mapOffsetThroughReplacement(
-                                    caret.selectionEnd,
-                                    edit.start,
-                                    edit.end,
-                                    edit.replacement.length,
-                                ),
-                            )
-                        }
+                        OperatorCaretOffsets(
+                            caret = mapOffsetThroughReplacement(caret.caret, hunks),
+                            selectionStart = mapOffsetThroughReplacement(caret.selectionStart, hunks),
+                            selectionEnd = mapOffsetThroughReplacement(caret.selectionEnd, hunks),
+                        )
                     }.map { caret ->
                         OperatorCaretOffsets(
                             caret = caret.caret.coerceIn(0, textLength),
@@ -2438,7 +2890,7 @@ internal fun <T> preserveOperatorEditorViewStateUtil(
                     // Measure the anchor after the caret restore. reloadFromDisk may
                     // have cleared the scrollbar; the target is the pre-edit scroll
                     // plus the anchor's visual-Y delta, not the post-edit scrollbar.
-                    val vertical = if (edit == null) {
+                    val vertical = if (hunks.isEmpty()) {
                         state.verticalScrollOffset.coerceAtLeast(0)
                     } else {
                         val anchor = operatorViewportAnchor(
@@ -2446,30 +2898,20 @@ internal fun <T> preserveOperatorEditorViewStateUtil(
                             caretInViewport = state.caretInViewport,
                             topLeftOffset = state.topLeftOffset,
                             bottomOffset = state.bottomOffset,
-                            editStart = edit.start,
-                            editEnd = edit.end,
-                        )
+                        ) { offset -> offsetOutsideDocumentHunks(offset, hunks) }
                         val (oldY, newY) = when (anchor) {
                             OperatorViewportAnchor.Caret -> {
                                 val line = state.editor.caretModel.primaryCaret.visualPosition.line
                                 state.primaryCaretY to state.editor.visualLineToY(line)
                             }
                             OperatorViewportAnchor.TopLeft -> {
-                                val mapped = mapOffsetThroughReplacement(
-                                    state.topLeftOffset,
-                                    edit.start,
-                                    edit.end,
-                                    edit.replacement.length,
-                                ).coerceIn(0, textLength)
+                                val mapped = mapOffsetThroughReplacement(state.topLeftOffset, hunks)
+                                    .coerceIn(0, textLength)
                                 state.topLeftY to state.editor.offsetToXY(mapped).y
                             }
                             OperatorViewportAnchor.Bottom -> {
-                                val mapped = mapOffsetThroughReplacement(
-                                    state.bottomOffset,
-                                    edit.start,
-                                    edit.end,
-                                    edit.replacement.length,
-                                ).coerceIn(0, textLength)
+                                val mapped = mapOffsetThroughReplacement(state.bottomOffset, hunks)
+                                    .coerceIn(0, textLength)
                                 state.bottomY to state.editor.offsetToXY(mapped).y
                             }
                             OperatorViewportAnchor.Unchanged ->

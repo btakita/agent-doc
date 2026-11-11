@@ -4540,6 +4540,119 @@ mod tests {
         assert!(!settled.changed, "{}", settled.target_content);
     }
 
+    /// `#nostuckidentity`: the struck `#adversarial-pr` and the new live
+    /// `#adversarial-pr` under haiven-api pull 869 shared one claim identity.
+    /// Admission observed `bare` and `🟡`, rolled the claim back
+    /// (`claim_projection_unrepresentable`), and held dispatch. The live
+    /// instruction is claimed. The struck copy stays struck. No second live
+    /// row is inserted.
+    #[test]
+    fn claim_of_a_live_row_beside_its_struck_copy_admits() {
+        let dir = tempfile::tempdir().unwrap();
+        let parent = "https://github.com/haiven-dev/haiven-api/pull/869";
+        let other = "https://github.com/haiven-dev/haiven-api/pull/870";
+        let body = format!(
+            "- ### {parent}\n  \
+             - %% fix(chat): retry a failed fpe evaluation in shadow mode %%\n  \
+             - ~~#address [#q-e41a2f57cc1f]~~\n  \
+             - ~~#adversarial-pr~~\n  \
+             - 📥 #adversarial-pr\n\
+             - ### {other}\n  \
+             - ~~#adversarial-pr~~\n"
+        );
+        let doc = write_claim_projection_doc(dir.path(), &body);
+        let effects = FakeEffects::default();
+
+        let (outcome, claim) = claim_with_runtime_projection(
+            &effects,
+            &doc,
+            "#adversarial-pr",
+            "subagent:nostuck",
+            600,
+        )
+        .expect("the live instruction admits beside its struck copy");
+        assert_eq!(outcome, agent_doc_queue::queue_claim::ClaimOutcome::Created);
+        assert_eq!(claim.item_text, format!("{parent}: #adversarial-pr"));
+        assert_eq!(claim.generation, 1);
+
+        let projected = std::fs::read_to_string(&doc).unwrap();
+        assert_eq!(
+            projected.matches("~~#adversarial-pr~~").count(),
+            2,
+            "both struck copies stay struck and no extra row is inserted: {projected}"
+        );
+        assert_eq!(
+            projected
+                .lines()
+                .filter(|line| line.contains("🟡") && line.contains("#adversarial-pr"))
+                .count(),
+            1,
+            "{projected}"
+        );
+        assert!(
+            projected.contains(&format!("- ### {parent}\n")),
+            "the parent is not painted as the claimed row: {projected}"
+        );
+        assert!(
+            projected.contains("- ~~#address [#q-e41a2f57cc1f]~~"),
+            "{projected}"
+        );
+        assert!(
+            !projected.contains("⟦effect:"),
+            "admission must not invent an effect row: {projected}"
+        );
+        assert_eq!(
+            crate::queue_claim::load_ledger(&doc).unwrap().claims.len(),
+            1
+        );
+        let lineage = crate::queue_lineage::load(&doc).unwrap();
+        assert!(
+            crate::queue_lineage::admission_refused_identities(&lineage).is_empty(),
+            "a successful admission does not hold dispatch"
+        );
+        assert!(
+            crate::subagent_dispatch::admission_refused_heads_for_content(&doc, &projected)
+                .is_empty()
+        );
+    }
+
+    /// `#nostuckidentity`: the same collision for an id-backed requeue.
+    /// `~~do [#id]~~` beside `do [#id]` must not roll the new claim back.
+    #[test]
+    fn claim_of_a_requeued_id_beside_its_struck_copy_admits() {
+        let dir = tempfile::tempdir().unwrap();
+        let head = "do [#requeue-me]";
+        let doc = write_claim_projection_doc(dir.path(), &format!("- ~~{head}~~\n- 📥 {head}\n"));
+        let effects = FakeEffects::default();
+
+        let (_, claim) =
+            claim_with_runtime_projection(&effects, &doc, head, "subagent:requeue", 600)
+                .expect("the requeued id admits beside its struck copy");
+        assert_eq!(claim.item_text, head);
+
+        let projected = std::fs::read_to_string(&doc).unwrap();
+        assert_eq!(
+            projected.matches(&format!("- ~~{head}~~\n")).count(),
+            1,
+            "{projected}"
+        );
+        assert_eq!(
+            projected
+                .lines()
+                .filter(|line| line.contains("🟡") && line.contains(head))
+                .count(),
+            1,
+            "{projected}"
+        );
+        assert_eq!(projected.matches(head).count(), 2, "{projected}");
+        assert!(
+            crate::queue_lineage::admission_refused_identities(
+                &crate::queue_lineage::load(&doc).unwrap()
+            )
+            .is_empty()
+        );
+    }
+
     #[test]
     fn claim_projection_rebases_on_editor_authority_cut() {
         let dir = tempfile::tempdir().unwrap();

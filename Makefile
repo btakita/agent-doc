@@ -666,7 +666,7 @@ install: editor-generation-bump
 	$(LOCAL_CARGO_ENV) $(CARGO_CMD) build --profile "$(LOCAL_INSTALL_PROFILE)" --target-dir "$(LOCAL_INSTALL_TARGET_DIR)" --bin agent-doc --lib
 	@"$(LOCAL_INSTALL_TARGET_DIR)/$(LOCAL_INSTALL_PROFILE)/agent-doc" binary-install --source "$(LOCAL_INSTALL_TARGET_DIR)/$(LOCAL_INSTALL_PROFILE)/agent-doc"
 	@cmp -s "$(LOCAL_INSTALL_TARGET_DIR)/$(LOCAL_INSTALL_PROFILE)/agent-doc" "$(CARGO_INSTALL_BIN_DIR_ABS)/agent-doc" || { echo "installed agent-doc does not match the freshly built dogfood binary" >&2; exit 1; }
-	@CARGO_TARGET_DIR="$(LOCAL_INSTALL_TARGET_DIR)" "$(LOCAL_INSTALL_TARGET_DIR)/$(LOCAL_INSTALL_PROFILE)/agent-doc" lib-install --profile "$(LOCAL_INSTALL_PROFILE)"
+	@CARGO_TARGET_DIR="$(LOCAL_INSTALL_TARGET_DIR)" "$(LOCAL_INSTALL_TARGET_DIR)/$(LOCAL_INSTALL_PROFILE)/agent-doc" lib-install --profile "$(LOCAL_INSTALL_PROFILE)" --target-dir "$(CARGO_INSTALL_BIN_DIR_ABS)"
 	@"$(LOCAL_INSTALL_TARGET_DIR)/$(LOCAL_INSTALL_PROFILE)/agent-doc" skill install --all
 	@"$(LOCAL_INSTALL_TARGET_DIR)/$(LOCAL_INSTALL_PROFILE)/agent-doc" skill install --root . --all
 	@"$(LOCAL_INSTALL_TARGET_DIR)/$(LOCAL_INSTALL_PROFILE)/agent-doc" skill hooks --fix --known-projects

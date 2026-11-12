@@ -1000,6 +1000,12 @@ mod tests {
                 "{target} must install the paired library before interruptible skill/hook work: \
                  binary={binary_install}, library={library_install}, skills={skill_install}"
             );
+            assert!(
+                body[library_install].contains("--target-dir \"$(CARGO_INSTALL_BIN_DIR_ABS)\""),
+                "{target} must install the library beside the canonical Cargo binary, not beside \
+                 the staging executable: {}",
+                body[library_install],
+            );
         }
     }
 

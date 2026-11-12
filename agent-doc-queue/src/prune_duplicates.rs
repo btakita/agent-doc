@@ -403,9 +403,11 @@ fn is_whitespace_boundary_prefix(prefix: &str, candidate: &str) -> bool {
 
 fn extensions_diverge(extensions: &[&str]) -> bool {
     extensions.iter().any(|left| {
-        extensions
-            .iter()
-            .any(|right| *left != *right && !left.starts_with(*right) && !right.starts_with(*left))
+        extensions.iter().any(|right| {
+            *left != *right
+                && !is_whitespace_boundary_prefix(left, right)
+                && !is_whitespace_boundary_prefix(right, left)
+        })
     })
 }
 
@@ -650,6 +652,20 @@ mod tests {
 <!-- agent:run id=\"main\" -->
 - Compile with C++
 - Compile with C++20 support before release
+<!-- /agent:run -->
+";
+        let plan = plan(source).unwrap();
+        assert!(plan.drops.is_empty());
+        assert_eq!(plan.document, source);
+    }
+
+    #[test]
+    fn keeps_a_shared_prefix_when_punctuation_bearing_extensions_diverge() {
+        let source = "\
+<!-- agent:run id=\"main\" -->
+- Release build with
+- Release build with C++
+- Release build with C++20 support before release
 <!-- /agent:run -->
 ";
         let plan = plan(source).unwrap();

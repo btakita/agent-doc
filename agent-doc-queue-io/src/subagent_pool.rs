@@ -367,9 +367,9 @@ mod tests {
         );
     }
 
-    /// A frozen worker frees its slot but keeps its claim: the next head is
-    /// handed out, the frozen row is never redispatched, and a refresh
-    /// heartbeat clears the freeze (`#subagentworkpool`).
+    /// A harness freeze first attempts continuation. When the stopped worker
+    /// cannot continue, that failure authorizes retry of the same row in the
+    /// freed slot; a refresh heartbeat clears the freeze (`#subagentworkpool`).
     #[test]
     fn freezing_a_worker_refills_its_slot_and_keeps_the_claim() {
         let dir = tempfile::tempdir().unwrap();
@@ -401,14 +401,13 @@ mod tests {
                 .iter()
                 .map(|head| head.item.as_str())
                 .collect::<Vec<_>>(),
-            ["do [#c]"],
+            ["do [#a]"],
             "{refill:#?}"
         );
-        assert_eq!(refill.frozen.len(), 1);
-        assert_eq!(refill.frozen[0].item, "do [#a]");
+        assert!(refill.frozen.is_empty(), "{refill:#?}");
         assert!(
-            crate::queue_claim::claimed_items_for_content(&file, &content).claims("do [#a]"),
-            "the frozen attempt keeps its claim"
+            !crate::queue_claim::claimed_items_for_content(&file, &content).claims("do [#a]"),
+            "the failed continuation authorizes retry"
         );
         let text = refill.render().unwrap();
         assert!(text.contains("trigger=frozen"), "{text}");

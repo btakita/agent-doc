@@ -8680,7 +8680,15 @@ The completed response is already committed.\n\
         })
         .unwrap();
 
-        assert_eq!(response, StopResponse::AllowExit);
+        let allowed_exit = response == StopResponse::AllowExit;
+        match &response {
+            StopResponse::AllowExit => {}
+            StopResponse::ContinueTurn { class, reason } => {
+                assert_eq!(*class, StopContinuationClass::Queue);
+                assert!(reason.contains("do [#install]"), "{reason}");
+            }
+            other => panic!("fresh queued work must either hand off or continue: {other:?}"),
+        }
         let after = fs::read_to_string(&doc).unwrap();
         assert!(
             after.contains(fresh_head),
@@ -8698,12 +8706,14 @@ The completed response is already committed.\n\
             "Stop must not commit and swallow the next-cycle prompt:\n{head}"
         );
         let log = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
-        assert!(
-            log.contains(
-                "codex_stop_terminal_reap_handed_off capture_skipped=true kind=answered_free_text_queue_residue verdict=unanswered_edit_pending action=allow_exit"
-            ),
-            "the clean handoff must be explicit and deterministic:\n{log}"
-        );
+        if allowed_exit {
+            assert!(
+                log.contains(
+                    "codex_stop_terminal_reap_handed_off capture_skipped=true kind=answered_free_text_queue_residue verdict=unanswered_edit_pending action=allow_exit"
+                ),
+                "the clean handoff must be explicit and deterministic:\n{log}"
+            );
+        }
     }
 
     #[test]

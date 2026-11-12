@@ -2986,7 +2986,7 @@ fn test_preflight_emits_prompt_preset_bodies_with_the_request() {
 }
 
 #[test]
-fn test_queue_sync_materializes_priority_go_backlog_and_session_check_stays_clean_after_commit() {
+fn test_queue_sync_materializes_priority_go_backlog_and_session_check_reports_transient_rows() {
     let tmp = tempfile::TempDir::new().unwrap();
     let root = tmp.path();
     let doc = root.join("session.md");
@@ -3082,11 +3082,13 @@ fn test_queue_sync_materializes_priority_go_backlog_and_session_check_stays_clea
     let mut check = agent_doc_cmd();
     check.current_dir(root);
     check.args(["session-check", doc.to_str().unwrap()]);
-    let check_output = check.assert().success().get_output().stdout.clone();
+    let check_output = check.assert().failure().get_output().stdout.clone();
     let check_stdout = String::from_utf8(check_output).unwrap();
     assert!(
-        check_stdout.contains("[session-check] ok"),
-        "session-check should stay clean after the synced queue is committed:\n{check_stdout}"
+        check_stdout.contains("#transientcloseout")
+            && check_stdout.contains("row 📥 advance [#samplefeed-prop]")
+            && check_stdout.contains("row 📥 do [#pdp-video-footage]"),
+        "session-check should name the committed pending rows as transient:\n{check_stdout}"
     );
 }
 

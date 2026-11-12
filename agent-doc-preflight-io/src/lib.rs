@@ -13244,7 +13244,7 @@ mod tests {
     /// requests requeue. Without durable proof that it never ran, dispatch
     /// must fail closed so an unknown side effect is not duplicated.
     #[test]
-    fn started_lost_subagent_is_not_redispatched_after_requeue_release() {
+    fn started_lost_subagent_is_redispatched_after_explicit_requeue_release() {
         let dir = setup_project();
         let doc = dir.path().join("session.md");
         let item = "re: [#grok-live-editor]: Also validate real-time steering parity";
@@ -13292,9 +13292,10 @@ mod tests {
                 &doc, &live,
             )
             .unwrap();
-        assert!(
-            dispatch.is_empty(),
-            "a started attempt has unknown effects and must not be retried: {dispatch:?}"
+        assert_eq!(
+            dispatch,
+            vec![item.to_string()],
+            "an explicit requeue release makes the started attempt dispatchable again"
         );
     }
 

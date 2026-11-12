@@ -7305,6 +7305,7 @@ Second answer line three.
 
     #[test]
     fn two_steering_candidates_do_not_take_one_admitted_qid() {
+        let _guard = crate::document_cell::CELL_MERGE_ENV_LOCK.lock();
         let parent = "- ### https://example.test/sample-app/pull/41";
         let earlier = "  - Since sample-app uses the release bot, should we close the open pull request? If yes, close it with a superceded by the release bot reason.";
         let first = "  - Since sample-app uses the release bot, should we close the open pull request? If yes, close it with a note that the release bot superceded it.";

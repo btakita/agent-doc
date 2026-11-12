@@ -1462,7 +1462,7 @@ fn transient_turn_end_continuation(file: &Path) -> Result<Option<ClaudeStopConti
             }));
         }
     };
-    let Some(failure) = agent_doc_queue::transient_closeout::turn_end_closeout_failure(&content)?
+    let Some(failure) = agent_doc_queue::transient_closeout::normal_closeout_failure(&content)?
     else {
         return Ok(None);
     };

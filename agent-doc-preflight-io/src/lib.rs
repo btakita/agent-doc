@@ -2277,6 +2277,16 @@ pub fn run_pending_maintenance(
     file: &Path,
     write_effects: &dyn PreflightMaintenanceWriteEffects,
 ) -> Result<PendingMaintenanceReport> {
+    let apply_guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(file)?;
+    run_pending_maintenance_under_apply_guard(file, write_effects, &apply_guard)
+}
+
+fn run_pending_maintenance_under_apply_guard(
+    file: &Path,
+    write_effects: &dyn PreflightMaintenanceWriteEffects,
+    apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
+) -> Result<PendingMaintenanceReport> {
+    apply_guard.ensure_protects(file)?;
     run_pending_maintenance_with_options(
         file,
         PendingMaintenanceOptions::default(),
@@ -2306,7 +2316,9 @@ pub fn run_pending_maintenance_fenced(
     file: &Path,
     write_effects: &dyn PreflightMaintenanceWriteEffects,
     effect_fence: &dyn PendingMaintenanceEffectFence,
+    apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
 ) -> Result<PendingMaintenanceReport> {
+    apply_guard.ensure_protects(file)?;
     run_pending_maintenance_with_options(
         file,
         PendingMaintenanceOptions::default(),
@@ -2319,6 +2331,8 @@ pub fn run_pending_maintenance_force_disk(
     file: &Path,
     write_effects: &dyn PreflightMaintenanceWriteEffects,
 ) -> Result<PendingMaintenanceReport> {
+    let apply_guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(file)?;
+    apply_guard.ensure_protects(file)?;
     run_pending_maintenance_with_options(
         file,
         PendingMaintenanceOptions {
@@ -5626,13 +5640,10 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
     let apply_guard = match agent_doc_queue_io::queue_edit_owner::QueueEditGuard::try_acquire(file)?
     {
         Some(guard) => guard,
-        None => {
-            eprintln!(
-                "[preflight] queue: deferred because another owner holds the apply lock for {}",
-                file.display(),
-            );
-            return Ok(QueueState::default());
-        }
+        None => anyhow::bail!(
+            "queue maintenance unsettled: another owner holds the apply lock for {}; retry after it completes",
+            file.display(),
+        ),
     };
     run_queue_maintenance_with_options_under_apply_guard(
         file,
@@ -14143,18 +14154,14 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
         let direct_guard =
             agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(&doc).unwrap();
 
-        let state = run_queue_maintenance(&doc, None).unwrap();
+        let error = run_queue_maintenance(&doc, None).unwrap_err();
 
         let after = std::fs::read_to_string(&doc).unwrap();
         assert_eq!(
             after, content,
             "queue must be untouched while a foreign edit is in flight"
         );
-        assert!(
-            state.synced_queue_ids.is_empty(),
-            "no backlog→queue sync may run while deferred, got {:?}",
-            state.synced_queue_ids
-        );
+        assert!(error.to_string().contains("queue maintenance unsettled"));
         assert!(
             !after.contains("- do [#alpha]"),
             "deferred maintenance must not mint the queue head:\n{after}"

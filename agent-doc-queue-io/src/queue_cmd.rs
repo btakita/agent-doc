@@ -1447,6 +1447,7 @@ pub fn clean_slate_with_effects(
     effects: &(impl QueueRuntimeProjectionEffects + ?Sized),
     file: &Path,
 ) -> Result<QueueCleanSlateOutcome> {
+    let _queue_edit_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file)?;
     let reset =
         agent_doc_controller_io::project_controller::queue_clean_slate_reset_for_file(file)?;
     let projection = match project_all_queue_runtime_state_once_for_generation_with_effects(
@@ -1813,6 +1814,7 @@ pub fn consume_with_options(
 /// Delegates to the write-layer striker, which guards against desyncing live
 /// open backlog work and keeps the document and snapshot in sync.
 pub fn consume_orphan_id(effects: &impl QueueCommandEffects, file: &Path, id: &str) -> Result<()> {
+    let _queue_edit_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file)?;
     let normalized = backlog::normalize_pending_id(id);
     if effects.strike_orphan_id_backed_queue_head(file, id)? {
         println!(
@@ -1836,6 +1838,7 @@ pub fn acknowledge_open_id(
     id: &str,
     attempt: Option<&agent_doc_document::queue_projection::QueueOwnerProjection>,
 ) -> Result<()> {
+    let _queue_edit_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file)?;
     let normalized = backlog::normalize_pending_id(id);
     let acknowledged = if attempt.is_some() {
         effects.acknowledge_open_id_backed_queue_head_for_attempt(file, id, attempt)?
@@ -1932,6 +1935,7 @@ pub fn plan_with_effects(effects: &impl QueueCommandEffects, file: &Path) -> Res
 }
 
 pub fn sync_with_effects(effects: &impl QueueCommandEffects, file: &Path) -> Result<()> {
+    let _queue_edit_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file)?;
     let previous_content = agent_doc_snapshot_io::load_document_baseline(file)?;
     let mut content = effects.current_document_content(file, "queue_sync")?;
     // A torn realtime merge can place the binary completion cell underneath
@@ -2529,6 +2533,40 @@ mod tests {
             }
             Ok(self.captured_answered.get())
         }
+    }
+
+    #[test]
+    fn direct_queue_mutations_defer_while_an_apply_guard_is_active() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "<!-- agent:queue -->\n",
+            "- do [#alpha]\n",
+            "<!-- /agent:queue -->\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#alpha] alpha\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        let effects = FakeEffects::with_current(content);
+        let active = crate::queue_edit_owner::QueueEditGuard::acquire(&doc).unwrap();
+
+        for error in [
+            sync_with_effects(&effects, &doc).unwrap_err(),
+            clean_slate_with_effects(&effects, &doc).unwrap_err(),
+            consume_orphan_id(&effects, &doc, "alpha").unwrap_err(),
+            acknowledge_open_id(&effects, &doc, "alpha", None).unwrap_err(),
+        ] {
+            assert!(
+                error.to_string().contains("queue mutation deferred"),
+                "{error:#}"
+            );
+        }
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), content);
+
+        drop(active);
+        sync_with_effects(&effects, &doc).unwrap();
     }
 
     struct RacingClaimEffects {

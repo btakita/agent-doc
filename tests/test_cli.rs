@@ -644,6 +644,152 @@ fn simultaneous_preflights_coalesce_to_one_background_maintenance_body() {
     );
 }
 
+#[test]
+fn crashed_worker_is_visible_and_promptly_redispatched_without_ttl_wait() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let doc = tmp.path().join("session.md");
+    let content = concat!(
+        "---\n",
+        "agent_doc_session: crash-recovery-test\n",
+        "agent_doc_format: template\n",
+        "agent: codex\n",
+        "model: gpt-5\n",
+        "---\n\n",
+        "<!-- agent:exchange -->\n",
+        "### Re: prior — gpt-5\n\nDone.\n",
+        "<!-- agent:boundary:1234abcd -->\n",
+        "<!-- /agent:exchange -->\n\n",
+        "<!-- agent:backlog priority queue -->\n",
+        "- legacy crash recovery item\n",
+        "<!-- /agent:backlog -->\n",
+    );
+    fs::write(&doc, content).unwrap();
+    init_git_repo(tmp.path(), &doc);
+
+    let first = agent_doc_cmd()
+        .current_dir(tmp.path())
+        .env(
+            "AGENT_DOC_TEST_BACKGROUND_MAINTENANCE_CRASH_AFTER_LOCK",
+            "1",
+        )
+        .args(["preflight", doc.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(
+        first.status.success(),
+        "admission failed before detached crash: {}",
+        String::from_utf8_lossy(&first.stderr),
+    );
+
+    let crash_deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    loop {
+        if agent_doc_queue_io::queue_edit_owner::read_queue_edit_owner_lease(&doc.to_string_lossy())
+            .is_some()
+            && !agent_doc_queue_io::queue_edit_owner::queue_apply_in_flight(&doc).unwrap()
+        {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < crash_deadline,
+            "crashed worker did not leave a durable incomplete attempt",
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+
+    let recovery_started = std::time::Instant::now();
+    let recovery = agent_doc_cmd()
+        .current_dir(tmp.path())
+        .args(["preflight", doc.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(
+        recovery.status.success(),
+        "recovery admission failed: {}",
+        String::from_utf8_lossy(&recovery.stderr),
+    );
+    assert!(
+        recovery_started.elapsed() < std::time::Duration::from_secs(5),
+        "dead worker recovery waited for the lease TTL: {:?}",
+        recovery_started.elapsed(),
+    );
+
+    let ops = tmp.path().join(".agent-doc/logs/ops.log");
+    let completion_deadline = std::time::Instant::now() + std::time::Duration::from_secs(8);
+    loop {
+        let current_ops = fs::read_to_string(&ops).unwrap_or_default();
+        if current_ops.contains("pending_maintenance_background_completed") {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < completion_deadline,
+            "successor never completed the crashed attempt: {current_ops}",
+        );
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    assert!(
+        fs::read_to_string(&doc).unwrap().contains("- [ ] [#"),
+        "successor did not durably apply pending maintenance",
+    );
+}
+
+#[test]
+fn every_public_queue_mutation_entrypoint_acquires_apply_exclusion() {
+    let queue_cmd = include_str!("../agent-doc-queue-io/src/queue_cmd.rs");
+    for function in [
+        "clean_slate_with_effects",
+        "consume_orphan_id",
+        "acknowledge_open_id",
+        "sync_with_effects",
+    ] {
+        let marker = format!("pub fn {function}");
+        let start = queue_cmd.find(&marker).unwrap();
+        let tail = &queue_cmd[start..];
+        let end = tail[1..]
+            .find("\npub fn ")
+            .map(|index| index + 1)
+            .unwrap_or(tail.len());
+        assert!(
+            tail[..end].contains("QueueEditGuard::acquire(file)?"),
+            "{function} bypasses queue apply exclusion",
+        );
+    }
+
+    let pending = include_str!("../agent-doc-preflight-io/src/lib.rs");
+    for function in [
+        "run_pending_maintenance",
+        "run_pending_maintenance_force_disk",
+    ] {
+        let marker = format!("pub fn {function}");
+        let start = pending.find(&marker).unwrap();
+        let body = &pending[start..start + 900.min(pending.len() - start)];
+        assert!(
+            body.contains("QueueEditGuard::acquire(file)?"),
+            "{function} bypasses pending apply exclusion",
+        );
+    }
+
+    let session_check = include_str!("../agent-doc-session-check-io/src/command.rs");
+    let closeout_guard = &session_check[session_check
+        .find("fn refuse_transient_queue_closeout")
+        .expect("session-check closeout guard exists")..];
+    let apply_probe = closeout_guard
+        .find("queue_apply_in_flight(file)")
+        .expect("session-check must probe the OS apply lock");
+    let lease_probe = closeout_guard
+        .find("read_queue_edit_owner_lease")
+        .expect("session-check must inspect durable incomplete attempts");
+    assert!(
+        apply_probe < lease_probe,
+        "session-check must close the lock-before-lease visibility gap",
+    );
+
+    let closeout = include_str!("../agent-doc-closeout-runtime-io/src/lib.rs");
+    assert!(
+        closeout.contains("run_queue_maintenance(file, None)?"),
+        "closeout must propagate typed maintenance contention instead of treating it as empty",
+    );
+}
+
 fn read_cycle_phase(root: &Path, doc: &Path) -> Option<String> {
     let _ = root;
     agent_doc_cycle_state_io::load(doc)

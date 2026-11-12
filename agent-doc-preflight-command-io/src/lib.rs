@@ -131,6 +131,8 @@ use agent_doc_session_accretion::SessionAccretionReport;
 
 const TEST_BACKGROUND_PENDING_MAINTENANCE_DELAY_MS_ENV: &str =
     "AGENT_DOC_TEST_BACKGROUND_PENDING_MAINTENANCE_DELAY_MS";
+const TEST_BACKGROUND_MAINTENANCE_CRASH_AFTER_LOCK_ENV: &str =
+    "AGENT_DOC_TEST_BACKGROUND_MAINTENANCE_CRASH_AFTER_LOCK";
 const BACKGROUND_QUEUE_MAINTENANCE_TOKEN_ENV: &str = "AGENT_DOC_BACKGROUND_QUEUE_MAINTENANCE_TOKEN";
 
 fn new_background_queue_maintenance_token() -> String {
@@ -199,6 +201,27 @@ pub fn spawn_background_queue_maintenance(file: &Path, commit_if_mutated: bool) 
             ));
         }
     };
+    // The reservation starts with the dispatcher's PID so a dispatcher crash
+    // before process creation is recoverable. Once spawn succeeds, hand the
+    // same token to the child PID immediately. This also makes a child crash
+    // before `adopt_reserved` promptly recoverable while a long-lived plugin
+    // host continues running.
+    match agent_doc_queue_io::queue_edit_owner::refresh_queue_edit_owner_lease_if_holder(
+        &file.to_string_lossy(),
+        &token,
+        pid,
+    ) {
+        Ok(_) => {}
+        Err(error) => agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "queue_maintenance_background_pid_handoff_failed file={} pid={} error={}",
+                file.display(),
+                pid,
+                format!("{error:#}").replace('\n', " | "),
+            ),
+        ),
+    }
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
@@ -341,6 +364,10 @@ impl BackgroundQueueMaintenanceLease {
     fn apply_guard(&self) -> &agent_doc_queue_io::queue_edit_owner::QueueEditGuard {
         &self._guard
     }
+
+    fn retain_incomplete_attempt_on_drop(&mut self) {
+        self._guard.retain_incomplete_attempt_on_drop();
+    }
 }
 
 impl agent_doc_preflight_io::PendingMaintenanceEffectFence for BackgroundQueueMaintenanceLease {
@@ -381,7 +408,7 @@ pub fn run_background_queue_maintenance(file: &Path, commit_if_mutated: bool) ->
         std::env::var(BACKGROUND_QUEUE_MAINTENANCE_TOKEN_ENV)
             .context("background queue maintenance reservation token is missing")?
     };
-    let Some(queue_mutation) = BackgroundQueueMaintenanceLease::adopt_reserved(file, &token)?
+    let Some(mut queue_mutation) = BackgroundQueueMaintenanceLease::adopt_reserved(file, &token)?
     else {
         eprintln!(
             "[preflight] background maintenance reservation is no longer owned for {} (child_pid={})",
@@ -390,116 +417,129 @@ pub fn run_background_queue_maintenance(file: &Path, commit_if_mutated: bool) ->
         );
         return Ok(());
     };
-    if let Some(delay) = std::env::var(TEST_BACKGROUND_PENDING_MAINTENANCE_DELAY_MS_ENV)
-        .ok()
-        .and_then(|raw| raw.trim().parse::<u64>().ok())
-        .filter(|delay| *delay > 0)
-    {
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "pending_maintenance_background_test_delay file={} delay_ms={delay}",
-                file.display(),
-            ),
-        );
-        std::thread::sleep(std::time::Duration::from_millis(delay));
+    if std::env::var_os(TEST_BACKGROUND_MAINTENANCE_CRASH_AFTER_LOCK_ENV).is_some() {
+        // Integration-only crash barrier: process::exit intentionally skips
+        // Drop, modeling a hard worker crash after flock acquisition and
+        // durable adoption but before any maintenance success/effect.
+        std::process::exit(91);
     }
-    if !queue_mutation.refresh_owned()? {
-        eprintln!(
-            "[preflight] background maintenance reservation was superseded for {} (child_pid={})",
-            file.display(),
-            std::process::id(),
-        );
-        return Ok(());
-    }
-    let pending_report = match agent_doc_preflight_io::run_pending_maintenance_fenced(
-        file,
-        &PREFLIGHT_MAINTENANCE_WRITE_EFFECTS,
-        &queue_mutation,
-    ) {
-        Ok(report) => report,
-        Err(error) if !queue_mutation.refresh_owned()? => {
+    let result = (|| -> Result<()> {
+        if let Some(delay) = std::env::var(TEST_BACKGROUND_PENDING_MAINTENANCE_DELAY_MS_ENV)
+            .ok()
+            .and_then(|raw| raw.trim().parse::<u64>().ok())
+            .filter(|delay| *delay > 0)
+        {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "pending_maintenance_background_test_delay file={} delay_ms={delay}",
+                    file.display(),
+                ),
+            );
+            std::thread::sleep(std::time::Duration::from_millis(delay));
+        }
+        if !queue_mutation.refresh_owned()? {
             eprintln!(
-                "[preflight] background pending maintenance stopped after lease loss for {}: {error:#}",
+                "[preflight] background maintenance reservation was superseded for {} (child_pid={})",
                 file.display(),
+                std::process::id(),
             );
             return Ok(());
         }
-        Err(error) => return Err(error),
-    };
-    queue_mutation.fence_effect(file)?;
-    agent_doc_ops_log_io::log_op(
-        file,
-        &format!(
-            "pending_maintenance_background_completed file={} reordered={} backlog_gated={} review_count={} todo_signals={}",
-            file.display(),
-            pending_report.reordered,
-            pending_report.backlog_gated_count,
-            pending_report.review_count,
-            pending_report.todo_signals.len(),
-        ),
-    );
-    queue_mutation.fence_effect(file)?;
-    let outcome = agent_doc_preflight_io::run_queue_maintenance_under_apply_guard(
-        file,
-        None,
-        queue_mutation.apply_guard(),
-    );
-    match outcome {
-        Ok(state) => {
-            queue_mutation.fence_effect(file)?;
-            agent_doc_cycle_state_io::record_queue_mirrored_ids_or_warn(
-                file,
-                &state.mirrored_queue_ids,
-                "background_queue_maintenance",
-            );
-            let committed = match commit_if_mutated {
-                true => match queue_mutation
-                    .fence_effect(file)
-                    .and_then(|()| agent_doc_commit_io::commit(file))
-                {
-                    Ok(committed) => committed,
-                    Err(error) => {
-                        queue_mutation.fence_effect(file)?;
-                        agent_doc_ops_log_io::log_op(
-                            file,
-                            &format!(
-                                "queue_maintenance_background_failed file={} stage=commit error={}",
-                                file.display(),
-                                format!("{error:#}").replace('\n', " | "),
-                            ),
-                        );
-                        return Err(error);
-                    }
-                },
-                false => false,
-            };
-            queue_mutation.fence_effect(file)?;
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "queue_maintenance_background_completed file={} mutated={} committed={} drainable={}",
+        let pending_report = match agent_doc_preflight_io::run_pending_maintenance_fenced(
+            file,
+            &PREFLIGHT_MAINTENANCE_WRITE_EFFECTS,
+            &queue_mutation,
+            queue_mutation.apply_guard(),
+        ) {
+            Ok(report) => report,
+            Err(error) if !queue_mutation.refresh_owned()? => {
+                eprintln!(
+                    "[preflight] background pending maintenance stopped after lease loss for {}: {error:#}",
                     file.display(),
-                    state.maintenance_mutated,
-                    committed,
-                    state.queue_drainable_head_count,
-                ),
-            );
-            Ok(())
+                );
+                return Ok(());
+            }
+            Err(error) => return Err(error),
+        };
+        queue_mutation.fence_effect(file)?;
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "pending_maintenance_background_completed file={} reordered={} backlog_gated={} review_count={} todo_signals={}",
+                file.display(),
+                pending_report.reordered,
+                pending_report.backlog_gated_count,
+                pending_report.review_count,
+                pending_report.todo_signals.len(),
+            ),
+        );
+        queue_mutation.fence_effect(file)?;
+        let outcome = agent_doc_preflight_io::run_queue_maintenance_under_apply_guard(
+            file,
+            None,
+            queue_mutation.apply_guard(),
+        );
+        match outcome {
+            Ok(state) => {
+                queue_mutation.fence_effect(file)?;
+                agent_doc_cycle_state_io::record_queue_mirrored_ids_or_warn(
+                    file,
+                    &state.mirrored_queue_ids,
+                    "background_queue_maintenance",
+                );
+                let committed = match commit_if_mutated {
+                    true => match queue_mutation
+                        .fence_effect(file)
+                        .and_then(|()| agent_doc_commit_io::commit(file))
+                    {
+                        Ok(committed) => committed,
+                        Err(error) => {
+                            queue_mutation.fence_effect(file)?;
+                            agent_doc_ops_log_io::log_op(
+                                file,
+                                &format!(
+                                    "queue_maintenance_background_failed file={} stage=commit error={}",
+                                    file.display(),
+                                    format!("{error:#}").replace('\n', " | "),
+                                ),
+                            );
+                            return Err(error);
+                        }
+                    },
+                    false => false,
+                };
+                queue_mutation.fence_effect(file)?;
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "queue_maintenance_background_completed file={} mutated={} committed={} drainable={}",
+                        file.display(),
+                        state.maintenance_mutated,
+                        committed,
+                        state.queue_drainable_head_count,
+                    ),
+                );
+                Ok(())
+            }
+            Err(error) => {
+                queue_mutation.fence_effect(file)?;
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "queue_maintenance_background_failed file={} error={}",
+                        file.display(),
+                        format!("{error:#}").replace('\n', " | "),
+                    ),
+                );
+                Err(error)
+            }
         }
-        Err(error) => {
-            queue_mutation.fence_effect(file)?;
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "queue_maintenance_background_failed file={} error={}",
-                    file.display(),
-                    format!("{error:#}").replace('\n', " | "),
-                ),
-            );
-            Err(error)
-        }
+    })();
+    if result.is_err() {
+        queue_mutation.retain_incomplete_attempt_on_drop();
     }
+    result
 }
 
 /// Run the preflight sequence for a session document.

@@ -12,6 +12,7 @@ const QUEUE_EDIT_OWNER_TTL_SECS_ENV: &str = "AGENT_DOC_QUEUE_EDIT_OWNER_TTL_SECS
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct QueueEditOwnerLease {
+    pub holder: String,
     pub holder_pid: u32,
     pub heartbeat_secs: u64,
 }
@@ -40,14 +41,14 @@ fn state_location(file: &str) -> Result<(std::path::PathBuf, String)> {
     Ok((root, document_hash))
 }
 
-fn refresh_queue_edit_owner_lease(file: &str, pid: u32) -> Result<()> {
+fn publish_queue_edit_owner_lease(file: &str, holder: &str, pid: u32) -> Result<()> {
     let (project_root, document_hash) = state_location(file)?;
     agent_doc_controller_io::project_controller::upsert_coordination_lease(
         &project_root,
         &agent_doc_sqlite::state_store::CoordinationLeaseRecord {
             scope_kind: QUEUE_EDIT_OWNER_SCOPE.to_string(),
             scope_id: document_hash,
-            holder: pid.to_string(),
+            holder: holder.to_string(),
             holder_pid: Some(pid),
             heartbeat_secs: now_secs(),
         },
@@ -91,6 +92,19 @@ fn try_acquire_queue_apply_lock(file: &str) -> Result<QueueApplyLockAttempt> {
     }
 }
 
+/// Whether another thread/process currently holds the document's apply lock.
+/// This closes the observability gap before that owner publishes its SQLite
+/// lease and is safe for session-check/closeout probes (no mutation).
+pub fn queue_apply_in_flight(file: &Path) -> Result<bool> {
+    match try_acquire_queue_apply_lock(&file.to_string_lossy())? {
+        QueueApplyLockAttempt::Contended => Ok(true),
+        QueueApplyLockAttempt::Acquired(lock) => {
+            fs2::FileExt::unlock(&lock).context("failed to release queue apply probe lock")?;
+            Ok(false)
+        }
+    }
+}
+
 /// Atomically reserve queue-maintenance ownership for a child that has been
 /// spawned but has not entered its mutation body yet.
 ///
@@ -98,6 +112,11 @@ fn try_acquire_queue_apply_lock(file: &str) -> Result<QueueApplyLockAttempt> {
 /// one PID can win this SQLite compare-and-set.  Every child verifies this
 /// reservation before doing work.
 pub fn try_reserve_queue_edit_owner(file: &str, token: &str, pid: u32) -> Result<bool> {
+    if let Some(existing) = read_queue_edit_owner_lease(file)
+        && !pid_is_live(existing.holder_pid)
+    {
+        clear_queue_edit_owner_lease_if_holder(file, &existing.holder);
+    }
     let (project_root, document_hash) = state_location(file)?;
     let now = now_secs();
     let eligible_at_or_before = now.saturating_sub(queue_edit_owner_ttl().as_secs());
@@ -137,6 +156,7 @@ pub fn read_queue_edit_owner_lease(file: &str) -> Option<QueueEditOwnerLease> {
     )
     .ok()??;
     Some(QueueEditOwnerLease {
+        holder: lease.holder,
         holder_pid: lease.holder_pid?,
         heartbeat_secs: lease.heartbeat_secs,
     })
@@ -213,7 +233,7 @@ fn pid_is_live(_pid: u32) -> bool {
 pub struct QueueEditGuard {
     file: String,
     holder: String,
-    _apply_lock: File,
+    apply_lock: Option<File>,
 }
 
 impl QueueEditGuard {
@@ -240,6 +260,13 @@ impl QueueEditGuard {
     }
 
     pub fn try_acquire(file: &Path) -> Result<Option<Self>> {
+        Self::try_acquire_with_hook(file, || {})
+    }
+
+    fn try_acquire_with_hook(
+        file: &Path,
+        after_lock_before_lease: impl FnOnce(),
+    ) -> Result<Option<Self>> {
         let file = file.to_string_lossy().to_string();
         // This flock is the apply exclusion. The SQLite lease makes ownership
         // observable and coalesces dispatch, while the OS lock closes the
@@ -249,12 +276,26 @@ impl QueueEditGuard {
             QueueApplyLockAttempt::Acquired(lock) => lock,
             QueueApplyLockAttempt::Contended => return Ok(None),
         };
+        after_lock_before_lease();
+        // A detached worker reserves before it can acquire the flock. Do not
+        // overwrite that live reservation in the short lock-before-adoption
+        // window: doing so would make the sole worker fail adoption and lose
+        // maintenance. A dead owner is recoverable immediately.
+        if let Some(existing) = read_queue_edit_owner_lease(&file) {
+            if pid_is_live(existing.holder_pid) {
+                fs2::FileExt::unlock(&apply_lock)
+                    .context("failed to release queue apply lock after live reservation")?;
+                return Ok(None);
+            }
+            clear_queue_edit_owner_lease_if_holder(&file, &existing.holder);
+        }
         let holder_pid = std::process::id();
-        refresh_queue_edit_owner_lease(&file, holder_pid)?;
+        let holder = new_direct_queue_edit_holder(holder_pid);
+        publish_queue_edit_owner_lease(&file, &holder, holder_pid)?;
         Ok(Some(Self {
             file,
-            holder: holder_pid.to_string(),
-            _apply_lock: apply_lock,
+            holder,
+            apply_lock: Some(apply_lock),
         }))
     }
 
@@ -273,14 +314,45 @@ impl QueueEditGuard {
         Ok(Some(Self {
             file,
             holder: token.to_string(),
-            _apply_lock: apply_lock,
+            apply_lock: Some(apply_lock),
         }))
     }
+
+    /// Leave the durable reservation behind when a detached worker fails.
+    /// Dropping this guard still releases the OS apply exclusion. The failed
+    /// worker's PID then makes the incomplete attempt immediately recoverable
+    /// after process exit, while session-check remains fail-closed meanwhile.
+    pub fn retain_incomplete_attempt_on_drop(&mut self) {
+        self.holder.clear();
+    }
+
+    fn release_with_handoff_hook(&mut self, after_unlock: impl FnOnce()) {
+        // Release apply exclusion first. A successor may now acquire the flock
+        // and publish its own holder; the conditional clear below cannot erase
+        // that newer owner. Clearing SQLite first created a dispatch window in
+        // which the sole successor child failed flock adoption and was lost.
+        drop(self.apply_lock.take());
+        after_unlock();
+        if !self.holder.is_empty() {
+            clear_queue_edit_owner_lease_if_holder(&self.file, &self.holder);
+            self.holder.clear();
+        }
+    }
+}
+
+fn new_direct_queue_edit_holder(pid: u32) -> String {
+    static SEQUENCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let sequence = SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    format!("direct-{pid}-{nanos}-{sequence}")
 }
 
 impl Drop for QueueEditGuard {
     fn drop(&mut self) {
-        clear_queue_edit_owner_lease_if_holder(&self.file, &self.holder);
+        self.release_with_handoff_hook(|| {});
     }
 }
 
@@ -309,6 +381,7 @@ mod tests {
     #[test]
     fn only_foreign_live_fresh_holder_blocks() {
         let lease = QueueEditOwnerLease {
+            holder: "holder-999".to_string(),
             holder_pid: 999,
             heartbeat_secs: 1_000,
         };
@@ -352,8 +425,9 @@ mod tests {
             let body_entries = Arc::clone(&body_entries);
             contenders.push(std::thread::spawn(move || {
                 barrier.wait();
-                let pid = 40_000 + offset;
-                if try_reserve_queue_edit_owner(&file, &format!("contender-{pid}"), pid).unwrap() {
+                let pid = std::process::id();
+                if try_reserve_queue_edit_owner(&file, &format!("contender-{offset}"), pid).unwrap()
+                {
                     body_entries.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 }
             }));
@@ -377,7 +451,7 @@ mod tests {
             .unwrap()
             .expect("reserved worker owns the lease");
 
-        refresh_queue_edit_owner_lease(&file_text, 55_001).unwrap();
+        publish_queue_edit_owner_lease(&file_text, "successor-token", 55_001).unwrap();
         assert!(
             !refresh_queue_edit_owner_lease_if_holder(&file_text, token, std::process::id())
                 .unwrap(),
@@ -412,5 +486,121 @@ mod tests {
 
         drop(apply);
         QueueEditGuard::acquire(&file).expect("direct edit enters after apply guard drops");
+    }
+
+    #[test]
+    fn drop_unlocks_before_conditional_lease_clear_without_losing_successor() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        std::fs::write(&file, "body").unwrap();
+        let file_text = file.to_string_lossy();
+        let mut first = QueueEditGuard::acquire(&file).unwrap();
+        let mut successor_body_entries = 0usize;
+
+        first.release_with_handoff_hook(|| {
+            assert!(
+                QueueEditGuard::try_acquire(&file).unwrap().is_none(),
+                "successor must defer while the unlocked predecessor reservation remains live"
+            );
+            assert!(read_queue_edit_owner_lease(&file_text).is_some());
+        });
+
+        let successor = QueueEditGuard::acquire(&file)
+            .expect("successor enters immediately after predecessor lease clear");
+        successor_body_entries += 1;
+        assert_eq!(successor_body_entries, 1, "successor body was lost");
+        assert!(read_queue_edit_owner_lease(&file_text).is_some());
+        drop(first);
+        assert!(
+            read_queue_edit_owner_lease(&file_text).is_some(),
+            "old conditional clear erased successor"
+        );
+        drop(successor);
+        assert!(read_queue_edit_owner_lease(&file_text).is_none());
+    }
+
+    #[test]
+    fn direct_guard_cannot_overwrite_a_live_pre_spawn_reservation() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        std::fs::write(&file, "body").unwrap();
+        let file_text = file.to_string_lossy();
+        let token = "reserved-before-child-spawn";
+        assert!(try_reserve_queue_edit_owner(&file_text, token, std::process::id()).unwrap());
+
+        assert!(
+            QueueEditGuard::try_acquire(&file).unwrap().is_none(),
+            "direct mutation overwrote the sole reserved maintenance worker"
+        );
+        assert_eq!(
+            read_queue_edit_owner_lease(&file_text).unwrap().holder,
+            token
+        );
+
+        let worker = QueueEditGuard::adopt_reserved(&file, token)
+            .unwrap()
+            .expect("reserved worker still adopts after the rejected direct edit");
+        drop(worker);
+        assert!(read_queue_edit_owner_lease(&file_text).is_none());
+    }
+
+    #[test]
+    fn apply_probe_observes_lock_before_sqlite_lease_publish() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        std::fs::write(&file, "body").unwrap();
+        let entered = std::sync::Arc::new(std::sync::Barrier::new(2));
+        let release = std::sync::Arc::new(std::sync::Barrier::new(2));
+        let worker_file = file.clone();
+        let worker_entered = std::sync::Arc::clone(&entered);
+        let worker_release = std::sync::Arc::clone(&release);
+        let worker = std::thread::spawn(move || {
+            let guard = QueueEditGuard::try_acquire_with_hook(&worker_file, || {
+                worker_entered.wait();
+                worker_release.wait();
+            })
+            .unwrap()
+            .expect("worker acquired apply lock");
+            drop(guard);
+        });
+
+        entered.wait();
+        assert!(queue_apply_in_flight(&file).unwrap());
+        assert!(
+            read_queue_edit_owner_lease(&file.to_string_lossy()).is_none(),
+            "barrier must be before SQLite lease publication"
+        );
+        release.wait();
+        worker.join().unwrap();
+        assert!(!queue_apply_in_flight(&file).unwrap());
+    }
+
+    #[test]
+    fn dead_crashed_attempt_is_durable_then_promptly_redispatched() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        std::fs::write(&file, "body").unwrap();
+        let file_text = file.to_string_lossy();
+        let crashed = "crashed-worker-token";
+        let dead_pid = 4_000_000;
+        assert!(try_reserve_queue_edit_owner(&file_text, crashed, dead_pid).unwrap());
+        let incomplete = read_queue_edit_owner_lease(&file_text).unwrap();
+        assert_eq!(incomplete.holder, crashed);
+        assert_eq!(incomplete.holder_pid, dead_pid);
+        assert!(!queue_apply_in_flight(&file).unwrap());
+
+        assert!(
+            try_reserve_queue_edit_owner(&file_text, "recovery-worker", std::process::id())
+                .unwrap(),
+            "dead fresh attempt must be recovered without waiting for TTL"
+        );
+        assert_eq!(
+            read_queue_edit_owner_lease(&file_text).unwrap().holder,
+            "recovery-worker"
+        );
     }
 }

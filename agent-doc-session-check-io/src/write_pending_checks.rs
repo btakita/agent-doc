@@ -1055,6 +1055,36 @@ mod precommit_pending_capture_tests {
         assert!(!super::content_requires_closeout_pending_maintenance(&reconciled).unwrap());
     }
 
+    #[test]
+    fn closeout_pending_maintenance_fails_closed_during_an_active_apply() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("task.md");
+        std::fs::write(
+            &file,
+            "<!-- agent:backlog -->\n- [x] [#done] completed\n<!-- /agent:backlog -->\n",
+        )
+        .unwrap();
+        let active = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(&file).unwrap();
+
+        let error = super::run_closeout_pending_maintenance(&file, true, false, |file, _| {
+            let _guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(file)?;
+            Ok(())
+        })
+        .unwrap_err();
+        assert!(
+            error.to_string().contains("queue mutation deferred"),
+            "{error:#}"
+        );
+        drop(active);
+
+        super::run_closeout_pending_maintenance(&file, true, false, |file, _| {
+            let _guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(file)?;
+            Ok(())
+        })
+        .unwrap();
+    }
+
     struct TestBacklogCommandEffects;
 
     static TEST_BACKLOG_COMMAND_EFFECTS: TestBacklogCommandEffects = TestBacklogCommandEffects;

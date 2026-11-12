@@ -3740,18 +3740,35 @@ fn refuse_transient_queue_closeout(
     let SessionCheckStatus::Ok(message) = &status else {
         return Ok(status);
     };
+    match agent_doc_queue_io::queue_edit_owner::queue_apply_in_flight(file) {
+        Ok(true) => {
+            return Ok(SessionCheckStatus::Interrupted(format!(
+                "[session-check] INTERRUPTED: queue maintenance apply is in flight for {}; terminal closeout is withheld until the apply lock is released (#transientcloseout)",
+                file.display(),
+            )));
+        }
+        Err(error) => {
+            return Ok(SessionCheckStatus::Interrupted(format!(
+                "[session-check] INTERRUPTED: queue maintenance apply state could not be proven for {}: {error:#}; terminal closeout is withheld (#transientcloseout)",
+                file.display(),
+            )));
+        }
+        Ok(false) => {}
+    }
+    if let Some(attempt) =
+        agent_doc_queue_io::queue_edit_owner::read_queue_edit_owner_lease(&file.to_string_lossy())
+    {
+        return Ok(SessionCheckStatus::Interrupted(format!(
+            "[session-check] INTERRUPTED: queue maintenance attempt is incomplete for {} (holder_pid={}, holder={}); terminal closeout is withheld. The next admission will recover a dead owner or coalesce with a live one (#transientcloseout)",
+            file.display(),
+            attempt.holder_pid,
+            attempt.holder,
+        )));
+    }
     // Comprehensive queue maintenance is detached from admission. A terminal
     // result must not race that authority-checked projection: either the worker
     // finishes and the ordinary lifecycle debt below becomes visible, or the
     // next check retries after the short-lived lease settles.
-    if let Some(holder_pid) =
-        agent_doc_queue_io::queue_edit_owner::foreign_queue_edit_in_flight(&file.to_string_lossy())
-    {
-        return Ok(SessionCheckStatus::Interrupted(format!(
-            "[session-check] INTERRUPTED: background queue maintenance is still converging for {} (holder_pid={holder_pid}); terminal closeout is withheld until the queue authority projection settles (#transientcloseout)",
-            file.display(),
-        )));
-    }
     let content = match crate::resolve_current_document_content(file, "transient_closeout") {
         Ok(content) => content,
         Err(error) => {
@@ -5720,6 +5737,66 @@ mod terminal_convergence_tests {
         )
         .unwrap();
         assert!(matches!(steering, SessionCheckStatus::SteeringPending(_)));
+    }
+
+    #[test]
+    fn crashed_maintenance_attempt_withholds_terminal_status_until_redispatched() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("task.md");
+        std::fs::write(
+            &file,
+            "<!-- agent:queue -->\n- ⏳ awaiting operator\n<!-- /agent:queue -->\n",
+        )
+        .unwrap();
+        let file_text = file.to_string_lossy();
+        assert!(
+            agent_doc_queue_io::queue_edit_owner::try_reserve_queue_edit_owner(
+                &file_text,
+                "crashed-attempt",
+                4_000_000,
+            )
+            .unwrap()
+        );
+
+        let crashed = refuse_transient_queue_closeout(
+            &file,
+            SessionCheckStatus::Ok("[session-check] OK".to_string()),
+        )
+        .unwrap();
+        match crashed {
+            SessionCheckStatus::Interrupted(message) => {
+                assert!(
+                    message.contains("maintenance attempt is incomplete"),
+                    "{message}"
+                );
+                assert!(message.contains("crashed-attempt"), "{message}");
+            }
+            other => panic!("dead maintenance owner falsely reported terminal: {other:?}"),
+        }
+
+        let recovery = "recovery-attempt";
+        assert!(
+            agent_doc_queue_io::queue_edit_owner::try_reserve_queue_edit_owner(
+                &file_text,
+                recovery,
+                std::process::id(),
+            )
+            .unwrap(),
+            "a dead attempt must be recoverable immediately, without waiting for the TTL"
+        );
+        let guard =
+            agent_doc_queue_io::queue_edit_owner::QueueEditGuard::adopt_reserved(&file, recovery)
+                .unwrap()
+                .expect("the recovery worker adopts its durable reservation");
+        drop(guard);
+
+        let settled = refuse_transient_queue_closeout(
+            &file,
+            SessionCheckStatus::Ok("[session-check] OK".to_string()),
+        )
+        .unwrap();
+        assert!(matches!(settled, SessionCheckStatus::Ok(_)), "{settled:?}");
     }
 
     /// `#steerinterruptexit`: a guard finding whose recovery IS the pending

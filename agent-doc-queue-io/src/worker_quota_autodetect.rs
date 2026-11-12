@@ -116,12 +116,15 @@ pub fn apply_subagent_quota_autodetect(
     }
 }
 
-/// Freeze the Running or Lost attempt bound to a normally-ended subagent.
+/// Record the low-level stop of the Running or Lost attempt bound to a
+/// normally-ended subagent.
 ///
 /// A harness stop is only evidence that the wrapper ended, not that its work
 /// was integrated or even that a nested child task reached a terminal state.
-/// Freezing preserves the exact generation and worker binding until the
-/// coordinator reports its handback, resumes it, or explicitly abandons it.
+/// The ledger temporarily retains the exact generation and worker binding as
+/// recovery evidence. The next planning/refill pass runs failed-continue
+/// recovery and offers a fresh generation; coordinator guidance never resumes
+/// or refreshes the stopped generation.
 pub fn apply_subagent_freeze_autodetect(
     scan_paths: &[PathBuf],
     preferred_doc: Option<&Path>,

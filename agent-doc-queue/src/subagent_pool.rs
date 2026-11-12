@@ -259,9 +259,9 @@ pub fn classify_attempt(claim: &QueueClaim, now_secs: u64, frozen_secs: u64) -> 
     }
     if let Some(freeze) = &claim.frozen {
         // An explicit requeue is recovery debt once the attempt has lapsed.
-        // A harness freeze is not: the worker may resume through its
-        // transcript, so expiry must not drop the claim
-        // (`#frozenclaimrefreshrevive`).
+        // A recorded harness stop remains a frozen ledger entry only until the
+        // failed-continue recovery pass offers its fresh replacement; slot
+        // classification itself must not erase the evidence.
         if freeze.is_abandon() && lapsed {
             return AttemptSlot::Free;
         }
@@ -694,7 +694,7 @@ impl PoolRefill {
         }
         for worker in &self.frozen {
             out.push_str(&format!(
-                "\n  frozen: {:?} (worker {}, generation {}): {}; its slot is free and its claim is kept. `queue claim --refresh` with this owner and generation revives a transcript resume, including after the claim TTL; the head is not eligible for dispatch",
+                "\n  frozen: {:?} (worker {}, generation {}): {}; its slot is free. This refill owns failed-continue recovery: follow the fresh claim / brief / start commands when the item is offered, and do not refresh or rebind this stopped generation",
                 worker.item,
                 worker.worker_id,
                 worker.generation,
@@ -949,7 +949,16 @@ mod tests {
                 refresh_command: "agent-doc queue claim f --item r --refresh".to_string(),
                 freeze_command: "agent-doc queue freeze f --item r".to_string(),
             }],
-            frozen: Vec::new(),
+            frozen: vec![FrozenWorker {
+                item: "do [#stopped]".to_string(),
+                owner: "subagent:stopped".to_string(),
+                generation: 4,
+                worker_id: "worker-stopped".to_string(),
+                frozen: WorkerFrozen::HarnessReported {
+                    frozen_at_secs: 400,
+                    reason: "wrapper ended".to_string(),
+                },
+            }],
             quota_refill_block: None,
             next_heads: vec![RefillHead {
                 item: "do [#b]".to_string(),
@@ -968,6 +977,22 @@ mod tests {
         assert!(steps[2].contains("queue claim f --item b"));
         let text = refill.render().unwrap();
         assert!(text.contains("trigger=report_complete"), "{text}");
+        assert!(
+            text.contains("This refill owns failed-continue recovery"),
+            "{text}"
+        );
+        assert!(
+            text.contains("follow the fresh claim / brief / start commands"),
+            "{text}"
+        );
+        assert!(
+            text.contains("do not refresh or rebind this stopped generation"),
+            "{text}"
+        );
+        assert!(!text.contains(concat!(
+            "queue claim --refresh` with this owner and generation revives",
+            " a transcript resume"
+        )));
         assert!(
             text.contains("before integrating any reported result"),
             "{text}"

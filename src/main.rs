@@ -5645,9 +5645,11 @@ enum QueueAction {
         /// Extend the TTL of an already-started claim `--owner` holds on
         /// `--item` (a heartbeat for a long-running worker). With the exact
         /// `--generation` it also revives that attempt if it expired with its
-        /// worker still bound, including a harness `queue freeze` whose worker
-        /// resumed through its transcript. It does not revive an explicit
-        /// `queue release --requeue`. Refuses, without creating or promoting a
+        /// worker still bound and no worker stop was recorded. A low-level
+        /// frozen entry may accept proof before recovery, but the public
+        /// `queue freeze` command immediately directs a fresh generation. It
+        /// does not revive an explicit `queue release --requeue` or a recovered
+        /// harness stop. Refuses, without creating or promoting a
         /// claim, when the item is unclaimed, unstarted, otherwise expired, or
         /// another owner holds it. Also adopts the claim into the calling
         /// harness session after the coordinator `/clear`ed.
@@ -11410,6 +11412,22 @@ mod recycle_force_tests {
                 let help = queue.render_long_help().to_string();
                 assert!(help.contains(&legend), "{help}");
                 assert!(help.contains("🔄  needs reconcile"), "{help}");
+                let claim_help = queue
+                    .find_subcommand_mut("claim")
+                    .expect("claim")
+                    .render_long_help()
+                    .to_string();
+                let claim_help = claim_help.split_whitespace().collect::<Vec<_>>().join(" ");
+                assert!(
+                    claim_help.contains(
+                        "the public `queue freeze` command immediately directs a fresh generation"
+                    ),
+                    "{claim_help}"
+                );
+                assert!(!claim_help.contains(concat!(
+                    "including after a harness freeze whose worker resumes",
+                    " through its transcript"
+                )));
                 for name in [
                     "claim",
                     "start",

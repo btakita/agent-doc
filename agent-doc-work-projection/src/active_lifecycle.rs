@@ -111,9 +111,11 @@ pub struct ActiveLifecycle {
 impl ActiveLifecycle {
     /// Join the ledgers the same way the queue lifecycle projection does:
     /// cancelled attempts are gone; an expired, unreported claim is lost unless
-    /// a harness freeze still holds its worker; a
-    /// receipt stands for its identity only when no claim does; lineage that
-    /// ended an attempt removes it.
+    /// a transient low-level freeze still retains recovery evidence for its
+    /// worker before failed-continue replacement; a receipt stands for its
+    /// identity only when no claim does; lineage that ended an attempt removes
+    /// it. Public `queue freeze` does not expose that transient state as a
+    /// coordinator-resumable generation.
     pub fn from_ledgers(
         claims: &agent_doc_queue::queue_claim::QueueClaimLedger,
         receipts: &agent_doc_queue::claim_release_receipt::ClaimReleaseReceiptLedger,

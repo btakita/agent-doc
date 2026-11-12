@@ -1493,9 +1493,12 @@ fn refresh_attempt_at(
     outcome.map_err(|refused: QueueClaimRefreshRefused| refused.into())
 }
 
-/// Record that the harness reported this exact running worker stopped
-/// (`queue freeze`, `#subagentworkpool`): its pool slot frees for a refill
-/// while its claim, generation, and worker binding stay intact.
+/// Record the low-level ledger mutation that this exact worker stopped.
+///
+/// The binding is retained only as transient recovery evidence. The public
+/// `queue freeze` command immediately runs failed-continue recovery and emits
+/// the fresh claim / brief / start refill; coordinators must not rebind or
+/// refresh this stopped generation (`#subagentworkpool`).
 pub fn freeze_attempt(
     file: &Path,
     item: &str,

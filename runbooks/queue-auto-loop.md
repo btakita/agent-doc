@@ -183,15 +183,16 @@ its coordinator still passes the text.
 
 Never infer running from a label, intended spawn, process poll, or heartbeat.
 `queue claim --refresh --generation <N>` extends an already-started attempt and
-revives one that expired with its worker still bound. A continuation wrapper
-for a frozen attempt runs `queue start` and atomically replaces the stopped
-wrapper binding without changing generation. Neither operation revives an
-explicit requeue. A live generation binds to at most one wrapper and a wrapper
-to at most one live claim. Use generation-matched `queue release` only for that attempt; add
-`--requeue` to abandon it for a new worker. Expired attempts become visible `⚠️`
-lost state, except a harness freeze, which stays the same attempt until that
-refresh or an explicit requeue. Orphaned completion evidence is `🔄` and must be
-reconciled, not redispatched.
+revives one that expired with its worker still bound only when no worker stop
+was recorded. It does not revive an explicit requeue or a harness stop handled
+by `queue freeze`: that command's emitted refill owns failed-continue recovery
+and offers the stopped row through a fresh claim/generation. Never reuse the
+old generation's `queue start` command for a continuation wrapper. A live
+generation binds to at most one wrapper and a wrapper to at most one live
+claim. Use generation-matched `queue release` only for that attempt; add
+`--requeue` to abandon it for a new worker. Expired attempts become visible
+`⚠️` lost state. Orphaned completion evidence is `🔄` and must be reconciled,
+not redispatched.
 
 Claimed heads do not count toward continuation and must not be redispatched. If
 all remaining heads are claimed or operator-gated, end quietly and wait for the

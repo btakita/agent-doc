@@ -125,15 +125,19 @@ fn settle_failed_strict_closeout(
     // and this path reported "superseded, needs no action" while every later
     // `session-check` failed on the same committed bytes. Only a fresh
     // status-only session check that no longer interrupts supersedes the error.
+    let apply_guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(file)?;
+    let session_effects =
+        agent_doc_closeout_runtime_io::session_check_effects_under_apply_guard(file, &apply_guard)?;
     match recheck_committed_closeout(
         agent_doc_session_check_io::session_check_settle_window(),
         RESPOND_SETTLE_POLL,
         || {
             // `#sessioncheckread`: `respond` owns write intent, so its re-check
             // keeps the narrow self-heals the status-only CLI now only reports.
-            agent_doc_session_check_io::inspect_self_healing(
+            agent_doc_session_check_io::inspect_self_healing_under_apply_guard(
                 file,
-                &agent_doc_closeout_runtime_io::session_check_effects(),
+                &session_effects,
+                &apply_guard,
             )
         },
     ) {
@@ -499,45 +503,49 @@ pub fn resume_captured_finalize(
         Ok(None) => return CapturedFinalizeResumeOutcome::Superseded,
         Err(err) => return classify_captured_finalize_resume_error(&format!("{err:#}")),
     };
-    if matches!(
-        resolved.origin,
-        agent_doc_cycle_state_io::ProjectedCapturedFinalizeResumeOrigin::LegacyRetainedIntent { .. }
-    ) {
-        return resume_legacy_retained_delivery(file, expected, resolved);
-    }
-
     // GH 90: classify the captured bytes before any effect. A deterministic
     // structural refusal used to surface only after the attempt reached some
     // unrelated effect first (a native-save request to a dead editor pid), so
     // the loop reported that effect's failure and retried forever.
-    match agent_doc_session_check_io::current_unlandable_capture(file) {
-        Ok(Some(unlandable))
-            if unlandable.capture_id == expected.capture_id
-                && unlandable.response_sha256 == expected.response_sha256 =>
-        {
-            let recovery = agent_doc_session_check_io::UnlandableCapture::recovery_command(file);
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "captured_finalize_resume_{} file={} cycle_id={} capture_id={} response_sha256={} action=stop_retrying recovery=\"{recovery}\"",
-                    agent_doc_session_check_io::UNLANDABLE_CAPTURE_TOKEN,
-                    file.display(),
-                    expected.cycle_id,
-                    expected.capture_id,
-                    expected.response_sha256,
-                ),
-            );
-            return CapturedFinalizeResumeOutcome::Unlandable {
-                reason: unlandable.operator_report(file),
-                recovery,
-            };
-        }
-        Ok(_) => {}
+    let unlandable = match agent_doc_session_check_io::current_unlandable_capture(file) {
+        Ok(unlandable) => unlandable.filter(|unlandable| {
+            unlandable.capture_id == expected.capture_id
+                && unlandable.response_sha256 == expected.response_sha256
+        }),
         Err(err) => {
             return classify_captured_finalize_resume_error(&format!(
                 "captured response landability check failed: {err:#}"
             ));
         }
+    };
+    let apply_guard = match agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(file) {
+        Ok(guard) => guard,
+        Err(err) => return classify_captured_finalize_resume_error(&format!("{err:#}")),
+    };
+    if let Some(unlandable) = unlandable {
+        let recovery = agent_doc_session_check_io::UnlandableCapture::recovery_command(file);
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "captured_finalize_resume_{} file={} cycle_id={} capture_id={} response_sha256={} action=stop_retrying recovery=\"{recovery}\"",
+                agent_doc_session_check_io::UNLANDABLE_CAPTURE_TOKEN,
+                file.display(),
+                expected.cycle_id,
+                expected.capture_id,
+                expected.response_sha256,
+            ),
+        );
+        return CapturedFinalizeResumeOutcome::Unlandable {
+            reason: unlandable.operator_report(file),
+            recovery,
+        };
+    }
+
+    if matches!(
+        resolved.origin,
+        agent_doc_cycle_state_io::ProjectedCapturedFinalizeResumeOrigin::LegacyRetainedIntent { .. }
+    ) {
+        return resume_legacy_retained_delivery(file, expected, resolved, &apply_guard);
     }
 
     // `#writeappliedcontinuation`: the response command owns capture and
@@ -558,10 +566,10 @@ pub fn resume_captured_finalize(
         projected_phase,
         Some(agent_doc_turn::CyclePhase::WriteApplied | agent_doc_turn::CyclePhase::Committed)
     ) {
-        return resume_materialized_captured_finalize(file, expected);
+        return resume_materialized_captured_finalize(file, expected, &apply_guard);
     }
 
-    let result = resume_captured_finalize_intent(file, expected);
+    let result = resume_captured_finalize_intent(file, expected, &apply_guard);
     match result {
         Ok(outcome) => {
             let committed = agent_doc_cycle_state_io::load_with_closeout_projection(file)
@@ -601,7 +609,11 @@ fn resume_legacy_retained_delivery(
     file: &Path,
     expected: &CapturedFinalizeResumeKey,
     resolved: agent_doc_cycle_state_io::ProjectedCapturedFinalizeResume,
+    apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
 ) -> CapturedFinalizeResumeOutcome {
+    if let Err(err) = apply_guard.ensure_protects(file) {
+        return classify_captured_finalize_resume_error(&format!("{err:#}"));
+    }
     let agent_doc_cycle_state_io::ProjectedCapturedFinalizeResumeOrigin::LegacyRetainedIntent {
         intent_id,
         target_hash,
@@ -875,7 +887,9 @@ pub fn drop_already_applied_mutations(
 fn apply_unlanded_captured_mutation_plan(
     file: &Path,
     expected: &CapturedFinalizeResumeKey,
+    apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
 ) -> Result<bool> {
+    apply_guard.ensure_protects(file)?;
     let Some(capture) = captured_closeout_for(file, expected)? else {
         return Ok(false);
     };
@@ -950,10 +964,11 @@ fn apply_unlanded_captured_mutation_plan(
             agent_doc_hash::content_hash(plan_json),
         ),
     );
-    agent_doc_write_runtime_io::run_command_with_response(
+    agent_doc_write_runtime_io::run_command_with_response_under_apply_guard(
         options,
         agent_doc_write_command_io::CommitMode::None,
         String::new(),
+        apply_guard,
     )
     .with_context(|| {
         format!(
@@ -967,15 +982,24 @@ fn apply_unlanded_captured_mutation_plan(
 fn resume_materialized_captured_finalize(
     file: &Path,
     expected: &CapturedFinalizeResumeKey,
+    apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
 ) -> CapturedFinalizeResumeOutcome {
     use agent_doc_session_check_io::SessionCheckEffects;
 
     // `#deferredmutdrop`: continue the SAME closeout, not just its response half.
-    if let Err(err) = apply_unlanded_captured_mutation_plan(file, expected) {
+    if let Err(err) = apply_unlanded_captured_mutation_plan(file, expected, apply_guard) {
         return classify_captured_finalize_resume_error(&format!("{err:#}"));
     }
 
-    match agent_doc_closeout_runtime_io::session_check_effects().resume_captured_finalize(file) {
+    let session_effects =
+        match agent_doc_closeout_runtime_io::session_check_effects_under_apply_guard(
+            file,
+            apply_guard,
+        ) {
+            Ok(effects) => effects,
+            Err(err) => return classify_captured_finalize_resume_error(&format!("{err:#}")),
+        };
+    match session_effects.resume_captured_finalize(file) {
         Ok(agent_doc_session_check_io::CapturedFinalizeResumeOutcome::Committed) => {
             CapturedFinalizeResumeOutcome::Committed {
                 repair_outcome: "ContinuedWriteAppliedCapture".to_string(),
@@ -1038,9 +1062,13 @@ pub fn run_session_check(file: &Path, codex_final_gate: bool) -> Result<()> {
 /// exactly the self-heals the read-only `session-check` reports, through the
 /// same check, then report its terminal status. Rerun `session-check` after.
 pub fn run_session_check_heal(file: &Path) -> Result<()> {
-    agent_doc_session_check_io::run_self_heal(
+    let apply_guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(file)?;
+    let session_effects =
+        agent_doc_closeout_runtime_io::session_check_effects_under_apply_guard(file, &apply_guard)?;
+    agent_doc_session_check_io::run_self_heal_under_apply_guard(
         file,
-        &agent_doc_closeout_runtime_io::session_check_effects(),
+        &session_effects,
+        &apply_guard,
     )?;
     // The applying twin of `run_session_check`'s steering block: a claimed
     // queue-row cancellation the status check deferred is applied here.
@@ -1054,7 +1082,9 @@ pub fn run_session_check_heal(file: &Path) -> Result<()> {
 fn resume_captured_finalize_intent(
     file: &Path,
     expected: &CapturedFinalizeResumeKey,
+    apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
 ) -> Result<RepairOutcome> {
+    apply_guard.ensure_protects(file)?;
     let retained = agent_doc_cycle_state_io::load_projected_retained_captured_response(file)?
         .filter(|capture| {
             capture.cycle_id == expected.cycle_id
@@ -1098,17 +1128,23 @@ fn resume_captured_finalize_intent(
             );
             response = normalized;
         }
-        agent_doc_write_runtime_io::run_command_with_response(
+        agent_doc_write_runtime_io::run_command_with_response_under_apply_guard(
             options,
             agent_doc_write_command_io::CommitMode::Required,
             response,
+            apply_guard,
         )?;
         return Ok(RepairOutcome::ReplayedResponse);
     }
 
     // Backward-compatible recovery for captures written before the typed
     // mutation plan became part of the Lazily intent.
-    run_legacy_resume_repair_under_closeout_lease(&RuntimeLegacyResumeRepair, file, expected)
+    run_legacy_resume_repair_under_closeout_lease(
+        &RuntimeLegacyResumeRepair,
+        file,
+        expected,
+        apply_guard,
+    )
 }
 
 /// Effects of the legacy captured-finalize repair fallback, split so the lease
@@ -1120,7 +1156,11 @@ trait LegacyResumeRepairEffects {
     /// retry deadline.
     fn claim_closeout_lease(&self, file: &Path, cycle_id: &str) -> Result<Option<Self::Lease>>;
     fn ensure_lease_still_held(&self, lease: &Self::Lease) -> Result<()>;
-    fn repair(&self, file: &Path) -> Result<RepairOutcome>;
+    fn repair(
+        &self,
+        file: &Path,
+        apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
+    ) -> Result<RepairOutcome>;
 }
 
 struct RuntimeLegacyResumeRepair;
@@ -1147,10 +1187,13 @@ impl LegacyResumeRepairEffects for RuntimeLegacyResumeRepair {
         lease.ensure_still_held()
     }
 
-    fn repair(&self, file: &Path) -> Result<RepairOutcome> {
-        let apply_guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(file)?;
+    fn repair(
+        &self,
+        file: &Path,
+        apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
+    ) -> Result<RepairOutcome> {
         let repair_effects =
-            agent_doc_closeout_runtime_io::RuntimeRepairIoEffects::new(file, &apply_guard)?;
+            agent_doc_closeout_runtime_io::RuntimeRepairIoEffects::new(file, apply_guard)?;
         agent_doc_repair_io::repair_preserving_live_authority(
             agent_doc_repair_runtime_io::repair_coordinator_effects(
                 &repair_effects,
@@ -1175,7 +1218,9 @@ fn run_legacy_resume_repair_under_closeout_lease<E: LegacyResumeRepairEffects>(
     effects: &E,
     file: &Path,
     expected: &CapturedFinalizeResumeKey,
+    apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
 ) -> Result<RepairOutcome> {
+    apply_guard.ensure_protects(file)?;
     let Some(lease) = effects.claim_closeout_lease(file, &expected.cycle_id)? else {
         agent_doc_ops_log_io::log_op(
             file,
@@ -1189,7 +1234,7 @@ fn run_legacy_resume_repair_under_closeout_lease<E: LegacyResumeRepairEffects>(
         return Ok(RepairOutcome::Noop);
     };
     effects.ensure_lease_still_held(&lease)?;
-    let outcome = effects.repair(file);
+    let outcome = effects.repair(file, apply_guard);
     drop(lease);
     outcome
 }
@@ -1456,7 +1501,11 @@ mod captured_finalize_resume_tests {
             Ok(())
         }
 
-        fn repair(&self, _file: &Path) -> Result<RepairOutcome> {
+        fn repair(
+            &self,
+            _file: &Path,
+            _apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
+        ) -> Result<RepairOutcome> {
             self.events.borrow_mut().push("repair");
             Ok(RepairOutcome::AlreadyApplied)
         }
@@ -1470,13 +1519,21 @@ mod captured_finalize_resume_tests {
         }
     }
 
+    fn test_apply_guard(file: &Path) -> agent_doc_queue_io::queue_edit_owner::QueueEditGuard {
+        std::fs::create_dir_all(file.parent().unwrap().join(".agent-doc/locks")).unwrap();
+        std::fs::write(file, "test\n").unwrap();
+        agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(file).unwrap()
+    }
+
     #[test]
     fn legacy_resume_repair_runs_only_after_acquiring_the_closeout_lease() {
         let dir = tempfile::TempDir::new().unwrap();
         let file = dir.path().join("session.md");
         let effects = ScriptedLegacyRepair::new(Ok(Some("lease")));
+        let guard = test_apply_guard(&file);
         let outcome =
-            run_legacy_resume_repair_under_closeout_lease(&effects, &file, &legacy_key()).unwrap();
+            run_legacy_resume_repair_under_closeout_lease(&effects, &file, &legacy_key(), &guard)
+                .unwrap();
         assert_eq!(outcome, RepairOutcome::AlreadyApplied);
         assert_eq!(*effects.events.borrow(), vec!["claim", "repair"]);
     }
@@ -1490,8 +1547,10 @@ mod captured_finalize_resume_tests {
             agent_doc_write_runtime_io::CLOSEOUT_OWNER_RETRY_AT_MARKER,
         );
         let effects = ScriptedLegacyRepair::new(Err(anyhow::anyhow!(held)));
-        let err = run_legacy_resume_repair_under_closeout_lease(&effects, &file, &legacy_key())
-            .expect_err("a held lease must refuse the repair");
+        let guard = test_apply_guard(&file);
+        let err =
+            run_legacy_resume_repair_under_closeout_lease(&effects, &file, &legacy_key(), &guard)
+                .expect_err("a held lease must refuse the repair");
         assert_eq!(
             *effects.events.borrow(),
             vec!["claim"],
@@ -1511,8 +1570,10 @@ mod captured_finalize_resume_tests {
         let dir = tempfile::TempDir::new().unwrap();
         let file = dir.path().join("session.md");
         let effects = ScriptedLegacyRepair::new(Ok(None));
+        let guard = test_apply_guard(&file);
         let outcome =
-            run_legacy_resume_repair_under_closeout_lease(&effects, &file, &legacy_key()).unwrap();
+            run_legacy_resume_repair_under_closeout_lease(&effects, &file, &legacy_key(), &guard)
+                .unwrap();
         assert_eq!(outcome, RepairOutcome::Noop);
         assert_eq!(*effects.events.borrow(), vec!["claim"]);
     }
@@ -1523,7 +1584,8 @@ mod captured_finalize_resume_tests {
         let file = dir.path().join("session.md");
         let mut effects = ScriptedLegacyRepair::new(Ok(Some("lease")));
         effects.lease_lost = true;
-        run_legacy_resume_repair_under_closeout_lease(&effects, &file, &legacy_key())
+        let guard = test_apply_guard(&file);
+        run_legacy_resume_repair_under_closeout_lease(&effects, &file, &legacy_key(), &guard)
             .expect_err("a lost lease must refuse the repair");
         assert_eq!(*effects.events.borrow(), vec!["claim"]);
     }

@@ -378,8 +378,13 @@ fn repair_atomic_write_if_current(
     Ok(authoritative)
 }
 
-pub struct RuntimeSessionCheckEffects<'a> {
-    apply_guard: Option<&'a agent_doc_queue_io::queue_edit_owner::QueueEditGuard>,
+/// Status-only session inspection. This adapter can describe pending recovery
+/// but cannot apply any document, snapshot, cycle, projection, or Git effect.
+pub struct RuntimeReadOnlySessionCheckEffects;
+
+/// Session recovery owned by one already-held document apply transaction.
+pub struct RuntimeApplyingSessionCheckEffects<'a> {
+    apply_guard: &'a agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
 }
 
 /// Closed transition identities emitted while resuming one durable captured
@@ -595,18 +600,16 @@ fn pending_only_commit_target_landed(
             && committed_snapshot_hash.is_some_and(|hash| hash.eq_ignore_ascii_case(head_hash)))
 }
 
-pub fn session_check_effects() -> RuntimeSessionCheckEffects<'static> {
-    RuntimeSessionCheckEffects { apply_guard: None }
+pub fn session_check_effects() -> RuntimeReadOnlySessionCheckEffects {
+    RuntimeReadOnlySessionCheckEffects
 }
 
 pub fn session_check_effects_under_apply_guard<'a>(
     file: &Path,
     apply_guard: &'a agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
-) -> Result<RuntimeSessionCheckEffects<'a>> {
+) -> Result<RuntimeApplyingSessionCheckEffects<'a>> {
     apply_guard.ensure_protects(file)?;
-    Ok(RuntimeSessionCheckEffects {
-        apply_guard: Some(apply_guard),
-    })
+    Ok(RuntimeApplyingSessionCheckEffects { apply_guard })
 }
 
 /// `#sessioncheckread`: read-only twin of
@@ -615,10 +618,9 @@ pub fn session_check_effects_under_apply_guard<'a>(
 /// intent, or roll back an invalid completion right now, without recording
 /// the inferred target or touching the editor, disk, or git.
 fn retained_pending_only_commit_is_pending(
-    effects: &RuntimeSessionCheckEffects<'_>,
+    effects: &impl agent_doc_session_check_io::SessionCheckEffects,
     file: &Path,
 ) -> Result<bool> {
-    use agent_doc_session_check_io::SessionCheckEffects as _;
     let Some(mut state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
         return Ok(false);
     };
@@ -665,7 +667,111 @@ fn retained_pending_only_commit_is_pending(
     )
 }
 
-impl agent_doc_session_check_io::SessionCheckEffects for RuntimeSessionCheckEffects<'_> {
+fn read_only_session_check_mutation<T>(operation: &str) -> Result<T> {
+    anyhow::bail!(
+        "read-only session-check adapter cannot apply {operation}; acquire one QueueEditGuard and construct session_check_effects_under_apply_guard"
+    )
+}
+
+impl agent_doc_session_check_io::SessionCheckEffects for RuntimeReadOnlySessionCheckEffects {
+    fn applies_self_heals(&self) -> bool {
+        false
+    }
+
+    fn pending_committed_response_evidence_repair(&self, file: &Path) -> Result<Option<String>> {
+        agent_doc_commit_io::pending_committed_response_evidence_repair(file)
+    }
+
+    fn pending_committed_historical_snapshot_drift(
+        &self,
+        file: &Path,
+    ) -> Result<Option<&'static str>> {
+        agent_doc_repair_io::pending_committed_historical_snapshot_drift(file)
+    }
+
+    fn pending_retained_pending_only_commit(&self, file: &Path) -> Result<bool> {
+        retained_pending_only_commit_is_pending(self, file)
+    }
+
+    fn allows_recovery(&self) -> bool {
+        false
+    }
+
+    fn allows_response_replay_canonicalization(&self) -> bool {
+        false
+    }
+
+    fn closeout_recovery_hint(&self, file: &Path) -> String {
+        closeout_recovery_hint(file)
+    }
+
+    fn document_only_drift_is_commit_recoverable(&self, file: &Path) -> bool {
+        document_only_drift_is_commit_recoverable(file)
+    }
+
+    fn atomic_write(&self, _file: &Path, _content: &str) -> Result<()> {
+        read_only_session_check_mutation("atomic document write")
+    }
+
+    fn atomic_repair_write_if_current(
+        &self,
+        _file: &Path,
+        _content: &str,
+        _expected_current: &str,
+        _source: &str,
+    ) -> Result<String> {
+        read_only_session_check_mutation("conditional repair write")
+    }
+
+    fn settle_committed_projection(
+        &self,
+        _file: &Path,
+        _committed_content: &str,
+        _expected_current: &str,
+    ) -> Result<()> {
+        read_only_session_check_mutation("committed projection settlement")
+    }
+
+    fn settle_retained_committed_projection(
+        &self,
+        _file: &Path,
+        _committed_content: &str,
+        _expected_disk: &str,
+    ) -> Result<bool> {
+        read_only_session_check_mutation("retained projection settlement")
+    }
+
+    fn repair_committed_historical_snapshot_drift(
+        &self,
+        _file: &Path,
+    ) -> Result<Option<&'static str>> {
+        read_only_session_check_mutation("historical snapshot repair")
+    }
+
+    fn recover_missing_commit_boundary(
+        &self,
+        _file: &Path,
+        _event: &str,
+    ) -> Result<Option<&'static str>> {
+        read_only_session_check_mutation("missing commit-boundary recovery")
+    }
+
+    fn resume_captured_finalize(
+        &self,
+        _file: &Path,
+    ) -> Result<agent_doc_session_check_io::CapturedFinalizeResumeOutcome> {
+        read_only_session_check_mutation("captured finalize resume")
+    }
+
+    fn retained_document_write_blocks(&self, file: &Path) -> bool {
+        agent_doc_document_realtime_io::retained_write_blocks_session_closeout(
+            file,
+            agent_doc_document_realtime_io::RetainedWriteCycleBoundary::SessionCheck.gate_source(),
+        )
+    }
+}
+
+impl agent_doc_session_check_io::SessionCheckEffects for RuntimeApplyingSessionCheckEffects<'_> {
     fn pending_committed_response_evidence_repair(&self, file: &Path) -> Result<Option<String>> {
         agent_doc_commit_io::pending_committed_response_evidence_repair(file)
     }
@@ -759,14 +865,7 @@ impl agent_doc_session_check_io::SessionCheckEffects for RuntimeSessionCheckEffe
         file: &Path,
         event: &str,
     ) -> Result<Option<&'static str>> {
-        let owned_guard;
-        let apply_guard = if let Some(apply_guard) = self.apply_guard {
-            apply_guard
-        } else {
-            owned_guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(file)?;
-            &owned_guard
-        };
-        let effects = RuntimeRepairIoEffects::new(file, apply_guard)?;
+        let effects = RuntimeRepairIoEffects::new(file, self.apply_guard)?;
         agent_doc_repair_io::recover_missing_commit_boundary(&effects, file, event)
     }
 
@@ -1604,20 +1703,22 @@ impl agent_doc_flow_io::closeout::CloseoutEffects for RuntimeCloseoutEffects<'_>
 
     fn enforce_clean_closeout(&self, file: &Path) -> Result<()> {
         let apply_guard = self.require_apply_guard(file)?;
+        let session_effects = session_check_effects_under_apply_guard(file, apply_guard)?;
         agent_doc_session_check_io::enforce_clean_closeout_with_force_disk_under_apply_guard(
             file,
             false,
-            &session_check_effects(),
+            &session_effects,
             apply_guard,
         )
     }
 
     fn enforce_clean_closeout_for_authority(&self, file: &Path, force_disk: bool) -> Result<()> {
         let apply_guard = self.require_apply_guard(file)?;
+        let session_effects = session_check_effects_under_apply_guard(file, apply_guard)?;
         agent_doc_session_check_io::enforce_clean_closeout_with_force_disk_under_apply_guard(
             file,
             force_disk,
-            &session_check_effects(),
+            &session_effects,
             apply_guard,
         )
     }
@@ -2219,7 +2320,10 @@ mod tests {
             abandoned.last_event,
         );
 
-        let outcome = session_check_effects()
+        let apply_guard =
+            agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(&file).unwrap();
+        let outcome = session_check_effects_under_apply_guard(&file, &apply_guard)
+            .unwrap()
             .resume_captured_finalize(&file)
             .unwrap();
         assert!(
@@ -2310,7 +2414,10 @@ mod tests {
         );
         assert!(agent_doc_document_realtime_io::pending_document_write(&file).is_some());
 
-        let outcome = session_check_effects()
+        let apply_guard =
+            agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(&file).unwrap();
+        let outcome = session_check_effects_under_apply_guard(&file, &apply_guard)
+            .unwrap()
             .resume_captured_finalize(&file)
             .unwrap();
         assert_eq!(outcome, CapturedFinalizeResumeOutcome::Committed);
@@ -2376,7 +2483,10 @@ mod tests {
             Some(capture.capture_id.as_str())
         );
 
-        let outcome = session_check_effects()
+        let apply_guard =
+            agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(&file).unwrap();
+        let outcome = session_check_effects_under_apply_guard(&file, &apply_guard)
+            .unwrap()
             .resume_captured_finalize(&file)
             .unwrap();
         assert!(
@@ -2461,7 +2571,10 @@ mod tests {
         .unwrap();
         agent_doc_capture_io::mark_write_applied(&file).unwrap();
 
-        let outcome = session_check_effects()
+        let apply_guard =
+            agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(&file).unwrap();
+        let outcome = session_check_effects_under_apply_guard(&file, &apply_guard)
+            .unwrap()
             .resume_captured_finalize(&file)
             .unwrap();
         assert_eq!(outcome, CapturedFinalizeResumeOutcome::ClosedIgnoredPath);

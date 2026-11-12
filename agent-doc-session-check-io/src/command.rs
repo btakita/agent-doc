@@ -1991,6 +1991,17 @@ pub fn run_self_heal(file: &Path, effects: &impl SessionCheckEffects) -> Result<
     exit_on_interrupted(file, try_run_with_options(file, false, &heal))
 }
 
+#[doc(hidden)]
+pub fn run_self_heal_under_apply_guard(
+    file: &Path,
+    effects: &impl SessionCheckEffects,
+    apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
+) -> Result<()> {
+    apply_guard.ensure_protects(file)?;
+    let _scope = QueueApplyGuardScope::enter();
+    run_self_heal(file, effects)
+}
+
 /// The explicit command that applies a self-heal `session-check` reported.
 pub fn session_check_heal_command(file: &Path) -> String {
     format!("agent-doc repair {} --session-check-heal", file.display())
@@ -3687,6 +3698,17 @@ pub fn inspect_self_healing(
 ) -> Result<SessionCheckStatus> {
     let heal = SessionCheckHealEffects { inner: effects };
     inspect(file, &heal)
+}
+
+#[doc(hidden)]
+pub fn inspect_self_healing_under_apply_guard(
+    file: &Path,
+    effects: &impl SessionCheckEffects,
+    apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
+) -> Result<SessionCheckStatus> {
+    apply_guard.ensure_protects(file)?;
+    let _scope = QueueApplyGuardScope::enter();
+    inspect_self_healing(file, effects)
 }
 
 pub fn is_committed_head_response_missing_interruption(message: &str) -> bool {

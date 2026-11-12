@@ -14202,9 +14202,12 @@ fn test_agent_doc_session_check_io_owns_guard_adapters() {
     assert!(
         closeout_runtime.contains("pub fn session_check_effects()")
             && closeout_runtime.contains(
-                "impl agent_doc_session_check_io::SessionCheckEffects for RuntimeSessionCheckEffects"
+                "impl agent_doc_session_check_io::SessionCheckEffects for RuntimeReadOnlySessionCheckEffects"
+            )
+            && closeout_runtime.contains(
+                "impl agent_doc_session_check_io::SessionCheckEffects for RuntimeApplyingSessionCheckEffects"
             ),
-        "agent-doc-closeout-runtime-io should own the session-check runtime effects port"
+        "agent-doc-closeout-runtime-io should own separate read-only and applying session-check runtime effects ports"
     );
     for production_source in [
         "src/main.rs",
@@ -14366,10 +14369,15 @@ fn test_agent_doc_flow_io_owns_closeout_effect_adapter() {
                 "impl agent_doc_flow_io::closeout::CloseoutEffects for RuntimeCloseoutEffects"
             )
             && closeout_runtime.contains("pub struct RuntimeRepairIoEffects<'a>")
+            && closeout_runtime.contains("pub struct RuntimeReadOnlySessionCheckEffects")
+            && closeout_runtime.contains("pub struct RuntimeApplyingSessionCheckEffects<'a>")
+            && closeout_runtime
+                .contains("pub fn session_check_effects() -> RuntimeReadOnlySessionCheckEffects")
+            && closeout_runtime.contains(") -> Result<RuntimeApplyingSessionCheckEffects<'a>>")
             && closeout_runtime
                 .contains("apply_guard: &'a agent_doc_queue_io::queue_edit_owner::QueueEditGuard")
             && !closeout_runtime.contains("pub static REPAIR_IO_EFFECTS"),
-        "agent-doc-closeout-runtime-io should own capability-guarded closeout and repair runtime effects ports"
+        "agent-doc-closeout-runtime-io should split read-only inspection from capability-guarded closeout, repair, and session-heal ports"
     );
 
     assert!(

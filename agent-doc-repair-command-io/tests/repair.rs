@@ -171,6 +171,34 @@ mod tests {
         assert_eq!(agent_doc_cycle_state_io::load(&doc).unwrap(), before_cycle);
     }
 
+    #[test]
+    fn session_check_heal_refuses_apply_contention_before_any_heal_effect() {
+        let dir = setup_project();
+        let doc = dir.path().join("heal-contention.md");
+        let content = "# Doc\n\n## User\n\nDo the thing\n";
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        let before_snapshot = agent_doc_snapshot_io::load_document_baseline(&doc).unwrap();
+        let before_cycle = agent_doc_cycle_state_io::load(&doc).unwrap();
+        let _incumbent =
+            agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(&doc).unwrap();
+
+        let error = agent_doc_repair_command_io::run_session_check_heal(&doc).unwrap_err();
+        assert!(error.to_string().contains("queue mutation deferred"));
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), content);
+        assert_eq!(
+            agent_doc_snapshot_io::load_document_baseline(&doc).unwrap(),
+            before_snapshot
+        );
+        assert_eq!(agent_doc_cycle_state_io::load(&doc).unwrap(), before_cycle);
+    }
+
     fn init_git_repo(root: &Path, tracked: &Path) {
         ProcessCommand::new("git")
             .current_dir(root)
@@ -2370,6 +2398,29 @@ mod tests {
         let key = agent_doc_repair_command_io::captured_finalize_resume_key(&doc)
             .unwrap()
             .expect("captured response should expose a durable resume key");
+        let before_document = std::fs::read_to_string(&doc).unwrap();
+        let before_cycle = agent_doc_cycle_state_io::load_with_closeout_projection(&doc).unwrap();
+        let before_capture = agent_doc_capture_io::load_active(&doc).unwrap();
+        let incumbent =
+            agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(&doc).unwrap();
+        let deferred = agent_doc_repair_command_io::resume_captured_finalize(&doc, &key);
+        assert!(
+            !matches!(
+                deferred,
+                agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::Committed { .. }
+            ),
+            "contended legacy resume must defer before effects: {deferred:?}",
+        );
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), before_document);
+        assert_eq!(
+            agent_doc_cycle_state_io::load_with_closeout_projection(&doc).unwrap(),
+            before_cycle
+        );
+        assert_eq!(
+            agent_doc_capture_io::load_active(&doc).unwrap(),
+            before_capture
+        );
+        drop(incumbent);
         let outcome = agent_doc_repair_command_io::resume_captured_finalize(&doc, &key);
         assert!(
             matches!(
@@ -2759,6 +2810,29 @@ mod tests {
         let key = agent_doc_repair_command_io::captured_finalize_resume_key(&doc)
             .unwrap()
             .expect("write-applied capture should expose a durable resume key");
+        let before_document = std::fs::read_to_string(&doc).unwrap();
+        let before_cycle = agent_doc_cycle_state_io::load_with_closeout_projection(&doc).unwrap();
+        let before_capture = agent_doc_capture_io::load_active(&doc).unwrap();
+        let incumbent =
+            agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(&doc).unwrap();
+        let deferred = agent_doc_repair_command_io::resume_captured_finalize(&doc, &key);
+        assert!(
+            !matches!(
+                deferred,
+                agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::Committed { .. }
+            ),
+            "contended materialized resume must defer before effects: {deferred:?}",
+        );
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), before_document);
+        assert_eq!(
+            agent_doc_cycle_state_io::load_with_closeout_projection(&doc).unwrap(),
+            before_cycle
+        );
+        assert_eq!(
+            agent_doc_capture_io::load_active(&doc).unwrap(),
+            before_capture
+        );
+        drop(incumbent);
         let outcome = agent_doc_repair_command_io::resume_captured_finalize(&doc, &key);
         assert!(
             matches!(

@@ -50,6 +50,25 @@ pub struct OpsLogTracking<'a> {
 static SESSION_ID_CACHE: LazyLock<Mutex<HashMap<PathBuf, String>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
+thread_local! {
+    static OPS_LOG_SUPPRESSION_DEPTH: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+}
+
+/// Run one pure inspection without allowing observation diagnostics to append
+/// durable ops evidence. Nested scopes remain suppressed until the outermost
+/// pure inspection returns.
+pub fn with_ops_log_suppressed<T>(operation: impl FnOnce() -> T) -> T {
+    struct SuppressionGuard;
+    impl Drop for SuppressionGuard {
+        fn drop(&mut self) {
+            OPS_LOG_SUPPRESSION_DEPTH.with(|depth| depth.set(depth.get().saturating_sub(1)));
+        }
+    }
+    OPS_LOG_SUPPRESSION_DEPTH.with(|depth| depth.set(depth.get().saturating_add(1)));
+    let _guard = SuppressionGuard;
+    operation()
+}
+
 /// Best-effort `agent_doc_session` for `file`, cached per process.
 fn cached_session_id(file: &Path) -> Option<String> {
     let key = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
@@ -228,6 +247,9 @@ pub fn reset_ops_log_attribution_cache() {
 }
 
 fn try_log_op(file: &Path, message: &str) -> Option<()> {
+    if OPS_LOG_SUPPRESSION_DEPTH.with(|depth| depth.get() > 0) {
+        return Some(());
+    }
     let project_root = cached_project_root(file)?;
     let doc_stem = file.file_stem().and_then(|n| n.to_str());
     let session = cached_session_id(file);

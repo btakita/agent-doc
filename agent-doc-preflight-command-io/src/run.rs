@@ -320,10 +320,12 @@ fn maybe_record_preflight_terminal_closeout_proof(file: &Path, did_commit: bool)
 
 fn record_preflight_terminal_closeout_proof(file: &Path, did_commit: bool) -> Result<()> {
     let agent_doc_session_check_io::SessionCheckStatus::Ok(_) =
-        agent_doc_session_check_io::inspect_read_only(
-            file,
-            &agent_doc_closeout_runtime_io::session_check_effects(),
-        )?
+        agent_doc_ops_log_io::with_ops_log_suppressed(|| {
+            agent_doc_session_check_io::inspect_read_only(
+                file,
+                &agent_doc_closeout_runtime_io::session_check_effects(),
+            )
+        })?
     else {
         return Ok(());
     };
@@ -813,10 +815,16 @@ fn run_with_options_to_writer_in_pass(
         .as_ref()
         .is_some_and(agent_doc_session_check_io::TurnAdmissionVerdict::requires_clean_closeout)
     {
+        let apply_guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(file)?;
+        let session_effects =
+            agent_doc_closeout_runtime_io::session_check_effects_under_apply_guard(
+                file,
+                &apply_guard,
+            )?;
         agent_doc_preflight_runtime_io::enforce_no_uncommitted_closeout_drift(
             file,
             &rc,
-            &agent_doc_closeout_runtime_io::session_check_effects(),
+            &session_effects,
         )?;
     }
 
@@ -979,10 +987,16 @@ fn run_with_options_to_writer_in_pass(
             agent_doc_session_check_io::TurnAdmissionVerdict::continues_with_operator_intent,
         );
         if verdict.requires_clean_closeout() && !operator_intent_at_entry {
+            let apply_guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(file)?;
+            let session_effects =
+                agent_doc_closeout_runtime_io::session_check_effects_under_apply_guard(
+                    file,
+                    &apply_guard,
+                )?;
             agent_doc_preflight_runtime_io::enforce_no_uncommitted_closeout_drift(
                 file,
                 &rc,
-                &agent_doc_closeout_runtime_io::session_check_effects(),
+                &session_effects,
             )?;
         }
     }
@@ -3675,6 +3689,60 @@ mod tests {
         assert_eq!(
             agent_doc_capture_io::load_active(&file).unwrap(),
             before_capture
+        );
+    }
+
+    #[test]
+    fn terminal_proof_read_only_cut_does_not_tombstone_a_removed_claim() {
+        let temp = setup_project();
+        let claimed = "release claimed work";
+        let baseline = format!(
+            "---\nagent_doc_format: template\nagent_doc_steering_debounce_ms: 0\n---\n\n<!-- agent:exchange -->\nPrompt.\n<!-- /agent:exchange -->\n\n<!-- agent:queue go -->\n- current work\n- {claimed}\n<!-- /agent:queue -->\n"
+        );
+        let file = write_committed_doc(temp.path(), "session.md", &baseline, "initial", None);
+        agent_doc_cycle_state_io::start_preflight(&file, Some(&baseline), Some(&baseline)).unwrap();
+        let (_, claim) =
+            agent_doc_queue_io::queue_claim::claim(&file, claimed, "subagent:terminal-proof", 3600)
+                .unwrap();
+        agent_doc_queue_io::queue_claim::start_attempt(
+            &file,
+            claimed,
+            "subagent:terminal-proof",
+            "/root/terminal_proof",
+            3600,
+            claim.generation,
+        )
+        .unwrap();
+        let deleted = baseline.replace(&format!("- {claimed}\n"), "");
+        std::fs::write(&file, &deleted).unwrap();
+        let before_claims = agent_doc_queue_io::queue_claim::load_ledger(&file).unwrap();
+        let before_receipts = agent_doc_queue_io::claim_release_receipt::load(&file).unwrap();
+        let before_document = std::fs::read_to_string(&file).unwrap();
+        let ops_path = temp.path().join(".agent-doc/logs/ops.log");
+        let before_ops = std::fs::read_to_string(&ops_path).unwrap_or_default();
+
+        let _ = agent_doc_ops_log_io::with_ops_log_suppressed(|| {
+            agent_doc_session_check_io::inspect_read_only(
+                &file,
+                &agent_doc_closeout_runtime_io::session_check_effects(),
+            )
+        });
+
+        assert_eq!(
+            agent_doc_queue_io::queue_claim::load_ledger(&file).unwrap(),
+            before_claims,
+            "pre-guard terminal proof inspection must not tombstone the claim",
+        );
+        assert_eq!(
+            agent_doc_queue_io::claim_release_receipt::load(&file).unwrap(),
+            before_receipts,
+            "pre-guard inspection must not create completion/cancellation receipts",
+        );
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), before_document);
+        assert_eq!(
+            std::fs::read_to_string(&ops_path).unwrap_or_default(),
+            before_ops,
+            "read-only terminal proof inspection must not append ops",
         );
     }
 

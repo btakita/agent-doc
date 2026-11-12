@@ -5515,10 +5515,15 @@ fn finalize_commit(
                         }
                     }
                 }
+                let session_effects =
+                    agent_doc_closeout_runtime_io::session_check_effects_under_apply_guard(
+                        file,
+                        queue_apply_guard,
+                    )?;
                 agent_doc_session_check_io::enforce_clean_closeout_with_force_disk_under_apply_guard(
                     file,
                     force_disk,
-                    &agent_doc_closeout_runtime_io::session_check_effects(),
+                    &session_effects,
                     queue_apply_guard,
                 )?;
             } else {

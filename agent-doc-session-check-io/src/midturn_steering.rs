@@ -651,13 +651,6 @@ fn route_claimed_items(
         // `agent-doc repair <FILE> --session-check-heal`).
         if crate::status_only_pass_active() {
             crate::note_status_only_deferred_write();
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "session_check_self_heal_pending file={} heal=cancel_removed_claim_attempt applied=false (#sessioncheckread)",
-                    file.display(),
-                ),
-            );
             continue;
         }
         cancel_removed_claim_attempt(file, content, item)?;

@@ -35,8 +35,11 @@ fn now_secs() -> u64 {
 fn state_location(file: &str) -> Result<(std::path::PathBuf, String)> {
     let file = Path::new(file);
     let root = agent_doc_fs::find_project_root_canonical(file)
-        .or_else(|| agent_doc_fs::find_project_root(file))
-        .with_context(|| format!("no .agent-doc project root for {}", file.display()))?;
+        .or_else(|| agent_doc_fs::find_project_root(file));
+    #[cfg(test)]
+    let root = root.or_else(|| file.parent().map(Path::to_path_buf));
+    let root =
+        root.with_context(|| format!("no .agent-doc project root for {}", file.display()))?;
     let document_hash = agent_doc_fs::document_state_hash(file)?;
     Ok((root, document_hash))
 }
@@ -112,6 +115,14 @@ pub fn queue_apply_in_flight(file: &Path) -> Result<bool> {
 /// one PID can win this SQLite compare-and-set.  Every child verifies this
 /// reservation before doing work.
 pub fn try_reserve_queue_edit_owner(file: &str, token: &str, pid: u32) -> Result<bool> {
+    // The flock is the authoritative apply exclusion. Probe and hold it across
+    // stale-lease recovery plus the reservation CAS: a long-running direct
+    // apply has no heartbeat thread, so heartbeat age alone must never allow a
+    // detached worker to replace its still-live ownership.
+    let reservation_lock = match try_acquire_queue_apply_lock(file)? {
+        QueueApplyLockAttempt::Contended => return Ok(false),
+        QueueApplyLockAttempt::Acquired(lock) => lock,
+    };
     if let Some(existing) = read_queue_edit_owner_lease(file)
         && !pid_is_live(existing.holder_pid)
     {
@@ -120,17 +131,21 @@ pub fn try_reserve_queue_edit_owner(file: &str, token: &str, pid: u32) -> Result
     let (project_root, document_hash) = state_location(file)?;
     let now = now_secs();
     let eligible_at_or_before = now.saturating_sub(queue_edit_owner_ttl().as_secs());
-    agent_doc_controller_io::project_controller::claim_coordination_lease_if_expired(
-        &project_root,
-        &agent_doc_sqlite::state_store::CoordinationLeaseRecord {
-            scope_kind: QUEUE_EDIT_OWNER_SCOPE.to_string(),
-            scope_id: document_hash,
-            holder: token.to_string(),
-            holder_pid: Some(pid),
-            heartbeat_secs: now,
-        },
-        eligible_at_or_before,
-    )
+    let reserved =
+        agent_doc_controller_io::project_controller::claim_coordination_lease_if_expired(
+            &project_root,
+            &agent_doc_sqlite::state_store::CoordinationLeaseRecord {
+                scope_kind: QUEUE_EDIT_OWNER_SCOPE.to_string(),
+                scope_id: document_hash,
+                holder: token.to_string(),
+                holder_pid: Some(pid),
+                heartbeat_secs: now,
+            },
+            eligible_at_or_before,
+        )?;
+    fs2::FileExt::unlock(&reservation_lock)
+        .context("failed to release queue reservation probe lock")?;
+    Ok(reserved)
 }
 
 /// Refresh only the lease still owned by `token`; a superseded worker cannot
@@ -543,6 +558,52 @@ mod tests {
             .unwrap()
             .expect("reserved worker still adopts after the rejected direct edit");
         drop(worker);
+        assert!(read_queue_edit_owner_lease(&file_text).is_none());
+    }
+
+    #[test]
+    fn expired_heartbeat_cannot_supersede_a_live_direct_apply_lock() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        std::fs::write(&file, "body").unwrap();
+        let file_text = file.to_string_lossy().to_string();
+        let direct = QueueEditGuard::acquire(&file).unwrap();
+        let original = read_queue_edit_owner_lease(&file_text).unwrap();
+
+        // Age the observable lease beyond every TTL without sleeping. The
+        // still-held flock remains the authoritative proof that apply is live.
+        let (project_root, document_hash) = state_location(&file_text).unwrap();
+        agent_doc_controller_io::project_controller::upsert_coordination_lease(
+            &project_root,
+            &agent_doc_sqlite::state_store::CoordinationLeaseRecord {
+                scope_kind: QUEUE_EDIT_OWNER_SCOPE.to_string(),
+                scope_id: document_hash,
+                holder: original.holder.clone(),
+                holder_pid: Some(std::process::id()),
+                heartbeat_secs: 0,
+            },
+        )
+        .unwrap();
+
+        assert!(
+            !try_reserve_queue_edit_owner(&file_text, "replacement", std::process::id()).unwrap(),
+            "heartbeat expiry must not overwrite a live apply lock"
+        );
+        assert_eq!(
+            read_queue_edit_owner_lease(&file_text).unwrap().holder,
+            original.holder
+        );
+
+        drop(direct);
+        assert!(
+            try_reserve_queue_edit_owner(&file_text, "successor-after-release", std::process::id())
+                .unwrap()
+        );
+        let successor = QueueEditGuard::adopt_reserved(&file, "successor-after-release")
+            .unwrap()
+            .expect("one successor adopts after the direct apply releases");
+        drop(successor);
         assert!(read_queue_edit_owner_lease(&file_text).is_none());
     }
 

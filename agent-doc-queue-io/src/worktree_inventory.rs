@@ -120,6 +120,17 @@ pub fn inspect(file: &Path, content: &str) -> Result<WorktreeMaintenance> {
 /// attempt so the inventory cannot list them again. Instruction children are
 /// returned and left in the document for preflight to queue.
 pub fn maintain(file: &Path, content: &str) -> Result<WorktreeMaintenance> {
+    let apply_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file)?;
+    maintain_under_apply_guard(file, content, &apply_guard)
+}
+
+#[doc(hidden)]
+pub fn maintain_under_apply_guard(
+    file: &Path,
+    content: &str,
+    apply_guard: &crate::queue_edit_owner::QueueEditGuard,
+) -> Result<WorktreeMaintenance> {
+    apply_guard.ensure_protects(file)?;
     if agent_doc_fs::find_project_root(file).is_none() {
         return Ok(WorktreeMaintenance::default());
     }
@@ -131,7 +142,18 @@ pub fn maintain(file: &Path, content: &str) -> Result<WorktreeMaintenance> {
 /// projection. This is the preflight and repair-apply path; `session-check`
 /// keeps using [`reconcile`], which does not remove a checkout.
 pub fn reconcile_maintained(file: &Path, content: &str) -> Result<Option<String>> {
-    let outcome = maintain(file, content)?;
+    let apply_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file)?;
+    reconcile_maintained_under_apply_guard(file, content, &apply_guard)
+}
+
+#[doc(hidden)]
+pub fn reconcile_maintained_under_apply_guard(
+    file: &Path,
+    content: &str,
+    apply_guard: &crate::queue_edit_owner::QueueEditGuard,
+) -> Result<Option<String>> {
+    apply_guard.ensure_protects(file)?;
+    let outcome = maintain_under_apply_guard(file, content, apply_guard)?;
     for removal in &outcome.removed {
         eprintln!(
             "[worktrees] removed {} ({})",
@@ -540,6 +562,26 @@ mod tests {
     use std::process::Command;
 
     use super::*;
+
+    #[test]
+    fn public_worktree_mutators_defer_under_apply_contention() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        std::fs::write(&file, "body").unwrap();
+        let guard = crate::queue_edit_owner::QueueEditGuard::acquire(&file).unwrap();
+
+        for error in [
+            maintain(&file, "body").unwrap_err(),
+            reconcile_maintained(&file, "body").unwrap_err(),
+        ] {
+            assert!(
+                error.to_string().contains("queue mutation deferred"),
+                "{error:#}"
+            );
+        }
+        drop(guard);
+    }
 
     fn observed(
         topic: &str,

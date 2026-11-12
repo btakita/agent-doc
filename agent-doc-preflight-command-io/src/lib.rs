@@ -133,6 +133,8 @@ const TEST_BACKGROUND_PENDING_MAINTENANCE_DELAY_MS_ENV: &str =
     "AGENT_DOC_TEST_BACKGROUND_PENDING_MAINTENANCE_DELAY_MS";
 const TEST_BACKGROUND_MAINTENANCE_CRASH_AFTER_LOCK_ENV: &str =
     "AGENT_DOC_TEST_BACKGROUND_MAINTENANCE_CRASH_AFTER_LOCK";
+const TEST_BACKGROUND_MAINTENANCE_PANIC_AFTER_EFFECT_ENV: &str =
+    "AGENT_DOC_TEST_BACKGROUND_MAINTENANCE_PANIC_AFTER_EFFECT";
 const BACKGROUND_QUEUE_MAINTENANCE_TOKEN_ENV: &str = "AGENT_DOC_BACKGROUND_QUEUE_MAINTENANCE_TOKEN";
 
 fn new_background_queue_maintenance_token() -> String {
@@ -275,6 +277,7 @@ struct BackgroundQueueMaintenanceLease {
     lost: std::sync::Arc<std::sync::atomic::AtomicBool>,
     stop: Option<std::sync::mpsc::Sender<()>>,
     heartbeat: Option<std::thread::JoinHandle<()>>,
+    completed: bool,
     _guard: agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
 }
 
@@ -339,6 +342,7 @@ impl BackgroundQueueMaintenanceLease {
             lost,
             stop: heartbeat.as_ref().map(|_| stop),
             heartbeat,
+            completed: false,
             _guard: guard,
         }))
     }
@@ -365,8 +369,8 @@ impl BackgroundQueueMaintenanceLease {
         &self._guard
     }
 
-    fn retain_incomplete_attempt_on_drop(&mut self) {
-        self._guard.retain_incomplete_attempt_on_drop();
+    fn mark_completed(&mut self) {
+        self.completed = true;
     }
 }
 
@@ -378,6 +382,12 @@ impl agent_doc_preflight_io::PendingMaintenanceEffectFence for BackgroundQueueMa
 
 impl Drop for BackgroundQueueMaintenanceLease {
     fn drop(&mut self) {
+        // Incomplete is the safe default. This executes during ordinary errors
+        // and panic unwinding, preserving fail-closed recovery evidence even
+        // when control never reaches the worker's result handling.
+        if !self.completed {
+            self._guard.retain_incomplete_attempt_on_drop();
+        }
         self.stop.take();
         if let Some(heartbeat) = self.heartbeat.take() {
             let _ = heartbeat.join();
@@ -474,6 +484,9 @@ pub fn run_background_queue_maintenance(file: &Path, commit_if_mutated: bool) ->
                 pending_report.todo_signals.len(),
             ),
         );
+        if std::env::var_os(TEST_BACKGROUND_MAINTENANCE_PANIC_AFTER_EFFECT_ENV).is_some() {
+            panic!("injected background maintenance panic after pending effect");
+        }
         queue_mutation.fence_effect(file)?;
         let outcome = agent_doc_preflight_io::run_queue_maintenance_under_apply_guard(
             file,
@@ -536,8 +549,8 @@ pub fn run_background_queue_maintenance(file: &Path, commit_if_mutated: bool) ->
             }
         }
     })();
-    if result.is_err() {
-        queue_mutation.retain_incomplete_attempt_on_drop();
+    if result.is_ok() {
+        queue_mutation.mark_completed();
     }
     result
 }

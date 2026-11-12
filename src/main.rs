@@ -1692,12 +1692,14 @@ impl agent_doc_queue_io::queue_cmd::QueueCommandEffects for CliQueueCommandEffec
         &self,
         file: &Path,
         count: usize,
+        apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
     ) -> anyhow::Result<Option<agent_doc_queue_io::queue_cmd::QueueCommandConsumeOutcome>> {
-        agent_doc_queue_io::queue_consume::consume_free_text_queue_prompts_with_outcome(
+        agent_doc_queue_io::queue_consume::consume_free_text_queue_prompts_under_apply_guard(
             file,
             count,
             true,
             &CLI_QUEUE_CONSUME_WRITE_EFFECTS,
+            apply_guard,
         )
         .map(|outcome| outcome.map(queue_command_consume_outcome))
     }
@@ -1706,29 +1708,44 @@ impl agent_doc_queue_io::queue_cmd::QueueCommandEffects for CliQueueCommandEffec
         &self,
         file: &Path,
         count: usize,
+        apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
     ) -> anyhow::Result<Option<agent_doc_queue_io::queue_cmd::QueueCommandConsumeOutcome>> {
-        agent_doc_queue_io::queue_consume::consume_free_text_queue_prompts_with_outcome(
+        agent_doc_queue_io::queue_consume::consume_free_text_queue_prompts_under_apply_guard(
             file,
             count,
             false,
             &CLI_QUEUE_CONSUME_WRITE_EFFECTS,
+            apply_guard,
         )
         .map(|outcome| outcome.map(queue_command_consume_outcome))
     }
 
-    fn strike_orphan_id_backed_queue_head(&self, file: &Path, id: &str) -> anyhow::Result<bool> {
-        agent_doc_queue_io::queue_consume::strike_orphan_id_backed_queue_head(
+    fn strike_orphan_id_backed_queue_head(
+        &self,
+        file: &Path,
+        id: &str,
+        apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
+    ) -> anyhow::Result<bool> {
+        agent_doc_queue_io::queue_consume::strike_orphan_id_backed_queue_head_under_apply_guard(
             file,
             id,
             &CLI_QUEUE_CONSUME_WRITE_EFFECTS,
+            apply_guard,
         )
     }
 
-    fn acknowledge_open_id_backed_queue_head(&self, file: &Path, id: &str) -> anyhow::Result<bool> {
-        agent_doc_queue_io::queue_consume::acknowledge_open_id_backed_queue_head(
+    fn acknowledge_open_id_backed_queue_head(
+        &self,
+        file: &Path,
+        id: &str,
+        apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
+    ) -> anyhow::Result<bool> {
+        agent_doc_queue_io::queue_consume::acknowledge_open_id_backed_queue_head_under_apply_guard(
             file,
             id,
+            None,
             &CLI_QUEUE_CONSUME_WRITE_EFFECTS,
+            apply_guard,
         )
     }
 
@@ -1737,12 +1754,14 @@ impl agent_doc_queue_io::queue_cmd::QueueCommandEffects for CliQueueCommandEffec
         file: &Path,
         id: &str,
         attempt: Option<&agent_doc_document::queue_projection::QueueOwnerProjection>,
+        apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
     ) -> anyhow::Result<bool> {
-        agent_doc_queue_io::queue_consume::acknowledge_open_id_backed_queue_head_for_attempt(
+        agent_doc_queue_io::queue_consume::acknowledge_open_id_backed_queue_head_under_apply_guard(
             file,
             id,
             attempt,
             &CLI_QUEUE_CONSUME_WRITE_EFFECTS,
+            apply_guard,
         )
     }
 
@@ -1750,11 +1769,14 @@ impl agent_doc_queue_io::queue_cmd::QueueCommandEffects for CliQueueCommandEffec
         &self,
         file: &Path,
         expected_head: &str,
+        apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
     ) -> anyhow::Result<Option<agent_doc_queue_io::queue_cmd::QueueCommandConsumeOutcome>> {
-        agent_doc_queue_io::queue_consume::acknowledge_paused_free_text_queue_head_with_outcome(
+        agent_doc_queue_io::queue_consume::acknowledge_paused_free_text_queue_head_under_apply_guard(
             file,
             expected_head,
+            None,
             &CLI_QUEUE_CONSUME_WRITE_EFFECTS,
+            apply_guard,
         )
         .map(|outcome| outcome.map(queue_command_consume_outcome))
     }
@@ -1764,30 +1786,39 @@ impl agent_doc_queue_io::queue_cmd::QueueCommandEffects for CliQueueCommandEffec
         file: &Path,
         expected_head: &str,
         selector: Option<&agent_doc_queue_io::queue_consume::AckTextSelector>,
+        apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
     ) -> anyhow::Result<Option<agent_doc_queue_io::queue_cmd::QueueCommandConsumeOutcome>> {
-        agent_doc_queue_io::queue_consume::acknowledge_paused_free_text_queue_head_with_selector_and_outcome(
+        agent_doc_queue_io::queue_consume::acknowledge_paused_free_text_queue_head_under_apply_guard(
             file,
             expected_head,
             selector,
             &CLI_QUEUE_CONSUME_WRITE_EFFECTS,
+            apply_guard,
         )
         .map(|outcome| outcome.map(queue_command_consume_outcome))
     }
 
-    fn prune_noise_queue_heads(&self, file: &Path) -> anyhow::Result<usize> {
-        agent_doc_queue_io::queue_consume::prune_noise_queue_heads(
+    fn prune_noise_queue_heads(
+        &self,
+        file: &Path,
+        apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
+    ) -> anyhow::Result<usize> {
+        agent_doc_queue_io::queue_consume::prune_noise_queue_heads_under_apply_guard(
             file,
             &CLI_QUEUE_CONSUME_WRITE_EFFECTS,
+            apply_guard,
         )
     }
 
     fn converge_captured_answered_free_text_projection(
         &self,
         file: &Path,
+        apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
     ) -> anyhow::Result<usize> {
-        agent_doc_queue_io::queue_consume::converge_captured_answered_free_text_projection(
+        agent_doc_queue_io::queue_consume::converge_captured_answered_free_text_projection_under_apply_guard(
             file,
             &CLI_QUEUE_CONSUME_WRITE_EFFECTS,
+            apply_guard,
         )
     }
 }

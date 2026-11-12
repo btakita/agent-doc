@@ -2292,6 +2292,7 @@ fn run_pending_maintenance_under_apply_guard(
         PendingMaintenanceOptions::default(),
         write_effects,
         None,
+        Some(apply_guard),
     )
 }
 
@@ -2324,6 +2325,7 @@ pub fn run_pending_maintenance_fenced(
         PendingMaintenanceOptions::default(),
         write_effects,
         Some(effect_fence),
+        Some(apply_guard),
     )
 }
 
@@ -2341,6 +2343,7 @@ pub fn run_pending_maintenance_force_disk(
         },
         write_effects,
         None,
+        Some(&apply_guard),
     )
 }
 
@@ -2359,6 +2362,7 @@ pub fn inspect_pending_maintenance(
             persist: false,
         },
         write_effects,
+        None,
         None,
     )
 }
@@ -2396,6 +2400,7 @@ fn run_pending_maintenance_with_options(
     options: PendingMaintenanceOptions,
     write_effects: &dyn PreflightMaintenanceWriteEffects,
     effect_fence: Option<&dyn PendingMaintenanceEffectFence>,
+    apply_guard: Option<&agent_doc_queue_io::queue_edit_owner::QueueEditGuard>,
 ) -> Result<PendingMaintenanceReport> {
     let content = match std::fs::read_to_string(file) {
         Ok(c) => c,
@@ -3001,7 +3006,11 @@ fn run_pending_maintenance_with_options(
     // worker repeats the pass with persistence enabled and owns those effects.
     let worktrees_reconciled = if options.persist {
         fence_pending_maintenance_effect(file, effect_fence)?;
-        agent_doc_queue_io::worktree_inventory::reconcile_maintained(file, &current_content)?
+        agent_doc_queue_io::worktree_inventory::reconcile_maintained_under_apply_guard(
+            file,
+            &current_content,
+            apply_guard.context("persisting pending maintenance requires an apply guard")?,
+        )?
     } else {
         agent_doc_queue_io::worktree_inventory::reconcile(file, &current_content)?
     };
@@ -8764,7 +8773,11 @@ fn run_queue_maintenance_with_options_under_apply_guard(
         eprintln!("[preflight] active: reconciled after queue lifecycle projection");
     }
     if let Some(reconciled) =
-        agent_doc_queue_io::worktree_inventory::reconcile_maintained(file, &current_content)?
+        agent_doc_queue_io::worktree_inventory::reconcile_maintained_under_apply_guard(
+            file,
+            &current_content,
+            apply_guard,
+        )?
     {
         current_content = reconciled;
         mutated = true;

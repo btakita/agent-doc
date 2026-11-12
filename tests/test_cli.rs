@@ -733,13 +733,125 @@ fn crashed_worker_is_visible_and_promptly_redispatched_without_ttl_wait() {
 }
 
 #[test]
+fn panic_after_background_effect_retains_incomplete_attempt_until_successor_completes() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let doc = tmp.path().join("session.md");
+    let content = concat!(
+        "---\n",
+        "agent_doc_session: panic-recovery-test\n",
+        "agent_doc_format: template\n",
+        "agent: codex\n",
+        "model: gpt-5\n",
+        "---\n\n",
+        "<!-- agent:exchange -->\n",
+        "### Re: prior — gpt-5\n\nDone.\n",
+        "<!-- agent:boundary:1234abcd -->\n",
+        "<!-- /agent:exchange -->\n\n",
+        "<!-- agent:backlog priority queue -->\n",
+        "- legacy panic recovery item\n",
+        "<!-- /agent:backlog -->\n",
+    );
+    fs::write(&doc, content).unwrap();
+    init_git_repo(tmp.path(), &doc);
+
+    let admission = agent_doc_cmd()
+        .current_dir(tmp.path())
+        .env(
+            "AGENT_DOC_TEST_BACKGROUND_MAINTENANCE_PANIC_AFTER_EFFECT",
+            "1",
+        )
+        .args(["preflight", doc.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(
+        admission.status.success(),
+        "admission failed before detached panic: {}",
+        String::from_utf8_lossy(&admission.stderr),
+    );
+
+    let panic_deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        if agent_doc_queue_io::queue_edit_owner::read_queue_edit_owner_lease(&doc.to_string_lossy())
+            .is_some()
+            && !agent_doc_queue_io::queue_edit_owner::queue_apply_in_flight(&doc).unwrap()
+        {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < panic_deadline,
+            "panicking worker cleared its incomplete attempt during unwind",
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+
+    let check = agent_doc_cmd()
+        .current_dir(tmp.path())
+        .args(["session-check", doc.to_str().unwrap()])
+        .output()
+        .unwrap();
+    let check_text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&check.stdout),
+        String::from_utf8_lossy(&check.stderr),
+    );
+    assert!(
+        check_text.contains("queue maintenance attempt is incomplete")
+            && !check_text.contains("[session-check] ok"),
+        "session-check falsely terminalized a panicked attempt: {check_text}",
+    );
+
+    let recovery = agent_doc_cmd()
+        .current_dir(tmp.path())
+        .args(["preflight", doc.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(
+        recovery.status.success(),
+        "successor admission failed: {}",
+        String::from_utf8_lossy(&recovery.stderr),
+    );
+
+    let ops = tmp.path().join(".agent-doc/logs/ops.log");
+    let completion_deadline = std::time::Instant::now() + std::time::Duration::from_secs(8);
+    loop {
+        let current_ops = fs::read_to_string(&ops).unwrap_or_default();
+        if current_ops.contains("queue_maintenance_background_completed") {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < completion_deadline,
+            "successor never completed the panicked attempt: {current_ops}",
+        );
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    assert!(
+        agent_doc_queue_io::queue_edit_owner::read_queue_edit_owner_lease(&doc.to_string_lossy())
+            .is_none(),
+        "successful successor left stale incomplete ownership",
+    );
+}
+
+#[test]
 fn every_public_queue_mutation_entrypoint_acquires_apply_exclusion() {
     let queue_cmd = include_str!("../agent-doc-queue-io/src/queue_cmd.rs");
     for function in [
         "clean_slate_with_effects",
+        "consume_with_options",
         "consume_orphan_id",
         "acknowledge_open_id",
+        "acknowledge_paused_free_text",
+        "prune_noise",
         "sync_with_effects",
+        "project_claim_runtime_state_with_effects",
+        "project_claim_item_runtime_state_with_effects",
+        "claim_with_runtime_projection",
+        "claim_with_runtime_projection_for_harness",
+        "project_all_queue_runtime_state_with_effects",
+        "project_all_queue_runtime_state_once_with_effects",
+        "project_all_queue_runtime_state_once_run_with_effects",
+        "project_all_queue_runtime_state_once_for_generation_with_effects",
+        "project_background_self_heal_runtime_state_once_for_generation_with_effects",
+        "project_blocker_runtime_state_with_effects",
     ] {
         let marker = format!("pub fn {function}");
         let start = queue_cmd.find(&marker).unwrap();
@@ -751,6 +863,101 @@ fn every_public_queue_mutation_entrypoint_acquires_apply_exclusion() {
         assert!(
             tail[..end].contains("QueueEditGuard::acquire(file)?"),
             "{function} bypasses queue apply exclusion",
+        );
+    }
+
+    for internal in [
+        "fn project_claim_runtime_state_under_apply_guard",
+        "fn project_claim_item_runtime_state_under_apply_guard",
+        "fn claim_with_runtime_projection_under_apply_guard",
+        "fn project_all_queue_runtime_state_under_apply_guard",
+        "fn project_all_queue_runtime_state_once_for_generation_under_apply_guard",
+        "fn project_blocker_runtime_state_under_apply_guard",
+        "fn project_runtime_state_with_effects",
+    ] {
+        let start = queue_cmd.find(internal).unwrap();
+        let signature = &queue_cmd[start..start + 900.min(queue_cmd.len() - start)];
+        assert!(
+            signature.contains("apply_guard: &crate::queue_edit_owner::QueueEditGuard"),
+            "low-level mutator {internal} lacks a compile-time apply capability"
+        );
+    }
+    let worktree_inventory = include_str!("../agent-doc-queue-io/src/worktree_inventory.rs");
+    for function in ["maintain", "reconcile_maintained"] {
+        let start = worktree_inventory
+            .find(&format!("pub fn {function}"))
+            .unwrap();
+        let body = &worktree_inventory[start..start + 700.min(worktree_inventory.len() - start)];
+        assert!(
+            body.contains("QueueEditGuard::acquire(file)?"),
+            "worktree mutator {function} bypasses queue apply exclusion"
+        );
+    }
+    for internal in [
+        "maintain_under_apply_guard",
+        "reconcile_maintained_under_apply_guard",
+    ] {
+        let start = worktree_inventory
+            .find(&format!("pub fn {internal}"))
+            .unwrap();
+        let body = &worktree_inventory[start..start + 700.min(worktree_inventory.len() - start)];
+        assert!(
+            body.contains("apply_guard: &crate::queue_edit_owner::QueueEditGuard"),
+            "worktree low-level mutator {internal} lacks a compile-time apply capability"
+        );
+    }
+
+    let queue_consume = include_str!("../agent-doc-queue-io/src/queue_consume.rs");
+    for function in [
+        "consume_queue_prompt",
+        "consume_queue_prompt_with_outcome",
+        "consume_free_text_queue_prompts_with_outcome",
+        "consume_queue_prompts_for_done_ids_with_outcome",
+        "consume_queue_prompts_for_done_ids_force_disk_with_outcome",
+        "consume_queue_prompts_for_done_ids_selected_with_outcome",
+        "consume_queue_prompt_force_disk",
+        "consume_queue_prompts_with_outcome",
+        "consume_queue_prompt_if_head_matches_with_outcome",
+        "acknowledge_paused_free_text_queue_head_with_outcome",
+        "acknowledge_paused_free_text_queue_head_with_selector_and_outcome",
+        "refresh_waiting_on_you_tree",
+        "annotate_newly_completed_queue_prompts_with_response_id",
+        "strike_answered_free_text_queue_heads",
+        "strike_free_text_heads_answered_by_committed_heading_replay",
+        "converge_captured_answered_free_text_projection",
+        "prune_noise_queue_heads",
+        "strike_orphan_id_backed_queue_head",
+        "acknowledge_open_id_backed_queue_head",
+        "acknowledge_open_id_backed_queue_head_for_attempt",
+        "mark_completed_queue_prompts_for_done_ids",
+        "mark_completed_queue_prompts_for_done_ids_with_response",
+        "record_queue_consumption_proofs",
+    ] {
+        let marker = format!("pub fn {function}");
+        let start = queue_consume.find(&marker).unwrap();
+        let body = &queue_consume[start..start + 1400.min(queue_consume.len() - start)];
+        assert!(
+            body.contains("QueueEditGuard::acquire(file)?"),
+            "queue-consume mutator {function} bypasses queue apply exclusion"
+        );
+    }
+    for internal in [
+        "consume_free_text_queue_prompts_under_apply_guard",
+        "acknowledge_paused_free_text_queue_head_under_apply_guard",
+        "refresh_waiting_on_you_tree_under_apply_guard",
+        "annotate_newly_completed_queue_prompts_with_response_id_under_apply_guard",
+        "converge_captured_answered_free_text_projection_under_apply_guard",
+        "prune_noise_queue_heads_under_apply_guard",
+        "strike_orphan_id_backed_queue_head_under_apply_guard",
+        "acknowledge_open_id_backed_queue_head_under_apply_guard",
+        "mark_completed_queue_prompts_for_done_ids_under_apply_guard",
+        "record_queue_consumption_proofs_under_apply_guard",
+    ] {
+        let start = queue_consume.find(&format!("pub fn {internal}")).unwrap();
+        let body = &queue_consume[start..start + 900.min(queue_consume.len() - start)];
+        assert!(
+            body.contains("apply_guard: &crate::queue_edit_owner::QueueEditGuard"),
+            "queue-consume low-level mutator {internal} lacks a compile-time apply capability"
         );
     }
 

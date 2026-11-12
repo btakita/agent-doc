@@ -441,14 +441,19 @@ pub struct QueueConsumptionOutcome {
 
 #[allow(dead_code)]
 pub fn consume_queue_prompt(file: &Path, effects: &dyn QueueConsumeWriteEffects) -> Result<bool> {
-    Ok(consume_queue_prompt_with_outcome(file, effects)?.is_some())
+    let apply_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file)?;
+    Ok(
+        consume_queue_prompts_with_options(file, &[], 1, false, None, &[], effects, &apply_guard)?
+            .is_some(),
+    )
 }
 
 pub fn consume_queue_prompt_with_outcome(
     file: &Path,
     effects: &dyn QueueConsumeWriteEffects,
 ) -> Result<Option<QueueConsumptionOutcome>> {
-    consume_queue_prompts_with_options(file, &[], 1, false, None, &[], effects)
+    let apply_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file)?;
+    consume_queue_prompts_with_options(file, &[], 1, false, None, &[], effects, &apply_guard)
 }
 
 /// Consume up to `count` leading free-text prompts in one revision-pinned
@@ -462,6 +467,7 @@ pub fn consume_free_text_queue_prompts_with_outcome(
     skip_visible_guard: bool,
     effects: &dyn QueueConsumeWriteEffects,
 ) -> Result<Option<QueueConsumptionOutcome>> {
+    let apply_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file)?;
     consume_queue_prompts_with_options(
         file,
         &[],
@@ -470,6 +476,27 @@ pub fn consume_free_text_queue_prompts_with_outcome(
         None,
         &[],
         effects,
+        &apply_guard,
+    )
+}
+
+#[doc(hidden)]
+pub fn consume_free_text_queue_prompts_under_apply_guard(
+    file: &Path,
+    count: usize,
+    skip_visible_guard: bool,
+    effects: &dyn QueueConsumeWriteEffects,
+    apply_guard: &crate::queue_edit_owner::QueueEditGuard,
+) -> Result<Option<QueueConsumptionOutcome>> {
+    consume_queue_prompts_with_options(
+        file,
+        &[],
+        count.max(1),
+        skip_visible_guard,
+        None,
+        &[],
+        effects,
+        apply_guard,
     )
 }
 
@@ -498,8 +525,18 @@ pub fn consume_queue_prompts_for_done_ids_with_outcome(
     done_ids: &[String],
     effects: &dyn QueueConsumeWriteEffects,
 ) -> Result<Option<QueueConsumptionOutcome>> {
+    let apply_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file)?;
     let budget = done_ids_free_text_budget(done_ids);
-    consume_queue_prompts_with_options(file, done_ids, budget, false, None, &[], effects)
+    consume_queue_prompts_with_options(
+        file,
+        done_ids,
+        budget,
+        false,
+        None,
+        &[],
+        effects,
+        &apply_guard,
+    )
 }
 
 pub fn consume_queue_prompts_for_done_ids_force_disk_with_outcome(
@@ -507,8 +544,18 @@ pub fn consume_queue_prompts_for_done_ids_force_disk_with_outcome(
     done_ids: &[String],
     effects: &dyn QueueConsumeWriteEffects,
 ) -> Result<Option<QueueConsumptionOutcome>> {
+    let apply_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file)?;
     let budget = done_ids_free_text_budget(done_ids);
-    consume_queue_prompts_with_options(file, done_ids, budget, true, None, &[], effects)
+    consume_queue_prompts_with_options(
+        file,
+        done_ids,
+        budget,
+        true,
+        None,
+        &[],
+        effects,
+        &apply_guard,
+    )
 }
 
 /// A response closeout's consume, fenced to the heads preflight selected for
@@ -533,6 +580,7 @@ pub fn consume_queue_prompts_for_done_ids_selected_with_outcome(
     response_body: Option<&str>,
     effects: &dyn QueueConsumeWriteEffects,
 ) -> Result<Option<QueueConsumptionOutcome>> {
+    let apply_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file)?;
     let budget = if skip_visible_guard {
         1
     } else {
@@ -553,6 +601,7 @@ pub fn consume_queue_prompts_for_done_ids_selected_with_outcome(
         approved_head,
         response_body,
         effects,
+        &apply_guard,
     )
 }
 
@@ -571,7 +620,8 @@ pub fn consume_queue_prompt_force_disk(
     file: &Path,
     effects: &dyn QueueConsumeWriteEffects,
 ) -> Result<Option<QueueConsumptionOutcome>> {
-    consume_queue_prompts_with_options(file, &[], 1, true, None, &[], effects)
+    let apply_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file)?;
+    consume_queue_prompts_with_options(file, &[], 1, true, None, &[], effects, &apply_guard)
 }
 
 pub fn consume_queue_prompts_with_outcome(
@@ -580,7 +630,17 @@ pub fn consume_queue_prompts_with_outcome(
     skip_visible_guard: bool,
     effects: &dyn QueueConsumeWriteEffects,
 ) -> Result<Option<QueueConsumptionOutcome>> {
-    consume_queue_prompts_with_options(file, done_ids, 1, skip_visible_guard, None, &[], effects)
+    let apply_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file)?;
+    consume_queue_prompts_with_options(
+        file,
+        done_ids,
+        1,
+        skip_visible_guard,
+        None,
+        &[],
+        effects,
+        &apply_guard,
+    )
 }
 
 /// Consume exactly the head observed by the caller. If another write already
@@ -593,6 +653,7 @@ pub fn consume_queue_prompt_if_head_matches_with_outcome(
     skip_visible_guard: bool,
     effects: &dyn QueueConsumeWriteEffects,
 ) -> Result<Option<QueueConsumptionOutcome>> {
+    let apply_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file)?;
     consume_queue_prompts_with_options(
         file,
         done_ids,
@@ -601,6 +662,7 @@ pub fn consume_queue_prompt_if_head_matches_with_outcome(
         Some(expected_head),
         &[],
         effects,
+        &apply_guard,
     )
 }
 
@@ -783,11 +845,13 @@ pub fn acknowledge_paused_free_text_queue_head_with_outcome(
     expected_head: &str,
     effects: &dyn QueueConsumeWriteEffects,
 ) -> Result<Option<QueueConsumptionOutcome>> {
-    acknowledge_paused_free_text_queue_head_with_selector_and_outcome(
+    let apply_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file)?;
+    acknowledge_paused_free_text_queue_head_under_apply_guard(
         file,
         expected_head,
         None,
         effects,
+        &apply_guard,
     )
 }
 
@@ -797,6 +861,25 @@ pub fn acknowledge_paused_free_text_queue_head_with_selector_and_outcome(
     selector: Option<&AckTextSelector>,
     effects: &dyn QueueConsumeWriteEffects,
 ) -> Result<Option<QueueConsumptionOutcome>> {
+    let apply_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file)?;
+    acknowledge_paused_free_text_queue_head_under_apply_guard(
+        file,
+        expected_head,
+        selector,
+        effects,
+        &apply_guard,
+    )
+}
+
+#[doc(hidden)]
+pub fn acknowledge_paused_free_text_queue_head_under_apply_guard(
+    file: &Path,
+    expected_head: &str,
+    selector: Option<&AckTextSelector>,
+    effects: &dyn QueueConsumeWriteEffects,
+    apply_guard: &crate::queue_edit_owner::QueueEditGuard,
+) -> Result<Option<QueueConsumptionOutcome>> {
+    apply_guard.ensure_protects(file)?;
     let content = effects.current_document_content(file, "queue_consume_ack_text")?;
     let (fm, _) = frontmatter::parse(&content)?;
 
@@ -886,12 +969,22 @@ pub fn acknowledge_paused_free_text_queue_head_with_selector_and_outcome(
             new_snapshot: target.clone(),
             save_snapshot: true,
         };
-        record_queue_consumption_proofs(file, &plan, QueueConsumptionProofStage::BeforeMutation)?;
+        record_queue_consumption_proofs_under_apply_guard(
+            file,
+            &plan,
+            QueueConsumptionProofStage::BeforeMutation,
+            apply_guard,
+        )?;
         effects
             .converge_document_or_disk(file, &target, &content, "queue_consume_ack_text")
             .context("queue consume --ack-text: failed to converge document")?;
         save_snapshot_recovery_only(file, &target, "queue consume --ack-text writeback");
-        record_queue_consumption_proofs(file, &plan, QueueConsumptionProofStage::AfterMutation)?;
+        record_queue_consumption_proofs_under_apply_guard(
+            file,
+            &plan,
+            QueueConsumptionProofStage::AfterMutation,
+            apply_guard,
+        )?;
         retire_exact_text_ack_strike(file, &row.lineage, selector, &target, &content);
         agent_doc_ops_log_io::log_op(
             file,
@@ -1058,12 +1151,22 @@ pub fn acknowledge_paused_free_text_queue_head_with_selector_and_outcome(
         save_snapshot: true,
     };
 
-    record_queue_consumption_proofs(file, &plan, QueueConsumptionProofStage::BeforeMutation)?;
+    record_queue_consumption_proofs_under_apply_guard(
+        file,
+        &plan,
+        QueueConsumptionProofStage::BeforeMutation,
+        apply_guard,
+    )?;
     effects
         .converge_document_or_disk(file, &target, &content, "queue_consume_ack_text")
         .context("queue consume --ack-text: failed to converge document")?;
     save_snapshot_recovery_only(file, &target, "queue consume --ack-text writeback");
-    record_queue_consumption_proofs(file, &plan, QueueConsumptionProofStage::AfterMutation)?;
+    record_queue_consumption_proofs_under_apply_guard(
+        file,
+        &plan,
+        QueueConsumptionProofStage::AfterMutation,
+        apply_guard,
+    )?;
     retire_exact_text_ack_strike(file, &observed_head, None, &target, &content);
     agent_doc_ops_log_io::log_op(
         file,
@@ -1149,6 +1252,7 @@ fn retire_exact_text_ack_strike(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn consume_queue_prompts_with_options(
     file: &Path,
     done_ids: &[String],
@@ -1157,6 +1261,7 @@ fn consume_queue_prompts_with_options(
     expected_head: Option<&str>,
     selected_heads: &[String],
     effects: &dyn QueueConsumeWriteEffects,
+    apply_guard: &crate::queue_edit_owner::QueueEditGuard,
 ) -> Result<Option<QueueConsumptionOutcome>> {
     consume_queue_prompts_with_options_fenced(
         file,
@@ -1168,6 +1273,7 @@ fn consume_queue_prompts_with_options(
         None,
         None,
         effects,
+        apply_guard,
     )
 }
 
@@ -1182,7 +1288,9 @@ fn consume_queue_prompts_with_options_fenced(
     approved_head: Option<&ApprovedQueueHead>,
     response_body: Option<&str>,
     effects: &dyn QueueConsumeWriteEffects,
+    apply_guard: &crate::queue_edit_owner::QueueEditGuard,
 ) -> Result<Option<QueueConsumptionOutcome>> {
+    apply_guard.ensure_protects(file)?;
     // `#crdtstructops` Phase D follow-on: no file-TOCTOU flock across the
     // read-parse-write cycle. The detached single-writer consumes directly; the
     // editor-attached path converges via the relay. The consume still computes
@@ -1409,7 +1517,12 @@ fn consume_queue_prompts_with_options_fenced(
     plan.new_document = reconcile_terminal_active_projection(file, plan.new_document)?.0;
     plan.new_snapshot = reconcile_terminal_active_projection(file, plan.new_snapshot)?.0;
 
-    record_queue_consumption_proofs(file, &plan, QueueConsumptionProofStage::BeforeMutation)?;
+    record_queue_consumption_proofs_under_apply_guard(
+        file,
+        &plan,
+        QueueConsumptionProofStage::BeforeMutation,
+        apply_guard,
+    )?;
 
     // `#fcc0`: converge the queue-consume write through the editor IPC when a JB
     // listener is active (no `File Cache Conflict` dialog); fall back to the
@@ -1440,7 +1553,12 @@ fn consume_queue_prompts_with_options_fenced(
     if plan.save_snapshot {
         save_snapshot_recovery_only(file, &plan.new_snapshot, "queue consume writeback");
     }
-    record_queue_consumption_proofs(file, &plan, QueueConsumptionProofStage::AfterMutation)?;
+    record_queue_consumption_proofs_under_apply_guard(
+        file,
+        &plan,
+        QueueConsumptionProofStage::AfterMutation,
+        apply_guard,
+    )?;
 
     // `#claimstrike` / GH #303: id-backed heads reach this consume path rather
     // than the free-text strike path below. End their claims at the same
@@ -1602,6 +1720,18 @@ pub fn record_queue_consumption_proofs(
     plan: &QueueConsumptionPlan,
     stage: QueueConsumptionProofStage,
 ) -> Result<()> {
+    let apply_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file)?;
+    record_queue_consumption_proofs_under_apply_guard(file, plan, stage, &apply_guard)
+}
+
+#[doc(hidden)]
+pub fn record_queue_consumption_proofs_under_apply_guard(
+    file: &Path,
+    plan: &QueueConsumptionPlan,
+    stage: QueueConsumptionProofStage,
+    apply_guard: &crate::queue_edit_owner::QueueEditGuard,
+) -> Result<()> {
+    apply_guard.ensure_protects(file)?;
     record_queue_consumption_proofs_with_effects(
         &QUEUE_CONSUMPTION_PROOF_EFFECTS,
         file,
@@ -1719,6 +1849,25 @@ pub fn refresh_waiting_on_you_tree(
     force_disk: bool,
     effects: &dyn QueueConsumeWriteEffects,
 ) -> Result<bool> {
+    let apply_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file)?;
+    refresh_waiting_on_you_tree_under_apply_guard(
+        file,
+        response_body,
+        force_disk,
+        effects,
+        &apply_guard,
+    )
+}
+
+#[doc(hidden)]
+pub fn refresh_waiting_on_you_tree_under_apply_guard(
+    file: &Path,
+    response_body: &str,
+    force_disk: bool,
+    effects: &dyn QueueConsumeWriteEffects,
+    apply_guard: &crate::queue_edit_owner::QueueEditGuard,
+) -> Result<bool> {
+    apply_guard.ensure_protects(file)?;
     if response_body.trim().is_empty() {
         return Ok(false);
     }
@@ -1790,6 +1939,27 @@ pub fn annotate_newly_completed_queue_prompts_with_response_id(
     skip_visible_guard: bool,
     effects: &dyn QueueConsumeWriteEffects,
 ) -> Result<usize> {
+    let apply_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file)?;
+    annotate_newly_completed_queue_prompts_with_response_id_under_apply_guard(
+        file,
+        before,
+        response_body,
+        skip_visible_guard,
+        effects,
+        &apply_guard,
+    )
+}
+
+#[doc(hidden)]
+pub fn annotate_newly_completed_queue_prompts_with_response_id_under_apply_guard(
+    file: &Path,
+    before: &str,
+    response_body: &str,
+    skip_visible_guard: bool,
+    effects: &dyn QueueConsumeWriteEffects,
+    apply_guard: &crate::queue_edit_owner::QueueEditGuard,
+) -> Result<usize> {
+    apply_guard.ensure_protects(file)?;
     if response_body.trim().is_empty() {
         return Ok(0);
     }
@@ -2188,12 +2358,14 @@ pub fn strike_answered_free_text_queue_heads(
     skip_visible_guard: bool,
     effects: &dyn QueueConsumeWriteEffects,
 ) -> Result<usize> {
+    let apply_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file)?;
     strike_free_text_queue_heads_with_proof(
         file,
         response_body,
         skip_visible_guard,
         AnswerPresenceProof::Materialized,
         effects,
+        &apply_guard,
     )
 }
 
@@ -2210,12 +2382,14 @@ pub fn strike_free_text_heads_answered_by_committed_heading_replay(
     replay_body: &str,
     effects: &dyn QueueConsumeWriteEffects,
 ) -> Result<usize> {
+    let apply_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file)?;
     strike_free_text_queue_heads_with_proof(
         file,
         replay_body,
         false,
         AnswerPresenceProof::CommittedHeadingReplay,
         effects,
+        &apply_guard,
     )
 }
 
@@ -2235,7 +2409,9 @@ fn strike_free_text_queue_heads_with_proof(
     skip_visible_guard: bool,
     proof: AnswerPresenceProof,
     effects: &dyn QueueConsumeWriteEffects,
+    apply_guard: &crate::queue_edit_owner::QueueEditGuard,
 ) -> Result<usize> {
+    apply_guard.ensure_protects(file)?;
     if response_body.trim().is_empty() {
         return Ok(0);
     }
@@ -2764,10 +2940,28 @@ pub fn converge_captured_answered_free_text_projection(
     file: &Path,
     effects: &dyn QueueConsumeWriteEffects,
 ) -> Result<usize> {
+    let apply_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file)?;
+    converge_captured_answered_free_text_projection_under_apply_guard(file, effects, &apply_guard)
+}
+
+#[doc(hidden)]
+pub fn converge_captured_answered_free_text_projection_under_apply_guard(
+    file: &Path,
+    effects: &dyn QueueConsumeWriteEffects,
+    apply_guard: &crate::queue_edit_owner::QueueEditGuard,
+) -> Result<usize> {
+    apply_guard.ensure_protects(file)?;
     let Some(response_body) = projected_capture_response_body(file) else {
         return Ok(0);
     };
-    strike_answered_free_text_queue_heads(file, &response_body, false, effects)
+    strike_free_text_queue_heads_with_proof(
+        file,
+        &response_body,
+        false,
+        AnswerPresenceProof::Materialized,
+        effects,
+        apply_guard,
+    )
 }
 
 fn projected_capture_response_body(file: &Path) -> Option<String> {
@@ -2857,6 +3051,17 @@ pub fn prune_noise_queue_heads(
     file: &Path,
     effects: &dyn QueueConsumeWriteEffects,
 ) -> Result<usize> {
+    let apply_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file)?;
+    prune_noise_queue_heads_under_apply_guard(file, effects, &apply_guard)
+}
+
+#[doc(hidden)]
+pub fn prune_noise_queue_heads_under_apply_guard(
+    file: &Path,
+    effects: &dyn QueueConsumeWriteEffects,
+    apply_guard: &crate::queue_edit_owner::QueueEditGuard,
+) -> Result<usize> {
+    apply_guard.ensure_protects(file)?;
     // `#crdtstructops` Phase D follow-on: no file-TOCTOU flock. The noise prune
     // mixes a node-addressable bulleted strike with a non-addressable
     // multiline/freeform byte-range excise, so it keeps the full-text
@@ -2957,6 +3162,18 @@ pub fn strike_orphan_id_backed_queue_head(
     id: &str,
     effects: &dyn QueueConsumeWriteEffects,
 ) -> Result<bool> {
+    let apply_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file)?;
+    strike_orphan_id_backed_queue_head_under_apply_guard(file, id, effects, &apply_guard)
+}
+
+#[doc(hidden)]
+pub fn strike_orphan_id_backed_queue_head_under_apply_guard(
+    file: &Path,
+    id: &str,
+    effects: &dyn QueueConsumeWriteEffects,
+    apply_guard: &crate::queue_edit_owner::QueueEditGuard,
+) -> Result<bool> {
+    apply_guard.ensure_protects(file)?;
     // `#crdtstructops` Phase D: the strike converges through CRDT structural ops
     // (no flock). The detached single-writer projection writes the file; the
     // editor-attached path converges via the relay. The read-parse cycle below
@@ -3643,7 +3860,9 @@ fn acknowledge_generated_prompt_id(
     target_id: &str,
     attempt: Option<&agent_doc_document::queue_projection::QueueOwnerProjection>,
     effects: &dyn QueueConsumeWriteEffects,
+    apply_guard: &crate::queue_edit_owner::QueueEditGuard,
 ) -> Result<bool> {
+    apply_guard.ensure_protects(file)?;
     use agent_doc_document::queue_projection::{QueueLifecycleMarker, lifecycle_marker};
     let rows = addressable_executable_rows(content)?;
     let nodes =
@@ -3736,11 +3955,12 @@ fn acknowledge_generated_prompt_id(
     }
     let row = reported[0];
     let selector = row.owner.clone().map(AckTextSelector::Owner);
-    let outcome = acknowledge_paused_free_text_queue_head_with_selector_and_outcome(
+    let outcome = acknowledge_paused_free_text_queue_head_under_apply_guard(
         file,
         &row.lineage,
         selector.as_ref(),
         effects,
+        apply_guard,
     )?;
     Ok(outcome.is_some())
 }
@@ -3772,7 +3992,8 @@ pub fn acknowledge_open_id_backed_queue_head(
     id: &str,
     effects: &dyn QueueConsumeWriteEffects,
 ) -> Result<bool> {
-    acknowledge_open_id_backed_queue_head_for_attempt(file, id, None, effects)
+    let apply_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file)?;
+    acknowledge_open_id_backed_queue_head_under_apply_guard(file, id, None, effects, &apply_guard)
 }
 
 /// [`acknowledge_open_id_backed_queue_head`] fenced to one worker attempt.
@@ -3782,6 +4003,25 @@ pub fn acknowledge_open_id_backed_queue_head_for_attempt(
     attempt: Option<&agent_doc_document::queue_projection::QueueOwnerProjection>,
     effects: &dyn QueueConsumeWriteEffects,
 ) -> Result<bool> {
+    let apply_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file)?;
+    acknowledge_open_id_backed_queue_head_under_apply_guard(
+        file,
+        id,
+        attempt,
+        effects,
+        &apply_guard,
+    )
+}
+
+#[doc(hidden)]
+pub fn acknowledge_open_id_backed_queue_head_under_apply_guard(
+    file: &Path,
+    id: &str,
+    attempt: Option<&agent_doc_document::queue_projection::QueueOwnerProjection>,
+    effects: &dyn QueueConsumeWriteEffects,
+    apply_guard: &crate::queue_edit_owner::QueueEditGuard,
+) -> Result<bool> {
+    apply_guard.ensure_protects(file)?;
     // `#crdtstructops` Phase D: the ack strike converges through CRDT structural
     // ops (no flock) — same detached-single-writer / editor-relay split as the
     // orphan strike above.
@@ -3799,7 +4039,14 @@ pub fn acknowledge_open_id_backed_queue_head_for_attempt(
     // free-text active-head bail, which told the operator to consume the
     // wrong row.
     if !open_backlog && !open_todo && target_id.starts_with("q-") {
-        return acknowledge_generated_prompt_id(file, &content, &target_id, attempt, effects);
+        return acknowledge_generated_prompt_id(
+            file,
+            &content,
+            &target_id,
+            attempt,
+            effects,
+            apply_guard,
+        );
     }
     if !open_backlog && !open_todo {
         if queue_head_is_free_text_prompt(&content)? {
@@ -4173,12 +4420,14 @@ pub fn mark_completed_queue_prompts_for_done_ids(
     skip_visible_guard: bool,
     effects: &dyn QueueConsumeWriteEffects,
 ) -> Result<usize> {
-    mark_completed_queue_prompts_for_done_ids_with_response(
+    let apply_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file)?;
+    mark_completed_queue_prompts_for_done_ids_under_apply_guard(
         file,
         done_ids,
         skip_visible_guard,
         None,
         effects,
+        &apply_guard,
     )
 }
 
@@ -4192,6 +4441,27 @@ pub fn mark_completed_queue_prompts_for_done_ids_with_response(
     response_body: Option<&str>,
     effects: &dyn QueueConsumeWriteEffects,
 ) -> Result<usize> {
+    let apply_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file)?;
+    mark_completed_queue_prompts_for_done_ids_under_apply_guard(
+        file,
+        done_ids,
+        skip_visible_guard,
+        response_body,
+        effects,
+        &apply_guard,
+    )
+}
+
+#[doc(hidden)]
+pub fn mark_completed_queue_prompts_for_done_ids_under_apply_guard(
+    file: &Path,
+    done_ids: &[String],
+    skip_visible_guard: bool,
+    response_body: Option<&str>,
+    effects: &dyn QueueConsumeWriteEffects,
+    apply_guard: &crate::queue_edit_owner::QueueEditGuard,
+) -> Result<usize> {
+    apply_guard.ensure_protects(file)?;
     if done_ids.is_empty() {
         return Ok(0);
     }
@@ -5325,6 +5595,52 @@ mod core_tests {
             );
             Ok(())
         }
+    }
+
+    #[test]
+    fn public_queue_consume_mutators_defer_under_apply_contention() {
+        let tmp = TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        let doc = tmp.path().join("session.md");
+        fs::write(
+            &doc,
+            "<!-- agent:queue -->\n- prompt\n<!-- /agent:queue -->\n",
+        )
+        .unwrap();
+        let guard = crate::queue_edit_owner::QueueEditGuard::acquire(&doc).unwrap();
+
+        let errors = [
+            super::consume_queue_prompt_with_outcome(&doc, &TEST_EFFECTS).unwrap_err(),
+            super::refresh_waiting_on_you_tree(&doc, "response", false, &TEST_EFFECTS).unwrap_err(),
+            super::annotate_newly_completed_queue_prompts_with_response_id(
+                &doc,
+                "before",
+                "response",
+                false,
+                &TEST_EFFECTS,
+            )
+            .unwrap_err(),
+            super::strike_answered_free_text_queue_heads(&doc, "response", false, &TEST_EFFECTS)
+                .unwrap_err(),
+            super::prune_noise_queue_heads(&doc, &TEST_EFFECTS).unwrap_err(),
+            super::strike_orphan_id_backed_queue_head(&doc, "missing", &TEST_EFFECTS).unwrap_err(),
+            super::acknowledge_open_id_backed_queue_head(&doc, "missing", &TEST_EFFECTS)
+                .unwrap_err(),
+            super::mark_completed_queue_prompts_for_done_ids(
+                &doc,
+                &["missing".to_string()],
+                false,
+                &TEST_EFFECTS,
+            )
+            .unwrap_err(),
+        ];
+        assert!(
+            errors
+                .iter()
+                .all(|error| error.to_string().contains("queue mutation deferred")),
+            "all public queue-consume mutators must fail closed: {errors:#?}"
+        );
+        drop(guard);
     }
 
     #[test]
@@ -7227,6 +7543,7 @@ mod core_tests {
         // Exercise the post-selection write seam directly: request todos are a
         // pre-selection hold, while this regression is specifically about the
         // atomic mutation after closeout has already selected the row.
+        let apply_guard = crate::queue_edit_owner::QueueEditGuard::acquire(&doc).unwrap();
         let outcome = consume_queue_prompts_with_options_fenced(
             &doc,
             &[request_id.to_string()],
@@ -7237,6 +7554,7 @@ mod core_tests {
             None,
             None,
             &TEST_EFFECTS,
+            &apply_guard,
         )
         .unwrap()
         .expect("the selected request row is consumed");

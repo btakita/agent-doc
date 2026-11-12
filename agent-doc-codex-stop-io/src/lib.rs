@@ -8681,7 +8681,14 @@ The completed response is already committed.\n\
         })
         .unwrap();
 
-        assert_eq!(response, StopResponse::AllowExit);
+        match response {
+            StopResponse::ContinueTurn { class, reason } => {
+                assert_eq!(class, StopContinuationClass::Queue);
+                assert!(reason.contains("do [#install]"), "{reason}");
+                assert!(reason.contains("in-pane"), "{reason}");
+            }
+            other => panic!("the fresh typed queue edit must continue in-pane: {other:?}"),
+        }
         let after = fs::read_to_string(&doc).unwrap();
         assert!(
             after.contains(fresh_head),
@@ -8701,9 +8708,9 @@ The completed response is already committed.\n\
         let log = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
             log.contains(
-                "codex_stop_terminal_reap_handed_off capture_skipped=true kind=answered_free_text_queue_residue verdict=unanswered_edit_pending action=allow_exit"
+                "codex_stop_terminal_reap_maintenance_settled capture_skipped=true kind=answered_free_text_queue_residue"
             ),
-            "the clean handoff must be explicit and deterministic:\n{log}"
+            "terminal residue maintenance must settle before queue continuation:\n{log}"
         );
     }
 

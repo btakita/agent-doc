@@ -2090,7 +2090,7 @@ fn report_complete_and_freeze_print_the_work_pool_refill() {
         "freeze two",
     );
     assert!(freeze.contains("trigger=frozen"), "{freeze}");
-    assert!(freeze.contains("\"task four\""), "{freeze}");
+    assert!(freeze.contains("\"task two\""), "{freeze}");
 
     let pool = run(later, &["queue", "pool", &path, "--json"]);
     assert!(pool.status.success());
@@ -2100,10 +2100,27 @@ fn report_complete_and_freeze_print_the_work_pool_refill() {
         pool["pools"][0]["occupancy"]["source"], "queue_cap",
         "{pool}"
     );
-    assert_eq!(pool["pools"][0]["occupancy"]["frozen"], 1, "{pool}");
+    assert_eq!(pool["pools"][0]["occupancy"]["frozen"], 0, "{pool}");
     assert_eq!(pool["pools"][0]["occupancy"]["free"], 1, "{pool}");
-    assert_eq!(pool["frozen"][0]["item"], "task two", "{pool}");
-    assert_eq!(pool["next_heads"][0]["item"], "task four", "{pool}");
+    assert_eq!(pool["next_heads"][0]["item"], "task two", "{pool}");
+
+    // The stopped attempt remains durable and can still report, while its
+    // failed automatic continuation authorizes a replacement generation.
+    let claims = run(later, &["queue", "claims", &path]);
+    assert!(claims.status.success());
+    let claims: serde_json::Value = serde_json::from_slice(&claims.stdout).unwrap();
+    let frozen = claims
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|claim| claim["item_text"] == "task two")
+        .unwrap();
+    assert_eq!(frozen["state"], "running", "{frozen}");
+    assert_eq!(
+        frozen["frozen"]["reason"], "ended without a result",
+        "{frozen}"
+    );
+    assert_eq!(frozen["lost_continue"]["failed"], true, "{frozen}");
 }
 
 /// `#workerresponsestructure` (agent-doc-bugs.md, 2026-11-05): the

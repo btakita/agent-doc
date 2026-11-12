@@ -1379,10 +1379,9 @@ fn apply_claude_stop_with_drain_readiness(
         if cycle
             .as_ref()
             .is_some_and(|cycle| cycle.phase == agent_doc_turn::CyclePhase::PreflightStarted)
+            && let Some(continuation) = transient_turn_end_continuation(&file)?
         {
-            if let Some(continuation) = transient_turn_end_continuation(&file)? {
-                return Ok(Some(continuation));
-            }
+            return Ok(Some(continuation));
         }
         agent_doc_ops_log_io::log_op(
             &file,

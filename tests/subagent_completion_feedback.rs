@@ -1885,8 +1885,9 @@ fn report_complete_without_a_matching_subagent_claim_fails_and_names_candidates(
 
 /// `#subagentworkpool`, end to end through the CLI: `report-complete` prints
 /// the pool refill with the unstarted claim's spawn first and the next head's
-/// exact claim / brief / start commands; `queue freeze` frees a slot while
-/// keeping the claim; `queue pool --json` reports the same projection.
+/// exact claim / brief / start commands; `queue freeze` frees a slot and
+/// emits the stopped row's fresh retry; `queue pool --json` reports the same
+/// projection.
 #[test]
 fn report_complete_and_freeze_print_the_work_pool_refill() {
     let dir = tempfile::tempdir().unwrap();
@@ -2091,6 +2092,16 @@ fn report_complete_and_freeze_print_the_work_pool_refill() {
     );
     assert!(freeze.contains("trigger=frozen"), "{freeze}");
     assert!(freeze.contains("\"task two\""), "{freeze}");
+    assert!(
+        freeze.contains("use its exact claim / brief / start commands for a fresh generation"),
+        "{freeze}"
+    );
+    assert!(
+        freeze.contains("agent-doc queue claim")
+            && freeze.contains("agent-doc queue brief")
+            && freeze.contains("agent-doc queue start"),
+        "{freeze}"
+    );
 
     let pool = run(later, &["queue", "pool", &path, "--json"]);
     assert!(pool.status.success());
@@ -2104,8 +2115,7 @@ fn report_complete_and_freeze_print_the_work_pool_refill() {
     assert_eq!(pool["pools"][0]["occupancy"]["free"], 1, "{pool}");
     assert_eq!(pool["next_heads"][0]["item"], "task two", "{pool}");
 
-    // The stopped attempt remains durable and can still report, while its
-    // failed automatic continuation authorizes a replacement generation.
+    // Failed automatic continuation authorizes a replacement generation.
     let claims = run(later, &["queue", "claims", &path]);
     assert!(claims.status.success());
     let claims: serde_json::Value = serde_json::from_slice(&claims.stdout).unwrap();
@@ -2121,6 +2131,54 @@ fn report_complete_and_freeze_print_the_work_pool_refill() {
         "{frozen}"
     );
     assert_eq!(frozen["lost_continue"]["failed"], true, "{frozen}");
+
+    let retry = ok(
+        run(
+            later,
+            &[
+                "queue",
+                "claim",
+                &path,
+                "--item",
+                "task two",
+                "--owner",
+                "subagent:two-retry",
+            ],
+        ),
+        "claim fresh retry",
+    );
+    assert!(retry.contains("generation 2"), "{retry}");
+    ok(
+        run(
+            later,
+            &[
+                "queue",
+                "start",
+                &path,
+                "--item",
+                "task two",
+                "--owner",
+                "subagent:two-retry",
+                "--generation",
+                "2",
+                "--worker-id",
+                "worker:two-retry",
+            ],
+        ),
+        "start fresh retry",
+    );
+    let claims = run(later, &["queue", "claims", &path]);
+    assert!(claims.status.success());
+    let claims: serde_json::Value = serde_json::from_slice(&claims.stdout).unwrap();
+    let replacement = claims
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|claim| claim["item_text"] == "task two")
+        .unwrap();
+    assert_eq!(replacement["generation"], 2, "{replacement}");
+    assert_eq!(replacement["owner"], "subagent:two-retry", "{replacement}");
+    assert_eq!(replacement["state"], "running", "{replacement}");
 }
 
 /// `#workerresponsestructure` (agent-doc-bugs.md, 2026-11-05): the

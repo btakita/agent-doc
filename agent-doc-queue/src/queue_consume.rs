@@ -11168,7 +11168,7 @@ mod tests {
         ));
     }
 
-    const STOPPED_BLOCKED: &str = "BLOCKED tmstorm clears or replaces review 5847621418 against the current head base=a9465a587b4c2fa751260d769e1b44963b326de0 head=4b1ec5002f2c7c90d24c19799196eeb654d0137e cycles=4";
+    const STOPPED_BLOCKED: &str = "BLOCKED operator supplies the missing release credential base=a9465a587b4c2fa751260d769e1b44963b326de0 head=4b1ec5002f2c7c90d24c19799196eeb654d0137e cycles=4";
     const STOPPED_AT: &str = "2026-11-10T22:30:57.000Z";
 
     fn stopped_run(row: &str, exchange: &str) -> String {

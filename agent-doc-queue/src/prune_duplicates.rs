@@ -5,8 +5,8 @@
 //! leaves intentional free-text duplicates in place and only collapses id
 //! directives. The repair here runs when an operator asks: identical live work
 //! text inside one queue lineage collapses to one row, and a truncated live
-//! fragment whose whole text is a token-boundary prefix of one other live row
-//! in that lineage is removed.
+//! fragment whose whole text is a whitespace-separated prefix of one other
+//! live row in that lineage is removed.
 //! Struck history is not a live row. Nothing in this module releases a claim
 //! or rewrites a row it keeps.
 
@@ -385,7 +385,8 @@ fn distinct_extensions<'a>(
         {
             continue;
         }
-        if is_token_boundary_prefix(&subject.work, &row.work) && !found.contains(&row.work.as_str())
+        if is_whitespace_boundary_prefix(&subject.work, &row.work)
+            && !found.contains(&row.work.as_str())
         {
             found.push(row.work.as_str());
         }
@@ -393,21 +394,11 @@ fn distinct_extensions<'a>(
     found
 }
 
-fn is_token_boundary_prefix(prefix: &str, candidate: &str) -> bool {
+fn is_whitespace_boundary_prefix(prefix: &str, candidate: &str) -> bool {
     let Some(suffix) = candidate.strip_prefix(prefix) else {
         return false;
     };
-    let Some(next) = suffix.chars().next() else {
-        return false;
-    };
-    let Some(previous) = prefix.chars().last() else {
-        return false;
-    };
-    !is_word_character(previous) || !is_word_character(next)
-}
-
-fn is_word_character(character: char) -> bool {
-    character.is_alphanumeric() || character == '_'
+    suffix.chars().next().is_some_and(char::is_whitespace)
 }
 
 fn extensions_diverge(extensions: &[&str]) -> bool {
@@ -646,6 +637,19 @@ mod tests {
 <!-- agent:run id=\"main\" -->
 - Audit the queue map
 - Audit the queue mapper before applying the repair
+<!-- /agent:run -->
+";
+        let plan = plan(source).unwrap();
+        assert!(plan.drops.is_empty());
+        assert_eq!(plan.document, source);
+    }
+
+    #[test]
+    fn keeps_a_punctuation_bearing_identifier_prefix_collision() {
+        let source = "\
+<!-- agent:run id=\"main\" -->
+- Compile with C++
+- Compile with C++20 support before release
 <!-- /agent:run -->
 ";
         let plan = plan(source).unwrap();

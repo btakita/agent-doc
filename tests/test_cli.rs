@@ -2986,7 +2986,8 @@ fn test_preflight_emits_prompt_preset_bodies_with_the_request() {
 }
 
 #[test]
-fn test_queue_sync_materializes_priority_go_backlog_and_session_check_stays_clean_after_commit() {
+fn test_queue_sync_materializes_priority_go_backlog_and_session_check_enforces_transient_closeout_after_commit()
+ {
     let tmp = tempfile::TempDir::new().unwrap();
     let root = tmp.path();
     let doc = root.join("session.md");
@@ -3082,12 +3083,28 @@ fn test_queue_sync_materializes_priority_go_backlog_and_session_check_stays_clea
     let mut check = agent_doc_cmd();
     check.current_dir(root);
     check.args(["session-check", doc.to_str().unwrap()]);
-    let check_output = check.assert().success().get_output().stdout.clone();
+    let check_output = check.assert().failure().code(1).get_output().stdout.clone();
     let check_stdout = String::from_utf8(check_output).unwrap();
     assert!(
-        check_stdout.contains("[session-check] ok"),
-        "session-check should stay clean after the synced queue is committed:\n{check_stdout}"
+        check_stdout.contains("[session-check] INTERRUPTED:")
+            && check_stdout.contains("#transientcloseout"),
+        "session-check should refuse closeout while synced queue rows remain pending:\n{check_stdout}"
     );
+    for row in [
+        "advance [#samplefeed-prop]",
+        "advance [#gvj5]",
+        "do [#2qrx]",
+        "do [#rating-emails]",
+        "do [#cf-txn-email]",
+        "do [#884m]",
+        "do [#tk2p]",
+        "do [#pdp-video-footage]",
+    ] {
+        assert!(
+            check_stdout.contains(row),
+            "strict closeout should name pending row {row:?}:\n{check_stdout}"
+        );
+    }
 }
 
 #[test]

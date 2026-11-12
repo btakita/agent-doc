@@ -356,7 +356,7 @@ version-sync:
 
 dev-harness-test: $(VSCODE_NODE_LOCK)
 	@python3 scripts/agent-doc-dev self-test
-	@cd editors/jetbrains && ./gradlew $(AGENT_DOC_GRADLE_FLAGS) --no-daemon --console=plain -q test
+	@cd editors/jetbrains && ./gradlew $(AGENT_DOC_GRADLE_FLAGS) --no-daemon --console=plain --init-script ../../scripts/jetbrains-test-logging.gradle.kts test
 	@cd editors/vscode && npm test
 	@cd editors/vscode && npm run test:package
 

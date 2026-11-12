@@ -35316,23 +35316,9 @@ fn test_cli_resync_of_a_rootless_document_never_touches_the_cwd_project() {
         &cwd_project.to_string_lossy(),
     )
     .unwrap();
-    let cwd_state = |dir: &Path| -> Vec<(std::ffi::OsString, Vec<u8>)> {
-        let mut entries: Vec<_> = fs::read_dir(dir.join(".agent-doc"))
-            .unwrap()
-            .map(|entry| {
-                let entry = entry.unwrap();
-                let bytes = if entry.file_type().unwrap().is_file() {
-                    fs::read(entry.path()).unwrap()
-                } else {
-                    Vec::new()
-                };
-                (entry.file_name(), bytes)
-            })
-            .collect();
-        entries.sort();
-        entries
-    };
-    let before = cwd_state(&cwd_project);
+    let before =
+        serde_json::to_value(agent_doc_session_registry_io::load_in(&cwd_project).unwrap())
+            .unwrap();
 
     let mut resync = agent_doc_cmd();
     resync.current_dir(&cwd_project).arg("resync").arg(&doc);
@@ -35353,8 +35339,10 @@ fn test_cli_resync_of_a_rootless_document_never_touches_the_cwd_project() {
         "a read of a rootless document's store never creates it: {stderr}"
     );
     assert!(
-        before == cwd_state(&cwd_project),
-        "resync of another store's document writes nothing into the cwd project: {stderr}"
+        before
+            == serde_json::to_value(agent_doc_session_registry_io::load_in(&cwd_project).unwrap(),)
+                .unwrap(),
+        "resync of another store's document leaves the cwd registry unchanged: {stderr}"
     );
 }
 

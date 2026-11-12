@@ -2284,7 +2284,9 @@ mod tests {
         let projection = derive_claim_runtime_projection(&doc, &content, None).unwrap();
         assert_eq!(queue_len(&projection.target_content), 3);
         assert!(
-            projection.target_content.contains(&format!("- {parent}\n")),
+            projection
+                .target_content
+                .contains(&format!("- ### {parent}\n")),
             "{}",
             projection.target_content
         );
@@ -2788,6 +2790,10 @@ mod tests {
 
         let expected = content
             .replace(
+                "- ~~The response id belongs in every related response header. [#q-f07f85cbaefd] ⟦local⟧~~ — auto-struck: answered this cycle (#ftstrike); response: [#r-0648593c3bc4] ⟦addressed-at:2026-11-01T12:08:38.000Z⟧\n",
+                "- ### ~~The response id belongs in every related response header. [#q-f07f85cbaefd] ⟦local⟧~~\n",
+            )
+            .replace(
                 "  - 📥 **Response [#r-fedcba987654]:**",
                 "  - **Response [#r-fedcba987654]:**",
             )
@@ -2795,7 +2801,7 @@ mod tests {
         assert_eq!(
             std::fs::read_to_string(&doc).unwrap(),
             expected,
-            "queue sync may paint live siblings but must not reopen or canonicalize a terminal row"
+            "queue sync may canonicalize presentation but must preserve terminal state and response children"
         );
 
         sync_with_effects(&effects, &doc).expect("response metadata repair must be idempotent");
@@ -3844,10 +3850,10 @@ mod tests {
         let current = std::fs::read_to_string(&doc).unwrap();
         let projection = derive_claim_runtime_projection(&doc, &current, None).unwrap();
         assert!(projection.target_content.contains(&format!(
-            "- https://github.com/haiven-dev/haiven-cli/pull/10\n  - 🚧 [#{owner10}#1] #adversarial-pr\n"
+            "- ### https://github.com/haiven-dev/haiven-cli/pull/10\n  - 🚧 [#{owner10}#1] #adversarial-pr\n"
         )));
         assert!(projection.target_content.contains(&format!(
-            "- https://github.com/haiven-dev/haiven-cli/pull/11\n  - 🚧 [#{owner11}#1] #adversarial-pr\n"
+            "- ### https://github.com/haiven-dev/haiven-cli/pull/11\n  - 🚧 [#{owner11}#1] #adversarial-pr\n"
         )));
         assert!(
             !projection

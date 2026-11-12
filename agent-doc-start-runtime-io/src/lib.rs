@@ -350,6 +350,7 @@ fn turn_active_for_owned_pane_with_idle_evidence(
     shared: &SupervisorShared,
     _prompt_visible: bool,
     session_log: &mut Option<SessionLog>,
+    interrupted_turn_reclaimed: &mut bool,
 ) -> bool {
     match owned_pane_id(shared) {
         // The harness-owned marker is stronger evidence than a rendered ready
@@ -367,6 +368,7 @@ fn turn_active_for_owned_pane_with_idle_evidence(
             if let Some(interrupted) =
                 agent_doc_turn_status_io::reclaim_interrupted_turn_for_pane_for_file(file, pane)
             {
+                *interrupted_turn_reclaimed = true;
                 log_interrupted_turn_lease_retired(file, shared, &interrupted, session_log);
             }
             agent_doc_turn_status_io::turn_active_for_pane_for_file(file, pane)
@@ -4478,11 +4480,13 @@ mod tests {
             Some("%owner".to_string()),
         );
         let mut session_log = None;
+        let mut interrupted_turn_reclaimed = false;
         assert!(!turn_active_for_owned_pane_with_idle_evidence(
             &doc,
             &shared,
             false,
             &mut session_log,
+            &mut interrupted_turn_reclaimed,
         ));
 
         agent_doc_turn_status_io::write_turn_active_marker(dir.path(), "%owner").unwrap();
@@ -4491,6 +4495,7 @@ mod tests {
             &shared,
             false,
             &mut session_log,
+            &mut interrupted_turn_reclaimed,
         ));
     }
 
@@ -4500,11 +4505,26 @@ mod tests {
     /// reported `harness_turn_live=true` until the next prompt's Stop. The
     /// probe now retires the lease from the transcript's interrupt record.
     #[test]
-    fn reclaim_probe_retires_interrupted_turn_lease_without_stop_hook() {
+    fn interrupted_turn_reclaim_redrives_same_head_with_pending_steering_once() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let doc = dir.path().join("contracts.md");
-        std::fs::write(&doc, "doc").unwrap();
+        let baseline = "---\nagent_doc_steering_debounce_ms: 0\n---\n# Contracts\n\n<!-- agent:queue -->\n- current task\n<!-- /agent:queue -->\n";
+        std::fs::write(&doc, baseline).unwrap();
+        agent_doc_session_check_io::midturn_steering::seed_for_cycle(
+            &doc,
+            "cycle-interrupted",
+            baseline,
+            Some("current task"),
+            Vec::new(),
+        )
+        .unwrap();
+        std::fs::write(
+            &doc,
+            baseline.replace("- current task\n", "- current task\n- operator steering\n"),
+        )
+        .unwrap();
+        agent_doc_session_check_io::midturn_steering::record_explicit_send(&doc).unwrap();
         let transcript = dir.path().join("session.jsonl");
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -4542,9 +4562,65 @@ mod tests {
             Some("%owner".to_string()),
         );
         let mut session_log = None;
+        let mut interrupted_turn_reclaimed = false;
         assert!(
-            !turn_active_for_owned_pane_with_idle_evidence(&doc, &shared, false, &mut session_log),
+            !turn_active_for_owned_pane_with_idle_evidence(
+                &doc,
+                &shared,
+                false,
+                &mut session_log,
+                &mut interrupted_turn_reclaimed,
+            ),
             "an interrupted turn must not veto empty-preflight reclaim"
+        );
+        assert!(interrupted_turn_reclaimed);
+        assert_eq!(
+            agent_doc_session_check_io::midturn_steering::explicit_send_pending_items(&doc)
+                .unwrap()
+                .len(),
+            1,
+            "the explicit steering edit remains pending at the interrupt boundary"
+        );
+        let head = "current task";
+        let (last_dispatched, rearmed) =
+            agent_doc_queue::queue::rearm_queue_dispatch_after_interrupted_turn(
+                Some(head.to_string()),
+                Some(head),
+                interrupted_turn_reclaimed,
+            );
+        assert!(rearmed);
+        assert_eq!(
+            idle_queue_drain_decision(
+                false,
+                true,
+                false,
+                false,
+                false,
+                Some(head),
+                last_dispatched.as_deref(),
+            ),
+            IdleQueueDrainDecision::Dispatch,
+            "the canceled owner admits one successor trigger"
+        );
+        let (last_dispatched, rearmed) =
+            agent_doc_queue::queue::rearm_queue_dispatch_after_interrupted_turn(
+                Some(head.to_string()),
+                Some(head),
+                false,
+            );
+        assert!(!rearmed);
+        assert_eq!(
+            idle_queue_drain_decision(
+                false,
+                true,
+                false,
+                false,
+                false,
+                Some(head),
+                last_dispatched.as_deref(),
+            ),
+            IdleQueueDrainDecision::SkipAlreadyDispatched,
+            "the accepted successor trigger rearms same-head dedup"
         );
         assert!(!agent_doc_turn_status_io::turn_active_for_pane_for_file(
             &doc, "%owner"
@@ -4575,6 +4651,7 @@ mod tests {
             &shared,
             false,
             &mut session_log,
+            &mut interrupted_turn_reclaimed,
         ));
     }
 
@@ -4596,12 +4673,14 @@ mod tests {
             Some("%owner".to_string()),
         );
         let mut session_log = None;
+        let mut interrupted_turn_reclaimed = false;
 
         assert!(turn_active_for_owned_pane_with_idle_evidence(
             &doc,
             &shared,
             true,
             &mut session_log,
+            &mut interrupted_turn_reclaimed,
         ));
         assert!(
             agent_doc_turn_status_io::read_turn_active_marker(dir.path()).is_some(),
@@ -4627,12 +4706,14 @@ mod tests {
             Some("%owner".to_string()),
         );
         let mut session_log = None;
+        let mut interrupted_turn_reclaimed = false;
 
         assert!(turn_active_for_owned_pane_with_idle_evidence(
             &doc,
             &shared,
             true,
             &mut session_log,
+            &mut interrupted_turn_reclaimed,
         ));
         assert!(
             agent_doc_turn_status_io::read_turn_active_marker(dir.path()).is_some(),
@@ -4658,12 +4739,14 @@ mod tests {
             Some("%owner".to_string()),
         );
         let mut session_log = None;
+        let mut interrupted_turn_reclaimed = false;
 
         assert!(!turn_active_for_owned_pane_with_idle_evidence(
             &doc,
             &shared,
             true,
             &mut session_log,
+            &mut interrupted_turn_reclaimed,
         ));
         assert_eq!(
             agent_doc_turn_status_io::read_turn_active_marker(dir.path()).map(|marker| marker.pane),

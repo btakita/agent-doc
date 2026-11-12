@@ -2854,6 +2854,10 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 // A tick cannot span two turns, so the scope is exact rather
                 // than a TTL guess, and it drops at the end of each iteration.
                 let _turn_attribution = agent_doc_ops_log_io::begin_turn_attribution_scope();
+                // A transcript-proven interrupt is a one-tick lifecycle edge.
+                // Carry it across both turn probes so the queue drain can rearm
+                // the exact head whose prior owner was canceled.
+                let mut interrupted_turn_reclaimed = false;
                 // `#lostrunningcontinue`: continue a lost running claim on every
                 // tick, including while this pane's turn is in progress. The
                 // flag records that fact and must not suppress recovery. This
@@ -3797,6 +3801,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         &shared,
                         false,
                         &mut session_log,
+                        &mut interrupted_turn_reclaimed,
                     );
                 let dispatch_grace_active = actor_busy
                     && shared.prompt_dispatch_grace_active(std::time::Duration::from_secs(15));
@@ -4132,7 +4137,27 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     &shared,
                     prompt_visible,
                     &mut session_log,
+                    &mut interrupted_turn_reclaimed,
                 );
+
+                let (rearmed_last_dispatched, interrupted_head_rearmed) =
+                    agent_doc_queue::queue::rearm_queue_dispatch_after_interrupted_turn(
+                        last_dispatched,
+                        active_head.as_deref(),
+                        interrupted_turn_reclaimed,
+                    );
+                last_dispatched = rearmed_last_dispatched;
+                if interrupted_head_rearmed {
+                    let head = active_head.as_deref().expect("rearmed queue head");
+                    agent_doc_ops_log_io::log_op(
+                        &path,
+                        &format!(
+                            "interrupted_turn_queue_redrive_armed file={} head_sha256={} action=rearm_same_head_dispatch (#staleharnessturnlive #runsteer)",
+                            path.display(),
+                            agent_doc_hash::content_hash(head),
+                        ),
+                    );
+                }
 
                 // `#agentreloadrestart` Phase 1a: detect a frontmatter `agent:`
                 // change and log the boundary-gate decision. Re-resolve the
@@ -5182,6 +5207,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         &shared,
                         false,
                         &mut session_log,
+                        &mut interrupted_turn_reclaimed,
                     );
                     let reclaim_outcome = if supervisor_may_reclaim_empty_preflight(
                         true,

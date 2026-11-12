@@ -1224,6 +1224,17 @@ validation occurs before any traversal of the replica graph so neither a cyclic
 payload nor validation of a large retained history can pin the Project
 Controller while it holds document authority.
 
+A binary-owned queue attempt projection remains a row prefix when the controller
+and editor concurrently insert at the row's first work-text anchor
+(`#projectionprefixrace`). The CRDT union may order that lossless pair as
+`When 📥 work`; the relay moves the exact projection back to the prefix only when
+the canonical-before row carries it, the editor's observed-before row is that
+exact row without it, the editor's observed-after row is changed and
+unprojected, and removing the displaced token from exactly one union row
+reproduces the observed-after row byte for byte. The correction is projected
+back to the origin editor as well as the other replicas. Without that complete
+four-state proof, an embedded glyph remains operator text.
+
 A graph-valid update can still structurally corrupt the canonical: an editor
 buffer (an operator's deletion, or a stale or truncated buffer) tombstones a
 component marker line and leaves the document unparseable

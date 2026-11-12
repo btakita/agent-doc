@@ -4519,12 +4519,30 @@ mod tests {
             Vec::new(),
         )
         .unwrap();
-        std::fs::write(
+        // Production ordering: Run Agent Doc records the send before its
+        // starting-owner route appends the accepted prompt to agent:queue.
+        agent_doc_session_check_io::midturn_steering::record_explicit_send(&doc).unwrap();
+        fn write_route_queue(
+            file: &std::path::Path,
+            next: &str,
+            _previous: &str,
+            _reason: &str,
+        ) -> anyhow::Result<()> {
+            std::fs::write(file, next)?;
+            Ok(())
+        }
+        let queued = agent_doc_route_io::queue_dispatch::enqueue_route_dispatch_prompt(
             &doc,
-            baseline.replace("- current task\n", "- current task\n- operator steering\n"),
+            "operator steering",
+            "starting_owner",
+            true,
+            agent_doc_route_io::queue_dispatch::RouteQueueEffects {
+                write_document: write_route_queue,
+                refresh_explicit_send_after_enqueue: true,
+            },
         )
         .unwrap();
-        agent_doc_session_check_io::midturn_steering::record_explicit_send(&doc).unwrap();
+        assert!(queued.appended && queued.activated);
         let transcript = dir.path().join("session.jsonl");
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)

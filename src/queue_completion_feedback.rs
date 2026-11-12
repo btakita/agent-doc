@@ -2302,7 +2302,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let doc = dir.path().join("sdk-dev.md");
-        const ROW: &str = "haiven-sdk: Setup Release Please workflow to merge sdk-dev into main [#q-bac390dcf354]";
+        const ROW: &str = "haiven-sdk: Setup Release Please workflow to replace the run that opened https://github.com/haiven-dev/haiven-sdk/pull/228 [#q-bac390dcf354]";
         fs::write(
             &doc,
             format!(
@@ -2311,14 +2311,16 @@ mod tests {
         )
         .unwrap();
         start_subagent(&doc, ROW, "subagent:closepressure");
-        let cited = "\
+        let cited = format!(
+            "> **Queue prompt:**\n> {ROW}\n\n\
 **Summary**\n\n\
 This leaf is answered and is safe to delete.\n\n\
 **What changed**\n\n\
 The setup pull request is the merged https://github.com/haiven-dev/haiven-sdk/pull/228. The promotion that workflow opened is https://github.com/haiven-dev/haiven-sdk/pull/227.\n\n\
 **Verification**\n\n\
-- `cargo test`\n";
-        let pressure = requeue_prompt_pressure_hand_back(&doc, ROW, Some(1), cited, true)
+- `cargo test`\n"
+        );
+        let pressure = requeue_prompt_pressure_hand_back(&doc, ROW, Some(1), &cited, true)
             .unwrap()
             .expect("citing an existing pull request does not complete a setup head");
         assert_eq!(

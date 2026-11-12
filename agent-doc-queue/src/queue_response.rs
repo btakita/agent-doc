@@ -2388,6 +2388,13 @@ fn latest_echo_cell(content: &str, text: &str, head_text: &str) -> Option<String
     Some(cell)
 }
 
+fn unquoted_response_text(text: &str) -> String {
+    text.lines()
+        .filter(|line| !line.trim_start().starts_with('>'))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 /// `#closepressure`: the latest echo claims `head_text` is done, the head
 /// requires a pull request this turn created, and the answer cell does not
 /// show one. A structured deferral and a prompt-blocker review are not that
@@ -2415,15 +2422,11 @@ pub fn latest_echo_cell_lacks_created_pull_request(
     {
         return false;
     }
-    let answer: String = cell
-        .lines()
-        .filter(|line| !line.trim_start().starts_with('>'))
-        .collect::<Vec<_>>()
-        .join("\n");
+    let answer = unquoted_response_text(&cell);
     if text_states_deferral(&answer) {
         return false;
     }
-    !crate::prompt_pressure::response_shows_created_pull_request(&cell)
+    !crate::prompt_pressure::response_shows_created_pull_request(&answer)
 }
 
 /// `#closepressure`: a worker hand-back for `head` reports the row complete
@@ -2439,7 +2442,8 @@ pub fn hand_back_lacks_required_pull_request(head: &str, response: &str) -> bool
     if text_states_deferral(response) {
         return false;
     }
-    !crate::prompt_pressure::response_shows_created_pull_request(response)
+    let answer = unquoted_response_text(response);
+    !crate::prompt_pressure::response_shows_created_pull_request(&answer)
 }
 
 /// True when `block` starts another response cell: a `### Re:` heading or a
@@ -2841,6 +2845,21 @@ mod tests {
         assert!(hand_back_lacks_required_pull_request(
             head,
             "**Summary**\n\nThe leaf is answered.\n\n**Verification:**\n- `cargo test`\n\nThe setup pull request is the merged https://github.com/haiven-dev/haiven-sdk/pull/228.\n"
+        ));
+
+        let cited_head = "Open a pull request to replace the build that opened https://github.com/haiven-dev/haiven-sdk/pull/228";
+        let cited_head_doc = active_queue_doc(cited_head);
+        let echoed_citation = format!(
+            "### Re: replacement\n\n> **Queue prompt:**\n> {cited_head}\n\nNo replacement pull request was created.\n"
+        );
+        assert!(latest_echo_cell_lacks_created_pull_request(
+            &cited_head_doc,
+            &echoed_citation,
+            cited_head,
+        ));
+        assert!(hand_back_lacks_required_pull_request(
+            cited_head,
+            &echoed_citation,
         ));
     }
 

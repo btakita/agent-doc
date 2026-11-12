@@ -263,13 +263,24 @@ fn inside_inline_quote(text: &str, index: usize) -> bool {
 
 fn request_is_negated(text: &str, index: usize, after: usize) -> bool {
     let line_start = text[..index].rfind('\n').map_or(0, |offset| offset + 1);
-    let prefix = text[line_start..index].trim_end();
-    let prefix_negated = ["do not", "don't", "never", "without", "not to"]
+    let prefix = &text[line_start..index];
+    let clause = request_clause(prefix);
+    let words = clause
+        .split(|ch: char| !ch.is_ascii_alphanumeric() && ch != '\'')
+        .filter(|word| !word.is_empty())
+        .collect::<Vec<_>>();
+    let forgets_negation = words
         .iter()
-        .any(|lead| prefix.ends_with(lead));
+        .any(|word| matches!(*word, "forget" | "fail" | "neglect"));
+    let do_not = words.windows(2).any(|pair| pair == ["do", "not"]) || words.contains(&"don't");
+    let not_only = words.windows(2).any(|pair| pair == ["not", "only"]);
+    let prefix_negated = (!forgets_negation && do_not)
+        || words.contains(&"never")
+        || words.contains(&"without")
+        || (words.contains(&"not") && !not_only && !forgets_negation);
     let descriptive = ["sentence", "phrase", "example", "words", "text"]
         .iter()
-        .any(|lead| prefix.ends_with(lead));
+        .any(|lead| prefix.trim_end().ends_with(lead));
     let line_end = text[after..]
         .find('\n')
         .map_or(text.len(), |offset| after + offset);
@@ -283,6 +294,22 @@ fn request_is_negated(text: &str, index: usize, after: usize) -> bool {
     .iter()
     .any(|tail| suffix.contains(tail));
     prefix_negated || descriptive || effect_negated
+}
+
+/// Keep negation local to the clause that owns the request. An earlier
+/// prohibition followed by `and` / `but` must not suppress a later affirmative
+/// request, while modifiers inside `do not ever open` stay in the same clause.
+fn request_clause(prefix: &str) -> &str {
+    let punctuation = prefix
+        .rmatch_indices([',', ';', ':', '.', '!', '?'])
+        .next()
+        .map_or(0, |(index, delimiter)| index + delimiter.len());
+    let conjunction = [" and ", " but "]
+        .iter()
+        .filter_map(|delimiter| prefix.rfind(delimiter).map(|index| index + delimiter.len()))
+        .max()
+        .unwrap_or(0);
+    prefix[punctuation.max(conjunction)..].trim()
 }
 
 fn creation_verb_then_pull_url(lower: &str) -> bool {
@@ -946,6 +973,18 @@ mod tests {
         ));
         assert!(!head_requires_created_pull_request(
             "Do not open a pull request for this documentation-only change."
+        ));
+        assert!(!head_requires_created_pull_request(
+            "Do not ever open a pull request; only update the local draft."
+        ));
+        assert!(!head_requires_created_pull_request(
+            "Don't actually create a pull request for this local-only edit."
+        ));
+        assert!(head_requires_created_pull_request(
+            "Do not delay and open a pull request for the ready release."
+        ));
+        assert!(head_requires_created_pull_request(
+            "Do not forget to open a pull request for the ready release."
         ));
         assert!(!head_requires_created_pull_request(
             "Explain why I said \"create a pull request\" in the example."

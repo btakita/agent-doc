@@ -1908,9 +1908,11 @@ pub fn consume(effects: &impl QueueCommandEffects, file: &Path, count: usize) ->
 ///
 /// Identical work text (binary-owned lifecycle prefixes and `[#owner#generation]`
 /// markers stripped) keeps one row, preferring the row that carries the live
-/// claim marker. A live row whose entire remaining text is a truncated prefix
-/// of another live row in that queue is removed. Struck history stays. The
-/// default is a dry report; `--apply` writes. The keeper's claim is not released.
+/// claim marker. Conflicting non-bare projections fail closed because this pure
+/// repair has no durable claim authority. A live row whose entire remaining
+/// text is a truncated prefix of another live row in that queue is removed.
+/// Struck history stays. The default is a dry report; `--apply` writes. The
+/// keeper's claim is not released.
 pub fn prune_duplicates(
     effects: &impl QueueCommandEffects,
     file: &Path,
@@ -6334,5 +6336,37 @@ mod prune_duplicates_cmd_tests {
         prune_duplicates(&effects, &file, true).unwrap();
         assert_eq!(effects.writes.get(), 1, "a second apply is a no-op");
         assert_eq!(effects.content.borrow().as_str(), written);
+    }
+
+    #[test]
+    fn prune_duplicates_dry_run_and_apply_fail_closed_on_conflicting_attempts() {
+        let source = "\
+<!-- agent:run id=\"main\" -->
+- 🚧 [#subagent:old#1] Run the independently reviewed queue repair.
+- ☑️ [#subagent:current#2] Run the independently reviewed queue repair.
+<!-- /agent:run -->
+";
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("session.md");
+        std::fs::write(&file, source).unwrap();
+        let effects = Mem {
+            content: std::cell::RefCell::new(source.to_string()),
+            writes: Cell::new(0),
+            expect_lease: Cell::new(false),
+        };
+
+        prune_duplicates(&effects, &file, false).unwrap();
+        assert_eq!(effects.writes.get(), 0);
+        assert_eq!(effects.content.borrow().as_str(), source);
+
+        effects.expect_lease.set(true);
+        prune_duplicates(&effects, &file, true).unwrap();
+        assert_eq!(effects.writes.get(), 0);
+        assert_eq!(effects.content.borrow().as_str(), source);
+        assert!(
+            crate::queue_edit_owner::read_queue_edit_owner_lease(&file.to_string_lossy()).is_none(),
+            "no-op apply must release the queue-edit lease"
+        );
     }
 }

@@ -54,6 +54,8 @@ struct LiveRow {
     parent_span: Option<usize>,
     range: Range<usize>,
     work: String,
+    /// Binary-owned lifecycle/attempt projection, without surrounding whitespace.
+    projection: String,
     /// 2 = worker annotation, 1 = any other binary-owned prefix, 0 = bare.
     claim_score: u8,
     has_children: bool,
@@ -168,6 +170,12 @@ fn plan_body(
         if group.len() < 2 {
             continue;
         }
+        // The pure planner has no durable claim authority. If two otherwise
+        // identical rows disagree about their binary-owned lifecycle or
+        // owner/generation projection, neither is safe to discard.
+        if has_conflicting_projections(&group, &live) {
+            continue;
+        }
         let keeper = *group
             .iter()
             .min_by_key(|index| {
@@ -228,6 +236,22 @@ fn plan_body(
     (drops, excise(body, &ranges))
 }
 
+fn has_conflicting_projections(group: &[usize], live: &[LiveRow]) -> bool {
+    let mut projection = None;
+    for index in group {
+        let current = live[*index].projection.as_str();
+        if current.is_empty() {
+            continue;
+        }
+        match projection {
+            None => projection = Some(current),
+            Some(expected) if expected == current => {}
+            Some(_) => return true,
+        }
+    }
+    false
+}
+
 fn drop_of(
     queue_id: &str,
     reason: DuplicateDropReason,
@@ -261,6 +285,7 @@ fn live_rows(spans: &[(QueueEntry, Range<usize>)]) -> Vec<LiveRow> {
                 range: range.clone(),
                 claim_score: claim_score(&prompt.text),
                 has_children: has_nested_children(spans, span),
+                projection: projection_prefix(&prompt.text).trim().to_string(),
                 work: work.to_string(),
             })
         })
@@ -589,6 +614,48 @@ mod tests {
         assert!(!plan.drops[0].kept_has_worker_marker);
         assert!(plan.document.contains(&format!("- 🚧 {text}\n")));
         assert!(!plan.document.contains(&format!("- {text}\n")));
+    }
+
+    #[test]
+    fn keeps_conflicting_attempt_projections_but_prunes_the_same_attempt() {
+        let text = "Run the independently reviewed queue repair.";
+        let conflicting = format!(
+            "\
+<!-- agent:run id=\"main\" -->
+- 🚧 [#subagent:old#1] {text}
+- ☑️ [#subagent:current#2] {text}
+<!-- /agent:run -->
+"
+        );
+        let conflicting_plan = plan(&conflicting).unwrap();
+        assert!(conflicting_plan.drops.is_empty());
+        assert_eq!(conflicting_plan.document, conflicting);
+        assert_eq!(
+            conflicting_plan.report("session.md", false),
+            "session.md: no duplicate live queue rows.\n"
+        );
+        assert_eq!(
+            conflicting_plan.report("session.md", true),
+            "session.md: no duplicate live queue rows.\n"
+        );
+
+        let same_attempt = format!(
+            "\
+<!-- agent:run id=\"main\" -->
+- 🚧 [#subagent:current#2] {text}
+- 🚧 [#subagent:current#2] {text}
+<!-- /agent:run -->
+"
+        );
+        let same_attempt_plan = plan(&same_attempt).unwrap();
+        assert_eq!(same_attempt_plan.drops.len(), 1);
+        assert_eq!(
+            same_attempt_plan
+                .document
+                .matches("🚧 [#subagent:current#2]")
+                .count(),
+            1
+        );
     }
 
     #[test]

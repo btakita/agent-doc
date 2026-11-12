@@ -684,11 +684,11 @@ fn addressable_executable_rows(content: &str) -> Result<Vec<AddressableExecutabl
     Ok(rows)
 }
 
-fn exact_acknowledgement_row<'a>(
+fn exact_acknowledgement_rows<'a>(
     rows: &'a [AddressableExecutableRow],
     expected_head: &str,
     selector: Option<&AckTextSelector>,
-) -> Result<Option<&'a AddressableExecutableRow>> {
+) -> Result<Option<Vec<&'a AddressableExecutableRow>>> {
     let expected_normalized = strip_priority_markers(expected_head);
     let expected = expected_normalized.trim();
     let lineage_matches: Vec<&AddressableExecutableRow> = rows
@@ -696,7 +696,7 @@ fn exact_acknowledgement_row<'a>(
         .filter(|row| strip_priority_markers(&row.lineage).trim() == expected)
         .collect();
     if !lineage_matches.is_empty() {
-        return select_exact_acknowledgement_row(&lineage_matches, expected, selector).map(Some);
+        return select_exact_acknowledgement_rows(&lineage_matches, expected, selector).map(Some);
     }
 
     let display_matches: Vec<&AddressableExecutableRow> = rows
@@ -707,7 +707,7 @@ fn exact_acknowledgement_row<'a>(
         return Ok(None);
     }
     match display_matches.as_slice() {
-        [only] => select_exact_acknowledgement_row(&[*only], expected, selector).map(Some),
+        [only] => select_exact_acknowledgement_rows(&[*only], expected, selector).map(Some),
         many @ [_, _, ..] => {
             let lineages = many
                 .iter()
@@ -722,14 +722,14 @@ fn exact_acknowledgement_row<'a>(
     }
 }
 
-fn select_exact_acknowledgement_row<'a>(
+fn select_exact_acknowledgement_rows<'a>(
     matches: &[&'a AddressableExecutableRow],
     expected: &str,
     selector: Option<&AckTextSelector>,
-) -> Result<&'a AddressableExecutableRow> {
+) -> Result<Vec<&'a AddressableExecutableRow>> {
     match selector {
         None => match matches {
-            [only] => Ok(*only),
+            [only] => Ok(vec![*only]),
             _ => anyhow::bail!(
                 "--ack-text matches more than one executable queue lineage; no change was applied. expected={expected:?}; pass --ack-occurrence or --ack-owner"
             ),
@@ -740,6 +740,7 @@ fn select_exact_acknowledgement_row<'a>(
         Some(AckTextSelector::Occurrence(occurrence)) => matches
             .get(occurrence - 1)
             .copied()
+            .map(|row| vec![row])
             .with_context(|| {
                 format!(
                     "--ack-occurrence {occurrence} is outside the {} exact --ack-text match(es); no change was applied. expected={expected:?}",
@@ -752,24 +753,25 @@ fn select_exact_acknowledgement_row<'a>(
                 .filter(|row| row.owner.as_ref() == Some(expected_owner))
                 .copied()
                 .collect::<Vec<_>>();
-            match owner_matches.as_slice() {
-                [only] => Ok(*only),
-                [] => anyhow::bail!(
+            if owner_matches.is_empty() {
+                anyhow::bail!(
                     "--ack-owner did not match an exact --ack-text lineage; no change was applied. expected={expected:?} owner={:?} generation={}",
                     expected_owner.owner,
                     expected_owner.generation
-                ),
-                _ => anyhow::bail!(
-                    "--ack-owner still matches more than one exact --ack-text lineage; no change was applied. expected={expected:?} owner={:?} generation={}",
-                    expected_owner.owner,
-                    expected_owner.generation
-                ),
+                );
             }
+            // One durable attempt can have more than one visible projection
+            // after coordinator/editor convergence races. The owner+generation
+            // fence names that attempt, not one arbitrary Markdown occurrence,
+            // so settle all of its exact projections together. Rows belonging
+            // to every other attempt remain outside this selection.
+            Ok(owner_matches)
         }
     }
 }
 
-/// Explicitly acknowledge exactly one free-text queue head.
+/// Explicitly acknowledge one free-text queue head or every exact projection
+/// of one owner-fenced durable attempt.
 ///
 /// This is the recovery path for a response completed through direct harness
 /// steering while `queue_active` remained false, or for completed subagent work
@@ -803,10 +805,12 @@ pub fn acknowledge_paused_free_text_queue_head_with_selector_and_outcome(
     // `#acktextlineage`: exact operator proof may repair completed subagent
     // work whose attempt evidence was lost before coordinator writeback. It is
     // valid while a run queue remains active, but must resolve one executable
-    // leaf across every queue block. Repeated short leaves require the full
-    // nest vector, preserving the automatic `#subagentinlineveto` contract.
+    // lineage across every queue block. Repeated short leaves require the full
+    // nest vector; an owner fence may then settle only the exact projections of
+    // that one attempt, preserving the automatic `#subagentinlineveto` contract.
     let addressable = addressable_executable_rows(&content)?;
-    if let Some(row) = exact_acknowledgement_row(&addressable, expected_head, selector)? {
+    if let Some(rows) = exact_acknowledgement_rows(&addressable, expected_head, selector)? {
+        let row = rows[0];
         if !queue_prompt_text_is_free_text(&content, &row.lineage) {
             anyhow::bail!(
                 "{}: --ack-text matched a non-free-text queue head. Use --ack-id/--id or \
@@ -817,10 +821,10 @@ pub fn acknowledge_paused_free_text_queue_head_with_selector_and_outcome(
         // `#adadvprstatedrift`: `Reported` is coordinator integration debt, not
         // worker-owned work still in flight. Once integration has materialized
         // the exact queue echo, an owner selector supplies the remaining
-        // generation fence needed to close that one occurrence. Keep every
-        // other durable attempt state fail-closed, including `Lost`: a stale
-        // visible owner annotation is not authority to close an abandoned
-        // attempt.
+        // generation fence needed to close that attempt's exact projections.
+        // Keep every other durable attempt state fail-closed, including `Lost`:
+        // a stale visible owner annotation is not authority to close an
+        // abandoned attempt.
         let row_identity = agent_doc_queue::queue_claim::claim_identity(&row.lineage);
         let attempts = crate::queue_claim::claim_states_for_content(file, &content)
             .context("queue consume --ack-text: failed to inspect queue attempt state")?;
@@ -858,7 +862,11 @@ pub fn acknowledge_paused_free_text_queue_head_with_selector_and_outcome(
                 row.lineage
             );
         }
-        let node_keys = vec![row.node_key.clone()];
+        let node_keys = rows
+            .iter()
+            .map(|row| row.node_key.clone())
+            .collect::<Vec<_>>();
+        let consumed_count = node_keys.len();
         let mut target = consume_queue_nodes_by_key(&content, &node_keys)?;
         target = attach_stopped_row_responses_for_file(file, &content, target)?;
         let remaining = addressable_executable_rows(&target)?.len();
@@ -877,11 +885,11 @@ pub fn acknowledge_paused_free_text_queue_head_with_selector_and_outcome(
         target = reconcile_terminal_active_projection(file, target)?.0;
         let plan = QueueConsumptionPlan {
             consumed_text: row.lineage.clone(),
-            consumed_texts: vec![row.lineage.clone()],
+            consumed_texts: rows.iter().map(|row| row.lineage.clone()).collect(),
             node_ops: queue_consume_node_ops(&node_keys),
             remaining,
             drained: remaining == 0,
-            auto: row.auto,
+            auto: rows.iter().all(|row| row.auto),
             new_document: target.clone(),
             new_snapshot: target.clone(),
             save_snapshot: true,
@@ -896,17 +904,18 @@ pub fn acknowledge_paused_free_text_queue_head_with_selector_and_outcome(
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
-                "queue_consume_exact_text_ack file={} head_hash={} remaining={} \
+                "queue_consume_exact_text_ack file={} head_hash={} consumed_count={} remaining={} \
                  queue_active_preserved={} proof=operator_exact_lineage",
                 file.display(),
                 agent_doc_hash::content_hash(row.lineage.trim()),
+                consumed_count,
                 remaining,
                 fm.queue_active == Some(true),
             ),
         );
         return Ok(Some(QueueConsumptionOutcome {
             consumed_text: row.lineage.clone(),
-            consumed_count: 1,
+            consumed_count,
             node_ops: plan.node_ops,
             remaining,
             drained: remaining == 0,
@@ -6037,6 +6046,77 @@ mod core_tests {
         );
     }
 
+    /// `#acksameattemptprojection`: an owner/generation is one durable attempt
+    /// even when a convergence race projected it onto more than one exact row.
+    /// Its attempt fence settles all of those projections atomically, without
+    /// consuming an otherwise identical row owned by another attempt.
+    #[test]
+    fn exact_text_ack_owner_settles_all_same_attempt_projections_only() {
+        let tmp = TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        let doc = tmp.path().join("session.md");
+        let target = "https://github.com/btakita/agent-doc/pull/402: #fix-ci";
+        let content = format!(
+            concat!(
+                "---\nqueue_active: true\n---\n\n",
+                "<!-- agent:exchange -->\n",
+                "### Re: integrated CI repair\n\n",
+                "> **Queue prompt:** {target}\n\n",
+                "The CI repair is integrated.\n",
+                "<!-- /agent:exchange -->\n\n",
+                "<!-- agent:run id=main subagents -->\n",
+                "- ☑️ [#subagent:pr402fixci3#2] {target}\n",
+                "- ☑️ [#subagent:pr402fixci3#2] {target}\n",
+                "- ☑️ [#subagent:pr402retry#1] {target}\n",
+                "<!-- /agent:run -->\n",
+            ),
+            target = target,
+        );
+        fs::write(&doc, &content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        let selected_owner = agent_doc_document::queue_projection::QueueOwnerProjection {
+            owner: "subagent:pr402fixci3".to_string(),
+            generation: 2,
+        };
+        let selector = super::AckTextSelector::Owner(selected_owner.clone());
+        let outcome = super::acknowledge_paused_free_text_queue_head_with_selector_and_outcome(
+            &doc,
+            target,
+            Some(&selector),
+            &TEST_EFFECTS,
+        )
+        .unwrap()
+        .expect("the exact attempt should settle every duplicate projection");
+
+        assert_eq!(outcome.consumed_count, 2);
+        assert_eq!(outcome.node_ops.len(), 2);
+        assert_eq!(outcome.remaining, 1);
+        let updated = fs::read_to_string(&doc).unwrap();
+        let addressable = super::addressable_executable_rows(&updated).unwrap();
+        assert_eq!(addressable.len(), 1, "{updated}");
+        assert_eq!(addressable[0].lineage, target);
+        assert_eq!(
+            addressable[0].owner,
+            Some(agent_doc_document::queue_projection::QueueOwnerProjection {
+                owner: "subagent:pr402retry".to_string(),
+                generation: 1,
+            }),
+            "a foreign attempt must remain live: {updated}"
+        );
+        assert!(
+            !addressable
+                .iter()
+                .any(|row| row.owner.as_ref() == Some(&selected_owner)),
+            "the named attempt must leave no live duplicate projection: {updated}"
+        );
+    }
+
     #[test]
     fn exact_text_ack_owner_closes_only_its_reported_effect_occurrence() {
         let tmp = TempDir::new().unwrap();
@@ -6559,7 +6639,7 @@ mod core_tests {
         let selector = super::AckTextSelector::Occurrence(1);
 
         let error =
-            super::exact_acknowledgement_row(&rows, "#address", Some(&selector)).unwrap_err();
+            super::exact_acknowledgement_rows(&rows, "#address", Some(&selector)).unwrap_err();
 
         assert!(
             error.to_string().contains("short leaf is ambiguous"),

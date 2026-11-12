@@ -67,9 +67,14 @@ fn assert_transient_closeout(output: &std::process::Output, what: &str) {
 fn committed_session(dir: &std::path::Path, kind: &str, run_rows: &str) -> std::path::PathBuf {
     fs::create_dir_all(dir.join(".agent-doc/locks")).unwrap();
     let doc = dir.join("session.md");
+    let fixture = dir
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("fixture")
+        .trim_start_matches('.');
     let content = format!(
         concat!(
-            "---\nagent_doc_session: nested-subprompts\nagent_doc_format: template\n",
+            "---\nagent_doc_session: nested-subprompts-{kind}-{fixture}\nagent_doc_format: template\n",
             "prompt_presets:\n  \"#auth\": \"I authorize you to do this.\"\n---\n\n",
             "## Exchange\n\n",
             "<!-- agent:exchange patch=append subagents -->\n",
@@ -98,6 +103,7 @@ fn committed_session(dir: &std::path::Path, kind: &str, run_rows: &str) -> std::
             "<!-- /agent:icebox -->\n",
         ),
         kind = kind,
+        fixture = fixture,
         rows = run_rows,
     );
     fs::write(&doc, &content).unwrap();

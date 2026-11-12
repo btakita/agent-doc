@@ -15,8 +15,9 @@
 //!
 //! The policy has two halves, keyed on who is launching:
 //!
-//! - **A workspace test harness** (a lib test or an integration test,
-//!   `target/<profile>/deps/<name>-<hash>`) is served by this process's
+//! - **A workspace test harness** (a lib test or an integration test, in
+//!   Cargo's `deps/` or structured `build/<package>/<hash>/out/` layout) is
+//!   served by this process's
 //!   in-process state actor
 //!   ([`ensure_state_actor_for_tests`](super::ensure_state_actor_for_tests)),
 //!   which runs the same RPC handlers with no process boundary and no launch
@@ -71,31 +72,16 @@ fn allowed(project_root: &Path) -> bool {
     !roots.is_empty() && (roots.contains(project_root) || roots.contains(&key(project_root)))
 }
 
-/// A workspace crate's test harness: `target/<profile>/deps/<name>-<hash>`,
-/// where `<hash>` is Cargo's 16-hex-digit metadata hash. This covers lib-test
-/// harnesses (`agent_doc_queue_io-<hash>`) and integration-test harnesses,
-/// which are named after their `tests/*.rs` file (`test_cli-<hash>`).
+/// A workspace crate's test harness in Cargo's conventional `deps/` layout or
+/// Rust 1.100's structured `build/<package>/<hash>/out/` layout. This covers
+/// lib-test harnesses (`agent_doc_queue_io-<hash>`) and integration-test
+/// harnesses, which are named after their `tests/*.rs` file (`test_cli-<hash>`).
 ///
 /// The `agent-doc` binary itself (a launched controller, or the CLI an
 /// integration test runs) is uplifted to `target/<profile>/agent-doc` or
 /// installed under a `bin/` directory, and is never matched.
 pub(super) fn exe_is_workspace_test_harness(exe: &Path) -> bool {
-    let in_deps = exe
-        .parent()
-        .and_then(Path::file_name)
-        .is_some_and(|dir| dir == "deps");
-    let named_like_a_harness = exe
-        .file_name()
-        .and_then(|name| name.to_str())
-        .and_then(|name| name.rsplit_once('-'))
-        .is_some_and(|(stem, hash)| {
-            !stem.is_empty()
-                && hash.len() == 16
-                && hash
-                    .bytes()
-                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-        });
-    in_deps && named_like_a_harness
+    agent_doc_fs::root_ceiling::is_cargo_test_binary_path(exe)
 }
 
 pub(super) fn running_in_workspace_test_harness() -> bool {
@@ -252,6 +238,8 @@ mod tests {
             // Integration-test harnesses are named after their `tests/*.rs` file.
             "/w/target/debug/deps/test_cli-0123456789abcdef",
             "/w/target/debug/deps/session_check-5ed933108ec6fb30",
+            // Rust 1.100's structured Cargo artifact layout.
+            "/w/target/debug/build/agent-doc/0123456789abcdef/out/test_cli-0123456789abcdef",
         ] {
             assert!(
                 exe_is_workspace_test_harness(Path::new(harness)),
@@ -270,6 +258,8 @@ mod tests {
             "/w/target/debug/deps/agent_doc-3FC46B27ADD6FC7C",
             "/w/target/debug/deps/agent_doc-3fc46b27",
             "/w/target/debug/agent_doc-3fc46b27add6fc7c",
+            // The structured-layout directory hash must identify this artifact.
+            "/w/target/debug/build/agent-doc/ffffffffffffffff/out/test_cli-0123456789abcdef",
         ] {
             assert!(
                 !exe_is_workspace_test_harness(Path::new(not_a_harness)),

@@ -52,17 +52,38 @@ extern "C" fn accept_message(_message: *const c_char) -> c_int {
 
 fn built_cdylib() -> PathBuf {
     let test_exe = std::env::current_exe().expect("current test executable");
-    let target_profile = test_exe
-        .parent()
-        .and_then(Path::parent)
-        .expect("target profile directory");
-    let library = target_profile.join("libagent_doc.so");
-    assert!(
-        library.is_file(),
-        "{} is missing; the test target must build --lib before running integration tests",
-        library.display()
-    );
-    library
+    find_built_cdylib(&test_exe).unwrap_or_else(|| {
+        panic!(
+            "libagent_doc.so is missing above {}; the test target must build --lib before running integration tests",
+            test_exe.display()
+        )
+    })
+}
+
+fn find_built_cdylib(test_exe: &Path) -> Option<PathBuf> {
+    test_exe
+        .ancestors()
+        .skip(1)
+        .map(|directory| directory.join("libagent_doc.so"))
+        .find(|library| library.is_file())
+}
+
+#[test]
+fn cdylib_discovery_handles_cargo_test_artifact_layouts() {
+    let temp = tempfile::tempdir().unwrap();
+    let profile = temp.path().join("debug");
+    let library = profile.join("libagent_doc.so");
+    std::fs::create_dir_all(profile.join("deps")).unwrap();
+    std::fs::write(&library, b"fixture").unwrap();
+
+    let conventional = profile.join("deps/native_reload_handoff-hash");
+    assert_eq!(find_built_cdylib(&conventional), Some(library.clone()));
+
+    // Rust 1.100 may place test executables under the package build output
+    // instead of `debug/deps`; discovery must not assume or select a hash.
+    let structured = profile.join("build/agent-doc/test-hash/out/native_reload_handoff-hash");
+    std::fs::create_dir_all(structured.parent().unwrap()).unwrap();
+    assert_eq!(find_built_cdylib(&structured), Some(library));
 }
 
 fn mapped(path: &Path) -> bool {

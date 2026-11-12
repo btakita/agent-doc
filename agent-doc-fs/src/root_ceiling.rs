@@ -73,17 +73,54 @@ fn strip_trailing_separators(path: PathBuf) -> PathBuf {
     path.components().collect()
 }
 
-/// Whether this process is a cargo-built test harness binary
-/// (`target/<profile>/deps/<crate>-<hash>`). Shipped binaries never live in a
-/// `deps/` directory, so production behaviour is unaffected.
+/// Whether `exe` is a cargo-built test harness binary. Cargo traditionally
+/// writes these to `target/<profile>/deps/<crate>-<hash>`; Rust 1.100 may write
+/// them to `target/<profile>/build/<package>/<hash>/out/<crate>-<hash>`.
+/// Shipped binaries use neither layout, so production behaviour is unaffected.
+pub fn is_cargo_test_binary_path(exe: &Path) -> bool {
+    let Some((stem, hash)) = exe
+        .file_name()
+        .and_then(|name| name.to_str())
+        .and_then(|name| name.rsplit_once('-'))
+    else {
+        return false;
+    };
+    if stem.is_empty()
+        || hash.len() != 16
+        || !hash
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        return false;
+    }
+
+    let Some(parent) = exe.parent() else {
+        return false;
+    };
+    if parent.file_name().is_some_and(|name| name == "deps") {
+        return true;
+    }
+
+    parent.file_name().is_some_and(|name| name == "out")
+        && parent
+            .parent()
+            .and_then(Path::file_name)
+            .is_some_and(|name| name == hash)
+        && parent
+            .parent()
+            .and_then(Path::parent)
+            .and_then(Path::parent)
+            .and_then(Path::file_name)
+            .is_some_and(|name| name == "build")
+}
+
+/// Whether this process is a cargo-built test harness binary.
 pub fn running_as_cargo_test_binary() -> bool {
     static IS_TEST_BINARY: OnceLock<bool> = OnceLock::new();
     *IS_TEST_BINARY.get_or_init(|| {
-        std::env::current_exe().ok().is_some_and(|exe| {
-            exe.parent()
-                .and_then(Path::file_name)
-                .is_some_and(|name| name == "deps")
-        })
+        std::env::current_exe()
+            .ok()
+            .is_some_and(|exe| is_cargo_test_binary_path(&exe))
     })
 }
 
@@ -179,6 +216,26 @@ mod tests {
     #[test]
     fn this_unit_test_process_is_recognised_as_a_cargo_test_binary() {
         assert!(running_as_cargo_test_binary());
+    }
+
+    #[test]
+    fn cargo_test_binary_layouts_are_recognised_without_guessing_a_hash() {
+        for harness in [
+            "/w/target/debug/deps/agent_doc_fs-0123456789abcdef",
+            "/w/target/debug/build/agent-doc-fs/0123456789abcdef/out/agent_doc_fs-0123456789abcdef",
+        ] {
+            assert!(is_cargo_test_binary_path(Path::new(harness)), "{harness}");
+        }
+        for not_a_harness in [
+            "/w/target/debug/agent-doc",
+            "/w/target/debug/build/agent-doc-fs/ffffffffffffffff/out/agent_doc_fs-0123456789abcdef",
+            "/w/target/debug/build/agent-doc-fs/0123456789abcdef/out/agent_doc_fs-01234567.d",
+        ] {
+            assert!(
+                !is_cargo_test_binary_path(Path::new(not_a_harness)),
+                "{not_a_harness}"
+            );
+        }
     }
 
     /// Child-process probe for the env-driven tests below: discovery reads the

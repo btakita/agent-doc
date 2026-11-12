@@ -997,8 +997,8 @@ fn every_public_queue_mutation_entrypoint_acquires_apply_exclusion() {
 
     let closeout = include_str!("../agent-doc-closeout-runtime-io/src/lib.rs");
     assert!(
-        closeout.contains("run_queue_maintenance(file, None)?"),
-        "closeout must propagate typed maintenance contention instead of treating it as empty",
+        closeout.contains("run_queue_maintenance_under_apply_guard(file, None, &apply_guard)?"),
+        "closeout must propagate typed maintenance contention while retaining its transaction capability",
     );
 
     let completion = include_str!("../src/queue_completion_feedback.rs");
@@ -1034,6 +1034,43 @@ fn every_public_queue_mutation_entrypoint_acquires_apply_exclusion() {
             && session_check.contains("enforce_clean_closeout_with_force_disk_under_apply_guard",),
         "embedded closeout must thread the held capability through maintenance and session-check"
     );
+    let public_closeout = &closeout[closeout
+        .find("pub fn complete_required_closeout(")
+        .expect("public closeout entry exists")..];
+    let residue_closeout = &closeout[closeout
+        .find("pub fn complete_answered_free_text_queue_residue(")
+        .expect("public residue closeout entry exists")..];
+    assert!(
+        public_closeout[..public_closeout.find("#[doc(hidden)]").unwrap()]
+            .contains("QueueEditGuard::acquire(file)?"),
+        "standalone Stop/repair/run closeout must acquire one transaction capability"
+    );
+    let residue_body = &residue_closeout[..residue_closeout.find("\nimpl ").unwrap()];
+    assert!(
+        residue_body.contains("QueueEditGuard::acquire(file)?")
+            && residue_body.contains("run_queue_maintenance_under_apply_guard")
+            && residue_body.contains("complete_required_closeout_under_apply_guard"),
+        "answered-residue closeout must retain one capability through queue maintenance and commit"
+    );
+    for (label, source) in [
+        (
+            "Codex Stop",
+            include_str!("../agent-doc-codex-stop-io/src/lib.rs"),
+        ),
+        (
+            "repair runtime",
+            include_str!("../agent-doc-repair-runtime-io/src/lib.rs"),
+        ),
+        (
+            "run runtime",
+            include_str!("../agent-doc-run-runtime-io/src/lib.rs"),
+        ),
+    ] {
+        assert!(
+            source.contains("agent_doc_closeout_runtime_io::complete_required_closeout"),
+            "{label} must route standalone closeout through the guarded runtime entry"
+        );
+    }
 }
 
 fn read_cycle_phase(root: &Path, doc: &Path) -> Option<String> {

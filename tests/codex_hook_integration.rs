@@ -4,6 +4,7 @@ use predicates::prelude::*;
 use serde_json::json;
 use std::collections::BTreeSet;
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command as ProcessCommand;
 use tempfile::TempDir;
@@ -420,13 +421,58 @@ fn codex_hook_cli_auto_closes_open_cycle_after_user_prompt_submit() {
         "stop_hook_active": false,
     });
 
-    agent_doc()
+    let marker = tmp.path().join("stop-closeout-after-pending.marker");
+    let release = tmp.path().join("stop-closeout-after-pending.release");
+    let mut stop = ProcessCommand::new(env!("CARGO_BIN_EXE_agent-doc"))
+        .env("AGENT_DOC_CODEX_STOP_HOOK_DEADLINE", "worker_completion")
+        .env(
+            agent_doc_controller_io::project_controller::TEST_CONTROLLER_LAUNCH_REASON_ENV,
+            CONTROLLER_LAUNCH_REASON,
+        )
+        .env("AGENT_DOC_TEST_CLOSEOUT_AFTER_PENDING_MARKER", &marker)
+        .env("AGENT_DOC_TEST_CLOSEOUT_AFTER_PENDING_RELEASE", &release)
         .current_dir(tmp.path())
         .args(["hook", "codex-stop"])
-        .write_stdin(stop_payload.to_string())
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("\"continue\":true"));
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    stop.stdin
+        .as_mut()
+        .unwrap()
+        .write_all(stop_payload.to_string().as_bytes())
+        .unwrap();
+    drop(stop.stdin.take());
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    while !marker.exists() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "timed out waiting for Stop closeout transaction barrier"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert!(
+        !agent_doc_queue_io::queue_edit_owner::try_reserve_queue_edit_owner(
+            &doc.to_string_lossy(),
+            "maintenance-during-stop-closeout",
+            std::process::id(),
+        )
+        .unwrap(),
+        "detached maintenance must not enter between Stop maintenance and commit"
+    );
+    assert!(
+        stop.try_wait().unwrap().is_none(),
+        "Stop must remain inside the guarded closeout transaction at the barrier"
+    );
+    fs::write(&release, b"release").unwrap();
+    let stop = stop.wait_with_output().unwrap();
+    assert!(
+        stop.status.success(),
+        "Stop hook failed: {}",
+        String::from_utf8_lossy(&stop.stderr)
+    );
+    assert!(String::from_utf8_lossy(&stop.stdout).contains("\"continue\":true"));
 
     let content = fs::read_to_string(&doc).unwrap();
     assert!(content.contains("### Re: hook proof — gpt-5"));

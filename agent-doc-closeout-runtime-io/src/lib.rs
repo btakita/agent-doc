@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 
 pub use agent_doc_document_realtime_io::{
     RUNTIME_PIPELINE_FRONTMATTER_EFFECTS as PIPELINE_FRONTMATTER_EFFECTS,
@@ -1410,16 +1410,8 @@ pub fn closeout_effects() -> RuntimeCloseoutEffects<'static> {
 /// pass. Every nested session-check/commit reader shares the projection until
 /// the CRDT state vector (or detached disk hash) changes.
 pub fn complete_required_closeout(file: &Path, force_disk: bool) -> Result<bool> {
-    agent_doc_document_realtime_io::with_current_document_projection_pass(|| {
-        agent_doc_flow_io::closeout::complete_required_closeout_with_options(
-            file,
-            &closeout_effects(),
-            agent_doc_flow_io::closeout::CompleteRequiredCloseoutOptions {
-                force_disk,
-                proven_committed_cycle: None,
-            },
-        )
-    })
+    let apply_guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(file)?;
+    complete_required_closeout_under_apply_guard(file, force_disk, &apply_guard)
 }
 
 /// Complete a write/finalize transaction without releasing its document apply
@@ -1455,7 +1447,9 @@ pub fn complete_required_closeout_under_apply_guard(
 /// without opening a successor response cycle or capturing predecessor chat
 /// text as a new answer.
 pub fn complete_answered_free_text_queue_residue(file: &Path, force_disk: bool) -> Result<bool> {
-    let queue_state = agent_doc_preflight_io::run_queue_maintenance(file, None)?;
+    let apply_guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(file)?;
+    let queue_state =
+        agent_doc_preflight_io::run_queue_maintenance_under_apply_guard(file, None, &apply_guard)?;
     // `#mirrorbinaryownedids`: rows this maintenance mirrored belong to the
     // cycle being closed, never to the operator.
     agent_doc_cycle_state_io::record_queue_mirrored_ids_or_warn(
@@ -1463,7 +1457,7 @@ pub fn complete_answered_free_text_queue_residue(file: &Path, force_disk: bool) 
         &queue_state.mirrored_queue_ids,
         "closeout_queue_residue_maintenance",
     );
-    complete_required_closeout(file, force_disk)
+    complete_required_closeout_under_apply_guard(file, force_disk, &apply_guard)
 }
 
 impl agent_doc_flow_io::closeout::CloseoutEffects for RuntimeCloseoutEffects<'_> {
@@ -1487,8 +1481,8 @@ impl agent_doc_flow_io::closeout::CloseoutEffects for RuntimeCloseoutEffects<'_>
         file: &Path,
         force_disk: bool,
     ) -> Result<agent_doc_preflight_io::PendingMaintenanceReport> {
-        if let Some(apply_guard) = self.apply_guard {
-            return if force_disk {
+        let report = if let Some(apply_guard) = self.apply_guard {
+            if force_disk {
                 agent_doc_preflight_io::run_pending_maintenance_force_disk_under_apply_guard(
                     file,
                     &agent_doc_preflight_runtime_io::PREFLIGHT_MAINTENANCE_WRITE_EFFECTS,
@@ -1500,9 +1494,8 @@ impl agent_doc_flow_io::closeout::CloseoutEffects for RuntimeCloseoutEffects<'_>
                     &agent_doc_preflight_runtime_io::PREFLIGHT_MAINTENANCE_WRITE_EFFECTS,
                     apply_guard,
                 )
-            };
-        }
-        if force_disk {
+            }
+        } else if force_disk {
             agent_doc_preflight_io::run_pending_maintenance_force_disk(
                 file,
                 &agent_doc_preflight_runtime_io::PREFLIGHT_MAINTENANCE_WRITE_EFFECTS,
@@ -1512,7 +1505,9 @@ impl agent_doc_flow_io::closeout::CloseoutEffects for RuntimeCloseoutEffects<'_>
                 file,
                 &agent_doc_preflight_runtime_io::PREFLIGHT_MAINTENANCE_WRITE_EFFECTS,
             )
-        }
+        }?;
+        maybe_pause_closeout_after_pending_maintenance()?;
+        Ok(report)
     }
 
     fn enforce_clean_closeout(&self, file: &Path) -> Result<()> {
@@ -1630,12 +1625,54 @@ impl agent_doc_flow_io::closeout::CloseoutEffects for RuntimeCloseoutEffects<'_>
     }
 }
 
+fn maybe_pause_closeout_after_pending_maintenance() -> Result<()> {
+    let Ok(marker) = std::env::var("AGENT_DOC_TEST_CLOSEOUT_AFTER_PENDING_MARKER") else {
+        return Ok(());
+    };
+    let release = std::env::var("AGENT_DOC_TEST_CLOSEOUT_AFTER_PENDING_RELEASE")
+        .context("closeout test barrier requires a release path")?;
+    std::fs::write(&marker, b"ready")?;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    while !Path::new(&release).exists() {
+        anyhow::ensure!(
+            std::time::Instant::now() < deadline,
+            "timed out waiting for closeout post-maintenance test barrier release"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 #[allow(clippy::items_after_test_module)]
 mod tests {
     use super::*;
     use agent_doc_session_check_io::{CapturedFinalizeResumeOutcome, SessionCheckEffects};
     use agent_doc_turn::CyclePhase;
+
+    #[test]
+    fn public_closeout_entries_refuse_apply_contention_before_any_closeout_effect() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("session.md");
+        let content = "---\nagent_doc_format: template\n---\n\n<!-- agent:exchange -->\nDone.\n<!-- /agent:exchange -->\n";
+        std::fs::write(&file, content).unwrap();
+        let _incumbent =
+            agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(&file).unwrap();
+
+        for result in [
+            complete_required_closeout(&file, false),
+            complete_answered_free_text_queue_residue(&file, false),
+        ] {
+            let error = result.expect_err("public closeout must fail before entering effects");
+            assert!(error.to_string().contains("queue mutation deferred"));
+            assert_eq!(std::fs::read_to_string(&file).unwrap(), content);
+        }
+        assert!(
+            !dir.path().join(".git").exists(),
+            "contention must not initialize or mutate repository state"
+        );
+    }
 
     #[test]
     fn recovery_claim_follows_foreground_guard_release_once() {

@@ -166,6 +166,17 @@ fn without_admitted_queue_ids(text: &str) -> String {
     normalized
 }
 
+fn admitted_queue_id_annotation(line: &str) -> &str {
+    let id_start = line
+        .rfind("[#q-")
+        .unwrap_or_else(|| panic!("missing stable queue id: {line}"));
+    let id_end = id_start
+        + line[id_start..]
+            .find(']')
+            .unwrap_or_else(|| panic!("unterminated stable queue id: {line}"));
+    &line[id_start..=id_end]
+}
+
 fn work_texts(items: &[String]) -> Vec<String> {
     items
         .iter()
@@ -574,7 +585,7 @@ fn run_agent_doc_stdin(dir: &std::path::Path, args: &[&str], stdin: &str) -> std
 }
 
 /// Claim, start and report one item the way a coordinator dispatches it.
-fn dispatch_and_report(dir: &std::path::Path, path: &str, item: &str, owner: &str) {
+fn dispatch_and_report(dir: &std::path::Path, path: &str, item: &str, owner: &str) -> String {
     assert_ok(
         &run_agent_doc(
             dir,
@@ -582,6 +593,20 @@ fn dispatch_and_report(dir: &std::path::Path, path: &str, item: &str, owner: &st
         ),
         "queue claim",
     );
+    let claims = run_agent_doc(dir, &["queue", "claims", path]);
+    assert_ok(&claims, "queue claims after claim");
+    let claims: serde_json::Value = serde_json::from_slice(&claims.stdout).unwrap();
+    let claimed_item = claims
+        .as_array()
+        .and_then(|claims| {
+            claims.iter().find_map(|claim| {
+                (claim["owner"].as_str() == Some(owner))
+                    .then(|| claim["item_text"].as_str())
+                    .flatten()
+            })
+        })
+        .unwrap_or_else(|| panic!("missing claimed item for {owner}: {claims}"))
+        .to_string();
     assert_ok(
         &run_agent_doc(
             dir,
@@ -590,7 +615,7 @@ fn dispatch_and_report(dir: &std::path::Path, path: &str, item: &str, owner: &st
                 "start",
                 path,
                 "--item",
-                item,
+                &claimed_item,
                 "--owner",
                 owner,
                 "--generation",
@@ -601,24 +626,28 @@ fn dispatch_and_report(dir: &std::path::Path, path: &str, item: &str, owner: &st
         ),
         "queue start",
     );
-    assert_ok(
-        &run_agent_doc(
-            dir,
-            &[
-                "queue",
-                "report-complete",
-                "--prose-only",
-                path,
-                "--item",
-                item,
-                "--generation",
-                "1",
-                "--response",
-                "Part 1 shipped; Part 2 is a design doc.",
-            ],
-        ),
-        "queue report-complete",
+    let response = if item.contains("#adversarial-pr") {
+        "REVIEW-CLEAN https://github.com/haiven-dev/haiven-api/pull/823#pullrequestreview-1 base=aaaa111 head=bbbb222 cycles=1\nINLINE-THREADS-LOADED 0 head=bbbb222\nQueried pulls/823/comments."
+    } else {
+        "Part 1 shipped; Part 2 is a design doc."
+    };
+    let report = run_agent_doc(
+        dir,
+        &[
+            "queue",
+            "report-complete",
+            "--prose-only",
+            path,
+            "--item",
+            &claimed_item,
+            "--generation",
+            "1",
+            "--response",
+            response,
+        ],
     );
+    assert_ok(&report, "queue report-complete");
+    claimed_item
 }
 
 fn claim_owners(dir: &std::path::Path, path: &str) -> Vec<String> {
@@ -660,21 +689,14 @@ fn a_verbatim_nested_echo_closes_the_reported_leaf_not_the_parent() {
                 .lines()
                 .find(|line| line.contains(child))
                 .unwrap_or_else(|| panic!("missing admitted child {child}:\n{admitted}"));
-            let id_start = line
-                .rfind("[#q-")
-                .unwrap_or_else(|| panic!("missing stable id for {child}: {line}"));
-            let id_end = id_start
-                + line[id_start..]
-                    .find(']')
-                    .unwrap_or_else(|| panic!("unterminated stable id for {child}: {line}"));
-            format!(">   - {child} {}\n", &line[id_start..=id_end])
+            format!(">   - {child} {}\n", admitted_queue_id_annotation(line))
         })
         .collect();
     let response = format!(
         "<!-- patch:exchange -->\n### Re: PM sync — gpt-5\n\n> **Queue prompt:** {PARENT}\n{echo}\nPart 1 shipped; Part 2 is a design doc.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nPart 1 shipped; Part 2 is a design doc.\n<!-- /patch:recap -->\n"
     );
     let output = run_agent_doc_stdin(dir.path(), &["respond", path, "--force-disk"], &response);
-    assert_ok(&output, "respond");
+    assert_transient_closeout(&output, "respond");
 
     let body = without_admitted_queue_ids(&run_body(&doc, "run"));
     assert!(!body.contains(&format!("- ~~{PARENT}~~")), "{body}");
@@ -705,18 +727,42 @@ fn equal_nested_children_close_by_parent_vector() {
     let doc = closeout_session(dir.path(), &rows, "");
     let path = doc.to_str().unwrap();
 
+    preflight_json(dir.path(), &doc);
+    let admitted = run_body(&doc, "run");
+    let second_section = admitted
+        .split_once(second_parent)
+        .map(|(_, section)| section)
+        .unwrap_or_else(|| panic!("missing second parent:\n{admitted}"));
+    let second_child = second_section
+        .lines()
+        .find(|line| line.contains(child))
+        .unwrap_or_else(|| panic!("missing second child:\n{admitted}"));
+    let second_annotation = admitted_queue_id_annotation(second_child);
+    let second_id = second_annotation
+        .trim_start_matches("[#")
+        .trim_end_matches(']');
+    let second_leaf_echo = format!("{child} {second_annotation}");
+    assert_ok(
+        &run_agent_doc(dir.path(), &["commit", path]),
+        "close the coordinator cycle",
+    );
+    let second_reported_vector = format!("{second_vector} {second_annotation}");
     dispatch_and_report(
         dir.path(),
         path,
-        &second_vector,
+        &second_reported_vector,
         "subagent:adversarial-pr-823",
     );
-    preflight_json(dir.path(), &doc);
+    let ack = run_agent_doc(
+        dir.path(),
+        &["queue", "consume", path, "--ack-id", second_id],
+    );
+    assert_ok(&ack, "queue consume --ack-id on the reported nested leaf");
     let response = format!(
-        "<!-- patch:exchange -->\n### Re: adversarial review — gpt-5\n\n> **Queue prompt:** {first_parent}\n\n**Deferred:** Its child remains queued.\n\n> **Queue prompt:** {second_vector}\n\nReviewed pull request 823.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nDone.\n<!-- /patch:recap -->\n"
+        "<!-- patch:exchange -->\n### Re: adversarial review — gpt-5\n\n> **Queue prompt:** {first_parent}\n\n**Deferred:** Its child remains queued.\n\n> **Queue prompt:** {second_parent}\n>   - {second_leaf_echo}\n\nReviewed pull request 823.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nDone.\n<!-- /patch:recap -->\n"
     );
     let output = run_agent_doc_stdin(dir.path(), &["respond", path, "--force-disk"], &response);
-    assert_ok(&output, "respond");
+    assert_transient_closeout(&output, "respond");
 
     let body = without_admitted_queue_ids(&run_body(&doc, "run"));
     let (first_section, second_section) = body

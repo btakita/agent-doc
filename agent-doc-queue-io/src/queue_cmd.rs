@@ -1888,6 +1888,63 @@ pub fn consume(effects: &impl QueueCommandEffects, file: &Path, count: usize) ->
     consume_with_options(effects, file, count, ConsumeOptions::default())
 }
 
+/// `agent-doc queue prune-duplicates <FILE> [--apply]` — collapse live rows
+/// that are already duplicated inside one queue (`#pruneduplicates`).
+///
+/// Identical work text (binary-owned lifecycle prefixes and `[#owner#generation]`
+/// markers stripped) keeps one row, preferring the row that carries the live
+/// claim marker. Conflicting non-bare projections fail closed because this pure
+/// repair has no durable claim authority. Text-prefix shape alone never
+/// authorizes deletion; `truncated_prefix_line` must explicitly select the
+/// exact live document row before a strict semantic prefix can be removed.
+/// Struck history stays. The default is a dry report; `--apply` writes. The
+/// keeper's claim is not released.
+pub fn prune_duplicates(
+    effects: &impl QueueCommandEffects,
+    file: &Path,
+    apply: bool,
+    truncated_prefix_line: Option<usize>,
+) -> Result<()> {
+    // Same single-writer lease as `prune-noise`: idle-watch and preflight
+    // defer across the authoritative read, plan, and converged write.
+    let _queue_edit_guard = apply.then(|| crate::queue_edit_owner::QueueEditGuard::acquire(file));
+    let content = effects.current_document_content(file, "queue_prune_duplicates")?;
+    let plan = match truncated_prefix_line {
+        Some(line) => {
+            agent_doc_queue::prune_duplicates::plan_with_truncated_prefix_line(&content, line)
+        }
+        None => agent_doc_queue::prune_duplicates::plan(&content),
+    }
+    .with_context(|| format!("{}: queue duplicate prune refused to parse", file.display()))?;
+    if plan.drops.is_empty() || !apply {
+        print!("{}", plan.report(&file.display().to_string(), false));
+        return Ok(());
+    }
+    effects
+        .converge_document_or_disk(file, &plan.document, &content, "queue_prune_duplicates")
+        .context("duplicate prune: failed to write document")?;
+    let base_hash = agent_doc_hash::content_hash(&content);
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "queue_prune_duplicates file={} removed={} base_hash={} source_component=queue operation=prune_duplicates proof={} truncated_prefix_line={}",
+            file.display(),
+            plan.drops.len(),
+            base_hash,
+            if truncated_prefix_line.is_some() {
+                "identical_live_head_or_explicit_truncated_prefix"
+            } else {
+                "identical_live_head"
+            },
+            truncated_prefix_line
+                .map(|line| line.to_string())
+                .unwrap_or_else(|| "none".to_string())
+        ),
+    );
+    print!("{}", plan.report(&file.display().to_string(), true));
+    Ok(())
+}
+
 /// `agent-doc queue prune-noise <FILE>` — strike every non-drainable noise queue
 /// head at any position (`#goqstall2`), clearing pasted console output / agent
 /// response fragments that session-check surfaces as
@@ -6176,5 +6233,187 @@ mod waiting_item_claim_projection_tests {
             1,
             "only `retry_crdt_merge` refusals earn a retry"
         );
+    }
+}
+
+#[cfg(test)]
+mod prune_duplicates_cmd_tests {
+    use super::*;
+    use std::cell::Cell;
+    use std::path::Path;
+
+    struct Mem {
+        content: std::cell::RefCell<String>,
+        writes: Cell<usize>,
+        expect_lease: Cell<bool>,
+    }
+
+    impl QueueCommandEffects for Mem {
+        fn current_document_content(&self, file: &Path, _source: &str) -> Result<String> {
+            if self.expect_lease.get() {
+                assert!(
+                    crate::queue_edit_owner::read_queue_edit_owner_lease(&file.to_string_lossy())
+                        .is_some(),
+                    "apply must hold the queue-edit lease during its authority read"
+                );
+            }
+            Ok(self.content.borrow().clone())
+        }
+
+        fn converge_document_or_disk(
+            &self,
+            file: &Path,
+            target_content: &str,
+            source_content: &str,
+            _reason: &str,
+        ) -> Result<()> {
+            if self.expect_lease.get() {
+                assert!(
+                    crate::queue_edit_owner::read_queue_edit_owner_lease(&file.to_string_lossy())
+                        .is_some(),
+                    "apply must hold the queue-edit lease through convergence"
+                );
+            }
+            assert_eq!(source_content, self.content.borrow().as_str());
+            *self.content.borrow_mut() = target_content.to_string();
+            self.writes.set(self.writes.get() + 1);
+            Ok(())
+        }
+
+        fn consume_free_text_queue_prompts_force_disk(
+            &self,
+            _file: &Path,
+            _count: usize,
+        ) -> Result<Option<QueueCommandConsumeOutcome>> {
+            Ok(None)
+        }
+
+        fn consume_free_text_queue_prompts_with_outcome(
+            &self,
+            _file: &Path,
+            _count: usize,
+        ) -> Result<Option<QueueCommandConsumeOutcome>> {
+            Ok(None)
+        }
+
+        fn strike_orphan_id_backed_queue_head(&self, _file: &Path, _id: &str) -> Result<bool> {
+            Ok(false)
+        }
+
+        fn acknowledge_open_id_backed_queue_head(&self, _file: &Path, _id: &str) -> Result<bool> {
+            Ok(false)
+        }
+
+        fn acknowledge_paused_free_text_queue_head(
+            &self,
+            _file: &Path,
+            _expected_head: &str,
+        ) -> Result<Option<QueueCommandConsumeOutcome>> {
+            Ok(None)
+        }
+
+        fn prune_noise_queue_heads(&self, _file: &Path) -> Result<usize> {
+            Ok(0)
+        }
+    }
+
+    #[test]
+    fn prune_duplicates_dry_run_writes_nothing_and_apply_keeps_the_claim() {
+        let source = "\
+<!-- agent:run id=\"main\" -->
+- 🚧 [#subagent:shell#1] If the claiming tmux pane for a document is in shell, start agent-doc.
+- If the claiming
+- 🚧 [#subagent:shell#1] If the claiming tmux pane for a document is in shell, start agent-doc.
+<!-- /agent:run -->
+";
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("session.md");
+        std::fs::write(&file, source).unwrap();
+        let effects = Mem {
+            content: std::cell::RefCell::new(source.to_string()),
+            writes: Cell::new(0),
+            expect_lease: Cell::new(false),
+        };
+        prune_duplicates(&effects, &file, false, Some(3)).unwrap();
+        assert_eq!(effects.writes.get(), 0);
+        assert_eq!(effects.content.borrow().as_str(), source);
+        effects.expect_lease.set(true);
+        prune_duplicates(&effects, &file, true, Some(3)).unwrap();
+        assert!(
+            crate::queue_edit_owner::read_queue_edit_owner_lease(&file.to_string_lossy()).is_none(),
+            "apply must release the queue-edit lease after convergence"
+        );
+        assert_eq!(effects.writes.get(), 1);
+        let written = effects.content.borrow().clone();
+        assert!(written.contains("[#subagent:shell#1]"));
+        assert!(!written.contains("- If the claiming\n"));
+        assert_eq!(written.matches("[#subagent:shell#1]").count(), 1);
+        prune_duplicates(&effects, &file, true, Some(3)).unwrap();
+        assert_eq!(effects.writes.get(), 1, "a second apply is a no-op");
+        assert_eq!(effects.content.borrow().as_str(), written);
+    }
+
+    #[test]
+    fn prune_duplicates_dry_run_and_apply_fail_closed_on_conflicting_attempts() {
+        let source = "\
+<!-- agent:run id=\"main\" -->
+- 🚧 [#subagent:old#1] Run the independently reviewed queue repair.
+- ☑️ [#subagent:current#2] Run the independently reviewed queue repair.
+<!-- /agent:run -->
+";
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("session.md");
+        std::fs::write(&file, source).unwrap();
+        let effects = Mem {
+            content: std::cell::RefCell::new(source.to_string()),
+            writes: Cell::new(0),
+            expect_lease: Cell::new(false),
+        };
+
+        prune_duplicates(&effects, &file, false, None).unwrap();
+        assert_eq!(effects.writes.get(), 0);
+        assert_eq!(effects.content.borrow().as_str(), source);
+
+        effects.expect_lease.set(true);
+        prune_duplicates(&effects, &file, true, None).unwrap();
+        assert_eq!(effects.writes.get(), 0);
+        assert_eq!(effects.content.borrow().as_str(), source);
+        assert!(
+            crate::queue_edit_owner::read_queue_edit_owner_lease(&file.to_string_lossy()).is_none(),
+            "no-op apply must release the queue-edit lease"
+        );
+    }
+
+    #[test]
+    fn prune_duplicates_requires_an_exact_line_before_removing_a_semantic_prefix() {
+        let source = "\
+<!-- agent:run id=\"main\" -->
+- 📥 Run queue tests
+- Run queue tests before publishing the release
+<!-- /agent:run -->
+";
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("session.md");
+        std::fs::write(&file, source).unwrap();
+        let effects = Mem {
+            content: std::cell::RefCell::new(source.to_string()),
+            writes: Cell::new(0),
+            expect_lease: Cell::new(false),
+        };
+
+        prune_duplicates(&effects, &file, false, None).unwrap();
+        prune_duplicates(&effects, &file, true, None).unwrap();
+        assert_eq!(effects.writes.get(), 0);
+        assert_eq!(effects.content.borrow().as_str(), source);
+
+        effects.expect_lease.set(true);
+        prune_duplicates(&effects, &file, true, Some(2)).unwrap();
+        assert_eq!(effects.writes.get(), 1);
+        let written = effects.content.borrow();
+        assert!(!written.contains("- 📥 Run queue tests\n"));
+        assert!(written.contains("- Run queue tests before publishing the release\n"));
     }
 }

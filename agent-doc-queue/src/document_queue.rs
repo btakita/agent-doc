@@ -1386,10 +1386,7 @@ pub fn is_noise_freeform_line(line: &str) -> bool {
         return false;
     }
     let de_bulleted = trimmed.strip_prefix("- ").unwrap_or(trimmed);
-    if is_reference_directive(de_bulleted) {
-        return false;
-    }
-    true
+    !is_reference_directive(de_bulleted)
 }
 
 /// Extract the `#id` from `do [#id]` (or `do #id`) prompt text, normalized to

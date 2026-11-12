@@ -2708,13 +2708,8 @@ fn deferral_scope_has_marker(blocks: &[&str], index: usize) -> bool {
         return false;
     };
     let next = prose(next);
-    if deferral_scan_text(&next).contains(STRUCTURED_DEFERRAL_MARKER)
+    deferral_scan_text(&next).contains(STRUCTURED_DEFERRAL_MARKER)
         || text_states_deferral(&block_lead_statement(&next))
-    {
-        return true;
-    }
-
-    false
 }
 
 /// True when `block` is nothing but a `> **Operator note:** ...` blockquote

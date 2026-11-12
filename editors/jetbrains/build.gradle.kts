@@ -61,7 +61,6 @@ dependencies {
     // needs the same API on its non-IDE JavaExec runtime classpath.
     testRuntimeOnly("com.google.code.gson:gson:2.11.0")
     testImplementation("junit:junit:4.13.2")
-    testImplementation("org.mockito:mockito-core:5.14.2")
 }
 
 java {

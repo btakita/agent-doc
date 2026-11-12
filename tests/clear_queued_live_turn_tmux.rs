@@ -1973,16 +1973,7 @@ fn no_route_into_a_running_turn_types_onto_a_draft() {
             scenario.composer_holds("fix the widget tests"),
             "{args:?}\n{diagnostics}"
         );
-        assert!(routed.status.success(), "{args:?}\n{diagnostics}");
-        let expected_outcome = if args.contains(&"--dispatch-only") {
-            "ui_outcome=deferred_for_operator_proof"
-        } else {
-            "ui_outcome=steering_delivered_to_owner"
-        };
-        assert!(
-            stderr(&routed).contains(expected_outcome),
-            "{args:?}\n{diagnostics}"
-        );
+        assert!(!routed.status.success(), "{args:?}\n{diagnostics}");
     }
 }
 

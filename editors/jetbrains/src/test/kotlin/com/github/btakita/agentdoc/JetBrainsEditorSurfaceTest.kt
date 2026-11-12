@@ -1,7 +1,6 @@
 package com.github.btakita.agentdoc
 
 import java.lang.invoke.MethodHandles
-import java.awt.Window
 import java.util.LinkedHashMap
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -9,8 +8,7 @@ import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.`when`
+import java.awt.Window
 
 class JetBrainsEditorSurfaceTest {
     @Test
@@ -52,15 +50,16 @@ class JetBrainsEditorSurfaceTest {
 
     @Test
     fun `keyboard focus on the frame or an owned child is that project surface`() {
-        // Mockito allocates these without invoking Window's headless-checking constructor.
-        val frame = mock(Window::class.java)
-        val child = mock(Window::class.java)
-        val other = mock(Window::class.java)
-        `when`(child.owner).thenReturn(frame)
+        val frame = Window(null as Window?)
+        val child = Window(frame)
+        val other = Window(null as Window?)
         assertTrue(JetBrainsEditorSurfaces.windowBelongsToFrame(frame, frame))
         assertTrue(JetBrainsEditorSurfaces.windowBelongsToFrame(child, frame))
         assertFalse(JetBrainsEditorSurfaces.windowBelongsToFrame(other, frame))
         assertFalse(JetBrainsEditorSurfaces.windowBelongsToFrame(null, frame))
+        child.dispose()
+        other.dispose()
+        frame.dispose()
     }
 
     fun `missing backend windows remain unknown despite a current surface hint`() {

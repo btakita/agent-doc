@@ -5355,7 +5355,7 @@ mod tests {
             "agent-doc queue release <FILE> --item <...>",
             "agent-doc queue release <FILE> --item <...> --generation <N>",
             "`agent-doc orchestrate <FILE> --mode parallel --task \"<item>\" ...`",
-            "end the turn quietly",
+            "end the turn\n  quietly",
             "`authorization.subagent_prompt_preamble` VERBATIM",
             "`unresolved_preset`",
             "`conflicting_preset_attrs`",

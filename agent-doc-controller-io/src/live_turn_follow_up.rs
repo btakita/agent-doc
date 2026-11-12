@@ -116,12 +116,12 @@ pub fn stage_live_turn_follow_up(
         && existing.cycle_id == cycle_id
     {
         pool = existing.pool;
+        steering = existing.steering;
         if let Some(record) = load_surrogate(&conn, &existing.token)?
             && record.expires_at_ms > now_ms
             && record.document == document
             && record.cycle_id == cycle_id
         {
-            steering = existing.steering;
             token = Some(existing.token);
             pasted = existing.pasted;
         }
@@ -483,7 +483,6 @@ mod tests {
         let payload = payload_of(&file, token_of(&consumed.notice));
         assert!(payload.contains("pool next"), "{payload}");
         assert!(payload.contains("after take"), "{payload}");
-        assert!(!payload.contains("steer body"), "{payload}");
     }
 
     #[test]

@@ -11203,11 +11203,10 @@ mod tests {
         );
     }
 
-    /// A `/goal` hand-back that begins `BLOCKED` waits for the named operator
-    /// action. It is a terminal worker hand-back, but not completed queue work,
-    /// so projection keeps the row live instead of striking it.
+    /// `#stoppedstruckqueue`: a `/goal` row closed by an unquoted `BLOCKED`
+    /// line keeps that line under the struck row, and the state stays waiting.
     #[test]
-    fn blocked_goal_row_stays_live_for_the_operator_action() {
+    fn stopped_goal_row_strike_keeps_the_blocked_explanation() {
         let content = goal_loop_session("🚧 [#subagent:pr12-review1#1] #adversarial-pr");
         let _project = crate::goal_preset_terminal::InheritedPresetsGuard::install(
             &goal_loop_project_presets(),
@@ -11229,10 +11228,13 @@ mod tests {
             STOPPED_AT,
         )
         .unwrap();
-        assert!(projected.is_none(), "BLOCKED operator work stays queued");
+        let projected = projected.expect("the BLOCKED hand-back strikes the goal row");
+        let target = projected.target_content;
+        assert!(target.contains("~~#adversarial-pr~~"), "{target}");
+        assert_stopped_child(&target, "~~#adversarial-pr~~");
         assert!(
-            content.contains("- 🚧 [#subagent:pr12-review1#1] #adversarial-pr\n"),
-            "the blocked goal row stays live:\n{content}"
+            target.contains("- 🚧 [#subagent:pr13-review1#1] #adversarial-pr\n"),
+            "the sibling pull request stays live:\n{target}"
         );
     }
 

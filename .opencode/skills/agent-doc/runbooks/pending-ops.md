@@ -92,15 +92,6 @@ delivered answer settled; it never closes anything else. For the graph kinds
 current answer with the cited revision id (`<decision>@<hash>`) kept in its
 text, which marks it reconciled.
 
-**Closing pull request (`#prannotate`).** A `closing_pull_request` signal names
-an open todo or backlog item and the pull request (or issue) that closes it.
-The dependency graph records that pair whichever side appeared first: the pull
-request's text cites an item that already exists, or the item is added while
-the pull request already exists. Add the URL to the item with `--todo-edit` or
-`--backlog-edit` in this closeout. Do not wait for the operator to ask, and do
-not check the item off only because the pull request exists. The signal stops
-once the item text cites the URL.
-
 Finalize also auto-dedupes identical same-id review entries during closeout maintenance, so an interleaved-finalize duplicate collapses without an explicit flag; distinct items that merely share an id are preserved so the ambiguity warning still surfaces.
 
 **Complete over gate — keep `agent:review` small (target < 10).** The default

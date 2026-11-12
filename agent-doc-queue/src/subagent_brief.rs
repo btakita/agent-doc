@@ -645,6 +645,23 @@ pub const SUBAGENT_PROCEDURAL_CHOICE_RULE: &str = concat!(
     "action not already authorized, or must be granted by the harness permission UI.\n"
 );
 
+/// A child-role capability restriction is coordinator work, not an operator
+/// question. Some harnesses expose an action only to their main session even
+/// though the dispatched worker has all authorization and inputs needed for it.
+pub const SUBAGENT_COORDINATOR_ACTION_FALLBACK_RULE: &str = concat!(
+    "If the harness blocks an action only because this subagent role cannot invoke a tool or ",
+    "capability that the coordinator's main session can invoke, do not turn that role restriction ",
+    "into an operator question or a permission denial. Send the coordinator the exact blocked ",
+    "action, all inputs and target scope, the exact harness block, and any prepared artifact through ",
+    "the native parent-message mechanism; if messaging is unavailable, return them as your result ",
+    "under `Coordinator action fallback`. Keep the queue item incomplete while that effect remains. ",
+    "The coordinator must perform the already-authorized action from the main session, invoke any ",
+    "main-session approval UI for that exact action, verify its receipt, and send the receipt back to ",
+    "the same worker when continuation is available. Use the operator-request packet only when ",
+    "authorization or genuinely operator-owned input is missing, or when the main session also ",
+    "cannot perform or present the action. (`#harnessactionfallback`)\n"
+);
+
 /// The tracked id carried by a subagent operator-request marker line.
 ///
 /// New markers require a non-empty alphanumeric/hyphen suffix. The fixed
@@ -673,7 +690,7 @@ pub fn subagent_operator_request_id(line: &str) -> Option<&str> {
 /// free-text values of `queue_item`, `request`, and `context` are nested beneath
 /// their key bullet so a long value never runs on beside the key.
 pub const SUBAGENT_OPERATOR_REQUEST_PROTOCOL: &str = concat!(
-    "If required scope or a choice is still missing, or a protected tool action still requires ",
+    "After applying `#harnessactionfallback`, if required scope or a choice is still missing, or a protected tool action still requires ",
     "harness approval, do not guess or silently deny it. Send the coordinator this exact packet ",
     "before ",
     "stopping; use the harness's native parent-message mechanism when available, otherwise ",
@@ -995,6 +1012,8 @@ fn render_preamble(
         out.push('\n');
     }
     out.push('\n');
+    out.push_str(SUBAGENT_COORDINATOR_ACTION_FALLBACK_RULE);
+    out.push('\n');
     out.push_str(SUBAGENT_PROCEDURAL_CHOICE_RULE);
     out.push('\n');
     let queue_item = agent_doc_document::queue_projection::operator_request_origin_item(&auth.item);
@@ -1224,6 +1243,35 @@ mod tests {
         assert!(source_planning.contains(
             "Only genuinely operator-owned input\n   becomes an exchange question and TODO"
         ));
+    }
+
+    #[test]
+    fn child_role_harness_block_is_routed_to_the_main_session() {
+        let item = "publish the prepared review comment";
+        let content = doc("", "subagents", &[item], &[]);
+
+        let auth = subagent_authorization("reviews.md", &content, item);
+        let preamble = &auth.subagent_prompt_preamble;
+
+        assert!(preamble.contains(SUBAGENT_COORDINATOR_ACTION_FALLBACK_RULE));
+        assert!(preamble.contains("exact blocked action"));
+        assert!(preamble.contains("exact harness block"));
+        assert!(preamble.contains("perform the already-authorized action from the main session"));
+        assert!(preamble.contains("Keep the queue item incomplete while that effect remains"));
+        assert!(preamble.contains("After applying `#harnessactionfallback`"));
+
+        let source_runbook = include_str!("../../runbooks/respond.md");
+        let bundled_runbook = include_str!("../../.claude/skills/agent-doc/runbooks/respond.md");
+        assert_eq!(source_runbook, bundled_runbook);
+        assert!(source_runbook.contains("Child-role capability blocks (`#harnessactionfallback`)"));
+        assert!(source_runbook.contains("exact already-authorized action from the main session"));
+
+        let source_planning = include_str!("../../runbooks/planning-dispatch.md");
+        let bundled_planning =
+            include_str!("../../.claude/skills/agent-doc/runbooks/planning-dispatch.md");
+        assert_eq!(source_planning, bundled_planning);
+        assert!(source_planning.contains("child-role capability block"));
+        assert!(source_planning.contains("main session performs"));
     }
 
     #[test]

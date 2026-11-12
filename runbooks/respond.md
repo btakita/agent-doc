@@ -414,6 +414,19 @@ and the pending granular-flags-only rule. This runbook carries the rest.
      work remains; use a genuine review/external gate only when execution is
      complete; otherwise keep the item tracked with its concrete blocker.
 
+     Child-role capability blocks (`#harnessactionfallback`) are coordinator
+     work, not operator requests. When the worker's harness blocks an action
+     because that subagent role lacks a tool or capability available to the
+     main session, require the exact blocked action, all inputs and target
+     scope, the exact harness block, and any prepared artifact. Keep the row
+     live; do not add an exchange question or TODO. The coordinator must execute
+     the exact already-authorized action from the main session, invoke the
+     main-session harness approval UI when that exact call requires it, verify
+     the receipt, and return the receipt to the same worker when continuation
+     is available. Only route an operator packet when authorization or genuinely
+     operator-owned input is missing, or when the main session also cannot
+     perform or present the action.
+
      A valid operator-owned packet changes product behavior or scope, needs an
      external fact the agents cannot know, requests an outward action absent
      from current authorization, or requires the harness permission UI. Treat

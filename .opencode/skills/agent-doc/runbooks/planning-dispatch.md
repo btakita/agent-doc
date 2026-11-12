@@ -45,6 +45,13 @@ The command emits a structured planning record as JSON.
    agent-owned. Derive them from the item, prompt tree, presets, evidence, and
    completion state and resume the worker. Only genuinely operator-owned input
    becomes an exchange question and TODO.
+   A child-role capability block is coordinator work, not an operator request
+   (`#harnessactionfallback`). Require the worker's exact blocked action,
+   inputs/target, harness block, and prepared artifact; the main session performs
+   the action under the existing authorization, obtains any exact main-session
+   harness approval, verifies the receipt, and returns it to the worker. Keep the
+   row live until that effect is verified. Ask the operator only when the main
+   session also lacks authorization, capability, or genuinely operator-owned input.
 9. If `blockers` is non-empty, surface the blocker and stop instead of freelancing around it.
    A turn the binary's preflight already sealed never reports the `No changes` blocker: plan reads the open cycle, recovers the free-text queue head preflight selected, and otherwise returns `task_class: preflight_sealed` with no blocker — execute the preflight contract (`#plansealedturn`, GH #68 §1).
 

@@ -10,8 +10,7 @@ use agent_doc_preflight_io::{
     PendingMaintenanceReport, PreflightResponseContract, QueueState, check_linked_docs,
     enforce_no_dropped_backlog, explicit_backlog_target_requirements, inspect_queue_state,
     inspect_queue_state_from_content, read_and_truncate_claims, read_claims,
-    resolve_pipeline_state, run_gate_verify, run_pending_maintenance,
-    shadow_open_backlog_admission,
+    resolve_pipeline_state, run_gate_verify, shadow_open_backlog_admission,
     sweep::{
         current_sweep_budget, current_sweep_owner, load_sweep_cursor,
         log_and_skip_foreign_owned_sweep_if_needed, order_from_cursor, run_bounded_sweep,
@@ -965,20 +964,25 @@ fn run_with_options_to_writer_in_pass(
     // Preserve the command-entry cut. Pending maintenance runs below, so only
     // this cached observation can prove a backlog deletion predated binary work.
     let operator_entry_content = rc.doc_content();
-    // Step 1c: Pending component maintenance — lazy backfill, reap, archive, and
-    // reorder detection. MUST run BEFORE step 2 commit so the single step-2
-    // commit bundles the pending mutations with the previous-cycle response,
-    // producing exactly one HEAD advance per preflight. Running after step 2
-    // caused #64mb (double commit_staging: step 2 committed, then maintenance
-    // mutated and committed again).
-    //
-    // Maintenance applies its mutations to BOTH the working tree file AND the
-    // snapshot (surgically, via component replace), so the upcoming step-2
-    // commit which stages from snapshot picks them up atomically.
+    // Step 1c: derive the pending-component report without performing editor,
+    // snapshot, or commit convergence on the admission lane.  The detached
+    // maintenance owner re-observes authority and persists the same projection
+    // after this command emits JSON.  Keeping the pure report here preserves
+    // review/todo/reorder guidance while a slow editor-native save can no longer
+    // consume the hook budget.
     let pending_report = if options.probe {
         PendingMaintenanceReport::default()
+    } else if cfg!(test) {
+        // Unit tests exercise downstream admission invariants in-process and do
+        // not launch the detached CLI worker (`spawn` is also cfg-gated below).
+        // Keep their fixture projection synchronous; CLI integration tests cover
+        // the production inspect-then-background boundary.
+        agent_doc_preflight_io::run_pending_maintenance(file, &PREFLIGHT_MAINTENANCE_WRITE_EFFECTS)?
     } else {
-        run_pending_maintenance(file, &PREFLIGHT_MAINTENANCE_WRITE_EFFECTS)?
+        agent_doc_preflight_io::inspect_pending_maintenance(
+            file,
+            &PREFLIGHT_MAINTENANCE_WRITE_EFFECTS,
+        )?
     };
     let backlog_reordered = pending_report.reordered;
     let backlog_gated_count = pending_report.backlog_gated_count;

@@ -53,6 +53,43 @@ pub fn refresh_queue_edit_owner_lease(file: &str, pid: u32) -> Result<()> {
     )
 }
 
+/// Atomically reserve queue-maintenance ownership for a child that has been
+/// spawned but has not entered its mutation body yet.
+///
+/// Competing admissions may both create a short-lived child process, but only
+/// one PID can win this SQLite compare-and-set.  Every child verifies this
+/// reservation before doing work.
+pub fn try_reserve_queue_edit_owner(file: &str, token: &str, pid: u32) -> Result<bool> {
+    let (project_root, document_hash) = state_location(file)?;
+    let now = now_secs();
+    let eligible_at_or_before = now.saturating_sub(queue_edit_owner_ttl().as_secs());
+    agent_doc_controller_io::project_controller::claim_coordination_lease_if_expired(
+        &project_root,
+        &agent_doc_sqlite::state_store::CoordinationLeaseRecord {
+            scope_kind: QUEUE_EDIT_OWNER_SCOPE.to_string(),
+            scope_id: document_hash,
+            holder: token.to_string(),
+            holder_pid: Some(pid),
+            heartbeat_secs: now,
+        },
+        eligible_at_or_before,
+    )
+}
+
+/// Refresh only the lease still owned by `token`; a superseded worker cannot
+/// overwrite the heartbeat or identity of its replacement.
+pub fn refresh_queue_edit_owner_lease_if_holder(file: &str, token: &str, pid: u32) -> Result<bool> {
+    let (project_root, document_hash) = state_location(file)?;
+    agent_doc_controller_io::project_controller::refresh_coordination_lease_if_holder(
+        &project_root,
+        QUEUE_EDIT_OWNER_SCOPE,
+        &document_hash,
+        token,
+        pid,
+        now_secs(),
+    )
+}
+
 pub fn read_queue_edit_owner_lease(file: &str) -> Option<QueueEditOwnerLease> {
     let (project_root, document_hash) = state_location(file).ok()?;
     let lease = agent_doc_controller_io::project_controller::load_coordination_lease(
@@ -78,6 +115,20 @@ pub fn clear_queue_edit_owner_lease(file: &str) {
     });
     if let Err(err) = result {
         eprintln!("[agent-doc] warning: failed to clear queue-mutation lease: {err}");
+    }
+}
+
+pub fn clear_queue_edit_owner_lease_if_holder(file: &str, token: &str) {
+    let result = state_location(file).and_then(|(project_root, document_hash)| {
+        agent_doc_controller_io::project_controller::clear_coordination_lease_if_holder(
+            &project_root,
+            QUEUE_EDIT_OWNER_SCOPE,
+            &document_hash,
+            token,
+        )
+    });
+    if let Err(err) = result {
+        eprintln!("[agent-doc] warning: failed to clear owned queue-mutation lease: {err}");
     }
 }
 
@@ -122,21 +173,40 @@ fn pid_is_live(_pid: u32) -> bool {
 
 pub struct QueueEditGuard {
     file: String,
+    holder: String,
 }
 
 impl QueueEditGuard {
     pub fn acquire(file: &Path) -> Self {
         let file = file.to_string_lossy().to_string();
-        if let Err(err) = refresh_queue_edit_owner_lease(&file, std::process::id()) {
+        let holder_pid = std::process::id();
+        if let Err(err) = refresh_queue_edit_owner_lease(&file, holder_pid) {
             eprintln!("[agent-doc] warning: failed to acquire queue-mutation lease: {err}");
         }
-        Self { file }
+        Self {
+            file,
+            holder: holder_pid.to_string(),
+        }
+    }
+
+    /// Adopt a reservation published for this process before it was allowed to
+    /// enter the maintenance body.
+    pub fn adopt_reserved(file: &Path, token: &str) -> Result<Option<Self>> {
+        let file = file.to_string_lossy().to_string();
+        let holder_pid = std::process::id();
+        if !refresh_queue_edit_owner_lease_if_holder(&file, token, holder_pid)? {
+            return Ok(None);
+        }
+        Ok(Some(Self {
+            file,
+            holder: token.to_string(),
+        }))
     }
 }
 
 impl Drop for QueueEditGuard {
     fn drop(&mut self) {
-        clear_queue_edit_owner_lease(&self.file);
+        clear_queue_edit_owner_lease_if_holder(&self.file, &self.holder);
     }
 }
 
@@ -188,5 +258,60 @@ mod tests {
             ),
             None
         );
+    }
+
+    #[test]
+    fn only_one_concurrent_background_maintenance_body_is_admitted() {
+        use std::sync::{Arc, Barrier};
+
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        std::fs::write(&file, "body").unwrap();
+        let file = Arc::new(file.to_string_lossy().to_string());
+        let barrier = Arc::new(Barrier::new(8));
+        let body_entries = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let mut contenders = Vec::new();
+        for offset in 0..8u32 {
+            let file = Arc::clone(&file);
+            let barrier = Arc::clone(&barrier);
+            let body_entries = Arc::clone(&body_entries);
+            contenders.push(std::thread::spawn(move || {
+                barrier.wait();
+                let pid = 40_000 + offset;
+                if try_reserve_queue_edit_owner(&file, &format!("contender-{pid}"), pid).unwrap() {
+                    body_entries.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                }
+            }));
+        }
+        for contender in contenders {
+            contender.join().unwrap();
+        }
+        assert_eq!(body_entries.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn superseded_worker_cannot_refresh_or_clear_its_successor() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        std::fs::write(&file, "body").unwrap();
+        let file_text = file.to_string_lossy();
+        let token = "reserved-worker-token";
+        assert!(try_reserve_queue_edit_owner(&file_text, token, std::process::id()).unwrap());
+        let guard = QueueEditGuard::adopt_reserved(&file, token)
+            .unwrap()
+            .expect("reserved worker owns the lease");
+
+        refresh_queue_edit_owner_lease(&file_text, 55_001).unwrap();
+        assert!(
+            !refresh_queue_edit_owner_lease_if_holder(&file_text, token, std::process::id())
+                .unwrap(),
+            "superseded worker must not revive its token"
+        );
+        drop(guard);
+
+        let successor = read_queue_edit_owner_lease(&file_text).expect("successor lease remains");
+        assert_eq!(successor.holder_pid, 55_001);
     }
 }

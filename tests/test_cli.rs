@@ -10,6 +10,7 @@ use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command as ProcessCommand, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Barrier};
 
 /// `#integrationtesttargets`: this target drives the real `agent-doc` CLI, and
 /// a controller launch by that CLI is production behavior, so every spawned
@@ -33,6 +34,21 @@ fn agent_doc_cmd() -> Command {
     // rewrite the operator's real `~/.claude/settings.json` (observed
     // 2026-10-27). Scope it to the temp dir as `make test` does; the install
     // then skips any user layer outside it.
+    if std::env::var_os(agent_doc_fs::TEST_RUNTIME_SCOPE_ENV).is_none() {
+        command.env(agent_doc_fs::TEST_RUNTIME_SCOPE_ENV, std::env::temp_dir());
+    }
+    command
+}
+
+fn agent_doc_process_cmd() -> ProcessCommand {
+    let mut command = ProcessCommand::new(assert_cmd::cargo::cargo_bin!("agent-doc"));
+    command.env(
+        agent_doc_controller_io::project_controller::TEST_CONTROLLER_LAUNCH_REASON_ENV,
+        CONTROLLER_LAUNCH_REASON,
+    );
+    if std::env::var_os("AGENT_DOC_ROOT_CEILING_DIRECTORIES").is_none() {
+        command.env("AGENT_DOC_ROOT_CEILING_DIRECTORIES", std::env::temp_dir());
+    }
     if std::env::var_os(agent_doc_fs::TEST_RUNTIME_SCOPE_ENV).is_none() {
         command.env(agent_doc_fs::TEST_RUNTIME_SCOPE_ENV, std::env::temp_dir());
     }
@@ -209,6 +225,162 @@ fn preflight_admits_under_five_seconds_while_slow_queue_maintenance_stays_detach
         );
         std::thread::sleep(std::time::Duration::from_millis(50));
     }
+}
+
+#[test]
+fn preflight_admits_under_five_seconds_while_slow_pending_maintenance_stays_detached() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let doc = tmp.path().join("session.md");
+    let content = concat!(
+        "---\n",
+        "agent_doc_session: pending-timing-test\n",
+        "agent_doc_format: template\n",
+        "agent: codex\n",
+        "model: gpt-5\n",
+        "---\n\n",
+        "<!-- agent:exchange -->\n",
+        "### Re: prior — gpt-5\n\nDone.\n",
+        "<!-- agent:boundary:1234abcd -->\n",
+        "<!-- /agent:exchange -->\n\n",
+        "<!-- agent:backlog priority queue -->\n",
+        "- legacy pending item\n",
+        "<!-- /agent:backlog -->\n",
+    );
+    fs::write(&doc, content).unwrap();
+    init_git_repo(tmp.path(), &doc);
+
+    let started = std::time::Instant::now();
+    let output = agent_doc_cmd()
+        .current_dir(tmp.path())
+        .env(
+            "AGENT_DOC_TEST_BACKGROUND_PENDING_MAINTENANCE_DELAY_MS",
+            "6000",
+        )
+        .args(["preflight", doc.to_str().unwrap()])
+        .output()
+        .unwrap();
+    let admitted_elapsed = started.elapsed();
+    eprintln!("bounded pending admission elapsed: {admitted_elapsed:?}");
+    assert!(
+        output.status.success(),
+        "preflight failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        admitted_elapsed < std::time::Duration::from_secs(5),
+        "bounded admission waited for six-second pending maintenance: {admitted_elapsed:?}"
+    );
+
+    let ops = tmp.path().join(".agent-doc/logs/ops.log");
+    let initial_ops = fs::read_to_string(&ops).unwrap_or_default();
+    assert!(
+        initial_ops.contains("queue_maintenance_background_dispatched"),
+        "admission did not dispatch maintenance: {initial_ops}"
+    );
+    assert!(
+        !initial_ops.contains("pending_maintenance_background_completed"),
+        "six-second pending maintenance completed before bounded admission returned"
+    );
+
+    let completion_deadline = std::time::Instant::now() + std::time::Duration::from_secs(12);
+    loop {
+        let current_ops = fs::read_to_string(&ops).unwrap_or_default();
+        if current_ops.contains("pending_maintenance_background_completed") {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < completion_deadline,
+            "detached pending maintenance never completed: {current_ops}"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    let converged = fs::read_to_string(&doc).unwrap();
+    assert!(
+        converged.contains("- [ ] [#"),
+        "pending backfill did not converge durably: {converged}"
+    );
+}
+
+#[test]
+fn simultaneous_preflights_coalesce_to_one_background_maintenance_body() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let doc = tmp.path().join("session.md");
+    let content = concat!(
+        "---\n",
+        "agent_doc_session: dispatch-coalescing-test\n",
+        "agent_doc_format: template\n",
+        "agent: codex\n",
+        "model: gpt-5\n",
+        "---\n\n",
+        "<!-- agent:exchange -->\n",
+        "### Re: prior — gpt-5\n\nDone.\n",
+        "<!-- agent:boundary:1234abcd -->\n",
+        "<!-- /agent:exchange -->\n\n",
+        "<!-- agent:backlog priority queue -->\n",
+        "- legacy coalesced item\n",
+        "<!-- /agent:backlog -->\n",
+    );
+    fs::write(&doc, content).unwrap();
+    init_git_repo(tmp.path(), &doc);
+
+    let barrier = Arc::new(Barrier::new(3));
+    let mut contenders = Vec::new();
+    for _ in 0..2 {
+        let barrier = Arc::clone(&barrier);
+        let root = tmp.path().to_path_buf();
+        let doc = doc.clone();
+        contenders.push(std::thread::spawn(move || {
+            barrier.wait();
+            agent_doc_process_cmd()
+                .current_dir(root)
+                .env(
+                    "AGENT_DOC_TEST_BACKGROUND_PENDING_MAINTENANCE_DELAY_MS",
+                    "6000",
+                )
+                .args(["preflight", doc.to_str().unwrap()])
+                .output()
+                .unwrap()
+        }));
+    }
+    barrier.wait();
+    for contender in contenders {
+        let output = contender.join().unwrap();
+        assert!(
+            output.status.success(),
+            "racing preflight failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    let ops = tmp.path().join(".agent-doc/logs/ops.log");
+    let completion_deadline = std::time::Instant::now() + std::time::Duration::from_secs(12);
+    loop {
+        let current_ops = fs::read_to_string(&ops).unwrap_or_default();
+        if current_ops.contains("pending_maintenance_background_completed") {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < completion_deadline,
+            "coalesced background maintenance never completed: {current_ops}"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+
+    let final_ops = fs::read_to_string(&ops).unwrap_or_default();
+    assert_eq!(
+        final_ops
+            .matches("pending_maintenance_background_test_delay")
+            .count(),
+        1,
+        "more than one background maintenance body ran: {final_ops}"
+    );
+    assert_eq!(
+        final_ops
+            .matches("pending_maintenance_background_completed")
+            .count(),
+        1,
+        "more than one background maintenance body completed: {final_ops}"
+    );
 }
 
 fn read_cycle_phase(root: &Path, doc: &Path) -> Option<String> {

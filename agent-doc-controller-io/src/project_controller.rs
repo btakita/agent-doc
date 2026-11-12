@@ -13840,6 +13840,44 @@ pub fn upsert_coordination_lease(
     state_store::upsert_coordination_lease_in_db(&conn, lease)
 }
 
+pub fn claim_coordination_lease_if_expired(
+    project_root: &Path,
+    lease: &state_store::CoordinationLeaseRecord,
+    eligible_at_or_before_secs: u64,
+) -> Result<bool> {
+    let conn = open_state_db(project_root)?;
+    state_store::claim_coordination_lease_if_expired_in_db(&conn, lease, eligible_at_or_before_secs)
+}
+
+pub fn refresh_coordination_lease_if_holder(
+    project_root: &Path,
+    scope_kind: &str,
+    scope_id: &str,
+    holder: &str,
+    holder_pid: u32,
+    heartbeat_secs: u64,
+) -> Result<bool> {
+    let conn = open_state_db(project_root)?;
+    state_store::refresh_coordination_lease_if_holder_in_db(
+        &conn,
+        scope_kind,
+        scope_id,
+        holder,
+        holder_pid,
+        heartbeat_secs,
+    )
+}
+
+pub fn clear_coordination_lease_if_holder(
+    project_root: &Path,
+    scope_kind: &str,
+    scope_id: &str,
+    holder: &str,
+) -> Result<bool> {
+    let conn = open_state_db(project_root)?;
+    state_store::clear_coordination_lease_if_holder_in_db(&conn, scope_kind, scope_id, holder)
+}
+
 pub fn load_coordination_lease(
     project_root: &Path,
     scope_kind: &str,

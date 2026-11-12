@@ -2363,6 +2363,34 @@ pub fn claim_coordination_lease_if_expired_in_db(
     )? > 0)
 }
 
+/// Refresh a coordination lease only while `holder` still owns it, and move
+/// the live-process identity to `holder_pid` when a reserved worker starts.
+///
+/// A superseded worker must never revive itself over a newer reservation.  The
+/// compare-and-update stays in one SQLite statement so heartbeat races cannot
+/// replace the active owner.
+pub fn refresh_coordination_lease_if_holder_in_db(
+    conn: &Connection,
+    scope_kind: &str,
+    scope_id: &str,
+    holder: &str,
+    holder_pid: u32,
+    heartbeat_secs: u64,
+) -> Result<bool> {
+    Ok(conn.execute(
+        "UPDATE coordination_leases \
+         SET holder_pid = ?4, heartbeat_secs = ?5 \
+         WHERE scope_kind = ?1 AND scope_id = ?2 AND holder = ?3",
+        params![
+            scope_kind,
+            scope_id,
+            holder,
+            i64::from(holder_pid),
+            heartbeat_secs as i64,
+        ],
+    )? > 0)
+}
+
 pub fn load_coordination_lease_from_db(
     conn: &Connection,
     scope_kind: &str,

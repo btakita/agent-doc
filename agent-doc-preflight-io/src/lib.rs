@@ -2249,9 +2249,19 @@ pub struct PendingMaintenanceReport {
     pub todo_signals: Vec<TodoSignal>,
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy)]
 struct PendingMaintenanceOptions {
     force_disk: bool,
+    persist: bool,
+}
+
+impl Default for PendingMaintenanceOptions {
+    fn default() -> Self {
+        Self {
+            force_disk: false,
+            persist: true,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -2276,9 +2286,44 @@ pub fn run_pending_maintenance_force_disk(
 ) -> Result<PendingMaintenanceReport> {
     run_pending_maintenance_with_options(
         file,
-        PendingMaintenanceOptions { force_disk: true },
+        PendingMaintenanceOptions {
+            force_disk: true,
+            persist: true,
+        },
         write_effects,
     )
+}
+
+/// Derive the pending-maintenance report without persisting any projected
+/// bookkeeping. Admission uses this pure view while the detached maintenance
+/// owner performs editor/snapshot convergence after the response contract has
+/// been emitted.
+pub fn inspect_pending_maintenance(
+    file: &Path,
+    write_effects: &dyn PreflightMaintenanceWriteEffects,
+) -> Result<PendingMaintenanceReport> {
+    run_pending_maintenance_with_options(
+        file,
+        PendingMaintenanceOptions {
+            force_disk: false,
+            persist: false,
+        },
+        write_effects,
+    )
+}
+
+fn archive_pending_done_for_maintenance(
+    file: &Path,
+    content: &str,
+    removed: &[agent_doc_element_backlog::backlog::PendingItem],
+    persist: bool,
+) -> Result<Option<String>> {
+    if !persist {
+        // External done archives are an effect, not a projection. The detached
+        // owner repeats this derivation with persistence enabled after admission.
+        return Ok(None);
+    }
+    agent_doc_element_backlog_io::done_archive::archive_pending_done(file, content, removed)
 }
 
 fn run_pending_maintenance_with_options(
@@ -2339,14 +2384,16 @@ fn run_pending_maintenance_with_options(
             "[preflight] terminal boundary: pruned {} proven-redundant debris line(s)",
             terminal_debris_lines_pruned
         );
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "terminal_debris_pruned file={} lines={} authority=maintenance_convergence",
-                file.display(),
-                terminal_debris_lines_pruned
-            ),
-        );
+        if options.persist {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "terminal_debris_pruned file={} lines={} authority=maintenance_convergence",
+                    file.display(),
+                    terminal_debris_lines_pruned
+                ),
+            );
+        }
     }
     if let Some(ref mut snapshot) = snapshot_content
         && let Some(pruned) =
@@ -2364,21 +2411,23 @@ fn run_pending_maintenance_with_options(
         eprintln!("[preflight] tracked lists: {action} (#managedlistnodrift)");
     }
     if let Some(projected) = tracked.content {
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "tracked_lists_projected file={} moved={} (#managedlistnodrift)",
-                file.display(),
-                tracked
-                    .actions
-                    .iter()
-                    .filter(|action| matches!(
-                        action,
-                        agent_doc_work_projection::managed_list::ReconcileAction::Migrate { .. }
-                    ))
-                    .count()
-            ),
-        );
+        if options.persist {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "tracked_lists_projected file={} moved={} (#managedlistnodrift)",
+                    file.display(),
+                    tracked
+                        .actions
+                        .iter()
+                        .filter(|action| matches!(
+                            action,
+                            agent_doc_work_projection::managed_list::ReconcileAction::Migrate { .. }
+                        ))
+                        .count()
+                ),
+            );
+        }
         current_content = projected;
         mutated = true;
     }
@@ -2462,14 +2511,16 @@ fn run_pending_maintenance_with_options(
                             "[preflight] {}: kept #{} although a done entry shares its id: the texts describe different work (id collision)",
                             surface_label, item.id
                         );
-                        agent_doc_ops_log_io::log_op(
-                            file,
-                            &format!(
-                                "done_mirror_reap_skipped_id_collision file={} id={} texts_differ=true",
-                                file.display(),
-                                item.id
-                            ),
-                        );
+                        if options.persist {
+                            agent_doc_ops_log_io::log_op(
+                                file,
+                                &format!(
+                                    "done_mirror_reap_skipped_id_collision file={} id={} texts_differ=true",
+                                    file.display(),
+                                    item.id
+                                ),
+                            );
+                        }
                     }
                     mirrored
                 })
@@ -2559,20 +2610,26 @@ fn run_pending_maintenance_with_options(
                             .get(&item.id)
                             .map(String::as_str)
                             .unwrap_or("ops_proof");
-                        agent_doc_ops_log_io::log_op(
-                            file,
-                            &format!(
-                                "auto_complete_ops_proof file={} id={} surface={} evidence={}",
-                                file.display(),
-                                item.id,
-                                surface_label,
-                                evidence
-                            ),
-                        );
+                        if options.persist {
+                            agent_doc_ops_log_io::log_op(
+                                file,
+                                &format!(
+                                    "auto_complete_ops_proof file={} id={} surface={} evidence={}",
+                                    file.display(),
+                                    item.id,
+                                    surface_label,
+                                    evidence
+                                ),
+                            );
+                        }
                     }
-                    let _ = agent_doc_cycle_state_io::record_pending_done_ids(file, &removed_ids);
-                    let _ = agent_doc_cycle_state_io::record_reaped_pending_ids(file, &removed_ids);
-                    let _ = agent_doc_cycle_state_io::mark_pending_mutations(file);
+                    if options.persist {
+                        let _ =
+                            agent_doc_cycle_state_io::record_pending_done_ids(file, &removed_ids);
+                        let _ =
+                            agent_doc_cycle_state_io::record_reaped_pending_ids(file, &removed_ids);
+                        let _ = agent_doc_cycle_state_io::mark_pending_mutations(file);
+                    }
                     current_body = after_ops_proof_reap;
                     mutated = true;
                     removed_items.extend(ops_proof_items);
@@ -2590,7 +2647,9 @@ fn run_pending_maintenance_with_options(
                 reaped_items.len(),
                 removed_ids.join(", ")
             );
-            let _ = agent_doc_cycle_state_io::record_reaped_pending_ids(file, &removed_ids);
+            if options.persist {
+                let _ = agent_doc_cycle_state_io::record_reaped_pending_ids(file, &removed_ids);
+            }
             current_body = after_reap;
             mutated = true;
         }
@@ -2630,12 +2689,12 @@ fn run_pending_maintenance_with_options(
                     snapshot_mutated = true;
                 }
                 if !removed_items.is_empty()
-                    && let Some(archived) =
-                        agent_doc_element_backlog_io::done_archive::archive_pending_done(
-                            file,
-                            snap_content,
-                            &removed_items,
-                        )?
+                    && let Some(archived) = archive_pending_done_for_maintenance(
+                        file,
+                        snap_content,
+                        &removed_items,
+                        options.persist,
+                    )?
                 {
                     *snap_content = archived;
                     snapshot_mutated = true;
@@ -2655,32 +2714,27 @@ fn run_pending_maintenance_with_options(
 
         current_content = comp.replace_content(&current_content, &current_body);
         if !removed_items.is_empty()
-            && let Some(archived) =
-                agent_doc_element_backlog_io::done_archive::archive_pending_done(
-                    file,
-                    &current_content,
-                    &removed_items,
-                )?
+            && let Some(archived) = archive_pending_done_for_maintenance(
+                file,
+                &current_content,
+                &removed_items,
+                options.persist,
+            )?
         {
             current_content = archived;
         }
     }
 
-    if let Some(archived) = agent_doc_element_backlog_io::done_archive::archive_pending_done(
-        file,
-        &current_content,
-        &[],
-    )? && archived != current_content
+    if let Some(archived) =
+        archive_pending_done_for_maintenance(file, &current_content, &[], options.persist)?
+        && archived != current_content
     {
         current_content = archived;
         mutated = true;
     }
     if let Some(ref mut snap_content) = snapshot_content
-        && let Some(archived) = agent_doc_element_backlog_io::done_archive::archive_pending_done(
-            file,
-            snap_content,
-            &[],
-        )?
+        && let Some(archived) =
+            archive_pending_done_for_maintenance(file, snap_content, &[], options.persist)?
         && archived != *snap_content
     {
         *snap_content = archived;
@@ -2710,14 +2764,16 @@ fn run_pending_maintenance_with_options(
                     eprintln!(
                         "[preflight] todo: closed [#{id}]: its tracked work is resolved (#managedlistnodrift)"
                     );
-                    agent_doc_ops_log_io::log_op(
-                        file,
-                        &format!(
-                            "todo_auto_done file={} id={} basis=linked_work_resolved source=preflight_projection",
-                            file.display(),
-                            id
-                        ),
-                    );
+                    if options.persist {
+                        agent_doc_ops_log_io::log_op(
+                            file,
+                            &format!(
+                                "todo_auto_done file={} id={} basis=linked_work_resolved source=preflight_projection",
+                                file.display(),
+                                id
+                            ),
+                        );
+                    }
                 }
                 current_content = projected;
                 mutated = true;
@@ -2901,7 +2957,7 @@ fn run_pending_maintenance_with_options(
     //    independently of the file write so a write-phase pending mutation that
     //    only diverged the snapshot (gate/edit/review-add) is still committed
     //    rather than stranded (#pending-gate-snapshot-desync).
-    if mutated {
+    if mutated && options.persist {
         // `#fcc0`: converge the reconciled document through the editor IPC when a
         // live JB listener is active so per-cycle pending maintenance never raises a
         // `File Cache Conflict`; `content` is the pre-maintenance on-disk baseline.
@@ -3031,7 +3087,8 @@ fn run_pending_maintenance_with_options(
             }
         }
     }
-    if (mutated || snapshot_mutated)
+    if options.persist
+        && (mutated || snapshot_mutated)
         && let Some(snap_content) = &snapshot_content
         && let Err(e) = agent_doc_snapshot_io::checkpoint_document_baseline(
             file,
@@ -3042,7 +3099,7 @@ fn run_pending_maintenance_with_options(
         eprintln!("[preflight] pending: snapshot sync warning: {}", e);
     }
 
-    if saw_completed_before && !maintenance_deferred {
+    if options.persist && saw_completed_before && !maintenance_deferred {
         let persisted_content = if mutated {
             current_content.clone()
         } else {
@@ -20079,6 +20136,53 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
         assert_eq!(
             snapshot_after, content,
             "deferred status clear must not desync the snapshot from the file"
+        );
+    }
+
+    #[test]
+    fn pending_maintenance_inspection_has_no_persistence_side_effects() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let archive = dir.path().join("session.done.md");
+        let content = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [x] [#done1] Completed item\n",
+            "- legacy item without bookkeeping\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:done archive=\"session.done.md\" -->\n",
+            "<!-- /agent:done -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        let effects = GuardFailingPreflightMaintenanceWriteEffects::default();
+        let ops = dir.path().join(".agent-doc/logs/ops.log");
+        let ops_before = std::fs::read_to_string(&ops).unwrap_or_default();
+
+        inspect_pending_maintenance(&doc, &effects).unwrap();
+
+        assert_eq!(effects.authority_checks.get(), 0);
+        assert_eq!(effects.converge_calls.get(), 0);
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), content);
+        assert_eq!(
+            agent_doc_snapshot_io::load_document_baseline(&doc)
+                .unwrap()
+                .unwrap(),
+            content
+        );
+        assert!(
+            !archive.exists(),
+            "pure admission inspection must not append an external done archive"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&ops).unwrap_or_default(),
+            ops_before,
+            "pure admission inspection must not publish durable maintenance evidence"
         );
     }
 

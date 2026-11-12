@@ -114,7 +114,7 @@
 //!   returns `Some(path)` when `.agent-doc/` exists.
 
 use anyhow::{Context, Result};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use agent_doc_preflight_io::{
@@ -131,6 +131,19 @@ use agent_doc_session_accretion::SessionAccretionReport;
 
 const TEST_BACKGROUND_QUEUE_MAINTENANCE_DELAY_MS_ENV: &str =
     "AGENT_DOC_TEST_BACKGROUND_QUEUE_MAINTENANCE_DELAY_MS";
+const TEST_BACKGROUND_PENDING_MAINTENANCE_DELAY_MS_ENV: &str =
+    "AGENT_DOC_TEST_BACKGROUND_PENDING_MAINTENANCE_DELAY_MS";
+const BACKGROUND_QUEUE_MAINTENANCE_TOKEN_ENV: &str = "AGENT_DOC_BACKGROUND_QUEUE_MAINTENANCE_TOKEN";
+
+fn new_background_queue_maintenance_token() -> String {
+    static SEQUENCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let sequence = SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    format!("{}-{nanos}-{sequence}", std::process::id())
+}
 
 /// Dispatch comprehensive queue reconciliation outside the admission process.
 ///
@@ -140,9 +153,23 @@ const TEST_BACKGROUND_QUEUE_MAINTENANCE_DELAY_MS_ENV: &str =
 /// controller's launch policy also keeps embedded/plugin callers from trying to
 /// execute their host process as `agent-doc`.
 pub fn spawn_background_queue_maintenance(file: &Path, commit_if_mutated: bool) -> Result<u32> {
-    if let Some(holder_pid) =
-        agent_doc_queue_io::queue_edit_owner::foreign_queue_edit_in_flight(&file.to_string_lossy())
+    let binary = agent_doc_controller_io::project_controller::current_binary_identity()?.path;
+    let token = new_background_queue_maintenance_token();
+    // Claim before process creation. Concurrent admissions race in one SQLite
+    // statement, so only the winner launches a child at all. The unique token
+    // fences PID reuse and is passed to the child for atomic adoption.
+    if !agent_doc_queue_io::queue_edit_owner::try_reserve_queue_edit_owner(
+        &file.to_string_lossy(),
+        &token,
+        std::process::id(),
+    )
+    .context("failed to reserve background queue maintenance ownership")?
     {
+        let holder_pid = agent_doc_queue_io::queue_edit_owner::read_queue_edit_owner_lease(
+            &file.to_string_lossy(),
+        )
+        .map(|lease| lease.holder_pid)
+        .unwrap_or_default();
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
@@ -152,32 +179,28 @@ pub fn spawn_background_queue_maintenance(file: &Path, commit_if_mutated: bool) 
         );
         return Ok(holder_pid);
     }
-    let binary = agent_doc_controller_io::project_controller::current_binary_identity()?.path;
     let mut command = Command::new(&binary);
     command
         .arg("preflight")
         .arg(file)
-        .arg("--queue-maintenance-only");
+        .arg("--queue-maintenance-only")
+        .env(BACKGROUND_QUEUE_MAINTENANCE_TOKEN_ENV, &token);
     if commit_if_mutated {
         command.arg("--commit-queue-maintenance");
     }
-    let pid = spawn_detached_queue_effect(&mut command).map_err(|error| {
-        anyhow::anyhow!(
-            "failed to launch background queue maintenance with {}: {error}",
-            binary.display()
-        )
-    })?;
-    // Publish ownership synchronously with dispatch. A closeout that starts
-    // before the child reaches its entrypoint must still see comprehensive
-    // maintenance as unsettled instead of terminally accepting an unprojected
-    // queue cut.
-    agent_doc_queue_io::queue_edit_owner::refresh_queue_edit_owner_lease(
-        &file.to_string_lossy(),
-        pid,
-    )
-    .with_context(|| {
-        format!("failed to publish background queue maintenance ownership for pid {pid}")
-    })?;
+    let pid = match spawn_detached_queue_effect(&mut command) {
+        Ok(pid) => pid,
+        Err(error) => {
+            agent_doc_queue_io::queue_edit_owner::clear_queue_edit_owner_lease_if_holder(
+                &file.to_string_lossy(),
+                &token,
+            );
+            return Err(anyhow::anyhow!(
+                "failed to launch background queue maintenance with {}: {error}",
+                binary.display()
+            ));
+        }
+    };
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
@@ -226,16 +249,23 @@ fn detach_queue_effect(command: &mut Command) {
 fn detach_queue_effect(_command: &mut Command) {}
 
 struct BackgroundQueueMaintenanceLease {
+    file: PathBuf,
+    token: String,
     stop: Option<std::sync::mpsc::Sender<()>>,
     heartbeat: Option<std::thread::JoinHandle<()>>,
     _guard: agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
 }
 
 impl BackgroundQueueMaintenanceLease {
-    fn acquire(file: &Path) -> Self {
-        let guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(file);
+    fn adopt_reserved(file: &Path, token: &str) -> Result<Option<Self>> {
+        let Some(guard) =
+            agent_doc_queue_io::queue_edit_owner::QueueEditGuard::adopt_reserved(file, token)?
+        else {
+            return Ok(None);
+        };
         let file = file.to_path_buf();
         let heartbeat_file = file.clone();
+        let heartbeat_token = token.to_string();
         let (stop, stopped) = std::sync::mpsc::channel();
         let heartbeat = match std::thread::Builder::new()
             .name("queue-maintenance-lease-heartbeat".to_string())
@@ -243,19 +273,26 @@ impl BackgroundQueueMaintenanceLease {
                 match stopped.recv_timeout(std::time::Duration::from_secs(5)) {
                     Ok(()) | Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
                     Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-                        if let Err(error) =
-                            agent_doc_queue_io::queue_edit_owner::refresh_queue_edit_owner_lease(
-                                &heartbeat_file.to_string_lossy(),
-                                std::process::id(),
-                            )
-                        {
-                            agent_doc_ops_log_io::log_op(
+                        match agent_doc_queue_io::queue_edit_owner::refresh_queue_edit_owner_lease_if_holder(
+                            &heartbeat_file.to_string_lossy(),
+                            &heartbeat_token,
+                            std::process::id(),
+                        ) {
+                            Err(error) => agent_doc_ops_log_io::log_op(
                                 &heartbeat_file,
                                 &format!(
                                     "queue_maintenance_background_lease_refresh_failed file={} error={error:#}",
                                     heartbeat_file.display(),
                                 ),
-                            );
+                            ),
+                            Ok(false) => agent_doc_ops_log_io::log_op(
+                                &heartbeat_file,
+                                &format!(
+                                    "queue_maintenance_background_lease_lost file={} token={heartbeat_token}",
+                                    heartbeat_file.display(),
+                                ),
+                            ),
+                            Ok(true) => {}
                         }
                     }
                 }
@@ -272,11 +309,21 @@ impl BackgroundQueueMaintenanceLease {
                 None
             }
         };
-        Self {
+        Ok(Some(Self {
+            file,
+            token: token.to_string(),
             stop: heartbeat.as_ref().map(|_| stop),
             heartbeat,
             _guard: guard,
-        }
+        }))
+    }
+
+    fn refresh_owned(&self) -> Result<bool> {
+        agent_doc_queue_io::queue_edit_owner::refresh_queue_edit_owner_lease_if_holder(
+            &self.file.to_string_lossy(),
+            &self.token,
+            std::process::id(),
+        )
     }
 }
 
@@ -297,19 +344,78 @@ impl Drop for BackgroundQueueMaintenanceLease {
 /// maintenance implementation, so moving the effect off the admission lane
 /// does not introduce a disk-authority escape hatch.
 pub fn run_background_queue_maintenance(file: &Path, commit_if_mutated: bool) -> Result<()> {
-    if let Some(holder_pid) =
-        agent_doc_queue_io::queue_edit_owner::foreign_queue_edit_in_flight(&file.to_string_lossy())
+    let token = if cfg!(test) {
+        // Unit tests invoke the worker body directly instead of going through
+        // `spawn_background_queue_maintenance`, so reserve the test process as
+        // the worker owner before exercising the same adoption path.
+        let token = new_background_queue_maintenance_token();
+        let _ = agent_doc_queue_io::queue_edit_owner::try_reserve_queue_edit_owner(
+            &file.to_string_lossy(),
+            &token,
+            std::process::id(),
+        )?;
+        token
+    } else {
+        std::env::var(BACKGROUND_QUEUE_MAINTENANCE_TOKEN_ENV)
+            .context("background queue maintenance reservation token is missing")?
+    };
+    let Some(queue_mutation) = BackgroundQueueMaintenanceLease::adopt_reserved(file, &token)?
+    else {
+        let holder_pid = agent_doc_queue_io::queue_edit_owner::read_queue_edit_owner_lease(
+            &file.to_string_lossy(),
+        )
+        .map(|lease| lease.holder_pid)
+        .unwrap_or_default();
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "queue_maintenance_background_reservation_not_owned file={} child_pid={} holder_pid={holder_pid}",
+                file.display(),
+                std::process::id(),
+            ),
+        );
+        return Ok(());
+    };
+    if let Some(delay) = std::env::var(TEST_BACKGROUND_PENDING_MAINTENANCE_DELAY_MS_ENV)
+        .ok()
+        .and_then(|raw| raw.trim().parse::<u64>().ok())
+        .filter(|delay| *delay > 0)
     {
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
-                "queue_maintenance_background_coalesced file={} holder_pid={holder_pid}",
+                "pending_maintenance_background_test_delay file={} delay_ms={delay}",
                 file.display(),
+            ),
+        );
+        std::thread::sleep(std::time::Duration::from_millis(delay));
+    }
+    if !queue_mutation.refresh_owned()? {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "queue_maintenance_background_reservation_lost file={} child_pid={}",
+                file.display(),
+                std::process::id(),
             ),
         );
         return Ok(());
     }
-    let _queue_mutation = BackgroundQueueMaintenanceLease::acquire(file);
+    let pending_report = agent_doc_preflight_io::run_pending_maintenance(
+        file,
+        &PREFLIGHT_MAINTENANCE_WRITE_EFFECTS,
+    )?;
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "pending_maintenance_background_completed file={} reordered={} backlog_gated={} review_count={} todo_signals={}",
+            file.display(),
+            pending_report.reordered,
+            pending_report.backlog_gated_count,
+            pending_report.review_count,
+            pending_report.todo_signals.len(),
+        ),
+    );
     if let Some(delay) = std::env::var(TEST_BACKGROUND_QUEUE_MAINTENANCE_DELAY_MS_ENV)
         .ok()
         .and_then(|raw| raw.trim().parse::<u64>().ok())
@@ -324,6 +430,17 @@ pub fn run_background_queue_maintenance(file: &Path, commit_if_mutated: bool) ->
         );
         std::thread::sleep(std::time::Duration::from_millis(delay));
     }
+    if !queue_mutation.refresh_owned()? {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "queue_maintenance_background_reservation_lost file={} child_pid={}",
+                file.display(),
+                std::process::id(),
+            ),
+        );
+        return Ok(());
+    }
     let outcome = agent_doc_preflight_io::run_queue_maintenance(file, None);
     match outcome {
         Ok(state) => {
@@ -332,7 +449,7 @@ pub fn run_background_queue_maintenance(file: &Path, commit_if_mutated: bool) ->
                 &state.mirrored_queue_ids,
                 "background_queue_maintenance",
             );
-            let committed = match commit_if_mutated && state.maintenance_mutated {
+            let committed = match commit_if_mutated {
                 true => match agent_doc_commit_io::commit(file) {
                     Ok(committed) => committed,
                     Err(error) => {

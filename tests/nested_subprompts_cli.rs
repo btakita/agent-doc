@@ -6,6 +6,7 @@
 
 use std::fs;
 use std::process::Command;
+use std::time::{Duration, Instant};
 
 /// `#integrationtesttargets`: these commands reach the project controller,
 /// which they launch as production does.
@@ -132,6 +133,39 @@ fn preflight_json(dir: &std::path::Path, doc: &std::path::Path) -> serde_json::V
     })
 }
 
+/// `agent:loop` is a scheduled runnable list. This tree-shape test is about an
+/// open pass, so admit the fixture through the production scheduler and wait on
+/// the public read-only schedule contract before asserting its queue plan. An
+/// unopened or not-yet-admitted window correctly holds every loop head.
+fn wait_for_loop_window(dir: &std::path::Path, doc: &std::path::Path) {
+    agent_doc_controller_io::queue_scheduler::start_queue_scheduler(dir).unwrap();
+    let _ = agent_doc_controller_io::queue_scheduler::note_document_changed(doc).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let output = run_agent_doc(dir, &["queue", "schedule", doc.to_str().unwrap(), "--json"]);
+        if output.status.success()
+            && serde_json::from_slice::<serde_json::Value>(&output.stdout)
+                .ok()
+                .and_then(|report| {
+                    report
+                        .get("window_open")
+                        .and_then(serde_json::Value::as_bool)
+                })
+                == Some(true)
+        {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "loop schedule did not open its first pass: status={} stdout={} stderr={}",
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
 fn string_list(state: &serde_json::Value, key: &str) -> Vec<String> {
     state
         .get(key)
@@ -221,6 +255,9 @@ fn only_nested_leaves_run_in_every_runnable_list_spelling() {
     for kind in ["run", "queue", "loop"] {
         let dir = tempfile::tempdir().unwrap();
         let doc = committed_session(dir.path(), kind, &live_rows());
+        if kind == "loop" {
+            wait_for_loop_window(dir.path(), &doc);
+        }
         let state = preflight_json(dir.path(), &doc);
 
         let prompts = string_list(&state, "queue_prompts");
@@ -252,12 +289,11 @@ fn only_nested_leaves_run_in_every_runnable_list_spelling() {
                 "{kind}: every leaf is independently dispatchable: {dispatch:#?}"
             );
         }
-        assert_eq!(
+        assert!(
             dispatch_work
                 .iter()
                 .any(|item| item == "separate flat head"),
-            kind != "loop",
-            "{kind}: the flat sibling follows the component policy: {dispatch:#?}"
+            "{kind}: the flat sibling is independently dispatchable: {dispatch:#?}"
         );
 
         // Tracked checklist rows keep their children in the item, never in the

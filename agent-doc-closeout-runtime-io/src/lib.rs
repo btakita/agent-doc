@@ -385,7 +385,131 @@ pub struct RuntimeReadOnlySessionCheckEffects;
 /// Session recovery owned by one already-held document apply transaction.
 pub struct RuntimeApplyingSessionCheckEffects<'a> {
     apply_guard: &'a agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
-    closeout_owner_already_held: bool,
+    outer_closeout_fence: Option<&'a VerifiedCloseoutOwnerFence>,
+}
+
+/// Controller-verified proof that one exact closeout owner was acquired.
+///
+/// Fields are private and construction reclaims the exact owner through the
+/// controller, so callers cannot manufacture the old boolean "owner held"
+/// bypass. The token observes the owner's heartbeat loss flag and every effect
+/// fence also reclaims that same owner without takeover; either an answered
+/// loss or a superseding cycle therefore invalidates it.
+pub struct VerifiedCloseoutOwnerFence {
+    file: std::path::PathBuf,
+    cycle_id: String,
+    owner_id: Option<String>,
+    owner_pid: u32,
+    role: String,
+    lease_secs: u64,
+    lease_lost: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl VerifiedCloseoutOwnerFence {
+    pub fn verify(
+        file: &Path,
+        cycle_id: &str,
+        owner_id: Option<&str>,
+        owner_pid: u32,
+        role: &str,
+        lease_secs: u64,
+        lease_lost: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    ) -> Result<Self> {
+        use agent_doc_controller_io::project_controller as controller;
+
+        if agent_doc_project_root_io::project_root_containing(file).is_none() {
+            anyhow::ensure!(
+                owner_id.is_none(),
+                "actorless closeout fence for {} unexpectedly carried owner identity",
+                file.display()
+            );
+            return Ok(Self {
+                file: file.to_path_buf(),
+                cycle_id: cycle_id.to_string(),
+                owner_id: None,
+                owner_pid,
+                role: role.to_string(),
+                lease_secs,
+                lease_lost,
+            });
+        }
+        let owner_id = owner_id.context("tracked closeout fence requires an acquired owner id")?;
+        let outcome = controller::claim_closeout_owner_for_file(
+            file,
+            controller::CloseoutOwnerClaimRequest {
+                expected_cycle_id: Some(cycle_id.to_string()),
+                owner_id: owner_id.to_string(),
+                owner_pid,
+                role: role.to_string(),
+                now_secs: current_epoch_secs(),
+                lease_secs,
+                allow_dead_owner_takeover: false,
+            },
+        )?;
+        anyhow::ensure!(
+            matches!(
+                outcome,
+                controller::CloseoutOwnerClaimOutcome::Acquired(ref owner)
+                    if owner.cycle_id == cycle_id && owner.owner_id == owner_id
+            ),
+            "cannot verify closeout owner fence for {} cycle {} owner {}: {outcome:?}",
+            file.display(),
+            cycle_id,
+            owner_id,
+        );
+        Ok(Self {
+            file: file.to_path_buf(),
+            cycle_id: cycle_id.to_string(),
+            owner_id: Some(owner_id.to_string()),
+            owner_pid,
+            role: role.to_string(),
+            lease_secs,
+            lease_lost,
+        })
+    }
+
+    pub fn ensure_still_held(&self) -> Result<()> {
+        if std::env::var("AGENT_DOC_TEST_CAPTURED_RESUME_FORCE_LEASE_LOST_FILE")
+            .ok()
+            .is_some_and(|target| Path::new(&target) == self.file)
+        {
+            self.lease_lost
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+        anyhow::ensure!(
+            !self.lease_lost.load(std::sync::atomic::Ordering::SeqCst),
+            "closeout owner lease for cycle {} owner {} was lost before the next durable effect",
+            self.cycle_id,
+            self.owner_id.as_deref().unwrap_or("actorless"),
+        );
+        let Some(owner_id) = self.owner_id.as_deref() else {
+            return Ok(());
+        };
+        use agent_doc_controller_io::project_controller as controller;
+        let outcome = controller::claim_closeout_owner_for_file(
+            &self.file,
+            controller::CloseoutOwnerClaimRequest {
+                expected_cycle_id: Some(self.cycle_id.clone()),
+                owner_id: owner_id.to_string(),
+                owner_pid: self.owner_pid,
+                role: self.role.clone(),
+                now_secs: current_epoch_secs(),
+                lease_secs: self.lease_secs,
+                allow_dead_owner_takeover: false,
+            },
+        )?;
+        anyhow::ensure!(
+            matches!(
+                outcome,
+                controller::CloseoutOwnerClaimOutcome::Acquired(ref owner)
+                    if owner.cycle_id == self.cycle_id && owner.owner_id == owner_id
+            ),
+            "closeout owner lease for cycle {} owner {} was lost before the next durable effect: {outcome:?}",
+            self.cycle_id,
+            owner_id,
+        );
+        Ok(())
+    }
 }
 
 /// Closed transition identities emitted while resuming one durable captured
@@ -612,7 +736,7 @@ pub fn session_check_effects_under_apply_guard<'a>(
     apply_guard.ensure_protects(file)?;
     Ok(RuntimeApplyingSessionCheckEffects {
         apply_guard,
-        closeout_owner_already_held: false,
+        outer_closeout_fence: None,
     })
 }
 
@@ -626,11 +750,13 @@ pub fn session_check_effects_under_apply_guard<'a>(
 pub fn session_check_effects_under_apply_guard_and_closeout_owner<'a>(
     file: &Path,
     apply_guard: &'a agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
+    outer_closeout_fence: &'a VerifiedCloseoutOwnerFence,
 ) -> Result<RuntimeApplyingSessionCheckEffects<'a>> {
     apply_guard.ensure_protects(file)?;
+    outer_closeout_fence.ensure_still_held()?;
     Ok(RuntimeApplyingSessionCheckEffects {
         apply_guard,
-        closeout_owner_already_held: true,
+        outer_closeout_fence: Some(outer_closeout_fence),
     })
 }
 
@@ -795,6 +921,42 @@ impl agent_doc_session_check_io::SessionCheckEffects for RuntimeReadOnlySessionC
             agent_doc_document_realtime_io::RetainedWriteCycleBoundary::SessionCheck.gate_source(),
         )
     }
+}
+
+impl RuntimeApplyingSessionCheckEffects<'_> {
+    fn ensure_outer_closeout_fence(&self) -> Result<()> {
+        if let Some(fence) = self.outer_closeout_fence {
+            fence.ensure_still_held()?;
+        }
+        Ok(())
+    }
+}
+
+fn maybe_pause_captured_resume_session_before_commit(
+    file: &Path,
+    outer_closeout_fence: Option<&VerifiedCloseoutOwnerFence>,
+) -> Result<()> {
+    if outer_closeout_fence.is_none()
+        || std::env::var("AGENT_DOC_TEST_CAPTURED_RESUME_SESSION_BEFORE_COMMIT_FILE")
+            .ok()
+            .is_none_or(|target| Path::new(&target) != file)
+    {
+        return Ok(());
+    }
+    let marker = std::env::var("AGENT_DOC_TEST_CAPTURED_RESUME_SESSION_BEFORE_COMMIT_MARKER")
+        .context("captured-resume session-commit barrier requires a marker path")?;
+    let release = std::env::var("AGENT_DOC_TEST_CAPTURED_RESUME_SESSION_BEFORE_COMMIT_RELEASE")
+        .context("captured-resume session-commit barrier requires a release path")?;
+    std::fs::write(&marker, b"ready")?;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    while !Path::new(&release).exists() {
+        anyhow::ensure!(
+            std::time::Instant::now() < deadline,
+            "timed out waiting for captured-resume session-commit barrier release"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    Ok(())
 }
 
 impl agent_doc_session_check_io::SessionCheckEffects for RuntimeApplyingSessionCheckEffects<'_> {
@@ -1115,6 +1277,8 @@ impl agent_doc_session_check_io::SessionCheckEffects for RuntimeApplyingSessionC
         use agent_doc_session_check_io::CapturedFinalizeResumeOutcome as Outcome;
         use agent_doc_turn::CyclePhase;
 
+        self.ensure_outer_closeout_fence()?;
+
         let Some(mut state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
             return Ok(Outcome::NotApplicable);
         };
@@ -1130,12 +1294,17 @@ impl agent_doc_session_check_io::SessionCheckEffects for RuntimeApplyingSessionC
                     "session_check_reactivated_false_stale_capture_retirement",
                 ));
         if false_stale_reactivation_cycle
-            && let (Some(capture_id), Some(response_sha256)) =
-                (state.capture_id.as_deref(), state.response_sha256.as_deref())
-            && let Some(capture) = agent_doc_cycle_state_io::load_projected_captured_response(file, capture_id)?
+            && let (Some(capture_id), Some(response_sha256)) = (
+                state.capture_id.as_deref(),
+                state.response_sha256.as_deref(),
+            )
+            && let Some(capture) =
+                agent_doc_cycle_state_io::load_projected_captured_response(file, capture_id)?
             && capture.cycle_id == state.cycle_id
             && capture.response_sha256 == response_sha256
-            && agent_doc_document_realtime_io::settle_retained_captured_projection_through_authority(
+            && {
+                self.ensure_outer_closeout_fence()?;
+                agent_doc_document_realtime_io::settle_retained_captured_projection_through_authority(
                         file,
                         agent_doc_turn::response_replay::retained_response_materialization_body(
                             &capture.response_body,
@@ -1143,14 +1312,16 @@ impl agent_doc_session_check_io::SessionCheckEffects for RuntimeApplyingSessionC
                         ),
                         CapturedFinalizeSource::FalseStaleRetirementSettlement.as_str(),
                     )?
-            {
-                let cycle_reactivated =
-                    agent_doc_cycle_state_io::reactivate_false_stale_capture_retirement(
-                file,
-                capture_id,
-                response_sha256,
-            )?;
-                if !cycle_reactivated {
+            }
+        {
+            self.ensure_outer_closeout_fence()?;
+            let cycle_reactivated =
+                agent_doc_cycle_state_io::reactivate_false_stale_capture_retirement(
+                    file,
+                    capture_id,
+                    response_sha256,
+                )?;
+            if !cycle_reactivated {
                 return Ok(Outcome::Retained {
                     reason: "false-stale capture reactivation remains partially applied"
                         .to_string(),
@@ -1160,7 +1331,7 @@ impl agent_doc_session_check_io::SessionCheckEffects for RuntimeApplyingSessionC
             else {
                 return Ok(Outcome::Retained {
                     reason: "false-stale capture reactivation lost its cycle projection"
-                    .to_string(),
+                        .to_string(),
                 });
             };
             if reactivated.phase != CyclePhase::ResponseCaptured
@@ -1220,6 +1391,7 @@ impl agent_doc_session_check_io::SessionCheckEffects for RuntimeApplyingSessionC
             ) {
                 return Ok(Outcome::NotApplicable);
             }
+            self.ensure_outer_closeout_fence()?;
             return match agent_doc_document_realtime_io::settle_retained_captured_projection_through_authority(
                 file,
                 materialization_body,
@@ -1242,7 +1414,8 @@ impl agent_doc_session_check_io::SessionCheckEffects for RuntimeApplyingSessionC
         ) {
             return Ok(Outcome::NotApplicable);
         }
-        let _closeout_owner = if self.closeout_owner_already_held {
+        let _closeout_owner = if self.outer_closeout_fence.is_some() {
+            self.ensure_outer_closeout_fence()?;
             None
         } else {
             match claim_recovery_closeout_owner(file, &state.cycle_id)? {
@@ -1302,6 +1475,7 @@ impl agent_doc_session_check_io::SessionCheckEffects for RuntimeApplyingSessionC
         let has_retained_delivery =
             agent_doc_document_realtime_io::pending_document_write(file).is_some();
         if has_retained_delivery {
+            self.ensure_outer_closeout_fence()?;
             let settled = match agent_doc_document_realtime_io::settle_retained_captured_projection_through_authority(
                 file,
                 materialization_body,
@@ -1335,6 +1509,7 @@ impl agent_doc_session_check_io::SessionCheckEffects for RuntimeApplyingSessionC
                     &current,
                 );
             if current != disk || !response_materialized {
+                self.ensure_outer_closeout_fence()?;
                 match agent_doc_document_realtime_io::
                     settle_projected_captured_response_through_authority(
                         file,
@@ -1374,6 +1549,7 @@ impl agent_doc_session_check_io::SessionCheckEffects for RuntimeApplyingSessionC
             match decision {
                 agent_doc_turn::closeout_recovery::WriteAppliedReconciliationDecision::AlreadyProjected => {}
                 agent_doc_turn::closeout_recovery::WriteAppliedReconciliationDecision::PromoteCycleProjection => {
+                    self.ensure_outer_closeout_fence()?;
                     agent_doc_cycle_state_io::mark_write_applied(
                         file,
                         "session_check_capture_write_applied_reconciled",
@@ -1418,6 +1594,7 @@ impl agent_doc_session_check_io::SessionCheckEffects for RuntimeApplyingSessionC
             return Ok(Outcome::Superseded);
         }
 
+        self.ensure_outer_closeout_fence()?;
         if let Err(err) = agent_doc_repair_io::pending::clear_pending(file) {
             return Ok(Outcome::Retained {
                 reason: format!("failed to advance the durable capture to write-applied: {err:#}"),
@@ -1456,6 +1633,7 @@ impl agent_doc_session_check_io::SessionCheckEffects for RuntimeApplyingSessionC
                     .to_string(),
             });
         }
+        self.ensure_outer_closeout_fence()?;
         if let Err(err) = agent_doc_snapshot_io::checkpoint_document_baseline(
             file,
             &current,
@@ -1466,6 +1644,10 @@ impl agent_doc_session_check_io::SessionCheckEffects for RuntimeApplyingSessionC
             });
         }
         if state.phase == CyclePhase::ResponseCaptured
+            && {
+                self.ensure_outer_closeout_fence()?;
+                true
+            }
             && let Err(err) = agent_doc_cycle_state_io::mark_write_applied(
                 file,
                 "session_check_retained_capture_write_applied",
@@ -1479,6 +1661,8 @@ impl agent_doc_session_check_io::SessionCheckEffects for RuntimeApplyingSessionC
         }
         let controller_owned_commit =
             agent_doc_document_realtime_io::live_editor_endpoint_attached_for_file(file);
+        maybe_pause_captured_resume_session_before_commit(file, self.outer_closeout_fence)?;
+        self.ensure_outer_closeout_fence()?;
         if let Err(err) = agent_doc_commit_io::commit(file) {
             return Ok(Outcome::Retained {
                 reason: format!("same-capture commit remains retryable: {err:#}"),

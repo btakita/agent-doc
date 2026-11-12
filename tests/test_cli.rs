@@ -14216,7 +14216,18 @@ fn test_agent_doc_session_check_io_owns_guard_adapters() {
         fs::read_to_string(manifest_dir.join("agent-doc-repair-command-io/src/lib.rs")).unwrap();
     assert!(
         write_runtime.contains("pub fn applying_session_check_effects")
-            && repair_command.contains("closeout_lease.applying_session_check_effects"),
+            && repair_command.contains("closeout_lease.applying_session_check_effects")
+            && closeout_runtime.contains("pub struct VerifiedCloseoutOwnerFence")
+            && closeout_runtime
+                .contains("outer_closeout_fence: Option<&'a VerifiedCloseoutOwnerFence>")
+            && closeout_runtime
+                .contains("lease_lost: std::sync::Arc<std::sync::atomic::AtomicBool>")
+            && write_runtime.contains("closeout_lease.fence()")
+            && write_runtime.contains("guard.lease_lost.clone()")
+            && write_runtime.contains(
+                "ensure_active_closeout_fence(_closeout_owner.as_ref(), outer_closeout_fence)?;"
+            )
+            && !closeout_runtime.contains("closeout_owner_already_held"),
         "captured-finalize session recovery must carry the typed closeout lease through the nested applying adapter instead of reverse-claiming a second owner"
     );
     let session_check_command =

@@ -748,6 +748,9 @@ fn resume_legacy_retained_delivery(
     if captured_finalize_resume_key_from_capture(&resolved.capture).as_ref() != Some(expected) {
         return CapturedFinalizeResumeOutcome::Superseded;
     }
+    if let Err(err) = closeout_lease.ensure_still_held() {
+        return classify_captured_finalize_resume_error(&format!("{err:#}"));
+    }
     match agent_doc_document_realtime_io::settle_retained_captured_projection_through_authority_if_matches(
         file,
         &resolved.capture.response_body,

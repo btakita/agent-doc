@@ -650,6 +650,17 @@ fn ensure_closeout_lease_still_held(owner: Option<&CloseoutOwnerGuard>) -> Resul
     Ok(())
 }
 
+fn ensure_active_closeout_fence(
+    owner: Option<&CloseoutOwnerGuard>,
+    outer_fence: Option<&agent_doc_closeout_runtime_io::VerifiedCloseoutOwnerFence>,
+) -> Result<()> {
+    ensure_closeout_lease_still_held(owner)?;
+    if let Some(fence) = outer_fence {
+        fence.ensure_still_held()?;
+    }
+    Ok(())
+}
+
 /// `#netadv3` F4: one owner id per (process, thread, role).
 ///
 /// The id used to be minted per claim, so a claim whose reply was lost (or a
@@ -1028,13 +1039,19 @@ fn claim_closeout_owner(
 #[must_use = "the closeout lease is released when this value is dropped"]
 pub struct CapturedFinalizeResumeCloseoutLease {
     guard: Option<CloseoutOwnerGuard>,
+    fence: Box<agent_doc_closeout_runtime_io::VerifiedCloseoutOwnerFence>,
 }
 
 impl CapturedFinalizeResumeCloseoutLease {
     /// Refuse to continue once the heartbeat learned, from an answered
     /// refresh, that another closeout took the lease (`#netadv3` F5).
     pub fn ensure_still_held(&self) -> Result<()> {
-        ensure_closeout_lease_still_held(self.guard.as_ref())
+        ensure_closeout_lease_still_held(self.guard.as_ref())?;
+        self.fence.ensure_still_held()
+    }
+
+    fn fence(&self) -> &agent_doc_closeout_runtime_io::VerifiedCloseoutOwnerFence {
+        &self.fence
     }
 
     /// Construct the applying session-check adapter covered by this exact
@@ -1042,7 +1059,7 @@ impl CapturedFinalizeResumeCloseoutLease {
     /// prevents recovery from bypassing the lease -> apply-guard order or
     /// accidentally claiming a second recovery owner mid-transaction.
     pub fn applying_session_check_effects<'a>(
-        &self,
+        &'a self,
         file: &Path,
         apply_guard: &'a agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
     ) -> Result<agent_doc_closeout_runtime_io::RuntimeApplyingSessionCheckEffects<'a>> {
@@ -1050,6 +1067,7 @@ impl CapturedFinalizeResumeCloseoutLease {
         agent_doc_closeout_runtime_io::session_check_effects_under_apply_guard_and_closeout_owner(
             file,
             apply_guard,
+            &self.fence,
         )
     }
 }
@@ -1080,13 +1098,33 @@ pub fn claim_captured_finalize_resume_closeout_lease(
             Some(expected_cycle_id),
         )? {
             CloseoutOwnerClaim::Held(guard) => {
+                let fence = agent_doc_closeout_runtime_io::VerifiedCloseoutOwnerFence::verify(
+                    file,
+                    &guard.cycle_id,
+                    Some(&guard.owner_id),
+                    std::process::id(),
+                    WriteCloseoutOwnerRole::CapturedFinalizeResume.as_str(),
+                    agent_doc_controller_io::project_controller::CLOSEOUT_OWNER_LEASE_SECS,
+                    guard.lease_lost.clone(),
+                )?;
                 CapturedFinalizeResumeLeaseClaim::Acquired(CapturedFinalizeResumeCloseoutLease {
                     guard: Some(guard),
+                    fence: Box::new(fence),
                 })
             }
             CloseoutOwnerClaim::Covered => {
+                let fence = agent_doc_closeout_runtime_io::VerifiedCloseoutOwnerFence::verify(
+                    file,
+                    expected_cycle_id,
+                    None,
+                    std::process::id(),
+                    WriteCloseoutOwnerRole::CapturedFinalizeResume.as_str(),
+                    agent_doc_controller_io::project_controller::CLOSEOUT_OWNER_LEASE_SECS,
+                    std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                )?;
                 CapturedFinalizeResumeLeaseClaim::Acquired(CapturedFinalizeResumeCloseoutLease {
                     guard: None,
+                    fence: Box::new(fence),
                 })
             }
             CloseoutOwnerClaim::CycleSuperseded => {
@@ -1138,7 +1176,18 @@ pub fn run_command_with_response_under_captured_finalize_resume_owners(
 ) -> Result<()> {
     closeout_lease.ensure_still_held()?;
     apply_guard.ensure_protects(&options.file)?;
-    run_command_with_response_under_apply_guard(options, commit_mode, response, apply_guard)
+    let previous = RESPONSE_STDIN_OVERRIDE.with(|slot| slot.replace(Some(response)));
+    let result = run_command_inner_under_apply_guard_and_closeout_fence(
+        options,
+        commit_mode,
+        None,
+        apply_guard,
+        closeout_lease.fence(),
+    );
+    RESPONSE_STDIN_OVERRIDE.with(|slot| {
+        slot.replace(previous);
+    });
+    result
 }
 
 /// Persist a cumulative, semantically complete response into the live document
@@ -3377,7 +3426,7 @@ fn run_command_inner(
     empty_response_recovery: Option<EmptyResponseRecovery>,
 ) -> Result<()> {
     agent_doc_document_realtime_io::with_current_document_projection_pass(|| {
-        run_command_inner_within_pass(options, commit_mode, empty_response_recovery, None)
+        run_command_inner_within_pass(options, commit_mode, empty_response_recovery, None, None)
     })
 }
 
@@ -3393,6 +3442,25 @@ fn run_command_inner_under_apply_guard(
             commit_mode,
             empty_response_recovery,
             Some(apply_guard),
+            None,
+        )
+    })
+}
+
+fn run_command_inner_under_apply_guard_and_closeout_fence(
+    options: CommandOptions,
+    commit_mode: CommitMode,
+    empty_response_recovery: Option<EmptyResponseRecovery>,
+    apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
+    closeout_fence: &agent_doc_closeout_runtime_io::VerifiedCloseoutOwnerFence,
+) -> Result<()> {
+    agent_doc_document_realtime_io::with_current_document_projection_pass(|| {
+        run_command_inner_within_pass(
+            options,
+            commit_mode,
+            empty_response_recovery,
+            Some(apply_guard),
+            Some(closeout_fence),
         )
     })
 }
@@ -3511,6 +3579,7 @@ fn run_command_inner_within_pass(
     commit_mode: CommitMode,
     empty_response_recovery: Option<EmptyResponseRecovery>,
     existing_apply_guard: Option<&agent_doc_queue_io::queue_edit_owner::QueueEditGuard>,
+    outer_closeout_fence: Option<&agent_doc_closeout_runtime_io::VerifiedCloseoutOwnerFence>,
 ) -> Result<()> {
     // `#packettodo`: own the path so the closeout may extend its own
     // `options.todo_add` with the binary-derived packet todo below.
@@ -3813,7 +3882,8 @@ fn run_command_inner_within_pass(
                 );
             }
         }
-        ensure_closeout_lease_still_held(_closeout_owner.as_ref())?;
+        maybe_pause_captured_resume_before_write_commit(file, outer_closeout_fence)?;
+        ensure_active_closeout_fence(_closeout_owner.as_ref(), outer_closeout_fence)?;
         return finalize_commit(file, commit_mode, options.force_disk, queue_apply_guard);
     }
 
@@ -4733,9 +4803,11 @@ fn run_command_inner_within_pass(
     }
 
     let commit_result = if write_result.is_ok() {
-        let primary = ensure_closeout_lease_still_held(_closeout_owner.as_ref()).and_then(|()| {
-            finalize_commit(file, commit_mode, options.force_disk, queue_apply_guard)
-        });
+        maybe_pause_captured_resume_before_write_commit(file, outer_closeout_fence)?;
+        let primary = ensure_active_closeout_fence(_closeout_owner.as_ref(), outer_closeout_fence)
+            .and_then(|()| {
+                finalize_commit(file, commit_mode, options.force_disk, queue_apply_guard)
+            });
         if primary.is_ok() && !options.commit_sibling.is_empty() {
             let pairs: Vec<(std::path::PathBuf, String)> = options
                 .commit_sibling
@@ -4743,6 +4815,7 @@ fn run_command_inner_within_pass(
                 .cloned()
                 .zip(options.commit_sibling_message.iter().cloned())
                 .collect();
+            ensure_active_closeout_fence(_closeout_owner.as_ref(), outer_closeout_fence)?;
             agent_doc_git_io::sibling::commit_siblings_for_session_doc(file, &pairs)?;
         }
         primary
@@ -4755,6 +4828,33 @@ fn run_command_inner_within_pass(
         (Ok(()), Err(commit_err)) => Err(commit_err),
         (Err(write_err), Err(commit_err)) => Err(write_err.context(commit_err.to_string())),
     }
+}
+
+fn maybe_pause_captured_resume_before_write_commit(
+    file: &Path,
+    outer_closeout_fence: Option<&agent_doc_closeout_runtime_io::VerifiedCloseoutOwnerFence>,
+) -> Result<()> {
+    if outer_closeout_fence.is_none()
+        || std::env::var("AGENT_DOC_TEST_CAPTURED_RESUME_WRITE_BEFORE_COMMIT_FILE")
+            .ok()
+            .is_none_or(|target| Path::new(&target) != file)
+    {
+        return Ok(());
+    }
+    let marker = std::env::var("AGENT_DOC_TEST_CAPTURED_RESUME_WRITE_BEFORE_COMMIT_MARKER")
+        .context("captured-resume write-commit barrier requires a marker path")?;
+    let release = std::env::var("AGENT_DOC_TEST_CAPTURED_RESUME_WRITE_BEFORE_COMMIT_RELEASE")
+        .context("captured-resume write-commit barrier requires a release path")?;
+    std::fs::write(&marker, b"ready")?;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    while !Path::new(&release).exists() {
+        anyhow::ensure!(
+            std::time::Instant::now() < deadline,
+            "timed out waiting for captured-resume write-commit barrier release"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    Ok(())
 }
 
 fn maybe_pause_closeout_transaction_after_response_write() -> Result<()> {

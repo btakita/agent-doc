@@ -369,6 +369,11 @@ pub struct ReloadLibReport {
 /// Send a typed `reload_library` intent to safe hot-reload editor members.
 pub fn reload_lib() -> Result<ReloadLibReport> {
     let version = env!("CARGO_PKG_VERSION");
+    let installed_library = std::env::current_exe()?
+        .parent()
+        .context("cannot determine agent-doc binary directory")?
+        .join(platform_lib_name());
+    validate_reload_library_matches_binary(&installed_library, INSTALLER_BUILD_ID)?;
     let fanout = agent_doc_controller_io::project_controller::reload_library_all_projects(version);
     Ok(ReloadLibReport {
         lib_version: version.to_string(),
@@ -380,6 +385,37 @@ pub fn reload_lib() -> Result<ReloadLibReport> {
         deferred_cycle_open: fanout.deferred_cycle_open,
         failures: fanout.failures,
     })
+}
+
+/// Refuse to announce a reload that cannot converge the editor with this
+/// binary. The editor intent historically carried only the release version, so
+/// a same-version binary-only install could be acknowledged while the installed
+/// cdylib still belonged to an older source generation.
+fn validate_reload_library_matches_binary(
+    installed_library: &Path,
+    binary_build_id: &str,
+) -> Result<()> {
+    if !installed_library.is_file() {
+        anyhow::bail!(
+            "[admin] reload-lib refused before sending an editor intent: installed library {} \
+             is missing. Install the binary and library together with `make install` (or run a \
+             matching `agent-doc lib-install`) before retrying.",
+            installed_library.display(),
+        );
+    }
+    if let Err(error) =
+        validate_build_identity_matches_installer(installed_library, binary_build_id)
+    {
+        anyhow::bail!(
+            "[admin] reload-lib refused before sending an editor intent: installed library {} \
+             does not match the running agent-doc binary build {binary_build_id}; an acknowledged \
+             semantic-version reload could not converge this pair. Install the binary and library \
+             together with `make install` (or run a matching `agent-doc lib-install`) before \
+             retrying. Validation detail: {error:#}",
+            installed_library.display(),
+        );
+    }
+    Ok(())
 }
 
 /// GH #94 — the exit verdict of `admin reload-lib`.
@@ -880,6 +916,33 @@ mod tests {
     }
 
     #[test]
+    fn reload_lib_refuses_binary_library_build_skew_before_fanout() {
+        let dir = tempfile::tempdir().unwrap();
+        let installed = dir.path().join(platform_lib_name());
+        std::fs::write(&installed, b"\x7fELF..0.35.573+c7cffb5616e9897f..").unwrap();
+
+        let error = validate_reload_library_matches_binary(&installed, "0.35.573+104de4120cdc9b0b")
+            .unwrap_err()
+            .to_string();
+
+        assert!(
+            error.contains("refused before sending an editor intent"),
+            "{error}"
+        );
+        assert!(error.contains("0.35.573+104de4120cdc9b0b"), "{error}");
+        assert!(error.contains("make install"), "{error}");
+    }
+
+    #[test]
+    fn reload_lib_accepts_the_running_binarys_library_build() {
+        let dir = tempfile::tempdir().unwrap();
+        let installed = dir.path().join(platform_lib_name());
+        std::fs::write(&installed, format!("\x7fELF..{INSTALLER_BUILD_ID}..")).unwrap();
+
+        validate_reload_library_matches_binary(&installed, INSTALLER_BUILD_ID).unwrap();
+    }
+
+    #[test]
     fn embedded_build_ids_finds_the_wire_identity_only() {
         let ids = embedded_build_ids(
             b"x\x000.35.419+3d7dff1545faf0b4\x00a+b 1.2+0123456789abcdef 1.2.3+0123456789abcdef0 9.9.9+0123456789ABCDEF",
@@ -919,6 +982,29 @@ mod tests {
                 builds[0].contains("scripts/with-cargo-cache")
                     || makefile.contains("CARGO_CMD ?= ./scripts/with-cargo-cache cargo"),
                 "{target} must preserve worktree-local targets while enabling optional sccache"
+            );
+            let binary_install = body
+                .iter()
+                .position(|line| line.contains("binary-install --source"))
+                .unwrap_or_else(|| panic!("{target} must install the built binary"));
+            let library_install = body
+                .iter()
+                .position(|line| line.contains("lib-install --profile"))
+                .unwrap_or_else(|| panic!("{target} must install the paired library"));
+            let skill_install = body
+                .iter()
+                .position(|line| line.contains("skill install --all"))
+                .unwrap_or_else(|| panic!("{target} must install generated skills"));
+            assert!(
+                binary_install < library_install && library_install < skill_install,
+                "{target} must install the paired library before interruptible skill/hook work: \
+                 binary={binary_install}, library={library_install}, skills={skill_install}"
+            );
+            assert!(
+                body[library_install].contains("--target-dir \"$(CARGO_INSTALL_BIN_DIR_ABS)\""),
+                "{target} must install the library beside the canonical Cargo binary, not beside \
+                 the staging executable: {}",
+                body[library_install],
             );
         }
     }

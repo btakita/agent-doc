@@ -56,6 +56,12 @@ pub fn clear_structural_effect_generation() -> Option<(u64, Arc<AtomicU64>)> {
     STRUCTURAL_EFFECT_CANCEL.with(|c| c.borrow_mut().take())
 }
 
+/// True while the controller's pane-layout worker owns this thread's
+/// structural sync effect. Standalone `agent-doc sync` calls are never bound.
+pub fn structural_effect_active() -> bool {
+    STRUCTURAL_EFFECT_CANCEL.with(|c| c.borrow().is_some())
+}
+
 /// True when the active structural effect's generation has been superseded by a
 /// newer published layout. Always false when no binding is set (standalone CLI).
 pub fn structural_effect_superseded() -> bool {
@@ -220,6 +226,7 @@ pub fn process_tree_runs_unmanaged_harness_session(root_pid: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::AtomicU64;
 
     fn tree(entries: &[(&str, &str)]) -> Vec<TreeProcess> {
         entries
@@ -282,5 +289,23 @@ mod tests {
             Some("20".to_string()),
             "an unreadable process must not shadow the real owner below it"
         );
+    }
+
+    #[test]
+    fn structural_effect_scope_distinguishes_controller_work_from_standalone_sync() {
+        assert!(!structural_effect_active());
+        assert!(!structural_effect_superseded());
+
+        let latest = Arc::new(AtomicU64::new(7));
+        set_structural_effect_generation(7, Arc::clone(&latest));
+        assert!(structural_effect_active());
+        assert!(!structural_effect_superseded());
+
+        latest.store(8, Ordering::SeqCst);
+        assert!(structural_effect_superseded());
+
+        clear_structural_effect_generation();
+        assert!(!structural_effect_active());
+        assert!(!structural_effect_superseded());
     }
 }

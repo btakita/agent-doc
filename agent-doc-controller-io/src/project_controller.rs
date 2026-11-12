@@ -1803,6 +1803,10 @@ struct PaneLayoutRouteLease {
     generation: u64,
     document: String,
     defer_all_passive: bool,
+    /// Identical overlapping manual commands share one physical intent and
+    /// therefore one generation. Retain the lease until every waiting command
+    /// guard has released it.
+    holders: usize,
     /// Cross-root routes retain their lease in the main-window owner while a
     /// different controller dispatches. The deadline is a fail-open boundary
     /// when that client disappears before sending its release RPC. Local
@@ -2062,7 +2066,25 @@ impl ControllerPaneLayoutGraph {
             self.plane_seen.fetch_max(version, Ordering::SeqCst);
             self.waiters.notify_all();
         }
-        if let Some(active_route) = &publication_state.active_route {
+        if let Some(active_route) = &mut publication_state.active_route {
+            // `#manualsynclayoutlease`: two foreground callers can publish the
+            // same command while its first effect is still in flight (for
+            // example, Run Agent Doc rebuilding a pane immediately after the
+            // operator killed it). They are one physical intent. Let the later
+            // caller join the leased generation instead of superseding it and
+            // making the first caller report `superseded_by_newer_layout_state`.
+            // Once the lease drops, a later retry still mints a fresh
+            // generation as required by the manual retry contract.
+            if publication == PaneLayoutPublication::FreshCommandIntent
+                && active_route.defer_all_passive
+                && current.as_ref().is_some_and(|current| {
+                    current.generation == active_route.generation
+                        && current.invocation == invocation
+                })
+            {
+                active_route.holders += 1;
+                return current.expect("the active command lease retains desired layout state");
+            }
             if publication == PaneLayoutPublication::CoalesceIdentical
                 && invocation.caller_kind == "automatic"
             {
@@ -2127,6 +2149,7 @@ impl ControllerPaneLayoutGraph {
                 generation: desired.generation,
                 document,
                 defer_all_passive: publication == PaneLayoutPublication::FreshCommandIntent,
+                holders: 1,
                 expires_at: None,
             });
         }
@@ -2283,11 +2306,12 @@ impl ControllerPaneLayoutGraph {
     /// held back, if one was published now.
     fn release_route_lease(&self, generation: u64) -> Option<PaneLayoutDesired> {
         let mut publication_state = self.publication_state.lock();
-        if !publication_state
+        let active_route = publication_state
             .active_route
-            .as_ref()
-            .is_some_and(|active| active.generation == generation)
-        {
+            .as_mut()
+            .filter(|active| active.generation == generation)?;
+        if active_route.holders > 1 {
+            active_route.holders -= 1;
             return None;
         }
         publication_state.active_route = None;
@@ -17316,6 +17340,72 @@ mod tests {
         let projected = graph.desired().unwrap();
         assert_eq!(projected.invocation, passive);
         assert!(projected.generation > manual.generation);
+    }
+
+    /// A pane restart can make Run Agent Doc and the editor's immediate retry
+    /// publish the same foreground command before the first effect completes.
+    /// The duplicate must join the command lease; otherwise it supersedes the
+    /// first generation and surfaces a false sync failure to the operator.
+    #[test]
+    fn identical_foreground_commands_share_the_active_generation() {
+        let scope = agent_doc_state_scope::ProcessScope::new();
+        let actors = ControllerActorGraph::new_in(&scope, BTreeMap::new());
+        let graph = ControllerPaneLayoutGraph::new_in(&scope, actors.live_bindings_handle());
+
+        let mut command = pane_layout_desired_for_test(1).invocation;
+        command.caller_kind = "manual".to_string();
+        command.no_autostart = false;
+        let first = graph.set_desired_attributed(
+            command.clone(),
+            None,
+            PaneLayoutPublication::FreshCommandIntent,
+            PaneLayoutPublisher::Command,
+        );
+        let duplicate = graph.set_desired_attributed(
+            command.clone(),
+            None,
+            PaneLayoutPublication::FreshCommandIntent,
+            PaneLayoutPublisher::Command,
+        );
+
+        assert_eq!(duplicate.generation, first.generation);
+        assert_eq!(duplicate.invocation, command);
+        assert_eq!(graph.desired().unwrap().generation, first.generation);
+
+        let mut passive = command.clone();
+        passive.caller_kind = "automatic".to_string();
+        passive.no_autostart = true;
+        graph.set_desired_attributed(
+            passive.clone(),
+            Some(42),
+            PaneLayoutPublication::CoalesceIdentical,
+            PaneLayoutPublisher::EditorSurface,
+        );
+
+        graph.release_route_lease(first.generation);
+        assert_eq!(graph.desired().unwrap().generation, first.generation);
+        graph.release_route_lease(duplicate.generation);
+        let projected = graph.desired().unwrap();
+        assert_eq!(projected.invocation, passive);
+        assert!(projected.generation > first.generation);
+
+        let retry = graph.set_desired_attributed(
+            command.clone(),
+            None,
+            PaneLayoutPublication::FreshCommandIntent,
+            PaneLayoutPublisher::Command,
+        );
+        assert!(retry.generation > projected.generation);
+
+        let mut changed = command;
+        changed.focus = Some("tasks/other.md".to_string());
+        let changed = graph.set_desired_attributed(
+            changed,
+            None,
+            PaneLayoutPublication::FreshCommandIntent,
+            PaneLayoutPublisher::Command,
+        );
+        assert!(changed.generation > retry.generation);
     }
 
     /// GH #224 case 1: an escalation may derive from retained columns, then

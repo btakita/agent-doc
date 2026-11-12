@@ -659,13 +659,17 @@ timings:
 # editing the shared tree between them gave the binary 3d7dff.. and the cdylib
 # c7a28f.. under one version (2026-09-29), and every editor handshake was then
 # refused until the next install. `lib-install` also refuses that skew.
+# `~/.cargo/bin/agent-doc` is the canonical machine/dogfood executable. Verify
+# the atomic install byte-for-byte and keep every remaining install step on the
+# freshly-built binary, never an older `agent-doc` resolved from PATH.
 install: editor-generation-bump
 	$(LOCAL_CARGO_ENV) $(CARGO_CMD) build --profile "$(LOCAL_INSTALL_PROFILE)" --target-dir "$(LOCAL_INSTALL_TARGET_DIR)" --bin agent-doc --lib
 	@"$(LOCAL_INSTALL_TARGET_DIR)/$(LOCAL_INSTALL_PROFILE)/agent-doc" binary-install --source "$(LOCAL_INSTALL_TARGET_DIR)/$(LOCAL_INSTALL_PROFILE)/agent-doc"
+	@cmp -s "$(LOCAL_INSTALL_TARGET_DIR)/$(LOCAL_INSTALL_PROFILE)/agent-doc" "$(CARGO_INSTALL_BIN_DIR_ABS)/agent-doc" || { echo "installed agent-doc does not match the freshly built dogfood binary" >&2; exit 1; }
+	@CARGO_TARGET_DIR="$(LOCAL_INSTALL_TARGET_DIR)" "$(LOCAL_INSTALL_TARGET_DIR)/$(LOCAL_INSTALL_PROFILE)/agent-doc" lib-install --profile "$(LOCAL_INSTALL_PROFILE)" --target-dir "$(CARGO_INSTALL_BIN_DIR_ABS)"
 	@"$(LOCAL_INSTALL_TARGET_DIR)/$(LOCAL_INSTALL_PROFILE)/agent-doc" skill install --all
 	@"$(LOCAL_INSTALL_TARGET_DIR)/$(LOCAL_INSTALL_PROFILE)/agent-doc" skill install --root . --all
 	@"$(LOCAL_INSTALL_TARGET_DIR)/$(LOCAL_INSTALL_PROFILE)/agent-doc" skill hooks --fix --known-projects
-	@CARGO_TARGET_DIR="$(LOCAL_INSTALL_TARGET_DIR)" agent-doc lib-install --profile "$(LOCAL_INSTALL_PROFILE)"
 	@$(MAKE) install-editor-plugins
 
 # Pre-release parity install. NOT the dev-loop install -- use `make install`.
@@ -683,10 +687,11 @@ install: editor-generation-bump
 install-full: editor-generation-bump
 	$(CARGO_CMD) build --release --target-dir "$(CARGO_TARGET_DIR_ABS)" --bin agent-doc --lib
 	@"$(CARGO_TARGET_DIR_ABS)/release/agent-doc" binary-install --source "$(CARGO_TARGET_DIR_ABS)/release/agent-doc"
+	@cmp -s "$(CARGO_TARGET_DIR_ABS)/release/agent-doc" "$(CARGO_INSTALL_BIN_DIR_ABS)/agent-doc" || { echo "installed agent-doc does not match the freshly built release binary" >&2; exit 1; }
+	@CARGO_TARGET_DIR="$(CARGO_TARGET_DIR_ABS)" "$(CARGO_TARGET_DIR_ABS)/release/agent-doc" lib-install --profile release --target-dir "$(CARGO_INSTALL_BIN_DIR_ABS)"
 	@"$(CARGO_TARGET_DIR_ABS)/release/agent-doc" skill install --all
 	@"$(CARGO_TARGET_DIR_ABS)/release/agent-doc" skill install --root . --all
 	@"$(CARGO_TARGET_DIR_ABS)/release/agent-doc" skill hooks --fix --known-projects
-	@CARGO_TARGET_DIR="$(CARGO_TARGET_DIR_ABS)" "$(CARGO_TARGET_DIR_ABS)/release/agent-doc" lib-install --profile release --target-dir "$(CARGO_INSTALL_BIN_DIR_ABS)"
 	@$(MAKE) install-editor-plugins
 	@$(MAKE) cleanup-build-artifacts
 

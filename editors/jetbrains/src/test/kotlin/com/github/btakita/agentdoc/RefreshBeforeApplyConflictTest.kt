@@ -87,7 +87,7 @@ class RefreshBeforeApplyConflictTest {
     }
 
     @Test
-    fun `remote crdt apply refreshes only a clean target before save`() {
+    fun `remote crdt apply refreshes only a clean target before memory projection`() {
         val crdtReplicaPath =
             listOf(
                     Paths.get("src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"),
@@ -109,7 +109,7 @@ class RefreshBeforeApplyConflictTest {
     }
 
     @Test
-    fun `failed persistent remote projections are rolled back transactionally`() {
+    fun `remote delta projection never owns native disk persistence`() {
         val crdtReplicaPath =
             listOf(
                     Paths.get("src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"),
@@ -127,7 +127,12 @@ class RefreshBeforeApplyConflictTest {
             functionBody(crdtReplica, "private fun applyReplaceDelivery(")
         val delta =
             functionBody(crdtReplica, "private fun applyRemoteTextOnEdt(")
+        val persistCurrent =
+            functionBody(crdtReplica, "private fun persistCurrentVisibleRevision(")
 
+        // REPLACE remains a separate fail-closed recovery path. Ordinary remote
+        // deltas (including status emoji projections) must never start a native
+        // save while the operator can keep typing in the same Document.
         assertTrue(persist.contains("readRawDiskText(filePath)"))
         assertTrue(persist.contains("reconcileRemotePersistence("))
         assertTrue(persist.contains("catch (failure: Throwable)"))
@@ -139,9 +144,13 @@ class RefreshBeforeApplyConflictTest {
         assertTrue(reconcile.contains("RemotePersistOutcome(false, null)"))
         assertTrue(replace.contains("before,"))
         assertTrue(replace.contains("replace-delivery-persist-rollback"))
-        assertTrue(delta.contains("persisted.editorTextForProjection"))
+        assertFalse(delta.contains("persistRemoteCrdtTextIfSafe("))
+        assertFalse(delta.contains("saveDocument("))
+        assertFalse(delta.contains("remoteCrdtDiskCanPersistUtil("))
+        assertFalse(delta.contains("readRawDiskText("))
+        assertTrue(persistCurrent.contains("saveDocument(document)"))
         assertTrue(
-            "memory-only projection must remain visible without entering disk persistence",
+            "remote projection must remain visible while disk persistence stays deferred",
             delta.contains("RemoteEditorApplyOutcome(false, pending.targetText)"),
         )
     }

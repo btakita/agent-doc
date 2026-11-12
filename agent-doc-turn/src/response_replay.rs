@@ -1413,7 +1413,16 @@ fn indexed_normalized_response_lines(content: &str) -> Vec<(usize, String)> {
     let mut out = Vec::new();
     let mut lines = content.lines().enumerate().peekable();
     while let Some((index, line)) = lines.next() {
-        if line.trim() == "> **Queue prompt:**" {
+        let trimmed = line.trim();
+        let starts_queue_prompt_echo = ["> **Queue prompt:**", "> **Queue prompts:**"]
+            .into_iter()
+            .any(|label| {
+                trimmed == label
+                    || trimmed
+                        .strip_prefix(label)
+                        .is_some_and(|rest| rest.chars().next().is_some_and(char::is_whitespace))
+            });
+        if starts_queue_prompt_echo {
             while let Some((_, next)) = lines.peek() {
                 if next.trim_start().starts_with('>') {
                     lines.next();
@@ -1714,6 +1723,38 @@ mod tests {
             "<!-- /agent:exchange -->\n",
         );
         assert!(!response_already_applied(other_doc, captured_response));
+    }
+
+    /// Queue consumption may canonicalize a same-line nested prompt echo from
+    /// a parent-plus-children tree into a parent-vector leaf. The assistant
+    /// heading and prose are still the same captured response, so the commit
+    /// guard must not strand it as unmaterialized.
+    #[test]
+    fn materialization_tolerates_a_rewritten_same_line_nested_queue_prompt_echo() {
+        let captured_response = concat!(
+            "<!-- patch:exchange -->\n",
+            "### Re: PM sync — gpt-5\n\n",
+            "> **Queue prompt:** Sync PR and Jira state into this document.\n",
+            ">   - So this is the first subtask. [#q-first]\n",
+            ">   - This is the second subtask. [#q-second]\n\n",
+            "Part 1 shipped; Part 2 is a design doc.\n",
+            "<!-- /patch:exchange -->\n",
+        );
+        let materialized_doc = concat!(
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: PM sync — gpt-5 (HEAD)\n\n",
+            "> **Queue prompt:** Sync PR and Jira state into this document.\n",
+            "> Sync PR and Jira state into this document.: So this is the first subtask. [#q-first]\n",
+            ">   - This is the second subtask. [#q-second]\n\n",
+            "Part 1 shipped; Part 2 is a design doc.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        assert!(response_materialized_in_content(
+            captured_response,
+            materialized_doc
+        ));
     }
 
     #[test]

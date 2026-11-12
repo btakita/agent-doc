@@ -109,8 +109,10 @@ pool's running, dispatching, frozen, and free counts.
 - A running worker's heartbeat (start or `queue claim --refresh`) falls due
   halfway through its claim window, well before expiry. The refill and plan
   warnings list it with the exact `queue claim --refresh --generation <N>`
-  command; run it while the worker is alive. A harness notice that a worker is
-  waiting on its own background work is proof of life, so refresh it.
+  command; run it while the worker wrapper is alive. An in-turn harness notice
+  that the wrapper is waiting on its own background work is proof of life, so
+  refresh it. If the wrapper exits and that notice is its terminal handback,
+  the subagent-end hook freezes the ended wrapper instead.
 - While you wait with no tool call running, the project controller reaches you
   instead: it submits the document's trigger into your idle pane once per
   distinct set of due heartbeats (`#poolidleheartbeat`). When a turn opens with
@@ -127,9 +129,11 @@ pool's running, dispatching, frozen, and free counts.
   --reason '<what was reported>'`). It frees the slot but keeps the claim; a
   later report from that worker is still accepted. `queue claim --refresh`
   with that attempt's owner and generation clears the freeze, including after
-  the claim TTL, so a worker resumed through its transcript keeps the same
-  attempt. Expiry does not turn a harness freeze into lost and does not make
-  its head eligible for dispatch. Only `queue release --requeue` abandons it.
+  the claim TTL. A resumed transcript may use a new wrapper id; run `queue
+  start` with that returned id to atomically rebind the same generation and
+  clear the freeze. Reusing the old wrapper id is an idempotent resume. Expiry
+  does not turn a harness freeze into lost and does not make its head eligible
+  for dispatch. Only `queue release --requeue` abandons it.
 - No heartbeat for `AGENT_DOC_SUBAGENT_FROZEN_SECS` (default 1.5 times the
   claim TTL, so expiry alone is never this case) fails continue. The same task
   is retried into the freed slot. Do not leave that row for a later prompt.
@@ -180,10 +184,11 @@ its coordinator still passes the text.
 
 Never infer running from a label, intended spawn, process poll, or heartbeat.
 `queue claim --refresh --generation <N>` extends an already-started attempt and
-revives one that expired with its worker still bound, including a harness freeze
-whose worker resumed through its transcript. It does not revive an explicit
-requeue. A generation binds to at most one worker and a worker to at most one
-live claim. Use generation-matched `queue release` only for that attempt; add
+revives one that expired with its worker still bound. A continuation wrapper
+for a frozen attempt runs `queue start` and atomically replaces the stopped
+wrapper binding without changing generation. Neither operation revives an
+explicit requeue. A live generation binds to at most one wrapper and a wrapper
+to at most one live claim. Use generation-matched `queue release` only for that attempt; add
 `--requeue` to abandon it for a new worker. Expired attempts become visible `⚠️`
 lost state, except a harness freeze, which stays the same attempt until that
 refresh or an explicit requeue. Orphaned completion evidence is `🔄` and must be

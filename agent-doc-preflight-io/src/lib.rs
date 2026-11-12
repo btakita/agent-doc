@@ -13247,11 +13247,11 @@ mod tests {
         );
     }
 
-    /// A started attempt cannot be retried merely because its release receipt
-    /// requests requeue. Without durable proof that it never ran, dispatch
-    /// must fail closed so an unknown side effect is not duplicated.
+    /// A started attempt is retried only after continuation of its bound worker
+    /// is attempted and fails. The failed continuation is durable retry
+    /// authorization, so the same row becomes dispatchable again.
     #[test]
-    fn started_lost_subagent_is_not_redispatched_after_requeue_release() {
+    fn started_lost_subagent_is_redispatched_after_failed_continue() {
         let dir = setup_project();
         let doc = dir.path().join("session.md");
         let item = "re: [#grok-live-editor]: Also validate real-time steering parity";
@@ -13299,10 +13299,7 @@ mod tests {
                 &doc, &live,
             )
             .unwrap();
-        assert!(
-            dispatch.is_empty(),
-            "a started attempt has unknown effects and must not be retried: {dispatch:?}"
-        );
+        assert_eq!(dispatch, vec![item]);
     }
 
     /// `#presetattralias`: the live `tasks/docs.md` marker used plural

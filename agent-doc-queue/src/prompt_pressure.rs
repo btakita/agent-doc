@@ -174,13 +174,35 @@ fn decision_has_later_creation_request(rest: &str) -> bool {
         .iter()
         .filter_map(|delimiter| {
             rest.find(delimiter)
-                .map(|index| &rest[index + delimiter.len()..])
+                .map(|index| (index, &rest[index + delimiter.len()..]))
         })
-        .any(|tail| {
-            EXPLICIT_PULL_REQUEST_REQUESTS
-                .iter()
-                .any(|phrase| contains_unquoted_request(tail, phrase))
+        .min_by_key(|(index, _)| *index)
+        .is_some_and(|(_, tail)| {
+            !later_request_is_conditional(tail)
+                && EXPLICIT_PULL_REQUEST_REQUESTS
+                    .iter()
+                    .any(|phrase| contains_unquoted_request(tail, phrase))
         })
+}
+
+fn later_request_is_conditional(tail: &str) -> bool {
+    let tail = tail.trim_start();
+    [
+        "if yes",
+        "if so",
+        "if needed",
+        "if necessary",
+        "if appropriate",
+        "if approved",
+    ]
+    .iter()
+    .any(|lead| {
+        tail.strip_prefix(lead).is_some_and(|rest| {
+            rest.chars()
+                .next()
+                .is_none_or(|ch| !ch.is_ascii_alphanumeric())
+        })
+    })
 }
 
 fn strip_generated_q_id(text: &str) -> String {
@@ -398,6 +420,12 @@ fn creation_verb_end(text: &str, index: usize) -> Option<usize> {
                 | "wasn't"
                 | "weren't"
                 | "didn't"
+                | "would"
+                | "could"
+                | "should"
+                | "might"
+                | "may"
+                | "will"
         )
     });
     let after = index + verb.len();
@@ -472,16 +500,43 @@ fn line_cites_existing_pull_request(line: &str) -> bool {
 
 fn gh_pr_create_receipt(lower: &str) -> bool {
     let mut ran_create = false;
+    let mut preceding_line_disclaims_execution = false;
     for line in lower.lines() {
-        if !line_runs_gh_pr_create(line) {
+        if !line.contains("gh pr create") {
+            if !line.trim().is_empty() {
+                preceding_line_disclaims_execution = line_disclaims_command_execution(line);
+            }
             continue;
         }
+        if preceding_line_disclaims_execution || !line_runs_gh_pr_create(line) {
+            preceding_line_disclaims_execution = false;
+            continue;
+        }
+        preceding_line_disclaims_execution = false;
         ran_create = true;
         if github_pull_url_end(line.trim(), 0).is_some() || creation_verb_then_pull_url(line) {
             return true;
         }
     }
     ran_create && lower.lines().any(line_is_only_pull_url)
+}
+
+fn line_disclaims_command_execution(lower: &str) -> bool {
+    [
+        "prepared command",
+        "command prepared",
+        "command to run",
+        "run later",
+        "would run",
+        "plan to run",
+        "planned command",
+        "example command",
+        "suggested command",
+        "dry run",
+        "dry-run",
+    ]
+    .iter()
+    .any(|phrase| lower.contains(phrase))
 }
 
 fn line_runs_gh_pr_create(lower: &str) -> bool {
@@ -1069,6 +1124,15 @@ mod tests {
             "Determine whether the release is ready; then open a pull request for it"
         ));
         assert!(!head_requires_created_pull_request(
+            "Determine whether a PR is needed; if yes, open a pull request for the change"
+        ));
+        assert!(!head_requires_created_pull_request(
+            "Assess whether a PR is appropriate; if approved, create a pull request"
+        ));
+        assert!(!head_requires_created_pull_request(
+            "Decide whether a PR is needed; if needed, then open a pull request"
+        ));
+        assert!(!head_requires_created_pull_request(
             "Setup the PR status app for the sdk-reviews channel."
         ));
         assert!(!head_requires_created_pull_request(
@@ -1125,6 +1189,18 @@ mod tests {
         ));
         assert!(!response_shows_created_pull_request(
             "The existing automation had already automatically opened https://github.com/haiven-dev/haiven-sdk/pull/228"
+        ));
+        assert!(!response_shows_created_pull_request(
+            "The command failed, but it would have opened https://github.com/haiven-dev/haiven-sdk/pull/228"
+        ));
+        assert!(!response_shows_created_pull_request(
+            "It should have created https://github.com/haiven-dev/haiven-sdk/pull/228"
+        ));
+        assert!(!response_shows_created_pull_request(
+            "Command to run later:\ngh pr create --title 'setup'\nhttps://github.com/haiven-dev/haiven-sdk/pull/228\n"
+        ));
+        assert!(response_shows_created_pull_request(
+            "Ran the command:\ngh pr create --title 'setup'\nhttps://github.com/haiven-dev/haiven-sdk/pull/229\n"
         ));
     }
 }

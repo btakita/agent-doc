@@ -6131,6 +6131,8 @@ mod tests {
         assert!(content.contains("handoff"));
         assert!(content.contains("blockers"));
         assert!(content.contains("handoff=orchestrate"));
+        assert!(content.contains("child-role capability block"));
+        assert!(content.contains("main session performs"));
     }
 
     #[test]

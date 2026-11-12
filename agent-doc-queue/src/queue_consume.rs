@@ -5720,6 +5720,373 @@ fn summary_is_blocked_stop(summary: &str) -> bool {
         || lower.starts_with("**blocked:**")
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ReviewReceiptKind {
+    Blocked,
+    Clean,
+}
+
+#[derive(Debug, Clone)]
+struct ReviewReceipt {
+    kind: ReviewReceiptKind,
+    summary: String,
+    head: String,
+    cycles: u64,
+    pull_request: String,
+}
+
+#[derive(Debug)]
+struct GeneratedResponseCell {
+    start: usize,
+    indent: usize,
+    response_id: String,
+    summary: String,
+    state: String,
+    state_range: std::ops::Range<usize>,
+    guidance_range: std::ops::Range<usize>,
+}
+
+fn markdown_list_item(line: &str) -> Option<(usize, &str)> {
+    let line = line.trim_end_matches(['\r', '\n']);
+    let indent = line.len() - line.trim_start_matches([' ', '\t']).len();
+    Some((indent, line[indent..].strip_prefix("- ")?.trim_end()))
+}
+
+fn generated_response_id(item: &str) -> Option<String> {
+    let body = item.trim().strip_prefix("**Response ")?;
+    let response_id = body.get(..body.find(']')? + 1)?;
+    agent_doc_markdown_ast::exchange_tree::is_compact_response_id(response_id)
+        .then(|| response_id.to_string())
+}
+
+fn generated_response_cells(document: &str) -> Vec<GeneratedResponseCell> {
+    let lines = document.split_inclusive('\n').collect::<Vec<_>>();
+    let mut offsets = Vec::with_capacity(lines.len() + 1);
+    offsets.push(0usize);
+    for line in &lines {
+        offsets.push(offsets.last().copied().unwrap_or_default() + line.len());
+    }
+    let mut cells = Vec::new();
+    for (index, line) in lines.iter().enumerate() {
+        let Some((response_indent, item)) = markdown_list_item(line) else {
+            continue;
+        };
+        let Some(response_id) = generated_response_id(item) else {
+            continue;
+        };
+        let mut summary = None;
+        let mut state = None;
+        let mut state_range = None;
+        let mut guidance_range = None;
+        for child_index in index + 1..lines.len() {
+            let child = lines[child_index];
+            if child.trim().is_empty() {
+                continue;
+            }
+            let Some((child_indent, child_item)) = markdown_list_item(child) else {
+                break;
+            };
+            if child_indent <= response_indent {
+                break;
+            }
+            if child_indent != response_indent + 2 {
+                continue;
+            }
+            if let Some(value) = child_item.strip_prefix("**Summary:** ") {
+                summary = Some(value.trim().to_string());
+            } else if let Some(value) = child_item.strip_prefix("**State:** ") {
+                state = Some(value.trim().to_string());
+                state_range = Some(offsets[child_index]..offsets[child_index + 1]);
+            } else if child_item.starts_with("**Guidance:** ") {
+                guidance_range = Some(offsets[child_index]..offsets[child_index + 1]);
+            }
+        }
+        if let (Some(summary), Some(state), Some(state_range), Some(guidance_range)) =
+            (summary, state, state_range, guidance_range)
+        {
+            cells.push(GeneratedResponseCell {
+                start: offsets[index],
+                indent: response_indent,
+                response_id,
+                summary,
+                state,
+                state_range,
+                guidance_range,
+            });
+        }
+    }
+    cells
+}
+
+fn response_source_by_id(document: &str) -> HashMap<String, String> {
+    let mut sources = HashMap::new();
+    let Ok(components) = element::parse(document) else {
+        return sources;
+    };
+    for component in components
+        .into_iter()
+        .filter(|component| component.name == "exchange")
+    {
+        let nodes = agent_doc_markdown_ast::exchange_tree::parse_exchange_nodes(
+            component.content(document),
+        );
+        for span in agent_doc_markdown_ast::exchange_tree::response_cell_spans(&nodes) {
+            let source = nodes[span]
+                .iter()
+                .map(|node| node.render())
+                .collect::<String>();
+            let response_id = source.lines().find_map(|line| {
+                agent_doc_markdown_ast::exchange_tree::response_id_from_heading(line.trim())
+                    .or_else(|| {
+                        agent_doc_markdown_ast::exchange_tree::response_id_from_lookup_marker(
+                            line.trim(),
+                        )
+                    })
+            });
+            if let Some(response_id) = response_id {
+                sources.entry(response_id.to_string()).or_insert(source);
+            }
+        }
+    }
+    sources
+}
+
+fn canonical_pull_request_url(text: &str) -> Option<String> {
+    let mut urls = Vec::new();
+    let mut search_from = 0usize;
+    while search_from < text.len() {
+        let https = text[search_from..].find("https://");
+        let http = text[search_from..].find("http://");
+        let Some(relative_start) = https.into_iter().chain(http).min() else {
+            break;
+        };
+        let start = search_from + relative_start;
+        let tail = &text[start..];
+        let token_end = tail.find(char::is_whitespace).unwrap_or(tail.len());
+        let candidate = tail[..token_end].trim_end_matches([
+            ')', ']', '}', '>', '`', '\'', '"', ',', ';', '.', ':', '*', '_',
+        ]);
+        if let Some(pull_at) = candidate.find("/pull/") {
+            let number_start = pull_at + "/pull/".len();
+            let number_len = candidate[number_start..]
+                .chars()
+                .take_while(char::is_ascii_digit)
+                .count();
+            if number_len > 0 {
+                urls.push(candidate[..number_start + number_len].to_string());
+            }
+        }
+        search_from = start + token_end.max(1);
+    }
+    urls.sort();
+    urls.dedup();
+    (urls.len() == 1).then(|| urls.remove(0))
+}
+
+fn receipt_field(summary: &str, name: &str) -> Option<String> {
+    summary.split_whitespace().find_map(|word| {
+        word.strip_prefix(name)
+            .map(|value| value.trim_matches(|character: char| !character.is_ascii_alphanumeric()))
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+    })
+}
+
+fn ancestor_pull_request_url(document: &str, cell: &GeneratedResponseCell) -> Option<String> {
+    let mut ancestors = Vec::new();
+    let mut maximum_indent = cell.indent;
+    for line in document[..cell.start].lines().rev() {
+        let Some((indent, item)) = markdown_list_item(line) else {
+            continue;
+        };
+        if indent >= maximum_indent {
+            continue;
+        }
+        if let Some(url) = canonical_pull_request_url(item) {
+            ancestors.push(url);
+        }
+        maximum_indent = indent;
+        if maximum_indent == 0 {
+            break;
+        }
+    }
+    ancestors.sort();
+    ancestors.dedup();
+    (ancestors.len() == 1).then(|| ancestors.remove(0))
+}
+
+fn review_receipt(
+    document: &str,
+    cell: &GeneratedResponseCell,
+    response_sources: &HashMap<String, String>,
+) -> Option<ReviewReceipt> {
+    let summary = unwrap_wrapping_backticks(cell.summary.trim());
+    let kind = if summary == "BLOCKED" || summary.starts_with("BLOCKED ") {
+        ReviewReceiptKind::Blocked
+    } else if summary == "REVIEW-CLEAN" || summary.starts_with("REVIEW-CLEAN ") {
+        ReviewReceiptKind::Clean
+    } else {
+        return None;
+    };
+    if kind == ReviewReceiptKind::Clean && cell.state != RESPONSE_STATE_COMPLETE {
+        return None;
+    }
+    // Base is required evidence but is deliberately not part of the lineage:
+    // the target branch can advance its base before the clean re-review.
+    let _base = receipt_field(summary, "base=")?;
+    let head = receipt_field(summary, "head=")?;
+    let cycles = receipt_field(summary, "cycles=")?.parse().ok()?;
+    let pull_request = canonical_pull_request_url(summary)
+        .or_else(|| {
+            response_sources
+                .get(&cell.response_id)
+                .and_then(|source| canonical_pull_request_url(source))
+        })
+        .or_else(|| ancestor_pull_request_url(document, cell))?;
+    Some(ReviewReceipt {
+        kind,
+        summary: summary.to_string(),
+        head,
+        cycles,
+        pull_request,
+    })
+}
+
+fn structurally_complete_response_tree(
+    document: &str,
+    cell: &GeneratedResponseCell,
+    nodes: &[agent_doc_markdown_ast::mutations::MutationItemNode],
+) -> bool {
+    let indent_at = |start: usize| {
+        document
+            .get(start..)
+            .and_then(|tail| tail.lines().next())
+            .map(|line| line.len() - line.trim_start_matches([' ', '\t']).len())
+            .unwrap_or(0)
+    };
+    let owner = nodes
+        .iter()
+        .filter(|node| node.item.start_byte < cell.start)
+        .filter_map(|node| {
+            let indent = indent_at(node.item.start_byte);
+            let end = descendant_region_end(document, node.item.end_byte, indent);
+            (cell.start < end).then_some((node, end))
+        })
+        .max_by_key(|(node, _)| node.item.start_byte);
+    let Some((owner, scope_end)) = owner else {
+        return false;
+    };
+    owner.item.struck
+        && nodes.iter().all(|node| {
+            node.item.start_byte <= owner.item.start_byte
+                || node.item.start_byte >= scope_end
+                || node.item.struck
+        })
+}
+
+/// Reconcile generated response cells whose operator-wait state has become
+/// historical. A completely struck prompt tree is the general proof. Review
+/// loops additionally use a uniquely later `REVIEW-CLEAN` receipt for the same
+/// canonical PR, even when historical response rows remain in another tree.
+/// Summary text is never rewritten.
+pub fn reconcile_superseded_response_blockers(document: &str) -> Option<String> {
+    let cells = generated_response_cells(document);
+    let response_sources = response_source_by_id(document);
+    let receipts = cells
+        .iter()
+        .filter_map(|cell| review_receipt(document, cell, &response_sources))
+        .collect::<Vec<_>>();
+    let nodes = agent_doc_markdown_ast::mutations::all_item_nodes(document)
+        .into_iter()
+        .filter(|node| matches!(node.component.as_str(), "queue" | "run" | "loop"))
+        .collect::<Vec<_>>();
+
+    let mut latest_clean = HashMap::<String, &ReviewReceipt>::new();
+    let mut ambiguous = HashSet::<String>::new();
+    for receipt in receipts
+        .iter()
+        .filter(|receipt| receipt.kind == ReviewReceiptKind::Clean)
+    {
+        match latest_clean.get(&receipt.pull_request) {
+            Some(current) if current.cycles > receipt.cycles => {}
+            Some(current) if current.cycles == receipt.cycles && current.head != receipt.head => {
+                ambiguous.insert(receipt.pull_request.clone());
+            }
+            _ => {
+                latest_clean.insert(receipt.pull_request.clone(), receipt);
+                ambiguous.remove(&receipt.pull_request);
+            }
+        }
+    }
+    for receipt in &receipts {
+        if receipt.kind == ReviewReceiptKind::Blocked
+            && latest_clean
+                .get(&receipt.pull_request)
+                .is_some_and(|clean| receipt.cycles >= clean.cycles)
+        {
+            latest_clean.remove(&receipt.pull_request);
+        }
+    }
+    for pull_request in ambiguous {
+        latest_clean.remove(&pull_request);
+    }
+
+    let mut replacements = Vec::<(std::ops::Range<usize>, String)>::new();
+    for cell in &cells {
+        if cell.state != RESPONSE_STATE_WAITING_ON_OPERATOR {
+            continue;
+        }
+        let blocked_receipt = review_receipt(document, cell, &response_sources)
+            .filter(|receipt| receipt.kind == ReviewReceiptKind::Blocked);
+        let superseding = blocked_receipt.as_ref().and_then(|blocked| {
+            latest_clean
+                .get(&blocked.pull_request)
+                .copied()
+                .filter(|clean| clean.cycles > blocked.cycles)
+        });
+        let tree_complete = structurally_complete_response_tree(document, cell, &nodes);
+        if superseding.is_none() && !tree_complete {
+            continue;
+        }
+        let evidence = superseding.map_or_else(
+            || "the owning prompt tree is durably complete".to_string(),
+            |clean| format!("later durable completion evidence: {}", clean.summary),
+        );
+        for (range, replacement) in [
+            (
+                cell.state_range.clone(),
+                format!("- **State:** {RESPONSE_STATE_COMPLETE}"),
+            ),
+            (
+                cell.guidance_range.clone(),
+                format!(
+                    "- **Guidance:** Historical blocker resolved by {evidence}. This response remains as history and requires no operator action."
+                ),
+            ),
+        ] {
+            let old = &document[range.clone()];
+            let indent = &old[..old.len() - old.trim_start().len()];
+            let newline = if old.ends_with("\r\n") {
+                "\r\n"
+            } else if old.ends_with('\n') {
+                "\n"
+            } else {
+                ""
+            };
+            replacements.push((range, format!("{indent}{replacement}{newline}")));
+        }
+    }
+    if replacements.is_empty() {
+        return None;
+    }
+    replacements.sort_by_key(|(range, _)| range.start);
+    let mut reconciled = document.to_string();
+    for (range, replacement) in replacements.into_iter().rev() {
+        reconciled.replace_range(range, &replacement);
+    }
+    Some(reconciled)
+}
+
 fn collapse_ws(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
@@ -11367,6 +11734,211 @@ mod tests {
         assert_eq!(
             attach_stopped_row_responses(&before, &after, plain, STOPPED_AT).unwrap(),
             after
+        );
+    }
+
+    fn blocker_supersession_document(
+        blocked_owner: &str,
+        blocked_pr: u64,
+        clean_pr: u64,
+        clean_base: &str,
+        clean_cycles: u64,
+        trailing_receipt: &str,
+    ) -> String {
+        format!(
+            concat!(
+                "---\nqueue_active: true\n---\n\n",
+                "<!-- agent:exchange -->\n",
+                "### Re: blocked review [#r-a2a27372e373]\n\n",
+                "> **Queue prompt:** review the pull request\n\n",
+                "The independent review of https://github.com/btakita/agent-doc/pull/{blocked_pr} stopped.\n\n",
+                "### Re: clean review [#r-b3b38483f484]\n\n",
+                "REVIEW-CLEAN https://github.com/btakita/agent-doc/pull/{clean_pr}#pullrequestreview-2 base={clean_base} head=ac729dc cycles={clean_cycles}\n\n",
+                "<!-- /agent:exchange -->\n\n",
+                "<!-- agent:queue -->\n",
+                "- {blocked_owner}\n",
+                "  - **Response [#r-a2a27372e373]**\n",
+                "    - **Timestamp:** 2026-11-12T01:00:00.000Z\n",
+                "    - **Summary:** BLOCKED independent review of the opened pull request base=7520b7f0c34eaad08cd69bebb7c85e380100be28 head=0e9991bf5615377d4a2db4fae249d6defe53804d cycles=1\n",
+                "    - **State:** Waiting on operator input.\n",
+                "    - **Guidance:** The row stopped. Keep this tree until the blocker in the summary is cleared.\n",
+                "  - ~~complete the independent review. When verified complete, strike all items in this prompt tree. [#q-0f0f0f0f0f0f]~~\n",
+                "- ~~https://github.com/btakita/agent-doc/pull/{clean_pr}~~\n",
+                "  - **Response [#r-b3b38483f484]**\n",
+                "    - **Timestamp:** 2026-11-12T02:00:00.000Z\n",
+                "    - **Summary:** REVIEW-CLEAN https://github.com/btakita/agent-doc/pull/{clean_pr}#pullrequestreview-2 base={clean_base} head=ac729dc cycles={clean_cycles}\n",
+                "    - **State:** Complete.\n",
+                "    - **Guidance:** This row is complete.\n",
+                "{trailing_receipt}",
+                "<!-- /agent:queue -->\n",
+            ),
+            clean_pr = clean_pr,
+            blocked_pr = blocked_pr,
+            clean_base = clean_base,
+            clean_cycles = clean_cycles,
+            blocked_owner = blocked_owner,
+            trailing_receipt = trailing_receipt,
+        )
+    }
+
+    /// Exact dogfood shape: the historical BLOCKED response remains readable,
+    /// but every executable descendant in its prompt tree is already struck.
+    #[test]
+    fn complete_prompt_tree_supersedes_historical_blocker_without_deleting_summary() {
+        let document = blocker_supersession_document(
+            "~~In sdk-dev.md, add a state with prefix icon.~~",
+            407,
+            407,
+            "99aa88bb77cc",
+            2,
+            "",
+        );
+        let cells = generated_response_cells(&document);
+        assert_eq!(cells.len(), 2, "generated cells:\n{document}");
+        let nodes = agent_doc_markdown_ast::mutations::item_nodes_all(&document, "queue").unwrap();
+        assert!(
+            structurally_complete_response_tree(&document, &cells[0], &nodes),
+            "nodes={nodes:#?}\n{document}"
+        );
+        let reconciled = reconcile_superseded_response_blockers(&document)
+            .expect("the stale operator-wait state should reconcile");
+        assert!(
+            reconciled.contains("**Summary:** BLOCKED independent review of the opened pull request base=7520b7f0c34eaad08cd69bebb7c85e380100be28 head=0e9991bf5615377d4a2db4fae249d6defe53804d cycles=1"),
+            "historical evidence must remain verbatim:\n{reconciled}"
+        );
+        assert!(
+            reconciled.contains("later durable completion evidence: REVIEW-CLEAN https://github.com/btakita/agent-doc/pull/407#pullrequestreview-2 base=99aa88bb77cc head=ac729dc cycles=2"),
+            "the advanced-base clean receipt should be named:\n{reconciled}"
+        );
+        assert_eq!(reconciled.matches("**State:** Complete.").count(), 2);
+        assert_eq!(
+            reconcile_superseded_response_blockers(&reconciled),
+            None,
+            "reconciliation is idempotent"
+        );
+
+        let url_less_child_completion = concat!(
+            "<!-- agent:queue -->\n",
+            "- ~~Review PR405 and keep the prompt tree live until complete.~~\n",
+            "  - **Response [#r-d5d5a6a6b7b7]**\n",
+            "    - **Timestamp:** 2026-11-12T04:00:00.000Z\n",
+            "    - **Summary:** BLOCKED independent review of the opened pull request base=fbdb13a5352c56e182f3e01789370591ad30e64a head=f4488e840f6fb51a3c585eda5effc80b9eec111c cycles=0\n",
+            "    - **State:** Waiting on operator input.\n",
+            "    - **Guidance:** The row stopped. Keep this tree until the blocker in the summary is cleared.\n",
+            "  - ~~complete the independent review~~\n",
+            "    - **Response [#r-e6e6b7b7c8c8]**\n",
+            "      - **Timestamp:** 2026-11-12T05:00:00.000Z\n",
+            "      - **Summary:** REVIEW-CLEAN merged at 24bb90b into c11668a\n",
+            "      - **State:** Complete.\n",
+            "      - **Guidance:** This row is complete.\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let reconciled = reconcile_superseded_response_blockers(url_less_child_completion)
+            .expect("the fully struck PR405 prompt tree is structural completion proof");
+        assert!(
+            reconciled.contains("**Summary:** BLOCKED independent review of the opened pull request base=fbdb13a5352c56e182f3e01789370591ad30e64a head=f4488e840f6fb51a3c585eda5effc80b9eec111c cycles=0"),
+            "the exact live historical receipt must stay visible:\n{reconciled}"
+        );
+        assert!(
+            reconciled.contains(
+                "Historical blocker resolved by the owning prompt tree is durably complete"
+            ),
+            "URL-less child completion must use structural proof:\n{reconciled}"
+        );
+    }
+
+    /// Structural completion applies to every runnable component alias and to
+    /// stale operator-wait metadata whose Summary is not review-specific.
+    #[test]
+    fn complete_run_and_loop_trees_reconcile_any_stale_waiting_response() {
+        for component in ["run", "loop"] {
+            let document = format!(
+                concat!(
+                    "<!-- agent:{component} keep -->\n",
+                    "- ~~finish the whole prompt tree~~\n",
+                    "  - **Response [#r-f7f7c8c8d9d9]**\n",
+                    "    - **Timestamp:** 2026-11-12T06:00:00.000Z\n",
+                    "    - **Summary:** Operator choice was previously required.\n",
+                    "    - **State:** Waiting on operator input.\n",
+                    "    - **Guidance:** More work remains.\n",
+                    "  - ~~finish the last executable descendant~~\n",
+                    "<!-- /agent:{component} -->\n",
+                ),
+                component = component,
+            );
+            let reconciled = reconcile_superseded_response_blockers(&document)
+                .unwrap_or_else(|| panic!("{component} must reconcile:\n{document}"));
+            assert!(
+                reconciled.contains("**Summary:** Operator choice was previously required."),
+                "{reconciled}"
+            );
+            assert!(reconciled.contains("**State:** Complete."), "{reconciled}");
+            assert!(
+                reconciled.contains("the owning prompt tree is durably complete"),
+                "{reconciled}"
+            );
+        }
+    }
+
+    /// A live descendant prevents structural completion, so only a uniquely
+    /// later clean receipt for the same canonical PR may clear the blocker.
+    #[test]
+    fn review_lineage_uses_pr_identity_and_rejects_unrelated_or_reblocked_receipts() {
+        let same_pr = blocker_supersession_document(
+            "review the pull request",
+            402,
+            402,
+            "advancedbase",
+            2,
+            "",
+        );
+        let reconciled = reconcile_superseded_response_blockers(&same_pr)
+            .expect("same-PR cycle 2 should supersede cycle 1 despite advanced base");
+        assert!(
+            reconciled.contains("Historical blocker resolved"),
+            "{reconciled}"
+        );
+
+        let unrelated = blocker_supersession_document(
+            "review the pull request",
+            402,
+            403,
+            "advancedbase",
+            2,
+            "",
+        );
+        assert_eq!(
+            reconcile_superseded_response_blockers(&unrelated),
+            None,
+            "another PR must not clear this blocker"
+        );
+
+        let later_block = concat!(
+            "  - review blocked again\n",
+            "    - **Response [#r-c4c49594a595]**\n",
+            "      - **Timestamp:** 2026-11-12T03:00:00.000Z\n",
+            "      - **Summary:** BLOCKED human approval base=advancedbase head=dd88 cycles=3\n",
+            "      - **State:** Waiting on operator input.\n",
+            "      - **Guidance:** The row stopped.\n",
+        );
+        let reblocked = blocker_supersession_document(
+            "review the pull request",
+            402,
+            402,
+            "advancedbase",
+            2,
+            later_block,
+        );
+        // Supply the PR identity for the later BLOCKED response through its
+        // durable response-id-linked exchange cell.
+        let reblocked = reblocked.replace(
+            "<!-- /agent:exchange -->",
+            "### Re: blocked again [#r-c4c49594a595]\n\nThe same https://github.com/btakita/agent-doc/pull/402 review is blocked again.\n\n<!-- /agent:exchange -->",
+        );
+        assert_eq!(
+            reconcile_superseded_response_blockers(&reblocked),
+            None,
+            "a higher-cycle BLOCKED receipt keeps the lineage open"
         );
     }
 

@@ -237,6 +237,19 @@ fn enforce_selected_queue_response_contract(
             agent_doc_queue::queue_response::QUEUE_PROMPT_DEFERRAL_MARKER
         );
     }
+    // `#closepressure`: an exact echo is evidence the head was addressed, not
+    // evidence a required pull request was created. Fail before capture so the
+    // turn cannot close on a citation of a pull request that already existed.
+    let missing_pull_request =
+        agent_doc_queue::queue_closeout_guard::echoed_heads_missing_created_pull_request(
+            current, response,
+        )?;
+    if !missing_pull_request.is_empty() {
+        anyhow::bail!(
+            "[finalize] pre-write gate: the task requires a pull request and this response does not show one was created (#closepressure): {}. Create the pull request and include its URL as the effect this turn opened. Citing a pull request that already existed does not complete the task. Writing that the leaf is answered and safe to delete does not complete it either (#promptpressure). A real blocker is only the review structure (`<!-- agent-doc:prompt-blocker -->` with the incomplete work, **Complete by:**, and **Prompt:**). No response has been captured.",
+            missing_pull_request.join("; ")
+        );
+    }
     Ok(())
 }
 
@@ -3584,6 +3597,59 @@ mod tests {
             &flags,
         )
         .expect("a claimed head is owned by its worker, not by this cycle");
+    }
+
+    /// `#closepressure`: an exact queue-prompt echo of a setup head is not
+    /// completion when the answer only cites a pull request that already
+    /// existed. The turn fails before capture. A creation receipt and a
+    /// stated deferral still close.
+    #[test]
+    fn closepressure_refuses_a_setup_head_closed_on_an_existing_pull_request() {
+        let head = "haiven-sdk: Setup Release Please workflow to merge sdk-dev into main [#q-bac390dcf354]";
+        let current = format!("<!-- agent:queue go -->\n- 📥 {head}\n<!-- /agent:queue -->\n");
+        let flags = WriteFlags {
+            strict_closeout: true,
+            require_recap: false,
+            commit_requested: true,
+            ..Default::default()
+        };
+        let cited = format!(
+            "### Re: setup — codex\n\n> **Queue prompt:**\n> {head}\n\nThe setup pull request is the merged https://github.com/haiven-dev/haiven-sdk/pull/228. It is off the open list. The promotion that workflow opened is https://github.com/haiven-dev/haiven-sdk/pull/227, and that pull stays OPEN and CONFLICTING. This leaf is answered and is safe to delete.\n"
+        );
+        let error = enforce_selected_queue_response_contract(
+            None,
+            Some(&current),
+            &current,
+            &cited,
+            &flags,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("#closepressure"), "{error}");
+        assert!(error.contains("No response has been captured"), "{error}");
+        assert!(error.contains(head), "{error}");
+
+        let opened = format!(
+            "### Re: setup — codex\n\n> **Queue prompt:**\n> {head}\n\nOpened https://github.com/haiven-dev/haiven-sdk/pull/229\n"
+        );
+        enforce_selected_queue_response_contract(None, Some(&current), &current, &opened, &flags)
+            .expect("a pull request this turn opened completes the setup head");
+
+        let deferred = format!(
+            "### Re: setup — codex\n\n> **Queue prompt:**\n> {head}\n\n**Deferred:** the credentials for opening the pull request are absent.\n"
+        );
+        enforce_selected_queue_response_contract(None, Some(&current), &current, &deferred, &flags)
+            .expect("a stated deferral keeps the head queued without failing close");
+
+        let ordinary = "<!-- agent:queue go -->\n- Fix the widget export\n<!-- /agent:queue -->\n";
+        enforce_selected_queue_response_contract(
+            None,
+            Some(ordinary),
+            ordinary,
+            "> **Queue prompt:** Fix the widget export\n\nFinished the widget.\n",
+            &flags,
+        )
+        .expect("an ordinary echoed head still closes");
     }
 
     #[test]

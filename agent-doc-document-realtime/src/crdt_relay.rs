@@ -2435,6 +2435,26 @@ impl RelayHub {
                 }
             }
         }
+        // `#projectionprefixrace`: a controller lifecycle projection and an
+        // operator insertion at the first work character are concurrent inserts
+        // at one CRDT anchor. The union preserves both, but may order them as
+        // `When 📥 work`. Repair only when the controller-before row, the
+        // editor's observed before/after intent, and the union all prove that
+        // exact displacement. The origin must receive the corrective delta too.
+        let projection_union = self.canonical.text();
+        if let Some(repaired) = agent_doc_merge::crdt::repair_displaced_attempt_projection(
+            &before_text,
+            &projection_union,
+            intent_before_text,
+            intent_after_text,
+        ) {
+            for (offset, delete_len, text) in minimal_char_span_edits(&projection_union, &repaired)?
+            {
+                self.canonical.apply_local_edit(offset, delete_len, &text);
+            }
+            component_isolation_reconciled = true;
+            eprintln!("[crdt] displaced_attempt_projection_repaired client_id={client_id}");
+        }
         let published_text = self.canonical.text();
         self.sync_live_document_projection(&before_text, &published_text);
         let delta = self.canonical.diff(&before)?;
@@ -4923,6 +4943,36 @@ mod tests {
             canonical.contains("Complete response."),
             "and the concurrent agent response must survive too; canonical was:\n{canonical}"
         );
+    }
+
+    #[test]
+    fn concurrent_first_word_keeps_pending_projection_at_the_queue_prefix() {
+        let work = "agent-doc uses subagents for blocked harness actions.";
+        let base = format!("<!-- agent:run id=\"main\" -->\n- {work}\n<!-- /agent:run -->\n");
+        let projected =
+            format!("<!-- agent:run id=\"main\" -->\n- 📥 {work}\n<!-- /agent:run -->\n");
+        let expected =
+            format!("<!-- agent:run id=\"main\" -->\n- 📥 When {work}\n<!-- /agent:run -->\n");
+
+        let mut hub = RelayHub::from_text(1, &base);
+        hub.register(2).unwrap();
+        let editor = ReplicaState::from_encoded(2, &hub.canonical_encoded_state()).unwrap();
+        let editor_frontier = editor.state_vector();
+        hub.apply_canonical_replace(&base, &projected).unwrap();
+
+        let insertion = base.find(work).expect("work row");
+        editor.apply_local_edit(base[..insertion].chars().count() as u32, 0, "When ");
+        let update = editor.diff(&editor_frontier).unwrap();
+        let packet = hub.relay_update(2, &update).unwrap();
+
+        assert!(packet.component_isolation_reconciled);
+        assert_eq!(hub.canonical_text(), expected);
+        assert_eq!(
+            hub.member_text(2),
+            Some(expected),
+            "the origin editor receives the corrective projection delta",
+        );
+        assert!(!hub.canonical_text().contains("When 📥"));
     }
 
     #[test]

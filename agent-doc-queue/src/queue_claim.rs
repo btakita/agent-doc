@@ -3815,8 +3815,13 @@ impl ClaimedQueueItems {
     /// These claims plus `heads` (by identity): the in-session exclusion set
     /// once the queue-level subagents attribute holds heads back.
     pub fn with_heads<'a>(mut self, heads: impl IntoIterator<Item = &'a String>) -> Self {
-        self.0
-            .extend(heads.into_iter().map(|head| claim_identity(head)));
+        for head in heads {
+            self.0.insert(claim_identity(head));
+            if let Some(id) = queue_prompt_stable_id(head) {
+                self.0
+                    .insert(QueueItemIdentity::FreeText(format!("queue-id:{id}")));
+            }
+        }
         self
     }
 
@@ -3843,7 +3848,12 @@ impl ClaimedQueueItems {
 
     /// Whether the queue head `prompt_text` is claimed.
     pub fn claims(&self, prompt_text: &str) -> bool {
-        !self.0.is_empty() && self.0.contains(&claim_identity(prompt_text))
+        !self.0.is_empty()
+            && (self.0.contains(&claim_identity(prompt_text))
+                || queue_prompt_stable_id(prompt_text).is_some_and(|id| {
+                    self.0
+                        .contains(&QueueItemIdentity::FreeText(format!("queue-id:{id}")))
+                }))
     }
 
     /// Whether the row at `index` is claimed (`#nestlistlineage`).
@@ -4350,6 +4360,20 @@ mod tests {
         assert_eq!(ledger.claims[0].identity, claim_identity(&annotated_leaf));
         assert_eq!(ledger.claims[0].item_text, annotated_leaf);
         assert_ne!(ledger.claims[0].identity, claim_identity("#adversarial-pr"));
+    }
+
+    /// A selected closeout records the executable leaf, while a worker claim
+    /// records its full nest vector. Their binary-owned q-id is the stable
+    /// bridge; otherwise the closeout gate asks the coordinator to answer work
+    /// that a live worker already owns.
+    #[test]
+    fn claimed_nested_q_id_head_matches_its_selected_leaf() {
+        let lineage =
+            "https://github.com/btakita/agent-doc/pull/407: #fix-ci [#q-b77d4a62dd9f]".to_string();
+        let claimed = ClaimedQueueItems::none().with_heads([&lineage]);
+
+        assert!(claimed.claims("#fix-ci [#q-b77d4a62dd9f]"));
+        assert!(!claimed.claims("#fix-ci [#q-another-attempt]"));
     }
 
     /// `#queueeffectidentity`: duplicate nested commands retain their effect

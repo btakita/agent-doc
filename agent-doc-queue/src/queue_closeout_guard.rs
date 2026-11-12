@@ -156,6 +156,42 @@ pub fn selected_free_text_prompts_missing_response_evidence_for_closeout(
     Ok(missing)
 }
 
+/// `#closepressure`: live free-text heads the response echoes as answered
+/// while the required pull request was never shown as created this turn.
+///
+/// An in-progress marker is not required. The echo is the completion claim,
+/// and citing a pull request that already existed is not that pull request.
+pub fn echoed_heads_missing_created_pull_request(
+    content: &str,
+    response: &str,
+) -> anyhow::Result<Vec<String>> {
+    if !element::parse(content)?
+        .iter()
+        .any(|component| component.name == "queue")
+    {
+        return Ok(Vec::new());
+    }
+    let mut missing = Vec::new();
+    for node in agent_doc_markdown_ast::mutations::item_nodes(content, "queue")? {
+        if node.item.struck
+            || !queue_response::queue_prompt_text_is_free_text(content, &node.item.text)
+        {
+            continue;
+        }
+        let head = strip_priority_markers(&node.item.text);
+        let head = head.trim();
+        if head.is_empty()
+            || !queue_response::latest_echo_cell_lacks_created_pull_request(content, response, head)
+        {
+            continue;
+        }
+        if !missing.iter().any(|existing: &String| existing == head) {
+            missing.push(head.to_string());
+        }
+    }
+    Ok(missing)
+}
+
 /// True when a selected free-text head LEADS with a directive for an id this
 /// closeout completes (`--done`), so that completion is its evidence.
 ///

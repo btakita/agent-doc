@@ -1225,12 +1225,11 @@ pub fn claim_with_session_for_worker_harness(
     {
         refuse_open_prompt_review(&target, &blocker)?;
     }
-    if visible_kept_reported_row(file, &target)? {
-        if let Some(restored) =
+    if visible_kept_reported_row(file, &target)?
+        && let Some(restored) =
             reattach_kept_completion(file, &target, &heads, ttl_secs, owner_session.clone())?
-        {
-            return Ok(restored);
-        }
+    {
+        return Ok(restored);
     }
     let same_work =
         agent_doc_queue::queue_claim::user_prompt_backlog_identity_classes(&review_text);

@@ -1265,10 +1265,12 @@ pool refill (`[queue] subagent work pool`): run its steps in order in the same t
 integrating; never wait for another operator prompt to dispatch the waiting heads. A running \
 worker's heartbeat falls due halfway through its claim window: while it is alive, run the printed \
 `agent-doc queue claim <FILE> --item <item> --owner <owner> --refresh --generation <generation>`, \
-which also revives an attempt that expired with its worker still bound. A harness notice that a \
+which can revive an expired attempt only when no worker stop was recorded. A harness notice that a \
 worker is waiting on its own background work is proof of life, so refresh it. Only when the \
 harness reports a worker ended without a result, run `agent-doc queue freeze <FILE> --item <item> \
---generation <generation> --reason '<what it reported>'`: the claim is kept and the slot refills. \
+--generation <generation> --reason '<what it reported>'`. That command's emitted refill owns \
+failed-continue recovery: follow its exact fresh claim / brief / start steps, and never refresh or \
+rebind the stopped generation. \
 Expiry alone frees no slot and offers no row again. When the harness ends the \
 subagent on a usage limit, the subagent-end hook records ⛔ itself from the worker id \
 and the hand-back (`#workerquotaautodetect`); pass the text to `queue report-complete` \
@@ -13151,6 +13153,26 @@ mod tests {
         );
         assert!(QUEUE_SUBAGENT_DISPATCH_GUIDANCE.contains("agent-doc queue freeze"));
         assert!(QUEUE_SUBAGENT_DISPATCH_GUIDANCE.contains("is proof of life, so refresh it"));
+        assert!(
+            QUEUE_SUBAGENT_DISPATCH_GUIDANCE
+                .contains("That command's emitted refill owns failed-continue recovery")
+        );
+        assert!(
+            QUEUE_SUBAGENT_DISPATCH_GUIDANCE
+                .contains("follow its exact fresh claim / brief / start steps")
+        );
+        assert!(
+            QUEUE_SUBAGENT_DISPATCH_GUIDANCE
+                .contains("never refresh or rebind the stopped generation")
+        );
+        assert!(
+            !QUEUE_SUBAGENT_DISPATCH_GUIDANCE
+                .contains(concat!("the claim is kept and the slot", " refills"))
+        );
+        assert!(!QUEUE_SUBAGENT_DISPATCH_GUIDANCE.contains(concat!(
+            "also revives an attempt that expired with its worker",
+            " still bound"
+        )));
         assert!(QUEUE_SUBAGENT_DISPATCH_GUIDANCE.contains("Expiry alone frees no slot"));
         assert!(
             QUEUE_SUBAGENT_DISPATCH_GUIDANCE.contains("also record its concrete operator action")
@@ -18218,8 +18240,8 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
         let state = run_queue_maintenance(&doc, None).unwrap();
         assert_eq!(state.selected_queue_prompts, vec!["do [#a]".to_string()]);
         let updated = std::fs::read_to_string(&doc).unwrap();
-        // The TTL was moved into the past, but the worker's heartbeat is still
-        // inside the frozen bound. Maintenance continues that same attempt
+        // The TTL was moved into the past with no recorded worker stop, and
+        // the heartbeat is still inside the staleness bound. Maintenance continues that same attempt
         // (`#lostrunningcontinue`) instead of leaving `⚠️🚧` for a new generation.
         assert!(updated.contains(
             "- ### 🚧 do [#a]\n- ### 📥 do [#b]\n- ### ☑️ [#subagent:c#1] do [#c]\n- ### 🚧 [#subagent:d#1] do [#d]"

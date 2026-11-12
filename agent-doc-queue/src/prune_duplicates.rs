@@ -154,6 +154,7 @@ fn plan_body(
 ) -> (Vec<DuplicateDrop>, String) {
     let live = live_rows(spans);
     let mut dropped = HashSet::new();
+    let mut conflicting_projection_rows = HashSet::new();
     let mut keyed: Vec<(usize, DuplicateDrop)> = Vec::new();
 
     let mut groups: Vec<Vec<usize>> = Vec::new();
@@ -174,6 +175,7 @@ fn plan_body(
         // identical rows disagree about their binary-owned lifecycle or
         // owner/generation projection, neither is safe to discard.
         if has_conflicting_projections(&group, &live) {
+            conflicting_projection_rows.extend(group.iter().map(|index| live[*index].span));
             continue;
         }
         let keeper = *group
@@ -205,7 +207,10 @@ fn plan_body(
     }
 
     for row in &live {
-        if dropped.contains(&row.span) || row.has_children {
+        if dropped.contains(&row.span)
+            || conflicting_projection_rows.contains(&row.span)
+            || row.has_children
+        {
             continue;
         }
         let extensions = distinct_extensions(row, &live, &dropped);
@@ -656,6 +661,23 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    #[test]
+    fn prefix_pruning_keeps_conflicting_lifecycle_projections() {
+        let text = "Run the complete queue verification";
+        let source = format!(
+            "\
+<!-- agent:run id=\"main\" -->
+- 📥 {text}
+- ☑️ {text}
+- {text} before release
+<!-- /agent:run -->
+"
+        );
+        let plan = plan(&source).unwrap();
+        assert!(plan.drops.is_empty(), "{plan:?}");
+        assert_eq!(plan.document, source);
     }
 
     #[test]

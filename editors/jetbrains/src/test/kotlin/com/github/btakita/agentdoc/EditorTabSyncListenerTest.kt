@@ -704,6 +704,23 @@ class EditorTabSyncListenerTest {
     }
 
     @Test
+    fun `automatic structural sync exposes the pending effect instead of looking dropped`() {
+        val source =
+            Files.readString(
+                Paths.get("src/main/kotlin/com/github/btakita/agentdoc/EditorTabSyncListener.kt")
+                    .takeIf { Files.exists(it) }
+                    ?: Paths.get(
+                        "editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/EditorTabSyncListener.kt",
+                    ),
+            )
+        val delivery = source.substringAfter("private fun deliverCapturedSurface(")
+            .substringBefore("private fun retireClosedSurfaceEndpoints(")
+
+        assertTrue(delivery.contains("surfaceObservationQueuesStructuralSync(receipt.output)"))
+        assertTrue(delivery.contains("SyncLayoutAction.LAYOUT_SYNC_PENDING_MESSAGE"))
+    }
+
+    @Test
     fun `a frontend handoff fences the listener's frames and the fallback makes them live again`() {
         // #surfaceretireformal (model: PassiveTmuxSyncRetireNet `live`): a retired-endpoint receipt
         // re-registers only while the listener owns its frames. After a handoff it must stay a

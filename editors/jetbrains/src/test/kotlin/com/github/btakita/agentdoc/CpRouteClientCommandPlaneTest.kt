@@ -16,6 +16,25 @@ import org.junit.Test
  * projection resolution the controller's shadow endpoint relies on.
  */
 class CpRouteClientCommandPlaneTest {
+    @Test
+    fun `accepted structural observation is reported as queued until its tmux effect runs`() {
+        assertTrue(
+            surfaceObservationQueuesStructuralSync(
+                """{"intent":{"kind":"sync","columns":[],"document":"/repo/a.md","preserve_focus":false},"idle":false,"outcome":null,"error":null}""",
+            ),
+        )
+        assertFalse(
+            surfaceObservationQueuesStructuralSync(
+                """{"intent":{"kind":"focus","document":"/repo/a.md"},"idle":false,"outcome":null,"error":null}""",
+            ),
+        )
+        assertFalse(
+            surfaceObservationQueuesStructuralSync(
+                """{"intent":{"kind":"sync","columns":[],"document":"/repo/a.md","preserve_focus":false},"idle":false,"outcome":null,"error":null,"deferred_to":"other-ide"}""",
+            ),
+        )
+    }
+
 
     @Test
     fun `manual layout client wait outlives controller terminal projection`() {

@@ -1,8 +1,7 @@
 package com.github.btakita.agentdoc
 
 import java.lang.invoke.MethodHandles
-import java.nio.file.Files
-import java.nio.file.Paths
+import java.awt.Window
 import java.util.LinkedHashMap
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -10,6 +9,8 @@ import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.mockito.Mockito.mock
+import org.mockito.Mockito.`when`
 
 class JetBrainsEditorSurfaceTest {
     @Test
@@ -51,21 +52,15 @@ class JetBrainsEditorSurfaceTest {
 
     @Test
     fun `keyboard focus on the frame or an owned child is that project surface`() {
-        // Constructing java.awt.Window throws HeadlessException on hosted Linux.
-        // Verify the small ownership walk directly from its shipped source so
-        // this contract remains covered without requiring a display server.
-        val source =
-            listOf(
-                Paths.get("src/main/kotlin/com/github/btakita/agentdoc/JetBrainsEditorSurface.kt"),
-                Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/JetBrainsEditorSurface.kt"),
-            ).first(Files::exists).toFile().readText()
-        val ownershipWalk =
-            source.substringAfter("internal fun windowBelongsToFrame")
-                .substringBefore("fun isProjectSurfaceActive")
-        assertTrue(ownershipWalk.contains("var cursor = active"))
-        assertTrue(ownershipWalk.contains("if (cursor === frame) return true"))
-        assertTrue(ownershipWalk.contains("cursor = cursor.owner"))
-        assertTrue(ownershipWalk.contains("return false"))
+        // Mockito allocates these without invoking Window's headless-checking constructor.
+        val frame = mock(Window::class.java)
+        val child = mock(Window::class.java)
+        val other = mock(Window::class.java)
+        `when`(child.owner).thenReturn(frame)
+        assertTrue(JetBrainsEditorSurfaces.windowBelongsToFrame(frame, frame))
+        assertTrue(JetBrainsEditorSurfaces.windowBelongsToFrame(child, frame))
+        assertFalse(JetBrainsEditorSurfaces.windowBelongsToFrame(other, frame))
+        assertFalse(JetBrainsEditorSurfaces.windowBelongsToFrame(null, frame))
     }
 
     fun `missing backend windows remain unknown despite a current surface hint`() {

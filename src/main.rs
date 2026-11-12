@@ -5738,14 +5738,12 @@ enum QueueAction {
     /// (`#subagentworkpool`), e.g. a harness reporting that the worker ended
     /// without a result. A notice that a worker is waiting on its own
     /// background work is proof of life: run `queue claim --refresh` for that,
-    /// never this. The worker's work-pool slot is freed so the coordinator
-    /// refills it now; its claim, generation, and worker binding are kept, so
-    /// a later report from the same worker is still accepted and `queue claim
-    /// --refresh` with the exact owner and generation clears the freeze,
-    /// including after the claim TTL. Expiry does not turn that frozen attempt
-    /// into lost or make its head eligible for dispatch. An attempt that
-    /// expired with its worker bound may be frozen too. Prints the pool refill
-    /// (next heads' claim / brief / start commands).
+    /// never this. The worker's work-pool slot is freed and failed-continue
+    /// recovery runs immediately. Prints the authoritative pool refill; when
+    /// it offers the same item, follow its exact claim / brief / start commands
+    /// to create a fresh generation. Do not rebind the stopped generation with
+    /// an old `queue start` command. An attempt that expired with its worker
+    /// bound may be frozen too.
     #[command(after_help = agent_doc_frontmatter::frontmatter::queue_marker_legend_help())]
     Freeze {
         /// Path to the session document
@@ -10531,7 +10529,7 @@ fn try_main() -> anyhow::Result<()> {
                     &file, &item, generation, &reason,
                 )?;
                 eprintln!(
-                    "[queue] froze {:?} (owner {}, generation {}); its work-pool slot is free, its claim and worker binding are kept. A report from the same worker is still accepted; `queue claim --refresh` clears the freeze.",
+                    "[queue] froze {:?} (owner {}, generation {}); its work-pool slot is free. The authoritative refill below runs failed-continue recovery: if it offers this item, use its exact claim / brief / start commands for a fresh generation; do not reuse the frozen generation's start command.",
                     claim.item_text, claim.owner, claim.generation,
                 );
                 emit_subagent_pool_refill(

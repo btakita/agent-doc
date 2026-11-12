@@ -4509,7 +4509,7 @@ fn retained_pending_write_message(
     pending: RetainedPendingWriteMessage<'_>,
     ownership: agent_doc_turn::write_ownership::RetainedWriteOwnership,
 ) -> String {
-    let editor_live = agent_doc_crdt_relay_io::reliable_sync_editor_live_for_file(file);
+    let editor_live = retained_projection_editor_live(file);
     let converged_but_unsettleable =
         agent_doc_document_realtime_io::retained_write_is_stranded(file, "session_check_guidance");
     retained_pending_write_message_from_observation(
@@ -4519,6 +4519,47 @@ fn retained_pending_write_message(
         editor_live,
         converged_but_unsettleable,
     )
+}
+
+/// Whether the retained projection has an editor replica that can actually
+/// consume its keyed delivery.
+///
+/// The durable Lazily open-set is the buffer-authority fence, but it can outlive
+/// a crashed or recycled replica worker. It must not, by itself, justify the
+/// promise that a retained closeout will converge automatically. The
+/// controller's compact relay revision is the fresher delivery observation:
+/// when it reports zero members (or an attached editor with no replica), the
+/// response stays durable but needs an editor reopen/restart before it can move.
+/// Unknown controller state still fails closed to the durable liveness fact.
+fn retained_projection_editor_live(file: &Path) -> bool {
+    let durable_editor_live = agent_doc_crdt_relay_io::reliable_sync_editor_live_for_file(file);
+    if !durable_editor_live {
+        return false;
+    }
+    let revision =
+        agent_doc_controller_io::project_controller::revision_via_controller_model_read_for_doc(
+            file,
+            "session_check_retained_projection_liveness",
+        )
+        .ok()
+        .flatten();
+    retained_projection_editor_live_from_revision(durable_editor_live, revision.as_ref())
+}
+
+fn retained_projection_editor_live_from_revision(
+    durable_editor_live: bool,
+    revision: Option<&agent_doc_crdt_relay_io::CurrentRevision>,
+) -> bool {
+    match revision {
+        Some(agent_doc_crdt_relay_io::CurrentRevision::Current { live_editors, .. }) => {
+            *live_editors > 0
+        }
+        Some(
+            agent_doc_crdt_relay_io::CurrentRevision::Detached
+            | agent_doc_crdt_relay_io::CurrentRevision::EditorAttachedMissingReplica,
+        ) => false,
+        None => durable_editor_live,
+    }
 }
 
 /// Render one coherent retained-write observation.
@@ -4572,6 +4613,21 @@ fn retained_pending_write_message_from_observation(
                 ownership.with_retained_projection(true),
                 &file.display().to_string(),
             ),
+        );
+    }
+
+    if !editor_live {
+        let kind = if captured_closeout {
+            "response delivery"
+        } else {
+            "document projection"
+        };
+        return format!(
+            "[session-check] INTERRUPTED: binary-owned {kind} `{intent_id}` is retained for `{}` (reason={reason}, source={source}, target_hash={target_hash}); {} state=retained_projection_replica_absent.{} The exact target remains durable, but zero live editor replicas are registered, so this delivery cannot converge automatically. Reopen the document or restart/reload its editor integration, then rerun `agent-doc session-check {}`. Do not submit another closeout payload, run `commit`, or force disk.",
+            file.display(),
+            RETAINED_PENDING_NEEDS_OPERATOR_TOKEN,
+            resume_detail,
+            file.display(),
         );
     }
 
@@ -7410,14 +7466,8 @@ mod terminal_convergence_tests {
 
     #[test]
     fn retained_pending_write_guidance_preserves_same_capture() {
-        // An absolute file inside its own project: a relative path resolves the
-        // project root from the test's cwd, which walks up into the operator's
-        // home controller when the checkout lives outside a project.
-        let dir = tempfile::TempDir::new().unwrap();
-        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-        let file = dir.path().join("session.md");
-        let file = file.as_path();
-        let message = retained_pending_write_message(
+        let file = Path::new("session.md");
+        let message = retained_pending_write_message_from_observation(
             file,
             RetainedPendingWriteMessage {
                 intent_id: "intent-1",
@@ -7431,6 +7481,8 @@ mod terminal_convergence_tests {
             },
             agent_doc_turn::write_ownership::RetainedWriteOwnership::new(true, true)
                 .with_retained_projection(true),
+            true,
+            false,
         );
         assert!(message.contains("same capture will resume"));
         assert!(message.contains("Do not issue another closeout payload"));
@@ -7445,14 +7497,8 @@ mod terminal_convergence_tests {
 
     #[test]
     fn retained_pending_write_guidance_distinguishes_non_capture_projection() {
-        // An absolute file inside its own project: a relative path resolves the
-        // project root from the test's cwd, which walks up into the operator's
-        // home controller when the checkout lives outside a project.
-        let dir = tempfile::TempDir::new().unwrap();
-        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-        let file = dir.path().join("session.md");
-        let file = file.as_path();
-        let message = retained_pending_write_message(
+        let file = Path::new("session.md");
+        let message = retained_pending_write_message_from_observation(
             file,
             RetainedPendingWriteMessage {
                 intent_id: "intent-2",
@@ -7466,6 +7512,8 @@ mod terminal_convergence_tests {
             },
             agent_doc_turn::write_ownership::RetainedWriteOwnership::UNOWNED
                 .with_retained_projection(true),
+            true,
+            false,
         );
         assert!(message.contains("binary-owned document projection"));
         assert!(message.contains("same intent will resume"));
@@ -7541,6 +7589,46 @@ mod terminal_convergence_tests {
         assert!(message.contains("identity-fenced `repair --resume-capture`"));
         assert!(message.contains("do not assume the reconnect created a replay edge"));
         assert!(!message.contains("capture then drains automatically"));
+    }
+
+    #[test]
+    fn stale_durable_liveness_does_not_hide_zero_authoritative_replicas() {
+        let revision = agent_doc_crdt_relay_io::CurrentRevision::Current {
+            lineage: "retained-target".to_string(),
+            state_vector: vec![1, 2, 3],
+            live_editors: 0,
+            delivery_converged: true,
+        };
+
+        assert!(
+            !retained_projection_editor_live_from_revision(true, Some(&revision)),
+            "a stale durable open-set must not promise that zero relay members can drain a retained delivery",
+        );
+
+        let message = retained_pending_write_message_from_observation(
+            Path::new("sdk-dev.md"),
+            RetainedPendingWriteMessage {
+                intent_id: "retained-response",
+                reason: "editor_projection_pending",
+                source: "serialized_atomic_write",
+                target_hash: "d627e959",
+                resume_reason: Some(
+                    "retained target has not reached exact canonical/disk convergence",
+                ),
+                captured_closeout: true,
+                capture_resume_available: true,
+                retained_write_resume_available: true,
+            },
+            agent_doc_turn::write_ownership::RetainedWriteOwnership::new(true, true)
+                .with_retained_projection(true),
+            false,
+            false,
+        );
+        assert!(message.contains(RETAINED_PENDING_NEEDS_OPERATOR_TOKEN));
+        assert!(message.contains("state=retained_projection_replica_absent"));
+        assert!(message.contains("restart/reload its editor integration"));
+        assert!(!message.contains("converge automatically after"));
+        assert!(!message.contains("retry only `agent-doc session-check"));
     }
 
     /// `#retainedcapturereplayterminal`: after a replica reconnect, exact

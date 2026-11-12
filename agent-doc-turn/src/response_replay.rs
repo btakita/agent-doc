@@ -1755,6 +1755,7 @@ mod tests {
             captured_response,
             materialized_doc
         ));
+
         let captured_plural =
             captured_response.replace("> **Queue prompt:**", "> **Queue prompts:**");
         let materialized_plural =

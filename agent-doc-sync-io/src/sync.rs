@@ -6070,16 +6070,33 @@ fn run_with_options_internal_at_root_with_column_authority(
     // sync runs on every editor file switch, so paying ~1s for diagnostics that
     // change no state is exactly the work to keep off the hot path.
     //
-    // Full `agent-doc sync` (the deliberate layout reconcile, and the doctor
-    // repair path below) still runs it, so the validation is not lost — it is
-    // deferred to the passes that are allowed to be slow and that actually act on
-    // the result.
-    if matches!(auto_start_mode, AutoStartMode::SafePassive) {
+    // Full standalone `agent-doc sync` (the deliberate layout reconcile, and
+    // the doctor repair path below) still runs it, so the validation is not
+    // lost — it is deferred to the passes that are allowed to be slow and that
+    // actually act on the result.
+    //
+    // `#tmuxautosyncpostscan`: the controller's structural worker must not run
+    // this global report-only scan either. In a live incident the tmux router
+    // finished in 1.3s, then `resync::run(false, ..)` held the single
+    // latest-wins worker for another 50s. A foreground Sync Tmux Layout command
+    // published during that scan remained `NeedsEffect` and timed out as
+    // `tmux_effect_not_started`, even though the old layout had already been
+    // applied. The worker already performs its own post-effect drift survey;
+    // doing the global health report inside the effect adds no convergence
+    // signal and prevents newer generations from starting.
+    let controller_structural_effect = agent_doc_process_owner_io::structural_effect_active();
+    if should_run_post_sync_resync(auto_start_mode, controller_structural_effect) {
+        if let Err(e) = resync::run(false, None, None) {
+            eprintln!("[sync] warning: post-sync resync failed: {}", e);
+        }
+    } else if matches!(auto_start_mode, AutoStartMode::SafePassive) {
         sync_log(
             "post_sync_resync_skipped mode=safe-passive reason=report_only_off_hot_path (#passiveresyncdefer)",
         );
-    } else if let Err(e) = resync::run(false, None, None) {
-        eprintln!("[sync] warning: post-sync resync failed: {}", e);
+    } else {
+        sync_log(
+            "post_sync_resync_skipped mode=full reason=controller_structural_effect_report_only_off_worker (#tmuxautosyncpostscan)",
+        );
     }
     if run_doctor_repair {
         let doctor_repair_start = Instant::now();
@@ -6129,6 +6146,13 @@ fn run_with_options_internal_at_root_with_column_authority(
     }
 
     Ok(())
+}
+
+fn should_run_post_sync_resync(
+    auto_start_mode: AutoStartMode,
+    controller_structural_effect: bool,
+) -> bool {
+    !matches!(auto_start_mode, AutoStartMode::SafePassive) && !controller_structural_effect
 }
 
 /// Register or update registry entries for synced files.
@@ -8009,6 +8033,20 @@ mod tests {
     use std::process::Command as ProcessCommand;
     use std::time::Duration;
     use tmux_router::IsolatedTmux;
+
+    #[test]
+    fn controller_structural_effect_skips_report_only_post_sync_resync() {
+        assert!(should_run_post_sync_resync(AutoStartMode::Full, false));
+        assert!(!should_run_post_sync_resync(AutoStartMode::Full, true));
+        assert!(!should_run_post_sync_resync(
+            AutoStartMode::SafePassive,
+            false
+        ));
+        assert!(!should_run_post_sync_resync(
+            AutoStartMode::SafePassive,
+            true
+        ));
+    }
 
     #[test]
     fn doctor_repair_prefers_visible_column_over_unrelated_focus_gh388() {

@@ -73,45 +73,45 @@ fn strip_trailing_separators(path: PathBuf) -> PathBuf {
     path.components().collect()
 }
 
-/// Whether `exe` is a cargo-built test harness binary. Cargo traditionally
-/// writes these to `target/<profile>/deps/<crate>-<hash>`; Rust 1.100 may write
-/// them to `target/<profile>/build/<package>/<hash>/out/<crate>-<hash>`.
-/// Shipped binaries use neither layout, so production behaviour is unaffected.
-pub fn is_cargo_test_binary_path(exe: &Path) -> bool {
-    let Some((stem, hash)) = exe
-        .file_name()
-        .and_then(|name| name.to_str())
-        .and_then(|name| name.rsplit_once('-'))
-    else {
-        return false;
-    };
+/// Resolve the Cargo profile directory containing the artifacts for test
+/// harness executable `exe`. Cargo traditionally writes harnesses to
+/// `target/<profile>/deps/<crate>-<hash>`; Rust 1.100 may write them to
+/// `target/<profile>/build/<package>/<hash>/out/<crate>-<hash>`.
+pub fn cargo_test_profile_dir(exe: &Path) -> Option<&Path> {
+    let (stem, hash) = exe.file_name()?.to_str()?.rsplit_once('-')?;
     if stem.is_empty()
         || hash.len() != 16
         || !hash
             .bytes()
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
     {
-        return false;
+        return None;
     }
 
-    let Some(parent) = exe.parent() else {
-        return false;
-    };
+    let parent = exe.parent()?;
     if parent.file_name().is_some_and(|name| name == "deps") {
-        return true;
+        return parent.parent();
     }
 
-    parent.file_name().is_some_and(|name| name == "out")
-        && parent
-            .parent()
-            .and_then(Path::file_name)
-            .is_some_and(|name| name == hash)
-        && parent
-            .parent()
-            .and_then(Path::parent)
-            .and_then(Path::parent)
-            .and_then(Path::file_name)
-            .is_some_and(|name| name == "build")
+    let hash_dir = parent.parent()?;
+    let package_dir = hash_dir.parent()?;
+    let build_dir = package_dir.parent()?;
+    if parent.file_name().is_some_and(|name| name == "out")
+        && hash_dir.file_name().is_some_and(|name| name == hash)
+        && build_dir.file_name().is_some_and(|name| name == "build")
+    {
+        build_dir.parent()
+    } else {
+        None
+    }
+}
+
+/// Whether `exe` is a cargo-built test harness binary. Cargo traditionally
+/// writes these to `target/<profile>/deps/<crate>-<hash>`; Rust 1.100 may write
+/// them to `target/<profile>/build/<package>/<hash>/out/<crate>-<hash>`.
+/// Shipped binaries use neither layout, so production behaviour is unaffected.
+pub fn is_cargo_test_binary_path(exe: &Path) -> bool {
+    cargo_test_profile_dir(exe).is_some()
 }
 
 /// Whether this process is a cargo-built test harness binary.
@@ -220,11 +220,21 @@ mod tests {
 
     #[test]
     fn cargo_test_binary_layouts_are_recognised_without_guessing_a_hash() {
-        for harness in [
-            "/w/target/debug/deps/agent_doc_fs-0123456789abcdef",
-            "/w/target/debug/build/agent-doc-fs/0123456789abcdef/out/agent_doc_fs-0123456789abcdef",
+        for (harness, profile) in [
+            (
+                "/w/target/debug/deps/agent_doc_fs-0123456789abcdef",
+                "/w/target/debug",
+            ),
+            (
+                "/w/target/debug/build/agent-doc-fs/0123456789abcdef/out/agent_doc_fs-0123456789abcdef",
+                "/w/target/debug",
+            ),
         ] {
             assert!(is_cargo_test_binary_path(Path::new(harness)), "{harness}");
+            assert_eq!(
+                cargo_test_profile_dir(Path::new(harness)),
+                Some(Path::new(profile))
+            );
         }
         for not_a_harness in [
             "/w/target/debug/agent-doc",

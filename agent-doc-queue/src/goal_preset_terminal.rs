@@ -351,12 +351,8 @@ pub fn hand_back_completes_goal_loop(response: &str, states: &[String], bodies: 
         return false;
     }
     let blocked = ["BLOCKED".to_string()];
-    if hand_back_begins_with_final_state(response, &blocked)
-        && blocked_review_order_already_answered(response, bodies)
-    {
-        return false;
-    }
-    true
+    !(hand_back_begins_with_final_state(response, &blocked)
+        && blocked_review_order_already_answered(response, bodies))
 }
 
 /// True when `line` begins with one of `states`, after blockquote, list, and

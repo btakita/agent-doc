@@ -56,6 +56,15 @@ fn brief_prints_preset_and_backlog_authorization_for_an_id_head() {
         .stdout(predicate::str::contains(
             "does not itself grant a harness-native tool permission",
         ))
+        .stdout(predicate::str::contains("#harnessactionfallback"))
+        .stdout(predicate::str::contains("exact blocked action"))
+        .stdout(predicate::str::contains("exact harness block"))
+        .stdout(predicate::str::contains(
+            "perform the already-authorized action from the main session",
+        ))
+        .stdout(predicate::str::contains(
+            "Keep the queue item incomplete while that effect remains",
+        ))
         .stdout(predicate::str::contains("treat prior authorization as the answer").not())
         .stdout(predicate::str::contains("Never run `make install`"))
         .stdout(predicate::str::contains(

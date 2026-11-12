@@ -107,6 +107,13 @@ tasks {
         options.compilerArgs.addAll(listOf("--add-modules", "jdk.attach"))
     }
 
+    withType<Test>().configureEach {
+        testLogging {
+            events(org.gradle.api.tasks.testing.logging.TestLogEvent.FAILED)
+            exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
+        }
+    }
+
     jar {
         archiveBaseName.set(packageName)
         manifest {

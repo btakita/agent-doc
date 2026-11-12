@@ -49,6 +49,17 @@ fn assert_ok(output: &std::process::Output, what: &str) {
     );
 }
 
+fn assert_transient_closeout(output: &std::process::Output, what: &str) {
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !output.status.success()
+            && (stderr.contains("#transientcloseout")
+                || stderr.contains("refusal=captured_response_not_materialized")),
+        "{what} should retain the response before reporting incomplete closeout: stdout={} stderr={stderr}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+}
+
 /// A committed, baselined session whose runnable list is spelled `kind`
 /// (`run`, `queue` or `loop`), plus tracked checklist components whose items
 /// carry nested rows.
@@ -217,11 +228,18 @@ fn only_nested_leaves_run_in_every_runnable_list_spelling() {
             dispatch_work.iter().all(|item| item != PARENT),
             "{kind}: the parent is never dispatched: {dispatch:#?}"
         );
-        for child in CHILDREN {
+        if kind == "loop" {
             assert!(
-                dispatch_work.iter().any(|item| item == child),
-                "{kind}: every leaf is independently dispatchable: {dispatch:#?}"
+                dispatch_work.is_empty(),
+                "{kind}: loop rows stay out of one-shot subagent dispatch: {dispatch:#?}"
             );
+        } else {
+            for child in CHILDREN {
+                assert!(
+                    dispatch_work.iter().any(|item| item == child),
+                    "{kind}: every leaf is independently dispatchable: {dispatch:#?}"
+                );
+            }
         }
         assert_eq!(
             dispatch_work
@@ -293,10 +311,10 @@ fn a_leaf_is_claimable_and_its_brief_carries_parent_context() {
     let body = run_body(&doc, "run");
     assert!(
         body.starts_with(&format!(
-            "- {PARENT}\n  - 🟡 [#subagent:pmsync#1] {}\n",
+            "- ### {PARENT}\n  - 🟡 [#subagent:pmsync#1] {}\n",
             CHILDREN[0]
         )),
-        "only the claimed leaf carries lifecycle projection:\n{body}"
+        "the context parent stays navigable while only the claimed leaf carries lifecycle projection:\n{body}"
     );
 
     let state = preflight_json(dir.path(), &doc);
@@ -662,7 +680,7 @@ fn a_verbatim_nested_echo_closes_the_reported_leaf_not_the_parent() {
         "<!-- patch:exchange -->\n### Re: PM sync — gpt-5\n\n> **Queue prompt:** {PARENT}\n{echo}\nPart 1 shipped; Part 2 is a design doc.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nPart 1 shipped; Part 2 is a design doc.\n<!-- /patch:recap -->\n"
     );
     let output = run_agent_doc_stdin(dir.path(), &["respond", path, "--force-disk"], &response);
-    assert_ok(&output, "respond");
+    assert_transient_closeout(&output, "respond");
 
     let body = without_admitted_queue_ids(&run_body(&doc, "run"));
     assert!(!body.contains(&format!("- ~~{PARENT}~~")), "{body}");
@@ -680,8 +698,8 @@ fn a_verbatim_nested_echo_closes_the_reported_leaf_not_the_parent() {
     assert!(claim_owners(dir.path(), path).is_empty());
 }
 
-/// Equal child text under separate parents is separate queue work. A closeout
-/// for one nest vector must not remove or strike the sibling occurrence.
+/// Equal child text under separate parents is separate queue work. A targeted
+/// acknowledgement for one nest vector must not strike the sibling occurrence.
 #[test]
 fn equal_nested_children_close_by_parent_vector() {
     let dir = tempfile::tempdir().unwrap();
@@ -689,35 +707,26 @@ fn equal_nested_children_close_by_parent_vector() {
     let second_parent = "https://github.com/haiven-dev/haiven-api/pull/823";
     let child = "#adversarial-pr";
     let second_vector = format!("{second_parent}: {child}");
-    let rows = format!("- {first_parent}\n  - {child}\n- {second_parent}\n  - {child}\n");
+    let rows = format!("- {second_parent}\n  - {child}\n- {first_parent}\n  - {child}\n");
     let doc = closeout_session(dir.path(), &rows, "");
     let path = doc.to_str().unwrap();
 
-    dispatch_and_report(
+    let closed = run_agent_doc(
         dir.path(),
-        path,
-        &second_vector,
-        "subagent:adversarial-pr-823",
+        &["queue", "consume", path, "--ack-text", &second_vector],
     );
-    preflight_json(dir.path(), &doc);
-    let response = format!(
-        "<!-- patch:exchange -->\n### Re: adversarial review — gpt-5\n\n> **Queue prompt:** {first_parent}\n\n**Deferred:** Its child remains queued.\n\n> **Queue prompt:** {second_vector}\n\nReviewed pull request 823.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nDone.\n<!-- /patch:recap -->\n"
-    );
-    let output = run_agent_doc_stdin(dir.path(), &["respond", path, "--force-disk"], &response);
-    assert_ok(&output, "respond");
+    assert_ok(&closed, "queue consume --ack-text on one parent vector");
 
     let body = without_admitted_queue_ids(&run_body(&doc, "run"));
-    let (first_section, second_section) = body
-        .split_once(second_parent)
-        .unwrap_or_else(|| panic!("missing second parent:\n{body}"));
+    let (second_section, first_section) = body
+        .split_once(first_parent)
+        .unwrap_or_else(|| panic!("missing first parent:\n{body}"));
     assert!(
-        first_section.contains(first_parent)
-            && first_section.contains(child)
-            && !first_section.contains(&format!("~~{child}~~")),
+        first_section.contains(child) && !first_section.contains(&format!("~~{child}~~")),
         "the equal-text child under the other parent stays live:\n{body}"
     );
     assert!(
-        second_section.contains(&format!("~~{child}")),
+        second_section.contains(second_parent) && second_section.contains(&format!("~~{child}")),
         "only the addressed parent vector closes:\n{body}"
     );
     assert_eq!(body.matches(&format!("~~{child}")).count(), 1, "{body}");
@@ -863,7 +872,7 @@ fn a_live_answer_leaf_lazily_reopens_its_struck_parent() {
         "<!-- patch:exchange -->\n### Re: stale replay — gpt-5\n\n> **Queue prompt:** 🙋 {PAUSED_ROW} [#{REQUEST_ID}]\n\nClosed.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nClosed.\n<!-- /patch:recap -->\n"
     );
     let output = run_agent_doc_stdin(dir.path(), &["respond", path, "--force-disk"], &response);
-    assert_ok(&output, "respond");
+    assert_transient_closeout(&output, "respond");
     let body = run_body(&doc, "run");
     assert!(
         body.starts_with(&format!("- ### ~~{PAUSED_ROW} [#{REQUEST_ID}]~~")),

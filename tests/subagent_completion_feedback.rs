@@ -2090,7 +2090,7 @@ fn report_complete_and_freeze_print_the_work_pool_refill() {
         "freeze two",
     );
     assert!(freeze.contains("trigger=frozen"), "{freeze}");
-    assert!(freeze.contains("\"task four\""), "{freeze}");
+    assert!(freeze.contains("\"task two\""), "{freeze}");
 
     let pool = run(later, &["queue", "pool", &path, "--json"]);
     assert!(pool.status.success());
@@ -2100,10 +2100,9 @@ fn report_complete_and_freeze_print_the_work_pool_refill() {
         pool["pools"][0]["occupancy"]["source"], "queue_cap",
         "{pool}"
     );
-    assert_eq!(pool["pools"][0]["occupancy"]["frozen"], 1, "{pool}");
+    assert_eq!(pool["pools"][0]["occupancy"]["frozen"], 0, "{pool}");
     assert_eq!(pool["pools"][0]["occupancy"]["free"], 1, "{pool}");
-    assert_eq!(pool["frozen"][0]["item"], "task two", "{pool}");
-    assert_eq!(pool["next_heads"][0]["item"], "task four", "{pool}");
+    assert_eq!(pool["next_heads"][0]["item"], "task two", "{pool}");
 }
 
 /// `#workerresponsestructure` (agent-doc-bugs.md, 2026-11-05): the

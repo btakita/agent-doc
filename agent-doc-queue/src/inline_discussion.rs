@@ -109,10 +109,10 @@ fn github_pull_request_path(rest: &str) -> bool {
     if digits == 0 {
         return false;
     }
-    match number[digits..].chars().next() {
-        Some(ch) if ch.is_ascii_alphanumeric() => false,
-        _ => true,
-    }
+    !matches!(
+        number[digits..].chars().next(),
+        Some(ch) if ch.is_ascii_alphanumeric()
+    )
 }
 
 fn github_slug(part: &str) -> bool {

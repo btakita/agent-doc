@@ -1180,7 +1180,7 @@ mod tests {
             &[started],
         )
         .unwrap();
-        let item = payload.lost.iter_mut().next().unwrap();
+        let item = payload.lost.first_mut().unwrap();
         assert_eq!(item.operation, QueueSyncOperation::Retry);
         apply_attempt_evidence(item, QueueSyncExecutionEvidence::Started, Vec::new());
         assert_eq!(item.operation, QueueSyncOperation::Retry);

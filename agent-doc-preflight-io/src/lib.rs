@@ -5623,6 +5623,51 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
     coin_gate: &FreeTextCoinGate,
     admission_snapshot: Option<&str>,
 ) -> Result<QueueState> {
+    let apply_guard = match agent_doc_queue_io::queue_edit_owner::QueueEditGuard::try_acquire(file)?
+    {
+        Some(guard) => guard,
+        None => {
+            eprintln!(
+                "[preflight] queue: deferred because another owner holds the apply lock for {}",
+                file.display(),
+            );
+            return Ok(QueueState::default());
+        }
+    };
+    run_queue_maintenance_with_options_under_apply_guard(
+        file,
+        diff,
+        coin_gate,
+        admission_snapshot,
+        &apply_guard,
+    )
+}
+
+/// Queue maintenance for a caller that already holds the document's apply
+/// guard. This prevents nested flock acquisition while preserving a typed
+/// proof that the detached worker holds exclusion across pending + queue apply.
+pub fn run_queue_maintenance_under_apply_guard(
+    file: &Path,
+    diff: Option<&str>,
+    apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
+) -> Result<QueueState> {
+    run_queue_maintenance_with_options_under_apply_guard(
+        file,
+        diff,
+        &FreeTextCoinGate::structural_only(),
+        None,
+        apply_guard,
+    )
+}
+
+fn run_queue_maintenance_with_options_under_apply_guard(
+    file: &Path,
+    diff: Option<&str>,
+    coin_gate: &FreeTextCoinGate,
+    admission_snapshot: Option<&str>,
+    apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
+) -> Result<QueueState> {
+    apply_guard.ensure_protects(file)?;
     // #sqedit-race Phase 2: defer ALL queue maintenance mutation while a different,
     // live process holds a fresh queue-edit lease (a direct `queue prune-noise` /
     // `queue consume` in flight). Round-tripping a torn intermediate queue through
@@ -5707,6 +5752,23 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
     // frontier with itself, making the supposed deletion-adoption branch dead
     // while obscuring which authority maintenance actually mutated.
     let authority_baseline = content.clone();
+    // Deterministic integration barrier inside the queue-maintenance body.
+    // The detached owner already holds the per-document apply lock here, so a
+    // concurrent direct mutation must fail closed rather than supersede it.
+    if let Some(delay) = std::env::var("AGENT_DOC_TEST_BACKGROUND_QUEUE_MAINTENANCE_DELAY_MS")
+        .ok()
+        .and_then(|raw| raw.trim().parse::<u64>().ok())
+        .filter(|delay| *delay > 0)
+    {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "queue_maintenance_background_test_delay file={} delay_ms={delay}",
+                file.display(),
+            ),
+        );
+        std::thread::sleep(std::time::Duration::from_millis(delay));
+    }
     let normalized_generated_responses =
         agent_doc_markdown_ast::overlay::normalize_generated_response_lifecycle_markers(&content);
     let generated_response_markers_normalized = normalized_generated_responses != content;
@@ -14049,12 +14111,10 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
         );
     }
     #[test]
-    fn run_queue_maintenance_defers_while_foreign_queue_edit_lease_held() {
+    fn run_queue_maintenance_defers_while_queue_apply_lock_is_held() {
         // #sqedit-race Phase 2: a backlog `queue=sync` would normally regenerate
-        // the empty queue. While a DIFFERENT live process holds a fresh queue-edit
-        // lease (a direct `queue prune-noise` / `queue consume` in flight),
-        // preflight maintenance must defer entirely — no mutation, no sync — so it
-        // never round-trips a torn intermediate queue.
+        // the empty queue. While a direct queue owner holds the apply lock,
+        // maintenance must defer entirely — no mutation, no sync.
         let dir = setup_project();
         let doc = dir.path().join("session.md");
         let content = concat!(
@@ -14080,10 +14140,8 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
         )
         .unwrap();
 
-        // pid 1 (init) is always live on Unix and is never this test process →
-        // a genuine foreign in-flight queue edit.
-        let doc_str = doc.to_string_lossy().to_string();
-        agent_doc_queue_io::queue_edit_owner::refresh_queue_edit_owner_lease(&doc_str, 1).unwrap();
+        let direct_guard =
+            agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(&doc).unwrap();
 
         let state = run_queue_maintenance(&doc, None).unwrap();
 
@@ -14102,9 +14160,9 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
             "deferred maintenance must not mint the queue head:\n{after}"
         );
 
-        // Once the lease clears, the next pass syncs normally (the defer is a
+        // Once the apply guard clears, the next pass syncs normally (the defer is a
         // yield, not a permanent skip).
-        agent_doc_queue_io::queue_edit_owner::clear_queue_edit_owner_lease(&doc_str);
+        drop(direct_guard);
         let resumed = run_queue_maintenance(&doc, None).unwrap();
         assert_eq!(resumed.synced_queue_ids, vec!["alpha".to_string()]);
         assert!(

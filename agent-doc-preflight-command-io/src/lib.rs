@@ -129,8 +129,6 @@ use agent_doc_session_accretion::SessionAccretionLevel;
 #[cfg(test)]
 use agent_doc_session_accretion::SessionAccretionReport;
 
-const TEST_BACKGROUND_QUEUE_MAINTENANCE_DELAY_MS_ENV: &str =
-    "AGENT_DOC_TEST_BACKGROUND_QUEUE_MAINTENANCE_DELAY_MS";
 const TEST_BACKGROUND_PENDING_MAINTENANCE_DELAY_MS_ENV: &str =
     "AGENT_DOC_TEST_BACKGROUND_PENDING_MAINTENANCE_DELAY_MS";
 const BACKGROUND_QUEUE_MAINTENANCE_TOKEN_ENV: &str = "AGENT_DOC_BACKGROUND_QUEUE_MAINTENANCE_TOKEN";
@@ -339,6 +337,10 @@ impl BackgroundQueueMaintenanceLease {
         }
         Ok(())
     }
+
+    fn apply_guard(&self) -> &agent_doc_queue_io::queue_edit_owner::QueueEditGuard {
+        &self._guard
+    }
 }
 
 impl agent_doc_preflight_io::PendingMaintenanceEffectFence for BackgroundQueueMaintenanceLease {
@@ -437,30 +439,12 @@ pub fn run_background_queue_maintenance(file: &Path, commit_if_mutated: bool) ->
             pending_report.todo_signals.len(),
         ),
     );
-    if let Some(delay) = std::env::var(TEST_BACKGROUND_QUEUE_MAINTENANCE_DELAY_MS_ENV)
-        .ok()
-        .and_then(|raw| raw.trim().parse::<u64>().ok())
-        .filter(|delay| *delay > 0)
-    {
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "queue_maintenance_background_test_delay file={} delay_ms={delay}",
-                file.display(),
-            ),
-        );
-        std::thread::sleep(std::time::Duration::from_millis(delay));
-    }
-    if !queue_mutation.refresh_owned()? {
-        eprintln!(
-            "[preflight] background maintenance reservation was superseded for {} (child_pid={})",
-            file.display(),
-            std::process::id(),
-        );
-        return Ok(());
-    }
     queue_mutation.fence_effect(file)?;
-    let outcome = agent_doc_preflight_io::run_queue_maintenance(file, None);
+    let outcome = agent_doc_preflight_io::run_queue_maintenance_under_apply_guard(
+        file,
+        None,
+        queue_mutation.apply_guard(),
+    );
     match outcome {
         Ok(state) => {
             queue_mutation.fence_effect(file)?;

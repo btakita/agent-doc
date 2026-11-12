@@ -105,7 +105,7 @@ pub fn restore_loop_items_for_queue_with_effects(
     roster: &[String],
 ) -> Result<usize> {
     // `#sqedit-race`: one queue writer at a time, including the source read.
-    let _queue_edit_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file);
+    let _queue_edit_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file)?;
     let current = effects.current_document_content(file, "queue_schedule_loop_restore")?;
     restore_loop_items_for_queue_from_source_locked(effects, file, queue_id, roster, &current)
 }
@@ -122,7 +122,7 @@ pub fn restore_loop_items_for_queue_from_source_with_effects(
     source_content: &str,
 ) -> Result<usize> {
     // `#sqedit-race`: one queue writer at a time.
-    let _queue_edit_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file);
+    let _queue_edit_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file)?;
     restore_loop_items_for_queue_from_source_locked(effects, file, queue_id, roster, source_content)
 }
 

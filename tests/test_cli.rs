@@ -215,6 +215,27 @@ fn preflight_admits_under_five_seconds_while_slow_queue_maintenance_stays_detach
         "six-second comprehensive maintenance completed before bounded admission returned"
     );
 
+    let mid_run_deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    loop {
+        let current_ops = fs::read_to_string(&ops).unwrap_or_default();
+        if current_ops.contains("queue_maintenance_background_test_delay") {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < mid_run_deadline,
+            "background worker never reached the in-body queue barrier: {current_ops}",
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    let direct_attempt = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(&doc);
+    assert!(
+        direct_attempt
+            .unwrap_err()
+            .to_string()
+            .contains("queue mutation deferred"),
+        "direct queue edit entered during mid-run maintenance",
+    );
+
     let completion_deadline = std::time::Instant::now() + std::time::Duration::from_secs(12);
     loop {
         let current_ops = fs::read_to_string(&ops).unwrap_or_default();
@@ -441,10 +462,20 @@ fn superseded_delayed_worker_has_no_advisory_archive_or_worktree_effects() {
         std::thread::sleep(std::time::Duration::from_millis(20));
     }
 
-    // A direct edit/successor supersedes the already-running detached owner
-    // while its deterministic delay is active. The old owner must not publish
-    // even diagnostic durable evidence after this point.
-    let successor = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(&doc);
+    // A direct edit cannot enter or overwrite the already-running detached
+    // apply owner while its deterministic delay is active.
+    let direct_attempt = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(&doc);
+    assert!(
+        direct_attempt
+            .unwrap_err()
+            .to_string()
+            .contains("queue mutation deferred"),
+        "direct queue mutation did not fail closed on the held apply lock",
+    );
+    // Simulate controller cancellation after the rejected direct attempt. The
+    // old worker still owns the OS apply lock, but its token is gone; when the
+    // barrier releases it must publish no effect and drop exclusion cleanly.
+    agent_doc_queue_io::queue_edit_owner::clear_queue_edit_owner_lease(&doc.to_string_lossy());
     let ops_after_supersede = fs::read_to_string(&ops).unwrap_or_default();
     assert!(!root.join(".agent-doc/advisories").exists());
     assert!(!root.join("tasks/history.done.md").exists());
@@ -487,8 +518,6 @@ fn superseded_delayed_worker_has_no_advisory_archive_or_worktree_effects() {
                 != agent_doc_queue_io::queue_lineage::QueueLineageEventKind::Removed),
         "superseded worker wrote a removal receipt",
     );
-    drop(successor);
-
     // A newly reserved owner performs the exact durable maintenance the stale
     // worker was forbidden to publish.
     let token = "integration-successor-token";

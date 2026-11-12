@@ -1,5 +1,6 @@
 //! Direct queue-mutation ownership coordinated through project `state.db`.
 
+use std::fs::{File, OpenOptions};
 use std::path::Path;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -39,7 +40,7 @@ fn state_location(file: &str) -> Result<(std::path::PathBuf, String)> {
     Ok((root, document_hash))
 }
 
-pub fn refresh_queue_edit_owner_lease(file: &str, pid: u32) -> Result<()> {
+fn refresh_queue_edit_owner_lease(file: &str, pid: u32) -> Result<()> {
     let (project_root, document_hash) = state_location(file)?;
     agent_doc_controller_io::project_controller::upsert_coordination_lease(
         &project_root,
@@ -51,6 +52,43 @@ pub fn refresh_queue_edit_owner_lease(file: &str, pid: u32) -> Result<()> {
             heartbeat_secs: now_secs(),
         },
     )
+}
+
+fn open_queue_apply_lock(file: &str) -> Result<File> {
+    let (project_root, document_hash) = state_location(file)?;
+    let lock_dir = project_root.join(".agent-doc/locks/queue-apply");
+    std::fs::create_dir_all(&lock_dir).with_context(|| {
+        format!(
+            "failed to create queue apply lock directory {}",
+            lock_dir.display()
+        )
+    })?;
+    let lock_path = lock_dir.join(format!("{document_hash}.lock"));
+    OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(&lock_path)
+        .with_context(|| format!("failed to open queue apply lock {}", lock_path.display()))
+}
+
+enum QueueApplyLockAttempt {
+    Acquired(File),
+    Contended,
+}
+
+fn try_acquire_queue_apply_lock(file: &str) -> Result<QueueApplyLockAttempt> {
+    use fs2::FileExt as _;
+
+    let lock = open_queue_apply_lock(file)?;
+    match lock.try_lock_exclusive() {
+        Ok(()) => Ok(QueueApplyLockAttempt::Acquired(lock)),
+        Err(error) if error.raw_os_error() == fs2::lock_contended_error().raw_os_error() => {
+            Ok(QueueApplyLockAttempt::Contended)
+        }
+        Err(error) => Err(error).context("failed to acquire queue apply lock"),
+    }
 }
 
 /// Atomically reserve queue-maintenance ownership for a child that has been
@@ -171,28 +209,63 @@ fn pid_is_live(_pid: u32) -> bool {
     true
 }
 
+#[derive(Debug)]
 pub struct QueueEditGuard {
     file: String,
     holder: String,
+    _apply_lock: File,
 }
 
 impl QueueEditGuard {
-    pub fn acquire(file: &Path) -> Self {
-        let file = file.to_string_lossy().to_string();
-        let holder_pid = std::process::id();
-        if let Err(err) = refresh_queue_edit_owner_lease(&file, holder_pid) {
-            eprintln!("[agent-doc] warning: failed to acquire queue-mutation lease: {err}");
+    pub fn ensure_protects(&self, file: &Path) -> Result<()> {
+        let (_, held_hash) = state_location(&self.file)?;
+        let (_, requested_hash) = state_location(&file.to_string_lossy())?;
+        if held_hash != requested_hash {
+            anyhow::bail!(
+                "queue apply guard for {} cannot protect {}",
+                self.file,
+                file.display()
+            );
         }
-        Self {
+        Ok(())
+    }
+
+    pub fn acquire(file: &Path) -> Result<Self> {
+        Self::try_acquire(file)?.with_context(|| {
+            format!(
+                "queue mutation deferred: another owner is applying maintenance for {}; retry after it completes",
+                file.display()
+            )
+        })
+    }
+
+    pub fn try_acquire(file: &Path) -> Result<Option<Self>> {
+        let file = file.to_string_lossy().to_string();
+        // This flock is the apply exclusion. The SQLite lease makes ownership
+        // observable and coalesces dispatch, while the OS lock closes the
+        // check-then-effect race: no direct queue mutation can overwrite the
+        // lease or enter its apply body until the current guard drops.
+        let apply_lock = match try_acquire_queue_apply_lock(&file)? {
+            QueueApplyLockAttempt::Acquired(lock) => lock,
+            QueueApplyLockAttempt::Contended => return Ok(None),
+        };
+        let holder_pid = std::process::id();
+        refresh_queue_edit_owner_lease(&file, holder_pid)?;
+        Ok(Some(Self {
             file,
             holder: holder_pid.to_string(),
-        }
+            _apply_lock: apply_lock,
+        }))
     }
 
     /// Adopt a reservation published for this process before it was allowed to
     /// enter the maintenance body.
     pub fn adopt_reserved(file: &Path, token: &str) -> Result<Option<Self>> {
         let file = file.to_string_lossy().to_string();
+        let apply_lock = match try_acquire_queue_apply_lock(&file)? {
+            QueueApplyLockAttempt::Acquired(lock) => lock,
+            QueueApplyLockAttempt::Contended => return Ok(None),
+        };
         let holder_pid = std::process::id();
         if !refresh_queue_edit_owner_lease_if_holder(&file, token, holder_pid)? {
             return Ok(None);
@@ -200,6 +273,7 @@ impl QueueEditGuard {
         Ok(Some(Self {
             file,
             holder: token.to_string(),
+            _apply_lock: apply_lock,
         }))
     }
 }
@@ -222,7 +296,7 @@ mod tests {
         std::fs::write(&file, "body").unwrap();
         let file_str = file.to_string_lossy().to_string();
         {
-            let _guard = QueueEditGuard::acquire(&file);
+            let _guard = QueueEditGuard::acquire(&file).unwrap();
             assert_eq!(
                 read_queue_edit_owner_lease(&file_str).unwrap().holder_pid,
                 std::process::id()
@@ -313,5 +387,30 @@ mod tests {
 
         let successor = read_queue_edit_owner_lease(&file_text).expect("successor lease remains");
         assert_eq!(successor.holder_pid, 55_001);
+    }
+
+    #[test]
+    fn direct_edit_cannot_supersede_an_active_apply_guard() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        std::fs::write(&file, "body").unwrap();
+        let file_text = file.to_string_lossy();
+        let token = "active-apply-token";
+        assert!(try_reserve_queue_edit_owner(&file_text, token, std::process::id()).unwrap());
+        let apply = QueueEditGuard::adopt_reserved(&file, token)
+            .unwrap()
+            .expect("reserved worker owns the apply lock");
+
+        let direct = QueueEditGuard::acquire(&file).unwrap_err();
+        assert!(direct.to_string().contains("queue mutation deferred"));
+        assert!(
+            refresh_queue_edit_owner_lease_if_holder(&file_text, token, std::process::id())
+                .unwrap(),
+            "rejected direct edit must not overwrite the active token",
+        );
+
+        drop(apply);
+        QueueEditGuard::acquire(&file).expect("direct edit enters after apply guard drops");
     }
 }

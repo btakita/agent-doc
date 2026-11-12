@@ -1734,7 +1734,7 @@ pub fn consume_with_options(
     // preflight queue maintenance and the supervisor idle-watch defer instead of
     // round-tripping a torn intermediate queue. Released on drop (incl. early
     // return / `bail!`).
-    let _queue_edit_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file);
+    let _queue_edit_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file)?;
     let target = count.max(1);
     let content = effects.current_document_content(file, "queue_consume_classify")?;
     match classify_active_queue_head(&content)? {
@@ -1864,7 +1864,7 @@ pub fn acknowledge_paused_free_text(
     expected_head: &str,
     selector: Option<&crate::queue_consume::AckTextSelector>,
 ) -> Result<()> {
-    let _queue_edit_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file);
+    let _queue_edit_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file)?;
     match effects.acknowledge_paused_free_text_queue_head_with_selector(
         file,
         expected_head,
@@ -1904,7 +1904,7 @@ pub fn consume(effects: &impl QueueCommandEffects, file: &Path, count: usize) ->
 pub fn prune_noise(effects: &impl QueueCommandEffects, file: &Path) -> Result<()> {
     // #sqedit-race Phase 2: hold the queue-edit lease across the prune so the
     // supervisor idle-watch + preflight maintenance defer (single queue writer).
-    let _queue_edit_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file);
+    let _queue_edit_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file)?;
     let struck = effects.prune_noise_queue_heads(file)?;
     if struck == 0 {
         println!(

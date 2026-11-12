@@ -214,7 +214,7 @@ pub fn edit_with_effects(
     sets: &[QueueAttrSet],
     removes: &[String],
 ) -> Result<bool> {
-    let _queue_edit_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file);
+    let _queue_edit_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file)?;
     let current = effects.current_document_content(file, "queue_attr")?;
     let plan = plan_queue_attr_edit(&current, queue_id, sets, removes)?;
     if !plan.changed {

@@ -8,14 +8,16 @@
 //! attempt was abandoned for requeue. That failure authorizes a new generation
 //! in the same pass (`#transientcloseout`). An explicit requeue must not resume
 //! the abandoned worker, and it must not leave the row stuck on `⚠️🚧`. A
-//! harness freeze whose worker has already stopped, with no handback, stays
-//! `Running` and is not marked Lost. Continue fails because that worker is
-//! gone, and the failure authorizes a new generation in the same pass
+//! Low-level freeze recording temporarily keeps a stopped worker with no
+//! handback `Running` as recovery evidence. The public `queue freeze` command
+//! synchronously attempts continue, records its failure because the worker is
+//! gone, and authorizes a new generation in the same pass
 //! (`#transientcloseout`). A worker that is still running is not this case.
 //! A Lost non-abandon freeze is still `⚠️🚧`. The same pass continues it.
 //! Continue fails because that worker is gone, and the failure authorizes a
-//! new generation. Until that failure is recorded the freeze stays
-//! undispatchable, and `queue claim --refresh` revives that same generation.
+//! new generation. Before that recovery pass, exact proof can revive the
+//! ledger entry at a low-level seam; that is not coordinator guidance and the
+//! public freeze path does not expose an old-generation rebind.
 //! A Running freeze is not marked Lost. A Lost attempt that already recorded
 //! `lost_continue.failed` is not held by the freeze. A frozen handback that
 //! was not report-completed, quota exhaustion, and lost-reported closeout
@@ -66,8 +68,9 @@ pub fn is_lost_running_candidate(claim: &QueueClaim) -> bool {
     // already `⚠️🚧`. The freeze must not skip the continue attempt. Continue
     // fails because that worker is gone, and the same pass authorizes a new
     // generation (`#transientcloseout`). Once `lost_continue.failed` is set,
-    // the freeze must not hide that retry. `queue claim --refresh` still
-    // revives a generation whose continue has not failed. A frozen handback
+    // the freeze must not hide that retry. At the low-level seam only, exact
+    // proof may revive the ledger entry before continue runs; the public
+    // freeze command performs this recovery synchronously. A frozen handback
     // that was never report-completed is not this loss. An explicit requeue
     // abandon still fails continue below; it is a candidate so that failure
     // can authorize a new generation while the row shows `⚠️🚧`.
@@ -81,17 +84,18 @@ pub fn is_lost_running_candidate(claim: &QueueClaim) -> bool {
         == agent_doc_document::queue_projection::QueueLifecycleMarker::LostRunning
 }
 
-/// A harness freeze whose worker has stopped and that has no handback.
+/// A transient low-level freeze whose worker has stopped and has no handback.
 ///
-/// The attempt stays [`QueueClaimState::Running`]. It is not Lost. Continue
-/// cannot resume the stopped worker, so the failure authorizes a new
-/// generation. A freeze that already carries a handback is not this case.
+/// Until recovery runs, the ledger attempt stays [`QueueClaimState::Running`].
+/// It is not Lost. Continue cannot resume the stopped worker, so the failure
+/// authorizes a new generation. The public freeze command runs that recovery
+/// synchronously. A freeze that already carries a handback is not this case.
 pub fn is_stopped_harness_freeze(claim: &QueueClaim) -> bool {
     claim.state == QueueClaimState::Running && harness_freeze_worker_is_gone(claim)
 }
 
-/// A non-abandon harness freeze with no handback. The worker has stopped.
-/// Continue cannot resume it, including when the attempt is already `Lost`.
+/// A transient non-abandon ledger freeze with no handback. The worker has
+/// stopped. Continue cannot resume it, including when already `Lost`.
 fn harness_freeze_worker_is_gone(claim: &QueueClaim) -> bool {
     if claim.state == QueueClaimState::QuotaBlocked
         || claim.quota_block.is_some()
@@ -133,9 +137,10 @@ fn frozen_unreported_handback(claim: &QueueClaim) -> bool {
 }
 
 /// Continue, or retry when a previous continue failed. `None` for every other
-/// claim. Callers project TTL expiry first. A stopped harness freeze stays
-/// `Running`; a worker that is still running is not a candidate. A Lost
-/// non-abandon freeze is continued, and that continue fails in the same pass.
+/// claim. Callers project TTL expiry first. A stopped harness freeze remains
+/// `Running` only as transient ledger evidence before this pass; a worker that
+/// is still running is not a candidate. A Lost non-abandon freeze is
+/// continued, and that continue fails in the same pass.
 pub fn recovery_action(claim: &QueueClaim) -> Option<LostRunningAction> {
     if !is_continue_retry_candidate(claim) {
         return None;
@@ -367,8 +372,9 @@ mod tests {
             abandoned: false,
         });
         claim.publication_state = Some(crate::QueueReportState::Local);
-        // A non-abandon freeze keeps the claim; project_expiry must not be
-        // required for the exclusion.
+        // An unreported handback retains its ledger entry for reconciliation;
+        // project_expiry must not be required for the exclusion. This is not
+        // the no-handback CLI freeze that synchronously authorizes a retry.
         assert!(recovery_action(&claim).is_none());
         assert!(!retry_authorized(&claim));
     }
@@ -500,7 +506,7 @@ mod tests {
     }
 
     #[test]
-    fn a_heartbeat_after_a_stopped_freeze_continues_the_same_generation_later() {
+    fn a_ledger_only_refresh_before_replacement_can_cancel_retry() {
         let mut ledger = QueueClaimLedger::default();
         ledger.claim("annocorrupt", "subagent:annocorrupt", 1_000, 60);
         ledger
@@ -527,6 +533,9 @@ mod tests {
         });
         assert_eq!(applied[0].action, LostRunningAction::Retry);
         ledger.claims[0] = claims[0].clone();
+        // This exercises an internal ordering seam: exact proof arrives after
+        // recovery mutation but before the replacement is claimed. It is not
+        // a coordinator contract; public `queue freeze` emits the fresh retry.
         let revived = ledger
             .refresh_or_revive_attempt_in_session(
                 "annocorrupt",

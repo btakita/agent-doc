@@ -165,9 +165,10 @@ fn subagent_dispatch_candidates_for_content(file: &Path, content: &str) -> Resul
         .collect::<Vec<_>>();
     // `#subagentworkpool`: an attempt that expired with its worker still bound
     // and was not abandoned may still be working, so its row is never offered.
-    // A stopped harness freeze stays `Running`. Once continue fails, the same
-    // retry offer claims a new generation (`#transientcloseout`). This filter
-    // is only the unconfirmed slot, which a freeze does not hold.
+    // A stopped harness freeze is transiently `Running` in the ledger. The
+    // synchronous recovery pass fails continue and offers a new generation
+    // (`#transientcloseout`). This filter is only the unconfirmed slot, which
+    // that transient frozen entry does not hold.
     let retrying = |claim: &agent_doc_queue::queue_claim::QueueClaim| {
         agent_doc_queue::lost_running_recovery::retry_authorized(claim)
     };
@@ -434,8 +435,8 @@ fn queue_attr_subagent_plan_with_pools(
         ));
     let claim_states = crate::queue_claim::claim_states_for_content(file, content)?;
     // `#subagentworkpool`: a dispatching claim and a live running worker hold
-    // a pool slot; a frozen worker frees its slot but keeps its claim (it
-    // stays in `excluded` through the ledger claims).
+    // a pool slot; a frozen ledger entry frees its slot and remains excluded
+    // only until failed-continue recovery offers its fresh replacement.
     let now = crate::queue_claim::claim_clock_now_secs();
     let frozen_secs = crate::subagent_pool::frozen_secs();
     let default_pool = crate::subagent_pool::default_pool_size();

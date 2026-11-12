@@ -483,8 +483,8 @@ mod tests {
 
     /// `#subagentworkpool`, the Claude Code miss (2026-11-05): a working
     /// worker's claim expires because nothing refreshed it. A heartbeat is
-    /// due well before expiry. After expiry, while the heartbeat is still
-    /// inside the frozen bound, the same attempt is continued automatically
+    /// due well before expiry. After expiry, with no recorded stop and while
+    /// the heartbeat is still inside the staleness bound, the same attempt is continued automatically
     /// (`#lostrunningcontinue`): it holds its slot, its row is not offered,
     /// and a later refresh keeps that generation.
     #[test]

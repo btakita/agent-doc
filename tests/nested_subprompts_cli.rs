@@ -49,6 +49,18 @@ fn assert_ok(output: &std::process::Output, what: &str) {
     );
 }
 
+fn assert_transient_closeout(output: &std::process::Output, what: &str) {
+    assert!(
+        !output.status.success(),
+        "{what} must reject the intentionally live sibling rows"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("#transientcloseout"),
+        "{what} must identify its strict closeout refusal:\n{stderr}"
+    );
+}
+
 /// A committed, baselined session whose runnable list is spelled `kind`
 /// (`run`, `queue` or `loop`), plus tracked checklist components whose items
 /// carry nested rows.
@@ -909,7 +921,7 @@ fn a_live_answer_leaf_lazily_reopens_its_struck_parent() {
         "<!-- patch:exchange -->\n### Re: stale replay — gpt-5\n\n> **Queue prompt:** 🙋 {PAUSED_ROW} [#{REQUEST_ID}]\n\nClosed.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nClosed.\n<!-- /patch:recap -->\n"
     );
     let output = run_agent_doc_stdin(dir.path(), &["respond", path, "--force-disk"], &response);
-    assert_ok(&output, "respond");
+    assert_transient_closeout(&output, "respond");
     let body = run_body(&doc, "run");
     assert!(
         body.starts_with(&format!("- ### ~~{PAUSED_ROW} [#{REQUEST_ID}]~~")),

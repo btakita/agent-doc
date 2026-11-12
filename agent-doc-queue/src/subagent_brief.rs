@@ -743,7 +743,9 @@ pub const SUBAGENT_RESOLVED_AUTHORIZATION_RULE: &str = concat!(
     "authorizing preset such as `#auth`, do the work without asking the operator to repeat those ",
     "words, reconfirm, or invoke the preset again. Complete each authorized outward effect before ",
     "handback and include its result or receipt; returning a prepared artifact does not defer the ",
-    "effect to coordinator closeout (`#effectbeforecloseout`). If the effect cannot run, return the ",
+    "effect to coordinator closeout (`#effectbeforecloseout`). A head that requires a pull request ",
+    "is complete only when this turn opened it; citing a pull request that already existed does not ",
+    "complete the task (`#closepressure`). If the effect cannot run, return the ",
     "exact blocker and leave the task incomplete. This task authorization does not itself grant a ",
     "harness-native tool permission.\n"
 );

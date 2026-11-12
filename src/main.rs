@@ -10424,6 +10424,20 @@ fn try_main() -> anyhow::Result<()> {
                             pressure.incomplete,
                             pressure.complete_by,
                         );
+                    } else if agent_doc_queue::queue_response::hand_back_lacks_required_pull_request(
+                        &pressure.claim.item_text,
+                        &response,
+                    ) {
+                        eprintln!(
+                            "[queue] prompt hand-back for {:?} (owner {}, generation {}) does not show a pull request this turn created; the row stays open and the attempt was requeued (#closepressure). Citing a pull request that already existed does not complete the task. Create the pull request and include its URL as the effect this turn opened, or return only the review structure. Next: {} and dispatch the same row.",
+                            pressure.claim.item_text,
+                            pressure.claim.owner,
+                            pressure.claim.generation,
+                            agent_doc_queue_io::subagent_dispatch::claim_command(
+                                &file.display().to_string(),
+                                &pressure.claim.item_text,
+                            ),
+                        );
                     } else {
                         eprintln!(
                             "[queue] prompt hand-back for {:?} (owner {}, generation {}) does not complete the prompt; the row stays open and the attempt was requeued, so it is dispatchable again (#promptpressure). Next: {} and dispatch the same row. Finish the prompt, or return only the review structure. A prose blocker in agent:exchange does not complete the prompt.",

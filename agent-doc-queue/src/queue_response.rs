@@ -2231,6 +2231,7 @@ pub fn response_defers_queue_head(content: &str, response_body: &str, head_text:
         || latest_echo_cell_omits_inline_threads(content, response_body, head_text)
         || crate::prompt_pressure::review_blocks_prompt(content, head_text)
         || latest_echo_cell_needs_prompt_pressure(content, response_body, head_text)
+        || latest_echo_cell_lacks_created_pull_request(content, response_body, head_text)
 }
 
 /// `#addressinline`: true when `head_text` is `#address` or `#adversarial-pr`
@@ -2387,6 +2388,64 @@ fn latest_echo_cell(content: &str, text: &str, head_text: &str) -> Option<String
     Some(cell)
 }
 
+fn unquoted_response_text(text: &str) -> String {
+    text.lines()
+        .filter(|line| !line.trim_start().starts_with('>'))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// `#closepressure`: the latest echo claims `head_text` is done, the head
+/// requires a pull request this turn created, and the answer cell does not
+/// show one. A structured deferral and a prompt-blocker review are not that
+/// claim. A response that never echoes the head is not this gap. Returning
+/// true keeps the row queued; the closeout gate fails the turn on the same fact.
+pub fn latest_echo_cell_lacks_created_pull_request(
+    content: &str,
+    text: &str,
+    head_text: &str,
+) -> bool {
+    if !crate::prompt_pressure::head_requires_created_pull_request(head_text) {
+        return false;
+    }
+    if crate::prompt_pressure::response_contains_prompt_blocker(text) {
+        return false;
+    }
+    let Some(cell) = latest_echo_cell(content, text, head_text) else {
+        return false;
+    };
+    if response_defers_free_text_head(text, head_text) {
+        return false;
+    }
+    if nest_vector_in_document(content, head_text)
+        .is_some_and(|vector| response_defers_free_text_head(text, &vector))
+    {
+        return false;
+    }
+    let answer = unquoted_response_text(&cell);
+    if text_states_deferral(&answer) {
+        return false;
+    }
+    !crate::prompt_pressure::response_shows_created_pull_request(&answer)
+}
+
+/// `#closepressure`: a worker hand-back for `head` reports the row complete
+/// without showing the pull request this turn created. A deferral and a
+/// prompt-blocker review are not that report.
+pub fn hand_back_lacks_required_pull_request(head: &str, response: &str) -> bool {
+    if !crate::prompt_pressure::head_requires_created_pull_request(head) {
+        return false;
+    }
+    if crate::prompt_pressure::response_contains_prompt_blocker(response) {
+        return false;
+    }
+    let answer = unquoted_response_text(response);
+    if text_states_deferral(&answer) {
+        return false;
+    }
+    !crate::prompt_pressure::response_shows_created_pull_request(&answer)
+}
+
 /// True when `block` starts another response cell: a `### Re:` heading or a
 /// `> **Queue prompt:**` echo.
 fn block_opens_response_cell(block: &str) -> bool {
@@ -2404,6 +2463,7 @@ pub fn latest_queue_head_echo_is_deferral(content: &str, text: &str, head_text: 
     if crate::prompt_pressure::review_blocks_prompt(content, head_text)
         || latest_echo_cell_needs_prompt_pressure(content, text, head_text)
         || latest_echo_cell_omits_address_fix(content, text, head_text)
+        || latest_echo_cell_lacks_created_pull_request(content, text, head_text)
     {
         return true;
     }
@@ -2727,6 +2787,88 @@ mod tests {
             &review,
             evidence,
             "do the other thing",
+        ));
+    }
+
+    /// `#closepressure`: echoing a setup head and citing a pull request that
+    /// already existed does not answer it. A receipt for a pull request this
+    /// turn opened does. A stated deferral stays a deferral, not this gap.
+    #[test]
+    fn closepressure_existing_pull_request_does_not_answer_a_setup_head() {
+        let head = "haiven-sdk: Setup Release Please workflow to merge sdk-dev into main [#q-bac390dcf354]";
+        let doc = active_queue_doc(&format!("📥 {head}"));
+        let cited = format!(
+            "### Re: setup — codex\n\n> **Queue prompt:**\n> {head}\n\nThe setup pull request is the merged https://github.com/haiven-dev/haiven-sdk/pull/228. It is off the open list. The promotion that workflow opened is https://github.com/haiven-dev/haiven-sdk/pull/227, `chore: promote sdk-dev to main`, and that pull stays OPEN and CONFLICTING. This leaf is answered and is safe to delete.\n"
+        );
+        assert!(latest_echo_cell_lacks_created_pull_request(
+            &doc, &cited, head
+        ));
+        assert!(response_defers_queue_head(&doc, &cited, head));
+        assert!(latest_queue_head_echo_is_deferral(&doc, &cited, head));
+        let missing =
+            crate::queue_closeout_guard::echoed_heads_missing_created_pull_request(&doc, &cited)
+                .unwrap();
+        assert_eq!(missing, vec![head.to_string()]);
+
+        let opened = format!(
+            "### Re: setup — codex\n\n> **Queue prompt:**\n> {head}\n\nOpened https://github.com/haiven-dev/haiven-sdk/pull/229\n"
+        );
+        assert!(!latest_echo_cell_lacks_created_pull_request(
+            &doc, &opened, head
+        ));
+        assert!(!response_defers_queue_head(&doc, &opened, head));
+        assert!(
+            crate::queue_closeout_guard::echoed_heads_missing_created_pull_request(&doc, &opened)
+                .unwrap()
+                .is_empty()
+        );
+
+        let deferred = format!(
+            "### Re: setup — codex\n\n> **Queue prompt:**\n> {head}\n\n**Deferred:** the credentials for opening the pull request are absent.\n"
+        );
+        assert!(!latest_echo_cell_lacks_created_pull_request(
+            &doc, &deferred, head
+        ));
+        assert!(response_defers_queue_head(&doc, &deferred, head));
+
+        let question = "Do we need to create a pull request for the release?";
+        let question_doc = active_queue_doc(question);
+        let question_answer = format!(
+            "> **Queue prompt:** {question}\n\nNo. The existing release pull request covers it.\n"
+        );
+        assert!(!latest_echo_cell_lacks_created_pull_request(
+            &question_doc,
+            &question_answer,
+            question
+        ));
+        assert!(!hand_back_lacks_required_pull_request(head, &opened));
+        assert!(hand_back_lacks_required_pull_request(
+            head,
+            "**Summary**\n\nThe leaf is answered.\n\n**Verification:**\n- `cargo test`\n\nThe setup pull request is the merged https://github.com/haiven-dev/haiven-sdk/pull/228.\n"
+        ));
+
+        let cited_head = "Open a pull request to replace the build that opened https://github.com/haiven-dev/haiven-sdk/pull/228";
+        let cited_head_doc = active_queue_doc(cited_head);
+        let echoed_citation = format!(
+            "### Re: replacement\n\n> **Queue prompt:**\n> {cited_head}\n\nNo replacement pull request was created.\n"
+        );
+        assert!(latest_echo_cell_lacks_created_pull_request(
+            &cited_head_doc,
+            &echoed_citation,
+            cited_head,
+        ));
+        assert!(hand_back_lacks_required_pull_request(
+            cited_head,
+            &echoed_citation,
+        ));
+
+        let quoted_deferral_head = "Open a pull request for the work deferred until today";
+        let quoted_deferral = format!(
+            "> **Queue prompt:**\n> {quoted_deferral_head}\n\nThe work is complete, but no pull request was created.\n"
+        );
+        assert!(hand_back_lacks_required_pull_request(
+            quoted_deferral_head,
+            &quoted_deferral,
         ));
     }
 

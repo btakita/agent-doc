@@ -34,6 +34,9 @@ Read `ui_outcome` before describing a stop:
 `queue_auto_clear_yield: true` is an intentional supervisor handoff only after
 the just-completed item's authorized current-item and returned-subagent outward
 effects have executed and their results are verified (`#effectbeforecloseout`).
+A required pull request is one of those effects (`#closepressure`): citing a
+pull request that already existed does not complete a setup or
+open-a-pull-request head.
 `END THIS TURN` and `next_queue_prompt` govern later queue work; they never
 preempt, defer, or cancel a required post/publish/push/message/API effect from
 the item being closed. End after that proven closeout; the ready supervisor

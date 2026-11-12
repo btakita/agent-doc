@@ -176,6 +176,29 @@ pub(crate) fn requeue_prompt_pressure_hand_back(
             complete_by: blocker.complete_by,
         }));
     }
+    // `#closepressure`: a delivered hand-back and execution evidence still
+    // leave the row unfinished when the task required a pull request this
+    // turn and the response only cites one that already existed.
+    if agent_doc_queue::queue_response::hand_back_lacks_required_pull_request(
+        &claim.item_text,
+        response,
+    ) {
+        let claim = agent_doc_queue_io::goal_loop_handoff::requeue_with_prompt_pressure(
+            file,
+            &current,
+            &claim,
+            Some(generation),
+            response,
+            agent_doc_queue::goal_preset_terminal::PromptPressureKind::Prose,
+        )?;
+        return Ok(Some(PromptPressureRequeue {
+            claim,
+            kind: agent_doc_queue::goal_preset_terminal::PromptPressureKind::Prose,
+            review_id: None,
+            incomplete: String::new(),
+            complete_by: String::new(),
+        }));
+    }
     if delivered || !agent_doc_queue::prompt_pressure::prose_blocker_needs_pressure(response) {
         return Ok(None);
     }
@@ -2269,6 +2292,78 @@ mod tests {
                 .contains("> Blocked. The widget export is unfinished")
         );
         assert!(brief.subagent_prompt_preamble.contains("#promptpressure"));
+    }
+
+    /// `#closepressure`: a structured done hand-back that cites an already
+    /// merged pull request does not report a setup head complete, even when
+    /// the repository result was delivered. A creation receipt does.
+    #[test]
+    fn closepressure_setup_hand_back_requeues_until_a_pull_request_is_created() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("sdk-dev.md");
+        const ROW: &str = "haiven-sdk: Setup Release Please workflow to replace the run that opened https://github.com/haiven-dev/haiven-sdk/pull/228 [#q-bac390dcf354]";
+        fs::write(
+            &doc,
+            format!(
+                "---\nagent_doc_session: sdk-dev\nagent_doc_format: template\n---\n\n<!-- agent:queue -->\n- {ROW}\n<!-- /agent:queue -->\n"
+            ),
+        )
+        .unwrap();
+        start_subagent(&doc, ROW, "subagent:closepressure");
+        let cited = format!(
+            "> **Queue prompt:**\n> {ROW}\n\n\
+**Summary**\n\n\
+This leaf is answered and is safe to delete.\n\n\
+**What changed**\n\n\
+The setup pull request is the merged https://github.com/haiven-dev/haiven-sdk/pull/228. The promotion that workflow opened is https://github.com/haiven-dev/haiven-sdk/pull/227.\n\n\
+**Verification**\n\n\
+- `cargo test`\n"
+        );
+        let pressure = requeue_prompt_pressure_hand_back(&doc, ROW, Some(1), &cited, true)
+            .unwrap()
+            .expect("citing an existing pull request does not complete a setup head");
+        assert_eq!(
+            pressure.kind,
+            agent_doc_queue::goal_preset_terminal::PromptPressureKind::Prose
+        );
+        let content = fs::read_to_string(&doc).unwrap();
+        assert!(!content.contains("### Re: Subagent completed"), "{content}");
+        assert!(!content.contains("~~"), "{content}");
+        let brief =
+            agent_doc_queue_io::subagent_dispatch::subagent_authorization_for_item(&doc, ROW)
+                .unwrap();
+        assert!(
+            brief.subagent_prompt_preamble.contains("#closepressure"),
+            "{}",
+            brief.subagent_prompt_preamble
+        );
+        let (_, claim) =
+            agent_doc_queue_io::queue_claim::claim(&doc, ROW, "subagent:closepressure-2", 600)
+                .unwrap();
+        agent_doc_queue_io::queue_claim::start_attempt(
+            &doc,
+            ROW,
+            "subagent:closepressure-2",
+            "worker:closepressure-2",
+            600,
+            claim.generation,
+        )
+        .unwrap();
+        let opened = "Opened https://github.com/haiven-dev/haiven-sdk/pull/229\n";
+        assert!(
+            requeue_prompt_pressure_hand_back(&doc, ROW, Some(claim.generation), opened, true)
+                .unwrap()
+                .is_none(),
+            "a pull request this turn opened takes the ordinary report path"
+        );
+        let ledger = agent_doc_queue_io::queue_claim::load_ledger(&doc).unwrap();
+        assert!(
+            ledger.claims.iter().any(|claim| {
+                claim.owner == "subagent:closepressure-2" && claim.state.blocks_dispatch()
+            }),
+            "{ledger:?}"
+        );
     }
 
     /// A repository delivery is an ordinary report even when the prose leads

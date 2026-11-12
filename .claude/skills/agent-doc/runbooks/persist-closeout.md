@@ -13,7 +13,10 @@ effect **before** persisting (`#effectbeforecloseout`). This includes posting a
 completed review or performing any push, publish, message, or API mutation that
 the prompt, a resolved preset, a nested authorization, or the worker handback
 requires. Execute the effect and verify its result; a prepared artifact or
-worker report alone is not completion. Do not run the final `session-check`
+worker report alone is not completion. A head that requires a pull request is
+not complete when the response only cites one that already existed
+(`#closepressure`); the close fails until this turn shows the pull request it
+created. Do not run the final `session-check`
 first and treat an auto-clear `END THIS TURN` or `next_queue_prompt` as permission
 to abandon the effect. If the effect cannot run, keep the current item live and
 record its exact blocker.

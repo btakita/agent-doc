@@ -2439,10 +2439,10 @@ pub fn hand_back_lacks_required_pull_request(head: &str, response: &str) -> bool
     if crate::prompt_pressure::response_contains_prompt_blocker(response) {
         return false;
     }
-    if text_states_deferral(response) {
+    let answer = unquoted_response_text(response);
+    if text_states_deferral(&answer) {
         return false;
     }
-    let answer = unquoted_response_text(response);
     !crate::prompt_pressure::response_shows_created_pull_request(&answer)
 }
 
@@ -2860,6 +2860,15 @@ mod tests {
         assert!(hand_back_lacks_required_pull_request(
             cited_head,
             &echoed_citation,
+        ));
+
+        let quoted_deferral_head = "Open a pull request for the work deferred until today";
+        let quoted_deferral = format!(
+            "> **Queue prompt:**\n> {quoted_deferral_head}\n\nThe work is complete, but no pull request was created.\n"
+        );
+        assert!(hand_back_lacks_required_pull_request(
+            quoted_deferral_head,
+            &quoted_deferral,
         ));
     }
 

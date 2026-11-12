@@ -138,6 +138,15 @@ const QUESTION_LEADS: &[&str] = &[
     "why ",
 ];
 
+const DECISION_LEADS: &[&str] = &[
+    "determine whether ",
+    "determine if ",
+    "decide whether ",
+    "decide if ",
+    "assess whether ",
+    "assess if ",
+];
+
 fn task_prose(head: &str) -> String {
     let stripped = strip_generated_q_id(head);
     let bare = agent_doc_document::queue_projection::strip_priority_markers(&stripped);
@@ -151,7 +160,27 @@ fn task_prose_is_question(prose: &str) -> bool {
         return true;
     }
     let lower = prose.to_ascii_lowercase();
-    QUESTION_LEADS.iter().any(|lead| lower.starts_with(lead))
+    if QUESTION_LEADS.iter().any(|lead| lower.starts_with(lead)) {
+        return true;
+    }
+    DECISION_LEADS
+        .iter()
+        .find(|lead| lower.starts_with(**lead))
+        .is_some_and(|lead| !decision_has_later_creation_request(&lower[lead.len()..]))
+}
+
+fn decision_has_later_creation_request(rest: &str) -> bool {
+    [";", ". ", "! ", "? ", ", then ", " and then ", " then "]
+        .iter()
+        .filter_map(|delimiter| {
+            rest.find(delimiter)
+                .map(|index| &rest[index + delimiter.len()..])
+        })
+        .any(|tail| {
+            EXPLICIT_PULL_REQUEST_REQUESTS
+                .iter()
+                .any(|phrase| contains_unquoted_request(tail, phrase))
+        })
 }
 
 fn strip_generated_q_id(text: &str) -> String {
@@ -352,17 +381,25 @@ fn creation_verb_end(text: &str, index: usize) -> Option<usize> {
     let before_ok = index == 0 || !text.as_bytes()[index - 1].is_ascii_alphanumeric();
     let line_start = text[..index].rfind('\n').map_or(0, |offset| offset + 1);
     let prefix = text[line_start..index].trim_end();
-    let historical_or_negated = [
-        "not",
-        "never",
-        "already",
-        "previously",
-        "wasn't",
-        "weren't",
-        "didn't",
-    ]
-    .iter()
-    .any(|lead| prefix.ends_with(lead));
+    let words = request_clause(prefix)
+        .split(|ch: char| !ch.is_ascii_alphanumeric() && ch != '\'')
+        .filter(|word| !word.is_empty())
+        .collect::<Vec<_>>();
+    let historical_or_negated = words.iter().any(|word| {
+        matches!(
+            *word,
+            "not"
+                | "never"
+                | "already"
+                | "previously"
+                | "existing"
+                | "existed"
+                | "had"
+                | "wasn't"
+                | "weren't"
+                | "didn't"
+        )
+    });
     let after = index + verb.len();
     let after_ok = text
         .as_bytes()
@@ -448,6 +485,9 @@ fn gh_pr_create_receipt(lower: &str) -> bool {
 }
 
 fn line_runs_gh_pr_create(lower: &str) -> bool {
+    let Some(command_index) = lower.find("gh pr create") else {
+        return false;
+    };
     let failed_exit = lower.contains("exit code") && !lower.contains("exit code 0");
     if lower.contains(" not ")
         || lower.contains("n't")
@@ -459,10 +499,31 @@ fn line_runs_gh_pr_create(lower: &str) -> bool {
         || lower.contains("with an api error")
         || failed_exit
         || lower.contains("exited")
+        || lower.contains("prepared command")
+        || lower.contains("command to run")
+        || lower.contains("would run")
+        || lower.contains("plan to run")
+        || lower.contains("planned command")
+        || lower.contains("example command")
+        || lower.contains("suggested command")
+        || lower.contains("--dry-run")
     {
         return false;
     }
-    contains_ascii_phrase(lower, "gh pr create")
+    let direct_command = lower
+        .trim_start_matches(['-', '*', ' ', '`', '$', '+'])
+        .starts_with("gh pr create");
+    let prefix_words = lower[..command_index]
+        .split(|ch: char| !ch.is_ascii_alphanumeric() && ch != '\'')
+        .filter(|word| !word.is_empty())
+        .collect::<Vec<_>>();
+    let affirmative_execution = prefix_words
+        .iter()
+        .any(|word| matches!(*word, "ran" | "executed" | "invoked" | "succeeded"));
+    let historical_execution = prefix_words
+        .iter()
+        .any(|word| matches!(*word, "previously" | "had"));
+    (direct_command || affirmative_execution) && !historical_execution
 }
 
 fn line_is_only_pull_url(line: &str) -> bool {
@@ -999,6 +1060,15 @@ mod tests {
             "Should we open a PR before the freeze?"
         ));
         assert!(!head_requires_created_pull_request(
+            "Determine whether to open a pull request for the change"
+        ));
+        assert!(!head_requires_created_pull_request(
+            "Assess if we should create a pull request for the change"
+        ));
+        assert!(head_requires_created_pull_request(
+            "Determine whether the release is ready; then open a pull request for it"
+        ));
+        assert!(!head_requires_created_pull_request(
             "Setup the PR status app for the sdk-reviews channel."
         ));
         assert!(!head_requires_created_pull_request(
@@ -1038,11 +1108,23 @@ mod tests {
         assert!(response_shows_created_pull_request(
             "gh pr create --title 'setup'\nhttps://github.com/haiven-dev/haiven-sdk/pull/229\n"
         ));
+        assert!(response_shows_created_pull_request(
+            "Executed `gh pr create --title setup`\nhttps://github.com/haiven-dev/haiven-sdk/pull/229\n"
+        ));
         assert!(!response_shows_created_pull_request(
             "do not run gh pr create\nhttps://github.com/haiven-dev/haiven-sdk/pull/228\n"
         ));
         assert!(!response_shows_created_pull_request(
             "`gh pr create` failed with an API error.\nhttps://github.com/haiven-dev/haiven-sdk/pull/228\n"
+        ));
+        assert!(!response_shows_created_pull_request(
+            "Prepared command: gh pr create --title 'setup'\nhttps://github.com/haiven-dev/haiven-sdk/pull/228\n"
+        ));
+        assert!(!response_shows_created_pull_request(
+            "Command prepared: gh pr create --title 'setup'\nhttps://github.com/haiven-dev/haiven-sdk/pull/228\n"
+        ));
+        assert!(!response_shows_created_pull_request(
+            "The existing automation had already automatically opened https://github.com/haiven-dev/haiven-sdk/pull/228"
         ));
     }
 }

@@ -331,7 +331,8 @@ fn status_sync_checkpoint_commit_lands_status_beside_pending_completion_cells() 
             "<!-- patch:exchange -->\n### Re: the thing — claude\n\nDid the thing.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         )
         .assert()
-        .success();
+        .failure()
+        .stderr(predicates::str::contains("#transientcloseout"));
     assert_eq!(
         read_cycle_phase(tmp.path(), &doc).as_deref(),
         Some("committed")
@@ -422,7 +423,8 @@ fn status_sync_checkpoint_commit_lands_status_beside_pending_completion_cells() 
         .current_dir(tmp.path())
         .args(["session-check", file])
         .assert()
-        .success();
+        .failure()
+        .stdout(predicates::str::contains("#transientcloseout"));
 
     let log = fs::read_to_string(tmp.path().join(".agent-doc/logs/ops.log")).unwrap();
     assert!(
@@ -2089,7 +2091,8 @@ fn finalize_late_claimed_response_ignores_unrelated_visible_queue_heads() {
             "<!-- patch:exchange -->\n### Re: setup — gpt-5\n\nFirst response.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         )
         .assert()
-        .success();
+        .failure()
+        .stderr(predicates::str::contains("#transientcloseout"));
 
     agent_doc_queue_io::queue_claim::release(&doc, tmux).unwrap();
     agent_doc_queue_io::queue_claim::release(&doc, release).unwrap();
@@ -2111,7 +2114,8 @@ fn finalize_late_claimed_response_ignores_unrelated_visible_queue_heads() {
             "<!-- patch:exchange -->\n### Re: GH #186 — gpt-5\n\nFixed and verified issue #186.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         )
         .assert()
-        .success();
+        .failure()
+        .stderr(predicates::str::contains("#transientcloseout"));
 
     let head = head_blob(tmp.path());
     for queue_line in [
@@ -2493,6 +2497,9 @@ fn backlog_add_mirrors_into_heading_anchored_run_beside_a_loop() {
         let baseline_content = fs::read_to_string(&doc).unwrap();
         checkpoint_baseline(tmp.path(), &baseline_content);
 
+        // The response and backlog mutation commit, but the newly mirrored
+        // follow-up is intentionally still live. Strict closeout therefore
+        // refuses to call the turn complete until a later cycle handles it.
         agent_doc()
             .current_dir(tmp.path())
             .args([
@@ -2508,7 +2515,8 @@ fn backlog_add_mirrors_into_heading_anchored_run_beside_a_loop() {
                 "<!-- patch:exchange -->\n### Re: do [#head] — gpt-5\nFiled the follow-up.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
             )
             .assert()
-            .success();
+            .failure()
+            .stderr(predicates::str::contains("#transientcloseout"));
 
         let head = head_blob(tmp.path());
         assert!(
@@ -3767,7 +3775,8 @@ fn finalize_pending_add_prepends_to_active_go_backlog_queue_after_consuming_head
             "<!-- patch:exchange -->\n### Re: do [#head] — gpt-5\nChanged paths: tests/finalize_integration.rs and agent-doc-orchestration/src/write.rs.\nCommands: cargo test finalize_pending_add_appends_to_active_go_backlog_queue_after_consuming_head.\nVerification: passed.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         )
         .assert()
-        .success()
+        .failure()
+        .stderr(predicates::str::contains("#transientcloseout"))
         .stderr(predicates::str::contains(
             "[write] queue: prepended 1 same-cycle actionable backlog id(s)",
         ));
@@ -3826,7 +3835,8 @@ fn finalize_pending_add_multiple_flags_keep_cli_order_at_active_go_queue_head() 
             "<!-- patch:exchange -->\n### Re: do [#head] — gpt-5\nDone.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         )
         .assert()
-        .success()
+        .failure()
+        .stderr(predicates::str::contains("#transientcloseout"))
         .stderr(predicates::str::contains(
             "[write] queue: prepended 3 same-cycle actionable backlog id(s)",
         ));
@@ -3896,7 +3906,8 @@ fn finalize_pending_add_back_appends_to_active_go_queue() {
             "<!-- patch:exchange -->\n### Re: do [#head] — gpt-5\nCaptured the signals follow-up.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         )
         .assert()
-        .success()
+        .failure()
+        .stderr(predicates::str::contains("#transientcloseout"))
         .stderr(predicates::str::contains(
             "[write] queue: appended 1 same-cycle actionable backlog id(s)",
         ));
@@ -3952,7 +3963,8 @@ fn backlog_only_write_enqueues_created_items_at_go_queue_head() {
             "id=freshonly follow-up filed by a backlog-only write",
         ])
         .assert()
-        .success();
+        .failure()
+        .stderr(predicates::str::contains("#transientcloseout"));
 
     let updated = fs::read_to_string(&doc).unwrap();
     assert!(
@@ -4007,7 +4019,8 @@ fn finalize_icebox_add_back_does_not_append_to_active_go_queue() {
             "<!-- patch:exchange -->\n### Re: do [#head] — gpt-5\nParked the signals follow-up.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         )
         .assert()
-        .success();
+        .failure()
+        .stderr(predicates::str::contains("#transientcloseout"));
 
     let committed = head_blob(tmp.path());
     let icebox = committed
@@ -5717,6 +5730,8 @@ fn backlog_edit_on_a_struck_head_id_does_not_requeue_it() {
         .success();
     assert_not_requeued("preflight");
 
+    // The edit commits while `#other` intentionally remains live. Strict
+    // closeout must surface that unfinished row instead of reporting success.
     agent_doc()
         .current_dir(tmp.path())
         .args([
@@ -5736,7 +5751,8 @@ fn backlog_edit_on_a_struck_head_id_does_not_requeue_it() {
             "<!-- patch:exchange -->\n### Re: kept\n\nKept open.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         )
         .assert()
-        .success();
+        .failure()
+        .stderr(predicates::str::contains("#transientcloseout"));
     assert_not_requeued("write --commit --backlog-edit");
     assert!(
         fs::read_to_string(&doc)
@@ -5809,8 +5825,8 @@ fn respond_closes_out_a_document_whose_run_opener_shares_a_nonmatching_heading()
         .unwrap();
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        output.status.success(),
-        "respond must close out a heading-prefixed opener:\n{stderr}"
+        !output.status.success() && stderr.contains("#transientcloseout"),
+        "respond must commit the heading-prefixed opener, then refuse closeout while its queue head remains live:\n{stderr}"
     );
     assert!(
         !stderr.contains("non_standalone_component_marker"),
@@ -5833,7 +5849,8 @@ fn respond_closes_out_a_document_whose_run_opener_shares_a_nonmatching_heading()
         .current_dir(tmp.path())
         .args(["session-check", doc.to_str().unwrap()])
         .assert()
-        .success();
+        .failure()
+        .stdout(predicates::str::contains("#transientcloseout"));
 }
 
 /// GH #275: the strict closeout commits BEFORE its terminal session check. When
@@ -5978,7 +5995,8 @@ fn finalize_strikes_a_mid_turn_head_whose_reported_worker_was_released() {
             "<!-- patch:exchange -->\n### Re: setup — gpt-5\n\nFirst response.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         )
         .assert()
-        .success();
+        .failure()
+        .stderr(predicates::str::contains("#transientcloseout"));
     assert!(!head_blob(tmp.path()).contains(question));
 
     // The operator adds the question after the commit; the coordinator claims
@@ -6115,7 +6133,8 @@ fn finalize_strikes_a_mid_turn_head_whose_reported_worker_was_released() {
             "<!-- patch:exchange -->\n### Re: page status enum — gpt-5\n\n> **Queue prompt:** {question}\n\n{worker_response}\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n"
         ))
         .assert()
-        .success();
+        .failure()
+        .stderr(predicates::str::contains("#transientcloseout"));
 
     let head = head_blob(tmp.path());
     assert!(head.contains("`archived`, `historical`"), "{head}");

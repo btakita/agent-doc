@@ -605,21 +605,13 @@ thread_local! {
 }
 
 struct CloseoutOwnerGuard {
-    file: std::path::PathBuf,
     owner_key: std::path::PathBuf,
-    cycle_id: String,
-    owner_id: String,
-    stop: Option<std::sync::mpsc::Sender<()>>,
-    heartbeat: Option<std::thread::JoinHandle<()>>,
-    /// `#netadv3` F5: set by the heartbeat when the controller ANSWERED that this
-    /// owner no longer holds the lease (another closeout took it, or the cycle
-    /// was superseded). The foreground checks it before committing.
-    lease_lost: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    claimed: agent_doc_controller_io::project_controller::ClaimedCloseoutOwnerGuard,
 }
 
 impl CloseoutOwnerGuard {
     fn lease_lost(&self) -> bool {
-        self.lease_lost.load(std::sync::atomic::Ordering::SeqCst)
+        self.claimed.capability().lease_lost()
     }
 }
 
@@ -633,18 +625,18 @@ fn ensure_closeout_lease_still_held(owner: Option<&CloseoutOwnerGuard>) -> Resul
     };
     if owner.lease_lost() {
         agent_doc_ops_log_io::log_op(
-            &owner.file,
+            owner.claimed.capability().file(),
             &format!(
                 "closeout_owner_lease_lost_before_commit file={} cycle_id={} owner_id={}",
-                owner.file.display(),
-                owner.cycle_id,
-                owner.owner_id,
+                owner.claimed.capability().file().display(),
+                owner.claimed.capability().cycle_id(),
+                owner.claimed.capability().owner_id(),
             ),
         );
         anyhow::bail!(
             "closeout owner lease for cycle {} was taken over before commit (owner {}); the response stays retained for the current owner",
-            owner.cycle_id,
-            owner.owner_id,
+            owner.claimed.capability().cycle_id(),
+            owner.claimed.capability().owner_id(),
         );
     }
     Ok(())
@@ -652,7 +644,7 @@ fn ensure_closeout_lease_still_held(owner: Option<&CloseoutOwnerGuard>) -> Resul
 
 fn ensure_active_closeout_fence(
     owner: Option<&CloseoutOwnerGuard>,
-    outer_fence: Option<&agent_doc_closeout_runtime_io::VerifiedCloseoutOwnerFence>,
+    outer_fence: Option<&agent_doc_controller_io::project_controller::CloseoutOwnerCapability>,
 ) -> Result<()> {
     ensure_closeout_lease_still_held(owner)?;
     if let Some(fence) = outer_fence {
@@ -712,6 +704,7 @@ fn claim_closeout_owner_until_answered<T>(
 }
 
 /// What the heartbeat does with one refresh result (`#netadv3` F5).
+#[cfg(test)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CloseoutHeartbeatStep {
     /// Refreshed: wait the full interval.
@@ -723,6 +716,7 @@ enum CloseoutHeartbeatStep {
     LeaseLost,
 }
 
+#[cfg(test)]
 fn closeout_heartbeat_step<T>(
     refreshed: &Result<agent_doc_controller_io::project_controller::CloseoutOwnerClaimOutcome, T>,
 ) -> CloseoutHeartbeatStep {
@@ -736,62 +730,19 @@ fn closeout_heartbeat_step<T>(
 
 impl Drop for CloseoutOwnerGuard {
     fn drop(&mut self) {
-        if let Some(stop) = self.stop.take()
-            && stop.send(()).is_err()
-        {
-            agent_doc_ops_log_io::log_op(
-                &self.file,
-                &format!(
-                    "closeout_owner_heartbeat_stop_disconnected file={} cycle_id={} owner_id={}",
-                    self.file.display(),
-                    self.cycle_id,
-                    self.owner_id
-                ),
-            );
-        }
-        if let Some(heartbeat) = self.heartbeat.take()
-            && heartbeat.join().is_err()
-        {
-            agent_doc_ops_log_io::log_op(
-                &self.file,
-                &format!(
-                    "closeout_owner_heartbeat_panicked file={} cycle_id={} owner_id={}",
-                    self.file.display(),
-                    self.cycle_id,
-                    self.owner_id
-                ),
-            );
-        }
-        if let Err(err) =
-            agent_doc_controller_io::project_controller::release_closeout_owner_for_file(
-                &self.file,
-                &self.cycle_id,
-                &self.owner_id,
-                "foreground_closeout_finished",
-            )
-        {
-            agent_doc_ops_log_io::log_op(
-                &self.file,
-                &format!(
-                    "closeout_owner_release_failed file={} cycle_id={} owner_id={} err={err}",
-                    self.file.display(),
-                    self.cycle_id,
-                    self.owner_id,
-                ),
-            );
-        }
+        let capability = self.claimed.capability();
         ACTIVE_FOREGROUND_CLOSEOUTS.with(|active| {
             let mut active = active.borrow_mut();
             if let Some(index) = active.iter().rposition(|path| path == &self.owner_key) {
                 active.remove(index);
             } else {
                 agent_doc_ops_log_io::log_op(
-                    &self.file,
+                    capability.file(),
                     &format!(
                         "closeout_owner_local_capability_missing file={} cycle_id={} owner_id={}",
-                        self.file.display(),
-                        self.cycle_id,
-                        self.owner_id,
+                        capability.file().display(),
+                        capability.cycle_id(),
+                        capability.owner_id(),
                     ),
                 );
             }
@@ -880,12 +831,6 @@ fn claim_closeout_owner(
 ) -> Result<CloseoutOwnerClaim> {
     use agent_doc_controller_io::project_controller as controller;
 
-    // Ignored/untracked and standalone documents have no project actor. Their
-    // existing write path decides whether to skip or use the explicit
-    // actorless compatibility boundary.
-    if agent_doc_project_root_io::project_root_containing(file).is_none() {
-        return Ok(CloseoutOwnerClaim::Covered);
-    }
     let owner_key = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
     if ACTIVE_FOREGROUND_CLOSEOUTS
         .with(|active| active.borrow().iter().any(|path| path == &owner_key))
@@ -899,7 +844,7 @@ fn claim_closeout_owner(
     let claimed = claim_closeout_owner_until_answered(
         CLOSEOUT_OWNER_CLAIM_ATTEMPTS,
         || {
-            controller::claim_closeout_owner_for_file(
+            controller::claim_closeout_owner_guard_for_file(
                 file,
                 controller::CloseoutOwnerClaimRequest {
                     expected_cycle_id: expected_cycle_id.map(str::to_string),
@@ -925,9 +870,9 @@ fn claim_closeout_owner(
             std::thread::sleep(std::time::Duration::from_millis(250u64 << attempt.min(3)));
         },
     )?;
-    let cycle_id = match claimed {
-        controller::CloseoutOwnerClaimOutcome::Acquired(owner) => owner.cycle_id,
-        controller::CloseoutOwnerClaimOutcome::HeldByOther(owner) => {
+    let claimed = match claimed {
+        controller::CloseoutOwnerGuardClaimOutcome::Acquired(claimed) => claimed,
+        controller::CloseoutOwnerGuardClaimOutcome::HeldByOther(owner) => {
             anyhow::bail!(
                 "closeout operation is already in progress for cycle {} by {} pid={} role={} until={} [{}{}]",
                 owner.cycle_id,
@@ -939,89 +884,14 @@ fn claim_closeout_owner(
                 owner.expires_secs,
             );
         }
-        controller::CloseoutOwnerClaimOutcome::CycleSuperseded => {
+        controller::CloseoutOwnerGuardClaimOutcome::CycleSuperseded => {
             return Ok(CloseoutOwnerClaim::CycleSuperseded);
         }
     };
-
-    let (stop, stopped) = std::sync::mpsc::channel();
-    let heartbeat_file = file.to_path_buf();
-    let heartbeat_cycle = cycle_id.clone();
-    let heartbeat_owner = owner_id.clone();
-    let lease_lost = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let heartbeat_lease_lost = lease_lost.clone();
-    let heartbeat = std::thread::spawn(move || {
-        let interval =
-            std::time::Duration::from_secs((controller::CLOSEOUT_OWNER_LEASE_SECS / 3).max(1));
-        let mut wait = interval;
-        let mut lost_refreshes: u32 = 0;
-        loop {
-            match stopped.recv_timeout(wait) {
-                Ok(()) | Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
-                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
-            }
-            let refreshed = controller::claim_closeout_owner_for_file(
-                &heartbeat_file,
-                controller::CloseoutOwnerClaimRequest {
-                    expected_cycle_id: Some(heartbeat_cycle.clone()),
-                    owner_id: heartbeat_owner.clone(),
-                    owner_pid,
-                    role: role_name.to_string(),
-                    now_secs: current_epoch_secs(),
-                    lease_secs: controller::CLOSEOUT_OWNER_LEASE_SECS,
-                    allow_dead_owner_takeover: false,
-                },
-            );
-            // `#netadv3` F5: one failed refresh used to `break` this loop while
-            // the foreground kept working, so the lease expired under a live
-            // owner. A lost reply is not a verdict: retry sooner. Only an
-            // ANSWERED loss stops the heartbeat, and it tells the foreground.
-            match closeout_heartbeat_step(&refreshed) {
-                CloseoutHeartbeatStep::Refreshed => {
-                    lost_refreshes = 0;
-                    wait = interval;
-                }
-                CloseoutHeartbeatStep::RetrySoon => {
-                    lost_refreshes = lost_refreshes.saturating_add(1);
-                    wait =
-                        std::time::Duration::from_secs(1u64 << lost_refreshes.min(5)).min(interval);
-                    agent_doc_ops_log_io::log_op(
-                        &heartbeat_file,
-                        &format!(
-                            "closeout_owner_heartbeat_refresh_retry file={} cycle_id={} owner_id={} consecutive={} retry_in_ms={} outcome={refreshed:?}",
-                            heartbeat_file.display(),
-                            heartbeat_cycle,
-                            heartbeat_owner,
-                            lost_refreshes,
-                            wait.as_millis(),
-                        ),
-                    );
-                }
-                CloseoutHeartbeatStep::LeaseLost => {
-                    heartbeat_lease_lost.store(true, std::sync::atomic::Ordering::SeqCst);
-                    agent_doc_ops_log_io::log_op(
-                        &heartbeat_file,
-                        &format!(
-                            "closeout_owner_heartbeat_stopped file={} cycle_id={} owner_id={} reason=lease_lost outcome={refreshed:?}",
-                            heartbeat_file.display(),
-                            heartbeat_cycle,
-                            heartbeat_owner,
-                        ),
-                    );
-                    break;
-                }
-            }
-        }
-    });
     ACTIVE_FOREGROUND_CLOSEOUTS.with(|active| active.borrow_mut().push(owner_key.clone()));
     Ok(CloseoutOwnerClaim::Held(CloseoutOwnerGuard {
-        file: file.to_path_buf(),
         owner_key,
-        cycle_id,
-        owner_id,
-        stop: Some(stop),
-        heartbeat: Some(heartbeat),
-        lease_lost,
+        claimed,
     }))
 }
 
@@ -1038,20 +908,19 @@ fn claim_closeout_owner(
 /// thread are covered by it rather than claiming again.
 #[must_use = "the closeout lease is released when this value is dropped"]
 pub struct CapturedFinalizeResumeCloseoutLease {
-    guard: Option<CloseoutOwnerGuard>,
-    fence: Box<agent_doc_closeout_runtime_io::VerifiedCloseoutOwnerFence>,
+    guard: CloseoutOwnerGuard,
 }
 
 impl CapturedFinalizeResumeCloseoutLease {
     /// Refuse to continue once the heartbeat learned, from an answered
     /// refresh, that another closeout took the lease (`#netadv3` F5).
     pub fn ensure_still_held(&self) -> Result<()> {
-        ensure_closeout_lease_still_held(self.guard.as_ref())?;
-        self.fence.ensure_still_held()
+        ensure_closeout_lease_still_held(Some(&self.guard))?;
+        self.guard.claimed.capability().ensure_still_held()
     }
 
-    fn fence(&self) -> &agent_doc_closeout_runtime_io::VerifiedCloseoutOwnerFence {
-        &self.fence
+    fn fence(&self) -> &agent_doc_controller_io::project_controller::CloseoutOwnerCapability {
+        self.guard.claimed.capability()
     }
 
     /// Construct the applying session-check adapter covered by this exact
@@ -1067,7 +936,7 @@ impl CapturedFinalizeResumeCloseoutLease {
         agent_doc_closeout_runtime_io::session_check_effects_under_apply_guard_and_closeout_owner(
             file,
             apply_guard,
-            &self.fence,
+            self.guard.claimed.capability(),
         )
     }
 }
@@ -1098,35 +967,13 @@ pub fn claim_captured_finalize_resume_closeout_lease(
             Some(expected_cycle_id),
         )? {
             CloseoutOwnerClaim::Held(guard) => {
-                let fence = agent_doc_closeout_runtime_io::VerifiedCloseoutOwnerFence::verify(
-                    file,
-                    &guard.cycle_id,
-                    Some(&guard.owner_id),
-                    std::process::id(),
-                    WriteCloseoutOwnerRole::CapturedFinalizeResume.as_str(),
-                    agent_doc_controller_io::project_controller::CLOSEOUT_OWNER_LEASE_SECS,
-                    guard.lease_lost.clone(),
-                )?;
                 CapturedFinalizeResumeLeaseClaim::Acquired(CapturedFinalizeResumeCloseoutLease {
-                    guard: Some(guard),
-                    fence: Box::new(fence),
+                    guard,
                 })
             }
-            CloseoutOwnerClaim::Covered => {
-                let fence = agent_doc_closeout_runtime_io::VerifiedCloseoutOwnerFence::verify(
-                    file,
-                    expected_cycle_id,
-                    None,
-                    std::process::id(),
-                    WriteCloseoutOwnerRole::CapturedFinalizeResume.as_str(),
-                    agent_doc_controller_io::project_controller::CLOSEOUT_OWNER_LEASE_SECS,
-                    std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
-                )?;
-                CapturedFinalizeResumeLeaseClaim::Acquired(CapturedFinalizeResumeCloseoutLease {
-                    guard: None,
-                    fence: Box::new(fence),
-                })
-            }
+            CloseoutOwnerClaim::Covered => anyhow::bail!(
+                "captured-finalize resume attempted to reconstruct a closeout owner inside an active closeout transaction"
+            ),
             CloseoutOwnerClaim::CycleSuperseded => {
                 CapturedFinalizeResumeLeaseClaim::CycleSuperseded
             }
@@ -3452,7 +3299,7 @@ fn run_command_inner_under_apply_guard_and_closeout_fence(
     commit_mode: CommitMode,
     empty_response_recovery: Option<EmptyResponseRecovery>,
     apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
-    closeout_fence: &agent_doc_closeout_runtime_io::VerifiedCloseoutOwnerFence,
+    closeout_fence: &agent_doc_controller_io::project_controller::CloseoutOwnerCapability,
 ) -> Result<()> {
     agent_doc_document_realtime_io::with_current_document_projection_pass(|| {
         run_command_inner_within_pass(
@@ -3579,7 +3426,9 @@ fn run_command_inner_within_pass(
     commit_mode: CommitMode,
     empty_response_recovery: Option<EmptyResponseRecovery>,
     existing_apply_guard: Option<&agent_doc_queue_io::queue_edit_owner::QueueEditGuard>,
-    outer_closeout_fence: Option<&agent_doc_closeout_runtime_io::VerifiedCloseoutOwnerFence>,
+    outer_closeout_fence: Option<
+        &agent_doc_controller_io::project_controller::CloseoutOwnerCapability,
+    >,
 ) -> Result<()> {
     // `#packettodo`: own the path so the closeout may extend its own
     // `options.todo_add` with the binary-derived packet todo below.
@@ -3588,7 +3437,14 @@ fn run_command_inner_within_pass(
     let file = file_buf.as_path();
     quote_component_markers_in_tracked_item_inputs(file, &mut options)?;
     let closeout_role = WriteCloseoutOwnerRole::from_origin(options.origin.as_deref());
-    let mut _closeout_owner = claim_foreground_closeout_owner(file, closeout_role)?;
+    // A captured-finalize resume carries the controller-minted owner
+    // capability from its outer transaction. Re-claiming here would either
+    // invert lease/apply ordering or replace that exact loss fence.
+    let mut _closeout_owner = if outer_closeout_fence.is_some() {
+        None
+    } else {
+        claim_foreground_closeout_owner(file, closeout_role)?
+    };
     let _force_disk_authority_scope = if options.force_disk {
         Some(
             agent_doc_document_realtime_io::begin_force_disk_authority_scope(
@@ -3884,7 +3740,13 @@ fn run_command_inner_within_pass(
         }
         maybe_pause_captured_resume_before_write_commit(file, outer_closeout_fence)?;
         ensure_active_closeout_fence(_closeout_owner.as_ref(), outer_closeout_fence)?;
-        return finalize_commit(file, commit_mode, options.force_disk, queue_apply_guard);
+        return finalize_commit(
+            file,
+            commit_mode,
+            options.force_disk,
+            queue_apply_guard,
+            outer_closeout_fence,
+        );
     }
 
     // Queue-local operator answers are durable completion signals. Fold them
@@ -4099,7 +3961,7 @@ fn run_command_inner_within_pass(
             // any response capture or document mutation. Actorless documents keep
             // the existing compatibility path; a project actor that cannot grant
             // the new-cycle lease fails closed instead of creating ownerless work.
-            if _closeout_owner.is_none() {
+            if _closeout_owner.is_none() && outer_closeout_fence.is_none() {
                 _closeout_owner = claim_foreground_closeout_owner(file, closeout_role)?;
                 anyhow::ensure!(
                     _closeout_owner.is_some()
@@ -4806,7 +4668,13 @@ fn run_command_inner_within_pass(
         maybe_pause_captured_resume_before_write_commit(file, outer_closeout_fence)?;
         let primary = ensure_active_closeout_fence(_closeout_owner.as_ref(), outer_closeout_fence)
             .and_then(|()| {
-                finalize_commit(file, commit_mode, options.force_disk, queue_apply_guard)
+                finalize_commit(
+                    file,
+                    commit_mode,
+                    options.force_disk,
+                    queue_apply_guard,
+                    outer_closeout_fence,
+                )
             });
         if primary.is_ok() && !options.commit_sibling.is_empty() {
             let pairs: Vec<(std::path::PathBuf, String)> = options
@@ -4832,7 +4700,9 @@ fn run_command_inner_within_pass(
 
 fn maybe_pause_captured_resume_before_write_commit(
     file: &Path,
-    outer_closeout_fence: Option<&agent_doc_closeout_runtime_io::VerifiedCloseoutOwnerFence>,
+    outer_closeout_fence: Option<
+        &agent_doc_controller_io::project_controller::CloseoutOwnerCapability,
+    >,
 ) -> Result<()> {
     if outer_closeout_fence.is_none()
         || std::env::var("AGENT_DOC_TEST_CAPTURED_RESUME_WRITE_BEFORE_COMMIT_FILE")
@@ -5539,6 +5409,9 @@ fn finalize_commit(
     commit_mode: CommitMode,
     force_disk: bool,
     queue_apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
+    outer_closeout_fence: Option<
+        &agent_doc_controller_io::project_controller::CloseoutOwnerCapability,
+    >,
 ) -> Result<()> {
     match commit_mode {
         CommitMode::None => Ok(()),
@@ -5613,11 +5486,18 @@ fn finalize_commit(
                     }
                     return Ok(());
                 }
-                let closeout_effects =
+                let closeout_effects = if let Some(fence) = outer_closeout_fence {
+                    agent_doc_closeout_runtime_io::closeout_effects_under_apply_guard_and_closeout_owner(
+                        file,
+                        queue_apply_guard,
+                        fence,
+                    )?
+                } else {
                     agent_doc_closeout_runtime_io::closeout_effects_under_apply_guard(
                         file,
                         queue_apply_guard,
-                    )?;
+                    )?
+                };
                 match agent_doc_flow_io::closeout::CloseoutEffects::commit_for_authority(
                     &closeout_effects,
                     file,
@@ -5648,11 +5528,18 @@ fn finalize_commit(
                         }
                     }
                 }
-                let session_effects =
+                let session_effects = if let Some(fence) = outer_closeout_fence {
+                    agent_doc_closeout_runtime_io::session_check_effects_under_apply_guard_and_closeout_owner(
+                        file,
+                        queue_apply_guard,
+                        fence,
+                    )?
+                } else {
                     agent_doc_closeout_runtime_io::session_check_effects_under_apply_guard(
                         file,
                         queue_apply_guard,
-                    )?;
+                    )?
+                };
                 agent_doc_session_check_io::enforce_clean_closeout_with_force_disk_under_apply_guard(
                     file,
                     force_disk,
@@ -5665,11 +5552,20 @@ fn finalize_commit(
             Ok(())
         }
         CommitMode::Required => {
-            agent_doc_closeout_runtime_io::complete_required_closeout_under_apply_guard(
-                file,
-                force_disk,
-                queue_apply_guard,
-            )
+            if let Some(fence) = outer_closeout_fence {
+                agent_doc_closeout_runtime_io::complete_required_closeout_under_apply_guard_and_closeout_owner(
+                    file,
+                    force_disk,
+                    queue_apply_guard,
+                    fence,
+                )
+            } else {
+                agent_doc_closeout_runtime_io::complete_required_closeout_under_apply_guard(
+                    file,
+                    force_disk,
+                    queue_apply_guard,
+                )
+            }
             .map(|_| ())
         }
     }

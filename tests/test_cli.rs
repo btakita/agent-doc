@@ -14214,16 +14214,43 @@ fn test_agent_doc_session_check_io_owns_guard_adapters() {
         fs::read_to_string(manifest_dir.join("agent-doc-write-runtime-io/src/lib.rs")).unwrap();
     let repair_command =
         fs::read_to_string(manifest_dir.join("agent-doc-repair-command-io/src/lib.rs")).unwrap();
+    let controller_rpc = fs::read_to_string(
+        manifest_dir.join("agent-doc-controller-io/src/project_controller/rpc.rs"),
+    )
+    .unwrap();
+    let capability_struct = controller_rpc
+        .split("pub struct CloseoutOwnerCapability {")
+        .nth(1)
+        .and_then(|tail| tail.split("\n}").next())
+        .expect("opaque closeout-owner capability struct");
+    let claimed_guard_struct = controller_rpc
+        .split("pub struct ClaimedCloseoutOwnerGuard {")
+        .nth(1)
+        .and_then(|tail| tail.split("\n}").next())
+        .expect("controller-owned closeout-owner guard struct");
     assert!(
         write_runtime.contains("pub fn applying_session_check_effects")
             && repair_command.contains("closeout_lease.applying_session_check_effects")
-            && closeout_runtime.contains("pub struct VerifiedCloseoutOwnerFence")
-            && closeout_runtime
-                .contains("outer_closeout_fence: Option<&'a VerifiedCloseoutOwnerFence>")
-            && closeout_runtime
-                .contains("lease_lost: std::sync::Arc<std::sync::atomic::AtomicBool>")
+            && controller_rpc.contains("pub struct CloseoutOwnerCapability")
+            && controller_rpc.contains("pub fn claim_closeout_owner_guard_for_file(")
+            && controller_rpc.contains("Acquired(ClaimedCloseoutOwnerGuard)")
+            && capability_struct.contains("lease_lost: Arc<AtomicBool>")
+            && !capability_struct
+                .lines()
+                .any(|line| line.trim_start().starts_with("pub "))
+            && claimed_guard_struct.contains("capability: CloseoutOwnerCapability")
+            && !claimed_guard_struct
+                .lines()
+                .any(|line| line.trim_start().starts_with("pub "))
+            && !controller_rpc.contains("pub fn verify_closeout_owner")
+            && !controller_rpc.contains("impl Clone for CloseoutOwnerCapability")
+            && !controller_rpc.contains("#[derive(Clone)]\npub struct CloseoutOwnerCapability")
+            && !closeout_runtime.contains("pub struct VerifiedCloseoutOwnerFence")
             && write_runtime.contains("closeout_lease.fence()")
-            && write_runtime.contains("guard.lease_lost.clone()")
+            && write_runtime.contains(
+                "claimed: agent_doc_controller_io::project_controller::ClaimedCloseoutOwnerGuard"
+            )
+            && write_runtime.contains("self.guard.claimed.capability()")
             && write_runtime.contains(
                 "ensure_active_closeout_fence(_closeout_owner.as_ref(), outer_closeout_fence)?;"
             )

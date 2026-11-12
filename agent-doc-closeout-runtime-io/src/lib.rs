@@ -385,131 +385,8 @@ pub struct RuntimeReadOnlySessionCheckEffects;
 /// Session recovery owned by one already-held document apply transaction.
 pub struct RuntimeApplyingSessionCheckEffects<'a> {
     apply_guard: &'a agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
-    outer_closeout_fence: Option<&'a VerifiedCloseoutOwnerFence>,
-}
-
-/// Controller-verified proof that one exact closeout owner was acquired.
-///
-/// Fields are private and construction reclaims the exact owner through the
-/// controller, so callers cannot manufacture the old boolean "owner held"
-/// bypass. The token observes the owner's heartbeat loss flag and every effect
-/// fence also reclaims that same owner without takeover; either an answered
-/// loss or a superseding cycle therefore invalidates it.
-pub struct VerifiedCloseoutOwnerFence {
-    file: std::path::PathBuf,
-    cycle_id: String,
-    owner_id: Option<String>,
-    owner_pid: u32,
-    role: String,
-    lease_secs: u64,
-    lease_lost: std::sync::Arc<std::sync::atomic::AtomicBool>,
-}
-
-impl VerifiedCloseoutOwnerFence {
-    pub fn verify(
-        file: &Path,
-        cycle_id: &str,
-        owner_id: Option<&str>,
-        owner_pid: u32,
-        role: &str,
-        lease_secs: u64,
-        lease_lost: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    ) -> Result<Self> {
-        use agent_doc_controller_io::project_controller as controller;
-
-        if agent_doc_project_root_io::project_root_containing(file).is_none() {
-            anyhow::ensure!(
-                owner_id.is_none(),
-                "actorless closeout fence for {} unexpectedly carried owner identity",
-                file.display()
-            );
-            return Ok(Self {
-                file: file.to_path_buf(),
-                cycle_id: cycle_id.to_string(),
-                owner_id: None,
-                owner_pid,
-                role: role.to_string(),
-                lease_secs,
-                lease_lost,
-            });
-        }
-        let owner_id = owner_id.context("tracked closeout fence requires an acquired owner id")?;
-        let outcome = controller::claim_closeout_owner_for_file(
-            file,
-            controller::CloseoutOwnerClaimRequest {
-                expected_cycle_id: Some(cycle_id.to_string()),
-                owner_id: owner_id.to_string(),
-                owner_pid,
-                role: role.to_string(),
-                now_secs: current_epoch_secs(),
-                lease_secs,
-                allow_dead_owner_takeover: false,
-            },
-        )?;
-        anyhow::ensure!(
-            matches!(
-                outcome,
-                controller::CloseoutOwnerClaimOutcome::Acquired(ref owner)
-                    if owner.cycle_id == cycle_id && owner.owner_id == owner_id
-            ),
-            "cannot verify closeout owner fence for {} cycle {} owner {}: {outcome:?}",
-            file.display(),
-            cycle_id,
-            owner_id,
-        );
-        Ok(Self {
-            file: file.to_path_buf(),
-            cycle_id: cycle_id.to_string(),
-            owner_id: Some(owner_id.to_string()),
-            owner_pid,
-            role: role.to_string(),
-            lease_secs,
-            lease_lost,
-        })
-    }
-
-    pub fn ensure_still_held(&self) -> Result<()> {
-        if std::env::var("AGENT_DOC_TEST_CAPTURED_RESUME_FORCE_LEASE_LOST_FILE")
-            .ok()
-            .is_some_and(|target| Path::new(&target) == self.file)
-        {
-            self.lease_lost
-                .store(true, std::sync::atomic::Ordering::SeqCst);
-        }
-        anyhow::ensure!(
-            !self.lease_lost.load(std::sync::atomic::Ordering::SeqCst),
-            "closeout owner lease for cycle {} owner {} was lost before the next durable effect",
-            self.cycle_id,
-            self.owner_id.as_deref().unwrap_or("actorless"),
-        );
-        let Some(owner_id) = self.owner_id.as_deref() else {
-            return Ok(());
-        };
-        use agent_doc_controller_io::project_controller as controller;
-        let outcome = controller::claim_closeout_owner_for_file(
-            &self.file,
-            controller::CloseoutOwnerClaimRequest {
-                expected_cycle_id: Some(self.cycle_id.clone()),
-                owner_id: owner_id.to_string(),
-                owner_pid: self.owner_pid,
-                role: self.role.clone(),
-                now_secs: current_epoch_secs(),
-                lease_secs: self.lease_secs,
-                allow_dead_owner_takeover: false,
-            },
-        )?;
-        anyhow::ensure!(
-            matches!(
-                outcome,
-                controller::CloseoutOwnerClaimOutcome::Acquired(ref owner)
-                    if owner.cycle_id == self.cycle_id && owner.owner_id == owner_id
-            ),
-            "closeout owner lease for cycle {} owner {} was lost before the next durable effect: {outcome:?}",
-            self.cycle_id,
-            owner_id,
-        );
-        Ok(())
-    }
+    outer_closeout_fence:
+        Option<&'a agent_doc_controller_io::project_controller::CloseoutOwnerCapability>,
 }
 
 /// Closed transition identities emitted while resuming one durable captured
@@ -750,7 +627,7 @@ pub fn session_check_effects_under_apply_guard<'a>(
 pub fn session_check_effects_under_apply_guard_and_closeout_owner<'a>(
     file: &Path,
     apply_guard: &'a agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
-    outer_closeout_fence: &'a VerifiedCloseoutOwnerFence,
+    outer_closeout_fence: &'a agent_doc_controller_io::project_controller::CloseoutOwnerCapability,
 ) -> Result<RuntimeApplyingSessionCheckEffects<'a>> {
     apply_guard.ensure_protects(file)?;
     outer_closeout_fence.ensure_still_held()?;
@@ -934,7 +811,9 @@ impl RuntimeApplyingSessionCheckEffects<'_> {
 
 fn maybe_pause_captured_resume_session_before_commit(
     file: &Path,
-    outer_closeout_fence: Option<&VerifiedCloseoutOwnerFence>,
+    outer_closeout_fence: Option<
+        &agent_doc_controller_io::project_controller::CloseoutOwnerCapability,
+    >,
 ) -> Result<()> {
     if outer_closeout_fence.is_none()
         || std::env::var("AGENT_DOC_TEST_CAPTURED_RESUME_SESSION_BEFORE_COMMIT_FILE")
@@ -1747,13 +1626,18 @@ impl agent_doc_session_check_io::SessionCheckEffects for RuntimeApplyingSessionC
 
 pub struct RuntimeCloseoutEffects<'a> {
     apply_guard: Option<&'a agent_doc_queue_io::queue_edit_owner::QueueEditGuard>,
+    outer_closeout_fence:
+        Option<&'a agent_doc_controller_io::project_controller::CloseoutOwnerCapability>,
 }
 
 /// Read-only runtime adapter for closeout classification and evidence gathering.
 /// Every mutating trait method rejects this adapter; mutation entrypoints must
 /// construct the typed guarded adapter below.
 pub fn closeout_inspection_effects() -> RuntimeCloseoutEffects<'static> {
-    RuntimeCloseoutEffects { apply_guard: None }
+    RuntimeCloseoutEffects {
+        apply_guard: None,
+        outer_closeout_fence: None,
+    }
 }
 
 #[doc(hidden)]
@@ -1764,6 +1648,21 @@ pub fn closeout_effects_under_apply_guard<'a>(
     apply_guard.ensure_protects(file)?;
     Ok(RuntimeCloseoutEffects {
         apply_guard: Some(apply_guard),
+        outer_closeout_fence: None,
+    })
+}
+
+#[doc(hidden)]
+pub fn closeout_effects_under_apply_guard_and_closeout_owner<'a>(
+    file: &Path,
+    apply_guard: &'a agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
+    outer_closeout_fence: &'a agent_doc_controller_io::project_controller::CloseoutOwnerCapability,
+) -> Result<RuntimeCloseoutEffects<'a>> {
+    apply_guard.ensure_protects(file)?;
+    outer_closeout_fence.ensure_still_held()?;
+    Ok(RuntimeCloseoutEffects {
+        apply_guard: Some(apply_guard),
+        outer_closeout_fence: Some(outer_closeout_fence),
     })
 }
 
@@ -1777,6 +1676,13 @@ impl RuntimeCloseoutEffects<'_> {
         )?;
         apply_guard.ensure_protects(file)?;
         Ok(apply_guard)
+    }
+
+    fn ensure_outer_closeout_fence(&self) -> Result<()> {
+        if let Some(fence) = self.outer_closeout_fence {
+            fence.ensure_still_held()?;
+        }
+        Ok(())
     }
 }
 
@@ -1847,6 +1753,32 @@ pub fn complete_required_closeout_under_apply_guard(
     })
 }
 
+#[doc(hidden)]
+pub fn complete_required_closeout_under_apply_guard_and_closeout_owner(
+    file: &Path,
+    force_disk: bool,
+    apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
+    outer_closeout_fence: &agent_doc_controller_io::project_controller::CloseoutOwnerCapability,
+) -> Result<bool> {
+    apply_guard.ensure_protects(file)?;
+    outer_closeout_fence.ensure_still_held()?;
+    let effects = closeout_effects_under_apply_guard_and_closeout_owner(
+        file,
+        apply_guard,
+        outer_closeout_fence,
+    )?;
+    agent_doc_document_realtime_io::with_current_document_projection_pass(|| {
+        agent_doc_flow_io::closeout::complete_required_closeout_with_options(
+            file,
+            &effects,
+            agent_doc_flow_io::closeout::CompleteRequiredCloseoutOptions {
+                force_disk,
+                proven_committed_cycle: None,
+            },
+        )
+    })
+}
+
 /// Finish a committed cycle whose exact answered free-text queue strike lagged
 /// behind its response commit (`#qresiduestop`).
 ///
@@ -1876,7 +1808,12 @@ impl agent_doc_flow_io::closeout::CloseoutEffects for RuntimeCloseoutEffects<'_>
 
     fn commit(&self, file: &Path) -> Result<bool> {
         self.require_apply_guard(file)?;
-        agent_doc_commit_io::commit(file)
+        maybe_pause_captured_resume_closeout_before_commit(file, self.outer_closeout_fence)?;
+        if let Some(fence) = self.outer_closeout_fence {
+            fence.run_terminal_effect(|| agent_doc_commit_io::commit(file))
+        } else {
+            agent_doc_commit_io::commit(file)
+        }
     }
 
     fn repair_committed_historical_snapshot_drift(
@@ -1884,12 +1821,19 @@ impl agent_doc_flow_io::closeout::CloseoutEffects for RuntimeCloseoutEffects<'_>
         file: &Path,
     ) -> Result<Option<&'static str>> {
         self.require_apply_guard(file)?;
+        self.ensure_outer_closeout_fence()?;
         agent_doc_repair_io::repair_committed_historical_snapshot_drift(file)
     }
 
     fn commit_for_authority(&self, file: &Path, force_disk: bool) -> Result<bool> {
         self.require_apply_guard(file)?;
-        agent_doc_commit_io::commit_for_authority(file, force_disk)
+        maybe_pause_captured_resume_closeout_before_commit(file, self.outer_closeout_fence)?;
+        if let Some(fence) = self.outer_closeout_fence {
+            fence
+                .run_terminal_effect(|| agent_doc_commit_io::commit_for_authority(file, force_disk))
+        } else {
+            agent_doc_commit_io::commit_for_authority(file, force_disk)
+        }
     }
 
     fn run_pending_maintenance(
@@ -1898,6 +1842,7 @@ impl agent_doc_flow_io::closeout::CloseoutEffects for RuntimeCloseoutEffects<'_>
         force_disk: bool,
     ) -> Result<agent_doc_preflight_io::PendingMaintenanceReport> {
         let apply_guard = self.require_apply_guard(file)?;
+        self.ensure_outer_closeout_fence()?;
         let report = if force_disk {
             agent_doc_preflight_io::run_pending_maintenance_force_disk_under_apply_guard(
                 file,
@@ -1917,7 +1862,11 @@ impl agent_doc_flow_io::closeout::CloseoutEffects for RuntimeCloseoutEffects<'_>
 
     fn enforce_clean_closeout(&self, file: &Path) -> Result<()> {
         let apply_guard = self.require_apply_guard(file)?;
-        let session_effects = session_check_effects_under_apply_guard(file, apply_guard)?;
+        let session_effects = if let Some(fence) = self.outer_closeout_fence {
+            session_check_effects_under_apply_guard_and_closeout_owner(file, apply_guard, fence)?
+        } else {
+            session_check_effects_under_apply_guard(file, apply_guard)?
+        };
         agent_doc_session_check_io::enforce_clean_closeout_with_force_disk_under_apply_guard(
             file,
             false,
@@ -1928,7 +1877,11 @@ impl agent_doc_flow_io::closeout::CloseoutEffects for RuntimeCloseoutEffects<'_>
 
     fn enforce_clean_closeout_for_authority(&self, file: &Path, force_disk: bool) -> Result<()> {
         let apply_guard = self.require_apply_guard(file)?;
-        let session_effects = session_check_effects_under_apply_guard(file, apply_guard)?;
+        let session_effects = if let Some(fence) = self.outer_closeout_fence {
+            session_check_effects_under_apply_guard_and_closeout_owner(file, apply_guard, fence)?
+        } else {
+            session_check_effects_under_apply_guard(file, apply_guard)?
+        };
         agent_doc_session_check_io::enforce_clean_closeout_with_force_disk_under_apply_guard(
             file,
             force_disk,
@@ -1939,6 +1892,7 @@ impl agent_doc_flow_io::closeout::CloseoutEffects for RuntimeCloseoutEffects<'_>
 
     fn cancel_preflight_cycle(&self, file: &Path) -> Result<agent_doc_turn::repair::CancelOutcome> {
         let apply_guard = self.require_apply_guard(file)?;
+        self.ensure_outer_closeout_fence()?;
         let effects = RuntimeRepairIoEffects::new(file, apply_guard)?;
         agent_doc_repair_io::cancel_preflight_cycle(&effects, file)
     }
@@ -1948,6 +1902,7 @@ impl agent_doc_flow_io::closeout::CloseoutEffects for RuntimeCloseoutEffects<'_>
         file: &Path,
     ) -> Result<agent_doc_turn::repair::CancelOutcome> {
         let apply_guard = self.require_apply_guard(file)?;
+        self.ensure_outer_closeout_fence()?;
         let effects = RuntimeRepairIoEffects::new(file, apply_guard)?;
         agent_doc_repair_io::cancel_preflight_cycle_after_owner_release(&effects, file)
     }
@@ -1988,6 +1943,7 @@ impl agent_doc_flow_io::closeout::CloseoutEffects for RuntimeCloseoutEffects<'_>
         source: &str,
     ) -> Result<()> {
         self.require_apply_guard(doc.key().as_path())?;
+        self.ensure_outer_closeout_fence()?;
         agent_doc_document_realtime_io::atomic_write_if_current_through_authority(
             doc.key().as_path(),
             content,
@@ -2004,6 +1960,7 @@ impl agent_doc_flow_io::closeout::CloseoutEffects for RuntimeCloseoutEffects<'_>
         file_content: Option<&str>,
     ) -> Result<agent_doc_cycle_state_io::CycleState> {
         self.require_apply_guard(file)?;
+        self.ensure_outer_closeout_fence()?;
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
             &PIPELINE_FRONTMATTER_EFFECTS,
             file,
@@ -2021,6 +1978,7 @@ impl agent_doc_flow_io::closeout::CloseoutEffects for RuntimeCloseoutEffects<'_>
         file_content: Option<&str>,
     ) -> Result<agent_doc_cycle_state_io::CycleState> {
         self.require_apply_guard(file)?;
+        self.ensure_outer_closeout_fence()?;
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_abandoned(
             &PIPELINE_FRONTMATTER_EFFECTS,
             file,
@@ -2029,6 +1987,35 @@ impl agent_doc_flow_io::closeout::CloseoutEffects for RuntimeCloseoutEffects<'_>
             file_content,
         )
     }
+}
+
+fn maybe_pause_captured_resume_closeout_before_commit(
+    file: &Path,
+    outer_closeout_fence: Option<
+        &agent_doc_controller_io::project_controller::CloseoutOwnerCapability,
+    >,
+) -> Result<()> {
+    if outer_closeout_fence.is_none()
+        || std::env::var("AGENT_DOC_TEST_CAPTURED_RESUME_CLOSEOUT_BEFORE_COMMIT_FILE")
+            .ok()
+            .is_none_or(|target| Path::new(&target) != file)
+    {
+        return Ok(());
+    }
+    let marker = std::env::var("AGENT_DOC_TEST_CAPTURED_RESUME_CLOSEOUT_BEFORE_COMMIT_MARKER")
+        .context("captured-resume closeout-commit barrier requires a marker path")?;
+    let release = std::env::var("AGENT_DOC_TEST_CAPTURED_RESUME_CLOSEOUT_BEFORE_COMMIT_RELEASE")
+        .context("captured-resume closeout-commit barrier requires a release path")?;
+    std::fs::write(&marker, b"ready")?;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    while !Path::new(&release).exists() {
+        anyhow::ensure!(
+            std::time::Instant::now() < deadline,
+            "timed out waiting for captured-resume closeout-commit barrier release"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    Ok(())
 }
 
 fn maybe_pause_closeout_after_pending_maintenance() -> Result<()> {

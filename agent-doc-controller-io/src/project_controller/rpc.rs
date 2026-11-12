@@ -7813,6 +7813,313 @@ pub const CLOSEOUT_RECOVERY_LEASE_SECS: u64 =
 pub const CLOSEOUT_ROLE_SESSION_CHECK_RECOVERY: &str =
     agent_doc_state_backbone::CLOSEOUT_ROLE_SESSION_CHECK_RECOVERY;
 
+/// Opaque proof that this process acquired one exact closeout owner identity.
+///
+/// No scalar constructor is exposed. Callers obtain this only from
+/// [`claim_closeout_owner_guard_for_file`], retain it in their owner guard,
+/// and borrow it through nested closeout effects. The shared loss flag is
+/// minted here with the claim and cannot be replaced by a downstream caller.
+pub struct CloseoutOwnerCapability {
+    file: PathBuf,
+    cycle_id: String,
+    owner_id: String,
+    owner_pid: u32,
+    role: String,
+    lease_secs: u64,
+    actorless: bool,
+    lease_lost: Arc<AtomicBool>,
+    terminal_effect_in_progress: Arc<AtomicBool>,
+    terminal_effect_landed: Arc<AtomicBool>,
+}
+
+impl std::fmt::Debug for CloseoutOwnerCapability {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("CloseoutOwnerCapability")
+            .field("file", &self.file)
+            .field("cycle_id", &self.cycle_id)
+            .field("owner_id", &self.owner_id)
+            .field("owner_pid", &self.owner_pid)
+            .field("role", &self.role)
+            .field("lease_secs", &self.lease_secs)
+            .field("actorless", &self.actorless)
+            .field("lease_lost", &self.lease_lost.load(Ordering::SeqCst))
+            .field(
+                "terminal_effect_in_progress",
+                &self.terminal_effect_in_progress.load(Ordering::SeqCst),
+            )
+            .field(
+                "terminal_effect_landed",
+                &self.terminal_effect_landed.load(Ordering::SeqCst),
+            )
+            .finish()
+    }
+}
+
+impl CloseoutOwnerCapability {
+    fn heartbeat_clone(&self) -> Self {
+        Self {
+            file: self.file.clone(),
+            cycle_id: self.cycle_id.clone(),
+            owner_id: self.owner_id.clone(),
+            owner_pid: self.owner_pid,
+            role: self.role.clone(),
+            lease_secs: self.lease_secs,
+            actorless: self.actorless,
+            lease_lost: self.lease_lost.clone(),
+            terminal_effect_in_progress: self.terminal_effect_in_progress.clone(),
+            terminal_effect_landed: self.terminal_effect_landed.clone(),
+        }
+    }
+
+    pub fn file(&self) -> &Path {
+        &self.file
+    }
+
+    pub fn cycle_id(&self) -> &str {
+        &self.cycle_id
+    }
+
+    pub fn owner_id(&self) -> &str {
+        &self.owner_id
+    }
+
+    pub fn owner_pid(&self) -> u32 {
+        self.owner_pid
+    }
+
+    pub fn role(&self) -> &str {
+        &self.role
+    }
+
+    pub fn is_actorless(&self) -> bool {
+        self.actorless
+    }
+
+    pub fn lease_lost(&self) -> bool {
+        self.lease_lost.load(Ordering::SeqCst)
+    }
+
+    /// Mark an answered refresh loss on every borrow of this capability.
+    pub fn mark_lease_lost(&self) {
+        self.lease_lost.store(true, Ordering::SeqCst);
+    }
+
+    pub fn refresh(&self) -> Result<CloseoutOwnerClaimOutcome> {
+        if self.actorless {
+            return Ok(CloseoutOwnerClaimOutcome::Acquired(
+                CloseoutOwnerProjection {
+                    cycle_id: self.cycle_id.clone(),
+                    owner_id: self.owner_id.clone(),
+                    owner_pid: self.owner_pid,
+                    role: self.role.clone(),
+                    claimed_secs: timestamp_secs(),
+                    expires_secs: u64::MAX,
+                },
+            ));
+        }
+        claim_closeout_owner_for_file(
+            &self.file,
+            CloseoutOwnerClaimRequest {
+                expected_cycle_id: Some(self.cycle_id.clone()),
+                owner_id: self.owner_id.clone(),
+                owner_pid: self.owner_pid,
+                role: self.role.clone(),
+                now_secs: timestamp_secs(),
+                lease_secs: self.lease_secs,
+                allow_dead_owner_takeover: false,
+            },
+        )
+    }
+
+    pub fn ensure_still_held(&self) -> Result<()> {
+        if std::env::var("AGENT_DOC_TEST_CAPTURED_RESUME_FORCE_LEASE_LOST_FILE")
+            .ok()
+            .is_some_and(|target| Path::new(&target) == self.file)
+        {
+            self.mark_lease_lost();
+        }
+        anyhow::ensure!(
+            !self.lease_lost(),
+            "closeout owner lease for cycle {} owner {} was lost before the next durable effect",
+            self.cycle_id,
+            self.owner_id,
+        );
+        // The successful fenced commit itself closes the cycle and therefore
+        // makes a subsequent owner refresh answer `CycleSuperseded`. Retain
+        // that exact terminal receipt so the same transaction can finish its
+        // idempotent reap/proof work without treating its own commit as lease
+        // theft. A heartbeat-observed loss still wins above.
+        if self.terminal_effect_landed.load(Ordering::SeqCst) {
+            return Ok(());
+        }
+        let outcome = self.refresh()?;
+        anyhow::ensure!(
+            matches!(
+                outcome,
+                CloseoutOwnerClaimOutcome::Acquired(ref owner)
+                    if owner.cycle_id == self.cycle_id
+                        && owner.owner_id == self.owner_id
+                        && owner.owner_pid == self.owner_pid
+                        && owner.role == self.role
+            ),
+            "closeout owner lease for cycle {} owner {} pid={} role={} was lost before the next durable effect: {outcome:?}",
+            self.cycle_id,
+            self.owner_id,
+            self.owner_pid,
+            self.role,
+        );
+        Ok(())
+    }
+
+    /// Execute the terminal commit under this exact capability and retain a
+    /// receipt only when that effect closed this capability's cycle.
+    pub fn run_terminal_effect<T>(&self, effect: impl FnOnce() -> Result<T>) -> Result<T> {
+        anyhow::ensure!(
+            self.terminal_effect_in_progress
+                .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+                .is_ok(),
+            "terminal closeout effect is already in progress for cycle {} owner {}",
+            self.cycle_id,
+            self.owner_id,
+        );
+        let outcome = (|| {
+            self.ensure_still_held()?;
+            let result = effect()?;
+            let state = agent_doc_cycle_state_io::load_with_closeout_projection(&self.file)?
+                .with_context(|| {
+                    format!(
+                        "terminal closeout effect for {} did not persist cycle state",
+                        self.file.display()
+                    )
+                })?;
+            anyhow::ensure!(
+                state.cycle_id == self.cycle_id && !state.is_open(),
+                "terminal closeout effect did not close the owned cycle {} for {} (observed cycle={} phase={})",
+                self.cycle_id,
+                self.file.display(),
+                state.cycle_id,
+                state.phase.as_str(),
+            );
+            self.terminal_effect_landed.store(true, Ordering::SeqCst);
+            Ok(result)
+        })();
+        self.terminal_effect_in_progress
+            .store(false, Ordering::SeqCst);
+        outcome
+    }
+}
+
+#[derive(Debug)]
+pub enum CloseoutOwnerGuardClaimOutcome {
+    Acquired(ClaimedCloseoutOwnerGuard),
+    HeldByOther(CloseoutOwnerProjection),
+    CycleSuperseded,
+}
+
+pub struct ClaimedCloseoutOwnerGuard {
+    capability: CloseoutOwnerCapability,
+    stop: Option<std::sync::mpsc::Sender<()>>,
+    heartbeat: Option<std::thread::JoinHandle<()>>,
+}
+
+impl std::fmt::Debug for ClaimedCloseoutOwnerGuard {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ClaimedCloseoutOwnerGuard")
+            .field("capability", &self.capability)
+            .finish_non_exhaustive()
+    }
+}
+
+impl ClaimedCloseoutOwnerGuard {
+    fn new(capability: CloseoutOwnerCapability) -> Self {
+        if capability.is_actorless() {
+            return Self {
+                capability,
+                stop: None,
+                heartbeat: None,
+            };
+        }
+        let heartbeat_capability = capability.heartbeat_clone();
+        let (stop, stopped) = std::sync::mpsc::channel();
+        let heartbeat = std::thread::spawn(move || {
+            let interval = Duration::from_secs((heartbeat_capability.lease_secs / 3).max(1));
+            let mut wait = interval;
+            let mut lost_refreshes: u32 = 0;
+            loop {
+                match stopped.recv_timeout(wait) {
+                    Ok(()) | Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+                }
+                if heartbeat_capability
+                    .terminal_effect_landed
+                    .load(Ordering::SeqCst)
+                {
+                    break;
+                }
+                match heartbeat_capability.refresh() {
+                    Ok(CloseoutOwnerClaimOutcome::Acquired(ref owner))
+                        if owner.cycle_id == heartbeat_capability.cycle_id
+                            && owner.owner_id == heartbeat_capability.owner_id
+                            && owner.owner_pid == heartbeat_capability.owner_pid
+                            && owner.role == heartbeat_capability.role =>
+                    {
+                        lost_refreshes = 0;
+                        wait = interval;
+                    }
+                    Ok(_)
+                        if heartbeat_capability
+                            .terminal_effect_in_progress
+                            .load(Ordering::SeqCst)
+                            || heartbeat_capability
+                                .terminal_effect_landed
+                                .load(Ordering::SeqCst) =>
+                    {
+                        wait = Duration::from_millis(10);
+                    }
+                    Ok(_) => {
+                        heartbeat_capability.mark_lease_lost();
+                        break;
+                    }
+                    Err(_) => {
+                        lost_refreshes = lost_refreshes.saturating_add(1);
+                        wait = Duration::from_secs(1u64 << lost_refreshes.min(5)).min(interval);
+                    }
+                }
+            }
+        });
+        Self {
+            capability,
+            stop: Some(stop),
+            heartbeat: Some(heartbeat),
+        }
+    }
+
+    pub fn capability(&self) -> &CloseoutOwnerCapability {
+        &self.capability
+    }
+}
+
+impl Drop for ClaimedCloseoutOwnerGuard {
+    fn drop(&mut self) {
+        if let Some(stop) = self.stop.take() {
+            let _ = stop.send(());
+        }
+        if let Some(heartbeat) = self.heartbeat.take() {
+            let _ = heartbeat.join();
+        }
+        if !self.capability.is_actorless() {
+            let _ = release_closeout_owner_for_file(
+                self.capability.file(),
+                self.capability.cycle_id(),
+                self.capability.owner_id(),
+                "foreground_closeout_finished",
+            );
+        }
+    }
+}
+
 /// Lease duration for a closeout-owner `role` (`#closeoutwaitchurn`).
 pub fn closeout_owner_lease_secs(role: &str) -> u64 {
     agent_doc_state_backbone::closeout_owner_lease_secs(role)
@@ -7918,6 +8225,80 @@ pub fn claim_closeout_owner_for_file(
         ControllerRequest::command_plane_submit(submit_json),
         CONTROLLER_CLOSEOUT_COORDINATION_TIMEOUT,
     )
+}
+
+/// Claim one closeout owner and mint its non-reconstructible nested-effect
+/// capability. Actorless documents use the same minting boundary: they receive
+/// an opaque local capability instead of a caller-supplied boolean or loss
+/// flag.
+pub fn claim_closeout_owner_guard_for_file(
+    file: &Path,
+    request: CloseoutOwnerClaimRequest,
+) -> Result<CloseoutOwnerGuardClaimOutcome> {
+    let canonical_file = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    let expected_cycle_id = request.expected_cycle_id.clone();
+    let owner_id = request.owner_id.clone();
+    let owner_pid = request.owner_pid;
+    let role = request.role.clone();
+    let lease_secs = request.lease_secs;
+    let lease_lost = Arc::new(AtomicBool::new(false));
+    let terminal_effect_in_progress = Arc::new(AtomicBool::new(false));
+    let terminal_effect_landed = Arc::new(AtomicBool::new(false));
+
+    if agent_doc_project_root_io::project_root_containing(file).is_none() {
+        return Ok(CloseoutOwnerGuardClaimOutcome::Acquired(
+            ClaimedCloseoutOwnerGuard::new(CloseoutOwnerCapability {
+                file: canonical_file,
+                cycle_id: expected_cycle_id.unwrap_or_else(|| "actorless".to_string()),
+                owner_id,
+                owner_pid,
+                role,
+                lease_secs,
+                actorless: true,
+                lease_lost,
+                terminal_effect_in_progress,
+                terminal_effect_landed,
+            }),
+        ));
+    }
+
+    match claim_closeout_owner_for_file(file, request)? {
+        CloseoutOwnerClaimOutcome::Acquired(owner) => {
+            anyhow::ensure!(
+                owner.owner_id == owner_id
+                    && owner.owner_pid == owner_pid
+                    && owner.role == role
+                    && expected_cycle_id
+                        .as_deref()
+                        .is_none_or(|expected| owner.cycle_id == expected),
+                "controller returned a closeout owner identity different from the requested capability: requested owner={} pid={} role={} cycle={:?}; returned={owner:?}",
+                owner_id,
+                owner_pid,
+                role,
+                expected_cycle_id,
+            );
+            Ok(CloseoutOwnerGuardClaimOutcome::Acquired(
+                ClaimedCloseoutOwnerGuard::new(CloseoutOwnerCapability {
+                    file: canonical_file,
+                    cycle_id: owner.cycle_id,
+                    owner_id,
+                    owner_pid,
+                    role,
+                    lease_secs,
+                    actorless: false,
+                    lease_lost,
+                    terminal_effect_in_progress,
+                    terminal_effect_landed,
+                }),
+            ))
+        }
+        CloseoutOwnerClaimOutcome::HeldByOther(owner) => {
+            Ok(CloseoutOwnerGuardClaimOutcome::HeldByOther(owner))
+        }
+        CloseoutOwnerClaimOutcome::CycleSuperseded => {
+            Ok(CloseoutOwnerGuardClaimOutcome::CycleSuperseded)
+        }
+    }
 }
 
 pub fn release_closeout_owner_for_file(

@@ -3000,19 +3000,19 @@ mod tests {
         let key = agent_doc_repair_command_io::captured_finalize_resume_key(&doc)
             .unwrap()
             .expect("captured response");
-        let marker = dir.path().join("resume-write-before-commit.marker");
-        let release = dir.path().join("resume-write-before-commit.release");
+        let marker = dir.path().join("resume-closeout-before-commit.marker");
+        let release = dir.path().join("resume-closeout-before-commit.release");
         unsafe {
             std::env::set_var(
-                "AGENT_DOC_TEST_CAPTURED_RESUME_WRITE_BEFORE_COMMIT_FILE",
+                "AGENT_DOC_TEST_CAPTURED_RESUME_CLOSEOUT_BEFORE_COMMIT_FILE",
                 &doc,
             );
             std::env::set_var(
-                "AGENT_DOC_TEST_CAPTURED_RESUME_WRITE_BEFORE_COMMIT_MARKER",
+                "AGENT_DOC_TEST_CAPTURED_RESUME_CLOSEOUT_BEFORE_COMMIT_MARKER",
                 &marker,
             );
             std::env::set_var(
-                "AGENT_DOC_TEST_CAPTURED_RESUME_WRITE_BEFORE_COMMIT_RELEASE",
+                "AGENT_DOC_TEST_CAPTURED_RESUME_CLOSEOUT_BEFORE_COMMIT_RELEASE",
                 &release,
             );
         }
@@ -3043,9 +3043,9 @@ mod tests {
         );
 
         unsafe {
-            std::env::remove_var("AGENT_DOC_TEST_CAPTURED_RESUME_WRITE_BEFORE_COMMIT_FILE");
-            std::env::remove_var("AGENT_DOC_TEST_CAPTURED_RESUME_WRITE_BEFORE_COMMIT_MARKER");
-            std::env::remove_var("AGENT_DOC_TEST_CAPTURED_RESUME_WRITE_BEFORE_COMMIT_RELEASE");
+            std::env::remove_var("AGENT_DOC_TEST_CAPTURED_RESUME_CLOSEOUT_BEFORE_COMMIT_FILE");
+            std::env::remove_var("AGENT_DOC_TEST_CAPTURED_RESUME_CLOSEOUT_BEFORE_COMMIT_MARKER");
+            std::env::remove_var("AGENT_DOC_TEST_CAPTURED_RESUME_CLOSEOUT_BEFORE_COMMIT_RELEASE");
             std::env::remove_var("AGENT_DOC_TEST_CAPTURED_RESUME_FORCE_LEASE_LOST_FILE");
         }
         let retry_guard =

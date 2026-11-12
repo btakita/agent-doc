@@ -332,6 +332,16 @@ fn request_is_negated(text: &str, index: usize, after: usize) -> bool {
     let descriptive = ["sentence", "phrase", "example", "words", "text"]
         .iter()
         .any(|lead| prefix.trim_end().ends_with(lead));
+    let subject_matter = [
+        "document how to",
+        "explain how to",
+        "describe how to",
+        "show how to",
+        "demonstrate how to",
+        "test how to",
+    ]
+    .iter()
+    .any(|lead| clause.trim_end().ends_with(lead));
     let line_end = text[after..]
         .find('\n')
         .map_or(text.len(), |offset| after + offset);
@@ -344,7 +354,7 @@ fn request_is_negated(text: &str, index: usize, after: usize) -> bool {
     ]
     .iter()
     .any(|tail| suffix.contains(tail));
-    prefix_negated || descriptive || effect_negated
+    prefix_negated || descriptive || subject_matter || effect_negated
 }
 
 /// Keep negation local to the clause that owns the request. An earlier
@@ -403,6 +413,8 @@ fn creation_verb_end(text: &str, index: usize) -> Option<usize> {
     let before_ok = index == 0 || !text.as_bytes()[index - 1].is_ascii_alphanumeric();
     let line_start = text[..index].rfind('\n').map_or(0, |offset| offset + 1);
     let prefix = text[line_start..index].trim_end();
+    let preceding_context_disclaims_creation =
+        preceding_nonempty_line(text, line_start).is_some_and(line_disclaims_current_creation);
     let words = request_clause(prefix)
         .split(|ch: char| !ch.is_ascii_alphanumeric() && ch != '\'')
         .filter(|word| !word.is_empty())
@@ -433,7 +445,44 @@ fn creation_verb_end(text: &str, index: usize) -> Option<usize> {
         .as_bytes()
         .get(after)
         .is_none_or(|byte| !byte.is_ascii_alphanumeric());
-    (before_ok && after_ok && !historical_or_negated).then_some(after)
+    (before_ok && after_ok && !historical_or_negated && !preceding_context_disclaims_creation)
+        .then_some(after)
+}
+
+fn preceding_nonempty_line(text: &str, line_start: usize) -> Option<&str> {
+    text.get(..line_start)?
+        .lines()
+        .rev()
+        .find(|line| !line.trim().is_empty())
+}
+
+fn line_disclaims_current_creation(line: &str) -> bool {
+    let trimmed = line.trim();
+    let historical_header = trimmed.ends_with(':')
+        && [
+            "historical",
+            "history",
+            "example",
+            "existing",
+            "previous",
+            "earlier",
+            "old ",
+            "pre-existing",
+            "preexisting",
+            "for reference",
+        ]
+        .iter()
+        .any(|marker| trimmed.contains(marker));
+    historical_header
+        || [
+            "historical example",
+            "example from the existing",
+            "example from a previous",
+            "for example, the existing",
+            "for reference, the existing",
+        ]
+        .iter()
+        .any(|phrase| trimmed.contains(phrase))
 }
 
 fn skip_ascii_ws(text: &str, index: usize) -> usize {
@@ -464,24 +513,39 @@ fn skip_phrase(text: &str, index: usize, phrase: &str) -> Option<usize> {
 }
 
 fn labeled_pull_request_receipt(lower: &str) -> bool {
-    lower.lines().any(|line| {
+    let mut preceding_line_disclaims_creation = false;
+    for line in lower.lines() {
+        if line.trim().is_empty() {
+            continue;
+        }
         if line_cites_existing_pull_request(line) {
-            return false;
+            preceding_line_disclaims_creation = true;
+            continue;
         }
         let rest = line.trim().trim_start_matches(['-', '*', ' ']);
         let Some(after_label) = rest
             .strip_prefix("created pull request")
             .or_else(|| rest.strip_prefix("opened pull request"))
         else {
-            return false;
+            preceding_line_disclaims_creation = line_disclaims_current_creation(line);
+            continue;
         };
+        if preceding_line_disclaims_creation {
+            preceding_line_disclaims_creation = false;
+            continue;
+        }
         let after_label = after_label.trim_start_matches('*').trim_start();
         let Some(after_colon) = after_label.strip_prefix(':') else {
-            return false;
+            preceding_line_disclaims_creation = false;
+            continue;
         };
         let url = after_colon.trim_start_matches(['*', ' ']);
-        github_pull_url_end(url, 0).is_some()
-    })
+        if github_pull_url_end(url, 0).is_some() {
+            return true;
+        }
+        preceding_line_disclaims_creation = false;
+    }
+    false
 }
 
 fn line_cites_existing_pull_request(line: &str) -> bool {
@@ -522,21 +586,22 @@ fn gh_pr_create_receipt(lower: &str) -> bool {
 }
 
 fn line_disclaims_command_execution(lower: &str) -> bool {
-    [
-        "prepared command",
-        "command prepared",
-        "command to run",
-        "run later",
-        "would run",
-        "plan to run",
-        "planned command",
-        "example command",
-        "suggested command",
-        "dry run",
-        "dry-run",
-    ]
-    .iter()
-    .any(|phrase| lower.contains(phrase))
+    line_disclaims_current_creation(lower)
+        || [
+            "prepared command",
+            "command prepared",
+            "command to run",
+            "run later",
+            "would run",
+            "plan to run",
+            "planned command",
+            "example command",
+            "suggested command",
+            "dry run",
+            "dry-run",
+        ]
+        .iter()
+        .any(|phrase| lower.contains(phrase))
 }
 
 fn line_runs_gh_pr_create(lower: &str) -> bool {
@@ -1105,6 +1170,15 @@ mod tests {
         assert!(!head_requires_created_pull_request(
             "Explain why I said \"create a pull request\" in the example."
         ));
+        assert!(!head_requires_created_pull_request(
+            "Document how to open a pull request for contributors."
+        ));
+        assert!(!head_requires_created_pull_request(
+            "Test how to create a pull request in the contributor guide."
+        ));
+        assert!(head_requires_created_pull_request(
+            "Open a pull request for the contributor guide."
+        ));
         assert!(head_requires_created_pull_request(
             "I'm ready; open a pull request for the release workflow."
         ));
@@ -1201,6 +1275,15 @@ mod tests {
         ));
         assert!(response_shows_created_pull_request(
             "Ran the command:\ngh pr create --title 'setup'\nhttps://github.com/haiven-dev/haiven-sdk/pull/229\n"
+        ));
+        assert!(!response_shows_created_pull_request(
+            "Historical example from the existing release:\nOpened https://github.com/haiven-dev/haiven-sdk/pull/228"
+        ));
+        assert!(!response_shows_created_pull_request(
+            "Historical example from the existing release:\n**Created pull request:** https://github.com/haiven-dev/haiven-sdk/pull/228"
+        ));
+        assert!(response_shows_created_pull_request(
+            "Opened https://github.com/haiven-dev/haiven-sdk/pull/230"
         ));
     }
 }

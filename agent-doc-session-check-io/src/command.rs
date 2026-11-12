@@ -3740,6 +3740,18 @@ fn refuse_transient_queue_closeout(
     let SessionCheckStatus::Ok(message) = &status else {
         return Ok(status);
     };
+    // Comprehensive queue maintenance is detached from admission. A terminal
+    // result must not race that authority-checked projection: either the worker
+    // finishes and the ordinary lifecycle debt below becomes visible, or the
+    // next check retries after the short-lived lease settles.
+    if let Some(holder_pid) =
+        agent_doc_queue_io::queue_edit_owner::foreign_queue_edit_in_flight(&file.to_string_lossy())
+    {
+        return Ok(SessionCheckStatus::Interrupted(format!(
+            "[session-check] INTERRUPTED: background queue maintenance is still converging for {} (holder_pid={holder_pid}); terminal closeout is withheld until the queue authority projection settles (#transientcloseout)",
+            file.display(),
+        )));
+    }
     let content = match crate::resolve_current_document_content(file, "transient_closeout") {
         Ok(content) => content,
         Err(error) => {
@@ -3749,6 +3761,25 @@ fn refuse_transient_queue_closeout(
             )));
         }
     };
+    let live_ids = agent_doc_queue::queue_closeout_guard::live_queue_line_reference_ids(&content);
+    let closeout_state = agent_doc_cycle_state_io::load_with_closeout_projection(file)?;
+    let mut same_cycle_pending = closeout_state
+        .filter(|state| state.capture_id.is_none() && state.response_sha256.is_none())
+        .into_iter()
+        .flat_map(|state| state.pending_actionable_ids)
+        .filter(|id| live_ids.contains(id))
+        .collect::<Vec<_>>();
+    same_cycle_pending.sort();
+    if !same_cycle_pending.is_empty() {
+        return Ok(SessionCheckStatus::Interrupted(format!(
+            "[session-check] INTERRUPTED: normal closeout refused while same-cycle queue ingress is still pending lifecycle projection (#transientcloseout): {}",
+            same_cycle_pending
+                .iter()
+                .map(|id| format!("#{id}"))
+                .collect::<Vec<_>>()
+                .join(", "),
+        )));
+    }
     match agent_doc_queue::transient_closeout::closeout_failure_for_success_message(
         message, &content,
     )? {

@@ -533,6 +533,40 @@ fn resolve_expanded_claim_target(
     .ok()
 }
 
+/// Resolve a generated prompt selector against the same pure identity
+/// projection preflight exposes before comprehensive maintenance persists it.
+/// Return the authored row text so the durable claim remains valid both before
+/// and after the background reconciler annotates the document.
+fn resolve_projected_claim_target(
+    file: &Path,
+    item: &str,
+    disk_content: &str,
+    authority_content: Option<&str>,
+) -> Option<(String, ClaimHeadSource)> {
+    let (content, source) = authority_content
+        .map(|content| (content, ClaimHeadSource::EditorAuthority))
+        .unwrap_or((disk_content, ClaimHeadSource::Disk));
+    let authored_heads = all_queue_head_texts(content)?;
+    let projection = agent_doc_queue::prompt_identity::project(
+        content,
+        &agent_doc_hash::document_id_for_path(file),
+    );
+    if projection.assignments.is_empty() {
+        return None;
+    }
+    let projected_heads = all_queue_head_texts(&projection.content)?;
+    let projected_target =
+        agent_doc_queue::queue_claim::resolve_claim_target(item, &projected_heads).ok()?;
+    let target_identity = claim_identity(&projected_target);
+    let index = projected_heads
+        .iter()
+        .position(|head| claim_identity(head) == target_identity)?;
+    authored_heads
+        .get(index)
+        .cloned()
+        .map(|target| (target, source))
+}
+
 /// Resolve a claim `--item` against the live editor authority when available,
 /// otherwise against the on-disk document (GH #124 ask 5, GH #296): dispatch
 /// and claim must agree on what a live head is even while an editor save to
@@ -572,8 +606,11 @@ fn resolve_live_claim_target(
     let (target, view) = match resolved {
         Ok(resolved) => resolved,
         Err(miss) if miss.ambiguous.is_empty() => {
-            let expanded =
-                resolve_expanded_claim_target(file, item, &content, authority_text.as_deref());
+            let projected =
+                resolve_projected_claim_target(file, item, &content, authority_text.as_deref());
+            let expanded = projected.or_else(|| {
+                resolve_expanded_claim_target(file, item, &content, authority_text.as_deref())
+            });
             if let Some(resolved) = expanded {
                 resolved
             } else {
@@ -2857,7 +2894,15 @@ fn claimed_items_with_queue_holds(
 /// unreadable ledger contributes no claims (the gate this feeds stays armed).
 pub fn worker_owned_items_for_content(file: &Path, content: &str) -> ClaimedQueueItems {
     use agent_doc_queue::queue_claim::QueueClaimState;
-    let claims = claim_states_for_content(file, content).unwrap_or_else(|err| {
+    // Preflight can hand a deterministic `[#q-…]` selector to a worker before
+    // the background reconciler persists that annotation. Follow the claim on
+    // the same pure identity projection so the closeout capture gate observes
+    // one identity on both sides of that short persistence window.
+    let projected = agent_doc_queue::prompt_identity::project(
+        content,
+        &agent_doc_hash::document_id_for_path(file),
+    );
+    let claims = claim_states_for_content(file, &projected.content).unwrap_or_else(|err| {
         eprintln!(
             "[queue-claim] WARNING: could not read queue claims for {}; treating every head as unowned: {err:#}",
             file.display()

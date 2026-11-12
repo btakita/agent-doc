@@ -4146,12 +4146,36 @@ pub fn inspect_queue_state(file: &Path, diff: Option<&str>) -> Result<QueueState
         Ok(content) => content,
         Err(_) => return Ok(QueueState::default()),
     };
+    inspect_queue_state_from_content(file, diff, content)
+}
+
+/// Read-only queue admission from an already admitted authoritative document cut.
+///
+/// Preflight's reactive diff source has already failed closed when an attached
+/// editor cannot provide a current replica. Reusing that exact cut here keeps the
+/// admission lane bounded: claim/relevance selection is pure and comprehensive
+/// queue convergence can run as a later Effect without another editor save RPC.
+/// The disk-reading [`inspect_queue_state`] remains the diagnostic/probe adapter.
+pub fn inspect_queue_state_from_content(
+    file: &Path,
+    diff: Option<&str>,
+    content: String,
+) -> Result<QueueState> {
     let snapshot_content = agent_doc_snapshot_io::load_document_baseline(file)
         .ok()
         .flatten();
     let (content, _) =
         converge_queue_control_binding_content(&content, snapshot_content.as_deref())?;
     let (content, _) = infer_queue_go_from_prompt_edit(&content, snapshot_content.as_deref())?;
+    // Candidate identity is part of admission, not comprehensive maintenance:
+    // the contract hands `[#q-…]` selectors to claim/dispatch immediately, so
+    // derive the exact deterministic projection on the authoritative cut even
+    // when its persistence is deferred to the background reconciler.
+    let content = agent_doc_queue::prompt_identity::project(
+        &content,
+        &agent_doc_hash::document_id_for_path(file),
+    )
+    .content;
     let _nested_claim_steer =
         agent_doc_queue_io::queue_claim::nested_claim_steer_for(file, &content);
     let components = match agent_doc_element::element::parse(&content) {
@@ -11840,6 +11864,30 @@ mod tests {
             "an open (not operator-verify) item never shows awaiting:\n{updated}"
         );
         assert_eq!(queue_line(&updated, "verify"), "- ### ⏳ do [#verify]");
+    }
+
+    #[test]
+    fn authoritative_queue_admission_skips_claimed_and_processed_candidates() {
+        let (_dir, doc) = sdk_queue_lifecycle_fixture("#claimed");
+        let authority = std::fs::read_to_string(&doc).unwrap();
+
+        let state = inspect_queue_state_from_content(&doc, None, authority).unwrap();
+
+        assert_eq!(state.selected_queue_prompts, vec!["do [#plain]"]);
+        assert!(
+            state
+                .claimed_queue_heads
+                .iter()
+                .any(|fact| fact.item.contains("#claimed")),
+            "the skipped live claim remains visible in the admission contract"
+        );
+        assert!(
+            !state
+                .selected_queue_prompts
+                .iter()
+                .any(|prompt| prompt.contains("#verify") || prompt.contains("#claimed")),
+            "operator-verify and claimed rows are not currently relevant inline candidates"
+        );
     }
 
     /// `#queueawaitop`: a claim held on a head whose item already waits on the

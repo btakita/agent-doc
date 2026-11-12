@@ -1604,6 +1604,7 @@ dependencies = [
  "agent-doc-workflow-io",
  "agent-doc-write-runtime-io",
  "anyhow",
+ "libc",
  "parking_lot",
  "serde_json",
  "tempfile",

@@ -133,6 +133,84 @@ fn seed_snapshot(root: &Path, doc: &Path, content: &str) {
     agent_doc_snapshot_io::checkpoint_document_baseline(doc, content, |_, _| {}).unwrap();
 }
 
+#[test]
+fn preflight_admits_under_five_seconds_while_slow_queue_maintenance_stays_detached() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let doc = tmp.path().join("session.md");
+    let content = concat!(
+        "---\n",
+        "agent_doc_session: timing-test\n",
+        "agent_doc_format: template\n",
+        "agent: codex\n",
+        "model: gpt-5\n",
+        "queue: start\n",
+        "---\n\n",
+        "<!-- agent:exchange -->\n",
+        "### Re: prior — gpt-5\n\nDone.\n",
+        "<!-- agent:boundary:1234abcd -->\n",
+        "<!-- /agent:exchange -->\n\n",
+        "<!-- agent:queue priority go -->\n",
+        "- do [#timed]\n",
+        "<!-- /agent:queue -->\n\n",
+        "<!-- agent:backlog priority queue -->\n",
+        "- [ ] [#timed] slow comprehensive maintenance\n",
+        "<!-- /agent:backlog -->\n",
+    );
+    fs::write(&doc, content).unwrap();
+    init_git_repo(tmp.path(), &doc);
+
+    let started = std::time::Instant::now();
+    let output = agent_doc_cmd()
+        .current_dir(tmp.path())
+        .env(
+            "AGENT_DOC_TEST_BACKGROUND_QUEUE_MAINTENANCE_DELAY_MS",
+            "6000",
+        )
+        .args(["preflight", doc.to_str().unwrap()])
+        .output()
+        .unwrap();
+    let admitted_elapsed = started.elapsed();
+    eprintln!("bounded queue admission elapsed: {admitted_elapsed:?}");
+    assert!(
+        output.status.success(),
+        "preflight failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        admitted_elapsed < std::time::Duration::from_secs(5),
+        "bounded admission waited for six-second comprehensive maintenance: {admitted_elapsed:?}"
+    );
+    let contract: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        contract["selected_queue_prompts"].as_array().unwrap().len(),
+        1
+    );
+
+    let ops = tmp.path().join(".agent-doc/logs/ops.log");
+    let initial_ops = fs::read_to_string(&ops).unwrap_or_default();
+    assert!(
+        initial_ops.contains("queue_maintenance_background_dispatched"),
+        "admission did not dispatch comprehensive maintenance: {initial_ops}"
+    );
+    assert!(
+        !initial_ops.contains("queue_maintenance_background_completed"),
+        "six-second comprehensive maintenance completed before bounded admission returned"
+    );
+
+    let completion_deadline = std::time::Instant::now() + std::time::Duration::from_secs(12);
+    loop {
+        let current_ops = fs::read_to_string(&ops).unwrap_or_default();
+        if current_ops.contains("queue_maintenance_background_completed") {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < completion_deadline,
+            "detached comprehensive maintenance never completed: {current_ops}"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+}
+
 fn read_cycle_phase(root: &Path, doc: &Path) -> Option<String> {
     let _ = root;
     agent_doc_cycle_state_io::load(doc)
@@ -4123,25 +4201,31 @@ fn test_agent_doc_model_tier_owns_context_usage_policy() {
             "preflight/run.rs must not re-own model-tier attribution or harness policy: {forbidden_snippet}"
         );
     }
-    // `#n39j` / `#queuepersiststall`: when queue maintenance fails to PERSIST,
-    // preflight must report the queue's REAL drainability by probing it
-    // read-only, never a zeroed `QueueState::default()`. Those two are
-    // indistinguishable to the loop gate, so a persistence failure silently
-    // presenting as "queue empty" stalls a drain that still has work — observed
-    // live (0 -> 14 drainable on brookebrodack-dev.md).
-    //
-    // Reproducing the real failure needs a simulated editor-authority outage,
-    // so this pins the CONTRACT at the branch instead: the probe is called, and
-    // the zeroed default survives only as the probe's own last resort.
+    // Admission must not wait for comprehensive queue projection/persistence.
+    // It takes one fail-closed authoritative cut, derives candidate identity,
+    // claim filtering and relevance purely, emits the contract, and only then
+    // dispatches the editor-authoritative maintenance worker.
     assert!(
-        preflight_run_source.contains("inspect_queue_state(file, diff_result.as_deref())"),
-        "the queue-maintenance persist-failure branch must probe real drainability (#queuepersiststall)"
+        preflight_run_source
+            .contains("resolve_current_preflight_document(file, \"preflight_queue_admission\")")
+            && preflight_run_source.contains("inspect_queue_state_from_content(")
+            && !preflight_run_source.contains("run_queue_maintenance_with_coin_gate_and_snapshot("),
+        "preflight admission must remain a bounded read-only queue decision"
+    );
+    assert!(
+        preflight_source.contains("pub fn spawn_background_queue_maintenance(")
+            && preflight_source.contains("pub fn run_background_queue_maintenance(")
+            && preflight_run_source.contains("spawn_background_queue_maintenance(file,"),
+        "comprehensive queue maintenance must be dispatched through the detached worker boundary"
     );
     assert!(
         preflight_run_source
-            .contains("inspect_queue_state(file, diff_result.as_deref()).unwrap_or_else("),
-        "the zeroed QueueState::default() must remain the PROBE's fallback (`unwrap_or_else`), never the \
-         primary persist-failure answer (#queuepersiststall)"
+            .find("writeln!(writer, \"{}\", json)?;")
+            .expect("serialized admission write")
+            < preflight_run_source
+                .find("crate::spawn_background_queue_maintenance(file,")
+                .expect("background maintenance dispatch"),
+        "the admission contract must be written before comprehensive maintenance is dispatched"
     );
 
     assert!(

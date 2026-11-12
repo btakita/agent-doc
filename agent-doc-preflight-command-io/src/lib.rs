@@ -113,8 +113,9 @@
 //! - `links_cache_dir_creates_directory`: creates `.agent-doc/links_cache/` and
 //!   returns `Some(path)` when `.agent-doc/` exists.
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use std::path::Path;
+use std::process::{Command, Stdio};
 
 use agent_doc_preflight_io::{
     PreflightOutput, PreflightWarning,
@@ -127,6 +128,252 @@ use agent_doc_preflight_runtime_io::PREFLIGHT_MAINTENANCE_WRITE_EFFECTS;
 use agent_doc_session_accretion::SessionAccretionLevel;
 #[cfg(test)]
 use agent_doc_session_accretion::SessionAccretionReport;
+
+const TEST_BACKGROUND_QUEUE_MAINTENANCE_DELAY_MS_ENV: &str =
+    "AGENT_DOC_TEST_BACKGROUND_QUEUE_MAINTENANCE_DELAY_MS";
+
+/// Dispatch comprehensive queue reconciliation outside the admission process.
+///
+/// The child re-observes editor authority before every mutation. The admitting
+/// process only pays for process creation; it never waits for queue projection,
+/// editor-native save, or disk convergence. Using the binary selected by the
+/// controller's launch policy also keeps embedded/plugin callers from trying to
+/// execute their host process as `agent-doc`.
+pub fn spawn_background_queue_maintenance(file: &Path, commit_if_mutated: bool) -> Result<u32> {
+    if let Some(holder_pid) =
+        agent_doc_queue_io::queue_edit_owner::foreign_queue_edit_in_flight(&file.to_string_lossy())
+    {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "queue_maintenance_background_dispatch_coalesced file={} holder_pid={holder_pid}",
+                file.display(),
+            ),
+        );
+        return Ok(holder_pid);
+    }
+    let binary = agent_doc_controller_io::project_controller::current_binary_identity()?.path;
+    let mut command = Command::new(&binary);
+    command
+        .arg("preflight")
+        .arg(file)
+        .arg("--queue-maintenance-only");
+    if commit_if_mutated {
+        command.arg("--commit-queue-maintenance");
+    }
+    let pid = spawn_detached_queue_effect(&mut command).map_err(|error| {
+        anyhow::anyhow!(
+            "failed to launch background queue maintenance with {}: {error}",
+            binary.display()
+        )
+    })?;
+    // Publish ownership synchronously with dispatch. A closeout that starts
+    // before the child reaches its entrypoint must still see comprehensive
+    // maintenance as unsettled instead of terminally accepting an unprojected
+    // queue cut.
+    agent_doc_queue_io::queue_edit_owner::refresh_queue_edit_owner_lease(
+        &file.to_string_lossy(),
+        pid,
+    )
+    .with_context(|| {
+        format!("failed to publish background queue maintenance ownership for pid {pid}")
+    })?;
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "queue_maintenance_background_dispatched file={} pid={} binary={}",
+            file.display(),
+            pid,
+            binary.display(),
+        ),
+    );
+    Ok(pid)
+}
+
+fn spawn_detached_queue_effect(command: &mut Command) -> std::io::Result<u32> {
+    detach_queue_effect(command);
+    let child = command
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()?;
+    let pid = child.id();
+    // Dropping `Child` intentionally leaves the independently owned worker
+    // running; the short-lived preflight process must not join it.
+    drop(child);
+    Ok(pid)
+}
+
+#[cfg(unix)]
+fn detach_queue_effect(command: &mut Command) {
+    use std::os::unix::process::CommandExt;
+
+    // The admitting CLI can exit immediately after spawning this worker. Start
+    // a new session so a hook runner, test harness, terminal, or controller
+    // process-group cleanup cannot kill comprehensive maintenance with its
+    // short-lived parent.
+    unsafe {
+        command.pre_exec(|| {
+            if libc::setsid() == -1 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+}
+
+#[cfg(not(unix))]
+fn detach_queue_effect(_command: &mut Command) {}
+
+struct BackgroundQueueMaintenanceLease {
+    stop: Option<std::sync::mpsc::Sender<()>>,
+    heartbeat: Option<std::thread::JoinHandle<()>>,
+    _guard: agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
+}
+
+impl BackgroundQueueMaintenanceLease {
+    fn acquire(file: &Path) -> Self {
+        let guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(file);
+        let file = file.to_path_buf();
+        let heartbeat_file = file.clone();
+        let (stop, stopped) = std::sync::mpsc::channel();
+        let heartbeat = match std::thread::Builder::new()
+            .name("queue-maintenance-lease-heartbeat".to_string())
+            .spawn(move || loop {
+                match stopped.recv_timeout(std::time::Duration::from_secs(5)) {
+                    Ok(()) | Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                        if let Err(error) =
+                            agent_doc_queue_io::queue_edit_owner::refresh_queue_edit_owner_lease(
+                                &heartbeat_file.to_string_lossy(),
+                                std::process::id(),
+                            )
+                        {
+                            agent_doc_ops_log_io::log_op(
+                                &heartbeat_file,
+                                &format!(
+                                    "queue_maintenance_background_lease_refresh_failed file={} error={error:#}",
+                                    heartbeat_file.display(),
+                                ),
+                            );
+                        }
+                    }
+                }
+            }) {
+            Ok(heartbeat) => Some(heartbeat),
+            Err(error) => {
+                agent_doc_ops_log_io::log_op(
+                    &file,
+                    &format!(
+                        "queue_maintenance_background_lease_heartbeat_spawn_failed file={} error={error}",
+                        file.display(),
+                    ),
+                );
+                None
+            }
+        };
+        Self {
+            stop: heartbeat.as_ref().map(|_| stop),
+            heartbeat,
+            _guard: guard,
+        }
+    }
+}
+
+impl Drop for BackgroundQueueMaintenanceLease {
+    fn drop(&mut self) {
+        self.stop.take();
+        if let Some(heartbeat) = self.heartbeat.take() {
+            let _ = heartbeat.join();
+        }
+    }
+}
+
+/// Hidden child-process entrypoint for comprehensive queue reconciliation.
+///
+/// The queue mutation lease coalesces overlapping admissions: a worker that
+/// observes another live worker simply defers through the existing maintenance
+/// fence. All authority and persistence checks remain in the ordinary queue
+/// maintenance implementation, so moving the effect off the admission lane
+/// does not introduce a disk-authority escape hatch.
+pub fn run_background_queue_maintenance(file: &Path, commit_if_mutated: bool) -> Result<()> {
+    if let Some(holder_pid) =
+        agent_doc_queue_io::queue_edit_owner::foreign_queue_edit_in_flight(&file.to_string_lossy())
+    {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "queue_maintenance_background_coalesced file={} holder_pid={holder_pid}",
+                file.display(),
+            ),
+        );
+        return Ok(());
+    }
+    let _queue_mutation = BackgroundQueueMaintenanceLease::acquire(file);
+    if let Some(delay) = std::env::var(TEST_BACKGROUND_QUEUE_MAINTENANCE_DELAY_MS_ENV)
+        .ok()
+        .and_then(|raw| raw.trim().parse::<u64>().ok())
+        .filter(|delay| *delay > 0)
+    {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "queue_maintenance_background_test_delay file={} delay_ms={delay}",
+                file.display(),
+            ),
+        );
+        std::thread::sleep(std::time::Duration::from_millis(delay));
+    }
+    let outcome = agent_doc_preflight_io::run_queue_maintenance(file, None);
+    match outcome {
+        Ok(state) => {
+            agent_doc_cycle_state_io::record_queue_mirrored_ids_or_warn(
+                file,
+                &state.mirrored_queue_ids,
+                "background_queue_maintenance",
+            );
+            let committed = match commit_if_mutated && state.maintenance_mutated {
+                true => match agent_doc_commit_io::commit(file) {
+                    Ok(committed) => committed,
+                    Err(error) => {
+                        agent_doc_ops_log_io::log_op(
+                            file,
+                            &format!(
+                                "queue_maintenance_background_failed file={} stage=commit error={}",
+                                file.display(),
+                                format!("{error:#}").replace('\n', " | "),
+                            ),
+                        );
+                        return Err(error);
+                    }
+                },
+                false => false,
+            };
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "queue_maintenance_background_completed file={} mutated={} committed={} drainable={}",
+                    file.display(),
+                    state.maintenance_mutated,
+                    committed,
+                    state.queue_drainable_head_count,
+                ),
+            );
+            Ok(())
+        }
+        Err(error) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "queue_maintenance_background_failed file={} error={}",
+                    file.display(),
+                    format!("{error:#}").replace('\n', " | "),
+                ),
+            );
+            Err(error)
+        }
+    }
+}
 
 /// Run the preflight sequence for a session document.
 ///
@@ -344,6 +591,23 @@ mod tests {
     use std::io::Write;
     use std::process::Command;
     use tempfile::TempDir;
+
+    #[cfg(unix)]
+    #[test]
+    fn slow_comprehensive_queue_effect_does_not_block_admission_dispatch() {
+        let mut command = Command::new("sh");
+        command.args(["-c", "sleep 1"]);
+        let started = std::time::Instant::now();
+
+        let pid = spawn_detached_queue_effect(&mut command).unwrap();
+
+        assert!(pid > 0);
+        assert!(
+            started.elapsed() < std::time::Duration::from_millis(500),
+            "dispatch waited for the comprehensive effect: {:?}",
+            started.elapsed()
+        );
+    }
 
     #[test]
     fn pane_authority_precedes_every_preflight_mutation_boundary() {

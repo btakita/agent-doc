@@ -3368,6 +3368,18 @@ enum Commands {
         /// (`#preflight-probe-side-effect-free`).
         #[arg(long)]
         probe: bool,
+        /// Internal detached effect: run comprehensive queue reconciliation
+        /// after the admission process has returned its bounded read model.
+        #[arg(long, hide = true, conflicts_with = "probe")]
+        queue_maintenance_only: bool,
+        /// Internal detached-effect commit policy for a no-changes admission.
+        #[arg(
+            long,
+            hide = true,
+            requires = "queue_maintenance_only",
+            conflicts_with = "probe"
+        )]
+        commit_queue_maintenance: bool,
     },
     /// Diagnose workflow invariant status for a session document
     ///
@@ -8401,13 +8413,27 @@ fn try_main() -> anyhow::Result<()> {
             }
             Ok(())
         }
-        Commands::Preflight { file, probe } => agent_doc_preflight_command_io::run_with_options(
-            &file,
-            agent_doc_preflight_command_io::PreflightOptions {
-                probe,
-                ..Default::default()
-            },
-        ),
+        Commands::Preflight {
+            file,
+            probe,
+            queue_maintenance_only,
+            commit_queue_maintenance,
+        } => {
+            if queue_maintenance_only {
+                agent_doc_preflight_command_io::run_background_queue_maintenance(
+                    &file,
+                    commit_queue_maintenance,
+                )
+            } else {
+                agent_doc_preflight_command_io::run_with_options(
+                    &file,
+                    agent_doc_preflight_command_io::PreflightOptions {
+                        probe,
+                        ..Default::default()
+                    },
+                )
+            }
+        }
         Commands::Admit { file } => {
             let output = agent_doc_session_check_io::midturn_steering::admit_with_steering_seed(
                 &file,

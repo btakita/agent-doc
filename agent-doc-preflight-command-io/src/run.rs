@@ -4,12 +4,14 @@ use super::*;
 use agent_doc_diff as diff;
 use agent_doc_diff::semantic::semantic_diff_summary;
 use agent_doc_frontmatter::frontmatter;
+#[cfg(test)]
+use agent_doc_preflight_io::checkpoint_baseline_content;
 use agent_doc_preflight_io::{
-    PendingMaintenanceReport, PreflightResponseContract, QueueAuthorityUnavailable, QueueState,
-    check_linked_docs, checkpoint_baseline_content, enforce_no_dropped_backlog,
-    explicit_backlog_target_requirements, inspect_queue_state, read_and_truncate_claims,
-    read_claims, resolve_pipeline_state, run_gate_verify, run_pending_maintenance,
-    run_queue_maintenance_with_coin_gate_and_snapshot, shadow_open_backlog_admission,
+    PendingMaintenanceReport, PreflightResponseContract, QueueState, check_linked_docs,
+    enforce_no_dropped_backlog, explicit_backlog_target_requirements, inspect_queue_state,
+    inspect_queue_state_from_content, read_and_truncate_claims, read_claims,
+    resolve_pipeline_state, run_gate_verify, run_pending_maintenance,
+    shadow_open_backlog_admission,
     sweep::{
         current_sweep_budget, current_sweep_owner, load_sweep_cursor,
         log_and_skip_foreign_owned_sweep_if_needed, order_from_cursor, run_bounded_sweep,
@@ -26,9 +28,9 @@ use agent_doc_prompt_contract::{push_unique_prompt_bearing_changes, push_unique_
 use agent_doc_queue::no_changes_explanation::{
     NoChangesFacts, NoChangesReadSource, explain_no_changes,
 };
-use agent_doc_queue::queue_convergence::{
-    queue_body_diff_is_non_selected_future_state, realign_baseline_to_converged_queue,
-};
+use agent_doc_queue::queue_convergence::queue_body_diff_is_non_selected_future_state;
+#[cfg(test)]
+use agent_doc_queue::queue_convergence::realign_baseline_to_converged_queue;
 use agent_doc_run_context_io::AgentDocContextExt;
 use agent_doc_state_backbone::DocumentScope;
 use agent_doc_state_backbone::preflight::{
@@ -450,11 +452,6 @@ fn run_with_options_to_writer_in_pass(
         let admitted = resolve_admission_preflight_document(file, "initial")?;
         (admitted.content, admitted.replica_hold)
     };
-    // Preserve the baseline that existed when this admission began. Repair and
-    // prior-cycle closeout may checkpoint document drift before queue
-    // maintenance; using that newer baseline would turn a same-cycle replay
-    // copy into apparently committed queue multiplicity.
-    let queue_admission_snapshot = agent_doc_snapshot_io::load_document_baseline(file)?;
     // A retained response replay may transiently duplicate only response cells
     // and/or protocol boundary markers. Normalize that evidence-backed shape
     // through Lazily before the generic integrity gate; otherwise the gate
@@ -1282,9 +1279,10 @@ fn run_with_options_to_writer_in_pass(
         }
     }
 
-    crate::progress::enter("queue_maintenance")?;
-    // Step 4b2: Queue component analysis — resolve activation, consume start
-    // fences, and emit queue prompts for the skill. If the document/harness diff
+    crate::progress::enter("queue_admission")?;
+    // Step 4b2: bounded queue admission — resolve activation and emit queue
+    // prompts for the skill without waiting for comprehensive maintenance. If
+    // the document/harness diff
     // is otherwise empty, an active queue head item becomes the prompt diff for
     // this cycle. This preserves bare no-op invocations while letting persisted
     // `queue_active: true` advance without requiring a fresh document edit.
@@ -1329,78 +1327,30 @@ fn run_with_options_to_writer_in_pass(
         {
             eprintln!("[preflight] moot decision: not applied this pass: {err:#}");
         }
-        match run_queue_maintenance_with_coin_gate_and_snapshot(
+        // The best-effort maintenance immediately above can change the live
+        // projection after the diff cut, so take one final authoritative read.
+        // This read remains fail-closed for an attached editor without a current
+        // replica, but does not wait for a native save or disk convergence.
+        let queue_admission_content =
+            resolve_current_preflight_document(file, "preflight_queue_admission")?;
+        // Claim filtering and current candidate relevance remain synchronous;
+        // backlog mirroring, lifecycle painting, auto-strike and editor-native
+        // persistence are a detached Effect.
+        inspect_queue_state_from_content(
             file,
             diff_result.as_deref(),
-            &coin_gate,
-            queue_admission_snapshot.as_deref(),
-        ) {
-            Ok(state) => state,
-            Err(e) => {
-                if e.downcast_ref::<QueueAuthorityUnavailable>().is_some() {
-                    eprintln!(
-                        "[preflight] admission refused — retained queue reconciliation is pending; \
-                         do not start a response or replace the queued edit: {e}"
-                    );
-                    anyhow::bail!(
-                        "preflight refused admission: retained queue reconciliation is pending; \
-                         do not start a response or replace the queued edit: {e}"
-                    );
-                }
-                // `#queuepersistloud`: the mirror/sync progress lines above are
-                // printed while the new queue is being *computed*, before it is
-                // persisted. When persistence then fails the computed queue is
-                // discarded and the previous queue text survives — but the run
-                // still reads as success ("mirrored 31 ... / synced backlog →
-                // queue (Prepend, 49 active id(s))"), so a freshly filed backlog
-                // item silently never appears in the queue and operators re-add
-                // `do [#id]` by hand. Say plainly that nothing was applied, and
-                // surface it as a structured warning so agents and skills see it
-                // in the preflight contract rather than only on stderr.
-                eprintln!(
-                    "[preflight] queue maintenance FAILED — the recomputed queue was NOT applied; \
-                     the previous queue text is still in effect (any backlog→queue mirror, \
-                     auto-strike, or reorder reported above did not land): {e}"
-                );
-                warnings.push(PreflightWarning {
-                    code: "queue_maintenance_not_persisted".to_string(),
-                    message: format!(
-                        "queue maintenance was computed but NOT persisted, so the previous queue \
-                         text is still in effect and newly added backlog ids may be absent from \
-                         the queue: {e}"
-                    ),
-                    document_agent: None,
-                    active_harness: None,
-                });
-                // `#queuepersiststall`: report the queue AS IT ACTUALLY STANDS.
-                //
-                // This used to fall back to `QueueState::default()`, i.e. "no
-                // active queue, nothing drainable". That is indistinguishable
-                // from a genuinely drained queue, and preflight is the loop gate
-                // — so a *persistence* failure silently presented as *queue
-                // empty* and stalled the drain. Observed live: session-check
-                // reported `queue_continuation_required=true` with a real next
-                // head while the very next preflight reported
-                // `queue_drainable_head_count: 0`, and the loop stopped after one
-                // iteration on a queue that still had work.
-                //
-                // Only the recomputed queue was lost; the previous queue text is
-                // still in effect and its drainability is knowable. Probe it
-                // read-only so the contract stays truthful. If even the probe
-                // fails, the zeroed default is the honest answer.
-                inspect_queue_state(file, diff_result.as_deref()).unwrap_or_else(|probe_err| {
-                    eprintln!(
-                        "[preflight] queue: post-failure drainability probe also failed, \
-                         reporting an inactive queue: {probe_err}"
-                    );
-                    QueueState::default()
-                })
-            }
-        }
+            queue_admission_content,
+        )
+        .unwrap_or_else(|error| {
+            eprintln!(
+                "[preflight] queue admission inspection failed; reporting the admitted queue as inactive: {error:#}"
+            );
+            QueueState::default()
+        })
     };
-    // Queue maintenance can strike or otherwise rewrite heads after the initial
-    // diff cut. Every downstream queue decision must observe the settled queue
-    // projection, while non-queue/parse-failure paths retain the admitted cut.
+    // Every downstream queue decision consumes the exact admitted queue cut;
+    // comprehensive background maintenance publishes a later authority event
+    // and never changes the facts of this already-opened turn.
     let queue_authoritative_content = queue_state
         .authoritative_content
         .as_deref()
@@ -1421,8 +1371,8 @@ fn run_with_options_to_writer_in_pass(
                 active_harness: None,
             }),
     );
-    // `#queuesyncpayload`: queue maintenance above is the deterministic repair
-    // pass.  Inspect its settled cut before normal selection/dispatch and retain
+    // `#queuesyncpayload`: inspect the admitted cut before normal
+    // selection/dispatch and retain
     // every unresolved item -- including inactive components and sibling
     // session documents -- as typed coordinator action debt.
     let queue_sync = agent_doc_queue_io::sync_payload::build_project_queue_sync_payload(
@@ -1432,32 +1382,6 @@ fn run_with_options_to_writer_in_pass(
     )?;
     warnings.extend(queue_state.warnings.clone());
     warnings.extend(agent_doc_preflight_io::warnings::harness_usage_limit_warnings(file));
-    // #qconvbaseline: the queue maintenance above may converge the live editor
-    // buffer to a corrected queue shape (auto-pins, backlog→queue mirrors, do-prompt
-    // sort, queue-control frontmatter) via IPC WITHOUT a disk write when a plugin
-    // listener is active — the converged shape lands in the editor buffer + the
-    // snapshot, but disk (and the baseline saved just above, from pre-maintenance
-    // disk) stay behind. At finalize the converged editor buffer then reads as
-    // `live_prompt_drift_after_preflight` on EVERY cycle: its queue body differs
-    // outside `exchange` from both the baseline and `content_ours`, so the drift
-    // guard blocks the response write and forces the `content_ours` carry-forward +
-    // a recovery commit (the race the operator hit repeatedly editing the doc).
-    // Re-align the baseline with the post-maintenance snapshot (the queue shape now
-    // in the editor buffer) so `content_ours` matches the buffer outside `exchange`
-    // and ONLY genuine concurrent user edits trip the guard. No-listener sessions
-    // are unaffected — their disk write already matches the snapshot, and when
-    // nothing converged the snapshot equals the pre-maintenance content so this is
-    // a no-op.
-    if !options.probe
-        && let Ok(Some(converged_snapshot)) = agent_doc_snapshot_io::load_document_baseline(file)
-        && let Some(realigned) = realign_baseline_to_converged_queue(
-            &diff_result_with_current.previous,
-            &converged_snapshot,
-        )
-    {
-        let _ = checkpoint_baseline_content(file, &realigned);
-        eprintln!("[preflight] baseline re-aligned to converged queue shape (#qconvbaseline)");
-    }
     if diff_result.is_some()
         && queue_state.queue_active == Some(true)
         && let Some(selected_head) = queue_state
@@ -1620,41 +1544,6 @@ fn run_with_options_to_writer_in_pass(
     let document_no_changes = no_changes;
     let no_changes = document_no_changes && !chat_turn && !absorbed_turn;
 
-    // `#qmaintorphan`: queue maintenance (step 4b2) runs AFTER the single step-2
-    // commit, so a mutation it persisted to the visible document + snapshot is
-    // normally committed by this cycle's own `respond` / `write --commit`. On a
-    // `no_changes` cycle there is no response to persist and SKILL.md tells the
-    // agent to stop, which left that mutation orphaned: snapshot and working tree
-    // carried the reaped queue heads while HEAD stayed behind. `doctor` reports the
-    // result as recoverable `SnapshotDiffersFromHead`, and the next commit path can
-    // read it as an unanswered typed-component edit.
-    //
-    // Commit it here, but ONLY when step 2 committed nothing. That preserves the
-    // `#64mb` invariant of exactly one HEAD advance per preflight: if step 2 already
-    // advanced HEAD, this maintenance rides the next preflight's step-2 commit as
-    // before, instead of producing a second `commit_staging` in the same run.
-    if !options.probe && no_changes && queue_state.maintenance_mutated && !committed {
-        match commit_previous_cycle_for_preflight(file) {
-            Ok(true) => {
-                rc.invalidate_head_content();
-                eprintln!(
-                    "[preflight] committed queue maintenance on a no-changes cycle (#qmaintorphan)"
-                );
-                agent_doc_ops_log_io::log_op(
-                    file,
-                    &format!(
-                        "preflight_queue_maintenance_committed file={} reason=no_changes_cycle (#qmaintorphan)",
-                        file.display()
-                    ),
-                );
-            }
-            Ok(false) => {}
-            Err(e) => {
-                eprintln!("[preflight] queue maintenance commit warning: {e}");
-            }
-        }
-    }
-
     crate::progress::enter("prompt_classification")?;
     // Step 4c: Annotate the diff with content-source markers.
     let annotated_diff = diff_result.as_ref().and_then(|d| diff::annotate_diff(d));
@@ -1752,11 +1641,9 @@ fn run_with_options_to_writer_in_pass(
     // #op-scoped-drift-1: persist this cycle's node ops to the durable op log,
     // tagged with actor + causal (Lamport / session-origin) clock. Best effort:
     // the durable substrate must never block or fail a preflight cycle.
-    // `#pcc1`: `compute_with_current` ran BEFORE `run_queue_maintenance`. Persist
-    // that snapshot-to-authority cut as the operator batch, then persist the
-    // authority-to-post-maintenance cut separately as an agent batch. This keeps
-    // attribution truthful while still recording structural normalization such
-    // as `#qfoldedhead` re-segmentation at per-item granularity.
+    // `#pcc1`: persist the snapshot-to-authority cut as the operator batch, then
+    // any bounded pre-admission repair cut separately as an agent batch. The
+    // detached comprehensive worker records its own later authority event.
     //
     // Deliberately scoped to the op log: `semantic_diff` still feeds the
     // preflight contract from the original cut, so this changes what is
@@ -1764,10 +1651,10 @@ fn run_with_options_to_writer_in_pass(
     if !options.probe
         && let Some(project_root) = rc.project_root()
     {
-        let post_maintenance_current =
+        let post_admission_current =
             agent_doc_document_realtime_io::try_resolve_current_document_content(
                 file,
-                "preflight_op_log_post_maintenance",
+                "preflight_op_log_post_admission",
             )
             .ok();
         let document_path = file.to_string_lossy().to_string();
@@ -1782,7 +1669,7 @@ fn run_with_options_to_writer_in_pass(
         {
             eprintln!("[preflight] operator op-log persist skipped: {err}");
         }
-        if let Some(current) = post_maintenance_current.as_deref()
+        if let Some(current) = post_admission_current.as_deref()
             && current != diff_result_with_current.current
             && let Some(summary) =
                 semantic_diff_summary(&diff_result_with_current.current, current, &[])
@@ -2089,8 +1976,8 @@ fn run_with_options_to_writer_in_pass(
             .map(|assignment| assignment.source_text.clone())
             .collect::<Vec<_>>();
         not_drained = not_drained.with_heads(&admission_aliases);
-        // The admitted diff cut and the post-maintenance projection: maintenance
-        // may reap a struck line the diff still carries.
+        // Compare the admitted diff cut with the virtual candidate-identity
+        // projection; comprehensive maintenance has not run on this lane.
         let mut scope = agent_doc_queue::capture_scope::capture_scope(
             &[
                 diff_result_with_current.current.as_str(),
@@ -2440,16 +2327,8 @@ fn run_with_options_to_writer_in_pass(
             {
                 eprintln!("[preflight] in-progress recap status skipped (non-fatal): {error:#}");
             }
-            // `#mirrorbinaryownedids`: queue maintenance ran before this cycle
-            // opened, and the steering seed below is the PRE-maintenance cut, so
-            // rows the backlog→queue mirror just materialized are absent from
-            // the watermark. Record them on the cycle that now owns them, or
-            // mid-turn steering hands them back as operator queue additions.
-            agent_doc_cycle_state_io::record_queue_mirrored_ids_or_warn(
-                file,
-                &queue_state.mirrored_queue_ids,
-                "preflight_queue_maintenance",
-            );
+            // The detached comprehensive worker records newly mirrored ids on
+            // this cycle after its authority-checked write lands.
             preflight_effects
                 .settle(PreflightEffect::CycleOpen)
                 .context("preflight cycle-open effect settlement")?;
@@ -3184,6 +3063,26 @@ fn run_with_options_to_writer_in_pass(
     let json =
         serde_json::to_string_pretty(&output).context("failed to serialize preflight output")?;
     writeln!(writer, "{}", json)?;
+
+    if !options.probe
+        && !cfg!(test)
+        && let Err(error) =
+            crate::spawn_background_queue_maintenance(file, no_changes && !committed)
+    {
+        // Admission is already complete and its exact authoritative cut is in
+        // `output`; a launch failure cannot retroactively make that read false.
+        // Keep the failure loud and durable so the next controller/preflight
+        // tick can retry comprehensive maintenance.
+        eprintln!("[preflight] background queue maintenance was not dispatched: {error:#}");
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "queue_maintenance_background_dispatch_failed file={} error={}",
+                file.display(),
+                format!("{error:#}").replace('\n', " | "),
+            ),
+        );
+    }
 
     Ok(())
 }
@@ -4135,6 +4034,7 @@ mod tests {
                     .any(|id| id.trim_start_matches('#') == "verify")),
                 "press {press}: no `--done` obligation for the operator-verify head: {state:?}"
             );
+            crate::run_background_queue_maintenance(&doc, false).unwrap();
             let on_disk = std::fs::read_to_string(&doc).unwrap();
             assert!(
                 on_disk.contains("- ### ⏳ do [#verify]\n"),
@@ -4388,13 +4288,9 @@ mod tests {
             maintained.contains("<!-- agent:active priority -->"),
             "the derived active projection must not reactivate the claim: {maintained}"
         );
-        assert!(
-            maintained.contains("`[#runctrlclaude]` — Fix background supervisor thrash")
-                && maintained.contains("**Status:** claimed")
-                && maintained.contains("**Sources:** queue (claimed)")
-                && !maintained.contains("**Sources:** backlog"),
-            "the active projection must retain stale-claim reconciliation and its tracked source: {maintained}"
-        );
+        // Detailed lifecycle/status painting is comprehensive maintenance and
+        // is intentionally not awaited by admission; the contract above is the
+        // synchronous stale-claim authority.
         let fact = &parsed["no_changes_explanation"]["claimed_queue_items"][0];
         assert_eq!(
             fact["owner_session_ended"]["reason"], "session_replaced",
@@ -5144,18 +5040,15 @@ mod tests {
         assert!(requires, "{parsed:#}");
         let doc = dir.path().join("session.md");
         let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
-        // Queue maintenance promoted the free-text head into a `do [#id]` head;
-        // the recorded head names the live head a claim holds.
+        // Admission records stable virtual identities immediately; the
+        // background reconciler persists their document projection later.
         assert_eq!(state.backlog_capture_heads.len(), 2);
         assert!(state.backlog_capture_heads[0].contains("[#q-"));
-        assert_eq!(
-            state.backlog_capture_heads[1],
-            "do [#leftovercleanupbacklog]"
-        );
+        assert!(state.backlog_capture_heads[1].contains("[#q-"));
 
         start_worker_mid_cycle(&doc, &state.backlog_capture_heads[0], "subagent:review");
         assert_capture_gate_armed(&doc);
-        start_worker_mid_cycle(&doc, "do [#leftovercleanupbacklog]", "subagent:cleanup");
+        start_worker_mid_cycle(&doc, &state.backlog_capture_heads[1], "subagent:cleanup");
         prewrite_capture_gate(&doc).expect("every head behind the requirement is worker-owned");
     }
 
@@ -5177,14 +5070,9 @@ mod tests {
         let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
         assert!(state.backlog_capture_heads.is_empty(), "{state:?}");
 
-        let q_head = std::fs::read_to_string(&doc)
-            .unwrap()
-            .lines()
-            .find(|line| line.contains("#actionable-review [#q-"))
-            .unwrap()
-            .trim_start_matches("- ")
-            .strip_prefix("### ")
-            .expect("queue row must carry a navigation heading")
+        let q_head = parsed["queue_prompts"][0]
+            .as_str()
+            .expect("admission carries the queue head's stable identity")
             .to_string();
         start_worker_mid_cycle(&doc, &q_head, "subagent:review");
         assert_capture_gate_armed(&doc);
@@ -6229,6 +6117,7 @@ mod tests {
             "future queue edit must not retarget the active turn: {:?}",
             state.prompt_targets
         );
+        crate::run_background_queue_maintenance(&doc, false).unwrap();
         let snap = agent_doc_snapshot_io::load_document_baseline(&doc)
             .unwrap()
             .unwrap();
@@ -6277,6 +6166,7 @@ mod tests {
         .unwrap();
 
         run(&doc).unwrap();
+        crate::run_background_queue_maintenance(&doc, false).unwrap();
 
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(
@@ -6943,6 +6833,7 @@ mod tests {
         .unwrap();
 
         run(&doc).unwrap();
+        crate::run_background_queue_maintenance(&doc, false).unwrap();
 
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(updated.contains("<!-- agent:queue -->\n<!-- /agent:queue -->"));
@@ -6992,6 +6883,7 @@ mod tests {
         .unwrap();
 
         run(&doc).unwrap();
+        crate::run_background_queue_maintenance(&doc, false).unwrap();
 
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(
@@ -7035,6 +6927,7 @@ mod tests {
         .unwrap();
 
         run(&doc).unwrap();
+        crate::run_background_queue_maintenance(&doc, false).unwrap();
 
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(
@@ -7073,6 +6966,7 @@ mod tests {
         .unwrap();
 
         run(&doc).unwrap();
+        crate::run_background_queue_maintenance(&doc, false).unwrap();
 
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(
@@ -7497,12 +7391,13 @@ mod tests {
 
     #[test]
     fn preflight_commits_queue_maintenance_on_a_no_changes_cycle() {
-        // `#qmaintorphan`: queue maintenance runs at step 4b2, AFTER the single
-        // step-2 commit. On a `no_changes` cycle SKILL.md tells the agent to stop
-        // without persisting, so a mutation maintenance already wrote to the
-        // visible document AND the snapshot was left with HEAD behind it — the
-        // recoverable `SnapshotDiffersFromHead` split that `doctor` reports and
-        // that the next commit path can read as an unanswered typed-component edit.
+        // `#qmaintorphan`: comprehensive queue maintenance now runs after the
+        // bounded admission result is emitted. On a `no_changes` cycle SKILL.md
+        // tells the agent to stop without persisting, so the detached worker must
+        // commit any maintenance mutation it writes; otherwise it would leave the
+        // visible document and snapshot ahead of HEAD — the recoverable
+        // `SnapshotDiffersFromHead` split that `doctor` reports and that the next
+        // commit path can read as an unanswered typed-component edit.
         //
         // The mutation here is queue-tag attr normalization (the same one
         // `run_queue_maintenance_normalizes_boolean_true_queue_attrs` covers). The
@@ -7547,6 +7442,7 @@ mod tests {
         );
 
         run(&doc).expect("preflight must run a no-changes cycle");
+        crate::run_background_queue_maintenance(&doc, true).unwrap();
 
         let live_after = std::fs::read_to_string(&doc).unwrap();
         assert!(

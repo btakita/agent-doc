@@ -696,7 +696,7 @@ fn a_verbatim_nested_echo_closes_the_reported_leaf_not_the_parent() {
         "<!-- patch:exchange -->\n### Re: PM sync — gpt-5\n\n> **Queue prompt:** {PARENT}\n{echo}\nPart 1 shipped; Part 2 is a design doc.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nPart 1 shipped; Part 2 is a design doc.\n<!-- /patch:recap -->\n"
     );
     let output = run_agent_doc_stdin(dir.path(), &["respond", path, "--force-disk"], &response);
-    assert_ok(&output, "respond");
+    assert_transient_closeout(&output, "respond");
 
     let body = without_admitted_queue_ids(&run_body(&doc, "run"));
     assert!(!body.contains(&format!("- ~~{PARENT}~~")), "{body}");
@@ -762,7 +762,7 @@ fn equal_nested_children_close_by_parent_vector() {
         "<!-- patch:exchange -->\n### Re: adversarial review — gpt-5\n\n> **Queue prompt:** {first_parent}\n\n**Deferred:** Its child remains queued.\n\n> **Queue prompt:** {second_parent}\n>   - {second_leaf_echo}\n\nReviewed pull request 823.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nDone.\n<!-- /patch:recap -->\n"
     );
     let output = run_agent_doc_stdin(dir.path(), &["respond", path, "--force-disk"], &response);
-    assert_ok(&output, "respond");
+    assert_transient_closeout(&output, "respond");
 
     let body = without_admitted_queue_ids(&run_body(&doc, "run"));
     let (first_section, second_section) = body

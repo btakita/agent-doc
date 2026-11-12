@@ -1755,6 +1755,14 @@ mod tests {
             captured_response,
             materialized_doc
         ));
+        let captured_plural =
+            captured_response.replace("> **Queue prompt:**", "> **Queue prompts:**");
+        let materialized_plural =
+            materialized_doc.replace("> **Queue prompt:**", "> **Queue prompts:**");
+        assert!(response_materialized_in_content(
+            &captured_plural,
+            &materialized_plural
+        ));
     }
 
     #[test]

@@ -3641,8 +3641,7 @@ mod tests {
         enforce_selected_queue_response_contract(None, Some(&current), &current, &deferred, &flags)
             .expect("a stated deferral keeps the head queued without failing close");
 
-        let ordinary =
-            concat!("<!-- agent:queue go -->\n- Fix the widget export\n<!-- /agent:queue -->\n");
+        let ordinary = "<!-- agent:queue go -->\n- Fix the widget export\n<!-- /agent:queue -->\n";
         enforce_selected_queue_response_contract(
             None,
             Some(ordinary),

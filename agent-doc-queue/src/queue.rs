@@ -172,14 +172,18 @@ pub fn rearm_queue_dispatch_dedup(
 ///
 /// The queue head can therefore still equal `last_dispatched` after the
 /// turn-active lease is reclaimed. Rearm that exact head once at the durable
-/// interrupt boundary; a genuinely live/starting turn leaves the dedup fence
-/// intact, and the next accepted dispatch arms it again.
+/// interrupt boundary only when the interrupted generation owns pending
+/// explicit steering. An ordinary operator cancel leaves the dedup fence
+/// intact, as does a genuinely live/starting turn. The next accepted dispatch
+/// arms the fence again.
 pub fn rearm_queue_dispatch_after_interrupted_turn(
     last_dispatched: Option<String>,
     active_head: Option<&str>,
     interrupted_turn_reclaimed: bool,
+    pending_explicit_send: bool,
 ) -> (Option<String>, bool) {
     let rearmed = interrupted_turn_reclaimed
+        && pending_explicit_send
         && active_head.is_some()
         && last_dispatched.as_deref() == active_head;
     if rearmed {
@@ -483,18 +487,39 @@ mod tests {
     fn interrupted_turn_rearms_only_its_unchanged_dispatched_head() {
         let head = "do [#a]";
         assert_eq!(
-            rearm_queue_dispatch_after_interrupted_turn(Some(head.to_string()), Some(head), true,),
+            rearm_queue_dispatch_after_interrupted_turn(
+                Some(head.to_string()),
+                Some(head),
+                true,
+                true,
+            ),
             (None, true)
         );
         assert_eq!(
-            rearm_queue_dispatch_after_interrupted_turn(Some(head.to_string()), Some(head), false,),
+            rearm_queue_dispatch_after_interrupted_turn(
+                Some(head.to_string()),
+                Some(head),
+                false,
+                true,
+            ),
             (Some(head.to_string()), false),
             "a genuinely live/starting turn keeps the dispatch fence armed"
         );
         assert_eq!(
             rearm_queue_dispatch_after_interrupted_turn(
                 Some(head.to_string()),
+                Some(head),
+                true,
+                false,
+            ),
+            (Some(head.to_string()), false),
+            "an ordinary interrupt without a new explicit send stays canceled"
+        );
+        assert_eq!(
+            rearm_queue_dispatch_after_interrupted_turn(
+                Some(head.to_string()),
                 Some("do [#b]"),
+                true,
                 true,
             ),
             (Some(head.to_string()), false),

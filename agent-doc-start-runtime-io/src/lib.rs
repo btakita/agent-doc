@@ -4582,11 +4582,18 @@ mod tests {
             "the explicit steering edit remains pending at the interrupt boundary"
         );
         let head = "current task";
+        let pending_explicit_send =
+            agent_doc_session_check_io::midturn_steering::current_cycle_has_pending_explicit_send(
+                &doc,
+            )
+            .unwrap();
+        assert!(pending_explicit_send);
         let (last_dispatched, rearmed) =
             agent_doc_queue::queue::rearm_queue_dispatch_after_interrupted_turn(
                 Some(head.to_string()),
                 Some(head),
                 interrupted_turn_reclaimed,
+                pending_explicit_send,
             );
         assert!(rearmed);
         assert_eq!(
@@ -4607,6 +4614,7 @@ mod tests {
                 Some(head.to_string()),
                 Some(head),
                 false,
+                pending_explicit_send,
             );
         assert!(!rearmed);
         assert_eq!(
@@ -4653,6 +4661,99 @@ mod tests {
             &mut session_log,
             &mut interrupted_turn_reclaimed,
         ));
+    }
+
+    #[test]
+    fn interrupted_turn_without_explicit_steering_stays_canceled() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("contracts.md");
+        let baseline = "---\nagent_doc_steering_debounce_ms: 0\n---\n# Contracts\n\n<!-- agent:queue -->\n- current task\n<!-- /agent:queue -->\n";
+        std::fs::write(&doc, baseline).unwrap();
+        agent_doc_session_check_io::midturn_steering::seed_for_cycle(
+            &doc,
+            "cycle-interrupted-without-send",
+            baseline,
+            Some("current task"),
+            Vec::new(),
+        )
+        .unwrap();
+
+        let transcript = dir.path().join("session.jsonl");
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let stamp = agent_doc_turn::turn_status::format_rfc3339_utc_secs;
+        let records = [
+            serde_json::json!({"type": "user", "timestamp": stamp(now - 60),
+                "message": {"role": "user", "content": "unwedge agent-doc"}}),
+            serde_json::json!({"type": "assistant", "timestamp": stamp(now - 50),
+                "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "t", "name": "Bash", "input": {}}]}}),
+            serde_json::json!({"type": "user", "timestamp": stamp(now - 49),
+                "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t", "content": ""}]}}),
+            serde_json::json!({"type": "user", "timestamp": stamp(now - 49),
+                "message": {"role": "user", "content": [{"type": "text", "text": "[Request interrupted by user for tool use]"}]}}),
+        ];
+        let body: String = records.iter().map(|record| format!("{record}\n")).collect();
+        std::fs::write(&transcript, body).unwrap();
+        agent_doc_turn_status_io::write_turn_active_marker_with_transcript_at(
+            dir.path(),
+            "%owner",
+            now - 60,
+            Some(&transcript),
+        )
+        .unwrap();
+
+        let shared = SupervisorShared::with_actor_runtime(
+            "test",
+            "test-instance".to_string(),
+            None,
+            "claude",
+            None,
+            Some(agent_doc_controller::actor::ActorState::Ready),
+            Some("%owner".to_string()),
+        );
+        let mut session_log = None;
+        let mut interrupted_turn_reclaimed = false;
+        assert!(!turn_active_for_owned_pane_with_idle_evidence(
+            &doc,
+            &shared,
+            false,
+            &mut session_log,
+            &mut interrupted_turn_reclaimed,
+        ));
+        assert!(interrupted_turn_reclaimed);
+        let pending_explicit_send =
+            agent_doc_session_check_io::midturn_steering::current_cycle_has_pending_explicit_send(
+                &doc,
+            )
+            .unwrap();
+        assert!(!pending_explicit_send);
+
+        let head = "current task";
+        let (last_dispatched, rearmed) =
+            agent_doc_queue::queue::rearm_queue_dispatch_after_interrupted_turn(
+                Some(head.to_string()),
+                Some(head),
+                interrupted_turn_reclaimed,
+                pending_explicit_send,
+            );
+        assert!(!rearmed);
+        assert_eq!(last_dispatched.as_deref(), Some(head));
+        assert_eq!(
+            idle_queue_drain_decision(
+                false,
+                true,
+                false,
+                false,
+                false,
+                Some(head),
+                last_dispatched.as_deref(),
+            ),
+            IdleQueueDrainDecision::SkipAlreadyDispatched,
+            "an intentional interrupt without new steering must stay canceled"
+        );
     }
 
     #[test]

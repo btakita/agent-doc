@@ -4140,11 +4140,30 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     &mut interrupted_turn_reclaimed,
                 );
 
+                let pending_explicit_send = if interrupted_turn_reclaimed {
+                    match agent_doc_session_check_io::midturn_steering::current_cycle_has_pending_explicit_send(&path) {
+                        Ok(pending) => pending,
+                        Err(error) => {
+                            agent_doc_ops_log_io::log_op(
+                                &path,
+                                &format!(
+                                    "interrupted_turn_queue_redrive_refused file={} reason=pending_explicit_send_unreadable error={} (#staleharnessturnlive #runsteer)",
+                                    path.display(),
+                                    format!("{error:#}").replace('\n', "\\n"),
+                                ),
+                            );
+                            false
+                        }
+                    }
+                } else {
+                    false
+                };
                 let (rearmed_last_dispatched, interrupted_head_rearmed) =
                     agent_doc_queue::queue::rearm_queue_dispatch_after_interrupted_turn(
                         last_dispatched,
                         active_head.as_deref(),
                         interrupted_turn_reclaimed,
+                        pending_explicit_send,
                     );
                 last_dispatched = rearmed_last_dispatched;
                 if interrupted_head_rearmed {

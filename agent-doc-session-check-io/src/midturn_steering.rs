@@ -1833,6 +1833,30 @@ pub fn explicit_send_pending_items(file: &Path) -> Result<Vec<SteeringItem>> {
     .unwrap_or_default())
 }
 
+/// Whether this cycle has steering that the operator explicitly sent and no
+/// consumer has accepted yet (`#runsteer`).
+///
+/// The explicit-send record alone is insufficient: it intentionally persists
+/// for the exact document bytes it covered. Pair it with this cycle's pending
+/// steering watermark so an interrupt from a later generation cannot reuse an
+/// older send to rearm queue dispatch.
+pub fn current_cycle_has_pending_explicit_send(file: &Path) -> Result<bool> {
+    let Some(root) = project_root(file) else {
+        return Ok(false);
+    };
+    let conn = agent_doc_sqlite::state_store::open_state_db(&root)?;
+    let content = crate::resolve_current_document_content(file, "pending_explicit_send")?;
+    let content_hash = core::content_hash(&content);
+    let meta = std::fs::metadata(file).with_context(|| format!("stat {}", file.display()))?;
+    let editor_attached = agent_doc_crdt_relay_io::crdt_authority_for_file(file).editor_attached();
+    let explicit_send_covers_current = load_explicit_send(&conn, file)
+        .is_some_and(|send| send.covers(mtime_ms(&meta), &content_hash, editor_attached));
+    if !explicit_send_covers_current {
+        return Ok(false);
+    }
+    Ok(!explicit_send_pending_items(file)?.is_empty())
+}
+
 /// Document text last handed to a running owner as an explicit-send diff
 /// (`#routesyncsteer`). Keyed by the cycle so a new turn does not diff
 /// against the previous turn's delivery.

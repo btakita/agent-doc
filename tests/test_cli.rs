@@ -852,6 +852,7 @@ fn every_public_queue_mutation_entrypoint_acquires_apply_exclusion() {
         "project_all_queue_runtime_state_once_for_generation_with_effects",
         "project_background_self_heal_runtime_state_once_for_generation_with_effects",
         "project_blocker_runtime_state_with_effects",
+        "record_claim_runtime_projection",
     ] {
         let marker = format!("pub fn {function}");
         let start = queue_cmd.find(&marker).unwrap();
@@ -873,6 +874,7 @@ fn every_public_queue_mutation_entrypoint_acquires_apply_exclusion() {
         "fn project_all_queue_runtime_state_under_apply_guard",
         "fn project_all_queue_runtime_state_once_for_generation_under_apply_guard",
         "fn project_blocker_runtime_state_under_apply_guard",
+        "fn record_claim_runtime_projection_under_apply_guard",
         "fn project_runtime_state_with_effects",
     ] {
         let start = queue_cmd.find(internal).unwrap();
@@ -932,6 +934,7 @@ fn every_public_queue_mutation_entrypoint_acquires_apply_exclusion() {
         "mark_completed_queue_prompts_for_done_ids",
         "mark_completed_queue_prompts_for_done_ids_with_response",
         "record_queue_consumption_proofs",
+        "observe_authoritative_queue_state",
     ] {
         let marker = format!("pub fn {function}");
         let start = queue_consume.find(&marker).unwrap();
@@ -952,6 +955,8 @@ fn every_public_queue_mutation_entrypoint_acquires_apply_exclusion() {
         "acknowledge_open_id_backed_queue_head_under_apply_guard",
         "mark_completed_queue_prompts_for_done_ids_under_apply_guard",
         "record_queue_consumption_proofs_under_apply_guard",
+        "consume_queue_prompts_for_done_ids_selected_under_apply_guard",
+        "observe_authoritative_queue_state_under_apply_guard",
     ] {
         let start = queue_consume.find(&format!("pub fn {internal}")).unwrap();
         let body = &queue_consume[start..start + 900.min(queue_consume.len() - start)];
@@ -994,6 +999,40 @@ fn every_public_queue_mutation_entrypoint_acquires_apply_exclusion() {
     assert!(
         closeout.contains("run_queue_maintenance(file, None)?"),
         "closeout must propagate typed maintenance contention instead of treating it as empty",
+    );
+
+    let completion = include_str!("../src/queue_completion_feedback.rs");
+    let report = &completion[completion
+        .find("fn report_complete_with_lock_wait")
+        .expect("completion transaction entry exists")..];
+    assert!(
+        report.find("QueueEditGuard::acquire(file)?").unwrap()
+            < report.find("capture_response(file").unwrap(),
+        "report-complete must acquire apply exclusion before its first durable effect"
+    );
+    assert!(
+        report.contains("record_claim_runtime_projection_under_apply_guard"),
+        "report-complete must pass its transaction capability into nested projection"
+    );
+
+    let write = include_str!("../agent-doc-write-runtime-io/src/lib.rs");
+    let transaction = &write[write
+        .find("fn run_command_inner_within_pass")
+        .expect("write transaction entry exists")..];
+    assert!(
+        transaction.find("QueueEditGuard::acquire(file)?").unwrap()
+            < transaction.find("let write_result =").unwrap(),
+        "write/finalize must acquire apply exclusion before response publication"
+    );
+    assert!(
+        transaction.contains("complete_required_closeout_under_apply_guard"),
+        "write/finalize must retain the capability through strict closeout and commit"
+    );
+    assert!(
+        closeout.contains("complete_required_closeout_under_apply_guard")
+            && closeout.contains("run_pending_maintenance_under_apply_guard")
+            && session_check.contains("enforce_clean_closeout_with_force_disk_under_apply_guard",),
+        "embedded closeout must thread the held capability through maintenance and session-check"
     );
 }
 

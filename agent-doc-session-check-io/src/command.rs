@@ -3737,9 +3737,12 @@ fn refuse_transient_queue_closeout(
     file: &Path,
     status: SessionCheckStatus,
 ) -> Result<SessionCheckStatus> {
-    let SessionCheckStatus::Ok(message) = &status else {
+    let SessionCheckStatus::Ok(_) = &status else {
         return Ok(status);
     };
+    if closeout_caller_holds_queue_apply_guard() {
+        return refuse_transient_queue_lifecycle_debt(file, status);
+    }
     match agent_doc_queue_io::queue_edit_owner::queue_apply_in_flight(file) {
         Ok(true) => {
             return Ok(SessionCheckStatus::Interrupted(format!(
@@ -3765,6 +3768,16 @@ fn refuse_transient_queue_closeout(
             attempt.holder,
         )));
     }
+    refuse_transient_queue_lifecycle_debt(file, status)
+}
+
+fn refuse_transient_queue_lifecycle_debt(
+    file: &Path,
+    status: SessionCheckStatus,
+) -> Result<SessionCheckStatus> {
+    let SessionCheckStatus::Ok(message) = &status else {
+        return Ok(status);
+    };
     // Comprehensive queue maintenance is detached from admission. A terminal
     // result must not race that authority-checked projection: either the worker
     // finishes and the ordinary lifecycle debt below becomes visible, or the
@@ -4326,6 +4339,46 @@ pub fn enforce_clean_closeout_with_force_disk(
             enforce_clean_closeout_inner(file, effects)
         })
     })
+}
+
+thread_local! {
+    static CLOSEOUT_CALLER_HOLDS_QUEUE_APPLY_GUARD: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+}
+
+fn closeout_caller_holds_queue_apply_guard() -> bool {
+    CLOSEOUT_CALLER_HOLDS_QUEUE_APPLY_GUARD.with(|depth| depth.get() > 0)
+}
+
+struct QueueApplyGuardScope;
+
+impl QueueApplyGuardScope {
+    fn enter() -> Self {
+        CLOSEOUT_CALLER_HOLDS_QUEUE_APPLY_GUARD
+            .with(|depth| depth.set(depth.get().saturating_add(1)));
+        Self
+    }
+}
+
+impl Drop for QueueApplyGuardScope {
+    fn drop(&mut self) {
+        CLOSEOUT_CALLER_HOLDS_QUEUE_APPLY_GUARD
+            .with(|depth| depth.set(depth.get().saturating_sub(1)));
+    }
+}
+
+/// Embedded closeout for a transaction that already owns the document apply
+/// capability. The capability is validated before session-check suppresses
+/// only its foreign-owner probes; all lifecycle/debt checks still run.
+#[doc(hidden)]
+pub fn enforce_clean_closeout_with_force_disk_under_apply_guard(
+    file: &Path,
+    force_disk: bool,
+    effects: &impl SessionCheckEffects,
+    apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
+) -> Result<()> {
+    apply_guard.ensure_protects(file)?;
+    let _scope = QueueApplyGuardScope::enter();
+    enforce_clean_closeout_with_force_disk(file, force_disk, effects)
 }
 
 fn enforce_clean_closeout_inner(file: &Path, effects: &impl SessionCheckEffects) -> Result<()> {

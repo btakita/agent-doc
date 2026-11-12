@@ -581,6 +581,31 @@ pub fn consume_queue_prompts_for_done_ids_selected_with_outcome(
     effects: &dyn QueueConsumeWriteEffects,
 ) -> Result<Option<QueueConsumptionOutcome>> {
     let apply_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file)?;
+    consume_queue_prompts_for_done_ids_selected_under_apply_guard(
+        file,
+        done_ids,
+        selected_heads,
+        approved_head,
+        skip_visible_guard,
+        response_body,
+        effects,
+        &apply_guard,
+    )
+}
+
+#[doc(hidden)]
+#[allow(clippy::too_many_arguments)]
+pub fn consume_queue_prompts_for_done_ids_selected_under_apply_guard(
+    file: &Path,
+    done_ids: &[String],
+    selected_heads: &[String],
+    approved_head: Option<&ApprovedQueueHead>,
+    skip_visible_guard: bool,
+    response_body: Option<&str>,
+    effects: &dyn QueueConsumeWriteEffects,
+    apply_guard: &crate::queue_edit_owner::QueueEditGuard,
+) -> Result<Option<QueueConsumptionOutcome>> {
+    apply_guard.ensure_protects(file)?;
     let budget = if skip_visible_guard {
         1
     } else {
@@ -601,7 +626,7 @@ pub fn consume_queue_prompts_for_done_ids_selected_with_outcome(
         approved_head,
         response_body,
         effects,
-        &apply_guard,
+        apply_guard,
     )
 }
 
@@ -1741,6 +1766,17 @@ pub fn record_queue_consumption_proofs_under_apply_guard(
 }
 
 pub fn observe_authoritative_queue_state(file: &Path, content: &str) -> Result<usize> {
+    let apply_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file)?;
+    observe_authoritative_queue_state_under_apply_guard(file, content, &apply_guard)
+}
+
+#[doc(hidden)]
+pub fn observe_authoritative_queue_state_under_apply_guard(
+    file: &Path,
+    content: &str,
+    apply_guard: &crate::queue_edit_owner::QueueEditGuard,
+) -> Result<usize> {
+    apply_guard.ensure_protects(file)?;
     // GH #96 (second site) / GH #119: a document without an `agent:queue`
     // component has no queue lifecycle to project. The controller projection
     // would fail with "component `queue` was not found" and every commit of
@@ -1904,7 +1940,7 @@ pub fn refresh_waiting_on_you_tree_under_apply_guard(
         &target,
         agent_doc_ops_log_io::log_op,
     )?;
-    observe_authoritative_queue_state(file, &target)?;
+    observe_authoritative_queue_state_under_apply_guard(file, &target, apply_guard)?;
     Ok(true)
 }
 
@@ -3123,7 +3159,7 @@ pub fn prune_noise_queue_heads_under_apply_guard(
     );
     // Publish the post-mutation authoritative frontier. The controller's
     // document-scoped queue projection owns terminal lifecycle persistence.
-    observe_authoritative_queue_state(file, &new_document)?;
+    observe_authoritative_queue_state_under_apply_guard(file, &new_document, apply_guard)?;
     if let Some(snap) = new_snapshot {
         save_snapshot_recovery_only(file, &snap, "noise prune snapshot sync");
     }

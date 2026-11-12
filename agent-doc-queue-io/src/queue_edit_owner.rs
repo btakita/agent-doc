@@ -120,8 +120,31 @@ pub fn try_reserve_queue_edit_owner(file: &str, token: &str, pid: u32) -> Result
     // apply has no heartbeat thread, so heartbeat age alone must never allow a
     // detached worker to replace its still-live ownership.
     let reservation_lock = match try_acquire_queue_apply_lock(file)? {
-        QueueApplyLockAttempt::Contended => return Ok(false),
         QueueApplyLockAttempt::Acquired(lock) => lock,
+        QueueApplyLockAttempt::Contended => {
+            // A published holder means an active apply and coalesces normally.
+            // No holder while the flock is still held is the successful-Drop
+            // handoff window: the predecessor conditionally cleared its token
+            // before unlocking. Wait briefly for that unlock so the one
+            // successor dispatch is not lost as a false coalesce.
+            if read_queue_edit_owner_lease(file).is_some() {
+                return Ok(false);
+            }
+            let deadline = std::time::Instant::now() + Duration::from_millis(250);
+            loop {
+                std::thread::sleep(Duration::from_millis(2));
+                match try_acquire_queue_apply_lock(file)? {
+                    QueueApplyLockAttempt::Acquired(lock) => break lock,
+                    QueueApplyLockAttempt::Contended => {
+                        if read_queue_edit_owner_lease(file).is_some()
+                            || std::time::Instant::now() >= deadline
+                        {
+                            return Ok(false);
+                        }
+                    }
+                }
+            }
+        }
     };
     if let Some(existing) = read_queue_edit_owner_lease(file)
         && !pid_is_live(existing.holder_pid)
@@ -192,17 +215,21 @@ pub fn clear_queue_edit_owner_lease(file: &str) {
 }
 
 pub fn clear_queue_edit_owner_lease_if_holder(file: &str, token: &str) {
-    let result = state_location(file).and_then(|(project_root, document_hash)| {
+    let result = clear_queue_edit_owner_lease_if_holder_result(file, token).map(|_| ());
+    if let Err(err) = result {
+        eprintln!("[agent-doc] warning: failed to clear owned queue-mutation lease: {err}");
+    }
+}
+
+fn clear_queue_edit_owner_lease_if_holder_result(file: &str, token: &str) -> Result<bool> {
+    state_location(file).and_then(|(project_root, document_hash)| {
         agent_doc_controller_io::project_controller::clear_coordination_lease_if_holder(
             &project_root,
             QUEUE_EDIT_OWNER_SCOPE,
             &document_hash,
             token,
         )
-    });
-    if let Err(err) = result {
-        eprintln!("[agent-doc] warning: failed to clear owned queue-mutation lease: {err}");
-    }
+    })
 }
 
 pub fn foreign_queue_edit_in_flight_with(
@@ -341,17 +368,46 @@ impl QueueEditGuard {
         self.holder.clear();
     }
 
-    fn release_with_handoff_hook(&mut self, after_unlock: impl FnOnce()) {
-        // Release apply exclusion first. A successor may now acquire the flock
-        // and publish its own holder; the conditional clear below cannot erase
-        // that newer owner. Clearing SQLite first created a dispatch window in
-        // which the sole successor child failed flock adoption and was lost.
-        drop(self.apply_lock.take());
-        after_unlock();
+    fn release_with_handoff_hook(&mut self, after_clear_before_unlock: impl FnOnce()) {
+        // Successful owners clear their exact token while still holding the
+        // authoritative flock. A successor therefore sees either the live
+        // predecessor token, or the short no-token handoff window that
+        // reservation waits through. Incomplete/error owners leave the token
+        // durable and only release the flock.
         if !self.holder.is_empty() {
-            clear_queue_edit_owner_lease_if_holder(&self.file, &self.holder);
+            let deadline = std::time::Instant::now() + Duration::from_millis(500);
+            loop {
+                let cleared =
+                    clear_queue_edit_owner_lease_if_holder_result(&self.file, &self.holder).map(
+                        |_| {
+                            read_queue_edit_owner_lease(&self.file)
+                                .is_none_or(|lease| lease.holder != self.holder)
+                        },
+                    );
+                match cleared {
+                    Ok(true) => break,
+                    Ok(false) | Err(_) if std::time::Instant::now() < deadline => {
+                        std::thread::sleep(Duration::from_millis(2));
+                    }
+                    Ok(false) => {
+                        eprintln!(
+                            "[agent-doc] warning: owned queue-mutation lease remained after conditional clear for {}",
+                            self.file
+                        );
+                        break;
+                    }
+                    Err(error) => {
+                        eprintln!(
+                            "[agent-doc] warning: failed to clear owned queue-mutation lease before apply unlock: {error}"
+                        );
+                        break;
+                    }
+                }
+            }
             self.holder.clear();
         }
+        after_clear_before_unlock();
+        drop(self.apply_lock.take());
     }
 }
 
@@ -504,32 +560,45 @@ mod tests {
     }
 
     #[test]
-    fn drop_unlocks_before_conditional_lease_clear_without_losing_successor() {
+    fn drop_clears_while_locked_and_hands_the_sole_successor_dispatch_through() {
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let file = dir.path().join("plan.md");
         std::fs::write(&file, "body").unwrap();
         let file_text = file.to_string_lossy();
         let mut first = QueueEditGuard::acquire(&file).unwrap();
-        let mut successor_body_entries = 0usize;
+        let successor_file = file.clone();
+        let successor_file_text = file_text.to_string();
+        let (started_tx, started_rx) = std::sync::mpsc::channel();
+        let mut successor = None;
 
         first.release_with_handoff_hook(|| {
+            successor = Some(std::thread::spawn(move || {
+                started_tx.send(()).unwrap();
+                assert!(
+                    try_reserve_queue_edit_owner(
+                        &successor_file_text,
+                        "drop-handoff-successor",
+                        std::process::id(),
+                    )
+                    .unwrap()
+                );
+                QueueEditGuard::adopt_reserved(&successor_file, "drop-handoff-successor")
+                    .unwrap()
+                    .expect("the sole successor adopts after Drop unlocks")
+            }));
+            started_rx.recv().unwrap();
             assert!(
-                QueueEditGuard::try_acquire(&file).unwrap().is_none(),
-                "successor must defer while the unlocked predecessor reservation remains live"
+                read_queue_edit_owner_lease(&file_text).is_none(),
+                "successful Drop must clear its token before releasing the flock"
             );
-            assert!(read_queue_edit_owner_lease(&file_text).is_some());
         });
 
-        let successor = QueueEditGuard::acquire(&file)
-            .expect("successor enters immediately after predecessor lease clear");
-        successor_body_entries += 1;
-        assert_eq!(successor_body_entries, 1, "successor body was lost");
-        assert!(read_queue_edit_owner_lease(&file_text).is_some());
-        drop(first);
-        assert!(
-            read_queue_edit_owner_lease(&file_text).is_some(),
-            "old conditional clear erased successor"
+        let successor = successor.unwrap().join().unwrap();
+        assert_eq!(
+            read_queue_edit_owner_lease(&file_text).unwrap().holder,
+            "drop-handoff-successor",
+            "successor reservation/body was lost during Drop handoff",
         );
         drop(successor);
         assert!(read_queue_edit_owner_lease(&file_text).is_none());

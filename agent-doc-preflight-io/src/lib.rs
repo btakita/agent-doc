@@ -2281,7 +2281,8 @@ pub fn run_pending_maintenance(
     run_pending_maintenance_under_apply_guard(file, write_effects, &apply_guard)
 }
 
-fn run_pending_maintenance_under_apply_guard(
+#[doc(hidden)]
+pub fn run_pending_maintenance_under_apply_guard(
     file: &Path,
     write_effects: &dyn PreflightMaintenanceWriteEffects,
     apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
@@ -2334,6 +2335,15 @@ pub fn run_pending_maintenance_force_disk(
     write_effects: &dyn PreflightMaintenanceWriteEffects,
 ) -> Result<PendingMaintenanceReport> {
     let apply_guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(file)?;
+    run_pending_maintenance_force_disk_under_apply_guard(file, write_effects, &apply_guard)
+}
+
+#[doc(hidden)]
+pub fn run_pending_maintenance_force_disk_under_apply_guard(
+    file: &Path,
+    write_effects: &dyn PreflightMaintenanceWriteEffects,
+    apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
+) -> Result<PendingMaintenanceReport> {
     apply_guard.ensure_protects(file)?;
     run_pending_maintenance_with_options(
         file,
@@ -2343,7 +2353,7 @@ pub fn run_pending_maintenance_force_disk(
         },
         write_effects,
         None,
-        Some(&apply_guard),
+        Some(apply_guard),
     )
 }
 
@@ -6080,7 +6090,11 @@ fn run_queue_maintenance_with_options_under_apply_guard(
     // Publish authoritative markdown before any worklist projection. The
     // controller's document-scoped Computed persists terminal lifecycle facts
     // and returns only after its durable receipt feeds back into projection.
-    agent_doc_queue_io::queue_consume::observe_authoritative_queue_state(file, &current_content)?;
+    agent_doc_queue_io::queue_consume::observe_authoritative_queue_state_under_apply_guard(
+        file,
+        &current_content,
+        apply_guard,
+    )?;
 
     let mut entries = entries;
     let mut free_text_promotions: Vec<(String, String)> = Vec::new();
@@ -9073,7 +9087,11 @@ fn run_queue_maintenance_with_options_under_apply_guard(
     // Publish the final authority frontier before worklist/selection facts.
     // Lifecycle persistence remains a projection Effect, not a maintenance
     // companion write.
-    agent_doc_queue_io::queue_consume::observe_authoritative_queue_state(file, &current_content)?;
+    agent_doc_queue_io::queue_consume::observe_authoritative_queue_state_under_apply_guard(
+        file,
+        &current_content,
+        apply_guard,
+    )?;
     record_queue_worklist_state(
         file,
         &current_content,
@@ -9176,6 +9194,21 @@ pub fn sync_same_cycle_actionable_backlog_into_go_queue(
     file: &Path,
     placement: agent_doc_queue::backlog_sync::FollowUpQueuePlacement,
 ) -> Result<Vec<String>> {
+    let apply_guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(file)?;
+    sync_same_cycle_actionable_backlog_into_go_queue_under_apply_guard(
+        file,
+        placement,
+        &apply_guard,
+    )
+}
+
+#[doc(hidden)]
+pub fn sync_same_cycle_actionable_backlog_into_go_queue_under_apply_guard(
+    file: &Path,
+    placement: agent_doc_queue::backlog_sync::FollowUpQueuePlacement,
+    apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
+) -> Result<Vec<String>> {
+    apply_guard.ensure_protects(file)?;
     let actionable_this_cycle = agent_doc_cycle_state_io::pending_actionable_ids(file);
     if actionable_this_cycle.is_empty() {
         return Ok(Vec::new());

@@ -1669,12 +1669,35 @@ fn guard_no_exchange_compaction_request_between(
     guard_no_exchange_compaction_request_for_diff(file, &diff_text)
 }
 
+#[cfg(test)]
 fn consume_queue_prompts_for_done_ids_closeout(
     file: &Path,
     done_ids: &[String],
     force_disk: bool,
 ) -> Result<Option<QueueConsumptionOutcome>> {
-    consume_approved_queue_prompts_for_done_ids_closeout(file, done_ids, None, force_disk, None)
+    let apply_guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(file)?;
+    consume_queue_prompts_for_done_ids_closeout_under_apply_guard(
+        file,
+        done_ids,
+        force_disk,
+        &apply_guard,
+    )
+}
+
+fn consume_queue_prompts_for_done_ids_closeout_under_apply_guard(
+    file: &Path,
+    done_ids: &[String],
+    force_disk: bool,
+    apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
+) -> Result<Option<QueueConsumptionOutcome>> {
+    consume_approved_queue_prompts_for_done_ids_closeout(
+        file,
+        done_ids,
+        None,
+        force_disk,
+        None,
+        apply_guard,
+    )
 }
 
 /// Phase 3c's consume, bound to the head its decision approved
@@ -1684,12 +1707,32 @@ fn consume_queue_prompts_for_done_ids_closeout(
 /// must turn the consume into a no-op instead of taking the next prompt.
 /// `response_body` (`#atomicstrikeresponse`) is this closeout's captured
 /// response: its lookup child lands in the strike's own write.
+#[cfg(test)]
 fn consume_queue_prompts_for_response_closeout(
     file: &Path,
     decision_content: &str,
     done_ids: &[String],
     force_disk: bool,
     response_body: Option<&str>,
+) -> Result<Option<QueueConsumptionOutcome>> {
+    let apply_guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(file)?;
+    consume_queue_prompts_for_response_closeout_under_apply_guard(
+        file,
+        decision_content,
+        done_ids,
+        force_disk,
+        response_body,
+        &apply_guard,
+    )
+}
+
+fn consume_queue_prompts_for_response_closeout_under_apply_guard(
+    file: &Path,
+    decision_content: &str,
+    done_ids: &[String],
+    force_disk: bool,
+    response_body: Option<&str>,
+    apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
 ) -> Result<Option<QueueConsumptionOutcome>> {
     let approved_head = if done_ids.is_empty() {
         Some(agent_doc_queue::queue_consume::approved_queue_head_for_consume(decision_content)?)
@@ -1702,6 +1745,7 @@ fn consume_queue_prompts_for_response_closeout(
         approved_head.as_ref(),
         force_disk,
         response_body,
+        apply_guard,
     )
 }
 
@@ -1711,13 +1755,14 @@ fn consume_approved_queue_prompts_for_done_ids_closeout(
     approved_head: Option<&agent_doc_queue::queue_consume::ApprovedQueueHead>,
     force_disk: bool,
     response_body: Option<&str>,
+    apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
 ) -> Result<Option<QueueConsumptionOutcome>> {
     // `#qselectedheadonly`: fence a free-text consume to this cycle's
     // preflight-selected heads so it never takes the next, unanswered prompt.
     let selected_heads = agent_doc_cycle_state_io::load(file)?
         .map(|state| state.selected_free_text_queue_heads)
         .unwrap_or_default();
-    let result = queue_consume::consume_queue_prompts_for_done_ids_selected_with_outcome(
+    let result = queue_consume::consume_queue_prompts_for_done_ids_selected_under_apply_guard(
         file,
         done_ids,
         &selected_heads,
@@ -1725,6 +1770,7 @@ fn consume_approved_queue_prompts_for_done_ids_closeout(
         force_disk,
         response_body,
         queue_consume_writeback_effects(force_disk),
+        apply_guard,
     );
     match result {
         Err(err) if !force_disk && error_requests_retry_without_disk(&err) => {
@@ -1762,18 +1808,26 @@ fn complete_queue_prompts_for_pending_only_done(
     done_ids: &[String],
     commit_mode: CommitMode,
     force_disk: bool,
+    apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
 ) -> Result<()> {
     if done_ids.is_empty() || commit_mode == CommitMode::None {
         return Ok(());
     }
 
     let complete = || -> Result<()> {
-        consume_queue_prompts_for_done_ids_closeout(file, done_ids, force_disk)?;
-        queue_consume::mark_completed_queue_prompts_for_done_ids(
+        consume_queue_prompts_for_done_ids_closeout_under_apply_guard(
             file,
             done_ids,
             force_disk,
+            apply_guard,
+        )?;
+        queue_consume::mark_completed_queue_prompts_for_done_ids_under_apply_guard(
+            file,
+            done_ids,
+            force_disk,
+            None,
             queue_consume_writeback_effects(force_disk),
+            apply_guard,
         )?;
         Ok(())
     };
@@ -1921,7 +1975,9 @@ fn apply_pending_and_status_mutations(
     pending_kept_open_ids: &[String],
     has_pending_ops: bool,
     reap_done_in_same_write: bool,
+    apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
 ) -> Result<PendingStatusMutationOutcome> {
+    apply_guard.ensure_protects(file)?;
     let outcome = apply_pending_and_status_mutations_with_mode(
         file,
         options,
@@ -1935,11 +1991,12 @@ fn apply_pending_and_status_mutations(
         // open tracked work. Repaint it from the same authoritative successor
         // that applied this mutation, rather than leaving a stale `⛔` until a
         // later preflight or relay event happens to run.
-        agent_doc_queue_io::queue_cmd::project_blocker_runtime_state_with_effects(
+        agent_doc_queue_io::queue_cmd::project_blocker_runtime_state_under_apply_guard(
             &RuntimeQueueProjectionEffects {
                 force_disk: options.force_disk,
             },
             file,
+            apply_guard,
         )?;
     }
     Ok(outcome)
@@ -3551,6 +3608,12 @@ fn run_command_inner_within_pass(
     // uncommitted. Refuse here, before any capture or mutation, instead.
     prewrite_lint_gate(file, &options, commit_mode)?;
 
+    // One document apply capability owns the complete write/finalize
+    // transaction from its first mutation through response/queue convergence
+    // and commit. Detached maintenance therefore either runs before this point
+    // or after commit; it cannot enter between capture and closeout effects.
+    let queue_apply_guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(file)?;
+
     if options.pending_only {
         // GH #131 (`#trackedrepairterminates`): the retained intent that exists
         // BEFORE this envelope runs is not this write's. Only a new one proves
@@ -3563,6 +3626,7 @@ fn run_command_inner_within_pass(
             &pending_kept_open_ids,
             has_pending_ops,
             commit_mode != CommitMode::None || captured_finalize_continuation_owns_commit(&options),
+            &queue_apply_guard,
         );
         if let Err(error) = mutation_result {
             if let Some(target_hash) = absorb_retained_pending_only_mutation(
@@ -3597,6 +3661,7 @@ fn run_command_inner_within_pass(
             &options.pending_done,
             commit_mode,
             options.force_disk,
+            &queue_apply_guard,
         )?;
         agent_doc_session_check_io::run_closeout_pending_maintenance(
             file,
@@ -3604,15 +3669,17 @@ fn run_command_inner_within_pass(
             options.force_disk,
             |file, force_disk| {
                 if force_disk {
-                    agent_doc_preflight_io::run_pending_maintenance_force_disk(
+                    agent_doc_preflight_io::run_pending_maintenance_force_disk_under_apply_guard(
                         file,
                         &agent_doc_preflight_runtime_io::PREFLIGHT_MAINTENANCE_WRITE_EFFECTS,
+                        &queue_apply_guard,
                     )
                     .map(|_| ())
                 } else {
-                    agent_doc_preflight_io::run_pending_maintenance(
+                    agent_doc_preflight_io::run_pending_maintenance_under_apply_guard(
                         file,
                         &agent_doc_preflight_runtime_io::PREFLIGHT_MAINTENANCE_WRITE_EFFECTS,
+                        &queue_apply_guard,
                     )
                     .map(|_| ())
                 }
@@ -3641,8 +3708,10 @@ fn run_command_inner_within_pass(
         if commit_mode != CommitMode::None {
             let placement = follow_up_queue_placement(&options)?;
             if let Err(e) = with_backlog_effects(|| {
-                agent_doc_preflight_io::sync_same_cycle_actionable_backlog_into_go_queue(
-                    file, placement,
+                agent_doc_preflight_io::sync_same_cycle_actionable_backlog_into_go_queue_under_apply_guard(
+                    file,
+                    placement,
+                    &queue_apply_guard,
                 )
             }) {
                 eprintln!(
@@ -3652,7 +3721,7 @@ fn run_command_inner_within_pass(
             }
         }
         ensure_closeout_lease_still_held(_closeout_owner.as_ref())?;
-        return finalize_commit(file, commit_mode, options.force_disk);
+        return finalize_commit(file, commit_mode, options.force_disk, &queue_apply_guard);
     }
 
     // Queue-local operator answers are durable completion signals. Fold them
@@ -4010,6 +4079,10 @@ fn run_command_inner_within_pass(
         }
     };
 
+    if write_result.is_ok() {
+        maybe_pause_closeout_transaction_after_response_write()?;
+    }
+
     let response_write_retained =
         write_result.is_err() && write_outcome_retains_closeout_mutations(&write_result);
     if write_result.is_ok() || response_write_retained {
@@ -4026,6 +4099,7 @@ fn run_command_inner_within_pass(
             has_pending_ops,
             reap_done_in_same_write(write_result.is_ok(), commit_mode)
                 || captured_finalize_continuation_owns_commit(&options),
+            &queue_apply_guard,
         ) {
             Ok(outcome) => outcome,
             Err(err) => {
@@ -4204,15 +4278,17 @@ fn run_command_inner_within_pass(
             options.force_disk,
             |file, force_disk| {
                 if force_disk {
-                    agent_doc_preflight_io::run_pending_maintenance_force_disk(
+                    agent_doc_preflight_io::run_pending_maintenance_force_disk_under_apply_guard(
                         file,
                         &agent_doc_preflight_runtime_io::PREFLIGHT_MAINTENANCE_WRITE_EFFECTS,
+                        &queue_apply_guard,
                     )
                     .map(|_| ())
                 } else {
-                    agent_doc_preflight_io::run_pending_maintenance(
+                    agent_doc_preflight_io::run_pending_maintenance_under_apply_guard(
                         file,
                         &agent_doc_preflight_runtime_io::PREFLIGHT_MAINTENANCE_WRITE_EFFECTS,
+                        &queue_apply_guard,
                     )
                     .map(|_| ())
                 }
@@ -4357,33 +4433,36 @@ fn run_command_inner_within_pass(
             CommitMode::None => {}
             CommitMode::BestEffort => {
                 if queue_consumption_allowed {
-                    if let Err(e) = consume_queue_prompts_for_response_closeout(
+                    if let Err(e) = consume_queue_prompts_for_response_closeout_under_apply_guard(
                         file,
                         current_content_for_queue.as_ref(),
                         &queue_resolution_ids,
                         options.force_disk,
                         closeout_response,
+                        &queue_apply_guard,
                     ) {
                         eprintln!("[queue] warning: consumption failed: {}", e);
                     }
                     if let Err(e) =
-                        queue_consume::mark_completed_queue_prompts_for_done_ids_with_response(
+                        queue_consume::mark_completed_queue_prompts_for_done_ids_under_apply_guard(
                             file,
                             &queue_resolution_ids,
                             options.force_disk,
                             closeout_response,
                             queue_consume_writeback_effects(options.force_disk),
+                            &queue_apply_guard,
                         )
                     {
                         eprintln!("[queue] warning: done-id marking failed: {}", e);
                     }
                 } else {
-                    match queue_consume::mark_completed_queue_prompts_for_done_ids_with_response(
+                    match queue_consume::mark_completed_queue_prompts_for_done_ids_under_apply_guard(
                         file,
                         &queue_resolution_ids,
                         options.force_disk,
                         closeout_response,
                         queue_consume_writeback_effects(options.force_disk),
+                        &queue_apply_guard,
                     ) {
                         Ok(0) => {
                             eprintln!(
@@ -4402,28 +4481,31 @@ fn run_command_inner_within_pass(
             }
             CommitMode::Required => {
                 if queue_consumption_allowed {
-                    consume_queue_prompts_for_response_closeout(
+                    consume_queue_prompts_for_response_closeout_under_apply_guard(
                         file,
                         current_content_for_queue.as_ref(),
                         &queue_resolution_ids,
                         options.force_disk,
                         closeout_response,
+                        &queue_apply_guard,
                     )?;
-                    queue_consume::mark_completed_queue_prompts_for_done_ids_with_response(
+                    queue_consume::mark_completed_queue_prompts_for_done_ids_under_apply_guard(
                         file,
                         &queue_resolution_ids,
                         options.force_disk,
                         closeout_response,
                         queue_consume_writeback_effects(options.force_disk),
+                        &queue_apply_guard,
                     )?;
                 } else {
                     let marked =
-                        queue_consume::mark_completed_queue_prompts_for_done_ids_with_response(
+                        queue_consume::mark_completed_queue_prompts_for_done_ids_under_apply_guard(
                             file,
                             &queue_resolution_ids,
                             options.force_disk,
                             closeout_response,
                             queue_consume_writeback_effects(options.force_disk),
+                            &queue_apply_guard,
                         )?;
                     if marked == 0 {
                         eprintln!(
@@ -4440,7 +4522,7 @@ fn run_command_inner_within_pass(
         }
 
         if commit_mode != CommitMode::None {
-            let backlink = queue_consume::annotate_newly_completed_queue_prompts_with_response_id(
+            let backlink = queue_consume::annotate_newly_completed_queue_prompts_with_response_id_under_apply_guard(
                 file,
                 current_content
                     .as_deref()
@@ -4449,6 +4531,7 @@ fn run_command_inner_within_pass(
                 &response_body,
                 options.force_disk,
                 queue_consume_writeback_effects(options.force_disk),
+                &queue_apply_guard,
             );
             match (commit_mode, backlink) {
                 (_, Ok(0)) => {}
@@ -4477,7 +4560,11 @@ fn run_command_inner_within_pass(
                 effects.current_document_content(file, "free_text_projection_authority")
             };
             match authority.and_then(|content| {
-                queue_consume::observe_authoritative_queue_state(file, &content)
+                queue_consume::observe_authoritative_queue_state_under_apply_guard(
+                    file,
+                    &content,
+                    &queue_apply_guard,
+                )
             }) {
                 Ok(projected) if projected > 0 => {
                     eprintln!("[queue] projected {projected} terminal queue lifecycle update(s)")
@@ -4502,8 +4589,10 @@ fn run_command_inner_within_pass(
             CommitMode::None => {}
             CommitMode::BestEffort => {
                 if let Err(e) = with_backlog_effects(|| {
-                    agent_doc_preflight_io::sync_same_cycle_actionable_backlog_into_go_queue(
-                        file, placement,
+                    agent_doc_preflight_io::sync_same_cycle_actionable_backlog_into_go_queue_under_apply_guard(
+                        file,
+                        placement,
+                        &queue_apply_guard,
                     )
                 }) {
                     eprintln!(
@@ -4514,8 +4603,10 @@ fn run_command_inner_within_pass(
             }
             CommitMode::Required => {
                 with_backlog_effects(|| {
-                    agent_doc_preflight_io::sync_same_cycle_actionable_backlog_into_go_queue(
-                        file, placement,
+                    agent_doc_preflight_io::sync_same_cycle_actionable_backlog_into_go_queue_under_apply_guard(
+                        file,
+                        placement,
+                        &queue_apply_guard,
                     )
                 })?;
             }
@@ -4527,11 +4618,12 @@ fn run_command_inner_within_pass(
     // from the exact authority cut that will be committed.
     if write_result.is_ok() && commit_mode != CommitMode::None {
         let response_body = active_capture_response_body_for_write(file)?;
-        let refresh = queue_consume::refresh_waiting_on_you_tree(
+        let refresh = queue_consume::refresh_waiting_on_you_tree_under_apply_guard(
             file,
             &response_body,
             options.force_disk,
             queue_consume_writeback_effects(options.force_disk),
+            &queue_apply_guard,
         );
         match (commit_mode, refresh) {
             (CommitMode::BestEffort, Err(error)) => {
@@ -4545,8 +4637,9 @@ fn run_command_inner_within_pass(
     }
 
     let commit_result = if write_result.is_ok() {
-        let primary = ensure_closeout_lease_still_held(_closeout_owner.as_ref())
-            .and_then(|()| finalize_commit(file, commit_mode, options.force_disk));
+        let primary = ensure_closeout_lease_still_held(_closeout_owner.as_ref()).and_then(|()| {
+            finalize_commit(file, commit_mode, options.force_disk, &queue_apply_guard)
+        });
         if primary.is_ok() && !options.commit_sibling.is_empty() {
             let pairs: Vec<(std::path::PathBuf, String)> = options
                 .commit_sibling
@@ -4566,6 +4659,24 @@ fn run_command_inner_within_pass(
         (Ok(()), Err(commit_err)) => Err(commit_err),
         (Err(write_err), Err(commit_err)) => Err(write_err.context(commit_err.to_string())),
     }
+}
+
+fn maybe_pause_closeout_transaction_after_response_write() -> Result<()> {
+    let Ok(marker) = std::env::var("AGENT_DOC_TEST_CLOSEOUT_AFTER_RESPONSE_WRITE_MARKER") else {
+        return Ok(());
+    };
+    let release = std::env::var("AGENT_DOC_TEST_CLOSEOUT_AFTER_RESPONSE_WRITE_RELEASE")
+        .context("closeout transaction test barrier requires a release path")?;
+    std::fs::write(&marker, b"ready")?;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    while !Path::new(&release).exists() {
+        anyhow::ensure!(
+            std::time::Instant::now() < deadline,
+            "timed out waiting for closeout transaction test barrier release"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    Ok(())
 }
 
 /// Reject a fresh response before it can create capture/intent state when an
@@ -5227,7 +5338,12 @@ fn active_capture_response_body_for_write(file: &Path) -> Result<String> {
         .unwrap_or_default())
 }
 
-fn finalize_commit(file: &Path, commit_mode: CommitMode, force_disk: bool) -> Result<()> {
+fn finalize_commit(
+    file: &Path,
+    commit_mode: CommitMode,
+    force_disk: bool,
+    queue_apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
+) -> Result<()> {
     match commit_mode {
         CommitMode::None => Ok(()),
         CommitMode::BestEffort => {
@@ -5331,20 +5447,29 @@ fn finalize_commit(file: &Path, commit_mode: CommitMode, force_disk: bool) -> Re
                         }
                     }
                 }
-                agent_doc_session_check_io::enforce_clean_closeout_with_force_disk(
+                agent_doc_session_check_io::enforce_clean_closeout_with_force_disk_under_apply_guard(
                     file,
                     force_disk,
                     &agent_doc_closeout_runtime_io::session_check_effects(),
+                    queue_apply_guard,
                 )?;
             } else {
                 eprintln!("[commit] skipped (not in git repo)");
             }
             Ok(())
         }
-        CommitMode::Required => complete_required_closeout(file, force_disk).map(|_| ()),
+        CommitMode::Required => {
+            agent_doc_closeout_runtime_io::complete_required_closeout_under_apply_guard(
+                file,
+                force_disk,
+                queue_apply_guard,
+            )
+            .map(|_| ())
+        }
     }
 }
 
+#[cfg(test)]
 fn complete_required_closeout(file: &Path, force_disk: bool) -> Result<bool> {
     agent_doc_closeout_runtime_io::complete_required_closeout(file, force_disk)
 }
@@ -9071,7 +9196,8 @@ mod retained_closeout_reap {
             "precondition: the retained case must ask for a same-write reap"
         );
 
-        apply_pending_and_status_mutations(&doc, &options, &[], true, reap_in_same_write)
+        let guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(&doc).unwrap();
+        apply_pending_and_status_mutations(&doc, &options, &[], true, reap_in_same_write, &guard)
             .expect("the retained-case mutation must apply");
 
         let after = std::fs::read_to_string(&doc).unwrap();
@@ -9131,7 +9257,8 @@ mod retained_closeout_reap {
         options.force_disk = true;
         options.pending_done = vec!["bossroom-sbx-provision".to_string()];
 
-        apply_pending_and_status_mutations(&doc, &options, &[], true, true)
+        let guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(&doc).unwrap();
+        apply_pending_and_status_mutations(&doc, &options, &[], true, true, &guard)
             .expect("the tracked-work mutation and dependent projection must converge");
 
         let after = std::fs::read_to_string(&doc).unwrap();

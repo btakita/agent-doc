@@ -297,6 +297,11 @@ fn report_complete_with_lock_wait(
     response: &str,
     lock_wait: ProgressLockWait,
 ) -> Result<CompletionFeedbackOutcome> {
+    // One apply capability spans the response receipt, lineage facts, reported
+    // claim transition, completion-cell document successor, and projection
+    // ledgers. Contention is therefore rejected before the first durable
+    // transaction effect instead of surfacing halfway through completion.
+    let apply_guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(file)?;
     // `#subagentcompletionfeedback`: unlike SESSION_ACTOR_WRITE_QUEUE, this
     // lock serializes independent CLI processes. Re-resolve and rebuild inside
     // the owner so stale full-document successors cannot lose sibling notices.
@@ -337,6 +342,7 @@ fn report_complete_with_lock_wait(
     // process stops after this write, reconciliation can reconstruct the cell
     // and retry the exact state transition without consulting agent history.
     agent_doc_queue_io::claim_release_receipt::capture_response(file, &claim, response)?;
+    maybe_pause_report_complete_transaction_after_capture()?;
     // Join the result class to this exact claim before it can become
     // Reported. A crash can leave running repository debt, never a prose-only
     // completion that is eligible for closeout. The attempt is (re-)keyed from
@@ -393,7 +399,12 @@ fn report_complete_with_lock_wait(
         agent_doc_queue_io::queue_cmd::derive_claim_runtime_projection(file, &current, None)?;
     let (appended, replaced, intent_id, followups) =
         upsert_completion_feedback(file, &current, &projection.target_content, &claim, response)?;
-    agent_doc_queue_io::queue_cmd::record_claim_runtime_projection(file, &projection, None)?;
+    agent_doc_queue_io::queue_cmd::record_claim_runtime_projection_under_apply_guard(
+        file,
+        &projection,
+        None,
+        &apply_guard,
+    )?;
     if !followups.inserted.is_empty() {
         // `#capturegatedispatched`: queued follow-ups are tracked work. The
         // rows already landed; a failed mark only leaves the gate armed.
@@ -412,6 +423,24 @@ fn report_complete_with_lock_wait(
         intent_id,
         followups,
     })
+}
+
+fn maybe_pause_report_complete_transaction_after_capture() -> Result<()> {
+    let Ok(marker) = std::env::var("AGENT_DOC_TEST_REPORT_COMPLETE_AFTER_CAPTURE_MARKER") else {
+        return Ok(());
+    };
+    let release = std::env::var("AGENT_DOC_TEST_REPORT_COMPLETE_AFTER_CAPTURE_RELEASE")
+        .context("report-complete test barrier requires a release path")?;
+    std::fs::write(&marker, b"ready")?;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    while !Path::new(&release).exists() {
+        anyhow::ensure!(
+            std::time::Instant::now() < deadline,
+            "timed out waiting for report-complete transaction test barrier release"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    Ok(())
 }
 
 /// `#workerresponsestructure`: the report line's account of the hand-back's

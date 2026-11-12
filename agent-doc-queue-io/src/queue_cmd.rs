@@ -804,7 +804,18 @@ pub fn record_claim_runtime_projection(
     projection: &ClaimRuntimeProjection,
     cleared_item: Option<&str>,
 ) -> Result<()> {
-    record_claim_runtime_projection_scoped(file, projection, cleared_item, None)
+    let apply_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file)?;
+    record_claim_runtime_projection_under_apply_guard(file, projection, cleared_item, &apply_guard)
+}
+
+#[doc(hidden)]
+pub fn record_claim_runtime_projection_under_apply_guard(
+    file: &Path,
+    projection: &ClaimRuntimeProjection,
+    cleared_item: Option<&str>,
+    apply_guard: &crate::queue_edit_owner::QueueEditGuard,
+) -> Result<()> {
+    record_claim_runtime_projection_scoped(file, projection, cleared_item, None, apply_guard)
 }
 
 fn record_claim_runtime_projection_scoped(
@@ -812,7 +823,9 @@ fn record_claim_runtime_projection_scoped(
     projection: &ClaimRuntimeProjection,
     cleared_item: Option<&str>,
     only_identity: Option<&agent_doc_element_queue::QueueItemIdentity>,
+    apply_guard: &crate::queue_edit_owner::QueueEditGuard,
 ) -> Result<()> {
+    apply_guard.ensure_protects(file)?;
     if projection.changed {
         // Keep the recovery baseline aligned with this binary-owned cosmetic
         // mutation. Otherwise a later exchange update can make the unrelated
@@ -1665,7 +1678,8 @@ pub fn project_blocker_runtime_state_with_effects(
     project_blocker_runtime_state_under_apply_guard(effects, file, &apply_guard)
 }
 
-fn project_blocker_runtime_state_under_apply_guard(
+#[doc(hidden)]
+pub fn project_blocker_runtime_state_under_apply_guard(
     effects: &(impl QueueRuntimeProjectionEffects + ?Sized),
     file: &Path,
     apply_guard: &crate::queue_edit_owner::QueueEditGuard,
@@ -1833,7 +1847,13 @@ fn project_runtime_state_with_effects(
                 persisted_heads: settled.persisted_heads,
                 changed: wrote_successor,
             };
-            record_claim_runtime_projection_scoped(file, &accepted, cleared_item, only_identity)?;
+            record_claim_runtime_projection_scoped(
+                file,
+                &accepted,
+                cleared_item,
+                only_identity,
+                apply_guard,
+            )?;
             return Ok(wrote_successor);
         }
         let authority_superseded = authoritative != current;

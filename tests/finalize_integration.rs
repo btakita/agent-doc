@@ -3,6 +3,7 @@ use assert_cmd::Command;
 use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command as ProcessCommand;
 use tempfile::TempDir;
@@ -1975,6 +1976,125 @@ fn finalize_writes_and_commits_template_response() {
         .args(["session-check", doc.to_str().unwrap()])
         .assert()
         .success();
+}
+
+#[test]
+fn finalize_holds_queue_apply_exclusion_from_response_write_through_commit() {
+    let (tmp, doc) = setup_template_doc();
+    init_git_repo(tmp.path(), &doc);
+    let marker = tmp.path().join("closeout-after-write.marker");
+    let release = tmp.path().join("closeout-after-write.release");
+    let binary = env!("CARGO_BIN_EXE_agent-doc");
+    let mut child = ProcessCommand::new(binary)
+        .env(
+            agent_doc_controller_io::project_controller::TEST_CONTROLLER_LAUNCH_REASON_ENV,
+            CONTROLLER_LAUNCH_REASON,
+        )
+        .env(
+            "AGENT_DOC_TEST_CLOSEOUT_AFTER_RESPONSE_WRITE_MARKER",
+            &marker,
+        )
+        .env(
+            "AGENT_DOC_TEST_CLOSEOUT_AFTER_RESPONSE_WRITE_RELEASE",
+            &release,
+        )
+        .current_dir(tmp.path())
+        .args(["finalize", doc.to_str().unwrap(), "--force-disk"])
+        .stdin(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(
+            "<!-- patch:exchange -->\n### Re: transaction — gpt-5\ntransaction body\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n"
+                .as_bytes(),
+        )
+        .unwrap();
+    drop(child.stdin.take());
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    while !marker.exists() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "timed out waiting for closeout transaction barrier"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+
+    assert!(
+        fs::read_to_string(&doc)
+            .unwrap()
+            .contains("transaction body"),
+        "barrier must run after the response write"
+    );
+    let head_blob = ProcessCommand::new("git")
+        .current_dir(tmp.path())
+        .args(["show", "HEAD:session.md"])
+        .output()
+        .unwrap();
+    assert!(!String::from_utf8_lossy(&head_blob.stdout).contains("transaction body"));
+    assert!(
+        !agent_doc_queue_io::queue_edit_owner::try_reserve_queue_edit_owner(
+            &doc.to_string_lossy(),
+            "maintenance-during-closeout",
+            std::process::id(),
+        )
+        .unwrap(),
+        "detached maintenance must coalesce during closeout"
+    );
+    assert!(
+        agent_doc_queue_io::queue_edit_owner::QueueEditGuard::try_acquire(&doc)
+            .unwrap()
+            .is_none()
+    );
+
+    fs::write(&release, b"release").unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(
+        output.status.success(),
+        "finalize failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let head_blob = ProcessCommand::new("git")
+        .current_dir(tmp.path())
+        .args(["show", "HEAD:session.md"])
+        .output()
+        .unwrap();
+    assert!(String::from_utf8_lossy(&head_blob.stdout).contains("transaction body"));
+}
+
+#[test]
+fn finalize_apply_contention_fails_before_response_write_or_closeout_effects() {
+    let (tmp, doc) = setup_template_doc();
+    init_git_repo(tmp.path(), &doc);
+    let before = fs::read(&doc).unwrap();
+    let head_before = ProcessCommand::new("git")
+        .current_dir(tmp.path())
+        .args(["rev-parse", "HEAD"])
+        .output()
+        .unwrap()
+        .stdout;
+    let _guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(&doc).unwrap();
+    let output = agent_doc()
+        .current_dir(tmp.path())
+        .args(["finalize", doc.to_str().unwrap(), "--force-disk"])
+        .write_stdin(
+            "<!-- patch:exchange -->\n### Re: blocked — gpt-5\nmust not land\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nBlocked.\n<!-- /patch:recap -->\n",
+        )
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("queue mutation deferred"));
+    assert_eq!(fs::read(&doc).unwrap(), before);
+    let head_after = ProcessCommand::new("git")
+        .current_dir(tmp.path())
+        .args(["rev-parse", "HEAD"])
+        .output()
+        .unwrap()
+        .stdout;
+    assert_eq!(head_after, head_before);
 }
 
 #[test]

@@ -1398,10 +1398,12 @@ impl agent_doc_session_check_io::SessionCheckEffects for RuntimeSessionCheckEffe
     }
 }
 
-pub struct RuntimeCloseoutEffects;
+pub struct RuntimeCloseoutEffects<'a> {
+    apply_guard: Option<&'a agent_doc_queue_io::queue_edit_owner::QueueEditGuard>,
+}
 
-pub fn closeout_effects() -> RuntimeCloseoutEffects {
-    RuntimeCloseoutEffects
+pub fn closeout_effects() -> RuntimeCloseoutEffects<'static> {
+    RuntimeCloseoutEffects { apply_guard: None }
 }
 
 /// Run the closeout coordinator inside one revision-aware document projection
@@ -1412,6 +1414,30 @@ pub fn complete_required_closeout(file: &Path, force_disk: bool) -> Result<bool>
         agent_doc_flow_io::closeout::complete_required_closeout_with_options(
             file,
             &closeout_effects(),
+            agent_doc_flow_io::closeout::CompleteRequiredCloseoutOptions {
+                force_disk,
+                proven_committed_cycle: None,
+            },
+        )
+    })
+}
+
+/// Complete a write/finalize transaction without releasing its document apply
+/// capability between response publication, closeout maintenance, and commit.
+#[doc(hidden)]
+pub fn complete_required_closeout_under_apply_guard(
+    file: &Path,
+    force_disk: bool,
+    apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
+) -> Result<bool> {
+    apply_guard.ensure_protects(file)?;
+    let effects = RuntimeCloseoutEffects {
+        apply_guard: Some(apply_guard),
+    };
+    agent_doc_document_realtime_io::with_current_document_projection_pass(|| {
+        agent_doc_flow_io::closeout::complete_required_closeout_with_options(
+            file,
+            &effects,
             agent_doc_flow_io::closeout::CompleteRequiredCloseoutOptions {
                 force_disk,
                 proven_committed_cycle: None,
@@ -1440,7 +1466,7 @@ pub fn complete_answered_free_text_queue_residue(file: &Path, force_disk: bool) 
     complete_required_closeout(file, force_disk)
 }
 
-impl agent_doc_flow_io::closeout::CloseoutEffects for RuntimeCloseoutEffects {
+impl agent_doc_flow_io::closeout::CloseoutEffects for RuntimeCloseoutEffects<'_> {
     fn commit(&self, file: &Path) -> Result<bool> {
         agent_doc_commit_io::commit(file)
     }
@@ -1461,6 +1487,21 @@ impl agent_doc_flow_io::closeout::CloseoutEffects for RuntimeCloseoutEffects {
         file: &Path,
         force_disk: bool,
     ) -> Result<agent_doc_preflight_io::PendingMaintenanceReport> {
+        if let Some(apply_guard) = self.apply_guard {
+            return if force_disk {
+                agent_doc_preflight_io::run_pending_maintenance_force_disk_under_apply_guard(
+                    file,
+                    &agent_doc_preflight_runtime_io::PREFLIGHT_MAINTENANCE_WRITE_EFFECTS,
+                    apply_guard,
+                )
+            } else {
+                agent_doc_preflight_io::run_pending_maintenance_under_apply_guard(
+                    file,
+                    &agent_doc_preflight_runtime_io::PREFLIGHT_MAINTENANCE_WRITE_EFFECTS,
+                    apply_guard,
+                )
+            };
+        }
         if force_disk {
             agent_doc_preflight_io::run_pending_maintenance_force_disk(
                 file,
@@ -1475,10 +1516,26 @@ impl agent_doc_flow_io::closeout::CloseoutEffects for RuntimeCloseoutEffects {
     }
 
     fn enforce_clean_closeout(&self, file: &Path) -> Result<()> {
+        if let Some(apply_guard) = self.apply_guard {
+            return agent_doc_session_check_io::enforce_clean_closeout_with_force_disk_under_apply_guard(
+                file,
+                false,
+                &session_check_effects(),
+                apply_guard,
+            );
+        }
         agent_doc_session_check_io::enforce_clean_closeout(file, &session_check_effects())
     }
 
     fn enforce_clean_closeout_for_authority(&self, file: &Path, force_disk: bool) -> Result<()> {
+        if let Some(apply_guard) = self.apply_guard {
+            return agent_doc_session_check_io::enforce_clean_closeout_with_force_disk_under_apply_guard(
+                file,
+                force_disk,
+                &session_check_effects(),
+                apply_guard,
+            );
+        }
         agent_doc_session_check_io::enforce_clean_closeout_with_force_disk(
             file,
             force_disk,

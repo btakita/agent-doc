@@ -1,10 +1,225 @@
 use std::fs;
 use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 
 /// `#integrationtesttargets`: this target drives the real `agent-doc` CLI, and
 /// a controller launch by that CLI is production behavior, so every spawned
 /// command opts in with this reason.
 const CONTROLLER_LAUNCH_REASON: &str = "queue claim/repair CLI commands reach the project controller, which they launch as production does";
+
+fn wait_for_path(path: &std::path::Path) {
+    let deadline = Instant::now() + Duration::from_secs(15);
+    while !path.exists() {
+        assert!(
+            Instant::now() < deadline,
+            "timed out waiting for {}",
+            path.display()
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+#[test]
+fn report_complete_holds_queue_apply_exclusion_across_the_whole_transaction() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::create_dir_all(dir.path().join(".agent-doc/locks")).unwrap();
+    let doc = dir.path().join("session.md");
+    let item = "prove report transaction exclusion";
+    fs::write(
+        &doc,
+        format!(
+            "---\nagent_doc_session: report-transaction\nagent_doc_format: template\n---\n\n<!-- agent:exchange patch=append subagents -->\n### Re: prior — gpt-5\n\nDone.\n<!-- agent:boundary:keep -->\n<!-- /agent:exchange -->\n\n<!-- agent:queue subagents -->\n- {item}\n<!-- /agent:queue -->\n"
+        ),
+    )
+    .unwrap();
+    let binary = env!("CARGO_BIN_EXE_agent-doc");
+    let owner = "subagent:transaction";
+    let run = |args: &[&str]| {
+        let output = Command::new(binary)
+            .env(
+                agent_doc_controller_io::project_controller::TEST_CONTROLLER_LAUNCH_REASON_ENV,
+                CONTROLLER_LAUNCH_REASON,
+            )
+            .current_dir(dir.path())
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "command failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    };
+    run(&[
+        "queue",
+        "claim",
+        doc.to_str().unwrap(),
+        "--item",
+        item,
+        "--owner",
+        owner,
+    ]);
+    run(&[
+        "queue",
+        "start",
+        doc.to_str().unwrap(),
+        "--item",
+        item,
+        "--owner",
+        owner,
+        "--generation",
+        "1",
+        "--worker-id",
+        "worker:transaction",
+    ]);
+
+    let marker = dir.path().join("report-after-capture.marker");
+    let release = dir.path().join("report-after-capture.release");
+    let child = Command::new(binary)
+        .env(
+            agent_doc_controller_io::project_controller::TEST_CONTROLLER_LAUNCH_REASON_ENV,
+            CONTROLLER_LAUNCH_REASON,
+        )
+        .env(
+            "AGENT_DOC_TEST_REPORT_COMPLETE_AFTER_CAPTURE_MARKER",
+            &marker,
+        )
+        .env(
+            "AGENT_DOC_TEST_REPORT_COMPLETE_AFTER_CAPTURE_RELEASE",
+            &release,
+        )
+        .current_dir(dir.path())
+        .args([
+            "queue",
+            "report-complete",
+            "--prose-only",
+            doc.to_str().unwrap(),
+            "--item",
+            item,
+            "--generation",
+            "1",
+            "--response",
+            "transaction response",
+        ])
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    wait_for_path(&marker);
+
+    let paused = fs::read_to_string(&doc).unwrap();
+    assert!(!paused.contains("transaction response"));
+    assert!(
+        !agent_doc_queue_io::queue_edit_owner::try_reserve_queue_edit_owner(
+            &doc.to_string_lossy(),
+            "detached-maintenance-during-report",
+            std::process::id(),
+        )
+        .unwrap(),
+        "detached maintenance must coalesce while report-complete owns the transaction"
+    );
+    assert!(
+        agent_doc_queue_io::queue_edit_owner::QueueEditGuard::try_acquire(&doc)
+            .unwrap()
+            .is_none()
+    );
+
+    fs::write(&release, b"release").unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(
+        output.status.success(),
+        "report-complete failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        fs::read_to_string(&doc)
+            .unwrap()
+            .contains("transaction response")
+    );
+}
+
+#[test]
+fn report_complete_apply_contention_fails_before_any_transaction_effect() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::create_dir_all(dir.path().join(".agent-doc/locks")).unwrap();
+    let doc = dir.path().join("session.md");
+    let item = "reject report before capture";
+    fs::write(
+        &doc,
+        format!(
+            "---\nagent_doc_session: report-contention\nagent_doc_format: template\n---\n\n<!-- agent:exchange patch=append subagents -->\n### Re: prior — gpt-5\n\nDone.\n<!-- agent:boundary:keep -->\n<!-- /agent:exchange -->\n\n<!-- agent:queue subagents -->\n- {item}\n<!-- /agent:queue -->\n"
+        ),
+    )
+    .unwrap();
+    let binary = env!("CARGO_BIN_EXE_agent-doc");
+    let owner = "subagent:contention";
+    for args in [
+        vec![
+            "queue",
+            "claim",
+            doc.to_str().unwrap(),
+            "--item",
+            item,
+            "--owner",
+            owner,
+        ],
+        vec![
+            "queue",
+            "start",
+            doc.to_str().unwrap(),
+            "--item",
+            item,
+            "--owner",
+            owner,
+            "--generation",
+            "1",
+            "--worker-id",
+            "worker:contention",
+        ],
+    ] {
+        let status = Command::new(binary)
+            .env(
+                agent_doc_controller_io::project_controller::TEST_CONTROLLER_LAUNCH_REASON_ENV,
+                CONTROLLER_LAUNCH_REASON,
+            )
+            .current_dir(dir.path())
+            .args(args)
+            .status()
+            .unwrap();
+        assert!(status.success());
+    }
+    let before = fs::read(&doc).unwrap();
+    let _guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(&doc).unwrap();
+    let output = Command::new(binary)
+        .env(
+            agent_doc_controller_io::project_controller::TEST_CONTROLLER_LAUNCH_REASON_ENV,
+            CONTROLLER_LAUNCH_REASON,
+        )
+        .current_dir(dir.path())
+        .args([
+            "queue",
+            "report-complete",
+            "--prose-only",
+            doc.to_str().unwrap(),
+            "--item",
+            item,
+            "--generation",
+            "1",
+            "--response",
+            "must never be captured",
+        ])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("queue mutation deferred"));
+    assert_eq!(fs::read(&doc).unwrap(), before);
+    assert!(
+        agent_doc_queue_io::claim_release_receipt::load(&doc)
+            .unwrap()
+            .receipts
+            .is_empty(),
+        "contention must be rejected before response capture"
+    );
+}
 
 #[test]
 fn four_cli_reporters_serialize_without_losing_completion_feedback() {

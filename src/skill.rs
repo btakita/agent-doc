@@ -5822,6 +5822,30 @@ mod tests {
     }
 
     #[test]
+    fn queue_auto_loop_freeze_guidance_requires_a_fresh_generation() {
+        let (_, content) = BUNDLED_RUNBOOKS
+            .iter()
+            .find(|(name, _)| *name == "queue-auto-loop.md")
+            .expect("queue-auto-loop.md not found");
+        let normalized = content.split_whitespace().collect::<Vec<_>>().join(" ");
+
+        assert!(normalized.contains(
+            "that command's emitted refill owns failed-continue recovery and offers the stopped row through a fresh claim/generation"
+        ));
+        assert!(normalized.contains(
+            "Never reuse the old generation's `queue start` command for a continuation wrapper"
+        ));
+        assert!(!normalized.contains(concat!(
+            "A continuation wrapper for a frozen",
+            " attempt runs `queue start`"
+        )));
+        assert!(!normalized.contains(concat!(
+            "except a harness freeze, which stays the same",
+            " attempt until that refresh"
+        )));
+    }
+
+    #[test]
     fn harness_invocation_runbook_content() {
         let (_, content) = BUNDLED_RUNBOOKS
             .iter()

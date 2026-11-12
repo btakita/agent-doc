@@ -2876,12 +2876,21 @@ impl QueueClaimLedger {
         now_secs: u64,
         live_heads: Option<&HashSet<QueueItemIdentity>>,
     ) -> ClaimedQueueItems {
-        ClaimedQueueItems(
-            self.active(now_secs, live_heads)
-                .into_iter()
-                .map(|claim| claim.identity.clone())
-                .collect(),
-        )
+        let mut claimed = ClaimedQueueItems::none();
+        for claim in self.active(now_secs, live_heads) {
+            claimed.0.insert(claim.identity.clone());
+            // A worker owns the full nest vector, while closeout selects its
+            // executable leaf. Bridge those forms only for ledger claims:
+            // generic visible holds added by `with_heads` must stay exact.
+            if nest_vector_claim_identity(&claim.item_text).is_some()
+                && let Some(id) = queue_prompt_stable_id(&claim.item_text)
+            {
+                claimed
+                    .0
+                    .insert(QueueItemIdentity::FreeText(format!("queue-id:{id}")));
+            }
+        }
+        claimed
     }
 }
 
@@ -4342,6 +4351,33 @@ mod tests {
         assert_eq!(ledger.claims[0].identity, claim_identity(&annotated_leaf));
         assert_eq!(ledger.claims[0].item_text, annotated_leaf);
         assert_ne!(ledger.claims[0].identity, claim_identity("#adversarial-pr"));
+    }
+
+    /// A selected closeout records the executable leaf, while a worker claim
+    /// records its full nest vector. Their binary-owned q-id is the stable
+    /// bridge; otherwise the closeout gate asks the coordinator to answer work
+    /// that a live worker already owns.
+    #[test]
+    fn claimed_nested_q_id_head_matches_its_selected_leaf() {
+        let lineage =
+            "https://github.com/btakita/agent-doc/pull/407: #fix-ci [#q-b77d4a62dd9f]".to_string();
+        let mut ledger = QueueClaimLedger::default();
+        ledger.claim(&lineage, "worker", 100, 100);
+        let claimed = ledger.claimed_items(100, None);
+
+        assert!(claimed.claims("#fix-ci [#q-b77d4a62dd9f]"));
+        assert!(!claimed.claims("#fix-ci [#q-another-attempt]"));
+    }
+
+    #[test]
+    fn visible_q_id_hold_does_not_claim_its_nested_lineage() {
+        let leaf = "#fix-ci [#q-b77d4a62dd9f]".to_string();
+        let held = ClaimedQueueItems::none().with_heads([&leaf]);
+
+        assert!(
+            !held
+                .claims("https://github.com/btakita/agent-doc/pull/407: #fix-ci [#q-b77d4a62dd9f]")
+        );
     }
 
     /// `#queueeffectidentity`: duplicate nested commands retain their effect

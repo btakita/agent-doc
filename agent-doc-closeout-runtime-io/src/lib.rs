@@ -566,6 +566,19 @@ fn pending_only_commit_target(
     }
 }
 
+fn pending_only_commit_target_landed(
+    target_hash: &str,
+    head_hash: &str,
+    phase: agent_doc_turn::CyclePhase,
+    committed_file_hash: Option<&str>,
+    committed_snapshot_hash: Option<&str>,
+) -> bool {
+    head_hash.eq_ignore_ascii_case(target_hash)
+        || (phase == agent_doc_turn::CyclePhase::Committed
+            && committed_file_hash.is_some_and(|hash| hash.eq_ignore_ascii_case(target_hash))
+            && committed_snapshot_hash.is_some_and(|hash| hash.eq_ignore_ascii_case(head_hash)))
+}
+
 pub fn session_check_effects() -> RuntimeSessionCheckEffects {
     RuntimeSessionCheckEffects
 }
@@ -899,9 +912,23 @@ impl agent_doc_session_check_io::SessionCheckEffects for RuntimeSessionCheckEffe
                 file.display()
             )
         })?;
+        let head_hash = agent_doc_hash::content_hash(&head_content);
+        let committed_state = agent_doc_cycle_state_io::load_with_closeout_projection(file)?
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "pending-only commit continuation for {} completed without readable cycle state",
+                    file.display()
+                )
+            })?;
         anyhow::ensure!(
-            agent_doc_hash::content_hash(&head_content) == target_hash,
-            "pending-only commit continuation for {} did not land its exact target in HEAD",
+            pending_only_commit_target_landed(
+                &target_hash,
+                &head_hash,
+                committed_state.phase,
+                committed_state.file_hash.as_deref(),
+                committed_state.snapshot_hash.as_deref(),
+            ),
+            "pending-only commit continuation for {} did not land its target in HEAD or the committed snapshot",
             file.display(),
         );
         anyhow::ensure!(
@@ -1703,6 +1730,45 @@ mod tests {
             None,
             "a deletion-only retained projection must not gain commit authority",
         );
+    }
+
+    #[test]
+    fn pending_only_commit_accepts_a_commit_snapshot_that_absorbed_the_exact_target() {
+        assert!(pending_only_commit_target_landed(
+            "target",
+            "snapshot",
+            CyclePhase::Committed,
+            Some("target"),
+            Some("snapshot"),
+        ));
+        assert!(pending_only_commit_target_landed(
+            "target",
+            "target",
+            CyclePhase::Committed,
+            None,
+            None,
+        ));
+        assert!(!pending_only_commit_target_landed(
+            "target",
+            "snapshot",
+            CyclePhase::Committed,
+            Some("other"),
+            Some("snapshot"),
+        ));
+        assert!(!pending_only_commit_target_landed(
+            "target",
+            "snapshot",
+            CyclePhase::WriteApplied,
+            Some("target"),
+            Some("snapshot"),
+        ));
+        assert!(!pending_only_commit_target_landed(
+            "target",
+            "snapshot",
+            CyclePhase::Committed,
+            Some("target"),
+            Some("other"),
+        ));
     }
 
     /// `#deadlockhint` — when the recovery classifier finds nothing to recover

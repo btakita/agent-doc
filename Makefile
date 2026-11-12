@@ -356,7 +356,11 @@ version-sync:
 
 dev-harness-test: $(VSCODE_NODE_LOCK)
 	@python3 scripts/agent-doc-dev self-test
-	@cd editors/jetbrains && ./gradlew $(AGENT_DOC_GRADLE_FLAGS) --no-daemon --console=plain --init-script ../../scripts/jetbrains-test-logging.gradle.kts test
+	@if command -v xvfb-run >/dev/null 2>&1; then \
+		cd editors/jetbrains && xvfb-run -a ./gradlew $(AGENT_DOC_GRADLE_FLAGS) --no-daemon --console=plain -q test; \
+	else \
+		cd editors/jetbrains && ./gradlew $(AGENT_DOC_GRADLE_FLAGS) --no-daemon --console=plain -q test; \
+	fi
 	@cd editors/vscode && npm test
 	@cd editors/vscode && npm run test:package
 

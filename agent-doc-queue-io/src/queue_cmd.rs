@@ -1916,11 +1916,9 @@ pub fn prune_duplicates(
     file: &Path,
     apply: bool,
 ) -> Result<()> {
-    if apply {
-        // Same single-writer lease as `prune-noise`: idle-watch and preflight
-        // defer while the duplicate rows are excised.
-        let _queue_edit_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file);
-    }
+    // Same single-writer lease as `prune-noise`: idle-watch and preflight
+    // defer across the authoritative read, plan, and converged write.
+    let _queue_edit_guard = apply.then(|| crate::queue_edit_owner::QueueEditGuard::acquire(file));
     let content = effects.current_document_content(file, "queue_prune_duplicates")?;
     let plan = agent_doc_queue::prune_duplicates::plan(&content)
         .with_context(|| format!("{}: queue duplicate prune refused to parse", file.display()))?;
@@ -6229,20 +6227,35 @@ mod prune_duplicates_cmd_tests {
     struct Mem {
         content: std::cell::RefCell<String>,
         writes: Cell<usize>,
+        expect_lease: Cell<bool>,
     }
 
     impl QueueCommandEffects for Mem {
-        fn current_document_content(&self, _file: &Path, _source: &str) -> Result<String> {
+        fn current_document_content(&self, file: &Path, _source: &str) -> Result<String> {
+            if self.expect_lease.get() {
+                assert!(
+                    crate::queue_edit_owner::read_queue_edit_owner_lease(&file.to_string_lossy())
+                        .is_some(),
+                    "apply must hold the queue-edit lease during its authority read"
+                );
+            }
             Ok(self.content.borrow().clone())
         }
 
         fn converge_document_or_disk(
             &self,
-            _file: &Path,
+            file: &Path,
             target_content: &str,
             source_content: &str,
             _reason: &str,
         ) -> Result<()> {
+            if self.expect_lease.get() {
+                assert!(
+                    crate::queue_edit_owner::read_queue_edit_owner_lease(&file.to_string_lossy())
+                        .is_some(),
+                    "apply must hold the queue-edit lease through convergence"
+                );
+            }
             assert_eq!(source_content, self.content.borrow().as_str());
             *self.content.borrow_mut() = target_content.to_string();
             self.writes.set(self.writes.get() + 1);
@@ -6298,14 +6311,21 @@ mod prune_duplicates_cmd_tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let file = dir.path().join("session.md");
+        std::fs::write(&file, source).unwrap();
         let effects = Mem {
             content: std::cell::RefCell::new(source.to_string()),
             writes: Cell::new(0),
+            expect_lease: Cell::new(false),
         };
         prune_duplicates(&effects, &file, false).unwrap();
         assert_eq!(effects.writes.get(), 0);
         assert_eq!(effects.content.borrow().as_str(), source);
+        effects.expect_lease.set(true);
         prune_duplicates(&effects, &file, true).unwrap();
+        assert!(
+            crate::queue_edit_owner::read_queue_edit_owner_lease(&file.to_string_lossy()).is_none(),
+            "apply must release the queue-edit lease after convergence"
+        );
         assert_eq!(effects.writes.get(), 1);
         let written = effects.content.borrow().clone();
         assert!(written.contains("[#subagent:shell#1]"));

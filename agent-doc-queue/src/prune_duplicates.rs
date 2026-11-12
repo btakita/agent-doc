@@ -4,8 +4,9 @@
 //! This is not [`crate::document_queue::dedup_live_prompts`]. That path still
 //! leaves intentional free-text duplicates in place and only collapses id
 //! directives. The repair here runs when an operator asks: identical live work
-//! text inside one queue collapses to one row, and a truncated live fragment
-//! whose whole text is a strict prefix of one other live row is removed.
+//! text inside one queue lineage collapses to one row, and a truncated live
+//! fragment whose whole text is a token-boundary prefix of one other live row
+//! in that lineage is removed.
 //! Struck history is not a live row. Nothing in this module releases a claim
 //! or rewrites a row it keeps.
 
@@ -20,7 +21,7 @@ use crate::document_queue::{QueueEntry, parse_spans};
 /// Why a live row is removed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DuplicateDropReason {
-    /// Another live row in the same queue has the same work text.
+    /// Another live row in the same queue lineage has the same work text.
     IdenticalLiveHead,
     /// The row's whole work text is a truncated prefix of one other live row.
     TruncatedPrefix,
@@ -49,6 +50,8 @@ pub struct DuplicatePrunePlan {
 
 struct LiveRow {
     span: usize,
+    /// Direct parent entry, which uniquely identifies the row's ancestor path.
+    parent_span: Option<usize>,
     range: Range<usize>,
     work: String,
     /// 2 = worker annotation, 1 = any other binary-owned prefix, 0 = bare.
@@ -153,10 +156,9 @@ fn plan_body(
 
     let mut groups: Vec<Vec<usize>> = Vec::new();
     for (index, row) in live.iter().enumerate() {
-        if let Some(group) = groups
-            .iter_mut()
-            .find(|group| live[group[0]].work == row.work)
-        {
+        if let Some(group) = groups.iter_mut().find(|group| {
+            live[group[0]].parent_span == row.parent_span && live[group[0]].work == row.work
+        }) {
             group.push(index);
         } else {
             groups.push(vec![index]);
@@ -170,7 +172,11 @@ fn plan_body(
             .iter()
             .min_by_key(|index| {
                 let row = &live[**index];
-                (std::cmp::Reverse(row.claim_score), row.span)
+                (
+                    std::cmp::Reverse(row.claim_score),
+                    std::cmp::Reverse(row.has_children),
+                    row.span,
+                )
             })
             .expect("group is non-empty");
         let kept = &live[keeper];
@@ -194,11 +200,11 @@ fn plan_body(
         if dropped.contains(&row.span) || row.has_children {
             continue;
         }
-        let extensions = distinct_extensions(&row.work, &live, &dropped);
+        let extensions = distinct_extensions(row, &live, &dropped);
         if !should_drop_prefix(row, &extensions) {
             continue;
         }
-        let Some(kept) = keeper_of_extensions(&extensions, &live, &dropped) else {
+        let Some(kept) = keeper_of_extensions(row, &extensions, &live, &dropped) else {
             continue;
         };
         dropped.insert(row.span);
@@ -251,6 +257,7 @@ fn live_rows(spans: &[(QueueEntry, Range<usize>)]) -> Vec<LiveRow> {
             }
             Some(LiveRow {
                 span,
+                parent_span: parent_span(spans, span),
                 range: range.clone(),
                 claim_score: claim_score(&prompt.text),
                 has_children: has_nested_children(spans, span),
@@ -258,6 +265,22 @@ fn live_rows(spans: &[(QueueEntry, Range<usize>)]) -> Vec<LiveRow> {
             })
         })
         .collect()
+}
+
+fn parent_span(spans: &[(QueueEntry, Range<usize>)], index: usize) -> Option<usize> {
+    let indent = entry_indent(&spans[index].0)?;
+    spans[..index]
+        .iter()
+        .enumerate()
+        .rev()
+        .find_map(|(span, (entry, _))| (entry_indent(entry)? < indent).then_some(span))
+}
+
+fn entry_indent(entry: &QueueEntry) -> Option<usize> {
+    match entry {
+        QueueEntry::Prompt(prompt) | QueueEntry::Completed(prompt) => Some(prompt.indent),
+        _ => None,
+    }
 }
 
 fn work_text(text: &str) -> &str {
@@ -350,23 +373,41 @@ fn has_nested_children(spans: &[(QueueEntry, Range<usize>)], index: usize) -> bo
 }
 
 fn distinct_extensions<'a>(
-    work: &str,
+    subject: &LiveRow,
     rows: &'a [LiveRow],
     dropped: &HashSet<usize>,
 ) -> Vec<&'a str> {
     let mut found = Vec::new();
     for row in rows {
-        if dropped.contains(&row.span) || row.work == work {
+        if dropped.contains(&row.span)
+            || row.parent_span != subject.parent_span
+            || row.work == subject.work
+        {
             continue;
         }
-        if row.work.starts_with(work)
-            && row.work.len() > work.len()
-            && !found.contains(&row.work.as_str())
+        if is_token_boundary_prefix(&subject.work, &row.work) && !found.contains(&row.work.as_str())
         {
             found.push(row.work.as_str());
         }
     }
     found
+}
+
+fn is_token_boundary_prefix(prefix: &str, candidate: &str) -> bool {
+    let Some(suffix) = candidate.strip_prefix(prefix) else {
+        return false;
+    };
+    let Some(next) = suffix.chars().next() else {
+        return false;
+    };
+    let Some(previous) = prefix.chars().last() else {
+        return false;
+    };
+    !is_word_character(previous) || !is_word_character(next)
+}
+
+fn is_word_character(character: char) -> bool {
+    character.is_alphanumeric() || character == '_'
 }
 
 fn extensions_diverge(extensions: &[&str]) -> bool {
@@ -399,12 +440,17 @@ fn ends_sentence(work: &str) -> bool {
 }
 
 fn keeper_of_extensions<'a>(
+    subject: &LiveRow,
     extensions: &[&str],
     rows: &'a [LiveRow],
     dropped: &HashSet<usize>,
 ) -> Option<&'a LiveRow> {
     rows.iter()
-        .filter(|row| !dropped.contains(&row.span) && extensions.contains(&row.work.as_str()))
+        .filter(|row| {
+            !dropped.contains(&row.span)
+                && row.parent_span == subject.parent_span
+                && extensions.contains(&row.work.as_str())
+        })
         .max_by_key(|row| (row.work.len(), row.claim_score, std::cmp::Reverse(row.span)))
 }
 
@@ -595,6 +641,19 @@ mod tests {
     }
 
     #[test]
+    fn keeps_a_mid_token_prefix_collision() {
+        let source = "\
+<!-- agent:run id=\"main\" -->
+- Audit the queue map
+- Audit the queue mapper before applying the repair
+<!-- /agent:run -->
+";
+        let plan = plan(source).unwrap();
+        assert!(plan.drops.is_empty());
+        assert_eq!(plan.document, source);
+    }
+
+    #[test]
     fn keeps_a_prefix_of_only_struck_history_and_a_claimed_fragment() {
         let struck_only = format!(
             "\
@@ -625,8 +684,8 @@ mod tests {
             "\
 <!-- agent:run id=\"main\" -->
 - 🚧 [#subagent:sync#1] {SYNC}
-  - nested note that stays under the kept parent
 - 🚧 [#subagent:sync#1] {SYNC}
+  - nested note that stays under the kept parent
 <!-- /agent:run -->
 "
         );
@@ -637,6 +696,21 @@ mod tests {
                 .contains("nested note that stays under the kept parent")
         );
         assert_eq!(plan.document.matches("[#subagent:sync#1]").count(), 1);
+    }
+
+    #[test]
+    fn keeps_identical_children_under_different_parents() {
+        let source = "\
+<!-- agent:run id=\"main\" -->
+- Parent alpha
+  - Run the focused queue regression suite
+- Parent beta
+  - Run the focused queue regression suite
+<!-- /agent:run -->
+";
+        let plan = plan(source).unwrap();
+        assert!(plan.drops.is_empty());
+        assert_eq!(plan.document, source);
     }
 
     #[test]

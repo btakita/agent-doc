@@ -93,7 +93,7 @@ pub fn head_requires_created_pull_request(head: &str) -> bool {
     let lower = prose.to_ascii_lowercase();
     if EXPLICIT_PULL_REQUEST_REQUESTS
         .iter()
-        .any(|phrase| contains_ascii_phrase(&lower, phrase))
+        .any(|phrase| contains_unquoted_request(&lower, phrase))
     {
         return true;
     }
@@ -223,6 +223,68 @@ fn contains_ascii_phrase(text: &str, phrase: &str) -> bool {
     false
 }
 
+fn contains_unquoted_request(text: &str, phrase: &str) -> bool {
+    let mut rest = text;
+    let mut offset = 0usize;
+    while let Some(index) = rest.find(phrase) {
+        let absolute = offset + index;
+        let before_ok = absolute == 0 || !text.as_bytes()[absolute - 1].is_ascii_alphanumeric();
+        let after = absolute + phrase.len();
+        let after_ok = text
+            .as_bytes()
+            .get(after)
+            .is_none_or(|byte| !byte.is_ascii_alphanumeric());
+        if before_ok
+            && after_ok
+            && !inside_inline_quote(text, absolute)
+            && !request_is_negated(text, absolute, after)
+        {
+            return true;
+        }
+        let step = rest[index..]
+            .chars()
+            .next()
+            .map(|ch| ch.len_utf8())
+            .unwrap_or(1);
+        offset += index + step;
+        rest = &text[offset..];
+    }
+    false
+}
+
+fn inside_inline_quote(text: &str, index: usize) -> bool {
+    let line_start = text[..index].rfind('\n').map_or(0, |offset| offset + 1);
+    let prefix = &text[line_start..index];
+    ['`', '"']
+        .iter()
+        .any(|delimiter| prefix.chars().filter(|ch| ch == delimiter).count() % 2 == 1)
+        || prefix.ends_with('\'')
+}
+
+fn request_is_negated(text: &str, index: usize, after: usize) -> bool {
+    let line_start = text[..index].rfind('\n').map_or(0, |offset| offset + 1);
+    let prefix = text[line_start..index].trim_end();
+    let prefix_negated = ["do not", "don't", "never", "without", "not to"]
+        .iter()
+        .any(|lead| prefix.ends_with(lead));
+    let descriptive = ["sentence", "phrase", "example", "words", "text"]
+        .iter()
+        .any(|lead| prefix.ends_with(lead));
+    let line_end = text[after..]
+        .find('\n')
+        .map_or(text.len(), |offset| after + offset);
+    let suffix = &text[after..line_end];
+    let effect_negated = [
+        "without opening one",
+        "without creating one",
+        "without actually opening",
+        "without actually creating",
+    ]
+    .iter()
+    .any(|tail| suffix.contains(tail));
+    prefix_negated || descriptive || effect_negated
+}
+
 fn creation_verb_then_pull_url(lower: &str) -> bool {
     let mut index = 0;
     while index < lower.len() {
@@ -261,12 +323,25 @@ fn creation_verb_end(text: &str, index: usize) -> Option<usize> {
         return None;
     };
     let before_ok = index == 0 || !text.as_bytes()[index - 1].is_ascii_alphanumeric();
+    let line_start = text[..index].rfind('\n').map_or(0, |offset| offset + 1);
+    let prefix = text[line_start..index].trim_end();
+    let historical_or_negated = [
+        "not",
+        "never",
+        "already",
+        "previously",
+        "wasn't",
+        "weren't",
+        "didn't",
+    ]
+    .iter()
+    .any(|lead| prefix.ends_with(lead));
     let after = index + verb.len();
     let after_ok = text
         .as_bytes()
         .get(after)
         .is_none_or(|byte| !byte.is_ascii_alphanumeric());
-    (before_ok && after_ok).then_some(after)
+    (before_ok && after_ok && !historical_or_negated).then_some(after)
 }
 
 fn skip_ascii_ws(text: &str, index: usize) -> usize {
@@ -302,7 +377,10 @@ fn labeled_pull_request_receipt(lower: &str) -> bool {
             return false;
         }
         let rest = line.trim().trim_start_matches(['-', '*', ' ']);
-        let Some(after_label) = rest.strip_prefix("pull request") else {
+        let Some(after_label) = rest
+            .strip_prefix("created pull request")
+            .or_else(|| rest.strip_prefix("opened pull request"))
+        else {
             return false;
         };
         let after_label = after_label.trim_start_matches('*').trim_start();
@@ -343,10 +421,17 @@ fn gh_pr_create_receipt(lower: &str) -> bool {
 }
 
 fn line_runs_gh_pr_create(lower: &str) -> bool {
+    let failed_exit = lower.contains("exit code") && !lower.contains("exit code 0");
     if lower.contains(" not ")
         || lower.contains("n't")
         || lower.starts_with("not ")
         || lower.contains("without ")
+        || lower.contains(" fail")
+        || lower.starts_with("fail")
+        || lower.contains("returned an error")
+        || lower.contains("with an api error")
+        || failed_exit
+        || lower.contains("exited")
     {
         return false;
     }
@@ -854,6 +939,21 @@ mod tests {
             "haiven-api: Set up the merge workflow"
         ));
         assert!(!head_requires_created_pull_request(
+            "Update the runbook sentence `open a pull request` without opening one."
+        ));
+        assert!(!head_requires_created_pull_request(
+            "Update the runbook sentence open a pull request without opening one."
+        ));
+        assert!(!head_requires_created_pull_request(
+            "Do not open a pull request for this documentation-only change."
+        ));
+        assert!(!head_requires_created_pull_request(
+            "Explain why I said \"create a pull request\" in the example."
+        ));
+        assert!(head_requires_created_pull_request(
+            "I'm ready; open a pull request for the release workflow."
+        ));
+        assert!(!head_requires_created_pull_request(
             "Do we need to create a pull request for the release?"
         ));
         assert!(!head_requires_created_pull_request(
@@ -878,17 +978,32 @@ mod tests {
         assert!(response_shows_created_pull_request(
             "I created a pull request https://github.com/haiven-dev/haiven-sdk/pull/229"
         ));
-        assert!(response_shows_created_pull_request(
+        assert!(!response_shows_created_pull_request(
             "**Pull request:** https://github.com/haiven-dev/haiven-sdk/pull/229"
+        ));
+        assert!(response_shows_created_pull_request(
+            "**Created pull request:** https://github.com/haiven-dev/haiven-sdk/pull/229"
         ));
         assert!(!response_shows_created_pull_request(
             "Pull request: https://github.com/haiven-dev/haiven-sdk/pull/228 (already merged)"
+        ));
+        assert!(!response_shows_created_pull_request(
+            "The pull request already existed before this turn.\n**Pull request:** https://github.com/haiven-dev/haiven-sdk/pull/228"
+        ));
+        assert!(!response_shows_created_pull_request(
+            "I already created pull request https://github.com/haiven-dev/haiven-sdk/pull/228 last week."
+        ));
+        assert!(!response_shows_created_pull_request(
+            "The command did not create pull request https://github.com/haiven-dev/haiven-sdk/pull/228."
         ));
         assert!(response_shows_created_pull_request(
             "gh pr create --title 'setup'\nhttps://github.com/haiven-dev/haiven-sdk/pull/229\n"
         ));
         assert!(!response_shows_created_pull_request(
             "do not run gh pr create\nhttps://github.com/haiven-dev/haiven-sdk/pull/228\n"
+        ));
+        assert!(!response_shows_created_pull_request(
+            "`gh pr create` failed with an API error.\nhttps://github.com/haiven-dev/haiven-sdk/pull/228\n"
         ));
     }
 }

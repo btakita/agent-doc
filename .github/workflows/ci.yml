@@ -44,8 +44,8 @@ jobs:
       - name: Check out lazily-kt composite dependency
         run: git clone --depth 1 https://github.com/lazily-hub/lazily-kt ../lazily-kt
 
-      - name: Install tmux for integration tests
-        run: sudo apt-get update && sudo apt-get install -y tmux
+      - name: Install tmux and Xvfb for integration tests
+        run: sudo apt-get update && sudo apt-get install -y tmux xvfb
 
       # #ci25gradle: JDK 25 (listed last, so it is the default JAVA_HOME) runs
       # Gradle 9.2.1 for editors/jetbrains-262. The classic editors/jetbrains

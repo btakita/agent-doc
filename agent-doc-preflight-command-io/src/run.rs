@@ -311,6 +311,32 @@ pub fn run(file: &Path) -> Result<()> {
     run_with_options(file, PreflightOptions::default())
 }
 
+/// Rebase an editor-only queue convergence onto the admitted baseline.
+///
+/// Queue maintenance checkpoints its full authoritative content. In a detached
+/// session it also writes that exact content to disk, so replacing the fresh
+/// checkpoint with a projection built from `previous` would discard unrelated
+/// maintenance performed earlier in the same preflight (for example todo-id
+/// backfill). A live editor listener is the exceptional case: the converged
+/// snapshot advances while disk remains behind, and only that mismatch needs the
+/// queue-only baseline realignment.
+fn maybe_realign_baseline_to_editor_queue_convergence(file: &Path, previous: &str) -> bool {
+    let Ok(Some(converged_snapshot)) = agent_doc_snapshot_io::load_document_baseline(file) else {
+        return false;
+    };
+    let Ok(disk_content) = std::fs::read_to_string(file) else {
+        return false;
+    };
+    if disk_content == converged_snapshot {
+        return false;
+    }
+    let Some(realigned) = realign_baseline_to_converged_queue(previous, &converged_snapshot) else {
+        return false;
+    };
+    checkpoint_baseline_content(file, &realigned);
+    true
+}
+
 fn maybe_record_preflight_terminal_closeout_proof(file: &Path, did_commit: bool) {
     let Ok(agent_doc_session_check_io::SessionCheckStatus::Ok(_)) =
         agent_doc_session_check_io::inspect(
@@ -1449,13 +1475,11 @@ fn run_with_options_to_writer_in_pass(
     // nothing converged the snapshot equals the pre-maintenance content so this is
     // a no-op.
     if !options.probe
-        && let Ok(Some(converged_snapshot)) = agent_doc_snapshot_io::load_document_baseline(file)
-        && let Some(realigned) = realign_baseline_to_converged_queue(
+        && maybe_realign_baseline_to_editor_queue_convergence(
+            file,
             &diff_result_with_current.previous,
-            &converged_snapshot,
         )
     {
-        let _ = checkpoint_baseline_content(file, &realigned);
         eprintln!("[preflight] baseline re-aligned to converged queue shape (#qconvbaseline)");
     }
     if diff_result.is_some()
@@ -6633,6 +6657,8 @@ mod tests {
             "<!-- agent:exchange patch=append -->\n",
             "### Re: prior — gpt-5\n\nDone.\n",
             "<!-- /agent:exchange -->\n\n",
+            "## Todo\n\n",
+            "- [ ] preserve maintenance identity\n\n",
             "<!-- agent:queue go -->\n",
             "<!-- /agent:queue -->\n\n",
             "<!-- agent:backlog priority queue -->\n",
@@ -6661,6 +6687,42 @@ mod tests {
             "precondition: queue maintenance must have converged the queue shape"
         );
 
+        // Detached/no-listener maintenance writes the same authoritative cut to
+        // disk and the snapshot. A later binary-owned update (todo-id backfill in
+        // production) must not be replaced by a stale queue-only projection.
+        let maintained = converged.replace(
+            "- [ ] preserve maintenance identity",
+            "- [ ] [#keep] preserve maintenance identity",
+        );
+        std::fs::write(&doc, &maintained).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &maintained,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        assert!(
+            !maybe_realign_baseline_to_editor_queue_convergence(&doc, pre),
+            "disk/snapshot convergence must retain the fresh complete checkpoint"
+        );
+        assert_eq!(
+            agent_doc_snapshot_io::load_document_baseline(&doc)
+                .unwrap()
+                .unwrap(),
+            maintained,
+            "queue realignment must not regress intervening binary maintenance"
+        );
+
+        // A plugin listener instead advances only the snapshot/editor buffer;
+        // leave disk at the admitted cut to exercise the intended realignment.
+        std::fs::write(&doc, pre).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &converged,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
         // Helper: splice an agent response into the exchange (no user edit).
         let with_response = |d: &str| {
             d.replace(
@@ -6683,9 +6745,10 @@ mod tests {
 
         // The fix: re-align the baseline by splicing the converged queue into the
         // pre-maintenance content (preserving exchange/boundary).
-        let realigned = realign_baseline_to_converged_queue(pre, &converged)
-            .expect("queue convergence delta must produce a re-aligned baseline");
-        checkpoint_baseline_content(&doc, &realigned);
+        assert!(
+            maybe_realign_baseline_to_editor_queue_convergence(&doc, pre),
+            "editor-only convergence must re-align the baseline"
+        );
         let baseline_after = agent_doc_snapshot_io::load_document_baseline(&doc)
             .unwrap()
             .expect("re-aligned state.db baseline");
@@ -6693,6 +6756,7 @@ mod tests {
             baseline_after.contains("[#alpha]"),
             "re-aligned baseline must carry the converged queue shape"
         );
+        let realigned = baseline_after;
         let content_ours_aligned = with_response(&realigned);
         assert!(
             !ipc_snapshot_would_absorb_live_prompt_drift_after_preflight(

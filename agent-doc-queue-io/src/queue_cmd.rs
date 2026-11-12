@@ -1980,6 +1980,11 @@ pub fn sync_with_effects(effects: &impl QueueCommandEffects, file: &Path) -> Res
     // operator rows, including lookalikes with malformed ids, byte-for-byte.
     let normalized_responses =
         agent_doc_markdown_ast::overlay::normalize_generated_response_lifecycle_markers(&content);
+    let normalized_responses =
+        agent_doc_queue::queue_consume::reconcile_superseded_response_blockers(
+            &normalized_responses,
+        )
+        .unwrap_or(normalized_responses);
     let response_metadata_repaired = normalized_responses != content;
     if response_metadata_repaired {
         effects.converge_document_or_disk(
@@ -2698,6 +2703,54 @@ mod tests {
 
         sync_with_effects(&effects, &doc).expect("the waiting repair should be idempotent");
         assert_eq!(std::fs::read_to_string(&doc).unwrap(), repaired);
+    }
+
+    #[test]
+    fn sync_reconciles_a_historical_blocker_after_its_prompt_tree_completes() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("s.md");
+        let blocked = "BLOCKED independent review of the opened pull request base=fbdb13a5352c56e182f3e01789370591ad30e64a head=f4488e840f6fb51a3c585eda5effc80b9eec111c cycles=0";
+        let content = format!(
+            concat!(
+                "<!-- agent:queue keep -->\n",
+                "- ~~Review PR405 and keep the prompt tree live until complete.~~\n",
+                "  - **Response [#r-d5d5a6a6b7b7]**\n",
+                "    - **Timestamp:** 2026-11-12T04:00:00.000Z\n",
+                "    - **Summary:** {blocked}\n",
+                "    - **State:** Waiting on operator input.\n",
+                "    - **Guidance:** The row stopped. Keep this tree until the blocker in the summary is cleared.\n",
+                "  - ~~complete the independent review~~\n",
+                "    - **Response [#r-e6e6b7b7c8c8]**\n",
+                "      - **Timestamp:** 2026-11-12T05:00:00.000Z\n",
+                "      - **Summary:** REVIEW-CLEAN merged at 24bb90b into c11668a\n",
+                "      - **State:** Complete.\n",
+                "      - **Guidance:** This row is complete.\n",
+                "<!-- /agent:queue -->\n",
+            ),
+            blocked = blocked,
+        );
+        std::fs::write(&doc, &content).unwrap();
+        let effects = FakeEffects::with_current(&content);
+
+        sync_with_effects(&effects, &doc)
+            .expect("queue sync should reconcile stale binary-owned response metadata");
+
+        let reconciled = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            reconciled.contains(&format!("**Summary:** {blocked}")),
+            "historical receipt must remain verbatim:\n{reconciled}"
+        );
+        assert_eq!(reconciled.matches("**State:** Complete.").count(), 2);
+        assert!(
+            reconciled.contains(
+                "Historical blocker resolved by the owning prompt tree is durably complete"
+            ),
+            "{reconciled}"
+        );
+
+        sync_with_effects(&effects, &doc).expect("response reconciliation must be idempotent");
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), reconciled);
     }
 
     #[test]

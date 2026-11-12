@@ -718,11 +718,7 @@ mod tests {
             agent_doc_cycle_state_io::STALLED_CYCLE_RESOLVE_SECS + 1,
         );
 
-        let applied = agent_doc_flow_io::closeout::apply_closeout_recovery(
-            &doc,
-            &agent_doc_closeout_runtime_io::closeout_effects(),
-        )
-        .unwrap();
+        let applied = agent_doc_closeout_runtime_io::apply_closeout_recovery(&doc).unwrap();
         assert!(
             matches!(
                 applied,
@@ -746,11 +742,7 @@ mod tests {
         std::fs::write(&doc, content).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
 
-        let applied = agent_doc_flow_io::closeout::apply_closeout_recovery(
-            &doc,
-            &agent_doc_closeout_runtime_io::closeout_effects(),
-        )
-        .unwrap();
+        let applied = agent_doc_closeout_runtime_io::apply_closeout_recovery(&doc).unwrap();
         assert!(
             matches!(
                 applied,

@@ -195,7 +195,7 @@ fn route_decide_closeout_recovery(
     agent_doc_flow_io::closeout::decide_closeout_recovery(
         file,
         input,
-        &agent_doc_closeout_runtime_io::closeout_effects(),
+        &agent_doc_closeout_runtime_io::closeout_inspection_effects(),
     )
 }
 

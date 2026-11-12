@@ -313,27 +313,50 @@ pub fn run(file: &Path) -> Result<()> {
 }
 
 fn maybe_record_preflight_terminal_closeout_proof(file: &Path, did_commit: bool) {
-    let Ok(agent_doc_session_check_io::SessionCheckStatus::Ok(_)) =
+    if let Err(err) = record_preflight_terminal_closeout_proof(file, did_commit) {
+        eprintln!("[preflight] terminal proof warning: {err}");
+    }
+}
+
+fn record_preflight_terminal_closeout_proof(file: &Path, did_commit: bool) -> Result<()> {
+    let agent_doc_session_check_io::SessionCheckStatus::Ok(_) =
         agent_doc_session_check_io::inspect(
             file,
             &agent_doc_closeout_runtime_io::session_check_effects(),
-        )
+        )?
     else {
-        return;
+        return Ok(());
     };
-    if let Err(err) = agent_doc_controller_io::project_controller::persist_session_actor_closeout(
-        file,
+    maybe_pause_terminal_proof_after_inspection()?;
+    let apply_guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(file)?;
+    agent_doc_controller_io::project_controller::persist_session_actor_closeout(file).and_then(
+        |_| {
+            agent_doc_closeout_runtime_io::record_terminal_closeout_proof_under_apply_guard(
+                file,
+                did_commit,
+                agent_doc_flow_io::closeout::CompleteRequiredCloseoutOptions::default(),
+                &apply_guard,
+            )
+        },
     )
-    .and_then(|_| {
-        agent_doc_flow_io::closeout::record_terminal_closeout_proof(
-            file,
-            did_commit,
-            &agent_doc_closeout_runtime_io::closeout_effects(),
-            agent_doc_flow_io::closeout::CompleteRequiredCloseoutOptions::default(),
-        )
-    }) {
-        eprintln!("[preflight] terminal proof warning: {err}");
+}
+
+fn maybe_pause_terminal_proof_after_inspection() -> Result<()> {
+    let Ok(marker) = std::env::var("AGENT_DOC_TEST_TERMINAL_PROOF_AFTER_INSPECTION_MARKER") else {
+        return Ok(());
+    };
+    let release = std::env::var("AGENT_DOC_TEST_TERMINAL_PROOF_AFTER_INSPECTION_RELEASE")
+        .context("terminal proof test barrier requires a release path")?;
+    std::fs::write(marker, b"ready")?;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    while !Path::new(&release).exists() {
+        anyhow::ensure!(
+            std::time::Instant::now() < deadline,
+            "timed out waiting for terminal proof inspection barrier release"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
     }
+    Ok(())
 }
 
 pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
@@ -3570,6 +3593,86 @@ mod tests {
     use std::io::Write;
     use std::process::Command;
     use tempfile::TempDir;
+
+    #[test]
+    fn terminal_proof_contention_precedes_actor_projection_cycle_and_document_effects() {
+        let _env_lock = agent_doc_test_support::env_lock();
+        let temp = setup_project();
+        let content = "---\nagent_doc_format: template\n---\n\n<!-- agent:exchange -->\n### Re: Prompt — test\n\nAnswer.\n<!-- /agent:exchange -->\n";
+        let file = write_committed_doc(temp.path(), "session.md", content, "response", None);
+        agent_doc_cycle_state_io::start_preflight(&file, Some(content), Some(content)).unwrap();
+        agent_doc_capture_io::capture_response(
+            &file,
+            "<!-- patch:exchange -->\n### Re: Prompt — test\n\nAnswer.\n<!-- /patch:exchange -->",
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
+            &file,
+            "commit_success",
+            Some(content),
+            Some(content),
+        )
+        .unwrap();
+        assert!(matches!(
+            agent_doc_session_check_io::inspect(
+                &file,
+                &agent_doc_closeout_runtime_io::session_check_effects(),
+            )
+            .unwrap(),
+            agent_doc_session_check_io::SessionCheckStatus::Ok(_)
+        ));
+        let before_document = std::fs::read_to_string(&file).unwrap();
+        let before_snapshot = agent_doc_snapshot_io::load_document_baseline(&file).unwrap();
+        let before_cycle = agent_doc_cycle_state_io::load_with_closeout_projection(&file).unwrap();
+        let before_capture = agent_doc_capture_io::load_active(&file).unwrap();
+
+        let marker = temp.path().join("terminal-proof-inspected.marker");
+        let release = temp.path().join("terminal-proof-inspected.release");
+        unsafe {
+            std::env::set_var(
+                "AGENT_DOC_TEST_TERMINAL_PROOF_AFTER_INSPECTION_MARKER",
+                &marker,
+            );
+            std::env::set_var(
+                "AGENT_DOC_TEST_TERMINAL_PROOF_AFTER_INSPECTION_RELEASE",
+                &release,
+            );
+        }
+        let proof_file = file.clone();
+        let proof =
+            std::thread::spawn(move || record_preflight_terminal_closeout_proof(&proof_file, true));
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+        while !marker.exists() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "timed out waiting for terminal proof inspection barrier"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let _incumbent =
+            agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(&file).unwrap();
+        std::fs::write(&release, b"release").unwrap();
+        let error = proof.join().unwrap().unwrap_err();
+        unsafe {
+            std::env::remove_var("AGENT_DOC_TEST_TERMINAL_PROOF_AFTER_INSPECTION_MARKER");
+            std::env::remove_var("AGENT_DOC_TEST_TERMINAL_PROOF_AFTER_INSPECTION_RELEASE");
+        }
+        assert!(error.to_string().contains("queue mutation deferred"));
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), before_document);
+        assert_eq!(
+            agent_doc_snapshot_io::load_document_baseline(&file).unwrap(),
+            before_snapshot
+        );
+        assert_eq!(
+            agent_doc_cycle_state_io::load_with_closeout_projection(&file).unwrap(),
+            before_cycle
+        );
+        assert_eq!(
+            agent_doc_capture_io::load_active(&file).unwrap(),
+            before_capture
+        );
+    }
 
     #[test]
     fn stall_projection_ignores_head_added_after_committed_snapshot() {

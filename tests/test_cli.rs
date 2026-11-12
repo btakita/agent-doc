@@ -1071,6 +1071,51 @@ fn every_public_queue_mutation_entrypoint_acquires_apply_exclusion() {
             "{label} must route standalone closeout through the guarded runtime entry"
         );
     }
+    let main_source = include_str!("../src/main.rs");
+    assert!(
+        main_source.contains("agent_doc_closeout_runtime_io::apply_closeout_recovery(&file)?")
+            && !main_source.contains(
+                "agent_doc_flow_io::closeout::apply_closeout_recovery(\n                    &file",
+            ),
+        "operator recovery must acquire the runtime apply capability before classification or mutation"
+    );
+    let preflight_command = include_str!("../agent-doc-preflight-command-io/src/run.rs");
+    let proof_transaction = &preflight_command[preflight_command
+        .find("fn record_preflight_terminal_closeout_proof(")
+        .expect("preflight proof transaction exists")..];
+    assert!(
+        proof_transaction
+            .find("QueueEditGuard::acquire(file)?")
+            .unwrap()
+            < proof_transaction
+                .find("persist_session_actor_closeout(file)")
+                .unwrap()
+            && proof_transaction.contains("record_terminal_closeout_proof_under_apply_guard",),
+        "terminal proof must acquire once before actor projection and retain the capability through ledger persistence"
+    );
+    assert!(
+        closeout.contains("pub fn closeout_inspection_effects()")
+            && closeout.contains("fn require_apply_guard(")
+            && closeout.contains("fn require_mutation_capability(&self, file: &Path)")
+            && closeout.contains(
+                "mutating closeout runtime operation requires a held queue apply capability",
+            )
+            && !closeout.contains("pub fn closeout_effects()"),
+        "unguarded runtime effects must be inspection-only and reject every mutation method"
+    );
+    let flow_closeout = include_str!("../agent-doc-flow-io/src/closeout.rs");
+    for entrypoint in [
+        "pub fn complete_required_closeout_with_options(",
+        "pub fn record_terminal_closeout_proof(",
+        "pub fn apply_closeout_recovery(",
+        "pub fn apply_closeout_recovery_mutation(",
+    ] {
+        let body = &flow_closeout[flow_closeout.find(entrypoint).unwrap()..];
+        assert!(
+            body[..1000.min(body.len())].contains("effects.require_mutation_capability(file)?"),
+            "flow mutation entrypoint {entrypoint} must demand the typed runtime capability before direct effects"
+        );
+    }
 }
 
 fn read_cycle_phase(root: &Path, doc: &Path) -> Option<String> {
@@ -5805,7 +5850,7 @@ fn test_orchestration_write_uses_closeout_commit_adapter() {
         !write.contains("fn commit_via_closeout_effects(")
             && write
                 .contains("agent_doc_flow_io::closeout::CloseoutEffects::commit_for_authority(")
-            && write.contains("&agent_doc_closeout_runtime_io::closeout_effects()"),
+            && write.contains("agent_doc_closeout_runtime_io::closeout_effects_under_apply_guard("),
         "write.rs should route commit boundaries through the injected closeout effects adapter without a local helper facade"
     );
 }
@@ -14306,7 +14351,7 @@ fn test_agent_doc_flow_io_owns_closeout_effect_adapter() {
     assert!(
         !orchestration_lib.contains("pub mod flow;")
             && !orchestration_lib.contains("mod flow;")
-            && !orchestration_lib.contains("pub fn closeout_effects()")
+            && !orchestration_lib.contains("pub fn closeout_inspection_effects()")
             && !orchestration_lib.contains(
                 "impl agent_doc_flow_io::closeout::CloseoutEffects for OrchestrationCloseoutEffects"
             ),
@@ -14315,7 +14360,8 @@ fn test_agent_doc_flow_io_owns_closeout_effect_adapter() {
     let closeout_runtime =
         fs::read_to_string(manifest_dir.join("agent-doc-closeout-runtime-io/src/lib.rs")).unwrap();
     assert!(
-        closeout_runtime.contains("pub fn closeout_effects()")
+        closeout_runtime.contains("pub fn closeout_inspection_effects()")
+            && closeout_runtime.contains("pub fn closeout_effects_under_apply_guard")
             && closeout_runtime.contains(
                 "impl agent_doc_flow_io::closeout::CloseoutEffects for RuntimeCloseoutEffects"
             )
@@ -14335,7 +14381,8 @@ fn test_agent_doc_flow_io_owns_closeout_effect_adapter() {
     assert!(
         !closeout_tests.contains("crate::")
             && closeout_tests.contains("agent_doc_flow_io::closeout::")
-            && closeout_tests.contains("agent_doc_closeout_runtime_io::closeout_effects()"),
+            && closeout_tests
+                .contains("agent_doc_closeout_runtime_io::closeout_effects_under_apply_guard",),
         "moved closeout boundary tests should call flow-io directly through the focused closeout runtime effects port"
     );
 

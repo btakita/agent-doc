@@ -8408,10 +8408,7 @@ fn try_main() -> anyhow::Result<()> {
             }
             if apply_recovery {
                 use agent_doc_flow_io::closeout::RecoveryApplication;
-                match agent_doc_flow_io::closeout::apply_closeout_recovery(
-                    &file,
-                    &agent_doc_closeout_runtime_io::closeout_effects(),
-                )? {
+                match agent_doc_closeout_runtime_io::apply_closeout_recovery(&file)? {
                     RecoveryApplication::NothingToDo => {
                         eprintln!("[repair] {} is clean — no recovery needed", file.display());
                     }

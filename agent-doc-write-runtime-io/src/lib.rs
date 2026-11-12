@@ -5417,8 +5417,13 @@ fn finalize_commit(
                     }
                     return Ok(());
                 }
+                let closeout_effects =
+                    agent_doc_closeout_runtime_io::closeout_effects_under_apply_guard(
+                        file,
+                        queue_apply_guard,
+                    )?;
                 match agent_doc_flow_io::closeout::CloseoutEffects::commit_for_authority(
-                    &agent_doc_closeout_runtime_io::closeout_effects(),
+                    &closeout_effects,
                     file,
                     force_disk,
                 ) {

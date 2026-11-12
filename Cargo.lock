@@ -1120,6 +1120,7 @@ dependencies = [
  "agent-doc-ops-log-io",
  "agent-doc-preflight-io",
  "agent-doc-project-root-io",
+ "agent-doc-queue-io",
  "agent-doc-reliable-sync-io",
  "agent-doc-run-context-io",
  "agent-doc-session-check-io",

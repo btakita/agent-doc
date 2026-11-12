@@ -12,6 +12,9 @@ pub type RouteWriteDocumentFn =
 #[derive(Debug, Clone, Copy)]
 pub struct RouteQueueEffects {
     pub write_document: RouteWriteDocumentFn,
+    /// `Run Agent Doc` records its explicit-send proof before route admission.
+    /// Refresh that proof after this route-owned queue append converges.
+    pub refresh_explicit_send_after_enqueue: bool,
 }
 
 const ROUTE_QUEUE_MAX_WRITE_ATTEMPTS: usize = 3;
@@ -93,6 +96,13 @@ pub fn enqueue_route_dispatch_prompt(
                             file.display()
                         )
                     })?;
+                    if effects.refresh_explicit_send_after_enqueue {
+                        agent_doc_session_check_io::midturn_steering::refresh_explicit_send_after_route_enqueue(
+                            file,
+                            &original,
+                            &content,
+                        )?;
+                    }
                 }
                 Err(err)
                     if attempt < ROUTE_QUEUE_MAX_WRITE_ATTEMPTS

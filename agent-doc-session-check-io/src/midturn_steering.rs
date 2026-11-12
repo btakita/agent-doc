@@ -438,6 +438,67 @@ pub fn record_explicit_send(file: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Move the current explicit-send proof across one route-owned queue write.
+///
+/// `Run Agent Doc` records its send before authoritative routing. A starting
+/// owner may then accept that same send by appending its prompt to
+/// `agent:queue`, which intentionally changes the authoritative bytes. Keep
+/// the proof exact by requiring any existing record to name `previous_content`
+/// and the converged authority to equal `next_content` before replacing the
+/// hash. Queue writes that did not originate from an explicit route have no
+/// record and need no refresh; a stale send or concurrent authority change
+/// fails closed.
+pub fn refresh_explicit_send_after_route_enqueue(
+    file: &Path,
+    previous_content: &str,
+    next_content: &str,
+) -> Result<()> {
+    let Some(root) = project_root(file) else {
+        return Ok(());
+    };
+    let conn = agent_doc_sqlite::state_store::open_state_db(&root)?;
+    let Some(send) = load_explicit_send(&conn, file) else {
+        return Ok(());
+    };
+    let previous_hash = core::content_hash(previous_content);
+    if send.content_hash.as_deref() != Some(previous_hash.as_str()) {
+        anyhow::bail!(
+            "route queue enqueue for {} does not match the recorded explicit-send authority",
+            file.display()
+        );
+    }
+
+    let authoritative =
+        crate::resolve_current_document_content(file, "steering_route_enqueue_refresh")?;
+    let next_hash = core::content_hash(next_content);
+    if core::content_hash(&authoritative) != next_hash {
+        anyhow::bail!(
+            "route queue enqueue for {} did not converge to the authority whose send would be refreshed",
+            file.display()
+        );
+    }
+
+    let refreshed = ExplicitSend {
+        sent_at_ms: now_ms(),
+        content_hash: Some(next_hash),
+    };
+    agent_doc_sqlite::state_store::upsert_project_runtime_state_in_db(
+        &conn,
+        &explicit_send_key(file),
+        &serde_json::to_string(&refreshed)?,
+        refreshed.sent_at_ms,
+    )?;
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "steering_explicit_send_refreshed_after_route_enqueue file={} sent_at_ms={} (#runsteer)",
+            file.display(),
+            refreshed.sent_at_ms
+        ),
+    );
+    Ok(())
+}
+
 fn load_explicit_send(
     conn: &agent_doc_sqlite::state_store::Connection,
     file: &Path,
@@ -1831,6 +1892,30 @@ pub fn explicit_send_pending_items(file: &Path) -> Result<Vec<SteeringItem>> {
     .and_then(|prepared| prepared.report)
     .map(|report| report.items)
     .unwrap_or_default())
+}
+
+/// Whether this cycle has steering that the operator explicitly sent and no
+/// consumer has accepted yet (`#runsteer`).
+///
+/// The explicit-send record alone is insufficient: it intentionally persists
+/// for the exact document bytes it covered. Pair it with this cycle's pending
+/// steering watermark so an interrupt from a later generation cannot reuse an
+/// older send to rearm queue dispatch.
+pub fn current_cycle_has_pending_explicit_send(file: &Path) -> Result<bool> {
+    let Some(root) = project_root(file) else {
+        return Ok(false);
+    };
+    let conn = agent_doc_sqlite::state_store::open_state_db(&root)?;
+    let content = crate::resolve_current_document_content(file, "pending_explicit_send")?;
+    let content_hash = core::content_hash(&content);
+    let meta = std::fs::metadata(file).with_context(|| format!("stat {}", file.display()))?;
+    let editor_attached = agent_doc_crdt_relay_io::crdt_authority_for_file(file).editor_attached();
+    let explicit_send_covers_current = load_explicit_send(&conn, file)
+        .is_some_and(|send| send.covers(mtime_ms(&meta), &content_hash, editor_attached));
+    if !explicit_send_covers_current {
+        return Ok(false);
+    }
+    Ok(!explicit_send_pending_items(file)?.is_empty())
 }
 
 /// Document text last handed to a running owner as an explicit-send diff

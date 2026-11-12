@@ -34,6 +34,9 @@ Read `ui_outcome` before describing a stop:
 `queue_auto_clear_yield: true` is an intentional supervisor handoff only after
 the just-completed item's authorized current-item and returned-subagent outward
 effects have executed and their results are verified (`#effectbeforecloseout`).
+A required pull request is one of those effects (`#closepressure`): citing a
+pull request that already existed does not complete a setup or
+open-a-pull-request head.
 `END THIS TURN` and `next_queue_prompt` govern later queue work; they never
 preempt, defer, or cancel a required post/publish/push/message/API effect from
 the item being closed. End after that proven closeout; the ready supervisor
@@ -109,8 +112,10 @@ pool's running, dispatching, frozen, and free counts.
 - A running worker's heartbeat (start or `queue claim --refresh`) falls due
   halfway through its claim window, well before expiry. The refill and plan
   warnings list it with the exact `queue claim --refresh --generation <N>`
-  command; run it while the worker is alive. A harness notice that a worker is
-  waiting on its own background work is proof of life, so refresh it.
+  command; run it while the worker wrapper is alive. An in-turn harness notice
+  that the wrapper is waiting on its own background work is proof of life, so
+  refresh it. If the wrapper exits and that notice is its terminal handback,
+  the subagent-end hook freezes the ended wrapper instead.
 - While you wait with no tool call running, the project controller reaches you
   instead: it submits the document's trigger into your idle pane once per
   distinct set of due heartbeats (`#poolidleheartbeat`). When a turn opens with
@@ -124,12 +129,13 @@ pool's running, dispatching, frozen, and free counts.
   new generation for a worker whose continue succeeded.
 - A harness freeze means the harness reported the worker ended without a
   result (`agent-doc queue freeze <FILE> --item <item> --generation <N>
-  --reason '<what was reported>'`). It frees the slot but keeps the claim; a
-  later report from that worker is still accepted. `queue claim --refresh`
-  with that attempt's owner and generation clears the freeze, including after
-  the claim TTL, so a worker resumed through its transcript keeps the same
-  attempt. Expiry does not turn a harness freeze into lost and does not make
-  its head eligible for dispatch. Only `queue release --requeue` abandons it.
+  --reason '<what was reported>'`). The command immediately runs failed-
+  continue recovery and prints the authoritative refill. When that refill
+  offers the stopped item again, run its exact `queue claim`, `queue brief`,
+  and `queue start` commands as a fresh attempt with the newly returned
+  generation and wrapper id. Never run `queue start` against the frozen owner
+  and generation or reuse an old start command: the emitted refill has already
+  authorized retry and the replacement claim retires that stopped attempt.
 - No heartbeat for `AGENT_DOC_SUBAGENT_FROZEN_SECS` (default 1.5 times the
   claim TTL, so expiry alone is never this case) fails continue. The same task
   is retried into the freed slot. Do not leave that row for a later prompt.
@@ -180,14 +186,16 @@ its coordinator still passes the text.
 
 Never infer running from a label, intended spawn, process poll, or heartbeat.
 `queue claim --refresh --generation <N>` extends an already-started attempt and
-revives one that expired with its worker still bound, including a harness freeze
-whose worker resumed through its transcript. It does not revive an explicit
-requeue. A generation binds to at most one worker and a worker to at most one
-live claim. Use generation-matched `queue release` only for that attempt; add
-`--requeue` to abandon it for a new worker. Expired attempts become visible `⚠️`
-lost state, except a harness freeze, which stays the same attempt until that
-refresh or an explicit requeue. Orphaned completion evidence is `🔄` and must be
-reconciled, not redispatched.
+revives one that expired with its worker still bound only when no worker stop
+was recorded. It does not revive an explicit requeue or a harness stop handled
+by `queue freeze`: that command's emitted refill owns failed-continue recovery
+and offers the stopped row through a fresh claim/generation. Never reuse the
+old generation's `queue start` command for a continuation wrapper. A live
+generation binds to at most one wrapper and a wrapper to at most one live
+claim. Use generation-matched `queue release` only for that attempt; add
+`--requeue` to abandon it for a new worker. Expired attempts become visible
+`⚠️` lost state. Orphaned completion evidence is `🔄` and must be reconciled,
+not redispatched.
 
 Claimed heads do not count toward continuation and must not be redispatched. If
 all remaining heads are claimed or operator-gated, end quietly and wait for the

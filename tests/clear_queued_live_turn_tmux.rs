@@ -1973,7 +1973,16 @@ fn no_route_into_a_running_turn_types_onto_a_draft() {
             scenario.composer_holds("fix the widget tests"),
             "{args:?}\n{diagnostics}"
         );
-        assert!(!routed.status.success(), "{args:?}\n{diagnostics}");
+        assert!(routed.status.success(), "{args:?}\n{diagnostics}");
+        let expected_outcome = if args.contains(&"--dispatch-only") {
+            "ui_outcome=deferred_for_operator_proof"
+        } else {
+            "ui_outcome=steering_delivered_to_owner"
+        };
+        assert!(
+            stderr(&routed).contains(expected_outcome),
+            "{args:?}\n{diagnostics}"
+        );
     }
 }
 
@@ -2071,10 +2080,17 @@ impl LiveClearScenario {
         );
         let write = self.agent_doc(&["write", "--commit", DOC], &pane, Some(&response));
         assert!(
-            write.status.success(),
+            !write.status.success(),
             "write --commit: {}\n{}",
             String::from_utf8_lossy(&write.stdout),
             stderr(&write)
+        );
+        let write_stderr = stderr(&write);
+        assert!(
+            write_stderr.contains("closeout committed cycle")
+                && write_stderr.contains("#transientcloseout"),
+            "the response commits, but normal closeout must wait for item two: {}\n{write_stderr}",
+            String::from_utf8_lossy(&write.stdout),
         );
         self.end_turn();
     }

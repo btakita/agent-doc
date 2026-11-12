@@ -5355,7 +5355,7 @@ mod tests {
             "agent-doc queue release <FILE> --item <...>",
             "agent-doc queue release <FILE> --item <...> --generation <N>",
             "`agent-doc orchestrate <FILE> --mode parallel --task \"<item>\" ...`",
-            "end the turn\n  quietly",
+            "end the turn quietly",
             "`authorization.subagent_prompt_preamble` VERBATIM",
             "`unresolved_preset`",
             "`conflicting_preset_attrs`",
@@ -5819,6 +5819,104 @@ mod tests {
             SKILL_TEMPLATE.contains("baseline-drift"),
             "SKILL.md should list baseline-drift in the runbook catalog"
         );
+    }
+
+    #[test]
+    fn queue_auto_loop_freeze_guidance_requires_a_fresh_generation() {
+        let (_, content) = BUNDLED_RUNBOOKS
+            .iter()
+            .find(|(name, _)| *name == "queue-auto-loop.md")
+            .expect("queue-auto-loop.md not found");
+        let normalized = content.split_whitespace().collect::<Vec<_>>().join(" ");
+
+        assert!(normalized.contains(
+            "that command's emitted refill owns failed-continue recovery and offers the stopped row through a fresh claim/generation"
+        ));
+        assert!(normalized.contains(
+            "Never reuse the old generation's `queue start` command for a continuation wrapper"
+        ));
+        assert!(!normalized.contains(concat!(
+            "A continuation wrapper for a frozen",
+            " attempt runs `queue start`"
+        )));
+        assert!(!normalized.contains(concat!(
+            "except a harness freeze, which stays the same",
+            " attempt until that refresh"
+        )));
+    }
+
+    #[test]
+    fn freeze_contract_docs_reject_old_generation_revival_guidance() {
+        let normalize = |text: &str| {
+            text.split_whitespace()
+                .filter(|token| !matches!(*token, "///" | "//!" | "//" | "\\"))
+                .collect::<Vec<_>>()
+                .join(" ")
+        };
+        let orchestration = normalize(include_str!("../specs/07-orchestration-commands.md"));
+        let summary = normalize(include_str!("../SPEC.md"));
+        let claims = normalize(include_str!("../agent-doc-queue/src/queue_claim.rs"));
+        let pool = normalize(include_str!("../agent-doc-queue/src/subagent_pool.rs"));
+        let preflight = normalize(include_str!("../agent-doc-preflight-io/src/lib.rs"));
+        let cli = normalize(include_str!("main.rs"));
+
+        assert!(orchestration.contains(
+            "the public `queue freeze` command synchronously runs failed-continue recovery and directs a fresh claim/generation"
+        ));
+        assert!(summary.contains(
+            "a recorded harness stop is synchronously failed-continued and offered through a fresh claim/generation"
+        ));
+        assert!(claims.contains(
+            "Same-generation `start` / refresh and late-report support are pre-refill ledger operations"
+        ));
+        assert!(
+            pool.contains(
+                "follow the fresh claim / brief / start commands when the item is offered"
+            )
+        );
+        assert!(preflight.contains("That command's emitted refill owns failed-continue recovery"));
+        assert!(
+            cli.contains(
+                "the public `queue freeze` command immediately directs a fresh generation"
+            )
+        );
+
+        for (surface, text) in [
+            ("orchestration", &orchestration),
+            ("summary", &summary),
+            ("claims", &claims),
+            ("pool", &pool),
+            ("preflight", &preflight),
+            ("cli", &cli),
+        ] {
+            for stale in [
+                concat!(
+                    "including one frozen by `queue freeze` whose worker",
+                    " later resumes"
+                ),
+                concat!(
+                    "Freezing frees the slot but keeps the claim, generation,",
+                    " and worker binding"
+                ),
+                concat!(
+                    "including after a harness freeze whose worker resumes",
+                    " through its transcript"
+                ),
+                concat!(
+                    "A later report from the old worker remains accepted;",
+                    " `queue start` rebinds"
+                ),
+                concat!(
+                    "revives a transcript resume, including after",
+                    " the claim TTL"
+                ),
+            ] {
+                assert!(
+                    !text.contains(stale),
+                    "stale freeze guidance in {surface}: {stale}"
+                );
+            }
+        }
     }
 
     #[test]

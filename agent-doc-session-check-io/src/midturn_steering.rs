@@ -3021,8 +3021,12 @@ mod tests {
             "{}",
             second_payload
         );
+        let latest_diff = second_payload
+            .rsplit("Here is the diff since the last send.")
+            .next()
+            .expect("the latest steering payload carries its diff");
         assert!(
-            !second_payload
+            !latest_diff
                 .lines()
                 .any(|line| line.starts_with('+') && line.contains("ship the diff")),
             "the previous send is the baseline, not the cycle admission text: {}",

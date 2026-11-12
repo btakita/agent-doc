@@ -5645,9 +5645,11 @@ enum QueueAction {
         /// Extend the TTL of an already-started claim `--owner` holds on
         /// `--item` (a heartbeat for a long-running worker). With the exact
         /// `--generation` it also revives that attempt if it expired with its
-        /// worker still bound, including a harness `queue freeze` whose worker
-        /// resumed through its transcript. It does not revive an explicit
-        /// `queue release --requeue`. Refuses, without creating or promoting a
+        /// worker still bound and no worker stop was recorded. A low-level
+        /// frozen entry may accept proof before recovery, but the public
+        /// `queue freeze` command immediately directs a fresh generation. It
+        /// does not revive an explicit `queue release --requeue` or a recovered
+        /// harness stop. Refuses, without creating or promoting a
         /// claim, when the item is unclaimed, unstarted, otherwise expired, or
         /// another owner holds it. Also adopts the claim into the calling
         /// harness session after the coordinator `/clear`ed.
@@ -5738,14 +5740,12 @@ enum QueueAction {
     /// (`#subagentworkpool`), e.g. a harness reporting that the worker ended
     /// without a result. A notice that a worker is waiting on its own
     /// background work is proof of life: run `queue claim --refresh` for that,
-    /// never this. The worker's work-pool slot is freed so the coordinator
-    /// refills it now; its claim, generation, and worker binding are kept, so
-    /// a later report from the same worker is still accepted and `queue claim
-    /// --refresh` with the exact owner and generation clears the freeze,
-    /// including after the claim TTL. Expiry does not turn that frozen attempt
-    /// into lost or make its head eligible for dispatch. An attempt that
-    /// expired with its worker bound may be frozen too. Prints the pool refill
-    /// (next heads' claim / brief / start commands).
+    /// never this. The worker's work-pool slot is freed and failed-continue
+    /// recovery runs immediately. Prints the authoritative pool refill; when
+    /// it offers the same item, follow its exact claim / brief / start commands
+    /// to create a fresh generation. Do not rebind the stopped generation with
+    /// an old `queue start` command. An attempt that expired with its worker
+    /// bound may be frozen too.
     #[command(after_help = agent_doc_frontmatter::frontmatter::queue_marker_legend_help())]
     Freeze {
         /// Path to the session document
@@ -10403,6 +10403,20 @@ fn try_main() -> anyhow::Result<()> {
                             pressure.incomplete,
                             pressure.complete_by,
                         );
+                    } else if agent_doc_queue::queue_response::hand_back_lacks_required_pull_request(
+                        &pressure.claim.item_text,
+                        &response,
+                    ) {
+                        eprintln!(
+                            "[queue] prompt hand-back for {:?} (owner {}, generation {}) does not show a pull request this turn created; the row stays open and the attempt was requeued (#closepressure). Citing a pull request that already existed does not complete the task. Create the pull request and include its URL as the effect this turn opened, or return only the review structure. Next: {} and dispatch the same row.",
+                            pressure.claim.item_text,
+                            pressure.claim.owner,
+                            pressure.claim.generation,
+                            agent_doc_queue_io::subagent_dispatch::claim_command(
+                                &file.display().to_string(),
+                                &pressure.claim.item_text,
+                            ),
+                        );
                     } else {
                         eprintln!(
                             "[queue] prompt hand-back for {:?} (owner {}, generation {}) does not complete the prompt; the row stays open and the attempt was requeued, so it is dispatchable again (#promptpressure). Next: {} and dispatch the same row. Finish the prompt, or return only the review structure. A prose blocker in agent:exchange does not complete the prompt.",
@@ -10531,7 +10545,7 @@ fn try_main() -> anyhow::Result<()> {
                     &file, &item, generation, &reason,
                 )?;
                 eprintln!(
-                    "[queue] froze {:?} (owner {}, generation {}); its work-pool slot is free, its claim and worker binding are kept. A report from the same worker is still accepted; `queue claim --refresh` clears the freeze.",
+                    "[queue] froze {:?} (owner {}, generation {}); its work-pool slot is free. The authoritative refill below runs failed-continue recovery: if it offers this item, use its exact claim / brief / start commands for a fresh generation; do not reuse the frozen generation's start command.",
                     claim.item_text, claim.owner, claim.generation,
                 );
                 emit_subagent_pool_refill(
@@ -11412,6 +11426,22 @@ mod recycle_force_tests {
                 let help = queue.render_long_help().to_string();
                 assert!(help.contains(&legend), "{help}");
                 assert!(help.contains("🔄  needs reconcile"), "{help}");
+                let claim_help = queue
+                    .find_subcommand_mut("claim")
+                    .expect("claim")
+                    .render_long_help()
+                    .to_string();
+                let claim_help = claim_help.split_whitespace().collect::<Vec<_>>().join(" ");
+                assert!(
+                    claim_help.contains(
+                        "the public `queue freeze` command immediately directs a fresh generation"
+                    ),
+                    "{claim_help}"
+                );
+                assert!(!claim_help.contains(concat!(
+                    "including after a harness freeze whose worker resumes",
+                    " through its transcript"
+                )));
                 for name in [
                     "claim",
                     "start",

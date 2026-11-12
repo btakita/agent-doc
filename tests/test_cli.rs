@@ -2986,7 +2986,8 @@ fn test_preflight_emits_prompt_preset_bodies_with_the_request() {
 }
 
 #[test]
-fn test_queue_sync_materializes_priority_go_backlog_and_session_check_stays_clean_after_commit() {
+fn test_queue_sync_materializes_priority_go_backlog_and_session_check_enforces_transient_closeout_after_commit()
+ {
     let tmp = tempfile::TempDir::new().unwrap();
     let root = tmp.path();
     let doc = root.join("session.md");
@@ -3082,12 +3083,28 @@ fn test_queue_sync_materializes_priority_go_backlog_and_session_check_stays_clea
     let mut check = agent_doc_cmd();
     check.current_dir(root);
     check.args(["session-check", doc.to_str().unwrap()]);
-    let check_output = check.assert().success().get_output().stdout.clone();
+    let check_output = check.assert().failure().code(1).get_output().stdout.clone();
     let check_stdout = String::from_utf8(check_output).unwrap();
     assert!(
-        check_stdout.contains("[session-check] ok"),
-        "session-check should stay clean after the synced queue is committed:\n{check_stdout}"
+        check_stdout.contains("[session-check] INTERRUPTED:")
+            && check_stdout.contains("#transientcloseout"),
+        "session-check should refuse closeout while synced queue rows remain pending:\n{check_stdout}"
     );
+    for row in [
+        "advance [#samplefeed-prop]",
+        "advance [#gvj5]",
+        "do [#2qrx]",
+        "do [#rating-emails]",
+        "do [#cf-txn-email]",
+        "do [#884m]",
+        "do [#tk2p]",
+        "do [#pdp-video-footage]",
+    ] {
+        assert!(
+            check_stdout.contains(row),
+            "strict closeout should name pending row {row:?}:\n{check_stdout}"
+        );
+    }
 }
 
 #[test]
@@ -35299,23 +35316,9 @@ fn test_cli_resync_of_a_rootless_document_never_touches_the_cwd_project() {
         &cwd_project.to_string_lossy(),
     )
     .unwrap();
-    let cwd_state = |dir: &Path| -> Vec<(std::ffi::OsString, Vec<u8>)> {
-        let mut entries: Vec<_> = fs::read_dir(dir.join(".agent-doc"))
-            .unwrap()
-            .map(|entry| {
-                let entry = entry.unwrap();
-                let bytes = if entry.file_type().unwrap().is_file() {
-                    fs::read(entry.path()).unwrap()
-                } else {
-                    Vec::new()
-                };
-                (entry.file_name(), bytes)
-            })
-            .collect();
-        entries.sort();
-        entries
-    };
-    let before = cwd_state(&cwd_project);
+    let before =
+        serde_json::to_value(agent_doc_session_registry_io::load_in(&cwd_project).unwrap())
+            .unwrap();
 
     let mut resync = agent_doc_cmd();
     resync.current_dir(&cwd_project).arg("resync").arg(&doc);
@@ -35336,8 +35339,10 @@ fn test_cli_resync_of_a_rootless_document_never_touches_the_cwd_project() {
         "a read of a rootless document's store never creates it: {stderr}"
     );
     assert!(
-        before == cwd_state(&cwd_project),
-        "resync of another store's document writes nothing into the cwd project: {stderr}"
+        before
+            == serde_json::to_value(agent_doc_session_registry_io::load_in(&cwd_project).unwrap(),)
+                .unwrap(),
+        "resync of another store's document leaves the cwd registry unchanged: {stderr}"
     );
 }
 

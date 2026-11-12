@@ -516,7 +516,9 @@ and the pending granular-flags-only rule. This runbook carries the rest.
      Before treating the handback as complete, compare it with the queue item,
      resolved presets, nested authorization, and any effect named by the worker.
      A prepared review or other artifact is not complete while an authorized
-     post/publish/push/message/API effect remains (`#effectbeforecloseout`). Have
+     post/publish/push/message/API effect remains (`#effectbeforecloseout`). A
+     head that requires a pull request is not complete when the hand-back only
+     cites one that already existed (`#closepressure`). Have
      the still-running worker execute it, or execute the coordinator-owned
      effect with the returned artifact, and verify the effect result before
      response persistence and the final `session-check`. Never let queue
@@ -913,6 +915,14 @@ The incomplete work and how to finish it are the review item. Do not bury them
 in exchange prose. While the item is open the row stays visible and is not
 dispatched; claim refuses it. Mark the review item done to release the row,
 then finish the prompt.
+
+**A required pull request is created before close (`#closepressure`).** A queue
+head that says to open or create a pull request, or that starts with `Setup` /
+`Set up` and names a workflow, pull request, or merge, is not done when the
+response cites a pull request that already existed. Closeout fails and the row
+stays open until the response shows the pull request this turn opened.
+`**Deferred:**` and the review structure above remain the ways to leave it
+unfinished on purpose.
 
 An in-progress marker on a free-text head records selection, not completion
 (`#bugautostruck`). It never replaces the exact `> **Queue prompt:**` evidence.

@@ -62,10 +62,11 @@
 //!   nonblocking `Lost` while its row remains visibly worked. `queue claim --refresh`
 //!   ([`QueueClaimLedger::refresh`]) extends an already-started attempt and,
 //!   with the exact generation, revives one that expired with its worker still
-//!   bound, including a harness freeze whose worker resumed through its
-//!   transcript. It refuses an unstarted, abandoned, foreign, or missing claim
-//!   rather than promoting or (re)creating one. A harness freeze is not lost
-//!   when its TTL elapses. Under the
+//!   bound only when no worker stop was recorded. It refuses an unstarted,
+//!   abandoned, foreign, recovered-stop, or missing claim rather than promoting
+//!   or (re)creating one. A low-level frozen entry retains its generation only
+//!   until recovery; the public `queue freeze` command immediately runs
+//!   failed-continue recovery and directs a fresh generation. Under the
 //!   queue-level `subagents` attribute an expired claim returns the head to the
 //!   dispatch set, never to inline drainage.
 //!
@@ -212,20 +213,21 @@ pub struct QueueClaim {
     /// (`queue claim --refresh`). `None` falls back to the worker binding's
     /// `started_at_secs`. The work pool (`#subagentworkpool`) treats a
     /// running attempt whose heartbeat is older than the frozen bound as a
-    /// frozen worker: it frees its pool slot but keeps the claim.
+    /// frozen worker: it frees its pool slot while the ledger entry awaits
+    /// failed-continue recovery and a fresh retry.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub heartbeat_at_secs: Option<u64>,
     /// Recorded evidence that this exact worker wrapper stopped
     /// (`#subagentworkpool`): the subagent-end hook or `queue freeze` records
     /// the end, while `queue release --requeue` abandons the attempt. A live
     /// wrapper waiting on its own background work is a heartbeat. The same
-    /// notice delivered as the wrapper's terminal handback freezes the ended
-    /// wrapper while preserving its still-running child task. A frozen worker
-    /// frees its pool slot while the claim and generation stay intact. A later
-    /// report from the old worker remains accepted; `queue start` rebinds the
-    /// same generation to a continuation wrapper, and `queue claim --refresh`
-    /// revives the same binding. Expiry does not turn a harness freeze into
-    /// `Lost`. An explicit abandon does.
+    /// notice delivered as the wrapper's terminal handback records that the
+    /// wrapper ended. At this low-level ledger boundary the claim, generation,
+    /// and worker binding remain intact only until recovery runs. The public
+    /// `queue freeze` command synchronously runs failed-continue recovery and
+    /// emits a fresh claim / brief / start refill; its replacement claim retires
+    /// this attempt. Same-generation `start` / refresh and late-report support
+    /// are pre-refill ledger operations, not coordinator continuation guidance.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub frozen: Option<QueueWorkerFreeze>,
     /// What stopped the attempt, while `state` is
@@ -438,8 +440,9 @@ pub struct QueueLifecycleDiagnosis {
 /// * `Expected(q) = projection(state(a))`.
 /// * `Visible(q) != Expected(q) => ProjectionDrift` and projection is safe.
 /// * `state(a)=Claimed && age(a)>=grace => DispatchEvidenceMissing`.
-/// * A harness freeze that still holds its worker keeps `projection(state(a))`
-///   after the TTL. Expiry is not a lost projection for that attempt.
+/// * Before failed-continue replacement, a transient low-level freeze keeps
+///   `projection(state(a))` after the TTL. This retained ledger evidence is
+///   not a coordinator-visible old-generation continuation contract.
 /// * Missing worker evidence is `Unknown`; it never authorizes a lifecycle
 ///   transition. Only a generation-fenced start/heartbeat/report can prove work.
 pub fn diagnose_lifecycle(
@@ -804,10 +807,11 @@ impl QueueClaim {
                 .is_some_and(QueueWorkerFreeze::is_abandon)
     }
 
-    /// Project TTL expiry onto this attempt. A harness freeze with its worker
-    /// still bound stays `Running`: expiry is not evidence the worker stopped,
-    /// and marking it `Lost` made refresh say the head was eligible for
-    /// dispatch (`#frozenclaimrefreshrevive`).
+    /// Project TTL expiry onto this attempt. A low-level harness-freeze entry
+    /// stays `Running` until failed-continue recovery handles the recorded
+    /// stop; expiry alone does not perform that transition. The public
+    /// `queue freeze` command immediately runs that recovery and directs a
+    /// fresh generation (`#freezefreshretry`).
     pub fn project_expiry(&mut self, now_secs: u64) {
         if self.is_expired(now_secs) && !self.retains_frozen_worker_claim() {
             self.mark_lost();
@@ -1509,8 +1513,9 @@ impl QueueClaimLedger {
     ///   legacy `Running` row to `Claimed`;
     /// * `worker(a) = worker(b) => a = b` (injective binding);
     /// * only `Claimed -> Running` is permitted, apart from an idempotent
-    ///   replay carrying the same `(owner, generation, worker)` tuple and a
-    ///   frozen attempt rebinding to its continuation wrapper;
+    ///   replay carrying the same `(owner, generation, worker)` tuple and the
+    ///   internal pre-refill rebind of a frozen ledger entry; the public
+    ///   `queue freeze` command runs recovery and directs a fresh generation;
     /// * a stale generation can never acknowledge a replacement attempt.
     pub fn start(
         &mut self,
@@ -1691,10 +1696,11 @@ impl QueueClaimLedger {
     /// generation of an attempt that expired with its worker still bound
     /// (`#subagentworkpool`). Expiry only means nobody refreshed the claim, so
     /// the coordinator's proof of life revives that same attempt: same owner,
-    /// generation, and worker. A harness `queue freeze` is not a stop that
-    /// ends the attempt: the exact heartbeat revives it and clears the freeze,
-    /// including after the TTL, so a worker resumed through its transcript
-    /// keeps this attempt (`#frozenclaimrefreshrevive`). It cannot steal work:
+    /// generation, and worker. This applies only when no worker stop was
+    /// recorded. A low-level frozen ledger entry can still be revived before
+    /// recovery, but the public `queue freeze` command synchronously runs
+    /// failed-continue recovery and directs a fresh claim/generation instead.
+    /// This internal pre-refill operation cannot steal work:
     /// a reclaim moved the generation (refused as stale), an unbound attempt
     /// has no worker to vouch for, and an explicit `queue release --requeue`
     /// abandon stays lost.
@@ -1825,10 +1831,12 @@ impl QueueClaimLedger {
     }
 
     /// Record that the harness reported this exact running worker stopped
-    /// (`queue freeze`, `#subagentworkpool`). The attempt keeps its claim,
-    /// generation, and worker binding; only its pool slot is freed, so the
-    /// coordinator can refill it. An attempt that expired with its worker
-    /// bound may be frozen too. Idempotent for an already-frozen attempt.
+    /// (`queue freeze`, `#subagentworkpool`). This low-level mutation initially
+    /// keeps the claim, generation, and worker binding while freeing the slot.
+    /// The public command immediately follows it with failed-continue recovery;
+    /// when the refill offers this row, a fresh claim retires the stopped
+    /// attempt. An attempt that expired with its worker bound may be frozen too.
+    /// Idempotent for an already-frozen entry before recovery.
     pub fn freeze_attempt(
         &mut self,
         item: &str,
@@ -3418,8 +3426,8 @@ pub enum RefreshRefusal {
     /// No claim on the item at all.
     Unclaimed,
     /// The claim's TTL already lapsed. With no bound worker, or an explicit
-    /// abandon, the head is back in the eligible set. A bound worker, including
-    /// one frozen by `queue freeze`, is not evidence the worker stopped.
+    /// abandon, the head is back in the eligible set. A bound worker with no
+    /// recorded stop is not by itself evidence that the worker stopped.
     Expired {
         holder: String,
         expired_at_secs: u64,
@@ -5387,9 +5395,9 @@ mod tests {
             QueueClaimState::Running
         );
 
-        // A harness freeze that then expires is the same attempt. The exact
-        // heartbeat revives it and clears the freeze; expiry must not turn it
-        // into lost or call the head dispatchable.
+        // At the low-level ledger seam, before the public command runs refill
+        // recovery, an expired frozen entry can still receive exact proof of
+        // life. This is not coordinator guidance after `queue freeze`.
         let mut frozen = live();
         frozen
             .freeze_attempt("work", Some(1), 105, "ended without a result")
@@ -5407,7 +5415,7 @@ mod tests {
                 DISPATCH_EVIDENCE_GRACE_SECS,
             )
             .is_none(),
-            "a harness freeze keeps the running projection"
+            "transient pre-recovery evidence keeps the running projection"
         );
         let wrong_generation = revive(&mut frozen, "subagent:a", Some(2)).unwrap_err();
         assert!(
@@ -5622,7 +5630,7 @@ mod tests {
     }
 
     #[test]
-    fn a_frozen_attempt_rebinds_to_its_continuation_wrapper() {
+    fn a_pre_refill_frozen_ledger_entry_can_rebind_internally() {
         let mut ledger = QueueClaimLedger::default();
         assert_eq!(
             ledger.claim("work", "subagent:a", 100, 10),

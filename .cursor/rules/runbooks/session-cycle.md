@@ -122,7 +122,9 @@ only the compact routing table that survives context compaction.
   or a completed subagent handback is part of the current work. Execute it and
   verify its result before `respond` / `finalize` and the final `session-check`.
   A worker report or prepared artifact is not completion while its authorized
-  effect remains. Queue auto-clear and `next_queue_prompt` apply only after
+  effect remains. A head that requires a pull request is not complete when the
+  response only cites one that already existed (`#closepressure`); the close
+  fails until this turn shows the pull request it created. Queue auto-clear and `next_queue_prompt` apply only after
   those effects finish; they never preempt, defer, or cancel them. If an effect
   cannot run, keep the current item live and report the exact blocker instead of
   closing it and advancing to the next head.
@@ -147,7 +149,11 @@ review, done, icebox, and TODO changes. **Proactively reconcile every open
 preflight signal, compare the item with current-cycle evidence, and include
 `--todo-done <selector>` in this closeout whenever the action is finished or
 moot. Leave it open only while a concrete operator action remains; do not wait
-for the operator to notice stale checklist state. In template mode use real
+for the operator to notice stale checklist state. A `closing_pull_request`
+signal (`#prannotate`) means a pull request closes an open todo or backlog
+item that does not yet cite it: add the URL with `--todo-edit` or
+`--backlog-edit` in this closeout, whether the pull request or the item
+existed first, and do not wait to be asked. In template mode use real
 headings:
 
 `### Re: topic — opus-5 · 2026-09-11T23:45-04:00`

@@ -2524,6 +2524,7 @@ dependencies = [
  "agent-doc-queue",
  "agent-doc-queue-io",
  "agent-doc-repair-command-io",
+ "agent-doc-route-io",
  "agent-doc-run-context-io",
  "agent-doc-session-accretion-io",
  "agent-doc-session-actor-io",

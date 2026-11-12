@@ -50,6 +50,7 @@ pub fn route_busy_pane_retry_effects() -> RouteBusyPaneRetryEffects {
 pub fn route_queue_effects() -> RouteQueueEffects {
     RouteQueueEffects {
         write_document: route_write_document,
+        refresh_explicit_send_after_enqueue: true,
     }
 }
 

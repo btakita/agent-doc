@@ -4,9 +4,10 @@
 //! This is not [`crate::document_queue::dedup_live_prompts`]. That path still
 //! leaves intentional free-text duplicates in place and only collapses id
 //! directives. The repair here runs when an operator asks: identical live work
-//! text inside one queue lineage collapses to one row, and a truncated live
-//! fragment whose whole text is a whitespace-separated prefix of one other
-//! live row in that lineage is removed.
+//! text inside one queue lineage collapses to one row. A semantic prefix is
+//! never inferred to be corrupt from text alone: the operator must select its
+//! exact document line before a truncated live fragment whose whole text is a
+//! whitespace-separated prefix of one other live row can be removed.
 //! Struck history is not a live row. Nothing in this module releases a claim
 //! or rewrites a row it keeps.
 
@@ -59,6 +60,8 @@ struct LiveRow {
     /// 2 = worker annotation, 1 = any other binary-owned prefix, 0 = bare.
     claim_score: u8,
     has_children: bool,
+    /// One-based document line, used only by the explicit prefix selector.
+    line: usize,
 }
 
 impl DuplicateDrop {
@@ -114,6 +117,22 @@ impl DuplicatePrunePlan {
 /// work text in two queues is not a duplicate. An unparsable document is an
 /// error and [`DuplicatePrunePlan::document`] is not a partial edit.
 pub fn plan(document: &str) -> Result<DuplicatePrunePlan> {
+    plan_selected(document, None)
+}
+
+/// Plan exact duplicate collapse plus one explicitly selected semantic prefix.
+///
+/// `line` is the one-based document line of the live queue row the operator
+/// has identified as truncated. Prefix relationships on every other line fail
+/// closed and remain byte-for-byte intact.
+pub fn plan_with_truncated_prefix_line(document: &str, line: usize) -> Result<DuplicatePrunePlan> {
+    plan_selected(document, Some(line))
+}
+
+fn plan_selected(
+    document: &str,
+    truncated_prefix_line: Option<usize>,
+) -> Result<DuplicatePrunePlan> {
     let components = agent_doc_element::element::parse(document)?;
     let mut drops = Vec::new();
     let mut replacements = Vec::new();
@@ -131,7 +150,14 @@ pub fn plan(document: &str) -> Result<DuplicatePrunePlan> {
             .unwrap_or_else(|| format!("queue-{}", ordinal + 1));
         let body = component.content(document);
         let spans = parse_spans(body)?;
-        let (body_drops, new_body) = plan_body(&queue_id, body, &spans);
+        let (body_drops, new_body) = plan_body(
+            &queue_id,
+            document,
+            component.open_end,
+            body,
+            &spans,
+            truncated_prefix_line,
+        );
         if new_body != body {
             replacements.push((component.open_end, component.close_start, new_body));
         }
@@ -149,10 +175,13 @@ pub fn plan(document: &str) -> Result<DuplicatePrunePlan> {
 
 fn plan_body(
     queue_id: &str,
+    document: &str,
+    body_start: usize,
     body: &str,
     spans: &[(QueueEntry, Range<usize>)],
+    truncated_prefix_line: Option<usize>,
 ) -> (Vec<DuplicateDrop>, String) {
-    let live = live_rows(spans);
+    let live = live_rows(document, body_start, spans);
     let mut dropped = HashSet::new();
     let mut conflicting_projection_rows = HashSet::new();
     let mut keyed: Vec<(usize, DuplicateDrop)> = Vec::new();
@@ -210,6 +239,7 @@ fn plan_body(
         if dropped.contains(&row.span)
             || conflicting_projection_rows.contains(&row.span)
             || row.has_children
+            || truncated_prefix_line != Some(row.line)
         {
             continue;
         }
@@ -272,7 +302,11 @@ fn drop_of(
     }
 }
 
-fn live_rows(spans: &[(QueueEntry, Range<usize>)]) -> Vec<LiveRow> {
+fn live_rows(
+    document: &str,
+    body_start: usize,
+    spans: &[(QueueEntry, Range<usize>)],
+) -> Vec<LiveRow> {
     spans
         .iter()
         .enumerate()
@@ -292,6 +326,11 @@ fn live_rows(spans: &[(QueueEntry, Range<usize>)]) -> Vec<LiveRow> {
                 has_children: has_nested_children(spans, span),
                 projection: projection_prefix(&prompt.text).trim().to_string(),
                 work: work.to_string(),
+                line: document[..body_start + range.start]
+                    .bytes()
+                    .filter(|byte| *byte == b'\n')
+                    .count()
+                    + 1,
             })
         })
         .collect()
@@ -441,9 +480,10 @@ fn extensions_diverge(extensions: &[&str]) -> bool {
     })
 }
 
-/// A truncated fragment is a strict prefix of one live sentence (or of nested
-/// truncations of that same sentence). A short prefix, a finished sentence,
-/// a claimed row, and a prefix shared by diverging rows stay.
+/// After exact-line authorization, a truncated fragment is a strict prefix of
+/// one live sentence (or of nested truncations of that same sentence). A short
+/// prefix, a finished sentence, a claimed row, and a prefix shared by diverging
+/// rows stay. Callers never reach this predicate for an unselected row.
 fn should_drop_prefix(row: &LiveRow, extensions: &[&str]) -> bool {
     if extensions.is_empty() || extensions_diverge(extensions) {
         return false;
@@ -509,6 +549,14 @@ mod tests {
     const SYNC: &str = "On this machine, tmux auto-sync opened an in-editor terminal that errorred when linking to tmux.";
     const SHELL: &str = "If the claiming tmux pane for a document is in shell (no agent-doc start running), the supervisor should run `agent-doc start` in all cases.";
 
+    fn line_of(source: &str, needle: &str) -> usize {
+        source[..source.find(needle).expect("fixture row")]
+            .bytes()
+            .filter(|byte| *byte == b'\n')
+            .count()
+            + 1
+    }
+
     fn session() -> String {
         format!(
             "\
@@ -534,7 +582,9 @@ mod tests {
     #[test]
     fn collapses_identical_live_heads_and_a_truncated_prefix() {
         let source = session();
-        let plan = plan(&source).unwrap();
+        let plan =
+            plan_with_truncated_prefix_line(&source, line_of(&source, "- If the claiming\n"))
+                .unwrap();
         let expected = format!(
             "\
 # Session
@@ -582,6 +632,34 @@ mod tests {
         assert!(
             plan.report("session.md", true)
                 .contains("Claims were not released")
+        );
+    }
+
+    #[test]
+    fn semantic_prefixes_require_an_explicit_document_line() {
+        let source = "\
+<!-- agent:run id=\"main\" -->
+- 📥 Run queue tests
+- Run queue tests before publishing the release
+<!-- /agent:run -->
+";
+        let fail_closed = plan(source).unwrap();
+        assert!(fail_closed.drops.is_empty(), "{fail_closed:?}");
+        assert_eq!(fail_closed.document, source);
+
+        let selected =
+            plan_with_truncated_prefix_line(source, line_of(source, "- 📥 Run queue tests\n"))
+                .unwrap();
+        assert_eq!(selected.drops.len(), 1, "{selected:?}");
+        assert_eq!(
+            selected.drops[0].reason,
+            DuplicateDropReason::TruncatedPrefix
+        );
+        assert!(!selected.document.contains("- 📥 Run queue tests\n"));
+        assert!(
+            selected
+                .document
+                .contains("- Run queue tests before publishing the release\n")
         );
     }
 

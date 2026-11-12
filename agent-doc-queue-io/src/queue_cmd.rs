@@ -1894,21 +1894,28 @@ pub fn consume(effects: &impl QueueCommandEffects, file: &Path, count: usize) ->
 /// Identical work text (binary-owned lifecycle prefixes and `[#owner#generation]`
 /// markers stripped) keeps one row, preferring the row that carries the live
 /// claim marker. Conflicting non-bare projections fail closed because this pure
-/// repair has no durable claim authority. A live row whose entire remaining
-/// text is a truncated prefix of another live row in that queue is removed.
+/// repair has no durable claim authority. Text-prefix shape alone never
+/// authorizes deletion; `truncated_prefix_line` must explicitly select the
+/// exact live document row before a strict semantic prefix can be removed.
 /// Struck history stays. The default is a dry report; `--apply` writes. The
 /// keeper's claim is not released.
 pub fn prune_duplicates(
     effects: &impl QueueCommandEffects,
     file: &Path,
     apply: bool,
+    truncated_prefix_line: Option<usize>,
 ) -> Result<()> {
     // Same single-writer lease as `prune-noise`: idle-watch and preflight
     // defer across the authoritative read, plan, and converged write.
     let _queue_edit_guard = apply.then(|| crate::queue_edit_owner::QueueEditGuard::acquire(file));
     let content = effects.current_document_content(file, "queue_prune_duplicates")?;
-    let plan = agent_doc_queue::prune_duplicates::plan(&content)
-        .with_context(|| format!("{}: queue duplicate prune refused to parse", file.display()))?;
+    let plan = match truncated_prefix_line {
+        Some(line) => {
+            agent_doc_queue::prune_duplicates::plan_with_truncated_prefix_line(&content, line)
+        }
+        None => agent_doc_queue::prune_duplicates::plan(&content),
+    }
+    .with_context(|| format!("{}: queue duplicate prune refused to parse", file.display()))?;
     if plan.drops.is_empty() || !apply {
         print!("{}", plan.report(&file.display().to_string(), false));
         return Ok(());
@@ -1920,10 +1927,18 @@ pub fn prune_duplicates(
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "queue_prune_duplicates file={} removed={} base_hash={} source_component=queue operation=prune_duplicates proof=identical_live_head_or_truncated_prefix",
+            "queue_prune_duplicates file={} removed={} base_hash={} source_component=queue operation=prune_duplicates proof={} truncated_prefix_line={}",
             file.display(),
             plan.drops.len(),
-            base_hash
+            base_hash,
+            if truncated_prefix_line.is_some() {
+                "identical_live_head_or_explicit_truncated_prefix"
+            } else {
+                "identical_live_head"
+            },
+            truncated_prefix_line
+                .map(|line| line.to_string())
+                .unwrap_or_else(|| "none".to_string())
         ),
     );
     print!("{}", plan.report(&file.display().to_string(), true));
@@ -6267,11 +6282,11 @@ mod prune_duplicates_cmd_tests {
             writes: Cell::new(0),
             expect_lease: Cell::new(false),
         };
-        prune_duplicates(&effects, &file, false).unwrap();
+        prune_duplicates(&effects, &file, false, Some(3)).unwrap();
         assert_eq!(effects.writes.get(), 0);
         assert_eq!(effects.content.borrow().as_str(), source);
         effects.expect_lease.set(true);
-        prune_duplicates(&effects, &file, true).unwrap();
+        prune_duplicates(&effects, &file, true, Some(3)).unwrap();
         assert!(
             crate::queue_edit_owner::read_queue_edit_owner_lease(&file.to_string_lossy()).is_none(),
             "apply must release the queue-edit lease after convergence"
@@ -6281,7 +6296,7 @@ mod prune_duplicates_cmd_tests {
         assert!(written.contains("[#subagent:shell#1]"));
         assert!(!written.contains("- If the claiming\n"));
         assert_eq!(written.matches("[#subagent:shell#1]").count(), 1);
-        prune_duplicates(&effects, &file, true).unwrap();
+        prune_duplicates(&effects, &file, true, Some(3)).unwrap();
         assert_eq!(effects.writes.get(), 1, "a second apply is a no-op");
         assert_eq!(effects.content.borrow().as_str(), written);
     }
@@ -6304,17 +6319,48 @@ mod prune_duplicates_cmd_tests {
             expect_lease: Cell::new(false),
         };
 
-        prune_duplicates(&effects, &file, false).unwrap();
+        prune_duplicates(&effects, &file, false, None).unwrap();
         assert_eq!(effects.writes.get(), 0);
         assert_eq!(effects.content.borrow().as_str(), source);
 
         effects.expect_lease.set(true);
-        prune_duplicates(&effects, &file, true).unwrap();
+        prune_duplicates(&effects, &file, true, None).unwrap();
         assert_eq!(effects.writes.get(), 0);
         assert_eq!(effects.content.borrow().as_str(), source);
         assert!(
             crate::queue_edit_owner::read_queue_edit_owner_lease(&file.to_string_lossy()).is_none(),
             "no-op apply must release the queue-edit lease"
         );
+    }
+
+    #[test]
+    fn prune_duplicates_requires_an_exact_line_before_removing_a_semantic_prefix() {
+        let source = "\
+<!-- agent:run id=\"main\" -->
+- 📥 Run queue tests
+- Run queue tests before publishing the release
+<!-- /agent:run -->
+";
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("session.md");
+        std::fs::write(&file, source).unwrap();
+        let effects = Mem {
+            content: std::cell::RefCell::new(source.to_string()),
+            writes: Cell::new(0),
+            expect_lease: Cell::new(false),
+        };
+
+        prune_duplicates(&effects, &file, false, None).unwrap();
+        prune_duplicates(&effects, &file, true, None).unwrap();
+        assert_eq!(effects.writes.get(), 0);
+        assert_eq!(effects.content.borrow().as_str(), source);
+
+        effects.expect_lease.set(true);
+        prune_duplicates(&effects, &file, true, Some(2)).unwrap();
+        assert_eq!(effects.writes.get(), 1);
+        let written = effects.content.borrow();
+        assert!(!written.contains("- 📥 Run queue tests\n"));
+        assert!(written.contains("- Run queue tests before publishing the release\n"));
     }
 }

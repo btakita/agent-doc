@@ -6236,11 +6236,11 @@ enum QueueAction {
     ///
     /// Collapses live rows in one queue whose work text is identical after
     /// binary-owned markers (`[#subagent:…]`, lifecycle prefixes) are stripped,
-    /// keeping the row that carries the live claim. Also removes a live row
-    /// whose entire remaining text is a truncated prefix of another live row
-    /// in that queue. Struck history stays. Identical directive heads that
-    /// `prune-noise` keeps are in scope here. Dry run unless `--apply`.
-    /// Does not release a claim.
+    /// keeping the row that carries the live claim. A semantic prefix is kept
+    /// unless `--truncated-prefix-line` explicitly selects its exact document
+    /// row; text-prefix shape alone is never deletion authority. Struck history
+    /// stays. Identical directive heads that `prune-noise` keeps are in scope
+    /// here. Dry run unless `--apply`. Does not release a claim.
     #[command(name = "prune-duplicates")]
     PruneDuplicates {
         /// Path to the session document
@@ -6248,6 +6248,10 @@ enum QueueAction {
         /// Remove the duplicate rows (default: report only)
         #[arg(long)]
         apply: bool,
+        /// One-based document line of a live row explicitly identified as a
+        /// truncated prefix. Only that row may be prefix-pruned.
+        #[arg(long, value_name = "N")]
+        truncated_prefix_line: Option<std::num::NonZeroUsize>,
     },
 }
 
@@ -10918,9 +10922,18 @@ fn try_main() -> anyhow::Result<()> {
                 let queue_effects = CliQueueCommandEffects;
                 agent_doc_queue_io::queue_cmd::prune_noise(&queue_effects, &file)
             }
-            QueueAction::PruneDuplicates { file, apply } => {
+            QueueAction::PruneDuplicates {
+                file,
+                apply,
+                truncated_prefix_line,
+            } => {
                 let queue_effects = CliQueueCommandEffects;
-                agent_doc_queue_io::queue_cmd::prune_duplicates(&queue_effects, &file, apply)
+                agent_doc_queue_io::queue_cmd::prune_duplicates(
+                    &queue_effects,
+                    &file,
+                    apply,
+                    truncated_prefix_line.map(std::num::NonZeroUsize::get),
+                )
             }
         },
         Commands::ResolveGateCmd { gate_type, scope } => {
@@ -11492,6 +11505,36 @@ mod recycle_force_tests {
                 }
             }
         ));
+    }
+
+    #[test]
+    fn queue_prune_duplicates_parses_the_exact_prefix_line_selector() {
+        match parse(&[
+            "agent-doc",
+            "queue",
+            "prune-duplicates",
+            "tasks/session.md",
+            "--apply",
+            "--truncated-prefix-line",
+            "17",
+        ]) {
+            Commands::Queue {
+                action:
+                    QueueAction::PruneDuplicates {
+                        file,
+                        apply,
+                        truncated_prefix_line,
+                    },
+            } => {
+                assert_eq!(file, PathBuf::from("tasks/session.md"));
+                assert!(apply);
+                assert_eq!(
+                    truncated_prefix_line.map(std::num::NonZeroUsize::get),
+                    Some(17)
+                );
+            }
+            _ => panic!("expected queue prune-duplicates"),
+        }
     }
 
     #[test]

@@ -712,10 +712,7 @@ fn one_correlated_occurrence<'a>(
         .or_else(|| attempts.first().copied())
 }
 
-fn prompt_occurrence<'a>(
-    item: &str,
-    attempts: &[&'a QueueLineageAttempt],
-) -> PromptOccurrence<'a> {
+fn prompt_occurrence<'a>(item: &str, attempts: &[&'a QueueLineageAttempt]) -> PromptOccurrence<'a> {
     if attempts.len() <= 1 {
         return PromptOccurrence::Keep;
     }
@@ -3035,8 +3032,20 @@ mod tests {
         record_started(&fixture.doc, &claim).unwrap();
         assert_ne!(claim_identity(prose), claim_identity(live));
         assert_eq!(max_generation(&fixture.doc, live).unwrap(), 1);
-        assert_eq!(query(&fixture.doc, Some(live), Some(1)).unwrap().attempts.len(), 1);
-        assert_eq!(query(&fixture.doc, Some(bare), Some(1)).unwrap().attempts.len(), 1);
+        assert_eq!(
+            query(&fixture.doc, Some(live), Some(1))
+                .unwrap()
+                .attempts
+                .len(),
+            1
+        );
+        assert_eq!(
+            query(&fixture.doc, Some(bare), Some(1))
+                .unwrap()
+                .attempts
+                .len(),
+            1
+        );
         assert!(
             require_integrated_repo_work(&fixture.doc, live, 1).is_err(),
             "attached with no prose-only declaration stays undeclared"

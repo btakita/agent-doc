@@ -115,8 +115,20 @@ class SyncLayoutActionTest {
             sync.indexOf("FileEditorManagerEx.getInstanceEx(project).currentWindow?.selectedFile") <
                 sync.indexOf("manager.selectedTextEditor?.virtualFile"),
         )
-        assertTrue(action.contains("syncLayout(project)"))
+        assertTrue(action.contains("syncLayout(project, showProgress = true)"))
         assertTrue(sync.contains("IdeTerminalCoordinator.startAndAttach("))
+    }
+
+    @Test
+    fun `manual sync acknowledges pending work and terminal convergence`() {
+        val source = java.nio.file.Paths.get(
+            "src/main/kotlin/com/github/btakita/agentdoc/SyncLayoutAction.kt",
+        ).toFile().readText()
+        val sync = source.substringAfter("fun syncLayout(").substringBefore("override fun actionPerformed")
+
+        assertTrue(sync.contains("TerminalUtil.showHint(project, LAYOUT_SYNC_PENDING_MESSAGE)"))
+        assertTrue(sync.contains("request.notifySuccess()"))
+        assertTrue(sync.contains("LAYOUT_SYNC_COMPLETE_MESSAGE"))
     }
 
     @Test

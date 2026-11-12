@@ -55,6 +55,8 @@ class SyncLayoutAction : ImplAction {
         internal const val SYNC_PROCESS_TIMEOUT_MS = 30_000L
         internal const val SYNC_DEFERRED_RETRY_MS = 500L
         internal const val SYNC_DEFERRED_MAX_RETRIES = 80
+        internal const val LAYOUT_SYNC_PENDING_MESSAGE = "Syncing tmux layout…"
+        internal const val LAYOUT_SYNC_COMPLETE_MESSAGE = "Tmux layout synced"
 
         private val PROTECTED_PANES_PATTERN =
             Regex("""visible protected pane\(s\) (.+?) cannot be detached safely""")
@@ -398,10 +400,19 @@ class SyncLayoutAction : ImplAction {
         callerKind: String? = null,
         terminalPrepared: Boolean = false,
         allowSurfaceReference: Boolean = true,
+        showProgress: Boolean = false,
     ) {
             if (!SwingUtilities.isEventDispatchThread()) {
                 GenerationWork.invokeLater {
-                syncLayout(project, notify, noAutostart, callerKind, terminalPrepared, allowSurfaceReference)
+                syncLayout(
+                    project,
+                    notify,
+                    noAutostart,
+                    callerKind,
+                    terminalPrepared,
+                    allowSurfaceReference,
+                    showProgress,
+                )
                 }
                 return
             }
@@ -440,7 +451,11 @@ class SyncLayoutAction : ImplAction {
                 basePath = project.basePath,
                 focusedFile = focusedVFile.path,
                 visibleMdFiles = visibleMdFiles,
+                showProgress = showProgress,
             )
+            if (showProgress) {
+                TerminalUtil.showHint(project, LAYOUT_SYNC_PENDING_MESSAGE)
+            }
             if (allowSurfaceReference) {
                 val listener = EditorTabSyncListener.forProject(project)
                 val commandSurface = listener?.captureCommandSurface(project, focusedVFile)
@@ -477,6 +492,7 @@ class SyncLayoutAction : ImplAction {
         val basePath: String?,
         val focusedFile: String,
         val visibleMdFiles: List<String>,
+        val showProgress: Boolean,
     ) {
         val failureAction: String
             get() = if (noAutostart) "sync the tmux layout" else "open the tmux pane"
@@ -485,6 +501,10 @@ class SyncLayoutAction : ImplAction {
             if (!notify) return
             TerminalUtil.showEditorFailureStatus(project, focusedFile, failureAction, detail)
             TerminalUtil.notifyError(project, detail)
+        }
+
+        fun notifySuccess() {
+            if (showProgress) TerminalUtil.showHint(project, LAYOUT_SYNC_COMPLETE_MESSAGE)
         }
     }
 
@@ -527,6 +547,7 @@ class SyncLayoutAction : ImplAction {
                     callerKind = request.callerKind,
                     terminalPrepared = true,
                     allowSurfaceReference = request.allowSurfaceReference,
+                    showProgress = request.showProgress,
                 )
             },
             onFailure = { message ->
@@ -613,6 +634,7 @@ class SyncLayoutAction : ImplAction {
                                         "[sync] Project Controller projection completed: " +
                                             receipt.output.take(500),
                                     )
+                                    request.notifySuccess()
                                 }
                                 return@newThread
                             }
@@ -653,6 +675,7 @@ class SyncLayoutAction : ImplAction {
                     request.notifyFailure(syncFailureMessage(receipt.output))
                 } else {
                     LOG.info("[sync] Project Controller projection completed: ${receipt.output.take(500)}")
+                    request.notifySuccess()
                 }
             } catch (ex: Exception) {
                 request.notifyFailure("Failed to sync layout: ${ex.message}")
@@ -739,6 +762,7 @@ class SyncLayoutAction : ImplAction {
                                     "surface=${reference.surfaceId} min_sequence=${reference.minSequence}: " +
                                     receipt.output.take(500),
                             )
+                            request.notifySuccess()
                         }
                     }
                     is EditorTabSyncListener.CommandSurfacePublication.PreservedLayout -> {
@@ -748,6 +772,7 @@ class SyncLayoutAction : ImplAction {
                                 "min_sequence=${publication.reference.minSequence} " +
                                 "reason=flat_evidence_preserves_retained_layout",
                         )
+                        request.notifySuccess()
                     }
                 }
             } catch (ex: Exception) {
@@ -759,7 +784,7 @@ class SyncLayoutAction : ImplAction {
 
     override fun actionPerformed(e: AnActionEvent) {
         val project = e.project ?: return
-        syncLayout(project)
+        syncLayout(project, showProgress = true)
     }
 
     override fun update(e: AnActionEvent) {

@@ -48,6 +48,22 @@ internal fun controllerFailureMessageUtil(root: JsonObject): String? =
         jsonStringFieldOrNull(root, "error") ?: "Project Controller request failed"
     }
 
+/**
+ * An accepted editor-surface `sync` publishes desired layout state and returns before the
+ * controller's latest-wins tmux worker applies it. Treat that receipt as queued work, not as an
+ * already-finished sync, so the IDE can acknowledge the otherwise silent automatic path.
+ */
+internal fun surfaceObservationQueuesStructuralSync(receiptJson: String): Boolean =
+    runCatching {
+        val root = JsonParser.parseString(receiptJson).asJsonObject
+        val intent = root.getAsJsonObject("intent") ?: return@runCatching false
+        val rejected = root.get("rejected")?.takeUnless { it.isJsonNull }
+        val deferred = root.get("deferred_to")?.takeUnless { it.isJsonNull }
+        val error = root.get("error")?.takeUnless { it.isJsonNull }
+        rejected == null && deferred == null && error == null &&
+            jsonStringFieldOrNull(intent, "kind") == "sync"
+    }.getOrDefault(false)
+
 internal data class CpEditorRouteResult(
     val exitCode: Int,
     val output: String,

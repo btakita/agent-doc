@@ -445,13 +445,14 @@ impl agent_doc_repair_io::RepairStrictReplayWriteEffects for RuntimeRepairReplay
         is_stream: bool,
         force_disk: bool,
         queue_completion_ids: &[String],
+        apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
     ) -> Result<()> {
         let commit_mode = if agent_doc_git_io::status::is_in_git_repo(file) {
             CommitMode::Required
         } else {
             CommitMode::None
         };
-        run_command_with_response(
+        run_command_with_response_under_apply_guard(
             CommandOptions::repair_replay(
                 file,
                 is_template,
@@ -461,6 +462,7 @@ impl agent_doc_repair_io::RepairStrictReplayWriteEffects for RuntimeRepairReplay
             ),
             commit_mode,
             response.to_string(),
+            apply_guard,
         )
     }
 }
@@ -471,7 +473,9 @@ impl agent_doc_repair_io::RepairFallbackWriteEffects for RuntimeRepairReplayWrit
         file: &Path,
         response: &str,
         force_disk: bool,
+        apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
     ) -> Result<()> {
+        apply_guard.ensure_protects(file)?;
         run_entry::apply_template_from_string_with_options(
             file,
             response,
@@ -479,7 +483,13 @@ impl agent_doc_repair_io::RepairFallbackWriteEffects for RuntimeRepairReplayWrit
         )
     }
 
-    fn apply_append_from_string(&self, file: &Path, response: &str) -> Result<()> {
+    fn apply_append_from_string(
+        &self,
+        file: &Path,
+        response: &str,
+        apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
+    ) -> Result<()> {
+        apply_guard.ensure_protects(file)?;
         run_entry::apply_append_from_string(file, response)
     }
 }
@@ -489,13 +499,15 @@ impl agent_doc_repair_io::RepairRecoveredQueueHeadEffects for RuntimeRepairRepla
         &self,
         file: &Path,
         expected_head: &str,
+        apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
     ) -> Result<()> {
-        match agent_doc_queue_io::queue_consume::consume_queue_prompt_if_head_matches_with_outcome(
+        match agent_doc_queue_io::queue_consume::consume_queue_prompt_if_head_matches_with_outcome_under_apply_guard(
             file,
             expected_head,
             &[],
             true,
             &agent_doc_document_realtime_io::RUNTIME_QUEUE_CONSUME_WRITEBACK_EFFECTS,
+            apply_guard,
         ) {
             Ok(Some(outcome)) => {
                 eprintln!(
@@ -513,11 +525,13 @@ impl agent_doc_repair_io::RepairRecoveredQueueHeadEffects for RuntimeRepairRepla
         &self,
         file: &Path,
         replay_body: &str,
+        apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
     ) -> Result<usize> {
-        agent_doc_queue_io::queue_consume::strike_free_text_heads_answered_by_committed_heading_replay(
+        agent_doc_queue_io::queue_consume::strike_free_text_heads_answered_by_committed_heading_replay_under_apply_guard(
             file,
             replay_body,
             &agent_doc_document_realtime_io::RUNTIME_QUEUE_CONSUME_WRITEBACK_EFFECTS,
+            apply_guard,
         )
     }
 }
@@ -573,7 +587,14 @@ fn pending_write_flags(flags: &WriteFlags) -> agent_doc_session_check_io::Pendin
 pub(crate) const EMPTY_RESPONSE_ERROR: &str = "empty response — nothing to write";
 
 /// `(file, strict_closeout, has_pending_mutation, force_disk, commit_requested)`.
-pub(crate) type EmptyResponseRecovery = fn(&Path, bool, bool, bool, bool) -> Result<bool>;
+pub(crate) type EmptyResponseRecovery = fn(
+    &Path,
+    bool,
+    bool,
+    bool,
+    bool,
+    &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
+) -> Result<bool>;
 
 thread_local! {
     /// Capability tokens for strict-write recursion on this thread. A repair
@@ -1066,6 +1087,21 @@ pub fn run_command_with_response(
 ) -> Result<()> {
     let previous = RESPONSE_STDIN_OVERRIDE.with(|slot| slot.replace(Some(response)));
     let result = run_command(options, commit_mode);
+    RESPONSE_STDIN_OVERRIDE.with(|slot| {
+        slot.replace(previous);
+    });
+    result
+}
+
+pub fn run_command_with_response_under_apply_guard(
+    options: CommandOptions,
+    commit_mode: CommitMode,
+    response: String,
+    apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
+) -> Result<()> {
+    apply_guard.ensure_protects(&options.file)?;
+    let previous = RESPONSE_STDIN_OVERRIDE.with(|slot| slot.replace(Some(response)));
+    let result = run_command_inner_under_apply_guard(options, commit_mode, None, apply_guard);
     RESPONSE_STDIN_OVERRIDE.with(|slot| {
         slot.replace(previous);
     });
@@ -3308,7 +3344,23 @@ fn run_command_inner(
     empty_response_recovery: Option<EmptyResponseRecovery>,
 ) -> Result<()> {
     agent_doc_document_realtime_io::with_current_document_projection_pass(|| {
-        run_command_inner_within_pass(options, commit_mode, empty_response_recovery)
+        run_command_inner_within_pass(options, commit_mode, empty_response_recovery, None)
+    })
+}
+
+fn run_command_inner_under_apply_guard(
+    options: CommandOptions,
+    commit_mode: CommitMode,
+    empty_response_recovery: Option<EmptyResponseRecovery>,
+    apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
+) -> Result<()> {
+    agent_doc_document_realtime_io::with_current_document_projection_pass(|| {
+        run_command_inner_within_pass(
+            options,
+            commit_mode,
+            empty_response_recovery,
+            Some(apply_guard),
+        )
     })
 }
 
@@ -3425,6 +3477,7 @@ fn run_command_inner_within_pass(
     options: CommandOptions,
     commit_mode: CommitMode,
     empty_response_recovery: Option<EmptyResponseRecovery>,
+    existing_apply_guard: Option<&agent_doc_queue_io::queue_edit_owner::QueueEditGuard>,
 ) -> Result<()> {
     // `#packettodo`: own the path so the closeout may extend its own
     // `options.todo_add` with the binary-derived packet todo below.
@@ -3612,7 +3665,14 @@ fn run_command_inner_within_pass(
     // transaction from its first mutation through response/queue convergence
     // and commit. Detached maintenance therefore either runs before this point
     // or after commit; it cannot enter between capture and closeout effects.
-    let queue_apply_guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(file)?;
+    let owned_apply_guard;
+    let queue_apply_guard = if let Some(apply_guard) = existing_apply_guard {
+        apply_guard.ensure_protects(file)?;
+        apply_guard
+    } else {
+        owned_apply_guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(file)?;
+        &owned_apply_guard
+    };
 
     if options.pending_only {
         // GH #131 (`#trackedrepairterminates`): the retained intent that exists
@@ -3626,7 +3686,7 @@ fn run_command_inner_within_pass(
             &pending_kept_open_ids,
             has_pending_ops,
             commit_mode != CommitMode::None || captured_finalize_continuation_owns_commit(&options),
-            &queue_apply_guard,
+            queue_apply_guard,
         );
         if let Err(error) = mutation_result {
             if let Some(target_hash) = absorb_retained_pending_only_mutation(
@@ -3661,7 +3721,7 @@ fn run_command_inner_within_pass(
             &options.pending_done,
             commit_mode,
             options.force_disk,
-            &queue_apply_guard,
+            queue_apply_guard,
         )?;
         agent_doc_session_check_io::run_closeout_pending_maintenance(
             file,
@@ -3672,14 +3732,14 @@ fn run_command_inner_within_pass(
                     agent_doc_preflight_io::run_pending_maintenance_force_disk_under_apply_guard(
                         file,
                         &agent_doc_preflight_runtime_io::PREFLIGHT_MAINTENANCE_WRITE_EFFECTS,
-                        &queue_apply_guard,
+                        queue_apply_guard,
                     )
                     .map(|_| ())
                 } else {
                     agent_doc_preflight_io::run_pending_maintenance_under_apply_guard(
                         file,
                         &agent_doc_preflight_runtime_io::PREFLIGHT_MAINTENANCE_WRITE_EFFECTS,
-                        &queue_apply_guard,
+                        queue_apply_guard,
                     )
                     .map(|_| ())
                 }
@@ -3711,7 +3771,7 @@ fn run_command_inner_within_pass(
                 agent_doc_preflight_io::sync_same_cycle_actionable_backlog_into_go_queue_under_apply_guard(
                     file,
                     placement,
-                    &queue_apply_guard,
+                    queue_apply_guard,
                 )
             }) {
                 eprintln!(
@@ -3721,7 +3781,7 @@ fn run_command_inner_within_pass(
             }
         }
         ensure_closeout_lease_still_held(_closeout_owner.as_ref())?;
-        return finalize_commit(file, commit_mode, options.force_disk, &queue_apply_guard);
+        return finalize_commit(file, commit_mode, options.force_disk, queue_apply_guard);
     }
 
     // Queue-local operator answers are durable completion signals. Fold them
@@ -4030,7 +4090,7 @@ fn run_command_inner_within_pass(
     // A response already peeked is re-read (and re-noted) by the write below.
     RESPONSE_STATUS_SYNC_PAYLOAD.with(|slot| slot.borrow_mut().take());
     let write_result = if options.is_ipc {
-        run_ipc(file, baseline.as_deref(), write_flags)
+        run_ipc(file, baseline.as_deref(), write_flags, queue_apply_guard)
     } else if options.is_stream || template_flag_on_crdt_doc {
         if template_flag_on_crdt_doc && !options.is_stream {
             eprintln!(
@@ -4057,6 +4117,7 @@ fn run_command_inner_within_pass(
             options.force_disk,
             options.origin.as_deref(),
             write_flags,
+            queue_apply_guard,
         )
     } else if options.is_template {
         run_template(
@@ -4064,6 +4125,7 @@ fn run_command_inner_within_pass(
             baseline.as_deref(),
             options.origin.as_deref(),
             write_flags,
+            queue_apply_guard,
         )
     } else {
         if current_resolved_mode.is_some_and(|mode| mode.is_crdt()) {
@@ -4073,9 +4135,10 @@ fn run_command_inner_within_pass(
                 options.force_disk,
                 options.origin.as_deref(),
                 write_flags,
+                queue_apply_guard,
             )
         } else {
-            run(file, baseline.as_deref(), write_flags)
+            run(file, baseline.as_deref(), write_flags, queue_apply_guard)
         }
     };
 
@@ -4099,7 +4162,7 @@ fn run_command_inner_within_pass(
             has_pending_ops,
             reap_done_in_same_write(write_result.is_ok(), commit_mode)
                 || captured_finalize_continuation_owns_commit(&options),
-            &queue_apply_guard,
+            queue_apply_guard,
         ) {
             Ok(outcome) => outcome,
             Err(err) => {
@@ -4281,14 +4344,14 @@ fn run_command_inner_within_pass(
                     agent_doc_preflight_io::run_pending_maintenance_force_disk_under_apply_guard(
                         file,
                         &agent_doc_preflight_runtime_io::PREFLIGHT_MAINTENANCE_WRITE_EFFECTS,
-                        &queue_apply_guard,
+                        queue_apply_guard,
                     )
                     .map(|_| ())
                 } else {
                     agent_doc_preflight_io::run_pending_maintenance_under_apply_guard(
                         file,
                         &agent_doc_preflight_runtime_io::PREFLIGHT_MAINTENANCE_WRITE_EFFECTS,
-                        &queue_apply_guard,
+                        queue_apply_guard,
                     )
                     .map(|_| ())
                 }
@@ -4439,7 +4502,7 @@ fn run_command_inner_within_pass(
                         &queue_resolution_ids,
                         options.force_disk,
                         closeout_response,
-                        &queue_apply_guard,
+                        queue_apply_guard,
                     ) {
                         eprintln!("[queue] warning: consumption failed: {}", e);
                     }
@@ -4450,7 +4513,7 @@ fn run_command_inner_within_pass(
                             options.force_disk,
                             closeout_response,
                             queue_consume_writeback_effects(options.force_disk),
-                            &queue_apply_guard,
+                            queue_apply_guard,
                         )
                     {
                         eprintln!("[queue] warning: done-id marking failed: {}", e);
@@ -4462,7 +4525,7 @@ fn run_command_inner_within_pass(
                         options.force_disk,
                         closeout_response,
                         queue_consume_writeback_effects(options.force_disk),
-                        &queue_apply_guard,
+                        queue_apply_guard,
                     ) {
                         Ok(0) => {
                             eprintln!(
@@ -4487,7 +4550,7 @@ fn run_command_inner_within_pass(
                         &queue_resolution_ids,
                         options.force_disk,
                         closeout_response,
-                        &queue_apply_guard,
+                        queue_apply_guard,
                     )?;
                     queue_consume::mark_completed_queue_prompts_for_done_ids_under_apply_guard(
                         file,
@@ -4495,7 +4558,7 @@ fn run_command_inner_within_pass(
                         options.force_disk,
                         closeout_response,
                         queue_consume_writeback_effects(options.force_disk),
-                        &queue_apply_guard,
+                        queue_apply_guard,
                     )?;
                 } else {
                     let marked =
@@ -4505,7 +4568,7 @@ fn run_command_inner_within_pass(
                             options.force_disk,
                             closeout_response,
                             queue_consume_writeback_effects(options.force_disk),
-                            &queue_apply_guard,
+                            queue_apply_guard,
                         )?;
                     if marked == 0 {
                         eprintln!(
@@ -4531,7 +4594,7 @@ fn run_command_inner_within_pass(
                 &response_body,
                 options.force_disk,
                 queue_consume_writeback_effects(options.force_disk),
-                &queue_apply_guard,
+                queue_apply_guard,
             );
             match (commit_mode, backlink) {
                 (_, Ok(0)) => {}
@@ -4563,7 +4626,7 @@ fn run_command_inner_within_pass(
                 queue_consume::observe_authoritative_queue_state_under_apply_guard(
                     file,
                     &content,
-                    &queue_apply_guard,
+                    queue_apply_guard,
                 )
             }) {
                 Ok(projected) if projected > 0 => {
@@ -4592,7 +4655,7 @@ fn run_command_inner_within_pass(
                     agent_doc_preflight_io::sync_same_cycle_actionable_backlog_into_go_queue_under_apply_guard(
                         file,
                         placement,
-                        &queue_apply_guard,
+                        queue_apply_guard,
                     )
                 }) {
                     eprintln!(
@@ -4606,7 +4669,7 @@ fn run_command_inner_within_pass(
                     agent_doc_preflight_io::sync_same_cycle_actionable_backlog_into_go_queue_under_apply_guard(
                         file,
                         placement,
-                        &queue_apply_guard,
+                        queue_apply_guard,
                     )
                 })?;
             }
@@ -4623,7 +4686,7 @@ fn run_command_inner_within_pass(
             &response_body,
             options.force_disk,
             queue_consume_writeback_effects(options.force_disk),
-            &queue_apply_guard,
+            queue_apply_guard,
         );
         match (commit_mode, refresh) {
             (CommitMode::BestEffort, Err(error)) => {
@@ -4638,7 +4701,7 @@ fn run_command_inner_within_pass(
 
     let commit_result = if write_result.is_ok() {
         let primary = ensure_closeout_lease_still_held(_closeout_owner.as_ref()).and_then(|()| {
-            finalize_commit(file, commit_mode, options.force_disk, &queue_apply_guard)
+            finalize_commit(file, commit_mode, options.force_disk, queue_apply_guard)
         });
         if primary.is_ok() && !options.commit_sibling.is_empty() {
             let pairs: Vec<(std::path::PathBuf, String)> = options
@@ -6943,6 +7006,7 @@ mod tests {
             _is_stream: bool,
             _force_disk: bool,
             _queue_completion_ids: &[String],
+            _apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
         ) -> Result<()> {
             anyhow::bail!("unexpected strict replay in write runtime test")
         }
@@ -6954,11 +7018,17 @@ mod tests {
             _file: &Path,
             _response: &str,
             _force_disk: bool,
+            _apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
         ) -> Result<()> {
             anyhow::bail!("unexpected template replay in write runtime test")
         }
 
-        fn apply_append_from_string(&self, _file: &Path, _response: &str) -> Result<()> {
+        fn apply_append_from_string(
+            &self,
+            _file: &Path,
+            _response: &str,
+            _apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
+        ) -> Result<()> {
             anyhow::bail!("unexpected append replay in write runtime test")
         }
     }
@@ -6968,6 +7038,7 @@ mod tests {
             &self,
             _file: &Path,
             _expected_head: &str,
+            _apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
         ) -> Result<()> {
             Ok(())
         }
@@ -6976,6 +7047,7 @@ mod tests {
             &self,
             _file: &Path,
             _replay_body: &str,
+            _apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
         ) -> Result<usize> {
             Ok(0)
         }
@@ -8932,8 +9004,12 @@ mod tests {
         )
         .unwrap();
 
+        let guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(&doc).unwrap();
+        let effects =
+            agent_doc_closeout_runtime_io::RuntimeRepairIoEffects::new(&doc, &guard).unwrap();
         assert!(
-            agent_doc_repair_runtime_io::recover_missing_committed_head_response(&doc).unwrap(),
+            agent_doc_repair_runtime_io::recover_missing_committed_head_response(&effects, &doc)
+                .unwrap(),
             "missing committed response should be recovered"
         );
 
@@ -9038,9 +9114,13 @@ mod tests {
         .unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(visible), Some(visible)).unwrap();
 
+        let guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(&doc).unwrap();
+        let effects =
+            agent_doc_closeout_runtime_io::RuntimeRepairIoEffects::new(&doc, &guard).unwrap();
         assert!(
             agent_doc_repair_io::recover_empty_response_for_strict_closeout(
                 agent_doc_repair_runtime_io::repair_coordinator_effects(
+                    &effects,
                     &NOOP_REPAIR_REPLAY_WRITE_EFFECTS
                 ),
                 &doc,

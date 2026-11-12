@@ -320,7 +320,7 @@ fn maybe_record_preflight_terminal_closeout_proof(file: &Path, did_commit: bool)
 
 fn record_preflight_terminal_closeout_proof(file: &Path, did_commit: bool) -> Result<()> {
     let agent_doc_session_check_io::SessionCheckStatus::Ok(_) =
-        agent_doc_session_check_io::inspect(
+        agent_doc_session_check_io::inspect_read_only(
             file,
             &agent_doc_closeout_runtime_io::session_check_effects(),
         )?
@@ -927,8 +927,12 @@ fn run_with_options_to_writer_in_pass(
         || if options.probe {
             false
         } else {
+            let apply_guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(file)?;
+            let repair_effects =
+                agent_doc_closeout_runtime_io::RuntimeRepairIoEffects::new(file, &apply_guard)?;
             match agent_doc_repair_io::run(
                 agent_doc_repair_runtime_io::repair_coordinator_effects(
+                    &repair_effects,
                     &agent_doc_write_runtime_io::REPAIR_REPLAY_WRITE_EFFECTS,
                 ),
                 file,

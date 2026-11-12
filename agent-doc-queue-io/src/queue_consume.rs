@@ -691,6 +691,27 @@ pub fn consume_queue_prompt_if_head_matches_with_outcome(
     )
 }
 
+pub fn consume_queue_prompt_if_head_matches_with_outcome_under_apply_guard(
+    file: &Path,
+    expected_head: &str,
+    done_ids: &[String],
+    skip_visible_guard: bool,
+    effects: &dyn QueueConsumeWriteEffects,
+    apply_guard: &crate::queue_edit_owner::QueueEditGuard,
+) -> Result<Option<QueueConsumptionOutcome>> {
+    apply_guard.ensure_protects(file)?;
+    consume_queue_prompts_with_options(
+        file,
+        done_ids,
+        1,
+        skip_visible_guard,
+        Some(expected_head),
+        &[],
+        effects,
+        apply_guard,
+    )
+}
+
 #[derive(Debug, Clone)]
 struct AddressableExecutableRow {
     display: String,
@@ -2405,6 +2426,24 @@ pub fn strike_answered_free_text_queue_heads(
     )
 }
 
+pub fn strike_answered_free_text_queue_heads_under_apply_guard(
+    file: &Path,
+    response_body: &str,
+    skip_visible_guard: bool,
+    effects: &dyn QueueConsumeWriteEffects,
+    apply_guard: &crate::queue_edit_owner::QueueEditGuard,
+) -> Result<usize> {
+    apply_guard.ensure_protects(file)?;
+    strike_free_text_queue_heads_with_proof(
+        file,
+        response_body,
+        skip_visible_guard,
+        AnswerPresenceProof::Materialized,
+        effects,
+        apply_guard,
+    )
+}
+
 /// `#qresiduewedge`: strike the free-text heads a committed-heading replay
 /// answers — a response repair parks instead of replaying because the
 /// document already holds an answer under its `### Re:` heading. A head
@@ -2426,6 +2465,23 @@ pub fn strike_free_text_heads_answered_by_committed_heading_replay(
         AnswerPresenceProof::CommittedHeadingReplay,
         effects,
         &apply_guard,
+    )
+}
+
+pub fn strike_free_text_heads_answered_by_committed_heading_replay_under_apply_guard(
+    file: &Path,
+    replay_body: &str,
+    effects: &dyn QueueConsumeWriteEffects,
+    apply_guard: &crate::queue_edit_owner::QueueEditGuard,
+) -> Result<usize> {
+    apply_guard.ensure_protects(file)?;
+    strike_free_text_queue_heads_with_proof(
+        file,
+        replay_body,
+        false,
+        AnswerPresenceProof::CommittedHeadingReplay,
+        effects,
+        apply_guard,
     )
 }
 

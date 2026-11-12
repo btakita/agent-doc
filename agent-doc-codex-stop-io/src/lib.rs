@@ -3788,13 +3788,18 @@ fn try_recover_repeated_queue_head_response(
     );
 
     stop_phase("repeated_queue_repair");
+    let repair_guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(file)?;
+    let repair_effects =
+        agent_doc_closeout_runtime_io::RuntimeRepairIoEffects::new(file, &repair_guard)?;
     let repair_outcome = agent_doc_repair_io::run_with_queue_completion_ids(
         agent_doc_repair_runtime_io::repair_coordinator_effects(
+            &repair_effects,
             &agent_doc_write_runtime_io::REPAIR_REPLAY_WRITE_EFFECTS,
         ),
         file,
         &queue_completion_ids,
     )?;
+    drop(repair_guard);
     // Repair wrote the document; the pre-repair memo is now stale.
     invalidate_stop_document_cache();
     if repair_outcome.replayed_response() {
@@ -4750,8 +4755,12 @@ fn attempt_stop_closeout(
     // write retained under a deferred intent while the controller hands off) is a still-open
     // closeout whose owner the ownership predicate derives, not a hook failure. Propagating it here surfaced as "Stop hook failed closed" on fpe.md
     // (2026-09-30) while the same intent settled and committed 29s later.
+    let repair_guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(file)?;
+    let repair_effects =
+        agent_doc_closeout_runtime_io::RuntimeRepairIoEffects::new(file, &repair_guard)?;
     let repair_outcome = match agent_doc_repair_io::run_with_queue_completion_ids(
         agent_doc_repair_runtime_io::repair_coordinator_effects(
+            &repair_effects,
             &agent_doc_write_runtime_io::REPAIR_REPLAY_WRITE_EFFECTS,
         ),
         file,
@@ -4783,6 +4792,7 @@ fn attempt_stop_closeout(
             return Ok(StopCloseAttempt::StillOpen { note });
         }
     };
+    drop(repair_guard);
     // Repair wrote the document; the pre-repair memo is now stale.
     invalidate_stop_document_cache();
     log_slow_stop_closeout_phase(file, "intent_repair", &mut phase_started);

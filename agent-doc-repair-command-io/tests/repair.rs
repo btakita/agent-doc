@@ -64,8 +64,11 @@ use std::path::Path;
 
 #[cfg(test)]
 fn run(file: &Path) -> Result<RepairOutcome> {
+    let guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(file)?;
+    let effects = agent_doc_closeout_runtime_io::RuntimeRepairIoEffects::new(file, &guard)?;
     agent_doc_repair_io::run(
         agent_doc_repair_runtime_io::repair_coordinator_effects(
+            &effects,
             &agent_doc_write_runtime_io::REPAIR_REPLAY_WRITE_EFFECTS,
         ),
         file,
@@ -73,8 +76,11 @@ fn run(file: &Path) -> Result<RepairOutcome> {
 }
 
 pub fn repair(file: &Path) -> Result<RepairOutcome> {
+    let guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(file)?;
+    let effects = agent_doc_closeout_runtime_io::RuntimeRepairIoEffects::new(file, &guard)?;
     agent_doc_repair_io::repair(
         agent_doc_repair_runtime_io::repair_coordinator_effects(
+            &effects,
             &agent_doc_write_runtime_io::REPAIR_REPLAY_WRITE_EFFECTS,
         ),
         file,
@@ -98,6 +104,71 @@ mod tests {
         std::fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc/locks")).unwrap();
         dir
+    }
+
+    #[test]
+    fn ordinary_repair_refuses_apply_contention_before_any_repair_effect() {
+        let dir = setup_project();
+        let doc = dir.path().join("repair-contention.md");
+        let content = "# Doc\n\n## User\n\nDo the thing\n";
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        agent_doc_repair_io::pending::save_pending_with_current_content(
+            &doc,
+            "Recovered answer.",
+            content,
+        )
+        .unwrap();
+        let before_snapshot = agent_doc_snapshot_io::load_document_baseline(&doc).unwrap();
+        let before_capture = agent_doc_capture_io::load_active(&doc).unwrap();
+        let _incumbent =
+            agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(&doc).unwrap();
+
+        let error = agent_doc_repair_command_io::repair(&doc).unwrap_err();
+        assert!(error.to_string().contains("queue mutation deferred"));
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), content);
+        assert_eq!(
+            agent_doc_snapshot_io::load_document_baseline(&doc).unwrap(),
+            before_snapshot
+        );
+        assert_eq!(
+            agent_doc_capture_io::load_active(&doc).unwrap(),
+            before_capture
+        );
+    }
+
+    #[test]
+    fn empty_cycle_cancel_refuses_apply_contention_before_baseline_or_cycle_effects() {
+        let dir = setup_project();
+        let doc = dir.path().join("cancel-contention.md");
+        let content = "# Doc\n\n## User\n\nDo the thing\n";
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        let before_snapshot = agent_doc_snapshot_io::load_document_baseline(&doc).unwrap();
+        let before_cycle = agent_doc_cycle_state_io::load(&doc).unwrap();
+        let _incumbent =
+            agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(&doc).unwrap();
+
+        let error =
+            agent_doc_repair_command_io::cancel_preflight_cycle_after_run_cancel(&doc).unwrap_err();
+        assert!(error.to_string().contains("queue mutation deferred"));
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), content);
+        assert_eq!(
+            agent_doc_snapshot_io::load_document_baseline(&doc).unwrap(),
+            before_snapshot
+        );
+        assert_eq!(agent_doc_cycle_state_io::load(&doc).unwrap(), before_cycle);
     }
 
     fn init_git_repo(root: &Path, tracked: &Path) {
@@ -627,11 +698,7 @@ mod tests {
         agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
 
         assert_eq!(
-            agent_doc_repair_io::cancel_preflight_cycle(
-                &agent_doc_closeout_runtime_io::REPAIR_IO_EFFECTS,
-                &doc
-            )
-            .unwrap(),
+            agent_doc_repair_command_io::cancel_preflight_cycle(&doc).unwrap(),
             CancelOutcome::Protected
         );
         let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
@@ -647,11 +714,7 @@ mod tests {
         agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
 
         assert_eq!(
-            agent_doc_repair_io::cancel_preflight_cycle_after_run_cancel(
-                &agent_doc_closeout_runtime_io::REPAIR_IO_EFFECTS,
-                &doc
-            )
-            .unwrap(),
+            agent_doc_repair_command_io::cancel_preflight_cycle_after_run_cancel(&doc).unwrap(),
             CancelOutcome::Abandoned
         );
         let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
@@ -676,20 +739,12 @@ mod tests {
 
         // The same cycle, asked without proof, is still protected.
         assert_eq!(
-            agent_doc_repair_io::cancel_preflight_cycle(
-                &agent_doc_closeout_runtime_io::REPAIR_IO_EFFECTS,
-                &doc
-            )
-            .unwrap(),
+            agent_doc_repair_command_io::cancel_preflight_cycle(&doc).unwrap(),
             CancelOutcome::Protected
         );
 
         assert_eq!(
-            agent_doc_repair_io::cancel_preflight_cycle_after_owner_release(
-                &agent_doc_closeout_runtime_io::REPAIR_IO_EFFECTS,
-                &doc
-            )
-            .unwrap(),
+            agent_doc_repair_command_io::cancel_preflight_cycle_after_owner_release(&doc).unwrap(),
             CancelOutcome::Abandoned
         );
         let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
@@ -770,11 +825,7 @@ mod tests {
         agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
 
         assert_eq!(
-            agent_doc_repair_io::cancel_preflight_cycle_after_owner_release(
-                &agent_doc_closeout_runtime_io::REPAIR_IO_EFFECTS,
-                &doc
-            )
-            .unwrap(),
+            agent_doc_repair_command_io::cancel_preflight_cycle_after_owner_release(&doc).unwrap(),
             CancelOutcome::Protected,
             "a fresh cycle may still be generating its first response"
         );
@@ -797,11 +848,7 @@ mod tests {
         agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
 
         assert_eq!(
-            agent_doc_repair_io::cancel_preflight_cycle_after_run_cancel(
-                &agent_doc_closeout_runtime_io::REPAIR_IO_EFFECTS,
-                &doc
-            )
-            .unwrap(),
+            agent_doc_repair_command_io::cancel_preflight_cycle_after_run_cancel(&doc).unwrap(),
             CancelOutcome::Abandoned
         );
     }
@@ -822,11 +869,7 @@ mod tests {
         );
 
         assert_eq!(
-            agent_doc_repair_io::cancel_preflight_cycle_after_owner_release(
-                &agent_doc_closeout_runtime_io::REPAIR_IO_EFFECTS,
-                &doc
-            )
-            .unwrap(),
+            agent_doc_repair_command_io::cancel_preflight_cycle_after_owner_release(&doc).unwrap(),
             CancelOutcome::Protected
         );
         assert!(
@@ -849,11 +892,7 @@ mod tests {
         agent_doc_capture_io::capture_response(&doc, "### Re: do — opus-4-8\n\nDone.\n").unwrap();
 
         assert_eq!(
-            agent_doc_repair_io::cancel_preflight_cycle(
-                &agent_doc_closeout_runtime_io::REPAIR_IO_EFFECTS,
-                &doc
-            )
-            .unwrap(),
+            agent_doc_repair_command_io::cancel_preflight_cycle(&doc).unwrap(),
             CancelOutcome::Protected
         );
         assert!(
@@ -881,11 +920,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            agent_doc_repair_io::cancel_preflight_cycle(
-                &agent_doc_closeout_runtime_io::REPAIR_IO_EFFECTS,
-                &doc
-            )
-            .unwrap(),
+            agent_doc_repair_command_io::cancel_preflight_cycle(&doc).unwrap(),
             CancelOutcome::Protected
         );
     }
@@ -896,11 +931,7 @@ mod tests {
         let doc = dir.path().join("test.md");
         std::fs::write(&doc, "# Doc\n\nNothing\n").unwrap();
         assert_eq!(
-            agent_doc_repair_io::cancel_preflight_cycle(
-                &agent_doc_closeout_runtime_io::REPAIR_IO_EFFECTS,
-                &doc
-            )
-            .unwrap(),
+            agent_doc_repair_command_io::cancel_preflight_cycle(&doc).unwrap(),
             CancelOutcome::NoOpenCycle
         );
     }

@@ -753,10 +753,10 @@ impl agent_doc_sync_io::SyncRuntimeEffects for CliSyncRuntimeEffects {
         &self,
         file: &Path,
     ) -> anyhow::Result<agent_doc_turn::repair::RepairOutcome> {
-        agent_doc_repair_io::repair_stale_preflight_started_cycle(
-            &agent_doc_closeout_runtime_io::REPAIR_IO_EFFECTS,
-            file,
-        )
+        let apply_guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(file)?;
+        let effects =
+            agent_doc_closeout_runtime_io::RuntimeRepairIoEffects::new(file, &apply_guard)?;
+        agent_doc_repair_io::repair_stale_preflight_started_cycle(&effects, file)
     }
 
     fn save_pending(&self, file: &Path, response: &str) -> anyhow::Result<()> {
@@ -7726,10 +7726,7 @@ fn try_main() -> anyhow::Result<()> {
         }
         Commands::Dedupe { file } => dedupe_cmd::run(&file),
         Commands::Cancel { file } => {
-            match agent_doc_repair_io::cancel_preflight_cycle(
-                &agent_doc_closeout_runtime_io::REPAIR_IO_EFFECTS,
-                &file,
-            )? {
+            match agent_doc_repair_command_io::cancel_preflight_cycle(&file)? {
                 agent_doc_turn::repair::CancelOutcome::Abandoned => {
                     println!(
                         "[cancel] abandoned orphaned preflight_started cycle; next dispatch starts fresh"

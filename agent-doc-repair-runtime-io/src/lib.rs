@@ -6,19 +6,21 @@ use agent_doc_document::write_normalization::{
 use agent_doc_turn::response_replay::dedupe_responses;
 use anyhow::{Context, Result};
 
-pub fn repair_coordinator_effects<ReplayWriteEffects>(
-    replay_write_effects: &'static ReplayWriteEffects,
+pub fn repair_coordinator_effects<'a, ReplayWriteEffects>(
+    repair_io_effects: &'a agent_doc_closeout_runtime_io::RuntimeRepairIoEffects<'a>,
+    replay_write_effects: &'a ReplayWriteEffects,
 ) -> agent_doc_repair_io::RepairCoordinatorEffects<
-    'static,
-    agent_doc_closeout_runtime_io::RuntimeRepairIoEffects,
+    'a,
+    agent_doc_closeout_runtime_io::RuntimeRepairIoEffects<'a>,
     ReplayWriteEffects,
 >
 where
     ReplayWriteEffects: agent_doc_repair_io::RepairReplayWriteEffects,
 {
     agent_doc_repair_io::RepairCoordinatorEffects {
-        repair_io_effects: &agent_doc_closeout_runtime_io::REPAIR_IO_EFFECTS,
+        repair_io_effects,
         replay_write_effects,
+        apply_guard: repair_io_effects.apply_guard(),
         complete_required_closeout: repair_complete_required_closeout,
         inspect_session: repair_inspect_session,
         recover_missing_committed_head_response,
@@ -26,18 +28,37 @@ where
     }
 }
 
-fn repair_complete_required_closeout(file: &Path) -> Result<bool> {
-    agent_doc_closeout_runtime_io::complete_required_closeout(file, false)
-}
-
-fn repair_inspect_session(file: &Path) -> Result<agent_doc_session_check_io::SessionCheckStatus> {
-    agent_doc_session_check_io::inspect(
+fn repair_complete_required_closeout(
+    effects: &agent_doc_closeout_runtime_io::RuntimeRepairIoEffects<'_>,
+    file: &Path,
+) -> Result<bool> {
+    agent_doc_closeout_runtime_io::complete_required_closeout_under_apply_guard(
         file,
-        &agent_doc_closeout_runtime_io::session_check_effects(),
+        false,
+        effects.apply_guard(),
     )
 }
 
-pub fn recover_missing_committed_head_response(file: &Path) -> Result<bool> {
+fn repair_inspect_session(
+    effects: &agent_doc_closeout_runtime_io::RuntimeRepairIoEffects<'_>,
+    file: &Path,
+) -> Result<agent_doc_session_check_io::SessionCheckStatus> {
+    let session_effects = agent_doc_closeout_runtime_io::session_check_effects_under_apply_guard(
+        file,
+        effects.apply_guard(),
+    )?;
+    agent_doc_session_check_io::inspect_under_apply_guard(
+        file,
+        &session_effects,
+        effects.apply_guard(),
+    )
+}
+
+pub fn recover_missing_committed_head_response(
+    effects: &agent_doc_closeout_runtime_io::RuntimeRepairIoEffects<'_>,
+    file: &Path,
+) -> Result<bool> {
+    effects.apply_guard().ensure_protects(file)?;
     let Some(head_content) = agent_doc_git_io::revision::show_head(file)? else {
         return Ok(false);
     };
@@ -76,7 +97,11 @@ pub fn recover_missing_committed_head_response(file: &Path) -> Result<bool> {
     Ok(true)
 }
 
-pub fn recover_dedupe_only_drift(file: &Path) -> Result<bool> {
+pub fn recover_dedupe_only_drift(
+    effects: &agent_doc_closeout_runtime_io::RuntimeRepairIoEffects<'_>,
+    file: &Path,
+) -> Result<bool> {
+    effects.apply_guard().ensure_protects(file)?;
     let Some(head_content) = agent_doc_git_io::revision::show_head(file)? else {
         return Ok(false);
     };

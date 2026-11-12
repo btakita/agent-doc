@@ -336,9 +336,13 @@ pub fn recover_empty_response_for_strict_closeout(
     has_pending_mutation: bool,
     force_disk: bool,
     commit_requested: bool,
+    apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
 ) -> Result<bool> {
+    let repair_effects =
+        agent_doc_closeout_runtime_io::RuntimeRepairIoEffects::new(file, apply_guard)?;
     if agent_doc_repair_io::recover_empty_response_for_strict_closeout(
         agent_doc_repair_runtime_io::repair_coordinator_effects(
+            &repair_effects,
             &agent_doc_write_runtime_io::REPAIR_REPLAY_WRITE_EFFECTS,
         ),
         file,
@@ -362,8 +366,12 @@ pub fn recover_empty_response_for_strict_closeout(
 
 #[cfg(test)]
 pub fn run(file: &Path) -> Result<RepairOutcome> {
+    let apply_guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(file)?;
+    let repair_effects =
+        agent_doc_closeout_runtime_io::RuntimeRepairIoEffects::new(file, &apply_guard)?;
     agent_doc_repair_io::run(
         agent_doc_repair_runtime_io::repair_coordinator_effects(
+            &repair_effects,
             &agent_doc_write_runtime_io::REPAIR_REPLAY_WRITE_EFFECTS,
         ),
         file,
@@ -381,12 +389,22 @@ pub fn repair(file: &Path) -> Result<RepairOutcome> {
     {
         anyhow::bail!("{}", unlandable.operator_report(file));
     }
+    let apply_guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(file)?;
+    let repair_effects =
+        agent_doc_closeout_runtime_io::RuntimeRepairIoEffects::new(file, &apply_guard)?;
     agent_doc_repair_io::repair(
         agent_doc_repair_runtime_io::repair_coordinator_effects(
+            &repair_effects,
             &agent_doc_write_runtime_io::REPAIR_REPLAY_WRITE_EFFECTS,
         ),
         file,
     )
+}
+
+pub fn cancel_preflight_cycle(file: &Path) -> Result<agent_doc_turn::repair::CancelOutcome> {
+    let apply_guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(file)?;
+    let effects = agent_doc_closeout_runtime_io::RuntimeRepairIoEffects::new(file, &apply_guard)?;
+    agent_doc_repair_io::cancel_preflight_cycle(&effects, file)
 }
 
 /// Reclaim the empty preflight owned by a harness run that has already reached
@@ -395,10 +413,9 @@ pub fn repair(file: &Path) -> Result<RepairOutcome> {
 pub fn cancel_preflight_cycle_after_run_cancel(
     file: &Path,
 ) -> Result<agent_doc_turn::repair::CancelOutcome> {
-    agent_doc_repair_io::cancel_preflight_cycle_after_run_cancel(
-        &agent_doc_closeout_runtime_io::REPAIR_IO_EFFECTS,
-        file,
-    )
+    let apply_guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(file)?;
+    let effects = agent_doc_closeout_runtime_io::RuntimeRepairIoEffects::new(file, &apply_guard)?;
+    agent_doc_repair_io::cancel_preflight_cycle_after_run_cancel(&effects, file)
 }
 
 /// Reclaim the empty preflight left behind by an owner the controller proved
@@ -417,10 +434,9 @@ pub fn cancel_preflight_cycle_after_run_cancel(
 pub fn cancel_preflight_cycle_after_owner_release(
     file: &Path,
 ) -> Result<agent_doc_turn::repair::CancelOutcome> {
-    agent_doc_repair_io::cancel_preflight_cycle_after_owner_release(
-        &agent_doc_closeout_runtime_io::REPAIR_IO_EFFECTS,
-        file,
-    )
+    let apply_guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(file)?;
+    let effects = agent_doc_closeout_runtime_io::RuntimeRepairIoEffects::new(file, &apply_guard)?;
+    agent_doc_repair_io::cancel_preflight_cycle_after_owner_release(&effects, file)
 }
 
 /// Reclaim the empty preflight whose owning pane's harness reported a turn
@@ -428,10 +444,17 @@ pub fn cancel_preflight_cycle_after_owner_release(
 pub fn cancel_preflight_cycle_after_harness_turn_end(
     file: &Path,
 ) -> Result<agent_doc_turn::repair::CancelOutcome> {
-    agent_doc_repair_io::cancel_preflight_cycle_after_harness_turn_end(
-        &agent_doc_closeout_runtime_io::REPAIR_IO_EFFECTS,
-        file,
-    )
+    let apply_guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(file)?;
+    let effects = agent_doc_closeout_runtime_io::RuntimeRepairIoEffects::new(file, &apply_guard)?;
+    agent_doc_repair_io::cancel_preflight_cycle_after_harness_turn_end(&effects, file)
+}
+
+pub fn cancel_preflight_cycle_after_stable_dispatch_ready_pane(
+    file: &Path,
+) -> Result<agent_doc_turn::repair::CancelOutcome> {
+    let apply_guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(file)?;
+    let effects = agent_doc_closeout_runtime_io::RuntimeRepairIoEffects::new(file, &apply_guard)?;
+    agent_doc_repair_io::cancel_preflight_cycle_after_stable_dispatch_ready_pane(&effects, file)
 }
 
 /// Return the stable operation key only when the durable cycle contains a
@@ -1125,8 +1148,12 @@ impl LegacyResumeRepairEffects for RuntimeLegacyResumeRepair {
     }
 
     fn repair(&self, file: &Path) -> Result<RepairOutcome> {
+        let apply_guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(file)?;
+        let repair_effects =
+            agent_doc_closeout_runtime_io::RuntimeRepairIoEffects::new(file, &apply_guard)?;
         agent_doc_repair_io::repair_preserving_live_authority(
             agent_doc_repair_runtime_io::repair_coordinator_effects(
+                &repair_effects,
                 &agent_doc_write_runtime_io::REPAIR_REPLAY_WRITE_EFFECTS,
             ),
             file,

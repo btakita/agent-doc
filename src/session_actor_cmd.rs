@@ -1122,10 +1122,7 @@ fn reclaim_orphaned_cycle_after_run_cancel(
     file: &Path,
     source: &str,
 ) -> agent_doc_turn::repair::CancelOutcome {
-    match agent_doc_repair_io::cancel_preflight_cycle_after_run_cancel(
-        &agent_doc_closeout_runtime_io::REPAIR_IO_EFFECTS,
-        file,
-    ) {
+    match agent_doc_repair_command_io::cancel_preflight_cycle_after_run_cancel(file) {
         Ok(outcome) => {
             agent_doc_ops_log_io::log_op(
                 file,

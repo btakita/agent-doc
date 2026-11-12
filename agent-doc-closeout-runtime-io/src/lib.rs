@@ -7,9 +7,26 @@ pub use agent_doc_document_realtime_io::{
     RuntimePipelineFrontmatterEffects as PipelineFrontmatterEffects,
 };
 
-pub struct RuntimeRepairIoEffects;
+/// Repair mutations are valid only while their caller owns the document-wide
+/// queue/apply transaction.  Keeping the capability in the adapter makes an
+/// unguarded production repair impossible to construct accidentally.
+pub struct RuntimeRepairIoEffects<'a> {
+    apply_guard: &'a agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
+}
 
-pub static REPAIR_IO_EFFECTS: RuntimeRepairIoEffects = RuntimeRepairIoEffects;
+impl<'a> RuntimeRepairIoEffects<'a> {
+    pub fn new(
+        file: &Path,
+        apply_guard: &'a agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
+    ) -> Result<Self> {
+        apply_guard.ensure_protects(file)?;
+        Ok(Self { apply_guard })
+    }
+
+    pub fn apply_guard(&self) -> &'a agent_doc_queue_io::queue_edit_owner::QueueEditGuard {
+        self.apply_guard
+    }
+}
 
 struct RecoveryCloseoutOwnerGuard {
     file: std::path::PathBuf,
@@ -158,7 +175,7 @@ fn resolve_recovery_closeout_owner_after_first_claim(
     }
 }
 
-impl agent_doc_repair_io::RepairIoEffects for RuntimeRepairIoEffects {
+impl agent_doc_repair_io::RepairIoEffects for RuntimeRepairIoEffects<'_> {
     fn preflight_turn_fence(&self, file: &Path) -> Result<agent_doc_repair_io::PreflightTurnFence> {
         let Some(project_root) = agent_doc_project_root_io::project_root_containing(file) else {
             return Ok(agent_doc_repair_io::PreflightTurnFence {
@@ -292,12 +309,12 @@ impl agent_doc_repair_io::RepairIoEffects for RuntimeRepairIoEffects {
         file: &Path,
         mutation: agent_doc_flow_io::closeout::CloseoutRecoveryMutation<'_>,
     ) -> Result<()> {
-        let apply_guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(file)?;
-        apply_closeout_recovery_mutation_under_apply_guard(file, mutation, &apply_guard)
+        self.apply_guard.ensure_protects(file)?;
+        apply_closeout_recovery_mutation_under_apply_guard(file, mutation, self.apply_guard)
     }
 }
 
-impl agent_doc_repair_io::RepairTemplateWriteEffects for RuntimeRepairIoEffects {
+impl agent_doc_repair_io::RepairTemplateWriteEffects for RuntimeRepairIoEffects<'_> {
     fn atomic_write_if_current(
         &self,
         file: &Path,
@@ -361,7 +378,9 @@ fn repair_atomic_write_if_current(
     Ok(authoritative)
 }
 
-pub struct RuntimeSessionCheckEffects;
+pub struct RuntimeSessionCheckEffects<'a> {
+    apply_guard: Option<&'a agent_doc_queue_io::queue_edit_owner::QueueEditGuard>,
+}
 
 /// Closed transition identities emitted while resuming one durable captured
 /// response.
@@ -576,8 +595,18 @@ fn pending_only_commit_target_landed(
             && committed_snapshot_hash.is_some_and(|hash| hash.eq_ignore_ascii_case(head_hash)))
 }
 
-pub fn session_check_effects() -> RuntimeSessionCheckEffects {
-    RuntimeSessionCheckEffects
+pub fn session_check_effects() -> RuntimeSessionCheckEffects<'static> {
+    RuntimeSessionCheckEffects { apply_guard: None }
+}
+
+pub fn session_check_effects_under_apply_guard<'a>(
+    file: &Path,
+    apply_guard: &'a agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
+) -> Result<RuntimeSessionCheckEffects<'a>> {
+    apply_guard.ensure_protects(file)?;
+    Ok(RuntimeSessionCheckEffects {
+        apply_guard: Some(apply_guard),
+    })
 }
 
 /// `#sessioncheckread`: read-only twin of
@@ -586,7 +615,7 @@ pub fn session_check_effects() -> RuntimeSessionCheckEffects {
 /// intent, or roll back an invalid completion right now, without recording
 /// the inferred target or touching the editor, disk, or git.
 fn retained_pending_only_commit_is_pending(
-    effects: &RuntimeSessionCheckEffects,
+    effects: &RuntimeSessionCheckEffects<'_>,
     file: &Path,
 ) -> Result<bool> {
     use agent_doc_session_check_io::SessionCheckEffects as _;
@@ -636,7 +665,7 @@ fn retained_pending_only_commit_is_pending(
     )
 }
 
-impl agent_doc_session_check_io::SessionCheckEffects for RuntimeSessionCheckEffects {
+impl agent_doc_session_check_io::SessionCheckEffects for RuntimeSessionCheckEffects<'_> {
     fn pending_committed_response_evidence_repair(&self, file: &Path) -> Result<Option<String>> {
         agent_doc_commit_io::pending_committed_response_evidence_repair(file)
     }
@@ -730,7 +759,15 @@ impl agent_doc_session_check_io::SessionCheckEffects for RuntimeSessionCheckEffe
         file: &Path,
         event: &str,
     ) -> Result<Option<&'static str>> {
-        agent_doc_repair_io::recover_missing_commit_boundary(&REPAIR_IO_EFFECTS, file, event)
+        let owned_guard;
+        let apply_guard = if let Some(apply_guard) = self.apply_guard {
+            apply_guard
+        } else {
+            owned_guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(file)?;
+            &owned_guard
+        };
+        let effects = RuntimeRepairIoEffects::new(file, apply_guard)?;
+        agent_doc_repair_io::recover_missing_commit_boundary(&effects, file, event)
     }
 
     fn recover_retained_document_write(&self, file: &Path) -> Result<bool> {
@@ -1586,16 +1623,18 @@ impl agent_doc_flow_io::closeout::CloseoutEffects for RuntimeCloseoutEffects<'_>
     }
 
     fn cancel_preflight_cycle(&self, file: &Path) -> Result<agent_doc_turn::repair::CancelOutcome> {
-        self.require_apply_guard(file)?;
-        agent_doc_repair_io::cancel_preflight_cycle(&REPAIR_IO_EFFECTS, file)
+        let apply_guard = self.require_apply_guard(file)?;
+        let effects = RuntimeRepairIoEffects::new(file, apply_guard)?;
+        agent_doc_repair_io::cancel_preflight_cycle(&effects, file)
     }
 
     fn cancel_preflight_cycle_after_owner_release(
         &self,
         file: &Path,
     ) -> Result<agent_doc_turn::repair::CancelOutcome> {
-        self.require_apply_guard(file)?;
-        agent_doc_repair_io::cancel_preflight_cycle_after_owner_release(&REPAIR_IO_EFFECTS, file)
+        let apply_guard = self.require_apply_guard(file)?;
+        let effects = RuntimeRepairIoEffects::new(file, apply_guard)?;
+        agent_doc_repair_io::cancel_preflight_cycle_after_owner_release(&effects, file)
     }
 
     fn detect_jb_cache_conflict_cancel_recoverable(&self, file: &Path) -> Result<bool> {
@@ -1758,22 +1797,6 @@ mod tests {
                 .to_string()
                 .contains("queue mutation deferred")
         );
-        let mutation_error = agent_doc_repair_io::RepairIoEffects::apply_closeout_recovery_mutation(
-            &REPAIR_IO_EFFECTS,
-            &file,
-            agent_doc_flow_io::closeout::CloseoutRecoveryMutation::RefreshRecoveryProjectionFromContent {
-                content: "replacement",
-                write_visible_file: true,
-                reason: agent_doc_turn::closeout_recovery::CloseoutRecoveryMutationReason::ResetFromVisible,
-            },
-        )
-        .unwrap_err();
-        assert!(
-            mutation_error
-                .to_string()
-                .contains("queue mutation deferred")
-        );
-
         assert_eq!(std::fs::read_to_string(&file).unwrap(), before_document);
         assert_eq!(
             agent_doc_snapshot_io::load_document_baseline(&file).unwrap(),
@@ -2196,7 +2219,7 @@ mod tests {
             abandoned.last_event,
         );
 
-        let outcome = RuntimeSessionCheckEffects
+        let outcome = session_check_effects()
             .resume_captured_finalize(&file)
             .unwrap();
         assert!(
@@ -2287,7 +2310,7 @@ mod tests {
         );
         assert!(agent_doc_document_realtime_io::pending_document_write(&file).is_some());
 
-        let outcome = RuntimeSessionCheckEffects
+        let outcome = session_check_effects()
             .resume_captured_finalize(&file)
             .unwrap();
         assert_eq!(outcome, CapturedFinalizeResumeOutcome::Committed);
@@ -2353,7 +2376,7 @@ mod tests {
             Some(capture.capture_id.as_str())
         );
 
-        let outcome = RuntimeSessionCheckEffects
+        let outcome = session_check_effects()
             .resume_captured_finalize(&file)
             .unwrap();
         assert!(
@@ -2438,7 +2461,7 @@ mod tests {
         .unwrap();
         agent_doc_capture_io::mark_write_applied(&file).unwrap();
 
-        let outcome = RuntimeSessionCheckEffects
+        let outcome = session_check_effects()
             .resume_captured_finalize(&file)
             .unwrap();
         assert_eq!(outcome, CapturedFinalizeResumeOutcome::ClosedIgnoredPath);

@@ -3662,6 +3662,20 @@ pub fn inspect_read_only(
     crate::with_status_only_pass(|| inspect(file, &status_only))
 }
 
+/// Inspect from a transaction that already owns the document apply capability.
+/// Only the redundant foreign-owner probe is suppressed; ordinary lifecycle
+/// and closeout debt remain fail-closed.
+#[doc(hidden)]
+pub fn inspect_under_apply_guard(
+    file: &Path,
+    effects: &impl SessionCheckEffects,
+    apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
+) -> Result<SessionCheckStatus> {
+    apply_guard.ensure_protects(file)?;
+    let _scope = QueueApplyGuardScope::enter();
+    inspect(file, effects)
+}
+
 /// `#sessioncheckread`: [`inspect`] for an internal closeout caller that
 /// already owns write intent (`respond`'s failed-closeout re-check). It applies
 /// the same narrow self-heals as `agent-doc repair <FILE> --session-check-heal`

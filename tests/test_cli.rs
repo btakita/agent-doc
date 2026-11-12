@@ -14365,8 +14365,11 @@ fn test_agent_doc_flow_io_owns_closeout_effect_adapter() {
             && closeout_runtime.contains(
                 "impl agent_doc_flow_io::closeout::CloseoutEffects for RuntimeCloseoutEffects"
             )
-            && closeout_runtime.contains("pub static REPAIR_IO_EFFECTS"),
-        "agent-doc-closeout-runtime-io should own closeout and repair runtime effects ports"
+            && closeout_runtime.contains("pub struct RuntimeRepairIoEffects<'a>")
+            && closeout_runtime
+                .contains("apply_guard: &'a agent_doc_queue_io::queue_edit_owner::QueueEditGuard")
+            && !closeout_runtime.contains("pub static REPAIR_IO_EFFECTS"),
+        "agent-doc-closeout-runtime-io should own capability-guarded closeout and repair runtime effects ports"
     );
 
     assert!(

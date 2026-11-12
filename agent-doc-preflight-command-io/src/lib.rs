@@ -570,6 +570,11 @@ fn enforce_cycle_completion(
     file: &Path,
     preserve_fresh_owned_pane_reentry: bool,
 ) -> Result<(bool, bool)> {
+    let apply_guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(file)?;
+    let repair_effects =
+        agent_doc_closeout_runtime_io::RuntimeRepairIoEffects::new(file, &apply_guard)?;
+    let session_check_effects =
+        agent_doc_closeout_runtime_io::session_check_effects_under_apply_guard(file, &apply_guard)?;
     let mode = if preserve_fresh_owned_pane_reentry {
         agent_doc_preflight_io::PreflightCycleCompletionMode::PreserveFreshOwnedPaneReentry
     } else {
@@ -579,9 +584,10 @@ fn enforce_cycle_completion(
         file,
         &agent_doc_preflight_runtime_io::preflight_cycle_completion_effects(
             agent_doc_repair_runtime_io::repair_coordinator_effects(
+                &repair_effects,
                 &agent_doc_write_runtime_io::REPAIR_REPLAY_WRITE_EFFECTS,
             ),
-            agent_doc_closeout_runtime_io::session_check_effects(),
+            session_check_effects,
         ),
         mode,
     )

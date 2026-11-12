@@ -14,38 +14,43 @@ pub static PREFLIGHT_MAINTENANCE_WRITE_EFFECTS: RuntimePreflightMaintenanceWrite
     RuntimePreflightMaintenanceWriteEffects;
 
 pub struct RuntimePreflightCycleCompletionEffects<
+    'a,
     RepairIoEffects,
     ReplayWriteEffects,
     SessionCheckEffects,
 > where
-    RepairIoEffects: agent_doc_repair_io::RepairIoEffects
-        + agent_doc_repair_io::RepairTemplateWriteEffects
-        + 'static,
-    ReplayWriteEffects: agent_doc_repair_io::RepairReplayWriteEffects + 'static,
+    RepairIoEffects:
+        agent_doc_repair_io::RepairIoEffects + agent_doc_repair_io::RepairTemplateWriteEffects + 'a,
+    ReplayWriteEffects: agent_doc_repair_io::RepairReplayWriteEffects + 'a,
     SessionCheckEffects: agent_doc_session_check_io::SessionCheckEffects,
 {
     repair_effects:
-        agent_doc_repair_io::RepairCoordinatorEffects<'static, RepairIoEffects, ReplayWriteEffects>,
+        agent_doc_repair_io::RepairCoordinatorEffects<'a, RepairIoEffects, ReplayWriteEffects>,
     session_check_effects: SessionCheckEffects,
 }
 
 pub fn preflight_cycle_completion_effects<
+    'a,
     RepairIoEffects,
     ReplayWriteEffects,
     SessionCheckEffects,
 >(
     repair_effects: agent_doc_repair_io::RepairCoordinatorEffects<
-        'static,
+        'a,
         RepairIoEffects,
         ReplayWriteEffects,
     >,
     session_check_effects: SessionCheckEffects,
-) -> RuntimePreflightCycleCompletionEffects<RepairIoEffects, ReplayWriteEffects, SessionCheckEffects>
+) -> RuntimePreflightCycleCompletionEffects<
+    'a,
+    RepairIoEffects,
+    ReplayWriteEffects,
+    SessionCheckEffects,
+>
 where
-    RepairIoEffects: agent_doc_repair_io::RepairIoEffects
-        + agent_doc_repair_io::RepairTemplateWriteEffects
-        + 'static,
-    ReplayWriteEffects: agent_doc_repair_io::RepairReplayWriteEffects + 'static,
+    RepairIoEffects:
+        agent_doc_repair_io::RepairIoEffects + agent_doc_repair_io::RepairTemplateWriteEffects + 'a,
+    ReplayWriteEffects: agent_doc_repair_io::RepairReplayWriteEffects + 'a,
     SessionCheckEffects: agent_doc_session_check_io::SessionCheckEffects,
 {
     RuntimePreflightCycleCompletionEffects {
@@ -54,18 +59,18 @@ where
     }
 }
 
-impl<RepairIoEffects, ReplayWriteEffects, SessionCheckEffects>
+impl<'a, RepairIoEffects, ReplayWriteEffects, SessionCheckEffects>
     agent_doc_preflight_io::PreflightCycleCompletionEffects
     for RuntimePreflightCycleCompletionEffects<
+        'a,
         RepairIoEffects,
         ReplayWriteEffects,
         SessionCheckEffects,
     >
 where
-    RepairIoEffects: agent_doc_repair_io::RepairIoEffects
-        + agent_doc_repair_io::RepairTemplateWriteEffects
-        + 'static,
-    ReplayWriteEffects: agent_doc_repair_io::RepairReplayWriteEffects + 'static,
+    RepairIoEffects:
+        agent_doc_repair_io::RepairIoEffects + agent_doc_repair_io::RepairTemplateWriteEffects + 'a,
+    ReplayWriteEffects: agent_doc_repair_io::RepairReplayWriteEffects + 'a,
     SessionCheckEffects: agent_doc_session_check_io::SessionCheckEffects,
 {
     fn repair(&self, file: &Path) -> Result<agent_doc_turn::repair::RepairOutcome> {
@@ -105,7 +110,11 @@ where
     }
 
     fn session_interruption(&self, file: &Path) -> Result<Option<String>> {
-        match agent_doc_session_check_io::inspect(file, &self.session_check_effects)? {
+        match agent_doc_session_check_io::inspect_under_apply_guard(
+            file,
+            &self.session_check_effects,
+            self.repair_effects.apply_guard,
+        )? {
             // `#steerinterruptexit`: pending steering is this preflight's own
             // input, not a reason to refuse the resumed commit.
             agent_doc_session_check_io::SessionCheckStatus::Ok(_)

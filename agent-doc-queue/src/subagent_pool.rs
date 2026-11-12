@@ -22,22 +22,19 @@
 //!   expiry only means nobody refreshed the claim, so it is not evidence the
 //!   worker stopped (live miss, 2026-11-05: three working Claude Code workers
 //!   went `lost` at the two-hour TTL because nothing refreshed them);
-//! * a frozen worker frees its slot but keeps its claim. Frozen means evidence
-//!   the worker stopped: a recorded stop (`queue freeze`), or no heartbeat past
+//! * a frozen worker frees its slot. Frozen means evidence the worker stopped:
+//!   a recorded stop (`queue freeze`), or no heartbeat past
 //!   [`DEFAULT_WORKER_FROZEN_SECS`] on an attempt this recovery does not own.
-//!   work is proof of life while that wrapper remains open, so the coordinator
-//!   records it as a heartbeat (`queue claim --refresh`). If the wrapper exits
-//!   with that notice as its handback, the subagent-end hook freezes the ended
-//!   wrapper and a continuation wrapper rebinds the same generation with
-//!   `queue start`. A harness freeze with no handback stays `Running` and is not
-//!   marked `Lost`. Continue refuses because that worker is gone, which frees the
-//!   slot and offers the row for a new generation (`#lostrunningcontinue`). An
-//!   exact refresh or continuation rebind proves the same worker is still alive,
-//!   clears that failed continue, and keeps the generation
-//!   (`#frozenclaimrefreshrevive`). A lost-running
-//!   attempt is continued first. A heartbeat already past the frozen bound
-//!   fails that continue, and the same task is retried into the freed slot
-//!   (`#lostrunningcontinue`). Only `queue release --requeue` abandons it;
+//!   Work is proof of life while that wrapper remains open, so the coordinator
+//!   records it as a heartbeat (`queue claim --refresh`). Once the wrapper exits
+//!   and `queue freeze` records that stop, the command's immediate refill runs
+//!   failed-continue recovery and offers the same row for a fresh generation
+//!   (`#lostrunningcontinue`). The coordinator follows that refill's exact
+//!   claim / brief / start sequence; it never rebinds the stopped generation.
+//!   A lost-running attempt is likewise continued first. A heartbeat already
+//!   past the frozen bound fails that continue, and the same task is retried
+//!   into the freed slot (`#lostrunningcontinue`). An explicit `queue release
+//!   --requeue` also abandons the current attempt;
 //! * `Reported` attempts, unbound lapsed attempts, and attempts abandoned with
 //!   `queue release --requeue` hold no slot.
 //!

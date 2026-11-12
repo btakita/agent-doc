@@ -367,9 +367,9 @@ mod tests {
         );
     }
 
-    /// A frozen worker frees its slot but keeps its claim: the next head is
-    /// handed out, the failed-continue row is redispatched, and the replacement
-    /// attempt consumes the released slot (`#subagentworkpool`).
+    /// A frozen worker frees its slot: failed-continue recovery offers that
+    /// same head first, and its fresh replacement attempt consumes the slot
+    /// (`#subagentworkpool`).
     #[test]
     fn freezing_a_worker_requeues_its_head_and_frees_the_slot() {
         let dir = tempfile::tempdir().unwrap();
@@ -576,13 +576,11 @@ mod tests {
         assert!(!live.is_actionable(), "{live:#?}");
     }
 
-    /// A stopped harness freeze with no handback stays `Running`. Continue
-    /// fails, the slot frees, and the row is offered for a new generation.
-    /// An exact heartbeat proves that same worker is alive: the failed
-    /// continue is cleared and the generation is kept
-    /// (`#lostrunningcontinue`, `#frozenclaimrefreshrevive`).
+    /// A stopped harness freeze with no handback initially stays `Running`.
+    /// The refill immediately records failed continue, frees the slot, and
+    /// offers the row for a fresh generation (`#lostrunningcontinue`).
     #[test]
-    fn a_stopped_harness_freeze_is_offered_and_a_heartbeat_keeps_its_generation() {
+    fn a_stopped_harness_freeze_is_offered_as_a_fresh_generation() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let file = dir.path().join("task.md");
@@ -642,36 +640,29 @@ mod tests {
         assert!(!offered.blocks_dispatch(expired));
         let text = refill.render().unwrap();
         assert!(text.contains("queue claim"), "{text}");
-        let wrong =
-            crate::queue_claim::refresh_attempt(&file, "do [#a]", "subagent:a", 7200, Some(2))
-                .unwrap_err();
-        assert!(
-            wrong
-                .to_string()
-                .contains("NOT eligible for dispatch again"),
-            "{wrong}"
-        );
-        let revived =
-            crate::queue_claim::refresh_attempt(&file, "do [#a]", "subagent:a", 7200, Some(1))
-                .unwrap();
+        assert!(text.contains("queue brief"), "{text}");
+        assert!(text.contains("queue start"), "{text}");
+
+        let (_, replacement) =
+            crate::queue_claim::claim(&file, "do [#a]", "subagent:a-retry", 7200).unwrap();
         assert_eq!(
-            revived.state,
-            agent_doc_queue::queue_claim::QueueClaimState::Running
+            replacement.generation, 2,
+            "fresh refill claim: {replacement:#?}"
         );
-        assert!(revived.frozen.is_none(), "the heartbeat clears the freeze");
-        assert!(
-            revived.lost_continue.is_none(),
-            "proof of life drops the failed continue"
-        );
-        assert_eq!(revived.generation, 1);
-        assert_eq!(revived.heartbeat_at_secs, Some(expired));
-        assert!(!agent_doc_queue::lost_running_recovery::retry_authorized(
-            &revived
-        ));
+        assert_eq!(replacement.owner, "subagent:a-retry");
+        crate::queue_claim::start_attempt(
+            &file,
+            "do [#a]",
+            "subagent:a-retry",
+            "worker:subagent:a-retry",
+            7200,
+            replacement.generation,
+        )
+        .unwrap();
         let held = pool_refill_for_content(&file, &content, PoolRefillTrigger::Plan).unwrap();
         assert!(
             held.next_heads.iter().all(|head| head.item != "do [#a]"),
-            "a live heartbeat does not authorize a second generation: {held:#?}"
+            "the fresh retry occupies the slot: {held:#?}"
         );
         assert_eq!(held.pools[0].occupancy.running, 1, "{held:#?}");
     }

@@ -129,14 +129,13 @@ pool's running, dispatching, frozen, and free counts.
   new generation for a worker whose continue succeeded.
 - A harness freeze means the harness reported the worker ended without a
   result (`agent-doc queue freeze <FILE> --item <item> --generation <N>
-  --reason '<what was reported>'`). It frees the slot but keeps the claim; a
-  later report from that worker is still accepted. `queue claim --refresh`
-  with that attempt's owner and generation clears the freeze, including after
-  the claim TTL. A resumed transcript may use a new wrapper id; run `queue
-  start` with that returned id to atomically rebind the same generation and
-  clear the freeze. Reusing the old wrapper id is an idempotent resume. Expiry
-  does not turn a harness freeze into lost and does not make its head eligible
-  for dispatch. Only `queue release --requeue` abandons it.
+  --reason '<what was reported>'`). The command immediately runs failed-
+  continue recovery and prints the authoritative refill. When that refill
+  offers the stopped item again, run its exact `queue claim`, `queue brief`,
+  and `queue start` commands as a fresh attempt with the newly returned
+  generation and wrapper id. Never run `queue start` against the frozen owner
+  and generation or reuse an old start command: the emitted refill has already
+  authorized retry and the replacement claim retires that stopped attempt.
 - No heartbeat for `AGENT_DOC_SUBAGENT_FROZEN_SECS` (default 1.5 times the
   claim TTL, so expiry alone is never this case) fails continue. The same task
   is retried into the freed slot. Do not leave that row for a later prompt.

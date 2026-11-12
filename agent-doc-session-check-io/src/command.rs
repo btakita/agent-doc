@@ -400,6 +400,19 @@ impl ReadOnlyRetainedCloseoutResumeProjection {
 }
 
 pub trait SessionCheckEffects {
+    /// Whether every inspection through this adapter is observational only.
+    ///
+    /// This is stronger than [`Self::applies_self_heals`]: direct workflow
+    /// effects such as removed-claim cancellation do not dispatch through an
+    /// effects method.  The public inspection entrypoints use this bit to
+    /// install the status-only mutation fence and suppress ops/advisory writes
+    /// around the entire pass, so a caller cannot accidentally turn a
+    /// read-only adapter into an applying session-check by choosing `inspect`
+    /// instead of `inspect_read_only`.
+    fn read_only_inspection(&self) -> bool {
+        false
+    }
+
     /// `#sessioncheckread`: whether this caller may APPLY session-check's
     /// self-heals — archive/index restoration, response-replay
     /// canonicalization, snapshot rebasing, editor-native save requests,
@@ -2177,6 +2190,10 @@ struct StatusOnlySessionCheckEffects<'a, E> {
 }
 
 impl<E: SessionCheckEffects> SessionCheckEffects for StatusOnlySessionCheckEffects<'_, E> {
+    fn read_only_inspection(&self) -> bool {
+        true
+    }
+
     fn applies_self_heals(&self) -> bool {
         false
     }
@@ -3669,8 +3686,19 @@ pub fn inspect_read_only(
     file: &Path,
     effects: &impl SessionCheckEffects,
 ) -> Result<SessionCheckStatus> {
+    Ok(inspect_read_only_with_warnings(file, effects)?.status)
+}
+
+pub fn inspect_read_only_with_warnings(
+    file: &Path,
+    effects: &impl SessionCheckEffects,
+) -> Result<SessionCheckReport> {
     let status_only = StatusOnlySessionCheckEffects { inner: effects };
-    crate::with_status_only_pass(|| inspect(file, &status_only))
+    agent_doc_ops_log_io::with_ops_log_suppressed(|| {
+        crate::with_status_only_pass(|| {
+            crate::with_current_document_pass(|| inspect_with_warnings_inner(file, &status_only))
+        })
+    })
 }
 
 /// Inspect from a transaction that already owns the document apply capability.
@@ -3721,6 +3749,9 @@ pub fn inspect_with_warnings(
     file: &Path,
     effects: &impl SessionCheckEffects,
 ) -> Result<SessionCheckReport> {
+    if effects.read_only_inspection() {
+        return inspect_read_only_with_warnings(file, effects);
+    }
     // `#sccurrentpass`: callers outside `run_with_options` (compact/write
     // closeout) get the same one-version-per-sweep memo. Nested inside a pass
     // this reuses the outer one.

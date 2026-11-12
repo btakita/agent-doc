@@ -772,7 +772,7 @@ impl agent_doc_sync_io::SyncRuntimeEffects for CliSyncRuntimeEffects {
         &self,
         file: &Path,
     ) -> anyhow::Result<agent_doc_sync_io::SyncSessionCheckStatus> {
-        match agent_doc_session_check_io::inspect(
+        match agent_doc_session_check_io::inspect_read_only(
             file,
             &agent_doc_closeout_runtime_io::session_check_effects(),
         )? {
@@ -979,7 +979,7 @@ impl agent_doc_workflow_io::doctor::WorkflowDoctorEffects for CliWorkflowDoctorE
         &mut self,
         file: &Path,
     ) -> anyhow::Result<Option<agent_doc_workflow_io::doctor::LiveSessionCheckFacts>> {
-        let report = agent_doc_session_check_io::inspect_with_warnings(
+        let report = agent_doc_session_check_io::inspect_read_only_with_warnings(
             file,
             &agent_doc_closeout_runtime_io::session_check_effects(),
         )?;

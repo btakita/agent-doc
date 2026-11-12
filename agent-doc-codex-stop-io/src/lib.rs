@@ -2196,7 +2196,7 @@ fn apply_bound_stop(
     cleanup_roots: &[PathBuf],
 ) -> Result<StopResponse> {
     stop_phase("session_check_inspect");
-    match agent_doc_session_check_io::inspect(
+    match agent_doc_session_check_io::inspect_read_only(
         file,
         &agent_doc_closeout_runtime_io::session_check_effects(),
     )? {
@@ -2375,7 +2375,7 @@ fn apply_bound_stop(
                     return Ok(StopResponse::AllowExit);
                 }
                 invalidate_stop_document_cache();
-                let status = agent_doc_session_check_io::inspect(
+                let status = agent_doc_session_check_io::inspect_read_only(
                     file,
                     &agent_doc_closeout_runtime_io::session_check_effects(),
                 )?;
@@ -2740,7 +2740,7 @@ fn try_resume_captured_finalize_in_hook(file: &Path) -> CapturedFinalizeHookResu
                 return CapturedFinalizeHookResume::Pending;
             }
             agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::Superseded => {
-                return if agent_doc_session_check_io::inspect(
+                return if agent_doc_session_check_io::inspect_read_only(
                     file,
                     &agent_doc_closeout_runtime_io::session_check_effects(),
                 )

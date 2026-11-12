@@ -480,6 +480,45 @@ fn captured_finalize_resume_key_from_capture(
     })
 }
 
+fn captured_finalize_projected_phase(
+    file: &Path,
+    expected: &CapturedFinalizeResumeKey,
+) -> Result<Option<agent_doc_turn::CyclePhase>> {
+    Ok(
+        agent_doc_cycle_state_io::load_with_closeout_projection(file)?
+            .filter(|state| {
+                state.cycle_id == expected.cycle_id
+                    && state.capture_id.as_deref() == Some(expected.capture_id.as_str())
+                    && state.response_sha256.as_deref() == Some(expected.response_sha256.as_str())
+            })
+            .map(|state| state.phase),
+    )
+}
+
+fn maybe_pause_captured_finalize_resume_before_owner_claim(file: &Path) -> Result<()> {
+    let Ok(target) = std::env::var("AGENT_DOC_TEST_RESUME_BEFORE_OWNER_CLAIM_FILE") else {
+        return Ok(());
+    };
+    if Path::new(&target) != file {
+        return Ok(());
+    }
+    let Ok(marker) = std::env::var("AGENT_DOC_TEST_RESUME_BEFORE_OWNER_CLAIM_MARKER") else {
+        return Ok(());
+    };
+    let release = std::env::var("AGENT_DOC_TEST_RESUME_BEFORE_OWNER_CLAIM_RELEASE")
+        .context("captured-finalize resume test barrier requires a release path")?;
+    std::fs::write(marker, b"ready")?;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    while !Path::new(&release).exists() {
+        anyhow::ensure!(
+            std::time::Instant::now() < deadline,
+            "timed out waiting for captured-finalize resume barrier release"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    Ok(())
+}
+
 /// Resume one exact captured finalize operation through the existing strict
 /// repair/write/commit path. Disk fallback is explicitly disabled: a live or
 /// reconnecting editor remains authoritative, and convergence failures retain
@@ -488,22 +527,105 @@ pub fn resume_captured_finalize(
     file: &Path,
     expected: &CapturedFinalizeResumeKey,
 ) -> CapturedFinalizeResumeOutcome {
-    let current = match captured_finalize_resume_key(file) {
+    let observed_key = match captured_finalize_resume_key(file) {
         Ok(current) => current,
         Err(err) => {
             return classify_captured_finalize_resume_error(&format!("{err:#}"));
         }
     };
-    if current.as_ref() != Some(expected) {
+    if observed_key.as_ref() != Some(expected) {
         return CapturedFinalizeResumeOutcome::Superseded;
     }
 
-    let resolved = match agent_doc_cycle_state_io::load_projected_captured_finalize_resume(file) {
-        Ok(Some(resolved)) => resolved,
-        Ok(None) => return CapturedFinalizeResumeOutcome::Superseded,
+    let observed_resolved =
+        match agent_doc_cycle_state_io::load_projected_captured_finalize_resume(file) {
+            Ok(Some(resolved)) => resolved,
+            Ok(None) => return CapturedFinalizeResumeOutcome::Superseded,
+            Err(err) => return classify_captured_finalize_resume_error(&format!("{err:#}")),
+        };
+    let observed_phase = match captured_finalize_projected_phase(file, expected) {
+        Ok(phase) => phase,
         Err(err) => return classify_captured_finalize_resume_error(&format!("{err:#}")),
     };
-    // GH 90: classify the captured bytes before any effect. A deterministic
+    if let Err(err) = maybe_pause_captured_finalize_resume_before_owner_claim(file) {
+        return classify_captured_finalize_resume_error(&format!("{err:#}"));
+    }
+    // A winner may have landed while this attempt was waiting to enter owner
+    // acquisition. Re-read the complete authority cut before even touching
+    // the durable closeout-owner ledger so an already-superseded attempt has
+    // literally zero write/log effects. This is only a fast retirement check;
+    // the same cut is still revalidated under both owners below to close the
+    // subsequent TOCTOU window.
+    let preclaim_key = match captured_finalize_resume_key(file) {
+        Ok(key) => key,
+        Err(err) => return classify_captured_finalize_resume_error(&format!("{err:#}")),
+    };
+    let preclaim_resolved =
+        match agent_doc_cycle_state_io::load_projected_captured_finalize_resume(file) {
+            Ok(Some(resolved)) => resolved,
+            Ok(None) => return CapturedFinalizeResumeOutcome::Superseded,
+            Err(err) => return classify_captured_finalize_resume_error(&format!("{err:#}")),
+        };
+    let preclaim_phase = match captured_finalize_projected_phase(file, expected) {
+        Ok(phase) => phase,
+        Err(err) => return classify_captured_finalize_resume_error(&format!("{err:#}")),
+    };
+    if preclaim_key.as_ref() != Some(expected)
+        || preclaim_resolved != observed_resolved
+        || preclaim_phase != observed_phase
+    {
+        return CapturedFinalizeResumeOutcome::Superseded;
+    }
+    // Preserve the global closeout transaction order: the controller lease is
+    // always claimed before the per-document apply guard. Nested strict-write
+    // calls see this matching lease as covered instead of trying to acquire it
+    // in the reverse order.
+    let closeout_lease =
+        match agent_doc_write_runtime_io::claim_captured_finalize_resume_closeout_lease(
+            file,
+            &expected.cycle_id,
+        ) {
+            Ok(agent_doc_write_runtime_io::CapturedFinalizeResumeLeaseClaim::Acquired(lease)) => {
+                lease
+            }
+            Ok(agent_doc_write_runtime_io::CapturedFinalizeResumeLeaseClaim::CycleSuperseded) => {
+                return CapturedFinalizeResumeOutcome::Superseded;
+            }
+            Err(err) => return classify_captured_finalize_resume_error(&format!("{err:#}")),
+        };
+    let apply_guard = match agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(file) {
+        Ok(guard) => guard,
+        Err(err) => return classify_captured_finalize_resume_error(&format!("{err:#}")),
+    };
+    if let Err(err) = closeout_lease.ensure_still_held() {
+        return classify_captured_finalize_resume_error(&format!("{err:#}"));
+    }
+    let locked_key = match captured_finalize_resume_key(file) {
+        Ok(key) => key,
+        Err(err) => return classify_captured_finalize_resume_error(&format!("{err:#}")),
+    };
+    let locked_resolved =
+        match agent_doc_cycle_state_io::load_projected_captured_finalize_resume(file) {
+            Ok(Some(resolved)) => resolved,
+            Ok(None) => return CapturedFinalizeResumeOutcome::Superseded,
+            Err(err) => return classify_captured_finalize_resume_error(&format!("{err:#}")),
+        };
+    let locked_phase = match captured_finalize_projected_phase(file, expected) {
+        Ok(phase) => phase,
+        Err(err) => return classify_captured_finalize_resume_error(&format!("{err:#}")),
+    };
+    // The unlocked cut is only an admission hint. Intent id/target, capture
+    // bytes and hashes (the durable capture generation), origin, key, and
+    // projected phase must all still be the exact same cut under both owners.
+    if locked_key.as_ref() != Some(expected)
+        || locked_resolved != observed_resolved
+        || locked_phase != observed_phase
+    {
+        return CapturedFinalizeResumeOutcome::Superseded;
+    }
+    let resolved = locked_resolved;
+
+    // GH 90: derive landability from the locked authority cut. A deterministic
     // structural refusal used to surface only after the attempt reached some
     // unrelated effect first (a native-save request to a dead editor pid), so
     // the loop reported that effect's failure and retried forever.
@@ -517,10 +639,6 @@ pub fn resume_captured_finalize(
                 "captured response landability check failed: {err:#}"
             ));
         }
-    };
-    let apply_guard = match agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(file) {
-        Ok(guard) => guard,
-        Err(err) => return classify_captured_finalize_resume_error(&format!("{err:#}")),
     };
     if let Some(unlandable) = unlandable {
         let recovery = agent_doc_session_check_io::UnlandableCapture::recovery_command(file);
@@ -545,7 +663,13 @@ pub fn resume_captured_finalize(
         resolved.origin,
         agent_doc_cycle_state_io::ProjectedCapturedFinalizeResumeOrigin::LegacyRetainedIntent { .. }
     ) {
-        return resume_legacy_retained_delivery(file, expected, resolved, &apply_guard);
+        return resume_legacy_retained_delivery(
+            file,
+            expected,
+            resolved,
+            &closeout_lease,
+            &apply_guard,
+        );
     }
 
     // `#writeappliedcontinuation`: the response command owns capture and
@@ -553,23 +677,19 @@ pub fn resume_captured_finalize(
     // visible, replaying the command would start capture again after pending
     // response intent has already been cleared. Continue the exact capture
     // through retained delivery/snapshot/commit instead.
-    let projected_phase = agent_doc_cycle_state_io::load_with_closeout_projection(file)
-        .ok()
-        .flatten()
-        .filter(|state| {
-            state.cycle_id == expected.cycle_id
-                && state.capture_id.as_deref() == Some(expected.capture_id.as_str())
-                && state.response_sha256.as_deref() == Some(expected.response_sha256.as_str())
-        })
-        .map(|state| state.phase);
     if matches!(
-        projected_phase,
+        locked_phase,
         Some(agent_doc_turn::CyclePhase::WriteApplied | agent_doc_turn::CyclePhase::Committed)
     ) {
-        return resume_materialized_captured_finalize(file, expected, &apply_guard);
+        return resume_materialized_captured_finalize(
+            file,
+            expected,
+            &closeout_lease,
+            &apply_guard,
+        );
     }
 
-    let result = resume_captured_finalize_intent(file, expected, &apply_guard);
+    let result = resume_captured_finalize_intent(file, expected, &closeout_lease, &apply_guard);
     match result {
         Ok(outcome) => {
             let committed = agent_doc_cycle_state_io::load_with_closeout_projection(file)
@@ -609,9 +729,13 @@ fn resume_legacy_retained_delivery(
     file: &Path,
     expected: &CapturedFinalizeResumeKey,
     resolved: agent_doc_cycle_state_io::ProjectedCapturedFinalizeResume,
+    closeout_lease: &agent_doc_write_runtime_io::CapturedFinalizeResumeCloseoutLease,
     apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
 ) -> CapturedFinalizeResumeOutcome {
     if let Err(err) = apply_guard.ensure_protects(file) {
+        return classify_captured_finalize_resume_error(&format!("{err:#}"));
+    }
+    if let Err(err) = closeout_lease.ensure_still_held() {
         return classify_captured_finalize_resume_error(&format!("{err:#}"));
     }
     let agent_doc_cycle_state_io::ProjectedCapturedFinalizeResumeOrigin::LegacyRetainedIntent {
@@ -887,6 +1011,7 @@ pub fn drop_already_applied_mutations(
 fn apply_unlanded_captured_mutation_plan(
     file: &Path,
     expected: &CapturedFinalizeResumeKey,
+    closeout_lease: &agent_doc_write_runtime_io::CapturedFinalizeResumeCloseoutLease,
     apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
 ) -> Result<bool> {
     apply_guard.ensure_protects(file)?;
@@ -964,10 +1089,11 @@ fn apply_unlanded_captured_mutation_plan(
             agent_doc_hash::content_hash(plan_json),
         ),
     );
-    agent_doc_write_runtime_io::run_command_with_response_under_apply_guard(
+    agent_doc_write_runtime_io::run_command_with_response_under_captured_finalize_resume_owners(
         options,
         agent_doc_write_command_io::CommitMode::None,
         String::new(),
+        closeout_lease,
         apply_guard,
     )
     .with_context(|| {
@@ -982,23 +1108,28 @@ fn apply_unlanded_captured_mutation_plan(
 fn resume_materialized_captured_finalize(
     file: &Path,
     expected: &CapturedFinalizeResumeKey,
+    closeout_lease: &agent_doc_write_runtime_io::CapturedFinalizeResumeCloseoutLease,
     apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
 ) -> CapturedFinalizeResumeOutcome {
     use agent_doc_session_check_io::SessionCheckEffects;
 
     // `#deferredmutdrop`: continue the SAME closeout, not just its response half.
-    if let Err(err) = apply_unlanded_captured_mutation_plan(file, expected, apply_guard) {
+    if let Err(err) = closeout_lease.ensure_still_held() {
+        return classify_captured_finalize_resume_error(&format!("{err:#}"));
+    }
+    if let Err(err) =
+        apply_unlanded_captured_mutation_plan(file, expected, closeout_lease, apply_guard)
+    {
         return classify_captured_finalize_resume_error(&format!("{err:#}"));
     }
 
-    let session_effects =
-        match agent_doc_closeout_runtime_io::session_check_effects_under_apply_guard(
-            file,
-            apply_guard,
-        ) {
-            Ok(effects) => effects,
-            Err(err) => return classify_captured_finalize_resume_error(&format!("{err:#}")),
-        };
+    let session_effects = match closeout_lease.applying_session_check_effects(file, apply_guard) {
+        Ok(effects) => effects,
+        Err(err) => return classify_captured_finalize_resume_error(&format!("{err:#}")),
+    };
+    if let Err(err) = closeout_lease.ensure_still_held() {
+        return classify_captured_finalize_resume_error(&format!("{err:#}"));
+    }
     match session_effects.resume_captured_finalize(file) {
         Ok(agent_doc_session_check_io::CapturedFinalizeResumeOutcome::Committed) => {
             CapturedFinalizeResumeOutcome::Committed {
@@ -1082,9 +1213,11 @@ pub fn run_session_check_heal(file: &Path) -> Result<()> {
 fn resume_captured_finalize_intent(
     file: &Path,
     expected: &CapturedFinalizeResumeKey,
+    closeout_lease: &agent_doc_write_runtime_io::CapturedFinalizeResumeCloseoutLease,
     apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
 ) -> Result<RepairOutcome> {
     apply_guard.ensure_protects(file)?;
+    closeout_lease.ensure_still_held()?;
     let retained = agent_doc_cycle_state_io::load_projected_retained_captured_response(file)?
         .filter(|capture| {
             capture.cycle_id == expected.cycle_id
@@ -1128,10 +1261,12 @@ fn resume_captured_finalize_intent(
             );
             response = normalized;
         }
-        agent_doc_write_runtime_io::run_command_with_response_under_apply_guard(
+        closeout_lease.ensure_still_held()?;
+        agent_doc_write_runtime_io::run_command_with_response_under_captured_finalize_resume_owners(
             options,
             agent_doc_write_command_io::CommitMode::Required,
             response,
+            closeout_lease,
             apply_guard,
         )?;
         return Ok(RepairOutcome::ReplayedResponse);
@@ -1139,22 +1274,21 @@ fn resume_captured_finalize_intent(
 
     // Backward-compatible recovery for captures written before the typed
     // mutation plan became part of the Lazily intent.
-    run_legacy_resume_repair_under_closeout_lease(
-        &RuntimeLegacyResumeRepair,
-        file,
-        expected,
-        apply_guard,
-    )
+    closeout_lease.ensure_still_held()?;
+    RuntimeLegacyResumeRepair.repair(file, apply_guard)
 }
 
 /// Effects of the legacy captured-finalize repair fallback, split so the lease
 /// ordering is testable without a controller (`#closeoutleaseresume`).
 trait LegacyResumeRepairEffects {
+    #[cfg(test)]
     type Lease;
     /// Claim the closeout lease for `cycle_id`. `Ok(None)` means the cycle was
     /// superseded; a lease held by another closeout is an `Err` carrying the
     /// retry deadline.
+    #[cfg(test)]
     fn claim_closeout_lease(&self, file: &Path, cycle_id: &str) -> Result<Option<Self::Lease>>;
+    #[cfg(test)]
     fn ensure_lease_still_held(&self, lease: &Self::Lease) -> Result<()>;
     fn repair(
         &self,
@@ -1166,8 +1300,10 @@ trait LegacyResumeRepairEffects {
 struct RuntimeLegacyResumeRepair;
 
 impl LegacyResumeRepairEffects for RuntimeLegacyResumeRepair {
+    #[cfg(test)]
     type Lease = agent_doc_write_runtime_io::CapturedFinalizeResumeCloseoutLease;
 
+    #[cfg(test)]
     fn claim_closeout_lease(&self, file: &Path, cycle_id: &str) -> Result<Option<Self::Lease>> {
         Ok(
             match agent_doc_write_runtime_io::claim_captured_finalize_resume_closeout_lease(
@@ -1183,6 +1319,7 @@ impl LegacyResumeRepairEffects for RuntimeLegacyResumeRepair {
         )
     }
 
+    #[cfg(test)]
     fn ensure_lease_still_held(&self, lease: &Self::Lease) -> Result<()> {
         lease.ensure_still_held()
     }
@@ -1214,13 +1351,12 @@ impl LegacyResumeRepairEffects for RuntimeLegacyResumeRepair {
 /// deadline (`CLOSEOUT_OWNER_RETRY_AT_MARKER`), which the resume classifies
 /// as `RetryAt`: one bounded timer edge that any earlier document edge
 /// preempts, never a poll loop. A superseded cycle mutates nothing.
+#[cfg(test)]
 fn run_legacy_resume_repair_under_closeout_lease<E: LegacyResumeRepairEffects>(
     effects: &E,
     file: &Path,
     expected: &CapturedFinalizeResumeKey,
-    apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
 ) -> Result<RepairOutcome> {
-    apply_guard.ensure_protects(file)?;
     let Some(lease) = effects.claim_closeout_lease(file, &expected.cycle_id)? else {
         agent_doc_ops_log_io::log_op(
             file,
@@ -1233,8 +1369,9 @@ fn run_legacy_resume_repair_under_closeout_lease<E: LegacyResumeRepairEffects>(
         );
         return Ok(RepairOutcome::Noop);
     };
+    let apply_guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(file)?;
     effects.ensure_lease_still_held(&lease)?;
-    let outcome = effects.repair(file, apply_guard);
+    let outcome = effects.repair(file, &apply_guard);
     drop(lease);
     outcome
 }
@@ -1519,10 +1656,9 @@ mod captured_finalize_resume_tests {
         }
     }
 
-    fn test_apply_guard(file: &Path) -> agent_doc_queue_io::queue_edit_owner::QueueEditGuard {
+    fn seed_test_document(file: &Path) {
         std::fs::create_dir_all(file.parent().unwrap().join(".agent-doc/locks")).unwrap();
         std::fs::write(file, "test\n").unwrap();
-        agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(file).unwrap()
     }
 
     #[test]
@@ -1530,10 +1666,9 @@ mod captured_finalize_resume_tests {
         let dir = tempfile::TempDir::new().unwrap();
         let file = dir.path().join("session.md");
         let effects = ScriptedLegacyRepair::new(Ok(Some("lease")));
-        let guard = test_apply_guard(&file);
+        seed_test_document(&file);
         let outcome =
-            run_legacy_resume_repair_under_closeout_lease(&effects, &file, &legacy_key(), &guard)
-                .unwrap();
+            run_legacy_resume_repair_under_closeout_lease(&effects, &file, &legacy_key()).unwrap();
         assert_eq!(outcome, RepairOutcome::AlreadyApplied);
         assert_eq!(*effects.events.borrow(), vec!["claim", "repair"]);
     }
@@ -1547,10 +1682,8 @@ mod captured_finalize_resume_tests {
             agent_doc_write_runtime_io::CLOSEOUT_OWNER_RETRY_AT_MARKER,
         );
         let effects = ScriptedLegacyRepair::new(Err(anyhow::anyhow!(held)));
-        let guard = test_apply_guard(&file);
-        let err =
-            run_legacy_resume_repair_under_closeout_lease(&effects, &file, &legacy_key(), &guard)
-                .expect_err("a held lease must refuse the repair");
+        let err = run_legacy_resume_repair_under_closeout_lease(&effects, &file, &legacy_key())
+            .expect_err("a held lease must refuse the repair");
         assert_eq!(
             *effects.events.borrow(),
             vec!["claim"],
@@ -1570,10 +1703,8 @@ mod captured_finalize_resume_tests {
         let dir = tempfile::TempDir::new().unwrap();
         let file = dir.path().join("session.md");
         let effects = ScriptedLegacyRepair::new(Ok(None));
-        let guard = test_apply_guard(&file);
         let outcome =
-            run_legacy_resume_repair_under_closeout_lease(&effects, &file, &legacy_key(), &guard)
-                .unwrap();
+            run_legacy_resume_repair_under_closeout_lease(&effects, &file, &legacy_key()).unwrap();
         assert_eq!(outcome, RepairOutcome::Noop);
         assert_eq!(*effects.events.borrow(), vec!["claim"]);
     }
@@ -1584,8 +1715,8 @@ mod captured_finalize_resume_tests {
         let file = dir.path().join("session.md");
         let mut effects = ScriptedLegacyRepair::new(Ok(Some("lease")));
         effects.lease_lost = true;
-        let guard = test_apply_guard(&file);
-        run_legacy_resume_repair_under_closeout_lease(&effects, &file, &legacy_key(), &guard)
+        seed_test_document(&file);
+        run_legacy_resume_repair_under_closeout_lease(&effects, &file, &legacy_key())
             .expect_err("a lost lease must refuse the repair");
         assert_eq!(*effects.events.borrow(), vec!["claim"]);
     }

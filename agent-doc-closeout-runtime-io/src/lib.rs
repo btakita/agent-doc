@@ -385,6 +385,7 @@ pub struct RuntimeReadOnlySessionCheckEffects;
 /// Session recovery owned by one already-held document apply transaction.
 pub struct RuntimeApplyingSessionCheckEffects<'a> {
     apply_guard: &'a agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
+    closeout_owner_already_held: bool,
 }
 
 /// Closed transition identities emitted while resuming one durable captured
@@ -609,7 +610,28 @@ pub fn session_check_effects_under_apply_guard<'a>(
     apply_guard: &'a agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
 ) -> Result<RuntimeApplyingSessionCheckEffects<'a>> {
     apply_guard.ensure_protects(file)?;
-    Ok(RuntimeApplyingSessionCheckEffects { apply_guard })
+    Ok(RuntimeApplyingSessionCheckEffects {
+        apply_guard,
+        closeout_owner_already_held: false,
+    })
+}
+
+/// Construct applying session-check effects inside a transaction that already
+/// owns the matching controller closeout lease before `apply_guard`.
+///
+/// This entrypoint deliberately does not acquire or wait on another recovery
+/// owner. Its caller must retain and revalidate the typed lease for the whole
+/// operation; captured-finalize recovery is the production caller.
+#[doc(hidden)]
+pub fn session_check_effects_under_apply_guard_and_closeout_owner<'a>(
+    file: &Path,
+    apply_guard: &'a agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
+) -> Result<RuntimeApplyingSessionCheckEffects<'a>> {
+    apply_guard.ensure_protects(file)?;
+    Ok(RuntimeApplyingSessionCheckEffects {
+        apply_guard,
+        closeout_owner_already_held: true,
+    })
 }
 
 /// `#sessioncheckread`: read-only twin of
@@ -674,6 +696,10 @@ fn read_only_session_check_mutation<T>(operation: &str) -> Result<T> {
 }
 
 impl agent_doc_session_check_io::SessionCheckEffects for RuntimeReadOnlySessionCheckEffects {
+    fn read_only_inspection(&self) -> bool {
+        true
+    }
+
     fn applies_self_heals(&self) -> bool {
         false
     }
@@ -1216,35 +1242,39 @@ impl agent_doc_session_check_io::SessionCheckEffects for RuntimeApplyingSessionC
         ) {
             return Ok(Outcome::NotApplicable);
         }
-        let _closeout_owner = match claim_recovery_closeout_owner(file, &state.cycle_id)? {
-            RecoveryCloseoutOwnerResolution::Acquired(owner) => owner,
-            RecoveryCloseoutOwnerResolution::Terminal => {
-                let terminal = agent_doc_cycle_state_io::load_with_closeout_projection(file)?;
-                if terminal.as_ref().is_some_and(|current| {
-                    current.cycle_id == state.cycle_id && current.phase == CyclePhase::Committed
-                }) {
-                    return Ok(Outcome::Committed);
+        let _closeout_owner = if self.closeout_owner_already_held {
+            None
+        } else {
+            match claim_recovery_closeout_owner(file, &state.cycle_id)? {
+                RecoveryCloseoutOwnerResolution::Acquired(owner) => Some(owner),
+                RecoveryCloseoutOwnerResolution::Terminal => {
+                    let terminal = agent_doc_cycle_state_io::load_with_closeout_projection(file)?;
+                    if terminal.as_ref().is_some_and(|current| {
+                        current.cycle_id == state.cycle_id && current.phase == CyclePhase::Committed
+                    }) {
+                        return Ok(Outcome::Committed);
+                    }
+                    if terminal
+                        .as_ref()
+                        .is_none_or(|current| current.cycle_id != state.cycle_id)
+                    {
+                        return Ok(Outcome::Superseded);
+                    }
+                    return Ok(Outcome::Retained {
+                        reason: "foreground closeout reached a non-committed terminal projection"
+                            .to_string(),
+                    });
                 }
-                if terminal
-                    .as_ref()
-                    .is_none_or(|current| current.cycle_id != state.cycle_id)
-                {
-                    return Ok(Outcome::Superseded);
-                }
-                return Ok(Outcome::Retained {
-                    reason: "foreground closeout reached a non-committed terminal projection"
-                        .to_string(),
-                });
-            }
-            RecoveryCloseoutOwnerResolution::Superseded => return Ok(Outcome::Superseded),
-            RecoveryCloseoutOwnerResolution::RetryAt {
-                reason,
-                retry_at_secs,
-            } => {
-                return Ok(Outcome::RetryAt {
+                RecoveryCloseoutOwnerResolution::Superseded => return Ok(Outcome::Superseded),
+                RecoveryCloseoutOwnerResolution::RetryAt {
                     reason,
                     retry_at_secs,
-                });
+                } => {
+                    return Ok(Outcome::RetryAt {
+                        reason,
+                        retry_at_secs,
+                    });
+                }
             }
         };
         let (Some(capture_id), Some(response_sha256)) =

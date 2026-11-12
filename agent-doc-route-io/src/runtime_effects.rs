@@ -142,7 +142,7 @@ fn route_run_pending_maintenance(file: &Path, force_disk: bool) -> Result<()> {
 }
 
 fn route_inspect_session(file: &Path) -> Result<agent_doc_session_check_io::SessionCheckStatus> {
-    agent_doc_session_check_io::inspect(
+    agent_doc_session_check_io::inspect_read_only(
         file,
         &agent_doc_closeout_runtime_io::session_check_effects(),
     )

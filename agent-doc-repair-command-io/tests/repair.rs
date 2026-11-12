@@ -106,6 +106,17 @@ mod tests {
         dir
     }
 
+    fn wait_for_resume_owner_claim_barrier(marker: &Path) {
+        let deadline = std::time::Instant::now() + Duration::from_secs(15);
+        while !marker.exists() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "timed out waiting for captured-finalize resume owner-claim barrier"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
     #[test]
     fn ordinary_repair_refuses_apply_contention_before_any_repair_effect() {
         let dir = setup_project();
@@ -2445,6 +2456,98 @@ mod tests {
         ));
     }
 
+    /// The unlocked resume observation is only an admission hint. A normal
+    /// closeout that wins the controller lease while the resume is paused must
+    /// land once; after the pause, the stale resume revalidates under the same
+    /// lease -> apply-guard order and retires as superseded without effects.
+    #[test]
+    fn legacy_resume_revalidates_after_a_foreground_closeout_wins_pre_lock() {
+        let _env = agent_doc_test_support::env_lock();
+        let dir = setup_project();
+        let doc = dir.path().join("legacy-pre-lock.md");
+        let content = "---\nsession: test\nagent_doc_format: append\nagent_doc_write: merge\n---\n\n## User\n\nHello\n";
+        let response = "Foreground closeout wins.";
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        init_git_repo(dir.path(), &doc);
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        agent_doc_capture_io::capture_response(&doc, response).unwrap();
+        let key = agent_doc_repair_command_io::captured_finalize_resume_key(&doc)
+            .unwrap()
+            .expect("capture key");
+
+        let marker = dir.path().join("resume-before-owner.marker");
+        let release = dir.path().join("resume-before-owner.release");
+        unsafe {
+            std::env::set_var("AGENT_DOC_TEST_RESUME_BEFORE_OWNER_CLAIM_FILE", &doc);
+            std::env::set_var("AGENT_DOC_TEST_RESUME_BEFORE_OWNER_CLAIM_MARKER", &marker);
+            std::env::set_var("AGENT_DOC_TEST_RESUME_BEFORE_OWNER_CLAIM_RELEASE", &release);
+        }
+        let resume_doc = doc.clone();
+        let resume_key = key.clone();
+        let resume = std::thread::spawn(move || {
+            agent_doc_repair_command_io::resume_captured_finalize(&resume_doc, &resume_key)
+        });
+        wait_for_resume_owner_claim_barrier(&marker);
+
+        let winner = agent_doc_write_runtime_io::run_command_with_response(
+            agent_doc_write_command_io::CommandOptions::repair_replay(
+                &doc,
+                false,
+                false,
+                false,
+                &[],
+            ),
+            agent_doc_write_command_io::CommitMode::Required,
+            response.to_string(),
+        );
+        let after_winner_document = std::fs::read_to_string(&doc).unwrap();
+        let after_winner_cycle =
+            agent_doc_cycle_state_io::load_with_closeout_projection(&doc).unwrap();
+        let after_winner_capture = agent_doc_capture_io::load_active(&doc).unwrap();
+        let ops_path = dir.path().join(".agent-doc/logs/ops.log");
+        let after_winner_ops = std::fs::read_to_string(&ops_path).unwrap_or_default();
+        std::fs::write(&release, b"release").unwrap();
+        let stale_outcome = resume.join().unwrap();
+        unsafe {
+            std::env::remove_var("AGENT_DOC_TEST_RESUME_BEFORE_OWNER_CLAIM_FILE");
+            std::env::remove_var("AGENT_DOC_TEST_RESUME_BEFORE_OWNER_CLAIM_MARKER");
+            std::env::remove_var("AGENT_DOC_TEST_RESUME_BEFORE_OWNER_CLAIM_RELEASE");
+        }
+
+        winner.unwrap();
+        assert!(
+            matches!(
+                stale_outcome,
+                agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::Superseded
+            ),
+            "{stale_outcome:?}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&doc).unwrap(),
+            after_winner_document
+        );
+        assert_eq!(
+            agent_doc_cycle_state_io::load_with_closeout_projection(&doc).unwrap(),
+            after_winner_cycle
+        );
+        assert_eq!(
+            agent_doc_capture_io::load_active(&doc).unwrap(),
+            after_winner_capture
+        );
+        assert_eq!(
+            std::fs::read_to_string(&ops_path).unwrap_or_default(),
+            after_winner_ops,
+            "the stale resume must not append an operation after the winner lands"
+        );
+        assert_eq!(after_winner_document.matches(response).count(), 1);
+    }
+
     fn gh90_append_doc(dir: &TempDir) -> (std::path::PathBuf, &'static str) {
         let doc = dir.path().join("test.md");
         let content = "---\nsession: test\nagent_doc_format: append\nagent_doc_write: merge\n---\n\n## User\n\nHello\n";
@@ -2853,6 +2956,118 @@ mod tests {
                 .phase,
             agent_doc_turn::CyclePhase::Committed
         ));
+    }
+
+    /// A materialized response can be committed by the normal closeout owner
+    /// after the resume's unlocked read but before its owner claim. The stale
+    /// resume must classify that exact phase/generation cut as superseded and
+    /// leave every durable plane at the winner's state.
+    #[test]
+    fn materialized_resume_revalidates_after_closeout_lands_pre_lock() {
+        let _env = agent_doc_test_support::env_lock();
+        let dir = setup_project();
+        let doc = dir.path().join("materialized-pre-lock.md");
+        let content = "---\nsession: test\nagent_doc_format: append\nagent_doc_write: merge\n---\n\n## User\n\nHello\n";
+        let response = "Materialized closeout winner.";
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        let cycle =
+            agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        agent_doc_capture_io::capture_response(&doc, response).unwrap();
+        let applied = format!("{content}\n## Assistant\n\n{response}\n");
+        std::fs::write(&doc, &applied).unwrap();
+        agent_doc_cycle_state_io::mark_write_applied(
+            &doc,
+            "test_materialized_response_write_applied",
+            Some(&applied),
+            Some(&applied),
+        )
+        .unwrap();
+        agent_doc_repair_io::pending::clear_pending(&doc).unwrap();
+        let key = agent_doc_repair_command_io::captured_finalize_resume_key(&doc)
+            .unwrap()
+            .expect("materialized capture key");
+
+        let marker = dir.path().join("materialized-before-owner.marker");
+        let release = dir.path().join("materialized-before-owner.release");
+        unsafe {
+            std::env::set_var("AGENT_DOC_TEST_RESUME_BEFORE_OWNER_CLAIM_FILE", &doc);
+            std::env::set_var("AGENT_DOC_TEST_RESUME_BEFORE_OWNER_CLAIM_MARKER", &marker);
+            std::env::set_var("AGENT_DOC_TEST_RESUME_BEFORE_OWNER_CLAIM_RELEASE", &release);
+        }
+        let resume_doc = doc.clone();
+        let resume_key = key.clone();
+        let resume = std::thread::spawn(move || {
+            agent_doc_repair_command_io::resume_captured_finalize(&resume_doc, &resume_key)
+        });
+        wait_for_resume_owner_claim_barrier(&marker);
+
+        let lease = match agent_doc_write_runtime_io::claim_captured_finalize_resume_closeout_lease(
+            &doc,
+            &cycle.cycle_id,
+        )
+        .unwrap()
+        {
+            agent_doc_write_runtime_io::CapturedFinalizeResumeLeaseClaim::Acquired(lease) => lease,
+            agent_doc_write_runtime_io::CapturedFinalizeResumeLeaseClaim::CycleSuperseded => {
+                panic!("the materialized cycle must still be open")
+            }
+        };
+        let guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(&doc).unwrap();
+        let winner = agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
+            &doc,
+            "test_foreground_materialized_closeout_committed",
+            Some(&applied),
+            Some(&applied),
+        );
+        drop(guard);
+        drop(lease);
+        let after_winner_document = std::fs::read_to_string(&doc).unwrap();
+        let after_winner_cycle =
+            agent_doc_cycle_state_io::load_with_closeout_projection(&doc).unwrap();
+        let after_winner_capture = agent_doc_capture_io::load_active(&doc).unwrap();
+        let ops_path = dir.path().join(".agent-doc/logs/ops.log");
+        let after_winner_ops = std::fs::read_to_string(&ops_path).unwrap_or_default();
+        std::fs::write(&release, b"release").unwrap();
+        let stale_outcome = resume.join().unwrap();
+        unsafe {
+            std::env::remove_var("AGENT_DOC_TEST_RESUME_BEFORE_OWNER_CLAIM_FILE");
+            std::env::remove_var("AGENT_DOC_TEST_RESUME_BEFORE_OWNER_CLAIM_MARKER");
+            std::env::remove_var("AGENT_DOC_TEST_RESUME_BEFORE_OWNER_CLAIM_RELEASE");
+        }
+
+        winner.unwrap();
+        assert!(
+            matches!(
+                stale_outcome,
+                agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::Superseded
+            ),
+            "{stale_outcome:?}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&doc).unwrap(),
+            after_winner_document
+        );
+        assert_eq!(
+            agent_doc_cycle_state_io::load_with_closeout_projection(&doc).unwrap(),
+            after_winner_cycle
+        );
+        assert_eq!(
+            agent_doc_capture_io::load_active(&doc).unwrap(),
+            after_winner_capture
+        );
+        assert_eq!(
+            std::fs::read_to_string(&ops_path).unwrap_or_default(),
+            after_winner_ops,
+            "the stale materialized resume must not append an operation"
+        );
+        assert_eq!(after_winner_document.matches(response).count(), 1);
     }
 
     /// A capture can retain a response-only proof and a larger write intent.

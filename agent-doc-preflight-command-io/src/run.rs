@@ -3700,7 +3700,26 @@ mod tests {
             "---\nagent_doc_format: template\nagent_doc_steering_debounce_ms: 0\n---\n\n<!-- agent:exchange -->\nPrompt.\n<!-- /agent:exchange -->\n\n<!-- agent:queue go -->\n- current work\n- {claimed}\n<!-- /agent:queue -->\n"
         );
         let file = write_committed_doc(temp.path(), "session.md", &baseline, "initial", None);
-        agent_doc_cycle_state_io::start_preflight(&file, Some(&baseline), Some(&baseline)).unwrap();
+        let cycle =
+            agent_doc_cycle_state_io::start_preflight(&file, Some(&baseline), Some(&baseline))
+                .unwrap();
+        agent_doc_session_check_io::midturn_steering::seed_for_cycle(
+            &file,
+            &cycle.cycle_id,
+            &baseline,
+            Some("current work"),
+            Vec::new(),
+        )
+        .unwrap();
+        agent_doc_capture_io::capture_response(&file, "Answer.").unwrap();
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
+            &file,
+            "commit_success",
+            Some(&baseline),
+            Some(&baseline),
+        )
+        .unwrap();
         let (_, claim) =
             agent_doc_queue_io::queue_claim::claim(&file, claimed, "subagent:terminal-proof", 3600)
                 .unwrap();
@@ -3713,7 +3732,14 @@ mod tests {
             claim.generation,
         )
         .unwrap();
-        let deleted = baseline.replace(&format!("- {claimed}\n"), "");
+        // Keep the committed cycle clean, then publish one real next-turn
+        // queue prompt together with the claimed-row removal. The new row
+        // makes session-check enter its committed steering classifier; that
+        // same classifier must surface the removal as `cancel_claimed` without
+        // the read-only pre-guard cut applying its tombstone.
+        let deleted = baseline
+            .replace("- current work\n", "- current work\n- operator follow-up\n")
+            .replace(&format!("- {claimed}\n"), "");
         std::fs::write(&file, &deleted).unwrap();
         let before_claims = agent_doc_queue_io::queue_claim::load_ledger(&file).unwrap();
         let before_receipts = agent_doc_queue_io::claim_release_receipt::load(&file).unwrap();
@@ -3721,12 +3747,17 @@ mod tests {
         let ops_path = temp.path().join(".agent-doc/logs/ops.log");
         let before_ops = std::fs::read_to_string(&ops_path).unwrap_or_default();
 
-        let _ = agent_doc_ops_log_io::with_ops_log_suppressed(|| {
-            agent_doc_session_check_io::inspect_read_only(
-                &file,
-                &agent_doc_closeout_runtime_io::session_check_effects(),
-            )
-        });
+        let status = agent_doc_session_check_io::inspect(
+            &file,
+            &agent_doc_closeout_runtime_io::session_check_effects(),
+        )
+        .unwrap();
+        let agent_doc_session_check_io::SessionCheckStatus::SteeringPending(message) = status
+        else {
+            panic!("committed removed claim must reach steering classification: {status:?}");
+        };
+        assert!(message.contains("dispatch=cancel_claimed"), "{message}");
+        assert!(message.contains(claimed), "{message}");
 
         assert_eq!(
             agent_doc_queue_io::queue_claim::load_ledger(&file).unwrap(),

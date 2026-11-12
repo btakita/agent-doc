@@ -1036,6 +1036,22 @@ impl CapturedFinalizeResumeCloseoutLease {
     pub fn ensure_still_held(&self) -> Result<()> {
         ensure_closeout_lease_still_held(self.guard.as_ref())
     }
+
+    /// Construct the applying session-check adapter covered by this exact
+    /// outer closeout owner. Keeping construction on the lease capability
+    /// prevents recovery from bypassing the lease -> apply-guard order or
+    /// accidentally claiming a second recovery owner mid-transaction.
+    pub fn applying_session_check_effects<'a>(
+        &self,
+        file: &Path,
+        apply_guard: &'a agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
+    ) -> Result<agent_doc_closeout_runtime_io::RuntimeApplyingSessionCheckEffects<'a>> {
+        self.ensure_still_held()?;
+        agent_doc_closeout_runtime_io::session_check_effects_under_apply_guard_and_closeout_owner(
+            file,
+            apply_guard,
+        )
+    }
 }
 
 /// Outcome of [`claim_captured_finalize_resume_closeout_lease`].
@@ -1106,6 +1122,23 @@ pub fn run_command_with_response_under_apply_guard(
         slot.replace(previous);
     });
     result
+}
+
+/// Replay one captured-finalize write while the caller retains the closeout
+/// lease and document apply capability in the global lease -> guard order.
+/// The nested runtime owner claim is recognized as covered by the active
+/// same-thread lease; accepting both capabilities here prevents recovery
+/// callers from entering the writer with only the later apply lock.
+pub fn run_command_with_response_under_captured_finalize_resume_owners(
+    options: CommandOptions,
+    commit_mode: CommitMode,
+    response: String,
+    closeout_lease: &CapturedFinalizeResumeCloseoutLease,
+    apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
+) -> Result<()> {
+    closeout_lease.ensure_still_held()?;
+    apply_guard.ensure_protects(&options.file)?;
+    run_command_with_response_under_apply_guard(options, commit_mode, response, apply_guard)
 }
 
 /// Persist a cumulative, semantically complete response into the live document

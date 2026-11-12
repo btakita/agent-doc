@@ -14201,6 +14201,7 @@ fn test_agent_doc_session_check_io_owns_guard_adapters() {
         fs::read_to_string(manifest_dir.join("agent-doc-closeout-runtime-io/src/lib.rs")).unwrap();
     assert!(
         closeout_runtime.contains("pub fn session_check_effects()")
+            && closeout_runtime.contains("fn read_only_inspection(&self) -> bool")
             && closeout_runtime.contains(
                 "impl agent_doc_session_check_io::SessionCheckEffects for RuntimeReadOnlySessionCheckEffects"
             )
@@ -14209,6 +14210,54 @@ fn test_agent_doc_session_check_io_owns_guard_adapters() {
             ),
         "agent-doc-closeout-runtime-io should own separate read-only and applying session-check runtime effects ports"
     );
+    let write_runtime =
+        fs::read_to_string(manifest_dir.join("agent-doc-write-runtime-io/src/lib.rs")).unwrap();
+    let repair_command =
+        fs::read_to_string(manifest_dir.join("agent-doc-repair-command-io/src/lib.rs")).unwrap();
+    assert!(
+        write_runtime.contains("pub fn applying_session_check_effects")
+            && repair_command.contains("closeout_lease.applying_session_check_effects"),
+        "captured-finalize session recovery must carry the typed closeout lease through the nested applying adapter instead of reverse-claiming a second owner"
+    );
+    let session_check_command =
+        fs::read_to_string(manifest_dir.join("agent-doc-session-check-io/src/command.rs")).unwrap();
+    for required in [
+        "fn read_only_inspection(&self) -> bool",
+        "pub fn inspect_read_only_with_warnings(",
+        "if effects.read_only_inspection()",
+        "agent_doc_ops_log_io::with_ops_log_suppressed",
+        "crate::with_status_only_pass",
+    ] {
+        assert!(
+            session_check_command.contains(required),
+            "read-only effects must intrinsically fence the complete inspection, including direct removed-claim cancellation: {required}"
+        );
+    }
+    for (production_source, required) in [
+        (
+            "agent-doc-route-io/src/runtime_effects.rs",
+            "agent_doc_session_check_io::inspect_read_only(",
+        ),
+        (
+            "src/main.rs",
+            "agent_doc_session_check_io::inspect_read_only(",
+        ),
+        (
+            "src/mcp.rs",
+            "agent_doc_session_check_io::inspect_read_only_with_warnings(",
+        ),
+        (
+            "agent-doc-codex-stop-io/src/lib.rs",
+            "agent_doc_session_check_io::inspect_read_only(",
+        ),
+    ] {
+        let source = fs::read_to_string(manifest_dir.join(production_source)).unwrap();
+        assert!(
+            source.contains(required)
+                && source.contains("agent_doc_closeout_runtime_io::session_check_effects()"),
+            "{production_source} status inspection must use the intrinsic read-only adapter through the explicit read-only API"
+        );
+    }
     for production_source in [
         "src/main.rs",
         "src/mcp.rs",
@@ -14270,8 +14319,6 @@ fn test_agent_doc_session_check_io_owns_guard_adapters() {
             "session-check closeout guards must not retain moved prompt-bearing IO adapter: {forbidden}"
         );
     }
-    let session_check_command =
-        fs::read_to_string(manifest_dir.join("agent-doc-session-check-io/src/command.rs")).unwrap();
     assert!(
         session_check_command.contains("crate::check_shadow_backlog_guard")
             && session_check_command.contains("crate::check_free_text_queue_head_provenance")

@@ -132,9 +132,11 @@ fn init_git_repo(root: &Path, tracked: &Path) {
         .args(["config", "user.name", "Test User"])
         .status()
         .unwrap();
+    let tracked_relative = tracked.strip_prefix(root).unwrap_or(tracked);
     ProcessCommand::new("git")
         .current_dir(root)
-        .args(["add", tracked.file_name().unwrap().to_str().unwrap()])
+        .arg("add")
+        .arg(tracked_relative)
         .status()
         .unwrap();
     ProcessCommand::new("git")
@@ -298,6 +300,236 @@ fn preflight_admits_under_five_seconds_while_slow_pending_maintenance_stays_deta
     assert!(
         converged.contains("- [ ] [#"),
         "pending backfill did not converge durably: {converged}"
+    );
+}
+
+#[test]
+fn superseded_delayed_worker_has_no_advisory_archive_or_worktree_effects() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let root = tmp.path().join("repo");
+    let doc = root.join("tasks/a/session.md");
+    let worktree = tmp.path().join("remove-me");
+    fs::create_dir_all(doc.parent().unwrap()).unwrap();
+    let item = "remove the obsolete linked checkout";
+    let content = format!(
+        concat!(
+            "---\n",
+            "agent_doc_session: fenced-effects-test\n",
+            "agent_doc_format: template\n",
+            "agent: codex\n",
+            "model: gpt-5\n",
+            "---\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: prior — gpt-5\n\nDone.\n",
+            "<!-- agent:boundary:1234abcd -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:backlog priority queue -->\n",
+            "- legacy pending item\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:done archive=tasks/history.done.md -->\n",
+            "<!-- /agent:done -->\n\n",
+            "<!-- agent:run -->\n",
+            "- {item}\n",
+            "<!-- /agent:run -->\n\n",
+            "<!-- agent:worktrees -->\n",
+            "- **Topic:** {item}\n",
+            "  - **Branch:** feat/remove-me\n",
+            "  - **Directory:** `{worktree}`\n",
+            "  - remove\n",
+            "<!-- /agent:worktrees -->\n",
+        ),
+        item = item,
+        worktree = worktree.display(),
+    );
+    fs::write(&doc, &content).unwrap();
+    init_git_repo(&root, &doc);
+    seed_snapshot(&root, &doc, &content);
+    let git = |cwd: &Path, args: &[&str]| {
+        let output = ProcessCommand::new("git")
+            .current_dir(cwd)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "git {} failed: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&output.stderr),
+        );
+    };
+    git(
+        &root,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "feat/remove-me",
+            worktree.to_str().unwrap(),
+            "HEAD",
+        ],
+    );
+    let head_before = ProcessCommand::new("git")
+        .current_dir(&root)
+        .args(["rev-parse", "HEAD"])
+        .output()
+        .unwrap()
+        .stdout;
+    let (_outcome, claim) =
+        agent_doc_queue_io::queue_claim::claim(&doc, item, "subagent:fence-test", 600).unwrap();
+    let claim = agent_doc_queue_io::queue_claim::start_attempt(
+        &doc,
+        item,
+        "subagent:fence-test",
+        "worker:fence-test",
+        600,
+        claim.generation,
+    )
+    .unwrap();
+    agent_doc_queue_io::queue_lineage::record_started(&doc, &claim).unwrap();
+    agent_doc_queue_io::queue_lineage::record(
+        &doc,
+        item,
+        claim.generation,
+        agent_doc_queue_io::queue_lineage::RecordRequest {
+            kind: agent_doc_queue_io::queue_lineage::QueueLineageEventKind::Attached,
+            worker_id: Some("worker:fence-test".to_string()),
+            repo_path: Some(root.clone()),
+            worktree_path: Some(worktree.clone()),
+            branch: Some("feat/remove-me".to_string()),
+            ..agent_doc_queue_io::queue_lineage::RecordRequest::default()
+        },
+    )
+    .unwrap();
+
+    let misplaced = root.join("tasks/a/tasks/history.done.md");
+    fs::create_dir_all(misplaced.parent().unwrap()).unwrap();
+    fs::write(&misplaced, "- 2026-11-12 [#legacy] misplaced\n").unwrap();
+
+    let started = std::time::Instant::now();
+    let output = agent_doc_cmd()
+        .current_dir(&root)
+        .env(
+            "AGENT_DOC_TEST_BACKGROUND_PENDING_MAINTENANCE_DELAY_MS",
+            "6100",
+        )
+        .args(["preflight", doc.to_str().unwrap()])
+        .output()
+        .unwrap();
+    let admitted_elapsed = started.elapsed();
+    assert!(
+        output.status.success(),
+        "preflight failed: {}",
+        String::from_utf8_lossy(&output.stderr),
+    );
+    assert!(
+        admitted_elapsed < std::time::Duration::from_secs(5),
+        "admission waited for delayed effect owner: {admitted_elapsed:?}",
+    );
+
+    let ops = root.join(".agent-doc/logs/ops.log");
+    let delay_deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    loop {
+        let current_ops = fs::read_to_string(&ops).unwrap_or_default();
+        if current_ops.contains("pending_maintenance_background_test_delay") {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < delay_deadline,
+            "detached worker never entered its deterministic delay: {current_ops}",
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+
+    // A direct edit/successor supersedes the already-running detached owner
+    // while its deterministic delay is active. The old owner must not publish
+    // even diagnostic durable evidence after this point.
+    let successor = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(&doc);
+    let ops_after_supersede = fs::read_to_string(&ops).unwrap_or_default();
+    assert!(!root.join(".agent-doc/advisories").exists());
+    assert!(!root.join("tasks/history.done.md").exists());
+    assert!(worktree.is_dir());
+    assert_eq!(fs::read_to_string(&doc).unwrap(), content);
+    std::thread::sleep(std::time::Duration::from_millis(6500));
+    assert_eq!(
+        fs::read_to_string(&ops).unwrap_or_default(),
+        ops_after_supersede,
+        "superseded worker published durable evidence",
+    );
+    assert!(!root.join(".agent-doc/advisories").exists());
+    assert!(!root.join("tasks/history.done.md").exists());
+    assert!(worktree.is_dir(), "superseded worker removed the checkout");
+    assert_eq!(fs::read_to_string(&doc).unwrap(), content);
+    assert_eq!(
+        agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap(),
+        content,
+        "admission or stale worker changed the maintenance snapshot",
+    );
+    assert_eq!(
+        ProcessCommand::new("git")
+            .current_dir(&root)
+            .args(["rev-parse", "HEAD"])
+            .output()
+            .unwrap()
+            .stdout,
+        head_before,
+        "admission or stale worker created a git commit",
+    );
+    assert!(
+        agent_doc_queue_io::queue_lineage::load(&doc)
+            .unwrap()
+            .attempts
+            .iter()
+            .flat_map(|attempt| &attempt.events)
+            .all(|event| event.kind
+                != agent_doc_queue_io::queue_lineage::QueueLineageEventKind::Removed),
+        "superseded worker wrote a removal receipt",
+    );
+    drop(successor);
+
+    // A newly reserved owner performs the exact durable maintenance the stale
+    // worker was forbidden to publish.
+    let token = "integration-successor-token";
+    assert!(
+        agent_doc_queue_io::queue_edit_owner::try_reserve_queue_edit_owner(
+            &doc.to_string_lossy(),
+            token,
+            std::process::id(),
+        )
+        .unwrap(),
+    );
+    let successor_output = agent_doc_cmd()
+        .current_dir(&root)
+        .env("AGENT_DOC_BACKGROUND_QUEUE_MAINTENANCE_TOKEN", token)
+        .args([
+            "preflight",
+            doc.to_str().unwrap(),
+            "--queue-maintenance-only",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        successor_output.status.success(),
+        "successor maintenance failed: {}",
+        String::from_utf8_lossy(&successor_output.stderr),
+    );
+    assert!(root.join(".agent-doc/advisories").is_dir());
+    assert!(!worktree.exists(), "successor did not remove the checkout");
+    assert!(
+        agent_doc_queue_io::queue_lineage::load(&doc)
+            .unwrap()
+            .attempts
+            .iter()
+            .flat_map(|attempt| &attempt.events)
+            .any(|event| event.kind
+                == agent_doc_queue_io::queue_lineage::QueueLineageEventKind::Removed),
+        "successor did not write the removal receipt",
+    );
+    assert!(
+        fs::read_to_string(&doc).unwrap().contains("- [ ] [#"),
+        "successor did not durably backfill pending maintenance",
     );
 }
 

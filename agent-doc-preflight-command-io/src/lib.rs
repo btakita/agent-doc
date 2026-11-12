@@ -251,6 +251,7 @@ fn detach_queue_effect(_command: &mut Command) {}
 struct BackgroundQueueMaintenanceLease {
     file: PathBuf,
     token: String,
+    lost: std::sync::Arc<std::sync::atomic::AtomicBool>,
     stop: Option<std::sync::mpsc::Sender<()>>,
     heartbeat: Option<std::thread::JoinHandle<()>>,
     _guard: agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
@@ -266,6 +267,8 @@ impl BackgroundQueueMaintenanceLease {
         let file = file.to_path_buf();
         let heartbeat_file = file.clone();
         let heartbeat_token = token.to_string();
+        let lost = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let heartbeat_lost = std::sync::Arc::clone(&lost);
         let (stop, stopped) = std::sync::mpsc::channel();
         let heartbeat = match std::thread::Builder::new()
             .name("queue-maintenance-lease-heartbeat".to_string())
@@ -278,20 +281,20 @@ impl BackgroundQueueMaintenanceLease {
                             &heartbeat_token,
                             std::process::id(),
                         ) {
-                            Err(error) => agent_doc_ops_log_io::log_op(
-                                &heartbeat_file,
-                                &format!(
-                                    "queue_maintenance_background_lease_refresh_failed file={} error={error:#}",
+                            Err(error) => {
+                                heartbeat_lost.store(true, std::sync::atomic::Ordering::Release);
+                                eprintln!(
+                                    "[preflight] background maintenance lease refresh failed for {}: {error:#}",
                                     heartbeat_file.display(),
-                                ),
-                            ),
-                            Ok(false) => agent_doc_ops_log_io::log_op(
-                                &heartbeat_file,
-                                &format!(
-                                    "queue_maintenance_background_lease_lost file={} token={heartbeat_token}",
+                                );
+                            }
+                            Ok(false) => {
+                                heartbeat_lost.store(true, std::sync::atomic::Ordering::Release);
+                                eprintln!(
+                                    "[preflight] background maintenance lease was superseded for {}",
                                     heartbeat_file.display(),
-                                ),
-                            ),
+                                );
+                            }
                             Ok(true) => {}
                         }
                     }
@@ -312,6 +315,7 @@ impl BackgroundQueueMaintenanceLease {
         Ok(Some(Self {
             file,
             token: token.to_string(),
+            lost,
             stop: heartbeat.as_ref().map(|_| stop),
             heartbeat,
             _guard: guard,
@@ -319,11 +323,27 @@ impl BackgroundQueueMaintenanceLease {
     }
 
     fn refresh_owned(&self) -> Result<bool> {
+        if self.lost.load(std::sync::atomic::Ordering::Acquire) {
+            return Ok(false);
+        }
         agent_doc_queue_io::queue_edit_owner::refresh_queue_edit_owner_lease_if_holder(
             &self.file.to_string_lossy(),
             &self.token,
             std::process::id(),
         )
+    }
+
+    fn fence_effect(&self, _file: &Path) -> Result<()> {
+        if !self.refresh_owned()? {
+            anyhow::bail!("background queue maintenance reservation was superseded");
+        }
+        Ok(())
+    }
+}
+
+impl agent_doc_preflight_io::PendingMaintenanceEffectFence for BackgroundQueueMaintenanceLease {
+    fn check(&self, file: &Path) -> Result<()> {
+        self.fence_effect(file)
     }
 }
 
@@ -361,18 +381,10 @@ pub fn run_background_queue_maintenance(file: &Path, commit_if_mutated: bool) ->
     };
     let Some(queue_mutation) = BackgroundQueueMaintenanceLease::adopt_reserved(file, &token)?
     else {
-        let holder_pid = agent_doc_queue_io::queue_edit_owner::read_queue_edit_owner_lease(
-            &file.to_string_lossy(),
-        )
-        .map(|lease| lease.holder_pid)
-        .unwrap_or_default();
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "queue_maintenance_background_reservation_not_owned file={} child_pid={} holder_pid={holder_pid}",
-                file.display(),
-                std::process::id(),
-            ),
+        eprintln!(
+            "[preflight] background maintenance reservation is no longer owned for {} (child_pid={})",
+            file.display(),
+            std::process::id(),
         );
         return Ok(());
     };
@@ -391,20 +403,29 @@ pub fn run_background_queue_maintenance(file: &Path, commit_if_mutated: bool) ->
         std::thread::sleep(std::time::Duration::from_millis(delay));
     }
     if !queue_mutation.refresh_owned()? {
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "queue_maintenance_background_reservation_lost file={} child_pid={}",
-                file.display(),
-                std::process::id(),
-            ),
+        eprintln!(
+            "[preflight] background maintenance reservation was superseded for {} (child_pid={})",
+            file.display(),
+            std::process::id(),
         );
         return Ok(());
     }
-    let pending_report = agent_doc_preflight_io::run_pending_maintenance(
+    let pending_report = match agent_doc_preflight_io::run_pending_maintenance_fenced(
         file,
         &PREFLIGHT_MAINTENANCE_WRITE_EFFECTS,
-    )?;
+        &queue_mutation,
+    ) {
+        Ok(report) => report,
+        Err(error) if !queue_mutation.refresh_owned()? => {
+            eprintln!(
+                "[preflight] background pending maintenance stopped after lease loss for {}: {error:#}",
+                file.display(),
+            );
+            return Ok(());
+        }
+        Err(error) => return Err(error),
+    };
+    queue_mutation.fence_effect(file)?;
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
@@ -431,28 +452,31 @@ pub fn run_background_queue_maintenance(file: &Path, commit_if_mutated: bool) ->
         std::thread::sleep(std::time::Duration::from_millis(delay));
     }
     if !queue_mutation.refresh_owned()? {
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "queue_maintenance_background_reservation_lost file={} child_pid={}",
-                file.display(),
-                std::process::id(),
-            ),
+        eprintln!(
+            "[preflight] background maintenance reservation was superseded for {} (child_pid={})",
+            file.display(),
+            std::process::id(),
         );
         return Ok(());
     }
+    queue_mutation.fence_effect(file)?;
     let outcome = agent_doc_preflight_io::run_queue_maintenance(file, None);
     match outcome {
         Ok(state) => {
+            queue_mutation.fence_effect(file)?;
             agent_doc_cycle_state_io::record_queue_mirrored_ids_or_warn(
                 file,
                 &state.mirrored_queue_ids,
                 "background_queue_maintenance",
             );
             let committed = match commit_if_mutated {
-                true => match agent_doc_commit_io::commit(file) {
+                true => match queue_mutation
+                    .fence_effect(file)
+                    .and_then(|()| agent_doc_commit_io::commit(file))
+                {
                     Ok(committed) => committed,
                     Err(error) => {
+                        queue_mutation.fence_effect(file)?;
                         agent_doc_ops_log_io::log_op(
                             file,
                             &format!(
@@ -466,6 +490,7 @@ pub fn run_background_queue_maintenance(file: &Path, commit_if_mutated: bool) ->
                 },
                 false => false,
             };
+            queue_mutation.fence_effect(file)?;
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
@@ -479,6 +504,7 @@ pub fn run_background_queue_maintenance(file: &Path, commit_if_mutated: bool) ->
             Ok(())
         }
         Err(error) => {
+            queue_mutation.fence_effect(file)?;
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(

@@ -3644,6 +3644,74 @@ mod tests {
     use std::process::Command;
     use tempfile::TempDir;
 
+    fn logical_state_rows(root: &Path) -> Vec<String> {
+        let conn = agent_doc_sqlite::state_store::open_state_db(root).unwrap();
+        let tables = {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT name FROM sqlite_schema \
+                     WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
+                )
+                .unwrap();
+            stmt.query_map([], |row| row.get::<_, String>(0))
+                .unwrap()
+                .map(Result::unwrap)
+                .collect::<Vec<_>>()
+        };
+        let mut rows = Vec::new();
+        for table in tables {
+            let quoted_table = format!("\"{}\"", table.replace('"', "\"\""));
+            let columns = {
+                let mut stmt = conn
+                    .prepare(&format!("PRAGMA table_info({quoted_table})"))
+                    .unwrap();
+                stmt.query_map([], |row| row.get::<_, String>(1))
+                    .unwrap()
+                    .map(Result::unwrap)
+                    .collect::<Vec<_>>()
+            };
+            if columns.is_empty() {
+                continue;
+            }
+            let encoded_columns = columns
+                .iter()
+                .map(|column| {
+                    let quoted = format!("\"{}\"", column.replace('"', "\"\""));
+                    format!("typeof({quoted}) || ':' || quote({quoted})")
+                })
+                .collect::<Vec<_>>()
+                .join(" || '|' || ");
+            let mut stmt = conn
+                .prepare(&format!("SELECT {encoded_columns} FROM {quoted_table}"))
+                .unwrap();
+            rows.extend(
+                stmt.query_map([], |row| row.get::<_, String>(0))
+                    .unwrap()
+                    .map(Result::unwrap)
+                    .map(|row| format!("{table}|{row}")),
+            );
+        }
+        rows.sort();
+        rows
+    }
+
+    fn await_controller_bootstrap_receipt(root: &Path) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            if agent_doc_controller_io::project_controller::read_foreign_bootstrap(root)
+                .unwrap()
+                .is_some()
+            {
+                return;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "controller bootstrap receipt did not settle"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+    }
+
     #[test]
     fn terminal_proof_contention_precedes_actor_projection_cycle_and_document_effects() {
         let _env_lock = agent_doc_test_support::env_lock();
@@ -3805,7 +3873,17 @@ mod tests {
         let before_receipts = agent_doc_queue_io::claim_release_receipt::load(&file).unwrap();
         let before_document = std::fs::read_to_string(&file).unwrap();
         let ops_path = temp.path().join(".agent-doc/logs/ops.log");
+        // Establish the in-process controller and wait for its durable
+        // bootstrap receipt before taking the purity cut, so the assertion
+        // below compares the session-check transaction rather than an
+        // outstanding setup effect.
+        agent_doc_controller_io::project_controller::ensure_controller_running_for_file(&file)
+            .unwrap();
+        await_controller_bootstrap_receipt(temp.path());
         let before_ops = std::fs::read_to_string(&ops_path).unwrap_or_default();
+        let before_authority =
+            agent_doc_cycle_state_io::load_latest_document_authority(&file).unwrap();
+        let before_state = logical_state_rows(temp.path());
 
         let status = agent_doc_session_check_io::inspect_read_only(
             &file,
@@ -3830,6 +3908,16 @@ mod tests {
             "pre-guard inspection must not create completion/cancellation receipts",
         );
         assert_eq!(std::fs::read_to_string(&file).unwrap(), before_document);
+        assert_eq!(
+            agent_doc_cycle_state_io::load_latest_document_authority(&file).unwrap(),
+            before_authority,
+            "terminal steering's explicit disk comparison must not advance authority"
+        );
+        assert_eq!(
+            logical_state_rows(temp.path()),
+            before_state,
+            "terminal steering's explicit disk comparison must not mutate logical state.db rows"
+        );
         assert_eq!(
             std::fs::read_to_string(&ops_path).unwrap_or_default(),
             before_ops,

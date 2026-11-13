@@ -143,6 +143,12 @@ pub(crate) fn resolve_current_document_with_force_disk(
     if !force_disk {
         return resolve_current_document(file, source);
     }
+    if status_only_pass_active() {
+        return agent_doc_document_realtime_io::peek_disk_document(
+            file,
+            &format!("session-check:{source}"),
+        );
+    }
     agent_doc_document_realtime_io::resolve_disk_current_document(
         file,
         &format!("session-check:{source}"),
@@ -160,6 +166,12 @@ pub(crate) fn resolve_current_document_content(file: &Path, source: &str) -> Res
 
 pub(crate) fn resolve_disk_document_content(file: &Path, source: &str) -> Result<String> {
     profile::timed("resolve_disk_document_content", || {
+        if status_only_pass_active() {
+            return agent_doc_document_realtime_io::peek_disk_document_content(
+                file,
+                &format!("session-check:{source}"),
+            );
+        }
         agent_doc_document_realtime_io::resolve_disk_current_document_content(
             file,
             &format!("session-check:{source}"),

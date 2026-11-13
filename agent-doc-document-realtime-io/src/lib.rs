@@ -7325,7 +7325,9 @@ fn peek_embedded_relay(
     if !agent_doc_crdt_relay_io::embedded_relay_is_available_for_file(file) {
         return Ok(None);
     }
-    agent_doc_crdt_relay_io::current_text_for_file_nonblocking(file).map(Some)
+    let authority = agent_doc_crdt_relay_io::crdt_authority_for_file(file);
+    agent_doc_crdt_relay_io::peek_current_text_for_file_with_authority_nonblocking(file, authority)
+        .map(Some)
 }
 
 fn current_text_status(current: &agent_doc_crdt_relay_io::CurrentText) -> &'static str {
@@ -11529,6 +11531,57 @@ fn retained_compact_projection_blocks(
 mod tests {
     use super::*;
 
+    fn logical_state_rows(root: &std::path::Path) -> Vec<String> {
+        let conn = agent_doc_sqlite::state_store::open_state_db(root).unwrap();
+        let tables = {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT name FROM sqlite_schema \
+                     WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
+                )
+                .unwrap();
+            stmt.query_map([], |row| row.get::<_, String>(0))
+                .unwrap()
+                .map(Result::unwrap)
+                .collect::<Vec<_>>()
+        };
+        let mut rows = Vec::new();
+        for table in tables {
+            let quoted_table = format!("\"{}\"", table.replace('"', "\"\""));
+            let columns = {
+                let mut stmt = conn
+                    .prepare(&format!("PRAGMA table_info({quoted_table})"))
+                    .unwrap();
+                stmt.query_map([], |row| row.get::<_, String>(1))
+                    .unwrap()
+                    .map(Result::unwrap)
+                    .collect::<Vec<_>>()
+            };
+            if columns.is_empty() {
+                continue;
+            }
+            let encoded_columns = columns
+                .iter()
+                .map(|column| {
+                    let quoted = format!("\"{}\"", column.replace('"', "\"\""));
+                    format!("typeof({quoted}) || ':' || quote({quoted})")
+                })
+                .collect::<Vec<_>>()
+                .join(" || '|' || ");
+            let mut stmt = conn
+                .prepare(&format!("SELECT {encoded_columns} FROM {quoted_table}"))
+                .unwrap();
+            rows.extend(
+                stmt.query_map([], |row| row.get::<_, String>(0))
+                    .unwrap()
+                    .map(Result::unwrap)
+                    .map(|row| format!("{table}|{row}")),
+            );
+        }
+        rows.sort();
+        rows
+    }
+
     /// `#sdkretained` (haiven-dev `tasks/sdk.md`, 2026-10-12): the durable
     /// write verdict was `Satisfied` while the post-commit compact projection
     /// still held the closeout. The holder must be the compact continuation,
@@ -14307,6 +14360,50 @@ mod tests {
                 std::thread::sleep(std::time::Duration::from_millis(5));
             }
         })
+    }
+
+    #[test]
+    fn status_only_peek_of_allocated_current_hub_is_logically_pure() {
+        let content = "# Session\n\noperator text\n";
+        let (dir, file, _) = temp_doc(content);
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let identity = "test-status-only-peek";
+        seed_reliable_sync_open(&file, identity);
+        agent_doc_crdt_relay_io::seed_embedded_relay_for_file(&file).unwrap();
+        let document_hash = agent_doc_fs::document_state_hash(&file).unwrap();
+        assert!(agent_doc_crdt_relay_io::hub_is_allocated_for_test(
+            &document_hash
+        ));
+        assert!(agent_doc_crdt_relay_io::crdt_authority_for_file(&file).editor_attached());
+
+        let ops_path = dir.path().join(".agent-doc/logs/ops.log");
+        let before_authority =
+            agent_doc_cycle_state_io::load_latest_document_authority(&file).unwrap();
+        let before_state = logical_state_rows(dir.path());
+        let before_ops = std::fs::read(&ops_path).unwrap_or_default();
+
+        assert_eq!(
+            peek_current_document_content(&file, "test_status_only_embedded_peek").unwrap(),
+            content
+        );
+
+        assert_eq!(
+            agent_doc_cycle_state_io::load_latest_document_authority(&file).unwrap(),
+            before_authority,
+            "status-only embedded peek must not publish an authority observation"
+        );
+        assert_eq!(
+            logical_state_rows(dir.path()),
+            before_state,
+            "status-only embedded peek must not mutate logical state.db rows"
+        );
+        assert_eq!(
+            std::fs::read(&ops_path).unwrap_or_default(),
+            before_ops,
+            "status-only embedded peek must not append diagnostics"
+        );
+
+        seed_reliable_sync_close(&file, identity);
     }
 
     #[test]

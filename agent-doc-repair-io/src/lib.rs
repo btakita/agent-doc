@@ -3694,7 +3694,7 @@ fn cycle_has_captured_response_projection(
 }
 
 pub fn repair_committed_historical_snapshot_drift(file: &Path) -> Result<Option<&'static str>> {
-    let Some(plan) = plan_committed_historical_snapshot_drift_repair(file)? else {
+    let Some(plan) = plan_committed_historical_snapshot_drift_repair(file, false)? else {
         return Ok(None);
     };
     agent_doc_snapshot_io::checkpoint_document_baseline(
@@ -3761,19 +3761,27 @@ struct SnapshotDriftRepairPlan {
 /// baseline or converging the CRDT canonical (`#sessioncheckread`). A
 /// status-only `session-check` reports it and names the explicit repair.
 pub fn pending_committed_historical_snapshot_drift(file: &Path) -> Result<Option<&'static str>> {
-    Ok(plan_committed_historical_snapshot_drift_repair(file)?.map(|plan| plan.reason))
+    Ok(plan_committed_historical_snapshot_drift_repair(file, true)?.map(|plan| plan.reason))
 }
 
 fn plan_committed_historical_snapshot_drift_repair(
     file: &Path,
+    read_only: bool,
 ) -> Result<Option<SnapshotDriftRepairPlan>> {
     let Some(snapshot_doc) = agent_doc_snapshot_io::load_document_baseline(file)? else {
         return Ok(None);
     };
-    let current_doc = match agent_doc_document_realtime_io::try_resolve_current_document_content(
-        file,
-        "committed_historical_snapshot_drift",
-    ) {
+    let current_doc = match if read_only {
+        agent_doc_document_realtime_io::peek_current_document_content(
+            file,
+            "committed_historical_snapshot_drift",
+        )
+    } else {
+        agent_doc_document_realtime_io::try_resolve_current_document_content(
+            file,
+            "committed_historical_snapshot_drift",
+        )
+    } {
         Ok(content) => content,
         Err(_) => return Ok(None),
     };
@@ -3793,13 +3801,15 @@ fn plan_committed_historical_snapshot_drift_repair(
         &snapshot_doc,
         &current_doc,
     ) {
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "snapshot_repair_skipped file={} reason=pending_completion_cells_only (#statussynccommitrefusal)",
-                file.display()
-            ),
-        );
+        if !read_only {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "snapshot_repair_skipped file={} reason=pending_completion_cells_only (#statussynccommitrefusal)",
+                    file.display()
+                ),
+            );
+        }
         return Ok(None);
     }
 

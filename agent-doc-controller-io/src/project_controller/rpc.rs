@@ -10333,6 +10333,72 @@ pub fn peek_current_text_via_controller_model_read_for_doc(
         .map(Some)
 }
 
+/// Publish the diagnostic/pressure side of a controller-model observation
+/// after its caller has independently revalidated mutation authority.
+///
+/// Queue-maintenance effect owners first use
+/// [`peek_current_text_via_controller_model_read_for_doc`], recheck their
+/// admitted-cut fence, and only then call this function. Keeping the read and
+/// publication separate prevents a stale RPC from appending ops or changing
+/// pressure state before the caller can reject its observation.
+pub fn publish_controller_model_read_diagnostic_for_doc(
+    doc: &Path,
+    source: &str,
+    observed: Result<&Option<agent_doc_crdt_relay_io::CurrentText>, &anyhow::Error>,
+) {
+    let canonical = doc.canonicalize().unwrap_or_else(|_| doc.to_path_buf());
+    let file_arg = canonical.to_string_lossy().to_string();
+    let authority = crdt_authority_for_file(&file_arg);
+    if !authority.editor_attached() {
+        agent_doc_ops_log_io::log_op(
+            &canonical,
+            &format!(
+                "controller_crdt_current_text_skipped file={} source={} authority=git reason=detached_authority",
+                canonical.display(),
+                source,
+            ),
+        );
+        return;
+    }
+    let Some(project_root) = agent_doc_project_root_io::project_root_containing(&canonical) else {
+        agent_doc_ops_log_io::log_op(
+            doc,
+            &format!(
+                "controller_crdt_current_text_skipped file={} source={} reason=no_project_root",
+                doc.display(),
+                source,
+            ),
+        );
+        return;
+    };
+    match observed {
+        Ok(Some(current)) => {
+            clear_expired_controller_model_pressure(&project_root);
+            log_controller_current_text_result(&canonical, source, current);
+        }
+        Ok(None) => {}
+        Err(err) => {
+            record_controller_model_pressure(
+                &project_root,
+                &canonical,
+                source,
+                &format!("{err:#}"),
+            );
+            agent_doc_ops_log_io::log_op(
+                &canonical,
+                &format!(
+                    "controller_crdt_current_text_read_unavailable file={} source={} socket={} timeout_ms={} error={} recovery=idle_disk_fallback",
+                    canonical.display(),
+                    source,
+                    socket_path(&project_root).display(),
+                    CONTROLLER_CRDT_CURRENT_TEXT_READ_TIMEOUT.as_millis(),
+                    format!("{err:#}").replace('\n', "\\n"),
+                ),
+            );
+        }
+    }
+}
+
 /// Read the compact CRDT revision from an already-running controller.
 ///
 /// This intentionally does not materialize canonical markdown or emit the
@@ -12441,6 +12507,10 @@ fn handle_crdt_current_text_rpc(
         }
         return Ok(controller_current_text_response(current));
     }
+    #[cfg(any(test, feature = "test-support"))]
+    if payload.effect_free {
+        pause_effect_free_current_text_after_authority_for_test()?;
+    }
     let current = if payload.effect_free {
         agent_doc_crdt_relay_io::peek_current_text_for_file_with_authority_nonblocking(
             &canonical, authority,
@@ -12460,6 +12530,31 @@ fn handle_crdt_current_text_rpc(
         log_controller_current_text_result(&canonical, &source, &current);
     }
     Ok(controller_current_text_response(current))
+}
+
+#[cfg(any(test, feature = "test-support"))]
+fn pause_effect_free_current_text_after_authority_for_test() -> Result<()> {
+    let Some(marker) = std::env::var_os("AGENT_DOC_TEST_EFFECT_FREE_CURRENT_TEXT_AUTHORITY_MARKER")
+        .map(PathBuf::from)
+    else {
+        return Ok(());
+    };
+    let Some(release) =
+        std::env::var_os("AGENT_DOC_TEST_EFFECT_FREE_CURRENT_TEXT_AUTHORITY_RELEASE")
+            .map(PathBuf::from)
+    else {
+        return Ok(());
+    };
+    std::fs::write(&marker, b"authority-observed")?;
+    let deadline = Instant::now() + Duration::from_secs(15);
+    while !release.exists() {
+        anyhow::ensure!(
+            Instant::now() < deadline,
+            "timed out waiting to release effect-free current-text authority barrier"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    Ok(())
 }
 
 /// Candidate documents to test for a resume-id claim (`#resumeownerfmread`).
@@ -66385,6 +66480,124 @@ mod tests {
             std::fs::read(&state_path).ok(),
             before_state,
             "the effect-free client transport must not mutate controller state"
+        );
+    }
+
+    #[test]
+    fn effect_free_current_text_rpc_stays_pure_when_authority_drifts_mid_request() {
+        let _env = reliable_sync_env_lock();
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(dir.path().join("tasks")).unwrap();
+        let doc = dir.path().join("tasks/effect-free-mid-rpc-drift.md");
+        std::fs::write(&doc, "admitted authority\n").unwrap();
+        let canonical = doc.canonicalize().unwrap();
+        let document_hash = agent_doc_hash::document_id_for_path(&canonical);
+        controller_liveness_plane().lock().restore_liveness(&[
+            agent_doc_reliable_sync_io::liveness::LivenessOp::Open {
+                document_hash,
+                pid: std::process::id().into(),
+                tag: "test-editor-effect-free-mid-rpc-drift".into(),
+            },
+        ]);
+        let state_path = dir.path().join(".agent-doc/state.db");
+        let ops_path = dir.path().join(".agent-doc/logs/ops.log");
+        drop(agent_doc_sqlite::state_store::open_state_db(dir.path()).unwrap());
+        let before_state = std::fs::read(&state_path).ok();
+        let before_ops = std::fs::read(&ops_path).ok();
+        let marker = dir.path().join("effect-free-authority.marker");
+        let release = dir.path().join("effect-free-authority.release");
+        unsafe {
+            std::env::set_var(
+                "AGENT_DOC_TEST_EFFECT_FREE_CURRENT_TEXT_AUTHORITY_MARKER",
+                &marker,
+            );
+            std::env::set_var(
+                "AGENT_DOC_TEST_EFFECT_FREE_CURRENT_TEXT_AUTHORITY_RELEASE",
+                &release,
+            );
+        }
+
+        let sock = socket_path(dir.path());
+        std::fs::create_dir_all(sock.parent().unwrap()).unwrap();
+        let name = sock.to_fs_name::<GenericFilePath>().unwrap();
+        let listener = ListenerOptions::new().name(name).create_sync().unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let server = std::thread::spawn(move || {
+            let stream = listener.accept().unwrap();
+            let (reader_half, mut writer_half) = stream.split();
+            let mut line = String::new();
+            BufReader::new(reader_half).read_line(&mut line).unwrap();
+            let mut should_stop = false;
+            let response = handle_request(&line, &bootstrap, &mut should_stop).unwrap();
+            writeln!(writer_half, "{response}").unwrap();
+            writer_half.flush().unwrap();
+            assert!(!should_stop);
+        });
+        let root = dir.path().to_path_buf();
+        let request_file = canonical.clone();
+        let client = std::thread::spawn(move || {
+            let data: serde_json::Value = request_existing_controller_effect_free_with_timeout(
+                &root,
+                ControllerRequest {
+                    command: "crdt_current_text".to_string(),
+                    file: Some(request_file),
+                    session_id: None,
+                    pane_id: None,
+                    window_id: None,
+                    generation: None,
+                    state: None,
+                    caller: None,
+                    reason: None,
+                    supervisor_pid: None,
+                    supervisor_socket: None,
+                    command_kind: None,
+                    diagnostic_payload: Some(
+                        serde_json::json!({
+                            "source": "test_effect_free_mid_rpc_drift",
+                            "recover_projection": false,
+                            "flush_barrier": false,
+                            "effect_free": true,
+                        })
+                        .to_string(),
+                    ),
+                    sequence: None,
+                },
+                Duration::from_secs(30),
+            )?;
+            controller_current_text_from_data(&data)
+        });
+
+        let deadline = Instant::now() + Duration::from_secs(15);
+        while !marker.exists() {
+            assert!(
+                Instant::now() < deadline,
+                "effect-free RPC did not reach its post-authority barrier"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        std::fs::write(&doc, "operator authority\n").unwrap();
+        std::fs::write(&release, b"release").unwrap();
+        let observed = client.join().unwrap().unwrap();
+        server.join().unwrap();
+        unsafe {
+            std::env::remove_var("AGENT_DOC_TEST_EFFECT_FREE_CURRENT_TEXT_AUTHORITY_MARKER");
+            std::env::remove_var("AGENT_DOC_TEST_EFFECT_FREE_CURRENT_TEXT_AUTHORITY_RELEASE");
+        }
+
+        assert!(matches!(
+            observed,
+            agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica
+        ));
+        assert_eq!(
+            std::fs::read(&ops_path).ok(),
+            before_ops,
+            "a stale effect-free RPC must not append controller/relay diagnostics"
+        );
+        assert_eq!(
+            std::fs::read(&state_path).ok(),
+            before_state,
+            "a stale effect-free RPC must not mutate pressure/controller state"
         );
     }
 

@@ -105,6 +105,24 @@ fn current_text_via_preflight_authority(
     )
 }
 
+fn peek_current_text_via_preflight_authority(
+    file: &Path,
+    source: &str,
+) -> Result<Option<agent_doc_crdt_relay_io::CurrentText>> {
+    #[cfg(test)]
+    if agent_doc_crdt_relay_io::embedded_relay_is_available_for_file(file) {
+        let authority = agent_doc_crdt_relay_io::crdt_authority_for_file(file);
+        return Ok(Some(
+            agent_doc_crdt_relay_io::peek_current_text_for_file_with_authority_nonblocking(
+                file, authority,
+            )?,
+        ));
+    }
+    agent_doc_controller_io::project_controller::peek_current_text_via_controller_model_read_for_doc(
+        file, source,
+    )
+}
+
 /// `#px82` — how many bounded authority observations queue maintenance makes
 /// before it gives up and discards the recomputed queue. Override with
 /// `AGENT_DOC_QUEUE_AUTHORITY_ATTEMPTS`.
@@ -176,7 +194,20 @@ fn current_text_via_preflight_authority_retrying_with_fence(
         source,
         queue_authority_attempts(),
         effect_fence,
-        |file| current_text_via_preflight_authority(file, source),
+        |file| {
+            let observed = peek_current_text_via_preflight_authority(file, source);
+            fence_queue_maintenance_effect(
+                file,
+                effect_fence,
+                QueueMaintenanceEffectFamily::Controller,
+            )?;
+            agent_doc_controller_io::project_controller::publish_controller_model_read_diagnostic_for_doc(
+                file,
+                source,
+                observed.as_ref(),
+            );
+            observed
+        },
     )
 }
 
@@ -10271,7 +10302,9 @@ fn reproject_marker_only_queue_over_live_head(
 fn ensure_document_model_via_authority(
     file: &Path,
     source: &str,
+    effect_fence: Option<&dyn PendingMaintenanceEffectFence>,
 ) -> Result<agent_doc_crdt_relay_io::CurrentText> {
+    fence_queue_maintenance_effect(file, effect_fence, QueueMaintenanceEffectFamily::Controller)?;
     if agent_doc_crdt_relay_io::embedded_relay_is_available_for_file(file) {
         return agent_doc_crdt_relay_io::ensure_document_model(file, source);
     }
@@ -10295,10 +10328,16 @@ fn ensure_document_model_with_replica_reregistration(
     file: &Path,
     source: &str,
     first_err: anyhow::Error,
+    effect_fence: Option<&dyn PendingMaintenanceEffectFence>,
 ) -> Result<agent_doc_crdt_relay_io::CurrentText> {
     let attempts = queue_authority_attempts();
     let mut last_err = first_err;
     for attempt in 1..=attempts {
+        fence_queue_maintenance_effect(
+            file,
+            effect_fence,
+            QueueMaintenanceEffectFamily::Controller,
+        )?;
         let reregister = match agent_doc_crdt_relay_io::signal_crdt_replica_event(
             file,
             agent_doc_crdt_relay_io::CrdtReplicaEventReason::EditorReplicaReregister,
@@ -10308,9 +10347,10 @@ fn ensure_document_model_with_replica_reregistration(
             Err(err) => format!("failed:{}", format!("{err:#}").replace('\n', "\\n")),
         };
         std::thread::sleep(QUEUE_AUTHORITY_RETRY_BACKOFF);
-        let retried = ensure_document_model_via_authority(file, source);
-        agent_doc_ops_log_io::log_op(
+        let retried = ensure_document_model_via_authority(file, source, effect_fence);
+        queue_maintenance_log_op(
             file,
+            effect_fence,
             &format!(
                 "queue_maintenance_model_ensure_retry file={} source={} attempt={}/{} reregister={} outcome={} (#px82)",
                 file.display(),
@@ -10330,7 +10370,7 @@ fn ensure_document_model_with_replica_reregistration(
                     ),
                 }
             ),
-        );
+        )?;
         match retried {
             Ok(current) => return Ok(current),
             Err(err) => last_err = err,
@@ -10363,6 +10403,12 @@ fn load_projected_in_progress_queue_heads(file: &Path) -> std::collections::Hash
 /// preceded by a fresh authoritative observation.
 const QUEUE_MAINTENANCE_CAS_ATTEMPTS: usize = 3;
 
+#[derive(Clone, Copy)]
+struct QueueMaintenancePersistenceContext<'a> {
+    source: &'a str,
+    effect_fence: Option<&'a dyn PendingMaintenanceEffectFence>,
+}
+
 fn queue_maintenance_cas_is_retryable(err: &anyhow::Error) -> bool {
     format!("{err:#}").contains("recovery=retry_crdt_merge")
 }
@@ -10371,11 +10417,15 @@ fn persist_attached_queue_maintenance_with_retry(
     file: &Path,
     content: &str,
     expected_current: &str,
-    source: &str,
+    context: QueueMaintenancePersistenceContext<'_>,
     initial_current: String,
     mut apply: impl FnMut(&str, &str) -> Result<bool>,
     mut observe: impl FnMut() -> Result<String>,
 ) -> Result<String> {
+    let QueueMaintenancePersistenceContext {
+        source,
+        effect_fence,
+    } = context;
     let mut current = initial_current;
     for attempt in 1..=QUEUE_MAINTENANCE_CAS_ATTEMPTS {
         let rebased =
@@ -10387,8 +10437,9 @@ fn persist_attached_queue_maintenance_with_retry(
                 if attempt < QUEUE_MAINTENANCE_CAS_ATTEMPTS
                     && queue_maintenance_cas_is_retryable(&err) =>
             {
-                agent_doc_ops_log_io::log_op(
+                queue_maintenance_log_op(
                     file,
+                    effect_fence,
                     &format!(
                         "queue_maintenance_cas_retry file={} source={} attempt={}/{} expected_hash={} attempted_hash={} recovery=retry_crdt_merge",
                         file.display(),
@@ -10398,7 +10449,7 @@ fn persist_attached_queue_maintenance_with_retry(
                         agent_doc_hash::content_hash(&current),
                         agent_doc_hash::content_hash(&rebased),
                     ),
-                );
+                )?;
                 current = observe()?;
             }
             Err(err) => return Err(err),
@@ -10447,8 +10498,9 @@ fn persist_queue_maintenance_doc_with_admitted_authority(
     // so this stays fail-closed against clobbering a live buffer.
     // `#ensurereplicagen`: observe through the hub-owning process, not this
     // CLI process's always-empty local registry.
-    let observed = current_text_via_preflight_authority_retrying(file, source)?
-        .unwrap_or(agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica);
+    let observed =
+        current_text_via_preflight_authority_retrying_with_fence(file, source, effect_fence)?
+            .unwrap_or(agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica);
     let current = match queue_maintenance_head_action(&observed, false) {
         QueueMaintenanceHeadAction::EnsureThenReobserve => {
             // `#ensurewindowsize`: log the outcome on BOTH paths. This log used to
@@ -10456,7 +10508,7 @@ fn persist_queue_maintenance_doc_with_admitted_authority(
             // to debug — recorded no before/after label at all, and the ops.log
             // showed a bare `document_model_ensure_failed` with no queue-side
             // context.
-            let ensured = ensure_document_model_via_authority(file, source);
+            let ensured = ensure_document_model_via_authority(file, source, effect_fence);
             match &ensured {
                 Ok(ensured) => queue_maintenance_log_op(
                     file,
@@ -10489,9 +10541,12 @@ fn persist_queue_maintenance_doc_with_admitted_authority(
             // re-observe within a bounded budget before giving up.
             match ensured {
                 Ok(ensured) => ensured,
-                Err(first_err) => {
-                    ensure_document_model_with_replica_reregistration(file, source, first_err)?
-                }
+                Err(first_err) => ensure_document_model_with_replica_reregistration(
+                    file,
+                    source,
+                    first_err,
+                    effect_fence,
+                )?,
             }
         }
         _ => observed,
@@ -10561,7 +10616,10 @@ fn persist_queue_maintenance_doc_with_admitted_authority(
                 file,
                 content,
                 expected_current,
-                source,
+                QueueMaintenancePersistenceContext {
+                    source,
+                    effect_fence,
+                },
                 text,
                 |expected, target| {
                     fence_queue_maintenance_effect(
@@ -10581,10 +10639,12 @@ fn persist_queue_maintenance_doc_with_admitted_authority(
                     Ok(write.is_some())
                 },
                 || {
-                    let observed = current_text_via_preflight_authority_retrying(file, source)?
-                        .unwrap_or(
-                            agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica,
-                        );
+                    let observed = current_text_via_preflight_authority_retrying_with_fence(
+                        file,
+                        source,
+                        effect_fence,
+                    )?
+                    .unwrap_or(agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica);
                     match observed {
                         agent_doc_crdt_relay_io::CurrentText::Current { text, .. } => Ok(text),
                         other => anyhow::bail!(
@@ -10999,7 +11059,10 @@ mod tests {
             &file,
             maintenance,
             base,
-            "test",
+            QueueMaintenancePersistenceContext {
+                source: "test",
+                effect_fence: None,
+            },
             base.to_string(),
             |expected, target| {
                 attempts.push((expected.to_string(), target.to_string()));
@@ -11022,6 +11085,101 @@ mod tests {
         assert!(written.contains("🚧 active head"), "{written}");
         assert!(written.contains("operator-added item"), "{written}");
         assert_eq!(attempts[1].1, written);
+    }
+
+    #[test]
+    fn queue_maintenance_cas_drift_is_fenced_before_retry_diagnostics_or_reobserve() {
+        let dir = setup_project();
+        let file = dir.path().join("session.md");
+        let base = concat!(
+            "<!-- agent:queue go -->\n",
+            "- active head\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let maintenance = base.replace("- active head", "- 🚧 active head");
+        let superseding = base.replace("- active head", "- operator head");
+        std::fs::write(&file, base).unwrap();
+        let expected_hash = agent_doc_hash::content_hash(base);
+        let fence = |path: &Path| {
+            let observed = std::fs::read_to_string(path)?;
+            anyhow::ensure!(
+                agent_doc_hash::content_hash(&observed) == expected_hash,
+                "injected persistence authority superseded"
+            );
+            Ok(())
+        };
+        let ops_path = dir.path().join(".agent-doc/logs/ops.log");
+        let state_path = dir.path().join(".agent-doc/state.db");
+        drop(agent_doc_sqlite::state_store::open_state_db(dir.path()).unwrap());
+        let before_ops = std::fs::read(&ops_path).ok();
+        let before_state = std::fs::read(&state_path).ok();
+        let mut observations = 0usize;
+
+        let err = persist_attached_queue_maintenance_with_retry(
+            &file,
+            &maintenance,
+            base,
+            QueueMaintenancePersistenceContext {
+                source: "test_persistence_drift",
+                effect_fence: Some(&fence),
+            },
+            base.to_string(),
+            |_, _| {
+                std::fs::write(&file, &superseding).unwrap();
+                anyhow::bail!("CAS refused recovery=retry_crdt_merge")
+            },
+            || {
+                observations += 1;
+                Ok(superseding.clone())
+            },
+        )
+        .unwrap_err();
+
+        assert!(format!("{err:#}").contains("superseded"), "{err:#}");
+        assert_eq!(
+            observations, 0,
+            "a stale persistence owner must not reobserve"
+        );
+        assert_eq!(std::fs::read(&ops_path).ok(), before_ops);
+        assert_eq!(std::fs::read(&state_path).ok(), before_state);
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), superseding);
+    }
+
+    #[test]
+    fn queue_maintenance_model_reregister_is_fenced_before_signal() {
+        let dir = setup_project();
+        let file = dir.path().join("session.md");
+        let admitted = "admitted persistence authority\n";
+        let superseding = "operator persistence authority\n";
+        std::fs::write(&file, admitted).unwrap();
+        let expected_hash = agent_doc_hash::content_hash(admitted);
+        let fence = |path: &Path| {
+            let observed = std::fs::read_to_string(path)?;
+            anyhow::ensure!(
+                agent_doc_hash::content_hash(&observed) == expected_hash,
+                "injected reregister authority superseded"
+            );
+            Ok(())
+        };
+        let ops_path = dir.path().join(".agent-doc/logs/ops.log");
+        let state_path = dir.path().join(".agent-doc/state.db");
+        drop(agent_doc_sqlite::state_store::open_state_db(dir.path()).unwrap());
+        let before_ops = std::fs::read(&ops_path).ok();
+        let before_state = std::fs::read(&state_path).ok();
+        std::fs::write(&file, superseding).unwrap();
+
+        let err = ensure_document_model_with_replica_reregistration(
+            &file,
+            "test_reregister_drift",
+            anyhow::anyhow!("injected initial ensure failure"),
+            Some(&fence),
+        )
+        .unwrap_err();
+
+        assert!(format!("{err:#}").contains("superseded"), "{err:#}");
+        assert_eq!(std::fs::read(&ops_path).ok(), before_ops);
+        assert_eq!(std::fs::read(&state_path).ok(), before_state);
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), superseding);
     }
 
     struct TestPreflightMaintenanceWriteEffects;
